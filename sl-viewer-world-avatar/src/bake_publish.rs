@@ -34,9 +34,9 @@ use sl_client_bevy::{
 };
 use sl_texture::encode_baked_avatar_j2c;
 
-use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::composite_own_region;
 use crate::bake_inputs::OwnBakeInputs;
+use sl_viewer_kit::avatar_assets::AvatarAssetLibrary;
 
 /// How long, in seconds, to wait for one region's `UploadBakedTexture` reply
 /// before giving up on it, so a lost reply cannot wedge the publish.

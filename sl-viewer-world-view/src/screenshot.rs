@@ -84,7 +84,7 @@ use sl_client_bevy::SlCommand;
 use crate::harness_status::{DayPositionStatus, HarnessStatus};
 use crate::quiescence::SceneQuiescence;
 use crate::session::{ViewerSession, request_logout};
-use crate::world_api::{OverlayCamera, ViewerCamera};
+use sl_viewer_world_api::{OverlayCamera, ViewerCamera};
 
 /// The offline-inspection screenshot harness (R11): capture a numbered PNG
 /// sequence into `dir` after a startup delay, then quit.
@@ -997,7 +997,7 @@ pub(crate) fn poll_screenshot_saves(
 mod tests {
     use pretty_assertions::assert_eq;
 
-    use crate::world_api::OverlayCamera;
+    use sl_viewer_world_api::OverlayCamera;
 
     use super::{
         CaptureContent, CaptureSize, MAX_CAPTURE_DIMENSION, ScreenshotSchedule, parse_capture_size,

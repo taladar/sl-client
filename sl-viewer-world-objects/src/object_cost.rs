@@ -2,8 +2,8 @@
 //! per-linkset resource cost (`ObjectCost.linked_set_resource_cost`), the number
 //! the reference shows as an object's *Land Impact*.
 //!
-//! Both the in-world hover tooltip (`crate::hover_tooltip`) and the build /
-//! edit floater (`crate::edit_params`) want it, so it lives in **one**
+//! Both the in-world hover tooltip (`sl_client_bevy_viewer::hover_tooltip`) and the build /
+//! edit floater (`sl_viewer_edit::edit_params`) want it, so it lives in **one**
 //! resource with **one** `ingest_object_costs` reader. The whole point is to
 //! not spam requests: a value is requested **once** and every surface shares the
 //! result. That is modelled as an explicit state machine rather than an
@@ -37,8 +37,8 @@ use sl_client_bevy::{
     SlCapabilities, SlCommand, SlEvent, SlSessionEvent,
 };
 
-use crate::world_api::ObjectState;
-use crate::world_api::world_scoped::{
+use sl_viewer_world_api::ObjectState;
+use sl_viewer_world_api::world_scoped::{
     WorldPurge, WorldResetFrame, WorldResetSystems, WorldScoped, WorldScopedAppExt as _,
 };
 

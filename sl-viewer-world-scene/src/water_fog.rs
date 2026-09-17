@@ -62,10 +62,10 @@ use bevy::prelude::*;
 use sl_client_bevy::WaterSettings;
 
 use crate::environment::EnvironmentState;
-use crate::face_material::FaceMaterial;
 use crate::render_overrides::RenderOverrides;
 use crate::sky::day_position;
 use crate::water::{DEFAULT_WATER_HEIGHT, WaterLevel, drive_water};
+use sl_viewer_kit::face_material::FaceMaterial;
 
 /// The scene-wide water fog, as every consumer needs it: the authored fog colour,
 /// the density on each side of the surface, and the surface height.
@@ -321,9 +321,9 @@ mod tests {
         update_water_fog_settings,
     };
     use crate::environment::EnvironmentState;
-    use crate::face_material::{FaceMaterial, SlFaceExt};
     use crate::render_overrides::RenderOverrides;
     use crate::water::WaterLevel;
+    use sl_viewer_kit::face_material::{FaceMaterial, SlFaceExt};
 
     /// A fog density is the expected one, to within a relative tolerance that leaves
     /// room for the last bit of a `powf` — and, since every comparison against a

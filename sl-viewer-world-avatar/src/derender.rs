@@ -12,7 +12,7 @@
 //! cannot draw two hundred attachment-laden avatars.
 //!
 //! Both are purely **client-side** and strictly distinct from the server-side
-//! mute list (`crate::mutes`): nothing here goes on the wire, and the
+//! mute list (`sl_viewer_people::mutes`): nothing here goes on the wire, and the
 //! simulator keeps streaming everything — the viewer simply refuses to mirror it
 //! into the scene.
 //!
@@ -39,7 +39,7 @@
 //!
 //! The reference drops a derendered id in `LLViewerObjectList::createObject`, so
 //! nothing downstream ever sees the object. Ours does the same at the scene
-//! mirror's ingest ([`crate::objects::update_objects`],
+//! mirror's ingest ([`sl_viewer_world_objects::objects::update_objects`],
 //! [`crate::avatars::update_avatar_objects`]): a suppressed object is never
 //! applied, so no mesh is tessellated, no texture requested and no material
 //! built — the cheapest possible place to say no.
@@ -60,7 +60,7 @@
 //! # Temporary vs permanent
 //!
 //! A **permanent** entry is written to the per-avatar blacklist file (a sibling
-//! of the account `settings.toml`, like `crate::notification_persist`'s store)
+//! of the account `settings.toml`, like `sl_viewer_notices::notification_persist`'s store)
 //! and applies again on the next login. A **temporary** entry lives in the
 //! session only and is dropped on the next teleport
 //! (`clear_temporary_derenders`, the reference's
@@ -101,12 +101,12 @@ use tracing::{debug, info, warn};
 
 use crate::avatars::derender_agent;
 use crate::first_person::OwnAvatarView;
-use crate::settings::ViewerSettings;
-use crate::world_api::AvatarState;
-use crate::world_api::ObjectState;
-use crate::world_api::{
-    CameraMode, DerenderEntry, DerenderKind, DerenderList, FirstPersonAvatarVisible, FriendsModel,
-    HiddenBy,
+use sl_viewer_settings::ViewerSettings;
+use sl_viewer_social::FriendsModel;
+use sl_viewer_world_api::AvatarState;
+use sl_viewer_world_api::ObjectState;
+use sl_viewer_world_api::{
+    CameraMode, DerenderEntry, DerenderKind, DerenderList, FirstPersonAvatarVisible, HiddenBy,
 };
 
 /// The per-account file the permanent blacklist is stored in (a sibling of the
@@ -210,7 +210,7 @@ pub(crate) fn check_derender(
 
 /// Registers the derender list, its persistence, and the request / suppression
 /// systems. The ingest-side suppression itself lives in the scene mirror
-/// ([`crate::objects`] / [`crate::avatars`]), which reads [`DerenderList`].
+/// ([`sl_viewer_world_objects::objects`] / [`crate::avatars`]), which reads [`DerenderList`].
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DerenderPlugin;
 
@@ -224,7 +224,7 @@ impl Plugin for DerenderPlugin {
             // empty selection is the right default for a host with no build
             // tools, and `init_resource` leaves the edit layer's own registration
             // in charge where both are present.
-            .init_resource::<crate::world_api::SelectionSet>()
+            .init_resource::<sl_viewer_world_api::SelectionSet>()
             .add_message::<RequestDerender>()
             .add_message::<UnDerender>()
             .add_systems(Startup, register_derender_settings)
@@ -245,8 +245,8 @@ impl Plugin for DerenderPlugin {
                     index_derendered_objects,
                 )
                     .chain()
-                    .before(crate::objects::update_objects)
-                    .before(crate::world_api::WorldPhase::AvatarsUpdated),
+                    .before(sl_viewer_world_objects::objects::update_objects)
+                    .before(sl_viewer_world_api::WorldPhase::AvatarsUpdated),
             )
             // …and the scene purge after it, so it only ever has to despawn what
             // was already standing there.
@@ -261,9 +261,9 @@ impl Plugin for DerenderPlugin {
                     flush_derender_list,
                 )
                     .chain()
-                    .after(crate::objects::update_objects)
-                    .after(crate::world_api::WorldPhase::AvatarsUpdated)
-                    .after(crate::world_api::WorldPhase::AvatarsUpdated),
+                    .after(sl_viewer_world_objects::objects::update_objects)
+                    .after(sl_viewer_world_api::WorldPhase::AvatarsUpdated)
+                    .after(sl_viewer_world_api::WorldPhase::AvatarsUpdated),
             );
     }
 }
@@ -313,7 +313,7 @@ pub(crate) fn apply_derender_requests(
     identity: Res<SlIdentity>,
     parcel: Res<SlAgentParcel>,
     regions: Query<&SlRegionIdentity, With<SlCurrentRegion>>,
-    mut selection: ResMut<crate::world_api::SelectionSet>,
+    mut selection: ResMut<sl_viewer_world_api::SelectionSet>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     let own = identity.agent_id.map(|agent| agent.uuid());
@@ -787,7 +787,7 @@ mod tests {
         app.add_plugins(super::DerenderPlugin);
         assert!(
             app.world()
-                .contains_resource::<crate::world_api::SelectionSet>(),
+                .contains_resource::<sl_viewer_world_api::SelectionSet>(),
             "SelectionSet"
         );
         assert!(app.world().contains_resource::<DerenderList>(), "the list");

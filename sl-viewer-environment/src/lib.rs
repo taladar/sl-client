@@ -156,11 +156,11 @@ impl Plugin for EnvironmentUiPlugins {
 mod tests {
     use super::EnvironmentUiPlugins;
     use bevy::prelude::*;
+    use sl_viewer_intents::TexturePicked;
     use sl_viewer_ui_core::i18n::install_untranslated;
     use sl_viewer_ui_core::ui::UiRoot;
     use sl_viewer_ui_widgets::floater::FloaterPlugin;
     use sl_viewer_ui_widgets::ui_color_picker::ColorPicked;
-    use sl_viewer_world_api::TexturePicked;
 
     /// **Every window in this crate can actually be scheduled.**
     ///

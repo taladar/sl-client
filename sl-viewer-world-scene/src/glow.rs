@@ -55,8 +55,8 @@ use bevy::render::{GpuResourceAppExt as _, Render, RenderApp, RenderStartup, Ren
 
 use sl_settings::SettingValue;
 
-use crate::settings::ViewerSettings;
 use crate::tonemap::SlTonemapPass;
+use sl_viewer_settings::ViewerSettings;
 
 /// The internal handle the glow extract shader (`glow_extract.wgsl`) loads under.
 const EXTRACT_SHADER_HANDLE: Handle<Shader> = uuid_handle!("1d4a7f60-9b28-4c15-8e33-6a0f2d95c47e");

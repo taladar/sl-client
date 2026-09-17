@@ -48,7 +48,7 @@ use super::types::{
     mirror_local_pose, mirror_playback_time, mirror_sample_track, pose_rows, reference_fk,
 };
 use super::{GpuAvatarsMode, GpuAvatarsPlugin};
-use crate::face_material::{FaceMaterial, SlFaceMaterialPlugin, inert_face_material};
+use sl_viewer_kit::face_material::{FaceMaterial, SlFaceMaterialPlugin, inert_face_material};
 use sl_viewer_testkit::TestError;
 
 /// The four-bone / two-volume test skeleton shared with the `sl-client-bevy`
@@ -894,7 +894,7 @@ fn applied_bounds_cull_an_offscreen_avatar() -> Result<(), TestError> {
     use super::GpuSkinBinding;
     use super::render::GpuAvatarBounds;
     use super::stage::{GpuAvatarPoseFeed, GpuAvatarRegistry, apply_gpu_avatar_bounds};
-    use crate::world_api::PoseSlotKey;
+    use sl_viewer_world_api::PoseSlotKey;
 
     // Both bounds are the same 2 m box about the root they were posed under;
     // the published root places each.
@@ -1015,7 +1015,7 @@ fn the_cull_box_follows_a_falling_avatar() -> Result<(), TestError> {
     use super::GpuSkinBinding;
     use super::render::GpuAvatarBounds;
     use super::stage::{GpuAvatarPoseFeed, GpuAvatarRegistry, apply_gpu_avatar_bounds};
-    use crate::world_api::PoseSlotKey;
+    use sl_viewer_world_api::PoseSlotKey;
 
     let slot = PoseSlotKey::Crowd(0);
     // A standing-sized posed skeleton about its root.
@@ -1083,7 +1083,7 @@ fn gpu_skin_binding_requires_externally_posed_marker() {
     use bevy::pbr::ExternallyPosedSkin;
 
     use super::GpuSkinBinding;
-    use crate::world_api::PoseSlotKey;
+    use sl_viewer_world_api::PoseSlotKey;
 
     let mut world = World::new();
     let entity = world
@@ -1112,7 +1112,7 @@ fn skin_pose_twin_takes_its_sources_binding() -> Result<(), TestError> {
 
     use super::GpuSkinBinding;
     use super::stage::sync_skin_pose_twins;
-    use crate::world_api::{PoseSlotKey, SkinPoseTwin};
+    use sl_viewer_world_api::{PoseSlotKey, SkinPoseTwin};
 
     let mut world = World::new();
     let canonical: Arc<[u32]> = Arc::from(vec![3_u32, 7]);
@@ -1573,7 +1573,7 @@ fn golden_mirror_blend_matches_blend_joint() -> Result<(), TestError> {
 }
 
 /// **Idle golden**: the mirror's chest/torso composition reproduces
-/// [`crate::procedural::apply_idle_adjustments`] bit-for-bit, both over an
+/// [`sl_viewer_kit::procedural::apply_idle_adjustments`] bit-for-bit, both over an
 /// empty base (identity) and over a blended keyframe base.
 #[test]
 fn golden_mirror_idle_matches_procedural() -> Result<(), TestError> {
@@ -1644,7 +1644,7 @@ fn golden_mirror_idle_matches_procedural() -> Result<(), TestError> {
             pose.set_position(index, position);
         }
     }
-    crate::procedural::apply_idle_adjustments(&mut pose, idle_now, golden_joint_index);
+    sl_viewer_kit::procedural::apply_idle_adjustments(&mut pose, idle_now, golden_joint_index);
     let expected_chest = pose.rotation(2).ok_or("chest rotation")?;
     let chest_row = rows.get(2).ok_or("chest row")?;
     for (component, (got, want)) in chest_row

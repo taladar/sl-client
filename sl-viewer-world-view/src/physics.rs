@@ -9,7 +9,7 @@
 //! What it needs is (a) the dead-reckoning motion model and (b) collision
 //! geometry for raycasts (camera collision) and prim–prim contact (collision
 //! sounds). Both are provided directly: collision shapes are built with
-//! [`parry3d`] and handed to the custom [`crate::raycast_index`] index (the
+//! [`parry3d`] and handed to the custom [`sl_viewer_kit::raycast_index`] index (the
 //! replacement for avian's `SpatialQuery`,
 //! [[viewer-perf-custom-static-raycast-index]]), which maintains a BVH over the
 //! static prims off-thread and a small linear set for the moving ones.
@@ -46,7 +46,7 @@
 //! are excluded): **none** → no collider; **convex hull** → a convex hull of the
 //! prim / mesh vertices; **prim** → a trimesh of that geometry. These shapes are
 //! published each frame into the moving-collider set
-//! ([`crate::raycast_index::DynamicColliders`]) so camera collision and the
+//! ([`sl_viewer_kit::raycast_index::DynamicColliders`]) so camera collision and the
 //! prim–prim collision sounds see them.
 //!
 //! **P31.4 — avatar dead-reckoning.** The same `interpolateLinearMotion` port is
@@ -79,17 +79,21 @@ use sl_client_bevy::{
     SlCommand, SlEvent, SlIdentity, SlSessionEvent, Submesh, Vector,
 };
 
-use crate::avatars::update_avatar_objects;
-use crate::coords::{region_offset_bevy, sl_rotation_to_quat, sl_to_bevy_rotation, sl_to_bevy_vec};
-use crate::meshes::{MeshManager, MeshPhysicsAvailability};
-use crate::objects::{GeometryHolder, ObjectCategory, ObjectSlMotion, SceneObject, update_objects};
-use crate::raycast_index::{DynamicColliders, RaycastIndexColliders};
-use crate::world_api::ObjectState;
+use sl_viewer_kit::coords::{
+    region_offset_bevy, sl_rotation_to_quat, sl_to_bevy_rotation, sl_to_bevy_vec,
+};
+use sl_viewer_kit::raycast_index::{DynamicColliders, RaycastIndexColliders};
+use sl_viewer_world_api::ObjectState;
+use sl_viewer_world_avatar::avatars::update_avatar_objects;
+use sl_viewer_world_objects::meshes::{MeshManager, MeshPhysicsAvailability};
+use sl_viewer_world_objects::objects::{
+    GeometryHolder, ObjectCategory, ObjectSlMotion, SceneObject, update_objects,
+};
 
-use crate::world_api::AvatarState;
-use crate::world_api::TerrainState;
-use crate::world_api::world_scoped::{WorldPurge, WorldScoped, WorldScopedAppExt as _};
-use crate::world_api::{
+use sl_viewer_world_api::AvatarState;
+use sl_viewer_world_api::TerrainState;
+use sl_viewer_world_api::world_scoped::{WorldPurge, WorldScoped, WorldScopedAppExt as _};
+use sl_viewer_world_api::{
     AvatarControls, AvatarInterp, AvatarMotion, MotionState, PhysicalObject, ViewerCamera,
     bevy_rotation_of,
 };
@@ -167,7 +171,7 @@ impl Plugin for PhysicsPlugin {
                     // `drive_physical_objects` (between-update dead-reckon) — and after
                     // `drive_avatar_motion` (whose write it overrides for a seated
                     // anchor), and before the camera follow reads the own avatar's pose.
-                    crate::avatars::place_seated_avatars
+                    sl_viewer_world_avatar::avatars::place_seated_avatars
                         .after(update_objects)
                         .after(drive_physical_objects)
                         .after(drive_avatar_motion)
@@ -687,7 +691,7 @@ const ROTATION_SETTLE_EPSILON: f32 = 1.0e-5;
 
 /// The Bevy-world orientation an avatar anchor is eased towards: the viewer's own
 /// `held_heading` for the **own** avatar once it is known
-/// ([`AvatarControls::held_heading`](crate::world_api::AvatarControls::held_heading)),
+/// ([`AvatarControls::held_heading`](sl_viewer_world_api::AvatarControls::held_heading)),
 /// otherwise the authoritative / dead-reckoned facing of `motion`.
 ///
 /// Every other avatar can only be drawn from what the simulator reports. The own
@@ -1246,7 +1250,7 @@ pub(crate) fn drive_avatar_motion(
         ),
         // A seated avatar rides its seat, not the region: `place_seated_avatars`
         // drives its anchor, so the region-space dead-reckoner must leave it be.
-        Without<crate::world_api::Seated>,
+        Without<sl_viewer_world_api::Seated>,
     >,
     // Which anchor is the own avatar's, and the heading it is drawn facing
     // ([`avatar_facing_target`]).
@@ -1865,7 +1869,7 @@ fn scaled_points(points: impl Iterator<Item = [f32; 3]>, scale: [f32; 3]) -> Vec
 
 /// Convert a Bevy point cloud into [`parry3d`]'s vector type. parry builds on its
 /// own `glam` release, so the vector type does not unify with Bevy's — round-trip
-/// through a plain array (cf. [`crate::raycast_index`]).
+/// through a plain array (cf. [`sl_viewer_kit::raycast_index`]).
 fn to_parry_points(points: &[Vec3]) -> Vec<ParryVec> {
     points
         .iter()
@@ -2106,7 +2110,7 @@ struct ColliderWork {
 
 /// Give **every** non-physical, non-avatar, non-attachment prim a static
 /// [`SharedShape`] collider (marked with [`StaticCollider`]), which
-/// [`sync_raycast_index`] mirrors into the custom [`crate::raycast_index`] index —
+/// [`sync_raycast_index`] mirrors into the custom [`sl_viewer_kit::raycast_index`] index —
 /// the shared scene index that makes [`crate::camera::collide_camera`] functional
 /// ([[viewer-perf-custom-static-raycast-index]]). Physical roots keep their
 /// collider (`refine_physical_colliders`); this handles all the other solid
@@ -2372,7 +2376,7 @@ pub(crate) fn detach_static_colliders(
 }
 
 /// Mirror the static-index colliders into the custom [`RaycastIndexColliders`]
-/// set (the [`crate::raycast_index`] replacement for avian's `SpatialQuery`).
+/// set (the [`sl_viewer_kit::raycast_index`] replacement for avian's `SpatialQuery`).
 ///
 /// Change-driven: a collider is (re-)inserted only when it is freshly installed
 /// ([`Added<StaticCollider>`]), rebuilt (a resize / shape change re-inserts
@@ -2592,9 +2596,7 @@ mod tests {
         rotation_smoothing_alpha, shape_wants_geometry, smoothing_alpha, submesh_trimesh,
         to_parry_points,
     };
-    use crate::objects::ObjectCategory;
     use crate::physics::{ObjectPhysicsShapes, RegionTimeDilation};
-    use crate::world_api::world_scoped::{WorldPurge, WorldScoped as _};
     use bevy::ecs::world::CommandQueue;
     use bevy::ecs::world::World;
     use bevy::math::{Quat, Vec3};
@@ -2608,6 +2610,8 @@ mod tests {
         MeshPhysics, ObjectKey, PhysicsConvex, PhysicsShapeType, RegionHandle, Rotation, Submesh,
         Vector,
     };
+    use sl_viewer_world_api::world_scoped::{WorldPurge, WorldScoped as _};
+    use sl_viewer_world_objects::objects::ObjectCategory;
 
     /// Assert two `f32` are equal within a tight tolerance (the workspace lints
     /// forbid a strict `float_cmp`, and the clamp results are exact anyway).
@@ -3288,7 +3292,8 @@ mod tests {
         let held = 157.27_f32.to_radians();
 
         let drawn = avatar_facing_target(&echo, Some(held));
-        let expected = crate::coords::sl_to_bevy_rotation().mul_quat(Quat::from_rotation_z(held));
+        let expected =
+            sl_viewer_kit::coords::sl_to_bevy_rotation().mul_quat(Quat::from_rotation_z(held));
         assert!(
             drawn.abs_diff_eq(expected, 1.0e-6),
             "the own avatar faces its held heading: {drawn:?} vs {expected:?}"

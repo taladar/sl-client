@@ -56,8 +56,8 @@ use crate::objects::{
     FaceTextureDebug, ObjectCategory, ObjectDebugInfo, PrimLodTargets, SceneObject, TreeLodTargets,
 };
 use crate::textures::TextureManager;
-use crate::world_api::TreeTier;
-use crate::world_api::{PIXEL_AREA_CAP, ViewerCamera, on_hud_layer};
+use sl_viewer_world_api::TreeTier;
+use sl_viewer_world_api::{PIXEL_AREA_CAP, ViewerCamera, on_hud_layer};
 
 /// How often (seconds) the render-priority pass re-ranks the queued fetches. The
 /// reference viewer re-derives every texture's virtual size once per frame; a few
@@ -86,7 +86,7 @@ pub const LOD_FACTOR_MAX: f32 = 4.0;
 
 /// Declare the persisted LOD-factor setting (default: the stock
 /// [`DEFAULT_LOD_FACTOR`], i.e. the behaviour before the setting existed).
-pub fn register_settings(settings: &mut crate::settings::ViewerSettings) {
+pub fn register_settings(settings: &mut sl_viewer_settings::ViewerSettings) {
     settings.register_in(
         RENDER_SECTION,
         SETTING_LOD_FACTOR,
@@ -161,7 +161,7 @@ pub fn drive_render_priority(
     mut meshes: ResMut<MeshManager>,
     mut prim_targets: ResMut<PrimLodTargets>,
     mut tree_targets: ResMut<TreeLodTargets>,
-    settings: Option<Res<crate::settings::ViewerSettings>>,
+    settings: Option<Res<sl_viewer_settings::ViewerSettings>>,
 ) {
     *since_last += time.delta_secs();
     if *since_last < REPRIORITIZE_INTERVAL_SECS {
@@ -371,7 +371,7 @@ mod tests {
     use sl_settings::SettingsStore;
 
     use super::{DEFAULT_LOD_FACTOR, SETTING_LOD_FACTOR};
-    use crate::settings::ViewerSettings;
+    use sl_viewer_settings::ViewerSettings;
 
     /// The registered LOD factor defaults to the stock constant, so declaring
     /// the setting alone changes no behaviour.

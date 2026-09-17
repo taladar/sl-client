@@ -54,12 +54,12 @@ use sl_client_bevy::{
 };
 
 use crate::environment::EnvironmentState;
-use crate::probe_layers::environment_render_layers;
 use crate::sky::day_position;
-use crate::textures::{TextureDecoded, TextureManager};
 use crate::water_fog::WaterFogSettings;
-use crate::world_api::world_scoped::WorldScopedAppExt as _;
-use crate::world_api::{DecodedTextures, SKY_BOOST_PRIORITY, ViewerCamera, WorldPhase};
+use sl_viewer_kit::probe_layers::environment_render_layers;
+use sl_viewer_world_api::world_scoped::WorldScopedAppExt as _;
+use sl_viewer_world_api::{DecodedTextures, SKY_BOOST_PRIORITY, ViewerCamera, WorldPhase};
+use sl_viewer_world_objects::textures::{TextureDecoded, TextureManager};
 
 /// The water surface's own scheduling: the endless ocean and the per-region
 /// planes, spawned at `Startup` and driven every frame.
@@ -201,7 +201,7 @@ impl WaterState {
     }
 }
 
-impl crate::world_api::world_scoped::WorldScoped for WaterState {
+impl sl_viewer_world_api::world_scoped::WorldScoped for WaterState {
     /// Despawn every per-region plane and forget every learned water height.
     ///
     /// Both are keyed by regions the distant teleport just disconnected. The
@@ -216,7 +216,7 @@ impl crate::world_api::world_scoped::WorldScoped for WaterState {
     /// `drive_water` refreshes from the destination's environment anyway.
     fn purge_world(
         &mut self,
-        _purge: crate::world_api::world_scoped::WorldPurge,
+        _purge: sl_viewer_world_api::world_scoped::WorldPurge,
         commands: &mut Commands,
     ) {
         for (_cell, entity) in self.cells.drain() {
@@ -937,11 +937,11 @@ pub(crate) fn flat_normal_image() -> Image {
 #[cfg(test)]
 mod tests {
     use super::{WaterCell, WaterState, cell_height, default_water_lighting, water_params};
-    use crate::world_api::world_scoped::{WorldPurge, WorldScoped as _};
     use bevy::ecs::world::CommandQueue;
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::RegionHandle;
+    use sl_viewer_world_api::world_scoped::{WorldPurge, WorldScoped as _};
     use std::collections::HashMap;
 
     /// A region handle at the given grid coordinates (in region units).

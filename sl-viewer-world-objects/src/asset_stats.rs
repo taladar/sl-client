@@ -27,7 +27,7 @@ use bevy::prelude::*;
 use crate::materials::MaterialManager;
 use crate::meshes::MeshManager;
 use crate::textures::TextureManager;
-use crate::world_api::{
+use sl_viewer_world_api::{
     MATERIAL_LABEL, MESH_LABEL, PipelineStats, StorePipelineStats, TEXTURE_LABEL,
 };
 
@@ -45,7 +45,7 @@ impl Plugin for AssetStatsPlugin {
 }
 
 /// Snapshot each of the object layer's asset stores into
-/// [`PipelineStats`](crate::world_api::PipelineStats).
+/// [`PipelineStats`](sl_viewer_world_api::PipelineStats).
 ///
 /// Only runs while something is displaying the figures.
 fn publish_asset_store_stats(
@@ -86,9 +86,9 @@ mod tests {
     use crate::materials::MaterialManager;
     use crate::meshes::MeshManager;
     use crate::textures::TextureManager;
-    use crate::world_api::{MATERIAL_LABEL, MESH_LABEL, PipelineStats, TEXTURE_LABEL};
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
+    use sl_viewer_world_api::{MATERIAL_LABEL, MESH_LABEL, PipelineStats, TEXTURE_LABEL};
 
     /// Nothing is published while nothing is looking, and every store appears the
     /// frame the reader states its demand — the whole point of the inversion is

@@ -42,15 +42,15 @@ use bevy::window::PrimaryWindow;
 use sl_client_bevy::{AgentKey, Command, GroupKey, SlCommand};
 
 use crate::i18n::Translator;
+use crate::intents::OpenWebBrowser;
 use crate::parcel_names::ParcelNames;
+use crate::social::GroupsModel;
 use crate::system_browser::{ExternalUrl, open_in_system_browser};
 use crate::ui::UiRoot;
 use crate::ui_element::{ElementCx, TextMayClip};
 use crate::ui_font::UiFont;
 use crate::ui_name_link::{NAME_LINK_COLOR, NAME_PLAIN_COLOR};
 use crate::url_linkify::{AgentNameStyle, LinkIcon, LinkLabel, LinkTarget, TextRun, linkify};
-use crate::world_api::GroupsModel;
-use crate::world_api::OpenWebBrowser;
 use crate::world_api::{AvatarState, NameRecord};
 
 /// The leading-icon size, in logical pixels, relative to the label font size.

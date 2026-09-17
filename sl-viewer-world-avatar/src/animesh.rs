@@ -63,7 +63,7 @@ use crate::animations::{
     AnimationManager, PlayState, reconcile_playing, resolve_pose, retain_active,
 };
 use crate::avatars::AvatarBody;
-use crate::world_api::ObjectState;
+use sl_viewer_world_api::ObjectState;
 
 /// Whether worn rigged meshes' joint position overrides (R1) are applied to the
 /// avatar skeleton. On by default; `SL_VIEWER_JOINT_OVERRIDES=0` disables it, so the
@@ -119,7 +119,7 @@ struct ControlAvatar {
     root: Entity,
     /// The joint position overrides each of the linkset's rigged meshes imposes on
     /// this control avatar's skeleton (R1), keyed by the contributing mesh asset id
-    /// — the animesh counterpart of [`AvatarState`](crate::world_api::AvatarState)'s
+    /// — the animesh counterpart of [`AvatarState`](sl_viewer_world_api::AvatarState)'s
     /// per-avatar `joint_overrides`. Merged (highest mesh id wins per joint) into
     /// the effective set the GPU rest solve folds into the skeleton.
     overrides: HashMap<Uuid, JointOverrides>,
@@ -287,7 +287,7 @@ impl ControlAvatarState {
     /// Record the joint position overrides that rigged `mesh` imposes on `object`'s
     /// control-avatar skeleton (R1), replacing any previous contribution from that
     /// mesh. A no-op for an object with no spawned control avatar. Mirrors
-    /// [`AvatarState::record_joint_overrides`](crate::world_api::AvatarState).
+    /// [`AvatarState::record_joint_overrides`](sl_viewer_world_api::AvatarState).
     pub(crate) fn record_overrides(
         &mut self,
         object: ObjectKey,
@@ -390,7 +390,7 @@ pub(crate) fn drive_control_avatars(
     time: Res<Time>,
     mut events: MessageReader<SlEvent>,
     manager: Res<AnimationManager>,
-    state: Res<crate::world_api::ObjectState>,
+    state: Res<sl_viewer_world_api::ObjectState>,
     mut control: ResMut<ControlAvatarState>,
     body: Option<Res<AvatarBody>>,
 ) {
@@ -507,7 +507,7 @@ pub(crate) fn publish_control_avatars(
             continue;
         };
         feed.publish_real(
-            crate::world_api::PoseSlotKey::Animesh(object),
+            sl_viewer_world_api::PoseSlotKey::Animesh(object),
             root_global.to_matrix(),
             Vec::new(),
         );

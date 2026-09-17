@@ -67,8 +67,10 @@ use crate::floater::{
     KeyedFloaters, host_floater,
 };
 use crate::i18n::{TransArgs, Translated, Translator};
+use crate::intents::OpenGroupProfile;
 use crate::inventory_properties::format_unix_date;
 use crate::settings::ViewerSettings;
+use crate::social::GroupsModel;
 use crate::ui::{column, row};
 use crate::ui_font::UiFont;
 use crate::ui_tab::{
@@ -84,7 +86,6 @@ use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 use crate::world_api::AvatarState;
 use crate::world_api::ui_texture::{PendingUiTexture, UiTexturePlugin};
-use crate::world_api::{GroupsModel, OpenGroupProfile};
 
 /// The chrome font size, in logical pixels.
 const FONT_SIZE: f32 = 13.0;
@@ -3466,8 +3467,9 @@ mod tests {
         use crate::floater::{
             ActiveFloater, Floater, FloaterCommand, FloaterOp, FloaterPlugin, FloaterZTop,
         };
+        use crate::intents::OpenGroupProfile;
+        use crate::social::GroupsModel;
         use crate::ui::UiRoot;
-        use crate::world_api::{GroupsModel, OpenGroupProfile};
         use bevy::prelude::*;
         use pretty_assertions::assert_eq;
         use sl_client_bevy::{GroupKey, SlCommand, Uuid};

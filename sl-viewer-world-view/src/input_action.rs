@@ -50,7 +50,7 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 use sl_client_bevy::Uuid;
 
-use crate::world_api::InputContext;
+use sl_viewer_world_api::InputContext;
 
 /// A named viewer action a binding can drive — the stable target the camera and
 /// avatar-movement systems consume instead of a raw key.
@@ -353,9 +353,9 @@ mod tests {
     use super::{
         Action, BindingProfile, BindingTarget, InputBindings, InputMode, update_action_input,
     };
-    use crate::world_api::InputContext;
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
+    use sl_viewer_world_api::InputContext;
 
     /// An app wired with the action-map resources but none of the windowing.
     fn action_app(context: InputContext) -> App {
@@ -537,12 +537,12 @@ mod tests {
 mod typed_tests {
     use super::{Action, InputActionPlugin, InputMode};
     use crate::input_context::{CursorGrabAllowed, InputContextPlugin};
-    use crate::world_api::CameraMode;
     use bevy::input::keyboard::Key;
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
     use sl_viewer_testkit::interact::{self, InteractionTest};
     use sl_viewer_testkit::settle;
+    use sl_viewer_world_api::CameraMode;
 
     /// The interaction harness with both input layers, in `mode`, with nothing
     /// focused — so the world owns the keyboard.

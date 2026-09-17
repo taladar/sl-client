@@ -1,10 +1,10 @@
 //! The **render scene registry** (`viewer-render-test-harness`): the one list of
 //! things this viewer renders, built with **no login, no region, no OAR and no
 //! UUID lookup** — shared by the gallery a human looks at
-//! (`crate::render_gallery`) and the checks a machine runs
-//! (`crate::render_test`).
+//! (`sl_client_bevy_viewer::render_gallery`) and the checks a machine runs
+//! (`sl_client_bevy_viewer::render_test`).
 //!
-//! This is `crate::ui_element`'s 3D counterpart, and deliberately the same
+//! This is `sl_viewer_ui_core::ui_element`'s 3D counterpart, and deliberately the same
 //! shape: one registry, entries that construct themselves without wiring, and
 //! declared intent carried as components. Every argument that module makes
 //! applies here and applies harder — a rendering bug is currently found by a
@@ -37,20 +37,20 @@
 //!
 //! A `Timeline::STATIC` scene is sampled once. A scene that declares more than
 //! one sample is declaring *that something happens over time*, and
-//! `crate::render_test` holds it to that: a multi-sample scene whose geometry is
+//! `sl_client_bevy_viewer::render_test` holds it to that: a multi-sample scene whose geometry is
 //! identical at every sample has failed, because the thing it exists to exercise
 //! did not run. That is the check that catches a dead emitter, and it needs no
 //! opt-in beyond the timeline itself.
 //!
 //! Time is driven by [`TimeUpdateStrategy::ManualDuration`], never the wall
-//! clock — see `crate::render_test`. A harness whose results depend on how fast
+//! clock — see `sl_client_bevy_viewer::render_test`. A harness whose results depend on how fast
 //! the machine ran it is a harness that flakes.
 //!
 //! [`TimeUpdateStrategy::ManualDuration`]: bevy::time::TimeUpdateStrategy::ManualDuration
 //!
 //! # The rule this registry enforces: geometry without a session
 //!
-//! `crate::ui_element`'s rule is "constructible without its wiring". The 3D
+//! `sl_viewer_ui_core::ui_element`'s rule is "constructible without its wiring". The 3D
 //! rule is the same statement about a different dependency: **an object must be
 //! constructible without a session**. A mesh that can only be spawned by a
 //! `Session` handing it an `ObjectUpdate` is a mesh that can never be tested.
@@ -115,27 +115,33 @@ use sl_terrain::TerrainComposition;
 
 use std::path::{Path, PathBuf};
 
-use crate::avatar_assets::AvatarAssetLibrary;
-use crate::bump::{apply_surface_flags, generate_normal_map};
-use crate::coords::sl_to_bevy_rotation;
-use crate::face_material::{FaceMaterial, MAP_FLAG_NORMAL, MAP_FLAG_SPEC, inert_face_material};
-use crate::flexi::{FLEXI_LOD, FlexiSimState, ObjectFlexi, flexi_attributes, simulate_flexi};
-use crate::legacy_materials::{apply_legacy_scalars, build_linear_image, build_srgb_image};
-use crate::objects::{FaceTextureDebug, PrimFaceEntity};
 use crate::particles::{drive_particles, float_to_u8, retire_orphaned_clouds};
 use crate::sky::{
     MOON_DISK_RADIUS, SCENE_LIGHT_ILLUMINANCE, SKY_DOME_RADIUS, STAR_DOME_RADIUS, SUN_DISK_RADIUS,
     build_cloud_dome_mesh, build_star_mesh, cloud_params, disc_transform,
     placeholder_image as sky_placeholder_image, resolve_sky, shadow_cascades,
 };
-use crate::sky_presets::{MIDDAY, MIDNIGHT, SUNRISE, SUNSET, SkyPreset, sky_settings_from};
 use crate::terrain::{build_patch_mesh, placeholder_image as terrain_placeholder_image};
-use crate::texture_anim::{ObjectTextureAnimation, drive_texture_animations};
-use crate::textures::TextureManager;
 use crate::water::{DEFAULT_WATER_HEIGHT, water_normal_image, water_params, white_mask_image};
-use crate::world_api::ObjectReflectionProbe;
-use crate::world_api::PatchKey;
-use crate::world_api::{DecodedTextures, ObjectParticleSystem, TerrainSurface};
+use sl_viewer_kit::avatar_assets::AvatarAssetLibrary;
+use sl_viewer_kit::coords::sl_to_bevy_rotation;
+use sl_viewer_kit::face_material::{
+    FaceMaterial, MAP_FLAG_NORMAL, MAP_FLAG_SPEC, inert_face_material,
+};
+use sl_viewer_kit::flexi::{
+    FLEXI_LOD, FlexiSimState, ObjectFlexi, flexi_attributes, simulate_flexi,
+};
+use sl_viewer_kit::sky_presets::{MIDDAY, MIDNIGHT, SUNRISE, SUNSET, SkyPreset, sky_settings_from};
+use sl_viewer_world_api::ObjectReflectionProbe;
+use sl_viewer_world_api::PatchKey;
+use sl_viewer_world_api::{DecodedTextures, ObjectParticleSystem, TerrainSurface};
+use sl_viewer_world_objects::bump::{apply_surface_flags, generate_normal_map};
+use sl_viewer_world_objects::legacy_materials::{
+    apply_legacy_scalars, build_linear_image, build_srgb_image,
+};
+use sl_viewer_world_objects::objects::{FaceTextureDebug, PrimFaceEntity};
+use sl_viewer_world_objects::texture_anim::{ObjectTextureAnimation, drive_texture_animations};
+use sl_viewer_world_objects::textures::TextureManager;
 
 /// The environment variable naming a Linden `character/` directory — **the same
 /// one the viewer itself reads** (`--viewer-assets` / `SL_VIEWER_ASSETS`), so a
@@ -398,7 +404,7 @@ pub struct SceneAssets<'w> {
 
 /// Everything a registered scene needs to be **driven** — the viewer's own
 /// time-varying systems and the resources they read — added by the harness
-/// (`crate::render_test`) and the gallery (`crate::render_gallery`) alike.
+/// (`sl_client_bevy_viewer::render_test`) and the gallery (`sl_client_bevy_viewer::render_gallery`) alike.
 ///
 /// One plugin rather than two lists, and the reason is a failure both apps have
 /// already had. A dynamic scene's renderable does not exist until its driver has
@@ -442,7 +448,7 @@ impl Plugin for SceneRuntimePlugin {
                 Startup,
                 (
                     crate::particles::setup_particles,
-                    crate::particle_render::setup_particle_quad,
+                    sl_viewer_kit::particle_render::setup_particle_quad,
                 ),
             )
             .add_systems(
@@ -472,7 +478,7 @@ fn init_scene_asset<M: Asset>(app: &mut App) {
 /// **A new renderable belongs in [`SCENES`].** That is the whole obligation, and
 /// it buys the scene every check that exists now and every check added later, at
 /// every LOD, at every sample of its timeline — the compounding
-/// `crate::ui_element` describes, in three dimensions.
+/// `sl_viewer_ui_core::ui_element` describes, in three dimensions.
 #[derive(Debug)]
 pub struct RenderScene {
     /// The stable id a failure names and the gallery labels — kebab-case.
@@ -890,7 +896,7 @@ pub fn scene_root_transform() -> Transform {
 /// its visibility from **every** ancestor, so a root without one breaks the
 /// propagation chain for the whole scene and Bevy warns once per renderable
 /// (B0004). Bundled here rather than left to each caller because there are two —
-/// `crate::render_test` and `crate::render_gallery` — and the first version of
+/// `sl_client_bevy_viewer::render_test` and `sl_client_bevy_viewer::render_gallery` — and the first version of
 /// this had the bug in both.
 #[must_use]
 pub fn scene_root() -> impl Bundle {
@@ -904,7 +910,7 @@ pub fn scene_root() -> impl Bundle {
         // so without this the probe capture cameras (which render the probe layers
         // only, to stay off the sun's shadow path) would see an empty, unlit world
         // and a mirror would reflect nothing.
-        bevy::app::Propagate(crate::probe_layers::all_render_layers()),
+        bevy::app::Propagate(sl_viewer_kit::probe_layers::all_render_layers()),
     )
 }
 
@@ -1135,7 +1141,7 @@ const fn base_shape() -> PrimShapeFloat {
 /// And it is what makes a *whole-prim* check expressible. A single face of a box
 /// is a flat quad — open by construction — so "does this enclose a volume" is
 /// meaningless per face and meaningful per prim. The object entity is the group
-/// key `crate::render_test` unions the faces under.
+/// key `sl_client_bevy_viewer::render_test` unions the faces under.
 #[expect(
     clippy::too_many_arguments,
     reason = "the shape, its detail, its colour, its placement, its parent and the three \
@@ -1741,7 +1747,7 @@ fn spawn_skeleton(
 ///   real Linden body found it: the mini fixture is weighted, so the fallback
 ///   path never exercised it. Some real parts (the eyes) are not.
 ///
-/// Either way wgpu rejects the draw and Bevy quits. `crate::render_test`'s
+/// Either way wgpu rejects the draw and Bevy quits. `sl_client_bevy_viewer::render_test`'s
 /// `unskinned_violations` checks **both** directions now.
 fn spawn_base_part(
     name: String,
@@ -2619,12 +2625,12 @@ fn flexi_streamer(
 ///
 /// **Dynamic, and dynamic in a way no earlier scene was.** Nothing about this prim's
 /// *geometry* changes: the animation runs entirely in the shader
-/// ([`face_material.wgsl`](crate::face_material)'s `sl_animated_uv` from
+/// ([`face_material.wgsl`](sl_viewer_kit::face_material)'s `sl_animated_uv` from
 /// `globals.time`), and the vertex buffer it samples through is the same one at
 /// every sample. Because the animation is GPU-time-driven, **nothing in CPU state
-/// changes** frame to frame — a CPU digest (`crate::render_test`) cannot see it, so
+/// changes** frame to frame — a CPU digest (`sl_client_bevy_viewer::render_test`) cannot see it, so
 /// this scene is `Timeline::STATIC` there and its motion is verified by rendered
-/// pixels in [`crate::render_readback`] instead.
+/// pixels in [`sl_client_bevy_viewer::render_readback`] instead.
 ///
 /// The animation is a 4×4 flipbook at 8 frames a second: the reference viewer's
 /// `llSetTextureAnim(ANIM_ON | LOOP, ALL_SIDES, 4, 4, 0.0, 0.0, 8.0)`, the form
@@ -3354,7 +3360,7 @@ const WATER_CAMERA: Vec3 = Vec3::new(0.0, -40.0, 26.0);
 /// The colour of the slab on the sea bed in the `water-surface` scene: strongly red,
 /// and nothing else in that scene is, so a pixel dominated by red is the slab seen
 /// through the water and cannot be anything else. Read by the readback tier's
-/// refraction check (`crate::render_readback`).
+/// refraction check (`sl_client_bevy_viewer::render_readback`).
 pub(crate) const SUBMERGED_MARKER: Color = Color::srgb(0.9, 0.05, 0.05);
 
 /// [`SCENES`] `water-surface`: the endless ocean and a region's water plane.

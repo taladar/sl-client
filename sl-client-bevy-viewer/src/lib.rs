@@ -152,6 +152,8 @@ pub(crate) use sl_viewer_edit::edit_selection;
 pub(crate) use sl_viewer_edit::edit_texture;
 pub(crate) use sl_viewer_edit::edit_tool;
 pub(crate) use sl_viewer_edit::edit_undo;
+pub(crate) use sl_viewer_intents as intents;
+pub(crate) use sl_viewer_social as social;
 /// The shared world state every feature surface reads: the selection, the
 /// edit modes, the mute and buddy lists, group memberships, presence and map
 /// tracking. Aliased so the call sites read as a module of this crate.

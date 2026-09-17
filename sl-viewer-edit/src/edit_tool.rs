@@ -42,6 +42,7 @@ use crate::floater::{
 };
 use crate::gizmos::{EditPerm, perm_notice};
 use crate::i18n::{TransArgs, Translated, Translator};
+use crate::intents::LocalChatNotice;
 use crate::objects::{ObjectSlMotion, SceneObject};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
@@ -52,7 +53,6 @@ use crate::ui_tab::{
 use crate::ui_text::set_editor_text;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::world_api::InputContext;
-use crate::world_api::LocalChatNotice;
 use crate::world_api::ObjectState;
 use crate::world_api::SelectionSet;
 
@@ -1306,7 +1306,7 @@ fn commit_numeric_fields(
     mut motions: Query<(&mut ObjectSlMotion, &SceneObject)>,
     mut transforms: crate::gizmos::EditTransformQuery,
     mut commands: MessageWriter<SlCommand>,
-    mut notices: MessageWriter<crate::world_api::LocalChatNotice>,
+    mut notices: MessageWriter<crate::intents::LocalChatNotice>,
 ) {
     let Some(ui) = ui else {
         return;

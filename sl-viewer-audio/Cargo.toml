@@ -27,6 +27,7 @@ sl-viewer-kit = { workspace = true }
 sl-viewer-media = { workspace = true }
 sl-viewer-platform = { workspace = true }
 sl-viewer-settings = { workspace = true }
+sl-viewer-social = { workspace = true }
 sl-viewer-ui-core = { workspace = true }
 sl-viewer-ui-widgets = { workspace = true }
 sl-viewer-world-api = { workspace = true }

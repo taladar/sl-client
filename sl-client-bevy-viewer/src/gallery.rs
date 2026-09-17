@@ -317,7 +317,7 @@ pub fn run() -> AppExit {
         // fixed-label links. The two session messages it writes to are declared so
         // its `MessageWriter`s have somewhere inert to go.
         .add_message::<sl_client_bevy::SlCommand>()
-        .add_message::<crate::world_api::OpenWebBrowser>()
+        .add_message::<crate::intents::OpenWebBrowser>()
         .add_plugins(crate::linkified_text::LinkifiedTextPlugin)
         // The rich-text field, so the notecard specimens' embedded items and
         // link chips are placed in the flow of their text here too. Without it

@@ -1,0 +1,26 @@
+[package]
+name = "sl-viewer-intents"
+description = "The Second Life / OpenSim viewer's cross-tier intents: the block / friend / profile / picker requests and the drag, drop and open-editor vocabulary one surface uses to ask another for something"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords = ["secondlife", "opensim", "viewer", "state"]
+categories = ["game-development"]
+exclude.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Not a workspace dependency: members disagree about `default-features`, so the
+# spec stays per-crate (see the root manifest).
+bevy = { version = "0.19.0" }
+sl-client-bevy = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+
+[lints]
+workspace = true

@@ -51,6 +51,10 @@ use crate::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater,
 };
 use crate::i18n::{Translated, UiLocale};
+use crate::intents::OpenAvatarProfile;
+use crate::intents::OpenGroupProfile;
+use crate::intents::RequestFriendship;
+use crate::intents::{ConversationKey, OpenConversation};
 use crate::media_engine::MediaSurfaces;
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{SettingBinding, bound_checkbox};
@@ -68,11 +72,7 @@ use crate::ui_table::{
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow};
-use crate::world_api::OpenAvatarProfile;
-use crate::world_api::OpenGroupProfile;
-use crate::world_api::RequestFriendship;
 use crate::world_api::ui_texture::{PendingUiTexture, UiTexturePlugin};
-use crate::world_api::{ConversationKey, OpenConversation};
 use crate::world_map::OpenWorldMap;
 
 // ---------------------------------------------------------------------------

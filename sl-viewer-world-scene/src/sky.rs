@@ -71,14 +71,14 @@ use sl_client_bevy::{
     SunDiscMaterial, SunDiscParams, TextureKey, to_bevy_image, write_sky_lighting,
 };
 
-use crate::coords::sl_to_bevy_object_rotation;
 use crate::environment::EnvironmentState;
-use crate::probe_layers::{
+use crate::transparency::SkyBackdrop;
+use sl_viewer_kit::coords::sl_to_bevy_object_rotation;
+use sl_viewer_kit::probe_layers::{
     environment_render_layers, mirror_sun_render_layers, scene_sun_render_layers,
 };
-use crate::textures::{TextureDecoded, TextureManager};
-use crate::transparency::SkyBackdrop;
-use crate::world_api::{DecodedTextures, SKY_BOOST_PRIORITY, ViewerCamera, WorldPhase};
+use sl_viewer_world_api::{DecodedTextures, SKY_BOOST_PRIORITY, ViewerCamera, WorldPhase};
+use sl_viewer_world_objects::textures::{TextureDecoded, TextureManager};
 
 /// The sky stack's own scheduling: the dome, the sun / moon discs, the cloud
 /// layer and the star field, spawned at `Startup` and driven every frame.
@@ -2565,7 +2565,6 @@ mod tests {
         SHADOW_MAP_SIZE, build_cloud_dome_mesh, disc_drawn, quantised_day_position, resolve_sky,
         shader_light_colors, sky_ambient_light, snap_shadow_direction,
     };
-    use crate::sky_presets::{MIDDAY, MIDNIGHT, SUNRISE, SUNSET, sky_settings_from};
     use bevy::camera::primitives::MeshAabb as _;
     use bevy::math::Vec3;
     use bevy::mesh::{Mesh, VertexAttributeValues};
@@ -2573,6 +2572,7 @@ mod tests {
     use sl_client_bevy::TextureKey;
     use sl_client_bevy::azimuth_altitude_to_rotation;
     use sl_client_bevy::{EnvironmentSettings, SkyLighting, SkyLightingMode};
+    use sl_viewer_kit::sky_presets::{MIDDAY, MIDNIGHT, SUNRISE, SUNSET, sky_settings_from};
 
     /// A region on a live four-hour day cycle: the legacy WindLight default with
     /// the four ported presets keyframed across the day, so the blended sky
@@ -2584,7 +2584,7 @@ mod tests {
         let mut settings = EnvironmentSettings::legacy_windlight_default();
         settings.day_length = 14400;
         settings.day_offset = 0;
-        crate::sky_presets::install_preset_day_cycle(&mut settings);
+        sl_viewer_kit::sky_presets::install_preset_day_cycle(&mut settings);
         settings
     }
 

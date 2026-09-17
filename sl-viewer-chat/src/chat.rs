@@ -31,15 +31,15 @@ use sl_client_bevy::{
     chat_text_muted,
 };
 
+use crate::intents::LocalChatNotice;
 use crate::settings::ViewerSettings;
+use crate::social::MuteModel;
 use crate::ui::BottomArea;
 use crate::ui::UiRoot;
 use crate::ui_font::UiFont;
-use crate::world_api::LocalChatNotice;
 use crate::world_api::rlv::swallows_owner_say;
 use crate::world_api::{
-    MuteModel, ObjectState, SETTING_CHAT_FONT_SIZE, SETTING_CHAT_MAX_LINES,
-    SETTING_NEARBY_TOAST_LIFETIME,
+    ObjectState, SETTING_CHAT_FONT_SIZE, SETTING_CHAT_MAX_LINES, SETTING_NEARBY_TOAST_LIFETIME,
 };
 
 /// The most chat lines the overlay ever shows at once when no

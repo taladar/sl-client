@@ -147,11 +147,11 @@ use sl_viewer_world_avatar::animesh::ControlAvatarState;
 use sl_viewer_world_avatar::avatars::AvatarBodyPart;
 use sl_viewer_world_scene::environment::EnvironmentState;
 
-use crate::coords::{
+use sl_viewer_kit::coords::{
     bevy_to_sl_vec, metres_to_f32, region_offset_bevy, sl_rotation_to_quat, sl_to_bevy_rotation,
 };
-use crate::objects::ObjectSlMotion;
-use crate::settings::ViewerSettings;
+use sl_viewer_settings::ViewerSettings;
+use sl_viewer_world_objects::objects::ObjectSlMotion;
 
 /// The schema both viewers write. Bumped only when a field changes meaning; a
 /// comparison refuses two dumps that disagree about it.
@@ -832,7 +832,7 @@ fn build_environment(environment: &EnvironmentState) -> EnvironmentDump {
     let water = environment.water_at(position);
     // The reference's own derivation (`LLSettingsSky::getSunDirection`): the
     // body's orientation applied to the Second Life X axis.
-    let direction = crate::coords::sky_body_direction;
+    let direction = sl_viewer_kit::coords::sky_body_direction;
     EnvironmentDump {
         day_position: position,
         sun_direction: sky
@@ -1427,7 +1427,7 @@ mod tests {
         FaceDump, LocalPose, ObjectDump, Point, ReferencePose, compose_worn, dump_avatar,
         dump_face, dump_faces, loop_time, region_direction, region_point, region_rotation,
     };
-    use crate::coords::{sl_to_bevy_object_rotation, sl_to_bevy_vec};
+    use sl_viewer_kit::coords::{sl_to_bevy_object_rotation, sl_to_bevy_vec};
 
     /// The boxed error every test in this module reports through.
     type TestError = Box<dyn core::error::Error>;

@@ -23,11 +23,11 @@
 //! [`apply_legacy_normal_maps`] uploads that map (linear) into the face material's
 //! normal slot once it decodes.
 //!
-//! Since Phase 2 of the custom face material ([`crate::face_material`]) the mapping
+//! Since Phase 2 of the custom face material ([`sl_viewer_kit::face_material`]) the mapping
 //! is **faithful**, not the earlier scalar approximation: the material's normal and
 //! specular maps (each with its own offset / repeat / rotation UV transform), its
 //! specular colour, glossiness (exponent) and environment intensity are written
-//! onto the face material's [`SlFaceExt`](crate::face_material::SlFaceExt) extension,
+//! onto the face material's [`SlFaceExt`](sl_viewer_kit::face_material::SlFaceExt) extension,
 //! which renders them as an analytic normalized Blinn-Phong specular lobe over the
 //! matte base (see `face_material.wgsl`). The face's base [`StandardMaterial`] is
 //! set matte (metallic 0, roughness 1, reflectance 0) so the added lobe — not the
@@ -44,18 +44,18 @@ use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::math::Affine2;
 use bevy::prelude::*;
 
-use crate::world_api::DecodedTextures;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{
     Command, DecodedTexture, LegacyMaterial, Priority, SlCommand, SlEvent, SlSessionEvent,
     TextureKey, Uuid, texture_uv_transform,
 };
+use sl_viewer_world_api::DecodedTextures;
 
-use crate::face_material::{FaceMaterial, MAP_FLAG_NORMAL, MAP_FLAG_SPEC};
 use crate::materials::ObjectRenderMaterials;
 use crate::objects::{FaceTextureDebug, PrimFaceEntity};
 use crate::textures::{DerivedImage, TextureApplyBudget, TextureManager, refresh_derived_images};
-use crate::world_api::TERRAIN_BOOST_PRIORITY;
+use sl_viewer_kit::face_material::{FaceMaterial, MAP_FLAG_NORMAL, MAP_FLAG_SPEC};
+use sl_viewer_world_api::TERRAIN_BOOST_PRIORITY;
 
 /// The fetch priority a legacy material's normal map is requested at — the same
 /// modest boost the PBR pipeline uses for its maps, so the map loads at full
@@ -450,7 +450,7 @@ pub fn apply_legacy_materials(
 
 /// Write one legacy material onto a face [`FaceMaterial`] — the matte base, the
 /// diffuse alpha-mode override, and the legacy Blinn-Phong specular workflow onto
-/// the [`SlFaceExt`](crate::face_material::SlFaceExt) extension (specular colour /
+/// the [`SlFaceExt`](sl_viewer_kit::face_material::SlFaceExt) extension (specular colour /
 /// glossiness / environment intensity, and the normal- and specular-map UV
 /// transforms) — returning whether the material's diffuse alpha mode **overrode**
 /// the face's `alpha_mode` (the caller records that in
@@ -711,7 +711,9 @@ pub fn refresh_legacy_map_images(
 mod tests {
     use pretty_assertions::assert_eq;
 
-    use crate::face_material::{SL_FACE_MODE_DIFFUSE, SL_FACE_MODE_LEGACY, inert_face_material};
+    use sl_viewer_kit::face_material::{
+        SL_FACE_MODE_DIFFUSE, SL_FACE_MODE_LEGACY, inert_face_material,
+    };
 
     use super::*;
 

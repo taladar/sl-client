@@ -117,6 +117,7 @@ use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{SettingBinding, bound_checkbox};
+use crate::social::GroupsModel;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_element::{ElementCx, UiAction};
@@ -131,7 +132,7 @@ use crate::ui_table::{
     spawn_table_row,
 };
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
-use crate::world_api::{AvatarState, GroupsModel};
+use crate::world_api::AvatarState;
 
 /// The floater's id (its geometry-persistence key and menu target).
 pub const EXPERIENCES_FLOATER_ID: &str = "experiences";

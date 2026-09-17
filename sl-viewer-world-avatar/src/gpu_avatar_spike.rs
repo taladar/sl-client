@@ -729,7 +729,7 @@ mod tests {
     use bevy::render::render_resource::{TextureFormat, TextureUsages};
 
     use super::{GpuAvatarSpikePlugin, MAT4_BYTES, SpikeMode, SpikeReadbackData};
-    use crate::face_material::{FaceMaterial, SlFaceMaterialPlugin, inert_face_material};
+    use sl_viewer_kit::face_material::{FaceMaterial, SlFaceMaterialPlugin, inert_face_material};
     use sl_viewer_testkit::TestError;
 
     /// The rendered frame's edge, in pixels. 128 keeps a readback row at 512

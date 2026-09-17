@@ -7,7 +7,7 @@
 //! facts, so binding it needs the wearer's spawned skeleton ([`AvatarBody`]),
 //! the bake-on-mesh face materials (`BomFace`) and the GPU skinning slot
 //! (`gpu_avatars::GpuSkinBinding`). That is the whole
-//! reason this module is separate from [`crate::objects`]: the object layer
+//! reason this module is separate from [`sl_viewer_world_objects::objects`]: the object layer
 //! builds prims without ever naming an avatar, and everything that could not
 //! hold to that rule lives here instead.
 //!
@@ -37,19 +37,21 @@ use sl_client_bevy::{
 };
 
 use crate::animesh::{ControlAvatarState, animesh_root};
-use crate::asset_budget::MeshUploadBudget;
 use crate::avatars::{AvatarBody, BomFace, bom_face_material, log_avatar_faces_enabled};
-use crate::face_material::FaceMaterial;
-use crate::geometry_cache::GeometryCache;
-use crate::meshes::MeshManager;
-use crate::objects::{
+use sl_viewer_kit::face_material::FaceMaterial;
+use sl_viewer_kit::geometry_cache::GeometryCache;
+use sl_viewer_world_api::{
+    AVATAR_BOOST_PRIORITY, AvatarPickTarget, AvatarState, DecodedTextures, HUD_RENDER_LAYER,
+    HudState, ObjectState, is_hud_point,
+};
+use sl_viewer_world_objects::asset_budget::MeshUploadBudget;
+use sl_viewer_world_objects::meshes::MeshManager;
+use sl_viewer_world_objects::objects::{
     ObjectCategory, PendingBuilds, PendingDecodedMeshes, PendingGeometry, PrimFaceEntity,
     SceneObject, WornPickTarget,
 };
-use crate::textures::{PrimTextures, TextureAlpha, TextureManager, face_material};
-use crate::world_api::{
-    AVATAR_BOOST_PRIORITY, AvatarPickTarget, AvatarState, DecodedTextures, HUD_RENDER_LAYER,
-    HudState, ObjectState, is_hud_point,
+use sl_viewer_world_objects::textures::{
+    PrimTextures, TextureAlpha, TextureManager, face_material,
 };
 
 /// Parent every tracked attachment that is not yet parented to its avatar's
@@ -309,7 +311,7 @@ pub fn joint_overrides_enabled() -> bool {
 /// The same switch turns on the object layer's arrival line and this module's
 /// seating trace; it is read from the shared world crate so all three stages of
 /// a worn object's journey light up together.
-pub(crate) use crate::world_api::log_attachment_bind_enabled;
+pub(crate) use sl_viewer_world_api::log_attachment_bind_enabled;
 
 /// Diagnostic state for `log_attachment_bind_enabled`: the last-logged
 /// not-yet-bound reason per worn rigged attachment, so [`apply_rigged_attachments`]
@@ -343,14 +345,14 @@ impl RiggedBindSkipLog {
     }
 }
 
-impl crate::world_api::world_scoped::WorldScoped for RiggedBindSkipLog {
+impl sl_viewer_world_api::world_scoped::WorldScoped for RiggedBindSkipLog {
     /// Forget every stall reason. The keys are region-local ids the departed
     /// region's local-id space owns, and an attachment that never bound never
     /// reached `RiggedBindSkipLog::bound` to be removed — so without
     /// this the map only ever grew.
     fn purge_world(
         &mut self,
-        _purge: crate::world_api::world_scoped::WorldPurge,
+        _purge: sl_viewer_world_api::world_scoped::WorldPurge,
         _commands: &mut Commands,
     ) {
         self.0.clear();
@@ -383,14 +385,14 @@ impl AttachmentAdoptSkipLog {
     }
 }
 
-impl crate::world_api::world_scoped::WorldScoped for AttachmentAdoptSkipLog {
+impl sl_viewer_world_api::world_scoped::WorldScoped for AttachmentAdoptSkipLog {
     /// Forget every stall reason, for the same reason
     /// [`RiggedBindSkipLog`] does: the keys belong to the departed region's
     /// local-id space, and an attachment that never seated never reached
     /// `AttachmentAdoptSkipLog::seated` to be removed.
     fn purge_world(
         &mut self,
-        _purge: crate::world_api::world_scoped::WorldPurge,
+        _purge: sl_viewer_world_api::world_scoped::WorldPurge,
         _commands: &mut Commands,
     ) {
         self.0.clear();
@@ -474,7 +476,7 @@ pub(crate) fn rig_placement(
 ///
 /// Each frame, for every rigged build still pending whose linkset
 /// `rig_placement` finds in the world, the build is handed back to
-/// [`apply_object_meshes`](crate::objects::apply_object_meshes) as a static one
+/// [`apply_object_meshes`](sl_viewer_world_objects::objects::apply_object_meshes) as a static one
 /// (a mesh still upgrading to its finest block waits for it, since a rigged key
 /// is never swapped to another level afterwards). And every rigged mesh built
 /// that way whose linkset is now bound — ticked animated in the build floater,
@@ -533,7 +535,7 @@ pub fn route_in_world_rigged_meshes(
 /// rather than sitting rigidly at an attachment point.
 ///
 /// A rigged mesh's build is deferred here (rather than in
-/// [`apply_object_meshes`](crate::objects::apply_object_meshes))
+/// [`apply_object_meshes`](sl_viewer_world_objects::objects::apply_object_meshes))
 /// because it needs the wearer's spawned skeleton — which can arrive before or
 /// after the mesh decodes. The pending build is retried each frame until the
 /// avatar's rigged body (`AvatarState::is_rigged`) is present; an avatar
@@ -628,7 +630,7 @@ pub fn apply_rigged_attachments(
                 root,
                 joints,
                 None,
-                crate::world_api::PoseSlotKey::Animesh(object),
+                sl_viewer_world_api::PoseSlotKey::Animesh(object),
             )
         } else {
             // The wearer avatar, found by chasing this mesh's parent links up to the
@@ -702,7 +704,7 @@ pub fn apply_rigged_attachments(
                 root,
                 joints,
                 Some(agent),
-                crate::world_api::PoseSlotKey::Avatar(agent),
+                sl_viewer_world_api::PoseSlotKey::Avatar(agent),
             )
         };
         let Some(fallback) = joints.first().copied() else {
@@ -995,7 +997,7 @@ fn build_rigged_submeshes(
     canonical: &[u32],
     texture_entry: &[u8],
     root: Entity,
-    slot: crate::world_api::PoseSlotKey,
+    slot: sl_viewer_world_api::PoseSlotKey,
     agent: Option<AgentKey>,
     worn: Option<ScopedObjectId>,
     mesh_key: MeshKey,
@@ -1135,7 +1137,7 @@ fn build_rigged_submeshes(
             canonical: Arc::clone(&canonical_binding),
         });
         // …and the worn-object identity beside it, so that same pick can route a
-        // hit on this submesh to the attachment pies (`crate::attachment_menu`)
+        // hit on this submesh to the attachment pies (`sl_client_bevy_viewer::attachment_menu`)
         // instead of the wearer's plain avatar pie.
         if let Some(scoped) = worn {
             spawned.insert(WornPickTarget { scoped });
@@ -1197,10 +1199,10 @@ mod tests {
     };
 
     use crate::avatars::AvatarBody;
-    use crate::objects::fixture_object;
-    use crate::world_api::{
+    use sl_viewer_world_api::{
         AvatarState, HudState, INITIAL_TREE_TIER, ObjectState, ShapeFingerprint, TrackedObject,
     };
+    use sl_viewer_world_objects::objects::fixture_object;
 
     use super::{AttachmentAdoptSkipLog, RigPlacement, adopt_pending_attachments, rig_placement};
 

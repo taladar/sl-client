@@ -43,9 +43,9 @@ use bevy::ui_widgets::{Activate, Button};
 
 use sl_client_bevy::{Command, SlCommand, SlEvent, SlSessionEvent};
 
+use crate::intents::{BeginTeleportFlow, TeleportTarget, issue_teleport};
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
-use crate::world_api::{BeginTeleportFlow, TeleportTarget, issue_teleport};
 
 /// Seconds a live teleport may run before the overlay flags it as slow (and
 /// nudges the user that they can cancel). Below the server's 30 s timeout so the

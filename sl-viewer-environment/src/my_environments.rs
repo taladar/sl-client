@@ -71,6 +71,7 @@ use bevy::ui_widgets::{Checkbox, ValueChange};
 use sl_client_bevy::{
     AssetKey, Command, FolderType, InventoryKey, Permissions, SettingsKind, SlCommand,
 };
+use sl_viewer_intents::{OpenSettingsEditor, PendingSettingsCreations, SettingsItemCreated};
 use sl_viewer_inventory::inventory::{InventoryModel, query_folder_page};
 use sl_viewer_inventory::inventory_actions::{SettingsInventorySupport, new_settings_item};
 use sl_viewer_inventory::settings_index::SettingsIndex;
@@ -93,7 +94,6 @@ use sl_viewer_ui_widgets::ui_table::{
 };
 use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use sl_viewer_world_api::rlv::{RlvSession, can_change_environment};
-use sl_viewer_world_api::{OpenSettingsEditor, PendingSettingsCreations, SettingsItemCreated};
 use sl_viewer_world_scene::environment::LocalEnvironmentPick;
 
 use crate::rows::{ButtonPaint, paint_action_button};

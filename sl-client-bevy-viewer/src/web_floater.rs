@@ -21,6 +21,7 @@ use crate::browser_widget::{
 };
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::Translated;
+use crate::intents::OpenWebBrowser;
 use crate::media_engine::{MediaEngineSystems, MediaSurfaces};
 use crate::system_browser::{ExternalUrl, normalize_web_url, open_in_system_browser};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
@@ -28,7 +29,6 @@ use crate::ui_element::UiAction;
 use crate::ui_font::UiFont;
 use crate::ui_text::set_editor_text;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
-use crate::world_api::OpenWebBrowser;
 
 /// The [`UiAction`] element name of the floater's toolbar.
 pub(crate) const WEB_BROWSER_ELEMENT: &str = "web-browser";

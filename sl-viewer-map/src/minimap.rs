@@ -46,6 +46,11 @@ use sl_terrain::TerrainComposition;
 use crate::coords::bevy_to_sl_vec;
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::{TransArgs, Translated, Translator};
+use crate::intents::OpenAddToContactSet;
+use crate::intents::OpenAvatarProfile;
+use crate::intents::RequestBlock;
+use crate::intents::RequestFriendship;
+use crate::intents::{ConversationKey, OpenConversation};
 use crate::menu::{
     MenuCommand, MenuDef, MenuDynamicPick, MenuItemDef, OpenContextMenu, SetMenuDynamicLabels,
 };
@@ -57,22 +62,17 @@ use crate::minimap_math::{
 };
 use crate::settings::ViewerSettings;
 use crate::skin_colors;
+use crate::social::MuteModel;
+use crate::social::{FriendsModel, MapTracking, TrackTarget};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::water::{DEFAULT_WATER_HEIGHT, WaterState};
 use crate::world_api::AvatarState;
-use crate::world_api::MuteModel;
 use crate::world_api::ObjectDebugInfo;
 use crate::world_api::ObjectState;
-use crate::world_api::OpenAddToContactSet;
-use crate::world_api::OpenAvatarProfile;
-use crate::world_api::RequestBlock;
-use crate::world_api::RequestFriendship;
 use crate::world_api::TerrainState;
 use crate::world_api::{CameraMode, ViewerCamera};
-use crate::world_api::{ConversationKey, OpenConversation};
-use crate::world_api::{FriendsModel, MapTracking, TrackTarget};
 
 /// The `element` tag the minimap attributes its [`UiAction`]s to.
 pub(crate) const MINIMAP_ELEMENT: &str = "minimap";
@@ -2651,7 +2651,7 @@ fn on_minimap_click(
     identity: Res<SlIdentity>,
     mut tracking: ResMut<MapTracking>,
     mut commands: MessageWriter<SlCommand>,
-    mut begin: MessageWriter<crate::world_api::BeginTeleportFlow>,
+    mut begin: MessageWriter<crate::intents::BeginTeleportFlow>,
     mut world_map: MessageWriter<crate::world_map::OpenWorldMap>,
 ) {
     if click.button != PointerButton::Primary {
@@ -2715,10 +2715,10 @@ fn on_minimap_click(
         );
         let _current = identity.region_handle;
         let label = format!("{local_x:.0}, {local_y:.0}, {up:.0}");
-        crate::world_api::issue_teleport(
+        crate::intents::issue_teleport(
             &mut commands,
             &mut begin,
-            crate::world_api::TeleportTarget {
+            crate::intents::TeleportTarget {
                 region_handle: handle,
                 position: RegionCoordinates::new(local_x, local_y, up),
                 look_at: look,
@@ -3544,8 +3544,10 @@ mod tests {
         grid_index_at, handle_minimap_profile_picks, location_reached, phantom_alpha, range_metres,
         region_handle_at,
     };
+    use crate::intents::OpenAvatarProfile;
     use crate::minimap_math::{FLAG_YOU_OWNER, ObjectAccents};
-    use crate::world_api::{AvatarState, FriendsModel, MuteModel, OpenAvatarProfile};
+    use crate::social::{FriendsModel, MuteModel};
+    use crate::world_api::AvatarState;
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{

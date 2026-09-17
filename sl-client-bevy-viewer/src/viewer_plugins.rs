@@ -19,8 +19,9 @@
 // The crate-root module aliases the moved registrations name bare, as
 // `run_session` does at the crate root.
 use crate::{
-    avatars, body_physics, environment_assets, geometry_cache, ground, hand_pose, locomotion_ik,
-    look_at, material_cache, movement, mutes, name_tag_content, reach, world_api,
+    avatars, body_physics, environment_assets, geometry_cache, ground, hand_pose, intents,
+    locomotion_ik, look_at, material_cache, movement, mutes, name_tag_content, reach, social,
+    world_api,
 };
 
 use bevy::app::{HierarchyPropagatePlugin, PropagateSet};
@@ -482,14 +483,14 @@ impl Plugin for ViewerWorldPlugins {
         app.init_world_scoped::<AvatarState>();
         app.init_resource::<avatars::AvatarPlaceholderAssets>();
         app.init_resource::<AppearanceApplyBudget>();
-        app.init_resource::<world_api::MuteModel>();
-        app.add_message::<world_api::RequestBlock>();
+        app.init_resource::<social::MuteModel>();
+        app.add_message::<intents::RequestBlock>();
         // The prompted friendship-offer channel, for the same reason: the world
         // layer's avatar pie writes it, and an unregistered `Messages<T>` fails
         // that system's param validation the moment a slice is picked. The
         // feature that answers it (`add_friend::AddFriendPlugin`) registers it
         // too — `add_message` is idempotent.
-        app.add_message::<world_api::RequestFriendship>();
+        app.add_message::<intents::RequestFriendship>();
         app.init_resource::<name_tag_content::NameTagStatuses>();
         app.init_resource::<AvatarRuntimeMorphs>();
         app.init_resource::<look_at::LookAtTargets>();
@@ -530,7 +531,7 @@ impl Plugin for ViewerWorldPlugins {
         app.add_message::<MeshDecoded>();
         app.add_message::<WearableAssetFetched>();
         app.add_message::<RefetchAvatarTextures>();
-        app.add_message::<crate::world_api::LocalChatNotice>();
+        app.add_message::<crate::intents::LocalChatNotice>();
         // The build tools' selection, read by this group's material systems
         // (`detach_shared_face_materials` gives a selected object's faces private
         // materials for the editors' live previews; `apply_blinn_phong_hide`

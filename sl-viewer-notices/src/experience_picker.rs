@@ -5,11 +5,11 @@
 //!
 //! # Reusable by requesting control
 //!
-//! A feature opens the picker with [`sl_viewer_world_api::OpenExperiencePicker`]
+//! A feature opens the picker with [`sl_viewer_intents::OpenExperiencePicker`]
 //! naming the control that asked — its Add button; when the user confirms, the
-//! picker emits [`sl_viewer_world_api::ExperiencePicked`] naming that same
+//! picker emits [`sl_viewer_intents::ExperiencePicked`] naming that same
 //! control, and only the widget that asked acts on it. That is the same
-//! out-of-band contract [`sl_viewer_world_api::OpenAvatarPicker`] already uses,
+//! out-of-band contract [`sl_viewer_intents::OpenAvatarPicker`] already uses,
 //! so a list wanting an experience is written exactly like a list wanting a
 //! resident.
 //!
@@ -49,14 +49,14 @@
 //! # Filters
 //!
 //! An open states which experiences it may offer
-//! ([`sl_viewer_world_api::ExperiencePickerFilter`]) — the reference's filter
+//! ([`sl_viewer_intents::ExperiencePickerFilter`]) — the reference's filter
 //! predicates, named for the three combinations its callers build. A record the
 //! metadata cache has not resolved is *shown*: the reference's filters read a
 //! cached record and a miss leaves the row in, so hiding unresolved rows would
 //! make the visible results depend on reply order.
 //!
 //! An open may also name **one id to exclude**
-//! ([`sl_viewer_world_api::OpenExperiencePicker::excluded`]) — the reference's
+//! ([`sl_viewer_intents::OpenExperiencePicker::excluded`]) — the reference's
 //! second, `FilterMatching` filter, which is how the estate's Allowed and
 //! Blocked pickers keep the estate's own default experience off their lists. It
 //! needs no resolved record, so it is applied beside the property filter rather
@@ -98,7 +98,9 @@ use crate::floater::{
     FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater, picker_identity,
 };
 use crate::i18n::{TransArgs, Translated, Translator};
+use crate::intents::{ExperiencePicked, ExperiencePickerFilter, OpenExperiencePicker};
 use crate::settings::ViewerSettings;
+use crate::social::GroupsModel;
 use crate::ui::{UiScaffoldSystems, column, row};
 use crate::ui_combo::{ComboChanged, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
@@ -108,9 +110,7 @@ use crate::ui_table::{
     spawn_table, spawn_table_row,
 };
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
-use crate::world_api::{
-    AvatarState, ExperiencePicked, ExperiencePickerFilter, GroupsModel, OpenExperiencePicker,
-};
+use crate::world_api::AvatarState;
 
 /// The picker floater's stable [`Floater::id`] — the kind every instance is an
 /// instance *of*.

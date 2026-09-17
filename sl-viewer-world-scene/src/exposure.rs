@@ -78,8 +78,8 @@ use bevy::render::{GpuResourceAppExt as _, Render, RenderApp, RenderStartup, Ren
 
 use sl_settings::SettingValue;
 
-use crate::settings::ViewerSettings;
 use crate::underwater_fog::UnderwaterFogPass;
+use sl_viewer_settings::ViewerSettings;
 
 /// The internal handle the exposure-sample shader (`exposure.wgsl`) is loaded under.
 const EXPOSURE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("2f8d61b4-7c05-4e39-9a12-c4d6e8017b52");

@@ -66,8 +66,14 @@ use crate::floater::{
     KeyedFloaters, host_floater,
 };
 use crate::i18n::Translated;
+use crate::intents::OpenGroupProfile;
+use crate::intents::RequestBlock;
+use crate::intents::RequestFriendship;
+use crate::intents::{ConversationKey, OpenAvatarProfile, OpenConversation};
 use crate::inventory_drag::AgentDropTarget;
 use crate::inventory_properties::format_unix_date;
+use crate::social::FriendsModel;
+use crate::social::GroupsModel;
 use crate::ui::{column, row};
 use crate::ui_font::UiFont;
 use crate::ui_tab::{
@@ -76,13 +82,7 @@ use crate::ui_tab::{
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::world_api::AvatarState;
-use crate::world_api::FriendsModel;
-use crate::world_api::GroupsModel;
-use crate::world_api::OpenGroupProfile;
-use crate::world_api::RequestBlock;
-use crate::world_api::RequestFriendship;
 use crate::world_api::ui_texture::{PendingUiTexture, UiTexturePlugin};
-use crate::world_api::{ConversationKey, OpenAvatarProfile, OpenConversation};
 
 /// The chrome font size, in logical pixels.
 const PROFILE_FONT_SIZE: f32 = 14.0;
@@ -2573,7 +2573,7 @@ fn on_profile_action(
     mut blocks: MessageWriter<RequestBlock>,
     mut friendships: MessageWriter<RequestFriendship>,
     mut conversations: MessageWriter<OpenConversation>,
-    mut contact_sets: MessageWriter<crate::world_api::OpenAddToContactSet>,
+    mut contact_sets: MessageWriter<crate::intents::OpenAddToContactSet>,
 ) {
     if press.button != PointerButton::Primary {
         return;
@@ -2612,7 +2612,7 @@ fn on_profile_action(
             friendships.write(RequestFriendship::one(target));
         }
         ProfileAction::AddToContactSet => {
-            contact_sets.write(crate::world_api::OpenAddToContactSet::one(
+            contact_sets.write(crate::intents::OpenAddToContactSet::one(
                 target,
                 avatars
                     .name_of(target)
@@ -3268,8 +3268,9 @@ mod tests {
         use crate::floater::{
             ActiveFloater, Floater, FloaterCommand, FloaterOp, FloaterPlugin, FloaterZTop,
         };
+        use crate::intents::OpenAvatarProfile;
         use crate::ui::UiRoot;
-        use crate::world_api::{AvatarState, OpenAvatarProfile};
+        use crate::world_api::AvatarState;
         use bevy::prelude::*;
         use pretty_assertions::assert_eq;
         use sl_client_bevy::{AgentKey, SlCommand, Uuid};

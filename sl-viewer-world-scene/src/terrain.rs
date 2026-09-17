@@ -52,13 +52,13 @@ use sl_client_bevy::{
 
 use sl_terrain::TerrainComposition;
 
-use crate::asset_budget::MeshUploadBudget;
-use crate::coords::{metres_to_f32, sl_to_bevy_rotation, sl_to_bevy_vec};
-use crate::probe_layers::environment_render_layers;
-use crate::textures::{TextureDecoded, TextureManager};
-use crate::world_api::{
+use sl_viewer_kit::coords::{metres_to_f32, sl_to_bevy_rotation, sl_to_bevy_vec};
+use sl_viewer_kit::probe_layers::environment_render_layers;
+use sl_viewer_world_api::{
     DETAIL_COUNT, DecodedTextures, PatchKey, TerrainState, TerrainSurface, ViewerCamera,
 };
+use sl_viewer_world_objects::asset_budget::MeshUploadBudget;
+use sl_viewer_world_objects::textures::{TextureDecoded, TextureManager};
 
 /// The region edge length in metres. A standard Second Life / OpenSim region is
 /// 256 m (16×16 patches of 16×16 cells).
@@ -113,10 +113,10 @@ impl TerrainTextures {
     }
 }
 
-impl crate::world_api::world_scoped::WorldScoped for TerrainTextures {
+impl sl_viewer_world_api::world_scoped::WorldScoped for TerrainTextures {
     fn purge_world(
         &mut self,
-        _purge: crate::world_api::world_scoped::WorldPurge,
+        _purge: sl_viewer_world_api::world_scoped::WorldPurge,
         _commands: &mut Commands,
     ) {
         self.purge_materials();
@@ -132,13 +132,13 @@ impl crate::world_api::world_scoped::WorldScoped for TerrainTextures {
 /// only translated — never rotated — so a crossing cannot yaw the view). The
 /// third-person / mouselook camera recomputes its position from the avatar each
 /// frame, so shifting its transform would be undone immediately; instead its
-/// smoothing is **resnapped** ([`CameraRig::resnap`](crate::world_api::CameraRig)) so
+/// smoothing is **resnapped** ([`CameraRig::resnap`](sl_viewer_world_api::CameraRig)) so
 /// the eased pose does not glide across the 256 m rebase (the reference's
 /// sideways-after-crossing glitch).
 pub fn recenter_terrain(
     identity: Res<SlIdentity>,
     mut state: ResMut<TerrainState>,
-    mut cameras: Query<(&mut Transform, &mut crate::world_api::CameraRig), With<ViewerCamera>>,
+    mut cameras: Query<(&mut Transform, &mut sl_viewer_world_api::CameraRig), With<ViewerCamera>>,
     mut commands: Commands,
 ) {
     let Some(root) = identity.region_handle else {
@@ -521,7 +521,7 @@ fn learn_composition(
                 // seed caps arrive — so the store holds this request until the
                 // `GetTexture` cap is up rather than failing it (see
                 // `TextureManager::request_from`).
-                manager.request_boosted(key, crate::world_api::TERRAIN_BOOST_PRIORITY);
+                manager.request_boosted(key, sl_viewer_world_api::TERRAIN_BOOST_PRIORITY);
             }
             entry.requested = true;
         }

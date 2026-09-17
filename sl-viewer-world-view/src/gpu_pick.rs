@@ -60,12 +60,12 @@ use bevy::window::PrimaryWindow;
 
 use sl_client_bevy::{AgentKey, PrimFaceId, ScopedObjectId};
 
-use crate::objects::{PrimFaceEntity, SceneObject, WornPickTarget};
-use crate::water::WaterCell;
-use crate::world_api::{
-    AvatarPickTarget, DragPickActive, DragPickHit, DragWorldPick, TerrainSurface, ViewerCamera,
-    WorldPhase, on_hud_layer,
+use sl_viewer_intents::{DragPickActive, DragPickHit, DragWorldPick};
+use sl_viewer_world_api::{
+    AvatarPickTarget, TerrainSurface, ViewerCamera, WorldPhase, on_hud_layer,
 };
+use sl_viewer_world_objects::objects::{PrimFaceEntity, SceneObject, WornPickTarget};
+use sl_viewer_world_scene::water::WaterCell;
 
 /// The internal handle `pick.wgsl` is loaded under.
 const PICK_SHADER_HANDLE: Handle<Shader> = uuid_handle!("3f5d1a82-6c47-49b3-8e90-b21f7c04a6de");
@@ -1556,7 +1556,7 @@ mod tests {
             GlobalTransform::from(
                 Transform::from_xyz(0.0, 0.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
             ),
-            crate::world_api::ViewerCamera,
+            sl_viewer_world_api::ViewerCamera,
         ));
     }
 
@@ -1697,7 +1697,7 @@ mod tests {
         let object = world
             .spawn(SceneObject {
                 scoped_id: scoped(7),
-                category: crate::objects::ObjectCategory::Prim,
+                category: sl_viewer_world_objects::objects::ObjectCategory::Prim,
             })
             .id();
         let face = world
@@ -1831,7 +1831,7 @@ mod tests {
         app.world_mut()
             .entity_mut(hud)
             .insert(bevy::camera::visibility::RenderLayers::layer(
-                crate::world_api::HUD_RENDER_LAYER,
+                sl_viewer_world_api::HUD_RENDER_LAYER,
             ));
         app.update();
 

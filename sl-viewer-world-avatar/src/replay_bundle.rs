@@ -362,7 +362,7 @@ fn copy_materials(
 
 /// The live cache directory for `kind`, if the platform has a cache root.
 fn live_cache_dir(kind: &str) -> Option<PathBuf> {
-    crate::paths::asset_cache_dir(kind)
+    sl_viewer_platform::paths::asset_cache_dir(kind)
 }
 
 /// The bundle's cache directory for `kind` (`<bundle>/cache/<kind>`).

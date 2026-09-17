@@ -46,9 +46,6 @@ use sl_client_bevy::{
     parse_material_override,
 };
 
-use crate::face_material::{
-    FaceMaterial, MAP_FLAG_EMISSIVE, MAP_FLAG_MR, MAP_FLAG_NORMAL, MAP_FLAG_SPEC, SL_FACE_MODE_PBR,
-};
 use crate::legacy_materials::{LegacyMaterialManager, preview_legacy_material};
 use crate::objects::{
     FaceTextureDebug, PrimFaceEntity, SceneObject, TransparencyCulled, is_fully_transparent,
@@ -57,9 +54,12 @@ use crate::textures::{
     DerivedImage, PrimTextures, TextureAlpha, TextureApplyBudget, TextureManager,
     compose_face_material, refresh_derived_images,
 };
-use crate::world_api::DecodedTextures;
-use crate::world_api::ObjectState;
-use crate::world_api::{EditToolState, MatModeState, SelectionSet, TERRAIN_BOOST_PRIORITY};
+use sl_viewer_kit::face_material::{
+    FaceMaterial, MAP_FLAG_EMISSIVE, MAP_FLAG_MR, MAP_FLAG_NORMAL, MAP_FLAG_SPEC, SL_FACE_MODE_PBR,
+};
+use sl_viewer_world_api::DecodedTextures;
+use sl_viewer_world_api::ObjectState;
+use sl_viewer_world_api::{EditToolState, MatModeState, SelectionSet, TERRAIN_BOOST_PRIORITY};
 
 /// A face-material identity: the scoped object id and its Linden face index — the
 /// key both a registered face material and an incoming per-face GLTF override
@@ -546,7 +546,7 @@ impl MaterialManager {
 
     /// The decoded GLTF material for `id`, if its `ViewerAsset` fetch/decode has
     /// succeeded — a read-only lookup for the Texture tab's PBR channel display
-    /// (`crate::edit_material`).
+    /// (`sl_viewer_edit::edit_material`).
     #[must_use]
     pub fn decoded_material(&self, id: AssetKey) -> Option<&GltfMaterial> {
         self.decoded.get(&id)
@@ -592,7 +592,7 @@ impl MaterialManager {
 
     /// The per-face GLTF override layered on the base material, if the face has
     /// one — the starting point the Texture tab's PBR transform editor amends
-    /// before re-sending (`crate::edit_material`).
+    /// before re-sending (`sl_viewer_edit::edit_material`).
     #[must_use]
     pub fn face_override(&self, scoped: ScopedObjectId, face: u8) -> Option<MaterialOverride> {
         self.overrides.get(&(scoped, face)).copied()
@@ -729,7 +729,7 @@ fn build_asset_store(fetcher: &Arc<BevyAssetFetcher>, disk_dir: Option<PathBuf>)
             Arc::clone(&fetcher),
             Some(dir),
             AssetCacheLimits {
-                max_bytes: crate::paths::asset_cache_max_bytes(),
+                max_bytes: sl_viewer_platform::paths::asset_cache_max_bytes(),
                 ..AssetCacheLimits::default()
             },
         ) {
@@ -744,7 +744,7 @@ fn build_asset_store(fetcher: &Arc<BevyAssetFetcher>, disk_dir: Option<PathBuf>)
             Arc::clone(&fetcher),
             None,
             AssetCacheLimits {
-                max_bytes: crate::paths::asset_cache_max_bytes(),
+                max_bytes: sl_viewer_platform::paths::asset_cache_max_bytes(),
                 ..AssetCacheLimits::default()
             },
         ) {
@@ -758,7 +758,7 @@ fn build_asset_store(fetcher: &Arc<BevyAssetFetcher>, disk_dir: Option<PathBuf>)
 /// (`<cache>/sl-client-bevy-viewer/materialcache`), from `XDG_CACHE_HOME` or
 /// `~/.cache`, or `None` when neither is set (the store then runs in-memory only).
 fn material_cache_dir() -> Option<PathBuf> {
-    crate::paths::asset_cache_dir("materialcache")
+    sl_viewer_platform::paths::asset_cache_dir("materialcache")
 }
 
 /// Build a Bevy [`Image`] for a PBR material texture map from decoded RGBA8

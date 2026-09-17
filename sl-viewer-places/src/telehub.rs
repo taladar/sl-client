@@ -81,6 +81,7 @@ use crate::floater::{
     DeferredFloaterContent, Floater, FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater,
 };
 use crate::i18n::{TransArgs, Translated, Translator};
+use crate::social::{DebugBeacon, DebugBeacons};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_table::{
@@ -88,7 +89,7 @@ use crate::ui_table::{
     TableState, set_table_cell, spawn_table, spawn_table_row,
 };
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
-use crate::world_api::{DebugBeacon, DebugBeacons, ObjectState, SelectionSet};
+use crate::world_api::{ObjectState, SelectionSet};
 
 /// The floater's stable [`Floater::id`].
 pub const TELEHUB_FLOATER_ID: &str = "telehub";

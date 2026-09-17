@@ -75,6 +75,7 @@ use bevy_flair::style::components::ClassList;
 
 use crate::hud::HudScreen;
 use crate::i18n::{TransArgs, Translated, Translator};
+use crate::intents::LocalChatNotice;
 use crate::settings::ViewerSettings;
 use crate::status_bar::BalanceReadout;
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
@@ -84,7 +85,6 @@ use crate::ui_tab::{
     DEFAULT_ELLIPSIS, TabContainerHandle, TabPlacement, TabSpec, fill_tab_container,
     spawn_tab_container,
 };
-use crate::world_api::LocalChatNotice;
 
 use sl_settings::SettingValue;
 

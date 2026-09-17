@@ -14,7 +14,7 @@
 //! * the **render world** entity total — a separate sub-world Bevy's diagnostic
 //!   never sees, bridged out of the [`RenderApp`] through a shared atomic.
 //!
-//! Each is an ordinary [`bevy::diagnostic::Diagnostic`], so `crate::tracy_plots`
+//! Each is an ordinary [`bevy::diagnostic::Diagnostic`], so `sl_client_bevy_viewer::tracy_plots`
 //! streams them as plots with no extra wiring. Compiled only under
 //! `profile-tracy`.
 
@@ -27,9 +27,9 @@ use bevy::ecs::entity::Entities;
 use bevy::prelude::*;
 use bevy::render::{Render, RenderApp};
 
-use crate::floater::Floater;
-use crate::objects::{PrimFaceEntity, SceneObject};
-use crate::world_api::AvatarAnchor;
+use sl_viewer_ui_widgets::floater::Floater;
+use sl_viewer_world_api::AvatarAnchor;
+use sl_viewer_world_objects::objects::{PrimFaceEntity, SceneObject};
 
 /// UI-node entities (`bevy_ui`).
 const ENTITY_UI: DiagnosticPath = DiagnosticPath::const_new("entity/ui");
@@ -141,7 +141,7 @@ fn record_render_entity_count(entities: &Entities, shared: Res<RenderEntityCount
 
 /// Registers the per-kind main-world counts and the bridged render-world count.
 ///
-/// Added under `profile-tracy` (see `crate::tracy_plots`). Main-world
+/// Added under `profile-tracy` (see `sl_client_bevy_viewer::tracy_plots`). Main-world
 /// measurement runs in [`Update`], before the `Last` streaming system samples
 /// it; the render-world wiring is done in [`Plugin::finish`] so the
 /// [`RenderApp`] sub-app is guaranteed to exist.

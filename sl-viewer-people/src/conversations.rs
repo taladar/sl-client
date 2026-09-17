@@ -74,9 +74,13 @@ use crate::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater,
 };
 use crate::i18n::{TransArgs, Translator};
+use crate::intents::{
+    AvatarPicked, ConversationKey, OpenAvatarPicker, OpenConversation, StartConference,
+};
 use crate::linkified_text::{LinkTextStyle, spawn_linkified_text};
 use crate::local_chat_input::{LocalChatSubmit, spawn_local_chat_input};
 use crate::skin::SkinChatBands;
+use crate::social::MuteModel;
 use crate::ui::BOTTOM_BAR_Z;
 use crate::ui::BottomArea;
 use crate::ui::{
@@ -85,9 +89,6 @@ use crate::ui::{
 use crate::ui_font::UiFont;
 use crate::ui_tab::{TabDivider, TabPlacement, TabStrip, TabStripWidth, resize_strip_width};
 use crate::world_api::rlv::swallows_owner_say;
-use crate::world_api::{
-    AvatarPicked, ConversationKey, MuteModel, OpenAvatarPicker, OpenConversation, StartConference,
-};
 
 /// The hosting floater's [`crate::floater::FloaterSpec::id`] — it also keys the
 /// window's remembered geometry in [`crate::floater_persist`].
@@ -194,7 +195,7 @@ const CLOSE_GLYPH: &str = "\u{2715}";
 /// The add-participants glyph (a small ✚), on a one-to-one or conference pane.
 const ADD_PARTICIPANTS_GLYPH: &str = "\u{271A}";
 
-/// The [`crate::world_api::OpenAvatarPicker::field`] prefix the
+/// The [`crate::intents::OpenAvatarPicker::field`] prefix the
 /// add-participants button opens its picker under. The conversation's own key
 /// is appended: one window holds a pane per conversation, and two panes sharing
 /// a field name would share one picker and lose the first pane's request.
@@ -967,7 +968,7 @@ struct AddParticipantsButton(ConversationKey);
 /// A viewer-generated system line for the **Nearby Chat transcript** — e.g. a
 /// radar enter / leave report ([`crate::radar`]). This is deliberately a
 /// separate channel from the transient overlay
-/// ([`crate::world_api::LocalChatNotice`]); a producer that wants the line in both
+/// ([`crate::intents::LocalChatNotice`]); a producer that wants the line in both
 /// places writes both messages.
 #[derive(Message, Debug, Clone)]
 pub(crate) struct NearbyChatNotice {
@@ -1801,7 +1802,7 @@ pub(crate) fn ingest_conversation_events(
     mut avatars: ResMut<crate::world_api::AvatarState>,
     identity: Res<SlIdentity>,
     settings: Option<Res<crate::settings::ViewerSettings>>,
-    friends: Option<Res<crate::world_api::FriendsModel>>,
+    friends: Option<Res<crate::social::FriendsModel>>,
     objects: Option<Res<crate::world_api::ObjectState>>,
     mutes: Option<Res<MuteModel>>,
     mut sl: MessageWriter<SlCommand>,

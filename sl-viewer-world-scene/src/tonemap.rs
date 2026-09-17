@@ -76,8 +76,8 @@ use bevy::render::{GpuResourceAppExt as _, Render, RenderApp, RenderStartup, Ren
 
 use sl_settings::SettingValue;
 
-use crate::settings::ViewerSettings;
 use crate::underwater_fog::UnderwaterFogPass;
+use sl_viewer_settings::ViewerSettings;
 
 /// The internal handle the tone-map shader (`tonemap.wgsl`) is loaded under.
 const TONEMAP_SHADER_HANDLE: Handle<Shader> = uuid_handle!("6b1f0c94-3a27-4d58-9c11-70b4e8d5a213");
@@ -514,7 +514,7 @@ mod tests {
         SETTING_TONEMAP_MIX, SETTING_TONEMAP_TYPE, TONEMAP_ACES, effective_tonemap_mix,
         is_classic_sky, register_settings,
     };
-    use crate::settings::ViewerSettings;
+    use sl_viewer_settings::ViewerSettings;
 
     /// The store defaults `register_settings` declares must match the tone
     /// mapper's own reference defaults, so a fresh install (no override, no env)

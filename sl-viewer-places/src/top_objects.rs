@@ -140,6 +140,7 @@ use crate::floater::{
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::inventory_properties::format_unix_date;
 use crate::notifications::{NotificationResponse, ShowNotification};
+use crate::social::{MapTracking, TrackTarget};
 use crate::ui::{column, row};
 use crate::ui_font::UiFont;
 use crate::ui_format::format_duration_units;
@@ -149,7 +150,6 @@ use crate::ui_table::{
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{SCROLLBAR_THICKNESS, VirtualList, VirtualRow, layout_virtual_lists};
-use crate::world_api::{MapTracking, TrackTarget};
 
 /// The Top Scripts window's stable [`Floater::id`].
 pub const TOP_SCRIPTS_FLOATER_ID: &str = "top-scripts";

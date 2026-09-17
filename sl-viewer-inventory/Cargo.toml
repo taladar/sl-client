@@ -21,6 +21,7 @@ sl-client-bevy = { workspace = true, features = [
   "bevy_pbr",
 ] }
 sl-settings = { path = "../sl-settings", version = "0.1.0" }
+sl-viewer-intents = { workspace = true }
 sl-viewer-kit = { workspace = true }
 sl-viewer-settings = { workspace = true }
 sl-viewer-ui-core = { workspace = true }

@@ -20,8 +20,10 @@ use sl_viewer_world_avatar::bake_inputs::WearableAssetManager;
 use sl_viewer_world_objects::textures::TextureManager;
 use sl_viewer_world_scene::terrain::PendingPatchRebuilds;
 
-use crate::meshes::MeshManager;
-use crate::objects::{PendingDecodedMeshes, PendingDecodedSculpts, PendingObjectEvents};
+use sl_viewer_world_objects::meshes::MeshManager;
+use sl_viewer_world_objects::objects::{
+    PendingDecodedMeshes, PendingDecodedSculpts, PendingObjectEvents,
+};
 
 /// The scene's outstanding work, read from every store and queue that carries
 /// any. Every store is optional, so an app that runs a subset of the viewer

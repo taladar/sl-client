@@ -89,6 +89,7 @@ use sl_viewer_ui_widgets::ui_rich_text::{
     RichTextSpec, RichTextStyle, spawn_rich_text, spawn_rich_text_object,
 };
 
+use crate::intents::{NotecardDropTarget, NotecardSource, OpenNotecard};
 use crate::inventory::AddEmbeddedItem;
 use crate::linkified_text::{LinkActivated, LinkTextStyle, populate_linkified_text};
 use crate::notecard_render::spawn_embedded_item_box;
@@ -96,7 +97,6 @@ use crate::ui::{column, row};
 use crate::ui_element::{ElementCx, TextMayClip};
 use crate::ui_font::UiFont;
 use crate::url_linkify::{TextRun, linkify};
-use crate::world_api::{NotecardDropTarget, NotecardSource, OpenNotecard};
 
 /// The body field's height, in visible text lines — what the window opens at,
 /// being content-driven. It is a *starting* size, not a cap: the body fills, so
@@ -1314,8 +1314,8 @@ mod tests {
     mod instances {
         use super::super::{NotecardEditorState, notecard_key, open_notecard};
         use crate::floater::{Floater, FloaterCommand, FloaterOp, FloaterPlugin};
+        use crate::intents::{NotecardDropTarget, NotecardSource, OpenNotecard};
         use crate::ui::UiRoot;
-        use crate::world_api::{NotecardDropTarget, NotecardSource, OpenNotecard};
         use bevy::prelude::*;
         use pretty_assertions::assert_eq;
         use sl_client_bevy::{Command, InventoryKey, SlCommand, Uuid};
@@ -1497,9 +1497,9 @@ mod tests {
             open_notecard, rebuild_notecard_body,
         };
         use crate::floater::FloaterPlugin;
+        use crate::intents::{NotecardSource, OpenNotecard};
         use crate::inventory::AddEmbeddedItem;
         use crate::ui::UiRoot;
-        use crate::world_api::{NotecardSource, OpenNotecard};
         use bevy::input_focus::InputFocus;
         use bevy::prelude::*;
         use bevy::text::EditableText;

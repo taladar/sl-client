@@ -281,7 +281,7 @@ pub(crate) fn install_element_hosting(app: &mut App) {
     app.add_message::<crate::pie_menu::OpenPieMenu>();
     app.add_message::<crate::emoji_picker::OpenEmojiPicker>();
     app.add_message::<sl_client_bevy::SlCommand>();
-    app.add_message::<crate::world_api::OpenWebBrowser>();
+    app.add_message::<crate::intents::OpenWebBrowser>();
     // The asset editors' Save button names the floater it sits in and asks for
     // that window to be saved. A specimen sits in no window, so the ask is never
     // made — but the channel has to exist for the observer's parameters to

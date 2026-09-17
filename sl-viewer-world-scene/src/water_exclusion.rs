@@ -47,12 +47,12 @@ use bevy::render::render_resource::{Extent3d, TextureFormat};
 use bevy::window::PrimaryWindow;
 use sl_client_bevy::WaterMaterial;
 
-use crate::face_material::FaceMaterial;
-use crate::material_cache::SharedFaceMaterial;
-use crate::objects::FaceTextureDebug;
-use crate::probe_layers::WATER_EXCLUSION_LAYER;
 use crate::water::WaterState;
-use crate::world_api::{ViewerCamera, WorldPhase};
+use sl_viewer_kit::face_material::FaceMaterial;
+use sl_viewer_kit::probe_layers::WATER_EXCLUSION_LAYER;
+use sl_viewer_world_api::{ViewerCamera, WorldPhase};
+use sl_viewer_world_objects::material_cache::SharedFaceMaterial;
+use sl_viewer_world_objects::objects::FaceTextureDebug;
 
 /// The water-exclusion mask's own scheduling (`viewer-water-exclusion`): the
 /// mask camera and render target, and the three systems that fill and bind it.
@@ -325,11 +325,11 @@ mod tests {
         WaterExclusionCamera, WaterExclusionFace, WaterExclusionMask,
         convert_water_exclusion_faces, sync_water_exclusion_camera,
     };
-    use crate::face_material::FaceMaterial;
-    use crate::material_cache::SharedFaceMaterial;
-    use crate::objects::FaceTextureDebug;
-    use crate::probe_layers::WATER_EXCLUSION_LAYER;
-    use crate::world_api::ViewerCamera;
+    use sl_viewer_kit::face_material::FaceMaterial;
+    use sl_viewer_kit::probe_layers::WATER_EXCLUSION_LAYER;
+    use sl_viewer_world_api::ViewerCamera;
+    use sl_viewer_world_objects::material_cache::SharedFaceMaterial;
+    use sl_viewer_world_objects::objects::FaceTextureDebug;
 
     /// A face carrying the invisiprim-successor sentinel is converted into a
     /// water-exclusion surface: it loses its visible material, gains the flat-black

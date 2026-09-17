@@ -86,6 +86,7 @@ use sl_client_bevy::{
     Command, DayCycle, EnvironmentSettings, EnvironmentUpdate, LandArea, Permissions, SettingsKind,
     SlCommand, SlEvent, SlSessionEvent, TRACK_MAX, Uuid,
 };
+use sl_viewer_intents::{OpenSettingsPicker, SettingsPicked};
 use sl_viewer_inventory::inventory::InventoryModel;
 use sl_viewer_notifications::{NotificationResponse, ShowNotification};
 use sl_viewer_ui_core::i18n::{Translated, Translator};
@@ -93,7 +94,6 @@ use sl_viewer_ui_core::ui::{column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
 use sl_viewer_ui_widgets::ui_slider::{SliderStyle, spawn_slider};
 use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
-use sl_viewer_world_api::{OpenSettingsPicker, SettingsPicked};
 
 use crate::rows::{ButtonPaint, SliderRow, paint_action_button, spawn_action_button};
 use crate::style::{

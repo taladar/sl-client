@@ -40,10 +40,10 @@ use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
 use bevy::render::render_resource::BlendState;
 
-use crate::avatar_assets::AvatarAssetLibrary;
-use crate::coords::{sl_euler_deg_to_quat, sl_to_bevy_rotation};
-use crate::face_material::FaceMaterial;
-use crate::world_api::{HUD_RENDER_LAYER, HudState, on_hud_layer};
+use sl_viewer_kit::avatar_assets::AvatarAssetLibrary;
+use sl_viewer_kit::coords::{sl_euler_deg_to_quat, sl_to_bevy_rotation};
+use sl_viewer_kit::face_material::FaceMaterial;
+use sl_viewer_world_api::{HUD_RENDER_LAYER, HudState, on_hud_layer};
 
 /// The screen-space HUD's own scheduling (P35.1 / P35.2): the HUD screen and its
 /// attachment-point nodes, kept anchored to the viewport corners as the window's
@@ -63,7 +63,7 @@ impl Plugin for HudScreenPlugin {
         // The HUD census, gated by the shared worn-attachment trace: a HUD that
         // is routed onto its screen node and still draws nothing is silent
         // everywhere else (roadmap viewer-prim-attachment-worn-but-not-rendered).
-        if crate::world_api::log_attachment_bind_enabled() {
+        if sl_viewer_world_api::log_attachment_bind_enabled() {
             app.init_resource::<HudCensus>()
                 .add_systems(
                     PostUpdate,
@@ -360,7 +360,7 @@ pub(crate) fn setup_hud_screen(
             Camera3d::default(),
             Camera {
                 // After the world camera (order 0) and the edit-gizmo overlay
-                // (order 1, [`crate::gizmos`]), and without clearing what they
+                // (order 1, [`sl_viewer_edit::gizmos`]), and without clearing what they
                 // drew: the HUD is composited over the finished frame, exactly where
                 // the reference viewer draws it — `render_hud_attachments` runs in
                 // `render_ui`, *after* `renderFinalize`'s tonemap and post effects.
@@ -439,7 +439,7 @@ pub(crate) fn setup_hud_screen(
             // draws two things, the HUD layer and (as the default UI camera)
             // the UI, which is why the harness hides one when only the other
             // was asked for.
-            crate::world_api::OverlayCamera::HudAndUi,
+            sl_viewer_world_api::OverlayCamera::HudAndUi,
         ))
         .id();
     info!(
@@ -554,13 +554,13 @@ mod tests {
     use super::{
         HUD_CAMERA_DEPTH, HUD_RENDER_LAYER, HudScreen, anchored_point_offset, on_hud_layer,
     };
-    use crate::coords::sl_to_bevy_rotation;
-    use crate::world_api::is_hud_point;
     use bevy::app::{App, HierarchyPropagatePlugin, PostUpdate, Propagate};
     use bevy::camera::visibility::RenderLayers;
     use bevy::ecs::hierarchy::ChildOf;
     use bevy::math::Vec3;
     use bevy::transform::components::Transform;
+    use sl_viewer_kit::coords::sl_to_bevy_rotation;
+    use sl_viewer_world_api::is_hud_point;
 
     /// A 16:9 viewport, the shape the layout is most often seen in.
     const WIDE_ASPECT: f32 = 16.0 / 9.0;
@@ -590,8 +590,8 @@ mod tests {
         use bevy::render::view::Msaa;
         use pretty_assertions::assert_eq;
 
-        use crate::avatar_assets::AvatarAssetLibrary;
-        use crate::world_api::HudState;
+        use sl_viewer_kit::avatar_assets::AvatarAssetLibrary;
+        use sl_viewer_world_api::HudState;
 
         let character = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("..")

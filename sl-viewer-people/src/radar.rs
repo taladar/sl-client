@@ -61,6 +61,13 @@ use crate::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, floater_shown, spawn_floater,
 };
 use crate::i18n::{TransArgs, Translated, Translator};
+use crate::intents::LocalChatNotice;
+use crate::intents::OpenAddToContactSet;
+use crate::intents::OpenAvatarProfile;
+use crate::intents::RequestBlock;
+use crate::intents::RequestFriendship;
+use crate::intents::StartConference;
+use crate::intents::{ConversationKey, OpenConversation};
 use crate::menu::{
     MenuCommand, MenuDef, MenuDynamicPick, MenuItemDef, OpenContextMenu, SetMenuDynamicLabels,
 };
@@ -75,6 +82,9 @@ use crate::radar_model::{
 use crate::session::SETTING_DRAW_DISTANCE;
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{SettingBinding, bound_checkbox};
+use crate::social::FriendsModel;
+use crate::social::MuteModel;
+use crate::social::{MapTracking, TrackTarget};
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::UiAction;
 use crate::ui_font::UiFont;
@@ -89,17 +99,7 @@ use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 use crate::world_api::AvatarState;
 use crate::world_api::DerenderKind;
-use crate::world_api::FriendsModel;
-use crate::world_api::LocalChatNotice;
-use crate::world_api::MuteModel;
-use crate::world_api::OpenAddToContactSet;
-use crate::world_api::OpenAvatarProfile;
-use crate::world_api::RequestBlock;
-use crate::world_api::RequestFriendship;
-use crate::world_api::StartConference;
 use crate::world_api::TerrainState;
-use crate::world_api::{ConversationKey, OpenConversation};
-use crate::world_api::{MapTracking, TrackTarget};
 
 /// The radar floater's stable id (persistence, `SL_VIEWER_OPEN_FLOATER`).
 pub const RADAR_FLOATER_ID: &str = "radar";

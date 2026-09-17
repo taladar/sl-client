@@ -15,10 +15,10 @@
 //! viewer.
 //!
 //! Two consumers drive it:
-//! - the Texture tab's PBR **render-material swatch** (`crate::edit_material`)
+//! - the Texture tab's PBR **render-material swatch** (`sl_viewer_edit::edit_material`)
 //!   previews the selected face's *effective* material ([`MaterialPreview::Material`],
 //!   base + override, already folded by the caller);
-//! - the **material picker's** preview pane (`crate::ui_texture_picker`) previews
+//! - the **material picker's** preview pane (`sl_viewer_pickers::ui_texture_picker`) previews
 //!   the *selected* material by asset id ([`MaterialPreview::Asset`], resolved
 //!   through the [`MaterialManager`]'s decode).
 //!
@@ -35,9 +35,9 @@ use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
 use sl_client_bevy::{AssetKey, GltfMaterial};
 
-use crate::face_material::{FaceMaterial, inert_face_material};
 use crate::materials::MaterialManager;
 use crate::textures::TextureManager;
+use sl_viewer_kit::face_material::{FaceMaterial, inert_face_material};
 
 /// The square side, in texels, each studio renders its sphere into. One size
 /// serves both the 40px swatch and the 128px preview pane (the UI scales it).

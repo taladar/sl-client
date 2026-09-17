@@ -45,7 +45,7 @@
 //!   [`ParticleInstance`] buffer; the camera-facing billboard expansion
 //!   (`LLVOPartGroup::getGeometry`, with the `FOLLOW_VELOCITY` re-orientation) and
 //!   the texturing / lighting move onto the GPU in
-//!   [`particle_render`](crate::particle_render) — one shared unit-quad mesh, drawn
+//!   [`particle_render`](sl_viewer_kit::particle_render) — one shared unit-quad mesh, drawn
 //!   instanced. The source's sprite is resolved once through the shared texture
 //!   pipeline (or a procedural soft sprite when the source names no texture,
 //!   mirroring `sDefaultParticleImagep`).
@@ -54,7 +54,7 @@
 //! orientation come from its object entity's `GlobalTransform`, so the emitter
 //! tracks the prim as it moves. Emission directions are built in Second Life space
 //! (where the wire angles / axes are defined) and carried into Bevy by the single
-//! [basis change](crate::coords). Each source's live particles are baked into one
+//! [basis change](sl_viewer_kit::coords). Each source's live particles are baked into one
 //! [`Mesh`] hung off a dedicated **world-space cloud entity** (not a child of the
 //! source, mirroring `LLVOPartGroup` being its own spatial object), so the
 //! billboards are placed by their absolute baked vertex positions.
@@ -99,16 +99,16 @@ use bevy::render::batching::NoAutomaticBatching;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{DecodedTexture, ParticleSystem, particle_pattern, to_bevy_image};
 
-use crate::coords::sl_to_bevy_rotation;
-use crate::particle_render::{
+use sl_viewer_kit::coords::sl_to_bevy_rotation;
+use sl_viewer_kit::particle_render::{
     ParticleBlend, ParticleDrawParams, ParticleInstance, ParticleInstances, ParticleQuad,
 };
-use crate::settings::ViewerSettings;
-use crate::textures::TextureManager;
-use crate::world_api::{
+use sl_viewer_settings::ViewerSettings;
+use sl_viewer_world_api::{
     AVATAR_BOOST_PRIORITY, DecodedTextures, HUD_RENDER_LAYER, ObjectParticleSystem, ViewerCamera,
     WorldPhase, on_hud_layer,
 };
+use sl_viewer_world_objects::textures::TextureManager;
 
 /// The particle system's own scheduling (P30.2).
 ///
@@ -181,7 +181,7 @@ const RENDER_SECTION: &[&str] = &["render"];
 
 /// The particle-cap setting key: the maximum number of live particles across all
 /// sources. The reference viewer's `RenderMaxPartCount`; surfaced in the
-/// quick-preferences panel (`crate::quick_preferences`) and consumed live by
+/// quick-preferences panel (`sl_viewer_preferences::quick_preferences`) and consumed live by
 /// `drive_particles`.
 pub const SETTING_MAX_PARTICLES: &str = "RenderMaxPartCount";
 
@@ -716,8 +716,8 @@ fn busiest_centroid<'cloud>(clouds: impl Iterator<Item = &'cloud Cloud>) -> Opti
 /// write directly (the others recompute it), so it switches there.
 pub(crate) fn focus_camera_on_particles(
     clouds: Query<&Cloud>,
-    mut mode: ResMut<crate::world_api::CameraMode>,
-    mut camera: Query<(&mut Transform, &mut crate::world_api::CameraRig), With<ViewerCamera>>,
+    mut mode: ResMut<sl_viewer_world_api::CameraMode>,
+    mut camera: Query<(&mut Transform, &mut sl_viewer_world_api::CameraRig), With<ViewerCamera>>,
     mut enabled: Local<Option<bool>>,
 ) {
     let on = *enabled.get_or_insert_with(|| std::env::var_os("SL_VIEWER_PARTICLE_FOCUS").is_some());
@@ -732,7 +732,7 @@ pub(crate) fn focus_camera_on_particles(
     };
     // Stand back along +X/+Y from the cloud and look at it, in flycam so the pose
     // sticks (and the rig aim is seeded so the flycam driver reproduces it).
-    *mode = crate::world_api::CameraMode::Flycam;
+    *mode = sl_viewer_world_api::CameraMode::Flycam;
     let eye = v_add(centroid, Vec3::new(6.0, 3.0, 6.0));
     let look = Vec3::new(centroid.x - eye.x, centroid.y - eye.y, centroid.z - eye.z);
     rig.aim_along(look);
@@ -760,7 +760,7 @@ pub(crate) fn setup_particles(mut commands: Commands, mut images: ResMut<Assets<
 /// span exactly `[0, 1]`, so nothing ever samples off the end — but Bevy's
 /// default is clamp-to-edge, and a texture path that leaves the default in place
 /// is the R22h shape waiting for a caller whose UVs *do* leave the unit square.
-/// `crate::render_test`'s sampler check holds every path to this, and it found
+/// `sl_client_bevy_viewer::render_test`'s sampler check holds every path to this, and it found
 /// this one.
 fn default_particle_image() -> Image {
     const SIZE: u32 = 32;
@@ -809,7 +809,7 @@ fn default_particle_image() -> Image {
 /// (destination `ONE`) blend is the glow / fire look; anything else is ordinary
 /// source-over alpha. A whole system shares one blend function (it lives on the
 /// system's particle *template*), so one choice per cloud drives the pipeline
-/// specialization in [`particle_render`](crate::particle_render).
+/// specialization in [`particle_render`](sl_viewer_kit::particle_render).
 const fn particle_blend(system: &ParticleSystem) -> ParticleBlend {
     if system.part_blend_func_dest == LL_PART_BF_ONE {
         ParticleBlend::Additive
@@ -1180,7 +1180,7 @@ fn spawn_cloud_entity(
         // instance buffer) while leaving the rest of the scene's indirect drawing
         // untouched.
         NoAutomaticBatching,
-        // Named so a diagnostic — or `crate::render_test`'s checks —
+        // Named so a diagnostic — or `sl_client_bevy_viewer::render_test`'s checks —
         // can say "the particle cloud" rather than an entity id the
         // reader has no way to resolve. The cloud is spawned here rather
         // than by whatever created the source, so this is the only place
@@ -1273,10 +1273,10 @@ mod tests {
     use super::{
         MAX_PARTICLES, ObjectParticleSystem, SETTING_MAX_PARTICLES, particle_cap, register_settings,
     };
-    use crate::settings::ViewerSettings;
-    use crate::world_api::particles_from_object;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{Object, ParticleSystem, Vector};
+    use sl_viewer_settings::ViewerSettings;
+    use sl_viewer_world_api::particles_from_object;
 
     /// The particle cap reads the setting, falling back to the built-in default
     /// when the store is absent (the gallery app) or unset.
@@ -1443,8 +1443,8 @@ mod tests {
         Emitter, Particle, Rng, build_cloud_instances, cloud_centroid, is_unlit, part_flags,
         particle_blend,
     };
-    use crate::particle_render::ParticleBlend;
     use bevy::math::{Quat, Vec3};
+    use sl_viewer_kit::particle_render::ParticleBlend;
 
     /// The seed the emitter tests use, so the pseudo-random sequence is fixed.
     const TEST_SEED: u64 = 0x1234_5678;

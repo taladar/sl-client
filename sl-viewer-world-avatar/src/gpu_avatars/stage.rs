@@ -38,11 +38,11 @@ use super::types::{
 };
 use crate::animations::{AnimationManager, AnimationPlayback};
 use crate::animesh::ControlAvatarState;
-use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::AvatarBody;
-use crate::world_api::AvatarState;
-use crate::world_api::PoseSlotKey;
-use crate::world_api::SkinPoseTwin;
+use sl_viewer_kit::avatar_assets::AvatarAssetLibrary;
+use sl_viewer_world_api::AvatarState;
+use sl_viewer_world_api::PoseSlotKey;
+use sl_viewer_world_api::SkinPoseTwin;
 
 /// The GPU-avatar **skin binding** written at skin-build time
 /// (`roadmap/context/gpu-avatars.md` §1.1): which pose slot a skinned submesh
@@ -504,7 +504,7 @@ pub(crate) struct BlendInputs<'w, 's> {
     /// The decoded-motion cache the clip arena uploads from.
     manager: Option<Res<'w, AnimationManager>>,
     /// The viewer camera, for the exact-phase sync distance.
-    camera: Query<'w, 's, &'static GlobalTransform, With<crate::world_api::ViewerCamera>>,
+    camera: Query<'w, 's, &'static GlobalTransform, With<sl_viewer_world_api::ViewerCamera>>,
 }
 
 /// Assemble this frame's [`GpuAvatarStaging`] snapshot: free/allocate avatar
@@ -1398,11 +1398,11 @@ const ENV_LOG_ANIMESH: &str = "SL_VIEWER_LOG_ANIMESH";
     reason = "a diagnostic joining the object, mesh, control-avatar and GPU-slot state it reports on"
 )]
 pub(crate) fn log_animesh_census(
-    state: Res<crate::world_api::ObjectState>,
-    mesh_manager: Res<crate::meshes::MeshManager>,
+    state: Res<sl_viewer_world_api::ObjectState>,
+    mesh_manager: Res<sl_viewer_world_objects::meshes::MeshManager>,
     control: Res<ControlAvatarState>,
     registry: Res<GpuAvatarRegistry>,
-    builds: Query<&crate::objects::ObjectBuilds>,
+    builds: Query<&sl_viewer_world_objects::objects::ObjectBuilds>,
     faces: Query<(
         Option<&GpuSkinBinding>,
         Option<&Aabb>,
@@ -1440,12 +1440,18 @@ pub(crate) fn log_animesh_census(
         let stage = match builds
             .get(tracked.entity)
             .ok()
-            .and_then(crate::objects::ObjectBuilds::pending)
+            .and_then(sl_viewer_world_objects::objects::ObjectBuilds::pending)
         {
             None => "built",
-            Some(crate::objects::PendingGeometry::Mesh(_)) => "waiting on mesh decode",
-            Some(crate::objects::PendingGeometry::RiggedMesh(_)) => "waiting on skinned bind",
-            Some(crate::objects::PendingGeometry::Sculpt(_)) => "waiting on sculpt map",
+            Some(sl_viewer_world_objects::objects::PendingGeometry::Mesh(_)) => {
+                "waiting on mesh decode"
+            }
+            Some(sl_viewer_world_objects::objects::PendingGeometry::RiggedMesh(_)) => {
+                "waiting on skinned bind"
+            }
+            Some(sl_viewer_world_objects::objects::PendingGeometry::Sculpt(_)) => {
+                "waiting on sculpt map"
+            }
         };
         let decoded = mesh_manager
             .decoded(key)

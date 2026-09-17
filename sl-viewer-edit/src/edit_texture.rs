@@ -50,6 +50,7 @@ use crate::edit_tool::{
 };
 use crate::face_material::FaceMaterial;
 use crate::i18n::{TransArgs, Translated, Translator};
+use crate::intents::TexturePicked;
 use crate::objects::{FaceTextureDebug, PrimFaceEntity, TEXTURE_EDIT_LOG_TARGET};
 use crate::ui::row;
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
@@ -64,7 +65,6 @@ use crate::world_api::AVATAR_BOOST_PRIORITY;
 use crate::world_api::EditToolState;
 use crate::world_api::ObjectState;
 use crate::world_api::SelectionSet;
-use crate::world_api::TexturePicked;
 
 /// The tab index the Texture-tab widgets start their focus order at (well past
 /// the Object / Features tabs' fields).

@@ -23,6 +23,7 @@
 // Lower crates re-aliased under their original module names, so these
 // modules keep addressing them as `crate::ui` and `crate::inventory`.
 pub(crate) use sl_viewer_environment::land_environment;
+pub(crate) use sl_viewer_intents as intents;
 pub(crate) use sl_viewer_inventory::inventory;
 pub(crate) use sl_viewer_inventory::inventory_properties;
 pub(crate) use sl_viewer_map::world_map;
@@ -30,6 +31,7 @@ pub(crate) use sl_viewer_notices::ui_name_link;
 pub(crate) use sl_viewer_notifications as notifications;
 pub(crate) use sl_viewer_pickers::ui_texture_picker;
 pub(crate) use sl_viewer_platform::clipboard;
+pub(crate) use sl_viewer_social as social;
 pub(crate) use sl_viewer_ui_core::i18n;
 pub(crate) use sl_viewer_ui_core::ui;
 pub(crate) use sl_viewer_ui_core::ui_font;

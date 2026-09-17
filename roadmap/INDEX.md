@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 315 |
+| ready | 314 |
 | blocked | 41 |
 | in-progress | 22 |
 | bugs | 5 |
-| done | 1180 |
+| done | 1181 |
 | deferred | 27 |
 | wont-do | 16 |
 | **total** | **1706** |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (315)
+## ready (314)
 
 ### protocol
 
@@ -352,9 +352,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   not a preference
 - [`viewer-audit-world-api-query-tests`](ready/viewer-audit-world-api-query-tests.md)
   — sl-viewer-world-api has 214 functions and 5 tests
-- [`viewer-audit-world-api-split`](ready/viewer-audit-world-api-split.md) —
-  sl-viewer-world-api is a 6892-line god-module and the workspace's shared-types
-  dump
 - [`viewer-autopilot-click-to-walk`](ready/viewer-autopilot-click-to-walk.md) —
   Autopilot core + click-to-walk (blocked by `viewer-input-action-map` (done))
 - [`viewer-avatar-alignment-tools`](ready/viewer-avatar-alignment-tools.md) —
@@ -1185,7 +1182,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 
-## done (1180)
+## done (1181)
 
 ### protocol
 
@@ -1572,6 +1569,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The recycling virtual list re-binds every pooled row on a one-row scroll
 - [`viewer-audit-water-state-purge`](done/viewer-audit-water-state-purge.md) —
   WaterState is not purged on a teleport, and leaks spawned water planes
+- [`viewer-audit-world-api-split`](done/viewer-audit-world-api-split.md) —
+  sl-viewer-world-api is a 6892-line god-module and the workspace's shared-types
+  dump
 - [`viewer-audit-world-map-clipboard`](done/viewer-audit-world-map-clipboard.md)
   — The world map keeps a second live arboard handle
 - [`viewer-audit-world-reset-purge-completeness`](done/viewer-audit-world-reset-purge-completeness.md)

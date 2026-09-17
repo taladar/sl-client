@@ -25,16 +25,16 @@ use sl_client_bevy::{
 };
 use sl_settings::SettingValue;
 
-use crate::coords::bevy_to_sl_vec;
-use crate::settings::ViewerSettings;
-use crate::world_api::ViewerCamera;
+use sl_viewer_kit::coords::bevy_to_sl_vec;
+use sl_viewer_settings::ViewerSettings;
+use sl_viewer_world_api::ViewerCamera;
 
 /// The persisted-settings section the draw-distance setting lives under.
 const RENDER_SECTION: &[&str] = &["render"];
 
 /// The draw-distance setting key: how far, in metres, the simulator streams
 /// objects and terrain toward the agent. The reference viewer's `RenderFarClip`;
-/// surfaced in the quick-preferences panel (`crate::quick_preferences`) and
+/// surfaced in the quick-preferences panel (`sl_viewer_preferences::quick_preferences`) and
 /// applied live by [`apply_draw_distance`].
 pub const SETTING_DRAW_DISTANCE: &str = "RenderFarClip";
 
@@ -453,7 +453,7 @@ pub fn enforce_quit_deadline(
 ///
 /// The sim builds the agent's interest list around this radius, so it must be
 /// (re)announced for a fresh region and updated live when the quick-preferences
-/// panel (`crate::quick_preferences`) moves the draw-distance slider — the
+/// panel (`sl_viewer_preferences::quick_preferences`) moves the draw-distance slider — the
 /// reference viewer's `RenderFarClip` → `AgentSetAppearance`/interest behaviour.
 /// The camera's far clip plane is deliberately *not* tied to this: the sky dome
 /// and stars render at the fixed far plane (see `sl_viewer_world_scene::sky`), so shrinking it to
@@ -496,7 +496,7 @@ pub fn apply_draw_distance(
 /// (`crate::camera::position_camera`) follows the avatar the moment it arrives,
 /// so there is nothing to snap. The `SL_VIEWER_CAMERA_*` framing knobs the old
 /// snap read now seed the third-person orbit
-/// ([`CameraRig::seed_orbit_from_env`](crate::world_api::CameraRig)).
+/// ([`CameraRig::seed_orbit_from_env`](sl_viewer_world_api::CameraRig)).
 pub fn drive_session(
     mut events: MessageReader<SlEvent>,
     identity: Res<SlIdentity>,
@@ -511,7 +511,7 @@ pub fn drive_session(
                 info!("region handshake complete");
                 // The draw distance is announced by `apply_draw_distance`, and
                 // the bandwidth throttle by the network & cache tab's
-                // `apply_throttle` (`crate::preferences_network_cache`) — both
+                // `apply_throttle` (`sl_viewer_preferences::preferences_network_cache`) — both
                 // re-send their (user-tunable) setting on every handshake.
                 // Drain the agent's stored offline instant messages, once — the
                 // reference `LLIMProcessing::requestOfflineMessages`, which the
@@ -575,7 +575,7 @@ mod tests {
     use sl_settings::{Scope, SettingValue};
 
     use super::{SETTING_DRAW_DISTANCE, apply_draw_distance, register_settings};
-    use crate::settings::ViewerSettings;
+    use sl_viewer_settings::ViewerSettings;
 
     /// A boxed error so tests can use `?`.
     type TestError = Box<dyn core::error::Error>;
@@ -661,7 +661,7 @@ mod tests {
         use core::time::Duration;
 
         use super::{ViewerSession, report_camera_interest};
-        use crate::world_api::ViewerCamera;
+        use sl_viewer_world_api::ViewerCamera;
 
         /// The centre of the most recent `SetCamera` command.
         #[derive(Resource, Default)]
@@ -711,10 +711,10 @@ mod tests {
             .ok_or("a moving camera in-world reports its viewpoint")?;
         assert_eq!(
             reported,
-            crate::coords::bevy_to_sl_vec(current.translation),
+            sl_viewer_kit::coords::bevy_to_sl_vec(current.translation),
             "the interest camera is this frame's pose, not the frame-old \
              GlobalTransform's ({:?})",
-            crate::coords::bevy_to_sl_vec(stale.translation),
+            sl_viewer_kit::coords::bevy_to_sl_vec(stale.translation),
         );
         Ok(())
     }

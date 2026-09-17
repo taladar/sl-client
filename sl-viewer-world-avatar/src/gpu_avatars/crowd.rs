@@ -4,7 +4,7 @@
 //! at crowd scale) can finally be measured — every live test so far was 1–3
 //! avatars.
 //!
-//! **Manual trigger** (`crate::crowd_debug_button`). The crowd copies the
+//! **Manual trigger** (`sl_client_bevy_viewer::crowd_debug_button`). The crowd copies the
 //! local avatar's *currently visible* submeshes verbatim, so it must be captured
 //! only once the avatar is **fully** rezzed. A timing heuristic can't tell:
 //! asynchronous BOM bakes (client-side on OpenSim, server-side on the SL grids)
@@ -44,9 +44,9 @@ use sl_client_bevy::{AgentKey, SlIdentity};
 
 use super::stage::{GpuAvatarPoseFeed, GpuSkinBinding};
 use crate::avatars::AvatarBody;
-use crate::face_material::FaceMaterial;
-use crate::world_api::AvatarState;
-use crate::world_api::PoseSlotKey;
+use sl_viewer_kit::face_material::FaceMaterial;
+use sl_viewer_world_api::AvatarState;
+use sl_viewer_world_api::PoseSlotKey;
 
 /// The env var selecting the synthetic-crowd copy count (`SL_VIEWER_CROWD=N`).
 const ENV_CROWD: &str = "SL_VIEWER_CROWD";
@@ -135,7 +135,7 @@ pub struct GpuCrowd {
     submeshes: Vec<CrowdSubmesh>,
     /// The spawned copies, in crowd-index order (index = position).
     copies: Vec<CrowdCopy>,
-    /// Set by the [Spawn crowd button](crate::crowd_debug_button) when the user
+    /// Set by the [Spawn crowd button](sl_client_bevy_viewer::crowd_debug_button) when the user
     /// confirms the local avatar is fully rezzed: the template is captured on the
     /// next frame the avatar has visible submeshes. Nothing spawns until this is
     /// set — no timing heuristic (bakes give no reliable "done" signal).

@@ -82,10 +82,10 @@ use crate::floater::{
     KeyedFloaters, host_floater,
 };
 use crate::i18n::{TransArgs, Translated, Translator};
+use crate::intents::{OpenScript, ScriptSource};
 use crate::ui::{column, row};
 use crate::ui_element::ElementCx;
 use crate::ui_font::UiFont;
-use crate::world_api::{OpenScript, ScriptSource};
 
 /// A green-tinted colour for a checked Running box.
 const CHECK_COLOR: Color = Color::srgb(0.55, 0.85, 0.60);
@@ -857,7 +857,7 @@ pub fn spawn_script_editor_specimen(
 
 #[cfg(test)]
 mod tests {
-    use crate::world_api::ScriptSource;
+    use crate::intents::ScriptSource;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::ScriptUploadLocation;
     use sl_client_bevy::{InventoryKey, ObjectKey, Uuid};
@@ -892,8 +892,8 @@ mod tests {
     mod instances {
         use super::super::{ScriptEditorState, open_script, script_key};
         use crate::floater::{Floater, FloaterCommand, FloaterOp, FloaterPlugin};
+        use crate::intents::{OpenScript, ScriptSource};
         use crate::ui::UiRoot;
-        use crate::world_api::{OpenScript, ScriptSource};
         use bevy::prelude::*;
         use pretty_assertions::assert_eq;
         use sl_client_bevy::{Command, InventoryKey, ObjectKey, ScriptTarget, SlCommand, Uuid};

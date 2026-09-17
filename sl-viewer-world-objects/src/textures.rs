@@ -41,12 +41,12 @@ use sl_client_bevy::{
 // the crates that only *show* textures no longer depend on this fetch
 // pipeline; re-exported here so the call sites addressing them through this
 // module are unchanged.
-use crate::world_api::{BoostTexture, DecodedTextures};
-pub use crate::world_api::{DiffuseImage, build_prim_image, env_budget, is_absent_texture};
+use sl_viewer_world_api::{BoostTexture, DecodedTextures};
+pub use sl_viewer_world_api::{DiffuseImage, build_prim_image, env_budget, is_absent_texture};
 
-use crate::asset_retry::{RetryDisposition, RetryState};
-use crate::face_material::{FaceMaterial, inert_face_material};
 use crate::material_cache::{MaterialCache, MaterialKey};
+use sl_viewer_kit::face_material::{FaceMaterial, inert_face_material};
+use sl_viewer_platform::asset_retry::{RetryDisposition, RetryState};
 
 /// The outcome of one background texture fetch: the decoded RGBA8 image, or
 /// `None` if the texture could not be fetched or decoded.
@@ -172,7 +172,7 @@ pub struct TextureManager {
     /// resolves (moved into [`retry`](Self::retry) on failure).
     in_flight_params: HashMap<TextureKey, DeferredRequest>,
     /// Fetches that failed and are waiting to be re-issued (bounded backoff —
-    /// [`asset_retry`](crate::asset_retry)). Without this a transient `GetTexture`
+    /// [`asset_retry`](sl_viewer_platform::asset_retry)). Without this a transient `GetTexture`
     /// failure would strand a one-shot boosted consumer's texture (terrain, an
     /// avatar bake) for the whole session, invisible to the F3 overlay. Drained by
     /// [`poll_textures`] once each entry is due.
@@ -318,7 +318,7 @@ impl TextureManager {
         self.request_from(
             id,
             RemoteTextureSource::ServerBake { url },
-            crate::world_api::AVATAR_BOOST_PRIORITY,
+            sl_viewer_world_api::AVATAR_BOOST_PRIORITY,
             DiscardLevel::FULL,
             false,
             RetryDisposition::Supersede,
@@ -396,7 +396,7 @@ impl TextureManager {
         // request supersedes any pending retry for the id; the store's *own*
         // re-issue must not, or it would discard the attempt count the backoff loop
         // just parked and reset to attempt 1 forever
-        // (see [`RetryDisposition`](crate::asset_retry::RetryDisposition)).
+        // (see [`RetryDisposition`](sl_viewer_platform::asset_retry::RetryDisposition)).
         if retry.supersedes() {
             let _retried = self.retry.remove(&id);
         }
@@ -686,7 +686,7 @@ fn build_store(fetcher: &Arc<BevyTextureFetcher>, disk_dir: Option<PathBuf>) -> 
             Arc::clone(&fetcher),
             Some(dir),
             CacheLimits {
-                max_bytes: crate::paths::texture_cache_max_bytes(),
+                max_bytes: sl_viewer_platform::paths::texture_cache_max_bytes(),
                 ..CacheLimits::default()
             },
         ) {
@@ -701,7 +701,7 @@ fn build_store(fetcher: &Arc<BevyTextureFetcher>, disk_dir: Option<PathBuf>) -> 
             Arc::clone(&fetcher),
             None,
             CacheLimits {
-                max_bytes: crate::paths::texture_cache_max_bytes(),
+                max_bytes: sl_viewer_platform::paths::texture_cache_max_bytes(),
                 ..CacheLimits::default()
             },
         ) {
@@ -715,7 +715,7 @@ fn build_store(fetcher: &Arc<BevyTextureFetcher>, disk_dir: Option<PathBuf>) -> 
 /// texturecache`), from `XDG_CACHE_HOME` or `~/.cache`, or `None` when neither is
 /// set (the store then runs in-memory only).
 fn texture_cache_dir() -> Option<PathBuf> {
-    crate::paths::asset_cache_dir("texturecache")
+    sl_viewer_platform::paths::asset_cache_dir("texturecache")
 }
 
 /// Serve the [`BoostTexture`] requests raised by the crates that only *show*
@@ -737,14 +737,14 @@ pub fn serve_texture_boosts(
 /// Bevy resource. Cheap: a revision compare per frame, a rebuild only on a real
 /// change.
 pub fn sync_texture_blacklist(
-    derender: Res<crate::world_api::DerenderList>,
+    derender: Res<sl_viewer_world_api::DerenderList>,
     mut manager: ResMut<TextureManager>,
 ) {
     if manager.blacklist_revision == derender.revision() {
         return;
     }
     manager.blacklist_revision = derender.revision();
-    manager.blacklist = derender.ids_of_kind(crate::world_api::DerenderKind::Texture);
+    manager.blacklist = derender.ids_of_kind(sl_viewer_world_api::DerenderKind::Texture);
 }
 
 /// Refresh the store fetcher's `GetTexture` capability URL each time the region's
@@ -811,7 +811,7 @@ pub fn poll_textures(
                         warn!(
                             "texture {id} fetch failed; scheduling retry {}/{} in {:.1}s",
                             state.attempts,
-                            crate::asset_retry::MAX_RETRY_ATTEMPTS,
+                            sl_viewer_platform::asset_retry::MAX_RETRY_ATTEMPTS,
                             state.next_at - now
                         );
                         let _prev = manager.retry.insert(id, (params, state));
@@ -819,7 +819,7 @@ pub fn poll_textures(
                     _exhausted_or_unknown => {
                         warn!(
                             "texture {id} fetch failed; gave up after {} attempts",
-                            crate::asset_retry::MAX_RETRY_ATTEMPTS
+                            sl_viewer_platform::asset_retry::MAX_RETRY_ATTEMPTS
                         );
                         let _cleared = manager.retry.remove(&id);
                         decoded.write(TextureDecoded(id));
@@ -1917,21 +1917,21 @@ mod tests {
         drape_parked_faces, face_alpha_mode, refresh_derived_images, refresh_lod_image,
         reserve_image_build, resolve_texture_alpha_mode, texture_has_alpha,
     };
-    use crate::face_material::inert_face_material;
     use crate::legacy_materials::LegacyMaterialManager;
     use bevy::app::App;
     use bevy::asset::{AssetApp as _, AssetEvent, AssetPlugin, Assets, Handle};
     use bevy::ecs::message::Messages;
     use bevy::image::Image;
     use bevy::prelude::Mut;
+    use sl_viewer_kit::face_material::inert_face_material;
     use std::sync::Arc;
 
-    use crate::world_api::DecodedTextures;
     use bevy::pbr::StandardMaterial;
     use bevy::prelude::AlphaMode;
     use bytes::Bytes;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{DecodedTexture, DiscardLevel, TextureKey, Uuid};
+    use sl_viewer_world_api::DecodedTextures;
     use std::collections::VecDeque;
 
     /// A decoded texture with the given source component count (pixels unused by

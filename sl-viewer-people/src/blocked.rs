@@ -14,7 +14,7 @@
 //!
 //! # What it does
 //!
-//! - Lists every [`MuteEntry`] the [mute model](crate::world_api::MuteModel) holds,
+//! - Lists every [`MuteEntry`] the [mute model](crate::social::MuteModel) holds,
 //!   with the entry's **type** (Resident / Object / Group / By name /
 //!   external) beside its name, sorted by name or type and filtered by a name
 //!   fragment.
@@ -61,10 +61,14 @@ use sl_client_bevy::{AgentKey, Command, MuteEntry, MuteFlags, MuteType, SlComman
 
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::{TransArgs, Translated, Translator};
+use crate::intents::OpenAvatarProfile;
+use crate::intents::RequestBlock;
+use crate::intents::{AvatarPicked, OpenAvatarPicker};
 use crate::menu::{MenuCommand, MenuDef, MenuItemDef, OpenContextMenu};
 use crate::mutes::flags_apply;
 use crate::people::PeopleUi;
 use crate::settings::ViewerSettings;
+use crate::social::MuteModel;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::UiAction;
 use crate::ui_font::UiFont;
@@ -76,10 +80,6 @@ use crate::ui_table::{
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
-use crate::world_api::MuteModel;
-use crate::world_api::OpenAvatarProfile;
-use crate::world_api::RequestBlock;
-use crate::world_api::{AvatarPicked, OpenAvatarPicker};
 
 /// The `element` the block list's menu / UI actions are attributed to.
 const BLOCKED_ELEMENT: &str = "blocked";

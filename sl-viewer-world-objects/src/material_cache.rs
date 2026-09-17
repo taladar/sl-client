@@ -2,7 +2,7 @@
 //! face whose material *inputs* are byte-identical (roadmap
 //! `viewer-perf-material-intern`).
 //!
-//! The [`GeometryCache`](crate::geometry_cache) already shares one `Mesh`
+//! The [`GeometryCache`](sl_viewer_kit::geometry_cache) already shares one `Mesh`
 //! handle across identical object instances, but Bevy only collapses draws into
 //! instanced batches when the **material** handle matches too — and every face
 //! used to build its own material, so even a row of identical fence posts cost
@@ -41,19 +41,19 @@
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 
-use crate::world_api::DecodedTextures;
 use sl_client_bevy::{Object, PrimFaceId, Priority, TextureAnimation, TextureFace, TextureKey};
+use sl_viewer_world_api::DecodedTextures;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
-use crate::face_material::FaceMaterial;
 use crate::materials::ObjectRenderMaterials;
 use crate::objects::{FaceTextureDebug, PrimFaceEntity};
 use crate::texture_anim::{
     ObjectTextureAnimation, anim_applies_to_face, running_texture_animation,
 };
 use crate::textures::{PrimTextures, TextureAlpha, TextureManager, face_material};
-use crate::world_api::{SelectionSet, on_hud_layer};
+use sl_viewer_kit::face_material::FaceMaterial;
+use sl_viewer_world_api::{SelectionSet, on_hud_layer};
 
 /// The content key of one internable face material: every input
 /// `face_material` composes from, with the float fields stored as their exact
@@ -426,7 +426,6 @@ pub fn detach_shared_face_materials(
 #[cfg(test)]
 mod tests {
     use super::{MaterialCache, MaterialCacheStats, MaterialInternContext, MaterialKey};
-    use crate::face_material::FaceMaterial;
     use crate::texture_anim::running_texture_animation;
     use crate::textures::TextureAlpha;
     use bevy::prelude::*;
@@ -434,6 +433,7 @@ mod tests {
     use sl_client_bevy::{
         PrimFaceId, TextureAnimation, TextureFace, TextureKey, Uuid, texture_anim_mode,
     };
+    use sl_viewer_kit::face_material::FaceMaterial;
 
     /// A plain textured face with neutral placement.
     fn test_face() -> TextureFace {

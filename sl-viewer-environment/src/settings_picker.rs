@@ -50,6 +50,7 @@ use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use sl_client_bevy::{InventoryKey, SettingsKind, Uuid};
+use sl_viewer_intents::{OpenSettingsPicker, PickedSettings, SettingsPicked};
 use sl_viewer_inventory::inventory::InventoryModel;
 use sl_viewer_inventory::settings_index::SettingsIndex;
 use sl_viewer_ui_core::i18n::{TransArgs, Translated, Translator};
@@ -65,7 +66,6 @@ use sl_viewer_ui_widgets::ui_table::{
     TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells, TableSelectionMode,
     TableSortDefault, TableSpec, TableState, set_table_cell, spawn_table, spawn_table_row,
 };
-use sl_viewer_world_api::{OpenSettingsPicker, PickedSettings, SettingsPicked};
 
 use crate::settings_list::{
     SettingsListFilters, SettingsListRow, location_text, project, sort_rows,

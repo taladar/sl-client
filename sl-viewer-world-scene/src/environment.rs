@@ -29,8 +29,8 @@ use sl_viewer_settings::ViewerSettings;
 
 use sl_viewer_world_api::rlv::{RlvEnvironmentRequest, RlvEnvironmentSlot};
 
-use crate::environment_assets::EnvironmentAssetManager;
-use crate::sky_presets::FixedSky;
+use sl_viewer_kit::sky_presets::FixedSky;
+use sl_viewer_platform::environment_assets::EnvironmentAssetManager;
 
 /// A World ▸ Environment menu selection: a time of day
 /// ([`FixedSky`]) within one of three groups.
@@ -1601,7 +1601,7 @@ impl EnvironmentState {
         if self.settings.day_position_moves_the_sky(0.0) {
             return DayPositionPin::RegionDayCycle { position };
         }
-        crate::sky_presets::install_preset_day_cycle(&mut self.settings);
+        sl_viewer_kit::sky_presets::install_preset_day_cycle(&mut self.settings);
         DayPositionPin::SubstitutedPresets { position }
     }
 
@@ -2341,8 +2341,8 @@ mod tests {
         EnvironmentSource, EnvironmentState, ExperienceEnvironmentPush, ExperienceKey,
         FixedEnvironment, Llsd, SavedEnvironment, SkySettings, Uuid,
     };
-    use crate::sky_presets::FixedSky;
     use sl_client_bevy::WaterSettings;
+    use sl_viewer_kit::sky_presets::FixedSky;
 
     /// An environment reply for `parcel_id` (`-1` = the whole region), tagged by
     /// its day length so the folded settings are identifiable.

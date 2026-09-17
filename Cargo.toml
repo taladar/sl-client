@@ -48,6 +48,7 @@ members = [
   "sl-viewer-chat",
   "sl-viewer-edit",
   "sl-viewer-environment",
+  "sl-viewer-intents",
   "sl-viewer-inventory",
   "sl-viewer-kit",
   "sl-viewer-map",
@@ -62,6 +63,7 @@ members = [
   "sl-viewer-rlv",
   "sl-viewer-search",
   "sl-viewer-settings",
+  "sl-viewer-social",
   "sl-viewer-spacenav",
   "sl-viewer-testkit",
   "sl-viewer-ui-core",
@@ -134,6 +136,7 @@ sl-viewer-audio = { path = "sl-viewer-audio", version = "0.1.0" }
 sl-viewer-chat = { path = "sl-viewer-chat", version = "0.1.0" }
 sl-viewer-edit = { path = "sl-viewer-edit", version = "0.1.0" }
 sl-viewer-environment = { path = "sl-viewer-environment", version = "0.1.0" }
+sl-viewer-intents = { path = "sl-viewer-intents", version = "0.1.0" }
 sl-viewer-inventory = { path = "sl-viewer-inventory", version = "0.1.0" }
 sl-viewer-kit = { path = "sl-viewer-kit", version = "0.1.0" }
 sl-viewer-map = { path = "sl-viewer-map", version = "0.1.0" }
@@ -148,6 +151,7 @@ sl-viewer-preferences = { path = "sl-viewer-preferences", version = "0.1.0" }
 sl-viewer-rlv = { path = "sl-viewer-rlv", version = "0.1.0" }
 sl-viewer-search = { path = "sl-viewer-search", version = "0.1.0" }
 sl-viewer-settings = { path = "sl-viewer-settings", version = "0.1.0" }
+sl-viewer-social = { path = "sl-viewer-social", version = "0.1.0" }
 sl-viewer-spacenav = { path = "sl-viewer-spacenav", version = "0.1.0" }
 sl-viewer-testkit = { path = "sl-viewer-testkit", version = "0.1.0" }
 sl-viewer-ui-core = { path = "sl-viewer-ui-core", version = "0.1.0" }

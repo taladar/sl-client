@@ -50,10 +50,10 @@ use crate::inventory_properties::{
     LandmarkAsset, format_unix_date, parse_landmark, send_item_update,
 };
 use crate::name_revisions::NameRevisions;
+use crate::social::GroupsModel;
 use crate::ui::{column, row};
 use crate::ui_font::UiFont;
 use crate::world_api::AvatarState;
-use crate::world_api::GroupsModel;
 use crate::world_api::ui_texture::{PendingUiTexture, UiTexturePlugin};
 use crate::world_map::OpenWorldMap;
 
@@ -1077,7 +1077,8 @@ const fn local_coord_u16(value: f32) -> u16 {
 #[cfg(test)]
 mod tests {
     use super::{is_group_owned, landmark_slurl, maturity_key, parcel_owner_label, region_line};
-    use crate::world_api::{AvatarState, GroupsModel, NameAlias};
+    use crate::social::GroupsModel;
+    use crate::world_api::{AvatarState, NameAlias};
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{AgentKey, DisplayName, ParcelDetails, RegionName, Uuid};
 
@@ -1187,8 +1188,9 @@ mod tests {
         use super::super::{AboutLandmarkPlugin, AboutLandmarkState, landmark_key};
         use crate::floater::{Floater, FloaterCommand, FloaterOp, FloaterPlugin};
         use crate::inventory::OpenAboutLandmark;
+        use crate::social::GroupsModel;
         use crate::ui::UiRoot;
-        use crate::world_api::{AvatarState, GroupsModel};
+        use crate::world_api::AvatarState;
         use bevy::prelude::*;
         use pretty_assertions::assert_eq;
         use sl_client_bevy::{

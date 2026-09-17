@@ -62,6 +62,8 @@ use sl_client_bevy::{
 };
 
 use crate::coords::bevy_to_sl_vec;
+use crate::intents::LocalChatNotice;
+use crate::intents::{DragPickActive, DragPickHit, DragWorldPick};
 use crate::inventory::{
     InventoryModel, InventorySelection, InventoryUi, InventoryUiAction, InventoryView, RowKey,
     query_folder_page,
@@ -71,10 +73,9 @@ use crate::ui::UiRoot;
 use crate::ui_font::UiFont;
 use crate::virtual_list::{VirtualList, VirtualRow};
 use crate::world_api::AvatarPickTarget;
-use crate::world_api::LocalChatNotice;
 use crate::world_api::ViewerCamera;
+use crate::world_api::WorldPhase;
 use crate::world_api::pointer_over_blocking_ui;
-use crate::world_api::{DragPickActive, DragPickHit, DragWorldPick, WorldPhase};
 
 /// The tracing target of the drag-hover diagnostics: which stage of the chain
 /// between "a drag is in flight" and "this object is outlined" the current frame
@@ -715,7 +716,7 @@ pub(crate) fn on_row_drag_end(
         Query<&AgentDropTarget>,
         Query<&AvatarPickTarget>,
         Query<&ContentsDropTarget>,
-        Query<&crate::world_api::NotecardDropTarget>,
+        Query<&crate::intents::NotecardDropTarget>,
     ),
     world: (
         Query<(&Camera, &GlobalTransform), With<ViewerCamera>>,
@@ -729,7 +730,7 @@ pub(crate) fn on_row_drag_end(
     outputs: (
         MessageWriter<InventoryUiAction>,
         MessageWriter<SlCommand>,
-        MessageWriter<crate::world_api::ContentsMutated>,
+        MessageWriter<crate::intents::ContentsMutated>,
         Commands,
         MessageWriter<crate::inventory::AddEmbeddedItem>,
         MessageWriter<LocalChatNotice>,
@@ -832,10 +833,10 @@ pub(crate) fn on_row_drag_end(
         let mut added = Vec::new();
         for (source, _from_library) in sources {
             if let MenuTarget::Item(item) = source
-                && let Some(command) = crate::world_api::contents_drop_command(item, scoped, object)
+                && let Some(command) = crate::intents::contents_drop_command(item, scoped, object)
             {
                 commands.write(SlCommand(command));
-                added.push(crate::world_api::PendingAdd {
+                added.push(crate::intents::PendingAdd {
                     item_id: item.item_id,
                     name: item.name.clone(),
                     icon: crate::inventory::item_icon(item.inv_type),
@@ -846,7 +847,7 @@ pub(crate) fn on_row_drag_end(
         // item shows once the simulator confirms it — with a "…adding" phantom
         // row meanwhile (and not committed before the server confirms).
         if !added.is_empty() {
-            contents_mutations.write(crate::world_api::ContentsMutated {
+            contents_mutations.write(crate::intents::ContentsMutated {
                 scoped,
                 full: object,
                 added,
@@ -934,10 +935,10 @@ pub(crate) fn on_row_drag_end(
             let drop_into_contents = contents_target.is_some() && (!is_object || ctrl);
             if let Some((scoped, full)) = contents_target
                 && drop_into_contents
-                && let Some(command) = crate::world_api::contents_drop_command(item, scoped, full)
+                && let Some(command) = crate::intents::contents_drop_command(item, scoped, full)
             {
                 commands.write(SlCommand(command));
-                added.push(crate::world_api::PendingAdd {
+                added.push(crate::intents::PendingAdd {
                     item_id: item.item_id,
                     name: item.name.clone(),
                     icon: crate::inventory::item_icon(item.inv_type),
@@ -954,7 +955,7 @@ pub(crate) fn on_row_drag_end(
         if !added.is_empty()
             && let Some((scoped, full)) = contents_target
         {
-            contents_mutations.write(crate::world_api::ContentsMutated {
+            contents_mutations.write(crate::intents::ContentsMutated {
                 scoped,
                 full,
                 added,
@@ -1114,14 +1115,14 @@ fn contents_target_at(
 
 /// **Which** notecard editor a hovered UI node belongs to, when that editor
 /// accepts a dropped item — the node's own or nearest-ancestor
-/// [`crate::world_api::NotecardDropTarget`] with `editable` set. The
+/// [`crate::intents::NotecardDropTarget`] with `editable` set. The
 /// ancestor walk lets the floater stamp its root while a child is hovered.
 ///
 /// The entity, not a yes/no: notecard editors open **per notecard**, so the
 /// drop has to name the window the pointer was actually over.
 fn notecard_target_at(
     hovered: Entity,
-    notecard_targets: &Query<&crate::world_api::NotecardDropTarget>,
+    notecard_targets: &Query<&crate::intents::NotecardDropTarget>,
     child_of: &Query<&ChildOf>,
 ) -> Option<Entity> {
     let mut node = hovered;
@@ -1256,7 +1257,7 @@ fn drive_drag_object_hover(
     objects: Res<crate::world_api::ObjectState>,
     keyboard: Res<ButtonInput<KeyCode>>,
     occlusion: (Res<HoverMap>, Query<&Pickable>, Query<&ComputedNode>),
-    mut hover_out: ResMut<crate::world_api::DragHoverHighlight>,
+    mut hover_out: ResMut<crate::intents::DragHoverHighlight>,
     mut last_stage: Local<Option<&'static str>>,
 ) {
     // Where this frame's answer comes from, for [`DRAG_HOVER_LOG_TARGET`]: every
@@ -1305,7 +1306,7 @@ fn drive_drag_object_hover(
             stage = "the object under the cursor accepts no drop (not modifiable, no add flag)";
             break 'decide None;
         };
-        Some(crate::world_api::DragHover {
+        Some(crate::intents::DragHover {
             root,
             // Foreign (red) when you cannot modify it — you may only drop via its
             // "allow anyone to add inventory" flag.

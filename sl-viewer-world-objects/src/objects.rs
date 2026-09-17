@@ -9,7 +9,7 @@
 //!   [`SceneObject`] marker classifying it (avatar / mesh / sculpt / plain prim /
 //!   other), and its `Transform` set from the object's kinematic
 //!   [`motion`](sl_client_bevy::ObjectMotion) and scale via the Second Life →
-//!   Bevy [coordinate map](crate::coords);
+//!   Bevy [coordinate map](sl_viewer_kit::coords);
 //! - each [`SlSessionEvent::ObjectUpdated`] moves the existing entity (a
 //!   motion-only update just re-places it) and, only when the object's *shape*
 //!   parameters actually change, re-tessellates its geometry (a motion update
@@ -55,39 +55,41 @@ use sl_client_bevy::{
 };
 
 use crate::asset_budget::MeshUploadBudget;
-use crate::coords::{
+use bevy::app::Propagate;
+use sl_viewer_kit::coords::{
     origin_shift_bevy, region_offset_bevy, sl_rotation_to_quat, sl_to_bevy_object_rotation,
     sl_to_bevy_vec,
 };
-use crate::face_material::FaceMaterial;
-use crate::flexi::{FLEXI_LOD, FlexiSimState, apply_flexi, flexi_attributes, flexi_from_object};
-use crate::geometry_cache::{GeometryCache, GeometryKey, ScaleMm, scale_mm};
-use crate::world_api::DecodedTextures;
-use crate::world_api::targeted_ray_cast::{TargetVisibility, TargetedRayCast};
-use crate::world_api::world_has_keyboard;
-use crate::world_api::world_scoped::{WorldPurge, WorldScoped};
-use crate::world_api::{
+use sl_viewer_kit::face_material::FaceMaterial;
+use sl_viewer_kit::flexi::{
+    FLEXI_LOD, FlexiSimState, apply_flexi, flexi_attributes, flexi_from_object,
+};
+use sl_viewer_kit::geometry_cache::{GeometryCache, GeometryKey, ScaleMm, scale_mm};
+use sl_viewer_world_api::DecodedTextures;
+use sl_viewer_world_api::targeted_ray_cast::{TargetVisibility, TargetedRayCast};
+use sl_viewer_world_api::world_has_keyboard;
+use sl_viewer_world_api::world_scoped::{WorldPurge, WorldScoped};
+use sl_viewer_world_api::{
     AVATAR_BOOST_PRIORITY, FLAGS_USE_PHYSICS, INITIAL_TREE_TIER, MAX_PARENT_WALK, ObjectLight,
     ObjectParticleSystem, ObjectPickSummary, ObjectReflectionProbe, ObjectState, PhysicalObject,
     ShapeFingerprint, TrackedObject, TreeTier, ViewerCamera, is_hud_point, light_from_object,
     particles_from_object, reflection_probe_from_object, surface_info_from_hit,
 };
-use bevy::app::Propagate;
 
 use crate::legacy_materials::LegacyMaterialManager;
 use crate::material_cache::{MaterialCache, MaterialInternContext, SharedFaceMaterial};
 use crate::materials::ObjectRenderMaterials;
 use crate::meshes::{MeshDecoded, MeshManager};
-use crate::probe_layers::{dynamic_render_layers, world_geom_render_layers};
 use crate::render_priority::HUD_BOOST_PRIORITY;
 use crate::texture_anim::{ObjectTextureAnimation, running_texture_animation};
+use sl_viewer_kit::probe_layers::{dynamic_render_layers, world_geom_render_layers};
 // These moved down to the world API so the crates that only name them no
 // longer depend on the object layer's systems; re-exported here so the
 // call sites that address them through this module are unchanged.
 use crate::textures::{
     PrimTextures, TextureAlpha, TextureDecoded, TextureManager, face_material, intern_face_material,
 };
-pub use crate::world_api::{ObjectCategory, ObjectDebugInfo, SceneObject};
+pub use sl_viewer_world_api::{ObjectCategory, ObjectDebugInfo, SceneObject};
 
 /// The tracing target of the per-face texture-edit diagnostics: the entry a
 /// commit builds from the rendered faces (`sl-viewer-edit`'s Texture tab) and
@@ -192,9 +194,9 @@ pub struct WorldRootObject;
 /// identity instead. The GPU pick-tag assignment
 /// (`sl_viewer_world_view::gpu_pick::assign_avatar_pick_tags`) reads it so a right-click
 /// on a worn mesh resolves to the **attachment** pies
-/// (`crate::attachment_menu`, submesh → worn object → wearer) rather than
+/// (`sl_client_bevy_viewer::attachment_menu`, submesh → worn object → wearer) rather than
 /// the wearer's plain avatar pie — the wearer itself rides the sibling
-/// [`AvatarPickTarget`](crate::world_api::AvatarPickTarget). An animesh
+/// [`AvatarPickTarget`](sl_viewer_world_api::AvatarPickTarget). An animesh
 /// submesh (no wearer) is never tagged.
 #[derive(Component, Debug, Clone, Copy)]
 pub struct WornPickTarget {
@@ -822,7 +824,7 @@ fn classify(object: &Object) -> ObjectCategory {
 ///
 /// A **root** object (no parent) gets a world transform: its region-local
 /// position and orientation carried into Bevy's Y-up world by the Second Life →
-/// Bevy [basis change](crate::coords). A **child** (linkset member / attachment)
+/// Bevy [basis change](sl_viewer_kit::coords). A **child** (linkset member / attachment)
 /// gets a *local* transform in pure Second Life space — its position and
 /// rotation are already relative to its parent, whose entity carries the single
 /// basis change for the whole subtree.
@@ -1240,7 +1242,7 @@ pub fn update_objects(
     mut events: MessageReader<SlEvent>,
     mut state: ResMut<ObjectState>,
     faces: FaceIds,
-    derender: Res<crate::world_api::DerenderList>,
+    derender: Res<sl_viewer_world_api::DerenderList>,
     mut pending: ResMut<PendingObjectEvents>,
     mut mesh_budget: ResMut<MeshUploadBudget>,
     mut commands: Commands,
@@ -2253,7 +2255,7 @@ const DEFAULT_FLEXI: FlexiAttributes = FlexiAttributes {
 /// path, at a section count of `1 << softness` (fixed, not pixel-area managed). The
 /// chain is initialised from the prim's current pose and the rest path built from
 /// it, so the spawn geometry is a straight rest chain;
-/// [`simulate_flexi`](crate::flexi::simulate_flexi) then
+/// [`simulate_flexi`](sl_viewer_kit::flexi::simulate_flexi) then
 /// deforms and rewrites these same meshes each frame.
 ///
 /// The faces stay **ordinary `Aabb`-managed entities** — deliberately *not* the
@@ -2332,7 +2334,7 @@ fn build_flexi_faces(
 
 /// Seed or clear a flexi prim's [`FlexiSimState`] (P32.2) on the object entity: a
 /// prim that built a chain (`Some`) gets the state so
-/// [`simulate_flexi`](crate::flexi::simulate_flexi) drives it;
+/// [`simulate_flexi`](sl_viewer_kit::flexi::simulate_flexi) drives it;
 /// one that did not (a rigid prim, or a prim toggled rigid) has any stale state
 /// removed. Mirrors the [`apply_flexi`] block-component reconcile, but for the
 /// solver state that rides the built geometry.
@@ -3379,7 +3381,7 @@ fn apply_particles(
 /// current reflection-probe block: insert / refresh it when the prim is a probe,
 /// remove it when the prim was changed to non-probe in-world (the block dropped) or
 /// never was one. Called on both the spawn and update paths so a prim toggled probe
-/// on or off between updates is tracked, the way [`apply_flexi`](crate::flexi) /
+/// on or off between updates is tracked, the way [`apply_flexi`](sl_viewer_kit::flexi) /
 /// [`apply_light`] / [`apply_particles`] are.
 fn apply_reflection_probe(
     entity: Entity,
@@ -3889,7 +3891,7 @@ fn apply_object(
     // arrived and the avatar layer could not seat it" (roadmap
     // viewer-prim-attachment-worn-but-not-rendered).
     if let Some(point_id) = attachment_point
-        && crate::world_api::log_attachment_bind_enabled()
+        && sl_viewer_world_api::log_attachment_bind_enabled()
     {
         info!(
             "worn object {scoped} arrived ({category:?}) on point {point_id}, worn by object \
@@ -4547,7 +4549,7 @@ impl ObjectPicker<'_, '_> {
     /// is not picked through whatever hides it.
     ///
     /// Only the **edit tool**'s click-select still resolves through this ray
-    /// walk (`crate::edit_selection`); the cursor picks (touch, menus,
+    /// walk (`sl_viewer_edit::edit_selection`); the cursor picks (touch, menus,
     /// hover) moved to the GPU ID buffer (`sl_viewer_world_view::gpu_pick`).
     ///
     /// `exclude` is the HUD entity set: a HUD is screen-space and never a world
@@ -4973,17 +4975,17 @@ mod tests {
     /// to every world pick (left-click touch, the object pie menu) on top of
     /// never being culled. The per-frame mesh rewrite keeps the `Aabb` fresh
     /// instead (see `simulated_flexi_mesh_keeps_its_aabb_fresh` in
-    /// `crate::flexi`).
+    /// `sl_viewer_kit::flexi`).
     #[test]
     fn flexi_faces_stay_aabb_managed() -> Result<(), Box<dyn core::error::Error>> {
         use crate::textures::{PrimTextures, TextureManager};
-        use crate::world_api::DecodedTextures;
         use bevy::camera::visibility::NoFrustumCulling;
         use bevy::ecs::system::SystemState;
         use bevy::prelude::{Assets, Commands, Mesh, Mesh3d, Res, ResMut, World};
         use sl_client_bevy::{FlexibleData, Priority};
+        use sl_viewer_world_api::DecodedTextures;
 
-        use crate::face_material::FaceMaterial;
+        use sl_viewer_kit::face_material::FaceMaterial;
 
         /// The resources [`build_flexi_faces`](super::build_flexi_faces) takes,
         /// as one `SystemState` tuple (named to satisfy `type_complexity`).
@@ -5213,12 +5215,15 @@ mod tests {
         bevy::prelude::Commands<'w, 's>,
         super::FaceIds<'w, 's>,
         bevy::prelude::ResMut<'w, bevy::prelude::Assets<bevy::prelude::Mesh>>,
-        bevy::prelude::ResMut<'w, bevy::prelude::Assets<crate::face_material::FaceMaterial>>,
+        bevy::prelude::ResMut<
+            'w,
+            bevy::prelude::Assets<sl_viewer_kit::face_material::FaceMaterial>,
+        >,
         bevy::prelude::ResMut<'w, crate::textures::TextureManager>,
-        bevy::prelude::Res<'w, crate::world_api::DecodedTextures>,
+        bevy::prelude::Res<'w, sl_viewer_world_api::DecodedTextures>,
         bevy::prelude::ResMut<'w, crate::textures::PrimTextures>,
         bevy::prelude::ResMut<'w, crate::meshes::MeshManager>,
-        bevy::prelude::ResMut<'w, crate::geometry_cache::GeometryCache>,
+        bevy::prelude::ResMut<'w, sl_viewer_kit::geometry_cache::GeometryCache>,
         bevy::prelude::ResMut<'w, crate::material_cache::MaterialCache>,
     );
 
@@ -5226,12 +5231,12 @@ mod tests {
     /// [`World`](bevy::prelude::World) can run the real ingest path.
     fn seed_apply_resources(world: &mut bevy::prelude::World) {
         world.init_resource::<bevy::prelude::Assets<bevy::prelude::Mesh>>();
-        world.init_resource::<bevy::prelude::Assets<crate::face_material::FaceMaterial>>();
+        world.init_resource::<bevy::prelude::Assets<sl_viewer_kit::face_material::FaceMaterial>>();
         world.init_resource::<crate::textures::TextureManager>();
-        world.init_resource::<crate::world_api::DecodedTextures>();
+        world.init_resource::<sl_viewer_world_api::DecodedTextures>();
         world.init_resource::<crate::textures::PrimTextures>();
         world.init_resource::<crate::meshes::MeshManager>();
-        world.init_resource::<crate::geometry_cache::GeometryCache>();
+        world.init_resource::<sl_viewer_kit::geometry_cache::GeometryCache>();
         world.init_resource::<crate::material_cache::MaterialCache>();
     }
 
@@ -5325,7 +5330,7 @@ mod tests {
         use bevy::prelude::World;
         use sl_client_bevy::ObjectKey;
 
-        use crate::world_api::rlv::is_temp_attachment;
+        use sl_viewer_world_api::rlv::is_temp_attachment;
 
         let own = Uuid::from_u128(0x7e_11_a2);
         let attached_to_right_hand = sl_proto::attachment_state_from_point(6);
@@ -5385,7 +5390,7 @@ mod tests {
         use bevy::prelude::World;
         use sl_client_bevy::ObjectKey;
 
-        use crate::world_api::ObjectState;
+        use sl_viewer_world_api::ObjectState;
 
         let mut world = World::new();
         let mut objects = ObjectState::default();
@@ -5441,8 +5446,8 @@ mod tests {
         use sl_settings::{Scope, SettingValue, SettingsStore};
         use sl_viewer_settings::ViewerSettings;
 
-        use crate::world_api::ObjectState;
-        use crate::world_api::rlv::{
+        use sl_viewer_world_api::ObjectState;
+        use sl_viewer_world_api::rlv::{
             SETTING_ENABLE_TEMP_ATTACH, SETTING_MAIN, is_temp_attachment, register_settings,
             swallows_owner_say,
         };
@@ -5573,7 +5578,7 @@ mod tests {
     fn agent_flags_fold_in_the_linkset_root() {
         use bevy::prelude::{Entity, World};
 
-        use crate::world_api::FLAGS_OBJECT_MODIFY;
+        use sl_viewer_world_api::FLAGS_OBJECT_MODIFY;
 
         let mut world = World::new();
         let mut state = super::ObjectState::default();
@@ -5781,14 +5786,14 @@ mod tests {
     /// the session has ever seen.
     #[test]
     fn every_removal_path_drops_the_deferred_builds() -> Result<(), Box<dyn core::error::Error>> {
-        use crate::face_material::FaceMaterial;
-        use crate::geometry_cache::GeometryCache;
         use crate::material_cache::MaterialCache;
         use crate::meshes::MeshManager;
         use crate::textures::{PrimTextures, TextureManager};
-        use crate::world_api::DecodedTextures;
         use bevy::ecs::system::SystemState;
         use bevy::prelude::{Assets, Commands, Mesh, Res, ResMut, World};
+        use sl_viewer_kit::face_material::FaceMaterial;
+        use sl_viewer_kit::geometry_cache::GeometryCache;
+        use sl_viewer_world_api::DecodedTextures;
 
         /// The resources `apply_object`(super::apply_object) takes, as one
         /// `SystemState` tuple (named to satisfy `type_complexity`).
@@ -5948,16 +5953,16 @@ mod tests {
     ///    six faces down to one) keeps face 0's entity and despawns the rest.
     #[test]
     fn a_rebuild_reuses_each_face_entity() -> Result<(), Box<dyn core::error::Error>> {
-        use crate::face_material::FaceMaterial;
-        use crate::geometry_cache::GeometryCache;
         use crate::material_cache::MaterialCache;
         use crate::meshes::MeshManager;
         use crate::textures::{PrimTextures, TextureManager};
-        use crate::world_api::DecodedTextures;
         use bevy::ecs::system::SystemState;
         use bevy::prelude::{
             Assets, Changed, Commands, Component, Entity, Mesh, Query, Res, ResMut, World,
         };
+        use sl_viewer_kit::face_material::FaceMaterial;
+        use sl_viewer_kit::geometry_cache::GeometryCache;
+        use sl_viewer_world_api::DecodedTextures;
 
         /// Stands in for the per-face state a rebuild used to throw away — a pick
         /// tag, a registry slot, a collider — attached by "another system" and
@@ -6151,15 +6156,15 @@ mod tests {
     /// buffer but still cast a solid shadow over everything it enclosed.
     #[test]
     fn a_fully_transparent_face_is_built_hidden() -> Result<(), Box<dyn core::error::Error>> {
-        use crate::face_material::FaceMaterial;
-        use crate::geometry_cache::GeometryCache;
         use crate::material_cache::MaterialCache;
         use crate::meshes::MeshManager;
         use crate::textures::{PrimTextures, TextureManager};
-        use crate::world_api::DecodedTextures;
         use bevy::ecs::system::SystemState;
         use bevy::prelude::{Assets, Commands, Mesh, Res, ResMut, Visibility, World};
         use sl_client_bevy::{TextureEntry, encode_texture_entry};
+        use sl_viewer_kit::face_material::FaceMaterial;
+        use sl_viewer_kit::geometry_cache::GeometryCache;
+        use sl_viewer_world_api::DecodedTextures;
 
         /// The resources `apply_object`(super::apply_object) takes, as one
         /// `SystemState` tuple (named to satisfy `type_complexity`).

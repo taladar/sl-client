@@ -22,7 +22,9 @@ sl-client-bevy = { workspace = true, features = [
 ] }
 sl-emoji = { path = "../sl-emoji", version = "0.1.0" }
 sl-settings = { path = "../sl-settings", version = "0.1.0" }
+sl-viewer-intents = { workspace = true }
 sl-viewer-settings = { workspace = true }
+sl-viewer-social = { workspace = true }
 sl-viewer-ui-core = { workspace = true }
 sl-viewer-ui-widgets = { workspace = true }
 sl-viewer-world-api = { workspace = true }

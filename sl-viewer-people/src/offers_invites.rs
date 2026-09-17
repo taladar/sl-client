@@ -75,6 +75,7 @@ use sl_client_bevy::{
 };
 
 use crate::i18n::{TransArgs, Translator};
+use crate::intents::RequestBlock;
 use crate::inventory::InventoryModel;
 use crate::inventory_actions::default_folder_type;
 use crate::notification_host::{NotificationChannelRoot, ResolveNotification, adopt_toast};
@@ -82,7 +83,6 @@ use crate::notifications::{NotificationKind, NotificationManager, NotificationPr
 use crate::ui::{column, row};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
-use crate::world_api::RequestBlock;
 
 /// The catalogue-template sentinel an inventory-offer card reports as. Like the
 /// sibling bespoke cards these are not real [`crate::notifications::NOTIFICATIONS`]
@@ -261,9 +261,9 @@ fn ingest_offers_invites(
     mut manager: ResMut<NotificationManager>,
     translator: Translator,
     settings: Option<Res<crate::settings::ViewerSettings>>,
-    presence: Option<Res<crate::world_api::PresenceState>>,
-    friends: Option<Res<crate::world_api::FriendsModel>>,
-    groups: Option<Res<crate::world_api::GroupsModel>>,
+    presence: Option<Res<crate::social::PresenceState>>,
+    friends: Option<Res<crate::social::FriendsModel>>,
+    groups: Option<Res<crate::social::GroupsModel>>,
     mut deferred: ResMut<DeferredOffers>,
     inventory: Res<InventoryModel>,
     mut sl: MessageWriter<SlCommand>,

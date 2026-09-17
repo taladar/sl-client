@@ -44,11 +44,11 @@ use sl_client_bevy::{Command, ControlFlags, Rotation, SlAgentParcel, SlCommand, 
 
 use crate::camera::CameraAim;
 use crate::input_action::Action;
-use crate::spacenav::{AvatarAxisSettings, AvatarNavSmoothing, SpacenavInput, avatar_nav_drive};
+use sl_viewer_spacenav::{AvatarAxisSettings, AvatarNavSmoothing, SpacenavInput, avatar_nav_drive};
 
-use crate::world_api::AvatarState;
-use crate::world_api::TerrainState;
-use crate::world_api::{
+use sl_viewer_world_api::AvatarState;
+use sl_viewer_world_api::TerrainState;
+use sl_viewer_world_api::{
     AvatarControls, AvatarMotion, CameraMode, DoubleTapRun, ROTATION_SEND_INTERVAL_SECS, WorldPhase,
 };
 
@@ -98,7 +98,7 @@ impl Plugin for AvatarMovementPlugin {
             .add_systems(
                 Update,
                 crate::arrival::slam_arrival_facing
-                    .after(crate::avatars::update_avatar_objects)
+                    .after(sl_viewer_world_avatar::avatars::update_avatar_objects)
                     .before(crate::physics::drive_avatar_motion)
                     .before(drive_avatar_controls),
             );
@@ -143,7 +143,7 @@ const DOUBLE_TAP_RUN_WINDOW_SECS: f32 = 0.3;
 
 /// The user-tunable movement parameters, refreshed every frame from the typed
 /// settings store by the camera & movement preferences tab
-/// (`crate::preferences_camera_move`). The defaults reproduce the module
+/// (`sl_viewer_preferences::preferences_camera_move`). The defaults reproduce the module
 /// constants / established behaviour, so a run without a settings store (the
 /// gallery, headless tests) behaves as before — except
 /// [`allow_tap_tap_hold_run`](Self::allow_tap_tap_hold_run), a new gesture that
@@ -232,7 +232,7 @@ pub(crate) fn rotation_from_yaw(yaw: f32) -> Rotation {
 ///   [`CameraAim`]), so left / right *strafe* instead.
 /// - **Third person** — left / right turn the avatar heading, the classic default.
 ///
-/// The **SpaceNavigator** ([`crate::spacenav`]) composes with the keyboard here the
+/// The **SpaceNavigator** ([`sl_viewer_spacenav`]) composes with the keyboard here the
 /// way the reference `LLViewerJoystick::moveAvatar` composes with the keys: its
 /// forward axis walks (either source moving the avatar, neither blocking the other),
 /// its up axis flies up / down exactly as PageUp / PageDown do, and its twist turns
@@ -259,7 +259,7 @@ pub(crate) fn drive_avatar_controls(
     avatar_axes: Res<AvatarAxisSettings>,
     mut nav_smoothing: ResMut<AvatarNavSmoothing>,
     motions: Query<(Ref<AvatarMotion>, &Transform)>,
-    presence: Option<Res<crate::world_api::PresenceState>>,
+    presence: Option<Res<sl_viewer_social::PresenceState>>,
     mut controls: ResMut<AvatarControls>,
     mut writer: MessageWriter<SlCommand>,
 ) {
@@ -630,7 +630,7 @@ fn should_take_off(
 /// no heading.
 #[must_use]
 fn seated_heading(rotation: Quat) -> Option<f32> {
-    let sl_rotation = crate::coords::sl_to_bevy_rotation()
+    let sl_rotation = sl_viewer_kit::coords::sl_to_bevy_rotation()
         .inverse()
         .mul_quat(rotation);
     let forward = sl_rotation.mul_vec3(Vec3::X);
@@ -904,7 +904,7 @@ mod tests {
     #[test]
     fn a_seated_anchor_faces_the_heading_its_forward_axis_points_along() {
         let north = core::f32::consts::FRAC_PI_2;
-        let to_bevy = crate::coords::sl_to_bevy_rotation();
+        let to_bevy = sl_viewer_kit::coords::sl_to_bevy_rotation();
         let upright = to_bevy.mul_quat(bevy::math::Quat::from_rotation_z(north));
         let heading = super::seated_heading(upright).unwrap_or(f32::NAN);
         assert!((heading - north).abs() < 1.0e-4, "upright: {heading}");

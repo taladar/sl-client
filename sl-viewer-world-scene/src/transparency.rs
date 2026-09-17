@@ -97,9 +97,9 @@ use bevy::render::sync_world::{MainEntity, MainEntityHashMap, MainEntityHashSet}
 use bevy::render::view::{ExtractedView, RetainedViewEntity, ViewDepthTexture, ViewTarget};
 use bevy::render::{Extract, Render, RenderApp, RenderSystems};
 
-use crate::name_tag_billboard::WorldTextOverlay;
 use crate::water::{DEFAULT_WATER_HEIGHT, WaterLevel};
 use crate::water_clip::WaterClipSide;
+use sl_viewer_world_objects::name_tag_billboard::WorldTextOverlay;
 
 /// The system set the pre-water translucency pass runs in, so the water haze
 /// ([`crate::underwater_fog`]) can order itself before it without reaching for the

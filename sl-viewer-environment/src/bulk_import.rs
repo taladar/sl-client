@@ -65,6 +65,7 @@ use sl_client_bevy::{
     SettingsKind, SlCommand, environment_asset_to_bytes, legacy_day_cycle_from_bytes,
     legacy_preset_from_bytes, legacy_preset_name,
 };
+use sl_viewer_intents::{PendingSettingsCreations, SettingsItemCreated};
 use sl_viewer_inventory::inventory::InventoryModel;
 use sl_viewer_inventory::inventory_actions::{SettingsInventorySupport, new_settings_item};
 use sl_viewer_notifications::ShowNotification;
@@ -72,7 +73,6 @@ use sl_viewer_platform::file_dialog::{
     FileDialogClosed, FileDialogOutcome, FileDialogSelection, OpenFileDialog,
 };
 use sl_viewer_ui_core::i18n::{TransArgs, Translator};
-use sl_viewer_world_api::{PendingSettingsCreations, SettingsItemCreated};
 
 /// How long a run waits for the next `UpdateCreateInventoryItem` reply before
 /// giving up on the items it has not seen.
@@ -1109,7 +1109,7 @@ mod tests {
             filed: 4,
         });
         app.world_mut()
-            .write_message(sl_viewer_world_api::SettingsItemCreated {
+            .write_message(sl_viewer_intents::SettingsItemCreated {
                 item: sl_client_bevy::InventoryKey::from(sl_client_bevy::Uuid::nil()),
                 folder: sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::nil()),
                 kind: SettingsKind::Sky,

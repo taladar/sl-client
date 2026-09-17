@@ -26,6 +26,7 @@ pub(crate) use sl_viewer_media::media_audio;
 pub(crate) use sl_viewer_media::media_diagnostics;
 pub(crate) use sl_viewer_platform::sound_cache;
 pub(crate) use sl_viewer_settings as settings;
+pub(crate) use sl_viewer_social as social;
 pub(crate) use sl_viewer_ui_core::i18n;
 pub(crate) use sl_viewer_ui_core::ui;
 pub(crate) use sl_viewer_ui_core::ui_element;

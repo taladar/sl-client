@@ -17,6 +17,7 @@
 
 // Lower crates re-aliased under their original module names, so this
 // module keeps addressing them as `crate::ui` and `crate::settings`.
+pub(crate) use sl_viewer_intents as intents;
 pub(crate) use sl_viewer_map::world_map;
 pub(crate) use sl_viewer_media::browser_widget;
 pub(crate) use sl_viewer_media::media_engine;

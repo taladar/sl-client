@@ -3979,7 +3979,7 @@ pub struct AddEmbeddedItem {
     /// The inventory item to embed.
     pub item: ItemInfo,
     /// **Which** notecard window the item was dropped on — the floater root
-    /// carrying the [`NotecardDropTarget`](crate::world_api::NotecardDropTarget)
+    /// carrying the [`NotecardDropTarget`](crate::intents::NotecardDropTarget)
     /// the pointer was over. A notecard editor opens per notecard, so a drop
     /// names its window; without it the item would land in whichever one a
     /// resource happened to hold.

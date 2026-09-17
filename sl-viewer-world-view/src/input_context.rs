@@ -80,7 +80,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::window::{CursorGrabMode, CursorOptions};
 
-use crate::world_api::{CameraMode, InputContext};
+use sl_viewer_world_api::{CameraMode, InputContext};
 
 /// The key that hands the keyboard back to the world from a focused UI.
 const RELEASE_FOCUS_KEY: KeyCode = KeyCode::Escape;
@@ -128,7 +128,7 @@ pub struct CursorGrabAllowed(pub bool);
 pub(crate) fn compute_input_context(
     focus: Res<InputFocus>,
     ui_nodes: Query<Has<EditableText>, With<Node>>,
-    media: Option<Res<crate::world_api::MediaFocus>>,
+    media: Option<Res<sl_viewer_world_api::MediaFocus>>,
     mut context: ResMut<InputContext>,
 ) {
     let next = match focus.get().map(|entity| ui_nodes.get(entity)) {
@@ -152,9 +152,9 @@ pub(crate) fn compute_input_context(
 
 /// The world-keyboard run condition, re-exported under its long-standing path.
 ///
-/// It moved down to [`crate::world_api`] so the layers below this one can gate on
-/// it too; see [`crate::world_api::world_has_keyboard`].
-pub use crate::world_api::world_has_keyboard;
+/// It moved down to [`sl_viewer_world_api`] so the layers below this one can gate on
+/// it too; see [`sl_viewer_world_api::world_has_keyboard`].
+pub use sl_viewer_world_api::world_has_keyboard;
 
 /// [`RELEASE_FOCUS_KEY`] hands the keyboard back to the world.
 ///
@@ -220,12 +220,12 @@ mod tests {
         CursorGrabAllowed, InputContext, InputContextPlugin, compute_input_context,
         drive_cursor_grab, release_ui_focus_on_escape, world_has_keyboard,
     };
-    use crate::world_api::CameraMode;
     use bevy::input_focus::{FocusCause, InputFocus};
     use bevy::prelude::*;
     use bevy::text::EditableText;
     use bevy::window::{CursorGrabMode, CursorOptions};
     use pretty_assertions::assert_eq;
+    use sl_viewer_world_api::CameraMode;
 
     /// A boxed error so tests can use `?` instead of the disallowed
     /// `unwrap` / `expect`.
@@ -479,7 +479,6 @@ mod tests {
 mod typed_tests {
     use super::{CursorGrabAllowed, InputContext, InputContextPlugin};
     use crate::input_action::{Action, InputActionPlugin};
-    use crate::world_api::CameraMode;
     use bevy::input::keyboard::Key;
     use bevy::input_focus::tab_navigation::TabIndex;
     use bevy::prelude::*;
@@ -487,6 +486,7 @@ mod typed_tests {
     use pretty_assertions::assert_eq;
     use sl_viewer_testkit::interact::{self, InteractionTest};
     use sl_viewer_testkit::{TestError, settle};
+    use sl_viewer_world_api::CameraMode;
 
     /// The one field's node name.
     const FIELD: &str = "typed-field";

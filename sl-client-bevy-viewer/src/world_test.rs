@@ -98,7 +98,7 @@ pub(crate) fn world_app() -> App {
     // The agent's current parcel (a `SlClientPlugin` world resource) and the
     // friends model (people-plugin-owned): the context menus consult both.
     app.init_resource::<sl_client_bevy::SlAgentParcel>();
-    app.init_resource::<crate::world_api::FriendsModel>();
+    app.init_resource::<crate::social::FriendsModel>();
     // The build-tool state the `edit_tool_inactive` run condition reads; its
     // owner (`EditToolPlugin`) is in the edit group. Tests that drive the
     // gizmos flip `active` on this same resource.
@@ -130,9 +130,9 @@ pub(crate) fn world_app() -> App {
     // edit plugins the fixture world leaves out ( `add_message` is
     // idempotent, so double registration by a later `with_*` is harmless).
     app.add_message::<crate::derender::RequestDerender>();
-    app.add_message::<crate::world_api::OpenAvatarProfile>();
-    app.add_message::<crate::world_api::OpenConversation>();
-    app.add_message::<crate::world_api::OpenAddToContactSet>();
+    app.add_message::<crate::intents::OpenAvatarProfile>();
+    app.add_message::<crate::intents::OpenConversation>();
+    app.add_message::<crate::intents::OpenAddToContactSet>();
     app.add_message::<crate::about_land::OpenAboutLand>();
     app.add_message::<crate::edit_contents::OpenObjectContents>();
     app.add_message::<crate::avatar_render_settings::RequestRenderException>();
@@ -142,17 +142,17 @@ pub(crate) fn world_app() -> App {
     // world systems write into these channels whose owning UI plugins the
     // fixture world leaves out, and an unregistered `Messages<T>` fails
     // system-param validation with a panic the moment such a system runs.
-    app.add_message::<crate::world_api::OpenGroupProfile>();
-    app.add_message::<crate::world_api::OpenAvatarPicker>();
-    app.add_message::<crate::world_api::AvatarPicked>();
-    app.add_message::<crate::world_api::OpenTexturePicker>();
-    app.add_message::<crate::world_api::TexturePicked>();
-    app.add_message::<crate::world_api::OpenWebBrowser>();
-    app.add_message::<crate::world_api::BeginTeleportFlow>();
-    app.add_message::<crate::world_api::ContentsMutated>();
-    app.add_message::<crate::world_api::OpenNotecard>();
-    app.add_message::<crate::world_api::OpenScript>();
-    app.add_message::<crate::world_api::StartConference>();
+    app.add_message::<crate::intents::OpenGroupProfile>();
+    app.add_message::<crate::intents::OpenAvatarPicker>();
+    app.add_message::<crate::intents::AvatarPicked>();
+    app.add_message::<crate::intents::OpenTexturePicker>();
+    app.add_message::<crate::intents::TexturePicked>();
+    app.add_message::<crate::intents::OpenWebBrowser>();
+    app.add_message::<crate::intents::BeginTeleportFlow>();
+    app.add_message::<crate::intents::ContentsMutated>();
+    app.add_message::<crate::intents::OpenNotecard>();
+    app.add_message::<crate::intents::OpenScript>();
+    app.add_message::<crate::intents::StartConference>();
     // UI-sound requests (typing / menu feedback); the audio bridge that
     // consumes them lives in the shell group.
     app.add_message::<sl_viewer_ui_core::ui_sounds::PlayUiSound>();
@@ -451,7 +451,7 @@ pub(crate) fn world_app_with_build_tools() -> Result<App, Box<dyn core::error::E
     app.add_plugins(crate::group_picker::GroupPickerPlugin);
     // The local-chat channel the editors post a refused edit's notice on; its
     // owner is the chat group, which this fold leaves out.
-    app.add_message::<crate::world_api::LocalChatNotice>();
+    app.add_message::<crate::intents::LocalChatNotice>();
     // The string lookup the selection summary and every `Translated` label
     // read, with no bundles behind it: every key resolves to itself, so a test
     // asserts which strings a line is built from and never a translation's
@@ -561,14 +561,14 @@ pub(crate) fn world_app_with_ui_and_inventory() -> Result<App, Box<dyn core::err
     // The world tier's own drag-hover output: the outline `edit_selection`
     // renders while a drag is over a droppable object. Its owner is the edit
     // group, which this fold leaves out.
-    app.init_resource::<crate::world_api::DragHoverHighlight>();
+    app.init_resource::<crate::intents::DragHoverHighlight>();
     // The item-carrying open requests the inventory's actions raise; their
     // answering surfaces (the asset editors, the landmark panel) are whole
     // floaters this fold has no reason to stand up.
     app.add_message::<crate::inventory::OpenWearableEditor>();
     app.add_message::<crate::inventory::OpenMaterialEditor>();
     app.add_message::<crate::inventory::OpenAboutLandmark>();
-    app.add_message::<crate::world_api::OpenSettingsEditor>();
+    app.add_message::<crate::intents::OpenSettingsEditor>();
     // The drop-into-a-notecard branch's output; the editor that answers it is
     // another floater this fold leaves out.
     app.add_message::<crate::inventory::AddEmbeddedItem>();
@@ -4235,7 +4235,8 @@ mod movement_tests {
     use sl_viewer_testkit::interact;
 
     use super::{seed_avatar, seed_terrain, settle, world_app_with_input};
-    use crate::world_api::{AvatarControls, AvatarMotion, AvatarState, CameraMode, PresenceState};
+    use crate::social::PresenceState;
+    use crate::world_api::{AvatarControls, AvatarMotion, AvatarState, CameraMode};
 
     /// A boxed error so tests can use `?` instead of the disallowed
     /// `unwrap` / `expect`.
@@ -5011,15 +5012,15 @@ mod pie_dispatch_tests {
     use crate::contact_sets_panel::OpenSetPseudonym;
     use crate::derender::RequestDerender;
     use crate::edit_contents::OpenObjectContents;
+    use crate::intents::{
+        ConversationKey, OpenAddToContactSet, OpenAvatarProfile, OpenConversation, RequestBlock,
+        RequestFriendship,
+    };
     use crate::inventory::InventoryModel;
     use crate::land_menu::LAND_MENU_ELEMENT;
     use crate::object_menu::{FLAGS_HANDLE_TOUCH, OBJECT_MENU_ELEMENT};
     use crate::ui_element::UiAction;
-    use crate::world_api::{
-        ConversationKey, DerenderKind, EditTool, EditToolState, OpenAddToContactSet,
-        OpenAvatarProfile, OpenConversation, RequestBlock, RequestFriendship, SelectionSet,
-        SelfGroundSit,
-    };
+    use crate::world_api::{DerenderKind, EditTool, EditToolState, SelectionSet, SelfGroundSit};
 
     /// A boxed error so tests can use `?` instead of the disallowed
     /// `unwrap` / `expect`.
@@ -6030,7 +6031,7 @@ mod drag_drop_tests {
         let mut app = world_app_with_ui_and_inventory()?;
         app.world_mut().resource_mut::<SlIdentity>().agent_id =
             Some(AgentKey::from(Uuid::from_u128(OWN)));
-        record::<crate::world_api::ContentsMutated>(&mut app);
+        record::<crate::intents::ContentsMutated>(&mut app);
 
         // The world half: ground under the south-west corner, and the two
         // targets far enough apart that aiming at one never puts the other in
@@ -6332,7 +6333,7 @@ mod drag_drop_tests {
             )],
             "a row dropped on a contents surface is added to that object"
         );
-        let mutations = drain::<crate::world_api::ContentsMutated>(&mut app);
+        let mutations = drain::<crate::intents::ContentsMutated>(&mut app);
         assert_eq!(
             mutations
                 .iter()
@@ -6448,7 +6449,7 @@ mod drag_drop_tests {
         press_and_drag_row(&mut app, NOTE_LABEL, AIM)?;
         let hover = app
             .world()
-            .resource::<crate::world_api::DragHoverHighlight>()
+            .resource::<crate::intents::DragHoverHighlight>()
             .hover;
         assert_eq!(
             hover.map(|hover| (hover.root, hover.foreign)),
@@ -6462,7 +6463,7 @@ mod drag_drop_tests {
         settle(&mut app, REST_FRAMES);
         assert!(
             app.world()
-                .resource::<crate::world_api::DragHoverHighlight>()
+                .resource::<crate::intents::DragHoverHighlight>()
                 .hover
                 .is_none(),
             "the highlight clears when the pointer leaves every droppable object"

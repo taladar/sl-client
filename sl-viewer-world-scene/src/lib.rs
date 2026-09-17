@@ -6,8 +6,11 @@
 //! object layer below it (`sl-viewer-world-objects`) and knows nothing of the
 //! camera or the user's input, which live above it in `sl-viewer-world-view`.
 //!
-//! The modules keep the names they had inside the viewer, so a call site reads
-//! the same after the move as before it.
+//! Every reach into a lower crate names that crate: a call site says
+//! `sl_viewer_kit::coords` or `sl_viewer_world_api::ObjectState`, never a
+//! local-looking `crate::` path. So a file that crosses a crate boundary reads
+//! as one, and a new reach-across has to be written out rather than inherited
+//! from an alias at the top of this file.
 
 #![expect(
     clippy::module_name_repetitions,
@@ -17,33 +20,6 @@
               renaming them would churn every call site in the viewer to satisfy \
               a style rule this codebase does not follow"
 )]
-
-// Lower crates re-aliased under their original module names, so this crate's
-// modules keep addressing them as `crate::coords`, `crate::settings` and so
-// on rather than gaining a rename in every file.
-pub(crate) use sl_viewer_kit::avatar_assets;
-pub(crate) use sl_viewer_kit::coords;
-pub(crate) use sl_viewer_kit::face_material;
-pub(crate) use sl_viewer_kit::flexi;
-pub(crate) use sl_viewer_kit::geometry_cache;
-pub(crate) use sl_viewer_kit::particle_render;
-pub(crate) use sl_viewer_kit::probe_layers;
-pub(crate) use sl_viewer_kit::sky_presets;
-pub(crate) use sl_viewer_platform::environment_assets;
-pub(crate) use sl_viewer_platform::sound_cache;
-pub(crate) use sl_viewer_settings as settings;
-pub(crate) use sl_viewer_ui_core::ui;
-pub(crate) use sl_viewer_ui_core::ui_font;
-pub(crate) use sl_viewer_ui_widgets::floater;
-pub(crate) use sl_viewer_world_api as world_api;
-pub(crate) use sl_viewer_world_objects::asset_budget;
-pub(crate) use sl_viewer_world_objects::bump;
-pub(crate) use sl_viewer_world_objects::legacy_materials;
-pub(crate) use sl_viewer_world_objects::material_cache;
-pub(crate) use sl_viewer_world_objects::name_tag_billboard;
-pub(crate) use sl_viewer_world_objects::objects;
-pub(crate) use sl_viewer_world_objects::texture_anim;
-pub(crate) use sl_viewer_world_objects::textures;
 
 pub mod beacons;
 pub mod debug_beacons;

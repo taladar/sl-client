@@ -29,6 +29,7 @@ use sl_client_bevy::{
 };
 
 use crate::floater::{FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater};
+use crate::intents::TexturePicked;
 use crate::inventory::OpenMaterialEditor;
 use crate::material_preview::MaterialPreview;
 use crate::materials::MaterialManager;
@@ -37,7 +38,6 @@ use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_font::UiFont;
 use crate::ui_slider::{SliderStyle, SliderWidgetPlugin, spawn_slider};
 use crate::ui_texture_picker::{TextureSwatchValue, spawn_texture_swatch};
-use crate::world_api::TexturePicked;
 
 /// The chrome font size, in logical pixels.
 const FONT: f32 = 13.0;

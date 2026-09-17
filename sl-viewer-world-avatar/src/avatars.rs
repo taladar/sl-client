@@ -17,7 +17,7 @@
 //!   drops out of the coarse list.
 //!
 //! Each avatar also carries a floating **name tag** — a world-space billboard
-//! mesh (see [`crate::name_tag_billboard`]) that follows the avatar anchor and
+//! mesh (see [`sl_viewer_world_objects::name_tag_billboard`]) that follows the avatar anchor and
 //! renders through the main world camera with occlusion, constant on-screen
 //! size and distance fade. The legacy name is resolved once per agent via
 //! a `UUIDNameRequest` ([`Command::RequestAvatarNames`](sl_client_bevy::Command))
@@ -27,8 +27,8 @@
 //!
 //! Both sources share one placeholder sphere mesh and material, built lazily on
 //! first use. The spheres are plain world-space entities positioned via the
-//! Second Life → Bevy [coordinate map](crate::coords) — they are markers, not the
-//! avatar's object root, so (unlike a linkset root in [`objects`](crate::objects))
+//! Second Life → Bevy [coordinate map](sl_viewer_kit::coords) — they are markers, not the
+//! avatar's object root, so (unlike a linkset root in [`objects`](sl_viewer_world_objects::objects))
 //! they carry no attachment children and are not scaled by the avatar object's
 //! bounding box.
 
@@ -52,24 +52,26 @@ use sl_client_bevy::{
     to_bevy_runtime_morph_targets,
 };
 
-use crate::avatar_assets::{AvatarAssetLibrary, BodyRegion, LoadedBinding};
 use crate::bake_inputs::OwnBakeInputs;
-use crate::coords::{
+use sl_viewer_kit::avatar_assets::{AvatarAssetLibrary, BodyRegion, LoadedBinding};
+use sl_viewer_kit::coords::{
     metres_to_f32, origin_shift_bevy, region_offset_bevy, sl_euler_deg_to_quat,
     sl_rotation_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec,
 };
-use crate::face_material::{FaceMaterial, inert_face_material};
-use crate::name_tag_billboard::{
-    NameTag, SETTING_SHOW_NAME_TAGS, SETTING_SHOW_OWN_NAME_TAG, TagContent, name_tag_render_bundle,
-};
-use crate::probe_layers::dynamic_render_layers;
-use crate::textures::{TextureApplyBudget, TextureDecoded, TextureManager, tint_color};
-use crate::world_api::AvatarInterp;
-use crate::world_api::DecodedTextures;
-use crate::world_api::ObjectState;
-use crate::world_api::{
+use sl_viewer_kit::face_material::{FaceMaterial, inert_face_material};
+use sl_viewer_kit::probe_layers::dynamic_render_layers;
+use sl_viewer_world_api::AvatarInterp;
+use sl_viewer_world_api::DecodedTextures;
+use sl_viewer_world_api::ObjectState;
+use sl_viewer_world_api::{
     AppearanceDirtyStamps, AvatarAnchor, AvatarEntities, AvatarMotion, AvatarPickTarget,
     AvatarState, NameRecord, Seated, SeatedTarget, WorldPhase, despawn_avatar,
+};
+use sl_viewer_world_objects::name_tag_billboard::{
+    NameTag, SETTING_SHOW_NAME_TAGS, SETTING_SHOW_OWN_NAME_TAG, TagContent, name_tag_render_bundle,
+};
+use sl_viewer_world_objects::textures::{
+    TextureApplyBudget, TextureDecoded, TextureManager, tint_color,
 };
 
 /// The avatar appearance pipeline's own scheduling.
@@ -134,7 +136,7 @@ impl Plugin for AvatarAppearancePlugin {
         );
         // What of the own avatar mouselook draws: after the avatars are folded
         // in, so a body spawned this frame is layered before it is first drawn.
-        app.init_resource::<crate::world_api::FirstPersonAvatarVisible>()
+        app.init_resource::<sl_viewer_world_api::FirstPersonAvatarVisible>()
             .add_systems(
                 Update,
                 crate::first_person::apply_first_person_view.after(WorldPhase::AvatarsUpdated),
@@ -418,7 +420,7 @@ pub(crate) struct AttachmentPointNode {
 const NAME_TAG_SECTION: &[&str] = &["nametags"];
 
 /// Register the name-tag settings.
-pub fn register_settings(settings: &mut crate::settings::ViewerSettings) {
+pub fn register_settings(settings: &mut sl_viewer_settings::ViewerSettings) {
     settings.register_in(
         NAME_TAG_SECTION,
         SETTING_SHOW_NAME_TAGS,
@@ -499,19 +501,23 @@ pub fn register_settings(settings: &mut crate::settings::ViewerSettings) {
     );
     settings.register_in(
         NAME_TAG_SECTION,
-        crate::name_tag_billboard::SETTING_FADE_START,
-        sl_settings::SettingValue::F32(crate::name_tag_billboard::DEFAULT_FADE_START_METRES),
+        sl_viewer_world_objects::name_tag_billboard::SETTING_FADE_START,
+        sl_settings::SettingValue::F32(
+            sl_viewer_world_objects::name_tag_billboard::DEFAULT_FADE_START_METRES,
+        ),
         "Distance in metres at which name tags start to fade",
     );
     settings.register_in(
         NAME_TAG_SECTION,
-        crate::name_tag_billboard::SETTING_FADE_RANGE,
-        sl_settings::SettingValue::F32(crate::name_tag_billboard::DEFAULT_FADE_RANGE_METRES),
+        sl_viewer_world_objects::name_tag_billboard::SETTING_FADE_RANGE,
+        sl_settings::SettingValue::F32(
+            sl_viewer_world_objects::name_tag_billboard::DEFAULT_FADE_RANGE_METRES,
+        ),
         "Metres past the fade start at which name tags are fully hidden",
     );
     settings.register_in(
         NAME_TAG_SECTION,
-        crate::name_tag_billboard::SETTING_BUBBLE_OPACITY,
+        sl_viewer_world_objects::name_tag_billboard::SETTING_BUBBLE_OPACITY,
         sl_settings::SettingValue::F32(0.5),
         "Opacity of the name-tag backdrop bubble",
     );
@@ -999,10 +1005,10 @@ pub(crate) fn focus_camera_on_volume_shape(
     body: Option<Res<AvatarBody>>,
     library: Option<Res<AvatarAssetLibrary>>,
     roots: Query<&GlobalTransform>,
-    mut mode: ResMut<crate::world_api::CameraMode>,
+    mut mode: ResMut<sl_viewer_world_api::CameraMode>,
     mut camera: Query<
-        (&mut Transform, &mut crate::world_api::CameraRig),
-        With<crate::world_api::ViewerCamera>,
+        (&mut Transform, &mut sl_viewer_world_api::CameraRig),
+        With<sl_viewer_world_api::ViewerCamera>,
     >,
     mut setting: Local<Option<String>>,
     mut framed: Local<bool>,
@@ -1090,7 +1096,7 @@ pub(crate) fn focus_camera_on_volume_shape(
     );
     // Switch to flycam (the only mode whose pose a system may write; the others
     // recompute it) and seed the rig aim so the flycam driver reproduces the look.
-    *mode = crate::world_api::CameraMode::Flycam;
+    *mode = sl_viewer_world_api::CameraMode::Flycam;
     let look = Vec3::new(target.x - eye.x, target.y - eye.y, target.z - eye.z);
     rig.aim_along(look);
     *transform = Transform::from_translation(eye).looking_at(target, Vec3::Y);
@@ -1250,7 +1256,7 @@ fn spawn_body_part(
             ));
             if let Some(canonical) = canonical {
                 spawned.insert(crate::gpu_avatars::GpuSkinBinding {
-                    slot: crate::world_api::PoseSlotKey::Avatar(agent),
+                    slot: sl_viewer_world_api::PoseSlotKey::Avatar(agent),
                     canonical: std::sync::Arc::from(canonical),
                 });
             }
@@ -1300,7 +1306,7 @@ fn placeholder_sphere_mesh() -> Mesh {
 /// a tall mesh body — the reference anchors the tag above the actual head).
 ///
 /// **Frame:** the body root carries the whole Second Life → Bevy basis change
-/// ([`crate::coords::sl_to_bevy_object_rotation`], a `-90°` turn about `X`),
+/// ([`sl_viewer_kit::coords::sl_to_bevy_object_rotation`], a `-90°` turn about `X`),
 /// so its child subtree — the skeleton — is in **Second Life space**: `+Z`
 /// up. The head top is the joints' `z` span top, grown past the head joint to
 /// the crown (`HEAD_TOP_MARGIN`) and quantised to a 1 cm grid so idle
@@ -1359,8 +1365,8 @@ fn placeholder_material() -> FaceMaterial {
 ///
 /// A [`CoarseLocation`] is a whole-metre position relative to the region's
 /// south-west corner (`x`/`y` in `0`–`255`, `z` already in metres), carried into
-/// Bevy's Y-up world by the Second Life → Bevy [axis map](crate::coords). It sits
-/// in the root region's frame like the objects in [`objects`](crate::objects) —
+/// Bevy's Y-up world by the Second Life → Bevy [axis map](sl_viewer_kit::coords). It sits
+/// in the root region's frame like the objects in [`objects`](sl_viewer_world_objects::objects) —
 /// no multi-region origin offset yet.
 fn coarse_translation(location: &CoarseLocation, offset_east: f32, offset_north: f32) -> Vec3 {
     let position = sl_client_bevy::Vector {
@@ -1420,7 +1426,7 @@ pub(crate) fn dress_avatar_spheres(
 /// Spawn the floating world-space name-tag billboard for `agent`, anchored
 /// to `anchor`, floating `tag_height` metres above it, and pulled toward
 /// the camera by `pull_radius` metres so the avatar's own body cannot
-/// occlude it ([`crate::name_tag_billboard`]).
+/// occlude it ([`sl_viewer_world_objects::name_tag_billboard`]).
 fn spawn_label(
     state: &AvatarState,
     agent: AgentKey,
@@ -1906,7 +1912,7 @@ pub(crate) fn refetch_bakes(
                 manager.request_server_bake(id, url);
             }
             None => {
-                manager.request_boosted(id, crate::world_api::AVATAR_BOOST_PRIORITY);
+                manager.request_boosted(id, sl_viewer_world_api::AVATAR_BOOST_PRIORITY);
             }
         }
     }
@@ -2054,12 +2060,12 @@ fn visible_body_bakes(slot_ids: &HashMap<usize, TextureKey>) -> HashMap<usize, T
 /// the new origin so a freshly-streamed avatar is placed against it
 /// (`apply_object`).
 ///
-/// Like [`recenter_objects`](crate::objects::recenter_objects) this is
+/// Like [`recenter_objects`](sl_viewer_world_objects::objects::recenter_objects) this is
 /// belt-and-braces with the per-update placement: a moving avatar re-snaps itself
 /// on its next update (with the new offset), so the shift here keeps a *stationary*
 /// neighbour avatar — one receiving no update across the handover — in place. A
 /// **seated** avatar is skipped: its anchor is driven from its seat object (which
-/// [`recenter_objects`](crate::objects::recenter_objects) already re-based), so it
+/// [`recenter_objects`](sl_viewer_world_objects::objects::recenter_objects) already re-based), so it
 /// follows for free — shifting it here too would double-move it.
 ///
 /// Runs before [`update_avatar_objects`] and the dead-reckoner
@@ -2110,7 +2116,7 @@ pub fn update_avatar_objects(
     mut events: MessageReader<SlEvent>,
     identity: Res<SlIdentity>,
     mut state: ResMut<AvatarState>,
-    derender: Res<crate::world_api::DerenderList>,
+    derender: Res<sl_viewer_world_api::DerenderList>,
     body: Option<Res<AvatarBody>>,
     mut commands: Commands,
 ) {
@@ -2175,7 +2181,7 @@ pub type SeatChainQuery<'world, 'state> = Query<
     (&'static Transform, Option<&'static ChildOf>),
     (
         Without<AvatarAnchor>,
-        Without<crate::world_api::ViewerCamera>,
+        Without<sl_viewer_world_api::ViewerCamera>,
     ),
 >;
 
@@ -2205,7 +2211,7 @@ pub type SeatChainQuery<'world, 'state> = Query<
 /// the rider to the seat rigidly, with zero lag.
 ///
 /// Ordered after the movers that write the seat's local transform
-/// ([`update_objects`](crate::objects::update_objects) for the authoritative snap,
+/// ([`update_objects`](sl_viewer_world_objects::objects::update_objects) for the authoritative snap,
 /// `drive_physical_objects`(sl_viewer_world_view::physics::drive_physical_objects) for the
 /// between-update dead-reckon) and after
 /// `drive_avatar_motion` (whose write it
@@ -2502,7 +2508,7 @@ pub(crate) fn ingest_avatar_bakes(
                     }
                     None => {
                         debug!("requesting bake slot {slot} ({slot_name}) = {id} (by-UUID)");
-                        manager.request_boosted(id, crate::world_api::AVATAR_BOOST_PRIORITY);
+                        manager.request_boosted(id, sl_viewer_world_api::AVATAR_BOOST_PRIORITY);
                     }
                 }
             }
@@ -2897,7 +2903,7 @@ pub(crate) fn assign_avatar_bake_materials(
 /// Fill each decoded avatar bake into the region materials parked on it (P14.2):
 /// upload (and cache) the baked [`Image`], then drop it into every parked material's
 /// `base_color_texture`. Mirrors
-/// [`patch_parked_decoded_textures`](crate::textures::patch_parked_decoded_textures)
+/// [`patch_parked_decoded_textures`](sl_viewer_world_objects::textures::patch_parked_decoded_textures)
 /// — it re-scans the parked set for **any** decoded bake (not just a fresh decode
 /// event), so a region material parked *after* its bake decoded is still filled, and
 /// the per-frame overflow simply stays parked. A decode that failed leaves the
@@ -4272,9 +4278,6 @@ mod tests {
         invisible_body_slots, root_drop_from_metrics, seat_world_transform, seated_offset,
         should_refetch_bakes, visible_body_bakes,
     };
-    use crate::avatar_assets::BodyRegion;
-    use crate::coords::{sl_rotation_to_quat, sl_to_bevy_rotation};
-    use crate::world_api::NameAlias;
     use bevy::ecs::message::Messages;
     use bevy::ecs::system::RunSystemOnce as _;
     use bevy::ecs::world::World;
@@ -4287,6 +4290,9 @@ mod tests {
         RegionLocalObjectId, Rotation, ScopedObjectId, TextureEntry, TextureFace, TextureKey, Uuid,
         Vector, avatar_texture,
     };
+    use sl_viewer_kit::avatar_assets::BodyRegion;
+    use sl_viewer_kit::coords::{sl_rotation_to_quat, sl_to_bevy_rotation};
+    use sl_viewer_world_api::NameAlias;
 
     /// The zero vector (`Vector` does not derive `Default`).
     const fn zero() -> Vector {
@@ -4570,8 +4576,8 @@ mod tests {
     fn spheres_are_dressed_from_the_marker_and_share_one_mesh()
     -> Result<(), Box<dyn core::error::Error>> {
         use super::{AvatarPlaceholderAssets, AvatarSphere, dress_avatar_spheres};
-        use crate::face_material::FaceMaterial;
         use bevy::prelude::{App, Assets, Handle, Mesh, Mesh3d, MeshMaterial3d, Update};
+        use sl_viewer_kit::face_material::FaceMaterial;
 
         let mut app = App::new();
         app.init_resource::<AvatarPlaceholderAssets>()

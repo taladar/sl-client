@@ -89,7 +89,7 @@ pub(crate) const SETTING_PRIM_TEXT_MAX_DISTANCE: &str = "PrimTextMaxDrawDistance
 const HOVER_TEXT_SECTION: &[&str] = &["hovertext"];
 
 /// Register the floating-text settings.
-pub fn register_settings(settings: &mut crate::settings::ViewerSettings) {
+pub fn register_settings(settings: &mut sl_viewer_settings::ViewerSettings) {
     settings.register_in(
         HOVER_TEXT_SECTION,
         SETTING_SHOW_HOVER_TEXT,
@@ -301,7 +301,7 @@ struct HoverTextPlacement {
 impl HoverTextPlacement {
     /// Resolve the placement inputs from the settings (defaults when absent, so
     /// a bare headless test world runs shown at the reference distances).
-    pub(crate) fn resolve(settings: Option<&crate::settings::ViewerSettings>) -> Self {
+    pub(crate) fn resolve(settings: Option<&sl_viewer_settings::ViewerSettings>) -> Self {
         let show = settings
             .and_then(|settings| settings.store().get_bool(SETTING_SHOW_HOVER_TEXT).ok())
             .unwrap_or(true);
@@ -359,9 +359,9 @@ pub(crate) struct HoverTextObjects<'w, 's> {
 /// moving object by one frame — imperceptible for the stationary vendors /
 /// signs floating text lives on.
 pub(crate) fn follow_hover_text(
-    cameras: Query<&GlobalTransform, With<crate::world_api::ViewerCamera>>,
+    cameras: Query<&GlobalTransform, With<sl_viewer_world_api::ViewerCamera>>,
     objects: HoverTextObjects,
-    settings: Option<Res<crate::settings::ViewerSettings>>,
+    settings: Option<Res<sl_viewer_settings::ViewerSettings>>,
     mut billboards: Query<(&HoverText, &mut Transform, &mut Visibility)>,
     mut logged: Local<bevy::ecs::entity::EntityHashSet>,
 ) {
@@ -419,7 +419,7 @@ pub(crate) fn follow_hover_text(
               equality is the correct change test"
 )]
 pub(crate) fn apply_hover_text_settings(
-    settings: Option<Res<crate::settings::ViewerSettings>>,
+    settings: Option<Res<sl_viewer_settings::ViewerSettings>>,
     mut registry: ResMut<HoverTextMaterials>,
     mut materials: ResMut<Assets<NameTagMaterial>>,
 ) {
@@ -470,7 +470,7 @@ impl Plugin for HoverTextPlugin {
                 Update,
                 (despawn_removed_hover_text, sync_object_hover_text)
                     .chain()
-                    .after(crate::world_api::WorldPhase::ObjectsUpdated),
+                    .after(sl_viewer_world_api::WorldPhase::ObjectsUpdated),
             )
             // Read the object's freshly-propagated world pose and lift the text
             // by 0.6 × the prim's Z scale in world up (the billboard's own

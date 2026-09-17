@@ -35,9 +35,9 @@ use bevy::prelude::*;
 use sl_client_bevy::{Arrival, SlEvent, SlIdentity, SlSessionEvent, Vector};
 
 use crate::camera::{FocusTarget, facing_from_yaw};
-use crate::coords::{sl_rotation_to_quat, sl_to_bevy_rotation};
 use crate::movement::rotation_from_yaw;
-use crate::world_api::{
+use sl_viewer_kit::coords::{sl_rotation_to_quat, sl_to_bevy_rotation};
+use sl_viewer_world_api::{
     AvatarControls, AvatarInterp, AvatarMotion, AvatarState, CameraMode, CameraRig, ViewerCamera,
 };
 
@@ -211,15 +211,15 @@ fn yaw_of_look_at(look_at: &Vector) -> Option<f32> {
 mod tests {
     use super::{arrival_yaw, slam_arrival_facing, yaw_of_look_at};
     use crate::camera::{FocusTarget, facing_from_yaw};
-    use crate::world_api::{
-        AvatarControls, AvatarEntities, AvatarInterp, AvatarMotion, AvatarState, CameraMode,
-        CameraRig, ViewerCamera,
-    };
     use bevy::prelude::{App, Entity, Update, With};
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{
         AgentKey, Arrival, RegionCoordinates, RegionHandle, SlEvent, SlIdentity, SlSessionEvent,
         Uuid, Vector,
+    };
+    use sl_viewer_world_api::{
+        AvatarControls, AvatarEntities, AvatarInterp, AvatarMotion, AvatarState, CameraMode,
+        CameraRig, ViewerCamera,
     };
 
     /// A boxed error so tests can use `?` instead of the disallowed
@@ -324,7 +324,8 @@ mod tests {
         app.add_message::<SlEvent>();
         let own = AgentKey::from(Uuid::from_u128(7));
         // The shared bare-avatar fixture, facing east (identity rotation).
-        let object = crate::objects::fixture_object(sl_client_bevy::pcode::AVATAR);
+        let object =
+            sl_viewer_world_objects::objects::fixture_object(sl_client_bevy::pcode::AVATAR);
         let motion = AvatarMotion::from_object(&object, true);
         let interp = AvatarInterp::seeded(&motion, 0.0, bevy::math::Vec3::ZERO);
         let anchor = app.world_mut().spawn((motion, interp)).id();
@@ -474,8 +475,8 @@ mod tests {
             .world()
             .get::<AvatarInterp>(anchor)
             .ok_or("the own avatar keeps its interpolation")?;
-        let target = crate::coords::sl_to_bevy_rotation()
-            .mul_quat(crate::coords::sl_rotation_to_quat(&motion.rotation));
+        let target = sl_viewer_kit::coords::sl_to_bevy_rotation()
+            .mul_quat(sl_viewer_kit::coords::sl_rotation_to_quat(&motion.rotation));
         assert!(
             interp.rendered_rotation.abs_diff_eq(target, 1.0e-5),
             "the rendered orientation is already there — no eased turn on arrival"

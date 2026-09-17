@@ -3,7 +3,7 @@
 //! how it is actually moving through the world.
 //!
 //! Four of the reference's motion classes, all of which need the three-joint IK
-//! solver in [`crate::ik`] or the ground under the avatar's feet:
+//! solver in [`sl_viewer_kit::ik`] or the ground under the avatar's feet:
 //!
 //! - **`LLWalkAdjustMotion`** (`llkeyframewalkmotion.cpp`) — the always-on servo
 //!   that runs while any walk animation is signalled. It measures how far the
@@ -104,11 +104,11 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 use sl_client_bevy::{AgentKey, AnimationPose, RegionHandle};
 
-use crate::coords::{bevy_to_sl_vec, metres_to_f32, sl_to_bevy_rotation};
 use crate::ground::{AgentGround, GroundHit};
-use crate::ik::{Chain, JointSolver};
 use crate::look_at::smooth_interpolant;
-use crate::world_api::AvatarMotion;
+use sl_viewer_kit::coords::{bevy_to_sl_vec, metres_to_f32, sl_to_bevy_rotation};
+use sl_viewer_kit::ik::{Chain, JointSolver};
+use sl_viewer_world_api::AvatarMotion;
 
 /// Maximum ground speed (m/s) the walk servo adjusts for; beyond it the avatar is
 /// moving too fast for the walk cycle to keep up at all

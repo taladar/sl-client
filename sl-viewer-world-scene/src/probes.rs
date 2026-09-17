@@ -13,7 +13,7 @@
 //! volume, dynamic-object capture, and mirror). `reflection_probe_from_object`
 //! lifts a present block onto an `ObjectReflectionProbe` component that
 //! `apply_object` attaches to (or clears from) each object entity as its updates
-//! arrive, exactly the way [`apply_flexi`](crate::flexi) /
+//! arrive, exactly the way [`apply_flexi`](sl_viewer_kit::flexi) /
 //! [`apply_light`](sl_viewer_world_objects::objects) / [`apply_particles`](sl_viewer_world_objects::objects) do — a
 //! prim toggled probe on or off in-world flips the block present / absent, so the
 //! component is refreshed every update. The component also carries the prim's metre
@@ -63,7 +63,7 @@
 //! only and refreshes only every `DEFAULT_PROBE_PERIOD_SECS`
 //! (`RenderDefaultProbeUpdatePeriod`). Captures are **shadow-free** — the capture
 //! cameras render the reflection-probe layers only, so the shadow-casting sun
-//! builds no cascades for them (see [`crate::probe_layers`]). A freshly assigned
+//! builds no cascades for them (see [`sl_viewer_kit::probe_layers`]). A freshly assigned
 //! rig jumps the queue (`CaptureSchedule::urgent`) so a probe entering the budget
 //! shows its own surroundings almost immediately instead of the previous tenant's.
 //!
@@ -114,9 +114,6 @@
 //! `apply_object`: sl_viewer_world_objects::objects
 //! [`GeneratedEnvironmentMapLight`]: bevy::light::GeneratedEnvironmentMapLight
 
-use crate::probe_layers::{default_probe_camera_render_layers, local_probe_camera_render_layers};
-use crate::settings::ViewerSettings;
-use crate::world_api::{BOX_FALLOFF, MIN_NEAR_CLIP, ObjectReflectionProbe, ViewerCamera};
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::primitives::CUBE_MAP_FACES;
 use bevy::camera::visibility::RenderLayers;
@@ -134,6 +131,11 @@ use bevy::render::renderer::{RenderDevice, RenderQueue};
 use bevy::render::texture::GpuImage;
 use bevy::render::{Render, RenderApp, RenderSystems};
 use sl_settings::SettingValue;
+use sl_viewer_kit::probe_layers::{
+    default_probe_camera_render_layers, local_probe_camera_render_layers,
+};
+use sl_viewer_settings::ViewerSettings;
+use sl_viewer_world_api::{BOX_FALLOFF, MIN_NEAR_CLIP, ObjectReflectionProbe, ViewerCamera};
 use std::collections::VecDeque;
 use std::f32::consts::FRAC_PI_2;
 use std::sync::OnceLock;
@@ -651,7 +653,7 @@ fn create_cube_image(images: &mut Assets<Image>, size: u32) -> Handle<Image> {
 /// probe never captures dynamic content regardless — it is environment-only.
 #[derive(Resource, Clone, Copy, Debug)]
 pub(crate) struct ProbeDynamicContent {
-    /// Whether local probes render the [`PROBE_DYNAMIC_LAYER`](crate::probe_layers)
+    /// Whether local probes render the [`PROBE_DYNAMIC_LAYER`](sl_viewer_kit::probe_layers)
     /// (avatars, …).
     pub(crate) include: bool,
 }
@@ -725,7 +727,7 @@ fn capture_camera_render_layers(rig: usize, include_dynamic: bool) -> RenderLaye
 /// Reconcile the local probe capture cameras' render layers with the current
 /// `ProbeDynamicContent` setting whenever it changes (and once on startup). The
 /// default probe's cameras (rig `0`) are always environment-only, so this only
-/// flips the [`PROBE_DYNAMIC_LAYER`](crate::probe_layers) bit on the pool rigs.
+/// flips the [`PROBE_DYNAMIC_LAYER`](sl_viewer_kit::probe_layers) bit on the pool rigs.
 fn update_probe_camera_layers(
     setting: Res<ProbeDynamicContent>,
     mut cameras: Query<(&ProbeCaptureCamera, &mut RenderLayers)>,
@@ -2124,11 +2126,11 @@ fn copy_hero_faces(
 #[cfg(test)]
 mod tests {
     use super::sample_rotation;
-    use crate::coords::sl_to_bevy_rotation;
     use bevy::light::EnvironmentMapLight;
     use bevy::math::{Affine3A, EulerRot};
     use bevy::pbr::LightProbeComponent as _;
     use bevy::prelude::{Handle, Quat};
+    use sl_viewer_kit::coords::sl_to_bevy_rotation;
 
     /// A local probe must sample its cube in the space the cube was **captured**
     /// in — world space — however its prim is turned (R22i), and its influence
@@ -2206,11 +2208,11 @@ mod tests {
         BOX_FALLOFF, DEFAULT_PROBE_PERIOD_SECS, MIN_NEAR_CLIP, ObjectReflectionProbe, PROBE_GAIN,
         pick_next_rig, probe_intensity,
     };
-    use crate::world_api::{SPHERE_FALLOFF, reflection_probe_from_object};
     use bevy::camera::Exposure;
     use bevy::prelude::Vec3;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{Object, ReflectionProbe, ReflectionProbeFlags, Vector};
+    use sl_viewer_world_api::{SPHERE_FALLOFF, reflection_probe_from_object};
 
     /// A minimal plain prim object with no extra params — the fixture the probe
     /// tests decorate.

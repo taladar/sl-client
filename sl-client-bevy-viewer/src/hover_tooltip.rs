@@ -42,8 +42,8 @@ use crate::hud_pick::HudRayCast;
 use crate::i18n::Translator;
 use crate::name_tag_billboard::NameTagHitTest;
 use crate::objects::ObjectSlMotion;
+use crate::social::GroupsModel;
 use crate::world_api::AvatarState;
-use crate::world_api::GroupsModel;
 use crate::world_api::ObjectState;
 use crate::world_api::pointer_over_blocking_ui;
 

@@ -44,7 +44,7 @@
 //!   Trash / return-to-owner). The enable gates are deliberately simpler than
 //!   the reference's full predicates: you-owner for take / delete / return,
 //!   the copy permission bit for take-copy (see the condition constants).
-//! - **Mute** → a guarded [`crate::world_api::RequestBlock`] for the object (id +
+//! - **Mute** → a guarded [`crate::intents::RequestBlock`] for the object (id +
 //!   name). The name is not in
 //!   the object update stream, so opening the menu fires a
 //!   [`Command::RequestObjectPropertiesFamily`] and the reply's name is held on
@@ -112,6 +112,7 @@ use sl_client_bevy::{
 
 use crate::avatar_menu::{SELF_SITTING, SELF_STANDING};
 use crate::derender::RequestDerender;
+use crate::intents::RequestBlock;
 use crate::inventory::InventoryModel;
 use crate::menu::UNIMPLEMENTED;
 use crate::objects::ObjectRayHit;
@@ -119,7 +120,6 @@ use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, Pie
 use crate::ui_element::UiAction;
 use crate::world_api::DerenderKind;
 use crate::world_api::ObjectState;
-use crate::world_api::RequestBlock;
 use crate::world_api::SelfGroundSit;
 use crate::world_api::{EditTool, EditToolState};
 

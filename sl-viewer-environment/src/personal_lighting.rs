@@ -50,6 +50,7 @@
 use bevy::prelude::*;
 use bevy::ui_widgets::{SliderRange, SliderValue, ValueChange};
 use sl_client_bevy::{EnvironmentAsset, SkySettings, WaterSettings};
+use sl_viewer_intents::TexturePicked;
 use sl_viewer_notifications::{NotificationResponse, ShowNotification};
 use sl_viewer_pickers::ui_texture_picker::TextureSwatchValue;
 use sl_viewer_ui_core::i18n::Translated;
@@ -60,7 +61,6 @@ use sl_viewer_ui_widgets::floater::{
 };
 use sl_viewer_ui_widgets::ui_color_picker::{ColorPicked, ColorSwatchValue};
 use sl_viewer_ui_widgets::ui_trackball::TrackballAim;
-use sl_viewer_world_api::TexturePicked;
 use sl_viewer_world_scene::environment::EnvironmentState;
 use sl_viewer_world_scene::sky::day_position;
 

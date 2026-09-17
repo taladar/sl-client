@@ -26,7 +26,9 @@
 
 // Lower crates re-aliased under their original module names, so these
 // modules keep addressing them as `crate::ui` and `crate::settings`.
+pub(crate) use sl_viewer_intents as intents;
 pub(crate) use sl_viewer_settings as settings;
+pub(crate) use sl_viewer_social as social;
 pub(crate) use sl_viewer_ui_core::i18n;
 pub(crate) use sl_viewer_ui_core::skin_colors;
 pub(crate) use sl_viewer_ui_core::ui;

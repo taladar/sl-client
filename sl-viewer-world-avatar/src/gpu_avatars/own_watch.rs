@@ -38,7 +38,7 @@ use sl_client_bevy::{AgentKey, SlIdentity};
 use super::render::{GpuAvatarBounds, bounds_at};
 use super::stage::{GpuAvatarPoseFeed, GpuAvatarRegistry, GpuSkinBinding};
 use crate::animations::{AnimationManager, AnimationPlayback};
-use crate::world_api::{AvatarState, PoseSlotKey, ViewerCamera};
+use sl_viewer_world_api::{AvatarState, PoseSlotKey, ViewerCamera};
 
 /// The env flag turning the watch on.
 const ENV_LOG_OWN_VISIBILITY: &str = "SL_VIEWER_LOG_OWN_AVATAR_VISIBILITY";

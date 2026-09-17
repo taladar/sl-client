@@ -2,7 +2,7 @@
 //! colours (the reference viewer's `LLVOAvatar::idleUpdateNameTagText`).
 //!
 //! This module owns the *what* of a tag; the *how* (world-space billboard
-//! rendering) lives in [`crate::name_tag_billboard`]. The renderer consumes a
+//! rendering) lives in [`sl_viewer_world_objects::name_tag_billboard`]. The renderer consumes a
 //! [`TagContent`] component on each tag entity and rebuilds text layout and
 //! mesh only when the composed value actually changes, so composition here is
 //! deliberately change-driven: assemble, compare, and only then assign.
@@ -36,7 +36,7 @@ use std::collections::HashSet;
 
 use sl_client_bevy::{AgentKey, SlEvent, SlSessionEvent};
 
-use crate::name_tag_billboard::{NameTag, TagContent, TagLine, TagLineSize};
+use sl_viewer_world_objects::name_tag_billboard::{NameTag, TagContent, TagLine, TagLineSize};
 
 /// Show display names on tags (the reference `NameTagShowDisplayNames`,
 /// default on). Off = legacy names only.
@@ -216,7 +216,7 @@ pub(crate) struct TagInputs<'a> {
     /// Whether this is the logged-in avatar's own tag.
     pub(crate) is_self: bool,
     /// The avatar's resolved names, if any source answered yet.
-    pub(crate) record: Option<&'a crate::world_api::NameRecord>,
+    pub(crate) record: Option<&'a sl_viewer_world_api::NameRecord>,
     /// The id-fragment fallback shown until a name resolves.
     pub(crate) provisional: String,
     /// The avatar's group title, if any.
@@ -233,7 +233,7 @@ pub(crate) struct TagInputs<'a> {
     /// entry, shown as the reference's `Unavailable` status.
     pub(crate) is_do_not_disturb: bool,
     /// Whether *our own* tag should carry the `Auto-Response` status — one of
-    /// the two autorespond modes is on ([`crate::presence`]). Purely local:
+    /// the two autorespond modes is on ([`sl_viewer_people::presence`]). Purely local:
     /// autorespond has no wire representation, so it can only ever be true on
     /// the own tag.
     pub(crate) is_autoresponse: bool,
@@ -317,7 +317,7 @@ impl Default for TagToggles {
 impl TagToggles {
     /// Resolve the toggles from the settings store (all default-on except the
     /// distance tint, matching the registered defaults).
-    fn from_settings(settings: Option<&crate::settings::ViewerSettings>) -> Self {
+    fn from_settings(settings: Option<&sl_viewer_settings::ViewerSettings>) -> Self {
         let Some(settings) = settings else {
             return Self::default();
         };
@@ -349,7 +349,7 @@ impl TagToggles {
 
 /// The name-tag colour palette, resolved once per composer run from the
 /// settings store — the active skin's tokens under any per-account overrides
-/// (the [`crate::skin_colors`] bridge, edited on the preferences colors &
+/// (the [`sl_viewer_ui_core::skin_colors`] bridge, edited on the preferences colors &
 /// skins tab). [`Default`] is the built-in palette (the reference
 /// `colors.xml` values), used by tests and settings-less apps.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -398,19 +398,23 @@ impl Default for TagColors {
 impl TagColors {
     /// Resolve the palette from the settings store; without one the built-in
     /// [`Default`] palette stands.
-    fn from_settings(settings: Option<&crate::settings::ViewerSettings>) -> Self {
-        let color = |name: &str| crate::skin_colors::setting_color(settings, name);
+    fn from_settings(settings: Option<&sl_viewer_settings::ViewerSettings>) -> Self {
+        let color = |name: &str| sl_viewer_ui_core::skin_colors::setting_color(settings, name);
         Self {
-            default: color(crate::skin_colors::SETTING_NAME_TAG_DEFAULT),
-            self_: color(crate::skin_colors::SETTING_NAME_TAG_SELF),
-            friend: color(crate::skin_colors::SETTING_NAME_TAG_FRIEND),
-            muted: color(crate::skin_colors::SETTING_NAME_TAG_MUTED),
-            linden: color(crate::skin_colors::SETTING_NAME_TAG_LINDEN),
-            mismatch: color(crate::skin_colors::SETTING_NAME_TAG_MISMATCH),
-            distance_whisper: color(crate::skin_colors::SETTING_NAME_TAG_DISTANCE_WHISPER),
-            distance_chat: color(crate::skin_colors::SETTING_NAME_TAG_DISTANCE_CHAT),
-            distance_shout: color(crate::skin_colors::SETTING_NAME_TAG_DISTANCE_SHOUT),
-            distance_beyond: color(crate::skin_colors::SETTING_NAME_TAG_DISTANCE_BEYOND),
+            default: color(sl_viewer_ui_core::skin_colors::SETTING_NAME_TAG_DEFAULT),
+            self_: color(sl_viewer_ui_core::skin_colors::SETTING_NAME_TAG_SELF),
+            friend: color(sl_viewer_ui_core::skin_colors::SETTING_NAME_TAG_FRIEND),
+            muted: color(sl_viewer_ui_core::skin_colors::SETTING_NAME_TAG_MUTED),
+            linden: color(sl_viewer_ui_core::skin_colors::SETTING_NAME_TAG_LINDEN),
+            mismatch: color(sl_viewer_ui_core::skin_colors::SETTING_NAME_TAG_MISMATCH),
+            distance_whisper: color(
+                sl_viewer_ui_core::skin_colors::SETTING_NAME_TAG_DISTANCE_WHISPER,
+            ),
+            distance_chat: color(sl_viewer_ui_core::skin_colors::SETTING_NAME_TAG_DISTANCE_CHAT),
+            distance_shout: color(sl_viewer_ui_core::skin_colors::SETTING_NAME_TAG_DISTANCE_SHOUT),
+            distance_beyond: color(
+                sl_viewer_ui_core::skin_colors::SETTING_NAME_TAG_DISTANCE_BEYOND,
+            ),
         }
     }
 }
@@ -485,7 +489,7 @@ fn scale_rgb(color: Color, factor: f32) -> Color {
 
 /// Whether a legacy name marks grid staff (the reference colours `* Linden`
 /// tags `NameTagLinden`).
-fn is_linden(record: Option<&crate::world_api::NameRecord>) -> bool {
+fn is_linden(record: Option<&sl_viewer_world_api::NameRecord>) -> bool {
     record
         .and_then(|record| record.legacy.as_deref())
         .is_some_and(|legacy| legacy.ends_with(" Linden"))
@@ -508,7 +512,7 @@ pub(crate) fn compose_tag(
     let has_custom_display_name = toggles.show_display_names
         && inputs
             .record
-            .is_some_and(crate::world_api::NameRecord::has_custom_display_name);
+            .is_some_and(sl_viewer_world_api::NameRecord::has_custom_display_name);
     // A legacy name and a matching display name share the base colour (the
     // reference's NameTagLegacy / NameTagMatch, both White).
     let display_base = if has_custom_display_name {
@@ -701,22 +705,22 @@ pub fn compose_name_tags(
     time: Res<Time>,
     mut next_distance_at: Local<f32>,
     mut distance_cache: Local<std::collections::HashMap<AgentKey, f32>>,
-    avatars: Res<crate::world_api::AvatarState>,
+    avatars: Res<sl_viewer_world_api::AvatarState>,
     statuses: Res<NameTagStatuses>,
     playback: Res<crate::animations::AnimationPlayback>,
-    friends: Option<Res<crate::world_api::FriendsModel>>,
-    mutes: Option<Res<crate::world_api::MuteModel>>,
-    groups: Option<Res<crate::world_api::GroupsModel>>,
+    friends: Option<Res<sl_viewer_social::FriendsModel>>,
+    mutes: Option<Res<sl_viewer_social::MuteModel>>,
+    groups: Option<Res<sl_viewer_social::GroupsModel>>,
     complexity: Option<Res<crate::avatar_complexity::AvatarComplexityModel>>,
     identity: Option<Res<sl_client_bevy::SlIdentity>>,
-    settings: Option<Res<crate::settings::ViewerSettings>>,
-    anchors: Query<&Transform, With<crate::world_api::AvatarAnchor>>,
+    settings: Option<Res<sl_viewer_settings::ViewerSettings>>,
+    anchors: Query<&Transform, With<sl_viewer_world_api::AvatarAnchor>>,
     mut contents: Query<&mut TagContent, With<NameTag>>,
 ) {
     let toggles = TagToggles::from_settings(settings.as_deref());
     let colors = TagColors::from_settings(settings.as_deref());
     // Autorespond is local-only state, so it can only ever mark the own tag.
-    let autoresponse = crate::world_api::shows_autoresponse(settings.as_deref());
+    let autoresponse = sl_viewer_world_api::shows_autoresponse(settings.as_deref());
     let own_agent = identity.as_ref().and_then(|identity| identity.agent_id);
     // The distance line measures from the OWN AVATAR (the reference's
     // behaviour) — the camera-based distances only govern fade/cut-off.
@@ -808,9 +812,9 @@ mod tests {
         NAME_TAG_MUTED, TEXTURE_AREA_COLOR, TagColors, TagInputs, TagLineSize, TagToggles,
         complexity_color, compose_tag, distance_band_color, shows_complexity,
     };
-    use crate::world_api::NameRecord;
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
+    use sl_viewer_world_api::NameRecord;
 
     /// A record with a custom display name (username line shows).
     fn custom_record() -> NameRecord {

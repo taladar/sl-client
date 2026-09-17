@@ -32,7 +32,7 @@
 use bevy::prelude::*;
 
 use crate::sky::SCENE_LIGHT_ILLUMINANCE;
-use crate::world_api::{LightProjection, ObjectLight, ViewerCamera, WorldPhase};
+use sl_viewer_world_api::{LightProjection, ObjectLight, ViewerCamera, WorldPhase};
 
 /// The local-light budget's own scheduling (P25.2).
 ///
@@ -343,9 +343,9 @@ pub(crate) fn drive_local_lights(
 #[cfg(test)]
 mod tests {
     use super::{ObjectLight, legacy_distance_attenuation, local_light_lumens, luminance};
-    use crate::world_api::light_from_object;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{LightData, LightImage, Object, TextureKey, Uuid, Vector};
+    use sl_viewer_world_api::light_from_object;
 
     /// Tolerance for the 8-bit-quantized colour round-trips (the workspace denies
     /// strict float comparison).

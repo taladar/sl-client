@@ -19,7 +19,7 @@
 //! that sets an exception writes a [`RequestRenderException`] rather than
 //! touching the list (`apply_render_exception_requests` runs the guards), the
 //! same shape the derender list ([`crate::derender`]) and the mute list
-//! (`crate::mutes`) use.
+//! (`sl_viewer_people::mutes`) use.
 //!
 //! The render decision does **not** read this resource directly: the complexity
 //! model mirrors it by revision
@@ -63,8 +63,8 @@ use sl_client_bevy::{AgentKey, SlIdentity, Uuid};
 use tracing::{debug, info, warn};
 
 use crate::avatar_complexity::RenderOverride;
-use crate::settings::ViewerSettings;
-use crate::world_api::AvatarState;
+use sl_viewer_settings::ViewerSettings;
+use sl_viewer_world_api::AvatarState;
 
 /// The per-account file the exceptions are stored in (a sibling of the account
 /// `settings.toml`, like [`crate::derender`]'s blacklist). Our account directory
@@ -288,7 +288,7 @@ pub(crate) fn check_render_exception(
 // ---------------------------------------------------------------------------
 
 /// Registers the exception store, its requests and its persistence. The floater
-/// over it is `crate::avatar_render_floater`.
+/// over it is `sl_client_bevy_viewer::avatar_render_floater`.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AvatarRenderSettingsPlugin;
 
@@ -364,7 +364,7 @@ pub(crate) fn refresh_exception_names(
     for agent in agents {
         let resolved = avatars
             .name_record(agent)
-            .and_then(crate::world_api::NameRecord::preferred_name)
+            .and_then(sl_viewer_world_api::NameRecord::preferred_name)
             .map(ToOwned::to_owned);
         match resolved {
             Some(name) => settings.note_live_name(agent, &name),

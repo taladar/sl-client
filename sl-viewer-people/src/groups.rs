@@ -39,7 +39,7 @@
 //! People pane already toggles between its Friends and Groups sub-tabs. This module
 //! never touches that visibility — it only owns what is *inside* the Groups slot.
 //! The IM action hands the strip back to a conversation the same way the Friends
-//! list does, via [`crate::world_api::OpenConversation`].
+//! list does, via [`crate::intents::OpenConversation`].
 //!
 //! Reference (Firestorm, read-only): `llgrouplist`, `llgroupactions`,
 //! Vintage `panel_fs_contacts_groups`.
@@ -50,15 +50,15 @@ use bevy::prelude::*;
 use sl_client_bevy::{Command, GroupKey, SlCommand, SlEvent, SlSessionEvent, Uuid};
 
 use crate::i18n::{TransArgs, Translated, Translator};
+use crate::intents::OpenGroupProfile;
+use crate::intents::{ConversationKey, OpenConversation};
 use crate::people::PeopleUi;
+use crate::social::{GroupChoice, GroupRow, GroupsModel};
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::virtual_list::{
     VirtualList, VirtualRow, VirtualViewport, amend_row_node, layout_virtual_lists,
 };
-use crate::world_api::OpenGroupProfile;
-use crate::world_api::{ConversationKey, OpenConversation};
-use crate::world_api::{GroupChoice, GroupRow, GroupsModel};
 
 /// A group-list row's uniform height, in logical pixels — matched to the friends
 /// list beside it so the whole pane reads as one surface.

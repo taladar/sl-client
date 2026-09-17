@@ -117,14 +117,15 @@ use sl_client_bevy::{
     lod_triangle_counts,
 };
 
-use crate::avatar_assets::BodyRegion;
 use crate::avatars::AvatarBodyPart;
-use crate::face_material::{FaceMaterial, inert_face_material};
-use crate::meshes::{MeshDecoded, MeshManager};
-use crate::settings::ViewerSettings;
-use crate::textures::{TextureDecoded, TextureManager};
-use crate::world_api::{AvatarState, DecodedTextures, FriendsModel, ObjectParticleSystem};
-use crate::world_api::{ObjectState, PrimComplexityFacts};
+use sl_viewer_kit::avatar_assets::BodyRegion;
+use sl_viewer_kit::face_material::{FaceMaterial, inert_face_material};
+use sl_viewer_settings::ViewerSettings;
+use sl_viewer_social::FriendsModel;
+use sl_viewer_world_api::{AvatarState, DecodedTextures, ObjectParticleSystem};
+use sl_viewer_world_api::{ObjectState, PrimComplexityFacts};
+use sl_viewer_world_objects::meshes::{MeshDecoded, MeshManager};
+use sl_viewer_world_objects::textures::{TextureDecoded, TextureManager};
 
 // ---------------------------------------------------------------------------
 // Settings.
@@ -1040,7 +1041,7 @@ impl Plugin for AvatarComplexityPlugin {
                 // frame's events (a removal still resolves to its wearer then),
                 // and the score / decision follow it.
                 mark_complexity_dirty
-                    .before(crate::world_api::WorldPhase::ObjectsUpdated)
+                    .before(sl_viewer_world_api::WorldPhase::ObjectsUpdated)
                     .before(crate::avatars::update_avatar_objects),
             )
             .add_systems(
@@ -1053,7 +1054,7 @@ impl Plugin for AvatarComplexityPlugin {
                     decide_avatar_appearance,
                 )
                     .chain()
-                    .after(crate::world_api::WorldPhase::ObjectsUpdated)
+                    .after(sl_viewer_world_api::WorldPhase::ObjectsUpdated)
                     .after(crate::avatars::update_avatar_objects)
                     // The base-region visibility override reads the decision, so
                     // it must already be made this frame.
@@ -1617,10 +1618,10 @@ mod tests {
         ParticleBurst, PendingCostAssets, RenderOverride, avatar_complexity, est_tris_by_lod,
         jelly_reason, radius_weighted_tris, texture_cost,
     };
-    use crate::world_api::PrimComplexityFacts;
     use bevy::prelude::{Entity, Vec3};
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::{AgentKey, MeshKey, PRIM_LOD_COUNT, PrimShapeParams, TextureKey, Uuid};
+    use sl_viewer_world_api::PrimComplexityFacts;
     use std::collections::HashMap;
 
     /// A lookup with nothing in it: no mesh headers, no texture sizes, no

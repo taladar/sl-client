@@ -77,11 +77,15 @@ use crate::floater::{
     FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater,
 };
 use crate::i18n::{TransArgs, Translated, Translator};
+use crate::intents::{AvatarPicked, OpenAvatarPicker};
+use crate::intents::{GroupPicked, OpenGroupPicker};
+use crate::intents::{OpenTexturePicker, PickerKind, TexturePicked};
 use crate::inventory_properties::format_unix_date;
 use crate::land_environment::{
     LandEnvironmentPlugin, LandEnvironmentSubject, LandPanelKind, spawn_land_environment_panel,
 };
 use crate::name_revisions::{NameRevisions, ViewBuilt};
+use crate::social::GroupsModel;
 use crate::ui::{column, row};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
@@ -98,10 +102,6 @@ use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 use crate::world_api::AgentRegionPosition;
 use crate::world_api::AvatarState;
-use crate::world_api::GroupsModel;
-use crate::world_api::{AvatarPicked, OpenAvatarPicker};
-use crate::world_api::{GroupPicked, OpenGroupPicker};
-use crate::world_api::{OpenTexturePicker, PickerKind, TexturePicked};
 
 /// The floater's body font size, in logical pixels.
 const FONT_SIZE: f32 = 13.0;
@@ -4438,8 +4438,10 @@ mod tests {
         };
         use crate::floater::{Floater, FloaterCommand, FloaterOp, FloaterPlugin};
         use crate::i18n::Translated;
+        use crate::intents::GroupPicked;
+        use crate::social::GroupsModel;
         use crate::ui::UiRoot;
-        use crate::world_api::{AgentRegionPosition, AvatarState, GroupPicked, GroupsModel};
+        use crate::world_api::{AgentRegionPosition, AvatarState};
         use bevy::ecs::change_detection::Tick;
         use bevy::prelude::*;
         use pretty_assertions::{assert_eq, assert_ne};
@@ -4470,12 +4472,12 @@ mod tests {
             app.add_message::<SlCommand>()
                 .add_message::<SlEvent>()
                 .add_message::<crate::ui_combo::ComboChanged>()
-                .add_message::<crate::world_api::OpenTexturePicker>()
-                .add_message::<crate::world_api::TexturePicked>()
-                .add_message::<crate::world_api::OpenAvatarPicker>()
-                .add_message::<crate::world_api::AvatarPicked>()
-                .add_message::<crate::world_api::OpenGroupPicker>()
-                .add_message::<crate::world_api::GroupPicked>()
+                .add_message::<crate::intents::OpenTexturePicker>()
+                .add_message::<crate::intents::TexturePicked>()
+                .add_message::<crate::intents::OpenAvatarPicker>()
+                .add_message::<crate::intents::AvatarPicked>()
+                .add_message::<crate::intents::OpenGroupPicker>()
+                .add_message::<crate::intents::GroupPicked>()
                 .insert_resource(identity)
                 .init_resource::<AvatarState>()
                 .init_resource::<GroupsModel>()

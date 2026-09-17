@@ -40,11 +40,11 @@ use bevy::prelude::*;
 use sl_client_bevy::{AgentKey, Command, GroupKey, OwnerKey, SlCommand};
 
 use crate::i18n::Translator;
+use crate::intents::OpenAvatarProfile;
+use crate::intents::OpenGroupProfile;
+use crate::social::GroupsModel;
 use crate::ui_font::UiFont;
 use crate::world_api::AvatarState;
-use crate::world_api::GroupsModel;
-use crate::world_api::OpenAvatarProfile;
-use crate::world_api::OpenGroupProfile;
 
 /// The default link tint — the same cornflower blue the bespoke owner links used,
 /// so migrated sites look unchanged.

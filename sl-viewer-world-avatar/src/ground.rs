@@ -26,13 +26,13 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 use sl_client_bevy::{AgentKey, AnimationPose, RegionHandle, VolumeDeformations};
 
-use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::AvatarBody;
-use crate::coords::region_offset_bevy;
+use sl_viewer_kit::avatar_assets::AvatarAssetLibrary;
+use sl_viewer_kit::coords::region_offset_bevy;
 
-use crate::world_api::AvatarMotion;
-use crate::world_api::AvatarState;
-use crate::world_api::TerrainState;
+use sl_viewer_world_api::AvatarMotion;
+use sl_viewer_world_api::AvatarState;
+use sl_viewer_world_api::TerrainState;
 
 /// How far **above** a sample point a resolved surface may sit and still count as the
 /// ground under it, metres (the reference's `getGround` probes from `+1` on Z).

@@ -56,6 +56,8 @@ use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::OwnLocalBake;
 use crate::bake_inputs::{OwnBakeInputs, shape_is_male};
 use crate::floater::{FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater};
+use crate::intents::TexturePicked;
+use crate::intents::{ItemCreationFinished, ItemCreationTicket, PendingItemCreations};
 use crate::inventory::OpenWearableEditor;
 use crate::inventory_actions::{wearable_param_group, wearable_type_of};
 use crate::inventory_properties::to_wire_item;
@@ -67,8 +69,6 @@ use crate::ui_radio::{RadioLayout, RadioSelection, RadioSpec, spawn_radio_group}
 use crate::ui_slider::{SliderStyle, SliderWidgetPlugin, spawn_slider};
 use crate::ui_texture_picker::{TextureSwatchValue, spawn_texture_swatch};
 use crate::world_api::DecodedTextures;
-use crate::world_api::TexturePicked;
-use crate::world_api::{ItemCreationFinished, ItemCreationTicket, PendingItemCreations};
 
 /// The Shape gender radio group's element id.
 const GENDER_ELEMENT: &str = "wearable-gender";
@@ -1304,7 +1304,7 @@ fn set_status(texts: &mut Query<&mut Text>, node: Option<Entity>, message: &str)
 #[cfg(test)]
 mod tests {
     use super::{WearEdit, WearEditState, report_wearable_save, report_wearable_save_as};
-    use crate::world_api::PendingItemCreations;
+    use crate::intents::PendingItemCreations;
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{
@@ -1350,7 +1350,7 @@ mod tests {
     fn editor_app() -> (App, Entity) {
         let mut app = App::new();
         app.add_message::<SlEvent>()
-            .add_message::<crate::world_api::ItemCreationFinished>()
+            .add_message::<crate::intents::ItemCreationFinished>()
             .init_resource::<WearEditState>()
             .init_resource::<PendingItemCreations>()
             .add_systems(Update, (report_wearable_save, report_wearable_save_as));
@@ -1515,7 +1515,7 @@ mod tests {
 
         // Somebody else's creation on the shared queue is not this Save As.
         app.world_mut()
-            .write_message(crate::world_api::ItemCreationFinished {
+            .write_message(crate::intents::ItemCreationFinished {
                 ticket: other,
                 item: Some(InventoryKey::from(Uuid::from_u128(0xEE))),
             });
@@ -1527,7 +1527,7 @@ mod tests {
         );
 
         app.world_mut()
-            .write_message(crate::world_api::ItemCreationFinished {
+            .write_message(crate::intents::ItemCreationFinished {
                 ticket,
                 item: Some(InventoryKey::from(Uuid::from_u128(0xFF))),
             });
@@ -1557,7 +1557,7 @@ mod tests {
             edit.creation = Some(ticket);
         }
         app.world_mut()
-            .write_message(crate::world_api::ItemCreationFinished { ticket, item: None });
+            .write_message(crate::intents::ItemCreationFinished { ticket, item: None });
         app.update();
         assert_eq!(status_of(&app, status), "Saving a copy failed.");
         Ok(())

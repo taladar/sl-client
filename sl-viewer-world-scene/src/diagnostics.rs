@@ -8,7 +8,7 @@
 //!
 //! This is the P19.3 slice. The frame rate and per-frame budget the module once
 //! also showed in a top-right overlay now live in the status area
-//! (`crate::status_bar`) as a user-facing read-out, so only the developer
+//! (`sl_client_bevy_viewer::status_bar`) as a user-facing read-out, so only the developer
 //! pipeline panel remains here. It renders the P19.2
 //! [`StoreStats`](sl_client_bevy::StoreStats) /
 //! [`GateStats`](sl_client_bevy::GateStats) snapshots, which each store's own
@@ -22,15 +22,15 @@
 
 use bevy::prelude::*;
 
-use crate::environment_assets::EnvironmentAssetManager;
-use crate::geometry_cache::{GeometryCache, GeometryCacheStats};
-use crate::material_cache::{MaterialCache, MaterialCacheStats};
-use crate::sound_cache::SoundCache;
-use crate::ui_font::UiFont;
-use crate::world_api::{
+use sl_viewer_kit::geometry_cache::{GeometryCache, GeometryCacheStats};
+use sl_viewer_platform::environment_assets::EnvironmentAssetManager;
+use sl_viewer_platform::sound_cache::SoundCache;
+use sl_viewer_ui_core::ui_font::UiFont;
+use sl_viewer_world_api::{
     ANIMATION_LABEL, MATERIAL_LABEL, MESH_LABEL, PipelineStats, StorePipelineStats, TEXTURE_LABEL,
     WEARABLE_LABEL,
 };
+use sl_viewer_world_objects::material_cache::{MaterialCache, MaterialCacheStats};
 
 /// The pipeline-status overlay's own scheduling (P19.3): the `F3` panel that
 /// reports the texture / mesh / animation stores' live fetch and decode state.

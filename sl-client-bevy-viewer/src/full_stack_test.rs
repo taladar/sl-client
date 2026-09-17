@@ -1032,13 +1032,13 @@ fn build_viewer_app(params: LoginParams, options: HarnessOptions) -> (App, Captu
     app.init_resource::<crate::world_api::DerenderList>();
     app.init_resource::<crate::world_api::MatModeState>();
     app.init_resource::<crate::world_api::EditToolState>();
-    app.init_resource::<crate::world_api::FriendsModel>();
+    app.init_resource::<crate::social::FriendsModel>();
     app.init_resource::<sl_viewer_world_avatar::avatar_complexity::AvatarComplexityModel>();
     app.init_resource::<crate::avatar_render_settings::AvatarRenderSettings>();
     app.init_resource::<sl_viewer_inventory::inventory::InventoryModel>();
     // The tracked map destination the in-world beacon draws from, owned by the
     // map floater.
-    app.init_resource::<crate::world_api::MapTracking>();
+    app.init_resource::<crate::social::MapTracking>();
     // There is no cursor to grab: an unattended run must never reach for the
     // desktop's pointer, the same reason screenshot mode says `false`.
     app.insert_resource(crate::input_context::CursorGrabAllowed(false));
@@ -1056,21 +1056,21 @@ fn build_viewer_app(params: LoginParams, options: HarnessOptions) -> (App, Captu
     app.add_message::<crate::edit_contents::OpenObjectContents>();
     app.add_message::<crate::avatar_render_settings::RequestRenderException>();
     app.add_message::<crate::contact_sets_panel::OpenSetPseudonym>();
-    app.add_message::<crate::world_api::OpenAvatarProfile>();
-    app.add_message::<crate::world_api::OpenConversation>();
-    app.add_message::<crate::world_api::OpenAddToContactSet>();
+    app.add_message::<crate::intents::OpenAvatarProfile>();
+    app.add_message::<crate::intents::OpenConversation>();
+    app.add_message::<crate::intents::OpenAddToContactSet>();
     app.add_message::<crate::world_api::MediaWorldClick>();
-    app.add_message::<crate::world_api::OpenGroupProfile>();
-    app.add_message::<crate::world_api::OpenAvatarPicker>();
-    app.add_message::<crate::world_api::AvatarPicked>();
-    app.add_message::<crate::world_api::OpenTexturePicker>();
-    app.add_message::<crate::world_api::TexturePicked>();
-    app.add_message::<crate::world_api::OpenWebBrowser>();
-    app.add_message::<crate::world_api::BeginTeleportFlow>();
-    app.add_message::<crate::world_api::ContentsMutated>();
-    app.add_message::<crate::world_api::OpenNotecard>();
-    app.add_message::<crate::world_api::OpenScript>();
-    app.add_message::<crate::world_api::StartConference>();
+    app.add_message::<crate::intents::OpenGroupProfile>();
+    app.add_message::<crate::intents::OpenAvatarPicker>();
+    app.add_message::<crate::intents::AvatarPicked>();
+    app.add_message::<crate::intents::OpenTexturePicker>();
+    app.add_message::<crate::intents::TexturePicked>();
+    app.add_message::<crate::intents::OpenWebBrowser>();
+    app.add_message::<crate::intents::BeginTeleportFlow>();
+    app.add_message::<crate::intents::ContentsMutated>();
+    app.add_message::<crate::intents::OpenNotecard>();
+    app.add_message::<crate::intents::OpenScript>();
+    app.add_message::<crate::intents::StartConference>();
 
     app.add_plugins(SlClientPlugin {
         params,

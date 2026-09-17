@@ -39,9 +39,9 @@ use bevy::prelude::*;
 use sl_client_bevy::{Command, SlCommand};
 
 use crate::hud::{HudCamera, HudScreen};
-use crate::objects::{FaceTextureDebug, PrimFaceEntity, SceneObject};
-use crate::world_api::targeted_ray_cast::{TargetVisibility, TargetedRayCast};
-use crate::world_api::{MediaWorldClick, pointer_over_blocking_ui, surface_info_from_hit};
+use sl_viewer_world_api::targeted_ray_cast::{TargetVisibility, TargetedRayCast};
+use sl_viewer_world_api::{MediaWorldClick, pointer_over_blocking_ui, surface_info_from_hit};
+use sl_viewer_world_objects::objects::{FaceTextureDebug, PrimFaceEntity, SceneObject};
 
 /// The mouse button a HUD (or fall-through world) touch is made with.
 const TOUCH_BUTTON: MouseButton = MouseButton::Left;
@@ -316,13 +316,13 @@ fn touch_hit(
 
 #[cfg(test)]
 mod tests {
-    use crate::world_api::{surface_info_from_hit, vscale, vsub};
     use bevy::math::{Affine3A, Quat, Vec2, Vec3};
     use bevy::picking::mesh_picking::ray_cast::RayMeshHit;
     use bevy::transform::components::GlobalTransform;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::PrimFaceId;
     use sl_client_bevy::TextureFace;
+    use sl_viewer_world_api::{surface_info_from_hit, vscale, vsub};
 
     /// A ray hit with the given world point / normal / uv and a flat triangle in
     /// the XY plane, enough to exercise the surface-info build.

@@ -35,7 +35,7 @@ use sl_client_bevy::{
     Priority, SlCapabilities, StoreStats,
 };
 
-use crate::asset_retry::{RetryDisposition, RetryState};
+use sl_viewer_platform::asset_retry::{RetryDisposition, RetryState};
 
 /// The outcome of one background mesh fetch: the decoded geometry, the decoded
 /// rig skin (`None` when the mesh carries no skin block) and the parsed asset
@@ -138,7 +138,7 @@ pub struct MeshManager {
     /// [`retry`](Self::retry) on failure).
     in_flight_priority: HashMap<MeshKey, Priority>,
     /// Fetches that failed and are waiting to be re-issued (bounded backoff —
-    /// [`asset_retry`](crate::asset_retry)). Without this a transient `GetMesh`
+    /// [`asset_retry`](sl_viewer_platform::asset_retry)). Without this a transient `GetMesh`
     /// failure would leave a static mesh geometry-less for the whole session
     /// (nothing re-requests it), invisible to the F3 overlay. Drained by
     /// [`poll_meshes`] once each entry is due.
@@ -331,7 +331,7 @@ impl MeshManager {
         // at the same priority. A fresh explicit request supersedes a pending retry;
         // the store's *own* re-issue must not, or it would discard the attempt count
         // the backoff loop just parked and reset to attempt 1 forever
-        // (see [`RetryDisposition`](crate::asset_retry::RetryDisposition)).
+        // (see [`RetryDisposition`](sl_viewer_platform::asset_retry::RetryDisposition)).
         if retry.supersedes() {
             let _retried = self.retry.remove(&id);
         }
@@ -645,7 +645,7 @@ fn build_store(fetcher: &Arc<BevyMeshFetcher>, disk_dir: Option<PathBuf>) -> Mes
             Arc::clone(&fetcher),
             Some(dir),
             MeshCacheLimits {
-                max_bytes: crate::paths::asset_cache_max_bytes(),
+                max_bytes: sl_viewer_platform::paths::asset_cache_max_bytes(),
                 ..MeshCacheLimits::default()
             },
         ) {
@@ -660,7 +660,7 @@ fn build_store(fetcher: &Arc<BevyMeshFetcher>, disk_dir: Option<PathBuf>) -> Mes
             Arc::clone(&fetcher),
             None,
             MeshCacheLimits {
-                max_bytes: crate::paths::asset_cache_max_bytes(),
+                max_bytes: sl_viewer_platform::paths::asset_cache_max_bytes(),
                 ..MeshCacheLimits::default()
             },
         ) {
@@ -674,7 +674,7 @@ fn build_store(fetcher: &Arc<BevyMeshFetcher>, disk_dir: Option<PathBuf>) -> Mes
 /// meshcache`), from `XDG_CACHE_HOME` or `~/.cache`, or `None` when neither is set
 /// (the store then runs in-memory only).
 fn mesh_cache_dir() -> Option<PathBuf> {
-    crate::paths::asset_cache_dir("meshcache")
+    sl_viewer_platform::paths::asset_cache_dir("meshcache")
 }
 
 /// Refresh the store fetcher's mesh capability URL each time the region's
@@ -754,7 +754,7 @@ pub fn poll_meshes(
                         warn!(
                             "mesh {id} fetch failed; scheduling retry {}/{} in {:.1}s",
                             state.attempts,
-                            crate::asset_retry::MAX_RETRY_ATTEMPTS,
+                            sl_viewer_platform::asset_retry::MAX_RETRY_ATTEMPTS,
                             state.next_at - now
                         );
                         let _prev = manager.retry.insert(id, (priority, state));
@@ -762,7 +762,7 @@ pub fn poll_meshes(
                     _exhausted_or_unknown => {
                         warn!(
                             "mesh {id} fetch failed; gave up after {} attempts",
-                            crate::asset_retry::MAX_RETRY_ATTEMPTS
+                            sl_viewer_platform::asset_retry::MAX_RETRY_ATTEMPTS
                         );
                         let _cleared = manager.retry.remove(&id);
                         decoded.write(MeshDecoded(id));

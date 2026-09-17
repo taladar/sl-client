@@ -58,16 +58,16 @@ use crate::edit_tool::{
     spawn_row_label,
 };
 use crate::i18n::{Translated, Translator};
+use crate::intents::{GroupPicked, OpenGroupPicker};
+use crate::social::GroupsModel;
 use crate::ui::{UiPanelShown, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_text::set_editor_text;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, TextInputValue, spawn_text_input};
 use crate::world_api::AvatarState;
 use crate::world_api::EditToolState;
-use crate::world_api::GroupsModel;
 use crate::world_api::ObjectState;
 use crate::world_api::SelectionSet;
-use crate::world_api::{GroupPicked, OpenGroupPicker};
 
 // ---------------------------------------------------------------------------
 // Wire constants (the reference's `llprimitive.cpp` limits, SL variants).

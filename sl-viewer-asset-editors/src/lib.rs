@@ -20,6 +20,7 @@
 
 // Lower crates re-aliased under their original module names, so these
 // modules keep addressing them as `crate::ui` and `crate::inventory`.
+pub(crate) use sl_viewer_intents as intents;
 pub(crate) use sl_viewer_inventory::inventory;
 pub(crate) use sl_viewer_inventory::inventory_actions;
 pub(crate) use sl_viewer_inventory::inventory_properties;

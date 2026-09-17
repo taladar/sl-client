@@ -6,8 +6,11 @@
 //! ties a login to a rendered region. It sits above both the object layer
 //! (`sl-viewer-world-objects`) and the scene layer (`sl-viewer-world-scene`).
 //!
-//! The modules keep the names they had inside the viewer, so a call site reads
-//! the same after the move as before it.
+//! Every reach into a lower crate names that crate: a call site says
+//! `sl_viewer_kit::coords` or `sl_viewer_world_api::ObjectState`, never a
+//! local-looking `crate::` path. So a file that crosses a crate boundary reads
+//! as one, and a new reach-across has to be written out rather than inherited
+//! from an alias at the top of this file.
 
 #![expect(
     clippy::module_name_repetitions,
@@ -17,24 +20,6 @@
               renaming them would churn every call site in the viewer to satisfy \
               a style rule this codebase does not follow"
 )]
-
-// Lower crates re-aliased under their original module names, so this crate's
-// modules keep addressing them as `crate::coords`, `crate::settings` and so
-// on rather than gaining a rename in every file.
-pub(crate) use sl_viewer_kit::avatar_assets;
-pub(crate) use sl_viewer_kit::coords;
-pub(crate) use sl_viewer_kit::face_material;
-pub(crate) use sl_viewer_kit::raycast_index;
-pub(crate) use sl_viewer_media::browser_widget;
-pub(crate) use sl_viewer_media::media_engine;
-pub(crate) use sl_viewer_media::media_keys;
-pub(crate) use sl_viewer_settings as settings;
-pub(crate) use sl_viewer_spacenav as spacenav;
-pub(crate) use sl_viewer_world_api as world_api;
-pub(crate) use sl_viewer_world_avatar::avatars;
-pub(crate) use sl_viewer_world_objects::meshes;
-pub(crate) use sl_viewer_world_objects::objects;
-pub(crate) use sl_viewer_world_scene::water;
 
 pub mod arrival;
 pub mod camera;

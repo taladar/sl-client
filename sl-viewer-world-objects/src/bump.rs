@@ -10,7 +10,7 @@
 //!   ignoring scene lighting). Maps exactly onto [`StandardMaterial::unlit`].
 //! * **Glow** (0..1) — the face emits into the reference viewer's glow buffer and
 //!   blooms. Handled by the faithful glow pass (`sl_viewer_world_scene::glow`): the glow scalar is
-//!   carried on the face material's [`SlFaceExt`](crate::face_material::SlFaceExt)
+//!   carried on the face material's [`SlFaceExt`](sl_viewer_kit::face_material::SlFaceExt)
 //!   extension and written into the scene alpha (the per-face glow mask), which
 //!   `sl_viewer_world_scene::glow` extracts, blurs, and adds back — the port of the reference
 //!   `RenderGlow` pipeline. So `apply_surface_flags` does **not** touch it (it is
@@ -51,15 +51,15 @@ use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;
 
-use crate::world_api::DecodedTextures;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{DecodedTexture, Priority, TextureFace, TextureKey, Uuid};
+use sl_viewer_world_api::DecodedTextures;
 
-use crate::face_material::FaceMaterial;
 use crate::materials::ObjectRenderMaterials;
 use crate::objects::{FaceTextureDebug, PrimFaceEntity};
 use crate::textures::{DerivedImage, TextureApplyBudget, TextureManager, refresh_derived_images};
-use crate::world_api::TERRAIN_BOOST_PRIORITY;
+use sl_viewer_kit::face_material::FaceMaterial;
+use sl_viewer_world_api::TERRAIN_BOOST_PRIORITY;
 
 /// The reference viewer's `SHININESS_TO_ALPHA` table (`llface.cpp`): the
 /// environment-reflection intensity for each of the four shiny levels (none / low
@@ -165,7 +165,7 @@ fn reflectance_from_shiny(shiny: u8) -> f32 {
 /// [`StandardMaterial`] being built for it. Bump is handled separately (it needs the
 /// decoded diffuse) by [`register_bump_faces`] / [`apply_bump_normals`], and **glow**
 /// is handled by the faithful glow pass (`sl_viewer_world_scene::glow`): the face's glow scalar is
-/// carried on the [`SlFaceExt`](crate::face_material::SlFaceExt) extension and
+/// carried on the [`SlFaceExt`](sl_viewer_kit::face_material::SlFaceExt) extension and
 /// written into the scene alpha (the glow mask) by `face_material.wgsl`, so it is not
 /// set here. A face with none of these flags set is left untouched.
 pub fn apply_surface_flags(material: &mut StandardMaterial, face: &TextureFace) {

@@ -49,13 +49,15 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 use sl_client_bevy::SlIdentity;
 
-use crate::avatar_assets::BodyRegion;
 use crate::avatars::{AttachmentPointNode, AvatarBodyPart};
-use crate::objects::WornPickTarget;
-use crate::probe_layers::{dynamic_probe_only_render_layers, dynamic_shadow_only_render_layers};
-use crate::world_api::{
+use sl_viewer_kit::avatar_assets::BodyRegion;
+use sl_viewer_kit::probe_layers::{
+    dynamic_probe_only_render_layers, dynamic_shadow_only_render_layers,
+};
+use sl_viewer_world_api::{
     AvatarPickTarget, AvatarState, CameraMode, FirstPersonAvatarVisible, ObjectState,
 };
+use sl_viewer_world_objects::objects::WornPickTarget;
 
 /// How much of the own avatar the current camera mode draws.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -237,8 +239,8 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::{FirstPersonLayers, OwnAvatarView};
-    use crate::avatar_assets::BodyRegion;
-    use crate::world_api::{CameraMode, FirstPersonAvatarVisible};
+    use sl_viewer_kit::avatar_assets::BodyRegion;
+    use sl_viewer_world_api::{CameraMode, FirstPersonAvatarVisible};
 
     /// Only mouselook changes what is drawn, and the setting decides between
     /// losing the head and losing everything.

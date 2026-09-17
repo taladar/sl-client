@@ -21,7 +21,9 @@ bevy_flair = { version = "0.8.0" }
 sl-client-bevy = { workspace = true, features = [
   "bevy_pbr",
 ] }
+sl-viewer-intents = { workspace = true }
 sl-viewer-inventory = { workspace = true }
+sl-viewer-social = { workspace = true }
 sl-viewer-ui-core = { workspace = true }
 sl-viewer-ui-widgets = { workspace = true }
 sl-viewer-world-api = { workspace = true }

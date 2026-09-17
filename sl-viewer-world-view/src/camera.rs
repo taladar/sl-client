@@ -27,7 +27,7 @@
 //!   grabs the pointer in this mode and nowhere else).
 //! - **Flycam** ([`CameraMode::Flycam`]) is the free 6-DOF spectator camera, the
 //!   promotion of the old debug fly-camera. It is what the SpaceNavigator
-//!   ([`crate::spacenav`]) drives, and what the "Stop flycam" button leaves.
+//!   ([`sl_viewer_spacenav`]) drives, and what the "Stop flycam" button leaves.
 //!
 //! # Two reference bugs deliberately not reproduced
 //!
@@ -50,25 +50,25 @@
 //! `indra/newview/lltoolfocus.cpp` (alt-zoom), `indra/newview/llviewerjoystick`
 //! (the flycam).
 
-use crate::raycast_index::{DynamicColliders, StaticRaycastIndex};
 use bevy::diagnostic::{Diagnostic, DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
 use bevy::window::{CursorIcon, PrimaryWindow, SystemCursorIcon};
+use sl_viewer_kit::raycast_index::{DynamicColliders, StaticRaycastIndex};
 
-use crate::avatars::{SeatChainQuery, seat_world_transform};
-use crate::coords::{bevy_to_sl_vec, sl_to_bevy_vec};
 use crate::input_action::{Action, InputMode};
-use crate::spacenav::{FlycamAxisSettings, SpacenavInput};
-use crate::water::WaterCell;
-use crate::world_api::AvatarState;
-use crate::world_api::InputContext;
-use crate::world_api::rlv::RlvExtFacts;
-use crate::world_api::{
+use sl_client_bevy::{SlIdentity, Vector};
+use sl_viewer_kit::coords::{bevy_to_sl_vec, sl_to_bevy_vec};
+use sl_viewer_spacenav::{FlycamAxisSettings, SpacenavInput};
+use sl_viewer_world_api::AvatarState;
+use sl_viewer_world_api::InputContext;
+use sl_viewer_world_api::rlv::RlvExtFacts;
+use sl_viewer_world_api::{
     AvatarMotion, CameraMode, CameraRig, MAX_DISTANCE, MAX_PITCH, MOUSELOOK_CROSS_DISTANCE,
     ToggleFlycam, ViewerCamera,
 };
-use sl_client_bevy::{SlIdentity, Vector};
+use sl_viewer_world_avatar::avatars::{SeatChainQuery, seat_world_transform};
+use sl_viewer_world_scene::water::WaterCell;
 
 /// The agent-frame focus offset (forward, left, up metres) used only as the
 /// **fallback** third-person focus for a placeholder-sphere avatar with no head
@@ -137,7 +137,7 @@ const COLLISION_PADDING: f32 = 0.2;
 
 /// The user-tunable camera parameters, refreshed every frame from the typed
 /// settings store by the camera & movement preferences tab
-/// (`crate::preferences_camera_move`). The defaults reproduce the module
+/// (`sl_viewer_preferences::preferences_camera_move`). The defaults reproduce the module
 /// constants exactly, so a run without a settings store (the gallery, headless
 /// tests) behaves as it always did.
 #[derive(Resource, Debug, Clone, PartialEq)]
@@ -456,11 +456,11 @@ impl Plugin for CameraPlugin {
                     // movement-resets-focus branch applies in every mode.
                     orbit_third_person
                         .run_if(resource_equals(CameraMode::ThirdPerson))
-                        .in_set(crate::world_api::WorldPhase::CameraOrbited),
+                        .in_set(sl_viewer_world_api::WorldPhase::CameraOrbited),
                     aim_look.run_if(resource_equals(CameraMode::Mouselook)),
                     focus_on_object,
                     drive_flycam.run_if(resource_equals(CameraMode::Flycam)),
-                    position_camera.in_set(crate::world_api::WorldPhase::CameraPositioned),
+                    position_camera.in_set(sl_viewer_world_api::WorldPhase::CameraPositioned),
                 )
                     .chain()
                     // Run after the avatar dead-reckoner so `position_camera` reads
@@ -479,7 +479,7 @@ impl Plugin for CameraPlugin {
             // module's business.
             app.add_systems(
                 Update,
-                dump_camera_pose.after(crate::world_api::WorldPhase::CameraPositioned),
+                dump_camera_pose.after(sl_viewer_world_api::WorldPhase::CameraPositioned),
             );
         }
     }
@@ -715,7 +715,8 @@ pub(crate) fn orbit_third_person(
     // list does not leave the world context, and without this the wheel would
     // both scroll the list and zoom the camera. The wheel-zoom preference gates
     // only the wheel: an alt-drag zoom still works with it off.
-    let over_ui = crate::world_api::pointer_over_blocking_ui(&hover_map, &pickables, &node_sizes);
+    let over_ui =
+        sl_viewer_world_api::pointer_over_blocking_ui(&hover_map, &pickables, &node_sizes);
     let scroll = if over_ui || tuning.wheel_zoom_disabled {
         0.0
     } else {
@@ -1131,7 +1132,7 @@ pub(crate) fn position_camera(
     camera_state: (Res<CameraMode>, Res<FocusTarget>, Res<CameraTuning>),
     identity: Res<SlIdentity>,
     avatars: Res<AvatarState>,
-    objects: Res<crate::world_api::ObjectState>,
+    objects: Res<sl_viewer_world_api::ObjectState>,
     sit_camera: Res<crate::sit_camera::SitCamera>,
     time: Res<Time>,
     globals: AvatarPoseQuery,
@@ -1143,7 +1144,10 @@ pub(crate) fn position_camera(
     // the follow tracks the held heading, the report is the fallback until it is
     // seeded (see [`own_avatar_pose`]). One tuple, since this system is at Bevy's
     // parameter limit.
-    facing: (Query<&AvatarMotion>, Res<crate::world_api::AvatarControls>),
+    facing: (
+        Query<&AvatarMotion>,
+        Res<sl_viewer_world_api::AvatarControls>,
+    ),
     // The own avatar's mesh sub-hierarchy, so the collision ray can ignore the
     // agent's own body (see [`collide_camera`]).
     children: Query<&Children>,
@@ -1524,7 +1528,7 @@ fn collide_camera(
 /// facing. `None` until the avatar has spawned.
 ///
 /// The facing is the **heading** the viewer holds for the avatar
-/// ([`AvatarControls::held_heading`](crate::world_api::AvatarControls::held_heading)),
+/// ([`AvatarControls::held_heading`](sl_viewer_world_api::AvatarControls::held_heading)),
 /// the same one its body is drawn facing, and until that is seeded the avatar's
 /// reported heading ([`AvatarMotion::yaw`]). Never a skeleton joint's rotation:
 /// the chest / upper-body joints sway with the idle animation, and following that
@@ -1537,7 +1541,7 @@ fn own_avatar_pose(
     avatars: &AvatarState,
     transforms: &AvatarTransformQuery,
     motions: &Query<&AvatarMotion>,
-    controls: &crate::world_api::AvatarControls,
+    controls: &sl_viewer_world_api::AvatarControls,
 ) -> Option<(Vec3, Vec3)> {
     let agent = identity.agent_id?;
     let anchor = avatars.body_root_of(agent)?;
@@ -1582,7 +1586,7 @@ fn own_avatar_pose(
 /// ([[viewer-physical-object-motion-not-smooth]]).
 fn sit_camera_pose(
     sit_camera: &crate::sit_camera::SitCamera,
-    objects: &crate::world_api::ObjectState,
+    objects: &sl_viewer_world_api::ObjectState,
     chain: &SeatChainQuery,
 ) -> Option<(Vec3, Vec3)> {
     let (seat, eye_offset, at_offset) = sit_camera.offsets()?;
@@ -1635,8 +1639,8 @@ fn sl_heading_from_bevy_forward(forward: Vec3) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::{facing_from_yaw, flatten, sl_heading_from_bevy_forward, third_person_eye};
-    use crate::world_api::{CAMERA_OFFSET, CameraRig};
     use bevy::math::Vec3;
+    use sl_viewer_world_api::{CAMERA_OFFSET, CameraRig};
 
     /// Every resource the plugin's own systems read is registered by the plugin.
     ///
@@ -2228,11 +2232,11 @@ mod tests {
         use super::{
             CameraAim, CameraMode, CameraTuning, FocusTarget, ViewerCamera, position_camera,
         };
-        use crate::raycast_index::{DynamicColliders, StaticRaycastIndex};
-        use crate::world_api::{AvatarState, ObjectState};
         use bevy::prelude::*;
         use pretty_assertions::assert_eq;
         use sl_client_bevy::SlIdentity;
+        use sl_viewer_kit::raycast_index::{DynamicColliders, StaticRaycastIndex};
+        use sl_viewer_world_api::{AvatarState, ObjectState};
         use std::time::Duration;
 
         /// How many frames marked the camera's `Transform` as changed.
@@ -2260,7 +2264,7 @@ mod tests {
             .init_resource::<StaticRaycastIndex>()
             .init_resource::<DynamicColliders>()
             .init_resource::<CameraAim>()
-            .init_resource::<crate::world_api::AvatarControls>()
+            .init_resource::<sl_viewer_world_api::AvatarControls>()
             .init_resource::<Writes>()
             .add_systems(Update, (position_camera, count_writes).chain());
         // A non-zero eye offset from the focus point, so the look direction is

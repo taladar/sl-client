@@ -59,8 +59,8 @@ use bevy::window::PrimaryWindow;
 
 use sl_client_bevy::{AgentKey, SlIdentity};
 
-use crate::ui_font::UiFont;
-use crate::world_api::{AvatarAnchor, AvatarPickTarget};
+use sl_viewer_ui_core::ui_font::UiFont;
+use sl_viewer_world_api::{AvatarAnchor, AvatarPickTarget};
 
 /// The internal handle the name-tag shader (`name_tag.wgsl`) is loaded under,
 /// so the material can reference it without an on-disk asset path.
@@ -572,7 +572,7 @@ pub(crate) fn layout_tag_text(
     mut reprocess_queue: Local<EntityHashSet>,
     mut textures: ResMut<Assets<Image>>,
     fonts: Res<Assets<bevy::text::Font>>,
-    cameras: Query<&Camera, With<crate::world_api::ViewerCamera>>,
+    cameras: Query<&Camera, With<sl_viewer_world_api::ViewerCamera>>,
     mut font_atlas_set: ResMut<FontAtlasSet>,
     mut text_pipeline: ResMut<TextPipeline>,
     mut blocks: Query<(
@@ -1323,7 +1323,7 @@ pub(crate) fn build_tag_meshes(
               equality is the correct change test"
 )]
 pub(crate) fn apply_name_tag_settings(
-    settings: Option<Res<crate::settings::ViewerSettings>>,
+    settings: Option<Res<sl_viewer_settings::ViewerSettings>>,
     mut registry: ResMut<NameTagMaterials>,
     mut materials: ResMut<Assets<NameTagMaterial>>,
     mut layouts: Query<&mut TextLayoutInfo, With<TagText>>,
@@ -1502,7 +1502,7 @@ fn tag_page_render_bundle(mesh: Handle<Mesh>, material: Handle<NameTagMaterial>)
 )]
 pub(crate) fn follow_tag_anchors(
     time: Res<Time>,
-    cameras: Query<(&Camera, &GlobalTransform), With<crate::world_api::ViewerCamera>>,
+    cameras: Query<(&Camera, &GlobalTransform), With<sl_viewer_world_api::ViewerCamera>>,
     anchors: Query<&Transform, (With<AvatarAnchor>, Without<NameTag>)>,
     mut tags: Query<
         (
@@ -1517,7 +1517,7 @@ pub(crate) fn follow_tag_anchors(
         Without<AvatarAnchor>,
     >,
     registry: Option<Res<NameTagMaterials>>,
-    settings: Option<Res<crate::settings::ViewerSettings>>,
+    settings: Option<Res<sl_viewer_settings::ViewerSettings>>,
     identity: Option<Res<SlIdentity>>,
 ) {
     let Ok((camera, camera_transform)) = cameras.single() else {
@@ -1776,7 +1776,7 @@ pub(crate) fn solve_overlap_offsets(tags: &[(Rect, f32)]) -> Vec<Vec2> {
 pub(crate) fn solve_tag_overlap(
     time: Res<Time>,
     mut last_camera: Local<Option<Vec3>>,
-    cameras: Query<(&Camera, &GlobalTransform), With<crate::world_api::ViewerCamera>>,
+    cameras: Query<(&Camera, &GlobalTransform), With<sl_viewer_world_api::ViewerCamera>>,
     mut tags: Query<
         (
             &AvatarPickTarget,
@@ -2007,7 +2007,7 @@ impl Plugin for NameTagBillboardPlugin {
 /// cameras (layers 4/5/6) and the HUD camera (layer 1) must never see tags.
 #[must_use]
 pub const fn tag_render_layers() -> RenderLayers {
-    RenderLayers::layer(crate::probe_layers::MAIN_LAYER)
+    RenderLayers::layer(sl_viewer_kit::probe_layers::MAIN_LAYER)
 }
 
 #[cfg(test)]
@@ -2398,7 +2398,7 @@ mod tests {
         // looking down -Z with a symmetric orthographic clip sized to the
         // window.
         app.world_mut().spawn((
-            crate::world_api::ViewerCamera,
+            sl_viewer_world_api::ViewerCamera,
             Camera {
                 computed: bevy::camera::ComputedCameraValues {
                     clip_from_view: Mat4::orthographic_rh(-640.0, 640.0, -360.0, 360.0, 0.1, 100.0),
@@ -2433,7 +2433,7 @@ mod tests {
         let anchor = app
             .world_mut()
             .spawn((
-                crate::world_api::AvatarAnchor,
+                sl_viewer_world_api::AvatarAnchor,
                 Transform::from_translation(anchor_at),
             ))
             .id();
@@ -2444,7 +2444,7 @@ mod tests {
                     anchor,
                     tag_height: 0.3,
                 },
-                crate::world_api::AvatarPickTarget::new(agent),
+                sl_viewer_world_api::AvatarPickTarget::new(agent),
             ))
             .id()
     }
@@ -2498,9 +2498,9 @@ mod tests {
     /// own-tag toggle hides only the logged-in avatar's.
     #[test]
     fn preference_toggles_gate_tags() {
-        use crate::settings::ViewerSettings;
         use sl_client_bevy::{SlIdentity, Uuid};
         use sl_settings::{Scope, SettingValue, SettingsStore};
+        use sl_viewer_settings::ViewerSettings;
 
         let own: sl_client_bevy::AgentKey = Uuid::from_u128(7).into();
         let other: sl_client_bevy::AgentKey = Uuid::from_u128(9).into();

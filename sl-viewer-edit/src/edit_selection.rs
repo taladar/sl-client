@@ -63,6 +63,7 @@ use sl_client_bevy::{
 use crate::edit_math::rect_selects;
 use crate::face_material::{FaceMaterial, inert_face_material};
 use crate::gizmos::GizmoInteraction;
+use crate::intents::DragHoverHighlight;
 use crate::inventory::InventoryModel;
 use crate::objects::ObjectPicker;
 use crate::objects::{
@@ -75,7 +76,7 @@ use crate::world_api::SkinPoseTwin;
 use crate::world_api::ViewerCamera;
 use crate::world_api::on_hud_layer;
 use crate::world_api::pointer_over_blocking_ui;
-use crate::world_api::{DragHoverHighlight, EditTool, EditToolState};
+use crate::world_api::{EditTool, EditToolState};
 use crate::world_api::{SelectedNode, SelectionSet};
 
 /// How far (logical pixels) the cursor may wander between press and release
@@ -2168,7 +2169,7 @@ mod tests {
     fn a_drag_hover_target_outlines_the_object() {
         use bevy::prelude::*;
 
-        use crate::world_api::{DragHover, DragHoverHighlight};
+        use crate::intents::{DragHover, DragHoverHighlight};
 
         let (mut app, root, face) = face_app(false, ObjectCategory::Prim);
         app.add_systems(bevy::app::Update, super::apply_drag_hover_highlight);

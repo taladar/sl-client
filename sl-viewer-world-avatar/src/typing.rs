@@ -45,14 +45,14 @@
 //! — the UI-sound bus (`viewer-ui-sound-effects`) closed the gap this module used
 //! to record.
 
-pub use crate::world_api::TypingState;
+pub use sl_viewer_world_api::TypingState;
 
 use bevy::prelude::*;
 use sl_client_bevy::{AnimationKey, AssetKey, Command, SlCommand, SlIdentity};
 
 use crate::animations::{AnimationManager, AnimationPlayback};
-use crate::ui_sounds::{PlayUiSound, UiSound};
-use crate::world_api::AvatarState;
+use sl_viewer_ui_core::ui_sounds::{PlayUiSound, UiSound};
+use sl_viewer_world_api::AvatarState;
 
 /// The short name of the built-in `ANIM_AGENT_TYPE` animation in the [`sl_anim`]
 /// registry — the hands-on-keyboard gesture played and requested while typing.
@@ -64,7 +64,7 @@ const TYPE_ANIMATION: &str = "type";
 /// the typing) and a `StartTyping` / `StopTyping` `ChatFromViewer` (the "is typing"
 /// indicator) — while also playing the animation locally for immediate own-avatar
 /// feedback. The state itself is set by the nearby-chat bar
-/// (`crate::nearby_chat_bar`); this reconciles the edge from it.
+/// (`sl_viewer_chat::nearby_chat_bar`); this reconciles the edge from it.
 ///
 /// The wire signals are sent regardless of the own avatar's render state, since
 /// they are what let *other* clients see the typing; the local play is gated on the

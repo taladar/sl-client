@@ -1,9 +1,9 @@
 //! Avatar-state **replay** runtime (viewer-avatar-state-dump-replay): render a
 //! captured avatar bundle offline, with no grid.
 //!
-//! Given a bundle directory (`--replay <dir>`), `crate::run` points the asset
+//! Given a bundle directory (`--replay <dir>`), `sl_client_bevy_viewer::run` points the asset
 //! stores at the bundle's drop-in `cache/` (via
-//! [`crate::paths::set_replay_cache_root`]) and runs the *normal* viewer app with
+//! [`sl_viewer_platform::paths::set_replay_cache_root`]) and runs the *normal* viewer app with
 //! [`SlClientPlugin`](sl_client_bevy::SlClientPlugin) in **offline** mode, plus
 //! the systems here. `inject_replay_bundle` then, once, feeds the session the
 //! captured events — a synthetic [`SlCapabilities`] (so the cap-gated asset
@@ -48,8 +48,8 @@ impl Plugin for AvatarReplayPlugin {
     }
 }
 
-use crate::world_api::AvatarState;
-use crate::world_api::ObjectReflectionProbe;
+use sl_viewer_world_api::AvatarState;
+use sl_viewer_world_api::ObjectReflectionProbe;
 
 /// The replay configuration and injection latch: the loaded avatar manifests, the
 /// primary avatar the test rig centres on, and which rig extras to spawn.
@@ -95,7 +95,9 @@ impl ReplayConfig {
             .manifests
             .iter()
             .find_map(ReplayManifest::avatar_object)?;
-        Some(crate::coords::sl_to_bevy_vec(&object.motion.position))
+        Some(sl_viewer_kit::coords::sl_to_bevy_vec(
+            &object.motion.position,
+        ))
     }
 }
 

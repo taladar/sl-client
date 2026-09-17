@@ -26,8 +26,10 @@ use sl_client_bevy::{ExperienceInfo, ExperienceKey, ExperienceSearchPage, OwnerK
 
 use crate::experience_profile::maturity_key;
 use crate::i18n::Translator;
+use crate::intents::ExperiencePickerFilter;
+use crate::social::GroupsModel;
 use crate::ui_table::{TableAlign, TableColumn, TableColumnKind, TableColumnWidth};
-use crate::world_api::{AvatarState, ExperiencePickerFilter, GroupsModel};
+use crate::world_api::AvatarState;
 
 /// How many leading hex characters of an experience id stand in for its name
 /// while the name is still resolving.

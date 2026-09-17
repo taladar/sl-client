@@ -48,7 +48,7 @@
 //!   through `GetDisplayNames` instead, as the reference does — pasting a key
 //!   is a normal way to name someone. A search that matches nobody says so
 //!   rather than leaving a blank list.
-//! - **Friends** — the held friends roster ([`crate::world_api::FriendsModel`]).
+//! - **Friends** — the held friends roster ([`crate::social::FriendsModel`]).
 //! - **Near Me** — the avatars this viewer currently knows in-world
 //!   ([`crate::world_api::AvatarState`]), sorted by distance from the own
 //!   avatar (the reference's radius slider is folded into the sort — the
@@ -70,11 +70,12 @@ use crate::floater::{
     FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater, picker_identity,
 };
 use crate::i18n::Translated;
+use crate::intents::{AvatarPicked, OpenAvatarPicker, PickedAvatar};
+use crate::social::FriendsModel;
 use crate::ui::{UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab_strip};
 use crate::world_api::AvatarState;
-use crate::world_api::{AvatarPicked, FriendsModel, OpenAvatarPicker, PickedAvatar};
 
 /// The floater's [`crate::floater::FloaterSpec::id`].
 const PICKER_FLOATER_ID: &str = "avatar-picker";

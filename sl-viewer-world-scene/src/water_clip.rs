@@ -56,9 +56,9 @@ use bevy::render::{Extract, RenderApp};
 use sl_viewer_world_objects::material_cache::SharedFaceMaterial;
 use sl_viewer_world_objects::objects::PrimFaceEntity;
 
-use crate::face_material::FaceMaterial;
 use crate::water::{DEFAULT_WATER_HEIGHT, WaterLevel};
-use crate::world_api::SkinPoseTwin;
+use sl_viewer_kit::face_material::FaceMaterial;
+use sl_viewer_world_api::SkinPoseTwin;
 
 /// The tracing target of the straddling-split diagnostics: which faces were found
 /// to cross the waterline and split in two. Off by default; turn it on with
@@ -380,7 +380,6 @@ mod tests {
     )]
 
     use super::{WaterClipSide, WaterClipTwin, reconcile_water_clip_twins, straddles};
-    use crate::face_material::FaceMaterial;
     use crate::water::WaterLevel;
     use bevy::asset::AssetApp as _;
     use bevy::camera::primitives::Aabb;
@@ -389,6 +388,7 @@ mod tests {
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::PrimFaceId;
+    use sl_viewer_kit::face_material::FaceMaterial;
     use sl_viewer_kit::face_material::inert_face_material;
     use sl_viewer_world_objects::objects::PrimFaceEntity;
 

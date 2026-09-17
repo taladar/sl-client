@@ -69,7 +69,7 @@ use sl_client_bevy::WaterMaterial;
 
 use crate::transparency::PreWaterPass;
 use crate::water::WaterState;
-use crate::world_api::ViewerCamera;
+use sl_viewer_world_api::ViewerCamera;
 
 /// The sample count of the scene-depth copy. It must equal the main view's, or the
 /// copy is refused — and the main view's is pinned to 4× by
@@ -270,7 +270,7 @@ mod tests {
         placeholder_scene_depth_image, scene_depth_image, size_water_scene_depth,
     };
     use crate::water::WaterState;
-    use crate::world_api::ViewerCamera;
+    use sl_viewer_world_api::ViewerCamera;
 
     /// The copy destination must match the view depth texture Bevy renders into,
     /// or `copy_texture_to_texture` refuses it: same format, same sample count,
@@ -309,7 +309,7 @@ mod tests {
     }
 
     /// Build an app with the shared water material wearing the `1×1` placeholder
-    /// and a [`ViewerCamera`](crate::world_api::ViewerCamera) whose render target
+    /// and a [`ViewerCamera`](sl_viewer_world_api::ViewerCamera) whose render target
     /// measures `size`, with the sizing system scheduled. Returns the app and the
     /// water material handle.
     ///

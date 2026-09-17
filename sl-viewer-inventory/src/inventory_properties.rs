@@ -1052,21 +1052,21 @@ fn open_previews(
     mut opens: MessageReader<OpenItemPreview>,
     mut floaters: KeyedFloaters,
     mut commands: Commands,
-    mut notecard_opens: MessageWriter<crate::world_api::OpenNotecard>,
-    mut script_opens: MessageWriter<crate::world_api::OpenScript>,
+    mut notecard_opens: MessageWriter<crate::intents::OpenNotecard>,
+    mut script_opens: MessageWriter<crate::intents::OpenScript>,
     mut landmark_opens: MessageWriter<crate::inventory::OpenAboutLandmark>,
-    mut settings_opens: MessageWriter<crate::world_api::OpenSettingsEditor>,
+    mut settings_opens: MessageWriter<crate::intents::OpenSettingsEditor>,
 ) {
     for open in opens.read() {
         let item = &open.item;
         match item.inv_type {
             InventoryType::Notecard => {
                 // The notecard editor floater owns this type (read / edit / save).
-                notecard_opens.write(crate::world_api::OpenNotecard {
+                notecard_opens.write(crate::intents::OpenNotecard {
                     name: item.name.clone(),
                     asset_id: item.asset_id,
                     editable: item.permissions.owner.contains(Permissions::MODIFY),
-                    source: crate::world_api::NotecardSource::Agent {
+                    source: crate::intents::NotecardSource::Agent {
                         item_id: item.item_id,
                     },
                 });
@@ -1074,14 +1074,14 @@ fn open_previews(
             InventoryType::Script => {
                 // The script editor floater owns this type (read / edit / save →
                 // compile). The compile backend follows the item's language flag.
-                script_opens.write(crate::world_api::OpenScript {
+                script_opens.write(crate::intents::OpenScript {
                     name: item.name.clone(),
                     asset_id: item.asset_id,
                     editable: item.permissions.owner.contains(Permissions::MODIFY),
-                    source: crate::world_api::ScriptSource::Agent {
+                    source: crate::intents::ScriptSource::Agent {
                         item_id: item.item_id,
                     },
-                    target: crate::world_api::target_for(
+                    target: crate::intents::target_for(
                         sl_client_bevy::ScriptLanguage::from_item_flags(item.flags),
                     ),
                 });
@@ -1141,7 +1141,7 @@ fn open_previews(
                     );
                     continue;
                 };
-                settings_opens.write(crate::world_api::OpenSettingsEditor {
+                settings_opens.write(crate::intents::OpenSettingsEditor {
                     name: item.name.clone(),
                     asset_id: item.asset_id,
                     item_id: item.item_id,
@@ -1361,10 +1361,10 @@ mod tests {
             // notecards, scripts, landmarks and settings each open in their own
             // floater, in a crate this one does not pull in for a test.
             .add_message::<crate::world_api::BoostTexture>()
-            .add_message::<crate::world_api::OpenNotecard>()
-            .add_message::<crate::world_api::OpenScript>()
+            .add_message::<crate::intents::OpenNotecard>()
+            .add_message::<crate::intents::OpenScript>()
             .add_message::<crate::inventory::OpenAboutLandmark>()
-            .add_message::<crate::world_api::OpenSettingsEditor>()
+            .add_message::<crate::intents::OpenSettingsEditor>()
             .init_resource::<crate::world_api::DecodedTextures>()
             .init_resource::<Assets<Image>>()
             .add_plugins((

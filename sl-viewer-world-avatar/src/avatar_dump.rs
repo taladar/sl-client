@@ -9,7 +9,7 @@
 //! reproduced (and a fix tested) after the avatar has logged out or changed.
 //!
 //! Opt-in and non-interfering: the capture store and its systems are only added
-//! when `SL_VIEWER_DUMP_DIR` is set (see `crate::run`), so a normal session
+//! when `SL_VIEWER_DUMP_DIR` is set (see `sl_client_bevy_viewer::run`), so a normal session
 //! pays nothing. The heavy geometry/textures/animations are copied from the
 //! viewer's own caches, keyed by the ids in the captured events.
 

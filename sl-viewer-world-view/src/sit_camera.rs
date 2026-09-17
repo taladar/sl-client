@@ -41,7 +41,7 @@ use bevy::prelude::*;
 use sl_client_bevy::{ObjectKey, SlAgentParcel, SlEvent, SlIdentity, SlSessionEvent};
 
 use crate::camera::FocusTarget;
-use crate::world_api::{AvatarState, CameraMode, CameraRig, ViewerCamera};
+use sl_viewer_world_api::{AvatarState, CameraMode, CameraRig, ViewerCamera};
 
 /// The squared distance (metres²) the eye and at offsets must differ by for a sit
 /// camera to count as "set" — the reference's `CAMERA_POSITION_THRESHOLD_SQUARED`
@@ -289,7 +289,7 @@ mod tests {
 
     use super::{SitCamera, clear_sit_camera_on_stand, engage_sit_camera, ingest_sit_result};
     use crate::camera::FocusTarget;
-    use crate::world_api::{AvatarState, CameraMode, CameraRig, SeatedTarget, ViewerCamera};
+    use sl_viewer_world_api::{AvatarState, CameraMode, CameraRig, SeatedTarget, ViewerCamera};
 
     /// The logged-in agent every test sits (and stands) with.
     fn agent() -> AgentKey {

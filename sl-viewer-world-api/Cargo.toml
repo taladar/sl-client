@@ -1,6 +1,6 @@
 [package]
 name = "sl-viewer-world-api"
-description = "The Second Life / OpenSim viewer's shared world state: the selection, edit modes, mute list, buddy list, group memberships, presence and map tracking every feature surface reads"
+description = "The Second Life / OpenSim viewer's shared world state: the selection, the edit modes, the object graph, the camera, the terrain and the frame-ordering phases every layer of the world reads"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true

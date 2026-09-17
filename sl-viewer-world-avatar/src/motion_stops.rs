@@ -24,7 +24,7 @@ use bevy::prelude::*;
 use sl_client_bevy::{AnimationKey, Command, ControlFlags, SlCommand, SlIdentity, Uuid};
 
 use crate::animations::{AnimationManager, AnimationPlayback, RunOut};
-use crate::world_api::AvatarControls;
+use sl_viewer_world_api::AvatarControls;
 
 /// The built-ins the simulator holds the avatar still for until the viewer
 /// reports them finished, by their [`sl_anim`] registry names:

@@ -22,9 +22,10 @@ These rewrite files every agent touches, and they are not 5–10 small commits, 
 running one during a parallel round invalidates the other branches wholesale.
 They also *create* the separation the later rounds rely on.
 
-1. `viewer-audit-world-api-split` — `sl-viewer-world-api` is a ~7,900-line
-   god-module with 14 dependent crates. The biggest unblocker: afterwards each
-   agent edits its own module instead of queueing on one file.
+1. ~~`viewer-audit-world-api-split`~~ — **done**. `sl-viewer-world-api` is now
+   nine modules, and the social / intent half has left it for the new
+   `sl-viewer-social` and `sl-viewer-intents` crates. Each agent edits its own
+   module instead of queueing on one file.
 2. `viewer-audit-notifications-crate-split` — one ~21,600-line file that every
    notification / toast / alert task in every theme edits.
 3. `viewer-audit-binary-module-extraction` — moves ~15k lines out of
@@ -64,7 +65,7 @@ otherwise keep hitting.
 | Agent | Themes (approx. task counts) | Owns |
 | --- | --- | --- |
 | **A — world & render** | render 33, perf 44, avatar/appearance 28, region/parcel/land 28, input 26, camera 9, snapshot 4 (~170) | `sl-viewer-world-scene`, `-world-objects`, `-world-avatar`, `-world-view`, `sl-texture`, `sl-material`, `sl-bake`, `sl-anim`, `sl-terrain`, `sl-viewer-environment`, `sl-viewer-places` |
-| **B — UI shell & social** | UI shell 34, chat/IM/notices 27, inventory 22, people/groups 12, map/search 7, i18n 7, misc shell 19 (~128) | the viewer binary's UI (`menu_bar.rs`, `floaters.rs`, `status_bar.rs`, `bottom_toolbar.rs`), `sl-viewer-ui-*`, `-preferences`, `-settings`, `-chat`, `-notices`, `-notifications`, `-people`, `-inventory`, `-map`, `-search` |
+| **B — UI shell & social** | UI shell 34, chat/IM/notices 27, inventory 22, people/groups 12, map/search 7, i18n 7, misc shell 19 (~128) | the viewer binary's UI (`menu_bar.rs`, `floaters.rs`, `status_bar.rs`, `bottom_toolbar.rs`), `sl-viewer-ui-*`, `-preferences`, `-settings`, `-chat`, `-notices`, `-notifications`, `-people`, `-social`, `-intents`, `-inventory`, `-map`, `-search` |
 | **C — tools, protocol & server** | build/edit tools 42, server 21, test/conformance 18, audio/media/voice 12, scripts/LSL 11, protocol 8 (~152) | `sl-viewer-edit`, `sl-wire`, `sl-proto`, `sl-client-tokio`, `sl-fake-grid`, `sl-conformance`, `sl-crosscheck`, `sl-repl*`, `sl-lsl*`, `sl-audio`, `sl-gst`, `sl-cef` |
 
 Why these groupings rather than by feature area:

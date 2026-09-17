@@ -55,7 +55,7 @@
 //!
 //! Nothing here mutates the sets: every button, floater and pick writes a
 //! `RequestContactSet`, so the model's guards decide — the same arrangement the
-//! block list has with [`RequestBlock`](crate::world_api::RequestBlock).
+//! block list has with [`RequestBlock`](crate::intents::RequestBlock).
 //!
 //! Reference (Firestorm, read-only): `fspanelcontactsets`,
 //! `fsfloateraddtocontactset`, `fsfloatercontactsetconfiguration`,
@@ -76,9 +76,14 @@ use crate::contact_sets::{
 };
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::{TransArgs, Translated, Translator};
+use crate::intents::OpenAddToContactSet;
+use crate::intents::OpenAvatarProfile;
+use crate::intents::{AvatarPicked, OpenAvatarPicker};
+use crate::intents::{ConversationKey, OpenConversation};
 use crate::notifications::{NotificationResponse, ShowNotification};
 use crate::people::PeopleUi;
 use crate::settings::ViewerSettings;
+use crate::social::FriendsModel;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, SetComboOptions, spawn_combo};
@@ -91,10 +96,6 @@ use crate::ui_table::{
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
-use crate::world_api::OpenAvatarProfile;
-use crate::world_api::{AvatarPicked, OpenAvatarPicker};
-use crate::world_api::{ConversationKey, OpenConversation};
-use crate::world_api::{FriendsModel, OpenAddToContactSet};
 
 /// The **field** name the panel opens the avatar picker under — which of this
 /// window's pickers it is (see `OpenAvatarPicker::field`).

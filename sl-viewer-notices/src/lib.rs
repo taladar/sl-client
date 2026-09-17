@@ -21,11 +21,13 @@
 
 // Lower crates re-aliased under their original module names, so these
 // modules keep addressing them as `crate::ui` and `crate::settings`.
+pub(crate) use sl_viewer_intents as intents;
 pub(crate) use sl_viewer_kit::parcel_names;
 pub(crate) use sl_viewer_notifications as notifications;
 pub(crate) use sl_viewer_platform::system_browser;
 pub(crate) use sl_viewer_platform::url_linkify;
 pub(crate) use sl_viewer_settings as settings;
+pub(crate) use sl_viewer_social as social;
 pub(crate) use sl_viewer_ui_core::i18n;
 pub(crate) use sl_viewer_ui_core::ui;
 pub(crate) use sl_viewer_ui_core::ui_element;
@@ -114,12 +116,12 @@ mod tests {
             .add_message::<KeyboardInput>()
             .add_message::<ShowNotification>()
             .init_resource::<sl_viewer_world_api::AvatarState>()
-            .init_resource::<sl_viewer_world_api::GroupsModel>()
+            .init_resource::<sl_viewer_social::GroupsModel>()
             .init_resource::<sl_viewer_world_api::AgentRegionPosition>()
             .add_message::<sl_client_bevy::SlCommand>()
             .add_message::<sl_client_bevy::SlEvent>()
-            .add_message::<sl_viewer_world_api::OpenAvatarProfile>()
-            .add_message::<sl_viewer_world_api::OpenGroupProfile>()
+            .add_message::<sl_viewer_intents::OpenAvatarProfile>()
+            .add_message::<sl_viewer_intents::OpenGroupProfile>()
             .add_plugins((
                 FloaterPlugin,
                 VirtualListPlugin,
@@ -175,12 +177,12 @@ mod tests {
             .add_message::<KeyboardInput>()
             .add_message::<ShowNotification>()
             .init_resource::<sl_viewer_world_api::AvatarState>()
-            .init_resource::<sl_viewer_world_api::GroupsModel>()
+            .init_resource::<sl_viewer_social::GroupsModel>()
             .init_resource::<sl_viewer_world_api::AgentRegionPosition>()
             .add_message::<sl_client_bevy::SlCommand>()
             .add_message::<sl_client_bevy::SlEvent>()
-            .add_message::<sl_viewer_world_api::OpenAvatarProfile>()
-            .add_message::<sl_viewer_world_api::OpenGroupProfile>()
+            .add_message::<sl_viewer_intents::OpenAvatarProfile>()
+            .add_message::<sl_viewer_intents::OpenGroupProfile>()
             .add_plugins((
                 FloaterPlugin,
                 VirtualListPlugin,

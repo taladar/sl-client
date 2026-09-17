@@ -74,6 +74,7 @@ use sl_client_bevy::{
 };
 
 use crate::i18n::{TransArgs, Translator};
+use crate::intents::RequestBlock;
 use crate::linkified_text::{LinkTextStyle, spawn_linkified_text};
 use crate::notification_host::{NotificationChannelRoot, ResolveNotification, adopt_toast};
 use crate::notifications::{
@@ -83,7 +84,6 @@ use crate::script_permission::{is_caution, other_permission_keys, recognized_mas
 use crate::ui::{column, row};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
-use crate::world_api::RequestBlock;
 
 /// The catalogue-template sentinel an experience card reports as (it is not a real
 /// [`crate::notifications::NOTIFICATIONS`] entry — the card is bespoke — but the

@@ -38,7 +38,7 @@
 //! surfaces is front is arbitrated by `crate::conversations::StripFocus` so
 //! exactly one pane ever shows. Selecting the People tab takes the strip; the
 //! Friends "IM" action hands it back by opening a one-to-one conversation
-//! ([`crate::world_api::OpenConversation`]).
+//! ([`crate::intents::OpenConversation`]).
 //!
 //! Reference (Firestorm, read-only): `llpanelpeople`, `llavatarlist`,
 //! Vintage `floater_fs_contacts` / `panel_fs_contacts_friends`.
@@ -61,7 +61,12 @@ use sl_settings::SettingValue;
 
 use crate::conversations::{ConversationsUi, StripFocus};
 use crate::i18n::{TransArgs, Translated, Translator};
+use crate::intents::OpenAvatarProfile;
+use crate::intents::RequestBlock;
+use crate::intents::StartConference;
+use crate::intents::{ConversationKey, OpenConversation};
 use crate::settings::{ViewerSettings, load_account_settings};
+use crate::social::{FriendRow, FriendsModel, short_id};
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab_strip};
@@ -70,11 +75,6 @@ use crate::ui_table::{
     TableState, register_table_settings, spawn_table, spawn_table_row,
 };
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
-use crate::world_api::OpenAvatarProfile;
-use crate::world_api::RequestBlock;
-use crate::world_api::StartConference;
-use crate::world_api::{ConversationKey, OpenConversation};
-use crate::world_api::{FriendRow, FriendsModel, short_id};
 
 /// A friend-list row's uniform height, in logical pixels — matched to the
 /// conversation-transcript density so the whole floater reads as one surface.

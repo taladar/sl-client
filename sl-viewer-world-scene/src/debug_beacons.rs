@@ -61,8 +61,9 @@ use bevy::shader::ShaderRef;
 
 use sl_client_bevy::{ObjectKey, RegionHandle, SlIdentity};
 
-use crate::coords::{region_offset_bevy, sl_to_bevy_object_rotation, sl_to_bevy_vec};
-use crate::world_api::{DebugBeacon, DebugBeacons, ObjectState};
+use sl_viewer_kit::coords::{region_offset_bevy, sl_to_bevy_object_rotation, sl_to_bevy_vec};
+use sl_viewer_social::{DebugBeacon, DebugBeacons};
+use sl_viewer_world_api::ObjectState;
 
 /// The internal handle the marker shader (`debug_beacon.wgsl`) is loaded under, so
 /// the material can reference it without an on-disk asset path.

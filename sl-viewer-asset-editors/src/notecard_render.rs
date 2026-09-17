@@ -44,12 +44,12 @@ use sl_client_bevy::{
 };
 
 use crate::edit_notecard::embedded_icon;
+use crate::intents::NotecardSource;
+use crate::intents::OpenAvatarProfile;
 use crate::inventory_properties::OpenItemPreview;
 use crate::linkified_text::LinkTextStyle;
 use crate::notifications::{NotificationResponse, ShowNotification};
 use crate::ui_font::UiFont;
-use crate::world_api::NotecardSource;
-use crate::world_api::OpenAvatarProfile;
 
 /// The catalogue template for the copy-embedded-item confirmation — the
 /// reference `ConfirmItemCopy` alertmodal ("Copy this item to your inventory?").
@@ -319,7 +319,7 @@ fn on_embedded_out(
 #[cfg(test)]
 mod tests {
     use super::{EmbeddedAction, resolve_action};
-    use crate::world_api::NotecardSource;
+    use crate::intents::NotecardSource;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{InventoryKey, Uuid};
 

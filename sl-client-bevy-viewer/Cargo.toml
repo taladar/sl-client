@@ -192,6 +192,7 @@ sl-viewer-audio = { workspace = true }
 sl-viewer-chat = { workspace = true }
 sl-viewer-edit = { workspace = true }
 sl-viewer-environment = { workspace = true }
+sl-viewer-intents = { workspace = true }
 sl-viewer-inventory = { workspace = true }
 sl-viewer-kit = { workspace = true }
 sl-viewer-map = { workspace = true }
@@ -206,6 +207,7 @@ sl-viewer-preferences = { workspace = true }
 sl-viewer-rlv = { workspace = true }
 sl-viewer-search = { workspace = true }
 sl-viewer-settings = { workspace = true }
+sl-viewer-social = { workspace = true }
 sl-viewer-spacenav = { workspace = true }
 sl-viewer-ui-core = { workspace = true }
 sl-viewer-ui-pie-menu = { workspace = true }

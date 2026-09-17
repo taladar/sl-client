@@ -44,8 +44,9 @@ use sl_client_bevy::{
     SlSessionEvent, Uuid,
 };
 
+use crate::intents::RequestBlock;
 use crate::notifications::ShowNotification;
-use crate::world_api::{MuteModel, RequestBlock};
+use crate::social::MuteModel;
 
 /// Request the mute list once the session is up (the login handshake has
 /// produced an agent id).

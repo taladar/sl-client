@@ -67,13 +67,13 @@ use crate::floater::{
     FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater, picker_identity,
 };
 use crate::i18n::Translated;
+use crate::intents::{OpenTexturePicker, PickerKind, TexturePicked};
 use crate::inventory::{InventoryModel, MAX_FOLDER_DEPTH, item_icon, query_folder_page};
 use crate::material_preview::MaterialPreview;
 use crate::ui::{column, row};
 use crate::ui_font::UiFont;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::world_api::ui_texture::{PendingUiTexture, UiTexturePlugin};
-use crate::world_api::{OpenTexturePicker, PickerKind, TexturePicked};
 use sl_client_bevy::SlCommand;
 
 /// The blank / white texture (`IMG_WHITE`) the **Blank** quick choice picks.
@@ -1399,9 +1399,10 @@ mod tests {
             IMG_BLANK, TexturePickerPlugin, TexturePickerState, spawn_texture_swatch,
         };
         use crate::floater::Floater;
+        use crate::intents::TexturePicked;
         use crate::inventory::InventoryModel;
         use crate::ui::{UiRoot, UiScaffoldSystems};
-        use crate::world_api::{BoostTexture, DecodedTextures, TexturePicked};
+        use crate::world_api::{BoostTexture, DecodedTextures};
         use sl_client_bevy::{SlCommand, TextureKey, Uuid};
         use sl_viewer_testkit::interact::{self, InteractionTest};
         use sl_viewer_testkit::{drain, record, settle};

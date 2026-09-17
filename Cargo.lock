@@ -8571,6 +8571,7 @@ dependencies = [
  "sl-viewer-chat",
  "sl-viewer-edit",
  "sl-viewer-environment",
+ "sl-viewer-intents",
  "sl-viewer-inventory",
  "sl-viewer-kit",
  "sl-viewer-map",
@@ -8585,6 +8586,7 @@ dependencies = [
  "sl-viewer-rlv",
  "sl-viewer-search",
  "sl-viewer-settings",
+ "sl-viewer-social",
  "sl-viewer-spacenav",
  "sl-viewer-testkit",
  "sl-viewer-ui-core",
@@ -9148,6 +9150,7 @@ dependencies = [
  "sl-client-bevy",
  "sl-notecard",
  "sl-types",
+ "sl-viewer-intents",
  "sl-viewer-inventory",
  "sl-viewer-kit",
  "sl-viewer-notices",
@@ -9175,6 +9178,7 @@ dependencies = [
  "sl-viewer-media",
  "sl-viewer-platform",
  "sl-viewer-settings",
+ "sl-viewer-social",
  "sl-viewer-ui-core",
  "sl-viewer-ui-widgets",
  "sl-viewer-world-api",
@@ -9191,7 +9195,9 @@ dependencies = [
  "sl-client-bevy",
  "sl-emoji",
  "sl-settings",
+ "sl-viewer-intents",
  "sl-viewer-settings",
+ "sl-viewer-social",
  "sl-viewer-testkit",
  "sl-viewer-ui-core",
  "sl-viewer-ui-widgets",
@@ -9207,9 +9213,11 @@ dependencies = [
  "bevy_fluent",
  "pretty_assertions",
  "sl-client-bevy",
+ "sl-viewer-intents",
  "sl-viewer-inventory",
  "sl-viewer-kit",
  "sl-viewer-pickers",
+ "sl-viewer-social",
  "sl-viewer-ui-core",
  "sl-viewer-ui-widgets",
  "sl-viewer-world-api",
@@ -9226,6 +9234,7 @@ dependencies = [
  "fs-err",
  "pretty_assertions",
  "sl-client-bevy",
+ "sl-viewer-intents",
  "sl-viewer-inventory",
  "sl-viewer-notifications",
  "sl-viewer-pickers",
@@ -9238,6 +9247,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-viewer-intents"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "pretty_assertions",
+ "sl-client-bevy",
+]
+
+[[package]]
 name = "sl-viewer-inventory"
 version = "0.1.0"
 dependencies = [
@@ -9246,6 +9264,7 @@ dependencies = [
  "pretty_assertions",
  "sl-client-bevy",
  "sl-settings",
+ "sl-viewer-intents",
  "sl-viewer-kit",
  "sl-viewer-settings",
  "sl-viewer-testkit",
@@ -9288,9 +9307,11 @@ dependencies = [
  "sl-settings",
  "sl-terrain",
  "sl-types",
+ "sl-viewer-intents",
  "sl-viewer-kit",
  "sl-viewer-platform",
  "sl-viewer-settings",
+ "sl-viewer-social",
  "sl-viewer-ui-core",
  "sl-viewer-ui-widgets",
  "sl-viewer-world-api",
@@ -9334,10 +9355,12 @@ dependencies = [
  "sl-l10n",
  "sl-settings",
  "sl-types",
+ "sl-viewer-intents",
  "sl-viewer-kit",
  "sl-viewer-notifications",
  "sl-viewer-platform",
  "sl-viewer-settings",
+ "sl-viewer-social",
  "sl-viewer-testkit",
  "sl-viewer-ui-core",
  "sl-viewer-ui-widgets",
@@ -9371,6 +9394,7 @@ dependencies = [
  "sl-l10n",
  "sl-settings",
  "sl-viewer-chat",
+ "sl-viewer-intents",
  "sl-viewer-inventory",
  "sl-viewer-kit",
  "sl-viewer-map",
@@ -9379,6 +9403,7 @@ dependencies = [
  "sl-viewer-notifications",
  "sl-viewer-platform",
  "sl-viewer-settings",
+ "sl-viewer-social",
  "sl-viewer-ui-core",
  "sl-viewer-ui-widgets",
  "sl-viewer-world-api",
@@ -9395,7 +9420,9 @@ dependencies = [
  "bevy_flair",
  "pretty_assertions",
  "sl-client-bevy",
+ "sl-viewer-intents",
  "sl-viewer-inventory",
+ "sl-viewer-social",
  "sl-viewer-testkit",
  "sl-viewer-ui-core",
  "sl-viewer-ui-widgets",
@@ -9413,12 +9440,14 @@ dependencies = [
  "sl-notecard",
  "sl-types",
  "sl-viewer-environment",
+ "sl-viewer-intents",
  "sl-viewer-inventory",
  "sl-viewer-map",
  "sl-viewer-notices",
  "sl-viewer-notifications",
  "sl-viewer-pickers",
  "sl-viewer-platform",
+ "sl-viewer-social",
  "sl-viewer-ui-core",
  "sl-viewer-ui-widgets",
  "sl-viewer-world-api",
@@ -9505,6 +9534,7 @@ dependencies = [
  "pretty_assertions",
  "sl-client-bevy",
  "sl-settings",
+ "sl-viewer-intents",
  "sl-viewer-map",
  "sl-viewer-media",
  "sl-viewer-settings",
@@ -9526,6 +9556,15 @@ dependencies = [
  "sl-settings",
  "sl-viewer-platform",
  "tracing",
+]
+
+[[package]]
+name = "sl-viewer-social"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "pretty_assertions",
+ "sl-client-bevy",
 ]
 
 [[package]]
@@ -9636,6 +9675,7 @@ dependencies = [
  "sl-viewer-kit",
  "sl-viewer-platform",
  "sl-viewer-settings",
+ "sl-viewer-social",
  "sl-viewer-testkit",
  "sl-viewer-ui-core",
  "sl-viewer-world-api",
@@ -9680,6 +9720,7 @@ dependencies = [
  "sl-viewer-kit",
  "sl-viewer-platform",
  "sl-viewer-settings",
+ "sl-viewer-social",
  "sl-viewer-testkit",
  "sl-viewer-ui-core",
  "sl-viewer-ui-widgets",
@@ -9704,10 +9745,12 @@ dependencies = [
  "sl-client-bevy",
  "sl-proto",
  "sl-settings",
+ "sl-viewer-intents",
  "sl-viewer-kit",
  "sl-viewer-media",
  "sl-viewer-platform",
  "sl-viewer-settings",
+ "sl-viewer-social",
  "sl-viewer-spacenav",
  "sl-viewer-testkit",
  "sl-viewer-world-api",

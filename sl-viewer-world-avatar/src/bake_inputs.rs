@@ -30,7 +30,6 @@ use std::sync::Arc;
 
 use bevy::prelude::*;
 
-use crate::world_api::DecodedTextures;
 use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use sl_client_bevy::{
     AppearanceValues, AssetCacheLimits, AssetKey, AssetStore, AssetType, BakeRegion,
@@ -39,9 +38,10 @@ use sl_client_bevy::{
     SlEvent, SlSessionEvent, StoreStats, TextureKey, VisualParams, Wearable, WearableAsset,
     WearableType, avatar_texture, combine_layer_color, global_color, region_layers,
 };
+use sl_viewer_world_api::DecodedTextures;
 
-use crate::avatar_assets::AvatarAssetLibrary;
-use crate::textures::{TextureDecoded, TextureManager};
+use sl_viewer_kit::avatar_assets::AvatarAssetLibrary;
+use sl_viewer_world_objects::textures::{TextureDecoded, TextureManager};
 
 /// How long, in seconds, to wait for the wearable assets / their textures before
 /// assembling the bake inputs from whatever has arrived, so a stuck or missing
@@ -189,7 +189,7 @@ impl OwnBakeInputs {
             let key = TextureKey::from(id);
             if store.get(key).is_none() {
                 let _new = self.pending_textures.insert(key);
-                texture_manager.request_boosted(key, crate::world_api::AVATAR_BOOST_PRIORITY);
+                texture_manager.request_boosted(key, sl_viewer_world_api::AVATAR_BOOST_PRIORITY);
             }
         }
     }
@@ -334,7 +334,7 @@ fn build_asset_store(fetcher: &Arc<BevyAssetFetcher>, disk_dir: Option<PathBuf>)
             Arc::clone(&fetcher),
             Some(dir),
             AssetCacheLimits {
-                max_bytes: crate::paths::asset_cache_max_bytes(),
+                max_bytes: sl_viewer_platform::paths::asset_cache_max_bytes(),
                 ..AssetCacheLimits::default()
             },
         ) {
@@ -349,7 +349,7 @@ fn build_asset_store(fetcher: &Arc<BevyAssetFetcher>, disk_dir: Option<PathBuf>)
             Arc::clone(&fetcher),
             None,
             AssetCacheLimits {
-                max_bytes: crate::paths::asset_cache_max_bytes(),
+                max_bytes: sl_viewer_platform::paths::asset_cache_max_bytes(),
                 ..AssetCacheLimits::default()
             },
         ) {
@@ -362,7 +362,7 @@ fn build_asset_store(fetcher: &Arc<BevyAssetFetcher>, disk_dir: Option<PathBuf>)
 /// The viewer's on-disk generic-asset cache directory, or `None` when neither
 /// `XDG_CACHE_HOME` nor `HOME` is set (the store then runs in-memory only).
 fn asset_cache_dir() -> Option<PathBuf> {
-    crate::paths::asset_cache_dir("assetcache")
+    sl_viewer_platform::paths::asset_cache_dir("assetcache")
 }
 
 /// The `ViewerAsset` asset class for a wearable of `wearable_type`: body parts
@@ -418,7 +418,7 @@ enum OutfitAction {
 
 /// Decide how to handle a runtime `AgentWearables` update at `stage`. No
 /// update-`serial` dedup on purpose (mirroring the server-bake path,
-/// [`drive_server_bake`](crate::appearance::drive_server_bake)): live on aditi the
+/// [`drive_server_bake`](sl_viewer_kit::appearance::drive_server_bake)): live on aditi the
 /// sim re-broadcasts our wearables on an outfit change *without* advancing the
 /// serial, so a serial guard would silently drop real changes; a redundant
 /// re-fetch of an unchanged outfit is merely a cache-hit re-composite, whereas a
@@ -587,7 +587,7 @@ pub fn shape_is_male(
 pub fn publish_rlv_avatar_sex(
     inputs: Res<OwnBakeInputs>,
     library: Option<Res<AvatarAssetLibrary>>,
-    mut facts: ResMut<crate::world_api::rlv::RlvExtFacts>,
+    mut facts: ResMut<sl_viewer_world_api::rlv::RlvExtFacts>,
 ) {
     let is_male = shape_is_male(library.as_deref(), inputs.worn_asset(WearableType::Shape));
     if facts.avatar_is_male != is_male {
@@ -718,7 +718,8 @@ fn parse_and_request_textures(
                     // Our own avatar's client-side bake layer textures are boosted
                     // (P20.2): they clothe the own avatar and are not ranked by the
                     // on-screen prim-face pass, so a fixed boost loads them promptly.
-                    texture_manager.request_boosted(key, crate::world_api::AVATAR_BOOST_PRIORITY);
+                    texture_manager
+                        .request_boosted(key, sl_viewer_world_api::AVATAR_BOOST_PRIORITY);
                 }
             }
         }

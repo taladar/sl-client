@@ -43,13 +43,12 @@ use crate::coords::bevy_to_sl_vec;
 use crate::edit_tool::edit_tool_inactive;
 use crate::gpu_pick::{GpuPickResolved, GpuPicker, PickPurpose, PickResolution};
 use crate::hud_pick::HudRayCast;
+use crate::intents::{BeginTeleportFlow, TeleportTarget, issue_teleport};
 use crate::minimap::{narrow, region_handle_at};
 use crate::settings::ViewerSettings;
 use crate::world_api::InputContext;
+use crate::world_api::SETTING_DOUBLE_CLICK_ACTION;
 use crate::world_api::pointer_over_blocking_ui;
-use crate::world_api::{
-    BeginTeleportFlow, SETTING_DOUBLE_CLICK_ACTION, TeleportTarget, issue_teleport,
-};
 
 /// The persisted setting section — shared with other input-behaviour settings.
 const INPUT_SECTION: &[&str] = &["input"];

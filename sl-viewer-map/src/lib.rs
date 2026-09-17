@@ -19,12 +19,14 @@
 
 // Lower crates re-aliased under their original module names, so these
 // modules keep addressing them as `crate::coords` and `crate::settings`.
+pub(crate) use sl_viewer_intents as intents;
 pub(crate) use sl_viewer_kit::coords;
 pub(crate) use sl_viewer_kit::minimap_math;
 pub(crate) use sl_viewer_kit::world_map_math;
 pub(crate) use sl_viewer_platform::clipboard;
 pub(crate) use sl_viewer_platform::paths;
 pub(crate) use sl_viewer_settings as settings;
+pub(crate) use sl_viewer_social as social;
 pub(crate) use sl_viewer_ui_core::i18n;
 pub(crate) use sl_viewer_ui_core::skin_colors;
 pub(crate) use sl_viewer_ui_core::ui;

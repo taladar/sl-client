@@ -82,12 +82,12 @@ use bevy::render::sync_component::SyncComponent;
 use bevy::render::view::{ExtractedView, ViewDepthTexture, ViewTarget};
 use bevy::render::{GpuResourceAppExt as _, Render, RenderApp, RenderStartup, RenderSystems};
 
-use crate::coords::sl_to_bevy_object_rotation;
 use crate::environment::EnvironmentState;
 use crate::sky::day_position;
 use crate::water::drive_water;
 use crate::water_fog::WaterFogSettings;
-use crate::world_api::{ViewerCamera, WorldPhase};
+use sl_viewer_kit::coords::sl_to_bevy_object_rotation;
+use sl_viewer_world_api::{ViewerCamera, WorldPhase};
 
 /// The internal handle the fog shader (`underwater_fog.wgsl`) is loaded under.
 const FOG_SHADER_HANDLE: Handle<Shader> = uuid_handle!("3f2a9c17-54e8-4b6d-a90c-2e718d43ff05");
@@ -542,7 +542,7 @@ mod tests {
     use crate::render_overrides::RenderOverrides;
     use crate::water::WaterLevel;
     use crate::water_fog::{WaterFogSettings, update_water_fog_settings};
-    use crate::world_api::ViewerCamera;
+    use sl_viewer_world_api::ViewerCamera;
 
     /// A fog density is the expected one, to within a relative tolerance that leaves
     /// room for the last bit of a `powf` — and, since every comparison against a

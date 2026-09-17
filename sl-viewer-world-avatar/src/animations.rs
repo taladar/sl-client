@@ -51,7 +51,6 @@ use sl_client_bevy::{
     SlCapabilities, SlEvent, SlSessionEvent, StoreStats, Uuid, VolumeDeformations, sample_motion,
 };
 
-use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::{AvatarBody, AvatarBodyPart, AvatarRuntimeMorphs};
 use crate::body_physics::{BodyPhysicsInput, BodyPhysicsMotion};
 use crate::ground::AvatarGround;
@@ -60,8 +59,9 @@ use crate::look_at::{
     BLINK_LEFT_PARAM, BLINK_RIGHT_PARAM, LookAtJoints, LookAtMotion, LookAtTargets,
 };
 use crate::reach::{PointAtTargets, ReachInput, ReachJoints, ReachMotion};
-use crate::world_api::AvatarState;
-use crate::world_api::{AvatarMotion, DerenderKind, WorldPhase, world_has_keyboard};
+use sl_viewer_kit::avatar_assets::AvatarAssetLibrary;
+use sl_viewer_world_api::AvatarState;
+use sl_viewer_world_api::{AvatarMotion, DerenderKind, WorldPhase, world_has_keyboard};
 
 /// The avatar animation pipeline's own scheduling.
 ///
@@ -209,7 +209,7 @@ impl Plugin for AvatarPosePlugin {
 /// in-flight resolve tasks, the decoded motions already in hand, and the set of
 /// ids known to have no fetchable asset (procedural built-ins / failed fetches).
 ///
-/// Mirrors [`MeshManager`](crate::meshes::MeshManager) /
+/// Mirrors [`MeshManager`](sl_viewer_world_objects::meshes::MeshManager) /
 /// [`WearableAssetManager`](crate::bake_inputs::WearableAssetManager).
 #[derive(Debug, Resource)]
 pub struct AnimationManager {
@@ -431,7 +431,7 @@ fn build_asset_store(fetcher: &Arc<BevyAssetFetcher>, disk_dir: Option<PathBuf>)
             Arc::clone(&fetcher),
             Some(dir),
             AssetCacheLimits {
-                max_bytes: crate::paths::asset_cache_max_bytes(),
+                max_bytes: sl_viewer_platform::paths::asset_cache_max_bytes(),
                 ..AssetCacheLimits::default()
             },
         ) {
@@ -446,7 +446,7 @@ fn build_asset_store(fetcher: &Arc<BevyAssetFetcher>, disk_dir: Option<PathBuf>)
             Arc::clone(&fetcher),
             None,
             AssetCacheLimits {
-                max_bytes: crate::paths::asset_cache_max_bytes(),
+                max_bytes: sl_viewer_platform::paths::asset_cache_max_bytes(),
                 ..AssetCacheLimits::default()
             },
         ) {
@@ -460,7 +460,7 @@ fn build_asset_store(fetcher: &Arc<BevyAssetFetcher>, disk_dir: Option<PathBuf>)
 /// (`<cache>/sl-client-bevy-viewer/animcache`), from `XDG_CACHE_HOME` or
 /// `~/.cache`, or `None` when neither is set (the store then runs in-memory only).
 fn animation_cache_dir() -> Option<PathBuf> {
-    crate::paths::asset_cache_dir("animcache")
+    sl_viewer_platform::paths::asset_cache_dir("animcache")
 }
 
 /// Refresh the store fetcher's `ViewerAsset` capability URL each time the region's
@@ -490,7 +490,7 @@ pub(crate) fn update_animation_caps(
 pub(crate) fn ingest_avatar_animations(
     mut events: MessageReader<SlEvent>,
     mut manager: ResMut<AnimationManager>,
-    derender: Res<crate::world_api::DerenderList>,
+    derender: Res<sl_viewer_world_api::DerenderList>,
 ) {
     let log = std::env::var("SL_VIEWER_LOG_LOCOMOTION").as_deref() == Ok("1");
     for event in events.read() {
@@ -1390,7 +1390,7 @@ pub(crate) fn drive_avatar_skeletons(
     mut playback: ResMut<AnimationPlayback>,
     adjust: Res<LocomotionAdjust>,
     state: Res<AvatarState>,
-    derender: Res<crate::world_api::DerenderList>,
+    derender: Res<sl_viewer_world_api::DerenderList>,
     body: Option<Res<AvatarBody>>,
     library: Option<Res<AvatarAssetLibrary>>,
     gpu: GpuAvatarHooks<'_, '_>,
@@ -1574,7 +1574,7 @@ impl GpuAvatarHooks<'_, '_> {
         }
         if let Some(feed) = self.feed.as_mut() {
             feed.publish_real(
-                crate::world_api::PoseSlotKey::Avatar(agent),
+                sl_viewer_world_api::PoseSlotKey::Avatar(agent),
                 root,
                 corrections,
             );
@@ -1688,7 +1688,7 @@ pub(crate) fn pose_avatar_skeletons(
     // socket) are avatar-root children the socket writer places by their **local**
     // `Transform` (§5.4), so ordinary propagation seats the worn/rigid subtrees.
     // A different component from `globals`.
-    mut socket_transforms: Query<&mut Transform, Without<crate::world_api::AvatarAnchor>>,
+    mut socket_transforms: Query<&mut Transform, Without<sl_viewer_world_api::AvatarAnchor>>,
     mut gpu: GpuAvatarHooks<'_, '_>,
 ) {
     let (Some(library), Some(body)) = (library, body) else {
@@ -1766,7 +1766,7 @@ pub(crate) fn pose_avatar_skeletons(
             AnimationPose::default()
         } else {
             let mut pose = playback.poses.get(&agent).cloned().unwrap_or_default();
-            crate::procedural::apply_idle_adjustments(&mut pose, idle_now, |name| {
+            sl_viewer_kit::procedural::apply_idle_adjustments(&mut pose, idle_now, |name| {
                 body.joint_index(name)
             });
             pose
@@ -2065,7 +2065,7 @@ pub(crate) fn pose_avatar_skeletons(
               only move the argument list into a struct literal at the call sites"
 )]
 fn write_socket_locals(
-    socket_transforms: &mut Query<&mut Transform, Without<crate::world_api::AvatarAnchor>>,
+    socket_transforms: &mut Query<&mut Transform, Without<sl_viewer_world_api::AvatarAnchor>>,
     parts: &Query<(Entity, &AvatarBodyPart)>,
     hooks: &GpuAvatarHooks<'_, '_>,
     state: &AvatarState,
@@ -2165,12 +2165,12 @@ mod tests {
         poll_animations, reconcile_playing, take_run_out,
     };
     use crate::motion_stops::request_own_motion_stops;
-    use crate::world_api::WorldPhase;
     use bevy::ecs::schedule::{NodeId, ScheduleGraph, SystemKey};
     use bevy::prelude::{IntoScheduleConfigs as _, IntoSystem, Schedule, System, World};
     use core::any::TypeId;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::Uuid;
+    use sl_viewer_world_api::WorldPhase;
     use std::collections::HashMap;
     use std::collections::HashSet;
 

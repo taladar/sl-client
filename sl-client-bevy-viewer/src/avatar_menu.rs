@@ -24,20 +24,20 @@
 //! The handful that already have a home in this viewer are wired for real:
 //!
 //! - **IM** (other) → opens a one-to-one conversation tab
-//!   ([`crate::world_api::OpenConversation`]), exactly as the People list's IM
+//!   ([`crate::intents::OpenConversation`]), exactly as the People list's IM
 //!   action does.
 //! - **Stand Up / Sit Down** (self) → [`Command::Stand`] / [`Command::SitOnGround`],
 //!   each enabled only in the state where it makes sense (you cannot stand up
 //!   unless you are sitting), gated on [`SELF_SITTING`] / [`SELF_STANDING`].
-//! - **Mute** (other) → a guarded [`crate::world_api::RequestBlock`] for the picked
+//! - **Mute** (other) → a guarded [`crate::intents::RequestBlock`] for the picked
 //!   agent.
 //! - **Add as Friend** (other) → a prompted
-//!   [`crate::world_api::RequestFriendship`] for the picked agent (the dialog
+//!   [`crate::intents::RequestFriendship`] for the picked agent (the dialog
 //!   that asks for the offer's message, `sl_viewer_people::add_friend`),
 //!   disabled via [`TARGET_NOT_FRIEND`] when the agent already is a friend,
 //!   matching the reference's `on_enable`.
 //! - **Profile** (self and other) → opens the avatar profile floater
-//!   ([`crate::world_api::OpenAvatarProfile`]).
+//!   ([`crate::intents::OpenAvatarProfile`]).
 //! - **More ▸ Derender ▸ Blacklist / Temporary** (other) → a guarded
 //!   [`crate::derender::RequestDerender`] for the picked agent: this viewer
 //!   stops drawing them (and, through the scene mirror's suppression index,
@@ -94,23 +94,24 @@ use crate::derender::RequestDerender;
 use crate::gpu_pick::{GpuPickResolved, GpuPicker, PickPurpose, PickResolution};
 use crate::hud_pick::HudRayCast;
 use crate::input_action::Action;
+use crate::intents::OpenAvatarProfile;
+use crate::intents::RequestBlock;
+use crate::intents::RequestFriendship;
+use crate::intents::{ConversationKey, OpenConversation};
 use crate::land_menu::OpenLandMenu;
 use crate::menu::UNIMPLEMENTED;
 use crate::name_tag_billboard::NameTagHitTest;
 use crate::object_menu::OpenObjectMenu;
 use crate::objects::ObjectPicker;
 use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, PieMenuDef};
+use crate::social::FriendsModel;
 use crate::ui_element::UiAction;
 use crate::ui_font::UiFont;
 use crate::world_api::AvatarState;
 use crate::world_api::DerenderKind;
-use crate::world_api::OpenAvatarProfile;
-use crate::world_api::RequestBlock;
-use crate::world_api::RequestFriendship;
+use crate::world_api::SelfGroundSit;
 use crate::world_api::pointer_over_blocking_ui;
 use crate::world_api::targeted_ray_cast::TargetedRayCast;
-use crate::world_api::{ConversationKey, OpenConversation};
-use crate::world_api::{FriendsModel, SelfGroundSit};
 
 /// The `element` both avatar pies attribute their [`UiAction`]s to.
 ///
@@ -1262,7 +1263,7 @@ fn handle_avatar_menu_actions(
     mut conversations: MessageWriter<OpenConversation>,
     mut profiles: MessageWriter<OpenAvatarProfile>,
     mut refetch: MessageWriter<RefetchAvatarTextures>,
-    mut contact_sets: MessageWriter<crate::world_api::OpenAddToContactSet>,
+    mut contact_sets: MessageWriter<crate::intents::OpenAddToContactSet>,
     mut aliases: MessageWriter<crate::contact_sets_panel::OpenSetPseudonym>,
 ) {
     for action in actions.read() {
@@ -1342,7 +1343,7 @@ fn handle_avatar_menu_actions(
             // (`viewer-contact-sets`) — the floater asks which, since the pie
             // cannot grow a slice per set.
             "add-to-set" if action.element == AVATAR_MENU_ELEMENT => {
-                contact_sets.write(crate::world_api::OpenAddToContactSet::one(
+                contact_sets.write(crate::intents::OpenAddToContactSet::one(
                     agent,
                     avatars
                         .name_of(agent)

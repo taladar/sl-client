@@ -28,6 +28,7 @@
 // modules keep addressing them as `crate::ui` and `crate::world_api`.
 pub(crate) use sl_viewer_chat::chat_input;
 pub(crate) use sl_viewer_chat::local_chat_input;
+pub(crate) use sl_viewer_intents as intents;
 pub(crate) use sl_viewer_inventory::inventory;
 pub(crate) use sl_viewer_inventory::inventory_actions;
 pub(crate) use sl_viewer_inventory::inventory_drag;
@@ -45,6 +46,7 @@ pub(crate) use sl_viewer_notifications as notifications;
 pub(crate) use sl_viewer_platform::clipboard;
 pub(crate) use sl_viewer_platform::system_browser;
 pub(crate) use sl_viewer_settings as settings;
+pub(crate) use sl_viewer_social as social;
 pub(crate) use sl_viewer_ui_core::i18n;
 pub(crate) use sl_viewer_ui_core::skin;
 pub(crate) use sl_viewer_ui_core::skin_colors;

@@ -48,11 +48,11 @@ use sl_client_bevy::{
     ParcelOverlayGrid, ParcelOwnership, RegionHandle, SlParcelOverlay, SlRegion, Vector,
 };
 
-use crate::coords::{metres_to_f32, sl_to_bevy_rotation, sl_to_bevy_vec};
-use crate::settings::ViewerSettings;
 use crate::terrain::update_terrain;
 use crate::water::WaterState;
-use crate::world_api::TerrainState;
+use sl_viewer_kit::coords::{metres_to_f32, sl_to_bevy_rotation, sl_to_bevy_vec};
+use sl_viewer_settings::ViewerSettings;
+use sl_viewer_world_api::TerrainState;
 
 /// The setting name gating the in-world property lines (the reference viewer's
 /// `ShowPropertyLines`). Registered in [`register_settings`].
@@ -734,8 +734,8 @@ mod tests {
         use sl_settings::SettingsStore;
 
         use super::{ParcelBorderMaterial, ParcelBorderState, update_parcel_borders};
-        use crate::settings::ViewerSettings;
-        use crate::world_api::TerrainState;
+        use sl_viewer_settings::ViewerSettings;
+        use sl_viewer_world_api::TerrainState;
 
         let mut app = App::new();
         app.insert_resource(ViewerSettings::from_store_for_test(SettingsStore::new()))
@@ -774,8 +774,8 @@ mod tests {
         use super::{
             ParcelBorderMaterial, ParcelBorderState, stamp_is_stale, update_parcel_borders,
         };
-        use crate::settings::ViewerSettings;
-        use crate::world_api::TerrainState;
+        use sl_viewer_settings::ViewerSettings;
+        use sl_viewer_world_api::TerrainState;
 
         let region = RegionHandle::from_global(256_000, 256_000);
         let mut app = App::new();
@@ -861,8 +861,8 @@ mod tests {
         use super::{
             ParcelBorderMaterial, ParcelBorderState, stamp_is_stale, update_parcel_borders,
         };
-        use crate::settings::ViewerSettings;
-        use crate::world_api::TerrainState;
+        use sl_viewer_settings::ViewerSettings;
+        use sl_viewer_world_api::TerrainState;
 
         let region = RegionHandle::from_global(256_000, 256_000);
         let mut app = App::new();

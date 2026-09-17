@@ -1,7 +1,7 @@
 //! Head & eye look-at tracking (P31.12): the reference viewer's `LLHeadRotMotion`
 //! and `LLEyeMotion` procedural adjusters, ported to run on top of every rigged
 //! avatar's sampled keyframe pose (P18.3) — the same pose-apply seam the P31.8
-//! idle adjusters ([`crate::procedural`]) use.
+//! idle adjusters ([`sl_viewer_kit::procedural`]) use.
 //!
 //! Both motions turn the avatar toward a **world look-at target**. Two sources
 //! provide it:
@@ -55,8 +55,8 @@ use sl_client_bevy::{
     ViewerEffectData,
 };
 
-use crate::coords::{metres_to_f32, sl_to_bevy_vec};
-use crate::world_api::{CameraMode, ViewerCamera};
+use sl_viewer_kit::coords::{metres_to_f32, sl_to_bevy_vec};
+use sl_viewer_world_api::{CameraMode, ViewerCamera};
 
 /// Neck rotation factor — the fraction of the head's look-at rotation the neck
 /// takes (in world space), the head completing the rest (reference `NECK_LAG`).

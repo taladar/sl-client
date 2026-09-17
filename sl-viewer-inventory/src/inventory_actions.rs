@@ -54,6 +54,10 @@ use sl_client_bevy::{
 };
 use std::collections::{HashMap, HashSet};
 
+use crate::intents::StartConference;
+use crate::intents::{ConversationKey, OpenConversation};
+use crate::intents::{ItemCreationFinished, PendingItemCreations};
+use crate::intents::{PendingSettingsCreations, SettingsItemCreated};
 use crate::inventory::{
     InlineRename, InventoryModel, InventorySelection, InventoryUi, InventoryView, MAX_FOLDER_DEPTH,
     RowKey, query_folder_page,
@@ -64,10 +68,6 @@ use crate::ui::focus_within;
 use crate::ui_element::UiAction;
 use crate::virtual_list::VirtualRow;
 use crate::world_api::InputContext;
-use crate::world_api::StartConference;
-use crate::world_api::{ConversationKey, OpenConversation};
-use crate::world_api::{ItemCreationFinished, PendingItemCreations};
-use crate::world_api::{PendingSettingsCreations, SettingsItemCreated};
 
 /// The `element` the inventory context menus attribute their [`UiAction`]s to.
 pub(crate) const INVENTORY_MENU_ELEMENT: &str = "inventory-menu";
@@ -1774,7 +1774,7 @@ fn handle_inventory_menu_actions(
         MessageWriter<crate::inventory::InventoryUiAction>,
         MessageWriter<OpenConversation>,
         MessageWriter<StartConference>,
-        MessageWriter<crate::world_api::OpenAvatarPicker>,
+        MessageWriter<crate::intents::OpenAvatarPicker>,
         MessageWriter<crate::inventory_properties::OpenItemPreview>,
         MessageWriter<crate::inventory_properties::OpenItemProperties>,
         MessageWriter<SlCommand>,
@@ -1828,7 +1828,7 @@ fn handle_inventory_menu_actions(
                 pending_share.targets.clone_from(&targets);
                 // The reference shares with several residents at once
                 // (`give_inventory` opens the picker with `allow_multiple`).
-                picker_opens.write(crate::world_api::OpenAvatarPicker::many(
+                picker_opens.write(crate::intents::OpenAvatarPicker::many(
                     window,
                     SHARE_REQUESTER,
                 ));
@@ -3114,7 +3114,7 @@ const SHARE_REQUESTER: &str = "inventory-share";
 /// Complete a Share when the avatar picker confirms: give the stashed item /
 /// folder to every chosen avatar (the same wire path as drag-to-give).
 fn handle_share_picks(
-    mut picks: MessageReader<crate::world_api::AvatarPicked>,
+    mut picks: MessageReader<crate::intents::AvatarPicked>,
     floaters: Query<(Entity, &crate::floater::Floater)>,
     mut pending: ResMut<PendingShare>,
     mut commands: MessageWriter<SlCommand>,
@@ -3299,9 +3299,9 @@ mod tests {
         item_conditions, new_settings_item, outfit_add_commands, outfit_remove_commands,
         paste_commands, resolve_row_target, settings_caps_present, take_off_set, wear_set,
     };
+    use crate::intents::PendingSettingsCreations;
     use crate::inventory::InventoryModel;
     use crate::menu::{MenuDef, MenuItemDef};
-    use crate::world_api::PendingSettingsCreations;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{
         AgentKey, AssetType, CAP_UPDATE_SETTINGS_AGENT_INVENTORY,

@@ -1200,7 +1200,7 @@ pub(crate) fn mirror_blend_joint(
             } else {
                 Quat::IDENTITY
             };
-            let composed = base.mul_quat(crate::procedural::breathe_rotation(idle_now));
+            let composed = base.mul_quat(sl_viewer_kit::procedural::breathe_rotation(idle_now));
             out.rot = Vec4::new(composed.x, composed.y, composed.z, composed.w);
             out.flags |= POSE_FLAG_ROT;
         }
@@ -1210,7 +1210,7 @@ pub(crate) fn mirror_blend_joint(
             } else {
                 Quat::IDENTITY
             };
-            let composed = base.mul_quat(crate::procedural::body_noise_rotation(idle_now));
+            let composed = base.mul_quat(sl_viewer_kit::procedural::body_noise_rotation(idle_now));
             out.rot = Vec4::new(composed.x, composed.y, composed.z, composed.w);
             out.flags |= POSE_FLAG_ROT;
         }

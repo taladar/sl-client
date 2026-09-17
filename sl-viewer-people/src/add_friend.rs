@@ -9,7 +9,7 @@
 //! # One guarded way in
 //!
 //! So the surfaces write a [`RequestFriendship`] instead, the way every Block
-//! affordance writes a [`RequestBlock`](crate::world_api::RequestBlock)
+//! affordance writes a [`RequestBlock`](crate::intents::RequestBlock)
 //! ([`crate::mutes::apply_block_requests`]), and this module answers it the way
 //! the reference's `LLAvatarActions::requestFriendshipDialog` does:
 //!
@@ -62,8 +62,10 @@ use std::collections::VecDeque;
 use bevy::prelude::*;
 use sl_client_bevy::{AgentKey, Command, SlCommand, SlIdentity};
 
+use crate::intents::RequestFriendship;
 use crate::notifications::{NotificationResponse, ShowNotification};
-use crate::world_api::{AvatarState, FriendsModel, RequestFriendship};
+use crate::social::FriendsModel;
+use crate::world_api::AvatarState;
 
 /// The reference dialog that asks for the offer's message before sending it.
 const ASK_TEMPLATE: &str = "AddFriendWithMessage";
@@ -233,10 +235,12 @@ mod tests {
         AgentKey, Command, Friend, FriendKey, FriendRights, SlCommand, SlIdentity, Uuid,
     };
 
+    use crate::intents::RequestFriendship;
     use crate::notifications::{
         NotificationId, NotificationManager, NotificationResponse, ShowNotification,
     };
-    use crate::world_api::{AvatarState, FriendsModel, RequestFriendship};
+    use crate::social::FriendsModel;
+    use crate::world_api::AvatarState;
 
     /// A stable test agent.
     fn agent(n: u128) -> AgentKey {

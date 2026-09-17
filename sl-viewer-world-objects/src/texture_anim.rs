@@ -16,7 +16,7 @@
 //! whose animation is turned off in-world goes static again.
 //!
 //! **P28.2 driver — GPU-side (PERF).** The animation is evaluated **in the
-//! shader** ([`face_material.wgsl`](crate::face_material)'s `sl_animated_uv`, a
+//! shader** ([`face_material.wgsl`](sl_viewer_kit::face_material)'s `sl_animated_uv`, a
 //! port of the reference viewer's `LLViewerTextureAnim::animateTextures`) from
 //! `globals.time`, so the material's UV is derived per-fragment on the GPU. The CPU
 //! driver [`drive_texture_animations`] therefore only writes the animation's
@@ -24,7 +24,7 @@
 //! a `start_time` seeding the shader clock) into each face's `SlFaceParams`, and
 //! only **when they change** — so a steadily-running animation dirties **no**
 //! materials per frame. This matters enormously: a busy region has ~1000+ animated
-//! faces (the `SlFaceParams`(crate::face_material::SlFaceParams) `anim_*` fields
+//! faces (the `SlFaceParams`(sl_viewer_kit::face_material::SlFaceParams) `anim_*` fields
 //! carry the params), and the old per-frame `uv_transform` write forced a full render-world
 //! material re-prepare of every one of them each frame (Bevy recreates a material's
 //! whole bind group on any change), which is the dominant cost the GPU path removes.
@@ -44,8 +44,8 @@ use bevy::prelude::*;
 use sl_client_bevy::texture_uv_transform;
 use sl_client_bevy::{TextureAnimation, texture_anim_mode};
 
-use crate::face_material::FaceMaterial;
 use crate::objects::{FaceTextureDebug, PrimFaceEntity};
+use sl_viewer_kit::face_material::FaceMaterial;
 
 /// The decoded [`TextureAnimation`] (`llSetTextureAnim`) parameters an object is
 /// currently animating with, attached to the object's **geometry holder** entity
@@ -135,7 +135,7 @@ impl AnimatedPlacement {
 /// animation is not running ([`ON`](texture_anim_mode::ON) clear), which the driver
 /// treats as "leave the face alone".
 ///
-/// Test-gated: the production animation is [`sl_animated_uv`](crate::face_material)
+/// Test-gated: the production animation is [`sl_animated_uv`](sl_viewer_kit::face_material)
 /// in WGSL, a faithful translation of this; this Rust version is kept to pin the
 /// math in unit tests.
 #[cfg(test)]
@@ -253,9 +253,9 @@ fn animation_placement(
 }
 
 /// Publish every running texture animation's params to its faces (P28.2), for the
-/// **GPU** animation path: the shader ([`face_material.wgsl`](crate::face_material)
+/// **GPU** animation path: the shader ([`face_material.wgsl`](sl_viewer_kit::face_material)
 /// `sl_animated_uv`) evaluates the animation from `globals.time` each frame, so this
-/// only writes the per-face `SlFaceParams`(crate::face_material::SlFaceParams)
+/// only writes the per-face `SlFaceParams`(sl_viewer_kit::face_material::SlFaceParams)
 /// `anim_*` fields — and **only when they change** (a fresh `llSetTextureAnim`, a
 /// re-textured face, or a recomposition that wiped them). A steadily-running
 /// animation therefore dirties **no** material here (the read is a non-mutating

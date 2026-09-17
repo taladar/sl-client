@@ -1175,7 +1175,7 @@ mod tests {
     /// *send* sat behind a local echo it had no business depending on.
     #[test]
     fn the_group_set_button_opens_a_picker_whose_answer_commits() -> Result<(), TestError> {
-        use crate::world_api::{GroupPicked, OpenGroupPicker};
+        use crate::intents::{GroupPicked, OpenGroupPicker};
         use sl_client_bevy::{GroupKey, Uuid};
 
         let mut app = build_tools_app()?;
@@ -1250,7 +1250,7 @@ mod tests {
     /// about — which is why the sibling test above did not catch it.
     #[test]
     fn confirming_a_group_keeps_the_selection() -> Result<(), TestError> {
-        use crate::world_api::GroupsModel;
+        use crate::social::GroupsModel;
         use sl_client_bevy::{GroupKey, GroupMembership, LandArea, TextureKey, Uuid};
 
         let mut app = build_tools_app()?;

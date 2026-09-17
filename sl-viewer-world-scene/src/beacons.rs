@@ -29,7 +29,7 @@
 //!   beacon, and clickable to dismiss (stop tracking).
 //!
 //! The tracked position comes from the shared [`MapTracking`] resource
-//! (`crate::minimap`) — the one beacon the minimap and (later) the world map both
+//! (`sl_viewer_map::minimap`) — the one beacon the minimap and (later) the world map both
 //! drive. A tracked **location** resolves to a global position (this is also how a
 //! map double-click / teleport destination and a tracked landmark surface, exactly
 //! as the reference's `getTrackedPositionGlobal` returns one global position for all
@@ -56,14 +56,15 @@ use bevy::shader::ShaderRef;
 
 use sl_client_bevy::{AgentKey, RegionHandle, SlIdentity, Vector};
 
-use crate::coords::{metres_to_f32, sl_to_bevy_vec};
-use crate::name_tag_billboard::tag_render_layers;
+use sl_viewer_kit::coords::{metres_to_f32, sl_to_bevy_vec};
+use sl_viewer_world_objects::name_tag_billboard::tag_render_layers;
 
-use crate::ui::UiRoot;
-use crate::ui_font::UiFont;
-use crate::world_api::AvatarState;
-use crate::world_api::TerrainState;
-use crate::world_api::{FriendsModel, MapTracking, TrackTarget, ViewerCamera};
+use sl_viewer_social::{FriendsModel, MapTracking, TrackTarget};
+use sl_viewer_ui_core::ui::UiRoot;
+use sl_viewer_ui_core::ui_font::UiFont;
+use sl_viewer_world_api::AvatarState;
+use sl_viewer_world_api::TerrainState;
+use sl_viewer_world_api::ViewerCamera;
 
 /// The internal handle the beacon-beam shader (`beacon_beam.wgsl`) is loaded under,
 /// so the material can reference it without an on-disk asset path.

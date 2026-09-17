@@ -1,5 +1,5 @@
 //! **Media-on-a-prim** (`viewer-media-prim-browser`, in-world half): drive
-//! offscreen web-media surfaces ([`crate::media_engine`]) onto prim faces
+//! offscreen web-media surfaces ([`sl_viewer_media::media_engine`]) onto prim faces
 //! whose `TextureEntry` media flag and `ObjectMedia` capability data say they
 //! carry media, and route world input (hover, clicks, wheel, keyboard) into
 //! the page under the pick — the reference viewer's `LLViewerMedia` /
@@ -34,22 +34,22 @@ use sl_client_bevy::{
     SlEvent, SlSessionEvent, texture_face_uv_transform,
 };
 
-use crate::face_material::{FaceMaterial, inert_face_material};
 use crate::gpu_pick::{GpuPickResolved, GpuPicker, PICK_HZ, PickPurpose, PickResolution};
-use crate::media_engine::{
+use sl_cef::{KeyInput, MediaKind, SurfaceConfig, SurfaceTrust, ValidatedMediaUrl, classify_url};
+use sl_viewer_kit::face_material::{FaceMaterial, inert_face_material};
+use sl_viewer_media::media_engine::{
     MediaEngine, MediaEngineKind, MediaEngineSystems, MediaSurfaceId, MediaSurfaces,
 };
-use crate::media_keys::{current_modifiers, is_printable_text, vk_for_key_code};
-use crate::objects::{FaceTextureDebug, PrimFaceEntity, SceneObject};
-use crate::world_api::InputContext;
-use crate::world_api::ObjectState;
-use crate::world_api::pointer_over_blocking_ui;
-use crate::world_api::surface_info_from_hit;
-use crate::world_api::world_scoped::{WorldPurge, WorldScoped, WorldScopedAppExt as _};
-use crate::world_api::{
+use sl_viewer_media::media_keys::{current_modifiers, is_printable_text, vk_for_key_code};
+use sl_viewer_world_api::InputContext;
+use sl_viewer_world_api::ObjectState;
+use sl_viewer_world_api::pointer_over_blocking_ui;
+use sl_viewer_world_api::surface_info_from_hit;
+use sl_viewer_world_api::world_scoped::{WorldPurge, WorldScoped, WorldScopedAppExt as _};
+use sl_viewer_world_api::{
     FLAGS_OBJECT_YOU_OWNER, MediaFocus, MediaTarget, MediaWorldClick, ViewerCamera,
 };
-use sl_cef::{KeyInput, MediaKind, SurfaceConfig, SurfaceTrust, ValidatedMediaUrl, classify_url};
+use sl_viewer_world_objects::objects::{FaceTextureDebug, PrimFaceEntity, SceneObject};
 
 /// The hard cap on simultaneously live in-world media surfaces (the
 /// reference's `PluginInstancesTotal`).
@@ -164,7 +164,7 @@ const MEDIA_SECTION: &[&str] = &["media"];
 pub const MEDIA_AUTO_PLAY_SETTING: &str = "MediaAutoPlayEnabled";
 
 /// Startup: declare the persisted media settings.
-fn register_media_settings(settings: Option<ResMut<crate::settings::ViewerSettings>>) {
+fn register_media_settings(settings: Option<ResMut<sl_viewer_settings::ViewerSettings>>) {
     let Some(mut settings) = settings else {
         return;
     };
@@ -212,7 +212,7 @@ impl Plugin for MediaPrimPlugin {
                 Update,
                 claim_media_wheel
                     .after(MediaPrimSystems::Drive)
-                    .before(crate::world_api::WorldPhase::CameraOrbited),
+                    .before(sl_viewer_world_api::WorldPhase::CameraOrbited),
             );
     }
 }
@@ -255,8 +255,8 @@ fn claim_media_wheel(
     slot.surface.mouse_wheel(
         x,
         y,
-        crate::browser_widget::float_to_pixel(wheel.delta.x * scale),
-        crate::browser_widget::float_to_pixel(wheel.delta.y * scale),
+        sl_viewer_media::browser_widget::float_to_pixel(wheel.delta.x * scale),
+        sl_viewer_media::browser_widget::float_to_pixel(wheel.delta.y * scale),
     );
     wheel.delta = Vec2::ZERO;
 }
@@ -293,8 +293,8 @@ pub(crate) fn media_pixel_from_uv(uv: Vec2, size: UVec2) -> (i32, i32) {
     // Second Life's `v` runs bottom-up, a page's `y` top-down.
     let y = ((1.0 - wrap(uv.y)) * f32::from(height)).round();
     (
-        crate::browser_widget::float_to_pixel(x),
-        crate::browser_widget::float_to_pixel(y),
+        sl_viewer_media::browser_widget::float_to_pixel(x),
+        sl_viewer_media::browser_widget::float_to_pixel(y),
     )
 }
 
@@ -462,7 +462,7 @@ fn drive_media_surfaces(
     cameras: Query<&GlobalTransform, With<ViewerCamera>>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
-    settings: Option<Res<crate::settings::ViewerSettings>>,
+    settings: Option<Res<sl_viewer_settings::ViewerSettings>>,
     mut commands: Commands,
 ) {
     *timer += time.delta_secs();
@@ -1129,7 +1129,7 @@ fn route_media_keyboard(
 }
 
 /// `Escape` releases media focus (the reference also resets its camera zoom;
-/// `crate::media_controls` owns the zoom state and watches the same edge).
+/// `sl_client_bevy_viewer::media_controls` owns the zoom state and watches the same edge).
 fn release_media_focus_on_escape(
     keyboard: Res<ButtonInput<KeyCode>>,
     context: Res<InputContext>,

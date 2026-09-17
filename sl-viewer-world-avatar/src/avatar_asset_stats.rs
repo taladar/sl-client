@@ -16,7 +16,7 @@ use bevy::prelude::*;
 
 use crate::animations::AnimationManager;
 use crate::bake_inputs::WearableAssetManager;
-use crate::world_api::{ANIMATION_LABEL, PipelineStats, StorePipelineStats, WEARABLE_LABEL};
+use sl_viewer_world_api::{ANIMATION_LABEL, PipelineStats, StorePipelineStats, WEARABLE_LABEL};
 
 /// Publishing the avatar layer's asset-store figures for whoever displays them.
 #[derive(Debug, Default)]
@@ -32,7 +32,7 @@ impl Plugin for AvatarAssetStatsPlugin {
 }
 
 /// Snapshot the avatar layer's asset stores into
-/// [`PipelineStats`](crate::world_api::PipelineStats).
+/// [`PipelineStats`](sl_viewer_world_api::PipelineStats).
 ///
 /// Only runs while something is displaying the figures.
 fn publish_avatar_asset_store_stats(
@@ -63,9 +63,9 @@ mod tests {
     use super::{AvatarAssetStatsPlugin, publish_avatar_asset_store_stats};
     use crate::animations::AnimationManager;
     use crate::bake_inputs::WearableAssetManager;
-    use crate::world_api::{ANIMATION_LABEL, PipelineStats, WEARABLE_LABEL};
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
+    use sl_viewer_world_api::{ANIMATION_LABEL, PipelineStats, WEARABLE_LABEL};
 
     /// Nothing is published while nothing is looking, and both stores appear
     /// the frame the reader states its demand — the avatar half honours the

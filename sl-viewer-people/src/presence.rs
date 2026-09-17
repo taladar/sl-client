@@ -6,7 +6,7 @@
 //!
 //! - **Away** — session state, set by hand from Comm ▸ Online Status or
 //!   automatically after `SETTING_AFK_TIMEOUT` seconds without input, and
-//!   cleared by the next input once it has held [`MIN_AFK_SECS`](crate::world_api::MIN_AFK_SECS) (so a stray
+//!   cleared by the next input once it has held [`MIN_AFK_SECS`](crate::social::MIN_AFK_SECS) (so a stray
 //!   mouse twitch while the screen-saver runs does not un-away you). Going away
 //!   starts `ANIM_AGENT_AWAY` and raises `ControlFlags::AWAY` in the
 //!   `AgentUpdate` the movement driver sends.
@@ -84,12 +84,11 @@ use sl_settings::SettingValue;
 
 use crate::contact_sets::{ContactSets, SetAutoresponseMode};
 use crate::conversations::{ConversationModel, ConversationNotice};
+use crate::intents::ConversationKey;
 use crate::notifications::ShowNotification;
 use crate::settings::ViewerSettings;
-use crate::world_api::ConversationKey;
-use crate::world_api::{
-    PresenceState, SETTING_AUTORESPOND_MODE, SETTING_AUTORESPOND_NON_FRIENDS_MODE,
-};
+use crate::social::PresenceState;
+use crate::world_api::{SETTING_AUTORESPOND_MODE, SETTING_AUTORESPOND_NON_FRIENDS_MODE};
 
 /// The settings section the presence modes and their replies live in.
 pub(crate) const PRESENCE_SECTION: &[&str] = &["presence"];
@@ -435,8 +434,8 @@ fn auto_respond_to_ims(
     mut events: MessageReader<SlEvent>,
     presence: Res<PresenceState>,
     settings: Option<Res<ViewerSettings>>,
-    friends: Option<Res<crate::world_api::FriendsModel>>,
-    mutes: Option<Res<crate::world_api::MuteModel>>,
+    friends: Option<Res<crate::social::FriendsModel>>,
+    mutes: Option<Res<crate::social::MuteModel>>,
     sets: Option<Res<ContactSets>>,
     inventory: Res<crate::inventory::InventoryModel>,
     conversations: Res<ConversationModel>,
@@ -663,8 +662,8 @@ mod tests {
         AWAY_ANIMATION, ContactSets, DND_ANIMATION, PresenceState, ReplyMode, ReplyModes,
         SetAutoresponseMode, direct_peer, reply_for,
     };
-    use crate::world_api::ConversationKey;
-    use crate::world_api::MIN_AFK_SECS;
+    use crate::intents::ConversationKey;
+    use crate::social::MIN_AFK_SECS;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::AgentKey;
 

@@ -43,6 +43,7 @@ use crate::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, floater_shown, spawn_floater,
 };
 use crate::i18n::{TransArgs, Translated, Translator};
+use crate::intents::{AvatarPicked, OpenAvatarPicker};
 use crate::settings::ViewerSettings;
 use crate::snapshot_floater::LocalTimeZone;
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
@@ -54,7 +55,6 @@ use crate::ui_table::{
     spawn_table_row,
 };
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
-use crate::world_api::{AvatarPicked, OpenAvatarPicker};
 
 /// The floater's stable id (persistence, `SL_VIEWER_OPEN_FLOATER`).
 pub(crate) const RENDER_SETTINGS_FLOATER_ID: &str = "avatar-render-settings";

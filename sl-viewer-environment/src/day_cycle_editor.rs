@@ -71,6 +71,10 @@ use sl_client_bevy::{
     SlCommand, SlEvent, SlSessionEvent, UpdatableAssetType, WaterSettings,
     environment_asset_to_bytes,
 };
+use sl_viewer_intents::{
+    OpenSettingsEditor, OpenSettingsPicker, PendingSettingsCreations, SettingsItemCreated,
+    SettingsPicked, TexturePicked,
+};
 use sl_viewer_inventory::inventory::InventoryModel;
 use sl_viewer_inventory::inventory_actions::{SettingsInventorySupport, new_settings_item};
 use sl_viewer_notifications::{NotificationResponse, ShowNotification};
@@ -95,10 +99,6 @@ use sl_viewer_ui_widgets::ui_tab::{
 };
 use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use sl_viewer_ui_widgets::ui_trackball::TrackballAim;
-use sl_viewer_world_api::{
-    OpenSettingsEditor, OpenSettingsPicker, PendingSettingsCreations, SettingsItemCreated,
-    SettingsPicked, TexturePicked,
-};
 use sl_viewer_world_scene::environment::EnvironmentState;
 
 use crate::knobs::{ColorKnob, SkyKnob, TextureKnob, WaterKnob};

@@ -56,6 +56,7 @@ use sl_settings::SettingValue;
 use tracing::{debug, warn};
 
 use crate::i18n::Translator;
+use crate::intents::LocalChatNotice;
 use crate::notification_persist::{PersistNotification, PersistedKind};
 use crate::notifications::{
     DismissNotification, NOTIFICATIONS, NOTIFICATIONS_SECTION, NotificationIgnore,
@@ -68,7 +69,6 @@ use crate::ui::{LogicalInset, LogicalRect, UiRoot, UiScaffoldSystems, column, ro
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
-use crate::world_api::LocalChatNotice;
 
 /// The element id the gallery specimen and its inert actions report under.
 const NOTIFICATION_ELEMENT: &str = "notification-toast";
@@ -1065,7 +1065,7 @@ fn raise_notifications(
     root: Res<UiRoot>,
     translator: Translator,
     settings: Option<Res<ViewerSettings>>,
-    presence: Option<Res<crate::world_api::PresenceState>>,
+    presence: Option<Res<crate::social::PresenceState>>,
     mut queue: ResMut<DoNotDisturbQueue>,
     mut dismiss: MessageWriter<DismissNotification>,
     mut chat: MessageWriter<LocalChatNotice>,

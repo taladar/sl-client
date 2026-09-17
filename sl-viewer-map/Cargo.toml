@@ -26,9 +26,11 @@ sl-map-apis = { version = "0.8.0" }
 sl-settings = { path = "../sl-settings", version = "0.1.0" }
 sl-terrain = { path = "../sl-terrain", version = "0.1.0" }
 sl-types = { workspace = true }
+sl-viewer-intents = { workspace = true }
 sl-viewer-kit = { workspace = true }
 sl-viewer-platform = { workspace = true }
 sl-viewer-settings = { workspace = true }
+sl-viewer-social = { workspace = true }
 sl-viewer-ui-core = { workspace = true }
 sl-viewer-ui-widgets = { workspace = true }
 sl-viewer-world-api = { workspace = true }

@@ -52,6 +52,8 @@ use sl_l10n::{DateTimeLength, DateTimeStyle};
 
 use crate::group_profile::RequestedGroupNotices;
 use crate::i18n::{TransArgs, Translator};
+use crate::intents::OpenGroupProfile;
+use crate::intents::{ConversationKey, OpenConversation};
 use crate::linkified_text::{LinkTextStyle, spawn_linkified_text};
 use crate::notification_host::{NotificationChannelRoot, ResolveNotification, adopt_toast};
 use crate::notification_persist::{
@@ -61,13 +63,11 @@ use crate::notifications::{
     NotificationId, NotificationKind, NotificationManager, NotificationPriority,
 };
 use crate::slt;
+use crate::social::GroupsModel;
 use crate::ui::{column, row};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
-use crate::world_api::GroupsModel;
-use crate::world_api::OpenGroupProfile;
 use crate::world_api::ui_texture::{PendingUiTexture, UiTexturePlugin};
-use crate::world_api::{ConversationKey, OpenConversation};
 
 /// The catalogue-template sentinel a group-notice toast reports as (it is not a
 /// real [`crate::notifications::NOTIFICATIONS`] entry — the card is bespoke — but

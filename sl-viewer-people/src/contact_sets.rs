@@ -100,7 +100,7 @@ use tracing::{debug, info, warn};
 
 use crate::notifications::ShowNotification;
 use crate::settings::ViewerSettings;
-use crate::world_api::FriendsModel;
+use crate::social::FriendsModel;
 use crate::world_api::{AvatarState, NameAlias};
 
 /// The per-account file the sets are stored in (a sibling of the account

@@ -69,17 +69,18 @@ use sl_client_bevy::{
 use crate::edit_tool::{BuildTabPages, LABEL_CLASS, TOOL_FONT_SIZE, VALUE_CLASS};
 use crate::floater::{FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater};
 use crate::i18n::{TransArgs, Translated, Translator};
+use crate::intents::ContentsMutated;
+use crate::intents::LocalChatNotice;
 use crate::inventory::{InventoryModel, item_icon};
 use crate::ui::focus_within;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, VirtualViewport, amend_row_node};
+use crate::world_api::EditToolState;
 use crate::world_api::InputContext;
-use crate::world_api::LocalChatNotice;
 use crate::world_api::ObjectState;
 use crate::world_api::SelectionSet;
-use crate::world_api::{ContentsMutated, EditToolState};
 
 /// The uniform height of a contents row, in logical pixels (matches the
 /// inventory list's row metric so the two read the same).
@@ -1557,8 +1558,8 @@ fn run_contents_actions(
     translator: Translator,
     mut commands: MessageWriter<SlCommand>,
     mut notices: MessageWriter<LocalChatNotice>,
-    mut notecard_opens: MessageWriter<crate::world_api::OpenNotecard>,
-    mut script_opens: MessageWriter<crate::world_api::OpenScript>,
+    mut notecard_opens: MessageWriter<crate::intents::OpenNotecard>,
+    mut script_opens: MessageWriter<crate::intents::OpenScript>,
 ) {
     for request in requests.read() {
         let view = views.view(request.surface);
@@ -1600,24 +1601,24 @@ fn run_contents_actions(
                 // item opens read-only.
                 let editable = view.perms.can_modify && item_modifiable(item);
                 if item.inv_type == InventoryType::Script {
-                    script_opens.write(crate::world_api::OpenScript {
+                    script_opens.write(crate::intents::OpenScript {
                         name: item.name.clone(),
                         asset_id: asset_id.uuid(),
                         editable,
-                        source: crate::world_api::ScriptSource::Task {
+                        source: crate::intents::ScriptSource::Task {
                             task_id: full,
                             item_id,
                         },
-                        target: crate::world_api::target_for(
+                        target: crate::intents::target_for(
                             sl_client_bevy::ScriptLanguage::from_item_flags(item.flags),
                         ),
                     });
                 } else {
-                    notecard_opens.write(crate::world_api::OpenNotecard {
+                    notecard_opens.write(crate::intents::OpenNotecard {
                         name: item.name.clone(),
                         asset_id: asset_id.uuid(),
                         editable,
-                        source: crate::world_api::NotecardSource::Task {
+                        source: crate::intents::NotecardSource::Task {
                             task_id: full,
                             item_id,
                         },

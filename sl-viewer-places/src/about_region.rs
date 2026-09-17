@@ -15,7 +15,7 @@
 //! [`SlSessionEvent::RegionExperiences`]). Each list is a bounded table of
 //! name / rating rows with a per-row **Profile** and **Remove**, over an
 //! **Add** that opens the reusable experience picker
-//! ([`crate::world_api::OpenExperiencePicker`]) with that list's filter — Key
+//! ([`crate::intents::OpenExperiencePicker`]) with that list's filter — Key
 //! takes anything, Allowed only land-scoped experiences, Blocked only
 //! grid-scoped, non-privileged ones, exactly as `LLPanelRegionExperiences`
 //! filters its three pickers.
@@ -124,12 +124,17 @@ use crate::floater::{
     KeyedFloaters, host_floater,
 };
 use crate::i18n::{Translated, Translator};
+use crate::intents::TexturePicked;
+use crate::intents::{AvatarPicked, OpenAvatarPicker};
+use crate::intents::{ExperiencePicked, ExperiencePickerFilter, OpenExperiencePicker};
+use crate::intents::{GroupPicked, OpenGroupPicker};
 use crate::inventory_properties::format_unix_date;
 use crate::land_environment::{
     AllowEnvironmentOverrideRequested, LandEnvironmentPlugin, LandEnvironmentSubject,
     LandPanelKind, spawn_land_environment_panel,
 };
 use crate::name_revisions::{NameRevisions, ViewBuilt};
+use crate::social::GroupsModel;
 use crate::telehub::{OpenTelehub, TelehubPlugin};
 use crate::top_objects::{OpenTopObjects, TopObjectsPlugin};
 use crate::ui::{column, row};
@@ -148,11 +153,6 @@ use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::ui_texture_picker::{TextureSwatchValue, spawn_texture_swatch};
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 use crate::world_api::AvatarState;
-use crate::world_api::GroupsModel;
-use crate::world_api::TexturePicked;
-use crate::world_api::{AvatarPicked, OpenAvatarPicker};
-use crate::world_api::{ExperiencePicked, ExperiencePickerFilter, OpenExperiencePicker};
-use crate::world_api::{GroupPicked, OpenGroupPicker};
 
 /// The floater's body font size, in logical pixels.
 const FONT_SIZE: f32 = 13.0;
@@ -4722,7 +4722,7 @@ mod tests {
         PICK_ALLOWED, PICK_BANNED, PICK_KICK, PICK_MANAGER, PICK_TELEPORT, RegionBases,
         freshest_region_flags, maturity_from_index, maturity_index,
     };
-    use crate::world_api::ExperiencePickerFilter;
+    use crate::intents::ExperiencePickerFilter;
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::{
         EstateAccessDelta, EstateFlags, ExperienceKey, Maturity, OwnerKey, RegionDebugUpdate,
@@ -5113,8 +5113,10 @@ mod tests {
             WriteButton, region_key,
         };
         use crate::floater::{Floater, FloaterCommand, FloaterOp, FloaterPlugin};
+        use crate::intents::GroupPicked;
+        use crate::social::GroupsModel;
         use crate::ui::UiRoot;
-        use crate::world_api::{AvatarState, GroupPicked, GroupsModel};
+        use crate::world_api::AvatarState;
         use bevy::prelude::*;
         use bevy::text::EditableText;
         use bevy::ui::InteractionDisabled;
@@ -5164,14 +5166,14 @@ mod tests {
             app.add_message::<SlCommand>()
                 .add_message::<SlEvent>()
                 .add_message::<crate::ui_combo::ComboChanged>()
-                .add_message::<crate::world_api::OpenTexturePicker>()
-                .add_message::<crate::world_api::TexturePicked>()
-                .add_message::<crate::world_api::OpenAvatarPicker>()
-                .add_message::<crate::world_api::AvatarPicked>()
-                .add_message::<crate::world_api::OpenExperiencePicker>()
-                .add_message::<crate::world_api::ExperiencePicked>()
-                .add_message::<crate::world_api::OpenGroupPicker>()
-                .add_message::<crate::world_api::GroupPicked>()
+                .add_message::<crate::intents::OpenTexturePicker>()
+                .add_message::<crate::intents::TexturePicked>()
+                .add_message::<crate::intents::OpenAvatarPicker>()
+                .add_message::<crate::intents::AvatarPicked>()
+                .add_message::<crate::intents::OpenExperiencePicker>()
+                .add_message::<crate::intents::ExperiencePicked>()
+                .add_message::<crate::intents::OpenGroupPicker>()
+                .add_message::<crate::intents::GroupPicked>()
                 .add_message::<sl_viewer_notices::experience_profile::OpenExperienceProfile>()
                 .init_resource::<AvatarState>()
                 .init_resource::<GroupsModel>()

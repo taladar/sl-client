@@ -16,7 +16,8 @@
 //! Both caches carry a revision of their own that moves only when a name does.
 //! A view records the pair it resolved at and compares.
 
-use crate::world_api::{AvatarState, GroupsModel};
+use crate::social::GroupsModel;
+use crate::world_api::AvatarState;
 
 /// The avatar and group name caches' revisions, as a view last read them.
 ///

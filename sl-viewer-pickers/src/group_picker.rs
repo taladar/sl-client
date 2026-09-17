@@ -81,10 +81,11 @@ use crate::floater::{
     FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater, picker_identity,
 };
 use crate::i18n::Translated;
+use crate::intents::{GroupPicked, GroupPickerScope, OpenGroupPicker};
+use crate::social::{GroupChoice, GroupsModel};
 use crate::ui::{UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab_strip};
-use crate::world_api::{GroupChoice, GroupPicked, GroupPickerScope, GroupsModel, OpenGroupPicker};
 
 /// The floater's [`crate::floater::FloaterSpec::id`].
 const PICKER_FLOATER_ID: &str = "group-picker";
@@ -1124,8 +1125,9 @@ mod tests {
     mod windows {
         use super::super::{GroupPickerPlugin, GroupPickerState, GroupPickerUi};
         use super::{group, model};
+        use crate::intents::{GroupPicked, OpenGroupPicker};
+        use crate::social::GroupsModel;
         use crate::ui::{UiRoot, UiScaffoldSystems};
-        use crate::world_api::{GroupPicked, GroupsModel, OpenGroupPicker};
         use bevy::prelude::*;
         use pretty_assertions::assert_eq;
         use sl_client_bevy::{SlCommand, SlEvent};
