@@ -79,6 +79,17 @@ const TELEPORT_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long to wait for an `AvatarSitResponse` before giving up on a sit
 /// request and surfacing a [`Diagnostic::ExpectedReplyMissing`](crate::Diagnostic::ExpectedReplyMissing).
 const SIT_TIMEOUT: Duration = Duration::from_secs(15);
+/// The `AlertInfo` names under which a simulator refuses a sit request —
+/// the reference's sit-refusal notifications (`notifications.xml`). Second
+/// Life names its refusals; one of these ends a pending sit at once rather
+/// than leaving it to [`SIT_TIMEOUT`].
+const SIT_REFUSAL_ALERTS: &[&str] = &[
+    "SitFailNotSameRegion",
+    "SitFailCantMove",
+    "SitFailNotAllowedOnLand",
+    "CantSitNoRoom",
+    "CantSitNoSuitableSurface",
+];
 /// The default draw distance (metres) advertised in keep-alive `AgentUpdate`s,
 /// large enough that the simulator enables the neighbouring regions.
 const DEFAULT_DRAW_DISTANCE: Distance = Distance::new(256.0);
@@ -1646,7 +1657,12 @@ enum SitState {
     /// concern, not an object sit, and is not tracked here.
     NotSitting,
     /// An `AgentRequestSit` was sent; awaiting the `AvatarSitResponse`.
-    AwaitingResponse,
+    AwaitingResponse {
+        /// The circuit the request went out on: the region the seat object is
+        /// streamed from. A neighbour region's child circuit can only refuse
+        /// (a child agent cannot sit), so its alert ends the wait.
+        circuit: CircuitId,
+    },
     /// Seated on an object: the `AvatarSitResponse` arrived and the session
     /// answered with an `AgentSit`.
     Seated {

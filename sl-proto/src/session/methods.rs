@@ -48,12 +48,13 @@ use super::{
     LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT, MAX_XFER_DOWNLOAD_BYTES,
     MessageCursor, OfferedUpload, PARENT_REQUEST_WARN_ATTEMPTS, PING_INTERVAL, ParentRequest,
     PendingHandover, PendingInventorySave, PendingInvite, RELIABLE_REPLY_GRACE, ReliableSeverity,
-    SIT_TIMEOUT, ScriptGrant, ScriptHolder, ServerHistoryFetch, ServerHistoryMessage,
-    ServerHistoryState, Session, SessionMessage, SessionState, SitState, TELEPORT_TIMEOUT,
-    TEXTURE_DOWNLOAD_MAX_ATTEMPTS, TEXTURE_DOWNLOAD_STALL_TIMEOUT, TYPING_TIMEOUT, TakenControls,
-    TeleportPhase, TextureDownload, TransferDownload, TransferProgress, TransferPurpose,
-    VoiceChannelInfo, XFER_OFFER_TIMEOUT, XFER_REFUSED_RESULT, XFER_STALL_TIMEOUT,
-    XFER_TIMEOUT_RESULT, XferDownload, XferPurpose, XferUpload, deadline, merge_deadline,
+    SIT_REFUSAL_ALERTS, SIT_TIMEOUT, ScriptGrant, ScriptHolder, ServerHistoryFetch,
+    ServerHistoryMessage, ServerHistoryState, Session, SessionMessage, SessionState, SitState,
+    TELEPORT_TIMEOUT, TEXTURE_DOWNLOAD_MAX_ATTEMPTS, TEXTURE_DOWNLOAD_STALL_TIMEOUT,
+    TYPING_TIMEOUT, TakenControls, TeleportPhase, TextureDownload, TransferDownload,
+    TransferProgress, TransferPurpose, VoiceChannelInfo, XFER_OFFER_TIMEOUT, XFER_REFUSED_RESULT,
+    XFER_STALL_TIMEOUT, XFER_TIMEOUT_RESULT, XferDownload, XferPurpose, XferUpload, deadline,
+    merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
@@ -2235,6 +2236,9 @@ impl Session {
                     self.forget_sim_objects(circuit_id);
                 }
             }
+            // A neighbour region's alert — among them its refusal of a sit on
+            // one of its objects ("Try moving closer").
+            AnyMessage::AlertMessage(alert) => self.handle_alert_message(from, alert),
             // A neighbour region's coarse (minimap) avatar positions, tagged with
             // this child circuit's region so a consumer can place the dots into
             // world space — otherwise a neighbour-region avatar is never even shown
@@ -3812,7 +3816,7 @@ impl Session {
             AnyMessage::AvatarSitResponse(response) => {
                 // Only act on a response to our own AgentRequestSit; complete the
                 // sit with an AgentSit and surface the result.
-                if matches!(self.sit, SitState::AwaitingResponse) {
+                if matches!(self.sit, SitState::AwaitingResponse { .. }) {
                     let sit_object = ObjectKey::from(response.sit_object.id);
                     self.sit = SitState::Seated { on: sit_object };
                     if let Some(circuit) = self.circuit.as_mut() {
@@ -5284,24 +5288,7 @@ impl Session {
                     object_id: ObjectKey::from(clear.object_data.object_id),
                 });
             }
-            AnyMessage::AlertMessage(alert) => {
-                self.events.push_back(Event::AlertMessage {
-                    message: trimmed_string(&alert.alert_data.message),
-                    alert_info: alert
-                        .alert_info
-                        .iter()
-                        .map(|block| AlertInfo {
-                            message: trimmed_string(&block.message),
-                            extra_params: trimmed_string(&block.extra_params),
-                        })
-                        .collect(),
-                    agents: alert
-                        .agent_info
-                        .iter()
-                        .map(|block| block.agent_id)
-                        .collect(),
-                });
-            }
+            AnyMessage::AlertMessage(alert) => self.handle_alert_message(from, alert),
             AnyMessage::AgentAlertMessage(alert) => {
                 self.events.push_back(Event::AgentAlertMessage {
                     agent_id: AgentKey::from(alert.agent_data.agent_id),
@@ -5745,15 +5732,19 @@ impl Session {
             .and_then(|c| c.timers.sit)
             .is_some_and(|d| now >= d)
         {
-            self.sit = SitState::NotSitting;
             if let Some(circuit) = self.circuit.as_mut() {
                 circuit.timers.sit = None;
             }
-            tracing::warn!("sit timed out waiting for AvatarSitResponse");
-            self.push_diagnostic(Diagnostic::ExpectedReplyMissing {
-                request: Diagnostic::SIT_REQUEST.to_owned(),
-                sequence: None,
-            });
+            // Only a sit still pending went unanswered; one a teleport or a
+            // stand already ended is not a missing reply.
+            if matches!(self.sit, SitState::AwaitingResponse { .. }) {
+                self.sit = SitState::NotSitting;
+                tracing::warn!("sit timed out waiting for AvatarSitResponse");
+                self.push_diagnostic(Diagnostic::ExpectedReplyMissing {
+                    request: Diagnostic::SIT_REQUEST.to_owned(),
+                    sequence: None,
+                });
+            }
         }
 
         if self
@@ -6511,7 +6502,7 @@ impl Session {
     pub const fn seat(&self) -> Option<ObjectKey> {
         match self.sit {
             SitState::Seated { on } => Some(on),
-            SitState::NotSitting | SitState::AwaitingResponse => None,
+            SitState::NotSitting | SitState::AwaitingResponse { .. } => None,
         }
     }
 
@@ -6531,16 +6522,78 @@ impl Session {
     /// which the session completes with an `AgentSit` and surfaces as
     /// [`Event::SitResult`].
     ///
+    /// The request goes to the region the object is streamed from, as the
+    /// reference's `object->getRegion()->sendReliableMessage()` does. For an
+    /// object in a neighbour region that simulator refuses (a child agent
+    /// cannot sit) with an alert — Second Life's `SitFailNotSameRegion`, "Try
+    /// moving closer" — surfaced as [`Event::AlertMessage`]. A refusal ends the
+    /// pending sit rather than leaving it to time out.
+    ///
     /// # Errors
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
     pub fn sit_on(&mut self, target: ObjectKey, offset: Vector, now: Instant) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_object(target)?;
         circuit.send_agent_request_sit(target.uuid(), offset, now)?;
-        circuit.timers.sit = Some(deadline(now, SIT_TIMEOUT));
-        self.sit = SitState::AwaitingResponse;
+        let circuit = circuit.id;
+        // The wait is the agent's, not the region's: its deadline lives on the
+        // root circuit whichever region was asked.
+        let root = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        root.timers.sit = Some(deadline(now, SIT_TIMEOUT));
+        self.sit = SitState::AwaitingResponse { circuit };
         Ok(())
+    }
+
+    /// Ends a pending sit that `alert`, arriving on `circuit`, refuses.
+    ///
+    /// Two alerts are refusals: one of the named sit refusals
+    /// ([`SIT_REFUSAL_ALERTS`]) from any region — Second Life names them — and
+    /// any alert from the neighbour region the request went to, since a child
+    /// agent's sit can only be refused (OpenSim sends that refusal as bare
+    /// text, with no name). Without this the alert shows and the sit then also
+    /// times out as a request that was never answered.
+    fn end_sit_refused_by(&mut self, circuit: CircuitId, alert: &sl_wire::messages::AlertMessage) {
+        let SitState::AwaitingResponse { circuit: asked } = self.sit else {
+            return;
+        };
+        let asked_a_neighbour = self.circuit.as_ref().is_some_and(|root| root.id != asked);
+        let named_refusal = alert
+            .alert_info
+            .iter()
+            .any(|info| SIT_REFUSAL_ALERTS.contains(&trimmed_string(&info.message).as_str()));
+        if !(named_refusal || (asked_a_neighbour && circuit == asked)) {
+            return;
+        }
+        self.sit = SitState::NotSitting;
+        if let Some(root) = self.circuit.as_mut() {
+            root.timers.sit = None;
+        }
+    }
+
+    /// Surfaces an `AlertMessage` from the simulator at `from` — the root or a
+    /// neighbour region, as the reference's `process_alert_message` takes
+    /// either — and ends a pending sit it refuses.
+    fn handle_alert_message(&mut self, from: SocketAddr, alert: &sl_wire::messages::AlertMessage) {
+        if let Some(circuit) = self.circuit_id_for(from) {
+            self.end_sit_refused_by(circuit, alert);
+        }
+        self.events.push_back(Event::AlertMessage {
+            message: trimmed_string(&alert.alert_data.message),
+            alert_info: alert
+                .alert_info
+                .iter()
+                .map(|block| AlertInfo {
+                    message: trimmed_string(&block.message),
+                    extra_params: trimmed_string(&block.extra_params),
+                })
+                .collect(),
+            agents: alert
+                .agent_info
+                .iter()
+                .map(|block| block.agent_id)
+                .collect(),
+        });
     }
 
     /// Walks the agent to the global coordinates `(global_x, global_y, z)` using

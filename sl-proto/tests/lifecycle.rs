@@ -2283,6 +2283,167 @@ mod test {
         Ok(())
     }
 
+    /// An `AlertMessage` carrying `text`, and an `AlertInfo` named `name` when
+    /// one is given (Second Life names its alerts; OpenSim sends bare text).
+    fn alert(text: &str, name: Option<&str>) -> AnyMessage {
+        AnyMessage::AlertMessage(sl_wire::messages::AlertMessage {
+            alert_data: sl_wire::messages::AlertMessageAlertDataBlock {
+                message: text.as_bytes().to_vec(),
+            },
+            alert_info: name
+                .map(|name| sl_wire::messages::AlertMessageAlertInfoBlock {
+                    message: name.as_bytes().to_vec(),
+                    extra_params: Vec::new(),
+                })
+                .into_iter()
+                .collect(),
+            agent_info: Vec::new(),
+        })
+    }
+
+    /// Whether `diagnostics` report a sit that was never answered.
+    fn reports_missing_sit_reply(diagnostics: &[Diagnostic]) -> bool {
+        diagnostics.iter().any(|d| {
+            matches!(
+                d,
+                Diagnostic::ExpectedReplyMissing { request, .. } if request == "Sit"
+            )
+        })
+    }
+
+    /// Sitting on an object in a neighbour region asks **that** region, as the
+    /// reference does, and the neighbour's refusal — here OpenSim's bare-text
+    /// "Try moving closer", arriving on the child circuit — is surfaced as an
+    /// alert and ends the pending sit. Before, the request went to the root
+    /// simulator, the neighbour's alert was dropped unhandled, and the sit then
+    /// also timed out as a request nobody answered.
+    #[test]
+    fn sit_on_a_neighbour_object_asks_its_region_and_ends_on_its_refusal() -> Result<(), TestError>
+    {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        session.set_diagnostics(true);
+        drain(&mut session)?;
+        enable_neighbour_b(&mut session, 9, now)?;
+        drain(&mut session)?;
+        let seat = 0x5EA7_u128;
+        let update = object_update_in(NB_REGION, 700, seat, vec3(1.0, 2.0, 3.0));
+        session.handle_datagram(sim_b(), &server_message(&update, 3, true)?, now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        session.sit_on(
+            ObjectKey::from(uuid::Uuid::from_u128(seat)),
+            vec3(0.0, 0.0, 0.0),
+            now,
+        )?;
+        let mut to_neighbour = Vec::new();
+        let mut to_root = Vec::new();
+        while let Some(transmit) = session.poll_transmit() {
+            if transmit.destination == sim_b() {
+                to_neighbour.push(decode(&transmit)?);
+            } else {
+                to_root.push(decode(&transmit)?);
+            }
+        }
+        assert!(
+            to_neighbour
+                .iter()
+                .any(|m| matches!(m, AnyMessage::AgentRequestSit(_))),
+            "expected AgentRequestSit on the child circuit, got {to_neighbour:?}"
+        );
+        assert!(
+            !to_root
+                .iter()
+                .any(|m| matches!(m, AnyMessage::AgentRequestSit(_))),
+            "a neighbour's seat must not be asked of the root: {to_root:?}"
+        );
+
+        let refusal = alert(
+            "Try moving closer.  Can't sit on object because it is not in the same region as you.",
+            None,
+        );
+        session.handle_datagram(sim_b(), &server_message(&refusal, 4, true)?, now)?;
+        assert!(
+            drain_events(&mut session)
+                .iter()
+                .any(|e| matches!(e, Event::AlertMessage { message, .. } if message.starts_with("Try moving closer"))),
+            "the neighbour's refusal is surfaced"
+        );
+
+        session.handle_timeout(after(now, 16_000)?);
+        let diagnostics = drain_diagnostics(&mut session);
+        assert!(
+            !reports_missing_sit_reply(&diagnostics),
+            "a refused sit is not an unanswered one: {diagnostics:?}"
+        );
+        assert_eq!(session.seat(), None);
+        Ok(())
+    }
+
+    /// Second Life answers a sit it will not allow with a named alert — seen
+    /// live on aditi from the agent's own region as `SitFailNotSameRegion`. A
+    /// named refusal ends the pending sit whichever region sends it; an
+    /// unrelated alert does not.
+    #[test]
+    fn a_named_sit_refusal_ends_the_pending_sit_and_other_alerts_do_not() -> Result<(), TestError> {
+        for (name, refuses) in [
+            (Some("SitFailNotSameRegion"), true),
+            (Some("RegionEntryAccessBlocked"), false),
+            (None, false),
+        ] {
+            let now = Instant::now();
+            let mut session = established(now)?;
+            session.set_diagnostics(true);
+            drain(&mut session)?;
+
+            session.sit_on(
+                ObjectKey::from(uuid::Uuid::from_u128(0x5117)),
+                vec3(0.0, 0.0, 0.0),
+                now,
+            )?;
+            drain(&mut session)?;
+            let datagram = server_message(&alert("Some alert", name), 9, true)?;
+            session.handle_datagram(sim_addr(), &datagram, now)?;
+            drain_events(&mut session);
+
+            session.handle_timeout(after(now, 16_000)?);
+            let diagnostics = drain_diagnostics(&mut session);
+            assert_eq!(
+                reports_missing_sit_reply(&diagnostics),
+                !refuses,
+                "alert {name:?} on the root: {diagnostics:?}"
+            );
+        }
+        Ok(())
+    }
+
+    /// A sit that something else already ended — here a stand — does not time
+    /// out afterwards as a request that went unanswered.
+    #[test]
+    fn a_sit_ended_before_its_deadline_is_not_reported_missing() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        session.set_diagnostics(true);
+        drain(&mut session)?;
+
+        session.sit_on(
+            ObjectKey::from(uuid::Uuid::from_u128(0x5117)),
+            vec3(0.0, 0.0, 0.0),
+            now,
+        )?;
+        session.stand(now)?;
+        drain(&mut session)?;
+
+        session.handle_timeout(after(now, 16_000)?);
+        let diagnostics = drain_diagnostics(&mut session);
+        assert!(
+            !reports_missing_sit_reply(&diagnostics),
+            "a stand ended the sit: {diagnostics:?}"
+        );
+        Ok(())
+    }
+
     #[test]
     fn request_avatar_properties_packs_request() -> Result<(), TestError> {
         let now = Instant::now();

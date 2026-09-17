@@ -214,9 +214,18 @@ Sitting is a three-message handshake. The client asks with `AgentRequestSit`
 rotation relative to the object, the scripted-camera eye/focus offsets, a
 force-mouselook flag, and whether the viewer should autopilot into range
 first; the client completes with `AgentSit`. The result surfaces as
-`Event::SitResult`, and `Session::seat` reports the current seat. Refusing a
-sit is simply not answering — there is no refusal message; the client's sit
-timeout recovers.
+`Event::SitResult`, and `Session::seat` reports the current seat.
+
+The request goes to the simulator of the region the **object** is in, which is
+not always the agent's own: the reference sends it with
+`object->getRegion()->sendReliableMessage()`. A neighbour region refuses it,
+because a child agent cannot sit, and the refusal is an ordinary `AlertMessage`
+(surfaced as `Event::AlertMessage`). Second Life names it `SitFailNotSameRegion`
+("Try moving closer"); OpenSim sends the same words with no name. Second Life's
+other refusals (`SitFailCantMove`, `CantSitNoRoom`, …) are named alerts too. A
+refusal ends the pending sit at once. Only a request nothing answers at all
+runs into the sit timeout, which reports it as
+`Diagnostic::ExpectedReplyMissing`.
 
 Standing up is not a message at all: one `AgentUpdate` with the transient
 `STAND_UP` control flag (`Session::stand`). Sitting on the ground is likewise

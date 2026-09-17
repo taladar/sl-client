@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 41 |
 | in-progress | 22 |
 | bugs | 6 |
-| done | 1178 |
+| done | 1179 |
 | deferred | 27 |
 | wont-do | 16 |
-| **total** | **1705** |
+| **total** | **1706** |
 
 ## ideas (100)
 
@@ -1169,6 +1169,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ## bugs (6)
 
+### protocol
+
+- [`protocol-logout-reply-sometimes-missing-on-opensim`](bugs/protocol-logout-reply-sometimes-missing-on-opensim.md)
+  — A logout on the local OpenSim sometimes gets no LogoutReply
+
 ### viewer
 
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
@@ -1179,13 +1184,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Own avatar looks broken after a teleport
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
-- [`viewer-sit-on-neighbour-object-uses-root-circuit`](bugs/viewer-sit-on-neighbour-object-uses-root-circuit.md)
-  — Sitting on an object in a neighbour region fails silently instead of "move
-  closer"
 - [`viewer-texture-rotation-offset-t-in-flipped-uv-space`](bugs/viewer-texture-rotation-offset-t-in-flipped-uv-space.md)
   — A rotated face texture turns the wrong way (upside down at 90°)
 
-## done (1178)
+## done (1179)
 
 ### protocol
 
@@ -2772,6 +2774,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-sit-camera-vehicle-frame-lag`](done/viewer-sit-camera-vehicle-frame-lag.md)
   — Scripted sit camera lags a moving vehicle by a frame (wobble in the driver's
   view)
+- [`viewer-sit-on-neighbour-object-uses-root-circuit`](done/viewer-sit-on-neighbour-object-uses-root-circuit.md)
+  — Sitting on an object in a neighbour region fails silently instead of "move
+  closer"
 - [`viewer-sit-target-and-stand-button`](done/viewer-sit-target-and-stand-button.md)
   — Sit target ignored on sit, and no Stand button while seated
 - [`viewer-skinned-bind-group-quits-on-rez`](done/viewer-skinned-bind-group-quits-on-rez.md)
