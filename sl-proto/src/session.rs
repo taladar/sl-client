@@ -161,6 +161,16 @@ pub const CAP_VIEWER_ASSET: &str = "ViewerAsset";
 /// [`Session::handle_caps_event`].
 pub const CAP_UPDATE_AVATAR_APPEARANCE: &str = "UpdateAvatarAppearance";
 
+/// The HTTP capability that bumps the agent's **Current Outfit Folder version**
+/// on the grid (`IncrementCOFVersion`): a `GET` answered with the new version,
+/// `{ "version": <int> }`. Second Life's recovery for an appearance the grid
+/// has lost track of — Firestorm's `LLAppearanceMgr::syncCofVersionAndRefresh`
+/// increments the version this way and then requests a server-side bake
+/// ([`CAP_UPDATE_AVATAR_APPEARANCE`]) at it, so the grid re-bakes and
+/// re-publishes the outfit. Driven by the runtimes' `IncrementCofVersion`
+/// command; the reply is surfaced as [`Event::CofVersionIncremented`].
+pub const CAP_INCREMENT_COF_VERSION: &str = "IncrementCOFVersion";
+
 /// The HTTP capability for the modern asset upload: storing a new asset **and**
 /// creating an inventory item for it (`NewFileAgentInventory`). A two-step
 /// uploader — the driver POSTs the LLSD metadata (folder, asset/inventory type,
@@ -690,6 +700,7 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_GET_MESH2,
     CAP_VIEWER_ASSET,
     CAP_UPDATE_AVATAR_APPEARANCE,
+    CAP_INCREMENT_COF_VERSION,
     CAP_NEW_FILE_AGENT_INVENTORY,
     CAP_UPLOAD_BAKED_TEXTURE,
     CAP_UPDATE_GESTURE_AGENT_INVENTORY,
@@ -2123,11 +2134,11 @@ pub use conversions::{
     build_map_item_reply, build_map_layer_reply, bulk_update_inventory_to_llsd,
     chat_session_agent_params_from_llsd, chat_session_agents_body, chat_session_request_body,
     chat_session_request_from_llsd, chat_session_roster_to_llsd, chatterbox_invitation_to_llsd,
-    chatterbox_session_start_reply_to_llsd, copy_inventory_from_notecard_body,
-    created_category_to_llsd, crossed_region_to_caps_llsd, day_cycle_from_asset,
-    display_name_update_to_llsd, enable_simulator_to_caps_llsd, environment_asset_from_bytes,
-    environment_asset_to_bytes, environment_cap_url, environment_to_llsd,
-    establish_agent_communication_to_llsd, fetch_inventory_items_to_llsd,
+    chatterbox_session_start_reply_to_llsd, cof_version_increment_to_llsd,
+    copy_inventory_from_notecard_body, created_category_to_llsd, crossed_region_to_caps_llsd,
+    day_cycle_from_asset, display_name_update_to_llsd, enable_simulator_to_caps_llsd,
+    environment_asset_from_bytes, environment_asset_to_bytes, environment_cap_url,
+    environment_to_llsd, establish_agent_communication_to_llsd, fetch_inventory_items_to_llsd,
     group_invite_response_body, group_members_to_caps_llsd, group_memberships_to_caps_llsd,
     inventory_descendents_to_llsd, land_stat_reply_to_caps_llsd, nav_mesh_status_to_llsd,
     offline_messages_to_llsd, open_region_info_to_llsd, parcel_info_to_llsd,

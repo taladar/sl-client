@@ -4,9 +4,9 @@ use crate::{Caps, EVENT_QUEUE_TIMEOUT, deliver};
 use bevy::prelude::*;
 use crossbeam_channel::Sender;
 use sl_proto::{
-    CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY, CAP_GROUP_MEMBER_DATA, CAP_UPDATE_AVATAR_APPEARANCE,
-    Error, GroupKey, InventoryFolderKey, InventoryOwner, Llsd, Session, Uuid,
-    build_fetch_inventory_request, build_group_member_data_request,
+    CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY, CAP_GROUP_MEMBER_DATA, CAP_INCREMENT_COF_VERSION,
+    CAP_UPDATE_AVATAR_APPEARANCE, Error, GroupKey, InventoryFolderKey, InventoryOwner, Llsd,
+    Session, Uuid, build_fetch_inventory_request, build_group_member_data_request,
     build_update_avatar_appearance_request, parse_llsd_xml,
 };
 use std::time::Instant;
@@ -134,6 +134,24 @@ pub(crate) fn run_group_members_fetch(
     if let Ok(llsd) = parse_llsd_xml(&text) {
         deliver(caps_tx, (CAP_GROUP_MEMBER_DATA.to_owned(), llsd));
     }
+}
+
+/// GETs the `IncrementCOFVersion` capability (bump the agent's Current Outfit
+/// Folder version on the grid) and forwards the LLSD reply to `caps_tx` tagged
+/// [`CAP_INCREMENT_COF_VERSION`], for the session to surface as a
+/// [`SlSessionEvent::CofVersionIncremented`].
+///
+/// A failed request is forwarded too, as an undefined body — surfaced as a reply
+/// with no version — rather than as a bare caps failure: the caller retries the
+/// increment, as the reference does, and can only do so if it hears that this
+/// one did not land. Mirrors the tokio `increment_cof_version`.
+pub(crate) fn run_increment_cof_version(cap_url: &str, caps_tx: &Sender<(String, Llsd)>) {
+    let reply =
+        crate::http::blocking_get_llsd(cap_url, CAP_INCREMENT_COF_VERSION).unwrap_or_else(|| {
+            tracing::warn!("the Current Outfit Folder version increment failed");
+            Llsd::Undef
+        });
+    deliver(caps_tx, (CAP_INCREMENT_COF_VERSION.to_owned(), reply));
 }
 
 /// POSTs an `UpdateAvatarAppearance` request for `cof_version` (the modern

@@ -253,6 +253,7 @@ fn on_events(
             | SlSessionEvent::RenderMaterials(_)
             | SlSessionEvent::MaterialParamsResult { .. }
             | SlSessionEvent::ServerAppearanceUpdate { .. }
+            | SlSessionEvent::CofVersionIncremented { .. }
             | SlSessionEvent::CachedTextureResponse { .. }
             | SlSessionEvent::ParcelDwell { .. }
             | SlSessionEvent::ParcelAccessList { .. }

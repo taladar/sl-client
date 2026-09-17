@@ -151,6 +151,10 @@ pub use sl_proto::CAP_GET_TEXTURE;
 // `Command::RequestServerAppearanceUpdate` command — from an [`SlCapabilities`]
 // map, without depending on `sl_proto` directly.
 pub use sl_proto::CAP_UPDATE_AVATAR_APPEARANCE;
+// The `IncrementCOFVersion` capability name, so a frontend can tell whether the
+// grid offers the Current Outfit Folder version bump the appearance refresh
+// starts with (`Command::IncrementCofVersion`).
+pub use sl_proto::CAP_INCREMENT_COF_VERSION;
 // The `GetMesh2` / `GetMesh` capability names, the mesh counterpart of
 // [`CAP_GET_TEXTURE`]: a frontend driving the mesh store directly (rather than the
 // `Command::FetchMesh` path) resolves the cap URL from an [`SlCapabilities`] map
@@ -410,7 +414,7 @@ use crate::http::{
     run_remote_parcel_request,
 };
 use crate::inventory::{
-    fetch_folder_contents, run_group_members_fetch, run_inventory_fetch,
+    fetch_folder_contents, run_group_members_fetch, run_increment_cof_version, run_inventory_fetch,
     run_server_appearance_update,
 };
 use crate::inventory_cache::InventoryCache;
@@ -3078,6 +3082,16 @@ fn apply_command(
                 let version = *cof_version;
                 std::thread::spawn(move || {
                     run_server_appearance_update(&url, version, &events_tx);
+                });
+            }
+        }
+        Command::IncrementCofVersion => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_INCREMENT_COF_VERSION).cloned()
+            {
+                let events_tx = caps.events_tx.clone();
+                std::thread::spawn(move || {
+                    run_increment_cof_version(&url, &events_tx);
                 });
             }
         }

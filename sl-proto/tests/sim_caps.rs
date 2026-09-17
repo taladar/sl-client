@@ -19,12 +19,13 @@ mod test {
         CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES,
         CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST,
         CAP_GET_OBJECT_PHYSICS_DATA, CAP_GET_TEXTURE, CAP_GROUP_EXPERIENCES,
-        CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX,
-        CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
-        CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT,
-        CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST,
-        CAP_RENDER_MATERIALS, CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES,
-        CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_UPDATE_NOTECARD_AGENT_INVENTORY,
+        CAP_INCREMENT_COF_VERSION, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
+        CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS,
+        CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE,
+        CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
+        CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
+        CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE,
+        CAP_UPDATE_EXPERIENCE, CAP_UPDATE_NOTECARD_AGENT_INVENTORY,
         CAP_UPDATE_NOTECARD_TASK_INVENTORY, CAP_UPDATE_SCRIPT_AGENT,
         CAP_UPDATE_SETTINGS_TASK_INVENTORY, CAP_UPLOAD_BAKED_TEXTURE, CAP_VIEWER_ASSET,
         CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
@@ -146,13 +147,14 @@ mod test {
         let expected = caps.grant(&requested);
         assert_eq!(granted, expected);
         // Eight agent-comms/framework sim caps, the four asset-delivery caps
-        // (GetTexture/GetMesh/GetMesh2/ViewerAsset), the sixteen content
-        // upload/materials/MOAP caps, the seven inventory caps (the two
+        // (GetTexture/GetMesh/GetMesh2/ViewerAsset), the content
+        // upload/materials/MOAP caps (seventeen with IncrementCOFVersion beside
+        // UpdateAvatarAppearance), the seven inventory caps (the two
         // descendents fetches, the two per-item fetches, AISv3 agent +
         // Library, CreateInventoryCategory), the nine
         // region/object-information caps, the thirteen experience caps, and
         // the three voice signalling caps.
-        assert_eq!(granted.len(), 60);
+        assert_eq!(granted.len(), 61);
         Ok(())
     }
 
@@ -1457,6 +1459,44 @@ mod test {
             sim.poll_event(),
             Some(ServerEvent::ServerAppearanceRequested { cof_version: 42 })
         ));
+        Ok(())
+    }
+
+    /// `IncrementCOFVersion`: a GET bumps the served Current Outfit Folder's
+    /// version and the reply folds into `Event::CofVersionIncremented` with the
+    /// new one; an account without a Current Outfit Folder answers `404`, a
+    /// POST `405`, and an undefined body (how a runtime delivers a failed
+    /// request) folds into a reply with no version.
+    #[test]
+    fn increment_cof_version_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let mut client = new_client()?;
+        let path = granted_cap_path(&caps, CAP_INCREMENT_COF_VERSION)?;
+        let (status, _) = respond(&mut caps, &mut sim, &get(&path, None))?;
+        assert_eq!(status, 404, "no Current Outfit Folder to bump");
+        sim.agent_inventory_mut().insert_folder(InventoryFolder {
+            folder_id: folder_key(0xc0f),
+            parent_id: None,
+            name: "Current Outfit".to_owned(),
+            folder_type: sl_proto::FolderType::CurrentOutfit.to_code(),
+            version: 41,
+        });
+        let (status, _) = respond(&mut caps, &mut sim, &post(&path, ""))?;
+        assert_eq!(status, 405);
+        let (status, reply) = respond(&mut caps, &mut sim, &get(&path, None))?;
+        assert_eq!(status, 200);
+        client.handle_caps_event(CAP_INCREMENT_COF_VERSION, &parse_llsd_xml(&reply)?, now)?;
+        client.handle_caps_event(CAP_INCREMENT_COF_VERSION, &sl_proto::Llsd::Undef, now)?;
+        let replies: Vec<Option<i32>> = drain_client(&mut client)
+            .into_iter()
+            .filter_map(|event| match event {
+                Event::CofVersionIncremented { version } => Some(version),
+                _other => None,
+            })
+            .collect();
+        assert_eq!(replies, vec![Some(42), None]);
         Ok(())
     }
 

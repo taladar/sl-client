@@ -451,6 +451,18 @@ pub mod avatar_texture {
         !id.is_nil() && id != IMG_DEFAULT_AVATAR && id != IMG_INVISIBLE
     }
 
+    /// Whether a baked-slot texture id says anything about the region at all —
+    /// the reference viewer's `LLVOAvatar::isTextureDefined`. The null id, the
+    /// [`IMG_DEFAULT_AVATAR`] "not baked yet" placeholder and the blank plywood
+    /// ([`DEFAULT_PRIM_TEXTURE`](crate::DEFAULT_PRIM_TEXTURE), `IMG_DEFAULT`) are
+    /// undefined; a real bake and [`IMG_INVISIBLE`] (the region was deliberately
+    /// baked away) are defined.
+    #[must_use]
+    pub fn is_bake_defined(id: TextureKey) -> bool {
+        let id = id.uuid();
+        !id.is_nil() && id != IMG_DEFAULT_AVATAR && id != crate::DEFAULT_PRIM_TEXTURE
+    }
+
     /// If `id` is one of the `IMG_USE_BAKED_*` sentinels a worn attachment face
     /// uses to signal "a mesh replaces this baked region", the baked slot it names
     /// — so the corresponding base-avatar mesh region can be hidden. Mirrors the
@@ -669,6 +681,21 @@ pub struct AvatarAppearance {
     /// The avatar's HUD/attachment ids and their attachment points, if the
     /// simulator sent an `AttachmentBlock`.
     pub attachments: Vec<AvatarAttachment>,
+}
+
+impl AvatarAppearance {
+    /// Whether this appearance carries visual parameters to render from.
+    ///
+    /// The reference viewer discards an `AvatarAppearance` with at most one
+    /// visual parameter outright (`LLVOAvatar::processAvatarAppearance`: "we have
+    /// no reliable basis for knowing appearance"), baked textures included — and
+    /// Second Life does send such a message for the agent's own avatar now and
+    /// then, which Firestorm answers with a forced appearance refresh. A viewer
+    /// that applied one would replace a good appearance with nothing.
+    #[must_use]
+    pub const fn has_visual_params(&self) -> bool {
+        self.visual_params.len() > 1
+    }
 }
 
 /// One animation an avatar is currently playing, from an `AvatarAnimation`
@@ -1396,5 +1423,19 @@ mod tests {
             at::IMG_DEFAULT_AVATAR
         )));
         assert!(!at::is_bake_visible(TextureKey::from(at::IMG_INVISIBLE)));
+
+        // A bake the region was deliberately baked away with is still defined;
+        // only the null id and the two placeholders say nothing.
+        assert!(at::is_bake_defined(TextureKey::from(Uuid::from_u128(
+            0xabcd
+        ))));
+        assert!(at::is_bake_defined(TextureKey::from(at::IMG_INVISIBLE)));
+        assert!(!at::is_bake_defined(TextureKey::from(Uuid::nil())));
+        assert!(!at::is_bake_defined(TextureKey::from(
+            at::IMG_DEFAULT_AVATAR
+        )));
+        assert!(!at::is_bake_defined(TextureKey::from(
+            crate::DEFAULT_PRIM_TEXTURE
+        )));
     }
 }

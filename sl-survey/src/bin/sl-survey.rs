@@ -730,6 +730,7 @@ impl Survey {
             | Event::AttachedSoundGainChange { .. }
             | Event::PreloadSound { .. }
             | Event::ServerAppearanceUpdate { .. }
+            | Event::CofVersionIncremented { .. }
             | Event::CachedTextureResponse { .. }
             | Event::TeleportStarted
             | Event::TeleportProgress { .. }

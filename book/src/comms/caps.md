@@ -53,7 +53,8 @@ There are dozens. A non-exhaustive sense of the range:
 - **Inventory** — `FetchInventoryDescendents2`, the per-item
   `FetchInventory2`/`FetchLib2`, `InventoryAPIv3`,
   `CreateInventoryCategory`. See [Inventory](../content/inventory.md).
-- **Appearance** — `UpdateAvatarAppearance`, `UploadBakedTexture`. See
+- **Appearance** — `UpdateAvatarAppearance`, `IncrementCOFVersion`,
+  `UploadBakedTexture`. See
   [Appearance](../content/appearance.md).
 - **Media & materials** — `ObjectMedia`, `RenderMaterials`,
   `ModifyMaterialParams`. See [Materials](../content/materials.md) and
@@ -363,6 +364,9 @@ Current Outfit Folder version, surfaces
 `AvatarAppearance`). `CopyInventoryFromNotecard` is a one-way POST — it surfaces
 `ServerEvent::CopyInventoryFromNotecardRequested` and acks with an undefined
 body (the copied item is delivered over the normal inventory-update stream).
+`IncrementCOFVersion` is a `GET`: it bumps the version of the agent's Current
+Outfit Folder in the serving inventory tree and answers `{ version }`, or `404`
+for an account with no Current Outfit Folder.
 
 **Materials.** `RenderMaterials` routes on HTTP method: a `POST` (the zipped
 id list) or `GET` (all) queries the session's driver-populated

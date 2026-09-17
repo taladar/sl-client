@@ -350,6 +350,7 @@ fn on_events(
             | SlSessionEvent::AttachedSoundGainChange { .. }
             | SlSessionEvent::PreloadSound { .. }
             | SlSessionEvent::ServerAppearanceUpdate { .. }
+            | SlSessionEvent::CofVersionIncremented { .. }
             | SlSessionEvent::CachedTextureResponse { .. }
             | SlSessionEvent::ParcelDwell { .. }
             | SlSessionEvent::ParcelAccessList { .. }

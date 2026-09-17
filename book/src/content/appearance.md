@@ -43,6 +43,23 @@ regenerate that baked texture and upload it again. A baking client should
 re-bake the named texture; a headless bot with no appearance pipeline can
 ignore it.
 
+An `AvatarAppearance` with **at most one visual parameter** describes nothing,
+and the reference viewer discards it whole, baked textures included — a
+viewer that applied it would replace a good appearance with none. Second Life
+does send one for the agent's own avatar now and then, which says the grid has
+lost that appearance. Firestorm then **refreshes** it
+(`LLAppearanceMgr::syncCofVersionAndRefresh`): it bumps the Current Outfit
+Folder version over the `IncrementCOFVersion` capability
+(`Command::IncrementCofVersion` → `Event::CofVersionIncremented`), retrying a
+failure after 1, 3, 7, 15 and 31 seconds, and then requests a server-side bake
+at the version the grid answered, even if every increment failed. The viewer
+here does the same.
+
+A baked slot the new appearance leaves **undefined** — the null id, the
+`IMG_DEFAULT_AVATAR` "not baked yet" placeholder, or the plywood — keeps the
+last defined bake for that region, except for the skirt and the universal
+(mesh-body) slots (`LLVOAvatar::applyParsedAppearanceMessage`).
+
 ## Animations
 
 Animations are assets the avatar plays. The client starts/stops them
@@ -102,15 +119,17 @@ parameter/value pairs) and releases it with `Event::ClearFollowCamProperties`.
 >   `AvatarAppearance`, `AvatarAttachment`, `PlayingAnimation`. Texture-entry
 >   (de)serialization is `decode_texture_entry` / `encode_texture_entry` in
 >   `sl-proto/src/appearance.rs`.
-> - Caps `CAP_UPDATE_AVATAR_APPEARANCE` (`UpdateAvatarAppearance`) and
+> - Caps `CAP_UPDATE_AVATAR_APPEARANCE` (`UpdateAvatarAppearance`),
+>   `CAP_INCREMENT_COF_VERSION` (`IncrementCOFVersion`) and
 >   `CAP_UPLOAD_BAKED_TEXTURE` (`UploadBakedTexture`); the LLSD request builders
 >   are in `sl-wire/src/llsd.rs` (`build_update_avatar_appearance_request`,
 >   `build_upload_baked_texture_request`); the driver is
 >   `sl-client-tokio/src/appearance.rs`.
 > - Commands `SetWearing`, `RequestWearables`, `SetAppearance`,
->   `RequestServerAppearanceUpdate`, `RequestCachedTextures`, `PlayAnimation`,
->   `StopAnimation`, `SetAnimations`; events `AvatarAppearance`,
->   `AgentWearables`, `ServerAppearanceUpdate`, `CachedTextureResponse`,
+>   `RequestServerAppearanceUpdate`, `IncrementCofVersion`,
+>   `RequestCachedTextures`, `PlayAnimation`, `StopAnimation`, `SetAnimations`;
+>   events `AvatarAppearance`, `AgentWearables`, `ServerAppearanceUpdate`,
+>   `CofVersionIncremented`, `CachedTextureResponse`,
 >   `AvatarAnimation`, `RebakeAvatarTextures` (the missing-bake re-upload
 >   request; the sim-side inverse is
 >   `SimSession::send_rebake_avatar_textures`).

@@ -2479,6 +2479,168 @@ mod tests {
         harness.logout()
     }
 
+    /// **An appearance that says nothing does not undress an avatar.**
+    ///
+    /// Two messages a simulator does send, neither of which describes a new
+    /// look, sent over the wire to the catalogue NPC once it is wearing its blue
+    /// bakes:
+    ///
+    /// 1. an `AvatarAppearance` with **no visual params** and an empty texture
+    ///    entry — which the reference discards whole
+    ///    (`LLVOAvatar::processAvatarAppearance`), and which Second Life sends
+    ///    for the agent's own avatar now and then;
+    /// 2. one that does carry the params but has every baked slot at
+    ///    `IMG_DEFAULT_AVATAR`, "not baked yet" — where the reference keeps each
+    ///    region's last defined bake (`applyParsedAppearanceMessage`).
+    ///
+    /// After each the chest must still be blue. A viewer that applied either
+    /// replaced the bakes with none and drew the untextured body instead, for
+    /// as long as no further appearance came — the hair dome that stayed on the
+    /// default look for a whole session (viewer-hair-dome-stays-grey).
+    #[test]
+    fn an_appearance_that_says_nothing_keeps_the_bakes() -> Result<(), TestError> {
+        use sl_fake_grid::fixtures::catalogue::NPC_LOCAL_ID;
+        let mut harness = ViewerHarness::start(sl_fake_grid::catalogue())?;
+        harness.set_setting(
+            crate::name_tag_billboard::SETTING_SHOW_NAME_TAGS,
+            sl_settings::SettingValue::Bool(false),
+        );
+        harness.login()?;
+        harness.wait_event("the catalogue NPC's body", |event| match event {
+            sl_client_bevy::SlSessionEvent::ObjectAdded(object)
+            | sl_client_bevy::SlSessionEvent::ObjectUpdated(object)
+                if object.local_id == NPC_LOCAL_ID =>
+            {
+                Some(())
+            }
+            _ => None,
+        })?;
+        frame_the_npc_against_the_ground(&mut harness);
+        harness.hold_clock();
+        let Some(frame) = harness.capture_after(0.0)? else {
+            no_adapter("the empty-appearance check");
+            return Ok(());
+        };
+        let root = npc_body_root(&harness)?;
+        let chest = world_disc(
+            &mut harness,
+            Vec3::new(root.x, root.y + NPC_CHEST_ABOVE_ROOT, root.z),
+            NPC_BAKE_DISC,
+        )?;
+        let share = coverage(&frame, chest, Marker::Blue);
+        assert!(
+            share > BAKE_SHARE,
+            "the NPC paints only {share} of its chest in blue before anything was sent — the \
+             premise of this test does not hold"
+        );
+
+        let worn = sl_fake_grid::fixtures::catalogue::npc().appearance_record();
+        let empty = sl_client_bevy::AvatarAppearance {
+            texture_entry: sl_client_bevy::TextureEntry { faces: Vec::new() },
+            visual_params: Vec::new(),
+            ..worn.clone()
+        };
+        let unbaked = sl_client_bevy::AvatarAppearance {
+            texture_entry: sl_client_bevy::TextureEntry {
+                faces: vec![
+                    sl_client_bevy::TextureFace::new(sl_client_bevy::TextureKey::from(
+                        sl_client_bevy::avatar_texture::IMG_DEFAULT_AVATAR,
+                    ));
+                    sl_client_bevy::avatar_texture::COUNT
+                ],
+            },
+            ..worn
+        };
+        for (name, appearance) in [
+            ("no visual params", empty),
+            ("every bake not baked yet", unbaked),
+        ] {
+            let agent = harness.agent()?;
+            let now = agent.now();
+            harness.grid(agent.with_sim(|sim| sim.send_avatar_appearance(&appearance, now)))?;
+            harness.mark(name)?;
+            harness.wait_marker(name)?;
+            let frame = harness
+                .capture_after(0.0)?
+                .ok_or("the adapter answered the first capture and not a later one")?;
+            let share = coverage(&frame, chest, Marker::Blue);
+            assert!(
+                share > BAKE_SHARE,
+                "after an appearance with {name}, the NPC paints only {share} of its chest in \
+                 blue — the message replaced its bakes with none"
+            );
+        }
+        harness.logout()
+    }
+
+    /// **An empty appearance for our own avatar is refreshed.**
+    ///
+    /// The reference's answer when the grid sends the agent an appearance with
+    /// no visual params after a real one ("Empty appearance for self. Forcing a
+    /// refresh", `LLAppearanceMgr::syncCofVersionAndRefresh`): bump the Current
+    /// Outfit Folder version over `IncrementCOFVersion`, then ask the grid to
+    /// bake at the version it answered. Both halves are observed where they
+    /// land — the viewer's session hears the increment's reply, and the grid
+    /// receives a bake request naming that very version.
+    #[test]
+    fn an_empty_own_appearance_asks_the_grid_to_rebake() -> Result<(), TestError> {
+        let mut harness = ViewerHarness::start(sl_fake_grid::catalogue())?;
+        harness.login()?;
+        let own = harness
+            .world()
+            .resource::<sl_client_bevy::SlIdentity>()
+            .agent_id
+            .ok_or("the viewer has no agent id after login")?;
+        // The grid's own appearance for us has to have arrived first: an empty
+        // one before any real one is not a lost appearance.
+        harness.wait_event("our own appearance", |event| match event {
+            sl_client_bevy::SlSessionEvent::AvatarAppearance(appearance)
+                if appearance.avatar_id == own && appearance.has_visual_params() =>
+            {
+                Some(())
+            }
+            _ => None,
+        })?;
+
+        let agent = harness.agent()?;
+        let mut grid_events = agent.events();
+        let empty = sl_client_bevy::AvatarAppearance {
+            avatar_id: own,
+            is_trial: false,
+            texture_entry: sl_client_bevy::TextureEntry { faces: Vec::new() },
+            visual_params: Vec::new(),
+            appearance_version: Some(1),
+            cof_version: Some(1),
+            appearance_flags: Some(0),
+            hover_height: None,
+            attachments: Vec::new(),
+        };
+        let now = agent.now();
+        harness.grid(agent.with_sim(|sim| sim.send_avatar_appearance(&empty, now)))?;
+
+        let version =
+            harness.wait_event("the COF version increment's reply", |event| match event {
+                sl_client_bevy::SlSessionEvent::CofVersionIncremented { version } => Some(*version),
+                _ => None,
+            })?;
+        let version = version.ok_or("the grid's IncrementCOFVersion reply named no version")?;
+        harness.run_until(
+            &format!("the grid to be asked for a bake at COF version {version}"),
+            |_harness| loop {
+                match grid_events.try_recv() {
+                    Ok(sl_proto::ServerEvent::ServerAppearanceRequested { cof_version })
+                        if cof_version == version =>
+                    {
+                        break Some(());
+                    }
+                    Ok(_other) => {}
+                    Err(_empty) => break None,
+                }
+            },
+        )?;
+        harness.logout()
+    }
+
     /// How far above the **rendered** body root the NPC's chest sits, in metres:
     /// a little over two thirds of a 1.9 m avatar.
     const NPC_CHEST_ABOVE_ROOT: f32 = 1.35;

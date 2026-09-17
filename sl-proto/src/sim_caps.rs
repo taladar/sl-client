@@ -75,8 +75,8 @@ use crate::session::{
     ais_category_children_reply_to_llsd, ais_category_links_reply_to_llsd,
     ais_inventory_update_to_llsd, ais_item_reply_to_llsd, ais_mutation_reply_to_llsd,
     chat_session_agent_params_from_llsd, chat_session_request_from_llsd,
-    chat_session_roster_to_llsd, environment_to_llsd, environment_update_from_llsd,
-    fetch_inventory_items_to_llsd, inventory_descendents_to_llsd,
+    chat_session_roster_to_llsd, cof_version_increment_to_llsd, environment_to_llsd,
+    environment_update_from_llsd, fetch_inventory_items_to_llsd, inventory_descendents_to_llsd,
     parse_copy_inventory_from_notecard, server_appearance_update_to_llsd, session_history_to_llsd,
 };
 use crate::sim_inventory::SimInventoryError;
@@ -89,11 +89,11 @@ use crate::{
     CAP_FETCH_LIBRARY_ITEM, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
     CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
     CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_EXPERIENCES,
-    CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
-    CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS,
-    CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE,
-    CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
-    CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
+    CAP_INCREMENT_COF_VERSION, CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN,
+    CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX,
+    CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
+    CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT,
+    CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
     CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
     CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
     CAP_UPDATE_GESTURE_AGENT_INVENTORY, CAP_UPDATE_MATERIAL_AGENT_INVENTORY,
@@ -182,6 +182,7 @@ const SERVED_CAPABILITIES: &[&str] = &[
     CAP_UPDATE_SETTINGS_TASK_INVENTORY,
     CAP_UPDATE_MATERIAL_AGENT_INVENTORY,
     CAP_UPDATE_AVATAR_APPEARANCE,
+    CAP_INCREMENT_COF_VERSION,
     CAP_COPY_INVENTORY_FROM_NOTECARD,
     CAP_RENDER_MATERIALS,
     CAP_MODIFY_MATERIAL_PARAMS,
@@ -269,6 +270,8 @@ pub enum CapHandler {
     AssetUpload,
     /// The single-POST `UpdateAvatarAppearance` server-side-bake trigger.
     AvatarAppearance,
+    /// The single-GET `IncrementCOFVersion` Current Outfit Folder version bump.
+    IncrementCofVersion,
     /// The one-way `CopyInventoryFromNotecard` POST (no reply body).
     CopyInventoryFromNotecard,
     /// The legacy `RenderMaterials` materials surface (POST query / PUT set /
@@ -644,6 +647,7 @@ impl SimCaps {
             CAP_SEND_USER_REPORT => Some(CapHandler::UserReport),
             CAP_SEND_USER_REPORT_WITH_SCREENSHOT => Some(CapHandler::UserReportScreenshot),
             CAP_UPDATE_AVATAR_APPEARANCE => Some(CapHandler::AvatarAppearance),
+            CAP_INCREMENT_COF_VERSION => Some(CapHandler::IncrementCofVersion),
             CAP_COPY_INVENTORY_FROM_NOTECARD => Some(CapHandler::CopyInventoryFromNotecard),
             CAP_RENDER_MATERIALS => Some(CapHandler::RenderMaterials),
             CAP_MODIFY_MATERIAL_PARAMS => Some(CapHandler::ModifyMaterialParams),
@@ -792,6 +796,9 @@ impl SimCaps {
                 }
                 Some(CapHandler::AvatarAppearance) => {
                     CapsDispatch::Response(Self::dispatch_update_avatar_appearance(sim, request))
+                }
+                Some(CapHandler::IncrementCofVersion) => {
+                    CapsDispatch::Response(Self::dispatch_increment_cof_version(sim, request))
                 }
                 Some(CapHandler::CopyInventoryFromNotecard) => CapsDispatch::Response(
                     Self::dispatch_copy_inventory_from_notecard(sim, request),
@@ -1325,6 +1332,25 @@ impl SimCaps {
             expected_cof_version: None,
         };
         CapsResponse::llsd_xml(server_appearance_update_to_llsd(&reply).to_llsd_xml())
+    }
+
+    /// Serves one `IncrementCOFVersion` GET: bumps the version of the agent's
+    /// Current Outfit Folder in the served inventory tree and answers the new
+    /// version, `{ version }`. Wrong method → `405`; an account with no Current
+    /// Outfit Folder has no version to bump → `404`.
+    fn dispatch_increment_cof_version(
+        sim: &mut SimSession,
+        request: &CapsRequest<'_>,
+    ) -> CapsResponse {
+        if request.method != "GET" {
+            return CapsResponse::method_not_allowed();
+        }
+        match sim.agent_inventory_mut().increment_current_outfit_version() {
+            Some(version) => {
+                CapsResponse::llsd_xml(cof_version_increment_to_llsd(version).to_llsd_xml())
+            }
+            None => CapsResponse::not_found(),
+        }
     }
 
     /// Serves one `CopyInventoryFromNotecard` POST: surfaces the copy request
@@ -2500,6 +2526,7 @@ mod tests {
             ("GetMesh2", CapStatus::Served),
             ("ViewerAsset", CapStatus::Served),
             ("UpdateAvatarAppearance", CapStatus::Served),
+            ("IncrementCOFVersion", CapStatus::Served),
             ("NewFileAgentInventory", CapStatus::Served),
             ("UploadBakedTexture", CapStatus::Served),
             ("UpdateGestureAgentInventory", CapStatus::Served),

@@ -7,9 +7,9 @@ use super::conversions::{
     avatar_appearance, avatar_group, avatar_interests, avatar_names, avatar_picker_result,
     avatar_properties, benefits_of, bulk_update_folder, bulk_update_inventory_from_llsd,
     bulk_update_item, chat_message, chat_session_roster_from_llsd, chatterbox_invitation_from_llsd,
-    chatterbox_session_start_reply_from_llsd, classified_info, created_category_from_llsd,
-    crossed_region_from_caps_llsd, display_name_update_from_llsd, economy_data,
-    enable_simulator_from_caps_llsd, environment_from_llsd,
+    chatterbox_session_start_reply_from_llsd, classified_info, cof_version_increment_from_llsd,
+    created_category_from_llsd, crossed_region_from_caps_llsd, display_name_update_from_llsd,
+    economy_data, enable_simulator_from_caps_llsd, environment_from_llsd,
     establish_agent_communication_from_llsd, estate_access_from_params, estate_info_from_params,
     fetch_inventory_items_from_llsd, friend, grid_coordinates_from_handle, group_account_details,
     group_account_summary, group_account_transactions, group_active_proposal_item, group_member,
@@ -36,8 +36,8 @@ use super::{
     CAP_FETCH_LIBRARY_ITEM, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
     CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
     CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_MEMBER_DATA,
-    CAP_INVENTORY_API_V3, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX,
-    CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO,
+    CAP_INCREMENT_COF_VERSION, CAP_INVENTORY_API_V3, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3,
+    CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO,
     CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
     CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES,
     CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_USER_INFO,
@@ -756,6 +756,12 @@ impl Session {
             CAP_UPDATE_AVATAR_APPEARANCE => {
                 self.events
                     .push_back(server_appearance_update_from_llsd(body));
+            }
+            // The reply to an `IncrementCOFVersion` GET. A runtime whose request
+            // failed delivers an undefined body, so the caller hears about the
+            // failure as a reply with no version and can retry.
+            CAP_INCREMENT_COF_VERSION => {
+                self.events.push_back(cof_version_increment_from_llsd(body));
             }
             // The reply to an `ObjectMedia` GET: an object's current per-face
             // media (`UPDATE` and the navigate cap have no media-bearing reply —

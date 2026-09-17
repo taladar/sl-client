@@ -19,18 +19,18 @@ use sl_proto::{
     CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
     CAP_GET_EXPERIENCES, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_OBJECT_COST,
     CAP_GET_OBJECT_PHYSICS_DATA, CAP_GET_TEXTURE, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA,
-    CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
-    CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY,
-    CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO,
-    CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
-    CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS, CAP_RESOURCE_COST_SELECTED,
-    CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SIMULATOR_FEATURES,
-    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT,
-    CAP_UPDATE_SCRIPT_TASK, CAP_UPLOAD_BAKED_TEXTURE, CAP_USER_INFO, CAP_VIEWER_ASSET,
-    CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
-    CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE,
-    INVENTORY_FETCH_MAX_IN_FLIGHT, NewFileAgentInventoryRequest, RECV_BUFFER_SIZE,
-    SelectedCostKind, Session, UserInfoUpdate, ais_category_children_fetch_url,
+    CAP_INCREMENT_COF_VERSION, CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN,
+    CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS,
+    CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE,
+    CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
+    CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
+    CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
+    CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
+    CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_UPLOAD_BAKED_TEXTURE, CAP_USER_INFO,
+    CAP_VIEWER_ASSET, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
+    CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE,
+    CHAT_SESSION_START_CONFERENCE, INVENTORY_FETCH_MAX_IN_FLIGHT, NewFileAgentInventoryRequest,
+    RECV_BUFFER_SIZE, SelectedCostKind, Session, UserInfoUpdate, ais_category_children_fetch_url,
     ais_category_children_url, ais_category_url, ais_create_category_url, ais_item_url,
     associate_inventory_request, avatar_picker_search_query, build_agent_preferences_request,
     build_ais_create_category_body, build_ais_create_link_body, build_ais_move_body,
@@ -187,7 +187,7 @@ mod retry;
 pub mod textures;
 mod upload;
 mod voice;
-use crate::appearance::request_server_appearance_update;
+use crate::appearance::{increment_cof_version, request_server_appearance_update};
 use crate::caps::{
     CAPS_FAILURE_PREFIX, abort_task, deliver, fetch_capabilities, make_sleep, refetch_capabilities,
     spawn_event_queue, spawn_simulator_features,
@@ -1822,6 +1822,11 @@ impl Client {
                                 tokio::spawn(request_server_appearance_update(
                                     url, cof_version, http.clone(), caps_tx.clone(),
                                 ));
+                            }
+                        }
+                        Some(Command::IncrementCofVersion) => {
+                            if let Some(url) = caps.get(CAP_INCREMENT_COF_VERSION).cloned() {
+                                tokio::spawn(increment_cof_version(url, http.clone(), caps_tx.clone()));
                             }
                         }
                         Some(Command::SetAnimations(animations)) => {

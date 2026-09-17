@@ -9270,6 +9270,7 @@ dependencies = [
  "serde",
  "sl-client-bevy",
  "sl-l10n",
+ "sl-viewer-notifications",
  "thiserror 2.0.19",
  "tracing",
 ]

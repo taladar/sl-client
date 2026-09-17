@@ -485,6 +485,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // profile/region/parcel/teleport/group/appearance events.
             Event::ObjectUpdated(_)
             | Event::ServerAppearanceUpdate { .. }
+            | Event::CofVersionIncremented { .. }
             | Event::CachedTextureResponse { .. }
             | Event::ObjectAnimation { .. }
             | Event::RebakeAvatarTextures { .. }

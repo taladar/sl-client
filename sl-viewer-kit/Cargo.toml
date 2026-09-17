@@ -39,6 +39,8 @@ sl-client-bevy = { workspace = true, features = ["bevy_pbr"] }
 # Enabled unconditionally rather than behind a forwarding feature: these are
 # render materials, so there is no build of this crate that would not want it.
 sl-l10n = { path = "../sl-l10n", version = "0.1.0" }
+# The appearance refresh raises the reference's "attempting to fix this" tip.
+sl-viewer-notifications = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 

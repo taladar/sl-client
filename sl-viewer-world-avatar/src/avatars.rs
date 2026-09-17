@@ -1964,38 +1964,87 @@ pub(crate) const fn bake_service_slot_name(slot: usize) -> Option<&'static str> 
     }
 }
 
+/// Each baked slot's texture id in an avatar's newly arrived appearance — every
+/// `BODY_BAKE_SLOTS` and `UNIVERSAL_BAKE_SLOTS` slot — with the reference
+/// viewer's guard against a good bake being replaced by no bake applied.
+///
+/// `LLVOAvatar::applyParsedAppearanceMessage` "prevent[s] the overwriting of valid
+/// baked textures with invalid baked textures": a head, upper, lower, eyes or hair
+/// slot the new message leaves undefined
+/// ([`is_bake_defined`](avatar_texture::is_bake_defined) — the null id, the
+/// `IMG_DEFAULT_AVATAR` "not baked yet" placeholder, the plywood, or no face at
+/// all) keeps the last defined texture the avatar had there. The skirt and the
+/// universal slots are exempt, as in the reference: a skirt taken off and a
+/// mesh body's universal bakes legitimately go undefined.
+///
+/// The last defined texture is read back from what the previous appearance
+/// resolved to — `previous_bakes` (its visible bakes) and `previous_invisible`
+/// (its `IMG_INVISIBLE` regions) — so a carried slot keeps being carried.
+fn bake_slot_ids(
+    texture_entry: &TextureEntry,
+    previous_bakes: Option<&HashMap<usize, TextureKey>>,
+    previous_invisible: Option<&HashSet<usize>>,
+) -> HashMap<usize, TextureKey> {
+    let mut ids = HashMap::new();
+    for slot in BODY_BAKE_SLOTS.into_iter().chain(UNIVERSAL_BAKE_SLOTS) {
+        let incoming = texture_entry.texture_id(slot);
+        let undefined = incoming.is_none_or(|id| !avatar_texture::is_bake_defined(id));
+        let carried = if undefined && keeps_last_defined_bake(slot) {
+            previous_bakes
+                .and_then(|bakes| bakes.get(&slot).copied())
+                .or_else(|| {
+                    previous_invisible
+                        .is_some_and(|slots| slots.contains(&slot))
+                        .then(|| TextureKey::from(avatar_texture::IMG_INVISIBLE))
+                })
+        } else {
+            None
+        };
+        if let Some(id) = carried.or(incoming) {
+            let _replaced = ids.insert(slot, id);
+        }
+    }
+    ids
+}
+
+/// Whether a baked slot keeps its last defined texture when a new appearance
+/// leaves it undefined ([`bake_slot_ids`]): the system-body regions do, except
+/// the skirt; the universal slots do not (the reference's `BAKED_SKIRT`,
+/// `BAKED_LEFT_ARM`, `BAKED_LEFT_LEG` and `BAKED_AUX1`–`3` exemptions).
+fn keeps_last_defined_bake(slot: usize) -> bool {
+    slot != avatar_texture::SKIRT_BAKED && BODY_BAKE_SLOTS.contains(&slot)
+}
+
 /// The base-body region slots whose baked texture is the `IMG_INVISIBLE` sentinel
 /// (R22) — a worn system alpha layer carved the region away. The reference viewer's
 /// `isTextureVisible` treats these as not visible and hides the region; only the
 /// system-body `BODY_BAKE_SLOTS` are checked (a universal slot has no base part).
-fn invisible_body_slots(texture_entry: &TextureEntry) -> HashSet<usize> {
+/// `slot_ids` is an appearance's per-slot ids ([`bake_slot_ids`]).
+fn invisible_body_slots(slot_ids: &HashMap<usize, TextureKey>) -> HashSet<usize> {
     BODY_BAKE_SLOTS
         .into_iter()
-        .filter(|&slot| {
-            texture_entry
-                .texture_id(slot)
+        .filter(|slot| {
+            slot_ids
+                .get(slot)
                 .is_some_and(|id| id.uuid() == avatar_texture::IMG_INVISIBLE)
         })
         .collect()
 }
 
-/// The visible baked texture id in each baked slot of an avatar's texture entry —
+/// The visible baked texture id in each baked slot of an avatar's appearance —
 /// every `BODY_BAKE_SLOTS` (system-body region) and `UNIVERSAL_BAKE_SLOTS`
-/// (mesh-body bake-on-mesh) slot whose id names a real, renderable bake
+/// (mesh-body bake-on-mesh) slot of `slot_ids` ([`bake_slot_ids`]) whose id
+/// names a real, renderable bake
 /// ([`is_bake_visible`](avatar_texture::is_bake_visible)), keyed by baked slot. A
 /// slot that is empty, defaulted, or invisible is omitted, so a region with no
 /// published bake has nothing to fetch. The universal slots have no system-body
 /// part, so they are draped only onto a worn mesh body's BoM faces (R22).
-fn visible_body_bakes(texture_entry: &TextureEntry) -> HashMap<usize, TextureKey> {
-    let mut bakes = HashMap::new();
-    for slot in BODY_BAKE_SLOTS.into_iter().chain(UNIVERSAL_BAKE_SLOTS) {
-        if let Some(id) = texture_entry.texture_id(slot)
-            && avatar_texture::is_bake_visible(id)
-        {
-            let _replaced = bakes.insert(slot, id);
-        }
-    }
-    bakes
+fn visible_body_bakes(slot_ids: &HashMap<usize, TextureKey>) -> HashMap<usize, TextureKey> {
+    slot_ids
+        .iter()
+        .filter(|&(_slot, &id)| avatar_texture::is_bake_visible(id))
+        .map(|(&slot, &id)| (slot, id))
+        .collect()
 }
 
 /// Keep the scene origin on the root region for **avatars**: when the root region
@@ -2388,6 +2437,28 @@ pub(crate) fn ingest_avatar_bakes(
     let appearance_service = identity.agent_appearance_service.clone();
     for event in events.read() {
         if let SlSessionEvent::AvatarAppearance(appearance) = &event.0 {
+            // An appearance with no visual params is no appearance at all: the
+            // reference discards it whole rather than let it wipe the bakes it
+            // already has (`processAvatarAppearance`). Second Life sends one for
+            // our own avatar now and then (Firestorm carries a fix for it), and
+            // with no bakes left the regions a worn mesh does not cover — a
+            // mesh-hair wearer's scalp — fall back to the untextured body.
+            if !appearance.has_visual_params() {
+                if identity.agent_id == Some(appearance.avatar_id) {
+                    warn!(
+                        "ignoring an appearance for our own avatar with {} visual param(s); \
+                         keeping the last one",
+                        appearance.visual_params.len()
+                    );
+                } else {
+                    debug!(
+                        "ignoring an appearance for {} with {} visual param(s)",
+                        appearance.avatar_id,
+                        appearance.visual_params.len()
+                    );
+                }
+                continue;
+            }
             // Skip an out-of-order / duplicate resend so a stale appearance cannot
             // clobber a newer bake (P14.4); a newer or equal COF version, or one
             // with no COF version at all, is (re)fetched.
@@ -2395,17 +2466,21 @@ pub(crate) fn ingest_avatar_bakes(
             if !should_refetch_bakes(seen, appearance.cof_version) {
                 continue;
             }
-            let bakes = visible_body_bakes(&appearance.texture_entry);
+            let slot_ids = bake_slot_ids(
+                &appearance.texture_entry,
+                state.baked_textures.get(&appearance.avatar_id),
+                state.invisible_regions.get(&appearance.avatar_id),
+            );
+            let bakes = visible_body_bakes(&slot_ids);
             // The base regions this avatar has baked **invisible** (`IMG_INVISIBLE`)
             // — a worn system alpha layer that carves the system body away so a
             // (non-BOM) mesh body shows through cleanly. The reference viewer's
             // `isTextureVisible` returns false for these, hiding the region; we do
             // the same in `apply_avatar_part_visibility` (R22). Without it the
             // untextured system body renders and z-fights the mesh body (blotches).
-            state.invisible_regions.insert(
-                appearance.avatar_id,
-                invisible_body_slots(&appearance.texture_entry),
-            );
+            state
+                .invisible_regions
+                .insert(appearance.avatar_id, invisible_body_slots(&slot_ids));
             for (&slot, &id) in &bakes {
                 // On a central-baking grid a baked id is fetched from the appearance
                 // service (`<svc>texture/<avatar>/<slot>/<uuid>`), not by UUID from
@@ -3321,6 +3396,11 @@ pub(crate) fn apply_avatar_appearance(
     // Fold any fresh appearance vectors into the cache and flag those avatars.
     for event in events.read() {
         if let SlSessionEvent::AvatarAppearance(appearance) = &event.0 {
+            // No visual params, no appearance: keep the last one (the reference
+            // discards the whole message; `ingest_avatar_bakes` logs it).
+            if !appearance.has_visual_params() {
+                continue;
+            }
             state
                 .appearances
                 .insert(appearance.avatar_id, appearance.visual_params.clone());
@@ -4186,17 +4266,22 @@ pub(crate) fn apply_bom_face_materials(
 mod tests {
     use super::{
         AvatarEntities, AvatarState, BAKE_ALPHA_MASK_THRESHOLD, BakeAlpha, BodySizeMetrics,
-        HashMap, SeatChainQuery, Seated, SeatedTarget, body_root_transform, bom_face_alpha_mode,
-        classify_bake_alpha, coarse_translation, drop_to_hips, invisible_body_slots,
-        root_drop_from_metrics, seat_world_transform, seated_offset, should_refetch_bakes,
-        visible_body_bakes,
+        HashMap, HashSet, SeatChainQuery, Seated, SeatedTarget, SlEvent, SlIdentity,
+        SlSessionEvent, TextureManager, bake_slot_ids, body_root_transform, bom_face_alpha_mode,
+        classify_bake_alpha, coarse_translation, drop_to_hips, ingest_avatar_bakes,
+        invisible_body_slots, root_drop_from_metrics, seat_world_transform, seated_offset,
+        should_refetch_bakes, visible_body_bakes,
     };
     use crate::avatar_assets::BodyRegion;
     use crate::coords::{sl_rotation_to_quat, sl_to_bevy_rotation};
     use crate::world_api::NameAlias;
+    use bevy::ecs::message::Messages;
+    use bevy::ecs::system::RunSystemOnce as _;
+    use bevy::ecs::world::World;
     use bevy::math::{Quat, Vec3};
     use bevy::prelude::{AlphaMode, Transform};
     use pretty_assertions::assert_eq;
+    use sl_client_bevy::AvatarAppearance;
     use sl_client_bevy::{
         AgentKey, BakeRegion, CircuitId, CoarseLocation, Object, ObjectMotion, RegionHandle,
         RegionLocalObjectId, Rotation, ScopedObjectId, TextureEntry, TextureFace, TextureKey, Uuid,
@@ -4892,7 +4977,7 @@ mod tests {
                 TextureFace::new(id)
             })
             .collect();
-        let bakes = visible_body_bakes(&TextureEntry { faces });
+        let bakes = visible_body_bakes(&bake_slot_ids(&TextureEntry { faces }, None, None));
         assert_eq!(bakes.get(&avatar_texture::HEAD_BAKED), Some(&head));
         assert_eq!(bakes.get(&avatar_texture::UPPER_BAKED), Some(&upper));
         // The invisible-sentinel lower slot and the empty eyes/hair/skirt slots
@@ -4922,11 +5007,198 @@ mod tests {
                 TextureFace::new(id)
             })
             .collect();
-        let invisible = invisible_body_slots(&TextureEntry { faces });
+        let invisible = invisible_body_slots(&bake_slot_ids(&TextureEntry { faces }, None, None));
         assert!(invisible.contains(&avatar_texture::LOWER_BAKED));
         assert!(!invisible.contains(&avatar_texture::HEAD_BAKED));
         assert!(!invisible.contains(&avatar_texture::LEFT_ARM_BAKED));
         assert_eq!(invisible.len(), 1);
+    }
+
+    /// A texture entry with `set` ids in their baked slots and the null id in
+    /// every other slot, full length so every baked slot index exists.
+    fn baked_entry(set: &[(usize, TextureKey)]) -> TextureEntry {
+        let faces = (0..avatar_texture::COUNT)
+            .map(|slot| {
+                let id = set
+                    .iter()
+                    .find_map(|&(index, id)| (index == slot).then_some(id))
+                    .unwrap_or_else(|| TextureKey::from(Uuid::nil()));
+                TextureFace::new(id)
+            })
+            .collect();
+        TextureEntry { faces }
+    }
+
+    /// A body-region slot a new appearance leaves undefined — the "not baked yet"
+    /// placeholder, the plywood, the null id, or no face at all — keeps the last
+    /// defined bake, as the reference's `applyParsedAppearanceMessage` does; a
+    /// newly defined bake still replaces the old one.
+    #[test]
+    fn an_undefined_region_slot_keeps_its_last_bake() {
+        let hair = TextureKey::from(Uuid::from_u128(0x4a1));
+        let head = TextureKey::from(Uuid::from_u128(0x4ead));
+        let new_head = TextureKey::from(Uuid::from_u128(0x4eae));
+        let previous: HashMap<usize, TextureKey> = [
+            (avatar_texture::HAIR_BAKED, hair),
+            (avatar_texture::HEAD_BAKED, head),
+        ]
+        .into_iter()
+        .collect();
+        for placeholder in [
+            avatar_texture::IMG_DEFAULT_AVATAR,
+            sl_client_bevy::DEFAULT_PRIM_TEXTURE,
+            Uuid::nil(),
+        ] {
+            let entry = baked_entry(&[
+                (avatar_texture::HAIR_BAKED, TextureKey::from(placeholder)),
+                (avatar_texture::HEAD_BAKED, new_head),
+            ]);
+            let ids = bake_slot_ids(&entry, Some(&previous), None);
+            assert_eq!(
+                ids.get(&avatar_texture::HAIR_BAKED),
+                Some(&hair),
+                "a hair slot at {placeholder} must keep the last hair bake"
+            );
+            assert_eq!(ids.get(&avatar_texture::HEAD_BAKED), Some(&new_head));
+        }
+        // An entry with no faces at all says nothing about any region either.
+        let ids = bake_slot_ids(&TextureEntry { faces: Vec::new() }, Some(&previous), None);
+        assert_eq!(visible_body_bakes(&ids), previous);
+    }
+
+    /// A region last baked `IMG_INVISIBLE` stays invisible when a new appearance
+    /// leaves it undefined — invisible is a defined bake, not an absent one.
+    #[test]
+    fn an_undefined_region_slot_stays_invisible() {
+        let previous_invisible: HashSet<usize> = [avatar_texture::HAIR_BAKED].into_iter().collect();
+        let entry = baked_entry(&[(
+            avatar_texture::HAIR_BAKED,
+            TextureKey::from(avatar_texture::IMG_DEFAULT_AVATAR),
+        )]);
+        let ids = bake_slot_ids(&entry, None, Some(&previous_invisible));
+        assert_eq!(invisible_body_slots(&ids), previous_invisible);
+        assert!(visible_body_bakes(&ids).is_empty());
+    }
+
+    /// The skirt and the universal slots are exempt, as in the reference: a
+    /// skirt taken off and a mesh body's universal bakes legitimately go away.
+    #[test]
+    fn the_skirt_and_universal_slots_do_not_keep_a_bake() {
+        let previous: HashMap<usize, TextureKey> = [
+            (
+                avatar_texture::SKIRT_BAKED,
+                TextureKey::from(Uuid::from_u128(0x5c1)),
+            ),
+            (
+                avatar_texture::LEFT_ARM_BAKED,
+                TextureKey::from(Uuid::from_u128(0x1a)),
+            ),
+            (
+                avatar_texture::AUX3_BAKED,
+                TextureKey::from(Uuid::from_u128(0xa3)),
+            ),
+        ]
+        .into_iter()
+        .collect();
+        let entry = baked_entry(&[
+            (
+                avatar_texture::SKIRT_BAKED,
+                TextureKey::from(avatar_texture::IMG_DEFAULT_AVATAR),
+            ),
+            (
+                avatar_texture::LEFT_ARM_BAKED,
+                TextureKey::from(avatar_texture::IMG_DEFAULT_AVATAR),
+            ),
+        ]);
+        let ids = bake_slot_ids(&entry, Some(&previous), None);
+        assert!(visible_body_bakes(&ids).is_empty());
+    }
+
+    /// The avatar state `ingest_avatar_bakes` reads and writes, with no grid
+    /// capabilities (so a bake request parks instead of fetching).
+    fn bake_ingest_world() -> World {
+        let mut world = World::new();
+        world.init_resource::<Messages<SlEvent>>();
+        world.init_resource::<AvatarState>();
+        world.init_resource::<TextureManager>();
+        world.insert_resource(SlIdentity::default());
+        world
+    }
+
+    /// An appearance for `agent` with `params` visual params and hair bake `hair`.
+    fn hair_appearance(agent: AgentKey, params: usize, hair: TextureKey) -> SlEvent {
+        SlEvent(SlSessionEvent::AvatarAppearance(Box::new(
+            AvatarAppearance {
+                avatar_id: agent,
+                is_trial: false,
+                texture_entry: baked_entry(&[(avatar_texture::HAIR_BAKED, hair)]),
+                visual_params: vec![128; params],
+                appearance_version: Some(1),
+                cof_version: Some(7),
+                appearance_flags: Some(0),
+                hover_height: None,
+                attachments: Vec::new(),
+            },
+        )))
+    }
+
+    /// An appearance with no visual params is discarded whole, as the reference
+    /// discards it: the bakes the avatar already had stay, where applying it left
+    /// the hair region on the untextured default body for the session
+    /// (viewer-hair-dome-stays-grey).
+    #[test]
+    fn an_appearance_without_visual_params_keeps_the_bakes()
+    -> Result<(), Box<dyn core::error::Error>> {
+        let agent = AgentKey::from(Uuid::from_u128(0xa9e));
+        let hair = TextureKey::from(Uuid::from_u128(0x4a1));
+        let mut world = bake_ingest_world();
+        let _written = world.write_message(hair_appearance(agent, 218, hair));
+        world
+            .run_system_once(ingest_avatar_bakes)
+            .map_err(|error| format!("the bake ingest must run: {error}"))?;
+        // A different, defined hair bake: only discarding the message keeps the
+        // first one (the slot carry-over alone would take this one).
+        let other_hair = TextureKey::from(Uuid::from_u128(0x4a2));
+        let _written = world.write_message(hair_appearance(agent, 0, other_hair));
+        world
+            .run_system_once(ingest_avatar_bakes)
+            .map_err(|error| format!("the bake ingest must run: {error}"))?;
+        let state = world.resource::<AvatarState>();
+        assert_eq!(
+            state
+                .baked_textures
+                .get(&agent)
+                .and_then(|bakes| bakes.get(&avatar_texture::HAIR_BAKED)),
+            Some(&hair)
+        );
+        Ok(())
+    }
+
+    /// An appearance that does carry visual params but has not baked the hair
+    /// yet keeps the hair bake it had, through the same system.
+    #[test]
+    fn an_unbaked_hair_slot_keeps_the_hair_bake() -> Result<(), Box<dyn core::error::Error>> {
+        let agent = AgentKey::from(Uuid::from_u128(0xa9e));
+        let hair = TextureKey::from(Uuid::from_u128(0x4a1));
+        let mut world = bake_ingest_world();
+        let _written = world.write_message(hair_appearance(agent, 218, hair));
+        world
+            .run_system_once(ingest_avatar_bakes)
+            .map_err(|error| format!("the bake ingest must run: {error}"))?;
+        let placeholder = TextureKey::from(avatar_texture::IMG_DEFAULT_AVATAR);
+        let _written = world.write_message(hair_appearance(agent, 218, placeholder));
+        world
+            .run_system_once(ingest_avatar_bakes)
+            .map_err(|error| format!("the bake ingest must run: {error}"))?;
+        let state = world.resource::<AvatarState>();
+        assert_eq!(
+            state
+                .baked_textures
+                .get(&agent)
+                .and_then(|bakes| bakes.get(&avatar_texture::HAIR_BAKED)),
+            Some(&hair)
+        );
+        Ok(())
     }
 
     /// A baked texture's composited alpha (P14.3) is classified from its source

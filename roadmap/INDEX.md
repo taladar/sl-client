@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 315 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 8 |
-| done | 1171 |
+| bugs | 7 |
+| done | 1172 |
 | deferred | 26 |
 | wont-do | 16 |
 | **total** | **1699** |
@@ -1167,14 +1167,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (8)
+## bugs (7)
 
 ### viewer
 
 - [`viewer-combo-stops-opening`](bugs/viewer-combo-stops-opening.md) — A combo
   can stop dropping down (seen on the contact-sets chooser)
-- [`viewer-hair-dome-stays-grey`](bugs/viewer-hair-dome-stays-grey.md) — The
-  default hair dome intermittently stays grey for a whole session
 - [`viewer-horizon-thin-line-flashes`](bugs/viewer-horizon-thin-line-flashes.md)
   — Flashes along a thin line near the horizon
 - [`viewer-hover-tooltip-202ms-frame-spike`](bugs/viewer-hover-tooltip-202ms-frame-spike.md)
@@ -1188,7 +1186,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 
-## done (1171)
+## done (1172)
 
 ### protocol
 
@@ -1862,6 +1860,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-gst-audio-mixer-handoff`](done/viewer-gst-audio-mixer-handoff.md) —
   GStreamer audio into the shared mixer (parcel stream + video PCM) (blocked by
   `viewer-audio-backend` (done))
+- [`viewer-hair-dome-stays-grey`](done/viewer-hair-dome-stays-grey.md) — The
+  default hair dome intermittently stays grey for a whole session
 - [`viewer-hover-text`](done/viewer-hover-text.md) — Object hover text
   (llSetText floating text)
 - [`viewer-hover-text-colour-change-not-redrawn`](done/viewer-hover-text-colour-change-not-redrawn.md)

@@ -20,16 +20,81 @@
 //! that version up front, falling back to the grid's `expected` version on a
 //! mismatch. A one-shot handshake per session; central baking is Second
 //! Life-only, so on OpenSim (which never offers the capability) this is inert.
+//!
+//! The same driver runs the reference's **appearance refresh**
+//! (`LLAppearanceMgr::syncCofVersionAndRefresh`) when the grid sends our own
+//! avatar an appearance with no visual params after a real one: that message
+//! says the grid has lost our appearance, so the viewer tells the user it is
+//! fixing it, bumps the COF version over `IncrementCOFVersion` (retrying a
+//! failure with a growing delay) and requests a bake at the new version.
 
 use bevy::prelude::*;
 use sl_client_bevy::{
-    CAP_UPDATE_AVATAR_APPEARANCE, Command, FolderInfo, FolderType, InventoryFolderKey,
-    SlCapabilities, SlCommand, SlEvent, SlSessionEvent,
+    CAP_INCREMENT_COF_VERSION, CAP_UPDATE_AVATAR_APPEARANCE, Command, FolderInfo, FolderType,
+    InventoryFolderKey, SlCapabilities, SlCommand, SlEvent, SlIdentity, SlSessionEvent,
 };
+use sl_viewer_notifications::ShowNotification;
 
 /// A bound on the COF-version mismatch recovery loop, so a grid that never
 /// accepts a bake cannot make the viewer spin forever.
 const MAX_BAKE_ATTEMPTS: u32 = 4;
+
+/// How many times a failed COF version increment is retried before the refresh
+/// requests a bake anyway (the reference's `BAKE_RETRY_MAX_COUNT`).
+const MAX_COF_INCREMENT_RETRIES: u32 = 5;
+
+/// The base of the growing delay between COF version increment retries: retry
+/// `n` waits `BASE^n - 1` seconds (the reference's `BAKE_RETRY_TIMEOUT`).
+const COF_INCREMENT_RETRY_BASE: f64 = 2.0;
+
+/// The catalogue tip the reference raises when it starts an appearance refresh
+/// ("…you may appear as a cloud and is attempting to fix this automatically").
+const FORCE_UPDATE_NOTIFICATION: &str = "AvatarRezSelfBakeForceUpdateNotification";
+
+/// An appearance refresh in flight: a COF version increment awaiting its reply,
+/// or waiting out the delay before its next attempt.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct CofRefresh {
+    /// The failed increments so far.
+    retries: u32,
+    /// When (app elapsed seconds) to send the next increment, or `None` while
+    /// one is awaiting its reply.
+    retry_at: Option<f64>,
+}
+
+/// What the refresh does next after a COF version increment reply.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum RefreshStep {
+    /// The increment landed: request a bake at this version.
+    Bake(i32),
+    /// It failed: try again at this time (app elapsed seconds).
+    RetryAt(f64),
+    /// It failed too often: request a bake at the version already known, as
+    /// the reference does ("request an update even if we fail").
+    GiveUp,
+}
+
+impl CofRefresh {
+    /// The step after a reply carrying `version` (`None` for a failed
+    /// increment) at `now`, advancing the retry count on a failure.
+    ///
+    /// The reference retries a malformed reply without counting it; here every
+    /// failure counts, so a grid that keeps answering nonsense cannot hold the
+    /// refresh open forever.
+    fn after_reply(&mut self, version: Option<i32>, now: f64) -> RefreshStep {
+        if let Some(version) = version {
+            return RefreshStep::Bake(version);
+        }
+        self.retries = self.retries.saturating_add(1);
+        if self.retries > MAX_COF_INCREMENT_RETRIES {
+            return RefreshStep::GiveUp;
+        }
+        let delay = COF_INCREMENT_RETRY_BASE.powf(f64::from(self.retries)) - 1.0;
+        let at = now + delay;
+        self.retry_at = Some(at);
+        RefreshStep::RetryAt(at)
+    }
+}
 
 /// The stage of the one-shot server-bake handshake.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -66,6 +131,15 @@ pub struct ServerBakeState {
     /// COF-only change (a BoM layer that never touches the legacy `AgentWearables`
     /// set) still re-bakes.
     cof_folder: Option<InventoryFolderKey>,
+    /// Whether the `IncrementCOFVersion` capability has been offered, without
+    /// which there is no refresh to run (the reference warns and stops).
+    increment_available: bool,
+    /// Whether an appearance *with* visual params has arrived for our own
+    /// avatar — the reference's `mLastUpdateReceivedCOFVersion != -1`. A
+    /// param-less one before any real one is not a lost appearance.
+    own_appearance_seen: bool,
+    /// The appearance refresh in flight, if any.
+    refresh: Option<CofRefresh>,
 }
 
 /// The version of the agent's Current Outfit Folder in the inventory-folder
@@ -92,15 +166,26 @@ fn current_outfit_folder(folders: &[FolderInfo]) -> Option<InventoryFolderKey> {
 /// the login-seeded inventory skeleton and POST a bake request, retrying with the
 /// grid's expected version on a mismatch until it is accepted (or the attempt
 /// bound is reached). Inert on grids without central baking (e.g. OpenSim).
+#[expect(
+    clippy::too_many_lines,
+    reason = "one match over the session events the handshake and the refresh both advance on"
+)]
 pub fn drive_server_bake(
     mut capabilities: MessageReader<SlCapabilities>,
     mut events: MessageReader<SlEvent>,
     mut state: ResMut<ServerBakeState>,
     mut writer: MessageWriter<SlCommand>,
+    mut notify: MessageWriter<ShowNotification>,
+    identity: Res<SlIdentity>,
+    time: Res<Time>,
 ) {
+    let now = time.elapsed_secs_f64();
     // Kick off the handshake once the central-baking capability is offered, by
     // snapshotting the inventory folders to learn the current COF version.
     for SlCapabilities(map) in capabilities.read() {
+        if map.contains_key(CAP_INCREMENT_COF_VERSION) {
+            state.increment_available = true;
+        }
         if map.contains_key(CAP_UPDATE_AVATAR_APPEARANCE) {
             state.cap_available = true;
             if state.stage == BakeStage::Idle {
@@ -213,16 +298,305 @@ pub fn drive_server_bake(
                 state.attempts = 0;
                 debug!("Current Outfit Folder reconverged; re-running the server appearance bake");
             }
+            // An appearance for our own avatar. One with visual params is the
+            // grid's account of us; one without, after a real one, says the grid
+            // has lost it — the reference's "Empty appearance for self. Forcing
+            // a refresh". The avatar layer ignores the message itself.
+            SlSessionEvent::AvatarAppearance(appearance)
+                if identity.agent_id == Some(appearance.avatar_id) =>
+            {
+                if appearance.has_visual_params() {
+                    state.own_appearance_seen = true;
+                } else if state.own_appearance_seen && state.refresh.is_none() {
+                    notify.write(ShowNotification::new(FORCE_UPDATE_NOTIFICATION));
+                    if state.increment_available {
+                        info!(
+                            "the grid sent our own avatar an empty appearance; refreshing it \
+                             (incrementing the Current Outfit Folder version)"
+                        );
+                        writer.write(SlCommand(Command::IncrementCofVersion));
+                        state.refresh = Some(CofRefresh {
+                            retries: 0,
+                            retry_at: None,
+                        });
+                    } else {
+                        warn!(
+                            "the grid sent our own avatar an empty appearance, but offers no \
+                             IncrementCOFVersion capability to refresh it with"
+                        );
+                    }
+                }
+            }
+            // The reply to a refresh's COF version increment.
+            SlSessionEvent::CofVersionIncremented { version } => {
+                let Some(mut refresh) = state.refresh else {
+                    continue;
+                };
+                match refresh.after_reply(*version, now) {
+                    RefreshStep::Bake(cof_version) => {
+                        info!("incremented the Current Outfit Folder version to {cof_version}");
+                        state.refresh = None;
+                        request_bake(&mut state, &mut writer, cof_version);
+                    }
+                    RefreshStep::RetryAt(at) => {
+                        warn!(
+                            "the Current Outfit Folder version increment failed; retry {} in \
+                             {:.0} s",
+                            refresh.retries,
+                            at - now
+                        );
+                        state.refresh = Some(refresh);
+                    }
+                    RefreshStep::GiveUp => {
+                        warn!(
+                            "the Current Outfit Folder version increment failed \
+                             {MAX_COF_INCREMENT_RETRIES} times; requesting a bake anyway"
+                        );
+                        state.refresh = None;
+                        let cof_version = state.cof_version;
+                        request_bake(&mut state, &mut writer, cof_version);
+                    }
+                }
+            }
             _other => {}
         }
     }
+    // Send a refresh's next increment once its retry delay has passed.
+    if let Some(refresh) = state.refresh.as_mut()
+        && refresh.retry_at.is_some_and(|at| now >= at)
+    {
+        refresh.retry_at = None;
+        writer.write(SlCommand(Command::IncrementCofVersion));
+    }
+}
+
+/// Request a server-side bake at `cof_version` as a fresh handshake round —
+/// the end of an appearance refresh (the reference's
+/// `requestServerAppearanceUpdate`). The version-mismatch recovery above
+/// applies to it as to any other bake request.
+fn request_bake(
+    state: &mut ServerBakeState,
+    writer: &mut MessageWriter<SlCommand>,
+    cof_version: i32,
+) {
+    state.cof_version = cof_version;
+    state.attempts = 1;
+    state.stage = BakeStage::BakeRequested;
+    writer.write(SlCommand(Command::RequestServerAppearanceUpdate {
+        cof_version,
+    }));
 }
 
 #[cfg(test)]
 mod tests {
-    use super::current_outfit_version;
+    use super::{
+        CofRefresh, MAX_COF_INCREMENT_RETRIES, RefreshStep, ServerBakeState,
+        current_outfit_version, drive_server_bake,
+    };
+    use bevy::ecs::message::Messages;
+    use bevy::ecs::system::RunSystemOnce as _;
+    use bevy::prelude::{Time, World};
+    use core::time::Duration;
     use pretty_assertions::assert_eq;
-    use sl_client_bevy::{FolderInfo, FolderState, FolderType, InventoryFolderKey, Uuid};
+    use sl_client_bevy::{
+        AgentKey, AvatarAppearance, CAP_INCREMENT_COF_VERSION, CAP_UPDATE_AVATAR_APPEARANCE,
+        Command, FolderInfo, FolderState, FolderType, InventoryFolderKey, SlCapabilities,
+        SlCommand, SlEvent, SlIdentity, SlSessionEvent, TextureEntry, Uuid,
+    };
+    use sl_viewer_notifications::ShowNotification;
+
+    /// Our own agent in the refresh tests.
+    const OWN: Uuid = Uuid::from_u128(0x0a9e);
+
+    /// A world holding everything [`drive_server_bake`] reads and writes, for
+    /// our own agent [`OWN`].
+    fn bake_world() -> World {
+        let mut world = World::new();
+        world.init_resource::<Messages<SlCapabilities>>();
+        world.init_resource::<Messages<SlEvent>>();
+        world.init_resource::<Messages<SlCommand>>();
+        world.init_resource::<Messages<ShowNotification>>();
+        world.init_resource::<ServerBakeState>();
+        world.init_resource::<Time>();
+        world.insert_resource(SlIdentity {
+            agent_id: Some(AgentKey::from(OWN)),
+            ..SlIdentity::default()
+        });
+        world
+    }
+
+    /// Run the driver once over `events`, and return the commands it sent and
+    /// the notifications it raised (both drained, as are the events, so the
+    /// next run starts clean).
+    fn step(
+        world: &mut World,
+        events: Vec<SlSessionEvent>,
+    ) -> Result<(Vec<Command>, Vec<&'static str>), String> {
+        for event in events {
+            let _written = world.write_message(SlEvent(event));
+        }
+        world
+            .run_system_once(drive_server_bake)
+            .map_err(|error| format!("the bake driver must run: {error}"))?;
+        world.resource_mut::<Messages<SlEvent>>().clear();
+        world.resource_mut::<Messages<SlCapabilities>>().clear();
+        let commands = world
+            .resource_mut::<Messages<SlCommand>>()
+            .drain()
+            .map(|SlCommand(command)| command)
+            .collect();
+        let notifications = world
+            .resource_mut::<Messages<ShowNotification>>()
+            .drain()
+            .map(|notification| notification.template)
+            .collect();
+        Ok((commands, notifications))
+    }
+
+    /// An appearance for `agent` carrying `params` visual params.
+    fn appearance(agent: Uuid, params: usize) -> SlSessionEvent {
+        SlSessionEvent::AvatarAppearance(Box::new(AvatarAppearance {
+            avatar_id: AgentKey::from(agent),
+            is_trial: false,
+            texture_entry: TextureEntry { faces: Vec::new() },
+            visual_params: vec![128; params],
+            appearance_version: Some(1),
+            cof_version: Some(3),
+            appearance_flags: Some(0),
+            hover_height: None,
+            attachments: Vec::new(),
+        }))
+    }
+
+    /// Offer both appearance capabilities and settle the login handshake, so
+    /// what follows is the refresh alone.
+    fn offer_caps(world: &mut World) -> Result<(), String> {
+        let map = [CAP_INCREMENT_COF_VERSION, CAP_UPDATE_AVATAR_APPEARANCE]
+            .into_iter()
+            .map(|name| (name.to_owned(), format!("https://caps.example/{name}")))
+            .collect();
+        let _written = world.write_message(SlCapabilities(map));
+        let (commands, _) = step(world, Vec::new())?;
+        assert!(matches!(
+            commands.as_slice(),
+            [Command::QueryInventoryFolders]
+        ));
+        let (commands, _) = step(
+            world,
+            vec![SlSessionEvent::InventoryFolders(Vec::new().into())],
+        )?;
+        assert!(matches!(
+            commands.as_slice(),
+            [Command::RequestServerAppearanceUpdate { .. }]
+        ));
+        let (commands, _) = step(
+            world,
+            vec![SlSessionEvent::ServerAppearanceUpdate {
+                success: true,
+                error: None,
+                expected_cof_version: None,
+            }],
+        )?;
+        assert!(commands.is_empty());
+        Ok(())
+    }
+
+    /// **The reference's appearance refresh, end to end through the driver.**
+    /// An empty appearance for our own avatar after a real one raises the tip
+    /// and increments the COF version; a failed increment is retried after its
+    /// delay, not before; the increment that lands requests a bake at the
+    /// version it returned.
+    #[test]
+    fn an_empty_own_appearance_refreshes_it() -> Result<(), String> {
+        let mut world = bake_world();
+        offer_caps(&mut world)?;
+        let (commands, notifications) = step(&mut world, vec![appearance(OWN, 218)])?;
+        assert!(commands.is_empty() && notifications.is_empty());
+
+        let (commands, notifications) = step(&mut world, vec![appearance(OWN, 0)])?;
+        assert!(matches!(
+            commands.as_slice(),
+            [Command::IncrementCofVersion]
+        ));
+        assert_eq!(
+            notifications,
+            vec!["AvatarRezSelfBakeForceUpdateNotification"]
+        );
+        // A second empty appearance while the refresh runs starts nothing new.
+        let (commands, notifications) = step(&mut world, vec![appearance(OWN, 0)])?;
+        assert!(commands.is_empty() && notifications.is_empty());
+
+        // The increment fails: the first retry waits `2^1 - 1` = one second.
+        let (commands, _) = step(
+            &mut world,
+            vec![SlSessionEvent::CofVersionIncremented { version: None }],
+        )?;
+        assert!(commands.is_empty(), "a retry must wait out its delay");
+        world
+            .resource_mut::<Time>()
+            .advance_by(Duration::from_millis(1100));
+        let (commands, _) = step(&mut world, Vec::new())?;
+        assert!(matches!(
+            commands.as_slice(),
+            [Command::IncrementCofVersion]
+        ));
+
+        let (commands, _) = step(
+            &mut world,
+            vec![SlSessionEvent::CofVersionIncremented { version: Some(9) }],
+        )?;
+        assert!(matches!(
+            commands.as_slice(),
+            [Command::RequestServerAppearanceUpdate { cof_version: 9 }]
+        ));
+        Ok(())
+    }
+
+    /// Only a *lost* appearance of our *own* avatar is refreshed: an empty one
+    /// before any real one, and one for somebody else, start nothing.
+    #[test]
+    fn only_a_lost_own_appearance_is_refreshed() -> Result<(), String> {
+        let mut world = bake_world();
+        offer_caps(&mut world)?;
+        let (commands, notifications) = step(&mut world, vec![appearance(OWN, 0)])?;
+        assert!(commands.is_empty() && notifications.is_empty());
+        let other = Uuid::from_u128(0x07e);
+        let (commands, notifications) = step(
+            &mut world,
+            vec![appearance(other, 218), appearance(other, 0)],
+        )?;
+        assert!(commands.is_empty() && notifications.is_empty());
+        Ok(())
+    }
+
+    /// Retries grow as `2^n - 1` seconds, and the one past the limit gives up
+    /// (which requests a bake anyway).
+    #[test]
+    fn cof_increment_retries_grow_and_give_up() {
+        let mut refresh = CofRefresh {
+            retries: 0,
+            retry_at: None,
+        };
+        let steps: Vec<RefreshStep> = core::iter::repeat_with(|| refresh.after_reply(None, 100.0))
+            .take(
+                usize::try_from(MAX_COF_INCREMENT_RETRIES)
+                    .unwrap_or(0)
+                    .saturating_add(1),
+            )
+            .collect();
+        assert_eq!(
+            steps,
+            vec![
+                RefreshStep::RetryAt(101.0),
+                RefreshStep::RetryAt(103.0),
+                RefreshStep::RetryAt(107.0),
+                RefreshStep::RetryAt(115.0),
+                RefreshStep::RetryAt(131.0),
+                RefreshStep::GiveUp,
+            ]
+        );
+        assert_eq!(refresh.after_reply(Some(4), 100.0), RefreshStep::Bake(4));
+    }
 
     /// A minimal folder snapshot entry of the given type and version.
     fn folder(folder_type: FolderType, version: i32) -> FolderInfo {

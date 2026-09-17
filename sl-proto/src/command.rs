@@ -1894,6 +1894,13 @@ pub enum Command {
         /// The Current Outfit Folder version the grid should bake.
         cof_version: i32,
     },
+    /// Bump the agent's Current Outfit Folder version on the grid over the HTTP
+    /// `IncrementCOFVersion` capability — the first half of Second Life's
+    /// appearance refresh, followed by a
+    /// [`RequestServerAppearanceUpdate`](Self::RequestServerAppearanceUpdate) at
+    /// the new version. The reply (or its failure) arrives as
+    /// [`Event::CofVersionIncremented`](crate::Event::CofVersionIncremented).
+    IncrementCofVersion,
     /// Start and/or stop several of the agent's own animations (`AgentAnimation`):
     /// each `(anim_id, start)` pair starts (`true`) or stops (`false`) one
     /// animation. Other avatars observe the result as an
@@ -3123,6 +3130,7 @@ impl Command {
             Self::SetAppearance { .. } => "SetAppearance",
             Self::RequestCachedTextures { .. } => "RequestCachedTextures",
             Self::RequestServerAppearanceUpdate { .. } => "RequestServerAppearanceUpdate",
+            Self::IncrementCofVersion => "IncrementCofVersion",
             Self::SetAnimations(..) => "SetAnimations",
             Self::PlayAnimation(..) => "PlayAnimation",
             Self::StopAnimation(..) => "StopAnimation",

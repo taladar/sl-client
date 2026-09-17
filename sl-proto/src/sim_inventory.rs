@@ -125,6 +125,18 @@ impl SimInventoryTree {
             .min_by_key(|folder| folder.folder_id)
     }
 
+    /// Bumps the Current Outfit Folder's version, as the grid's
+    /// `IncrementCOFVersion` capability does, and returns the new version —
+    /// `None` when the account has no Current Outfit Folder.
+    pub(crate) fn increment_current_outfit_version(&mut self) -> Option<i32> {
+        let folder_id = self
+            .folder_of_type(crate::FolderType::CurrentOutfit.to_code())?
+            .folder_id;
+        let folder = self.folders.get_mut(&folder_id)?;
+        folder.version = folder.version.saturating_add(1);
+        Some(folder.version)
+    }
+
     /// The **link items** directly inside `folder_id`, sorted by name, or
     /// `None` when the folder is unknown.
     ///

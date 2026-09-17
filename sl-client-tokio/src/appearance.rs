@@ -2,7 +2,8 @@
 
 use reqwest::Client as ReqwestClient;
 use sl_proto::{
-    CAP_UPDATE_AVATAR_APPEARANCE, Llsd, build_update_avatar_appearance_request, parse_llsd_xml,
+    CAP_INCREMENT_COF_VERSION, CAP_UPDATE_AVATAR_APPEARANCE, Llsd,
+    build_update_avatar_appearance_request, parse_llsd_xml,
 };
 use tokio::sync::mpsc;
 
@@ -56,4 +57,28 @@ pub(crate) async fn request_server_appearance_update(
             report_caps_failure(&caps_tx, CAP_UPDATE_AVATAR_APPEARANCE).await;
         }
     }
+}
+
+/// GETs the `IncrementCOFVersion` capability (bump the agent's Current Outfit
+/// Folder version on the grid) and forwards the LLSD reply over `caps_tx`, to be
+/// surfaced as an [`Event::CofVersionIncremented`](sl_proto::Event::CofVersionIncremented).
+///
+/// A failed request is forwarded too, as an undefined body — which the session
+/// surfaces as a reply with no version — rather than as a bare caps failure:
+/// the caller retries the increment, as the reference does, and can only do so
+/// if it hears that this one did not land. Mirrors the bevy
+/// `run_increment_cof_version`.
+pub(crate) async fn increment_cof_version(
+    cap_url: String,
+    http: ReqwestClient,
+    caps_tx: mpsc::Sender<(String, Llsd)>,
+) {
+    let reply = match crate::http::get_llsd(&cap_url, CAP_INCREMENT_COF_VERSION, &http).await {
+        Some(llsd) => llsd,
+        None => {
+            tracing::warn!("the Current Outfit Folder version increment failed");
+            Llsd::Undef
+        }
+    };
+    deliver(&caps_tx, (CAP_INCREMENT_COF_VERSION.to_owned(), reply)).await;
 }

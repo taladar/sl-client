@@ -1791,6 +1791,15 @@ pub enum Event {
         /// expected — re-request with this version. `None` otherwise.
         expected_cof_version: Option<i32>,
     },
+    /// The grid's reply to an `IncrementCOFVersion` capability `GET` (see
+    /// [`CAP_INCREMENT_COF_VERSION`](crate::CAP_INCREMENT_COF_VERSION)): the
+    /// agent's Current Outfit Folder version after the bump.
+    CofVersionIncremented {
+        /// The new Current Outfit Folder version, or `None` when the request
+        /// failed or its reply named no version — a caller retries, as the
+        /// reference does.
+        version: Option<i32>,
+    },
     /// The simulator's reply to a baked-texture cache query
     /// (`AgentCachedTextureResponse`), in response to
     /// [`Session::request_cached_textures`](crate::Session::request_cached_textures):

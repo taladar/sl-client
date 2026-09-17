@@ -1537,6 +1537,16 @@ pub(crate) fn server_appearance_update_from_llsd(body: &Llsd) -> Event {
     }
 }
 
+/// Builds an [`Event::CofVersionIncremented`] from the LLSD reply to an
+/// `IncrementCOFVersion` GET (`{ version }`); a reply without an integer
+/// version — including the undefined body a failed request is delivered as —
+/// carries none.
+pub(crate) fn cof_version_increment_from_llsd(body: &Llsd) -> Event {
+    Event::CofVersionIncremented {
+        version: body.get("version").and_then(Llsd::as_i32),
+    }
+}
+
 /// Builds [`EconomyData`] from an `EconomyData` message's info block.
 ///
 /// The L$ price fields and the Land Impact capacity/count fields are decoded at
@@ -5296,6 +5306,14 @@ pub fn server_appearance_update_to_llsd(event: &Event) -> Llsd {
         entries.push(("expected", Llsd::Integer(expected)));
     }
     llsd_map(entries)
+}
+
+/// Serializes the new Current Outfit Folder version as an `IncrementCOFVersion`
+/// capability reply body, `{ version }` (inverse of
+/// `cof_version_increment_from_llsd`).
+#[must_use]
+pub fn cof_version_increment_to_llsd(version: i32) -> Llsd {
+    llsd_map(vec![("version", Llsd::Integer(version))])
 }
 
 /// Encodes an `f32` as an LLSD real.

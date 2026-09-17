@@ -5320,6 +5320,11 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "increment_cof_version",
+            usage: "",
+            build: |_args, _ctx| Ok(Command::IncrementCofVersion),
+        },
+        CommandSpec {
             name: "set_animations",
             usage: "<animations: anim_id:start,…>",
             build: |args, ctx| {
