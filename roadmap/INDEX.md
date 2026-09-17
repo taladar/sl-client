@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 315 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 6 |
-| done | 1173 |
+| bugs | 5 |
+| done | 1174 |
 | deferred | 27 |
 | wont-do | 16 |
 | **total** | **1700** |
@@ -1167,7 +1167,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (6)
+## bugs (5)
 
 ### viewer
 
@@ -1181,10 +1181,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Own avatar looks broken after a teleport
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
-- [`viewer-void-water-diagonal-takes-corner-height`](bugs/viewer-void-water-diagonal-takes-corner-height.md)
-  — Void water on a block's diagonal takes the corner region's sea level
 
-## done (1173)
+## done (1174)
 
 ### protocol
 
@@ -2983,6 +2981,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — An item the viewer just uploaded is not in its own inventory
 - [`viewer-url-linkification`](done/viewer-url-linkification.md) — URLs in chat
   & other text contexts (blocked by `viewer-ui-text-foundation` (done))
+- [`viewer-void-water-diagonal-takes-corner-height`](done/viewer-void-water-diagonal-takes-corner-height.md)
+  — Void water on a block's diagonal takes the corner region's sea level
 - [`viewer-volume-panel`](done/viewer-volume-panel.md) — Volume panel (master +
   per-category sliders) (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-audio-backend` (done))

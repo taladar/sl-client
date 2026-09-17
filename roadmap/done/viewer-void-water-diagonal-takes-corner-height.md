@@ -2,7 +2,7 @@
 id: viewer-void-water-diagonal-takes-corner-height
 title: Void water on a block's diagonal takes the corner region's sea level
 topic: viewer
-status: bugs
+status: done
 origin: user report on aditi while verifying viewer-horizon-thin-line-flashes
   (2026-09-17)
 refs: [viewer-sea-grid-edge-visible-from-height, viewer-p23-1]
@@ -66,3 +66,29 @@ lower level
 (`a_tied_void_cell_takes_the_lower_level`). This case is a pure function of the
 loaded-cell map, so it gets a unit test beside them: a 2x2 block with one
 corner higher, asserting that no void cell on that corner's diagonal is raised.
+
+## Resolution (2026-09-17)
+
+The first option above does not work: under Euclidean or Manhattan distance the
+corner is *still* the only nearest region on its diagonal (for a cell `d` out,
+`2d²` against `2d² + 2d + 1`, or `2d` against `2d + 1`), and Euclidean hands it
+the whole outer quadrant besides. Widening the vote over one extra ring also
+fails the mirror case: with the corner *lower* than the other three, the
+diagonal would vote 2:1 for the higher level while the tied cells beside it take
+the lower one — the same strip, inverted.
+
+What was done: a void cell whose nearest ring is one region lying exactly on a
+diagonal out from it is where that corner's two edge sides meet. It takes the
+**lower** of the plain nearest-ring votes of its two outward neighbours (one
+cell further out along each axis) — the same "too low beats too high" rule a tie
+follows. Every other cell is decided exactly as before. A lone region with
+nothing around it keeps its level on its diagonals, since both neighbours see it
+alone too.
+
+Tests in `water.rs`: `no_void_cell_on_a_raised_corner_diagonal_is_raised` (the
+report's 2x2 block; the whole window of void around it is at the lower level —
+fails with the diagonal rule disabled),
+`a_lowered_corner_diagonal_matches_the_void_beside_it` and
+`a_lone_region_diagonal_keeps_its_level`; the ring and tie tests are unchanged.
+
+Verified live on aditi (2026-09-17): the raised diagonal strip is gone.

@@ -566,11 +566,38 @@ fn cell_translation(cell: IVec2, height: f32) -> Vec3 {
 /// say) go to the majority, and then to the **lower** level: void water that is too
 /// high reads as a wall standing over the neighbouring sea, while too low only
 /// reveals a little more of the void it was covering.
+///
+/// One set of cells is decided differently: those on the outward **diagonal** of a
+/// corner region (one with no loaded region beside it on that side, in either axis).
+/// Chebyshev distance makes that corner the *only* nearest region there, while the
+/// cells either side of the diagonal each tie it with one of its edge neighbours.
+/// Left to the plain vote, the diagonal would be a line one cell wide running to the
+/// horizon at the corner's level, with the tie-broken sea on both sides of it. Such
+/// a cell is where the two edge sides of the corner meet, so it takes the **lower**
+/// of the levels its two outward neighbours (one cell further out along each axis)
+/// get — the same "too low beats too high" rule a tie follows.
 fn cell_height(cell: IVec2, loaded: &HashMap<IVec2, f32>, agent_height: f32) -> f32 {
     if let Some(&height) = loaded.get(&cell) {
         return height;
     }
-    let mut nearest: Vec<f32> = Vec::new();
+    let nearest = nearest_regions(cell, loaded);
+    if let [(region, _height)] = nearest.as_slice()
+        && let Some(outward) = diagonal_outward_step(*region, cell)
+    {
+        let across = nearest_height(cell.saturating_add(IVec2::new(outward.x, 0)), loaded);
+        let along = nearest_height(cell.saturating_add(IVec2::new(0, outward.y)), loaded);
+        if let (Some(across), Some(along)) = (across, along) {
+            return across.min(along);
+        }
+    }
+    let heights: Vec<f32> = nearest.iter().map(|&(_region, height)| height).collect();
+    majority_height(&heights).unwrap_or(agent_height)
+}
+
+/// The loaded regions nearest to `cell` by [`cell_distance`] (every one at that
+/// distance), with their water heights. Empty when nothing is loaded.
+fn nearest_regions(cell: IVec2, loaded: &HashMap<IVec2, f32>) -> Vec<(IVec2, f32)> {
+    let mut nearest: Vec<(IVec2, f32)> = Vec::new();
     let mut best = u32::MAX;
     for (&other, &height) in loaded {
         let distance = cell_distance(other, cell);
@@ -579,10 +606,28 @@ fn cell_height(cell: IVec2, loaded: &HashMap<IVec2, f32>, agent_height: f32) -> 
             nearest.clear();
         }
         if distance == best {
-            nearest.push(height);
+            nearest.push((other, height));
         }
     }
-    majority_height(&nearest).unwrap_or(agent_height)
+    nearest
+}
+
+/// The plain nearest-ring vote for `cell` — [`majority_height`] over
+/// [`nearest_regions`] — with no diagonal handling. `None` when nothing is loaded.
+fn nearest_height(cell: IVec2, loaded: &HashMap<IVec2, f32>) -> Option<f32> {
+    let heights: Vec<f32> = nearest_regions(cell, loaded)
+        .iter()
+        .map(|&(_region, height)| height)
+        .collect();
+    majority_height(&heights)
+}
+
+/// When `cell` lies exactly on a diagonal out from `region` (as far off in x as in
+/// y, and not on it), the unit step pointing further out along that diagonal, one
+/// sign per axis; `None` otherwise.
+fn diagonal_outward_step(region: IVec2, cell: IVec2) -> Option<IVec2> {
+    let offset = cell.saturating_sub(region);
+    (offset.x != 0 && offset.x.unsigned_abs() == offset.y.unsigned_abs()).then(|| offset.signum())
 }
 
 /// The Chebyshev distance between two cells, in cells: the number of rings out one
@@ -997,6 +1042,63 @@ mod tests {
             (IVec2::new(0, 1), 25.0),
         ]);
         assert_height(cell_height(IVec2::new(0, 0), &majority, 40.0), 25.0);
+    }
+
+    /// The aditi report: a 2x2 block whose south-east region's sea sits above the
+    /// other three. Every void cell around the block either ties that corner with
+    /// one of its edge neighbours or is nearer the lower three — except the cells on
+    /// the corner's outward diagonal, which saw the corner alone and ran a raised
+    /// strip of sea out to the horizon. None of the void may take the corner's level.
+    #[test]
+    fn no_void_cell_on_a_raised_corner_diagonal_is_raised() {
+        let loaded = HashMap::from([
+            (IVec2::new(0, 0), 10.0),
+            (IVec2::new(1, 0), 30.0),
+            (IVec2::new(0, 1), 10.0),
+            (IVec2::new(1, 1), 10.0),
+        ]);
+        // The diagonal itself, out to well past any draw distance.
+        for step in 1_i32..=12 {
+            let cell = IVec2::new(step.saturating_add(1), -step);
+            assert_height(cell_height(cell, &loaded, 30.0), 10.0);
+        }
+        // And every void cell in a window around the block.
+        for x in -8..=9 {
+            for y in -8..=9 {
+                let cell = IVec2::new(x, y);
+                if !loaded.contains_key(&cell) {
+                    assert_height(cell_height(cell, &loaded, 30.0), 10.0);
+                }
+            }
+        }
+    }
+
+    /// The same corner, lowered instead: the tie rule already puts the void off the
+    /// diagonal at the corner's level, so the diagonal must not be pulled *up* to the
+    /// other three's — that would be the same strip, inverted.
+    #[test]
+    fn a_lowered_corner_diagonal_matches_the_void_beside_it() {
+        let loaded = HashMap::from([
+            (IVec2::new(0, 0), 30.0),
+            (IVec2::new(1, 0), 10.0),
+            (IVec2::new(0, 1), 30.0),
+            (IVec2::new(1, 1), 30.0),
+        ]);
+        for step in 1_i32..=12 {
+            let diagonal = cell_height(IVec2::new(step.saturating_add(1), -step), &loaded, 30.0);
+            let beside = cell_height(IVec2::new(step.saturating_add(2), -step), &loaded, 30.0);
+            assert_height(diagonal, 10.0);
+            assert_height(beside, 10.0);
+        }
+    }
+
+    /// A region with nothing loaded around it keeps its level on its diagonals too:
+    /// the rule only lowers a diagonal towards a level that is actually nearby.
+    #[test]
+    fn a_lone_region_diagonal_keeps_its_level() {
+        let loaded = HashMap::from([(IVec2::new(0, 0), 30.0)]);
+        assert_height(cell_height(IVec2::new(3, 3), &loaded, 10.0), 30.0);
+        assert_height(cell_height(IVec2::new(-2, 2), &loaded, 10.0), 30.0);
     }
 
     /// With nothing loaded there is nothing to inherit from, so the sea falls back
