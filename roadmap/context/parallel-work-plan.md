@@ -26,8 +26,10 @@ They also *create* the separation the later rounds rely on.
    nine modules, and the social / intent half has left it for the new
    `sl-viewer-social` and `sl-viewer-intents` crates. Each agent edits its own
    module instead of queueing on one file.
-2. `viewer-audit-notifications-crate-split` — one ~21,600-line file that every
-   notification / toast / alert task in every theme edits.
+2. ~~`viewer-audit-notifications-crate-split`~~ — **done**. The ~21,600-line
+   file is now `lib.rs` (types, lookup, state, tests), `forms.rs` (the button
+   tables) and `catalogue/<family>.rs` x 31. A notification task edits its own
+   family's file, and `NOTIFICATIONS` is unchanged for every caller.
 3. `viewer-audit-binary-module-extraction` — moves ~15k lines out of
    `sl-client-bevy-viewer` into existing feature crates. This is what shrinks
    the overlap between the world agent and the UI agent.

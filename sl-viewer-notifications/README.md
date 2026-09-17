@@ -24,7 +24,13 @@ on it almost never have to rebuild because of it.
 
 ## Layout
 
-- `NOTIFICATIONS` — the catalogue, one `NotificationTemplate` per entry.
+- `NOTIFICATIONS` — the catalogue, one `NotificationTemplate` per entry. It is
+  assembled at compile time from `catalogue/<family>.rs`, one module per
+  notification family (appearance, groups, teleport, …), so an entry is edited
+  in a file of its own subject rather than in one ~20k-line table. `catalogue`
+  itself only lists the families and flattens them.
+- `forms` — the button rows an entry's form offers, one `const` per distinct
+  row, shared across families.
 - `NotificationManager` — the queue: what has been raised, what is showing, what
   the user answered.
 - `substitute` / `template` — argument substitution into a resolved message.

@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 314 |
+| ready | 313 |
 | blocked | 41 |
 | in-progress | 22 |
 | bugs | 5 |
-| done | 1181 |
+| done | 1182 |
 | deferred | 27 |
 | wont-do | 16 |
 | **total** | **1706** |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (314)
+## ready (313)
 
 ### protocol
 
@@ -320,8 +320,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The LSP position-to-byte direction has zero tests
 - [`viewer-audit-menu-label-i18n`](ready/viewer-audit-menu-label-i18n.md) — Menu
   and pie-menu labels cannot be translated, by type
-- [`viewer-audit-notifications-crate-split`](ready/viewer-audit-notifications-crate-split.md)
-  — Split the 21637-line notification catalogue and make its lookup a map
 - [`viewer-audit-object-children-index`](ready/viewer-audit-object-children-index.md)
   — ObjectState has no children index, so every linkset query full-scans the
   region
@@ -1182,7 +1180,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 
-## done (1181)
+## done (1182)
 
 ### protocol
 
@@ -1505,6 +1503,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The name-tag viewport-changed gate is exactly inverted
 - [`viewer-audit-notification-store-overwrite`](done/viewer-audit-notification-store-overwrite.md)
   — A malformed notification store is overwritten, destroying unanswered notices
+- [`viewer-audit-notifications-crate-split`](done/viewer-audit-notifications-crate-split.md)
+  — Split the 21637-line notification catalogue and make its lookup a map
 - [`viewer-audit-parcel-access-list-accumulate`](done/viewer-audit-parcel-access-list-accumulate.md)
   — Editing a multi-packet parcel ban list unbans everyone not in the last
   packet
