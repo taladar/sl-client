@@ -18033,6 +18033,144 @@ mod test {
         Ok(())
     }
 
+    /// An object in a **neighbour** region is addressed on that neighbour's
+    /// child circuit — the reference's `objectp->getRegion()->getHost()` —
+    /// because only its own simulator knows it: asked on the root circuit, a
+    /// hover tooltip's `RequestObjectPropertiesFamily` never got an answer and
+    /// the tip read "Loading…" for good. The neighbour's reply, and a script
+    /// dialog it sends, are surfaced from the child circuit, and the dialog's
+    /// answer goes back to the simulator that asked. An object the session has
+    /// never streamed is still asked on the root circuit.
+    #[test]
+    fn neighbour_object_requests_and_replies_use_its_child_circuit() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        enable_neighbour_b(&mut session, 9, now)?;
+        drain(&mut session)?;
+        let pos = Vector {
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+        };
+        let neighbour_object = 0xBEEF_u128;
+        let update = object_update_in(NB_REGION, 700, neighbour_object, pos);
+        session.handle_datagram(sim_b(), &server_message(&update, 3, true)?, now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // The request goes to the neighbour, not the root.
+        let object = ObjectKey::from(uuid::Uuid::from_u128(neighbour_object));
+        session.request_object_properties_family(0, object, now)?;
+        session.request_pay_price(object, now)?;
+        let mut to_neighbour = Vec::new();
+        let mut to_root = Vec::new();
+        while let Some(transmit) = session.poll_transmit() {
+            if transmit.destination == sim_b() {
+                to_neighbour.push(decode(&transmit)?);
+            } else {
+                to_root.push(decode(&transmit)?);
+            }
+        }
+        assert!(
+            to_neighbour
+                .iter()
+                .any(|m| matches!(m, AnyMessage::RequestObjectPropertiesFamily(_))),
+            "expected RequestObjectPropertiesFamily on the child circuit, got {to_neighbour:?}"
+        );
+        assert!(
+            to_neighbour
+                .iter()
+                .any(|m| matches!(m, AnyMessage::RequestPayPrice(_))),
+            "expected RequestPayPrice on the child circuit, got {to_neighbour:?}"
+        );
+        assert!(
+            !to_root.iter().any(|m| matches!(
+                m,
+                AnyMessage::RequestObjectPropertiesFamily(_) | AnyMessage::RequestPayPrice(_)
+            )),
+            "a neighbour object must not be asked on the root circuit: {to_root:?}"
+        );
+
+        // The neighbour's reply is surfaced from the child circuit.
+        let reply = AnyMessage::ObjectPropertiesFamily(ObjectPropertiesFamilyMessage {
+            object_data: ObjectPropertiesFamilyObjectDataBlock {
+                request_flags: 0,
+                object_id: uuid::Uuid::from_u128(neighbour_object),
+                owner_id: uuid::Uuid::from_u128(0x8002),
+                group_id: uuid::Uuid::nil(),
+                base_mask: 0,
+                owner_mask: 0,
+                group_mask: 0,
+                everyone_mask: 0,
+                next_owner_mask: 0,
+                ownership_cost: 0,
+                sale_type: 0,
+                sale_price: 0,
+                category: 0,
+                last_owner_id: uuid::Uuid::nil(),
+                name: b"Neighbour Box\0".to_vec(),
+                description: b"\0".to_vec(),
+            },
+        });
+        session.handle_datagram(sim_b(), &server_message(&reply, 4, true)?, now)?;
+        let properties = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::ObjectPropertiesFamily { properties } => Some(properties),
+                _ => None,
+            })
+            .ok_or("expected the neighbour's ObjectPropertiesFamily to be surfaced")?;
+        assert_eq!(properties.object_id, object);
+        assert_eq!(properties.name, "Neighbour Box");
+
+        // A dialog from a script the session has never streamed, arriving on the
+        // child circuit, is surfaced and answered back on that circuit.
+        let unseen = uuid::Uuid::from_u128(0x8001);
+        let dialog = AnyMessage::ScriptDialog(ScriptDialog {
+            data: ScriptDialogDataBlock {
+                object_id: unseen,
+                first_name: b"Avatar\0".to_vec(),
+                last_name: b"Tester\0".to_vec(),
+                object_name: b"Vendor\0".to_vec(),
+                message: b"Pick one\0".to_vec(),
+                chat_channel: -1234,
+                image_id: uuid::Uuid::nil(),
+            },
+            buttons: vec![ScriptDialogButtonsBlock {
+                button_label: b"Yes\0".to_vec(),
+            }],
+            owner_data: Vec::new(),
+        });
+        session.handle_datagram(sim_b(), &server_message(&dialog, 5, true)?, now)?;
+        assert!(
+            drain_events(&mut session)
+                .iter()
+                .any(|event| matches!(event, Event::ScriptDialog(_))),
+            "expected the neighbour's ScriptDialog to be surfaced"
+        );
+        drain(&mut session)?;
+        session.reply_script_dialog(ObjectKey::from(unseen), ChatChannel(-1234), 0, "Yes", now)?;
+        let answer = take_transmit_to(&mut session, sim_b())
+            .ok_or("expected the dialog answer on the child circuit")?;
+        assert!(
+            matches!(answer, AnyMessage::ScriptDialogReply(_)),
+            "expected ScriptDialogReply to sim_b, got {answer:?}"
+        );
+
+        // An object never streamed and never heard from is asked on the root.
+        drain(&mut session)?;
+        let stranger = ObjectKey::from(uuid::Uuid::from_u128(0xF00D));
+        session.request_object_properties_family(0, stranger, now)?;
+        let asked = take_transmit_to(&mut session, sim_addr())
+            .ok_or("expected the request on the root circuit")?;
+        assert!(
+            matches!(asked, AnyMessage::RequestObjectPropertiesFamily(_)),
+            "expected RequestObjectPropertiesFamily to the root, got {asked:?}"
+        );
+        Ok(())
+    }
+
     // Object interaction & editing (#17) -----------------------------------
 
     #[test]

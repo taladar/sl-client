@@ -82,6 +82,15 @@ what makes seamless movement across a contiguous grid possible.
 >   `send_region_handshake_reply` helpers used during the handshake.
 > - The owning `Session` (`sl-proto/src/session.rs`) holds the root circuit and
 >   any child circuits, and handles promotion on region change.
+> - A request **about an object** goes to the region the object is in, not
+>   to the root: a `ScopedObjectId` names its circuit directly, and an
+>   object-key request (`RequestObjectPropertiesFamily`, `RequestPayPrice`,
+>   the spin / grab updates, the script running / reset requests,
+>   `BuyObjectInventory`) is routed through `Session::circuit_for_object`, the
+>   reference's `objectp->getRegion()->getHost()`. The replies — and a
+>   neighbour script's `ScriptDialog` / `ScriptQuestion` — are handled on child
+>   circuits too, and a script's answer goes back to the circuit its request
+>   arrived on (`Session::circuit_for_script_reply`).
 > - `UseCircuitCode`, `CompleteAgentMovement`, `RegionHandshake`,
 >   `RegionHandshakeReply`, and `AddCircuitCode` are generated
 >   [messages](messages.md) in `sl-wire`.

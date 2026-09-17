@@ -83,9 +83,6 @@
 //! `menu_pie_avatar_other.xml` (the compass positions), and
 //! `newview/llviewermenu.cpp` (the action handlers).
 
-use std::collections::HashSet;
-
-use bevy::camera::visibility::RenderLayers;
 use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
@@ -95,8 +92,7 @@ use crate::attachment_menu::{ATTACHMENT_MENU_ELEMENT, OpenAttachmentMenu};
 use crate::avatars::RefetchAvatarTextures;
 use crate::derender::RequestDerender;
 use crate::gpu_pick::{GpuPickResolved, GpuPicker, PickPurpose, PickResolution};
-use crate::hud::HudCamera;
-use crate::hud_pick::pointer_over_hud;
+use crate::hud_pick::HudRayCast;
 use crate::input_action::Action;
 use crate::land_menu::OpenLandMenu;
 use crate::menu::UNIMPLEMENTED;
@@ -111,8 +107,8 @@ use crate::world_api::DerenderKind;
 use crate::world_api::OpenAvatarProfile;
 use crate::world_api::RequestBlock;
 use crate::world_api::RequestFriendship;
-use crate::world_api::on_hud_layer;
 use crate::world_api::pointer_over_blocking_ui;
+use crate::world_api::targeted_ray_cast::TargetedRayCast;
 use crate::world_api::{ConversationKey, OpenConversation};
 use crate::world_api::{FriendsModel, SelfGroundSit};
 
@@ -886,21 +882,19 @@ fn setup_pick_inspector(mut commands: Commands) {
 /// stage is visible without a click.
 #[expect(
     clippy::too_many_arguments,
-    reason = "a debug system reading everything a pick reads: the window, the HUD camera, \
-              render layers, the hover map / pickables / node sizes for UI occlusion, the \
-              name-tag hit test, the ray caster for the HUD test, the GPU pick queue + its \
+    reason = "a debug system reading everything a pick reads: the window, the HUD ray \
+              cast, the hover map / pickables / node sizes for UI occlusion, the \
+              name-tag hit test, the GPU pick queue + its \
               resolved channel, and the overlay node it writes"
 )]
 fn update_pick_inspector(
     time: Res<Time>,
     windows: Query<&Window>,
-    hud_camera: Query<(&Camera, &GlobalTransform), With<HudCamera>>,
-    layers: Query<(Entity, &RenderLayers)>,
+    hud: HudRayCast,
     hover_map: Res<HoverMap>,
     pickables: Query<&Pickable>,
     tag_hit: NameTagHitTest,
     node_sizes: Query<&ComputedNode>,
-    mut ray_cast: MeshRayCast,
     mut picker: ResMut<GpuPicker>,
     mut picks: MessageReader<GpuPickResolved>,
     mut last_pick: Local<Option<GpuPickResolved>>,
@@ -932,7 +926,7 @@ fn update_pick_inspector(
     }
 
     let ui_blocked = pointer_over_blocking_ui(&hover_map, &pickables, &node_sizes);
-    let hud = pointer_over_hud(cursor, &hud_camera, &layers, &mut ray_cast);
+    let hud = hud.over(cursor);
     let mut lines = vec![
         format!("cursor {:.0},{:.0}", cursor.x, cursor.y),
         format!("UI blocked={ui_blocked}  HUD={hud}"),
@@ -1015,8 +1009,7 @@ fn update_pick_inspector(
     reason = "a Bevy system's parameters are its injected resources / queries: the mouse button \
               and motion plus the click/drag tracker, the hover map / pickables / node sizes for \
               the UI occlusion, the name-tag hit test, the window for the \
-              cursor, the HUD camera plus render layers and the ray caster for the HUD \
-              pick, the object picker for the HUD resolve, the GPU pick queue for the world \
+              cursor, the HUD ray cast, the object picker for the HUD resolve, the GPU pick queue for the world \
               resolve, and the avatar / attachment open channels"
 )]
 fn request_avatar_menu_on_right_click(
@@ -1028,11 +1021,9 @@ fn request_avatar_menu_on_right_click(
     tag_hit: NameTagHitTest,
     node_sizes: Query<&ComputedNode>,
     windows: Query<&Window>,
-    hud_camera: Query<(&Camera, &GlobalTransform), With<HudCamera>>,
-    layers: Query<(Entity, &RenderLayers)>,
+    hud: HudRayCast,
     object_picker: ObjectPicker,
     mut picker: ResMut<GpuPicker>,
-    mut ray_cast: MeshRayCast,
     mut requests: MessageWriter<OpenAvatarMenu>,
     mut attachment_requests: MessageWriter<OpenAttachmentMenu>,
 ) {
@@ -1074,30 +1065,21 @@ fn request_avatar_menu_on_right_click(
         // overlays (the chat heads-up) and non-UI / zero-area hover entries opt out
         // and do not suppress this.
         return;
-    } else if pointer_over_hud(cursor, &hud_camera, &layers, &mut ray_cast) {
+    } else if let Some((entity, hit)) = hud.hit(cursor) {
         // A HUD attachment is under the cursor: it occludes the world (so no
         // avatar or object pie opens behind it), and — only the agent's own
         // HUDs being routed to the screen and shown — it gets the
         // attachment-self pie, resolved through the same orthographic HUD ray
         // the left-click touch uses. A HUD hit that resolves to no tracked
         // object still consumes the click (occlusion).
-        if let Ok((hud_cam, hud_transform)) = hud_camera.single()
-            && let Ok(hud_ray) = hud_cam.viewport_to_world(hud_transform, cursor)
-        {
-            let hud_entities: HashSet<Entity> = layers
-                .iter()
-                .filter(|(_entity, layers)| on_hud_layer(Some(layers)))
-                .map(|(entity, _layers)| entity)
-                .collect();
-            if let Some(hit) = object_picker.pick_hud(hud_ray, &mut ray_cast, &hud_entities) {
-                attachment_requests.write(OpenAttachmentMenu {
-                    summary: hit.summary,
-                    surface: Some(hit.surface),
-                    wearer: None,
-                    hud: true,
-                    at: cursor,
-                });
-            }
+        if let Some(hit) = object_picker.resolve_hud_hit(entity, &hit) {
+            attachment_requests.write(OpenAttachmentMenu {
+                summary: hit.summary,
+                surface: Some(hit.surface),
+                wearer: None,
+                hud: true,
+                at: cursor,
+            });
         }
         return;
     } else {
@@ -1122,7 +1104,7 @@ fn request_avatar_menu_on_right_click(
 pub(crate) fn resolve_right_click_pick(
     mut picks: MessageReader<GpuPickResolved>,
     object_picker: ObjectPicker,
-    mut ray_cast: MeshRayCast,
+    ray_cast: TargetedRayCast,
     mut requests: MessageWriter<OpenAvatarMenu>,
     mut object_requests: MessageWriter<OpenObjectMenu>,
     mut attachment_requests: MessageWriter<OpenAttachmentMenu>,
@@ -1169,8 +1151,7 @@ pub(crate) fn resolve_right_click_pick(
                 // Refine the pick against the one face the ID buffer named
                 // (a single-entity ray test, not a scene walk) for the exact
                 // struck surface — face index, ST/UV, position, normal.
-                let Some(object) = object_picker.pick_entity(pick.ray, &mut ray_cast, entity)
-                else {
+                let Some(object) = object_picker.pick_entity(pick.ray, &ray_cast, entity) else {
                     continue;
                 };
                 if object.summary.attachment {

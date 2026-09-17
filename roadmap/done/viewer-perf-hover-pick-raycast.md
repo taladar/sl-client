@@ -2,7 +2,7 @@
 id: viewer-perf-hover-pick-raycast
 title: Hover-tooltip world pick casts MeshRayCast over all meshes each dwelt frame
 topic: viewer
-status: ideas
+status: done
 origin: Tracy full-session aditi capture (2026-08-12)
 refs: [viewer-perf-steady-state-46fps-ceiling, viewer-hover-tooltips, viewer-profiling]
 ---
@@ -66,3 +66,10 @@ Measure `Update` p50 and the `update_hover_tooltip` mean with the pointer
 **held on dense world content** (the condition that opens the gate), window
 visible/focused, before and after. Idle-pointer runs will show ~0 either way
 and must not be used to judge this.
+
+## Resolution (2026-09-17)
+
+The world cast had already moved to the GPU ID-buffer pick; the remaining
+per-dwelt-frame `MeshRayCast` was the HUD-occlusion test, now a
+`TargetedRayCast` over the `HudScreen` subtree. See
+[[viewer-hover-tooltip-202ms-frame-spike]] for the measurements.

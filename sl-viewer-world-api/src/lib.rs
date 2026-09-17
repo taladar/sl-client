@@ -17,6 +17,7 @@
 //! underneath the world.
 
 pub mod rlv;
+pub mod targeted_ray_cast;
 pub mod ui_texture;
 pub mod world_scoped;
 

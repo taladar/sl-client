@@ -63,6 +63,7 @@ use crate::face_material::FaceMaterial;
 use crate::flexi::{FLEXI_LOD, FlexiSimState, apply_flexi, flexi_attributes, flexi_from_object};
 use crate::geometry_cache::{GeometryCache, GeometryKey, ScaleMm, scale_mm};
 use crate::world_api::DecodedTextures;
+use crate::world_api::targeted_ray_cast::{TargetVisibility, TargetedRayCast};
 use crate::world_api::world_has_keyboard;
 use crate::world_api::world_scoped::{WorldPurge, WorldScoped};
 use crate::world_api::{
@@ -4550,7 +4551,7 @@ impl ObjectPicker<'_, '_> {
     /// hover) moved to the GPU ID buffer (`sl_viewer_world_view::gpu_pick`).
     ///
     /// `exclude` is the HUD entity set: a HUD is screen-space and never a world
-    /// pick (see [`pick_hud`](Self::pick_hud) for its own ray).
+    /// pick (see [`resolve_hud_hit`](Self::resolve_hud_hit) for its own ray).
     pub fn pick(
         &self,
         ray: Ray3d,
@@ -4592,47 +4593,37 @@ impl ObjectPicker<'_, '_> {
     }
 
     /// Refine a GPU ID-buffer pick against the **one face entity** the ID
-    /// buffer named: a single-entity ray test (the filter admits only
-    /// `entity`, so this is not a scene walk) that recovers the exact struck
+    /// buffer named: a single-entity ray test (a [`TargetedRayCast`] over just
+    /// `entity`, so this is not a scene walk — a filtered `MeshRayCast` still
+    /// broad-phases every mesh in the region) that recovers the exact struck
     /// surface — face index, ST/UV, position, normal — the touch / sit /
     /// menu paths carry. `None` when the ray unexpectedly misses the face
     /// (an alpha-cutout edge pixel the v1 pick treats as opaque).
+    #[must_use]
     pub fn pick_entity(
         &self,
         ray: Ray3d,
-        ray_cast: &mut MeshRayCast,
+        ray_cast: &TargetedRayCast,
         entity: Entity,
     ) -> Option<ObjectRayHit> {
-        let only = |candidate: Entity| candidate == entity;
-        let settings = MeshRayCastSettings::default()
-            // The GPU pick already established visibility (it drew the
-            // pixel); the refinement must not second-guess a per-view flag.
-            .with_visibility(bevy::picking::mesh_picking::ray_cast::RayCastVisibility::Any)
-            .with_filter(&only);
-        let (entity, hit) = ray_cast.cast_ray(ray, &settings).first().cloned()?;
+        // The GPU pick already established visibility (it drew the pixel); the
+        // refinement must not second-guess a per-view flag.
+        let (entity, hit) = ray_cast.nearest(ray, [entity], TargetVisibility::Any)?;
         self.resolve(entity, &hit)
     }
 
-    /// Resolve the **HUD** ray `ray` (orthographic, through the HUD camera) to
-    /// the worn HUD attachment it hits: the same resolution as
-    /// [`pick`](Self::pick) but restricted **to** the HUD subtree
-    /// (`hud_entities`) and to *shown* geometry — only the agent's own HUDs are
-    /// routed to the screen and visible, so a hit here is always an own worn
-    /// object, which the resolver gives the attachment-self pie.
-    pub fn pick_hud(
+    /// Resolve a **HUD** ray hit (the orthographic HUD ray cast,
+    /// `sl_viewer_world_view::hud_pick::HudRayCast`) to the worn HUD attachment
+    /// it struck: the same resolution as [`pick`](Self::pick) — only the agent's
+    /// own HUDs are routed to the screen and visible, so a hit here is always an
+    /// own worn object, which the resolver gives the attachment-self pie.
+    #[must_use]
+    pub fn resolve_hud_hit(
         &self,
-        ray: Ray3d,
-        ray_cast: &mut MeshRayCast,
-        hud_entities: &HashSet<Entity>,
+        entity: Entity,
+        hit: &bevy::picking::mesh_picking::ray_cast::RayMeshHit,
     ) -> Option<ObjectRayHit> {
-        let hud_filter = |entity: Entity| hud_entities.contains(&entity);
-        let settings = MeshRayCastSettings::default()
-            // Inherited visibility, not per-view: the HUD is drawn by its own
-            // camera (the `sl_viewer_world_view::hud_pick` convention).
-            .with_visibility(bevy::picking::mesh_picking::ray_cast::RayCastVisibility::Visible)
-            .with_filter(&hud_filter);
-        let (entity, hit) = ray_cast.cast_ray(ray, &settings).first().cloned()?;
-        self.resolve(entity, &hit)
+        self.resolve(entity, hit)
     }
 
     /// The pick summary of an already-identified object — used by the resolver

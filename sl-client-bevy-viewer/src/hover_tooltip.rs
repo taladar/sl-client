@@ -25,7 +25,6 @@
 //! ~[`crate::gpu_pick::PICK_HZ`] Hz; the 1–2 frame readback latency is
 //! invisible under the 0.5 s dwell.
 
-use bevy::camera::visibility::RenderLayers;
 use bevy::ecs::system::SystemParam;
 use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::picking::hover::HoverMap;
@@ -39,8 +38,7 @@ use sl_client_bevy::{
 };
 
 use crate::gpu_pick::{GpuPickResolved, GpuPicker, PICK_HZ, PickPurpose, PickResolution};
-use crate::hud::HudCamera;
-use crate::hud_pick::pointer_over_hud;
+use crate::hud_pick::HudRayCast;
 use crate::i18n::Translator;
 use crate::name_tag_billboard::NameTagHitTest;
 use crate::objects::ObjectSlMotion;
@@ -113,6 +111,15 @@ pub(crate) struct HoverTooltipState {
     /// `Visibility` reads never share a system with the box's `Visibility`
     /// write (a Bevy query conflict, B0001).
     render: Option<TooltipRender>,
+    /// The target [`HoverTooltipState::render`] was composed for — the lines
+    /// are recomposed only when it changes or a fresh pick is requested, not on
+    /// every dwelt frame.
+    rendered_target: Option<HoverTarget>,
+    /// The prim count of the linkset root last hovered. Counting a linkset is a
+    /// scan of every tracked object ([`ObjectState::linkset_prim_count`]), which
+    /// on a dense region is the most expensive thing a hover does, so it is
+    /// counted once per hovered root rather than on every recomposition.
+    prim_count: Option<(ScopedObjectId, usize)>,
     /// Cached condensed properties, keyed by object root — filled by the
     /// [`ObjectPropertiesFamily`] reply.
     properties: HashMap<ObjectKey, CachedObjectInfo>,
@@ -211,18 +218,17 @@ const TOOLTIP_FLAGS: &[(u32, &str)] = &[
     (1 << 29, "hovertip-flag-temporary"),      // FLAGS_TEMPORARY_ON_REZ
 ];
 
-/// The cursor-occlusion machinery bundled as one system param — the HUD
-/// camera, render layers, the name-tag rect test, and the UI-occlusion
-/// inputs — so [`update_hover_tooltip`] stays within Bevy's per-system
-/// parameter limit. The world resolution itself is the asynchronous GPU
-/// ID-buffer pick ([`crate::gpu_pick`]); only the HUD-occlusion ray (the
-/// orthographic HUD test [`crate::hud_pick`] owns) still casts.
+/// The cursor-occlusion machinery bundled as one system param — the HUD ray
+/// cast, the name-tag rect test, and the UI-occlusion inputs — so
+/// [`update_hover_tooltip`] stays within Bevy's per-system parameter limit. The
+/// world resolution itself is the asynchronous GPU ID-buffer pick
+/// ([`crate::gpu_pick`]); only the HUD-occlusion ray (the orthographic HUD test
+/// [`crate::hud_pick`] owns) still casts, and only over the HUD's own meshes.
 #[derive(SystemParam)]
 pub(crate) struct HoverPick<'w, 's> {
-    /// The HUD camera, for the HUD-occlusion test.
-    hud_camera: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<HudCamera>>,
-    /// Every entity's render layers, to gather the HUD subtree.
-    layers: Query<'w, 's, (Entity, &'static RenderLayers)>,
+    /// The HUD-occlusion ray cast (HUD picking stays on the orthographic CPU
+    /// test by design).
+    hud: HudRayCast<'w, 's>,
     /// The pointer hover map, for the UI-occlusion test.
     hover_map: Res<'w, HoverMap>,
     /// Pickable flags, for the UI-occlusion test.
@@ -232,17 +238,14 @@ pub(crate) struct HoverPick<'w, 's> {
     /// The name-tag rect test (tags are custom billboard meshes no picking
     /// backend covers; the 2D rect test is exact and cheap, so it stays CPU).
     tag_hit: NameTagHitTest<'w, 's>,
-    /// The HUD-occlusion ray caster (HUD picking stays on the orthographic
-    /// CPU test by design).
-    ray_cast: MeshRayCast<'w, 's>,
 }
 
 impl HoverPick<'_, '_> {
     /// Whether a blocking UI surface or a HUD attachment is under the cursor (a
     /// tip must not appear over a floater / the agent's own HUD).
-    fn occluded(&mut self, cursor: Vec2) -> bool {
+    fn occluded(&self, cursor: Vec2) -> bool {
         pointer_over_blocking_ui(&self.hover_map, &self.pickables, &self.node_sizes)
-            || pointer_over_hud(cursor, &self.hud_camera, &self.layers, &mut self.ray_cast)
+            || self.hud.over(cursor)
     }
 }
 
@@ -363,7 +366,8 @@ fn short_id(id: Uuid) -> String {
 /// One object's tooltip extras — the reference's advanced-tooltip prim count,
 /// region position and own-avatar distance lines.
 struct ObjectExtras {
-    /// The linkset's prim count (`ObjectState::linkset_prim_count`).
+    /// The linkset's prim count (`ObjectState::linkset_prim_count`, counted
+    /// once per hovered root).
     prim_count: usize,
     /// The root's region-local position (Second Life coordinates), if resolved.
     position: Option<Vec3>,
@@ -387,8 +391,14 @@ pub(crate) struct HoverObjectData<'w, 's> {
 }
 
 impl HoverObjectData<'_, '_> {
-    /// Resolve the extras for a linkset root.
-    fn extras(&self, root_scoped: ScopedObjectId, avatars: &AvatarState) -> ObjectExtras {
+    /// Resolve the extras for a linkset root whose prim count the caller has
+    /// already counted.
+    fn extras(
+        &self,
+        root_scoped: ScopedObjectId,
+        prim_count: usize,
+        avatars: &AvatarState,
+    ) -> ObjectExtras {
         let entity = self.state.entity_by_scoped(&root_scoped);
         let position = entity
             .and_then(|entity| self.motions.get(entity).ok())
@@ -401,7 +411,7 @@ impl HoverObjectData<'_, '_> {
             _other => None,
         };
         ObjectExtras {
-            prim_count: self.state.linkset_prim_count(&root_scoped),
+            prim_count,
             position,
             distance,
         }
@@ -448,7 +458,7 @@ pub(crate) fn update_hover_tooltip(
     motion: Res<AccumulatedMouseMotion>,
     buttons: Res<ButtonInput<MouseButton>>,
     time: Res<Time>,
-    mut pick: HoverPick,
+    pick: HoverPick,
     mut picker: ResMut<GpuPicker>,
     names: HoverNames,
     object_data: HoverObjectData,
@@ -473,6 +483,8 @@ pub(crate) fn update_hover_tooltip(
         state.since_pick = f32::MAX;
         state.target = None;
         state.render = None;
+        state.rendered_target = None;
+        state.prim_count = None;
         return;
     }
     let Some(cursor) = cursor else {
@@ -496,7 +508,8 @@ pub(crate) fn update_hover_tooltip(
     // (`f32::MAX + dt` stays `f32::MAX`, so the post-dismiss sentinel simply
     // requests immediately on the first dwelt frame.)
     state.since_pick += time.delta_secs();
-    if state.since_pick >= 1.0 / PICK_HZ {
+    let refresh = state.since_pick >= 1.0 / PICK_HZ;
+    if refresh {
         picker.request(cursor, PickPurpose::Hover);
         state.since_pick = 0.0;
     }
@@ -507,6 +520,13 @@ pub(crate) fn update_hover_tooltip(
         Some(agent) => Some(HoverTarget::Avatar(agent)),
         None => state.target,
     };
+    // The cursor is at rest, so between pick refreshes nothing the box shows
+    // moves: keep the composed lines until the target changes or the next
+    // refresh (which also picks up a properties / name / cost reply).
+    if !refresh && target == state.rendered_target && state.render.is_some() {
+        return;
+    }
+    state.rendered_target = target;
 
     let lines = match target {
         Some(HoverTarget::Avatar(agent)) => Some(vec![names.avatars.label_text(agent)]),
@@ -515,7 +535,15 @@ pub(crate) fn update_hover_tooltip(
             root_scoped,
             flags,
         }) => {
-            let extras = object_data.extras(root_scoped, &names.avatars);
+            let prim_count = match state.prim_count {
+                Some((counted, count)) if counted == root_scoped => count,
+                _other => {
+                    let count = object_data.state.linkset_prim_count(&root_scoped);
+                    state.prim_count = Some((root_scoped, count));
+                    count
+                }
+            };
+            let extras = object_data.extras(root_scoped, prim_count, &names.avatars);
             Some(object_lines(
                 root,
                 flags,

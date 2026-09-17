@@ -32,7 +32,6 @@
 //! Reference (Firestorm, read-only): `lltoolpie` (double-click dispatch),
 //! `llagent::teleportViaLocationLookAt`, setting `DoubleClickAction`.
 
-use bevy::camera::visibility::RenderLayers;
 use bevy::ecs::system::SystemParam;
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
@@ -43,8 +42,7 @@ use sl_client_bevy::{RegionCoordinates, RegionHandle, SlCommand, SlIdentity, Vec
 use crate::coords::bevy_to_sl_vec;
 use crate::edit_tool::edit_tool_inactive;
 use crate::gpu_pick::{GpuPickResolved, GpuPicker, PickPurpose, PickResolution};
-use crate::hud::HudCamera;
-use crate::hud_pick::pointer_over_hud;
+use crate::hud_pick::HudRayCast;
 use crate::minimap::{narrow, region_handle_at};
 use crate::settings::ViewerSettings;
 use crate::world_api::InputContext;
@@ -173,19 +171,6 @@ fn toggle_double_click_teleport(
     );
 }
 
-/// The HUD-occlusion queries, grouped so the double-click system stays within
-/// Bevy's system-parameter budget (the world resolution itself is the GPU
-/// ID-buffer pick).
-#[derive(SystemParam)]
-struct WorldRay<'w, 's> {
-    /// The orthographic HUD camera, for HUD-attachment occlusion.
-    hud_cameras: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<HudCamera>>,
-    /// The HUD-occlusion ray caster.
-    ray_cast: MeshRayCast<'w, 's>,
-    /// Every render-layered entity, to gather the HUD subtree.
-    layers: Query<'w, 's, (Entity, &'static RenderLayers)>,
-}
-
 /// The UI-occlusion queries, grouped for the same reason.
 #[derive(SystemParam)]
 struct UiOcclusion<'w, 's> {
@@ -213,7 +198,7 @@ fn world_double_click_teleport(
     settings: Res<ViewerSettings>,
     windows: Query<&Window>,
     occlusion: UiOcclusion,
-    mut ray: WorldRay,
+    hud: HudRayCast,
     mut picker: ResMut<GpuPicker>,
     mut last_click: Local<Option<(f64, Vec2)>>,
 ) {
@@ -261,7 +246,7 @@ fn world_double_click_teleport(
     if pointer_over_blocking_ui(&occlusion.hover_map, &occlusion.pickables, &occlusion.sizes) {
         return;
     }
-    if pointer_over_hud(cursor, &ray.hud_cameras, &ray.layers, &mut ray.ray_cast) {
+    if hud.over(cursor) {
         return;
     }
 

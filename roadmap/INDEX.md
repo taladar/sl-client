@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 315 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 5 |
-| done | 1174 |
+| bugs | 7 |
+| done | 1176 |
 | deferred | 27 |
 | wont-do | 16 |
-| **total** | **1700** |
+| **total** | **1704** |
 
 ## ideas (100)
 
@@ -129,8 +129,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   avatar crowd — compute-pass animation + same-body instancing
 - [`viewer-perf-gpu-jpeg2000-decode`](ideas/viewer-perf-gpu-jpeg2000-decode.md)
   — GPU (wgpu compute) JPEG2000 texture decoding
-- [`viewer-perf-hover-pick-raycast`](ideas/viewer-perf-hover-pick-raycast.md) —
-  Hover-tooltip world pick casts MeshRayCast over all meshes each dwelt frame
 - [`viewer-perf-login-state-gate`](ideas/viewer-perf-login-state-gate.md) —
   App-level login state to gate world/streaming systems pre-login
 - [`viewer-perf-main-world-material-specialization-check`](ideas/viewer-perf-main-world-material-specialization-check.md)
@@ -172,6 +170,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Settings sanity-check warnings
 - [`viewer-shadow-tuning-knobs`](ideas/viewer-shadow-tuning-knobs.md) — Advanced
   shadow tuning (bias / blur / softness)
+- [`viewer-sit-across-region-border-auto-approach`](ideas/viewer-sit-across-region-border-auto-approach.md)
+  — Sit on an object across a region border by moving into its region first
 - [`viewer-stars-srgb-linearize`](ideas/viewer-stars-srgb-linearize.md) —
   Linearize the star field like the sky / clouds
 - [`viewer-status-bar-toggle-options`](ideas/viewer-status-bar-toggle-options.md)
@@ -1167,22 +1167,28 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (5)
+## bugs (7)
 
 ### viewer
 
-- [`viewer-hover-tooltip-202ms-frame-spike`](bugs/viewer-hover-tooltip-202ms-frame-spike.md)
-  — update_hover_tooltip spikes to 202 ms on a single frame
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
   Some worn mesh hair does not render (visible in Firestorm)
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
+- [`viewer-neighbour-object-caps-use-root-region`](bugs/viewer-neighbour-object-caps-use-root-region.md)
+  — Per-object capability requests ask the root region about a neighbour's
+  objects
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
+- [`viewer-sit-on-neighbour-object-uses-root-circuit`](bugs/viewer-sit-on-neighbour-object-uses-root-circuit.md)
+  — Sitting on an object in a neighbour region fails silently instead of "move
+  closer"
+- [`viewer-texture-rotation-offset-t-in-flipped-uv-space`](bugs/viewer-texture-rotation-offset-t-in-flipped-uv-space.md)
+  — A rotated face texture turns the wrong way (upside down at 90°)
 
-## done (1174)
+## done (1176)
 
 ### protocol
 
@@ -1865,6 +1871,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-hover-text-colour-change-not-redrawn`](done/viewer-hover-text-colour-change-not-redrawn.md)
   — A floating text that only changes colour keeps the old colour until its text
   changes
+- [`viewer-hover-tooltip-202ms-frame-spike`](done/viewer-hover-tooltip-202ms-frame-spike.md)
+  — update_hover_tooltip spikes to 202 ms on a single frame
 - [`viewer-hover-tooltips`](done/viewer-hover-tooltips.md) — In-world hover
   tooltips (object / avatar / land inspectors)
 - [`viewer-hud-attachments-not-composited`](done/viewer-hud-attachments-not-composited.md)
@@ -2441,6 +2449,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — GPU avatars Phase 4 — remove joint entities + CPU pose scaffolding
 - [`viewer-perf-gpu-particles`](done/viewer-perf-gpu-particles.md) —
   GPU-instanced particle rendering
+- [`viewer-perf-hover-pick-raycast`](done/viewer-perf-hover-pick-raycast.md) —
+  Hover-tooltip world pick casts MeshRayCast over all meshes each dwelt frame
 - [`viewer-perf-inventory-rows-amortise`](done/viewer-perf-inventory-rows-amortise.md)
   — Amortise inventory row rebuilds and the skeleton merge
 - [`viewer-perf-inventory-view-visibility-gate`](done/viewer-perf-inventory-view-visibility-gate.md)

@@ -256,6 +256,7 @@ impl Session {
             parcels: BTreeMap::new(),
             time_dilation: BTreeMap::new(),
             own_avatar: BTreeMap::new(),
+            script_request_circuits: BTreeMap::new(),
             inventory: Inventory::new(),
             background_inventory_fetch: false,
             fetch_server_chat_history: ServerHistoryFetch::Enabled,
@@ -1482,6 +1483,7 @@ impl Session {
             self.children.clear();
             self.child_seeds.clear();
             self.objects.clear();
+            self.script_request_circuits.clear();
             self.terrain.clear();
             self.regions.clear();
             self.time_dilation.clear();
@@ -1888,6 +1890,7 @@ impl Session {
                 // A fresh session: discard any objects and terrain from a
                 // previous login.
                 self.objects.clear();
+                self.script_request_circuits.clear();
                 self.terrain.clear();
                 self.regions.clear();
                 self.time_dilation.clear();
@@ -2407,8 +2410,10 @@ impl Session {
     }
 
     /// Handles the object/scene-graph messages (full / compressed / cached /
-    /// terse updates, `KillObject`, `ObjectProperties`) that arrive on the root
-    /// *and* child circuits, keyed by the source simulator `from`. Returns `true`
+    /// terse updates, `KillObject`, `ObjectProperties`) and the per-object
+    /// replies and script requests (`PayPriceReply`, `ObjectPropertiesFamily`,
+    /// `ScriptRunningReply`, `ScriptDialog`, `ScriptQuestion`) that arrive on the
+    /// root *and* child circuits, keyed by the source simulator `from`. Returns `true`
     /// if `message` was an object message (and thus fully handled here).
     fn try_dispatch_object(
         &mut self,
@@ -2547,6 +2552,79 @@ impl Session {
                         overrides: decoded.overrides,
                     });
                 }
+            }
+            // Replies about one object — its pay layout, its condensed
+            // properties, a script's running state — come from the simulator
+            // that was asked, which for an object in a neighbour region is that
+            // neighbour's child circuit (see `Session::circuit_for_object`).
+            // An object's pay-button layout, in reply to a `RequestPayPrice`.
+            AnyMessage::PayPriceReply(reply) => {
+                self.events.push_back(Event::PayPriceReply {
+                    object_id: ObjectKey::from(reply.object_data.object_id),
+                    default_pay_price: reply.object_data.default_pay_price,
+                    pay_buttons: reply
+                        .button_data
+                        .iter()
+                        .map(|button| button.pay_button)
+                        .collect(),
+                });
+            }
+            // An object's condensed broadcast properties, in reply to a
+            // `RequestObjectPropertiesFamily`.
+            AnyMessage::ObjectPropertiesFamily(reply) => {
+                let data = &reply.object_data;
+                self.events.push_back(Event::ObjectPropertiesFamily {
+                    properties: ObjectPropertiesFamily {
+                        request_flags: data.request_flags,
+                        object_id: ObjectKey::from(data.object_id),
+                        owner: crate::types::object_owner_from_wire(data.owner_id, data.group_id),
+                        group: crate::types::group_from_wire(data.group_id),
+                        permissions: Permissions5 {
+                            base: Permissions::from_bits(data.base_mask),
+                            owner: Permissions::from_bits(data.owner_mask),
+                            group: Permissions::from_bits(data.group_mask),
+                            everyone: Permissions::from_bits(data.everyone_mask),
+                            next_owner: Permissions::from_bits(data.next_owner_mask),
+                        },
+                        ownership_cost: crate::types::linden_from_wire(
+                            "OwnershipCost",
+                            data.ownership_cost,
+                        )?,
+                        sale_type: data.sale_type,
+                        sale_price: crate::types::linden_price_from_wire(
+                            data.sale_type != 0,
+                            "SalePrice",
+                            data.sale_price,
+                        )?,
+                        category: data.category,
+                        last_owner_id: data.last_owner_id,
+                        name: trimmed_string(&data.name),
+                        description: trimmed_string(&data.description),
+                    },
+                });
+            }
+            AnyMessage::ScriptRunningReply(reply) => {
+                let script = &reply.script;
+                self.events.push_back(Event::ScriptRunning {
+                    object_id: ObjectKey::from(script.object_id),
+                    item_id: InventoryKey::from(script.item_id),
+                    running: script.running,
+                });
+            }
+            // A script's dialog and permission question come from the region
+            // the scripted object is in — a neighbour's on its child circuit —
+            // and the answer must go back to that simulator, so the arrival
+            // circuit is remembered per object for the reply.
+            AnyMessage::ScriptDialog(dialog) => {
+                let dialog = script_dialog(dialog);
+                self.note_script_request_circuit(from, dialog.object_id);
+                self.events.push_back(Event::ScriptDialog(Box::new(dialog)));
+            }
+            AnyMessage::ScriptQuestion(question) => {
+                let request = script_permission_request(question);
+                self.note_script_request_circuit(from, request.task_id);
+                self.events
+                    .push_back(Event::ScriptPermissionRequest(Box::new(request)));
             }
             _ => return Ok(false),
         }
@@ -2941,6 +3019,53 @@ impl Session {
         self.children.values_mut().find(|child| child.id == id)
     }
 
+    /// The circuit an **object-addressed** send goes out on: the circuit of the
+    /// region the object is streamed from — the reference's
+    /// `objectp->getRegion()->getHost()` — so an object in a neighbour region
+    /// is asked on that neighbour's child circuit, whose simulator is the only
+    /// one that knows the object. An object this session has not streamed (or
+    /// whose circuit has since gone) falls back to the root circuit, the region
+    /// the agent is in.
+    fn circuit_for_object(&mut self, object: ObjectKey) -> Result<&mut Circuit, Error> {
+        let scope = self.object_by_full_id(object).map(|object| object.circuit);
+        self.circuit_or_root(scope)
+    }
+
+    /// The circuit a **reply to a script's request** goes out on: the circuit
+    /// the request (`ScriptDialog` / `ScriptQuestion`) arrived on — the
+    /// reference's `LLHost(notification["payload"]["sender"])` — so a
+    /// neighbour region's script hears its answer. A request this session has
+    /// no record of falls back to the object's own region, then to the root.
+    fn circuit_for_script_reply(&mut self, object: ObjectKey) -> Result<&mut Circuit, Error> {
+        let scope = self
+            .script_request_circuits
+            .get(&object)
+            .copied()
+            .or_else(|| self.object_by_full_id(object).map(|object| object.circuit));
+        self.circuit_or_root(scope)
+    }
+
+    /// Remembers that `object`'s script request arrived from simulator `from`,
+    /// for [`Session::circuit_for_script_reply`].
+    fn note_script_request_circuit(&mut self, from: SocketAddr, object: ObjectKey) {
+        if let Some(circuit) = self.circuit_id_for(from) {
+            self.script_request_circuits.insert(object, circuit);
+        }
+    }
+
+    /// The live circuit `scope` names, or the root circuit when `scope` is
+    /// `None` or names a circuit that is no longer established.
+    fn circuit_or_root(&mut self, scope: Option<CircuitId>) -> Result<&mut Circuit, Error> {
+        let live = scope.filter(|id| {
+            self.circuit.as_ref().is_some_and(|root| root.id == *id)
+                || self.children.values().any(|child| child.id == *id)
+        });
+        match live {
+            Some(id) => self.circuit_by_id_mut(id).ok_or(Error::UnknownCircuit),
+            None => self.circuit.as_mut().ok_or(Error::NoCircuit),
+        }
+    }
+
     /// Resolves the circuit a [`ScopedObjectId`] / [`ScopedParcelId`] is scoped
     /// to, for a send. Returns [`Error::NoCircuit`] when no circuit is
     /// established at all (not logged in — so the existing `# Errors` docs hold),
@@ -3083,6 +3208,8 @@ impl Session {
         self.parcels.remove(&circuit_id);
         self.time_dilation.remove(&circuit_id);
         self.own_avatar.remove(&circuit_id);
+        self.script_request_circuits
+            .retain(|_object, circuit| *circuit != circuit_id);
         // Outstanding parent re-send requests are scoped to this circuit's
         // region-local ids, so they go stale with it; without this they are the
         // one per-circuit store that survives the circuit.
@@ -4893,60 +5020,6 @@ impl Session {
                     },
                 });
             }
-            // An object's pay-button layout, in reply to a `RequestPayPrice`.
-            AnyMessage::PayPriceReply(reply) => {
-                self.events.push_back(Event::PayPriceReply {
-                    object_id: ObjectKey::from(reply.object_data.object_id),
-                    default_pay_price: reply.object_data.default_pay_price,
-                    pay_buttons: reply
-                        .button_data
-                        .iter()
-                        .map(|button| button.pay_button)
-                        .collect(),
-                });
-            }
-            // An object's condensed broadcast properties, in reply to a
-            // `RequestObjectPropertiesFamily`.
-            AnyMessage::ObjectPropertiesFamily(reply) => {
-                let data = &reply.object_data;
-                self.events.push_back(Event::ObjectPropertiesFamily {
-                    properties: ObjectPropertiesFamily {
-                        request_flags: data.request_flags,
-                        object_id: ObjectKey::from(data.object_id),
-                        owner: crate::types::object_owner_from_wire(data.owner_id, data.group_id),
-                        group: crate::types::group_from_wire(data.group_id),
-                        permissions: Permissions5 {
-                            base: Permissions::from_bits(data.base_mask),
-                            owner: Permissions::from_bits(data.owner_mask),
-                            group: Permissions::from_bits(data.group_mask),
-                            everyone: Permissions::from_bits(data.everyone_mask),
-                            next_owner: Permissions::from_bits(data.next_owner_mask),
-                        },
-                        ownership_cost: crate::types::linden_from_wire(
-                            "OwnershipCost",
-                            data.ownership_cost,
-                        )?,
-                        sale_type: data.sale_type,
-                        sale_price: crate::types::linden_price_from_wire(
-                            data.sale_type != 0,
-                            "SalePrice",
-                            data.sale_price,
-                        )?,
-                        category: data.category,
-                        last_owner_id: data.last_owner_id,
-                        name: trimmed_string(&data.name),
-                        description: trimmed_string(&data.description),
-                    },
-                });
-            }
-            AnyMessage::ScriptRunningReply(reply) => {
-                let script = &reply.script;
-                self.events.push_back(Event::ScriptRunning {
-                    object_id: ObjectKey::from(script.object_id),
-                    item_id: InventoryKey::from(script.item_id),
-                    running: script.running,
-                });
-            }
             AnyMessage::GenericMessage(generic)
                 // The sim NUL-terminates the method name on the wire.
                 if trimmed_string(&generic.method_data.method) == "emptymutelist" =>
@@ -5079,16 +5152,6 @@ impl Session {
                     reason: reason.clone(),
                 }));
                 self.close(DisconnectReason::Kicked { message: reason });
-            }
-            AnyMessage::ScriptDialog(dialog) => {
-                self.events
-                    .push_back(Event::ScriptDialog(Box::new(script_dialog(dialog))));
-            }
-            AnyMessage::ScriptQuestion(question) => {
-                self.events
-                    .push_back(Event::ScriptPermissionRequest(Box::new(
-                        script_permission_request(question),
-                    )));
             }
             AnyMessage::ScriptControlChange(change) => {
                 // Fold every block into the session-global taken-controls tracker
@@ -8602,7 +8665,7 @@ impl Session {
         button_label: &str,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_script_reply(object_id)?;
         circuit.send_script_dialog_reply(
             object_id,
             chat_channel,
@@ -8645,7 +8708,7 @@ impl Session {
         experience_id: Option<ExperienceKey>,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_script_reply(task_id)?;
         circuit.send_script_answer_yes(task_id, item_id.uuid(), permissions.0, now)?;
         // Record the answer into the mirror after the send (it follows the
         // wire). An empty answer is an explicit *deny* (recorded as such, distinct
@@ -9600,7 +9663,7 @@ impl Session {
         folder_id: InventoryFolderKey,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_object(object_id)?;
         circuit.send_buy_object_inventory(object_id, item_id.uuid(), folder_id.uuid(), now)?;
         Ok(())
     }
@@ -9613,7 +9676,7 @@ impl Session {
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
     pub fn request_pay_price(&mut self, object_id: ObjectKey, now: Instant) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_object(object_id)?;
         circuit.send_request_pay_price(object_id, now)?;
         Ok(())
     }
@@ -9633,7 +9696,7 @@ impl Session {
         object_id: ObjectKey,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_object(object_id)?;
         circuit.send_request_object_properties_family(request_flags, object_id, now)?;
         Ok(())
     }
@@ -9646,7 +9709,7 @@ impl Session {
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
     pub fn spin_object_start(&mut self, object_id: ObjectKey, now: Instant) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_object(object_id)?;
         circuit.send_object_spin_start(object_id, now)?;
         Ok(())
     }
@@ -9664,7 +9727,7 @@ impl Session {
         rotation: Rotation,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_object(object_id)?;
         circuit.send_object_spin_update(object_id, rotation, now)?;
         Ok(())
     }
@@ -9676,7 +9739,7 @@ impl Session {
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
     pub fn spin_object_stop(&mut self, object_id: ObjectKey, now: Instant) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_object(object_id)?;
         circuit.send_object_spin_stop(object_id, now)?;
         Ok(())
     }
@@ -9994,7 +10057,7 @@ impl Session {
         item_id: InventoryKey,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_object(object_id)?;
         circuit.send_get_script_running(object_id, item_id.uuid(), now)?;
         Ok(())
     }
@@ -10013,7 +10076,7 @@ impl Session {
         running: bool,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_object(object_id)?;
         circuit.send_set_script_running(object_id, item_id.uuid(), running, now)?;
         Ok(())
     }
@@ -10031,7 +10094,7 @@ impl Session {
         item_id: InventoryKey,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_object(object_id)?;
         circuit.send_script_reset(object_id, item_id.uuid(), now)?;
         Ok(())
     }
@@ -12812,7 +12875,7 @@ impl Session {
         surface: Option<&SurfaceInfo>,
         now: Instant,
     ) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let circuit = self.circuit_for_object(object_id)?;
         circuit.send_object_grab_update(
             object_id,
             grab_offset_initial,

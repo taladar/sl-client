@@ -2064,6 +2064,12 @@ pub struct Session {
     /// of a circuit's state in [`Session::forget_sim_objects`]. Surfaced via
     /// [`Session::own_avatar_id`].
     own_avatar: BTreeMap<CircuitId, RegionLocalObjectId>,
+    /// The circuit each object's latest script request (`ScriptDialog` /
+    /// `ScriptQuestion`) arrived on, so the reply goes back to the simulator
+    /// that asked — a neighbour region's script is reached only through its
+    /// child circuit. Dropped with a retiring circuit's state and on a world
+    /// reset; a stale entry only ever falls back to the root circuit.
+    script_request_circuits: BTreeMap<ObjectKey, CircuitId>,
     /// The held inventory model: the agent's own inventory tree and the read-only
     /// Library tree, each owning its folder/item stores, per-folder fetch state,
     /// and a parent→children index, plus the inventory roots and the async

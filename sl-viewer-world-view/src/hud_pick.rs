@@ -32,18 +32,16 @@
 //! surface block), so a click reaches a scripted object's `touch_start` /
 //! `touch_end`.
 
-use std::collections::HashSet;
-
-use bevy::camera::visibility::RenderLayers;
+use bevy::ecs::system::SystemParam;
 use bevy::picking::hover::HoverMap;
+use bevy::picking::mesh_picking::ray_cast::RayMeshHit;
 use bevy::prelude::*;
 use sl_client_bevy::{Command, SlCommand};
 
-use crate::hud::HudCamera;
+use crate::hud::{HudCamera, HudScreen};
 use crate::objects::{FaceTextureDebug, PrimFaceEntity, SceneObject};
-use crate::world_api::{
-    MediaWorldClick, on_hud_layer, pointer_over_blocking_ui, surface_info_from_hit,
-};
+use crate::world_api::targeted_ray_cast::{TargetVisibility, TargetedRayCast};
+use crate::world_api::{MediaWorldClick, pointer_over_blocking_ui, surface_info_from_hit};
 
 /// The mouse button a HUD (or fall-through world) touch is made with.
 const TOUCH_BUTTON: MouseButton = MouseButton::Left;
@@ -67,8 +65,7 @@ type FaceQuery<'world, 'state> =
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources / queries: the \
               mouse button, the Alt modifier, the hover map that says the click landed on UI, the \
-              window for the cursor, the HUD camera to cast from, the ray caster, the \
-              render-layer / face / object components a HUD hit is resolved through, the GPU \
+              window for the cursor, the HUD ray cast, the face / object components a HUD hit is resolved through, the GPU \
               pick queue for the world fall-through, and the command channel the touch is sent on"
 )]
 pub fn pick_and_touch(
@@ -78,9 +75,7 @@ pub fn pick_and_touch(
     pickables: Query<&Pickable>,
     node_sizes: Query<&ComputedNode>,
     windows: Query<&Window>,
-    hud_camera: Query<(&Camera, &GlobalTransform), With<HudCamera>>,
-    layers: Query<(Entity, &RenderLayers)>,
-    mut ray_cast: MeshRayCast,
+    hud: HudRayCast,
     faces: FaceQuery,
     scene: Query<&SceneObject>,
     globals: Query<&GlobalTransform>,
@@ -117,43 +112,22 @@ pub fn pick_and_touch(
         .cursor_position()
         .unwrap_or_else(|| Vec2::new(window.width() * 0.5, window.height() * 0.5));
 
-    // The HUD entities the orthographic pass may hit — the whole routed HUD
-    // subtree carries the HUD render layer (propagated from the screen), and
-    // world geometry carries no render layers at all, so this set cleanly splits
-    // the two passes.
-    let hud_entities: HashSet<Entity> = layers
-        .iter()
-        .filter(|(_entity, layers)| on_hud_layer(Some(layers)))
-        .map(|(entity, _layers)| entity)
-        .collect();
-
     // 1. HUD first: an orthographic ray through the HUD camera at the cursor,
     //    limited to the HUD subtree.
-    if let Ok((camera, camera_transform)) = hud_camera.single()
-        && let Ok(ray) = camera.viewport_to_world(camera_transform, cursor)
+    if let Some((entity, hit)) = hud.hit(cursor)
+        && touch_hit(
+            entity,
+            &hit,
+            &faces,
+            &scene,
+            &globals,
+            &parents,
+            &mut writer,
+            &mut media_clicks,
+            "HUD",
+        )
     {
-        let hud_filter = |entity: Entity| hud_entities.contains(&entity);
-        let settings = MeshRayCastSettings::default()
-            // Inherited visibility, not per-view: the HUD is drawn by its own
-            // camera, and a HUD entity's `ViewVisibility` from the world camera
-            // (which never renders it) would read false.
-            .with_visibility(bevy::picking::mesh_picking::ray_cast::RayCastVisibility::Visible)
-            .with_filter(&hud_filter);
-        if let Some((entity, hit)) = ray_cast.cast_ray(ray, &settings).first().cloned()
-            && touch_hit(
-                entity,
-                &hit,
-                &faces,
-                &scene,
-                &globals,
-                &parents,
-                &mut writer,
-                &mut media_clicks,
-                "HUD",
-            )
-        {
-            return;
-        }
+        return;
     }
 
     // 2. Fall through to the world: the GPU ID-buffer pick at the cursor
@@ -175,7 +149,7 @@ pub fn pick_and_touch(
 )]
 pub fn resolve_touch_pick(
     mut picks: MessageReader<crate::gpu_pick::GpuPickResolved>,
-    mut ray_cast: MeshRayCast,
+    ray_cast: TargetedRayCast,
     faces: FaceQuery,
     scene: Query<&SceneObject>,
     globals: Query<&GlobalTransform>,
@@ -194,11 +168,7 @@ pub fn resolve_touch_pick(
             continue;
         };
         // Refine against the one named face for the exact struck surface.
-        let only = |candidate: Entity| candidate == entity;
-        let settings = MeshRayCastSettings::default()
-            .with_visibility(bevy::picking::mesh_picking::ray_cast::RayCastVisibility::Any)
-            .with_filter(&only);
-        let Some((entity, ray_hit)) = ray_cast.cast_ray(pick.ray, &settings).first().cloned()
+        let Some((entity, ray_hit)) = ray_cast.nearest(pick.ray, [entity], TargetVisibility::Any)
         else {
             continue;
         };
@@ -216,39 +186,62 @@ pub fn resolve_touch_pick(
     }
 }
 
-/// Whether the cursor is over a **HUD attachment** — a screen-space worn object,
-/// which occludes the world behind it.
+/// The orthographic **HUD ray cast**: a ray through the [`HudCamera`] at the
+/// cursor, tested against the HUD subtree's meshes only.
 ///
 /// HUDs are 3D meshes on the HUD render layer, not `bevy_ui` nodes, so they never
-/// appear in the [`HoverMap`]; this casts the same orthographic HUD ray
-/// [`pick_and_touch`] does (restricted to the HUD subtree, visible geometry only)
-/// and reports whether it struck anything. A world pick — touch, or the avatar
-/// context menu's body pick — must treat a HUD hit as occlusion and stop, so the
-/// occlusion order is **UI, then HUD attachments, then world**.
-pub fn pointer_over_hud(
-    cursor: Vec2,
-    hud_camera: &Query<(&Camera, &GlobalTransform), With<HudCamera>>,
-    layers: &Query<(Entity, &RenderLayers)>,
-    ray_cast: &mut MeshRayCast,
-) -> bool {
-    let hud_entities: HashSet<Entity> = layers
-        .iter()
-        .filter(|(_entity, layers)| on_hud_layer(Some(layers)))
-        .map(|(entity, _layers)| entity)
-        .collect();
-    let Ok((camera, camera_transform)) = hud_camera.single() else {
-        return false;
-    };
-    let Ok(ray) = camera.viewport_to_world(camera_transform, cursor) else {
-        return false;
-    };
-    let hud_filter = |entity: Entity| hud_entities.contains(&entity);
-    let settings = MeshRayCastSettings::default()
-        // Inherited visibility, as the HUD is drawn by its own camera (see
-        // `pick_and_touch`); only a *shown* HUD occludes.
-        .with_visibility(bevy::picking::mesh_picking::ray_cast::RayCastVisibility::Visible)
-        .with_filter(&hud_filter);
-    !ray_cast.cast_ray(ray, &settings).is_empty()
+/// appear in the [`HoverMap`]. The candidates are the descendants of the
+/// [`HudScreen`] — the one subtree every routed HUD attachment hangs under — and
+/// the test is a [`TargetedRayCast`] over them, so its cost is the handful of
+/// HUD meshes. Neither a filtered `MeshRayCast` (a broad phase over every mesh
+/// in the region, what the hover tooltip paid on every dwelt frame) nor a scan
+/// of render-layered meshes (world geometry carries the main and probe layers,
+/// so that is every mesh too) scales that way.
+#[expect(
+    missing_debug_implementations,
+    reason = "it holds a `TargetedRayCast`, which has no Debug (Bevy's `Assets<Mesh>`)"
+)]
+#[derive(SystemParam)]
+pub struct HudRayCast<'w, 's> {
+    /// The HUD camera the ray is cast through.
+    camera: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<HudCamera>>,
+    /// The HUD subtree's root.
+    screen: Query<'w, 's, Entity, With<HudScreen>>,
+    /// Hierarchy links, to walk the HUD subtree.
+    children: Query<'w, 's, &'static Children>,
+    /// The candidate-restricted mesh ray caster.
+    cast: TargetedRayCast<'w, 's>,
+}
+
+impl HudRayCast<'_, '_> {
+    /// The orthographic HUD ray through `cursor` (logical px), when the HUD
+    /// camera exists.
+    #[must_use]
+    pub fn ray(&self, cursor: Vec2) -> Option<Ray3d> {
+        let (camera, camera_transform) = self.camera.single().ok()?;
+        camera.viewport_to_world(camera_transform, cursor).ok()
+    }
+
+    /// The nearest **shown** HUD surface under `cursor`, with its entity.
+    /// Inherited visibility, not per-view: the HUD is drawn by its own camera,
+    /// and a HUD entity's `ViewVisibility` from the world camera (which never
+    /// renders it) would read false.
+    #[must_use]
+    pub fn hit(&self, cursor: Vec2) -> Option<(Entity, RayMeshHit)> {
+        let ray = self.ray(cursor)?;
+        let screen = self.screen.single().ok()?;
+        let hud = self.children.iter_descendants(screen);
+        self.cast.nearest(ray, hud, TargetVisibility::Visible)
+    }
+
+    /// Whether the cursor is over a **HUD attachment**, which occludes the world
+    /// behind it: a world pick — touch, hover, or the avatar context menu's body
+    /// pick — must treat a HUD hit as occlusion and stop, so the occlusion order
+    /// is **UI, then HUD attachments, then world**.
+    #[must_use]
+    pub fn over(&self, cursor: Vec2) -> bool {
+        self.hit(cursor).is_some()
+    }
 }
 
 /// Resolve a ray hit to its object and touch it, carrying the surface the ray
