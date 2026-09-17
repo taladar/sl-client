@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 315 |
 | blocked | 41 |
 | in-progress | 22 |
-| bugs | 7 |
-| done | 1172 |
-| deferred | 26 |
+| bugs | 6 |
+| done | 1173 |
+| deferred | 27 |
 | wont-do | 16 |
-| **total** | **1699** |
+| **total** | **1700** |
 
 ## ideas (100)
 
@@ -1167,14 +1167,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (7)
+## bugs (6)
 
 ### viewer
 
-- [`viewer-combo-stops-opening`](bugs/viewer-combo-stops-opening.md) — A combo
-  can stop dropping down (seen on the contact-sets chooser)
-- [`viewer-horizon-thin-line-flashes`](bugs/viewer-horizon-thin-line-flashes.md)
-  — Flashes along a thin line near the horizon
 - [`viewer-hover-tooltip-202ms-frame-spike`](bugs/viewer-hover-tooltip-202ms-frame-spike.md)
   — update_hover_tooltip spikes to 202 ms on a single frame
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
@@ -1185,8 +1181,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Own avatar looks broken after a teleport
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
+- [`viewer-void-water-diagonal-takes-corner-height`](bugs/viewer-void-water-diagonal-takes-corner-height.md)
+  — Void water on a block's diagonal takes the corner region's sea level
 
-## done (1172)
+## done (1173)
 
 ### protocol
 
@@ -1862,6 +1860,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-audio-backend` (done))
 - [`viewer-hair-dome-stays-grey`](done/viewer-hair-dome-stays-grey.md) — The
   default hair dome intermittently stays grey for a whole session
+- [`viewer-horizon-thin-line-flashes`](done/viewer-horizon-thin-line-flashes.md)
+  — Flashes along a thin line near the horizon
 - [`viewer-hover-text`](done/viewer-hover-text.md) — Object hover text
   (llSetText floating text)
 - [`viewer-hover-text-colour-change-not-redrawn`](done/viewer-hover-text-colour-change-not-redrawn.md)
@@ -3758,7 +3758,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Fake grid — a top-objects report with rows in it, and a return that finds
   them
 
-## deferred (26)
+## deferred (27)
 
 ### protocol
 
@@ -3779,6 +3779,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Avatar shows mesh hair and a legacy hairbase at the same time
 - [`viewer-bevy-material-inplace-reprepare`](deferred/viewer-bevy-material-inplace-reprepare.md)
   — Bevy material in-place re-prepare (fast path for buffer-only changes)
+- [`viewer-combo-stops-opening`](deferred/viewer-combo-stops-opening.md) — A
+  combo can stop dropping down (seen on the contact-sets chooser)
 - [`viewer-destination-guide`](deferred/viewer-destination-guide.md) —
   Destination guide floater (blocked by `viewer-media-prim-browser`)
 - [`viewer-hud-menu-reorder-when-implemented`](deferred/viewer-hud-menu-reorder-when-implemented.md)

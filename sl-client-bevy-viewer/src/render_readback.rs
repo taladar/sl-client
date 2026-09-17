@@ -688,14 +688,21 @@ mod tests {
     use super::{
         CAP_PAIR_OPAQUE_X, CAP_PAIR_TOP, CAP_PAIR_TRANSLUCENT_X, CAPTURE_AT_SECS, FRAME,
         HALF_EMERGENT, MATRIX_DISTANCE, MATRIX_EYES, SCENE_WATER_LEVEL, SettleError,
-        build_readback_app, capture, capture_over_time, check_logs, frame_at, gpu_lock,
-        matrix_cells, row_to_f32, settle,
+        build_readback_app, capture, capture_over_time, capture_with, check_logs, frame_at,
+        gpu_lock, matrix_cells, row_to_f32, settle,
     };
+    use crate::environment::EnvironmentState;
     use crate::pixel_oracle::{
         CellVerdict, Marker, Silhouette, centroid, differing_pixels, dominant, read_cell,
     };
-    use crate::render_scene::{SCENES, SceneCx};
+    use crate::render_scene::{
+        RenderScene, SCENES, SceneAssets, SceneCamera, SceneCx, SceneLighting, Timeline,
+    };
     use crate::render_test::{TestError, capture_logs};
+    use crate::underwater_fog::UnderwaterFogPlugin;
+    use crate::viewer_camera::viewer_projection;
+    use crate::world_api::ViewerCamera;
+    use bevy::core_pipeline::tonemapping::Tonemapping;
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
 
@@ -1004,6 +1011,132 @@ mod tests {
             return Err("no frame came back after the specular map was re-added".into());
         }
         check_logs(&logs, "legacy-material-face (runtime specular map)");
+        Ok(())
+    }
+
+    /// How high the haze stage's eye stands over the default sea, in metres —
+    /// under the four-metre tolerance the far clip used to hand an empty pixel,
+    /// and off a whole metre so no row's top edge lands on the surface itself.
+    const HAZE_EYE_HEIGHT: f32 = 0.3;
+
+    /// The haze stage's vertical field of view, in radians: one row of the frame
+    /// spans one metre of height at the far clip (`256 / 4096`), so the rows the
+    /// old tolerance fogged are four whole rows and not a fraction of one.
+    const HAZE_FOV: f32 = 0.0625;
+
+    /// An empty stage with the eye just over the sea, looking level at the
+    /// horizon, so the horizon falls on the frame's middle row boundary.
+    const HAZE_STAGE: RenderScene = RenderScene {
+        id: "test-haze-horizon-stage",
+        what: "nothing but the water-haze pass, from an eye just over the sea looking level",
+        timeline: Timeline { samples: &[0.0] },
+        lighting: SceneLighting::Own,
+        camera: SceneCamera {
+            position: Vec3::new(0.0, 0.0, SCENE_WATER_LEVEL + HAZE_EYE_HEIGHT),
+            look_at: Vec3::new(0.0, 100.0, SCENE_WATER_LEVEL + HAZE_EYE_HEIGHT),
+        },
+        spawn: haze_stage_spawn,
+    };
+
+    /// The haze stage stages nothing: the pass fogs empty depth by itself.
+    fn haze_stage_spawn(
+        _cx: SceneCx,
+        _root: Entity,
+        _commands: &mut Commands,
+        _assets: &mut SceneAssets,
+    ) {
+    }
+
+    /// Narrow the readback camera to [`HAZE_FOV`] and take the linear output, so
+    /// a fogged row reads as the fog colour and an unfogged one as the clear.
+    fn pin_haze_camera(
+        mut cameras: Query<(&mut Projection, &mut Tonemapping), With<ViewerCamera>>,
+    ) {
+        for (mut projection, mut tonemapping) in &mut cameras {
+            if let Projection::Perspective(perspective) = projection.as_mut()
+                && perspective.fov.to_bits() != HAZE_FOV.to_bits()
+            {
+                perspective.fov = HAZE_FOV;
+            }
+            if *tonemapping != Tonemapping::None {
+                *tonemapping = Tonemapping::None;
+            }
+        }
+    }
+
+    /// The height, over the sea level's datum, at which the view ray through the
+    /// **top edge** of frame row `row` (centre column) reaches the far clip.
+    fn row_top_height_at_far_clip(row: u32) -> f64 {
+        let far = f64::from(viewer_projection().far);
+        let tan_half = (f64::from(HAZE_FOV) / 2.0).tan();
+        let ndc = 1.0 - 2.0 * f64::from(row) / f64::from(FRAME);
+        let slope = ndc * tan_half;
+        let up = slope / (1.0 + slope * slope).sqrt();
+        f64::from(SCENE_WATER_LEVEL + HAZE_EYE_HEIGHT) + far * up
+    }
+
+    /// **The water haze fogs no sky above the sea** (`viewer-horizon-thin-line-flashes`).
+    ///
+    /// The haze pass fogs a pixel whose depth is empty by the point its ray reaches
+    /// at the far clip. Two things once put that fog on sky that is *not* under the
+    /// water, and together they drew a dark line along the top of the sea whose
+    /// height followed the eye's, so an idling avatar's bob made it flash:
+    ///
+    /// - the distance tolerance meant for positions rebuilt from the depth buffer —
+    ///   four metres at the far clip, more than an eye's height over the sea — fogged
+    ///   rays that pass *above* the surface;
+    /// - the pass decides once per pixel but blends onto every multisample, so a
+    ///   pixel fogged from its centre went dark in the part the sea's far edge does
+    ///   not cover.
+    ///
+    /// So a pixel of empty depth is fogged only when all of it is under the surface.
+    /// This renders the pass alone over an empty stage, the eye 0.3 m over the sea
+    /// and a field of view narrow enough that a row is a metre at the far clip, and
+    /// holds every row to it: a row whose top edge reaches the far clip above the
+    /// surface keeps the clear colour, and one whose top edge is well under it is
+    /// fogged. The old tolerance fogged four rows above the horizon here, and the
+    /// old centre test the row straddling it.
+    #[test]
+    fn the_water_haze_fogs_no_sky_above_the_sea() -> Result<(), TestError> {
+        let Some((frame, _projected)) = capture_with(&HAZE_STAGE, SceneCx::new(), &[], |app| {
+            app.init_resource::<EnvironmentState>()
+                .add_plugins(UnderwaterFogPlugin)
+                .add_systems(PreUpdate, pin_haze_camera);
+        }) else {
+            warn!("skipping: no frame came back, so this machine has no usable GPU adapter");
+            return Ok(());
+        };
+
+        let column = FRAME / 2;
+        let clear = frame.pixel(column, 0).ok_or("the frame has no top row")?;
+        let level = f64::from(SCENE_WATER_LEVEL);
+        let mut fogged_sky = Vec::new();
+        let mut unfogged_sea = Vec::new();
+        for row in 0..FRAME {
+            let pixel = frame.pixel(column, row).ok_or("the frame is short")?;
+            let difference = (pixel.x - clear.x)
+                .abs()
+                .max((pixel.y - clear.y).abs())
+                .max((pixel.z - clear.z).abs());
+            let top = row_top_height_at_far_clip(row);
+            if top > level + 0.05 && difference > 1.5 / 255.0 {
+                fogged_sky.push((row, top, pixel));
+            }
+            if top < level - 0.5 && difference < 8.0 / 255.0 {
+                unfogged_sea.push((row, top, pixel));
+            }
+        }
+        assert!(
+            unfogged_sea.is_empty(),
+            "rows whose view rays are under the sea came out the clear colour \
+             {clear:?}, so the haze pass did not run at all and the other half of this \
+             test proves nothing: {unfogged_sea:?}"
+        );
+        assert!(
+            fogged_sky.is_empty(),
+            "rows whose top edge reaches the far clip above the sea were fogged \
+             (row, height at the far clip, pixel; clear is {clear:?}): {fogged_sky:?}"
+        );
         Ok(())
     }
 

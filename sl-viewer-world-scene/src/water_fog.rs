@@ -284,6 +284,11 @@ impl Plugin for WaterFogPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<WaterFogSettings>()
             .init_resource::<RenderOverrides>()
+            // The level the settings are measured from. The ocean publishes it, but
+            // the fog does not need an ocean to be correct — the render readback rig
+            // runs the haze pass over an empty stage — so the plugin stands alone at
+            // the default sea level rather than failing to run without one.
+            .init_resource::<WaterLevel>()
             .add_systems(
                 Update,
                 // After the ocean, whose own system publishes the water level these

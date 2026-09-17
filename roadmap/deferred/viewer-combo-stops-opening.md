@@ -2,7 +2,7 @@
 id: viewer-combo-stops-opening
 title: A combo can stop dropping down (seen on the contact-sets chooser)
 topic: viewer
-status: bugs
+status: deferred
 origin: seen while live-checking [[viewer-contact-set-presence-extras]]
   (2026-08-20)
 refs: [viewer-contact-sets, viewer-ui-widget-scaffold,
@@ -96,3 +96,33 @@ nothing. The recipe now names `sl_viewer_ui_widgets::ui_combo`.
 
 Reference (Firestorm, read-only): none — this is our own widget
 (`sl-viewer-ui-widgets/src/ui_combo.rs`).
+
+## Deferred (2026-09-17): not reproducible, no cause found by reading
+
+Deferred rather than kept open, because nothing short of a new sighting can move
+it: the recent live attempts did not reproduce it, and a symptom that cannot be
+reproduced cannot be verified fixed. Pick it up again when it is seen, with the
+capture recipe above.
+
+A read of the code on 2026-09-17 turned up nothing that explains it. What it
+checked:
+
+- **Where the list is placed.** `bevy_ui_widgets`' `position_popover` (the fork
+  at the pinned rev) always puts the list against an edge of the combo, below it
+  or above it, whichever the window cuts off less. So the list cannot open away
+  from the combo, off the window.
+- **The clip walk.** Since [[viewer-clipped-links-still-pickable]], the walk
+  still ends at the popover's `OverrideClip`, so its rows are never clipped by
+  the floater. The combo sits at the start of the chooser row, so a row that
+  overflows its pane pushes the three buttons out, not the combo.
+- **The planes at or above the list's 9 500.** The toast channel (9 500), the
+  beacon label and arrow (9 500), the modal scrim (9 800) and the People grant
+  confirm (1 000 000) are all either `Pickable::IGNORE`, `Visibility::Hidden`,
+  or `Display::None` until they are used. The Conversations dock host is at
+  9 001, below the list.
+- **What picking Pseudonyms changes.** It greys buttons (skin classes and
+  `InteractionDisabled` on `ContactSetsButton` only), rebuilds the table, and
+  moves `ComboSelection`. None of that reaches the combo's own pickability.
+- **A press arriving twice.** A second delivery would open the list and then
+  close it again. But the combo's children are `Pickable::IGNORE`, and the
+  viewer has no pointer other than the mouse.
