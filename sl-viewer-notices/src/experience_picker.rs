@@ -94,8 +94,8 @@ use crate::experience_search::{
 };
 use crate::experiences_floater::{SETTING_SEARCH_MATURITY, search_ceiling};
 use crate::floater::{
-    Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterOp, FloaterOwner, FloaterSpec,
-    FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater, picker_identity,
+    Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterHost, FloaterOp, FloaterOwner,
+    FloaterSpec, FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater, picker_identity,
 };
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::intents::{ExperiencePicked, ExperiencePickerFilter, OpenExperiencePicker};
@@ -946,14 +946,22 @@ fn picker_selection(tables: &Query<&TableState>, table: Entity) -> Option<usize>
         .and_then(TableState::primary_selected)
 }
 
+/// What an experience-picker button raises, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(bevy::ecs::system::SystemParam)]
+struct PickerOut<'w> {
+    /// The experience profile a Profile press opens.
+    profiles: MessageWriter<'w, OpenExperienceProfile>,
+    /// The pick the requester is answered with.
+    picked: MessageWriter<'w, ExperiencePicked>,
+    /// The close that follows a pick.
+    chrome: MessageWriter<'w, FloaterCommand>,
+    /// The wire a fresh search goes out on.
+    sl: MessageWriter<'w, SlCommand>,
+}
+
 /// Every button, resolved by its [`PickerButton`] kind, in the window it was
 /// pressed in.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "an observer's parameters are its injected world access: the button kind, \
-              the window it belongs to and that window's state and rows, the table \
-              selection, the query field and the three message sinks"
-)]
 fn on_picker_button(
     activate: On<Activate>,
     buttons: Query<&PickerButton>,
@@ -962,19 +970,21 @@ fn on_picker_button(
         &ExperiencePickerView,
         &mut ExperiencePickerState,
     )>,
-    parents: Query<&ChildOf>,
-    floaters: Query<(Entity, &Floater)>,
+    host: FloaterHost,
     tables: Query<&TableState>,
     fields: Query<&EditableText>,
-    mut profiles: MessageWriter<OpenExperienceProfile>,
-    mut picked: MessageWriter<ExperiencePicked>,
-    mut chrome: MessageWriter<FloaterCommand>,
-    mut sl: MessageWriter<SlCommand>,
+    out: PickerOut,
 ) {
+    let PickerOut {
+        mut profiles,
+        mut picked,
+        mut chrome,
+        mut sl,
+    } = out;
     let Ok(button) = buttons.get(activate.entity) else {
         return;
     };
-    let Some(window) = host_floater(activate.entity, &parents, &floaters) else {
+    let Some(window) = host.of(activate.entity) else {
         return;
     };
     let Ok((ui, view, mut state)) = windows.get_mut(window) else {

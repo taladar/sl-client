@@ -55,7 +55,9 @@ use crate::i18n::{TransArgs, Translator};
 use crate::intents::OpenGroupProfile;
 use crate::intents::{ConversationKey, OpenConversation};
 use crate::linkified_text::{LinkTextStyle, spawn_linkified_text};
-use crate::notification_host::{NotificationChannelRoot, ResolveNotification, adopt_toast};
+use crate::notification_host::{
+    NotificationChannelRoot, ResolveNotification, ToastSpec, adopt_toast,
+};
 use crate::notification_persist::{
     PersistNotification, PersistedKind, ReloadPersistedNotification,
 };
@@ -565,11 +567,13 @@ fn spawn_group_notice_card(
         manager,
         channel,
         card.root,
-        NotificationKind::Alert,
-        NotificationPriority::Normal,
-        GROUP_NOTICE_TEMPLATE,
-        Some("OK"),
-        notice.subject.clone(),
+        ToastSpec {
+            kind: NotificationKind::Alert,
+            priority: NotificationPriority::Normal,
+            template: GROUP_NOTICE_TEMPLATE,
+            default_button: Some("OK"),
+            history_body: notice.subject.clone(),
+        },
     );
 
     // OK / close ×: resolve the toast through the host's teardown — a user close,

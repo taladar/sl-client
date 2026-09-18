@@ -77,8 +77,8 @@ use sl_client_bevy::{
 };
 
 use crate::floater::{
-    Floater, FloaterCaps, FloaterHandle, FloaterKey, FloaterSpec, FloaterSystems, KeyedFloaterOpen,
-    KeyedFloaters, host_floater,
+    Floater, FloaterCaps, FloaterHandle, FloaterHost, FloaterKey, FloaterSpec, FloaterSystems,
+    KeyedFloaterOpen, KeyedFloaters, host_floater,
 };
 use crate::i18n::{Translated, Translator};
 use crate::ui::{column, row};
@@ -1031,29 +1031,53 @@ fn spawn_toggle(
 // Interaction.
 // ---------------------------------------------------------------------------
 
+/// Where the agent is, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the region-local position an
+/// experience's "allow here" acts on, and the region it is in.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct ProfileWhere<'w, 's> {
+    /// Where the agent is standing, region-local.
+    position: Res<'w, AgentRegionPosition>,
+    /// The region that position is in.
+    regions: Query<'w, 's, &'static SlRegionIdentity, With<SlCurrentRegion>>,
+}
+
+/// An experience profile window's widgets, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): its labels and their
+/// colours, the boxes a section is shown through, the name links, the edit
+/// fields and the maturity combo.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct ProfileWidgets<'w, 's> {
+    /// The window's labels.
+    texts: Query<'w, 's, &'static mut Text>,
+    /// Their colours.
+    colors: Query<'w, 's, &'static mut TextColor>,
+    /// The boxes a section is shown or hidden through.
+    nodes: Query<'w, 's, &'static mut Node>,
+    /// The owner / group name links.
+    links: Query<'w, 's, &'static mut NameLink>,
+    /// The editable fields.
+    fields: Query<'w, 's, &'static mut EditableText>,
+    /// The maturity combo's selection.
+    combos: Query<'w, 's, &'static mut ComboSelection>,
+}
+
 /// Every button in the window, resolved to **its own** window with
 /// [`host_floater`] — so a press in one profile never edits another's.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "an observer's parameters are its injected world access: the button kind, \
-              the window lookup, that window's state and fields, the region the \
-              location button reads, and the two command sinks"
-)]
 fn on_profile_button(
     activate: On<Activate>,
     buttons: Query<&ProfileButton>,
-    parents: Query<&ChildOf>,
-    floaters: Query<(Entity, &Floater)>,
+    host: FloaterHost,
     mut states: Query<(&mut ExperienceProfileState, &ExperienceProfileUi)>,
     fields: Query<&EditableText>,
-    position: Res<AgentRegionPosition>,
-    regions: Query<&SlRegionIdentity, With<SlCurrentRegion>>,
+    here: ProfileWhere,
     mut sl: MessageWriter<SlCommand>,
 ) {
+    let ProfileWhere { position, regions } = here;
     let Ok(button) = buttons.get(activate.entity) else {
         return;
     };
-    let Some(window) = host_floater(activate.entity, &parents, &floaters) else {
+    let Some(window) = host.of(activate.entity) else {
         return;
     };
     let Ok((mut state, ui)) = states.get_mut(window) else {
@@ -1312,22 +1336,19 @@ fn note_info(state: &mut ExperienceProfileState, info: ExperienceInfo) {
 /// A paint that wrote them every pass would replace what is being typed with the
 /// grid's copy on the next unrelated revision bump — the bug the notecard editor
 /// already paid for.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "one paint pass writes every kind of node the window holds: text, \
-              colours, name links, edit fields, the combo and the two panels' \
-              visibility"
-)]
 fn paint_profile_windows(
     translator: Translator,
     mut windows: Query<(&mut ExperienceProfileState, &ExperienceProfileUi)>,
-    mut texts: Query<&mut Text>,
-    mut colors: Query<&mut TextColor>,
-    mut nodes: Query<&mut Node>,
-    mut links: Query<&mut NameLink>,
-    mut fields: Query<&mut EditableText>,
-    mut combos: Query<&mut ComboSelection>,
+    widgets: ProfileWidgets,
 ) {
+    let ProfileWidgets {
+        mut texts,
+        mut colors,
+        mut nodes,
+        mut links,
+        mut fields,
+        mut combos,
+    } = widgets;
     let relocalised = translator.changed();
     for (mut state, ui) in &mut windows {
         if !relocalised && state.painted == Some(state.revision) {

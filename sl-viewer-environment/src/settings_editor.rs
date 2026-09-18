@@ -854,24 +854,87 @@ fn spawn_button_row(
 // Opening.
 // ---------------------------------------------------------------------------
 
+/// What opening a settings editor writes through, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the toast a refusal reports
+/// through, the raise that brings an open window forward, the panels it shows,
+/// and the titles it writes.
+#[derive(bevy::ecs::system::SystemParam)]
+struct EditorOpenOut<'w, 's> {
+    /// The toast a refusal reports through.
+    notify: MessageWriter<'w, ShowNotification>,
+    /// The raise that brings an already-open window forward.
+    raises: MessageWriter<'w, FloaterCommand>,
+    /// The panels the open shows.
+    panels: Query<'w, 's, &'static mut UiPanelShown>,
+    /// The window titles it writes.
+    texts: Query<'w, 's, &'static mut Text>,
+}
+
+/// What gates an editor button, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): which button was pressed,
+/// whether it is greyed, and the labels it repaints.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct EditorButtonGate<'w, 's> {
+    /// Which button was pressed.
+    buttons: Query<'w, 's, &'static EditorButton>,
+    /// Which buttons are greyed; a greyed one is inert.
+    disabled: Query<'w, 's, (), With<bevy::ui::InteractionDisabled>>,
+    /// The labels the press repaints.
+    texts: Query<'w, 's, &'static mut Text>,
+}
+
+/// The pending state an editor button leaves behind, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the settings creation in
+/// flight, the Save As awaiting its name, and the replace awaiting its
+/// confirmation.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct EditorButtonStashes<'w> {
+    /// The settings creation awaiting its item.
+    settings_creations: ResMut<'w, PendingSettingsCreations>,
+    /// The Save As awaiting its name.
+    saving_as: ResMut<'w, PendingEditorSaveAs>,
+    /// The replace awaiting its confirmation.
+    confirm: ResMut<'w, PendingEditorReplace>,
+}
+
+/// What an editor button raises, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(bevy::ecs::system::SystemParam)]
+struct EditorButtonOut<'w> {
+    /// The toast a refusal reports through.
+    notify: MessageWriter<'w, ShowNotification>,
+    /// The file dialog an Import / Export opens.
+    dialogs: MessageWriter<'w, OpenFileDialog>,
+    /// The wire the save goes out on.
+    commands: MessageWriter<'w, SlCommand>,
+}
+
+/// What an editor button is judged against, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): which settings asset types
+/// this grid supports, and the inventory a save is filed into.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct EditorFacts<'w> {
+    /// Which settings asset types this grid supports.
+    support: Res<'w, SettingsInventorySupport>,
+    /// The inventory a save is filed into.
+    inventory: Option<Res<'w, InventoryModel>>,
+}
+
 /// Handle an [`OpenSettingsEditor`]: show the right window and start fetching
 /// the item's asset.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the open stream, the \
-              editors and the asset store an open drives, the confirmation stash and channel a \
-              modified session needs, and the panel / raise / status outputs"
-)]
 fn open_settings_editor(
     mut opens: MessageReader<OpenSettingsEditor>,
     mut editors: ResMut<SettingsEditors>,
     mut assets: Option<ResMut<EnvironmentAssetManager>>,
     mut confirm: ResMut<PendingEditorReplace>,
-    mut notify: MessageWriter<ShowNotification>,
-    mut panels: Query<&mut UiPanelShown>,
-    mut raises: MessageWriter<FloaterCommand>,
-    mut texts: Query<&mut Text>,
+    out: EditorOpenOut,
 ) {
+    let EditorOpenOut {
+        mut notify,
+        mut raises,
+        mut panels,
+        mut texts,
+    } = out;
     for open in opens.read() {
         let Some(editor) = EditorKind::of_settings(open.kind) else {
             // A day cycle is a settings item too, and neither of these windows
@@ -1441,29 +1504,31 @@ fn drop_preview_on_close(
 
 /// A chrome button press: Import (a preset off disk), Save (over the item),
 /// Save As (a new item), Revert.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy observer's parameters are its injected resources: the button pool and its \
-              disabled filter, the session state, the two creation queues a Save As writes, the \
-              inventory mirror an unfiled frame needs a folder out of, the confirmation stash and \
-              file-dialog channel an Import uses, and the command and status channels"
-)]
 fn on_editor_button(
     press: On<Pointer<Press>>,
-    buttons: Query<&EditorButton>,
-    disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
+    gate: EditorButtonGate,
     mut editors: ResMut<SettingsEditors>,
-    support: Res<SettingsInventorySupport>,
-    mut settings_creations: ResMut<PendingSettingsCreations>,
-    mut saving_as: ResMut<PendingEditorSaveAs>,
-    mut confirm: ResMut<PendingEditorReplace>,
-    mut notify: MessageWriter<ShowNotification>,
-    mut dialogs: MessageWriter<OpenFileDialog>,
-    inventory: Option<Res<InventoryModel>>,
+    facts: EditorFacts,
+    stashes: EditorButtonStashes,
+    out: EditorButtonOut,
     translator: Translator,
-    mut commands: MessageWriter<SlCommand>,
-    mut texts: Query<&mut Text>,
 ) {
+    let EditorButtonGate {
+        buttons,
+        disabled,
+        mut texts,
+    } = gate;
+    let EditorFacts { support, inventory } = facts;
+    let EditorButtonStashes {
+        mut settings_creations,
+        mut saving_as,
+        mut confirm,
+    } = stashes;
+    let EditorButtonOut {
+        mut notify,
+        mut dialogs,
+        mut commands,
+    } = out;
     if press.button != PointerButton::Primary || disabled.contains(press.entity) {
         return;
     }

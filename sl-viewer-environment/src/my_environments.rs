@@ -774,14 +774,65 @@ fn mirror_my_environments_filter(
     }
 }
 
+/// The environment list's widgets, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the sortable header, the
+/// virtualized viewport and the count line.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct EnvListWidgets<'w, 's> {
+    /// The table header, for the sort the rows are ordered by.
+    tables: Query<'w, 's, &'static TableState>,
+    /// The virtualized viewport, whose item count the rows drive.
+    lists: Query<'w, 's, &'static mut VirtualList>,
+    /// The count line.
+    texts: Query<'w, 's, &'static mut Text>,
+}
+
+/// What a press on an environment row moves, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the keyboard focus, the
+/// selected row, and the menu target a right-click leaves behind.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct EnvRowPick<'w> {
+    /// The keyboard focus, which the clicked viewport takes.
+    focus: ResMut<'w, InputFocus>,
+    /// The selected row.
+    selected: ResMut<'w, SelectedEnvironment>,
+    /// What a right-click leaves for the menu actions.
+    target: ResMut<'w, MyEnvironmentsMenuTarget>,
+}
+
+/// What an environment action resolves against, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the built rows, the
+/// inventory the items live in, the window's handles and its edit fields.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct EnvActionContext<'w, 's> {
+    /// The built rows the target resolves in.
+    view: Res<'w, MyEnvironmentsView>,
+    /// The inventory model the items live in.
+    model: Option<Res<'w, InventoryModel>>,
+    /// The window's handles, absent before it is built.
+    ui: Option<Res<'w, MyEnvironmentsUi>>,
+    /// The window's edit fields, read on commit.
+    fields: Query<'w, 's, &'static EditableText>,
+}
+
+/// What a freshly created environment lands in, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the creations still in
+/// flight, the selection it becomes, the filters that have to admit it, and the
+/// scroll that brings it into view.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct EnvSelectState<'w> {
+    /// The creations still awaiting their item.
+    pending: ResMut<'w, PendingEnvironmentCreations>,
+    /// The selection the new row becomes.
+    selected: ResMut<'w, SelectedEnvironment>,
+    /// The filters, relaxed so the new row is admitted.
+    filters: ResMut<'w, SettingsListFilters>,
+    /// The scroll that brings it into view.
+    scroll: ResMut<'w, ScrollToSelection>,
+}
+
 /// Reproject when the index, the filters or the sort moved, and refresh the
 /// count line.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the two models and the \
-              filters it projects from, the window's entities, the translator, and the view \
-              and widgets it writes"
-)]
 fn rebuild_my_environments_view(
     index: Res<SettingsIndex>,
     model: Option<Res<InventoryModel>>,
@@ -789,10 +840,13 @@ fn rebuild_my_environments_view(
     ui: Option<Res<MyEnvironmentsUi>>,
     translator: Translator,
     mut view: ResMut<MyEnvironmentsView>,
-    tables: Query<&TableState>,
-    mut lists: Query<&mut VirtualList>,
-    mut texts: Query<&mut Text>,
+    widgets: EnvListWidgets,
 ) {
+    let EnvListWidgets {
+        tables,
+        mut lists,
+        mut texts,
+    } = widgets;
     let (Some(ui), Some(model)) = (ui, model) else {
         return;
     };
@@ -992,23 +1046,20 @@ fn on_kind_filter_toggle(
 
 /// A press on a pooled row: primary selects; secondary selects and opens the
 /// per-row menu with the open-time condition snapshot.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy observer's parameters are its injected resources: the row pool, the view \
-              and inventory the conditions are read from, and the focus / selection / \
-              menu-target stashes the press writes"
-)]
 fn on_environment_row_press(
     mut press: On<Pointer<Press>>,
     rows: Query<&BoundEnvironment>,
     view: Res<MyEnvironmentsView>,
     model: Option<Res<InventoryModel>>,
     ui: Res<MyEnvironmentsUi>,
-    mut focus: ResMut<InputFocus>,
-    mut selected: ResMut<SelectedEnvironment>,
-    mut target: ResMut<MyEnvironmentsMenuTarget>,
+    pick: EnvRowPick,
     mut menus: MessageWriter<OpenContextMenu>,
 ) {
+    let EnvRowPick {
+        mut focus,
+        mut selected,
+        mut target,
+    } = pick;
     let Ok(BoundEnvironment(Some(item))) = rows.get(press.entity).copied() else {
         return;
     };
@@ -1100,52 +1151,92 @@ struct CreateSettingsItem {
     kind: SettingsKind,
 }
 
+/// What an environment action is driven by, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the two action streams, the
+/// menu target and the selected row they act on, the RLV session that can refuse
+/// them, and which settings asset types this grid supports.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct EnvActionInputs<'w, 's> {
+    /// The window's own UI actions.
+    actions: MessageReader<'w, 's, UiAction>,
+    /// The creator requests.
+    creates: MessageReader<'w, 's, CreateSettingsItem>,
+    /// What the per-row menu was opened on.
+    target: Res<'w, MyEnvironmentsMenuTarget>,
+    /// The selected row the bottom-row actions act on.
+    selected: Res<'w, SelectedEnvironment>,
+    /// The RLV session, which can refuse an apply.
+    rlv: Option<Res<'w, RlvSession>>,
+    /// Which settings asset types this grid supports.
+    support: Res<'w, SettingsInventorySupport>,
+}
+
+/// The pending state an environment action leaves behind, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the delete and the two
+/// creations awaiting their replies, the local pick an apply sets, and the
+/// system clipboard a copy fills.
+#[derive(bevy::ecs::system::SystemParam)]
+struct EnvActionStashes<'w> {
+    /// The delete awaiting its confirmation.
+    pending_delete: ResMut<'w, PendingEnvironmentDelete>,
+    /// The environment creations awaiting their items.
+    pending_creations: ResMut<'w, PendingEnvironmentCreations>,
+    /// The settings creations, likewise.
+    settings_creations: ResMut<'w, PendingSettingsCreations>,
+    /// The local environment pick an apply sets; absent on a host without one.
+    pick: Option<ResMut<'w, LocalEnvironmentPick>>,
+    /// The system clipboard a Copy UUID fills, absent on a headless host.
+    clipboard: Option<ResMut<'w, bevy::clipboard::Clipboard>>,
+}
+
+/// What an environment action raises, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(bevy::ecs::system::SystemParam)]
+struct EnvActionOut<'w> {
+    /// The wire the apply / delete goes out on.
+    commands: MessageWriter<'w, SlCommand>,
+    /// The settings editor an Edit opens.
+    editors: MessageWriter<'w, OpenSettingsEditor>,
+    /// The toast a refusal reports through.
+    notify: MessageWriter<'w, ShowNotification>,
+}
+
 /// Dispatch the window's actions — the per-row menu's picks, the bottom row's
 /// rename and delete, and the creators.
-#[expect(
-    clippy::too_many_arguments,
-    clippy::type_complexity,
-    reason = "the window's one dispatcher takes every input its actions need — grouped into \
-              tuples by role (the action channels and targets, the mutated stashes, the \
-              message outputs) to fit the SystemParam arity"
-)]
 fn handle_my_environments_actions(
-    inputs: (
-        MessageReader<UiAction>,
-        MessageReader<CreateSettingsItem>,
-        Res<MyEnvironmentsMenuTarget>,
-        Res<SelectedEnvironment>,
-        Option<Res<RlvSession>>,
-        Res<SettingsInventorySupport>,
-    ),
-    view: Res<MyEnvironmentsView>,
-    model: Option<Res<InventoryModel>>,
-    ui: Option<Res<MyEnvironmentsUi>>,
-    fields: Query<&EditableText>,
+    inputs: EnvActionInputs,
+    context: EnvActionContext,
     translator: Translator,
-    mut stashes: (
-        ResMut<PendingEnvironmentDelete>,
-        ResMut<PendingEnvironmentCreations>,
-        ResMut<PendingSettingsCreations>,
-        Option<ResMut<LocalEnvironmentPick>>,
-        Option<ResMut<bevy::clipboard::Clipboard>>,
-    ),
-    mut outputs: (
-        MessageWriter<SlCommand>,
-        MessageWriter<OpenSettingsEditor>,
-        MessageWriter<ShowNotification>,
-    ),
+    mut stashes: EnvActionStashes,
+    mut outputs: EnvActionOut,
     mut texts: Query<&mut Text>,
 ) {
-    let (mut actions, mut creates, target, selected, rlv, support) = inputs;
-    let (
+    let EnvActionContext {
+        view,
+        model,
+        ui,
+        fields,
+    } = context;
+    let EnvActionInputs {
+        mut actions,
+        mut creates,
+        target,
+        selected,
+        rlv,
+        support,
+    } = inputs;
+    let EnvActionStashes {
         ref mut pending_delete,
         ref mut pending_creations,
         ref mut settings_creations,
         ref mut pick,
         ref mut clipboard,
-    ) = stashes;
-    let (ref mut commands, ref mut editors, ref mut notify) = outputs;
+    } = stashes;
+    let EnvActionOut {
+        ref mut commands,
+        ref mut editors,
+        ref mut notify,
+    } = outputs;
     let Some(model) = model else {
         // Every action below reaches the inventory mirror; without one there is
         // nothing to act on. Drain so a click made before login is not replayed
@@ -1386,21 +1477,19 @@ fn sync_kind_checkboxes(
 /// usable: the list is name-ordered over the whole inventory, so a new item can
 /// land anywhere in it, and hunting for the row you just made is not a thing a
 /// person should have to do.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the creation stream, the \
-              window's entities and rows, and the four stashes a claimed creation writes"
-)]
 fn select_created_environment(
     mut created: MessageReader<SettingsItemCreated>,
     ui: Option<Res<MyEnvironmentsUi>>,
     view: Res<MyEnvironmentsView>,
-    mut pending: ResMut<PendingEnvironmentCreations>,
-    mut selected: ResMut<SelectedEnvironment>,
-    mut filters: ResMut<SettingsListFilters>,
-    mut scroll: ResMut<ScrollToSelection>,
+    state: EnvSelectState,
     mut fields: Query<&mut EditableText>,
 ) {
+    let EnvSelectState {
+        mut pending,
+        mut selected,
+        mut filters,
+        mut scroll,
+    } = state;
     for item in created.read() {
         if pending.0 == 0 {
             // Somebody else's creation — the inventory's own create menu, an

@@ -1543,14 +1543,47 @@ fn reseed_land_widgets(
     }
 }
 
+/// The land panel's controls, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the action buttons, the
+/// picker buttons and the override checkboxes, each tagged with the panel it
+/// belongs to.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct LandControls<'w, 's> {
+    /// The action buttons, tagged with their panel.
+    actions: Query<'w, 's, (Entity, &'static PanelOf), With<LandAction>>,
+    /// The picker buttons, likewise.
+    pickers: Query<'w, 's, (Entity, &'static PanelOf), With<PickerButton>>,
+    /// The override checkboxes and what each overrides.
+    checks: Query<'w, 's, (&'static PanelOf, &'static OverrideCheck)>,
+}
+
+/// The land panel's chrome, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the boxes a control is shown
+/// or hidden through, its children, and the labels.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct LandChrome<'w, 's> {
+    /// The boxes a control is shown or hidden through.
+    nodes: Query<'w, 's, &'static mut Node>,
+    /// Their children, whose label follows the gate.
+    children: Query<'w, 's, &'static Children>,
+    /// The labels themselves.
+    texts: Query<'w, 's, &'static mut Text>,
+}
+
+/// What a land action raises, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(bevy::ecs::system::SystemParam)]
+struct LandActionOut<'w> {
+    /// The toast a refusal or confirmation reports through.
+    notify: MessageWriter<'w, ShowNotification>,
+    /// The wire the parcel / region update goes out on.
+    commands: MessageWriter<'w, SlCommand>,
+    /// The day-cycle editor an Edit opens.
+    edits: MessageWriter<'w, OpenLandDayCycle>,
+}
+
 /// Show the panel's controls or the note saying why it cannot be used, and
 /// grey every control the agent may not touch.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "one system painting every kind of control the panel has — the action buttons, the \
-              picker buttons and the override checkbox — each of which is its own query, over \
-              the shared button paint and the unavailable note"
-)]
 fn paint_land_controls(
     mut commands: Commands,
     panels: Query<(
@@ -1560,15 +1593,21 @@ fn paint_land_controls(
         &LandEnvironmentState,
         &LandEnvironmentUi,
     )>,
-    actions: Query<(Entity, &PanelOf), With<LandAction>>,
-    pickers: Query<(Entity, &PanelOf), With<PickerButton>>,
-    checks: Query<(&PanelOf, &OverrideCheck)>,
+    controls: LandControls,
     translator: Translator,
-    mut nodes: Query<&mut Node>,
     mut paint: ButtonPaint,
-    children: Query<&Children>,
-    mut texts: Query<&mut Text>,
+    chrome: LandChrome,
 ) {
+    let LandControls {
+        actions,
+        pickers,
+        checks,
+    } = controls;
+    let LandChrome {
+        mut nodes,
+        children,
+        mut texts,
+    } = chrome;
     for (entity, kind, subject, state, ui) in &panels {
         let reason = unavailable_reason(*kind, subject);
         show_node(&mut nodes, ui.unavailable, reason.is_some());
@@ -1628,13 +1667,6 @@ fn paint_land_controls(
 }
 
 /// An action button was pressed.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy observer's parameters are its injected resources: the button pool and its \
-              disabled filter, the panel's kind / subject / state, the one confirmation slot, \
-              and the notification / command / editor-open outputs the four actions write \
-              between them"
-)]
 fn on_land_action(
     mut press: On<Pointer<Press>>,
     buttons: Query<(&PanelOf, &LandAction)>,
@@ -1645,11 +1677,14 @@ fn on_land_action(
         &mut LandEnvironmentState,
     )>,
     mut confirm: ResMut<LandEnvironmentConfirm>,
-    mut notify: MessageWriter<ShowNotification>,
-    mut commands: MessageWriter<SlCommand>,
-    mut edits: MessageWriter<OpenLandDayCycle>,
+    out: LandActionOut,
     translator: Translator,
 ) {
+    let LandActionOut {
+        mut notify,
+        mut commands,
+        mut edits,
+    } = out;
     if press.button != PointerButton::Primary || disabled.contains(press.entity) {
         return;
     }

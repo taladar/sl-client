@@ -50,7 +50,9 @@ use sl_client_bevy::{
 use crate::i18n::{TransArgs, Translator};
 use crate::intents::RequestBlock;
 use crate::linkified_text::{LinkTextStyle, spawn_linkified_text};
-use crate::notification_host::{NotificationChannelRoot, ResolveNotification, adopt_toast};
+use crate::notification_host::{
+    NotificationChannelRoot, ResolveNotification, ToastSpec, adopt_toast,
+};
 use crate::notifications::{
     NotificationId, NotificationKind, NotificationManager, NotificationPriority,
 };
@@ -369,11 +371,13 @@ fn spawn_script_dialog_card(
         manager,
         channel,
         card.root,
-        NotificationKind::Alert,
-        NotificationPriority::Normal,
-        SCRIPT_DIALOG_TEMPLATE,
-        None,
-        content.message.clone(),
+        ToastSpec {
+            kind: NotificationKind::Alert,
+            priority: NotificationPriority::Normal,
+            template: SCRIPT_DIALOG_TEMPLATE,
+            default_button: None,
+            history_body: content.message.clone(),
+        },
     );
 
     let root = card.root;

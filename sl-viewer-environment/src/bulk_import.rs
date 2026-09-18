@@ -293,25 +293,32 @@ fn begin_bulk_conversion(
     }
 }
 
+/// What a bulk import raises, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the wire the creations go
+/// out on, and the toast that reports the run.
+#[derive(bevy::ecs::system::SystemParam)]
+struct BulkOut<'w> {
+    /// The wire the item creations go out on.
+    sl_commands: MessageWriter<'w, SlCommand>,
+    /// The toast that reports the run's progress and result.
+    notify: MessageWriter<'w, ShowNotification>,
+}
+
 /// Poll the folder read; when it finishes, ask the simulator for one item per
 /// preset that converted.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the task query and its \
-              despawns, the run state, the inventory the destination folder comes out of, the \
-              creation queue and the command channel each item needs, and the notification \
-              channel a run with nothing to file reports through"
-)]
 fn file_converted_presets(
     mut commands: Commands,
     mut tasks: Query<(Entity, &mut BulkConversionTask)>,
     mut state: ResMut<BulkImportRun>,
     inventory: Option<Res<InventoryModel>>,
     mut creations: ResMut<PendingSettingsCreations>,
-    mut sl_commands: MessageWriter<SlCommand>,
-    mut notify: MessageWriter<ShowNotification>,
+    out: BulkOut,
     translator: Translator,
 ) {
+    let BulkOut {
+        mut sl_commands,
+        mut notify,
+    } = out;
     for (entity, mut pending) in &mut tasks {
         let Some(conversion) = block_on(poll_once(&mut pending.task)) else {
             continue;

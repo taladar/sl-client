@@ -78,7 +78,9 @@ use crate::i18n::{TransArgs, Translator};
 use crate::intents::RequestBlock;
 use crate::inventory::InventoryModel;
 use crate::inventory_actions::default_folder_type;
-use crate::notification_host::{NotificationChannelRoot, ResolveNotification, adopt_toast};
+use crate::notification_host::{
+    NotificationChannelRoot, ResolveNotification, ToastSpec, adopt_toast,
+};
 use crate::notifications::{NotificationKind, NotificationManager, NotificationPriority};
 use crate::ui::{column, row};
 use crate::ui_element::{ElementCx, UiAction};
@@ -661,11 +663,13 @@ fn adopt_offer_card(
         manager,
         channel,
         card.root,
-        NotificationKind::Alert,
-        NotificationPriority::Normal,
-        template,
-        None,
-        history,
+        ToastSpec {
+            kind: NotificationKind::Alert,
+            priority: NotificationPriority::Normal,
+            template,
+            default_button: None,
+            history_body: history,
+        },
     );
 }
 

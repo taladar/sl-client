@@ -76,7 +76,9 @@ use sl_client_bevy::{
 use crate::i18n::{TransArgs, Translator};
 use crate::intents::RequestBlock;
 use crate::linkified_text::{LinkTextStyle, spawn_linkified_text};
-use crate::notification_host::{NotificationChannelRoot, ResolveNotification, adopt_toast};
+use crate::notification_host::{
+    NotificationChannelRoot, ResolveNotification, ToastSpec, adopt_toast,
+};
 use crate::notifications::{
     NotificationId, NotificationKind, NotificationManager, NotificationPriority,
 };
@@ -475,11 +477,13 @@ fn spawn_experience_card(
         manager,
         channel,
         card.root,
-        NotificationKind::Alert,
-        NotificationPriority::Normal,
-        EXPERIENCE_TEMPLATE,
-        None,
-        history,
+        ToastSpec {
+            kind: NotificationKind::Alert,
+            priority: NotificationPriority::Normal,
+            template: EXPERIENCE_TEMPLATE,
+            default_button: None,
+            history_body: history,
+        },
     );
 
     let root = card.root;

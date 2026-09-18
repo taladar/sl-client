@@ -64,7 +64,9 @@ use crate::i18n::{TransArgs, Translator};
 use crate::intents::OpenWebBrowser;
 use crate::intents::RequestBlock;
 use crate::linkified_text::{LinkTextStyle, spawn_linkified_text};
-use crate::notification_host::{NotificationChannelRoot, ResolveNotification, adopt_toast};
+use crate::notification_host::{
+    NotificationChannelRoot, ResolveNotification, ToastSpec, adopt_toast,
+};
 use crate::notifications::{
     NotificationId, NotificationKind, NotificationManager, NotificationPriority,
 };
@@ -347,11 +349,13 @@ fn spawn_load_url_card(
         manager,
         channel,
         card.root,
-        NotificationKind::Alert,
-        NotificationPriority::Normal,
-        LOAD_URL_TEMPLATE,
-        None,
-        url.clone(),
+        ToastSpec {
+            kind: NotificationKind::Alert,
+            priority: NotificationPriority::Normal,
+            template: LOAD_URL_TEMPLATE,
+            default_button: None,
+            history_body: url.clone(),
+        },
     );
 
     // The owner name is not in the message: resolve it after the fact, riding the

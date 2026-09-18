@@ -20,9 +20,9 @@ Scope: sweep the largest clusters into `SystemParam` bundles, in a codebase
 whose stated convention is no `#[expect]`. Start with `menu.rs`, then
 `sl-viewer-edit`.
 
-## Swept so far (2026-09-18): 338 → 88
+## Swept so far (2026-09-18): 338 → 67
 
-Ten crates are now at **zero** suppressions (`sl-viewer-world-objects` keeps
+Twelve crates are now at **zero** suppressions (`sl-viewer-world-objects` keeps
 two, both deliberate — see below):
 
 - **`sl-viewer-ui-widgets` (16)** — `menu.rs`'s thirteen collapse into one
@@ -128,6 +128,23 @@ two, both deliberate — see below):
   `MinimapMenuOut` / `MinimapActionOut`; `world_map.rs` around `WorldMapWorld` /
   `WorldMapPointer` / `LocationWidgets` / `WorldMapData` / `MapFetchAs` /
   `MapLabels` / `WorldMapSearchWidgets`.
+- **`sl-viewer-environment` (11)** — `my_environments.rs`'s three anonymous
+  tuple params become `EnvActionInputs` / `EnvActionStashes` / `EnvActionOut`,
+  plus `EnvListWidgets` / `EnvRowPick` / `EnvActionContext` / `EnvSelectState`;
+  `settings_editor.rs` `EditorOpenOut` / `EditorButtonGate` /
+  `EditorButtonStashes` / `EditorButtonOut` / `EditorFacts`;
+  `day_cycle_editor.rs` `DayFacts` / `DayChromeText` / `DayChromeOut` /
+  `DayButtonGate` / `DayButtonOut`; `land_environment.rs` `LandControls` /
+  `LandChrome` / `LandActionOut`; `bulk_import.rs` `BulkOut`.
+- **`sl-viewer-notices` (10)** — `notification_host.rs`'s `RaiseTargets` /
+  `RaiseGate` / `RaiseOut` / `ResolveWidgets`, and `adopt_toast`'s five
+  identity arguments as one `ToastSpec` — which is what its own suppression
+  reason already called them ("the toast's identity is genuinely this many
+  independent facts"), and which makes its six call sites name the `None` and
+  the priority they were passing positionally. Plus `PickerOut`,
+  `ProfileWhere` / `ProfileWidgets`, `ExperienceNames` /
+  `ExperienceListWidgets` / `ExperiencesPick` / `ExperiencesButtonState` /
+  `ExperiencesOut`, and `InspectorHost`.
 
 This crate also produced the sweep's one **shared** bundle: `FloaterHost` in
 `sl-viewer-ui-widgets::floater`, the injected form of `host_floater`'s
@@ -172,12 +189,15 @@ add a second name for the same record. The two that did go were not wire
 mirrors: `decompress_patch` / `encode_patch` share three precomputed codec
 tables, now one `PatchTables`.
 
-## Still to sweep (88)
+## Still to sweep (67, of which 13 are deliberate)
 
-By crate, largest first: `sl-viewer-environment` 11, `sl-viewer-notices` 10,
-`sl-viewer-ui-context-menus` 8, `sl-client-bevy-viewer` 7, `sl-viewer-search` 5,
-`sl-viewer-preferences` 5, `sl-viewer-asset-editors` 5, then singles, pairs and
-the eleven deliberate `sl-proto` ones.
+By crate, largest first: `sl-viewer-ui-context-menus` 8,
+`sl-client-bevy-viewer` 7, `sl-viewer-search` 5, `sl-viewer-preferences` 5,
+`sl-viewer-asset-editors` 5, `sl-viewer-audio` 3, `sl-conformance` 3, then
+singles and pairs across the rest.
+
+The 13 deliberate ones are the eleven `sl-proto` wire-block mirrors above and
+the two stock-Bevy text-system ports in `name_tag_billboard.rs`.
 
 Not in scope, and worth recording so it is not re-litigated: the remaining cast
 suppressions (152 `as_conversions`, 105 `cast_possible_truncation`, 63

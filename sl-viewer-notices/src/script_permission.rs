@@ -72,7 +72,9 @@ use sl_client_bevy::{
 
 use crate::i18n::{TransArgs, Translator};
 use crate::intents::RequestBlock;
-use crate::notification_host::{NotificationChannelRoot, ResolveNotification, adopt_toast};
+use crate::notification_host::{
+    NotificationChannelRoot, ResolveNotification, ToastSpec, adopt_toast,
+};
 use crate::notifications::{
     NotificationId, NotificationKind, NotificationManager, NotificationPriority,
 };
@@ -466,11 +468,13 @@ fn spawn_script_permission_card(
         manager,
         channel,
         card.root,
-        NotificationKind::Alert,
-        priority,
-        template,
-        None,
-        history,
+        ToastSpec {
+            kind: NotificationKind::Alert,
+            priority,
+            template,
+            default_button: None,
+            history_body: history,
+        },
     );
 
     let root = card.root;

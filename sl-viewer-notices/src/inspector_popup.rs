@@ -323,26 +323,37 @@ fn open_inspectors_from_links(
 // Opening a card.
 // ---------------------------------------------------------------------------
 
+/// Where an inspector popup is placed, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the window it is positioned
+/// within, the UI root it is parented under, and the clock its dwell is stamped
+/// with.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct InspectorHost<'w, 's> {
+    /// The window the popup is positioned within.
+    windows: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
+    /// The UI root the popup is parented under.
+    root: Res<'w, UiRoot>,
+    /// The clock the popup's dwell is stamped with.
+    time: Res<'w, Time>,
+}
+
 /// Open (or replace) the avatar inspector: build the card, wire the quick
 /// actions, request the resident's name and profile about-text, and store it as
 /// the live inspector.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "an open handler fuses the request stream, the live-card slot, the \
-              window / UI-root anchors, the name cache, the translator, the clock, \
-              and the two command channels"
-)]
 fn open_avatar_inspector(
     mut requests: MessageReader<OpenAvatarInspector>,
     mut active: ResMut<ActiveInspector>,
-    windows: Query<&Window, With<PrimaryWindow>>,
-    root: Res<UiRoot>,
+    host: InspectorHost,
     avatars: Res<AvatarState>,
     translator: Translator,
-    time: Res<Time>,
     mut commands: Commands,
     mut sl: MessageWriter<SlCommand>,
 ) {
+    let InspectorHost {
+        windows,
+        root,
+        time,
+    } = host;
     let requests: Vec<OpenAvatarInspector> = requests.read().copied().collect();
     let Some(request) = requests.last().copied() else {
         return;
@@ -446,22 +457,19 @@ fn open_avatar_inspector(
 /// Open (or replace) the object inspector: build the card from what the link
 /// carried, wire the actions, and (for an in-world object) request its
 /// properties.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "an open handler fuses the request stream, the live-card slot, the \
-              window / UI-root anchors, the translator, the clock, and the two \
-              command channels"
-)]
 fn open_object_inspector(
     mut requests: MessageReader<OpenObjectInspector>,
     mut active: ResMut<ActiveInspector>,
-    windows: Query<&Window, With<PrimaryWindow>>,
-    root: Res<UiRoot>,
+    host: InspectorHost,
     translator: Translator,
-    time: Res<Time>,
     mut commands: Commands,
     mut sl: MessageWriter<SlCommand>,
 ) {
+    let InspectorHost {
+        windows,
+        root,
+        time,
+    } = host;
     let requests: Vec<OpenObjectInspector> = requests.read().cloned().collect();
     let Some(request) = requests.last().cloned() else {
         return;

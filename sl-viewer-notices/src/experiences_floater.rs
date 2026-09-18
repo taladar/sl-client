@@ -1368,25 +1368,79 @@ fn ingest_experience_events(
 // View.
 // ---------------------------------------------------------------------------
 
+/// The name sources an experience row is rendered through, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the avatar mirror an owner
+/// resolves in, the group roster, and the settings the columns are read from.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct ExperienceNames<'w> {
+    /// The avatar mirror, for an experience's owner.
+    avatars: Res<'w, AvatarState>,
+    /// The group roster, for a group-owned experience.
+    groups: Res<'w, GroupsModel>,
+    /// The settings the shown columns are read from.
+    settings: Option<Res<'w, ViewerSettings>>,
+}
+
+/// The experience list's widgets, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the sortable header and the
+/// virtualized viewport.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct ExperienceListWidgets<'w, 's> {
+    /// The table header, for the sort the rows are ordered by.
+    tables: Query<'w, 's, &'static TableState>,
+    /// The virtualized viewport, whose item count the rows drive.
+    lists: Query<'w, 's, &'static mut VirtualList>,
+}
+
+/// What an experiences-floater button reads its target from, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the table's selection and
+/// the search field.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct ExperiencesPick<'w, 's> {
+    /// The table's selected rows.
+    tables: Query<'w, 's, &'static TableState>,
+    /// The search field.
+    fields: Query<'w, 's, &'static EditableText>,
+}
+
+/// The floater's own state, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the fetched experience log
+/// and the window's tab / query state.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct ExperiencesButtonState<'w> {
+    /// The fetched experiences, keyed by list.
+    log: ResMut<'w, ExperienceLog>,
+    /// The window's tab and query state.
+    state: ResMut<'w, ExperiencesState>,
+}
+
+/// What an experiences-floater button raises, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(bevy::ecs::system::SystemParam)]
+struct ExperiencesOut<'w> {
+    /// The experience profile a Profile press opens.
+    profiles: MessageWriter<'w, OpenExperienceProfile>,
+    /// The wire a fetch goes out on.
+    sl: MessageWriter<'w, SlCommand>,
+}
+
 /// Rebuild every pane's rendered rows when anything they derive from moved: the
 /// state, the log, a table's sort, the name caches or the locale.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the rendered rows are a function of every one of these: the id lists, \
-              the log, the seven sorts, the two name caches and the locale"
-)]
 fn rebuild_experience_views(
     state: Res<ExperiencesState>,
     log: Res<ExperienceLog>,
     ui: Option<Res<ExperiencesUi>>,
-    avatars: Res<AvatarState>,
-    groups: Res<GroupsModel>,
-    settings: Option<Res<ViewerSettings>>,
+    names: ExperienceNames,
     translator: Translator,
-    tables: Query<&TableState>,
     mut view: ResMut<ExperiencesView>,
-    mut lists: Query<&mut VirtualList>,
+    widgets: ExperienceListWidgets,
 ) {
+    let ExperienceNames {
+        avatars,
+        groups,
+        settings,
+    } = names;
+    let ExperienceListWidgets { tables, mut lists } = widgets;
     let Some(ui) = ui else {
         return;
     };
@@ -1680,24 +1734,21 @@ fn selected_row(ui: &ExperiencesUi, tables: &Query<&TableState>, pane: Pane) -> 
 }
 
 /// Every action button, resolved by its [`ExperiencesButton`] kind.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "an observer's parameters are its injected world access: the button kind, \
-              the window handles, both models, the table selections, the query field \
-              and the two command sinks"
-)]
 fn on_experiences_button(
     activate: On<Activate>,
     buttons: Query<&ExperiencesButton>,
     ui: Option<Res<ExperiencesUi>>,
     view: Res<ExperiencesView>,
-    tables: Query<&TableState>,
-    fields: Query<&EditableText>,
-    mut log: ResMut<ExperienceLog>,
-    mut state: ResMut<ExperiencesState>,
-    mut profiles: MessageWriter<OpenExperienceProfile>,
-    mut sl: MessageWriter<SlCommand>,
+    pick: ExperiencesPick,
+    books: ExperiencesButtonState,
+    out: ExperiencesOut,
 ) {
+    let ExperiencesPick { tables, fields } = pick;
+    let ExperiencesButtonState { mut log, mut state } = books;
+    let ExperiencesOut {
+        mut profiles,
+        mut sl,
+    } = out;
     let Ok(button) = buttons.get(activate.entity) else {
         return;
     };

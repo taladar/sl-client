@@ -940,6 +940,23 @@ fn build_toast_card(commands: &mut Commands, content: &ToastContent) -> ToastCar
     }
 }
 
+/// One toast's identity, as [`adopt_toast`] is handed it: what kind it is, how
+/// it is prioritised, the template it renders from, the button `Enter` answers
+/// with, and the line it leaves in the notification history.
+#[derive(Debug, Clone)]
+pub struct ToastSpec {
+    /// What kind of notification this is — which decides its lifetime.
+    pub kind: NotificationKind,
+    /// Where it sits in the channel's ordering.
+    pub priority: NotificationPriority,
+    /// The template it renders from.
+    pub template: &'static str,
+    /// The button `Enter` answers with, if any.
+    pub default_button: Option<&'static str>,
+    /// The line it leaves in the notification history.
+    pub history_body: String,
+}
+
 /// Adopt an externally-built card `root` as a managed toast in the shared corner
 /// channel — the way a bespoke-content notification (the group-notice card,
 /// `crate::group_notice`) joins the catalogue toasts so it inherits the same
@@ -952,23 +969,20 @@ fn build_toast_card(commands: &mut Commands, content: &ToastContent) -> ToastCar
 /// wiring the card's own dismiss affordances to a [`ResolveNotification`] (so a
 /// **user** close is what ends it — display alone never does). Returns the toast's
 /// [`NotificationId`](crate::notifications::NotificationId).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the toast's identity is genuinely this many independent facts (channel, kind, \
-              priority, template, default button, history body) plus the commands / manager / \
-              root it acts on; bundling them into a struct would only move the list, not shorten it"
-)]
 pub fn adopt_toast(
     commands: &mut Commands,
     manager: &mut NotificationManager,
     channel: &NotificationChannelRoot,
     root: Entity,
-    kind: NotificationKind,
-    priority: NotificationPriority,
-    template: &'static str,
-    default_button: Option<&'static str>,
-    history_body: String,
+    toast: ToastSpec,
 ) -> crate::notifications::NotificationId {
+    let ToastSpec {
+        kind,
+        priority,
+        template,
+        default_button,
+        history_body,
+    } = toast;
     let id = manager.allocate_id();
     commands.entity(root).insert((
         Toast {
@@ -1092,31 +1106,86 @@ fn ignore_checkbox_label(tmpl: &NotificationTemplate, translator: &Translator) -
     }
 }
 
+/// Where a raised toast is put, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the notification channel it
+/// is spawned under, and the UI root that channel hangs from.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct RaiseTargets<'w> {
+    /// The notification channel the toast is spawned under.
+    channel: Option<Res<'w, NotificationChannelRoot>>,
+    /// The UI root the channel hangs from.
+    root: Res<'w, UiRoot>,
+}
+
+/// What decides whether a notification is raised now, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the settings that can
+/// suppress it, our do-not-disturb state, and the queue it is held in meanwhile.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct RaiseGate<'w> {
+    /// The settings that can suppress a notification kind outright.
+    settings: Option<Res<'w, ViewerSettings>>,
+    /// Our presence, which defers a toast while do-not-disturb is on.
+    presence: Option<Res<'w, crate::social::PresenceState>>,
+    /// The queue a deferred toast is held in.
+    queue: ResMut<'w, DoNotDisturbQueue>,
+}
+
+/// Everything a raise writes, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the dismissal of a toast it
+/// replaces, the chat line a chat-routed notification becomes, its persistence,
+/// and the response an auto-answered one gives.
+#[derive(bevy::ecs::system::SystemParam)]
+struct RaiseOut<'w> {
+    /// The dismissal of a toast this one replaces.
+    dismiss: MessageWriter<'w, DismissNotification>,
+    /// The local-chat line a chat-routed notification becomes.
+    chat: MessageWriter<'w, LocalChatNotice>,
+    /// The persistence of a notification that survives a relog.
+    persist: MessageWriter<'w, PersistNotification>,
+    /// The response an auto-answered notification gives.
+    responses: MessageWriter<'w, NotificationResponse>,
+}
+
+/// The widgets a resolution reads its answer from, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the toasts themselves, their
+/// children, the ignore checkbox and the reply field.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct ResolveWidgets<'w, 's> {
+    /// The toasts being resolved.
+    toasts: Query<'w, 's, &'static Toast>,
+    /// Their children, walked to find the controls below.
+    children: Query<'w, 's, &'static Children>,
+    /// The "ignore this kind" checkbox.
+    checkboxes: Query<'w, 's, &'static IgnoreCheckbox>,
+    /// The reply field, for a notification that takes text.
+    editors: Query<'w, 's, &'static EditableText>,
+}
+
 /// Raise the queued [`ShowNotification`]s: look up the catalogue template, honour
 /// suppression and `unique` dedup, resolve the body + button labels through
 /// i18n, build the toast (corner card or modal scrim) and wire its buttons and
 /// ignore checkbox.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a raise needs the request queue, the manager, the channel/root, i18n, \
-              suppression settings, the dismiss channel, the persistence channel and the \
-              response channel (a suppressed raise auto-responds); each is distinct"
-)]
 fn raise_notifications(
     mut commands: Commands,
     mut requests: MessageReader<ShowNotification>,
     mut manager: ResMut<NotificationManager>,
-    channel: Option<Res<NotificationChannelRoot>>,
-    root: Res<UiRoot>,
+    targets: RaiseTargets,
     translator: Translator,
-    settings: Option<Res<ViewerSettings>>,
-    presence: Option<Res<crate::social::PresenceState>>,
-    mut queue: ResMut<DoNotDisturbQueue>,
-    mut dismiss: MessageWriter<DismissNotification>,
-    mut chat: MessageWriter<LocalChatNotice>,
-    mut persist: MessageWriter<PersistNotification>,
-    mut responses: MessageWriter<NotificationResponse>,
+    gate: RaiseGate,
+    out: RaiseOut,
 ) {
+    let RaiseTargets { channel, root } = targets;
+    let RaiseGate {
+        settings,
+        presence,
+        mut queue,
+    } = gate;
+    let RaiseOut {
+        mut dismiss,
+        mut chat,
+        mut persist,
+        mut responses,
+    } = out;
     let Some(channel) = channel else {
         return;
     };
@@ -1442,23 +1511,20 @@ fn handle_dismiss(
 /// clear the dedup index, emit the public [`NotificationResponse`], and despawn
 /// the toast (recursively, so a modal's scrim and dialog both go). Deduplicates
 /// repeat resolves for one toast within a frame.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a resolve needs the resolve queue, the manager, the toast + descendant \
-              queries for the ignore state and the input field's text, the response channel \
-              and the settings; each is distinct"
-)]
 fn resolve_notifications(
     mut commands: Commands,
     mut resolutions: MessageReader<ResolveNotification>,
     mut manager: ResMut<NotificationManager>,
-    toasts: Query<&Toast>,
-    children: Query<&Children>,
-    checkboxes: Query<&IgnoreCheckbox>,
-    editors: Query<&EditableText>,
+    widgets: ResolveWidgets,
     mut responses: MessageWriter<NotificationResponse>,
     mut settings: Option<ResMut<ViewerSettings>>,
 ) {
+    let ResolveWidgets {
+        toasts,
+        children,
+        checkboxes,
+        editors,
+    } = widgets;
     let mut handled: std::collections::HashSet<Entity> = std::collections::HashSet::new();
     for resolution in resolutions.read() {
         if !handled.insert(resolution.toast) {

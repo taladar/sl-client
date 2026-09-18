@@ -2010,6 +2010,66 @@ fn on_day_track_button(
     session.relist = true;
 }
 
+/// What the day editor's chrome is gated by, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the live environment the
+/// editor previews against, and which settings asset types this grid supports.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct DayFacts<'w> {
+    /// The live environment the editor previews against.
+    environment: Option<Res<'w, EnvironmentState>>,
+    /// Which settings asset types this grid supports.
+    support: Res<'w, SettingsInventorySupport>,
+}
+
+/// The day editor's text nodes, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the boxes a panel shows or
+/// hides, and the labels it writes.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct DayChromeText<'w, 's> {
+    /// The boxes a panel shows or hides.
+    nodes: Query<'w, 's, &'static mut Node>,
+    /// The labels it writes.
+    texts: Query<'w, 's, &'static mut Text>,
+}
+
+/// What a chrome sync raises, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the combo's option list and
+/// the commands that build the rest.
+#[derive(bevy::ecs::system::SystemParam)]
+struct DayChromeOut<'w, 's> {
+    /// The clone-source combo's option list.
+    options: MessageWriter<'w, SetComboOptions>,
+    /// What builds the rest of the chrome.
+    commands: Commands<'w, 's>,
+}
+
+/// What gates a day-editor button, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): which button was pressed,
+/// whether it is greyed, and the clone-source combo a New reads.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct DayButtonGate<'w, 's> {
+    /// Which button was pressed.
+    buttons: Query<'w, 's, &'static DayButton>,
+    /// Which buttons are greyed; a greyed one is inert.
+    disabled: Query<'w, 's, (), With<bevy::ui::InteractionDisabled>>,
+    /// The clone-source combo a New reads its template from.
+    combos: Query<'w, 's, &'static ComboSelection, With<DayCloneSource>>,
+}
+
+/// What a day-editor button raises, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(bevy::ecs::system::SystemParam)]
+struct DayButtonOut<'w> {
+    /// The wire the save / apply goes out on.
+    commands: MessageWriter<'w, SlCommand>,
+    /// The toast a refusal reports through.
+    notify: MessageWriter<'w, ShowNotification>,
+    /// The settings picker a Load opens.
+    pickers: MessageWriter<'w, OpenSettingsPicker>,
+    /// The parcel / region edit an Apply raises.
+    land_edits: MessageWriter<'w, LandDayCycleEdited>,
+}
+
 /// Keep the track buttons, the knob pages, the readout, the tick labels, the
 /// clone-source combo and the enabled states in step with the session.
 ///
@@ -2020,24 +2080,27 @@ fn on_day_track_button(
 /// second over a window where nothing moved. The remembered values are read out
 /// of the resource before the session is borrowed and written back after, which
 /// is what lets one system both read the session and record what it drew.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the state and environment it \
-              reads, the translator the readout is formatted through, and the families of node it \
-              reconciles — grouped into tuples by role to fit the SystemParam arity"
-)]
 fn sync_day_chrome(
     mut state: ResMut<DayCycleEditorState>,
-    environment: Option<Res<EnvironmentState>>,
-    support: Res<SettingsInventorySupport>,
+    facts: DayFacts,
     translator: Translator,
-    mut nodes: Query<&mut Node>,
-    mut texts: Query<&mut Text>,
+    chrome: DayChromeText,
     widgets: ChromeWidgets,
     mut paint: ChromePaint,
-    mut options: MessageWriter<SetComboOptions>,
-    mut commands: Commands,
+    out: DayChromeOut,
 ) {
+    let DayFacts {
+        environment,
+        support,
+    } = facts;
+    let DayChromeText {
+        mut nodes,
+        mut texts,
+    } = chrome;
+    let DayChromeOut {
+        mut options,
+        mut commands,
+    } = out;
     let (tracks, buttons, ticks, labels) = widgets;
     let day_length = environment.map_or(0, |environment| environment.settings.day_length);
     let settings_supported = support.supported();
@@ -2385,26 +2448,26 @@ fn set_status(texts: &mut Query<&mut Text>, status: Option<Entity>, message: &st
 // ---------------------------------------------------------------------------
 
 /// A button press: the transport, the track and frame verbs, and the save row.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy observer's parameters are its injected resources: the button pool and its \
-              disabled filter, the window's state, the clone-source combo a copy reads, the \
-              creation queue a Save As writes, and the command / picker / status outputs"
-)]
 fn on_day_button(
     mut press: On<Pointer<Press>>,
-    buttons: Query<&DayButton>,
-    disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
+    gate: DayButtonGate,
     mut state: ResMut<DayCycleEditorState>,
     support: Res<SettingsInventorySupport>,
-    combos: Query<&ComboSelection, With<DayCloneSource>>,
     mut creations: ResMut<PendingSettingsCreations>,
-    mut commands: MessageWriter<SlCommand>,
-    mut notify: MessageWriter<ShowNotification>,
-    mut pickers: MessageWriter<OpenSettingsPicker>,
-    mut land_edits: MessageWriter<LandDayCycleEdited>,
+    out: DayButtonOut,
     mut texts: Query<&mut Text>,
 ) {
+    let DayButtonGate {
+        buttons,
+        disabled,
+        combos,
+    } = gate;
+    let DayButtonOut {
+        mut commands,
+        mut notify,
+        mut pickers,
+        mut land_edits,
+    } = out;
     if press.button != PointerButton::Primary || disabled.contains(press.entity) {
         return;
     }
