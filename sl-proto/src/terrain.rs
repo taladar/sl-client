@@ -215,9 +215,11 @@ pub(crate) fn decode_layer(data: &[u8]) -> Option<(TerrainLayerType, Vec<Decoded
             prequant,
             range,
             dc_offset,
-            &dequantize,
-            &icosines,
-            &decopy,
+            PatchTables {
+                dequantize: &dequantize,
+                icosines: &icosines,
+                decopy: &decopy,
+            },
         );
         patches.push(DecodedPatch {
             patch_x,
@@ -259,23 +261,38 @@ fn decode_patch_data(reader: &mut BitReader<'_>, total: usize, word_bits: u32) -
     coefficients
 }
 
+/// The three precomputed tables a patch codec works from: the per-coefficient
+/// dequantisation scale, the inverse-DCT cosines, and the zig-zag copy order the
+/// coefficients are read and written in.
+///
+/// They depend only on the patch size, so one set is built per layer and handed
+/// to every patch in it.
+#[derive(Clone, Copy)]
+struct PatchTables<'a> {
+    /// The per-coefficient dequantisation scale.
+    dequantize: &'a [f32],
+    /// The inverse-DCT cosine table.
+    icosines: &'a [f32],
+    /// The zig-zag order the coefficients are read and written in.
+    decopy: &'a [u32],
+}
+
 /// Reconstructs a patch's grid from its quantized coefficients: dequantize and
 /// un-zigzag into a block, run the 2-D inverse DCT, then scale by the patch's
 /// range/offset. Returns the values row-major (`row * size + col`).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the per-patch tables and header fields are all decode inputs"
-)]
 fn decompress_patch(
     coefficients: &[i32],
     size: usize,
     prequant: u32,
     range: u32,
     dc_offset: f32,
-    dequantize: &[f32],
-    icosines: &[f32],
-    decopy: &[u32],
+    tables: PatchTables<'_>,
 ) -> Vec<f32> {
+    let PatchTables {
+        dequantize,
+        icosines,
+        decopy,
+    } = tables;
     let quantize = small_u32_to_f32(1u32 << prequant.min(31));
     let half_quantum = small_u32_to_f32(1u32 << prequant.wrapping_sub(1).min(31));
     let multiplier = small_u32_to_f32(range) / quantize;
@@ -603,9 +620,11 @@ pub fn encode_layer(layer: TerrainLayerType, patches: &[TerrainPatch]) -> Vec<u8
             large,
             size,
             total,
-            &dequantize,
-            &icosines,
-            &decopy,
+            PatchTables {
+                dequantize: &dequantize,
+                icosines: &icosines,
+                decopy: &decopy,
+            },
         );
     }
 
@@ -616,20 +635,19 @@ pub fn encode_layer(layer: TerrainLayerType, patches: &[TerrainPatch]) -> Vec<u8
 /// Encodes one patch: prescan for range/offset, scale to the quantizer grid,
 /// forward-DCT, quantize+zigzag into transmission order, then write the patch
 /// header and the entropy-coded coefficients.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the per-patch tables and grid geometry are all encode inputs"
-)]
 fn encode_patch(
     writer: &mut BitWriter,
     patch: &TerrainPatch,
     large: bool,
     size: usize,
     total: usize,
-    dequantize: &[f32],
-    icosines: &[f32],
-    decopy: &[u32],
+    tables: PatchTables<'_>,
 ) {
+    let PatchTables {
+        dequantize,
+        icosines,
+        decopy,
+    } = tables;
     // Materialise exactly `total` cells (padding any short input with zero) so
     // the prescan and the DCT agree on the grid.
     let cells: Vec<f32> = (0..total)

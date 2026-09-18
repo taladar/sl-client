@@ -20,9 +20,9 @@ Scope: sweep the largest clusters into `SystemParam` bundles, in a codebase
 whose stated convention is no `#[expect]`. Start with `menu.rs`, then
 `sl-viewer-edit`.
 
-## Swept so far (2026-09-18): 338 → 103
+## Swept so far (2026-09-18): 338 → 88
 
-Nine crates are now at **zero** suppressions (`sl-viewer-world-objects` keeps
+Ten crates are now at **zero** suppressions (`sl-viewer-world-objects` keeps
 two, both deliberate — see below):
 
 - **`sl-viewer-ui-widgets` (16)** — `menu.rs`'s thirteen collapse into one
@@ -122,6 +122,12 @@ two, both deliberate — see below):
   `DiscLog`, `TerrainStores` / `TerrainWork`, `SplitSources`,
   `ParticleStores` / `ParticleTuning`, and the three plain records `HazePass`,
   `PrimSpec` and `EmitInto`.
+- **`sl-viewer-map` (13)** — `minimap.rs` around `MinimapWorld` /
+  `MinimapPointer` / `MinimapImages` / `LayerSources` / `DotFacts` /
+  `HoverLookup` / `HoverLabels` / `ClickWorld` / `ClickOut` / `MinimapNames` /
+  `MinimapMenuOut` / `MinimapActionOut`; `world_map.rs` around `WorldMapWorld` /
+  `WorldMapPointer` / `LocationWidgets` / `WorldMapData` / `MapFetchAs` /
+  `MapLabels` / `WorldMapSearchWidgets`.
 
 This crate also produced the sweep's one **shared** bundle: `FloaterHost` in
 `sl-viewer-ui-widgets::floater`, the injected form of `host_floater`'s
@@ -157,12 +163,21 @@ Patterns worth reusing:
   reference: `= &facts` leaves each binding a `&Res<T>`, and every `&a` at a
   call site then trips `needless_borrow`.
 
-## Still to sweep (103)
+`sl-proto` went 13 → 11, and the eleven that stay are a **decision, not a
+backlog**. Every one of them says the same thing — "mirrors the wire block
+one-to-one" — and they mean it: the parameter list *is* the protocol record, in
+the order the message template declares it, so the builder reads against the
+template. Putting a hand-written struct beside the generated block type would
+add a second name for the same record. The two that did go were not wire
+mirrors: `decompress_patch` / `encode_patch` share three precomputed codec
+tables, now one `PatchTables`.
 
-By crate, largest first: `sl-viewer-map` 13, `sl-proto` 13,
-`sl-viewer-environment` 11, `sl-viewer-notices` 10,
-`sl-viewer-ui-context-menus` 8, `sl-client-bevy-viewer` 7, then singles and
-pairs across the rest.
+## Still to sweep (88)
+
+By crate, largest first: `sl-viewer-environment` 11, `sl-viewer-notices` 10,
+`sl-viewer-ui-context-menus` 8, `sl-client-bevy-viewer` 7, `sl-viewer-search` 5,
+`sl-viewer-preferences` 5, `sl-viewer-asset-editors` 5, then singles, pairs and
+the eleven deliberate `sl-proto` ones.
 
 Not in scope, and worth recording so it is not re-litigated: the remaining cast
 suppressions (152 `as_conversions`, 105 `cast_possible_truncation`, 63

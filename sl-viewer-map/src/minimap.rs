@@ -1064,29 +1064,217 @@ pub(crate) fn clear_reached_location_track(
     }
 }
 
+/// Where the minimap reads the world, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the terrain the region grid
+/// is laid out from, our own agent, the avatar mirror the dots come from, and
+/// the transforms their positions are read through.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct MinimapWorld<'w, 's> {
+    /// The terrain, for the region grid and the scene origin.
+    terrain: Res<'w, TerrainState>,
+    /// Our own agent, the map's centre.
+    identity: Res<'w, SlIdentity>,
+    /// The avatar mirror the dots are drawn from.
+    avatars: Res<'w, AvatarState>,
+    /// World transforms, for each dot's position.
+    transforms: Query<'w, 's, &'static GlobalTransform>,
+    /// The viewer camera, whose heading the map is oriented to.
+    cameras: Query<'w, 's, &'static GlobalTransform, With<ViewerCamera>>,
+}
+
+/// What says where the pointer is over the map, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the panel's laid-out box,
+/// the cursor's position within it, and whether the panel is shown at all.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct MinimapPointer<'w, 's> {
+    /// The panel's laid-out box, which the cursor position is relative to.
+    computed: Query<'w, 's, &'static ComputedNode>,
+    /// Where the cursor is within it.
+    cursors: Query<'w, 's, &'static RelativeCursorPosition>,
+    /// Whether the panel is shown; a hidden minimap draws nothing.
+    panels: Query<'w, 's, &'static UiPanelShown>,
+}
+
+/// The image the minimap is painted into, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(bevy::ecs::system::SystemParam)]
+struct MinimapImages<'w, 's> {
+    /// The image store the composed map lives in.
+    images: ResMut<'w, Assets<Image>>,
+    /// The panel's image node, repointed when the map is re-allocated.
+    image_nodes: Query<'w, 's, &'static mut ImageNode>,
+}
+
+/// What the minimap's layers are regenerated from, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the object model and its
+/// poses / debug info, the parcel overlay, the regions the grid is laid out
+/// from, the terrain, and the learned sea levels.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct LayerSources<'w, 's> {
+    /// The object model the prim layer is drawn from.
+    objects: Res<'w, ObjectState>,
+    /// World transforms, for each object's place on the map.
+    transforms: Query<'w, 's, &'static GlobalTransform>,
+    /// The per-object debug info the layer keys its colour off.
+    infos: Query<'w, 's, &'static ObjectDebugInfo>,
+    /// The parcel overlay, for the property lines.
+    overlay: Res<'w, SlParcelOverlay>,
+    /// The regions the grid is laid out from, and which one is current.
+    regions: Query<'w, 's, (&'static SlRegion, Option<&'static SlCurrentRegion>)>,
+    /// The terrain the heights are read from.
+    terrain: Res<'w, TerrainState>,
+    /// The learned sea levels. Optional: they are `WaterPlugin`'s, and the
+    /// minimap is a UI panel a host may add without the water surface. Absent,
+    /// every region falls back to the grid default water height — the same
+    /// answer this already gives for a region whose handshake has not arrived.
+    water: Option<Res<'w, WaterState>>,
+}
+
+/// What decides each dot's colour and ring, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): our own agent and the avatar
+/// mirror, the friend roster and mute list a dot is coloured by, the manual
+/// marks, the tracking target, the chat ranges the rings are drawn at, and the
+/// regions the dots are placed on.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct DotFacts<'w, 's> {
+    /// Our own agent, the map's centre.
+    identity: Res<'w, SlIdentity>,
+    /// The avatar mirror the dots come from.
+    avatars: Res<'w, AvatarState>,
+    /// The friend roster, for the friend colour (absent before login).
+    friends: Option<Res<'w, FriendsModel>>,
+    /// The mute list, for the muted colour.
+    mutes: Option<Res<'w, MuteModel>>,
+    /// The manual per-avatar marks.
+    marks: Res<'w, MinimapMarks>,
+    /// The tracking target, drawn with its beacon.
+    tracking: Res<'w, MapTracking>,
+    /// The chat ranges the rings are drawn at.
+    ranges: Res<'w, ChatRanges>,
+    /// The regions the dots are placed on, and which one is current.
+    regions: Query<'w, 's, (&'static SlRegion, Option<&'static SlCurrentRegion>)>,
+}
+
+/// What a hover is resolved through, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the avatar mirror a hovered
+/// dot is named from, and the region / parcel records under the cursor.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct HoverLookup<'w, 's> {
+    /// The avatar mirror, for a hovered dot's name.
+    avatars: Res<'w, AvatarState>,
+    /// The regions and their identities.
+    regions: Query<'w, 's, (&'static SlRegion, Option<&'static SlRegionIdentity>)>,
+    /// The parcels and the region each hangs under.
+    parcels: Query<'w, 's, (&'static SlParcel, &'static ChildOf)>,
+    /// The region handles those parcels resolve against.
+    region_handles: Query<'w, 's, &'static SlRegion>,
+}
+
+/// The hover label's own nodes, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct HoverLabels<'w, 's> {
+    /// The label's box, positioned by the cursor.
+    nodes: Query<'w, 's, &'static mut Node>,
+    /// Its visibility.
+    visibilities: Query<'w, 's, &'static mut Visibility>,
+    /// Its text.
+    texts: Query<'w, 's, &'static mut Text>,
+}
+
+/// What a minimap click acts on, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the terrain the clicked
+/// point is resolved in, our own agent, and the tracking target it sets.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct ClickWorld<'w> {
+    /// The terrain the clicked map point is resolved against.
+    terrain: Res<'w, TerrainState>,
+    /// Our own agent, the map's centre.
+    identity: Res<'w, SlIdentity>,
+    /// The tracking target a click sets.
+    tracking: ResMut<'w, MapTracking>,
+}
+
+/// What a minimap click raises, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the wire, the teleport flow
+/// a double-click begins, and the world map an expand opens.
+#[derive(bevy::ecs::system::SystemParam)]
+struct ClickOut<'w> {
+    /// The wire.
+    commands: MessageWriter<'w, SlCommand>,
+    /// The teleport flow a double-click begins.
+    begin: MessageWriter<'w, crate::intents::BeginTeleportFlow>,
+    /// The world map an expand opens.
+    world_map: MessageWriter<'w, crate::world_map::OpenWorldMap>,
+}
+
+/// The names a minimap context menu labels itself with, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the avatar mirror (which
+/// also requests a name it has not seen) and the translator that renders a
+/// placeholder meanwhile.
+#[derive(bevy::ecs::system::SystemParam)]
+struct MinimapNames<'w> {
+    /// The avatar mirror, which also requests an unseen name.
+    avatars: ResMut<'w, AvatarState>,
+    /// The translator, for a placeholder while a name resolves.
+    translator: Translator<'w>,
+}
+
+/// What a minimap right-click opens, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(bevy::ecs::system::SystemParam)]
+struct MinimapMenuOut<'w> {
+    /// The context menu itself.
+    menus: MessageWriter<'w, OpenContextMenu>,
+    /// The per-agent labels its entries carry.
+    labels: MessageWriter<'w, SetMenuDynamicLabels>,
+}
+
+/// Everything a minimap menu action raises, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(bevy::ecs::system::SystemParam)]
+struct MinimapActionOut<'w> {
+    /// The wire.
+    commands: MessageWriter<'w, SlCommand>,
+    /// A Block.
+    blocks: MessageWriter<'w, RequestBlock>,
+    /// An Add Friend.
+    friendships: MessageWriter<'w, RequestFriendship>,
+    /// An IM conversation.
+    conversations: MessageWriter<'w, OpenConversation>,
+    /// The profile floater.
+    profiles: MessageWriter<'w, OpenAvatarProfile>,
+    /// The add-to-set floater.
+    contact_sets: MessageWriter<'w, OpenAddToContactSet>,
+}
+
 /// Update the per-frame view state: seed the scale from its setting, size the
 /// surface image to the node, read the camera pose and cursor, ease the pan.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the view state genuinely reads the settings, clock, camera, terrain origin, \
-              avatar anchors and the surface node, and resizes the image — one per-frame pass"
-)]
 fn drive_minimap_view(
     ui: Option<Res<MinimapUi>>,
     mut state: ResMut<MinimapState>,
     mut settings: ResMut<ViewerSettings>,
     time: Res<Time>,
-    cameras: Query<&GlobalTransform, With<ViewerCamera>>,
-    terrain: Res<TerrainState>,
-    identity: Res<SlIdentity>,
-    avatars: Res<AvatarState>,
-    transforms: Query<&GlobalTransform>,
-    computed: Query<&ComputedNode>,
-    cursors: Query<&RelativeCursorPosition>,
-    panels: Query<&UiPanelShown>,
-    mut images: ResMut<Assets<Image>>,
-    mut image_nodes: Query<&mut ImageNode>,
+    world: MinimapWorld,
+    pointer: MinimapPointer,
+    paint: MinimapImages,
 ) {
+    let MinimapWorld {
+        terrain,
+        identity,
+        avatars,
+        transforms,
+        cameras,
+    } = world;
+    let MinimapPointer {
+        computed,
+        cursors,
+        panels,
+    } = pointer;
+    let MinimapImages {
+        mut images,
+        mut image_nodes,
+    } = paint;
     let Some(ui) = ui else {
         return;
     };
@@ -1379,29 +1567,22 @@ fn build_terrain_maps(regions: &[TerrainRegionSample]) -> HashMap<RegionHandle, 
 /// (bumping [`last_stamp`](MinimapState::last_stamp) to force a recomposite)
 /// when it lands. Only one task per layer is ever in flight — a change that
 /// arrives while it runs coalesces into the next spawn.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the three cached layers read disjoint world state (objects + transforms, parcel \
-              overlay + regions, terrain + water); splitting into three systems would triple \
-              the shared view-state plumbing without removing any parameter"
-)]
 fn regen_minimap_layers(
     ui: Option<Res<MinimapUi>>,
     mut state: ResMut<MinimapState>,
     settings: Res<ViewerSettings>,
-    objects: Res<ObjectState>,
-    transforms: Query<&GlobalTransform>,
-    infos: Query<&ObjectDebugInfo>,
-    overlay: Res<SlParcelOverlay>,
-    regions: Query<(&SlRegion, Option<&SlCurrentRegion>)>,
-    terrain: Res<TerrainState>,
-    // Optional: the learned sea levels are `WaterPlugin`'s, and the minimap is a
-    // UI panel a host may add without the water surface. Absent, every region
-    // falls back to the grid default water height — the same answer this already
-    // gives for a region whose handshake has not arrived.
-    water: Option<Res<WaterState>>,
+    sources: LayerSources,
     panels: Query<&UiPanelShown>,
 ) {
+    let LayerSources {
+        objects,
+        transforms,
+        infos,
+        overlay,
+        regions,
+        terrain,
+        water,
+    } = sources;
     let Some(ui) = ui else {
         return;
     };
@@ -1824,27 +2005,25 @@ struct CompositeJob {
 /// [`Assets<Image>`] (which almost every other viewer system also touches) —
 /// holding it across the loop serialised the whole frame and stalled the main
 /// thread for the render's full duration.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the composite genuinely folds every map data source into one snapshot; a staging \
-              resource would only rename the parameters"
-)]
 fn composite_minimap(
     ui: Option<Res<MinimapUi>>,
     mut state: ResMut<MinimapState>,
     settings: Res<ViewerSettings>,
-    identity: Res<SlIdentity>,
-    avatars: Res<AvatarState>,
-    friends: Option<Res<FriendsModel>>,
-    mutes: Option<Res<MuteModel>>,
-    marks: Res<MinimapMarks>,
-    tracking: Res<MapTracking>,
-    ranges: Res<ChatRanges>,
+    dots: DotFacts,
     transforms: Query<&GlobalTransform>,
     cameras: Query<&Projection, With<ViewerCamera>>,
-    regions: Query<(&SlRegion, Option<&SlCurrentRegion>)>,
     panels: Query<&UiPanelShown>,
 ) {
+    let DotFacts {
+        identity,
+        avatars,
+        friends,
+        mutes,
+        marks,
+        tracking,
+        ranges,
+        regions,
+    } = dots;
     let Some(ui) = ui else {
         return;
     };
@@ -2443,25 +2622,26 @@ fn dots_near(
 /// Update the hover tooltip: an avatar's name and distance when a dot is
 /// under the cursor, otherwise the region (and, with property lines on, the
 /// parcel) under the cursor plus the double-click hint.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the tooltip reads the hover state, the settings, avatar names, region and parcel \
-              mirrors, and writes the tooltip nodes — one cohesive pass"
-)]
 fn update_minimap_hover(
     ui: Option<Res<MinimapUi>>,
     state: Res<MinimapState>,
     settings: Res<ViewerSettings>,
-    avatars: Res<AvatarState>,
     translator: Translator,
-    regions: Query<(&SlRegion, Option<&SlRegionIdentity>)>,
-    parcels: Query<(&SlParcel, &ChildOf)>,
-    region_handles: Query<&SlRegion>,
+    lookup: HoverLookup,
     panels: Query<&UiPanelShown>,
-    mut nodes: Query<&mut Node>,
-    mut visibilities: Query<&mut Visibility>,
-    mut texts: Query<&mut Text>,
+    labels: HoverLabels,
 ) {
+    let HoverLookup {
+        avatars,
+        regions,
+        parcels,
+        region_handles,
+    } = lookup;
+    let HoverLabels {
+        mut nodes,
+        mut visibilities,
+        mut texts,
+    } = labels;
     let Some(ui) = ui else {
         return;
     };
@@ -2637,23 +2817,24 @@ const DOUBLE_CLICK_SLOP: f32 = 6.0;
 
 /// A primary click on the surface: track double-clicks and run the configured
 /// double-click action (teleport / beacon).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the double-click action needs the clock, view state, settings, terrain (for the \
-              arrival height), identity, tracking and the command channel at click time"
-)]
 fn on_minimap_click(
     click: On<Pointer<Click>>,
     time: Res<Time>,
     mut state: ResMut<MinimapState>,
     settings: Res<ViewerSettings>,
-    terrain: Res<TerrainState>,
-    identity: Res<SlIdentity>,
-    mut tracking: ResMut<MapTracking>,
-    mut commands: MessageWriter<SlCommand>,
-    mut begin: MessageWriter<crate::intents::BeginTeleportFlow>,
-    mut world_map: MessageWriter<crate::world_map::OpenWorldMap>,
+    world: ClickWorld,
+    out: ClickOut,
 ) {
+    let ClickWorld {
+        terrain,
+        identity,
+        mut tracking,
+    } = world;
+    let ClickOut {
+        mut commands,
+        mut begin,
+        mut world_map,
+    } = out;
     if click.button != PointerButton::Primary {
         return;
     }
@@ -2806,23 +2987,23 @@ fn on_minimap_scroll(
 /// Profiles* list takes their place, one line per avatar, labelled with whatever
 /// name is known now and re-labelled as the rest arrive
 /// (`refresh_minimap_menu_names`).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy observer's parameters are its injected world: the press, the minimap state \
-              it snapshots into, the settings / tracking / names it reads the conditions and \
-              labels from, the floater guard, and the two menu channels one open writes"
-)]
 fn on_minimap_context(
     mut press: On<Pointer<Press>>,
     mut state: ResMut<MinimapState>,
     settings: Res<ViewerSettings>,
     tracking: Res<MapTracking>,
-    mut avatars: ResMut<AvatarState>,
-    translator: Translator,
+    names: MinimapNames,
     ui: Option<Res<MinimapUi>>,
-    mut menus: MessageWriter<OpenContextMenu>,
-    mut labels: MessageWriter<SetMenuDynamicLabels>,
+    out: MinimapMenuOut,
 ) {
+    let MinimapNames {
+        mut avatars,
+        translator,
+    } = names;
+    let MinimapMenuOut {
+        mut menus,
+        mut labels,
+    } = out;
     if press.button != PointerButton::Secondary {
         return;
     }
@@ -3211,11 +3392,6 @@ pub const MARK_COLORS: [(&str, Rgba); 5] = [
 /// Dispatch the minimap's context-menu picks: settings toggles, zoom presets,
 /// marks, tracking, and the avatar actions (routed to the shared avatar
 /// action messages / commands).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the action dispatch fans out to the settings store, the mark / tracking \
-              resources, and the three shared avatar-action channels"
-)]
 fn handle_minimap_actions(
     mut actions: MessageReader<UiAction>,
     mut state: ResMut<MinimapState>,
@@ -3223,13 +3399,16 @@ fn handle_minimap_actions(
     mut marks: ResMut<MinimapMarks>,
     mut tracking: ResMut<MapTracking>,
     avatars: Res<AvatarState>,
-    mut commands: MessageWriter<SlCommand>,
-    mut blocks: MessageWriter<RequestBlock>,
-    mut friendships: MessageWriter<RequestFriendship>,
-    mut conversations: MessageWriter<OpenConversation>,
-    mut profiles: MessageWriter<OpenAvatarProfile>,
-    mut contact_sets: MessageWriter<OpenAddToContactSet>,
+    out: MinimapActionOut,
 ) {
+    let MinimapActionOut {
+        mut commands,
+        mut blocks,
+        mut friendships,
+        mut conversations,
+        mut profiles,
+        mut contact_sets,
+    } = out;
     for action in actions.read() {
         if action.element != MINIMAP_ELEMENT {
             continue;

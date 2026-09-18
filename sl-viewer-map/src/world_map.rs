@@ -986,28 +986,127 @@ const fn vec2_scale(v: Vec2, s: f32) -> Vec2 {
     Vec2::new(v.x * s, v.y * s)
 }
 
+/// Where the world map reads the world, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): our own agent, the avatar
+/// mirror, the terrain the grid is laid out from, and the transforms positions
+/// are read through.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct WorldMapWorld<'w, 's> {
+    /// Our own agent, the map's "you are here".
+    identity: Res<'w, SlIdentity>,
+    /// The avatar mirror, for the dots.
+    avatars: Res<'w, AvatarState>,
+    /// The terrain the region grid is laid out from.
+    terrain: Res<'w, crate::world_api::TerrainState>,
+    /// World transforms, for each dot's position.
+    transforms: Query<'w, 's, &'static GlobalTransform>,
+}
+
+/// What says where the pointer is over the map, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the panel's laid-out box,
+/// the cursor's position within it, and whether the panel is shown at all.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct WorldMapPointer<'w, 's> {
+    /// The panel's laid-out box, which the cursor position is relative to.
+    computed: Query<'w, 's, &'static ComputedNode>,
+    /// Where the cursor is within it.
+    cursors: Query<'w, 's, &'static RelativeCursorPosition>,
+    /// Whether the panel is shown; a hidden map draws nothing.
+    panels: Query<'w, 's, &'static UiPanelShown>,
+}
+
+/// The location bar's widgets, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the editable fields, the
+/// labels beside them, and parley's two contexts a programmatic rewrite needs.
+#[derive(bevy::ecs::system::SystemParam)]
+struct LocationWidgets<'w, 's> {
+    /// The coordinate fields.
+    fields: Query<'w, 's, &'static mut EditableText>,
+    /// The labels beside them.
+    texts: Query<'w, 's, &'static mut Text>,
+    /// Parley's font context, for a programmatic field rewrite.
+    font_cx: ResMut<'w, FontCx>,
+    /// Parley's layout context, likewise.
+    layout_cx: ResMut<'w, LayoutCx>,
+}
+
+/// Who the map's fetches are made as, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the settings that gate the
+/// tile fetch, our own agent, and the account context a tile URL is signed with.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct MapFetchAs<'w> {
+    /// The settings that gate the tile fetch.
+    settings: Res<'w, ViewerSettings>,
+    /// Our own agent, the map's centre.
+    identity: Res<'w, SlIdentity>,
+    /// The account context a tile URL is signed with; absent before login.
+    context: Option<Res<'w, AccountContext>>,
+}
+
+/// The map's own model and tile cache, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(bevy::ecs::system::SystemParam)]
+struct WorldMapData<'w> {
+    /// The region records the map is drawn from.
+    model: ResMut<'w, WorldMapModel>,
+    /// The fetched map tiles.
+    tiles: ResMut<'w, WorldMapTiles>,
+}
+
+/// The search box's widgets, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the query field, the panel's
+/// show / hide switch, and the result rows a fresh search despawns.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct WorldMapSearchWidgets<'w, 's> {
+    /// The search query field.
+    fields: Query<'w, 's, &'static EditableText>,
+    /// Whether the panel is shown; a hidden map searches nothing.
+    panels: Query<'w, 's, &'static UiPanelShown>,
+    /// The result rows a fresh search despawns.
+    rows: Query<'w, 's, Entity, With<WorldMapResultRow>>,
+}
+
+/// The label layer's nodes, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the laid-out map box the
+/// labels are placed within, the panel's show / hide switch, and each label's
+/// box, visibility and text.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct MapLabels<'w, 's> {
+    /// The laid-out boxes, for the map's own size.
+    computed: Query<'w, 's, &'static ComputedNode>,
+    /// Whether the panel is shown; a hidden map lays out nothing.
+    panels: Query<'w, 's, &'static UiPanelShown>,
+    /// Each label's box, positioned over its region.
+    nodes: Query<'w, 's, &'static mut Node>,
+    /// Its visibility.
+    visibilities: Query<'w, 's, &'static mut Visibility>,
+    /// Its text.
+    texts: Query<'w, 's, &'static mut Text>,
+}
+
 /// Update the per-frame view state: seed the scale from its setting, size the
 /// surface image to the node, read the cursor and the own avatar's position,
 /// and centre the map once after login.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the view state genuinely reads the settings, clock, identity, avatar anchors and \
-              the surface node, and resizes the image — one per-frame pass"
-)]
 fn drive_world_map_view(
     ui: Option<Res<WorldMapUi>>,
     mut state: ResMut<WorldMapState>,
     mut settings: ResMut<ViewerSettings>,
     time: Res<Time>,
-    identity: Res<SlIdentity>,
-    avatars: Res<AvatarState>,
-    terrain: Res<crate::world_api::TerrainState>,
-    transforms: Query<&GlobalTransform>,
-    computed: Query<&ComputedNode>,
-    cursors: Query<&RelativeCursorPosition>,
-    panels: Query<&UiPanelShown>,
+    world: WorldMapWorld,
+    pointer: WorldMapPointer,
     mut images: ResMut<Assets<Image>>,
 ) {
+    let WorldMapWorld {
+        identity,
+        avatars,
+        terrain,
+        transforms,
+    } = world;
+    let WorldMapPointer {
+        computed,
+        cursors,
+        panels,
+    } = pointer;
     let Some(ui) = ui else {
         return;
     };
@@ -1128,23 +1227,21 @@ fn surface_dimension(value: f32) -> u32 {
 /// Keep the selected-location block in step: push a click-selected position
 /// into the X/Y fields, parse the fields back into the selection state, and
 /// refresh the readout line (region name once known, else grid coordinates).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the location block reads the fields and model and writes the fields, the readout \
-              text and the selection state — one cohesive pass"
-)]
 fn drive_world_map_location(
     ui: Option<Res<WorldMapUi>>,
     mut state: ResMut<WorldMapState>,
     model: Res<WorldMapModel>,
     mut tracking: ResMut<MapTracking>,
     translator: Translator,
-    mut fields: Query<&mut EditableText>,
-    mut texts: Query<&mut Text>,
+    widgets: LocationWidgets,
     panels: Query<&UiPanelShown>,
-    mut font_cx: ResMut<FontCx>,
-    mut layout_cx: ResMut<LayoutCx>,
 ) {
+    let LocationWidgets {
+        mut fields,
+        mut texts,
+        mut font_cx,
+        mut layout_cx,
+    } = widgets;
     let Some(ui) = ui else {
         return;
     };
@@ -1273,23 +1370,24 @@ fn effective_base_url(
 /// Keep the map fed while it is open: run the tile service and request the
 /// visible tiles, and — in the detail regime — the visible map blocks and the
 /// enabled item layers.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the request pass reads the view state, the model bookkeeping, the settings, the \
-              account context and the clock, and writes commands and tile requests — one pass"
-)]
 fn request_world_map_data(
     ui: Option<Res<WorldMapUi>>,
     mut state: ResMut<WorldMapState>,
-    mut model: ResMut<WorldMapModel>,
-    mut tiles: ResMut<WorldMapTiles>,
-    settings: Res<ViewerSettings>,
-    identity: Res<SlIdentity>,
-    context: Option<Res<AccountContext>>,
+    data: WorldMapData,
+    fetch_as: MapFetchAs,
     time: Res<Time>,
     panels: Query<&UiPanelShown>,
     mut commands: MessageWriter<SlCommand>,
 ) {
+    let WorldMapData {
+        mut model,
+        mut tiles,
+    } = data;
+    let MapFetchAs {
+        settings,
+        identity,
+        context,
+    } = fetch_as;
     let Some(ui) = ui else {
         return;
     };
@@ -1913,23 +2011,21 @@ fn draw_marker(surface: &mut Surface<'_>, marker: &MarkerInfo) {
 // ---------------------------------------------------------------------------
 
 /// Overlay pooled region-name labels on the surface in the detail regime.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the label pass reads the view, model and settings and writes the pooled label \
-              nodes' position, text and visibility — one cohesive pass"
-)]
 fn layout_world_map_labels(
     mut commands: Commands,
     ui: Option<ResMut<WorldMapUi>>,
     state: Res<WorldMapState>,
     model: Res<WorldMapModel>,
     settings: Res<ViewerSettings>,
-    computed: Query<&ComputedNode>,
-    panels: Query<&UiPanelShown>,
-    mut nodes: Query<&mut Node>,
-    mut visibilities: Query<&mut Visibility>,
-    mut texts: Query<&mut Text>,
+    labels: MapLabels,
 ) {
+    let MapLabels {
+        computed,
+        panels,
+        mut nodes,
+        mut visibilities,
+        mut texts,
+    } = labels;
     let Some(mut ui) = ui else {
         return;
     };
@@ -2036,21 +2132,20 @@ const MARKER_PICK_RADIUS: f32 = 8.0;
 
 /// Update the hover tooltip: the marker under the cursor, otherwise the region
 /// under the cursor (name, rating, agent count).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the tooltip reads the hover state, the model and the translator, and writes the \
-              tooltip nodes — one cohesive pass"
-)]
 fn update_world_map_hover(
     ui: Option<Res<WorldMapUi>>,
     state: Res<WorldMapState>,
     model: Res<WorldMapModel>,
     translator: Translator,
-    panels: Query<&UiPanelShown>,
-    mut nodes: Query<&mut Node>,
-    mut visibilities: Query<&mut Visibility>,
-    mut texts: Query<&mut Text>,
+    labels: MapLabels,
 ) {
+    let MapLabels {
+        panels,
+        mut nodes,
+        mut visibilities,
+        mut texts,
+        ..
+    } = labels;
     let Some(ui) = ui else {
         return;
     };
@@ -2392,22 +2487,20 @@ const SEARCH_MIN_CHARS: usize = 2;
 
 /// Drive the region-name search: debounce the field's text into a
 /// `MapNameRequest`, and rebuild the result rows when the matches change.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the search pass reads the field, clock and model, sends the command, and rebuilds \
-              the result rows — one cohesive pass"
-)]
 fn drive_world_map_search(
     mut commands: Commands,
     ui: Option<Res<WorldMapUi>>,
     mut state: ResMut<WorldMapState>,
     model: Res<WorldMapModel>,
     time: Res<Time>,
-    fields: Query<&EditableText>,
-    panels: Query<&UiPanelShown>,
-    rows: Query<Entity, With<WorldMapResultRow>>,
+    search: WorldMapSearchWidgets,
     mut sl_commands: MessageWriter<SlCommand>,
 ) {
+    let WorldMapSearchWidgets {
+        fields,
+        panels,
+        rows,
+    } = search;
     let Some(ui) = ui else {
         return;
     };
