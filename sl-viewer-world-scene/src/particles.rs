@@ -453,6 +453,17 @@ struct Emitter {
     rng: Rng,
 }
 
+/// Where one emit step's particles go: this cloud's buffer, the running
+/// world-wide count, and the shared cap that count is held under.
+struct EmitInto<'a> {
+    /// This cloud's particle buffer, appended to.
+    particles: &'a mut Vec<Particle>,
+    /// The running world-wide particle count.
+    total: &'a mut usize,
+    /// The shared cap that count is held under.
+    cap: usize,
+}
+
 impl Emitter {
     /// A fresh emitter seeded from the source entity's bits.
     const fn new(seed: u64) -> Self {
@@ -471,20 +482,19 @@ impl Emitter {
     ///
     /// `src` is the source's world position and `q_sl` its Second Life-space world
     /// rotation (both from its object entity's `GlobalTransform`).
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "one burst-loop step needs the source pose, output buffer, and the shared cap"
-    )]
     fn emit(
         &mut self,
         system: &ParticleSystem,
         dt: f32,
         src: Vec3,
         q_sl: Quat,
-        particles: &mut Vec<Particle>,
-        total: &mut usize,
-        cap: usize,
+        into: EmitInto<'_>,
     ) {
+        let EmitInto {
+            particles,
+            total,
+            cap,
+        } = into;
         if self.dead {
             return;
         }
@@ -937,6 +947,40 @@ fn cloud_centroid(particles: &[Particle], default: Vec3) -> Vec3 {
     v_scale(sum, inv)
 }
 
+/// The stores a particle cloud is painted from, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the shared quad mesh, the
+/// decoded textures a source's diffuse comes from, the image store it lands in,
+/// the texture manager the fetch goes through, and the default image a source
+/// with no texture falls back to.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct ParticleStores<'w> {
+    /// The shared instanced quad every cloud draws.
+    quad: Res<'w, ParticleQuad>,
+    /// The decoded textures a source's diffuse is resolved in.
+    store: Res<'w, DecodedTextures>,
+    /// The image store those decode into.
+    images: ResMut<'w, Assets<Image>>,
+    /// The texture manager the fetch goes through.
+    manager: ResMut<'w, TextureManager>,
+    /// The fallback image for a source with no texture.
+    default_image: Res<'w, DefaultParticleImage>,
+}
+
+/// What paces and gates the particle drive, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the live particle cap, the
+/// HUD-particle override, and the throttle behind the live-count diagnostic.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub(crate) struct ParticleTuning<'w, 's> {
+    /// The live particle cap (`RenderMaxPartCount`); absent in the gallery app,
+    /// which falls back to the built-in default.
+    settings: Option<Res<'w, ViewerSettings>>,
+    /// `SL_VIEWER_DISABLE_HUD_PARTICLES` (P35.4): the reference's
+    /// `RenderHUDParticles` flag, mirrored. Defaulted on (HUD particles emit).
+    overrides: Res<'w, RenderOverrides>,
+    /// A throttle so the live-count diagnostic logs periodically, not every frame.
+    log_timer: Local<'s, f32>,
+}
+
 /// Drive the particle simulation and render (P30.2): for every live particle
 /// source, advance its emitter and particles this frame and rebuild its
 /// camera-facing billboard mesh.
@@ -949,10 +993,8 @@ fn cloud_centroid(particles: &[Particle], default: Vec3) -> Vec3 {
 /// reaped by [`retire_orphaned_clouds`]. The whole simulation is bounded by
 /// `MAX_PARTICLES`; particles beyond the cap are simply not emitted.
 #[expect(
-    clippy::too_many_arguments,
     clippy::type_complexity,
-    reason = "a Bevy system's arguments are its resource/query dependencies; a query's \
-              fetched components are inherently a tuple"
+    reason = "a Bevy query's fetched components are inherently a tuple"
 )]
 pub(crate) fn drive_particles(
     time: Res<Time>,
@@ -968,20 +1010,21 @@ pub(crate) fn drive_particles(
     // parameters are rewritten in place rather than re-inserted (and reallocated)
     // every frame. Disjoint from `sources`: a render entity is never a source.
     mut renders: Query<(&mut ParticleInstances, &mut ParticleDrawParams)>,
-    quad: Res<ParticleQuad>,
-    store: Res<DecodedTextures>,
-    mut images: ResMut<Assets<Image>>,
-    mut manager: ResMut<TextureManager>,
-    default_image: Res<DefaultParticleImage>,
-    // The live particle cap (`RenderMaxPartCount`); optional so the gallery app
-    // (no store) falls back to the built-in default.
-    settings: Option<Res<ViewerSettings>>,
-    // A throttle so the live-count diagnostic logs periodically, not every frame.
-    mut log_timer: Local<f32>,
-    // `SL_VIEWER_DISABLE_HUD_PARTICLES` (P35.4): the reference's `RenderHUDParticles`
-    // flag, mirrored. Defaulted on (HUD particles emit).
-    overrides: Res<RenderOverrides>,
+    stores: ParticleStores,
+    tuning: ParticleTuning,
 ) {
+    let ParticleStores {
+        quad,
+        store,
+        mut images,
+        mut manager,
+        default_image,
+    } = stores;
+    let ParticleTuning {
+        settings,
+        overrides,
+        mut log_timer,
+    } = tuning;
     let hud_disabled = overrides.hud_particles_disabled;
     // One clamped step drives both the emitter and the integration, mirroring the
     // reference's single `llmin(..., 0.1f)` — see [`MAX_SIM_DT`].
@@ -1074,9 +1117,11 @@ pub(crate) fn drive_particles(
             dt,
             src,
             q_sl,
-            &mut cloud.particles,
-            &mut total,
-            max_particles,
+            EmitInto {
+                particles: &mut cloud.particles,
+                total: &mut total,
+                cap: max_particles,
+            },
         );
 
         // Resolve the source's diffuse texture through the shared pipeline (or keep
@@ -1440,8 +1485,8 @@ mod tests {
     // -----------------------------------------------------------------------
 
     use super::{
-        Emitter, Particle, Rng, build_cloud_instances, cloud_centroid, is_unlit, part_flags,
-        particle_blend,
+        EmitInto, Emitter, Particle, Rng, build_cloud_instances, cloud_centroid, is_unlit,
+        part_flags, particle_blend,
     };
     use bevy::math::{Quat, Vec3};
     use sl_viewer_kit::particle_render::ParticleBlend;
@@ -1485,9 +1530,11 @@ mod tests {
             0.01,
             Vec3::ZERO,
             Quat::IDENTITY,
-            &mut particles,
-            &mut total,
-            4096,
+            EmitInto {
+                particles: &mut particles,
+                total: &mut total,
+                cap: 4096,
+            },
         );
         assert_eq!(particles.len(), 4);
         assert_eq!(total, 4);
@@ -1497,9 +1544,11 @@ mod tests {
             0.3,
             Vec3::ZERO,
             Quat::IDENTITY,
-            &mut particles,
-            &mut total,
-            4096,
+            EmitInto {
+                particles: &mut particles,
+                total: &mut total,
+                cap: 4096,
+            },
         );
         assert_eq!(particles.len(), 16);
     }
@@ -1517,9 +1566,11 @@ mod tests {
             0.01,
             Vec3::ZERO,
             Quat::IDENTITY,
-            &mut particles,
-            &mut total,
-            4096,
+            EmitInto {
+                particles: &mut particles,
+                total: &mut total,
+                cap: 4096,
+            },
         );
         assert_eq!(total, 4096);
         assert_eq!(particles.len(), 6);
@@ -1538,9 +1589,11 @@ mod tests {
             0.1,
             Vec3::ZERO,
             Quat::IDENTITY,
-            &mut particles,
-            &mut total,
-            4096,
+            EmitInto {
+                particles: &mut particles,
+                total: &mut total,
+                cap: 4096,
+            },
         );
         let after_first = particles.len();
         assert!(after_first > 0);
@@ -1550,18 +1603,22 @@ mod tests {
             1.0,
             Vec3::ZERO,
             Quat::IDENTITY,
-            &mut particles,
-            &mut total,
-            4096,
+            EmitInto {
+                particles: &mut particles,
+                total: &mut total,
+                cap: 4096,
+            },
         );
         emitter.emit(
             &system,
             1.0,
             Vec3::ZERO,
             Quat::IDENTITY,
-            &mut particles,
-            &mut total,
-            4096,
+            EmitInto {
+                particles: &mut particles,
+                total: &mut total,
+                cap: 4096,
+            },
         );
         assert_eq!(particles.len(), after_first);
     }

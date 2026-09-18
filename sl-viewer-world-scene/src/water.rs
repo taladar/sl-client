@@ -287,28 +287,41 @@ pub(crate) fn update_water(mut events: MessageReader<SlEvent>, mut state: ResMut
     }
 }
 
+/// The stores the water surface is driven through, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the per-region water state,
+/// the published sea level, the material store the surface is drawn with, and
+/// the texture manager its normal maps come from.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct WaterStores<'w> {
+    /// The per-region water state.
+    state: ResMut<'w, WaterState>,
+    /// The published sea level other systems read.
+    level: ResMut<'w, WaterLevel>,
+    /// The material store the surface is drawn with.
+    materials: ResMut<'w, Assets<WaterMaterial>>,
+    /// The texture manager the normal maps are fetched through.
+    textures: ResMut<'w, TextureManager>,
+}
+
 /// Centre the ocean on the camera at the agent-region water height, reconcile a
 /// per-region plane for every loaded region whose height differs from the agent
 /// region's, fold the blended EEP water settings into the shared material, and
 /// (re)request the wave normal map boosted.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected ECS resources and queries; \
-              placing the ocean and per-region planes needs the camera, identity, \
-              environment, meshes, and the water material together"
-)]
 pub(crate) fn drive_water(
     identity: Res<SlIdentity>,
     fog_settings: Res<WaterFogSettings>,
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
     environment: Res<EnvironmentState>,
-    mut state: ResMut<WaterState>,
-    mut level: ResMut<WaterLevel>,
-    mut materials: ResMut<Assets<WaterMaterial>>,
-    mut textures: ResMut<TextureManager>,
+    stores: WaterStores,
     mut cells: Query<(&WaterCell, &mut Transform)>,
     mut commands: Commands,
 ) {
+    let WaterStores {
+        mut state,
+        mut level,
+        mut materials,
+        mut textures,
+    } = stores;
     let Ok(camera) = camera.single() else {
         return;
     };

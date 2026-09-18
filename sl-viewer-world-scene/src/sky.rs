@@ -1075,6 +1075,41 @@ pub fn sun_shadows_enabled() -> bool {
     })
 }
 
+/// The stores the sky is painted through, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the sky material, the
+/// texture manager its cloud maps come from, and the image store those decode
+/// into.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct SkyStores<'w> {
+    /// The sky material the shader uniforms are written into.
+    materials: ResMut<'w, Assets<SkyMaterial>>,
+    /// The texture manager the cloud maps are fetched through.
+    textures: ResMut<'w, TextureManager>,
+    /// The image store those maps decode into.
+    images: ResMut<'w, Assets<Image>>,
+}
+
+/// The sun / moon discs' stores, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct DiscStores<'w> {
+    /// The disc material.
+    materials: ResMut<'w, Assets<SunDiscMaterial>>,
+    /// The texture manager the disc textures are fetched through.
+    textures: ResMut<'w, TextureManager>,
+}
+
+/// What the disc diagnostic last said, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam), so it logs on a change
+/// rather than every frame.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub(crate) struct DiscLog<'s> {
+    /// The HDR scale last logged.
+    last_logged_hdr: Local<'s, Option<f32>>,
+    /// The sun's height last logged.
+    last_logged_sun_y: Local<'s, Option<f32>>,
+}
+
 /// Fold the current environment + camera altitude into the sky material, the
 /// directional light, and the ambient light, and (re)request the sky's rainbow /
 /// halo overlay textures boosted.
@@ -1100,18 +1135,11 @@ pub fn sun_shadows_enabled() -> bool {
     clippy::type_complexity,
     reason = "one query over both directional lights (shadow sun + shadow-free mirror)"
 )]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the sky \
-              material, both suns, the ambient light, the exposure inputs, and the \
-              shared surface-lighting texture"
-)]
 pub(crate) fn drive_sky(
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
     environment: Res<EnvironmentState>,
     mut state: ResMut<SkyState>,
-    mut materials: ResMut<Assets<SkyMaterial>>,
-    mut textures: ResMut<TextureManager>,
+    stores: SkyStores,
     // Both the shadow-casting [`SceneSun`] and the shadow-free
     // [`SceneSunMirror`]; both take the texel-snapped direction, so both settle
     // between snap steps (the mirror only lights reflection-probe captures,
@@ -1122,8 +1150,12 @@ pub(crate) fn drive_sky(
     >,
     mut ambient: ResMut<GlobalAmbientLight>,
     mut exposure_range: ResMut<crate::exposure::ExposureRange>,
-    mut images: ResMut<Assets<Image>>,
 ) {
+    let SkyStores {
+        mut materials,
+        mut textures,
+        mut images,
+    } = stores;
     let altitude = camera.single().map_or(0.0, |camera| camera.translation().y);
     let position = day_position(&environment);
     let Some(sky) = environment.sky_at(altitude, position) else {
@@ -1346,22 +1378,23 @@ pub(crate) fn setup_sun_moon_discs(
     clippy::type_complexity,
     reason = "two Bevy queries whose disjointness filters keep the sun / moon discs distinct"
 )]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries, plus two `Local` \
-              accumulators for the env-gated on-change sky/sun diagnostic"
-)]
 pub(crate) fn drive_sun_moon_discs(
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
     environment: Res<EnvironmentState>,
     mut state: ResMut<DiscState>,
-    mut materials: ResMut<Assets<SunDiscMaterial>>,
-    mut textures: ResMut<TextureManager>,
+    stores: DiscStores,
     mut sun: Query<(&mut Transform, &mut Visibility), (With<SunDisc>, Without<MoonDisc>)>,
     mut moon: Query<(&mut Transform, &mut Visibility), (With<MoonDisc>, Without<SunDisc>)>,
-    mut last_logged_hdr: Local<Option<f32>>,
-    mut last_logged_sun_y: Local<Option<f32>>,
+    log: DiscLog,
 ) {
+    let DiscStores {
+        mut materials,
+        mut textures,
+    } = stores;
+    let DiscLog {
+        mut last_logged_hdr,
+        mut last_logged_sun_y,
+    } = log;
     let Ok(camera) = camera.single() else {
         return;
     };

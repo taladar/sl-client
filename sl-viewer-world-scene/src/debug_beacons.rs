@@ -403,27 +403,36 @@ pub(crate) struct DebugBeaconState {
     markers: Vec<MarkerEntities>,
 }
 
+/// The stores a debug beacon is built and placed through, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the shared mesh / material
+/// handles, the material store they live in, and the placement state.
+#[derive(bevy::ecs::system::SystemParam)]
+struct DebugBeaconStores<'w> {
+    /// The shared mesh / material handles, built on first use.
+    assets: ResMut<'w, DebugBeaconAssets>,
+    /// The material store those handles live in.
+    materials: ResMut<'w, Assets<DebugBeaconMaterial>>,
+    /// Which beacons are placed, and where.
+    state: ResMut<'w, DebugBeaconState>,
+}
+
 /// Drive the in-world markers from [`DebugBeacons`]: resolve each beacon's live
 /// anchor, place it, and point the pooled marker entities at the results, hiding
 /// the surplus.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the asked-for \
-              beacons, the object table and identity that resolve an anchor, the shared assets \
-              and material store, this feature's pool, the transform query and the command \
-              buffer to spawn a marker"
-)]
 fn update_debug_beacons(
     beacons: Res<DebugBeacons>,
     objects: Res<ObjectState>,
     identity: Res<SlIdentity>,
     globals: Query<&GlobalTransform>,
-    mut assets: ResMut<DebugBeaconAssets>,
-    mut materials: ResMut<Assets<DebugBeaconMaterial>>,
-    mut state: ResMut<DebugBeaconState>,
+    stores: DebugBeaconStores,
     mut placed_query: Query<(&mut Transform, &mut Visibility)>,
     mut commands: Commands,
 ) {
+    let DebugBeaconStores {
+        mut assets,
+        mut materials,
+        mut state,
+    } = stores;
     // Resolve every distinct anchor in one pass over the object table, rather than
     // a scan per beacon (`ObjectState::scoped_by_full_keys` exists for exactly
     // this).

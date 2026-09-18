@@ -208,6 +208,40 @@ impl PendingPatchRebuilds {
     }
 }
 
+/// The stores a terrain rebuild writes through, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the texture manager and
+/// decoded store the ground textures come from, and the mesh / material / image
+/// stores the patches are built into.
+#[expect(
+    missing_debug_implementations,
+    reason = "the asset stores are Bevy `Assets<T>` collections, none of which implements \
+              Debug; a hand-written impl could only print the field names"
+)]
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct TerrainStores<'w> {
+    /// The texture manager the four ground textures are fetched through.
+    manager: ResMut<'w, TextureManager>,
+    /// The decoded textures those land in.
+    store: Res<'w, DecodedTextures>,
+    /// The mesh store the patches are uploaded into.
+    meshes: ResMut<'w, Assets<Mesh>>,
+    /// The material store they are drawn with.
+    materials: ResMut<'w, Assets<TerrainMaterial>>,
+    /// The image store the composed ground maps live in.
+    images: ResMut<'w, Assets<Image>>,
+}
+
+/// What paces a terrain rebuild, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the patches still to rebuild
+/// and the shared mesh-upload budget they are spent from.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub struct TerrainWork<'w> {
+    /// The patches whose meshes still need rebuilding.
+    rebuilds: ResMut<'w, PendingPatchRebuilds>,
+    /// The shared mesh-upload budget those rebuilds are spent from.
+    mesh_budget: ResMut<'w, MeshUploadBudget>,
+}
+
 /// Fold terrain events into the scene: build (or rebuild) each land patch's
 /// heightfield mesh, learn each region's compositing parameters and request its
 /// detail textures, and swap each decoded texture into the right material(s).
@@ -219,26 +253,26 @@ impl PendingPatchRebuilds {
 /// [`drain_patch_rebuilds`], so a region streaming in no longer uploads an unbounded
 /// number of patch meshes in one frame (the serial `extract_render_asset<RenderMesh>`
 /// spike).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected ECS resources and event \
-              readers; folding terrain now also reads the texture store and its \
-              decode messages"
-)]
 pub fn update_terrain(
     mut events: MessageReader<SlEvent>,
     mut decoded: MessageReader<TextureDecoded>,
     mut state: ResMut<TerrainState>,
     mut textures: ResMut<TerrainTextures>,
-    mut rebuilds: ResMut<PendingPatchRebuilds>,
-    mut mesh_budget: ResMut<MeshUploadBudget>,
-    mut manager: ResMut<TextureManager>,
-    store: Res<DecodedTextures>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<TerrainMaterial>>,
-    mut images: ResMut<Assets<Image>>,
+    work: TerrainWork,
+    stores: TerrainStores,
     mut commands: Commands,
 ) {
+    let TerrainWork {
+        mut rebuilds,
+        mut mesh_budget,
+    } = work;
+    let TerrainStores {
+        mut manager,
+        store,
+        mut meshes,
+        mut materials,
+        mut images,
+    } = stores;
     for event in events.read() {
         match &event.0 {
             SlSessionEvent::TerrainPatch(patch) if patch.layer.is_land() => {

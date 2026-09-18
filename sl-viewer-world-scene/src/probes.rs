@@ -996,6 +996,19 @@ fn reaim_sample_frame(commands: &mut Commands, holder: Entity, world_rotation: Q
         });
 }
 
+/// The local-probe bookkeeping, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the spawned rigs, the
+/// capture schedule that cycles them, and the cube copies their faces land in.
+#[derive(bevy::ecs::system::SystemParam)]
+struct ProbeBooks<'w> {
+    /// The probe rigs spawned for the in-world reflection probes.
+    rigs: ResMut<'w, ProbeRigs>,
+    /// The capture schedule that cycles them.
+    schedule: ResMut<'w, CaptureSchedule>,
+    /// The cube copies each rig's faces land in.
+    copies: ResMut<'w, ProbeCubeCopies>,
+}
+
 /// Hand the nearest probe prims the pool of capture rigs (P33.2).
 ///
 /// Ranks every `ObjectReflectionProbe` by distance ([`rank_local_probes`]), frees
@@ -1008,21 +1021,19 @@ fn reaim_sample_frame(commands: &mut Commands, holder: Entity, world_rotation: Q
 ///
 /// Finally it republishes the render-world blit work-list ([`ProbeCubeCopies`]) —
 /// the default probe plus exactly the bound local probes.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters; the mirror-exclusion setting is the one \
-              added over the P33 original and does not group with the rest"
-)]
 fn drive_local_probes(
     mut commands: Commands,
-    mut rigs: ResMut<ProbeRigs>,
-    mut schedule: ResMut<CaptureSchedule>,
-    mut copies: ResMut<ProbeCubeCopies>,
+    books: ProbeBooks,
     mirrors: Res<MirrorSettings>,
     camera: Query<(&GlobalTransform, &Exposure), With<ViewerCamera>>,
     probes: Query<(Entity, &ObjectReflectionProbe, &GlobalTransform)>,
     mut last_bound: Local<usize>,
 ) {
+    let ProbeBooks {
+        mut rigs,
+        mut schedule,
+        mut copies,
+    } = books;
     let Ok((view, exposure)) = camera.single() else {
         return;
     };

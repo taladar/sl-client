@@ -469,31 +469,45 @@ fn water_haze_system(
         view_target,
         fog_index,
         view_depth,
-        &pipeline_cache,
-        &pipeline_res,
-        &uniforms,
+        HazePass {
+            pipeline_cache: &pipeline_cache,
+            pipeline_res: &pipeline_res,
+            uniforms: &uniforms,
+        },
         &mut ctx,
     );
 }
 
+/// The render-world handles the haze pass resolves itself through, borrowed as
+/// one struct: the pipeline cache, the pass's own pipeline resource, and the fog
+/// uniforms it binds.
+#[derive(Clone, Copy)]
+struct HazePass<'a> {
+    /// The pipeline cache the render pipeline is resolved through.
+    pipeline_cache: &'a PipelineCache,
+    /// The pass's own pipeline resource (layout, shader).
+    pipeline_res: &'a UnderwaterFogPipeline,
+    /// The fog uniforms the pass binds.
+    uniforms: &'a ComponentUniforms<UnderwaterFog>,
+}
+
 /// Draw the haze pass: bind the fog uniform and the main-pass depth, and blend a
 /// fullscreen triangle over the scene.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the caller is a render system whose params this simply forwards"
-)]
 fn draw_haze(
     pipeline_id: CachedRenderPipelineId,
     view_target: &ViewTarget,
     fog_index: &DynamicUniformIndex<UnderwaterFog>,
     view_depth: &ViewDepthTexture,
-    pipeline_cache: &PipelineCache,
-    pipeline_res: &UnderwaterFogPipeline,
-    uniforms: &ComponentUniforms<UnderwaterFog>,
+    pass: HazePass<'_>,
     ctx: &mut RenderContext,
 ) {
     /// The debug label the pass, its bind group and its pipeline share.
     const LABEL: &str = "water_haze";
+    let HazePass {
+        pipeline_cache,
+        pipeline_res,
+        uniforms,
+    } = pass;
     let Some(pipeline) = pipeline_cache.get_render_pipeline(pipeline_id) else {
         return;
     };

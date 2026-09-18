@@ -501,31 +501,92 @@ fn billboard_yaw(beam: Vec3, camera: Vec3) -> f32 {
 // The beam system.
 // ---------------------------------------------------------------------------
 
+/// What the beacon beam is aimed at, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the tracking target, our own
+/// agent and the avatar mirror the target is resolved in, the friend roster a
+/// friend beacon keys off, and the terrain the region origin comes from.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct BeaconTarget<'w> {
+    /// What the map is tracking, which is what the beacon marks.
+    tracking: Res<'w, MapTracking>,
+    /// Our own agent, which the beam is drawn from.
+    identity: Res<'w, SlIdentity>,
+    /// The avatar mirror the tracked resident is resolved in.
+    avatars: Res<'w, AvatarState>,
+    /// The friend roster, for a friend beacon (absent before login).
+    friends: Option<Res<'w, FriendsModel>>,
+    /// The terrain, for the scene's region origin.
+    terrain: Res<'w, TerrainState>,
+}
+
+/// The stores the beam is built and placed through, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the shared mesh / material
+/// handles, the material store they live in, and the placement state.
+#[derive(bevy::ecs::system::SystemParam)]
+struct BeaconStores<'w> {
+    /// The shared mesh / material handles, built on first use.
+    assets: ResMut<'w, BeaconAssets>,
+    /// The material store those handles live in.
+    materials: ResMut<'w, Assets<BeaconBeamMaterial>>,
+    /// Whether a beam is placed, and where.
+    state: ResMut<'w, BeaconState>,
+}
+
+/// The overlay's own nodes, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the label and arrow boxes,
+/// the label text, the arrow image, the two visibilities, and the arrow's
+/// rotation.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct BeaconWidgets<'w, 's> {
+    /// The label and arrow boxes, positioned on screen.
+    nodes: Query<'w, 's, &'static mut Node>,
+    /// The label text.
+    texts: Query<'w, 's, &'static mut Text>,
+    /// The arrow's image, tinted per beacon kind.
+    arrow_images: Query<'w, 's, &'static mut ImageNode>,
+    /// The label's and arrow's visibility.
+    visibilities: Query<'w, 's, &'static mut Visibility>,
+    /// The arrow's rotation.
+    ui_transforms: Query<'w, 's, &'static mut UiTransform>,
+}
+
+/// What the overlay is drawn from, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the beam's placement, the
+/// overlay's own spawned nodes, and the shared handles they use.
+#[derive(bevy::ecs::system::SystemParam)]
+struct BeaconOverlayState<'w> {
+    /// Whether a beam is placed, and where.
+    state: Res<'w, BeaconState>,
+    /// The overlay's spawned label / arrow entities.
+    overlay: ResMut<'w, BeaconOverlay>,
+    /// The shared handles the overlay draws with.
+    assets: Res<'w, BeaconAssets>,
+}
+
 /// Resolve the tracked target and drive the world-space beam: (re)spawn the beam
 /// root and its two shaft children, place them at the target, billboard them toward
 /// the camera, tint them by what is tracked, and hide them when nothing is tracked.
 /// Also records the resolved beacon in [`BeaconState`] for the overlay system.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the tracking \
-              source, the identity / avatar / friend / terrain resolvers, the shared assets and \
-              material store, this feature's state, the camera and transform queries, and the \
-              command buffer to spawn the beam"
-)]
 fn update_beacon_beam(
-    tracking: Res<MapTracking>,
-    identity: Res<SlIdentity>,
-    avatars: Res<AvatarState>,
-    friends: Option<Res<FriendsModel>>,
-    terrain: Res<TerrainState>,
-    mut assets: ResMut<BeaconAssets>,
-    mut materials: ResMut<Assets<BeaconBeamMaterial>>,
-    mut state: ResMut<BeaconState>,
+    target: BeaconTarget,
+    stores: BeaconStores,
     cameras: Query<&GlobalTransform, With<ViewerCamera>>,
     globals: Query<&GlobalTransform>,
     mut transforms: Query<(&mut Transform, &mut Visibility)>,
     mut commands: Commands,
 ) {
+    let BeaconTarget {
+        tracking,
+        identity,
+        avatars,
+        friends,
+        terrain,
+    } = target;
+    let BeaconStores {
+        mut assets,
+        mut materials,
+        mut state,
+    } = stores;
     let origin = terrain.origin().or(identity.region_handle);
     let resolved = resolve_beacon(
         &tracking,
@@ -731,24 +792,11 @@ struct BeaconArrowNode;
 /// [`update_beacon_beam`]: project the target to the viewport and either show the
 /// label pinned to it (on-screen) or the direction chevron on the viewport edge
 /// pointing toward it (off-screen). Hides both when nothing is tracked.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the beacon state, \
-              the lazily-spawned overlay bookkeeping, the UI root to parent under, the camera to \
-              project with, and the node / text / colour / visibility / transform queries that \
-              place the label and arrow"
-)]
 fn update_beacon_overlay(
-    state: Res<BeaconState>,
-    mut overlay: ResMut<BeaconOverlay>,
-    assets: Res<BeaconAssets>,
+    beacon: BeaconOverlayState,
     root: Option<Res<UiRoot>>,
     cameras: Query<(&Camera, &GlobalTransform), With<ViewerCamera>>,
-    mut nodes: Query<&mut Node>,
-    mut texts: Query<&mut Text>,
-    mut arrow_images: Query<&mut ImageNode>,
-    mut visibilities: Query<&mut Visibility>,
-    mut ui_transforms: Query<&mut UiTransform>,
+    mut widgets: BeaconWidgets,
     mut commands: Commands,
     mut last_log: Local<i8>,
 ) {
@@ -760,6 +808,11 @@ fn update_beacon_overlay(
         }
         *last = now;
     }
+    let BeaconOverlayState {
+        state,
+        mut overlay,
+        assets,
+    } = beacon;
 
     // Ensure the overlay nodes exist (spawned once under the UI root).
     let Some(root) = root.map(|root| root.0) else {
@@ -769,17 +822,17 @@ fn update_beacon_overlay(
 
     let Some(beacon) = state.resolved.as_ref() else {
         log_state(&mut last_log, 0, "hidden (nothing tracked)");
-        hide_overlay(&overlay, &mut visibilities);
+        hide_overlay(&overlay, &mut widgets.visibilities);
         return;
     };
     let Ok((camera, camera_transform)) = cameras.single() else {
         log_state(&mut last_log, 0, "hidden (no single viewer camera)");
-        hide_overlay(&overlay, &mut visibilities);
+        hide_overlay(&overlay, &mut widgets.visibilities);
         return;
     };
     let Some(viewport) = camera.logical_viewport_size() else {
         log_state(&mut last_log, 0, "hidden (no viewport size)");
-        hide_overlay(&overlay, &mut visibilities);
+        hide_overlay(&overlay, &mut widgets.visibilities);
         return;
     };
 
@@ -827,9 +880,9 @@ fn update_beacon_overlay(
                 beacon,
                 screen,
                 viewport,
-                &mut nodes,
-                &mut texts,
-                &mut visibilities,
+                &mut widgets.nodes,
+                &mut widgets.texts,
+                &mut widgets.visibilities,
             );
         }
         None => {
@@ -838,7 +891,7 @@ fn update_beacon_overlay(
                 2,
                 &format!("arrow only (off-screen), in_front={in_front} view_pos={view_pos:?}"),
             );
-            set_visibility_pair(overlay.label, Visibility::Hidden, &mut visibilities);
+            set_visibility_pair(overlay.label, Visibility::Hidden, &mut widgets.visibilities);
         }
     }
 
@@ -846,16 +899,7 @@ fn update_beacon_overlay(
     // the screen centre, and points back out at the beacon (the reference's
     // `LLTracker::drawMarker`). So it points up when the camera is below the beacon
     // altitude, down when above, sideways when level.
-    show_arrow(
-        &overlay,
-        beacon.kind,
-        seam_screen,
-        viewport,
-        &mut nodes,
-        &mut arrow_images,
-        &mut ui_transforms,
-        &mut visibilities,
-    );
+    show_arrow(&overlay, beacon.kind, seam_screen, viewport, &mut widgets);
 }
 
 /// Spawn the overlay label + arrow nodes once, under the UI root.
@@ -1000,22 +1044,20 @@ fn show_label(
 
 /// Show the direction arrow near the beacon's projected `seam_screen` point,
 /// pointing at it (the reference's `LLTracker::drawMarker`).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the arrow placement needs the overlay handle, the beacon kind (colour), the \
-              projected seam and viewport to place it, and the node / image-tint / transform / \
-              visibility queries that position, tint and rotate it"
-)]
 fn show_arrow(
     overlay: &BeaconOverlay,
     kind: BeaconKind,
     seam_screen: Vec2,
     viewport: Vec2,
-    nodes: &mut Query<&mut Node>,
-    arrow_images: &mut Query<&mut ImageNode>,
-    ui_transforms: &mut Query<&mut UiTransform>,
-    visibilities: &mut Query<&mut Visibility>,
+    widgets: &mut BeaconWidgets,
 ) {
+    let BeaconWidgets {
+        nodes,
+        arrow_images,
+        ui_transforms,
+        visibilities,
+        ..
+    } = widgets;
     let Some(arrow) = overlay.arrow else {
         return;
     };

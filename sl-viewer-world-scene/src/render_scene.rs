@@ -1127,6 +1127,22 @@ const fn base_shape() -> PrimShapeFloat {
     }
 }
 
+/// One sample prim to place: which part of the scene it is, its shape and
+/// detail, its colour and its placement.
+#[derive(Clone, Copy)]
+struct PrimSpec<'a> {
+    /// Which part of the scene this prim is, for the debug name.
+    part: &'a str,
+    /// The prim's shape parameters.
+    shape: &'a PrimShapeFloat,
+    /// The detail level it is tessellated at.
+    lod: PrimLod,
+    /// Its colour.
+    colour: Color,
+    /// Where it sits, relative to the scene root.
+    transform: Transform,
+}
+
 /// Tessellate a prim shape and spawn it as an **object entity with one child
 /// per face**, named `<part>` and `<part>/face-<n>`.
 ///
@@ -1142,22 +1158,19 @@ const fn base_shape() -> PrimShapeFloat {
 /// is a flat quad — open by construction — so "does this enclose a volume" is
 /// meaningless per face and meaningful per prim. The object entity is the group
 /// key `sl_client_bevy_viewer::render_test` unions the faces under.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the shape, its detail, its colour, its placement, its parent and the three \
-              asset collections are each genuinely independent inputs; bundling them would \
-              only move the list"
-)]
 fn spawn_prim(
-    part: &str,
-    shape: &PrimShapeFloat,
-    lod: PrimLod,
-    colour: Color,
-    transform: Transform,
+    prim: PrimSpec<'_>,
     parent: Entity,
     commands: &mut Commands,
     assets: &mut SceneAssets<'_>,
 ) -> Entity {
+    let PrimSpec {
+        part,
+        shape,
+        lod,
+        colour,
+        transform,
+    } = prim;
     let object = commands
         .spawn((
             transform,
@@ -1196,11 +1209,13 @@ fn spawn_prim(
 /// [`SCENES`] `prim-box`: the default box.
 fn prim_box(cx: SceneCx, root: Entity, commands: &mut Commands, assets: &mut SceneAssets<'_>) {
     let object = spawn_prim(
-        "prim-box",
-        &base_shape(),
-        cx.lod,
-        Color::srgb(0.8, 0.75, 0.7),
-        Transform::IDENTITY,
+        PrimSpec {
+            part: "prim-box",
+            shape: &base_shape(),
+            lod: cx.lod,
+            colour: Color::srgb(0.8, 0.75, 0.7),
+            transform: Transform::IDENTITY,
+        },
         root,
         commands,
         assets,
@@ -1332,11 +1347,13 @@ fn prim_hollow_cut_cylinder(
         ..base_shape()
     };
     spawn_prim(
-        "prim-hollow-cut-cylinder",
-        &shape,
-        cx.lod,
-        Color::srgb(0.7, 0.8, 0.75),
-        Transform::IDENTITY,
+        PrimSpec {
+            part: "prim-hollow-cut-cylinder",
+            shape: &shape,
+            lod: cx.lod,
+            colour: Color::srgb(0.7, 0.8, 0.75),
+            transform: Transform::IDENTITY,
+        },
         root,
         commands,
         assets,
@@ -1361,11 +1378,13 @@ fn prim_twisted_torus(
         ..base_shape()
     };
     spawn_prim(
-        "prim-twisted-torus",
-        &shape,
-        cx.lod,
-        Color::srgb(0.75, 0.7, 0.8),
-        Transform::IDENTITY,
+        PrimSpec {
+            part: "prim-twisted-torus",
+            shape: &shape,
+            lod: cx.lod,
+            colour: Color::srgb(0.75, 0.7, 0.8),
+            transform: Transform::IDENTITY,
+        },
         root,
         commands,
         assets,
@@ -2101,11 +2120,13 @@ fn projector_light_on_wall(
 ) {
     // The wall: a box flattened along Y, standing at the origin.
     spawn_prim(
-        "projector-light-on-wall/wall",
-        &base_shape(),
-        cx.lod,
-        Color::WHITE,
-        Transform::from_xyz(0.0, 2.0, 0.0).with_scale(Vec3::new(6.0, 0.1, 4.0)),
+        PrimSpec {
+            part: "projector-light-on-wall/wall",
+            shape: &base_shape(),
+            lod: cx.lod,
+            colour: Color::WHITE,
+            transform: Transform::from_xyz(0.0, 2.0, 0.0).with_scale(Vec3::new(6.0, 0.1, 4.0)),
+        },
         root,
         commands,
         assets,
@@ -2136,11 +2157,13 @@ fn point_light_between_prims(
 ) {
     for (side, name) in [(-1.5_f32, "left"), (1.5, "right")] {
         spawn_prim(
-            &format!("point-light-between-prims/{name}"),
-            &base_shape(),
-            cx.lod,
-            Color::WHITE,
-            Transform::from_xyz(side, 0.0, 0.0),
+            PrimSpec {
+                part: &format!("point-light-between-prims/{name}"),
+                shape: &base_shape(),
+                lod: cx.lod,
+                colour: Color::WHITE,
+                transform: Transform::from_xyz(side, 0.0, 0.0),
+            },
             root,
             commands,
             assets,
@@ -2267,11 +2290,13 @@ fn metallic_sphere_among_prims(
         ),
     ] {
         spawn_prim(
-            &format!("metallic-sphere-among-prims/{name}"),
-            &base_shape(),
-            cx.lod,
-            colour,
-            Transform::from_translation(offset),
+            PrimSpec {
+                part: &format!("metallic-sphere-among-prims/{name}"),
+                shape: &base_shape(),
+                lod: cx.lod,
+                colour,
+                transform: Transform::from_translation(offset),
+            },
             root,
             commands,
             assets,
@@ -3251,22 +3276,26 @@ fn spawn_sky_at(
     // clean off a 28 m plane, which is what the first version of this had. Sized to
     // hold the longest shadow the four times of day actually cast.
     spawn_prim(
-        &format!("{label}/ground"),
-        &base_shape(),
-        cx.lod,
-        Color::srgb(0.62, 0.60, 0.55),
-        Transform::from_xyz(0.0, 0.0, -0.15).with_scale(Vec3::new(60.0, 60.0, 0.3)),
+        PrimSpec {
+            part: &format!("{label}/ground"),
+            shape: &base_shape(),
+            lod: cx.lod,
+            colour: Color::srgb(0.62, 0.60, 0.55),
+            transform: Transform::from_xyz(0.0, 0.0, -0.15).with_scale(Vec3::new(60.0, 60.0, 0.3)),
+        },
         root,
         commands,
         assets,
     );
     spawn_prim(
-        &format!("{label}/caster"),
-        &base_shape(),
-        cx.lod,
-        Color::srgb(0.80, 0.78, 0.74),
-        // A 2 m box centred 2 m up: its underside sits a metre clear of the ground.
-        Transform::from_xyz(0.0, 0.0, 2.0).with_scale(Vec3::splat(2.0)),
+        PrimSpec {
+            part: &format!("{label}/caster"),
+            shape: &base_shape(),
+            lod: cx.lod,
+            colour: Color::srgb(0.80, 0.78, 0.74),
+            // A 2 m box centred 2 m up: its underside sits a metre clear of the ground.
+            transform: Transform::from_xyz(0.0, 0.0, 2.0).with_scale(Vec3::splat(2.0)),
+        },
         root,
         commands,
         assets,

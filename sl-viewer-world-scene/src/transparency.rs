@@ -275,6 +275,24 @@ impl PhasePrefixes {
 #[derive(Resource, Default, Debug)]
 pub(crate) struct PreWaterSplit(HashMap<RetainedViewEntity, PhasePrefixes>);
 
+/// What the pre-water split is decided by, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the render overrides, the
+/// sea level the split is taken at, the sky backdrops and world-text overlays
+/// that are pinned either side of it, and the water clip sides.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct SplitSources<'w> {
+    /// The render overrides that can switch the split off.
+    overrides: Res<'w, RenderOverrides>,
+    /// The sea level the split is taken at; absent before the water exists.
+    water_level: Option<Res<'w, WaterLevel>>,
+    /// The sky backdrops, pinned behind everything.
+    backdrops: Res<'w, SkyBackdrops>,
+    /// The world-text overlays, pinned in front.
+    overlays: Res<'w, WorldTextOverlays>,
+    /// The water clip sides each view is on.
+    clips: Res<'w, crate::water_clip::WaterClipSides>,
+}
+
 /// Re-sort each view's [`Transparent3d`] phase by `(bucket, backdrop order,
 /// distance)` so the translucency on the far side of the water surface leads the
 /// phase, the sky backdrops follow it, and the translucency on the eye's own side
@@ -292,23 +310,20 @@ pub(crate) struct PreWaterSplit(HashMap<RetainedViewEntity, PhasePrefixes>);
 /// property of that view's eye: the main camera can be submerged while a reflection
 /// probe's capture camera is not. A view whose `ExtractedView` this cannot resolve
 /// falls back to an eye above the water, the state every view is in most of the time.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected ECS state, and the bucket decision \
-              needs the water level, every marker mirror that overrides it, the views' eyes, \
-              the phases it sorts, and the split it records"
-)]
 fn sort_transparent_by_water(
-    overrides: Res<RenderOverrides>,
-    water_level: Option<Res<WaterLevel>>,
-    backdrops: Res<SkyBackdrops>,
-    overlays: Res<WorldTextOverlays>,
-    clips: Res<crate::water_clip::WaterClipSides>,
+    sources: SplitSources,
     views: Query<&ExtractedView>,
     mut phases: ResMut<ViewSortedRenderPhases<Transparent3d>>,
     mut split: ResMut<PreWaterSplit>,
     mut last_kept_out: Local<Option<(usize, usize)>>,
 ) {
+    let SplitSources {
+        overrides,
+        water_level,
+        backdrops,
+        overlays,
+        clips,
+    } = sources;
     let level = water_level.map_or(DEFAULT_WATER_HEIGHT, |water_level| water_level.0);
     // Each view's eye height, to resolve its side of the surface below.
     let eyes: HashMap<RetainedViewEntity, f32> = views

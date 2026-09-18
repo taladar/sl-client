@@ -20,9 +20,9 @@ Scope: sweep the largest clusters into `SystemParam` bundles, in a codebase
 whose stated convention is no `#[expect]`. Start with `menu.rs`, then
 `sl-viewer-edit`.
 
-## Swept so far (2026-09-18): 338 → 118
+## Swept so far (2026-09-18): 338 → 103
 
-Eight crates are now at **zero** suppressions (`sl-viewer-world-objects` keeps
+Nine crates are now at **zero** suppressions (`sl-viewer-world-objects` keeps
 two, both deliberate — see below):
 
 - **`sl-viewer-ui-widgets` (16)** — `menu.rs`'s thirteen collapse into one
@@ -115,6 +115,13 @@ two, both deliberate — see below):
   `TelehubFacts`; `top_objects.rs` `TopObjectsButtons` / `TopObjectsFacts` /
   `TopObjectsActionOut`; and `teleport_progress.rs`'s six per-part overlay
   queries as one `OverlayParts`.
+- **`sl-viewer-world-scene` (15)** — one or two per renderer, nearly all of them
+  the same shape: the asset stores a pass writes through. `BeaconTarget` /
+  `BeaconStores` / `BeaconWidgets` / `BeaconOverlayState`, `DebugBeaconStores`,
+  `BorderStores`, `ProbeBooks`, `WaterStores`, `SkyStores` / `DiscStores` /
+  `DiscLog`, `TerrainStores` / `TerrainWork`, `SplitSources`,
+  `ParticleStores` / `ParticleTuning`, and the three plain records `HazePass`,
+  `PrimSpec` and `EmitInto`.
 
 This crate also produced the sweep's one **shared** bundle: `FloaterHost` in
 `sl-viewer-ui-widgets::floater`, the injected form of `host_floater`'s
@@ -150,10 +157,10 @@ Patterns worth reusing:
   reference: `= &facts` leaves each binding a `&Res<T>`, and every `&a` at a
   call site then trips `needless_borrow`.
 
-## Still to sweep (118)
+## Still to sweep (103)
 
-By crate, largest first: `sl-viewer-world-scene` 15, `sl-viewer-map` 13,
-`sl-proto` 13, `sl-viewer-environment` 11, `sl-viewer-notices` 10,
+By crate, largest first: `sl-viewer-map` 13, `sl-proto` 13,
+`sl-viewer-environment` 11, `sl-viewer-notices` 10,
 `sl-viewer-ui-context-menus` 8, `sl-client-bevy-viewer` 7, then singles and
 pairs across the rest.
 

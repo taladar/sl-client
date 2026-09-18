@@ -532,6 +532,19 @@ fn despawn_all(state: &mut ParcelBorderState, commands: &mut Commands) {
     }
 }
 
+/// The stores a property-line rebuild writes through, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the mesh and material stores
+/// the borders live in, and the per-region build state.
+#[derive(bevy::ecs::system::SystemParam)]
+struct BorderStores<'w> {
+    /// The mesh store the border strips are uploaded into.
+    meshes: ResMut<'w, Assets<Mesh>>,
+    /// The material store they are drawn with.
+    materials: ResMut<'w, Assets<ParcelBorderMaterial>>,
+    /// Which regions' borders are built, and against what.
+    state: ResMut<'w, ParcelBorderState>,
+}
+
 /// Keep the in-world property-line bands current, **change-driven per region**:
 /// each frame, rebuild only the regions whose stamp (parcel grid + terrain
 /// revision + water height) changed or that are newly present, despawn regions
@@ -540,13 +553,6 @@ fn despawn_all(state: &mut ParcelBorderState, commands: &mut Commands) {
 /// that drew nothing because their overlay grid or their terrain had not arrived:
 /// those are stamped too, so their retry waits for the arrival instead of running
 /// every frame. Tears the bands down when the `ShowPropertyLines` setting is off.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the setting, \
-              the per-region overlay grids, the terrain heightfield, the per-region water \
-              heights, the region entities, the mesh + material asset stores, this feature's \
-              state, and the command buffer to spawn / despawn band entities"
-)]
 fn update_parcel_borders(
     settings: Res<ViewerSettings>,
     overlay: Res<SlParcelOverlay>,
@@ -557,11 +563,14 @@ fn update_parcel_borders(
     // region's handshake arrives, which this system already handles.
     water: Option<Res<WaterState>>,
     regions: Query<&SlRegion>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ParcelBorderMaterial>>,
-    mut state: ResMut<ParcelBorderState>,
+    stores: BorderStores,
     mut commands: Commands,
 ) {
+    let BorderStores {
+        mut meshes,
+        mut materials,
+        mut state,
+    } = stores;
     let show = settings
         .store()
         .get_bool(SETTING_SHOW_PROPERTY_LINES)
