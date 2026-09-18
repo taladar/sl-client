@@ -27,7 +27,7 @@
 //! - **Edit** → the same floater on the **move** manipulator, with the picked
 //!   object selected (the reference's `Object.Edit`).
 //! - **Touch** → [`Command::TouchObject`] on the picked prim, carrying the
-//!   [`SurfaceInfo`] of the right-click's own ray hit (what a script reads back
+//!   [`sl_client_bevy::SurfaceInfo`] of the right-click's own ray hit (what a script reads back
 //!   through `llDetectedTouch*`), enabled only for an object whose linkset
 //!   handles touch ([`TARGET_TOUCHABLE`], the reference's `Object.EnableTouch`
 //!   without its click-action refinements).
@@ -82,7 +82,7 @@
 //!   point addresses.
 //! - **Worn attachments do not open this pie.** The reference gives worn
 //!   objects their own pies (`menu_pie_attachment_*`), and so do we: a pick
-//!   whose [`ObjectPickSummary`] says `attachment` is routed by the shared
+//!   whose [`crate::world_api::ObjectPickSummary`] says `attachment` is routed by the shared
 //!   resolver to [`crate::attachment_menu`] instead.
 //! - **The muted-particle-source pie is deferred.** Its one slice (mute the
 //!   particle owner) needs particle picking, which this renderer does not do
@@ -96,8 +96,8 @@
 //! its depth test arbitrates avatar vs object nearest-wins in the pick view
 //! itself, so an object standing in front of an avatar gets the object pie
 //! and vice versa. An object-face hit is then **surface-refined** here
-//! ([`ObjectPicker::pick_entity`], a single-entity ray test against exactly
-//! the face the ID buffer named), walked up to its [`SceneObject`], and
+//! ([`crate::objects::ObjectPicker::pick_entity`], a single-entity ray test against exactly
+//! the face the ID buffer named), walked up to its [`crate::world_api::SceneObject`], and
 //! resolved through [`ObjectState::pick_summary`] to the picked prim +
 //! linkset root.
 //!
@@ -124,7 +124,7 @@ use crate::world_api::SelfGroundSit;
 use crate::world_api::{EditTool, EditToolState};
 
 /// The `element` the object pie attributes its [`UiAction`]s to.
-pub(crate) const OBJECT_MENU_ELEMENT: &str = "object-menu";
+pub const OBJECT_MENU_ELEMENT: &str = "object-menu";
 
 // ---------------------------------------------------------------------------
 // The condition vocabulary (see `crate::avatar_menu` for the shared names:
@@ -136,19 +136,19 @@ pub(crate) const OBJECT_MENU_ELEMENT: &str = "object-menu";
 /// Holds when the picked object's linkset **handles touch**
 /// ([`FLAGS_HANDLE_TOUCH`]) — enables Touch, the reference's
 /// `Object.EnableTouch` (without its click-action refinements).
-pub(crate) const TARGET_TOUCHABLE: &str = "target-touchable";
+pub const TARGET_TOUCHABLE: &str = "target-touchable";
 
-/// Holds when the agent **owns** the picked object ([`FLAGS_OBJECT_YOU_OWNER`])
+/// Holds when the agent **owns** the picked object (`FLAGS_OBJECT_YOU_OWNER`)
 /// — enables Take, Delete and Return. Deliberately narrower than the
 /// reference's predicates (which also admit gods, group roles, and
 /// objects-on-your-land for return); those refinements come with the features
 /// that need them.
-pub(crate) const TARGET_OWNED: &str = "target-owned";
+pub const TARGET_OWNED: &str = "target-owned";
 
 /// Holds when the agent may **copy** the picked object
-/// ([`FLAGS_OBJECT_COPY`]) — enables Take Copy, the reference's
+/// (`FLAGS_OBJECT_COPY`) — enables Take Copy, the reference's
 /// `Tools.EnableTakeCopy`.
-pub(crate) const TARGET_COPYABLE: &str = "target-copyable";
+pub const TARGET_COPYABLE: &str = "target-copyable";
 
 /// The `FLAGS_OBJECT_COPY` bit of an object's update flags (`object_flags.h`):
 /// the agent may copy this object.
@@ -158,7 +158,7 @@ const FLAGS_OBJECT_COPY: u32 = 1 << 3;
 const FLAGS_OBJECT_YOU_OWNER: u32 = 1 << 5;
 
 /// The `FLAGS_HANDLE_TOUCH` bit: the object's linkset has a touch handler.
-pub(crate) const FLAGS_HANDLE_TOUCH: u32 = 1 << 7;
+pub const FLAGS_HANDLE_TOUCH: u32 = 1 << 7;
 
 // ---------------------------------------------------------------------------
 // The take sub-pie (the reference's "Take Submenu", chained after Buy at the
@@ -689,7 +689,7 @@ static OBJECT_MORE_PIE: PieMenuDef = PieMenuDef {
 /// The object pie. See `menu_pie_object.xml`: Open, Create, Touch, Sit
 /// Here/Stand Up, [Buy/]Take, Pay, More, Edit (reference slots 0..7 → compass
 /// East..SouthEast).
-pub(crate) static OBJECT_PIE: PieMenuDef = PieMenuDef {
+pub static OBJECT_PIE: PieMenuDef = PieMenuDef {
     label: "Object",
     entries: &[
         PieEntry {
@@ -784,13 +784,13 @@ pub(crate) static OBJECT_PIE: PieMenuDef = PieMenuDef {
 ///
 /// Written by the shared right-click resolver in [`crate::avatar_menu`] once a
 /// right-click has resolved to an in-world object nearer than any avatar, and
-/// consumed by [`open_object_menu`].
+/// consumed by `open_object_menu`.
 #[derive(Message, Debug, Clone)]
-pub(crate) struct OpenObjectMenu {
+pub struct OpenObjectMenu {
     /// The resolved object pick.
-    pub(crate) hit: ObjectRayHit,
+    pub hit: ObjectRayHit,
     /// Where to centre the pie, in logical pixels.
-    pub(crate) at: Vec2,
+    pub at: Vec2,
 }
 
 /// The object the currently-open object pie acts on.
@@ -800,18 +800,18 @@ pub(crate) struct OpenObjectMenu {
 /// on every open; a stale value between opens is harmless because no
 /// object-menu [`UiAction`] is emitted unless a pie is open.
 #[derive(Resource, Debug, Default)]
-pub(crate) struct ObjectMenuTarget {
+pub struct ObjectMenuTarget {
     /// The picked object and its ray surface, or `None` before any open.
-    pub(crate) hit: Option<ObjectRayHit>,
+    pub hit: Option<ObjectRayHit>,
     /// The object's name, once the properties-family reply fired at open time
     /// has landed — what a Mute is recorded under. `None` until then (a mute
     /// picked that early goes out with an empty name).
-    pub(crate) name: Option<String>,
+    pub name: Option<String>,
 }
 
 /// The plugin wiring the object context menu into the viewer.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct ObjectMenuPlugin;
+pub struct ObjectMenuPlugin;
 
 impl Plugin for ObjectMenuPlugin {
     /// Register the target resource, the open request, and the systems that turn
@@ -916,7 +916,7 @@ fn capture_object_menu_name(
 ///
 /// `edit_linked` picks the reference's per-prim vs whole-linkset selection: with
 /// "Edit linked parts" on, the picked prim is selected, otherwise its root.
-pub(crate) fn edit_picked_object(
+pub fn edit_picked_object(
     summary: &crate::world_api::ObjectPickSummary,
     tool: &mut EditToolState,
     floaters: &Query<(Entity, &crate::floater::Floater)>,
@@ -1052,7 +1052,7 @@ fn handle_object_menu_actions(
             "return" => derez(Some(DeRezDestination::ReturnToOwner)),
             "mute" => {
                 // Blocks go through the guarded request channel, never straight
-                // onto the wire (see `crate::mutes`).
+                // onto the wire (see `sl-viewer-people`'s `mutes`).
                 blocks.write(RequestBlock::new(
                     hit.summary.root_full.uuid(),
                     target.name.clone().unwrap_or_default(),

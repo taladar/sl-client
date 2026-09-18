@@ -16,7 +16,7 @@ variants). The protocol side is finished: the calling-card offer/accept
 exchange landed in [[missing-out-batch-1]] and is live-verified by
 [[test-calling-card]] (plus its aditi variant). But no viewer surface
 sends the offer — our `give-card` slices in
-`sl-client-bevy-viewer/src/avatar_menu.rs` and `attachment_menu.rs` are
+`sl-viewer-ui-context-menus/src/avatar_menu.rs` and `attachment_menu.rs` are
 UNIMPLEMENTED placeholders, and no roadmap task tracked the verb.
 
 Scope: wire the two pie slices (avatar-other and attachment-other route

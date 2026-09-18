@@ -30,9 +30,14 @@ They also *create* the separation the later rounds rely on.
    file is now `lib.rs` (types, lookup, state, tests), `forms.rs` (the button
    tables) and `catalogue/<family>.rs` x 31. A notification task edits its own
    family's file, and `NOTIFICATIONS` is unchanged for every caller.
-3. `viewer-audit-binary-module-extraction` — moves ~15k lines out of
-   `sl-client-bevy-viewer` into existing feature crates. This is what shrinks
-   the overlap between the world agent and the UI agent.
+3. ~~`viewer-audit-binary-module-extraction`~~ — **done**. 14,171 lines left
+   `sl-client-bevy-viewer` (47,760 → 33,589) for six existing feature crates
+   plus two new ones, `sl-viewer-ui-context-menus` (the four pie-menu entry
+   trees) and `sl-viewer-gallery` (both offline galleries, which now take the
+   element and floater registries as arguments rather than reaching into the
+   binary). What is left in the binary is the composition root, the harness
+   tiers, and the seven surfaces that genuinely belong to it — so the world
+   agent and the UI agent no longer share a 19k-line `src/`.
 4. `protocol-audit-runtime-shared-crate` — 1,677 byte-identical lines across
    `sl-client-tokio` and `sl-client-bevy`. Until it lands, the runtime
    feature-parity rule makes every protocol feature a two-crate edit.
@@ -81,6 +86,17 @@ Why these groupings rather than by feature area:
 - `sl-viewer-edit` is a self-contained 15-file crate, and the build floater is
   its own corner of the binary, so the build/edit tools balance **C** without
   colliding with **B**.
+
+The two crates the binary extraction created are not covered by the glob above:
+
+- **`sl-viewer-ui-context-menus` belongs to B**, despite what its entries act
+  on. It is four entry trees and their enable/disable rules; the actions
+  themselves are messages other crates answer, so an avatar-menu task is a
+  menu edit, not a world edit.
+- **`sl-viewer-gallery` is a shared hub** like `sl-viewer-kit`: A judges render
+  scenes in it, B judges UI elements in it. The registries it renders stayed in
+  the binary, so ordinary feature work adds an entry there and never touches
+  this crate — changing the gallery itself is a `claim --subsystem` moment.
 
 ### Rules for a parallel round
 

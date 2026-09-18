@@ -26,9 +26,11 @@ sl-cef = { path = "../sl-cef", version = "0.1.0" }
 sl-client-bevy = { workspace = true }
 sl-gst = { path = "../sl-gst", version = "0.1.0" }
 sl-media = { workspace = true }
+sl-viewer-intents = { workspace = true }
 sl-viewer-kit = { workspace = true }
 sl-viewer-platform = { workspace = true }
 sl-viewer-ui-core = { workspace = true }
+sl-viewer-ui-widgets = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]

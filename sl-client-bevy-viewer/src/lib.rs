@@ -7,26 +7,30 @@
 //!
 //! # Why this is a library
 //!
-//! The crate builds **two** binaries over one module tree:
+//! The crate builds **three** binaries over one module tree:
 //!
 //! - `sl-client-bevy-viewer` (`src/main.rs`) — the viewer proper, a thin shell
 //!   over [`run`].
-//! - `sl-client-bevy-viewer-gallery` (`src/bin/`) — the UI gallery, a thin shell
-//!   over [`gallery::run`]: the same widgets and panels with **no login and no
-//!   world** (`viewer-ui-test-harness`).
-//! - `sl-client-bevy-viewer-scenes` (`src/bin/`) — the render gallery, a thin
-//!   shell over [`render_gallery::run`]: the same geometry, converters and
-//!   materials with **no login and no world** (`viewer-render-test-harness`).
+//! - `sl-client-bevy-viewer-gallery` (`src/bin/`) — the UI gallery
+//!   (`viewer-ui-test-harness`), and
+//! - `sl-client-bevy-viewer-scenes` (`src/bin/`) — the render gallery
+//!   (`viewer-render-test-harness`).
 //!
-//! Both need the UI modules (`ui`, `ui_font`, `ui_text`, [`gallery`]), and
-//! two binaries cannot share a `pub(crate)` module tree — only a library can
-//! give them one. Hence a library with two thin shells rather than two binaries
-//! that each re-`#[path]`-include the same files, which would compile them twice
-//! and leave every item either binary happens not to use tripping `dead_code`.
+//! The galleries themselves are `sl-viewer-gallery`; the two shells here exist
+//! because what a gallery shows is composition. [`ui_elements::ELEMENTS`] and
+//! [`floaters::FLOATERS`] name the feature modules, [`asset_root`] resolves the
+//! `assets/` tree against **this** crate's compile-time directory, and
+//! [`init_tracing`] installs the subscriber the `profile-*` features configure.
+//! A shell gathers those four and hands them over.
 //!
-//! Only the handful of items a shell actually calls ([`run`], [`Error`],
-//! [`gallery::run`]) are `pub`; the module tree stays `pub(crate)` exactly as it
-//! was.
+//! What still needs a library is `main.rs` and those shells sharing one
+//! `pub(crate)` module tree — two binaries cannot, and re-`#[path]`-including
+//! the same files would compile them twice and leave every item either binary
+//! happens not to use tripping `dead_code`.
+//!
+//! Only what a shell actually calls ([`run`], [`Error`], [`init_tracing`],
+//! [`asset_root`], [`floaters`], [`ui_elements`]) is `pub`; the rest of the
+//! module tree stays `pub(crate)` exactly as it was.
 
 mod about_floater;
 pub(crate) use sl_viewer_people::add_friend;
@@ -89,25 +93,25 @@ pub(crate) const REGISTRARS: &[fn(&mut crate::settings::ViewerSettings)] = &[
 // crate; each module is aliased under its old name so every
 // `crate::<module>::…` path in the viewer still resolves.
 pub(crate) use sl_viewer_kit::appearance;
-mod asset_blacklist;
-mod asset_root;
+pub(crate) use sl_viewer_world_avatar::asset_blacklist;
+pub mod asset_root;
 pub(crate) use sl_viewer_world_avatar::avatar_asset_stats;
 pub(crate) use sl_viewer_world_objects::asset_budget;
 pub(crate) use sl_viewer_world_objects::asset_stats;
 // The platform layer (directory layout, on-disk caches, clipboard, URL
 // linkification) is its own crate; each module is aliased under its old
 // name so every `crate::<module>::…` path in the viewer still resolves.
-mod attachment_menu;
 pub(crate) use sl_viewer_audio::audio;
 pub(crate) use sl_viewer_kit::avatar_assets;
 pub(crate) use sl_viewer_people::auto_reject;
+pub(crate) use sl_viewer_people::avatar_profile;
+pub(crate) use sl_viewer_people::blocked;
+pub(crate) use sl_viewer_pickers::avatar_picker;
+pub(crate) use sl_viewer_ui_context_menus::attachment_menu;
+pub(crate) use sl_viewer_ui_context_menus::avatar_menu;
 pub(crate) use sl_viewer_world_avatar::avatar_complexity;
 pub(crate) use sl_viewer_world_avatar::avatar_dump;
-mod avatar_menu;
-pub(crate) use sl_viewer_people::avatar_profile;
-pub(crate) use sl_viewer_pickers::avatar_picker;
-mod avatar_render_floater;
-pub(crate) use sl_viewer_people::blocked;
+pub(crate) use sl_viewer_world_avatar::avatar_render_floater;
 pub(crate) use sl_viewer_world_avatar::avatar_render_settings;
 pub(crate) use sl_viewer_world_avatar::avatar_replay;
 pub(crate) use sl_viewer_world_avatar::avatars;
@@ -176,10 +180,7 @@ pub(crate) use sl_viewer_ui_widgets::floater;
 #[cfg(test)]
 mod floater_chrome;
 pub(crate) use sl_viewer_ui_widgets::floater_persist;
-mod floaters;
-pub(crate) use sl_viewer_world_scene::environment;
-pub(crate) use sl_viewer_world_scene::exposure;
-pub mod gallery;
+pub mod floaters;
 pub(crate) use sl_viewer_edit::gizmos;
 pub(crate) use sl_viewer_kit::geometry_cache;
 pub(crate) use sl_viewer_people::group_notice;
@@ -191,18 +192,17 @@ pub(crate) use sl_viewer_world_avatar::gpu_avatars;
 pub(crate) use sl_viewer_world_avatar::ground;
 pub(crate) use sl_viewer_world_avatar::hand_pose;
 pub(crate) use sl_viewer_world_objects::hover_text;
+pub(crate) use sl_viewer_world_scene::environment;
+pub(crate) use sl_viewer_world_scene::exposure;
 pub(crate) use sl_viewer_world_scene::glow;
 pub(crate) use sl_viewer_world_view::gpu_pick;
-mod hover_tooltip;
+pub(crate) use sl_viewer_world_view::hover_tooltip;
 pub(crate) use sl_viewer_world_view::hud;
 pub(crate) use sl_viewer_world_view::hud_pick;
 // The UI vocabulary (scaffold, fonts, skin, Fluent) is its own crate; each
 // module is aliased under its old name so every `crate::<module>::…` path in
 // the viewer still resolves.
-pub(crate) use sl_viewer_ui_core::i18n;
-pub(crate) use sl_viewer_world_view::input_action;
-pub(crate) use sl_viewer_world_view::input_context;
-mod inspector_popup;
+pub(crate) use sl_viewer_chat::local_chat_input;
 pub(crate) use sl_viewer_inventory::inventory;
 pub(crate) use sl_viewer_inventory::inventory_actions;
 pub(crate) use sl_viewer_inventory::inventory_drag;
@@ -210,21 +210,24 @@ pub(crate) use sl_viewer_inventory::inventory_filters;
 pub(crate) use sl_viewer_inventory::inventory_gallery;
 pub(crate) use sl_viewer_inventory::inventory_properties;
 pub(crate) use sl_viewer_inventory::settings_index;
-mod land_menu;
+pub(crate) use sl_viewer_media::media_diagnostics;
+pub(crate) use sl_viewer_media::media_engine;
+pub(crate) use sl_viewer_notices::inspector_popup;
 pub(crate) use sl_viewer_notices::linkified_text;
-pub(crate) use sl_viewer_world_objects::legacy_materials;
-pub(crate) use sl_viewer_world_scene::lights;
-mod load_url;
-pub(crate) use sl_viewer_chat::local_chat_input;
+pub(crate) use sl_viewer_notices::load_url;
+pub(crate) use sl_viewer_ui_context_menus::land_menu;
+pub(crate) use sl_viewer_ui_core::i18n;
+pub(crate) use sl_viewer_ui_widgets::menu;
 pub(crate) use sl_viewer_world_avatar::locomotion_ik;
 pub(crate) use sl_viewer_world_avatar::look_at;
+pub(crate) use sl_viewer_world_objects::legacy_materials;
 pub(crate) use sl_viewer_world_objects::material_cache;
 pub(crate) use sl_viewer_world_objects::material_preview;
 pub(crate) use sl_viewer_world_objects::materials;
-mod media_controls;
-pub(crate) use sl_viewer_media::media_diagnostics;
-pub(crate) use sl_viewer_media::media_engine;
-pub(crate) use sl_viewer_ui_widgets::menu;
+pub(crate) use sl_viewer_world_scene::lights;
+pub(crate) use sl_viewer_world_view::input_action;
+pub(crate) use sl_viewer_world_view::input_context;
+pub(crate) use sl_viewer_world_view::media_controls;
 pub(crate) use sl_viewer_world_view::media_prim;
 mod menu_bar;
 mod menu_search;
@@ -241,17 +244,22 @@ pub(crate) use sl_viewer_world_view::movement;
 // The notification catalogue is its own crate (~22k lines of declarative data
 // with no dependency on anything else here), aliased under its old module name
 // so every `crate::notifications::…` path in the viewer still resolves.
-pub(crate) use sl_viewer_notifications as notifications;
-pub(crate) use sl_viewer_world_objects::object_cost;
-mod object_menu;
 pub(crate) use sl_viewer_audio::parcel_audio;
+pub(crate) use sl_viewer_environment::bulk_import;
+pub(crate) use sl_viewer_environment::day_cycle_editor;
+pub(crate) use sl_viewer_environment::my_environments;
+pub(crate) use sl_viewer_environment::personal_lighting;
+pub(crate) use sl_viewer_environment::settings_editor;
+pub(crate) use sl_viewer_environment::settings_picker;
 pub(crate) use sl_viewer_kit::parcel_names;
 pub(crate) use sl_viewer_kit::particle_render;
 pub(crate) use sl_viewer_kit::raycast_index;
+pub(crate) use sl_viewer_notifications as notifications;
 pub(crate) use sl_viewer_people::offers_invites;
 pub(crate) use sl_viewer_people::people;
 pub(crate) use sl_viewer_people::presence;
 pub(crate) use sl_viewer_people::radar;
+pub(crate) use sl_viewer_platform::local_time;
 pub(crate) use sl_viewer_platform::paths;
 pub(crate) use sl_viewer_preferences::phototools;
 pub(crate) use sl_viewer_preferences::preferences;
@@ -265,26 +273,21 @@ pub(crate) use sl_viewer_preferences::preferences_graphics;
 pub(crate) use sl_viewer_preferences::preferences_network_cache;
 pub(crate) use sl_viewer_preferences::quick_preferences;
 pub(crate) use sl_viewer_preferences::quick_prefs_environment;
-pub(crate) use sl_viewer_ui_pie_menu::pie_menu;
-pub(crate) use sl_viewer_world_avatar::reach;
-pub(crate) use sl_viewer_world_objects::objects;
-pub(crate) use sl_viewer_world_scene::parcel_borders;
-pub(crate) use sl_viewer_world_scene::particles;
-pub(crate) use sl_viewer_world_scene::probes;
-pub(crate) use sl_viewer_world_view::physics;
-pub mod render_gallery;
-pub(crate) use sl_viewer_environment::bulk_import;
-pub(crate) use sl_viewer_environment::day_cycle_editor;
-pub(crate) use sl_viewer_environment::my_environments;
-pub(crate) use sl_viewer_environment::personal_lighting;
-pub(crate) use sl_viewer_environment::settings_editor;
-pub(crate) use sl_viewer_environment::settings_picker;
 pub(crate) use sl_viewer_rlv::rlv_behaviours;
 pub(crate) use sl_viewer_rlv::rlv_console;
 pub(crate) use sl_viewer_rlv::rlv_locks;
 pub(crate) use sl_viewer_rlv::rlv_strings;
+pub(crate) use sl_viewer_ui_context_menus::object_menu;
+pub(crate) use sl_viewer_ui_pie_menu::pie_menu;
 pub(crate) use sl_viewer_world_api::rlv;
+pub(crate) use sl_viewer_world_avatar::reach;
+pub(crate) use sl_viewer_world_objects::object_cost;
+pub(crate) use sl_viewer_world_objects::objects;
 pub(crate) use sl_viewer_world_objects::render_priority;
+pub(crate) use sl_viewer_world_scene::parcel_borders;
+pub(crate) use sl_viewer_world_scene::particles;
+pub(crate) use sl_viewer_world_scene::probes;
+pub(crate) use sl_viewer_world_view::physics;
 #[cfg(test)]
 mod full_stack_test;
 #[cfg(test)]
@@ -297,6 +300,9 @@ mod viewer_plugins;
 #[cfg(test)]
 mod world_test;
 pub(crate) use sl_viewer_world_scene::render_overrides;
+// Only the render-harness tiers (`render_matrix`, `render_readback`,
+// `render_test`) build scenes; the viewer proper builds the world.
+#[cfg(test)]
 pub(crate) use sl_viewer_world_scene::render_scene;
 #[cfg(test)]
 mod render_test;
@@ -315,22 +321,20 @@ pub(crate) use sl_viewer_ui_widgets::settings_binding;
 #[cfg(test)]
 mod settings_golden;
 pub(crate) use sl_viewer_kit::shadow_visibility;
-pub(crate) use sl_viewer_kit::sit_offset;
 pub(crate) use sl_viewer_kit::sky_presets;
 pub(crate) use sl_viewer_kit::slt;
 pub(crate) use sl_viewer_ui_core::skin;
 mod skin_agreement;
+pub(crate) use sl_viewer_places::slurl_dispatch;
 pub(crate) use sl_viewer_ui_core::skin_colors;
 pub(crate) use sl_viewer_world_scene::sky;
 pub(crate) use sl_viewer_world_view::sit_camera;
-mod slurl_dispatch;
 mod snapshot_floater;
 pub(crate) use sl_viewer_platform::sound_cache;
-pub(crate) use sl_viewer_platform::system_browser;
 pub(crate) use sl_viewer_spacenav as spacenav;
 mod stand_stop_button;
 mod status_bar;
-mod teleport_progress;
+pub(crate) use sl_viewer_places::teleport_progress;
 pub(crate) use sl_viewer_world_objects::texture_anim;
 pub(crate) use sl_viewer_world_objects::textures;
 pub(crate) use sl_viewer_world_scene::terrain;
@@ -356,23 +360,24 @@ pub(crate) use sl_viewer_world_scene::transparency;
 pub(crate) use sl_viewer_world_scene::water_clip;
 #[cfg(test)]
 mod ui_contract;
-mod ui_elements;
+pub mod ui_elements;
 pub(crate) use sl_viewer_notices::ui_name_link;
 pub(crate) use sl_viewer_platform::ui_perf;
 pub(crate) use sl_viewer_ui_core::ui_font;
 pub(crate) use sl_viewer_ui_core::ui_sounds;
 pub(crate) use sl_viewer_ui_widgets::ui_radio;
 pub(crate) use sl_viewer_ui_widgets::ui_search;
-pub(crate) use sl_viewer_ui_widgets::ui_slider;
 pub(crate) use sl_viewer_ui_widgets::ui_tab;
 pub(crate) use sl_viewer_ui_widgets::ui_table;
 pub(crate) use sl_viewer_ui_widgets::ui_trackball;
 #[cfg(test)]
 mod ui_test;
 pub(crate) use sl_viewer_audio::volume_panel;
+pub(crate) use sl_viewer_audio::world_sounds;
+pub(crate) use sl_viewer_map::world_map;
 pub(crate) use sl_viewer_media::web_auth;
+pub(crate) use sl_viewer_media::web_floater;
 pub(crate) use sl_viewer_pickers::ui_texture_picker;
-pub(crate) use sl_viewer_platform::url_linkify;
 pub(crate) use sl_viewer_ui_core::ui_text;
 pub(crate) use sl_viewer_ui_core::virtual_list;
 pub(crate) use sl_viewer_ui_widgets::ui_text_input;
@@ -381,9 +386,6 @@ pub(crate) use sl_viewer_world_scene::viewer_camera;
 pub(crate) use sl_viewer_world_scene::water;
 pub(crate) use sl_viewer_world_scene::water_exclusion;
 pub(crate) use sl_viewer_world_scene::water_scene_depth;
-mod web_floater;
-pub(crate) use sl_viewer_audio::world_sounds;
-pub(crate) use sl_viewer_map::world_map;
 
 use std::collections::BTreeSet;
 use std::num::NonZero;
@@ -1124,7 +1126,7 @@ fn run_session(
     // it reads the `TZ` environment variable, and reading the environment is only
     // sound before Bevy's task pools spawn (below, with `DefaultPlugins`). The
     // snapshot floater reuses this cached zone to stamp filenames in local time.
-    let local_time_zone = crate::snapshot_floater::LocalTimeZone::capture();
+    let local_time_zone = crate::local_time::LocalTimeZone::capture();
 
     let mut app = App::new();
     app.insert_resource(local_time_zone);
@@ -2501,7 +2503,7 @@ pub fn init_tracing() -> TracingGuards {
 ///
 /// The `sl-client-bevy-viewer` binary is a thin shell over this, so that the
 /// whole viewer — the UI scaffold especially — lives in a library the gallery
-/// binary ([`gallery`]) can build against too.
+/// shells can build against too.
 ///
 /// # Errors
 ///

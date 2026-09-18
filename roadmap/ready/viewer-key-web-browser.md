@@ -10,7 +10,7 @@ refs: [viewer-keyed-floater-audit, viewer-profile-floater-single-instance]
 
 Context: [context/viewer.md](../context/viewer.md).
 
-`sl-client-bevy-viewer/src/web_floater.rs` (`"web-browser"`) is a singleton:
+`sl-viewer-media/src/web_floater.rs` (`"web-browser"`) is a singleton:
 `WebFloaterUi` holds one root, one embedded view, one address field, one
 history. Every `OpenWebBrowser` — a menu item, a link routed from another
 floater, a SLURL dispatch — lands in that one window, replacing whatever page

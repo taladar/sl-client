@@ -11,6 +11,11 @@
 //!
 //! All three are read-mostly views over parcel and region state the world
 //! layer already holds, plus the wire calls that change it.
+//!
+//! [`teleport_progress`] is the other half of "a place": getting to one. It is
+//! the overlay that tracks a teleport from request to arrival, and the watchdog
+//! that resolves every teleport to a visible success or failure rather than
+//! letting one hang.
 
 #![expect(
     clippy::module_name_repetitions,
@@ -27,6 +32,7 @@ pub(crate) use sl_viewer_intents as intents;
 pub(crate) use sl_viewer_inventory::inventory;
 pub(crate) use sl_viewer_inventory::inventory_properties;
 pub(crate) use sl_viewer_map::world_map;
+pub(crate) use sl_viewer_notices::linkified_text;
 pub(crate) use sl_viewer_notices::ui_name_link;
 pub(crate) use sl_viewer_notifications as notifications;
 pub(crate) use sl_viewer_pickers::ui_texture_picker;
@@ -36,6 +42,7 @@ pub(crate) use sl_viewer_ui_core::i18n;
 pub(crate) use sl_viewer_ui_core::ui;
 pub(crate) use sl_viewer_ui_core::ui_font;
 pub(crate) use sl_viewer_ui_core::ui_format;
+pub(crate) use sl_viewer_ui_core::ui_sounds;
 pub(crate) use sl_viewer_ui_core::virtual_list;
 pub(crate) use sl_viewer_ui_widgets::floater;
 pub(crate) use sl_viewer_ui_widgets::ui_combo;
@@ -49,5 +56,7 @@ pub mod about_landmark;
 pub mod about_region;
 mod edit_fields;
 mod name_revisions;
+pub mod slurl_dispatch;
 pub mod telehub;
+pub mod teleport_progress;
 pub mod top_objects;

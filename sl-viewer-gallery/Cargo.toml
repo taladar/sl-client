@@ -1,0 +1,43 @@
+[package]
+name = "sl-viewer-gallery"
+description = "The Second Life / OpenSim viewer's offline galleries: the UI element / floater gallery and the render-scene gallery, both with no login and no world"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords = ["secondlife", "opensim", "viewer", "ui", "gallery"]
+categories = ["gui", "game-development"]
+exclude.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Not a workspace dependency: members disagree about `default-features`, so the
+# spec stays per-crate (see the root manifest). `system_font_discovery` because
+# the gallery is where text rendering is judged, and a missing script has to
+# fall back to the host's fonts here exactly as it does in the viewer.
+bevy = { version = "0.19.0", features = ["system_font_discovery"] }
+bevy_flair = { version = "0.8.0" }
+clap = { workspace = true, features = ["cargo", "derive", "env"] }
+sl-client-bevy = { workspace = true, features = [
+  "bevy_pbr",
+] }
+sl-viewer-asset-editors = { workspace = true }
+sl-viewer-chat = { workspace = true }
+sl-viewer-intents = { workspace = true }
+sl-viewer-kit = { workspace = true }
+sl-viewer-media = { workspace = true }
+sl-viewer-notices = { workspace = true }
+sl-viewer-ui-core = { workspace = true }
+sl-viewer-ui-pie-menu = { workspace = true }
+sl-viewer-ui-widgets = { workspace = true }
+sl-viewer-world-scene = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+
+[lints]
+workspace = true

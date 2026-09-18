@@ -8556,7 +8556,6 @@ dependencies = [
  "pretty_assertions",
  "sl-account-dirs",
  "sl-asset",
- "sl-cef",
  "sl-client-bevy",
  "sl-fake-grid",
  "sl-l10n",
@@ -8571,6 +8570,7 @@ dependencies = [
  "sl-viewer-chat",
  "sl-viewer-edit",
  "sl-viewer-environment",
+ "sl-viewer-gallery",
  "sl-viewer-intents",
  "sl-viewer-inventory",
  "sl-viewer-kit",
@@ -8589,6 +8589,7 @@ dependencies = [
  "sl-viewer-social",
  "sl-viewer-spacenav",
  "sl-viewer-testkit",
+ "sl-viewer-ui-context-menus",
  "sl-viewer-ui-core",
  "sl-viewer-ui-pie-menu",
  "sl-viewer-ui-widgets",
@@ -9247,6 +9248,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-viewer-gallery"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_flair",
+ "clap",
+ "pretty_assertions",
+ "sl-client-bevy",
+ "sl-viewer-asset-editors",
+ "sl-viewer-chat",
+ "sl-viewer-intents",
+ "sl-viewer-kit",
+ "sl-viewer-media",
+ "sl-viewer-notices",
+ "sl-viewer-ui-core",
+ "sl-viewer-ui-pie-menu",
+ "sl-viewer-ui-widgets",
+ "sl-viewer-world-scene",
+ "tracing",
+]
+
+[[package]]
 name = "sl-viewer-intents"
 version = "0.1.0"
 dependencies = [
@@ -9335,9 +9358,11 @@ dependencies = [
  "sl-client-bevy",
  "sl-gst",
  "sl-media",
+ "sl-viewer-intents",
  "sl-viewer-kit",
  "sl-viewer-platform",
  "sl-viewer-ui-core",
+ "sl-viewer-ui-widgets",
  "url",
 ]
 
@@ -9462,6 +9487,7 @@ dependencies = [
  "bevy",
  "directories",
  "fs-err",
+ "jiff",
  "pretty_assertions",
  "regex",
  "rfd",
@@ -9592,6 +9618,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-viewer-ui-context-menus"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "pretty_assertions",
+ "sl-client-bevy",
+ "sl-viewer-edit",
+ "sl-viewer-intents",
+ "sl-viewer-inventory",
+ "sl-viewer-kit",
+ "sl-viewer-people",
+ "sl-viewer-places",
+ "sl-viewer-social",
+ "sl-viewer-ui-core",
+ "sl-viewer-ui-pie-menu",
+ "sl-viewer-ui-widgets",
+ "sl-viewer-world-api",
+ "sl-viewer-world-avatar",
+ "sl-viewer-world-objects",
+ "sl-viewer-world-view",
+]
+
+[[package]]
 name = "sl-viewer-ui-core"
 version = "0.1.0"
 dependencies = [
@@ -9672,12 +9721,14 @@ dependencies = [
  "sl-client-bevy",
  "sl-settings",
  "sl-texture",
+ "sl-viewer-intents",
  "sl-viewer-kit",
  "sl-viewer-platform",
  "sl-viewer-settings",
  "sl-viewer-social",
  "sl-viewer-testkit",
  "sl-viewer-ui-core",
+ "sl-viewer-ui-widgets",
  "sl-viewer-world-api",
  "sl-viewer-world-objects",
  "tracing",
@@ -9753,6 +9804,8 @@ dependencies = [
  "sl-viewer-social",
  "sl-viewer-spacenav",
  "sl-viewer-testkit",
+ "sl-viewer-ui-core",
+ "sl-viewer-ui-widgets",
  "sl-viewer-world-api",
  "sl-viewer-world-avatar",
  "sl-viewer-world-objects",

@@ -13,7 +13,7 @@ Context: [context/viewer.md](../context/viewer.md).
 Near-identical helpers, each diverging only in hardcoded padding, border width
 and colour:
 
-- `spawn_action_button` — **7 copies**: `sl-client-bevy-viewer/src/load_url.rs`,
+- `spawn_action_button` — **7 copies**: `sl-viewer-notices/src/load_url.rs`,
   `sl-viewer-asset-editors/src/edit_wearable.rs`,
   `sl-viewer-edit/src/edit_material.rs`, `sl-viewer-edit/src/edit_params.rs`,
   `sl-viewer-notices/src/experience_permission.rs`, plus two more. Padding is

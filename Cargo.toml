@@ -48,6 +48,7 @@ members = [
   "sl-viewer-chat",
   "sl-viewer-edit",
   "sl-viewer-environment",
+  "sl-viewer-gallery",
   "sl-viewer-intents",
   "sl-viewer-inventory",
   "sl-viewer-kit",
@@ -66,6 +67,7 @@ members = [
   "sl-viewer-social",
   "sl-viewer-spacenav",
   "sl-viewer-testkit",
+  "sl-viewer-ui-context-menus",
   "sl-viewer-ui-core",
   "sl-viewer-ui-pie-menu",
   "sl-viewer-ui-widgets",
@@ -136,6 +138,7 @@ sl-viewer-audio = { path = "sl-viewer-audio", version = "0.1.0" }
 sl-viewer-chat = { path = "sl-viewer-chat", version = "0.1.0" }
 sl-viewer-edit = { path = "sl-viewer-edit", version = "0.1.0" }
 sl-viewer-environment = { path = "sl-viewer-environment", version = "0.1.0" }
+sl-viewer-gallery = { path = "sl-viewer-gallery", version = "0.1.0" }
 sl-viewer-intents = { path = "sl-viewer-intents", version = "0.1.0" }
 sl-viewer-inventory = { path = "sl-viewer-inventory", version = "0.1.0" }
 sl-viewer-kit = { path = "sl-viewer-kit", version = "0.1.0" }
@@ -154,6 +157,7 @@ sl-viewer-settings = { path = "sl-viewer-settings", version = "0.1.0" }
 sl-viewer-social = { path = "sl-viewer-social", version = "0.1.0" }
 sl-viewer-spacenav = { path = "sl-viewer-spacenav", version = "0.1.0" }
 sl-viewer-testkit = { path = "sl-viewer-testkit", version = "0.1.0" }
+sl-viewer-ui-context-menus = { path = "sl-viewer-ui-context-menus", version = "0.1.0" }
 sl-viewer-ui-core = { path = "sl-viewer-ui-core", version = "0.1.0" }
 sl-viewer-ui-pie-menu = { path = "sl-viewer-ui-pie-menu", version = "0.1.0" }
 sl-viewer-ui-widgets = { path = "sl-viewer-ui-widgets", version = "0.1.0" }

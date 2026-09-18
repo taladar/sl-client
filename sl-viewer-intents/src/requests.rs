@@ -504,6 +504,18 @@ pub struct OpenConversation {
     pub key: ConversationKey,
 }
 
+/// A request to parse and dispatch a raw SLURL / app-command string — the entry
+/// point for sources outside the in-app link widgets: the `secondlife://` OS
+/// protocol handler / command line, an inspector popup handing its own SLURL
+/// back, and any future caller (a landmark's embedded SLURL, a typed address
+/// bar). The dispatcher runs the string through the same matcher the text layer
+/// uses and routes its first recognised link.
+#[derive(Message, Debug, Clone)]
+pub struct DispatchSlurl {
+    /// The raw URL string to parse and act on.
+    pub url: String,
+}
+
 /// Open (and optionally navigate) the web browser floater.
 #[derive(Message, Debug, Clone)]
 pub struct OpenWebBrowser {

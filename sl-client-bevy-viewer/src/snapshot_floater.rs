@@ -76,6 +76,7 @@ use bevy_flair::style::components::ClassList;
 use crate::hud::HudScreen;
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::intents::LocalChatNotice;
+use crate::local_time::LocalTimeZone;
 use crate::settings::ViewerSettings;
 use crate::status_bar::BalanceReadout;
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
@@ -370,33 +371,6 @@ impl SnapshotState {
 /// [`process_shot`] (which restores the UI, updates the preview and saves).
 #[derive(Resource, Debug, Default)]
 struct CapturedShot(Option<Image>);
-
-/// The system's local time zone, resolved **once at startup**
-/// ([`capture_local_timezone`]) and reused to stamp snapshot filenames.
-///
-/// Resolving the zone reads the `TZ` environment variable, and reading the
-/// environment is only sound while the process is still single-threaded — before
-/// Bevy's task pools spawn. So it is captured in `main`, not on each save; a save
-/// then only reads the (thread-safe) monotonic clock and applies this cached zone.
-#[derive(Resource, Clone)]
-pub(crate) struct LocalTimeZone(jiff::tz::TimeZone);
-
-impl LocalTimeZone {
-    /// Resolve the system time zone now. Call this **early**, while the process is
-    /// still single-threaded (see the type docs).
-    #[must_use]
-    pub(crate) fn capture() -> Self {
-        Self(jiff::tz::TimeZone::system())
-    }
-
-    /// The captured zone, for another surface rendering a stored timestamp in
-    /// local time (the derender blacklist's Date column,
-    /// [`crate::asset_blacklist`]).
-    #[must_use]
-    pub(crate) const fn zone(&self) -> &jiff::tz::TimeZone {
-        &self.0
-    }
-}
 
 /// The floater's live entity handles.
 #[derive(Resource, Debug)]
@@ -1265,7 +1239,7 @@ fn spawn_save_task(dynamic: image::DynamicImage, dest: SaveDest) -> Task<Result<
 /// the startup-captured [`LocalTimeZone`]. With no captured zone (a harness without
 /// it) it falls back to resolving the system zone now.
 fn local_iso8601_stamp(zone: Option<&LocalTimeZone>) -> String {
-    let zone = zone.map_or_else(jiff::tz::TimeZone::system, |zone| zone.0.clone());
+    let zone = zone.map_or_else(jiff::tz::TimeZone::system, |zone| zone.zone().clone());
     jiff::Timestamp::now()
         .to_zoned(zone)
         .strftime("%Y-%m-%dT%H-%M-%S")

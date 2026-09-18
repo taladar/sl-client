@@ -4,13 +4,16 @@
 //! Two backends sit behind one boundary — CEF for web pages, GStreamer for
 //! streams — and nothing above this crate needs to know which is answering. The
 //! parcel audio player and the media-on-a-prim faces are consumers, not part of
-//! this crate: what lives here is the machinery, not the placement.
+//! this crate: what lives here is the machinery, plus the one surface that is
+//! nothing but machinery — a browser floater that hosts [`browser_widget`] and
+//! knows about no world at all. Media *placed in the world* still lives above.
 //!
 //! - [`media_engine`] — backend selection and the frame pump.
 //! - [`media_audio`] — the audio side of a media stream.
 //! - [`media_keys`] — keyboard routing into a focused media surface.
 //! - [`media_diagnostics`] — what the F3 overlay reports about media.
 //! - [`browser_widget`] — a page as a UI element.
+//! - [`web_floater`] — that widget's own floater, the in-viewer web browser.
 //! - [`web_auth`] — the browser-hosted login flow.
 
 #![expect(
@@ -28,3 +31,4 @@ pub mod media_diagnostics;
 pub mod media_engine;
 pub mod media_keys;
 pub mod web_auth;
+pub mod web_floater;

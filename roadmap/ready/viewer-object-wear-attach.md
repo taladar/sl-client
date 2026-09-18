@@ -18,7 +18,7 @@ replacing whatever sits at the default/last point), **Add**
 paired **Attach To ▸** / **Attach To HUD ▸** submenus, which the viewer
 fills at runtime from the attachment-point list, marking points that are
 already occupied. Our object pie in
-`sl-client-bevy-viewer/src/object_menu.rs` keeps `wear` as an
+`sl-viewer-ui-context-menus/src/object_menu.rs` keeps `wear` as an
 UNIMPLEMENTED placeholder, and its ATTACH_PIE pins only the static Bento
 "Ext. Skeleton" tree while the plain and HUD point lists stay empty.
 

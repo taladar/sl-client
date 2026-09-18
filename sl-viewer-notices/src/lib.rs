@@ -9,6 +9,12 @@
 //! with things in it you can click: a resident, a group, a URL, a SLURL. That
 //! is [`linkified_text`] and [`ui_name_link`], which every other surface that
 //! shows a clickable name or link also uses.
+//!
+//! Two notices are about a link rather than a script: [`load_url`] is the
+//! confirmation an in-world object needs before your browser opens what it
+//! asked for, and [`inspector_popup`] is the small card an `.../inspect` link
+//! raises over whatever raised it. Both are here because they are written in
+//! the same linkified text, not because they interrupt the same way.
 
 #![expect(
     clippy::module_name_repetitions,
@@ -48,7 +54,9 @@ pub mod experience_picker;
 pub mod experience_profile;
 pub(crate) mod experience_search;
 pub mod experiences_floater;
+pub mod inspector_popup;
 pub mod linkified_text;
+pub mod load_url;
 pub mod notification_host;
 pub mod notification_persist;
 pub mod script_dialog;

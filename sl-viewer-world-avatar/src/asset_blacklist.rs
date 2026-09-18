@@ -15,7 +15,7 @@
 //! - **Clear temporary** drops every session-only entry at once (the
 //!   reference's "Clear temporary" button).
 //!
-//! Every [`DerenderKind`](crate::world_api::DerenderKind) is listed here, asset
+//! Every [`DerenderKind`](sl_viewer_world_api::DerenderKind) is listed here, asset
 //! entries included: the model honours a blacklisted sound / animation / texture
 //! at its own point of use, so this is where one is seen and removed even though
 //! no surface produces one yet (the explorer floaters will).
@@ -40,25 +40,25 @@ use bevy::text::EditableText;
 use sl_client_bevy::Uuid;
 
 use crate::derender::UnDerender;
-use crate::floater::{
+use sl_viewer_platform::local_time::LocalTimeZone;
+use sl_viewer_settings::ViewerSettings;
+use sl_viewer_ui_core::i18n::{TransArgs, Translated, Translator};
+use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems, column, row};
+use sl_viewer_ui_core::ui_font::UiFont;
+use sl_viewer_ui_core::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
+use sl_viewer_ui_widgets::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, floater_shown, spawn_floater,
 };
-use crate::i18n::{TransArgs, Translated, Translator};
-use crate::settings::ViewerSettings;
-use crate::snapshot_floater::LocalTimeZone;
-use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
-use crate::ui_font::UiFont;
-use crate::ui_search::{SearchFieldSpec, spawn_search_field};
-use crate::ui_table::{
+use sl_viewer_ui_widgets::ui_search::{SearchFieldSpec, spawn_search_field};
+use sl_viewer_ui_widgets::ui_table::{
     TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells, TableSelectionMode,
     TableSortDefault, TableSpec, TableState, register_table_settings, set_table_cell, spawn_table,
     spawn_table_row,
 };
-use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
-use crate::world_api::{DerenderEntry, DerenderList};
+use sl_viewer_world_api::{DerenderEntry, DerenderList};
 
 /// The floater's stable id (persistence, `SL_VIEWER_OPEN_FLOATER`).
-pub(crate) const BLACKLIST_FLOATER_ID: &str = "asset-blacklist";
+pub const BLACKLIST_FLOATER_ID: &str = "asset-blacklist";
 
 /// The persisted-settings section the table's sort / widths live under.
 const BLACKLIST_SECTION: &[&str] = &["blacklist"];
@@ -172,7 +172,8 @@ static BLACKLIST_TABLE: TableSpec = TableSpec {
 
 /// Whether `entry` survives the list's filter — a case-insensitive substring of
 /// the name *or* the region, so "that thing in Sandbox" is findable either way.
-pub(crate) fn matches_filter(entry: &DerenderEntry, filter: &str) -> bool {
+#[must_use]
+pub fn matches_filter(entry: &DerenderEntry, filter: &str) -> bool {
     let filter = filter.trim().to_lowercase();
     filter.is_empty()
         || entry.name.to_lowercase().contains(&filter)
@@ -181,7 +182,7 @@ pub(crate) fn matches_filter(entry: &DerenderEntry, filter: &str) -> bool {
 
 /// Order `rows` by the table's sort keys (most significant first), falling back
 /// to a case-insensitive name compare so the order is total.
-pub(crate) fn sort_rows(rows: &mut [DerenderEntry], keys: &[(&str, bool)]) {
+pub fn sort_rows(rows: &mut [DerenderEntry], keys: &[(&str, bool)]) {
     rows.sort_by(|left, right| {
         for (token, ascending) in keys {
             let ordering = match *token {
@@ -206,7 +207,8 @@ pub(crate) fn sort_rows(rows: &mut [DerenderEntry], keys: &[(&str, bool)]) {
 
 /// The local-time `YYYY-MM-DD hh:mm` stamp of an entry's epoch seconds, or an
 /// empty string when the value is out of the representable range.
-pub(crate) fn format_date(epoch_secs: i64, zone: Option<&LocalTimeZone>) -> String {
+#[must_use]
+pub fn format_date(epoch_secs: i64, zone: Option<&LocalTimeZone>) -> String {
     let Ok(stamp) = jiff::Timestamp::from_second(epoch_secs) else {
         return String::new();
     };
@@ -278,7 +280,7 @@ impl BlacklistButton {
 
 /// Registers the Asset Blacklist floater, its view state and its actions.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct AssetBlacklistPlugin;
+pub struct AssetBlacklistPlugin;
 
 impl Plugin for AssetBlacklistPlugin {
     fn build(&self, app: &mut App) {
@@ -320,7 +322,8 @@ fn register_blacklist_settings(settings: Option<ResMut<ViewerSettings>>) {
 
 /// The blacklist floater's [`FloaterSpec`] — shared with the `FLOATERS`
 /// registry, so the swept window is the one the viewer spawns.
-pub(crate) fn blacklist_floater_spec() -> FloaterSpec {
+#[must_use]
+pub fn blacklist_floater_spec() -> FloaterSpec {
     FloaterSpec {
         id: BLACKLIST_FLOATER_ID,
         title: "Asset Blacklist".to_owned(),
@@ -739,10 +742,10 @@ fn bind_blacklist_rows(
 #[cfg(test)]
 mod tests {
     use super::{format_date, matches_filter, sort_rows};
-    use crate::world_api::DerenderEntry;
-    use crate::world_api::DerenderKind;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::Uuid;
+    use sl_viewer_world_api::DerenderEntry;
+    use sl_viewer_world_api::DerenderKind;
 
     /// An entry, for the projection tests.
     fn entry(id: u128, name: &str, region: &str, permanent: bool, at: i64) -> DerenderEntry {

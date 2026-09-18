@@ -24,6 +24,9 @@ arboard = { version = "3.6.1", default-features = false, features = [
 bevy = { version = "0.19.0" }
 directories = { version = "6.0.0" }
 fs-err = { workspace = true }
+# Local (system-timezone) time: the zone captured once at startup for every
+# surface that renders a stored timestamp as a local date (`local_time`).
+jiff = { version = "0.2.35" }
 regex = { version = "1.13.1" }
 # The host's file-open dialog. `xdg-portal` only: under Wayland the chooser has
 # to come from `org.freedesktop.portal.FileChooser` (with a `zenity` fallback),

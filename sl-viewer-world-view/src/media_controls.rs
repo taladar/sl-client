@@ -38,22 +38,22 @@ use sl_cef::{PlaybackState, ValidatedMediaUrl};
 use sl_client_bevy::{Command, SlCommand};
 
 use crate::camera::FocusTarget;
-use crate::media_diagnostics::MediaDiagnostics;
-use crate::media_engine::{MediaEngineKind, MediaEngineSystems, MediaSurfaces};
 use crate::media_prim::{MediaData, MediaPrimState, media_permission_allows};
-use crate::system_browser::{ExternalUrl, normalize_web_url, open_in_system_browser};
-use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
-use crate::ui_element::UiAction;
-use crate::ui_font::UiFont;
-use crate::ui_slider::{SliderStyle, SliderWidgetPlugin, spawn_slider};
-use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
-use crate::world_api::MediaFocus;
-use crate::world_api::MediaTarget;
-use crate::world_api::ObjectState;
-use crate::world_api::{CameraRig, ViewerCamera};
+use sl_viewer_media::media_diagnostics::MediaDiagnostics;
+use sl_viewer_media::media_engine::{MediaEngineKind, MediaEngineSystems, MediaSurfaces};
+use sl_viewer_platform::system_browser::{ExternalUrl, normalize_web_url, open_in_system_browser};
+use sl_viewer_ui_core::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use sl_viewer_ui_core::ui_element::UiAction;
+use sl_viewer_ui_core::ui_font::UiFont;
+use sl_viewer_ui_widgets::ui_slider::{SliderStyle, SliderWidgetPlugin, spawn_slider};
+use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
+use sl_viewer_world_api::MediaFocus;
+use sl_viewer_world_api::MediaTarget;
+use sl_viewer_world_api::ObjectState;
+use sl_viewer_world_api::{CameraRig, ViewerCamera};
 
 /// The [`UiAction`] element name of the bar.
-pub(crate) const MEDIA_CONTROLS_ELEMENT: &str = "media-controls";
+pub const MEDIA_CONTROLS_ELEMENT: &str = "media-controls";
 
 /// Seconds without pointer activity before the bar hides (the reference's
 /// `MediaControlTimeout`).
@@ -118,7 +118,7 @@ struct MediaControlsUi {
 
 /// Which media face the bar currently controls, plus the zoom state.
 #[derive(Resource, Debug, Default)]
-pub(crate) struct MediaControlsState {
+pub struct MediaControlsState {
     /// The face the bar is shown for.
     target: Option<MediaTarget>,
     /// Seconds since the last pointer activity.
@@ -128,7 +128,8 @@ pub(crate) struct MediaControlsState {
 }
 
 /// The floating media-controls plugin.
-pub(crate) struct MediaControlsPlugin;
+#[derive(Debug, Clone, Copy, Default)]
+pub struct MediaControlsPlugin;
 
 impl Plugin for MediaControlsPlugin {
     fn build(&self, app: &mut App) {
@@ -680,7 +681,7 @@ fn update_media_controls(
             && let Ok(mut editor) = chrome.editors.get_mut(ui.url_field)
             && editor.value().to_string() != status.url
         {
-            crate::ui_text::set_editor_text(
+            sl_viewer_ui_core::ui_text::set_editor_text(
                 &mut editor,
                 &status.url,
                 &mut chrome.font_cx,
@@ -692,7 +693,7 @@ fn update_media_controls(
             // decoder-gap error) here; web surfaces their load progress. A
             // generic HTTP-source error is refined with the precise reason a
             // background probe recovers (GStreamer hides DNS / TCP / TLS / HTTP
-            // causes — see [`crate::media_diagnostics`]).
+            // causes — see [`sl_viewer_media::media_diagnostics`]).
             let want = if video {
                 let load_error = status.load_error.clone().map(|generic| {
                     if status.network_diagnosable {

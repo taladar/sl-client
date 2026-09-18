@@ -5,10 +5,10 @@
 //!
 //! # What it shows
 //!
-//! A teleport is a multi-step protocol handshake ([`Event::TeleportStarted`] →
-//! [`Event::TeleportProgress`] → [`Event::TeleportFinished`] →
-//! [`Event::RegionChanged`], or the intra-region [`Event::TeleportLocal`], or the
-//! [`Event::TeleportFailed`] error path). The overlay renders the live phase, the
+//! A teleport is a multi-step protocol handshake ([`SlSessionEvent::TeleportStarted`] →
+//! [`SlSessionEvent::TeleportProgress`] → [`SlSessionEvent::TeleportFinished`] →
+//! [`SlSessionEvent::RegionChanged`], or the intra-region [`SlSessionEvent::TeleportLocal`], or the
+//! [`SlSessionEvent::TeleportFailed`] error path). The overlay renders the live phase, the
 //! elapsed time, the destination (when the initiating surface supplies one), and
 //! the simulator's progress messages — more than the reference's opaque progress
 //! screen surfaces.
@@ -17,7 +17,7 @@
 //!
 //! The reference viewer can leave a teleport progress screen up forever when the
 //! terminal message never arrives. The [`Session`](sl_client_bevy) already arms a
-//! 30 s server-timeout that emits [`Event::TeleportFailed`], but a *lost* event
+//! 30 s server-timeout that emits [`SlSessionEvent::TeleportFailed`], but a *lost* event
 //! (a dropped packet on the failure path) would still hang the UI. So this module
 //! adds a **client-side watchdog** on top: a soft threshold that flags a
 //! slow-but-live teleport (offering Cancel), and a hard backstop that — if no
@@ -54,7 +54,7 @@ const SOFT_WATCHDOG_SECS: f64 = 18.0;
 
 /// Seconds a live teleport may run before the client **force-resolves** it to a
 /// failure and sends [`Command::CancelTeleport`]. A backstop above the session's
-/// 30 s server timeout: it only ever fires if the terminal [`Event::TeleportFailed`]
+/// 30 s server timeout: it only ever fires if the terminal [`SlSessionEvent::TeleportFailed`]
 /// itself was lost, so a hung teleport can never outlast it.
 const HARD_WATCHDOG_SECS: f64 = 38.0;
 
@@ -224,7 +224,7 @@ enum OverlayButton {
 /// [`BeginTeleportFlow`] message, spawns the (hidden) overlay once, and keeps it
 /// current from the teleport events and the watchdog.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct TeleportProgressPlugin;
+pub struct TeleportProgressPlugin;
 
 impl Plugin for TeleportProgressPlugin {
     /// Wire the resource, message, spawn, and the per-frame ingest / watchdog /

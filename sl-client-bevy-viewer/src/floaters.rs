@@ -18,7 +18,7 @@
 //! An entry does not restate its window's geometry; it points at the
 //! [`FloaterSpec`](crate::floater::FloaterSpec) constructor the module's own
 //! `Startup` system calls. Two callers, one source — see
-//! [`FloaterElement`](crate::floater::FloaterElement) for the argument, and
+//! [`FloaterElement`] for the argument, and
 //! `every_floater_spec_in_the_workspace_is_registered` below for the guard that
 //! notices a constructor nobody registered.
 //!
@@ -38,11 +38,11 @@
 use crate::floater::{FloaterContent, FloaterElement};
 
 /// **The registry.** Every floater the viewer opens, swept by
-/// [`crate::ui_test`] and rendered by [`crate::gallery`].
+/// the `ui_test` sweep and rendered by `sl-viewer-gallery`.
 ///
 /// In id order, so a duplicate or a gap is visible by reading. See the [module
 /// documentation](self).
-pub(crate) const FLOATERS: &[FloaterElement] = &[
+pub const FLOATERS: &[FloaterElement] = &[
     FloaterElement {
         id: "about",
         summary: "About: viewer version, the connected grid and region, system information as one \

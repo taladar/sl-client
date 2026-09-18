@@ -17,7 +17,7 @@ It is the classic "blurry prim" fix and the object-side sibling of the
 avatar Tex Refresh we already wired (`RefetchAvatarTextures` in
 `avatars.rs`, reachable from `avatar_menu.rs`). Our tree holds
 UNIMPLEMENTED placeholders at all three addresses: `tex-refresh` in
-`sl-client-bevy-viewer/src/object_menu.rs` (RESET_PIE) and in
+`sl-viewer-ui-context-menus/src/object_menu.rs` (RESET_PIE) and in
 `attachment_menu.rs` (self and other pies).
 
 Scope: a per-linkset texture re-fetch — drop the linkset's face textures

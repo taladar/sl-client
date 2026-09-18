@@ -11,15 +11,16 @@
 //! The gallery answers the one question a machine cannot: **does this look
 //! right**. Whether a layout is *correct* — content inside its box, nothing off
 //! screen, columns straight, text unsliced — is machine-checkable, and
-//! `crate::ui_test` checks it across every element in every script, direction,
+//! the viewer binary's `ui_test` sweep checks it across every element in every script, direction,
 //! scale and translation length. Walking that grid by eye is exactly the
 //! combinatorial explosion the harness exists to end, so the gallery does not try.
 //!
 //! What is left for a human is real and cannot be automated: is the spacing ugly,
 //! is the contrast wrong, does the accent land somewhere silly, does this read as
 //! one design with the panel next to it. And the discovery loop — a person
-//! notices something wrong here, and the fix is a **check** in
-//! `crate::ui_test`, which from then on runs against every element forever. The
+//! notices something wrong here, and the fix is a **check** in the viewer
+//! binary's `ui_test` sweep, which from then on runs against every element
+//! forever. The
 //! gallery is where bugs are *found*; the harness is where they stay found.
 //!
 //! # Why it can exist at all
@@ -43,7 +44,7 @@
 //! | `Escape` | quit |
 //!
 //! The **floater switcher** at the top of the page is the other half: one chip
-//! per window in `crate::floaters::FLOATERS`, and the floater manager is live
+//! per window in the caller's floater registry, and the floater manager is live
 //! here, so a click opens a real window that drags, resizes, minimizes, docks
 //! and closes. That is what a picture of a floater cannot answer.
 //!
@@ -60,8 +61,7 @@ use bevy::window::PresentMode;
 use bevy_flair::style::components::ClassList;
 use tracing::info;
 
-use crate::floater::{Floater, FloaterPlugin, toggle_floater};
-use crate::floaters::FLOATERS;
+use crate::floater::{Floater, FloaterElement, FloaterPlugin, toggle_floater};
 use crate::pie_menu::{FIXTURE_PIE, OpenPieMenu, PieMenuPlugin};
 use crate::skin::SkinSelection;
 use crate::ui::{
@@ -69,8 +69,7 @@ use crate::ui::{
     apply_ui_direction, column, invalidate_logical_boxes, park_new_tab_stops_in_hidden_subtrees,
     resolve_logical_boxes, row, scroll_focus_into_view, spawn_ui_root,
 };
-use crate::ui_element::{ElementCx, SCRIPTS, SampleText, UiAction};
-use crate::ui_elements::ELEMENTS;
+use crate::ui_element::{ElementCx, SCRIPTS, SampleText, UiAction, UiElement};
 use crate::ui_font::{UiFont, register_ui_fonts};
 
 /// The key that flips the layout direction.
@@ -109,7 +108,7 @@ const HEADER_BAR_BACKGROUND: Color = Color::srgb(0.14, 0.16, 0.20);
 
 /// Which cell of the matrix the gallery is currently showing.
 ///
-/// The same axes [`crate::ui_test`] sweeps, exposed as one resource so a person
+/// The same axes the `ui_test` sweep covers, exposed as one resource so a person
 /// can steer to the cell a failing check named and look at it.
 #[derive(Resource, Debug, Clone, Copy)]
 struct GalleryCell {
@@ -178,7 +177,7 @@ impl GalleryCell {
 struct GalleryPage;
 
 /// Logical pixels scrolled per wheel notch reported in [`MouseScrollUnit::Line`],
-/// matching [`crate::virtual_list`] so the two surfaces scroll at one speed.
+/// matching [`sl_viewer_ui_core::virtual_list`] so the two surfaces scroll at one speed.
 const LINE_SCROLL_PIXELS: f32 = 48.0;
 
 /// A marker on the node holding the element cards, so a cell change can clear
@@ -190,6 +189,20 @@ struct GalleryElements;
 #[derive(Component, Debug, Clone, Copy)]
 struct GalleryHeader;
 
+/// **What the gallery shows**, handed in by the caller rather than listed here.
+///
+/// The element and floater registries name every feature module plus the
+/// handful of surfaces that live in the viewer binary itself, so they stay in
+/// the composition root — see the crate docs. This resource is how they reach
+/// the systems below.
+#[derive(Resource, Debug, Clone, Copy)]
+pub struct GalleryRegistry {
+    /// Every panel and widget to render, in registry order.
+    pub elements: &'static [UiElement],
+    /// Every floater to spawn, in registry order.
+    pub floaters: &'static [FloaterElement],
+}
+
 /// Run the gallery: a window, the viewer's real UI scaffold, and every
 /// registered element rendered on its own.
 ///
@@ -199,12 +212,10 @@ struct GalleryHeader;
 /// gallery. The app underneath can still fail — a plugin that will not build, a
 /// renderer thread that panics — and a gallery run that a harness drives
 /// unattended must say so in its exit status rather than reporting success.
-pub fn run() -> AppExit {
-    // Held for the whole process so the Chrome profiler (if enabled) flushes.
-    let _tracing_guards = crate::init_tracing();
+pub fn run(assets: AssetPlugin, registry: GalleryRegistry) -> AppExit {
     info!(
-        elements = ELEMENTS.len(),
-        floaters = FLOATERS.len(),
+        elements = registry.elements.len(),
+        floaters = registry.floaters.len(),
         scripts = SCRIPTS.len(),
         "starting the UI gallery: no login, no world; D flips direction, L cycles \
          script/pseudoloc, S cycles font size"
@@ -221,22 +232,20 @@ pub fn run() -> AppExit {
                     }),
                     ..default()
                 })
-                // Resolve the viewer's own `assets/` the way the viewer binary
-                // does (`crate::asset_root`): the gallery is where appearance is
+                // The viewer's own `assets/` tree, resolved by the caller (it
+                // has to be: the development fallback is a compile-time
+                // `CARGO_MANIFEST_DIR`). The gallery is where appearance is
                 // judged, and a gallery with no skin has no focus ring at all.
-                //
-                // Watch the skin `.css` files: the gallery is the skin-authoring
-                // surface, so an edit re-applies live here without a restart.
-                .set(crate::asset_root::asset_plugin(Some(true)))
-                // The binary installs its own subscriber (`crate::init_tracing`),
-                // as the viewer does; two would clash over the global slot.
+                .set(assets)
+                // The caller installs the tracing subscriber, as the viewer
+                // does; two would clash over the global slot.
                 .disable::<LogPlugin>(),
         )
         // The keyboard half of focus. `DefaultPlugins` wires focus dispatch but
         // not navigation, so without this `Tab` is inert — and a gallery in which
         // nothing can be focused cannot show that anything is focusable.
         .add_plugins(TabNavigationPlugin)
-        // The floater manager, so every window in `FLOATERS` is **live** here:
+        // The floater manager, so every registered window is **live** here:
         // drag the title bar, drag the grip, minimize, dock, close, and watch
         // the front-most one take the highlight. A gallery that only drew a
         // window would answer none of the questions a floater actually raises,
@@ -431,7 +440,7 @@ fn spawn_gallery_camera(mut commands: Commands) {
 /// Scroll the gallery page with the mouse wheel.
 ///
 /// `bevy_ui` clips an `Overflow::scroll` node but does not itself move it — the
-/// app owns the wheel. Mirrors [`crate::virtual_list::scroll_virtual_lists`]:
+/// app owns the wheel. Mirrors [`sl_viewer_ui_core::virtual_list::scroll_virtual_lists`]:
 /// same per-notch step, same `Line` / `Pixel` unit handling. The offset floors at
 /// zero; `bevy_ui` clamps the far end to the scrollable range at layout time.
 fn scroll_gallery(
@@ -451,7 +460,12 @@ fn scroll_gallery(
 }
 
 /// Spawn the chrome and the element list under the scaffold's root.
-fn setup_gallery(mut commands: Commands, root: Res<crate::ui::UiRoot>, cell: Res<GalleryCell>) {
+fn setup_gallery(
+    mut commands: Commands,
+    root: Res<crate::ui::UiRoot>,
+    cell: Res<GalleryCell>,
+    registry: Res<GalleryRegistry>,
+) {
     // **The whole gallery is a right-click surface**, so a pie can be opened at any
     // screen position — including hard against an edge or in a corner, which is the
     // clamped-placement case worth being able to see by hand. This mirrors the real
@@ -526,8 +540,8 @@ fn setup_gallery(mut commands: Commands, root: Res<crate::ui::UiRoot>, cell: Res
             ChildOf(page),
         ))
         .id();
-    spawn_element_cards(&mut commands, elements, *cell);
-    spawn_gallery_floaters(&mut commands, root.0, *cell);
+    spawn_element_cards(&mut commands, elements, *cell, *registry);
+    spawn_gallery_floaters(&mut commands, root.0, *cell, *registry);
 }
 
 /// A marker on a gallery-spawned floater's root, so a cell change can clear and
@@ -542,13 +556,18 @@ struct GalleryFloater;
 /// window opens somewhere the viewer would never open it.
 ///
 /// Closed, because thirty-odd windows at their default positions are one heap.
-/// [`FloaterElement::spawn`](crate::floater::FloaterElement::spawn) leaves a
+/// [`FloaterElement::spawn`] leaves a
 /// window shown — which is what the headless sweep needs, since a hidden subtree
 /// lays out at zero size and would make every check vacuous — so the gallery
 /// closes it again straight afterwards and lets the chip strip open them one at
 /// a time.
-fn spawn_gallery_floaters(commands: &mut Commands, root: Entity, cell: GalleryCell) {
-    for floater in FLOATERS {
+fn spawn_gallery_floaters(
+    commands: &mut Commands,
+    root: Entity,
+    cell: GalleryCell,
+    registry: GalleryRegistry,
+) {
+    for floater in registry.floaters {
         let handle = floater.spawn(commands, root, cell.cx());
         commands
             .entity(handle.root)
@@ -567,14 +586,14 @@ struct GalleryFloaterChip(&'static str);
 /// is not laid out in the page flow, it floats over it. So the page carries the
 /// *openers* and the windows appear on top, which is exactly the relationship
 /// the bottom toolbar and the menu bar have to them in the viewer.
-fn spawn_floater_switcher(commands: &mut Commands, parent: Entity) {
+fn spawn_floater_switcher(commands: &mut Commands, parent: Entity, registry: GalleryRegistry) {
     let card = commands.spawn(card_bundle(parent)).id();
     commands.spawn((
         Text::new(format!(
             "floaters — {} registered windows; click a name to open one, then drag its title \
-             bar, grab the grip, minimize, dock or close it. Every floater in `FLOATERS` is \
+             bar, grab the grip, minimize, dock or close it. Every registered floater is \
              here, and nothing hand-picked.",
-            FLOATERS.len()
+            registry.floaters.len()
         )),
         UiFont::Mono.at(CHROME_FONT_SIZE),
         TextColor(CHROME_COLOR),
@@ -595,7 +614,7 @@ fn spawn_floater_switcher(commands: &mut Commands, parent: Entity) {
             ChildOf(card),
         ))
         .id();
-    for floater in FLOATERS {
+    for floater in registry.floaters {
         commands
             .spawn((
                 switcher_button(),
@@ -847,14 +866,19 @@ fn card_bundle(parent: Entity) -> impl Bundle {
 
 /// Spawn one card per registered element into `parent`.
 ///
-/// Every element in [`ELEMENTS`] and nothing hand-picked, so an element added to
+/// Every element in the registry and nothing hand-picked, so an element added to
 /// the registry shows up here for free — the same property that gets it swept by
 /// the harness.
-fn spawn_element_cards(commands: &mut Commands, parent: Entity, cell: GalleryCell) {
+fn spawn_element_cards(
+    commands: &mut Commands,
+    parent: Entity,
+    cell: GalleryCell,
+    registry: GalleryRegistry,
+) {
     // First, because the windows it opens float over everything below it and a
     // person should not have to scroll to the bottom to find the openers.
-    spawn_floater_switcher(commands, parent);
-    for element in ELEMENTS {
+    spawn_floater_switcher(commands, parent, registry);
+    for element in registry.elements {
         let card = commands.spawn(card_bundle(parent)).id();
         commands.spawn((
             Text::new(format!("{} — {}", element.id, element.summary)),
@@ -873,7 +897,7 @@ fn spawn_element_cards(commands: &mut Commands, parent: Entity, cell: GalleryCel
 /// can be seen appearing when the tabs outgrow the space and staying hidden when
 /// they fit. Auto from available space — the pairs differ only in tab count.
 ///
-/// Not driven by [`ELEMENTS`]: a scrolling strip clips its tabs, and the human
+/// Not driven by the element registry: a scrolling strip clips its tabs, and the human
 /// wants to drive the wheel / arrows here.
 fn spawn_scroll_tabs_cards(commands: &mut Commands, parent: Entity, cell: GalleryCell) {
     use crate::ui_tab::{TabPlacement, spawn_tabs_scroll_demo};
@@ -922,7 +946,7 @@ fn spawn_scroll_tabs_cards(commands: &mut Commands, parent: Entity, cell: Galler
 /// Spawn the resizable-tabs demo card — the one surface where a human can grab
 /// the divider and drag it.
 ///
-/// Not driven by [`ELEMENTS`] because a clipped tab label is deliberate overflow
+/// Not driven by the element registry because a clipped tab label is deliberate overflow
 /// the harness would flag (see [`crate::ui_tab::spawn_tabs_resizable_demo`]); the
 /// gallery hosts it by hand instead. Rebuilt with the rest on a cell change.
 fn spawn_resizable_tabs_card(commands: &mut Commands, parent: Entity, cell: GalleryCell) {
@@ -972,6 +996,7 @@ fn respawn_elements_on_cell_change(
     mut commands: Commands,
     cell: Res<GalleryCell>,
     root: Res<UiRoot>,
+    registry: Res<GalleryRegistry>,
     lists: Query<Entity, With<GalleryElements>>,
     windows: Query<Entity, With<GalleryFloater>>,
 ) {
@@ -980,7 +1005,7 @@ fn respawn_elements_on_cell_change(
     }
     for list in &lists {
         commands.entity(list).despawn_related::<Children>();
-        spawn_element_cards(&mut commands, list, *cell);
+        spawn_element_cards(&mut commands, list, *cell, *registry);
     }
     // The floaters too, and for the same reason: a window's title is baked in at
     // construction, so the only way to see it in the new cell is to rebuild it.
@@ -990,7 +1015,7 @@ fn respawn_elements_on_cell_change(
     for window in &windows {
         commands.entity(window).despawn();
     }
-    spawn_gallery_floaters(&mut commands, root.0, *cell);
+    spawn_gallery_floaters(&mut commands, root.0, *cell, *registry);
 }
 
 /// Keep the header reporting the live cell, so a person always knows which of the
@@ -998,6 +1023,7 @@ fn respawn_elements_on_cell_change(
 fn update_gallery_header(
     cell: Res<GalleryCell>,
     direction: Res<UiDirection>,
+    registry: Res<GalleryRegistry>,
     mut headers: Query<&mut Text, With<GalleryHeader>>,
 ) {
     if !cell.is_changed() && !direction.is_changed() {
@@ -1006,8 +1032,8 @@ fn update_gallery_header(
     let wanted = format!(
         "UI gallery — {} elements, {} floaters | strings: {} (L) | size: {} px (S) | \
          direction: {} (D) | Tab walks, Enter activates (inert), Escape quits",
-        ELEMENTS.len(),
-        FLOATERS.len(),
+        registry.elements.len(),
+        registry.floaters.len(),
         cell.text.name(),
         cell.font_size,
         if direction.is_rtl() { "RTL" } else { "LTR" },

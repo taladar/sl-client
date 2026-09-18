@@ -26,7 +26,7 @@ Shift+arrows — we strafe only in mouselook, third person has no strafe
 at all); `look_up`/`look_down` (bindable mouselook pitch — pitch is
 mouse-only today); and the two media actions `toggle_pause_media` /
 `toggle_enable_media` (ours has only a per-surface pause button in
-`sl-client-bevy-viewer/src/media_controls.rs`, relevant to
+`sl-viewer-world-view/src/media_controls.rs`, relevant to
 [[viewer-media-prim-browser]] and [[viewer-streaming-audio]]). Also add
 the reference's missing default binding Home → `toggle_fly`.
 

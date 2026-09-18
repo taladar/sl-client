@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 313 |
+| ready | 312 |
 | blocked | 41 |
 | in-progress | 22 |
 | bugs | 5 |
-| done | 1182 |
-| deferred | 27 |
+| done | 1183 |
+| deferred | 28 |
 | wont-do | 16 |
-| **total** | **1706** |
+| **total** | **1707** |
 
 ## ideas (100)
 
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (313)
+## ready (312)
 
 ### protocol
 
@@ -305,8 +305,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-attachment-align`](ready/viewer-attachment-align.md) — Attachment
   alignment tool (avatar align) (blocked by `viewer-object-edit-floater-shell`
   (done))
-- [`viewer-audit-binary-module-extraction`](ready/viewer-audit-binary-module-extraction.md)
-  — About 15k lines still in the viewer binary map onto existing feature crates
 - [`viewer-audit-decoded-texture-uploaders`](ready/viewer-audit-decoded-texture-uploaders.md)
   — Eight independent DecodedTexture uploaders each re-decide colour space
 - [`viewer-audit-demo-panels-in-release`](ready/viewer-audit-demo-panels-in-release.md)
@@ -1180,7 +1178,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 
-## done (1182)
+## done (1183)
 
 ### protocol
 
@@ -1469,6 +1467,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-audio-mute-and-device`](done/viewer-audit-audio-mute-and-device.md)
   — Collision sounds ignore the object-sound mute exception, and a device
   fallback lies to the UI
+- [`viewer-audit-binary-module-extraction`](done/viewer-audit-binary-module-extraction.md)
+  — About 15k lines still in the viewer binary map onto existing feature crates
 - [`viewer-audit-camera-reset-resnap`](done/viewer-audit-camera-reset-resnap.md)
   — Escape out of flycam interpolates between two unrelated poses
 - [`viewer-audit-cef-browser-settings-hardening`](done/viewer-audit-cef-browser-settings-hardening.md)
@@ -3775,7 +3775,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Fake grid — a top-objects report with rows in it, and a return that finds
   them
 
-## deferred (27)
+## deferred (28)
 
 ### protocol
 
@@ -3787,6 +3787,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-attachment-menu-reorder-when-implemented`](deferred/viewer-attachment-menu-reorder-when-implemented.md)
   — Re-lay the attachment pies by meaning once most actions are implemented
   (blocked by `viewer-attachment-context-menu` (done))
+- [`viewer-audit-debug-cli-affordances`](deferred/viewer-audit-debug-cli-affordances.md)
+  — Ten debug affordances sit in the shipping viewer --help
 - [`viewer-avatar-impostors-billboard`](deferred/viewer-avatar-impostors-billboard.md)
   — Billboard impostors for distant avatars
 - [`viewer-avatar-menu-reorder-when-implemented`](deferred/viewer-avatar-menu-reorder-when-implemented.md)

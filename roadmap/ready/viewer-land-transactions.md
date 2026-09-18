@@ -21,7 +21,7 @@ Our nine-tab About Land floater
 (`sl-client-bevy-viewer/src/about_land.rs`) has none of these:
 `AboutLandAction` covers only Apply/Refresh/pickers/landing/access-add,
 and the land pie's Buy This Land / Buy Pass slices are greyed
-`UNIMPLEMENTED` in `sl-client-bevy-viewer/src/land_menu.rs`. Every write
+`UNIMPLEMENTED` in `sl-viewer-ui-context-menus/src/land_menu.rs`. Every write
 path already exists unused in sl-proto (`sl-proto/src/command.rs`):
 `ParcelBuy` (with the group-owned variant for Buy For Group),
 `ParcelDeedToGroup`, `ParcelRelease` (abandon), `ParcelReclaim`,

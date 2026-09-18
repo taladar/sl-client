@@ -49,7 +49,7 @@
 //! worth stating because they are deliberate, not oversights:
 //!
 //! - **Eight slots, not nine.** The reference self pie has *nine* top-level
-//!   slices (it lets the ring overflow); ours is a hard eight ([`PIE_SLICES`]).
+//!   slices (it lets the ring overflow); ours is a hard eight ([`crate::pie_menu::PIE_SLICES`]).
 //!   The ninth reference slice is `Textures` (a debug texture dump), which we fold
 //!   into the `Appearance >` sub-pie next to the other debug entries, so all eight
 //!   compass positions still match the reference exactly.
@@ -67,7 +67,7 @@
 //! Picking is deliberately reusable: every pickable piece of an avatar — the
 //! placeholder sphere, each rigged body part, each worn rigged submesh, and the
 //! floating name tag — carries [`crate::world_api::AvatarPickTarget`] with the
-//! avatar's agent id. [`request_avatar_menu_on_right_click`] resolves a
+//! avatar's agent id. `request_avatar_menu_on_right_click` resolves a
 //! right-click to an agent two ways, mirroring the reference's "name tag or the
 //! avatar itself": the on-screen tag rect test
 //! ([`crate::name_tag_billboard::NameTagHitTest`] — tags are world-space
@@ -119,7 +119,7 @@ use crate::world_api::targeted_ray_cast::TargetedRayCast;
 /// declare (self has Stand / Sit, other has IM / Mute), and the picked agent —
 /// the only thing a handler needs beyond the action name — is carried out of band
 /// in [`AvatarMenuTarget`], not baked into the tag.
-pub(crate) const AVATAR_MENU_ELEMENT: &str = "avatar-menu";
+pub const AVATAR_MENU_ELEMENT: &str = "avatar-menu";
 
 // ---------------------------------------------------------------------------
 // The condition vocabulary. Every name here is a compile-time constant; the set
@@ -127,33 +127,34 @@ pub(crate) const AVATAR_MENU_ELEMENT: &str = "avatar-menu";
 // ---------------------------------------------------------------------------
 
 /// Holds when the local avatar is **sitting** — enables self "Stand Up".
-pub(crate) const SELF_SITTING: &str = "self-sitting";
+pub const SELF_SITTING: &str = "self-sitting";
 
 /// Holds when the local avatar is **standing** — enables self "Sit Down".
-pub(crate) const SELF_STANDING: &str = "self-standing";
+pub const SELF_STANDING: &str = "self-standing";
 
 /// Holds when the picked agent is **not already a friend** — enables "Add as
 /// Friend", matching the reference's `Avatar.EnableAddFriend`.
-pub(crate) const TARGET_NOT_FRIEND: &str = "target-not-friend";
+pub const TARGET_NOT_FRIEND: &str = "target-not-friend";
 
 /// Holds when the picked agent is **not** already pinned to "always draw in
 /// full" — enables More ▸ Render ▸ Fully.
-pub(crate) const TARGET_RENDER_NOT_FULLY: &str = "target-render-not-fully";
+pub const TARGET_RENDER_NOT_FULLY: &str = "target-render-not-fully";
 
 /// Holds when the picked agent is **not** already pinned to "never draw in
 /// full" — enables More ▸ Render ▸ Never.
-pub(crate) const TARGET_RENDER_NOT_NEVER: &str = "target-render-not-never";
+pub const TARGET_RENDER_NOT_NEVER: &str = "target-render-not-never";
 
 /// Holds when the picked agent **has** a standing render exception — enables
 /// More ▸ Render ▸ Normally, which clears it. The reference shows the three as
 /// check items; a pie slice cannot carry a tick, so the decision already in
 /// force is the one shown greyed out.
-pub(crate) const TARGET_RENDER_EXCEPTED: &str = "target-render-excepted";
+pub const TARGET_RENDER_EXCEPTED: &str = "target-render-excepted";
 
 /// The render conditions that hold for an agent whose standing exception is
 /// `setting` — every slice of the Render sub-pie except the one already in
 /// force.
-pub(crate) fn render_pie_conditions(
+#[must_use]
+pub fn render_pie_conditions(
     setting: crate::avatar_complexity::RenderOverride,
 ) -> Vec<&'static str> {
     use crate::avatar_complexity::RenderOverride;
@@ -178,7 +179,7 @@ pub(crate) fn render_pie_conditions(
 
 /// The "Mute >" sub-pie of the other-avatar pie (reference slot 1 / north-east),
 /// shared verbatim by the attachment-other pie ([`crate::attachment_menu`]).
-pub(crate) static OTHER_MUTE_PIE: PieMenuDef = PieMenuDef {
+pub static OTHER_MUTE_PIE: PieMenuDef = PieMenuDef {
     label: "Mute",
     entries: &[
         PieEntry {
@@ -432,7 +433,7 @@ static OTHER_DERENDER_PIE: PieMenuDef = PieMenuDef {
 };
 
 /// The pie for **another** avatar. See `menu_pie_avatar_other.xml`.
-pub(crate) static AVATAR_OTHER_PIE: PieMenuDef = PieMenuDef {
+pub static AVATAR_OTHER_PIE: PieMenuDef = PieMenuDef {
     label: "Avatar",
     entries: &[
         PieEntry {
@@ -606,7 +607,7 @@ static SELF_TAKEOFF_PIE: PieMenuDef = PieMenuDef {
 
 /// The "Reset >" sub-pie of the self "Appearance >" pie, shared verbatim by
 /// both attachment pies' reset tails ([`crate::attachment_menu`]).
-pub(crate) static SELF_RESET_PIE: PieMenuDef = PieMenuDef {
+pub static SELF_RESET_PIE: PieMenuDef = PieMenuDef {
     label: "Reset",
     entries: &[
         PieEntry {
@@ -697,7 +698,7 @@ static SELF_APPEARANCE_PIE: PieMenuDef = PieMenuDef {
 };
 
 /// The pie for your **own** avatar. See `menu_pie_avatar_self.xml`.
-pub(crate) static AVATAR_SELF_PIE: PieMenuDef = PieMenuDef {
+pub static AVATAR_SELF_PIE: PieMenuDef = PieMenuDef {
     label: "Self",
     entries: &[
         PieEntry {
@@ -769,7 +770,7 @@ pub(crate) static AVATAR_SELF_PIE: PieMenuDef = PieMenuDef {
 /// How far the pointer may travel between a right-button press and release and
 /// still count as a **click** rather than a drag, in logical pixels.
 ///
-/// This viewer binds a right-**drag** to camera free-look ([`crate::camera`]), so
+/// This viewer binds a right-**drag** to camera free-look ([`sl_viewer_world_view::camera`]), so
 /// the menu must open only on a right-*click*: press and release without moving.
 /// A few pixels of slop absorbs the tiny motion of an ordinary click.
 const RIGHT_CLICK_DRAG_SLOP: f32 = 6.0;
@@ -788,33 +789,33 @@ struct RightClickGesture {
 ///
 /// The pie's action strings are `&'static` and cannot carry a UUID, so the target
 /// is stashed here when the menu opens and read back when an action fires. Set on
-/// every open — by [`open_avatar_menu`], and by the attachment pies' opener
+/// every open — by `open_avatar_menu`, and by the attachment pies' opener
 /// ([`crate::attachment_menu`]), which stores the **wearer** so its
 /// avatar-derived slices dispatch through the shared handler. A stale value
 /// between opens is harmless because no avatar-menu [`UiAction`] is emitted
 /// unless a pie is open.
 #[derive(Resource, Debug, Default, Clone, Copy)]
-pub(crate) struct AvatarMenuTarget {
+pub struct AvatarMenuTarget {
     /// The picked agent, or `None` before any avatar menu has opened.
-    pub(crate) agent: Option<AgentKey>,
+    pub agent: Option<AgentKey>,
 }
 
 /// A resolved request to open an avatar pie on `agent` at screen point `at`.
 ///
-/// Written by [`request_avatar_menu_on_right_click`] once a right-click has been
+/// Written by `request_avatar_menu_on_right_click` once a right-click has been
 /// resolved to an avatar (by name tag or body), and consumed by
-/// [`open_avatar_menu`], which decides self vs other and computes the conditions.
+/// `open_avatar_menu`, which decides self vs other and computes the conditions.
 #[derive(Message, Debug, Clone, Copy)]
-pub(crate) struct OpenAvatarMenu {
+pub struct OpenAvatarMenu {
     /// The picked avatar.
-    pub(crate) agent: AgentKey,
+    pub agent: AgentKey,
     /// Where to centre the pie, in logical pixels.
-    pub(crate) at: Vec2,
+    pub at: Vec2,
 }
 
 /// The plugin wiring the avatar context menu into the viewer.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct AvatarMenuPlugin;
+pub struct AvatarMenuPlugin;
 
 impl Plugin for AvatarMenuPlugin {
     /// Register the target resource, the open request, and the three systems that
@@ -1102,7 +1103,7 @@ fn request_avatar_menu_on_right_click(
 /// pies, an object face (surface-refined) to the object or attachment pies,
 /// and bare terrain to the land pie — the same dispatch the synchronous
 /// resolver used to run on ray casts.
-pub(crate) fn resolve_right_click_pick(
+pub fn resolve_right_click_pick(
     mut picks: MessageReader<GpuPickResolved>,
     object_picker: ObjectPicker,
     ray_cast: TargetedRayCast,

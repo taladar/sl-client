@@ -39,7 +39,7 @@
 //! parcel the right-click landed on. The clicked ground point is stashed
 //! ([`LandMenuTarget`]) when the pie opens and resolved to a parcel by testing
 //! each of the current region's parcel membership bitmaps
-//! ([`about_land_target`]); a click that lands off the current region's parcels
+//! (`about_land_target`); a click that lands off the current region's parcels
 //! falls back to the agent's own parcel.
 //!
 //! # How a pick reaches here
@@ -67,12 +67,12 @@ use crate::ui_element::UiAction;
 use crate::world_api::{EditTool, EditToolState, SelfGroundSit};
 
 /// The `element` the land pie attributes its [`UiAction`]s to.
-pub(crate) const LAND_MENU_ELEMENT: &str = "land-menu";
+pub const LAND_MENU_ELEMENT: &str = "land-menu";
 
 /// The land pie. See `menu_pie_land.xml`: About Land, Create, Go Here, Sit
 /// Here, Mute Part. Own., Buy Pass, Edit Terrain, Buy This Land (reference
 /// slots 0..7 → compass East..SouthEast).
-pub(crate) static LAND_PIE: PieMenuDef = PieMenuDef {
+pub static LAND_PIE: PieMenuDef = PieMenuDef {
     label: "Land",
     entries: &[
         PieEntry {
@@ -157,31 +157,31 @@ pub(crate) static LAND_PIE: PieMenuDef = PieMenuDef {
 ///
 /// Written by the shared right-click resolver in [`crate::avatar_menu`] once a
 /// right-click has resolved to bare terrain nearer than any avatar or object,
-/// and consumed by [`open_land_menu`]. Unlike the object and avatar pies the
+/// and consumed by `open_land_menu`. Unlike the object and avatar pies the
 /// land pie needs no target stash yet: its one wired action (Sit Here) is
 /// global. The clicked ground *position* joins the open request when the first
 /// action that consumes it (Go Here, Buy Pass) goes live.
 #[derive(Message, Debug, Clone, Copy)]
-pub(crate) struct OpenLandMenu {
+pub struct OpenLandMenu {
     /// Where to centre the pie, in logical pixels.
-    pub(crate) at: Vec2,
+    pub at: Vec2,
     /// The world-space ground point the right-click landed on — the subject the
     /// About Land slice resolves to a parcel.
-    pub(crate) point: Vec3,
+    pub point: Vec3,
 }
 
 /// The world-space ground point the currently-open land pie was opened on,
-/// stashed by [`open_land_menu`] so a slice picked later ([`handle_land_menu_actions`])
+/// stashed by `open_land_menu` so a slice picked later (`handle_land_menu_actions`)
 /// can act on it. The land pie carries no target entity; this is its equivalent.
 #[derive(Resource, Debug, Default)]
-pub(crate) struct LandMenuTarget {
+pub struct LandMenuTarget {
     /// The world-space ground point of the pick, or `None` before any pick.
-    pub(crate) point: Option<Vec3>,
+    pub point: Option<Vec3>,
 }
 
 /// The plugin wiring the land context menu into the viewer.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct LandMenuPlugin;
+pub struct LandMenuPlugin;
 
 impl Plugin for LandMenuPlugin {
     /// Register the open request and the systems that turn a resolved terrain

@@ -35,8 +35,8 @@
 //! not their name. The card is raised immediately with a `(loading…)` owner
 //! placeholder and the owner name is requested ([`Command::RequestAvatarNames`] /
 //! [`Command::RequestGroupNames`]); when the reply arrives
-//! ([`resolve_load_url_owner_names`]) the title line is rewritten in place. The
-//! pending state rides on the title entity itself ([`PendingOwnerName`]), so a
+//! (`resolve_load_url_owner_names`) the title line is rewritten in place. The
+//! pending state rides on the title entity itself (`PendingOwnerName`), so a
 //! dismissed card drops its resolution with no dangling bookkeeping.
 //!
 //! # Links in the body are deferred
@@ -145,7 +145,8 @@ const BUTTON_BORDER: Color = Color::srgb(0.40, 0.50, 0.62);
 
 /// The plugin: drives the `LoadURL` cards into the shared notification channel and
 /// resolves their owner names after the fact.
-pub(crate) struct LoadUrlPlugin;
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LoadUrlPlugin;
 
 impl Plugin for LoadUrlPlugin {
     /// Ingest received `LoadURL` messages into the shared toast channel and
@@ -634,13 +635,9 @@ fn spawn_bounded_text(
 
 /// The gallery / `ui_test` specimen: a static `LoadURL` card with a resolved
 /// owner name, so the heading / title / message / URL / action layout is swept
-/// login-free (a live card needs a scripted object). Registered in
-/// [`crate::ui_element::ELEMENTS`]; its buttons report an inert [`UiAction`].
-pub(crate) fn spawn_load_url_specimen(
-    commands: &mut Commands,
-    parent: Entity,
-    cx: ElementCx,
-) -> Entity {
+/// login-free (a live card needs a scripted object). Registered in the viewer
+/// binary's `ui_elements::ELEMENTS`; its buttons report an inert [`UiAction`].
+pub fn spawn_load_url_specimen(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
     let content = LoadUrlContent {
         heading: cx.text("Open a web page?"),
         title: cx.text("'Info Kiosk' owned by Shopkeeper Resident"),

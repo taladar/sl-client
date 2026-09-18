@@ -20,12 +20,12 @@
 
 use crate::ui_element::UiElement;
 
-/// **The registry.** Every UI element, checked by [`crate::ui_test`] and
-/// rendered by [`crate::gallery`].
+/// **The registry.** Every UI element, checked by the `ui_test` sweep and
+/// rendered by `sl-viewer-gallery`.
 ///
 /// Add a panel or widget here and it inherits the whole suite. See the [module
 /// documentation](self).
-pub(crate) const ELEMENTS: &[UiElement] = &[
+pub const ELEMENTS: &[UiElement] = &[
     UiElement {
         id: "label",
         summary: "A text label in a decorated container — the pattern a text run must be \

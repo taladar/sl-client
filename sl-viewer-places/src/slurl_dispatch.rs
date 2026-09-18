@@ -3,7 +3,7 @@
 //!
 //! # The two halves
 //!
-//! Parsing already lives in [`crate::url_linkify`] — the shared matcher that turns
+//! Parsing already lives in [`sl_viewer_platform::url_linkify`] — the shared matcher that turns
 //! a run of text into [`LinkTarget`]s, faithful to the reference `LLUrlRegistry`.
 //! This module is the **other half**, the reference `LLURLDispatcher` /
 //! `LLCommandHandler` family: it takes a parsed [`LinkTarget`] and routes it to a
@@ -13,16 +13,16 @@
 //! # Sources
 //!
 //! A SLURL reaches the dispatcher from several places, all funnelled through the
-//! one routing core ([`route_target`]):
+//! one routing core (`route_target`):
 //!
 //! - **in-app clicks** — a link the user clicks in chat, a notification, a
 //!   profile: the [`crate::linkified_text`] widget emits [`LinkActivated`], which
-//!   [`dispatch_link_activations`] routes (skipping plain web links, which the
+//!   `dispatch_link_activations` routes (skipping plain web links, which the
 //!   widget opens itself — the reference internal/external browser split).
 //! - **external / command-line** — the OS `secondlife://` protocol handler
 //!   launches the viewer with the SLURL as an argument (the reference
-//!   `secondlife:` registration). [`capture_startup_slurl`] stashes it and
-//!   [`apply_startup_slurl`] dispatches it once the agent is in-region. Any other
+//!   `secondlife:` registration). `capture_startup_slurl` stashes it and
+//!   `apply_startup_slurl` dispatches it once the agent is in-region. Any other
 //!   caller can raise [`DispatchSlurl`] with a raw string to the same effect.
 //!
 //! # Location handlers (region name → destination)
@@ -32,13 +32,13 @@
 //! name**, which must be resolved to a grid position before the viewer can act —
 //! the reference `LLWorldMapMessage::sendNamedRegionRequest` round trip. The
 //! dispatcher fires [`Command::RequestMapByName`] and parks the request in
-//! [`PendingLocations`]; [`drive_location_resolves`] completes it when the
+//! `PendingLocations`; `drive_location_resolves` completes it when the
 //! matching `MapBlockReply` ([`SlSessionEvent::MapBlock`]) lands — teleporting
 //! (through the shared [`issue_teleport`] backend, so it drives the same progress
 //! overlay every teleport surface uses) or centring the world map
 //! ([`OpenWorldMap`]). A parcel link (`app/parcel/<id>/about`) resolves its
 //! anchor the same way through [`Command::RequestParcelInfo`] /
-//! [`SlSessionEvent::ParcelDetails`] ([`drive_parcel_resolves`]).
+//! [`SlSessionEvent::ParcelDetails`] (`drive_parcel_resolves`).
 //!
 //! A bare **teleport** app link (`app/teleport/...`) is guarded behind a
 //! confirmation (the reference `TeleportViaSLAPP` alert), so a hostile chat line
@@ -49,7 +49,7 @@
 //! # Split of responsibilities
 //!
 //! The `agent/.../inspect`, `objectim` and `app/object/.../inspect` targets — the
-//! mini-inspector popups — are handled by [`crate::inspector_popup`]
+//! mini-inspector popups — are handled by [`sl_viewer_notices::inspector_popup`]
 //! ([[viewer-inspector-popups]]); this dispatcher deliberately leaves them alone
 //! so the two consumers partition the [`LinkActivated`] stream cleanly.
 //!
@@ -67,6 +67,7 @@ use sl_client_bevy::{
     SlSessionEvent, Vector,
 };
 
+use crate::intents::DispatchSlurl;
 use crate::intents::OpenAvatarProfile;
 use crate::intents::OpenGroupProfile;
 use crate::intents::OpenWebBrowser;
@@ -76,15 +77,15 @@ use crate::intents::{BeginTeleportFlow, TeleportTarget, issue_teleport};
 use crate::intents::{ConversationKey, OpenConversation};
 use crate::linkified_text::LinkActivated;
 use crate::notifications::{NotificationResponse, ShowNotification};
-use crate::system_browser::{ExternalUrl, open_in_system_browser};
-use crate::url_linkify::{LinkTarget, LocationCoords, LocationKind, TextRun, linkify};
 use crate::world_api::AvatarState;
 use crate::world_map::OpenWorldMap;
+use sl_viewer_platform::system_browser::{ExternalUrl, open_in_system_browser};
+use sl_viewer_platform::url_linkify::{LinkTarget, LocationCoords, LocationKind, TextRun, linkify};
 
 /// The catalogue template the teleport-SLURL confirmation raises (the reference
 /// `TeleportViaSLAPP` alert). Answered "Teleport" resolves the region and jumps;
 /// "Cancel" (or a dismiss) drops the parked destination.
-pub(crate) const TELEPORT_VIA_SLAPP_TEMPLATE: &str = "TeleportViaSLAPP";
+pub const TELEPORT_VIA_SLAPP_TEMPLATE: &str = "TeleportViaSLAPP";
 
 /// The affirmative button name the [`TELEPORT_VIA_SLAPP_TEMPLATE`] form carries
 /// (the stable reference `OK` functor name; its visible label reads "Teleport").
@@ -115,18 +116,6 @@ const REGION_SIZE_METERS: f64 = 256.0;
 // ---------------------------------------------------------------------------
 // Public entry: a raw SLURL string from an external source.
 // ---------------------------------------------------------------------------
-
-/// A request to parse and dispatch a raw SLURL / app-command string — the entry
-/// point for sources outside the in-app link widgets: the `secondlife://` OS
-/// protocol handler / command line ([`apply_startup_slurl`]) and any future
-/// caller (a landmark's embedded SLURL, a typed address bar). The string is run
-/// through the same [`linkify`] matcher the text layer uses, and its first
-/// recognised link is routed.
-#[derive(Message, Debug, Clone)]
-pub(crate) struct DispatchSlurl {
-    /// The raw URL string to parse and act on.
-    pub(crate) url: String,
-}
 
 /// The command-line SLURL captured at startup (the reference `secondlife:`
 /// protocol argument), held until the agent is in-region and it can be
@@ -197,7 +186,7 @@ struct PendingLocations {
 /// Wires the SLURL dispatcher: the routing systems, the async region / parcel
 /// resolvers, the teleport-confirmation reader, and the startup-SLURL capture.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct SlurlDispatchPlugin;
+pub struct SlurlDispatchPlugin;
 
 impl Plugin for SlurlDispatchPlugin {
     fn build(&self, app: &mut App) {
@@ -368,7 +357,7 @@ fn route_agent(agent: AgentKey, action: &str, out: &mut DispatchOut, avatars: &A
 
 /// Route a location SLURL by its form: a confirmed teleport for the `app/teleport`
 /// app, otherwise open the world map centred on the destination. Both need the
-/// region name resolved first, so the work is parked in [`PendingLocations`].
+/// region name resolved first, so the work is parked in `PendingLocations`.
 fn route_location(
     kind: LocationKind,
     region: &str,
@@ -740,7 +729,7 @@ fn apply_startup_slurl(
 // ---------------------------------------------------------------------------
 
 /// The first recognised link in `text`, or `None` if it holds none.
-fn first_link(text: &str) -> Option<crate::url_linkify::LinkMatch> {
+fn first_link(text: &str) -> Option<sl_viewer_platform::url_linkify::LinkMatch> {
     linkify(text).into_iter().find_map(|run| match run {
         TextRun::Link(link) => Some(link),
         TextRun::Plain(_) => None,
@@ -782,7 +771,7 @@ mod tests {
         DEFAULT_HORIZONTAL, MAX_ALTITUDE, MAX_HORIZONTAL, first_link, global_axis, is_slurl_arg,
         region_local,
     };
-    use crate::url_linkify::{LinkTarget, LocationKind};
+    use sl_viewer_platform::url_linkify::{LinkTarget, LocationKind};
 
     /// A region-local coordinate defaults an omitted axis and clamps an
     /// out-of-range one, staying within the region / altitude bounds.

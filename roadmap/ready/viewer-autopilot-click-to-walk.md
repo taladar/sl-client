@@ -40,7 +40,7 @@ movement control bits (`movement.rs`).
 
 The parity audit found the context-menu entry points unwired: the land
 pie's **Go Here** slice (`go-here` in
-`sl-client-bevy-viewer/src/land_menu.rs`) and the avatar-other /
+`sl-viewer-ui-context-menus/src/land_menu.rs`) and the avatar-other /
 attachment-other **Go To** slices (`go-to`, reference `GoToObject`) are
 UNIMPLEMENTED placeholders that must dispatch onto the autopilot core
 this task builds. Also in scope: the land pie's **Sit Here** upgrade —

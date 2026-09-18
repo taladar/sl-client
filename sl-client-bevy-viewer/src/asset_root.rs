@@ -80,12 +80,13 @@ struct AssetRoot {
 }
 
 /// The [`AssetPlugin`] the viewer's binaries run with: Bevy's default with the
-/// asset root pinned to [`resolve`]'s answer, and the skin-watching override
+/// asset root pinned to `resolve`'s answer, and the skin-watching override
 /// passed through (`--watch-skins`, and the gallery, which always watches).
 ///
 /// Logs what it resolved — once per process, since each binary builds its
 /// `App` once — and shouts if the tree is not there.
-pub(crate) fn asset_plugin(watch_for_changes_override: Option<bool>) -> AssetPlugin {
+#[must_use]
+pub fn asset_plugin(watch_for_changes_override: Option<bool>) -> AssetPlugin {
     let root = resolve();
     report(&root, &missing_entries(&root, &|path| path.is_dir()));
     AssetPlugin {

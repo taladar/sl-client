@@ -33,8 +33,9 @@
 //! # Split with the dispatcher
 //!
 //! This module owns the `agent/.../inspect`, `objectim` and
-//! `app/object/.../inspect` link targets; every other SLURL / app link is the
-//! [`crate::slurl_dispatch`]'s ([[viewer-slurl-parse-dispatch]]). The two read the
+//! `app/object/.../inspect` link targets; every other SLURL / app link belongs
+//! to `sl-viewer-places`'s `slurl_dispatch` ([[viewer-slurl-parse-dispatch]]).
+//! The two read the
 //! same [`LinkActivated`] stream and partition it by target kind. Show on Map
 //! hands its SLURL back to the dispatcher via [`DispatchSlurl`].
 //!
@@ -53,12 +54,12 @@ use sl_client_bevy::{
 };
 
 use crate::i18n::Translator;
+use crate::intents::DispatchSlurl;
 use crate::intents::OpenAvatarProfile;
 use crate::intents::RequestBlock;
 use crate::intents::RequestFriendship;
 use crate::intents::{ConversationKey, OpenConversation};
 use crate::linkified_text::LinkActivated;
-use crate::slurl_dispatch::DispatchSlurl;
 use crate::ui::{UiRoot, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_name_link::{NameLink, NameLinkSpec, NameTarget, set_name_link, spawn_name_link};
@@ -138,26 +139,26 @@ const INSPECTOR_Z: i32 = i32::MAX - 1000;
 /// Open the avatar inspector on `agent`, anchored near `at` (a screen position,
 /// normally the click point).
 #[derive(Message, Debug, Clone, Copy)]
-pub(crate) struct OpenAvatarInspector {
+pub struct OpenAvatarInspector {
     /// The resident to inspect.
-    pub(crate) agent: AgentKey,
+    pub agent: AgentKey,
     /// The screen anchor (the click point).
-    pub(crate) at: Vec2,
+    pub at: Vec2,
 }
 
 /// Open the object inspector, anchored near `at`.
 #[derive(Message, Debug, Clone)]
-pub(crate) struct OpenObjectInspector {
+pub struct OpenObjectInspector {
     /// The screen anchor (the click point).
-    pub(crate) at: Vec2,
+    pub at: Vec2,
     /// Which object, and what is already known about it.
-    pub(crate) target: ObjectInspectTarget,
+    pub target: ObjectInspectTarget,
 }
 
 /// Which object an [`OpenObjectInspector`] addresses, and the data the link
 /// already carried.
 #[derive(Debug, Clone)]
-pub(crate) enum ObjectInspectTarget {
+pub enum ObjectInspectTarget {
     /// A remote object announced in chat (`objectim`): its name / owner / location
     /// came in the link, so nothing is fetched.
     Remote {
@@ -230,7 +231,7 @@ enum InspectorSubject {
 /// Wires the inspector popups: the link routing, the two open handlers, the
 /// content-reply / owner-name updaters, and the self-dismiss lifecycle.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct InspectorPopupPlugin;
+pub struct InspectorPopupPlugin;
 
 impl Plugin for InspectorPopupPlugin {
     fn build(&self, app: &mut App) {

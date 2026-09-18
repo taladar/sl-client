@@ -10,14 +10,16 @@
 //! The gallery answers the one question a machine cannot: **does this look
 //! right**. Whether geometry is *valid* — finite, unit-normalled, in-range,
 //! correctly weighted, correctly sampled — is machine-checkable, and
-//! `crate::render_test` checks it across every scene at every LOD at every
+//! the viewer binary's `render_test` sweep checks it across every scene at
+//! every LOD at every
 //! sample of its timeline. Walking that grid by eye is exactly the combinatorial
 //! explosion the harness exists to end, so the gallery does not try.
 //!
 //! What is left for a human is real and cannot be automated: is the shape right,
 //! is the shading plausible, does the light fall where it should, is the twist
 //! going the right way. And the discovery loop — a person notices something wrong
-//! here, and the fix is a **check** in `crate::render_test`, which from then on
+//! here, and the fix is a **check** in the viewer binary's `render_test`
+//! sweep, which from then on
 //! runs against every scene forever. The gallery is where bugs are *found*; the
 //! harness is where they stay found.
 //!
@@ -168,7 +170,8 @@ const CHROME_COLOR: Color = Color::srgb(0.70, 0.76, 0.85);
 
 /// Which cell of the matrix the gallery is showing.
 ///
-/// The same axes `crate::render_test` sweeps, exposed as one resource so a
+/// The same axes the viewer binary's `render_test` sweep covers, exposed as one
+/// resource so a
 /// person can steer to the cell a failing check named and look at it.
 #[derive(Resource, Debug, Clone, Copy)]
 struct GalleryCell {
@@ -347,9 +350,7 @@ type HasDeclaration = Or<(
 /// gallery. The app underneath can still fail — a plugin that will not build, a
 /// renderer thread that panics — and a gallery run that a harness drives
 /// unattended must say so in its exit status rather than reporting success.
-pub fn run() -> AppExit {
-    // Held for the whole process so the Chrome profiler (if enabled) flushes.
-    let _tracing_guards = crate::init_tracing();
+pub fn run(assets: AssetPlugin) -> AppExit {
     let args = GalleryArgs::parse();
     let start = match args.scene.as_deref() {
         None => 0,
@@ -395,12 +396,13 @@ pub fn run() -> AppExit {
                     }),
                     ..default()
                 })
-                // Resolve the viewer's own `assets/` the way the viewer binary
-                // does (`crate::asset_root`), so a scene run out of `target/`
-                // reads the same tree a `cargo run` would.
-                .set(crate::asset_root::asset_plugin(None))
-                // The binary installs its own subscriber (`crate::init_tracing`),
-                // as the viewer does; two would clash over the global slot.
+                // The viewer's own `assets/` tree, resolved by the caller (it
+                // has to be: the development fallback is a compile-time
+                // `CARGO_MANIFEST_DIR`), so a scene run out of `target/` reads
+                // the same tree a `cargo run` would.
+                .set(assets)
+                // The caller installs the tracing subscriber, as the viewer
+                // does; two would clash over the global slot.
                 .disable::<LogPlugin>(),
         )
         .insert_resource(GalleryCell {
@@ -425,7 +427,7 @@ pub fn run() -> AppExit {
             WaterMaterialPlugin,
         ))
         // The viewer's own time-varying systems and scene asset collections, the
-        // same ones `crate::render_test` gets. Without a scene's driver the scene
+        // same ones the `render_test` sweep gets. Without a scene's driver the scene
         // renders **nothing**: its emitter spawns and no cloud is ever built, which
         // is what the particle fountain showed the first time it was looked at — an
         // empty screen that no check could complain about, because the scene was
@@ -546,7 +548,8 @@ fn setup_chrome(mut commands: Commands) {
 
 /// Report what the shown scene **declares** about itself.
 ///
-/// Not decoration. The declared tier (`crate::render_test`) is the harness saying
+/// Not decoration. The declared tier (the `render_test` sweep) is the harness
+/// saying
 /// "this scene claims to be 1 m across and symmetric about X, and I checked it" —
 /// but a claim can be *wrong* in a way no check can catch, because the check only
 /// compares the geometry against the claim. If a fixture declares a box is

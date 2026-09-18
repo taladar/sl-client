@@ -13,6 +13,8 @@
 //! - [`sound_cache`] and [`environment_assets`] — on-disk caches keyed through
 //!   [`paths`].
 //! - [`asset_retry`] — the backoff policy for a fetch that failed.
+//! - [`local_time`] — the system time zone, captured once while the process
+//!   is still single-threaded, for every surface that stamps a local date.
 //! - [`clipboard`] — OS clipboard access.
 //! - [`file_dialog`] — the host's file-open dialog, through the desktop's own
 //!   file chooser.
@@ -37,6 +39,7 @@ pub mod asset_retry;
 pub mod clipboard;
 pub mod environment_assets;
 pub mod file_dialog;
+pub mod local_time;
 pub mod paths;
 pub mod sound_cache;
 pub mod system_browser;

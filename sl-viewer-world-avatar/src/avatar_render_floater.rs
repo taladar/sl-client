@@ -13,7 +13,7 @@
 //! - **Remove** drops the exception, handing that person back to the automatic
 //!   rules (the reference's "Remove From Exceptions").
 //! - **Add Fully… / Add Never…** open the shared avatar picker
-//!   ([`crate::avatar_picker`]), so someone who is nowhere near you — the usual
+//!   (`sl-viewer-pickers`), so someone who is nowhere near you — the usual
 //!   case for a decision made after an event — can be added by name. This is the
 //!   reference's `+` menu, whose two entries are the same two settings.
 //!
@@ -39,25 +39,25 @@ use crate::avatar_complexity::RenderOverride;
 use crate::avatar_render_settings::{
     AvatarRenderSettings, RenderException, RequestRenderException,
 };
-use crate::floater::{
+use sl_viewer_intents::{AvatarPicked, OpenAvatarPicker};
+use sl_viewer_platform::local_time::LocalTimeZone;
+use sl_viewer_settings::ViewerSettings;
+use sl_viewer_ui_core::i18n::{TransArgs, Translated, Translator};
+use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems, column, row};
+use sl_viewer_ui_core::ui_font::UiFont;
+use sl_viewer_ui_core::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
+use sl_viewer_ui_widgets::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, floater_shown, spawn_floater,
 };
-use crate::i18n::{TransArgs, Translated, Translator};
-use crate::intents::{AvatarPicked, OpenAvatarPicker};
-use crate::settings::ViewerSettings;
-use crate::snapshot_floater::LocalTimeZone;
-use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
-use crate::ui_font::UiFont;
-use crate::ui_search::{SearchFieldSpec, spawn_search_field};
-use crate::ui_table::{
+use sl_viewer_ui_widgets::ui_search::{SearchFieldSpec, spawn_search_field};
+use sl_viewer_ui_widgets::ui_table::{
     TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells, TableSelectionMode,
     TableSortDefault, TableSpec, TableState, register_table_settings, set_table_cell, spawn_table,
     spawn_table_row,
 };
-use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 
 /// The floater's stable id (persistence, `SL_VIEWER_OPEN_FLOATER`).
-pub(crate) const RENDER_SETTINGS_FLOATER_ID: &str = "avatar-render-settings";
+pub const RENDER_SETTINGS_FLOATER_ID: &str = "avatar-render-settings";
 
 /// The persisted-settings section the table's sort / widths live under.
 const RENDER_SETTINGS_SECTION: &[&str] = &["avatarrender"];
@@ -156,17 +156,18 @@ static RENDER_SETTINGS_TABLE: TableSpec = TableSpec {
 /// they agree with what is on screen even when the live name cache has moved on
 /// from the name stored with the decision.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ExceptionRow {
+pub struct ExceptionRow {
     /// The stored decision this row presents.
-    pub(crate) entry: RenderException,
+    pub entry: RenderException,
     /// What the Name column reads.
-    pub(crate) label: String,
+    pub label: String,
 }
 
 /// Whether `row` survives the list's filter — a case-insensitive substring of
 /// the shown name, or of the id, so an entry whose name has not resolved is
 /// still findable by what the list *does* show.
-pub(crate) fn matches_filter(row: &ExceptionRow, filter: &str) -> bool {
+#[must_use]
+pub fn matches_filter(row: &ExceptionRow, filter: &str) -> bool {
     let filter = filter.trim().to_lowercase();
     filter.is_empty()
         || row.label.to_lowercase().contains(&filter)
@@ -175,7 +176,7 @@ pub(crate) fn matches_filter(row: &ExceptionRow, filter: &str) -> bool {
 
 /// Order `rows` by the table's sort keys (most significant first), falling back
 /// to a case-insensitive name compare so the order is total.
-pub(crate) fn sort_rows(rows: &mut [ExceptionRow], keys: &[(&str, bool)]) {
+pub fn sort_rows(rows: &mut [ExceptionRow], keys: &[(&str, bool)]) {
     rows.sort_by(|left, right| {
         for (token, ascending) in keys {
             let ordering = match *token {
@@ -303,7 +304,7 @@ impl RenderSettingsButton {
 /// Registers the Avatar Render Settings floater, its view state and its
 /// actions.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct AvatarRenderFloaterPlugin;
+pub struct AvatarRenderFloaterPlugin;
 
 impl Plugin for AvatarRenderFloaterPlugin {
     fn build(&self, app: &mut App) {
@@ -350,7 +351,8 @@ fn register_render_settings_table(settings: Option<ResMut<ViewerSettings>>) {
 
 /// The render settings floater's [`FloaterSpec`] — shared with the `FLOATERS`
 /// registry, so the swept window is the one the viewer spawns.
-pub(crate) fn render_settings_floater_spec() -> FloaterSpec {
+#[must_use]
+pub fn render_settings_floater_spec() -> FloaterSpec {
     FloaterSpec {
         id: RENDER_SETTINGS_FLOATER_ID,
         title: "Avatar Render Settings".to_owned(),
@@ -806,7 +808,8 @@ fn bind_render_settings_rows(
 /// else the name stored with the decision, else their id in parentheses — the
 /// same fallback the other people-listing surfaces use, and the reason the id is
 /// filterable.
-pub(crate) fn name_label(entry: &RenderException, live: Option<&str>) -> String {
+#[must_use]
+pub fn name_label(entry: &RenderException, live: Option<&str>) -> String {
     if let Some(live) = live.map(str::trim).filter(|name| !name.is_empty()) {
         return live.to_owned();
     }

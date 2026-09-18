@@ -106,9 +106,9 @@ profile-chrome = ["bevy/trace", "bevy/trace_chrome", "dep:tracing-chrome"]
 # the user picks. The formats unify with the set `bevy_image` already turns on,
 # so naming them here only makes the snapshot encoder's requirement explicit.
 # Local (system-timezone) time, for the snapshot floater's human-readable
-# ISO-8601 filenames. Resolving the system zone reads the `TZ` env var, so the
-# zone is captured **once at startup** (before Bevy spawns its task-pool threads)
-# and reused — see `snapshot_floater::LocalTimeZone`.
+# ISO-8601 filenames. The zone itself is `sl_viewer_platform::local_time`,
+# captured once at startup (before Bevy spawns its task-pool threads, because
+# resolving it reads `TZ`); this is the clock read that applies it.
 # A direct dependency purely so the UI font stack (`src/ui_font.rs`) can register
 # the bundled faces under private family names: `bevy_text` wraps parley but does
 # not re-export it, so `Blob` / `FontInfoOverride` / `GenericFamily` are only
@@ -177,7 +177,6 @@ sl-account-dirs = { workspace = true }
 # The static-asset library the viewer ships (built-in animations, library
 # wearables and gestures) is installed process-wide before any asset store.
 sl-asset = { workspace = true }
-sl-cef = { path = "../sl-cef", version = "0.1.0" }
 sl-client-bevy = { workspace = true, features = [
   "bevy_pbr",
 ] }
@@ -192,6 +191,7 @@ sl-viewer-audio = { workspace = true }
 sl-viewer-chat = { workspace = true }
 sl-viewer-edit = { workspace = true }
 sl-viewer-environment = { workspace = true }
+sl-viewer-gallery = { workspace = true }
 sl-viewer-intents = { workspace = true }
 sl-viewer-inventory = { workspace = true }
 sl-viewer-kit = { workspace = true }
@@ -209,6 +209,7 @@ sl-viewer-search = { workspace = true }
 sl-viewer-settings = { workspace = true }
 sl-viewer-social = { workspace = true }
 sl-viewer-spacenav = { workspace = true }
+sl-viewer-ui-context-menus = { workspace = true }
 sl-viewer-ui-core = { workspace = true }
 sl-viewer-ui-pie-menu = { workspace = true }
 sl-viewer-ui-widgets = { workspace = true }

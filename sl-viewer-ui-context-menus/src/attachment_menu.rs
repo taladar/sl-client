@@ -123,14 +123,14 @@ use crate::world_api::SelfGroundSit;
 /// avatar-derived slices (IM / Mute / Add as Friend on the other pie, the sit /
 /// stand chain on the self pie) dispatch through the existing avatar code with
 /// the wearer stored in [`AvatarMenuTarget`].
-pub(crate) const ATTACHMENT_MENU_ELEMENT: &str = "attachment-menu";
+pub const ATTACHMENT_MENU_ELEMENT: &str = "attachment-menu";
 
 /// Holds when the picked attachment can be **dropped** into the world — it is
 /// worn on the body, not on a HUD point (a HUD is screen-space and has no world
 /// position to drop at). The core of the reference's `Attachment.EnableDrop`;
 /// its per-item no-drop permission refinement comes with inventory-permission
 /// wiring.
-pub(crate) const TARGET_DROPPABLE: &str = "target-droppable";
+pub const TARGET_DROPPABLE: &str = "target-droppable";
 
 // ---------------------------------------------------------------------------
 // The "self attachment" pie. Top level matches menu_pie_attachment_self.xml:
@@ -299,7 +299,7 @@ static SELF_APPEARANCE_PIE: PieMenuDef = PieMenuDef {
 
 /// The pie for an attachment **you** wear — in world or on a HUD point. See
 /// `menu_pie_attachment_self.xml`.
-pub(crate) static ATTACHMENT_SELF_PIE: PieMenuDef = PieMenuDef {
+pub static ATTACHMENT_SELF_PIE: PieMenuDef = PieMenuDef {
     label: "Attachment",
     entries: &[
         PieEntry {
@@ -625,7 +625,7 @@ static OTHER_MORE_PIE: PieMenuDef = PieMenuDef {
 /// The pie for an attachment worn by **another** avatar. See
 /// `menu_pie_attachment_other.xml` (whose root the reference itself names
 /// "Avatar Pie" — it is the avatar-other shape plus the object-ish tails).
-pub(crate) static ATTACHMENT_OTHER_PIE: PieMenuDef = PieMenuDef {
+pub static ATTACHMENT_OTHER_PIE: PieMenuDef = PieMenuDef {
     label: "Avatar",
     entries: &[
         PieEntry {
@@ -692,22 +692,22 @@ pub(crate) static ATTACHMENT_OTHER_PIE: PieMenuDef = PieMenuDef {
 /// Written by the shared right-click resolver in [`crate::avatar_menu`] for any
 /// of the three attachment pick shapes (HUD ray, rigid world attachment, worn
 /// rigged submesh — see the module doc), and consumed by
-/// [`open_attachment_menu`], which decides self vs other by the wearer.
+/// `open_attachment_menu`, which decides self vs other by the wearer.
 #[derive(Message, Debug, Clone)]
-pub(crate) struct OpenAttachmentMenu {
+pub struct OpenAttachmentMenu {
     /// The picked worn object, resolved to its attachment root.
-    pub(crate) summary: ObjectPickSummary,
+    pub summary: ObjectPickSummary,
     /// The surface the pick ray struck, when the pick produced one (a mesh ray
     /// hit does; the CPU-skinned rigged pick does not) — carried into Touch.
-    pub(crate) surface: Option<SurfaceInfo>,
+    pub surface: Option<SurfaceInfo>,
     /// The wearer, when the pick already resolved it (the avatar-pick path);
     /// otherwise looked up from [`ObjectPickSummary::wearer`] at open time.
-    pub(crate) wearer: Option<AgentKey>,
+    pub wearer: Option<AgentKey>,
     /// Whether the pick came through the HUD ray — a HUD attachment cannot be
     /// dropped into the world.
-    pub(crate) hud: bool,
+    pub hud: bool,
     /// Where to centre the pie, in logical pixels.
-    pub(crate) at: Vec2,
+    pub at: Vec2,
 }
 
 /// The worn object the currently-open attachment pie acts on.
@@ -718,16 +718,16 @@ pub(crate) struct OpenAttachmentMenu {
 /// dispatch). A stale value between opens is harmless because no
 /// attachment-menu [`UiAction`] is emitted unless a pie is open.
 #[derive(Resource, Debug, Default)]
-pub(crate) struct AttachmentMenuTarget {
+pub struct AttachmentMenuTarget {
     /// The picked worn object, or `None` before any open.
-    pub(crate) summary: Option<ObjectPickSummary>,
+    pub summary: Option<ObjectPickSummary>,
     /// The pick ray's surface on that object, when the pick produced one.
-    pub(crate) surface: Option<SurfaceInfo>,
+    pub surface: Option<SurfaceInfo>,
 }
 
 /// The plugin wiring the attachment context menus into the viewer.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct AttachmentMenuPlugin;
+pub struct AttachmentMenuPlugin;
 
 impl Plugin for AttachmentMenuPlugin {
     /// Register the target resource, the open request, and the systems that

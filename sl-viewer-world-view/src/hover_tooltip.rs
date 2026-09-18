@@ -6,15 +6,15 @@
 //!   Buy price when it is for sale) — resolved by firing
 //!   [`Command::RequestObjectPropertiesFamily`] for the hovered root on a
 //!   debounce and reading the [`ObjectPropertiesFamily`] reply (the command and
-//!   reply are already on the wire; [`crate::object_menu`] uses the same pair).
+//!   reply are already on the wire; the object context menu uses the same pair).
 //! - **avatar**: the resolved display / legacy name — the same
-//!   [`crate::world_api::AvatarState`] the name tags read.
+//!   [`sl_viewer_world_api::AvatarState`] the name tags read.
 //! - **land**: the parcel name / owner when nothing pickable is hit, gated
 //!   behind [`SETTING_SHOW_LAND_TIPS`] (the reference's "Show land tooltips",
 //!   off by default), from the held [`sl_client_bevy::SlAgentParcel`].
 //!
 //! The pick reuses the same cursor + occlusion arbitration the right-click
-//! world menu does ([`crate::avatar_menu`]): the name-tag rect test wins first,
+//! world menu does (the avatar context menu): the name-tag rect test wins first,
 //! then UI / HUD occlusion suppress, then the **GPU ID-buffer pick**
 //! ([`crate::gpu_pick`]) resolves what is drawn under the cursor — avatar,
 //! object face or bare land — with the depth test doing the nearest-wins
@@ -39,20 +39,20 @@ use sl_client_bevy::{
 
 use crate::gpu_pick::{GpuPickResolved, GpuPicker, PICK_HZ, PickPurpose, PickResolution};
 use crate::hud_pick::HudRayCast;
-use crate::i18n::Translator;
-use crate::name_tag_billboard::NameTagHitTest;
-use crate::objects::ObjectSlMotion;
-use crate::social::GroupsModel;
-use crate::world_api::AvatarState;
-use crate::world_api::ObjectState;
-use crate::world_api::pointer_over_blocking_ui;
+use sl_viewer_social::GroupsModel;
+use sl_viewer_ui_core::i18n::Translator;
+use sl_viewer_world_api::AvatarState;
+use sl_viewer_world_api::ObjectState;
+use sl_viewer_world_api::pointer_over_blocking_ui;
+use sl_viewer_world_objects::name_tag_billboard::NameTagHitTest;
+use sl_viewer_world_objects::objects::ObjectSlMotion;
 
 /// Master toggle: show in-world hover tooltips (object + avatar). Default on.
-pub(crate) const SETTING_SHOW_HOVER_TIPS: &str = "ShowHoverTips";
+pub const SETTING_SHOW_HOVER_TIPS: &str = "ShowHoverTips";
 
 /// Show the land tooltip when nothing pickable is under the cursor (the
 /// reference's "Show land tooltips"; default off).
-pub(crate) const SETTING_SHOW_LAND_TIPS: &str = "ShowLandTips";
+pub const SETTING_SHOW_LAND_TIPS: &str = "ShowLandTips";
 
 /// The settings section hover-tip toggles live in.
 const HOVER_TIP_SECTION: &[&str] = &["hovertips"];
@@ -73,7 +73,7 @@ const TIP_CURSOR_OFFSET_PX: f32 = 16.0;
 const TIP_MAX_WIDTH_PX: f32 = 400.0;
 
 /// Register the hover-tip settings.
-pub(crate) fn register_settings(settings: &mut crate::settings::ViewerSettings) {
+pub fn register_settings(settings: &mut sl_viewer_settings::ViewerSettings) {
     settings.register_in(
         HOVER_TIP_SECTION,
         SETTING_SHOW_HOVER_TIPS,
@@ -89,14 +89,14 @@ pub(crate) fn register_settings(settings: &mut crate::settings::ViewerSettings) 
 }
 
 /// Marker on the cursor-anchored tooltip box (a `Text` node with a dark
-/// backdrop that [`update_hover_tooltip`] positions and rewrites).
+/// backdrop that `update_hover_tooltip` positions and rewrites).
 #[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct HoverTooltip;
+pub struct HoverTooltip;
 
 /// The hover-tooltip runtime state: the dwell timer, the cached
 /// properties-family replies, and the request de-dup guards.
 #[derive(Resource, Debug, Default)]
-pub(crate) struct HoverTooltipState {
+pub struct HoverTooltipState {
     /// Seconds the pointer has rested since the last motion.
     idle_secs: f32,
     /// Seconds since the last GPU pick request (drives the ~15 Hz refresh
@@ -106,7 +106,7 @@ pub(crate) struct HoverTooltipState {
     /// nothing / not yet resolved), written by [`ingest_hover_picks`].
     target: Option<HoverTarget>,
     /// What the box should show this frame (`None` = hidden). The resolve
-    /// system ([`update_hover_tooltip`]) writes it; the apply system
+    /// system (`update_hover_tooltip`) writes it; the apply system
     /// ([`apply_hover_tooltip`]) renders it — split so the pick machinery's
     /// `Visibility` reads never share a system with the box's `Visibility`
     /// write (a Bevy query conflict, B0001).
@@ -165,9 +165,9 @@ impl From<&ObjectPropertiesFamily> for CachedObjectInfo {
 }
 
 /// Fold every [`ObjectPropertiesFamily`] reply into the tooltip cache (the same
-/// reply [`crate::object_menu`] reads for the Mute name — a shared, harmless
+/// reply the object context menu reads for the Mute name — a shared, harmless
 /// duplicate read).
-pub(crate) fn ingest_object_properties_family(
+fn ingest_object_properties_family(
     mut events: MessageReader<SlEvent>,
     mut state: ResMut<HoverTooltipState>,
 ) {
@@ -220,12 +220,12 @@ const TOOLTIP_FLAGS: &[(u32, &str)] = &[
 
 /// The cursor-occlusion machinery bundled as one system param — the HUD ray
 /// cast, the name-tag rect test, and the UI-occlusion inputs — so
-/// [`update_hover_tooltip`] stays within Bevy's per-system parameter limit. The
+/// `update_hover_tooltip` stays within Bevy's per-system parameter limit. The
 /// world resolution itself is the asynchronous GPU ID-buffer pick
 /// ([`crate::gpu_pick`]); only the HUD-occlusion ray (the orthographic HUD test
 /// [`crate::hud_pick`] owns) still casts, and only over the HUD's own meshes.
 #[derive(SystemParam)]
-pub(crate) struct HoverPick<'w, 's> {
+struct HoverPick<'w, 's> {
     /// The HUD-occlusion ray cast (HUD picking stays on the orthographic CPU
     /// test by design).
     hud: HudRayCast<'w, 's>,
@@ -253,7 +253,7 @@ impl HoverPick<'_, '_> {
 /// ID buffer names an avatar (its posed pixels, worn rigged submeshes
 /// included), an object face (resolved to its linkset summary), bare terrain,
 /// or nothing — the depth test already arbitrated nearest-wins.
-pub(crate) fn ingest_hover_picks(
+fn ingest_hover_picks(
     mut picks: MessageReader<GpuPickResolved>,
     objects: Res<ObjectState>,
     mut state: ResMut<HoverTooltipState>,
@@ -283,10 +283,10 @@ pub(crate) fn ingest_hover_picks(
 
 /// Spawn the tooltip box (hidden) — a dark-backed, cursor-anchored `Text` node
 /// drawn over everything and never itself pickable.
-pub(crate) fn setup_hover_tooltip(mut commands: Commands) {
+fn setup_hover_tooltip(mut commands: Commands) {
     commands.spawn((
         Text::new(String::new()),
-        crate::ui_font::UiFont::Sans.at(14.0),
+        sl_viewer_ui_core::ui_font::UiFont::Sans.at(14.0),
         TextColor(Color::srgb(0.95, 0.95, 0.95)),
         Node {
             position_type: PositionType::Absolute,
@@ -309,7 +309,7 @@ pub(crate) fn setup_hover_tooltip(mut commands: Commands) {
 /// The name resolvers a tooltip reads — the same sources the name tags and the
 /// about-land floater use.
 #[derive(SystemParam)]
-pub(crate) struct HoverNames<'w> {
+struct HoverNames<'w> {
     /// Avatar name records (display / legacy / provisional).
     avatars: Res<'w, AvatarState>,
     /// Group names (for a group-owned object or parcel).
@@ -379,7 +379,7 @@ struct ObjectExtras {
 /// distance lines: the tracked-object store, objects' Second Life motion and
 /// world transforms, and the own-agent identity (to place the own avatar).
 #[derive(SystemParam)]
-pub(crate) struct HoverObjectData<'w, 's> {
+struct HoverObjectData<'w, 's> {
     /// The tracked-object store (linkset prim count + root-entity lookup).
     state: Res<'w, ObjectState>,
     /// Objects' Second Life motion (the region position the tip shows).
@@ -429,7 +429,7 @@ impl HoverObjectData<'_, '_> {
 }
 
 /// Whether hover tips (and land tips) are enabled, from the settings store.
-fn tip_toggles(settings: Option<&crate::settings::ViewerSettings>) -> (bool, bool) {
+fn tip_toggles(settings: Option<&sl_viewer_settings::ViewerSettings>) -> (bool, bool) {
     let get = |name: &str, default: bool| {
         settings
             .and_then(|settings| settings.store().get_bool(name).ok())
@@ -453,7 +453,7 @@ fn tip_toggles(settings: Option<&crate::settings::ViewerSettings>) -> (bool, boo
     reason = "the resolve fuses the cursor / dwell inputs, the occlusion machinery, the \
               GPU pick queue, the name resolvers, the held parcel and the settings"
 )]
-pub(crate) fn update_hover_tooltip(
+fn update_hover_tooltip(
     windows: Query<&Window>,
     motion: Res<AccumulatedMouseMotion>,
     buttons: Res<ButtonInput<MouseButton>>,
@@ -462,9 +462,9 @@ pub(crate) fn update_hover_tooltip(
     mut picker: ResMut<GpuPicker>,
     names: HoverNames,
     object_data: HoverObjectData,
-    mut costs: ResMut<crate::object_cost::ObjectCostModel>,
+    mut costs: ResMut<sl_viewer_world_objects::object_cost::ObjectCostModel>,
     parcel: Option<Res<SlAgentParcel>>,
-    settings: Option<Res<crate::settings::ViewerSettings>>,
+    settings: Option<Res<sl_viewer_settings::ViewerSettings>>,
     mut state: ResMut<HoverTooltipState>,
     mut sl_commands: MessageWriter<SlCommand>,
 ) {
@@ -574,7 +574,7 @@ pub(crate) fn update_hover_tooltip(
 /// Render the resolved tooltip into the box: position it, rewrite its text (only
 /// on change), and show / hide it. The **only** system that writes the overlay,
 /// so its `Visibility` / `Node` / `Text` writes stay clear of the pick reads.
-pub(crate) fn apply_hover_tooltip(
+fn apply_hover_tooltip(
     state: Res<HoverTooltipState>,
     mut overlay: Query<(&mut Node, &mut Text, &mut Visibility), With<HoverTooltip>>,
 ) {
@@ -613,7 +613,7 @@ fn object_lines(
     extras: &ObjectExtras,
     names: &HoverNames,
     state: &mut HoverTooltipState,
-    costs: &mut crate::object_cost::ObjectCostModel,
+    costs: &mut sl_viewer_world_objects::object_cost::ObjectCostModel,
     commands: &mut MessageWriter<SlCommand>,
 ) -> Vec<String> {
     let Some(info) = state.properties.get(&root).cloned() else {
@@ -664,19 +664,19 @@ fn object_lines(
         extras.prim_count
     );
     match costs.resolve(root, commands) {
-        crate::object_cost::LandImpact::Known(land_impact) => {
+        sl_viewer_world_objects::object_cost::LandImpact::Known(land_impact) => {
             prims = format!(
                 "{prims}{} {land_impact:.0}",
                 names.translator.get("hovertip-land-impact")
             );
         }
-        crate::object_cost::LandImpact::Pending => {
+        sl_viewer_world_objects::object_cost::LandImpact::Pending => {
             prims = format!("{prims}{} …", names.translator.get("hovertip-land-impact"));
         }
         // No `GetObjectCost` cap on this grid (or not requested): show only the
         // prim count, like the reference on plain OpenSim.
-        crate::object_cost::LandImpact::CapUnavailable
-        | crate::object_cost::LandImpact::NotRequested => {}
+        sl_viewer_world_objects::object_cost::LandImpact::CapUnavailable
+        | sl_viewer_world_objects::object_cost::LandImpact::NotRequested => {}
     }
     lines.push(prims);
 
@@ -719,7 +719,7 @@ fn land_lines(
 /// The hover-tooltip plugin: the runtime state, the overlay spawn, and the
 /// dwell / reply systems.
 #[derive(Debug, Default)]
-pub(crate) struct HoverTooltipPlugin;
+pub struct HoverTooltipPlugin;
 
 impl Plugin for HoverTooltipPlugin {
     fn build(&self, app: &mut App) {

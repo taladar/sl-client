@@ -4,8 +4,8 @@
 //! open-external), the embedded browser view ([`crate::browser_widget`]),
 //! and a status row (status text + load progress).
 //!
-//! Opened from **Content ▸ Web Browser** ([`crate::menu_bar`]) or by writing
-//! an [`OpenWebBrowser`] message (other floaters route links here). Runs in
+//! Opened from **Content ▸ Web Browser** (the viewer binary's `menu_bar`) or by
+//! writing an [`OpenWebBrowser`] message (other floaters route links here). Runs in
 //! the **shared** (trusted-UI) request context so web logins persist across
 //! pages, unlike in-world media surfaces which are isolated.
 
@@ -19,23 +19,23 @@ use bevy::ui_widgets::{Activate, Button};
 use crate::browser_widget::{
     BrowserView, BrowserViewSpec, SurfaceTrust, ValidatedMediaUrl, spawn_browser_view,
 };
-use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
-use crate::i18n::Translated;
-use crate::intents::OpenWebBrowser;
 use crate::media_engine::{MediaEngineSystems, MediaSurfaces};
-use crate::system_browser::{ExternalUrl, normalize_web_url, open_in_system_browser};
-use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
-use crate::ui_element::UiAction;
-use crate::ui_font::UiFont;
-use crate::ui_text::set_editor_text;
-use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
+use sl_viewer_intents::OpenWebBrowser;
+use sl_viewer_platform::system_browser::{ExternalUrl, normalize_web_url, open_in_system_browser};
+use sl_viewer_ui_core::i18n::Translated;
+use sl_viewer_ui_core::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use sl_viewer_ui_core::ui_element::UiAction;
+use sl_viewer_ui_core::ui_font::UiFont;
+use sl_viewer_ui_core::ui_text::set_editor_text;
+use sl_viewer_ui_widgets::floater::{FloaterCaps, FloaterSpec, spawn_floater};
+use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 
 /// The [`UiAction`] element name of the floater's toolbar.
-pub(crate) const WEB_BROWSER_ELEMENT: &str = "web-browser";
+pub const WEB_BROWSER_ELEMENT: &str = "web-browser";
 
-/// The web-browser floater's stable [`crate::floater::Floater::id`], the key
+/// The web-browser floater's stable [`sl_viewer_ui_widgets::floater::Floater::id`], the key
 /// the openers (menu bar) look the panel up by.
-pub(crate) const WEB_FLOATER_ID: &str = "web-browser";
+pub const WEB_FLOATER_ID: &str = "web-browser";
 
 /// The page a fresh floater opens on.
 const DEFAULT_HOME_URL: &str = "https://secondlife.com/";
@@ -51,8 +51,8 @@ const BUTTON_LABEL_DIM: Color = Color::srgb(0.45, 0.45, 0.5);
 const STATUS_COLOR: Color = Color::srgb(0.7, 0.72, 0.78);
 
 /// The floater's entities.
-#[derive(Resource)]
-pub(crate) struct WebFloaterUi {
+#[derive(Debug, Resource)]
+pub struct WebFloaterUi {
     /// The floater root (open/close via [`UiPanelShown`]).
     root: Entity,
     /// The title-bar text (bound to the page title).
@@ -74,7 +74,8 @@ pub(crate) struct WebFloaterUi {
 }
 
 /// The web browser floater plugin.
-pub(crate) struct WebFloaterPlugin;
+#[derive(Debug, Clone, Copy, Default)]
+pub struct WebFloaterPlugin;
 
 impl Plugin for WebFloaterPlugin {
     fn build(&self, app: &mut App) {
@@ -94,7 +95,8 @@ impl Plugin for WebFloaterPlugin {
 
 /// The web floater's [`FloaterSpec`] — shared with the `FLOATERS`
 /// registry, so the swept window is the one the viewer spawns.
-pub(crate) fn web_floater_spec() -> FloaterSpec {
+#[must_use]
+pub fn web_floater_spec() -> FloaterSpec {
     FloaterSpec {
         id: WEB_FLOATER_ID,
         title: String::from("Web Browser"),
