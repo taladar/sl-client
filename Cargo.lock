@@ -8512,7 +8512,6 @@ dependencies = [
  "bevy",
  "bytes",
  "crossbeam-channel",
- "flate2",
  "fs-err",
  "pretty_assertions",
  "reqwest 0.12.28",
@@ -8522,6 +8521,7 @@ dependencies = [
  "sl-asset",
  "sl-avatar",
  "sl-bake",
+ "sl-client-common",
  "sl-fake-grid",
  "sl-material",
  "sl-mesh",
@@ -8531,8 +8531,6 @@ dependencies = [
  "sl-test-assets",
  "sl-texture",
  "sl-tree",
- "sl-wire",
- "time",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -8609,24 +8607,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-client-common"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "fs-err",
+ "pretty_assertions",
+ "reqwest 0.12.28",
+ "sl-proto",
+ "sl-wire",
+ "time",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "sl-client-tokio"
 version = "0.1.0"
 dependencies = [
  "arc-swap",
  "async-trait",
  "bytes",
- "flate2",
  "fs-err",
  "pretty_assertions",
  "reqwest 0.12.28",
  "sl-asset",
+ "sl-client-common",
  "sl-material",
  "sl-mesh",
  "sl-proto",
  "sl-texture",
  "sl-wire",
  "thiserror 2.0.19",
- "time",
  "tokio",
  "tracing",
  "tracing-subscriber",

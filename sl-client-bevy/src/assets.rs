@@ -17,7 +17,7 @@ use sl_asset::{AssetFetcher, AssetRef, FetchChunk, FetchError};
 
 use crate::async_http::{fetch_range_async, shared_async_client};
 use crate::async_runtime::run_on_shared_runtime;
-use crate::retry::{MAX_TRANSIENT_RETRIES, is_transient_status, transient_backoff};
+use sl_client_common::retry::{MAX_TRANSIENT_RETRIES, is_transient_status, transient_backoff};
 
 /// The `Accept` header a generic-asset fetch sends.
 const ASSET_ACCEPT: &str = "application/octet-stream";

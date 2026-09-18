@@ -1,8 +1,8 @@
 //! CAPS lifecycle: capability fetch, event-queue spawn/poll, task helpers.
 
 use crate::IDLE_SLEEP;
-use crate::retry::{MAX_TRANSIENT_RETRIES, transient_backoff};
 use reqwest::Client as ReqwestClient;
+use sl_client_common::retry::{MAX_TRANSIENT_RETRIES, transient_backoff};
 use sl_proto::{
     CAP_SIMULATOR_FEATURES, Llsd, REQUESTED_CAPABILITIES, build_event_queue_request,
     build_seed_request, parse_event_queue_response, parse_seed_response,

@@ -13,7 +13,7 @@ use reqwest::StatusCode as ReqwestStatusCode;
 use sl_proto::TextureKey;
 use sl_texture::{FetchChunk, FetchError, RemoteTextureSource, TextureFetcher};
 
-use crate::retry::{MAX_TRANSIENT_RETRIES, is_transient_status, transient_backoff};
+use sl_client_common::retry::{MAX_TRANSIENT_RETRIES, is_transient_status, transient_backoff};
 
 /// A `GetTexture` codestream fetcher over a shared async `reqwest` client.
 #[derive(Debug)]

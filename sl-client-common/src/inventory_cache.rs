@@ -38,7 +38,7 @@ const SAVE_INTERVAL: Duration = Duration::from_secs(60);
 /// per-account cache directory, our own agent id (the cache file is named for
 /// it), and the last-save instant the dirty/idle tick measures against.
 #[derive(Debug)]
-pub(crate) struct InventoryCache {
+pub struct InventoryCache {
     /// The pure configuration (the master enable flag and the Library toggle).
     config: InventoryCacheConfig,
     /// The directory the `<agent-uuid>.inv.llsd.gz` / `.lib.inv.llsd.gz` files are
@@ -59,8 +59,9 @@ impl InventoryCache {
     /// directory the cache files are written **directly** under, supplied
     /// verbatim by the runtime; `None` (or a disabled `config`, or an unknown
     /// `agent_id`) disables the feature. `now` seeds the dirty/idle clock so the
-    /// first periodic save is at most one [`SAVE_INTERVAL`] after login.
-    pub(crate) const fn new(
+    /// first periodic save is at most one save interval (a minute) after login.
+    #[must_use]
+    pub const fn new(
         config: InventoryCacheConfig,
         agent_cache_dir: Option<PathBuf>,
         agent_id: Option<AgentKey>,
@@ -77,7 +78,8 @@ impl InventoryCache {
     /// Whether the cache is active — the feature enabled, a directory supplied,
     /// and our agent id known (it names the file). The cheap gate every load/save
     /// checks first, so a consumer that leaves the feature off pays nothing.
-    pub(crate) const fn enabled(&self) -> bool {
+    #[must_use]
+    pub const fn enabled(&self) -> bool {
         self.config.enabled && self.cache_dir.is_some() && self.agent_id.is_some()
     }
 
@@ -99,13 +101,14 @@ impl InventoryCache {
     }
 
     /// Loads the cached **agent** tree (if any) into `session` and reconciles it
-    /// against the login `skeleton`, on the [`Event::InventorySkeleton`] tap. The
+    /// against the login `skeleton`, on the
+    /// [`InventorySkeleton`](sl_proto::Event::InventorySkeleton) tap. The
     /// disk cache is read and folded **before** the merge: a cached folder whose
     /// version matches the skeleton keeps its loaded contents (and is skipped by
     /// the background crawl), the rest are invalidated and queued for refetch. A
     /// cold/absent/corrupt file is simply ignored (a full refetch). Clears the
     /// dirty flag afterwards so the post-login state is the save baseline.
-    pub(crate) fn load_agent(&self, session: &mut Session, skeleton: &[InventoryFolder]) {
+    pub fn load_agent(&self, session: &mut Session, skeleton: &[InventoryFolder]) {
         if !self.enabled() {
             return;
         }
@@ -114,9 +117,9 @@ impl InventoryCache {
 
     /// Loads the cached **Library** tree (if the Library toggle is on) into
     /// `session` and reconciles it against the login `skeleton`, on the
-    /// [`Event::LibraryInventory`] tap. Mirrors [`load_agent`](Self::load_agent)
-    /// for the read-only Library tree.
-    pub(crate) fn load_library(&self, session: &mut Session, skeleton: &[InventoryFolder]) {
+    /// [`LibraryInventory`](sl_proto::Event::LibraryInventory) tap. Mirrors
+    /// [`load_agent`](Self::load_agent) for the read-only Library tree.
+    pub fn load_library(&self, session: &mut Session, skeleton: &[InventoryFolder]) {
         if !self.enabled() {
             return;
         }
@@ -129,10 +132,11 @@ impl InventoryCache {
     }
 
     /// The dirty/idle save tick: persists the model when it has changed and at
-    /// least [`SAVE_INTERVAL`] has passed since the last save. Cheap and
-    /// self-gating — a no-op while the cache is disabled, the interval has not
-    /// elapsed, or the model is unchanged. Call once per run-loop iteration.
-    pub(crate) fn maybe_save(&mut self, session: &mut Session, now: Instant) {
+    /// least the save interval (a minute) has passed since the last save.
+    /// Cheap and self-gating — a no-op while the cache is disabled, the interval
+    /// has not elapsed, or the model is unchanged. Call once per run-loop
+    /// iteration.
+    pub fn maybe_save(&mut self, session: &mut Session, now: Instant) {
         if !self.enabled() || now.duration_since(self.last_save) < SAVE_INTERVAL {
             return;
         }
@@ -145,7 +149,7 @@ impl InventoryCache {
 
     /// Persists the model unconditionally (the logout/shutdown save, mirroring
     /// Firestorm's save-at-cleanup). A no-op while the cache is disabled.
-    pub(crate) fn save(&self, session: &mut Session) {
+    pub fn save(&self, session: &mut Session) {
         if !self.enabled() {
             return;
         }

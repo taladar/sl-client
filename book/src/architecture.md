@@ -28,8 +28,13 @@ different runtimes.
    ┌──────────────┐   ┌──────────────┐
    │sl-client-    │   │sl-client-bevy│   I/O drivers: UDP socket +
    │tokio         │   │              │   HTTP (reqwest), task wiring
-   └──────┬───────┘   └──────────────┘
-          ▼
+   └──┬───────┬───┘   └───────┬──────┘
+      │       └───────┬───────┘
+      │               ▼
+      │        ┌──────────────────┐  no runtime of its own, but it
+      │        │ sl-client-common │  needs files: chat-log shell,
+      │        └──────────────────┘  disk caches, HTTP retry policy
+      ▼
    ┌──────────────┐
    │  sl-survey    │   a binary that consumes the tokio driver
    └──────────────┘
@@ -73,6 +78,14 @@ different runtimes.
   channel pump between that thread and the Bevy messages, so ACKs and
   retransmits do not wait for render frames and a login burst's protocol
   decode never stalls one.
+
+- **`sl-client-common`** — the part of a *driver* that turns out not to need a
+  runtime at all: the chat-log file shell over `sl-proto`'s sans-I/O chat-log
+  core, the gzipped inventory and `LSLSyntax` disk caches, and the
+  transient-HTTP-error retry policy (which statuses to retry, and the backoff
+  before attempt `n` — waiting out the `Duration` stays with the caller). Both
+  drivers depend on it, so a fix to any of them is one edit rather than two
+  copies kept in step by hand.
 
 - **`sl-survey`** — a headless binary (built on the tokio driver) that logs in,
   walks the map, and collects region/parcel metadata. A good worked example of

@@ -333,7 +333,6 @@ mod async_http;
 mod async_runtime;
 pub mod avatars;
 mod caps;
-mod chat_log;
 #[cfg(feature = "bevy_pbr")]
 pub mod clouds;
 mod experiences;
@@ -342,15 +341,12 @@ pub mod grass;
 mod http;
 pub mod http_proxy;
 mod inventory;
-mod inventory_cache;
-mod lsl_syntax_cache;
 mod marketplace;
 mod materials;
 mod media;
 pub mod meshes;
 mod object_caps;
 pub mod prims;
-mod retry;
 #[cfg(feature = "bevy_pbr")]
 pub mod sky;
 #[cfg(feature = "bevy_pbr")]
@@ -402,7 +398,6 @@ pub fn preserve_glow_mask_alpha(
 }
 
 use crate::caps::{CAPS_FAILURE_PREFIX, fetch_neighbour_caps, start_caps};
-use crate::chat_log::ChatLog;
 use crate::experiences::{run_experience_status, run_group_experiences};
 use crate::fetch::{run_asset_fetch, run_generic_asset_fetch, run_texture_fetch};
 use crate::http::{
@@ -415,8 +410,6 @@ use crate::inventory::{
     fetch_folder_contents, run_group_members_fetch, run_increment_cof_version, run_inventory_fetch,
     run_server_appearance_update,
 };
-use crate::inventory_cache::InventoryCache;
-use crate::lsl_syntax_cache::LslSyntaxCache;
 use crate::marketplace::dispatch_marketplace_request;
 use crate::materials::{
     run_modify_material_params, run_render_materials_fetch, run_set_render_materials,
@@ -428,6 +421,9 @@ use crate::upload::{
 };
 use crate::voice::{run_voice_cap, run_voice_signaling};
 use crate::world::{SlRegionIndex, maintain_world};
+use sl_client_common::chat_log::ChatLog;
+use sl_client_common::inventory_cache::InventoryCache;
+use sl_client_common::lsl_syntax_cache::LslSyntaxCache;
 
 pub use crate::world::{
     SlAgentParcel, SlCurrentRegion, SlIdentity, SlNeighbor, SlParcel, SlParcelOverlay, SlRegion,
@@ -4587,7 +4583,7 @@ mod tests {
     };
 
     use super::{NetOutbound, SessionError, apply_command, report_command_failed};
-    use crate::chat_log::ChatLog;
+    use sl_client_common::chat_log::ChatLog;
 
     /// A boxed error so tests can use `?` instead of the disallowed
     /// `unwrap` / `expect`.

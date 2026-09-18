@@ -16,8 +16,8 @@ use sl_proto::{
 use tokio::sync::mpsc;
 
 use crate::caps::{MAX_SEED_FETCH_RETRIES, deliver, fetch_capabilities, report_caps_failure};
-use crate::retry::transient_backoff;
 use crate::voice::{post_cap_llsd, post_voice_cap};
+use sl_client_common::retry::transient_backoff;
 
 /// A neighbouring region's capability map, or why it could not be fetched,
 /// keyed by the neighbour's simulator address.

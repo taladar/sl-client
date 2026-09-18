@@ -28,7 +28,7 @@ use bytes::Bytes;
 use reqwest::StatusCode as ReqwestStatusCode;
 use sl_asset::{FetchChunk, FetchError};
 
-use crate::retry::{MAX_TRANSIENT_RETRIES, is_transient_status, transient_backoff};
+use sl_client_common::retry::{MAX_TRANSIENT_RETRIES, is_transient_status, transient_backoff};
 
 /// The per-request timeout for the shared async client, matching the 60 s each
 /// fetcher's blocking client used.

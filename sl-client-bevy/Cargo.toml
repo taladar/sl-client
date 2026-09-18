@@ -35,8 +35,6 @@ bevy = { version = "0.19.0", default-features = false, features = [
 ] }
 bytes = { workspace = true }
 crossbeam-channel = { workspace = true }
-flate2 = { workspace = true }
-fs-err = { workspace = true }
 reqwest = { workspace = true, features = [
   "blocking",
   "rustls-tls",
@@ -46,6 +44,7 @@ sl-anim = { workspace = true }
 sl-asset = { workspace = true }
 sl-avatar = { workspace = true }
 sl-bake = { path = "../sl-bake", version = "0.1.0" }
+sl-client-common = { workspace = true }
 sl-material = { workspace = true }
 sl-mesh = { workspace = true }
 sl-prim = { workspace = true }
@@ -53,8 +52,6 @@ sl-proto = { workspace = true }
 sl-sculpt = { path = "../sl-sculpt", version = "0.1.0" }
 sl-texture = { path = "../sl-texture", version = "0.1.0" }
 sl-tree = { path = "../sl-tree", version = "0.1.0" }
-sl-wire = { workspace = true }
-time = { workspace = true, features = ["local-offset"] }
 # The small shared runtime the async asset fetchers drive (`async_runtime.rs`):
 # a few-thread multi-thread runtime so non-blocking `reqwest` downloads are no
 # longer pinned at Bevy's 4-wide `IoTaskPool` funnel. `rt-multi-thread` for the
@@ -68,6 +65,9 @@ uuid = { workspace = true, features = ["v4"] }
 wgpu-types = { workspace = true }
 
 [dev-dependencies]
+# The `avatar_replay` example reads its dump manifest and the character
+# fixtures off disk.
+fs-err = { workspace = true }
 pretty_assertions = { workspace = true }
 serde_json = { workspace = true }
 # The loopback grid the `fake_grid_login_smoke` tier logs the real plugin

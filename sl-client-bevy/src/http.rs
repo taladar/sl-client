@@ -1,11 +1,11 @@
 //! Blocking LLSD/byte HTTP capability helpers (GET/PUT/PATCH/DELETE).
 
 use crate::caps::report_caps_failure;
-use crate::lsl_syntax_cache::LslSyntaxCache;
-use crate::retry::{MAX_TRANSIENT_RETRIES, is_transient_status, transient_backoff};
 use crate::{EVENT_QUEUE_TIMEOUT, deliver};
 use bevy::prelude::*;
 use crossbeam_channel::Sender;
+use sl_client_common::lsl_syntax_cache::LslSyntaxCache;
+use sl_client_common::retry::{MAX_TRANSIENT_RETRIES, is_transient_status, transient_backoff};
 use sl_proto::{
     AVATAR_PICKER_SEARCH_TAG, CAP_CHAT_SESSION_REQUEST, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX,
     CAP_REMOTE_PARCEL_REQUEST, CHAT_SESSION_FETCH_HISTORY_TAG, EXPERIENCE_QUERY_TAG,

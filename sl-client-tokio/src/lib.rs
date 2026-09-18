@@ -169,20 +169,16 @@ pub use crate::textures::ReqwestTextureFetcher;
 mod appearance;
 pub mod assets;
 mod caps;
-mod chat_log;
 mod experiences;
 mod fetch;
 mod http;
 pub mod http_proxy;
 mod inventory;
-mod inventory_cache;
-mod lsl_syntax_cache;
 mod marketplace;
 mod materials;
 mod media;
 pub mod meshes;
 mod object_caps;
-mod retry;
 pub mod textures;
 mod upload;
 mod voice;
@@ -191,7 +187,6 @@ use crate::caps::{
     CAPS_FAILURE_PREFIX, abort_task, deliver, fetch_capabilities, make_sleep, refetch_capabilities,
     spawn_event_queue, spawn_simulator_features,
 };
-use crate::chat_log::ChatLog;
 use crate::experiences::{
     fetch_experience_admin, fetch_experience_contributor, fetch_group_experiences,
 };
@@ -203,13 +198,14 @@ use crate::http::{
     put_caps_llsd,
 };
 use crate::inventory::{fetch_folder_contents, fetch_group_members, fetch_inventory};
-use crate::inventory_cache::InventoryCache;
-use crate::lsl_syntax_cache::LslSyntaxCache;
 use crate::marketplace::dispatch_marketplace_request;
 use crate::materials::{fetch_render_materials, post_modify_material_params, set_render_materials};
 use crate::media::{fetch_object_media, post_object_media};
 use crate::upload::{run_caps_upload, run_report_screenshot_upload, run_script_upload};
 use crate::voice::{post_voice_cap, post_voice_signaling};
+use sl_client_common::chat_log::ChatLog;
+use sl_client_common::inventory_cache::InventoryCache;
+use sl_client_common::lsl_syntax_cache::LslSyntaxCache;
 
 /// How long to sleep when the session has no scheduled timeout.
 const IDLE_SLEEP: Duration = Duration::from_secs(3600);

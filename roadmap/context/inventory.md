@@ -125,8 +125,9 @@ Scope reminders:
   inventory.
 - The `chat_log` feature is the precedent for the whole runtime split: a pure
   format/config core in `sl-proto` (`chat_log.rs`, `ChatLogConfig`) and a
-  file-I/O shell in each runtime (`sl-client-tokio/src/chat_log.rs`,
-  `ChatLog::new`). The read-model exposure precedent (typed snapshot views +
+  file-I/O shell shared by both runtimes
+  (`sl-client-common/src/chat_log.rs`, `ChatLog::new`). The read-model
+  exposure precedent (typed snapshot views +
   cursor pagination + a query/reply pull-bridge for the channel runtimes, direct
   `&Session` borrow for bevy) is `ChatSessionInfo` / `MessageCursor` /
   `history_page` / `Command::QueryChatHistoryPage` / `Event::ChatHistoryPage`.

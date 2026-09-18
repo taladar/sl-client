@@ -13,8 +13,8 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::caps::{deliver, report_caps_failure};
-use crate::lsl_syntax_cache::LslSyntaxCache;
-use crate::retry::{MAX_TRANSIENT_RETRIES, is_transient_status, transient_backoff};
+use sl_client_common::lsl_syntax_cache::LslSyntaxCache;
+use sl_client_common::retry::{MAX_TRANSIENT_RETRIES, is_transient_status, transient_backoff};
 
 /// POSTs `body` to a capability URL and ignores the *reply*: the shared body of
 /// every fire-and-forget capability call, where the simulator answers with an
@@ -545,8 +545,8 @@ mod tests {
     )]
 
     use super::get_llsd;
-    use crate::retry::MAX_TRANSIENT_RETRIES;
     use pretty_assertions::assert_eq;
+    use sl_client_common::retry::MAX_TRANSIENT_RETRIES;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};

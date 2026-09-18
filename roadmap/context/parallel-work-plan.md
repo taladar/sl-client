@@ -38,9 +38,12 @@ They also *create* the separation the later rounds rely on.
    binary). What is left in the binary is the composition root, the harness
    tiers, and the seven surfaces that genuinely belong to it — so the world
    agent and the UI agent no longer share a 19k-line `src/`.
-4. `protocol-audit-runtime-shared-crate` — 1,677 byte-identical lines across
-   `sl-client-tokio` and `sl-client-bevy`. Until it lands, the runtime
-   feature-parity rule makes every protocol feature a two-crate edit.
+4. ~~`protocol-audit-runtime-shared-crate`~~ — **done**. The four modules that
+   were copies (`chat_log`, `inventory_cache`, `lsl_syntax_cache`, `retry` —
+   1,782 lines) now live once in the new `sl-client-common`, which both
+   runtimes depend on. A fix to any of them is one edit again, and the 18 tests
+   over them run once. What is still per-runtime is `http_proxy.rs` and
+   everything owning a task, a channel or a timer.
 
 Items 1–3 are large mechanical rewrites with little behavioural change: verify
 them with a normalised token diff against `git show HEAD:<file>` (see the
@@ -73,7 +76,7 @@ otherwise keep hitting.
 | --- | --- | --- |
 | **A — world & render** | render 33, perf 44, avatar/appearance 28, region/parcel/land 28, input 26, camera 9, snapshot 4 (~170) | `sl-viewer-world-scene`, `-world-objects`, `-world-avatar`, `-world-view`, `sl-texture`, `sl-material`, `sl-bake`, `sl-anim`, `sl-terrain`, `sl-viewer-environment`, `sl-viewer-places` |
 | **B — UI shell & social** | UI shell 34, chat/IM/notices 27, inventory 22, people/groups 12, map/search 7, i18n 7, misc shell 19 (~128) | the viewer binary's UI (`menu_bar.rs`, `floaters.rs`, `status_bar.rs`, `bottom_toolbar.rs`), `sl-viewer-ui-*`, `-preferences`, `-settings`, `-chat`, `-notices`, `-notifications`, `-people`, `-social`, `-intents`, `-inventory`, `-map`, `-search` |
-| **C — tools, protocol & server** | build/edit tools 42, server 21, test/conformance 18, audio/media/voice 12, scripts/LSL 11, protocol 8 (~152) | `sl-viewer-edit`, `sl-wire`, `sl-proto`, `sl-client-tokio`, `sl-fake-grid`, `sl-conformance`, `sl-crosscheck`, `sl-repl*`, `sl-lsl*`, `sl-audio`, `sl-gst`, `sl-cef` |
+| **C — tools, protocol & server** | build/edit tools 42, server 21, test/conformance 18, audio/media/voice 12, scripts/LSL 11, protocol 8 (~152) | `sl-viewer-edit`, `sl-wire`, `sl-proto`, `sl-client-tokio`, `sl-client-common`, `sl-fake-grid`, `sl-conformance`, `sl-crosscheck`, `sl-repl*`, `sl-lsl*`, `sl-audio`, `sl-gst`, `sl-cef` |
 
 Why these groupings rather than by feature area:
 

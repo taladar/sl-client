@@ -14,7 +14,7 @@ use reqwest::StatusCode as ReqwestStatusCode;
 use sl_mesh::{AssetFetcher, FetchChunk, FetchError};
 use sl_proto::MeshKey;
 
-use crate::retry::{MAX_TRANSIENT_RETRIES, is_transient_status, transient_backoff};
+use sl_client_common::retry::{MAX_TRANSIENT_RETRIES, is_transient_status, transient_backoff};
 
 /// The `Accept` MIME type for a mesh asset (the viewer's
 /// `HTTP_CONTENT_VND_LL_MESH`).

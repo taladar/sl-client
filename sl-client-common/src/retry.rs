@@ -1,5 +1,5 @@
-//! Shared transient-HTTP-error retry policy for the blocking asset / texture /
-//! mesh fetchers.
+//! The transient-HTTP-error retry policy shared by both runtimes' asset /
+//! texture / mesh fetchers.
 //!
 //! The `ViewerAsset` / `GetTexture` / `GetMesh2` cap services answer a transient
 //! `503` (and, behind a proxy, `502` / `504`) while they queue the requested asset
@@ -7,6 +7,11 @@
 //! on the first `503` strands the asset (a texture that never resolves, a mesh
 //! frozen at a coarse LOD), so the fetchers retry a bounded number of times with
 //! **exponential backoff**, matching the reference viewer's polling behaviour.
+//!
+//! This module only *decides*: which statuses are worth another attempt, and how
+//! long to wait before attempt `n`. Waiting out the [`Duration`] belongs to the
+//! caller's runtime — the tokio side awaits its timer, the bevy side blocks its
+//! task-pool thread.
 
 use std::time::Duration;
 
@@ -14,7 +19,7 @@ use reqwest::StatusCode as ReqwestStatusCode;
 
 /// The maximum number of times a transient (`503`/`502`/`504`) response is retried
 /// before the fetch fails.
-pub(crate) const MAX_TRANSIENT_RETRIES: u32 = 8;
+pub const MAX_TRANSIENT_RETRIES: u32 = 8;
 
 /// The first retry's backoff; each subsequent retry doubles it up to
 /// [`MAX_TRANSIENT_BACKOFF`].
@@ -27,7 +32,8 @@ const MAX_TRANSIENT_BACKOFF: Duration = Duration::from_secs(5);
 /// Whether `status` is a transient poll-service response worth retrying: the cap
 /// services answer `503` while queuing an asset, and a fronting proxy can surface
 /// it as `502` / `504`.
-pub(crate) fn is_transient_status(status: ReqwestStatusCode) -> bool {
+#[must_use]
+pub fn is_transient_status(status: ReqwestStatusCode) -> bool {
     matches!(
         status,
         ReqwestStatusCode::SERVICE_UNAVAILABLE
@@ -36,10 +42,11 @@ pub(crate) fn is_transient_status(status: ReqwestStatusCode) -> bool {
     )
 }
 
-/// The backoff before retry number `attempt` (0-based): exponential
-/// ([`INITIAL_TRANSIENT_BACKOFF`] doubled per attempt), capped at
-/// [`MAX_TRANSIENT_BACKOFF`].
-pub(crate) fn transient_backoff(attempt: u32) -> Duration {
+/// The backoff before retry number `attempt` (0-based): exponential — 200 ms
+/// doubled per attempt — capped at 5 s, so a long-queuing service is polled at a
+/// steady ceiling rather than an ever-growing delay.
+#[must_use]
+pub fn transient_backoff(attempt: u32) -> Duration {
     // Cap the shift so the multiplier never overflows before the cap clamps it.
     let factor = 1_u32.checked_shl(attempt.min(5)).unwrap_or(u32::MAX);
     INITIAL_TRANSIENT_BACKOFF

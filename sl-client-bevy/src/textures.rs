@@ -21,7 +21,7 @@ use wgpu_types::{Extent3d, TextureDimension, TextureFormat};
 
 use crate::async_http::{fetch_range_async, shared_async_client};
 use crate::async_runtime::run_on_shared_runtime;
-use crate::retry::{MAX_TRANSIENT_RETRIES, is_transient_status, transient_backoff};
+use sl_client_common::retry::{MAX_TRANSIENT_RETRIES, is_transient_status, transient_backoff};
 
 /// The `Accept` header a `GetTexture` codestream fetch sends.
 const TEXTURE_ACCEPT: &str = "image/x-j2c";

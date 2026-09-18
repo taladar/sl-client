@@ -303,10 +303,10 @@ mirroring inventory stays in sync. None has a reply; a mirror simply applies it:
 >   (`sl-proto/src/types/event.rs`, `Arc<[…]>` payloads).
 > - The disk cache: the pure (de)serialise/merge core is
 >   `sl-proto/src/session/inventory_cache.rs` (`INVENTORY_CACHE_VERSION`); the
->   runtime gzip+atomic-write shells are
->   `sl-client-tokio/src/inventory_cache.rs` and
->   `sl-client-bevy/src/inventory_cache.rs`, configured by `ClientDirectories` /
->   `InventoryCacheConfig` (`sl-proto/src/chat_log.rs`).
+>   runtime gzip+atomic-write shell is
+>   `sl-client-common/src/inventory_cache.rs` (shared by both runtimes),
+>   configured by `ClientDirectories` / `InventoryCacheConfig`
+>   (`sl-proto/src/chat_log.rs`).
 > - The HTTP fetch driver is `sl-client-tokio/src/inventory.rs`; the worked
 >   examples are `sl-client-tokio/examples/inventory_edit.rs` and
 >   `sl-client-tokio/examples/inventory_cache.rs`.

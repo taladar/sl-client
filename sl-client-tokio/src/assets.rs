@@ -18,7 +18,7 @@ use sl_asset::{AssetFetcher, AssetRef, FetchChunk, FetchError};
 use sl_proto::{AssetKey, InMemoryAssetSource};
 use uuid::Uuid;
 
-use crate::retry::{MAX_TRANSIENT_RETRIES, is_transient_status, transient_backoff};
+use sl_client_common::retry::{MAX_TRANSIENT_RETRIES, is_transient_status, transient_backoff};
 
 /// Eagerly loads every asset file in `dir` into an
 /// [`InMemoryAssetSource`], for a fake grid or a loopback test that serves the

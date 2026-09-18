@@ -1,0 +1,33 @@
+[package]
+name = "sl-client-common"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+description = "Runtime-independent client-side services shared by the tokio and bevy Second Life / OpenSim runtimes: chat-log file shell, inventory and LSL-syntax disk caches, and the transient-HTTP retry policy"
+readme = { workspace = true }
+license = { workspace = true }
+
+repository = { workspace = true }
+keywords = ["cache", "chat", "client", "opensim", "secondlife"]
+categories = ["filesystem", "game-development"]
+publish = { workspace = true }
+
+exclude = { workspace = true }
+
+[dependencies]
+flate2 = { workspace = true }
+fs-err = { workspace = true }
+reqwest = { workspace = true }
+sl-proto = { workspace = true }
+time = { workspace = true, features = ["local-offset"] }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+sl-wire = { workspace = true }
+url = { workspace = true }
+
+[lints]
+workspace = true

@@ -14,11 +14,11 @@
 //! retires it on timeout) rather than trying to close it, because a `done: true`
 //! close blocks like a long-poll on OpenSim and would stall the switch.
 
-use crate::retry::{MAX_TRANSIENT_RETRIES, transient_backoff};
 use crate::{Caps, EVENT_QUEUE_TIMEOUT, deliver};
 use bevy::prelude::*;
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, TryRecvError, unbounded};
 use reqwest::blocking::Client as ReqwestBlockingClient;
+use sl_client_common::retry::{MAX_TRANSIENT_RETRIES, transient_backoff};
 use sl_proto::{
     Llsd, REQUESTED_CAPABILITIES, Session, build_event_queue_request, build_seed_request,
     parse_event_queue_response, parse_seed_response,

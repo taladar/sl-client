@@ -105,7 +105,7 @@ fn to_unix(time: Option<LogLineTime>, offset: UtcOffset) -> Option<u32> {
 /// directory, the local UTC offset captured once at construction, and the
 /// name/path caches the format needs.
 #[derive(Debug)]
-pub(crate) struct ChatLog {
+pub struct ChatLog {
     /// The pure configuration (which types to log, the format knobs, the window).
     config: ChatLogConfig,
     /// The per-account directory transcripts are written **directly** under
@@ -159,7 +159,8 @@ impl ChatLog {
     /// verbatim by the runtime (no derived sub-directory); `None` disables all file
     /// output. The local offset is captured now (falling back to UTC if the
     /// platform will not report it under the running threads).
-    pub(crate) fn new(
+    #[must_use]
+    pub fn new(
         config: ChatLogConfig,
         agent_chat_log_dir: Option<PathBuf>,
         own_name: String,
@@ -193,7 +194,8 @@ impl ChatLog {
 
     /// Whether any logging is enabled — the run loop's cheap gate. Requires both an
     /// output directory and at least one enabled text-chat type.
-    pub(crate) fn any_enabled(&self) -> bool {
+    #[must_use]
+    pub fn any_enabled(&self) -> bool {
         self.base_dir.is_some() && self.config.any_enabled()
     }
 
@@ -207,7 +209,7 @@ impl ChatLog {
     /// configuration shortly after login may see the construction-time
     /// configuration govern the first few lines; that window is benign and
     /// inherent to the hand-off.
-    pub(crate) fn set_config(&mut self, config: ChatLogConfig) {
+    pub fn set_config(&mut self, config: ChatLogConfig) {
         let index_was_on = self.config.conversation_log;
         self.config = config;
         match (&self.base_dir, index_was_on, self.config.conversation_log) {
@@ -319,7 +321,7 @@ impl ChatLog {
     }
 
     /// Logs a region-local **nearby** chat line (`chat.txt`).
-    pub(crate) fn log_nearby(&mut self, from_name: &str, message: &str) {
+    pub fn log_nearby(&mut self, from_name: &str, message: &str) {
         if !self.config.logs_nearby() {
             return;
         }
@@ -331,7 +333,7 @@ impl ChatLog {
 
     /// Logs an **inbound 1:1 IM**, preferring the message's wire timestamp (the
     /// original time for a replayed offline IM).
-    pub(crate) fn log_inbound_im(
+    pub fn log_inbound_im(
         &mut self,
         peer: AgentKey,
         from_name: &str,
@@ -350,7 +352,7 @@ impl ChatLog {
     }
 
     /// Logs an **outbound 1:1 IM** (our own line, stamped now).
-    pub(crate) fn log_outbound_im(&mut self, peer: AgentKey, message: &str) {
+    pub fn log_outbound_im(&mut self, peer: AgentKey, message: &str) {
         if !self.config.logs_conversation(ConversationKind::Direct) {
             return;
         }
@@ -447,7 +449,7 @@ impl ChatLog {
     }
 
     /// Logs a **group** session message.
-    pub(crate) fn log_group(
+    pub fn log_group(
         &mut self,
         group_id: GroupKey,
         from_agent: AgentKey,
@@ -465,7 +467,7 @@ impl ChatLog {
     /// Logs a **conference** session message. The filename is the MD5 hash of the
     /// sorted `participants` (the simulator roster); with an empty roster it falls
     /// back to the session id.
-    pub(crate) fn log_conference(
+    pub fn log_conference(
         &mut self,
         session_id: ImSessionId,
         participants: &BTreeSet<AgentKey>,
@@ -513,7 +515,7 @@ impl ChatLog {
     /// back to the pane the live filter just cleared. Lines written *before* a
     /// block stay on disk, as they do in the reference — a block is not
     /// retroactive over a transcript already written.
-    pub(crate) fn observe_event(&mut self, session: &Session, event: &sl_proto::Event) {
+    pub fn observe_event(&mut self, session: &Session, event: &sl_proto::Event) {
         if session.mutes().text_muted_event(event) {
             return;
         }
@@ -637,7 +639,8 @@ impl ChatLog {
     /// stops only at the oldest line on disk. The window from a deep paging position
     /// is still bounded by `limit`, so a single page never materialises the whole
     /// file's messages.
-    pub(crate) fn read_older_page(
+    #[must_use]
+    pub fn read_older_page(
         &self,
         kind: ChatSessionKind,
         in_memory_len: usize,
@@ -681,7 +684,8 @@ impl ChatLog {
     /// count already paged past that. Returns the page (newest first) and the next
     /// older cursor, or `None` when nearby logging is disabled or the transcript
     /// does not exist yet.
-    pub(crate) fn read_nearby_older_page(
+    #[must_use]
+    pub fn read_nearby_older_page(
         &self,
         already_shown: usize,
         consumed: usize,

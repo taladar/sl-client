@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 312 |
+| ready | 311 |
 | blocked | 41 |
 | in-progress | 22 |
 | bugs | 5 |
-| done | 1183 |
+| done | 1184 |
 | deferred | 28 |
 | wont-do | 16 |
 | **total** | **1707** |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (312)
+## ready (311)
 
 ### protocol
 
@@ -260,8 +260,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The one crate with unsafe FFI has the workspace's weakest lint configuration
 - [`protocol-audit-runtime-parity-gaps`](ready/protocol-audit-runtime-parity-gaps.md)
   — Re-exports and derived login state reach only the bevy runtime
-- [`protocol-audit-runtime-shared-crate`](ready/protocol-audit-runtime-shared-crate.md)
-  — 1677 byte-identical lines are duplicated between the two runtime crates
 - [`protocol-audit-session-god-object`](ready/protocol-audit-session-god-object.md)
   — Session and SimSession are god objects with 12k-line impl blocks
 - [`protocol-audit-wire-error-contract`](ready/protocol-audit-wire-error-contract.md)
@@ -1178,7 +1176,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 
-## done (1183)
+## done (1184)
 
 ### protocol
 
@@ -1342,6 +1340,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   HandshakeFailed
 - [`protocol-audit-roxmltree-nesting-in-sl-wire`](done/protocol-audit-roxmltree-nesting-in-sl-wire.md)
   — sl-wire's own XML parsing has no nesting guard
+- [`protocol-audit-runtime-shared-crate`](done/protocol-audit-runtime-shared-crate.md)
+  — 1677 byte-identical lines are duplicated between the two runtime crates
 - [`protocol-audit-sim-session-lifecycle`](done/protocol-audit-sim-session-lifecycle.md)
   — SimSession accepts identity rebinding, never validates a session id, and
   frees nothing on close

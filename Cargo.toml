@@ -11,6 +11,7 @@ members = [
   "sl-cef",
   "sl-client-bevy",
   "sl-client-bevy-viewer",
+  "sl-client-common",
   "sl-client-tokio",
   "sl-conformance",
   "sl-crosscheck",
@@ -120,6 +121,7 @@ sl-asset = { path = "sl-asset", version = "0.1.0" }
 sl-asset-sched = { path = "sl-asset-sched", version = "0.1.0" }
 sl-avatar = { path = "sl-avatar", version = "0.1.0" }
 sl-client-bevy = { path = "sl-client-bevy", version = "0.1.0" }
+sl-client-common = { path = "sl-client-common", version = "0.1.0" }
 sl-client-tokio = { path = "sl-client-tokio", version = "0.1.0" }
 sl-llsd = { path = "sl-llsd", version = "0.1.0" }
 sl-lsl = { path = "sl-lsl", version = "0.1.0" }

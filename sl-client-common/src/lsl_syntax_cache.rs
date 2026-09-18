@@ -40,7 +40,7 @@ const SUBDIR: &str = "lsl-syntax";
 /// directory (or `None` to disable). Cheaply cloneable so a fetch task can carry
 /// its own handle.
 #[derive(Debug, Clone)]
-pub(crate) struct LslSyntaxCache {
+pub struct LslSyntaxCache {
     /// The shared cache directory the `lsl-syntax/` subdirectory is created
     /// under, or `None` to disable the cache (every load/store short-circuits).
     shared_cache_dir: Option<PathBuf>,
@@ -49,7 +49,8 @@ pub(crate) struct LslSyntaxCache {
 impl LslSyntaxCache {
     /// Builds the cache over the runtime's shared cache directory. `None`
     /// disables the feature (loads miss, stores are no-ops).
-    pub(crate) const fn new(shared_cache_dir: Option<PathBuf>) -> Self {
+    #[must_use]
+    pub const fn new(shared_cache_dir: Option<PathBuf>) -> Self {
         Self { shared_cache_dir }
     }
 
@@ -65,7 +66,8 @@ impl LslSyntaxCache {
     /// Loads and decodes the cached document for `id`, or `None` on a miss
     /// (disabled cache, absent file, or unreadable / undecodable content — all
     /// treated as a cold cache the caller refetches).
-    pub(crate) fn load(&self, id: Uuid) -> Option<Llsd> {
+    #[must_use]
+    pub fn load(&self, id: Uuid) -> Option<Llsd> {
         let path = self.path(id)?;
         let bytes = read_gz(&path)?;
         let text = String::from_utf8(bytes).ok()?;
@@ -75,7 +77,7 @@ impl LslSyntaxCache {
     /// Caches the raw fetched LLSD-XML `xml` for syntax `id`, crash-safely.
     /// Best-effort: a disabled cache is a no-op, and an I/O failure is logged and
     /// leaves any previous file intact rather than failing the fetch.
-    pub(crate) fn store(&self, id: Uuid, xml: &str) {
+    pub fn store(&self, id: Uuid, xml: &str) {
         let Some(path) = self.path(id) else {
             return;
         };
