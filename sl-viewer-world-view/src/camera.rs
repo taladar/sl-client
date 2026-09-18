@@ -677,6 +677,98 @@ pub fn update_camera_cursor(
     }
 }
 
+/// The raw input every camera control reads, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the focus context that gates
+/// world input, the modifier keys, the mouse buttons / motion / wheel, and the
+/// movement actions that return the focus to the avatar.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub(crate) struct CameraInput<'w> {
+    /// Where keyboard / mouse input is going this frame.
+    context: Res<'w, InputContext>,
+    /// The modifier keys (`Alt` orbits, `Ctrl` switches zoom for elevation).
+    keyboard: Res<'w, ButtonInput<KeyCode>>,
+    /// The mouse buttons.
+    buttons: Res<'w, ButtonInput<MouseButton>>,
+    /// The bound movement actions.
+    actions: Res<'w, ButtonInput<Action>>,
+    /// This frame's accumulated mouse motion.
+    motion: Res<'w, AccumulatedMouseMotion>,
+    /// This frame's accumulated wheel scroll.
+    wheel: Res<'w, AccumulatedMouseScroll>,
+}
+
+impl CameraInput<'_> {
+    /// Whether input is going to the world rather than a focused UI widget.
+    fn is_world(&self) -> bool {
+        self.context.is_world()
+    }
+
+    /// Whether either `Alt` is held — the modifier that turns a left-drag into an
+    /// orbit and a left-click into a focus pick.
+    fn alt(&self) -> bool {
+        self.keyboard.pressed(KeyCode::AltLeft) || self.keyboard.pressed(KeyCode::AltRight)
+    }
+
+    /// Whether either `Ctrl` is held.
+    fn ctrl(&self) -> bool {
+        self.keyboard.pressed(KeyCode::ControlLeft) || self.keyboard.pressed(KeyCode::ControlRight)
+    }
+
+    /// This frame's wheel scroll in notches ([`scroll_notches`]).
+    fn scroll(&self) -> f32 {
+        scroll_notches(&self.wheel)
+    }
+
+    /// Whether any avatar-movement action is held — what returns the camera focus
+    /// to the avatar.
+    fn moving(&self) -> bool {
+        self.actions.pressed(Action::MoveForward)
+            || self.actions.pressed(Action::MoveBackward)
+            || self.actions.pressed(Action::MoveLeft)
+            || self.actions.pressed(Action::MoveRight)
+    }
+}
+
+/// What says whether the pointer is over a blocking UI panel, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam) — the wheel scrolls such a
+/// panel rather than zooming the camera.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub(crate) struct UiHover<'w, 's> {
+    /// What the pointer is over this frame.
+    hover_map: Res<'w, bevy::picking::hover::HoverMap>,
+    /// Which of those entities are pickable.
+    pickables: Query<'w, 's, &'static Pickable>,
+    /// Their computed sizes, for the hit test.
+    node_sizes: Query<'w, 's, &'static ComputedNode>,
+}
+
+impl UiHover<'_, '_> {
+    /// Whether the pointer is over a UI panel that takes the wheel for itself.
+    fn over_blocking_ui(&self) -> bool {
+        sl_viewer_world_api::pointer_over_blocking_ui(
+            &self.hover_map,
+            &self.pickables,
+            &self.node_sizes,
+        )
+    }
+}
+
+/// The flycam's 6-DOF axis state, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the device's raw axes, the
+/// dead-zone / scale / feathering settings applied to them, the auto-spin, and
+/// the smoothed per-frame delta the feathering accumulates into.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub(crate) struct FlycamAxes<'w> {
+    /// The SpaceNavigator's raw axes.
+    spacenav: Res<'w, SpacenavInput>,
+    /// The dead zone / scale / feathering applied to them.
+    settings: Res<'w, FlycamAxisSettings>,
+    /// The `--camera-spin` auto-rotation.
+    spin: Res<'w, CameraSpin>,
+    /// The feathered per-frame delta that actually drives the camera.
+    smoothing: ResMut<'w, FlycamSmoothing>,
+}
+
 /// Third-person camera control from the mouse, matching Second Life:
 ///
 /// - **Alt + left-drag** orbits — horizontal motion swings the azimuth, vertical
@@ -690,24 +782,12 @@ pub fn update_camera_cursor(
 /// `crate::hud_pick`) and never on the arrow keys — so a vehicle's arrow-key
 /// steering can never be mistaken for a camera orbit (reference bug #2 in the
 /// module docs). The alt-drag focus point is set by `focus_on_object`.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the mode / focus / \
-              context state, the user camera tuning, the Alt / Ctrl modifiers, the mouse button \
-              and motion, the wheel, and the camera rig"
-)]
 pub(crate) fn orbit_third_person(
     mut mode: ResMut<CameraMode>,
     focus: Res<FocusTarget>,
     tuning: Res<CameraTuning>,
-    context: Res<InputContext>,
-    keyboard: Res<ButtonInput<KeyCode>>,
-    buttons: Res<ButtonInput<MouseButton>>,
-    motion: Res<AccumulatedMouseMotion>,
-    wheel: Res<AccumulatedMouseScroll>,
-    hover_map: Res<bevy::picking::hover::HoverMap>,
-    pickables: Query<&Pickable>,
-    node_sizes: Query<&ComputedNode>,
+    input: CameraInput,
+    hover: UiHover,
     mut cameras: Query<&mut CameraRig, With<ViewerCamera>>,
 ) {
     // A wheel scroll over a blocking UI panel (a floater's scrolling list) scrolls
@@ -715,24 +795,23 @@ pub(crate) fn orbit_third_person(
     // list does not leave the world context, and without this the wheel would
     // both scroll the list and zoom the camera. The wheel-zoom preference gates
     // only the wheel: an alt-drag zoom still works with it off.
-    let over_ui =
-        sl_viewer_world_api::pointer_over_blocking_ui(&hover_map, &pickables, &node_sizes);
+    let over_ui = hover.over_blocking_ui();
     let scroll = if over_ui || tuning.wheel_zoom_disabled {
         0.0
     } else {
-        scroll_notches(&wheel)
+        input.scroll()
     };
-    if *mode != CameraMode::ThirdPerson || !context.is_world() {
+    if *mode != CameraMode::ThirdPerson || !input.is_world() {
         return;
     }
     let Ok(mut rig) = cameras.single_mut() else {
         return;
     };
-    let alt = keyboard.pressed(KeyCode::AltLeft) || keyboard.pressed(KeyCode::AltRight);
-    let ctrl = keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight);
+    let alt = input.alt();
+    let ctrl = input.ctrl();
     // Only an Alt-held left-drag orbits; otherwise the mouse motion is left alone.
-    let drag = if alt && buttons.pressed(MouseButton::Left) {
-        motion.delta
+    let drag = if alt && input.buttons.pressed(MouseButton::Left) {
+        input.motion.delta
     } else {
         Vec2::ZERO
     };
@@ -820,18 +899,9 @@ type WaterQuery<'world, 'state> = Query<'world, 'state, Entity, With<WaterCell>>
 ///
 /// Reuses the world camera's perspective ray through the cursor (the same pick the
 /// `P` crosshair tool casts).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the mode / context \
-              gate, the Alt modifier and mouse button, the movement actions that reset the focus, \
-              the window and camera to cast from, the ray caster, and the focus target it sets"
-)]
 pub(crate) fn focus_on_object(
     mode: Res<CameraMode>,
-    context: Res<InputContext>,
-    keyboard: Res<ButtonInput<KeyCode>>,
-    buttons: Res<ButtonInput<MouseButton>>,
-    actions: Res<ButtonInput<Action>>,
+    input: CameraInput,
     windows: Query<&Window>,
     water: WaterQuery,
     mut cameras: Query<(&Camera, &GlobalTransform, &mut CameraRig), With<ViewerCamera>>,
@@ -839,21 +909,16 @@ pub(crate) fn focus_on_object(
     mut focus: ResMut<FocusTarget>,
 ) {
     // Moving the avatar returns the focus to it (and pre-empts a focus this frame).
-    let moving = actions.pressed(Action::MoveForward)
-        || actions.pressed(Action::MoveBackward)
-        || actions.pressed(Action::MoveLeft)
-        || actions.pressed(Action::MoveRight);
-    if moving {
+    if input.moving() {
         if !matches!(*focus, FocusTarget::Avatar) {
             *focus = FocusTarget::Avatar;
         }
         return;
     }
-    if *mode != CameraMode::ThirdPerson || !context.is_world() {
+    if *mode != CameraMode::ThirdPerson || !input.is_world() {
         return;
     }
-    let alt = keyboard.pressed(KeyCode::AltLeft) || keyboard.pressed(KeyCode::AltRight);
-    if !alt || !buttons.just_pressed(MouseButton::Left) {
+    if !input.alt() || !input.buttons.just_pressed(MouseButton::Left) {
         return;
     }
     let Ok(window) = windows.single() else {
@@ -890,21 +955,19 @@ pub(crate) fn focus_on_object(
 /// `drive_flycam` (with a local-frame quaternion, so it has no gimbal lock).
 pub(crate) fn aim_look(
     mut mode: ResMut<CameraMode>,
-    context: Res<InputContext>,
+    input: CameraInput,
     tuning: Res<CameraTuning>,
-    motion: Res<AccumulatedMouseMotion>,
-    wheel: Res<AccumulatedMouseScroll>,
     mut cameras: Query<&mut CameraRig, With<ViewerCamera>>,
 ) {
-    let scroll = scroll_notches(&wheel);
-    if *mode != CameraMode::Mouselook || !context.is_world() {
+    let scroll = input.scroll();
+    if *mode != CameraMode::Mouselook || !input.is_world() {
         return;
     }
     let Ok(mut rig) = cameras.single_mut() else {
         return;
     };
     let (yaw_delta, pitch_delta) = aim_deltas(
-        motion.delta,
+        input.motion.delta,
         tuning.mouselook_sensitivity_rad_per_px,
         tuning.invert_mouse_y,
     );
@@ -935,23 +998,11 @@ fn aim_deltas(delta: Vec2, sensitivity: f32, invert_y: bool) -> (f32, f32) {
 /// quaternion multiply), not rebuilt from accumulated Euler angles — so it is true
 /// 6-DOF with no gimbal lock looking straight up or down, and rotations act on the
 /// camera's own axes, as the reference flycam does. Only runs in flycam.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the mode gate, the \
-              movement actions, the device state, the auto-spin, time, the right-drag mouse-look \
-              (motion + button + focus context) and the camera transform"
-)]
 pub(crate) fn drive_flycam(
     mode: Res<CameraMode>,
-    actions: Res<ButtonInput<Action>>,
-    spacenav: Res<SpacenavInput>,
-    flycam_settings: Res<FlycamAxisSettings>,
-    spin: Res<CameraSpin>,
+    input: CameraInput,
+    mut axes: FlycamAxes,
     time: Res<Time>,
-    motion: Res<AccumulatedMouseMotion>,
-    buttons: Res<ButtonInput<MouseButton>>,
-    context: Res<InputContext>,
-    mut smoothing: ResMut<FlycamSmoothing>,
     mut cameras: Query<&mut Transform, With<ViewerCamera>>,
 ) {
     if *mode != CameraMode::Flycam {
@@ -969,11 +1020,11 @@ pub(crate) fn drive_flycam(
     // per-axis scale, the frame time, and then ease the smoothed per-frame delta
     // toward it at the feathering rate. The smoothed delta is what actually drives
     // the camera each frame, so it ramps up on push and down on release.
-    let feather = flycam_settings.feathering;
-    for (index, smoothed) in smoothing.delta.iter_mut().enumerate() {
-        let raw = spacenav.axes.get(index).copied().unwrap_or(0.0);
-        let dead_zone = flycam_settings.dead_zone.get(index).copied().unwrap_or(0.0);
-        let scale = flycam_settings.scale.get(index).copied().unwrap_or(0.0);
+    let feather = axes.settings.feathering;
+    for (index, smoothed) in axes.smoothing.delta.iter_mut().enumerate() {
+        let raw = axes.spacenav.axes.get(index).copied().unwrap_or(0.0);
+        let dead_zone = axes.settings.dead_zone.get(index).copied().unwrap_or(0.0);
+        let scale = axes.settings.scale.get(index).copied().unwrap_or(0.0);
         let deadzoned = if raw > 0.0 {
             (raw - dead_zone).max(0.0)
         } else {
@@ -989,7 +1040,7 @@ pub(crate) fn drive_flycam(
         nav_roll,
         nav_pitch,
         nav_yaw,
-    ] = smoothing.delta;
+    ] = axes.smoothing.delta;
 
     // Rotation: the device's feathered roll / pitch / yaw, plus a right-drag
     // mouse-look and the auto-spin, composed as one **local-frame** delta
@@ -999,13 +1050,13 @@ pub(crate) fn drive_flycam(
     let mut pitch = nav_pitch;
     let mut yaw = nav_yaw;
     let mut roll = nav_roll;
-    if context.is_world() && buttons.pressed(MouseButton::Right) {
-        yaw -= motion.delta.x * AIM_SENSITIVITY;
-        pitch -= motion.delta.y * AIM_SENSITIVITY;
+    if input.is_world() && input.buttons.pressed(MouseButton::Right) {
+        yaw -= input.motion.delta.x * AIM_SENSITIVITY;
+        pitch -= input.motion.delta.y * AIM_SENSITIVITY;
     }
-    if spin.rate != 0.0 {
-        let step = spin.rate * dt;
-        match spin.axis {
+    if axes.spin.rate != 0.0 {
+        let step = axes.spin.rate * dt;
+        match axes.spin.axis {
             SpinAxis::Yaw => yaw += step,
             SpinAxis::Pitch => pitch += step,
             SpinAxis::Roll => roll += step,
@@ -1025,7 +1076,7 @@ pub(crate) fn drive_flycam(
     // levels its left axis), *not* by deriving up from forward: the right axis
     // stays well-defined looking straight up or down, where a forward-based level
     // is singular — which is what caused the artefacts at those poles.
-    if flycam_settings.auto_leveling {
+    if axes.settings.auto_leveling {
         let forward = transform.forward().as_vec3();
         let right = transform.right().as_vec3();
         if let Some(level_right) = Vec3::new(right.x, 0.0, right.z).try_normalize() {
@@ -1041,7 +1092,7 @@ pub(crate) fn drive_flycam(
                 // sits still — the same invariant `camera_pose_moved` guards for
                 // the other two modes.
                 if rotation_moved(transform.rotation, leveled, CAMERA_SETTLE_ROT_EPSILON) {
-                    let ease = (flycam_settings.feathering * dt).min(1.0);
+                    let ease = (axes.settings.feathering * dt).min(1.0);
                     transform.rotation = transform.rotation.slerp(leveled, ease).normalize();
                 }
             }
@@ -1066,27 +1117,27 @@ pub(crate) fn drive_flycam(
     // Keyboard translation along the camera basis (unaffected by the device
     // feathering), accumulated per component so the arithmetic stays in plain `f32`.
     let mut move_vec = Vec3::ZERO;
-    if actions.pressed(Action::MoveForward) {
+    if input.actions.pressed(Action::MoveForward) {
         move_vec = vadd(move_vec, forward);
     }
-    if actions.pressed(Action::MoveBackward) {
+    if input.actions.pressed(Action::MoveBackward) {
         move_vec = vsub(move_vec, forward);
     }
-    if actions.pressed(Action::MoveRight) {
+    if input.actions.pressed(Action::MoveRight) {
         move_vec = vadd(move_vec, right);
     }
-    if actions.pressed(Action::MoveLeft) {
+    if input.actions.pressed(Action::MoveLeft) {
         move_vec = vsub(move_vec, right);
     }
-    if actions.pressed(Action::MoveUp) {
+    if input.actions.pressed(Action::MoveUp) {
         move_vec = vadd(move_vec, Vec3::Y);
     }
-    if actions.pressed(Action::MoveDown) {
+    if input.actions.pressed(Action::MoveDown) {
         move_vec = vsub(move_vec, Vec3::Y);
     }
     let length_squared = move_vec.length_squared();
     if length_squared > 0.0 {
-        let boost = if actions.pressed(Action::Run) {
+        let boost = if input.actions.pressed(Action::Run) {
             FLYCAM_FAST
         } else {
             1.0
@@ -1111,6 +1162,135 @@ type AvatarPoseQuery<'world, 'state> = Query<'world, 'state, &'static GlobalTran
 type AvatarTransformQuery<'world, 'state> =
     Query<'world, 'state, &'static Transform, Without<ViewerCamera>>;
 
+/// The camera's read-only control state, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): which mode is active, what
+/// it is focused on, and the user's tuning.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub(crate) struct CameraState<'w> {
+    /// The active camera mode.
+    mode: Res<'w, CameraMode>,
+    /// What the third-person camera pivots around.
+    focus: Res<'w, FocusTarget>,
+    /// The user's camera settings.
+    tuning: Res<'w, CameraTuning>,
+}
+
+/// Everything the camera needs to find the **own** avatar, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): who we are, the avatar
+/// mirror, the current-frame anchor transforms and frame-late globals the pose
+/// and head are read from, the heading the follow tracks, and the body
+/// sub-hierarchy the collision ray ignores.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub(crate) struct OwnAvatar<'w, 's> {
+    /// Our own agent.
+    identity: Res<'w, SlIdentity>,
+    /// The avatar mirror: body root, seat state, head socket.
+    avatars: Res<'w, AvatarState>,
+    /// Frame-late world transforms, for the head socket.
+    globals: AvatarPoseQuery<'w, 's>,
+    /// The current-frame anchor locals, so the follow has no frame lag.
+    transforms: AvatarTransformQuery<'w, 's>,
+    /// The avatar's reported motion — the heading fallback.
+    motions: Query<'w, 's, &'static AvatarMotion>,
+    /// The heading the viewer holds for the avatar, which the follow tracks.
+    controls: Res<'w, sl_viewer_world_api::AvatarControls>,
+    /// The body sub-hierarchy, so the collision ray ignores our own mesh.
+    children: Query<'w, 's, &'static Children>,
+}
+
+impl OwnAvatar<'_, '_> {
+    /// The own avatar's live world position and stable (heading-derived) facing,
+    /// if it has arrived — see [`own_avatar_pose`].
+    fn pose(&self) -> Option<(Vec3, Vec3)> {
+        own_avatar_pose(
+            &self.identity,
+            &self.avatars,
+            &self.transforms,
+            &self.motions,
+            &self.controls,
+        )
+    }
+
+    /// The own avatar's head-joint world position — see [`own_avatar_head`].
+    fn head(&self) -> Option<Vec3> {
+        own_avatar_head(
+            &self.identity,
+            &self.avatars,
+            &self.globals,
+            &self.transforms,
+        )
+    }
+
+    /// The own avatar's anchor and its whole rigged-body sub-hierarchy, so
+    /// [`collide_camera`] does not treat the agent's own body as an occluder.
+    /// Without this the ray cast from the head focus exits through the skull /
+    /// hair a few centimetres out and yanks the camera into the head — worst
+    /// while the walk animation tilts the head into the rearward ray. The
+    /// reference viewer excludes the agent's own avatar from the same test.
+    fn body_entities(&self) -> std::collections::HashSet<Entity> {
+        self.identity
+            .agent_id
+            .and_then(|agent| self.avatars.body_root_of(agent))
+            .map(|anchor| {
+                let mut set: std::collections::HashSet<Entity> =
+                    self.children.iter_descendants(anchor).collect();
+                set.insert(anchor);
+                set
+            })
+            .unwrap_or_default()
+    }
+}
+
+/// The scripted sit camera and what resolves its seat, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the offsets the seat set, the
+/// object model the seat entity is looked up in, the linkset chain its
+/// current-frame world pose is composed from, and whether the path was engaged
+/// last frame (so the diagnostic logs only on the transition).
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub(crate) struct SeatCamera<'w, 's> {
+    /// The `llSetCamera*Offset` offsets the seat set, if any.
+    sit_camera: Res<'w, crate::sit_camera::SitCamera>,
+    /// The object model, for the seat entity.
+    objects: Res<'w, sl_viewer_world_api::ObjectState>,
+    /// The seat and its linkset ancestors' current-frame locals.
+    seat_chain: SeatChainQuery<'w, 's>,
+    /// Whether the scripted path was active last frame.
+    active: Local<'s, bool>,
+}
+
+impl SeatCamera<'_, '_> {
+    /// The scripted sit camera's world `(eye, focus)` — see [`sit_camera_pose`].
+    fn pose(&self) -> Option<(Vec3, Vec3)> {
+        sit_camera_pose(&self.sit_camera, &self.objects, &self.seat_chain)
+    }
+}
+
+/// What the camera's line of sight is tested against, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the static prim BVH and the
+/// moving (physical-prim) colliders cast alongside it.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub(crate) struct CameraColliders<'w> {
+    /// The custom static raycast index — a parry BVH broad phase over the prim
+    /// colliders, maintained off-thread, so [`collide_camera`] tests only the
+    /// colliders near the short head→eye segment instead of every mesh in the
+    /// scene (viewer-perf-custom-static-raycast-index).
+    index: Res<'w, StaticRaycastIndex>,
+    /// The moving (physical-prim) colliders, so the camera also occludes on a
+    /// physical mover.
+    dynamic: Res<'w, DynamicColliders>,
+}
+
+/// What the pose pass writes, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the published mouselook aim
+/// and the camera entity's transform and rig.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub(crate) struct CameraOut<'w, 's> {
+    /// The aim the avatar body follows in mouselook.
+    aim: ResMut<'w, CameraAim>,
+    /// The camera itself.
+    cameras: Query<'w, 's, (&'static mut Transform, &'static mut CameraRig), With<ViewerCamera>>,
+}
+
 /// Compute and apply the final camera pose for the active mode, easing it toward
 /// the target so mode transitions glide.
 ///
@@ -1119,83 +1299,26 @@ type AvatarTransformQuery<'world, 'state> =
 /// - **Mouselook** sits at the avatar's eyes, aimed by the rig.
 /// - **Flycam** is already positioned by `drive_flycam`; this only seeds the
 ///   smoothed pose so a switch *into* it glides.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the mode / focus \
-              / aim state, the user camera tuning, the identity and avatar tables to find the own \
-              avatar, the transform query, the ray caster for collision, time for the smoothing, \
-              and the camera itself"
-)]
 pub(crate) fn position_camera(
-    // Bundled into one tuple param: a Bevy system tops out at 16 parameters and
-    // this one is full — a tuple of `SystemParam`s is itself a `SystemParam`.
-    camera_state: (Res<CameraMode>, Res<FocusTarget>, Res<CameraTuning>),
-    identity: Res<SlIdentity>,
-    avatars: Res<AvatarState>,
-    objects: Res<sl_viewer_world_api::ObjectState>,
-    sit_camera: Res<crate::sit_camera::SitCamera>,
+    state: CameraState,
+    own: OwnAvatar,
+    mut seat: SeatCamera,
+    colliders: CameraColliders,
     time: Res<Time>,
-    globals: AvatarPoseQuery,
-    transforms: AvatarTransformQuery,
-    // The seat and its linkset ancestors, to compose a scripted sit camera's seat
-    // pose from current-frame local transforms (see [`sit_camera_pose`]).
-    seat_chain: SeatChainQuery,
-    // The own avatar's reported motion and the heading the viewer holds for it:
-    // the follow tracks the held heading, the report is the fallback until it is
-    // seeded (see [`own_avatar_pose`]). One tuple, since this system is at Bevy's
-    // parameter limit.
-    facing: (
-        Query<&AvatarMotion>,
-        Res<sl_viewer_world_api::AvatarControls>,
-    ),
-    // The own avatar's mesh sub-hierarchy, so the collision ray can ignore the
-    // agent's own body (see [`collide_camera`]).
-    children: Query<&Children>,
-    // Tracks whether the scripted-sit-camera path was active last frame, so the
-    // diagnostic below logs only on the transition.
-    mut sit_camera_active: Local<bool>,
-    // The custom static raycast index for camera collision: a parry BVH broad
-    // phase over the prim colliders (maintained off-thread), so [`collide_camera`]
-    // tests only colliders near the short head→eye segment instead of every mesh
-    // in the scene. Replaces avian's `SpatialQuery`
-    // (viewer-perf-custom-static-raycast-index).
-    index: Res<StaticRaycastIndex>,
-    // The moving (physical-prim) colliders, cast alongside the static index so the
-    // camera also occludes on a physical mover.
-    dynamic: Res<DynamicColliders>,
-    mut aim_out: ResMut<CameraAim>,
-    mut cameras: Query<(&mut Transform, &mut CameraRig), With<ViewerCamera>>,
+    mut out: CameraOut,
 ) {
-    let (mode, focus_target, tuning) = camera_state;
-    let Ok((mut transform, mut rig)) = cameras.single_mut() else {
+    let Ok((mut transform, mut rig)) = out.cameras.single_mut() else {
         return;
     };
-    aim_out.mouselook = *mode == CameraMode::Mouselook;
+    out.aim.mouselook = *state.mode == CameraMode::Mouselook;
 
     // The own avatar's live world position and stable (heading-derived) facing, if
     // it has arrived. Read from the current-frame anchor `Transform`, not the
     // frame-late `GlobalTransform`, so the follow does not trail by a frame.
-    let (motions, controls) = facing;
-    let avatar_pose = own_avatar_pose(&identity, &avatars, &transforms, &motions, &controls);
+    let avatar_pose = own.pose();
+    let own_avatar_entities = own.body_entities();
 
-    // The own avatar's mesh entities (its anchor and the whole rigged-body
-    // sub-hierarchy), so [`collide_camera`] does not treat the agent's own body as
-    // an occluder. Without this the ray cast from the head focus exits through the
-    // skull / hair a few centimetres out and yanks the camera into the head — worst
-    // while the walk animation tilts the head into the rearward ray. The reference
-    // viewer excludes the agent's own avatar from the same occlusion test.
-    let own_avatar_entities: std::collections::HashSet<Entity> = identity
-        .agent_id
-        .and_then(|agent| avatars.body_root_of(agent))
-        .map(|anchor| {
-            let mut set: std::collections::HashSet<Entity> =
-                children.iter_descendants(anchor).collect();
-            set.insert(anchor);
-            set
-        })
-        .unwrap_or_default();
-
-    match *mode {
+    match *state.mode {
         CameraMode::Flycam => {
             // `drive_flycam` owns the transform; just keep the smoothed pose in sync
             // so a later switch out of flycam glides from here.
@@ -1212,7 +1335,8 @@ pub(crate) fn position_camera(
             // height), nudged a touch forward along the look so the view is not
             // inside the face. Falls back to the anchor plus a head-height offset for
             // a placeholder-sphere avatar with no skeleton.
-            let eye = own_avatar_head(&identity, &avatars, &globals, &transforms)
+            let eye = own
+                .head()
                 .map(|head| vadd(head, vscale(look_forward, MOUSELOOK_EYE_OFFSET.x)))
                 .or_else(|| {
                     avatar_pose.map(|(avatar, facing)| {
@@ -1244,7 +1368,7 @@ pub(crate) fn position_camera(
             rig.smoothed_focus = vadd(eye, look_forward);
             rig.seeded = true;
             // Publish the heading for the avatar body to follow.
-            aim_out.sl_yaw = sl_heading_from_bevy_forward(look_forward);
+            out.aim.sl_yaw = sl_heading_from_bevy_forward(look_forward);
             let mut posed = Transform::from_translation(eye);
             posed.rotation = look;
             // Mouselook builds its pose directly rather than through
@@ -1261,16 +1385,16 @@ pub(crate) fn position_camera(
             // ordinary follow while seated and focused on the avatar: the eye and
             // focus ride the seat at the script's offsets. It is not collided (the
             // script's placement is authoritative — e.g. a camera inside a vehicle).
-            let sit_pose = matches!(*focus_target, FocusTarget::Avatar)
-                .then(|| sit_camera_pose(&sit_camera, &objects, &seat_chain))
+            let sit_pose = matches!(*state.focus, FocusTarget::Avatar)
+                .then(|| seat.pose())
                 .flatten();
             // Log only when the scripted-sit-camera path engages / disengages (not
             // every frame), so a live run reveals whether the seat a driver rides uses
             // a scripted sit camera (this rigid-seat path) or the ordinary rear-view
             // follow — the two track the vehicle differently.
             let sit_now = sit_pose.is_some();
-            if sit_now != *sit_camera_active {
-                *sit_camera_active = sit_now;
+            if sit_now != *seat.active {
+                *seat.active = sit_now;
                 debug!(
                     "camera: scripted sit-camera path {}",
                     if sit_now {
@@ -1280,7 +1404,7 @@ pub(crate) fn position_camera(
                     }
                 );
             }
-            let (mut eye, focus, follow_avatar, collide) = match (sit_pose, *focus_target) {
+            let (mut eye, focus, follow_avatar, collide) = match (sit_pose, *state.focus) {
                 // Scripted sit camera: fixed offsets from the (moving) seat, tracked
                 // rigidly like a follow, never collided.
                 (Some((eye, focus)), _) => (eye, focus, true, false),
@@ -1303,7 +1427,7 @@ pub(crate) fn position_camera(
                     let Some((anchor, facing)) = avatar_pose else {
                         return;
                     };
-                    let head = own_avatar_head(&identity, &avatars, &globals, &transforms);
+                    let head = own.head();
                     let focus = third_person_focus(head, anchor, facing);
                     // The user's `CameraOffsetScale` multiplies the orbit distance
                     // (not the angles), pushing the whole rear view in or out.
@@ -1312,7 +1436,7 @@ pub(crate) fn position_camera(
                         facing,
                         rig.azimuth,
                         rig.elevation,
-                        rig.distance * tuning.offset_scale,
+                        rig.distance * state.tuning.offset_scale,
                     );
                     (eye, focus, true, true)
                 }
@@ -1320,7 +1444,13 @@ pub(crate) fn position_camera(
             // Camera collision: pull the eye in toward the focus if the line of
             // sight is obstructed, so the camera does not clip through a wall.
             if collide {
-                eye = collide_camera(&index, &dynamic, focus, eye, &own_avatar_entities);
+                eye = collide_camera(
+                    &colliders.index,
+                    &colliders.dynamic,
+                    focus,
+                    eye,
+                    &own_avatar_entities,
+                );
             }
             // `&transform` reads through the `Mut` without marking it; the write
             // below is the only mutable deref, so a settled camera stays
@@ -1328,12 +1458,14 @@ pub(crate) fn position_camera(
             if let Some(posed) = apply_pose(
                 &transform,
                 &mut rig,
-                eye,
-                focus,
-                follow_avatar,
                 &time,
-                tuning.smoothing_half_life,
-                false,
+                &PoseTarget {
+                    eye,
+                    focus,
+                    follow_avatar,
+                    half_life: state.tuning.smoothing_half_life,
+                    snap: false,
+                },
             ) {
                 *transform = posed;
             }
@@ -1375,6 +1507,25 @@ fn rotation_moved(current: Quat, new: Quat, epsilon: f32) -> bool {
     !current.abs_diff_eq(new, epsilon * 0.5)
 }
 
+/// One pose for [`apply_pose`] to ease the camera onto, and how: the desired eye
+/// / focus pair, whether the focus is a rigid avatar follow, and the two
+/// smoothing controls.
+#[derive(Debug, Clone, Copy)]
+struct PoseTarget {
+    /// Where the camera wants its eye.
+    eye: Vec3,
+    /// The world point it looks at.
+    focus: Vec3,
+    /// Rigid avatar follow (only the eye's offset from the focus eases) rather
+    /// than smoothing the whole pose in world space.
+    follow_avatar: bool,
+    /// The exponential easing half-life in seconds; zero or less snaps.
+    half_life: f32,
+    /// Bypass the smoothing entirely — a deliberate discontinuity, which always
+    /// writes.
+    snap: bool,
+}
+
 /// Ease the camera from its smoothed pose toward `(eye, focus)` and return the
 /// transform to write, seeding (snapping) on the first frame so it does not glide
 /// in from the origin. `half_life` is the exponential easing's half-life in
@@ -1395,23 +1546,19 @@ fn rotation_moved(current: Quat, new: Quat, epsilon: f32) -> bool {
 /// drift relative to each other — a sustained vertical flight has zero follow lag,
 /// as the reference viewer does. `false` (a fixed focus point) smooths the whole
 /// pose in world space as before — a static point has nothing to trail.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the camera pose write needs the transform it eases from and the rig it writes, the \
-              desired eye / focus pair, the follow mode, the frame time, and the two smoothing \
-              controls — bundling them into a struct for one internal call site would only \
-              obscure it"
-)]
 fn apply_pose(
     transform: &Transform,
     rig: &mut CameraRig,
-    eye: Vec3,
-    focus: Vec3,
-    follow_avatar: bool,
     time: &Time,
-    half_life: f32,
-    snap: bool,
+    target: &PoseTarget,
 ) -> Option<Transform> {
+    let &PoseTarget {
+        eye,
+        focus,
+        follow_avatar,
+        half_life,
+        snap,
+    } = target;
     let (final_eye, final_focus) = if !rig.seeded || snap {
         (eye, focus)
     } else {
@@ -1638,7 +1785,9 @@ fn sl_heading_from_bevy_forward(forward: Vec3) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{facing_from_yaw, flatten, sl_heading_from_bevy_forward, third_person_eye};
+    use super::{
+        PoseTarget, facing_from_yaw, flatten, sl_heading_from_bevy_forward, third_person_eye,
+    };
     use bevy::math::Vec3;
     use sl_viewer_world_api::{CAMERA_OFFSET, CameraRig};
 
@@ -1786,12 +1935,14 @@ mod tests {
                 if let Some(posed) = apply_pose(
                     transform,
                     rig,
-                    vadd(anchor, eye_off),
-                    vadd(anchor, focus_off),
-                    follow_avatar,
                     &time,
-                    SMOOTH_HALF_LIFE,
-                    false,
+                    &PoseTarget {
+                        eye: vadd(anchor, eye_off),
+                        focus: vadd(anchor, focus_off),
+                        follow_avatar,
+                        half_life: SMOOTH_HALF_LIFE,
+                        snap: false,
+                    },
                 ) {
                     *transform = posed;
                 }
@@ -1890,9 +2041,18 @@ mod tests {
         let mut rig = CameraRig::default();
         let mut transform = Transform::default();
         let mut frame = |eye: Vec3, focus: Vec3| {
-            if let Some(posed) =
-                apply_pose(&transform, &mut rig, eye, focus, false, &time, 0.0, false)
-            {
+            if let Some(posed) = apply_pose(
+                &transform,
+                &mut rig,
+                &time,
+                &PoseTarget {
+                    eye,
+                    focus,
+                    follow_avatar: false,
+                    half_life: 0.0,
+                    snap: false,
+                },
+            ) {
                 transform = posed;
             }
         };
@@ -2134,12 +2294,14 @@ mod tests {
             if let Some(posed) = apply_pose(
                 &transform,
                 &mut rig,
-                eye,
-                focus,
-                false,
                 &time,
-                SMOOTH_HALF_LIFE,
-                false,
+                &PoseTarget {
+                    eye,
+                    focus,
+                    follow_avatar: false,
+                    half_life: SMOOTH_HALF_LIFE,
+                    snap: false,
+                },
             ) {
                 transform = posed;
                 wrote_in_a_row = 0;
@@ -2161,12 +2323,14 @@ mod tests {
             apply_pose(
                 &transform,
                 &mut rig,
-                vadd(eye, Vec3::new(5.0, 0.0, 0.0)),
-                vadd(focus, Vec3::new(5.0, 0.0, 0.0)),
-                false,
                 &time,
-                SMOOTH_HALF_LIFE,
-                false,
+                &PoseTarget {
+                    eye: vadd(eye, Vec3::new(5.0, 0.0, 0.0)),
+                    focus: vadd(focus, Vec3::new(5.0, 0.0, 0.0)),
+                    follow_avatar: false,
+                    half_life: SMOOTH_HALF_LIFE,
+                    snap: false,
+                },
             )
             .is_some(),
             "a moved target writes again"
@@ -2175,12 +2339,14 @@ mod tests {
             apply_pose(
                 &transform,
                 &mut rig,
-                transform.translation,
-                vadd(transform.translation, transform.forward().as_vec3()),
-                false,
                 &time,
-                SMOOTH_HALF_LIFE,
-                true,
+                &PoseTarget {
+                    eye: transform.translation,
+                    focus: vadd(transform.translation, transform.forward().as_vec3()),
+                    follow_avatar: false,
+                    half_life: SMOOTH_HALF_LIFE,
+                    snap: true,
+                },
             )
             .is_some(),
             "a snap is a deliberate discontinuity and always writes"
@@ -2326,7 +2492,7 @@ mod tests {
             Action, CameraMode, CameraSpin, FlycamAxisSettings, FlycamSmoothing, InputContext,
             SpacenavInput, ViewerCamera, drive_flycam,
         };
-        use bevy::input::mouse::AccumulatedMouseMotion;
+        use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll};
         use bevy::prelude::*;
         use pretty_assertions::assert_eq;
         use std::time::Duration;
@@ -2350,7 +2516,11 @@ mod tests {
             .init_resource::<CameraSpin>()
             .init_resource::<Time>()
             .init_resource::<AccumulatedMouseMotion>()
+            // The flycam reads its input through `CameraInput`, which is the whole
+            // pointer + keyboard state every camera control shares.
+            .init_resource::<AccumulatedMouseScroll>()
             .init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<ButtonInput<KeyCode>>()
             .init_resource::<InputContext>()
             .init_resource::<FlycamSmoothing>()
             .init_resource::<Writes>()

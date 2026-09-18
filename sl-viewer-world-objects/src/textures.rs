@@ -1077,6 +1077,62 @@ pub enum TextureAlpha {
 /// and the reference viewer's default auto-mask.
 const FACE_ALPHA_MASK_CUTOFF: f32 = 0.5;
 
+/// The four [`FaceStores`] taken straight from the world, for a system that
+/// composes faces itself rather than being handed the borrows.
+#[expect(
+    missing_debug_implementations,
+    reason = "the asset stores here are Bevy `Assets<T>` collections, none of which implements \
+              Debug; a hand-written impl could only print the field names"
+)]
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct FaceStoresParam<'w> {
+    /// The face materials written.
+    pub materials: ResMut<'w, Assets<FaceMaterial>>,
+    /// The fetch / priority side of the texture pipeline.
+    pub manager: ResMut<'w, TextureManager>,
+    /// The decoded textures, read for a diffuse texture's alpha.
+    pub store: Res<'w, DecodedTextures>,
+    /// The per-prim texture bookkeeping: uploaded images, parked materials.
+    pub prim_textures: ResMut<'w, PrimTextures>,
+}
+
+impl FaceStoresParam<'_> {
+    /// The borrowed view the composition chain takes.
+    pub fn stores(&mut self) -> FaceStores<'_> {
+        FaceStores {
+            materials: &mut self.materials,
+            manager: &mut self.manager,
+            store: &self.store,
+            prim_textures: &mut self.prim_textures,
+        }
+    }
+}
+
+/// The four stores composing one face's material writes through, bundled so the
+/// composition chain does not thread them by hand.
+///
+/// Every path that paints a face — the object build's fresh and interned
+/// materials, the level-of-detail re-tessellation, the build tool's live
+/// previews, the Blinn-Phong revert of a PBR face — reaches for exactly these
+/// four: the material assets to write, the texture manager to fetch through,
+/// the decoded store to read alpha from, and the per-prim bookkeeping a parked
+/// texture is claimed from.
+#[expect(
+    missing_debug_implementations,
+    reason = "the asset stores here are Bevy `Assets<T>` collections, none of which implements \
+              Debug; a hand-written impl could only print the field names"
+)]
+pub struct FaceStores<'a> {
+    /// The face materials written.
+    pub materials: &'a mut Assets<FaceMaterial>,
+    /// The fetch / priority side of the texture pipeline.
+    pub manager: &'a mut TextureManager,
+    /// The decoded textures, read for a diffuse texture's alpha.
+    pub store: &'a DecodedTextures,
+    /// The per-prim texture bookkeeping: uploaded images, parked materials.
+    pub prim_textures: &'a mut PrimTextures,
+}
+
 /// Build the diffuse [`StandardMaterial`] for one prim face: `base_color` is the
 /// face tint (opaque white = untinted), and `base_color_texture` is filled in
 /// immediately when the face's texture is already uploaded, otherwise the
@@ -1091,24 +1147,12 @@ const FACE_ALPHA_MASK_CUTOFF: f32 = 0.5;
 /// A face with no texture (nil id) keeps just its flat tint.
 pub fn face_material(
     face: &TextureFace,
-    materials: &mut Assets<FaceMaterial>,
-    manager: &mut TextureManager,
-    store: &DecodedTextures,
-    prim_textures: &mut PrimTextures,
+    stores: &mut FaceStores,
     priority: Priority,
     texture_alpha: TextureAlpha,
 ) -> Handle<FaceMaterial> {
-    let handle = materials.add(FaceMaterial::default());
-    compose_face_material(
-        &handle,
-        face,
-        materials,
-        manager,
-        store,
-        prim_textures,
-        priority,
-        texture_alpha,
-    );
+    let handle = stores.materials.add(FaceMaterial::default());
+    compose_face_material(&handle, face, stores, priority, texture_alpha);
     handle
 }
 
@@ -1131,60 +1175,37 @@ pub fn face_material(
 /// since [`drape_face_texture`] is idempotent) and the texture re-requested —
 /// which both bumps the fetch priority for a boosted sharer and revives the
 /// retry after a failed decode consumed the original parking.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "interning a face material needs the face, its internability, the cache, the \
-              material assets, the texture manager, the decoded store and the fetch priority"
-)]
 pub(crate) fn intern_face_material(
     face: &TextureFace,
     internable: bool,
     cache: &mut MaterialCache,
-    materials: &mut Assets<FaceMaterial>,
-    manager: &mut TextureManager,
-    store: &DecodedTextures,
-    prim_textures: &mut PrimTextures,
+    stores: &mut FaceStores,
     priority: Priority,
 ) -> (Handle<FaceMaterial>, bool) {
     if !internable {
         cache.note_excluded();
-        let handle = face_material(
-            face,
-            materials,
-            manager,
-            store,
-            prim_textures,
-            priority,
-            TextureAlpha::Mask,
-        );
+        let handle = face_material(face, stores, priority, TextureAlpha::Mask);
         return (handle, false);
     }
     let key = MaterialKey::new(face, TextureAlpha::Mask);
-    if let Some(handle) = cache.revive(&key, materials) {
+    if let Some(handle) = cache.revive(&key, stores.materials) {
         cache.note_hit();
         let texture_id = face.texture_id;
-        if !is_absent_texture(texture_id) && !prim_textures.images.contains_key(&texture_id) {
-            let parked = prim_textures.pending.entry(texture_id).or_default();
+        if !is_absent_texture(texture_id) && !stores.prim_textures.images.contains_key(&texture_id)
+        {
+            let parked = stores.prim_textures.pending.entry(texture_id).or_default();
             if !parked
                 .iter()
                 .any(|(parked_handle, _alpha)| *parked_handle == handle)
             {
                 parked.push((handle.clone(), TextureAlpha::Mask));
             }
-            manager.request_face(texture_id, priority);
+            stores.manager.request_face(texture_id, priority);
         }
         return (handle, true);
     }
     cache.note_miss();
-    let handle = face_material(
-        face,
-        materials,
-        manager,
-        store,
-        prim_textures,
-        priority,
-        TextureAlpha::Mask,
-    );
+    let handle = face_material(face, stores, priority, TextureAlpha::Mask);
     cache.record(key, handle.id());
     (handle, true)
 }
@@ -1200,19 +1221,10 @@ pub(crate) fn intern_face_material(
 /// hide, [`crate::materials::apply_blinn_phong_hide`]): the face keeps its one
 /// stable handle (every other system that reads it is unaffected) and only its
 /// composition changes. `face_material` is the fresh-handle wrapper over it.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "composing a face material needs the handle, the face, the material assets, the \
-              texture manager, the decoded store, the prim-texture bookkeeping, the fetch \
-              priority and the alpha treatment"
-)]
 pub fn compose_face_material(
     handle: &Handle<FaceMaterial>,
     face: &TextureFace,
-    materials: &mut Assets<FaceMaterial>,
-    manager: &mut TextureManager,
-    store: &DecodedTextures,
-    prim_textures: &mut PrimTextures,
+    stores: &mut FaceStores,
     priority: Priority,
     texture_alpha: TextureAlpha,
 ) {
@@ -1242,7 +1254,7 @@ pub fn compose_face_material(
         // prim faces and decoded mesh submeshes carry outward-facing windings.
         ..default()
     };
-    if has_texture && let Some(image) = prim_textures.images.get(&texture_id) {
+    if has_texture && let Some(image) = stores.prim_textures.images.get(&texture_id) {
         material.base_color_texture = Some(image.clone());
         // The texture is already uploaded, so resolve its alpha channel **now**
         // (R25a): this build path never parks the face, so without this the
@@ -1251,11 +1263,13 @@ pub fn compose_face_material(
         // re-tessellation on approach, a shape change, a derender/re-create)
         // popped back in opaque, losing the alpha-texture transparency its
         // first build had gained when the texture decoded.
-        let has_alpha = store
+        let has_alpha = stores
+            .store
             .get(texture_id)
             .is_some_and(|decoded| texture_has_alpha(decoded));
         let has_transparency = has_alpha
-            && store
+            && stores
+                .store
                 .get(texture_id)
                 .is_some_and(|decoded| texture_has_transparency(decoded));
         resolve_texture_alpha_mode(&mut material, texture_alpha, has_alpha, has_transparency);
@@ -1268,7 +1282,7 @@ pub fn compose_face_material(
     // changed, so a re-composition — e.g. the FIRE-35138 Blinn-Phong revert of a
     // PBR face — rebuilds its bind group). A handle whose asset was dropped is a
     // no-op.
-    let Some(mut slot) = materials.get_mut(handle) else {
+    let Some(mut slot) = stores.materials.get_mut(handle) else {
         return;
     };
     // Write the composed diffuse into the face material's `base`, resetting the
@@ -1283,20 +1297,22 @@ pub fn compose_face_material(
     if has_texture {
         // Track this material so a later level-of-detail re-upload can mark it
         // changed and rebuild its bind group (P21.1) — see `PrimTextures::materials`.
-        prim_textures
+        stores
+            .prim_textures
             .materials
             .entry(texture_id)
             .or_default()
             .push(handle.id());
         // A textured face whose image is not uploaded yet: park the material and
         // ask the pipeline for the texture (idempotent across faces).
-        if !prim_textures.images.contains_key(&texture_id) {
-            prim_textures
+        if !stores.prim_textures.images.contains_key(&texture_id) {
+            stores
+                .prim_textures
                 .pending
                 .entry(texture_id)
                 .or_default()
                 .push((handle.clone(), texture_alpha));
-            manager.request_face(texture_id, priority);
+            stores.manager.request_face(texture_id, priority);
         }
     }
 }
@@ -1416,6 +1432,37 @@ fn reserve_image_build(
     None
 }
 
+/// Everything a parked-face texture drape reads and writes, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+///
+/// The two systems that drape parked faces — the decode event and the
+/// already-decoded sweep after it — and the shared body they call take exactly
+/// these seven: the decoded store the image is built from, the legacy materials
+/// a bump / specular face is finished with, the per-prim bookkeeping the faces
+/// are parked in, the two per-frame budgets, the image store and the materials.
+#[expect(
+    missing_debug_implementations,
+    reason = "the asset stores here are Bevy `Assets<T>` collections, none of which implements \
+              Debug; a hand-written impl could only print the field names"
+)]
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct TexturePatch<'w> {
+    /// The decoded textures the GPU image is built from.
+    store: Res<'w, DecodedTextures>,
+    /// The legacy materials a draped face's bump / specular is finished with.
+    legacy: Res<'w, crate::legacy_materials::LegacyMaterialManager>,
+    /// The per-prim bookkeeping: parked faces, uploaded images, material lists.
+    prim_textures: ResMut<'w, PrimTextures>,
+    /// The per-frame image-build and re-prep budgets.
+    budget: ResMut<'w, TextureApplyBudget>,
+    /// The overflow queue a budget-spent drape defers into.
+    deferred: ResMut<'w, DeferredFaceTextures>,
+    /// The image store an uploaded texture lands in.
+    images: ResMut<'w, Assets<Image>>,
+    /// The face materials the image is draped onto.
+    materials: ResMut<'w, Assets<FaceMaterial>>,
+}
+
 /// Turn a decoded texture's parked faces into a rendered, textured batch: build (and
 /// cache) its GPU image, then drape it onto the parked faces under the two per-frame
 /// budgets. Returns `false` — leaving the faces parked for a later frame — when the
@@ -1423,40 +1470,37 @@ fn reserve_image_build(
 /// cache-warm burst of decodes does not upload every texture in one frame);
 /// [`patch_parked_decoded_textures`] retries the parked faces next frame. Shared by
 /// [`apply_prim_textures`] and [`patch_parked_decoded_textures`].
-#[expect(
-    clippy::too_many_arguments,
-    reason = "funnels every resource the two texture-apply systems share into one place"
-)]
 fn drape_decoded_texture(
-    legacy: &crate::legacy_materials::LegacyMaterialManager,
-    prim_textures: &mut PrimTextures,
-    budget: &mut TextureApplyBudget,
-    deferred: &mut VecDeque<DeferredFaceTexture>,
-    images: &mut Assets<Image>,
-    materials: &mut Assets<FaceMaterial>,
+    patch: &mut TexturePatch,
     id: TextureKey,
     parked: Vec<(Handle<FaceMaterial>, TextureAlpha)>,
-    store: &DecodedTextures,
 ) -> bool {
-    let already_built = prim_textures.images.contains_key(&id);
-    let Some(parked) = reserve_image_build(prim_textures, budget, id, parked) else {
+    let already_built = patch.prim_textures.images.contains_key(&id);
+    let Some(parked) = reserve_image_build(&mut patch.prim_textures, &patch.budget, id, parked)
+    else {
         // Out of image-build budget this frame and the image is not built: the faces
-        // were re-parked for `patch` to build (and drape) in a later frame.
+        // were re-parked for `patch_parked_decoded_textures` to build (and drape) in
+        // a later frame.
         return false;
     };
-    let alpha = decoded_alpha(store, id);
-    let Some(image_handle) = prim_image(store, prim_textures, images, id) else {
+    let alpha = decoded_alpha(&patch.store, id);
+    let Some(image_handle) = prim_image(
+        &patch.store,
+        &mut patch.prim_textures,
+        &mut patch.images,
+        id,
+    ) else {
         // The fetch failed: the parked faces keep their flat tint.
         return true;
     };
     if !already_built {
-        budget.image_remaining = budget.image_remaining.saturating_sub(1);
+        patch.budget.image_remaining = patch.budget.image_remaining.saturating_sub(1);
     }
     drape_parked_faces(
-        materials,
-        legacy,
-        &mut budget.reprep_remaining,
-        deferred,
+        &mut patch.materials,
+        &patch.legacy,
+        &mut patch.budget.reprep_remaining,
+        &mut patch.deferred.queue,
         &image_handle,
         alpha,
         parked,
@@ -1643,51 +1687,36 @@ fn defer_lod_reupload(
 /// Drop each freshly decoded diffuse texture onto the prim faces parked on it (or
 /// refresh the image behind a level-of-detail re-decode), building images and draping
 /// faces under the per-frame [`TextureApplyBudget`].
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system: the decode reader plus the resources building + draping textures need"
-)]
-pub fn apply_prim_textures(
-    mut decoded: MessageReader<TextureDecoded>,
-    store: Res<DecodedTextures>,
-    legacy: Res<crate::legacy_materials::LegacyMaterialManager>,
-    mut prim_textures: ResMut<PrimTextures>,
-    mut budget: ResMut<TextureApplyBudget>,
-    mut deferred: ResMut<DeferredFaceTextures>,
-    mut images: ResMut<Assets<Image>>,
-    mut materials: ResMut<Assets<FaceMaterial>>,
-) {
+pub fn apply_prim_textures(mut decoded: MessageReader<TextureDecoded>, mut patch: TexturePatch) {
     for &TextureDecoded(id) in decoded.read() {
         // Level-of-detail re-decode (P21.1): a texture already uploaded to the GPU
         // whose store entry the driver upgraded / downgraded. Refresh it under the
         // per-frame image-build budget — a camera move that upgrades many textures at
         // once would otherwise rebuild them all in one frame; the overflow defers to
         // `drain_lod_reuploads`.
-        if prim_textures.images.contains_key(&id) {
-            if store.get(id).is_some() && !defer_lod_reupload(&mut prim_textures, &budget, id) {
-                refresh_lod_image(&store, &mut prim_textures, &mut images, &mut materials, id);
-                budget.image_remaining = budget.image_remaining.saturating_sub(1);
+        if patch.prim_textures.images.contains_key(&id) {
+            if patch.store.get(id).is_some()
+                && !defer_lod_reupload(&mut patch.prim_textures, &patch.budget, id)
+            {
+                refresh_lod_image(
+                    &patch.store,
+                    &mut patch.prim_textures,
+                    &mut patch.images,
+                    &mut patch.materials,
+                    id,
+                );
+                patch.budget.image_remaining = patch.budget.image_remaining.saturating_sub(1);
             }
             continue;
         }
-        let Some(parked) = prim_textures.pending.remove(&id) else {
+        let Some(parked) = patch.prim_textures.pending.remove(&id) else {
             // Not a texture any prim face is waiting on (e.g. a terrain texture).
             continue;
         };
         // Build the image (image-budgeted) and drape its faces (reprep-budgeted); the
         // overflow of either defers to a later frame so a cache-warm decode burst does
         // not upload every texture / re-prep hundreds of materials in one frame.
-        let _draped = drape_decoded_texture(
-            &legacy,
-            &mut prim_textures,
-            &mut budget,
-            &mut deferred.queue,
-            &mut images,
-            &mut materials,
-            id,
-            parked,
-            &store,
-        );
+        let _draped = drape_decoded_texture(&mut patch, id, parked);
     }
 }
 
@@ -1697,42 +1726,25 @@ pub fn apply_prim_textures(
 /// it for a live preview, then a commit re-tessellated the face) would never be
 /// filled and would render as a flat solid tint. This runs after
 /// [`apply_prim_textures`] and drains any such stranded parked faces.
-pub fn patch_parked_decoded_textures(
-    store: Res<DecodedTextures>,
-    legacy: Res<crate::legacy_materials::LegacyMaterialManager>,
-    mut prim_textures: ResMut<PrimTextures>,
-    mut budget: ResMut<TextureApplyBudget>,
-    mut deferred: ResMut<DeferredFaceTextures>,
-    mut images: ResMut<Assets<Image>>,
-    mut materials: ResMut<Assets<FaceMaterial>>,
-) {
-    let ready: Vec<TextureKey> = prim_textures
+pub fn patch_parked_decoded_textures(mut patch: TexturePatch) {
+    let ready: Vec<TextureKey> = patch
+        .prim_textures
         .pending
         .keys()
         .copied()
-        .filter(|id| !prim_textures.images.contains_key(id) && store.get(*id).is_some())
+        .filter(|id| !patch.prim_textures.images.contains_key(id) && patch.store.get(*id).is_some())
         .collect();
     for id in ready {
         // Stop once the image-build budget is spent — the rest stay parked for the
         // next frame (re-parking inside `drape_decoded_texture` is a no-op here, since
         // the faces were never removed).
-        if budget.image_remaining == 0 {
+        if patch.budget.image_remaining == 0 {
             break;
         }
-        let Some(parked) = prim_textures.pending.remove(&id) else {
+        let Some(parked) = patch.prim_textures.pending.remove(&id) else {
             continue;
         };
-        let _draped = drape_decoded_texture(
-            &legacy,
-            &mut prim_textures,
-            &mut budget,
-            &mut deferred.queue,
-            &mut images,
-            &mut materials,
-            id,
-            parked,
-            &store,
-        );
+        let _draped = drape_decoded_texture(&mut patch, id, parked);
     }
 }
 

@@ -25,8 +25,8 @@
 //! `bevy_ui_widgets`' `Button` / `MenuButton` activation. That indirection
 //! (`Pointer<Press>` → `Activate` → `MenuEvent`) proved not to fire in this app,
 //! whereas a plain press observer on the row is reliable — so a bar button's
-//! press toggles its menu (`toggle_host`), an entry's press runs it and closes
-//! the stack, and a press that reaches the UI root (i.e. landed on nothing in a
+//! press toggles its menu (`MenuNav::toggle_host`), an entry's press runs it and
+//! closes the stack, and a press that reaches the UI root (i.e. landed on nothing in a
 //! menu, because a menu row stops its own press) dismisses everything
 //! (`dismiss_menus_on_press`). The highlight is painted by
 //! `highlight_menu_hover`, not bevy_flair `:hover`, so it reads identically in
@@ -68,6 +68,7 @@
 //!
 //! Reference (Firestorm, read-only): `indra/llui/llmenugl.{h,cpp}`.
 
+use bevy::ecs::system::SystemParam;
 use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
@@ -753,8 +754,8 @@ pub fn spawn_menu_bar(
 ///
 /// The reusable unit shared by the top menu bar and the inventory window's gear
 /// / view buttons. Open / close is driven by the press observer on the button
-/// (`toggle_host`); the `Button` component is kept for keyboard focus, not its
-/// activation path.
+/// (`MenuNav::toggle_host`); the `Button` component is kept for keyboard focus,
+/// not its activation path.
 pub fn spawn_menu_button(
     commands: &mut Commands,
     parent: Entity,
@@ -790,15 +791,9 @@ pub fn spawn_menu_button(
         ))
         .observe(
             move |mut press: On<Pointer<Press>>,
-                  mut hosts: Query<(Entity, &mut MenuHost)>,
-                  conditions: Query<&MenuConditions>,
-                  slots: Res<MenuDynamicSlots>,
-                  child_of: Query<&ChildOf>,
-                  direction: Res<UiDirection>,
-                  filter: Res<MenuFilter>,
                   mut focus: ResMut<InputFocus>,
                   mut keyboard: ResMut<MenuKeyboard>,
-                  mut commands: Commands| {
+                  mut nav: MenuNav| {
                 // Consume the press so it does not reach the root dismiss
                 // observer (which would close the menu we are about to open).
                 press.propagate(false);
@@ -811,16 +806,7 @@ pub fn spawn_menu_button(
                 // menu-captured focus, released back to the world on close.
                 focus.set(press.entity, FocusCause::Navigated);
                 keyboard.focus_captured = true;
-                toggle_host(
-                    host,
-                    &mut hosts,
-                    &conditions,
-                    &slots,
-                    &child_of,
-                    *direction,
-                    &filter,
-                    &mut commands,
-                );
+                nav.toggle_host(host);
             },
         )
         .with_child((
@@ -834,35 +820,196 @@ pub fn spawn_menu_button(
     host
 }
 
-/// Toggle `host`'s drop-down: close the whole bar, then (re)open this one unless
-/// it was already the open menu.
+// ---------------------------------------------------------------------------
+// The menu world, bundled — what every open / close path reaches for.
+// ---------------------------------------------------------------------------
+
+/// Everything opening or closing a menu touches, bundled as one [`SystemParam`].
 ///
-/// Closing the bar first is what makes clicking straight from one top menu to
-/// the next read as *switching* rather than stacking, and matches the reference
-/// (at most one bar menu is ever down).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the host to toggle plus the world one open reads: the hosts and their conditions, \
-              the dynamic slots and ancestry a popup builds from, the layout direction, the \
-              menu-search filter, and commands"
-)]
-fn toggle_host(
-    host: Entity,
-    hosts: &mut Query<(Entity, &mut MenuHost)>,
-    conditions: &Query<&MenuConditions>,
-    slots: &MenuDynamicSlots,
-    child_of: &Query<&ChildOf>,
-    direction: UiDirection,
-    filter: &MenuFilter,
-    commands: &mut Commands,
-) {
-    let was_open = hosts.get(host).is_ok_and(|(_, menu)| menu.open.is_some());
-    close_all_hosts(hosts, commands);
-    if !was_open {
-        let held = conditions_at(host, child_of, conditions);
-        if let Ok((_, mut menu)) = hosts.get_mut(host) {
-            open_host(&mut menu, host, held, slots, direction, filter, commands);
+/// Every path that drops a popup — a bar button's press, a hover sweep across
+/// the bar, the menu-search filter, a submenu hover, and each of the four
+/// keyboard paths — needs the *same* world: the ancestry and child order a popup
+/// is placed and walked by, the conditions and dynamic slots its lines resolve
+/// against, the layout direction and search term it is built for, and the hosts
+/// / branches whose `open` it sets. Threading those ten by hand is what made
+/// each of those systems a thirteen-parameter signature; as one bundle the
+/// signatures say what is actually specific to the system (which keys, which
+/// pointer, which request) and the open / close verbs become methods on the
+/// bundle rather than free functions taking it apart again.
+#[derive(SystemParam)]
+struct MenuNav<'w, 's> {
+    /// Ancestry: resolving a popup's anchor, and a row's conditions.
+    child_of: Query<'w, 's, &'static ChildOf>,
+    /// Child order: bar order for a top-menu switch, row order inside a popup.
+    children: Query<'w, 's, &'static Children>,
+    /// The condition snapshots, read by ancestry ([`conditions_at`]).
+    conditions: Query<'w, 's, &'static MenuConditions>,
+    /// The runtime entries filling each dynamic slot.
+    slots: Res<'w, MenuDynamicSlots>,
+    /// The layout direction a popup drops and mirrors against.
+    direction: Res<'w, UiDirection>,
+    /// The live menu-search term.
+    filter: Res<'w, MenuFilter>,
+    /// The bar (and gear) menus whose drop-down this opens and closes.
+    hosts: Query<'w, 's, (Entity, &'static mut MenuHost)>,
+    /// The submenu rows whose child popup this opens and closes.
+    branches: Query<'w, 's, (Entity, &'static mut MenuBranch)>,
+    /// The free (anchorless) context-menu anchors, despawned on dismissal.
+    free: Query<'w, 's, Entity, With<FreeContextMenu>>,
+    /// What spawns and despawns the popups.
+    commands: Commands<'w, 's>,
+}
+
+impl MenuNav<'_, '_> {
+    /// Toggle `host`'s drop-down: close the whole bar, then (re)open this one
+    /// unless it was already the open menu.
+    ///
+    /// Closing the bar first is what makes clicking straight from one top menu
+    /// to the next read as *switching* rather than stacking, and matches the
+    /// reference (at most one bar menu is ever down).
+    fn toggle_host(&mut self, host: Entity) {
+        let was_open = self
+            .hosts
+            .get(host)
+            .is_ok_and(|(_, menu)| menu.open.is_some());
+        self.close_all_hosts();
+        if !was_open {
+            self.open_host(host);
         }
+    }
+
+    /// Build and attach `host`'s drop-down.
+    fn open_host(&mut self, host: Entity) {
+        let Ok((_, menu)) = self.hosts.get(host) else {
+            return;
+        };
+        let (def, element) = (menu.def, menu.element);
+        let empty = MenuConditions::default();
+        let held = conditions_at(host, &self.child_of, &self.conditions);
+        let ctx = MenuBuildCtx {
+            element,
+            conditions: held.unwrap_or(&empty),
+            slots: &self.slots,
+            direction: *self.direction,
+            filter: self.filter.context_for(element, def),
+        };
+        let popup = build_menu_popup(
+            &mut self.commands,
+            host,
+            MenuSource::Static(def),
+            DropDirection::Block,
+            ctx,
+        );
+        if let Ok((_, mut menu)) = self.hosts.get_mut(host) {
+            menu.open = Some(popup);
+        }
+    }
+
+    /// Close every open bar menu.
+    fn close_all_hosts(&mut self) {
+        close_all_hosts(&mut self.hosts, &mut self.commands);
+    }
+
+    /// Close every open menu, bar and free alike.
+    fn dismiss_all(&mut self) {
+        dismiss_all(&mut self.hosts, &self.free, &mut self.commands);
+    }
+
+    /// Build and attach `branch`'s child popup (a no-op if already open) — the
+    /// shared submenu-open used by both hover ([`manage_submenus`]) and keyboard
+    /// ([`menu_keyboard_nav`]).
+    fn open_submenu_popup(&mut self, branch_entity: Entity) {
+        let Ok((_, branch)) = self.branches.get(branch_entity) else {
+            return;
+        };
+        if branch.open.is_some() {
+            return;
+        }
+        let (def, element, parent_matched) =
+            (branch.def, branch.element, branch.filter_parent_matched);
+        let empty = MenuConditions::default();
+        let held = conditions_at(branch_entity, &self.child_of, &self.conditions);
+        let ctx = MenuBuildCtx {
+            element,
+            conditions: held.unwrap_or(&empty),
+            slots: &self.slots,
+            direction: *self.direction,
+            filter: self.filter.context_for_branch(element, parent_matched),
+        };
+        let popup = build_menu_popup(
+            &mut self.commands,
+            branch_entity,
+            def,
+            DropDirection::Inline,
+            ctx,
+        );
+        if let Ok((_, mut branch)) = self.branches.get_mut(branch_entity) {
+            branch.open = Some(popup);
+        }
+    }
+
+    /// Commit a row the keyboard picked: a submenu opens and the highlight
+    /// descends into it (the reference's branch `onCommit`); a command emits its
+    /// action and dismisses the whole stack. Shared by `Enter` / `Space`, the
+    /// inline-end arrow on a branch, and a jump key.
+    fn commit_row(&mut self, row: Entity, keyboard: &mut MenuKeyboard, entries: &ActivatableRows) {
+        if self.branches.get(row).is_ok() {
+            self.open_submenu_popup(row);
+            keyboard.active = true;
+            keyboard.highlighted = Some(row);
+            keyboard.pending_first = Some(row);
+        } else if entries.get(row).is_ok() {
+            // Emission and dismissal go through the same points a mouse press
+            // uses.
+            self.commands.trigger(Activate {
+                entity: row,
+                button: None,
+            });
+            self.dismiss_all();
+            *keyboard = MenuKeyboard::default();
+        }
+    }
+
+    /// Switch the open bar menu to the next / previous top menu (inline-axis
+    /// arrows at the top level), highlighting the new menu's first entry once it
+    /// builds.
+    fn switch_bar_menu(&mut self, host: Entity, forward: bool, keyboard: &mut MenuKeyboard) {
+        let Ok(bar) = self.child_of.get(host).map(ChildOf::parent) else {
+            return;
+        };
+        let Ok(kids) = self.children.get(bar) else {
+            return;
+        };
+        let siblings: Vec<Entity> = kids
+            .iter()
+            .filter(|&kid| self.hosts.get(kid).is_ok())
+            .collect();
+        let last = siblings.len().saturating_sub(1);
+        let Some(index) = siblings.iter().position(|&entity| entity == host) else {
+            return;
+        };
+        let target_index = if forward {
+            if index >= last {
+                0
+            } else {
+                index.saturating_add(1)
+            }
+        } else {
+            index.checked_sub(1).unwrap_or(last)
+        };
+        let Some(target) = siblings.get(target_index).copied() else {
+            return;
+        };
+        if target == host {
+            return;
+        }
+        if let Ok((_, mut menu)) = self.hosts.get_mut(host) {
+            close_host(&mut menu, &mut self.commands);
+        }
+        self.open_host(target);
+        keyboard.active = true;
+        keyboard.highlighted = None;
+        keyboard.pending_first = Some(target);
     }
 }
 
@@ -872,37 +1019,25 @@ fn toggle_host(
 ///
 /// Gated on a menu already being open: the *first* menu still opens on a click
 /// (a bare hover over the bar does nothing), matching the reference.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the hover map, the \
-              ancestry and bar-button queries, the live conditions, the layout direction, the \
-              menu-search filter, the hosts to (re)open and commands to do it with"
-)]
 fn switch_menu_on_hover(
     hover: Res<HoverMap>,
     keyboard: Res<MenuKeyboard>,
-    child_of: Query<&ChildOf>,
     buttons: Query<&ChildOf, With<MenuBarButton>>,
-    conditions: Query<&MenuConditions>,
-    slots: Res<MenuDynamicSlots>,
-    direction: Res<UiDirection>,
-    filter: Res<MenuFilter>,
-    mut hosts: Query<(Entity, &mut MenuHost)>,
-    mut commands: Commands,
+    mut nav: MenuNav,
 ) {
     // Keyboard navigation owns the open menu while active; sweeping the pointer
     // must not yank it to another top menu.
     if keyboard.active {
         return;
     }
-    if !hosts.iter().any(|(_, menu)| menu.open.is_some()) {
+    if !nav.hosts.iter().any(|(_, menu)| menu.open.is_some()) {
         return;
     }
     let mut hovered = HashSet::new();
     for hits in hover.values() {
         for hit in hits.keys() {
             hovered.insert(*hit);
-            for ancestor in child_of.iter_ancestors(*hit) {
+            for ancestor in nav.child_of.iter_ancestors(*hit) {
                 hovered.insert(ancestor);
             }
         }
@@ -915,17 +1050,12 @@ fn switch_menu_on_hover(
     };
     // Only switch *to* a closed menu; hovering the already-open one is a no-op
     // (toggling it would close the menu the pointer is on).
-    if hosts.get(host).is_ok_and(|(_, menu)| menu.open.is_none()) {
-        toggle_host(
-            host,
-            &mut hosts,
-            &conditions,
-            &slots,
-            &child_of,
-            *direction,
-            &filter,
-            &mut commands,
-        );
+    if nav
+        .hosts
+        .get(host)
+        .is_ok_and(|(_, menu)| menu.open.is_none())
+    {
+        nav.toggle_host(host);
     }
 }
 
@@ -947,90 +1077,48 @@ fn close_all_hosts(hosts: &mut Query<(Entity, &mut MenuHost)>, commands: &mut Co
 /// clearing the term closes it. Runs only on a real filter change
 /// ([`MenuFilter`]'s change detection), so a menu opened or closed by hand while
 /// the term is steady is left alone.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the filter itself, \
-              the conditions and dynamic slots a popup builds from, the ancestry and children \
-              queries, the layout direction, the hosts to (re)open and commands"
-)]
-fn open_filtered_menu(
-    filter: Res<MenuFilter>,
-    conditions: Query<&MenuConditions>,
-    slots: Res<MenuDynamicSlots>,
-    child_of: Query<&ChildOf>,
-    children: Query<&Children>,
-    direction: Res<UiDirection>,
-    mut hosts: Query<(Entity, &mut MenuHost)>,
-    mut commands: Commands,
-) {
-    if !filter.is_changed() {
+fn open_filtered_menu(mut nav: MenuNav) {
+    if !nav.filter.is_changed() {
         return;
     }
     // The bar row holding the filtered element's hosts, walked in child order.
-    let bar = hosts
+    let bar = nav
+        .hosts
         .iter()
-        .find(|(_, menu)| menu.element == filter.element)
-        .and_then(|(host, _)| child_of.get(host).ok())
+        .find(|(_, menu)| menu.element == nav.filter.element)
+        .and_then(|(host, _)| nav.child_of.get(host).ok())
         .map(ChildOf::parent);
     // The target: the first host, in bar order, whose subtree carries a match.
-    let target = if filter.query.is_empty() {
+    let target = if nav.filter.query.is_empty() {
         None
     } else {
-        bar.and_then(|bar| children.get(bar).ok()).and_then(|kids| {
-            kids.iter().find(|&child| {
-                hosts.get(child).is_ok_and(|(_, menu)| {
-                    menu.element == filter.element
-                        && subtree_matches_filter(menu.def, &filter.query)
+        bar.and_then(|bar| nav.children.get(bar).ok())
+            .and_then(|kids| {
+                kids.iter().find(|&child| {
+                    nav.hosts.get(child).is_ok_and(|(_, menu)| {
+                        menu.element == nav.filter.element
+                            && subtree_matches_filter(menu.def, &nav.filter.query)
+                    })
                 })
             })
-        })
     };
     // Close every host under the element, then (re)open the target so its popup
-    // reflects the current term.
-    for (host_entity, mut menu) in hosts.iter_mut() {
-        if menu.element != filter.element {
-            continue;
+    // reflects the current term. Collected first because reopening one goes
+    // back through the whole bundle ([`MenuNav::open_host`]).
+    let under_element: Vec<Entity> = nav
+        .hosts
+        .iter()
+        .filter(|(_, menu)| menu.element == nav.filter.element)
+        .map(|(host, _)| host)
+        .collect();
+    for host in under_element {
+        if let Ok((_, mut menu)) = nav.hosts.get_mut(host) {
+            close_host(&mut menu, &mut nav.commands);
         }
-        close_host(&mut menu, &mut commands);
-        if Some(host_entity) == target {
-            let held = conditions_at(host_entity, &child_of, &conditions);
-            open_host(
-                &mut menu,
-                host_entity,
-                held,
-                &slots,
-                *direction,
-                &filter,
-                &mut commands,
-            );
+        if Some(host) == target {
+            nav.open_host(host);
         }
     }
-}
-
-/// Build and attach `host`'s drop-down.
-fn open_host(
-    host_menu: &mut MenuHost,
-    host: Entity,
-    conditions: Option<&MenuConditions>,
-    slots: &MenuDynamicSlots,
-    direction: UiDirection,
-    filter: &MenuFilter,
-    commands: &mut Commands,
-) {
-    let empty = MenuConditions::default();
-    let held = conditions.unwrap_or(&empty);
-    let popup = build_menu_popup(
-        commands,
-        host,
-        MenuSource::Static(host_menu.def),
-        host_menu.element,
-        held,
-        slots,
-        DropDirection::Block,
-        direction,
-        filter.context_for(host_menu.element, host_menu.def),
-    );
-    host_menu.open = Some(popup);
 }
 
 /// Despawn `host`'s drop-down (and any submenus under it), if open.
@@ -1151,29 +1239,39 @@ fn split_label_at(label: &str, offset: usize) -> Option<(&str, &str, &str)> {
 // The drop-down list itself.
 // ---------------------------------------------------------------------------
 
+/// What one popup's lines are built against, independent of *which* popup it is.
+///
+/// One open resolves every line of every level it spawns against the same four
+/// facts, so they travel together rather than as four parameters repeated down
+/// the builder chain. [`MenuNav`] is the system-side counterpart: it holds the
+/// queries these are *read from*, and assembles one of these per open.
+#[derive(Clone, Copy)]
+struct MenuBuildCtx<'a> {
+    /// The `element` a pick from this popup is attributed to.
+    element: &'static str,
+    /// The condition snapshot every `enabled_when` / `checked_when` /
+    /// `visible_when` resolves against.
+    conditions: &'a MenuConditions,
+    /// The runtime entries filling each dynamic slot.
+    slots: &'a MenuDynamicSlots,
+    /// The layout direction the popup drops and mirrors against.
+    direction: UiDirection,
+    /// The menu-search context, `None` when this menu is not the searched one.
+    filter: Option<MenuFilterCtx<'a>>,
+}
+
 /// Build a drop-down popup for `source` under `anchor`, and return it.
 ///
 /// A column of entry rows positioned against `anchor` by [`Popover`], built
 /// fresh on each open so its check / enabled / visible states reflect the
 /// conditions that hold *now* — and, for a dynamic slot, the labels it holds
 /// now.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the popup builder takes each of the independent inputs its caller supplies: the \
-              spawn target, the menu to build, the element its picks are attributed to, the live \
-              conditions and dynamic slots, the drop and layout directions, and the optional \
-              menu-search filter"
-)]
 fn build_menu_popup(
     commands: &mut Commands,
     anchor: Entity,
     source: MenuSource,
-    element: &'static str,
-    conditions: &MenuConditions,
-    slots: &MenuDynamicSlots,
     drop: DropDirection,
-    direction: UiDirection,
-    filter: Option<MenuFilterCtx>,
+    ctx: MenuBuildCtx,
 ) -> Entity {
     let popup = commands
         .spawn((
@@ -1194,7 +1292,7 @@ fn build_menu_popup(
                 ..column(Val::Px(0.0))
             },
             Popover {
-                positions: drop.placements(direction),
+                positions: drop.placements(ctx.direction),
                 window_margin: 4.0,
             },
             BackgroundColor(MENU_BACKGROUND),
@@ -1202,7 +1300,7 @@ fn build_menu_popup(
             GlobalZIndex(MENU_Z_INDEX),
             // A drop-down is a floating layer: it must render in full even when it
             // overhangs its anchor's edge. A button-anchored menu (`spawn_menu_button`
-            // / `open_host`, and every submenu) is spawned `ChildOf` a button that can
+            // / `MenuNav::open_host`, and every submenu) is spawned `ChildOf` a button that can
             // live inside a clipping ancestor — the inventory floater's content slot
             // sets `Overflow::clip()` — and a `CalculatedClip` is inherited by all
             // descendants regardless of `position_type: Absolute` or `GlobalZIndex`, so
@@ -1225,17 +1323,15 @@ fn build_menu_popup(
         // mnemonic.
         MenuSource::Static(def) => {
             for (item, jump) in def.items.iter().zip(assign_jump_keys(def.items)) {
-                spawn_menu_line(
-                    commands, popup, *item, element, conditions, slots, filter, jump,
-                );
+                spawn_menu_line(commands, popup, *item, jump, ctx);
             }
         }
         // A dynamic list is as long as the slot the domain filled, and its
         // labels are data, not authored text: no jump keys (a mnemonic taken
         // from someone's name is noise, and the reference assigns none either).
         MenuSource::Dynamic { slot, .. } => {
-            for (index, label) in slots.labels(slot).iter().enumerate() {
-                spawn_dynamic_line(commands, popup, element, slot, index, label);
+            for (index, label) in ctx.slots.labels(slot).iter().enumerate() {
+                spawn_dynamic_line(commands, popup, ctx.element, slot, index, label);
             }
         }
     }
@@ -1249,60 +1345,49 @@ fn build_menu_popup(
 /// an ancestor menu already matched), drawn highlighted on its own match; a
 /// submenu is shown only if its subtree carries a match; and separators are
 /// dropped, since the groups they divide are being filtered anyway.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "one line's inputs, each independent: where it goes, what it declares, the element \
-              its pick is attributed to, the live conditions and dynamic slots it resolves \
-              against, the menu-search filter, and its jump key"
-)]
 fn spawn_menu_line(
     commands: &mut Commands,
     popup: Entity,
     item: MenuItemDef,
-    element: &'static str,
-    conditions: &MenuConditions,
-    slots: &MenuDynamicSlots,
-    filter: Option<MenuFilterCtx>,
     jump: Option<(char, usize)>,
+    ctx: MenuBuildCtx,
 ) {
     match item {
         MenuItemDef::Command(command) => {
-            if !conditions.holds(command.visible_when) {
+            if !ctx.conditions.holds(command.visible_when) {
                 return;
             }
-            match filter {
+            match ctx.filter {
                 None => {
-                    spawn_command_line(commands, popup, command, element, conditions, false, jump);
+                    spawn_command_line(commands, popup, command, false, jump, ctx);
                 }
-                Some(ctx) => {
-                    let own_match = label_matches_filter(command.label, ctx.query);
-                    if ctx.parent_matched || own_match {
-                        spawn_command_line(
-                            commands, popup, command, element, conditions, own_match, jump,
-                        );
+                Some(filter) => {
+                    let own_match = label_matches_filter(command.label, filter.query);
+                    if filter.parent_matched || own_match {
+                        spawn_command_line(commands, popup, command, own_match, jump, ctx);
                     }
                 }
             }
         }
-        MenuItemDef::Submenu(sub) => match filter {
+        MenuItemDef::Submenu(sub) => match ctx.filter {
             None => spawn_submenu_line(
                 commands,
                 popup,
                 MenuSource::Static(sub),
-                element,
+                ctx.element,
                 false,
                 false,
                 jump,
             ),
-            Some(ctx) => {
-                let own_match = label_matches_filter(sub.label, ctx.query);
-                let child_parent_matched = ctx.parent_matched || own_match;
-                if child_parent_matched || subtree_matches_filter(sub, ctx.query) {
+            Some(filter) => {
+                let own_match = label_matches_filter(sub.label, filter.query);
+                let child_parent_matched = filter.parent_matched || own_match;
+                if child_parent_matched || subtree_matches_filter(sub, filter.query) {
                     spawn_submenu_line(
                         commands,
                         popup,
                         MenuSource::Static(sub),
-                        element,
+                        ctx.element,
                         child_parent_matched,
                         own_match,
                         jump,
@@ -1315,21 +1400,23 @@ fn spawn_menu_line(
         // is one avatar, and the reference hides its `View Profiles` branch on
         // exactly that count.
         MenuItemDef::DynamicSubmenu { label, slot } => {
-            if slots.labels(slot).is_empty() {
+            if ctx.slots.labels(slot).is_empty() {
                 return;
             }
             let source = MenuSource::Dynamic { label, slot };
-            match filter {
-                None => spawn_submenu_line(commands, popup, source, element, false, false, jump),
-                Some(ctx) => {
-                    let own_match = label_matches_filter(label, ctx.query);
-                    if ctx.parent_matched || own_match {
+            match ctx.filter {
+                None => {
+                    spawn_submenu_line(commands, popup, source, ctx.element, false, false, jump);
+                }
+                Some(filter) => {
+                    let own_match = label_matches_filter(label, filter.query);
+                    if filter.parent_matched || own_match {
                         spawn_submenu_line(
                             commands,
                             popup,
                             source,
-                            element,
-                            ctx.parent_matched || own_match,
+                            ctx.element,
+                            filter.parent_matched || own_match,
                             own_match,
                             jump,
                         );
@@ -1338,21 +1425,12 @@ fn spawn_menu_line(
             }
         }
         MenuItemDef::SubmenuWhen(sub, when) => {
-            if conditions.holds(Some(when)) {
-                spawn_menu_line(
-                    commands,
-                    popup,
-                    MenuItemDef::Submenu(sub),
-                    element,
-                    conditions,
-                    slots,
-                    filter,
-                    jump,
-                );
+            if ctx.conditions.holds(Some(when)) {
+                spawn_menu_line(commands, popup, MenuItemDef::Submenu(sub), jump, ctx);
             }
         }
         MenuItemDef::Separator => {
-            if filter.is_none() {
+            if ctx.filter.is_none() {
                 spawn_separator_line(commands, popup);
             }
         }
@@ -1368,13 +1446,13 @@ fn spawn_command_line(
     commands: &mut Commands,
     popup: Entity,
     command: MenuCommand,
-    element: &'static str,
-    conditions: &MenuConditions,
     highlight: bool,
     jump: Option<(char, usize)>,
+    ctx: MenuBuildCtx,
 ) {
-    let enabled = conditions.holds(command.enabled_when);
-    let checked = command.checked_when.is_some() && conditions.holds(command.checked_when);
+    let element = ctx.element;
+    let enabled = ctx.conditions.holds(command.enabled_when);
+    let checked = command.checked_when.is_some() && ctx.conditions.holds(command.checked_when);
     let text_color = if !enabled {
         ENTRY_TEXT_DISABLED
     } else if highlight {
@@ -1761,24 +1839,7 @@ fn apply_dynamic_labels(
 /// because a branch's open child list is spawned as a *child of the branch row*,
 /// the child list is part of that subtree. So the pointer moving from a branch
 /// into its submenu keeps the chain open; moving to a sibling drops it.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the \
-              hover map and keyboard state, the ancestry / conditions queries, \
-              the layout direction and search filter, the branches it opens or \
-              closes, and commands"
-)]
-fn manage_submenus(
-    hover: Res<HoverMap>,
-    keyboard: Res<MenuKeyboard>,
-    child_of: Query<&ChildOf>,
-    conditions: Query<&MenuConditions>,
-    slots: Res<MenuDynamicSlots>,
-    direction: Res<UiDirection>,
-    filter: Res<MenuFilter>,
-    mut branches: Query<(Entity, &mut MenuBranch)>,
-    mut commands: Commands,
-) {
+fn manage_submenus(hover: Res<HoverMap>, keyboard: Res<MenuKeyboard>, mut nav: MenuNav) {
     // While keyboard navigation owns the stack, submenu open / close is driven
     // by the arrow keys (`menu_keyboard_nav`); hover must not fight it (it
     // would close a keyboard-opened submenu the pointer is not over).
@@ -1789,70 +1850,38 @@ fn manage_submenus(
     for hits in hover.values() {
         for hit in hits.keys() {
             hovered.insert(*hit);
-            for ancestor in child_of.iter_ancestors(*hit) {
+            for ancestor in nav.child_of.iter_ancestors(*hit) {
                 hovered.insert(ancestor);
             }
         }
     }
-    for (branch_entity, mut branch) in &mut branches {
-        let active = hovered.contains(&branch_entity);
-        match (active, branch.open) {
-            (true, None) => {
-                open_submenu_popup(
-                    &mut commands,
-                    branch_entity,
-                    &mut branch,
-                    &conditions,
-                    &slots,
-                    &child_of,
-                    *direction,
-                    &filter,
-                );
+    // The branches whose state the sweep changes, and the popup each already
+    // has. Collected rather than applied in the loop because opening one goes
+    // back through the whole bundle ([`MenuNav::open_submenu_popup`]); the list
+    // is empty on almost every frame, since a sweep changes nothing until the
+    // pointer crosses a branch row.
+    let changed: Vec<(Entity, Option<Entity>)> = nav
+        .branches
+        .iter()
+        .filter_map(|(branch_entity, branch)| {
+            match (hovered.contains(&branch_entity), branch.open) {
+                (true, None) => Some((branch_entity, None)),
+                (false, Some(popup)) => Some((branch_entity, Some(popup))),
+                (true, Some(_)) | (false, None) => None,
             }
-            (false, Some(popup)) => {
-                commands.entity(popup).despawn();
-                branch.open = None;
+        })
+        .collect();
+    for (branch_entity, open) in changed {
+        match open {
+            None => nav.open_submenu_popup(branch_entity),
+            Some(popup) => {
+                nav.commands.entity(popup).despawn();
+                if let Ok((_, mut branch)) = nav.branches.get_mut(branch_entity) {
+                    branch.open = None;
+                }
             }
-            (true, Some(_)) | (false, None) => {}
         }
     }
-}
-
-/// Build and attach `branch`'s child popup (a no-op if already open) — the shared
-/// submenu-open used by both hover ([`manage_submenus`]) and keyboard
-/// (`menu_keyboard_nav`).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "commands and the branch to open plus what its popup is built from: the conditions \
-              and ancestry queries, the dynamic slots, the layout direction and the search filter"
-)]
-fn open_submenu_popup(
-    commands: &mut Commands,
-    branch_entity: Entity,
-    branch: &mut MenuBranch,
-    conditions: &Query<&MenuConditions>,
-    slots: &MenuDynamicSlots,
-    child_of: &Query<&ChildOf>,
-    direction: UiDirection,
-    filter: &MenuFilter,
-) {
-    if branch.open.is_some() {
-        return;
-    }
-    let held = conditions_at(branch_entity, child_of, conditions);
-    let empty = MenuConditions::default();
-    let popup = build_menu_popup(
-        commands,
-        branch_entity,
-        branch.def,
-        branch.element,
-        held.unwrap_or(&empty),
-        slots,
-        DropDirection::Inline,
-        direction,
-        filter.context_for_branch(branch.element, branch.filter_parent_matched),
-    );
-    branch.open = Some(popup);
 }
 
 /// The [`MenuConditions`] on `entity` or the nearest ancestor that carries them.
@@ -1896,28 +1925,20 @@ pub struct OpenContextMenu {
 /// Spawn a popup for each [`OpenContextMenu`] request, anchored to a zero-size
 /// node at the cursor so [`Popover`] positions it against a point. Any previous
 /// free menu is cleared first, so a second right-click moves the menu.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the requests, the \
-              UI root to anchor at, the dynamic slots and layout direction a popup builds from, \
-              the previous menu to clear, the focus and keyboard state one open takes, and \
-              commands"
-)]
 fn open_context_menus(
     mut requests: MessageReader<OpenContextMenu>,
     root: Res<UiRoot>,
-    slots: Res<MenuDynamicSlots>,
-    direction: Res<UiDirection>,
-    existing: Query<Entity, With<FreeContextMenu>>,
     mut focus: ResMut<InputFocus>,
     mut keyboard: ResMut<MenuKeyboard>,
-    mut commands: Commands,
+    mut nav: MenuNav,
 ) {
     for request in requests.read() {
-        for anchor in &existing {
-            commands.entity(anchor).despawn();
+        let existing: Vec<Entity> = nav.free.iter().collect();
+        for anchor in existing {
+            nav.commands.entity(anchor).despawn();
         }
-        let anchor = commands
+        let anchor = nav
+            .commands
             .spawn((
                 Node {
                     position_type: PositionType::Absolute,
@@ -1938,17 +1959,21 @@ fn open_context_menus(
         // menu-captured focus, released on close (the anchor is also despawned).
         focus.set(anchor, FocusCause::Navigated);
         keyboard.focus_captured = true;
+        let held = MenuConditions(request.conditions.clone());
         build_menu_popup(
-            &mut commands,
+            &mut nav.commands,
             anchor,
             MenuSource::Static(request.menu),
-            request.element,
-            &MenuConditions(request.conditions.clone()),
-            &slots,
             DropDirection::Block,
-            *direction,
-            // A context menu is not the searched element, so it is never filtered.
-            None,
+            MenuBuildCtx {
+                element: request.element,
+                conditions: &held,
+                slots: &nav.slots,
+                direction: *nav.direction,
+                // A context menu is not the searched element, so it is never
+                // filtered.
+                filter: None,
+            },
         );
     }
 }
@@ -2105,13 +2130,13 @@ fn root_open_popup(
 fn deepest_open_popup(
     popup: Entity,
     children: &Query<&Children>,
-    branches: &Query<&mut MenuBranch>,
+    branches: &Query<(Entity, &mut MenuBranch)>,
 ) -> Entity {
     let mut current = popup;
     loop {
         let descend = children.get(current).ok().and_then(|kids| {
             kids.iter()
-                .find_map(|kid| branches.get(kid).ok().and_then(|branch| branch.open))
+                .find_map(|kid| branches.get(kid).ok().and_then(|(_, branch)| branch.open))
         });
         match descend {
             Some(child) => current = child,
@@ -2128,7 +2153,7 @@ fn current_nav_popup(
     hosts: &Query<(Entity, &mut MenuHost)>,
     free: &Query<Entity, With<FreeContextMenu>>,
     children: &Query<&Children>,
-    branches: &Query<&mut MenuBranch>,
+    branches: &Query<(Entity, &mut MenuBranch)>,
 ) -> Option<Entity> {
     if let Some(highlight) = keyboard.highlighted {
         return child_of.get(highlight).ok().map(ChildOf::parent);
@@ -2144,7 +2169,7 @@ fn navigable_rows(
     popup: Entity,
     children: &Query<&Children>,
     entries: &ActivatableRows,
-    branches: &Query<&mut MenuBranch>,
+    branches: &Query<(Entity, &mut MenuBranch)>,
     disabled: &Query<Has<InteractionDisabled>>,
 ) -> Vec<Entity> {
     let Ok(kids) = children.get(popup) else {
@@ -2161,13 +2186,18 @@ fn navigable_rows(
 fn open_popup_of(
     anchor: Entity,
     hosts: &Query<(Entity, &mut MenuHost)>,
-    branches: &Query<&mut MenuBranch>,
+    branches: &Query<(Entity, &mut MenuBranch)>,
 ) -> Option<Entity> {
     hosts
         .get(anchor)
         .ok()
         .and_then(|(_, menu)| menu.open)
-        .or_else(|| branches.get(anchor).ok().and_then(|branch| branch.open))
+        .or_else(|| {
+            branches
+                .get(anchor)
+                .ok()
+                .and_then(|(_, branch)| branch.open)
+        })
 }
 
 /// The bar host at the root of `popup`'s open chain, or `None` for a free context
@@ -2176,7 +2206,7 @@ fn root_host_of(
     popup: Entity,
     child_of: &Query<&ChildOf>,
     hosts: &Query<(Entity, &mut MenuHost)>,
-    branches: &Query<&mut MenuBranch>,
+    branches: &Query<(Entity, &mut MenuBranch)>,
 ) -> Option<Entity> {
     let mut current = popup;
     loop {
@@ -2294,118 +2324,6 @@ fn pressed_letter(keys: &ButtonInput<KeyCode>) -> Option<char> {
     keys.get_just_pressed().copied().find_map(keycode_to_letter)
 }
 
-/// Commit a row the keyboard picked: a submenu opens and the highlight descends
-/// into it (the reference's branch `onCommit`); a command emits its action and
-/// dismisses the whole stack. Shared by `Enter` / `Space`, the inline-end arrow
-/// on a branch, and a jump key.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy handler threading the world it edits: the picked row, the \
-              keyboard state, the ancestry / conditions / command / free-menu \
-              queries, the hosts and branches to open or close, the layout \
-              direction, the search filter, and commands"
-)]
-fn commit_row(
-    row: Entity,
-    keyboard: &mut MenuKeyboard,
-    child_of: &Query<&ChildOf>,
-    conditions: &Query<&MenuConditions>,
-    slots: &MenuDynamicSlots,
-    entries: &ActivatableRows,
-    free: &Query<Entity, With<FreeContextMenu>>,
-    hosts: &mut Query<(Entity, &mut MenuHost)>,
-    branches: &mut Query<&mut MenuBranch>,
-    direction: UiDirection,
-    filter: &MenuFilter,
-    commands: &mut Commands,
-) {
-    if branches.get(row).is_ok() {
-        if let Ok(mut branch) = branches.get_mut(row) {
-            open_submenu_popup(
-                commands,
-                row,
-                &mut branch,
-                conditions,
-                slots,
-                child_of,
-                direction,
-                filter,
-            );
-        }
-        keyboard.active = true;
-        keyboard.highlighted = Some(row);
-        keyboard.pending_first = Some(row);
-    } else if entries.get(row).is_ok() {
-        // Emission and dismissal go through the same points a mouse press uses.
-        commands.trigger(Activate {
-            entity: row,
-            button: None,
-        });
-        dismiss_all(hosts, free, commands);
-        *keyboard = MenuKeyboard::default();
-    }
-}
-
-/// Switch the open bar menu to the next / previous top menu (inline-axis arrows
-/// at the top level), highlighting the new menu's first entry once it builds.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy handler threading the world it edits: the current host and \
-              the direction to move, the ancestry / children / conditions \
-              queries, the hosts to close and open, the layout direction, the \
-              search filter, the keyboard state and commands"
-)]
-fn switch_bar_menu(
-    host: Entity,
-    forward: bool,
-    hosts: &mut Query<(Entity, &mut MenuHost)>,
-    child_of: &Query<&ChildOf>,
-    children: &Query<&Children>,
-    conditions: &Query<&MenuConditions>,
-    slots: &MenuDynamicSlots,
-    direction: UiDirection,
-    filter: &MenuFilter,
-    keyboard: &mut MenuKeyboard,
-    commands: &mut Commands,
-) {
-    let Ok(bar) = child_of.get(host).map(ChildOf::parent) else {
-        return;
-    };
-    let Ok(kids) = children.get(bar) else {
-        return;
-    };
-    let siblings: Vec<Entity> = kids.iter().filter(|&kid| hosts.get(kid).is_ok()).collect();
-    let last = siblings.len().saturating_sub(1);
-    let Some(index) = siblings.iter().position(|&entity| entity == host) else {
-        return;
-    };
-    let target_index = if forward {
-        if index >= last {
-            0
-        } else {
-            index.saturating_add(1)
-        }
-    } else {
-        index.checked_sub(1).unwrap_or(last)
-    };
-    let Some(target) = siblings.get(target_index).copied() else {
-        return;
-    };
-    if target == host {
-        return;
-    }
-    if let Ok((_, mut menu)) = hosts.get_mut(host) {
-        close_host(&mut menu, commands);
-    }
-    let held = conditions_at(target, child_of, conditions);
-    if let Ok((_, mut menu)) = hosts.get_mut(target) {
-        open_host(&mut menu, target, held, slots, direction, filter, commands);
-    }
-    keyboard.active = true;
-    keyboard.highlighted = None;
-    keyboard.pending_first = Some(target);
-}
-
 /// Leave keyboard navigation the moment the pointer really moves — the reference
 /// switches back to mouse mode on any hover, so a keyboard-opened submenu then
 /// yields to the hover systems.
@@ -2430,28 +2348,14 @@ fn menu_keyboard_mouse_switch(
 /// step entries, and the jump keys work — the same as opening it with the mouse.
 /// (The reference highlights the first *closed* top menu instead; opening its
 /// drop-down immediately is the one deliberate simplification.)
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the \
-              keys and mouse motion, the primary-bar and bar-button / ancestry / \
-              conditions queries, the layout direction and search filter, the \
-              hosts to open, the keyboard and focus state, and commands"
-)]
 fn menu_alt_enter(
     keys: Res<ButtonInput<KeyCode>>,
     motion: Res<AccumulatedMouseMotion>,
     bars: Query<&Children, With<PrimaryMenuBar>>,
     buttons: Query<(), With<MenuBarButton>>,
-    conditions: Query<&MenuConditions>,
-    slots: Res<MenuDynamicSlots>,
-    children: Query<&Children>,
-    child_of: Query<&ChildOf>,
-    direction: Res<UiDirection>,
-    filter: Res<MenuFilter>,
-    mut hosts: Query<(Entity, &mut MenuHost)>,
     mut keyboard: ResMut<MenuKeyboard>,
     mut focus: ResMut<InputFocus>,
-    mut commands: Commands,
+    mut nav: MenuNav,
 ) {
     let alt_down = keys.just_pressed(KeyCode::AltLeft) || keys.just_pressed(KeyCode::AltRight);
     let alt_up = keys.just_released(KeyCode::AltLeft) || keys.just_released(KeyCode::AltRight);
@@ -2466,68 +2370,47 @@ fn menu_alt_enter(
     }
     let armed = keyboard.alt_armed;
     keyboard.alt_armed = false;
-    if !armed || hosts.iter().any(|(_, menu)| menu.open.is_some()) {
+    if !armed || nav.hosts.iter().any(|(_, menu)| menu.open.is_some()) {
         return;
     }
     // The primary bar's first menu button, and the host it drops.
     let Some(button) = bars
         .iter()
         .flat_map(bevy::ecs::hierarchy::Children::iter)
-        .filter_map(|host| children.get(host).ok())
+        .filter_map(|host| nav.children.get(host).ok())
         .flat_map(bevy::ecs::hierarchy::Children::iter)
         .find(|&child| buttons.get(child).is_ok())
     else {
         return;
     };
-    let Ok(host) = child_of.get(button).map(ChildOf::parent) else {
+    let Ok(host) = nav.child_of.get(button).map(ChildOf::parent) else {
         return;
     };
-    let held = conditions_at(host, &child_of, &conditions);
-    if let Ok((_, mut menu)) = hosts.get_mut(host) {
-        open_host(
-            &mut menu,
-            host,
-            held,
-            &slots,
-            *direction,
-            &filter,
-            &mut commands,
-        );
-        keyboard.active = true;
-        keyboard.highlighted = None;
-        keyboard.pending_first = Some(host);
-        keyboard.just_opened = true;
-        // Tap-Alt is a menu-captured focus: released back to the world on close.
-        focus.set(button, FocusCause::Navigated);
-        keyboard.focus_captured = true;
+    if nav.hosts.get(host).is_err() {
+        return;
     }
+    nav.open_host(host);
+    keyboard.active = true;
+    keyboard.highlighted = None;
+    keyboard.pending_first = Some(host);
+    keyboard.just_opened = true;
+    // Tap-Alt is a menu-captured focus: released back to the world on close.
+    focus.set(button, FocusCause::Navigated);
+    keyboard.focus_captured = true;
 }
 
 /// Open a bar menu from its `Tab`-focused button: with nothing open yet and a
 /// menu-bar button holding focus, `Enter` / `Space` / the block-end arrow drop
 /// its menu and enter keyboard navigation (its first entry highlights a frame
 /// later, once the deferred rows exist — [`MenuKeyboard::pending_first`]).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the \
-              keys and current focus, the bar-button and ancestry / conditions \
-              queries, the layout direction, the search filter, the hosts to open \
-              and the keyboard state, and commands"
-)]
 fn menu_keyboard_open_focused(
     keys: Res<ButtonInput<KeyCode>>,
     focus: Res<InputFocus>,
     buttons: Query<&ChildOf, With<MenuBarButton>>,
-    conditions: Query<&MenuConditions>,
-    slots: Res<MenuDynamicSlots>,
-    child_of: Query<&ChildOf>,
-    direction: Res<UiDirection>,
-    filter: Res<MenuFilter>,
-    mut hosts: Query<(Entity, &mut MenuHost)>,
     mut keyboard: ResMut<MenuKeyboard>,
-    mut commands: Commands,
+    mut nav: MenuNav,
 ) {
-    if hosts.iter().any(|(_, menu)| menu.open.is_some()) {
+    if nav.hosts.iter().any(|(_, menu)| menu.open.is_some()) {
         return;
     }
     let opens = keys.just_pressed(KeyCode::Enter)
@@ -2542,23 +2425,15 @@ fn menu_keyboard_open_focused(
     let Ok(host) = buttons.get(focused).map(ChildOf::parent) else {
         return;
     };
-    let held = conditions_at(host, &child_of, &conditions);
-    if let Ok((_, mut menu)) = hosts.get_mut(host) {
-        open_host(
-            &mut menu,
-            host,
-            held,
-            &slots,
-            *direction,
-            &filter,
-            &mut commands,
-        );
-        keyboard.active = true;
-        keyboard.pending_first = Some(host);
-        // The same key press must not also activate through `menu_keyboard_nav`
-        // this frame (the chained sync point makes the new rows visible to it).
-        keyboard.just_opened = true;
+    if nav.hosts.get(host).is_err() {
+        return;
     }
+    nav.open_host(host);
+    keyboard.active = true;
+    keyboard.pending_first = Some(host);
+    // The same key press must not also activate through `menu_keyboard_nav`
+    // this frame (the chained sync point makes the new rows visible to it).
+    keyboard.just_opened = true;
 }
 
 /// Drive the highlight of an open menu from the keyboard — the heart of the task.
@@ -2568,36 +2443,19 @@ fn menu_keyboard_open_focused(
 /// switch top menus at the bar); `Enter` / `Space` commit the highlight; and,
 /// once navigation has begun, a typed letter jumps to its [`MenuMnemonic`]. With
 /// nothing open it resets the state.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the \
-              keys and layout direction, the search filter, the ancestry / \
-              children / command / disabled / mnemonic / conditions / free-menu \
-              queries, the hosts and branches it opens and closes, the keyboard \
-              state and commands"
-)]
 fn menu_keyboard_nav(
     keys: Res<ButtonInput<KeyCode>>,
-    direction: Res<UiDirection>,
-    filter: Res<MenuFilter>,
-    child_of: Query<&ChildOf>,
-    children: Query<&Children>,
     entries: ActivatableRows,
     disabled: Query<Has<InteractionDisabled>>,
     mnemonics: Query<&MenuMnemonic>,
-    conditions: Query<&MenuConditions>,
-    slots: Res<MenuDynamicSlots>,
-    free: Query<Entity, With<FreeContextMenu>>,
-    mut hosts: Query<(Entity, &mut MenuHost)>,
-    mut branches: Query<&mut MenuBranch>,
     mut keyboard: ResMut<MenuKeyboard>,
-    mut commands: Commands,
+    mut nav: MenuNav,
 ) {
     // Resolve a submenu's deferred first-child highlight, now its rows may exist.
     if let Some(anchor) = keyboard.pending_first {
-        match open_popup_of(anchor, &hosts, &branches) {
+        match open_popup_of(anchor, &nav.hosts, &nav.branches) {
             Some(popup) => {
-                let rows = navigable_rows(popup, &children, &entries, &branches, &disabled);
+                let rows = navigable_rows(popup, &nav.children, &entries, &nav.branches, &disabled);
                 if let Some(first) = rows.first().copied() {
                     keyboard.highlighted = Some(first);
                     keyboard.pending_first = None;
@@ -2615,7 +2473,7 @@ fn menu_keyboard_nav(
     }
 
     // Nothing open: reset and bail, so the next open starts in mouse mode.
-    let open = hosts.iter().any(|(_, menu)| menu.open.is_some()) || !free.is_empty();
+    let open = nav.hosts.iter().any(|(_, menu)| menu.open.is_some()) || !nav.free.is_empty();
     if !open {
         if keyboard.active || keyboard.highlighted.is_some() || keyboard.pending_first.is_some() {
             *keyboard = MenuKeyboard::default();
@@ -2623,13 +2481,19 @@ fn menu_keyboard_nav(
         return;
     }
 
-    let Some(popup) = current_nav_popup(&keyboard, &child_of, &hosts, &free, &children, &branches)
-    else {
+    let Some(popup) = current_nav_popup(
+        &keyboard,
+        &nav.child_of,
+        &nav.hosts,
+        &nav.free,
+        &nav.children,
+        &nav.branches,
+    ) else {
         return;
     };
-    let rows = navigable_rows(popup, &children, &entries, &branches, &disabled);
-    let inline_end = inline_end_key(*direction);
-    let inline_start = inline_start_key(*direction);
+    let rows = navigable_rows(popup, &nav.children, &entries, &nav.branches, &disabled);
+    let inline_end = inline_end_key(*nav.direction);
+    let inline_start = inline_start_key(*nav.direction);
 
     if keys.just_pressed(KeyCode::ArrowDown) {
         if let Some(next) = step_highlight(&rows, keyboard.highlighted, true) {
@@ -2645,80 +2509,30 @@ fn menu_keyboard_nav(
         // A highlighted submenu opens; otherwise the bar advances a top menu.
         let branch_highlight = keyboard
             .highlighted
-            .filter(|&row| branches.get(row).is_ok());
+            .filter(|&row| nav.branches.get(row).is_ok());
         if let Some(branch) = branch_highlight {
-            commit_row(
-                branch,
-                &mut keyboard,
-                &child_of,
-                &conditions,
-                &slots,
-                &entries,
-                &free,
-                &mut hosts,
-                &mut branches,
-                *direction,
-                &filter,
-                &mut commands,
-            );
-        } else if let Some(host) = root_host_of(popup, &child_of, &hosts, &branches) {
-            switch_bar_menu(
-                host,
-                true,
-                &mut hosts,
-                &child_of,
-                &children,
-                &conditions,
-                &slots,
-                *direction,
-                &filter,
-                &mut keyboard,
-                &mut commands,
-            );
+            nav.commit_row(branch, &mut keyboard, &entries);
+        } else if let Some(host) = root_host_of(popup, &nav.child_of, &nav.hosts, &nav.branches) {
+            nav.switch_bar_menu(host, true, &mut keyboard);
         }
     } else if keys.just_pressed(inline_start) {
         // A submenu closes (back up a level); at the top, the bar steps back.
-        if let Some(anchor) = child_of.get(popup).ok().map(ChildOf::parent) {
-            if branches.get(anchor).is_ok() {
-                if let Ok(mut branch) = branches.get_mut(anchor)
+        if let Some(anchor) = nav.child_of.get(popup).ok().map(ChildOf::parent) {
+            if nav.branches.get(anchor).is_ok() {
+                if let Ok((_, mut branch)) = nav.branches.get_mut(anchor)
                     && let Some(child_popup) = branch.open.take()
                 {
-                    commands.entity(child_popup).despawn();
+                    nav.commands.entity(child_popup).despawn();
                 }
                 keyboard.active = true;
                 keyboard.highlighted = Some(anchor);
-            } else if hosts.get(anchor).is_ok() {
-                switch_bar_menu(
-                    anchor,
-                    false,
-                    &mut hosts,
-                    &child_of,
-                    &children,
-                    &conditions,
-                    &slots,
-                    *direction,
-                    &filter,
-                    &mut keyboard,
-                    &mut commands,
-                );
+            } else if nav.hosts.get(anchor).is_ok() {
+                nav.switch_bar_menu(anchor, false, &mut keyboard);
             }
         }
     } else if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space) {
         if let Some(highlight) = keyboard.highlighted {
-            commit_row(
-                highlight,
-                &mut keyboard,
-                &child_of,
-                &conditions,
-                &slots,
-                &entries,
-                &free,
-                &mut hosts,
-                &mut branches,
-                *direction,
-                &filter,
-                &mut commands,
-            );
+            nav.commit_row(highlight, &mut keyboard, &entries);
         }
     } else if let Some(letter) = pressed_letter(&keys) {
         // Jump keys act only once keyboard navigation has begun.
@@ -2730,20 +2544,7 @@ fn menu_keyboard_nav(
             })
         {
             keyboard.highlighted = Some(row);
-            commit_row(
-                row,
-                &mut keyboard,
-                &child_of,
-                &conditions,
-                &slots,
-                &entries,
-                &free,
-                &mut hosts,
-                &mut branches,
-                *direction,
-                &filter,
-                &mut commands,
-            );
+            nav.commit_row(row, &mut keyboard, &entries);
         }
     }
 }
@@ -3021,12 +2822,14 @@ mod tests {
                     &mut commands,
                     anchor,
                     MenuSource::Static(menu),
-                    "test",
-                    &held,
-                    &slots,
                     DropDirection::Block,
-                    UiDirection::Ltr,
-                    None,
+                    super::MenuBuildCtx {
+                        element: "test",
+                        conditions: &held,
+                        slots: &slots,
+                        direction: UiDirection::Ltr,
+                        filter: None,
+                    },
                 );
             })
             .after(UiScaffoldSystems::SpawnRoot),
@@ -3037,7 +2840,8 @@ mod tests {
 
     /// Spawn a drop-down for `menu` under a filter `query`, and settle its layout.
     /// The filter's `parent_matched` is seeded from whether `menu`'s own label
-    /// matches, exactly as [`open_host`](super::open_host) does for a top menu.
+    /// matches, exactly as [`MenuNav::open_host`](super::MenuNav::open_host)
+    /// does for a top menu.
     fn filtered_popup_app(menu: &'static MenuDef, query: &str) -> Result<App, TestError> {
         let mut app = LayoutTest::new().build();
         enable_action_recording(&mut app);
@@ -3054,12 +2858,14 @@ mod tests {
                     &mut commands,
                     anchor,
                     MenuSource::Static(menu),
-                    "test",
-                    &MenuConditions::default(),
-                    &MenuDynamicSlots::default(),
                     DropDirection::Block,
-                    UiDirection::Ltr,
-                    Some(ctx),
+                    super::MenuBuildCtx {
+                        element: "test",
+                        conditions: &MenuConditions::default(),
+                        slots: &MenuDynamicSlots::default(),
+                        direction: UiDirection::Ltr,
+                        filter: Some(ctx),
+                    },
                 );
             })
             .after(UiScaffoldSystems::SpawnRoot),
@@ -3148,12 +2954,14 @@ mod tests {
                     &mut commands,
                     button,
                     MenuSource::Static(&FIXTURE_AVATAR),
-                    "test",
-                    &MenuConditions::default(),
-                    &MenuDynamicSlots::default(),
                     DropDirection::Block,
-                    UiDirection::Ltr,
-                    None,
+                    super::MenuBuildCtx {
+                        element: "test",
+                        conditions: &MenuConditions::default(),
+                        slots: &MenuDynamicSlots::default(),
+                        direction: UiDirection::Ltr,
+                        filter: None,
+                    },
                 );
             })
             .after(UiScaffoldSystems::SpawnRoot),
@@ -3436,12 +3244,14 @@ mod tests {
                         label: "View Profiles",
                         slot: TEST_SLOT,
                     },
-                    "test",
-                    &MenuConditions::default(),
-                    &slots,
                     DropDirection::Inline,
-                    UiDirection::Ltr,
-                    None,
+                    super::MenuBuildCtx {
+                        element: "test",
+                        conditions: &MenuConditions::default(),
+                        slots: &slots,
+                        direction: UiDirection::Ltr,
+                        filter: None,
+                    },
                 );
             })
             .after(UiScaffoldSystems::SpawnRoot),

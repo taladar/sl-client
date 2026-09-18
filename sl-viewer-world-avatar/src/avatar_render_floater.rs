@@ -728,34 +728,43 @@ fn on_render_settings_row_press(
     selected.0 = Some(agent);
 }
 
+/// The cells one table row is painted into, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the rows themselves, their
+/// backgrounds and the texts inside them.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub struct RowCells<'w, 's> {
+    /// The virtual rows and what each is currently bound to.
+    rows: Query<
+        'w,
+        's,
+        (
+            Entity,
+            Ref<'static, VirtualRow>,
+            &'static ChildOf,
+            &'static TableRowCells,
+            &'static mut BoundRenderException,
+        ),
+    >,
+    /// Each row's background, repainted on selection.
+    backgrounds: Query<'w, 's, &'static mut BackgroundColor>,
+    /// The cell texts and their colours.
+    texts: Query<'w, 's, (&'static mut Text, &'static mut TextColor)>,
+}
+
 /// Bind each pooled row to the exception it now presents.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the view, the \
-              selection, the UI handles, the local time zone and translator the cells render \
-              through, and the row / background / text queries they are written into"
-)]
 fn bind_render_settings_rows(
     view: Res<RenderSettingsView>,
     selected: Res<SelectedRenderException>,
     ui: Option<Res<RenderSettingsUi>>,
     zone: Option<Res<LocalTimeZone>>,
     translator: Translator,
-    mut rows: Query<(
-        Entity,
-        Ref<VirtualRow>,
-        &ChildOf,
-        &TableRowCells,
-        &mut BoundRenderException,
-    )>,
-    mut backgrounds: Query<&mut BackgroundColor>,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
+    mut table: RowCells,
 ) {
     let Some(ui) = ui else {
         return;
     };
     let refresh_all = view.is_changed() || selected.is_changed();
-    for (row_entity, row, child_of, cells, mut bound) in &mut rows {
+    for (row_entity, row, child_of, cells, mut bound) in &mut table.rows {
         if child_of.parent() != ui.viewport {
             continue;
         }
@@ -767,7 +776,7 @@ fn bind_render_settings_rows(
         let Some(data) = data else {
             for column in 0..RENDER_SETTINGS_TABLE.columns.len() {
                 if let Some(cell) = cells.cell(column) {
-                    set_table_cell(&mut texts, cell, "", LABEL_COLOR);
+                    set_table_cell(&mut table.texts, cell, "", LABEL_COLOR);
                 }
             }
             continue;
@@ -787,10 +796,10 @@ fn bind_render_settings_rows(
         ];
         for (column, value, color) in cell_values {
             if let Some(cell) = cells.cell(column) {
-                set_table_cell(&mut texts, cell, &value, color);
+                set_table_cell(&mut table.texts, cell, &value, color);
             }
         }
-        if let Ok(mut background) = backgrounds.get_mut(row_entity) {
+        if let Ok(mut background) = table.backgrounds.get_mut(row_entity) {
             let wanted = if selected.0 == Some(AgentKey::from(data.entry.agent)) {
                 SELECTED_BACKGROUND
             } else {

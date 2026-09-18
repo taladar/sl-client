@@ -118,6 +118,57 @@ pub(crate) const fn is_boost_priority(priority: Priority) -> bool {
 /// pass hands it instead, is what keeps a HUD sharp (P35.1).
 pub(crate) const HUD_BOOST_PRIORITY: Priority = Priority::new(PIXEL_AREA_CAP + 4);
 
+/// What the pixel-area pass ranks, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the view it projects into
+/// and the two kinds of thing it projects.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub struct RankedScene<'w, 's> {
+    /// The world camera's pose and projection.
+    ///
+    /// Qualified by `ViewerCamera`: the reflection probes (P33.2) spawn a
+    /// `Camera3d` per probe-capture face, so a bare `With<Camera3d>` matches
+    /// several and `single()` fails — which silently switched this whole
+    /// re-prioritisation off.
+    camera: Query<'w, 's, (&'static GlobalTransform, &'static Projection), With<ViewerCamera>>,
+    /// The window, for the viewport height the pixel area is measured in.
+    windows: Query<'w, 's, &'static Window>,
+    /// Every face, ranked for its diffuse texture's fetch priority.
+    faces: Query<
+        'w,
+        's,
+        (
+            &'static GlobalTransform,
+            &'static FaceTextureDebug,
+            Option<&'static RenderLayers>,
+        ),
+    >,
+    /// Every object, ranked for its mesh / tessellation level of detail.
+    objects: Query<
+        'w,
+        's,
+        (
+            &'static GlobalTransform,
+            &'static ObjectDebugInfo,
+            &'static SceneObject,
+            Option<&'static RenderLayers>,
+        ),
+    >,
+}
+
+/// What the pixel-area pass writes its verdicts into, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub struct RankTargets<'w> {
+    /// The texture fetch priorities.
+    textures: ResMut<'w, TextureManager>,
+    /// The mesh level-of-detail requests.
+    meshes: ResMut<'w, MeshManager>,
+    /// The prim re-tessellation levels `apply_prim_lod` drains.
+    prim_targets: ResMut<'w, PrimLodTargets>,
+    /// The tree tiers `apply_tree_lod` drains.
+    tree_targets: ResMut<'w, TreeLodTargets>,
+}
+
 /// Re-rank every queued texture and mesh fetch by on-screen pixel area (P20.2),
 /// throttled to `REPRIORITIZE_INTERVAL_SECS`.
 ///
@@ -138,29 +189,11 @@ pub(crate) const HUD_BOOST_PRIORITY: Priority = Priority::new(PIXEL_AREA_CAP + 4
 /// area: every HUD face counts as covering the whole screen, its textures and
 /// mesh take `HUD_BOOST_PRIORITY`, and its geometry is pinned to the finest
 /// level of detail.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system reading the camera, window, scene faces / objects, and both asset managers"
-)]
 pub fn drive_render_priority(
     time: Res<Time>,
     mut since_last: Local<f32>,
-    // Qualified by `ViewerCamera`: the reflection probes (P33.2) spawn a `Camera3d` per
-    // probe-capture face, so a bare `With<Camera3d>` matches several and `single()`
-    // fails — which silently switched this whole re-prioritisation off.
-    camera: Query<(&GlobalTransform, &Projection), With<ViewerCamera>>,
-    windows: Query<&Window>,
-    faces: Query<(&GlobalTransform, &FaceTextureDebug, Option<&RenderLayers>)>,
-    objects: Query<(
-        &GlobalTransform,
-        &ObjectDebugInfo,
-        &SceneObject,
-        Option<&RenderLayers>,
-    )>,
-    mut textures: ResMut<TextureManager>,
-    mut meshes: ResMut<MeshManager>,
-    mut prim_targets: ResMut<PrimLodTargets>,
-    mut tree_targets: ResMut<TreeLodTargets>,
+    scene: RankedScene,
+    mut targets: RankTargets,
     settings: Option<Res<sl_viewer_settings::ViewerSettings>>,
 ) {
     *since_last += time.delta_secs();
@@ -178,10 +211,10 @@ pub fn drive_render_priority(
             factor.clamp(LOD_FACTOR_MIN, LOD_FACTOR_MAX)
         });
 
-    let Ok((camera_transform, Projection::Perspective(perspective))) = camera.single() else {
+    let Ok((camera_transform, Projection::Perspective(perspective))) = scene.camera.single() else {
         return;
     };
-    let Ok(window) = windows.single() else {
+    let Ok(window) = scene.windows.single() else {
         return;
     };
     let metrics = ScreenMetrics::new(window.height(), perspective.fov);
@@ -197,7 +230,7 @@ pub fn drive_render_priority(
     // by an on-screen area the HUD's own space cannot supply (P35.1).
     let mut hud_textures: HashSet<TextureKey> = HashSet::new();
     let mut hud_meshes: HashSet<MeshKey> = HashSet::new();
-    for (transform, FaceTextureDebug(face), layers) in &faces {
+    for (transform, FaceTextureDebug(face), layers) in &scene.faces {
         let area = if on_hud_layer(layers) {
             hud_textures.insert(face.texture_id);
             hud_area
@@ -222,9 +255,9 @@ pub fn drive_render_priority(
     let mut mesh_lod: HashMap<MeshKey, MeshLod> = HashMap::new();
     // Fresh prim / tree LOD targets for this pass (P21.3 / P26.2); `apply_prim_lod`
     // / `apply_tree_lod` drain them.
-    prim_targets.0.clear();
-    tree_targets.0.clear();
-    for (transform, info, scene, layers) in &objects {
+    targets.prim_targets.0.clear();
+    targets.tree_targets.0.clear();
+    for (transform, info, scene, layers) in &scene.objects {
         // A HUD attachment is not in the world: its entity sits in the HUD's own
         // screen space, so the camera distance below would rank it by nonsense.
         // The reference viewer pins it to the finest detail and treats it as
@@ -249,7 +282,7 @@ pub fn drive_render_priority(
                 } else {
                     PrimLod::for_distance(scale_length, distance, lod_factor)
                 };
-                prim_targets.0.insert(scene.scoped_id, desired);
+                targets.prim_targets.0.insert(scene.scoped_id, desired);
             } else if scene.category == ObjectCategory::Tree && !hud {
                 // A tree is procedurally generated (like a prim, no asset): pick the
                 // branching tier its on-screen size warrants, or the billboard
@@ -257,7 +290,7 @@ pub fn drive_render_priority(
                 // so a HUD one is left at the tier it was built with.
                 let area = metrics.pixel_area(0.5 * scale_length, distance);
                 let desired = tree_tier_for_size(scale_length, distance, area, lod_factor);
-                tree_targets.0.insert(scene.scoped_id, desired);
+                targets.tree_targets.0.insert(scene.scoped_id, desired);
             }
             continue;
         };
@@ -277,7 +310,7 @@ pub fn drive_render_priority(
             } else {
                 PrimLod::for_distance(scale_length, distance, lod_factor)
             };
-            prim_targets.0.insert(scene.scoped_id, desired);
+            targets.prim_targets.0.insert(scene.scoped_id, desired);
         }
         let mesh_key = MeshKey::from(asset);
         if hud {
@@ -305,13 +338,13 @@ pub fn drive_render_priority(
         } else {
             Priority::from_pixel_area(area)
         };
-        textures.set_priority(id, priority);
+        targets.textures.set_priority(id, priority);
         // Pixel-area LOD (P21.1): pick the discard level the on-screen size of
         // the face warrants and upgrade / downgrade the store entry toward it.
         // A no-op for a boosted (full-resolution) or not-yet-decoded texture. A HUD
         // face's area is the whole screen, so a LOD-managed texture it shares with
         // world geometry is pulled to its finest level rather than discarded.
-        textures.set_lod_for_area(id, area);
+        targets.textures.set_lod_for_area(id, area);
     }
     for (mesh_key, area) in mesh_area {
         let priority = if hud_meshes.contains(&mesh_key) {
@@ -319,13 +352,13 @@ pub fn drive_render_priority(
         } else {
             Priority::from_pixel_area(area)
         };
-        meshes.set_priority(mesh_key, priority);
+        targets.meshes.set_priority(mesh_key, priority);
     }
     for (mesh_key, desired) in mesh_lod {
         // Mesh LOD (P21.2): upgrade / downgrade the managed mesh toward the finest
         // level any on-screen instance warrants. A no-op for a boosted (finest,
         // unmanaged) or not-yet-decoded mesh.
-        meshes.set_lod_for_area(mesh_key, desired);
+        targets.meshes.set_lod_for_area(mesh_key, desired);
     }
 }
 

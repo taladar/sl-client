@@ -25,14 +25,13 @@
 //! dead-reckoned velocity ([`AvatarMotion`]) and the P31.5 movement intent
 //! ([`AvatarControls`] / the turn keys), maps it to the matching built-in
 //! animation, and plays it on the own avatar through a dedicated client-driven
-//! slot on [`AnimationPlayback`]. It **defers entirely** to the simulator whenever
+//! slot on [`AnimationPlayback`](crate::animations::AnimationPlayback). It **defers entirely** to the simulator whenever
 //! the sim is driving the avatar (a root presence, or an AO on Second Life), so it
 //! only ever fills genuine silence — the two never animate the avatar at once.
 
 use bevy::prelude::*;
 use sl_client_bevy::{AssetKey, ControlFlags, SlIdentity};
 
-use crate::animations::{AnimationManager, AnimationPlayback};
 use sl_viewer_world_api::AvatarControls;
 use sl_viewer_world_api::AvatarMotion;
 use sl_viewer_world_api::AvatarState;
@@ -119,38 +118,44 @@ fn turn_intent(keyboard: &ButtonInput<KeyCode>) -> TurnIntent {
     }
 }
 
+/// Our own avatar as the client-driven motions see it, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): who we are, the model that
+/// says whether we are rigged, and the motion the gait is read off.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub struct OwnAvatar<'w, 's> {
+    /// Our agent id.
+    identity: Res<'w, SlIdentity>,
+    /// The avatar model, for the rigged / seated tests.
+    avatars: Res<'w, AvatarState>,
+    /// Each avatar's Second Life motion, for the gait.
+    motions: Query<'w, 's, &'static AvatarMotion>,
+}
+
 /// Drive the own avatar's client-side locomotion animation each frame (P31.6):
 /// derive the movement state from its dead-reckoned velocity and advertised
 /// controls, resolve the matching built-in animation, request its asset, and play
-/// it through the client-driven slot on [`AnimationPlayback`].
+/// it through the client-driven slot on [`AnimationPlayback`](crate::animations::AnimationPlayback).
 ///
 /// It runs only while the own avatar is **rigged** (there is a skeleton to pose)
 /// and the **simulator is silent** about it — the moment the sim broadcasts the
 /// agent's own animations (a root presence, or an AO on Second Life) the fallback
 /// eases its motion out and defers, so it never double-drives the avatar.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system reading time, keyboard, identity, controls, avatars, motions, and both animation resources"
-)]
 pub(crate) fn drive_own_locomotion(
     time: Res<Time>,
     keyboard: Res<ButtonInput<KeyCode>>,
-    identity: Res<SlIdentity>,
     controls: Res<AvatarControls>,
-    avatars: Res<AvatarState>,
-    motions: Query<&AvatarMotion>,
-    mut manager: ResMut<AnimationManager>,
-    mut playback: ResMut<AnimationPlayback>,
+    me: OwnAvatar,
+    mut anim: crate::animations::AnimationState,
     mut last_state: Local<Option<&'static str>>,
 ) {
     let now = time.elapsed_secs();
-    let Some(own) = identity.agent_id else {
+    let Some(own) = me.identity.agent_id else {
         return;
     };
     // Only a rigged own avatar has a skeleton to pose; a placeholder sphere gains
     // nothing, so do not fetch locomotion assets for it.
-    if !avatars.is_rigged(own) {
-        playback.set_client_locomotion(own, None, now);
+    if !me.avatars.is_rigged(own) {
+        anim.playback.set_client_locomotion(own, None, now);
         log_state(&mut last_state, None);
         return;
     }
@@ -160,8 +165,8 @@ pub(crate) fn drive_own_locomotion(
     // a root presence too (where the sim would otherwise always drive the avatar and
     // hide it). When forced, the client state and the sim's tend to agree, so the
     // pose merge collapses to one animation rather than doubling.
-    if !force_client_locomotion() && playback.has_active_sim_animation(own) {
-        playback.set_client_locomotion(own, None, now);
+    if !force_client_locomotion() && anim.playback.has_active_sim_animation(own) {
+        anim.playback.set_client_locomotion(own, None, now);
         log_state(&mut last_state, Some("<simulator-driven>"));
         return;
     }
@@ -169,17 +174,19 @@ pub(crate) fn drive_own_locomotion(
     // states; zero when its motion is unknown). The walk / run / turn states come
     // from the control-flag intent, not velocity, so a released key stops them at
     // once — see [`locomotion_anim`].
-    let vertical = avatars
+    let vertical = me
+        .avatars
         .body_root_of(own)
-        .and_then(|anchor| motions.get(anchor).ok())
+        .and_then(|anchor| me.motions.get(anchor).ok())
         .map_or(0.0, AvatarMotion::vertical_speed);
     let name = locomotion_anim(controls.advertised(), vertical, turn_intent(&keyboard));
     let Some(builtin) = sl_anim::builtin_animation_by_name(name) else {
         return;
     };
     // Fetch the asset (idempotent) and play it on the client-driven slot.
-    manager.request(AssetKey::from(builtin.id));
-    playback.set_client_locomotion(own, Some(builtin.id), now);
+    anim.manager.request(AssetKey::from(builtin.id));
+    anim.playback
+        .set_client_locomotion(own, Some(builtin.id), now);
     log_state(&mut last_state, Some(name));
 }
 

@@ -1043,6 +1043,24 @@ pub(crate) fn mirror_pose_cache(
     cache
 }
 
+/// The blend parameters shared by every joint of one mirrored pose: the clock
+/// the tracks are sampled at, the idle quantum the CPU and GPU both round to,
+/// the two joints the torso twist is spread over, and the sparse per-joint
+/// corrections the adjusters published.
+#[derive(Clone, Copy)]
+pub(crate) struct BlendParams<'a> {
+    /// The sampling clock.
+    pub now: f32,
+    /// The idle quantum both sides round to, when idling.
+    pub idle: Option<f32>,
+    /// The chest joint the torso twist is spread onto.
+    pub chest_joint: u32,
+    /// The torso joint it is spread from.
+    pub torso_joint: u32,
+    /// The adjusters' sparse per-joint corrections.
+    pub corrections: &'a [(u32, GpuLocalPose)],
+}
+
 /// The Rust mirror of one pass-B thread: gather this joint's contributions
 /// from one avatar's playback slots, blend them by priority with the running
 /// weight budget (an exact port of [`sl_anim::blend_joint`] under
@@ -1058,22 +1076,12 @@ pub(crate) fn mirror_pose_cache(
 /// it. It holds keyframe values only — the idle deltas and corrections are
 /// composed on top afterwards and never held. `None` is the T-pose freeze,
 /// which neither reads nor writes the held rows.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the mirror takes exactly the WGSL pass's bindings — the arena view, the \
-              avatar's playback slots, the pose cache, the joint, and the frame params; \
-              packing them into a struct would only obscure the 1:1 WGSL correspondence"
-)]
 pub(crate) fn mirror_blend_joint(
     slices: ClipSlices<'_>,
     plays: &[GpuPlayState],
     cache: &[GpuLocalPose],
     joint: u32,
-    now: f32,
-    idle: Option<f32>,
-    chest_joint: u32,
-    torso_joint: u32,
-    corrections: &[(u32, GpuLocalPose)],
+    params: &BlendParams<'_>,
     held: Option<&mut GpuLocalPose>,
 ) -> GpuLocalPose {
     /// One gathered contribution, ordered like the WGSL's fixed arrays.
@@ -1087,6 +1095,13 @@ pub(crate) fn mirror_blend_joint(
         /// The cached sampled channels.
         value: GpuLocalPose,
     }
+    let &BlendParams {
+        now,
+        idle,
+        chest_joint,
+        torso_joint,
+        corrections,
+    } = params;
     let mut contributions: Vec<Contribution> = Vec::new();
     for play in plays {
         if play.clip_id == CLIP_NONE {
@@ -1240,23 +1255,13 @@ pub(crate) fn mirror_blend_joint(
 /// `held` is the avatar's `joint_count` held rows, updated in place (see
 /// [`mirror_blend_joint`]); `None` under the T-pose freeze. A row missing from
 /// a short slice holds nothing for that joint.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the mirror takes exactly the WGSL passes' bindings and frame params; \
-              packing them into a struct would only obscure the 1:1 WGSL \
-              correspondence"
-)]
 pub(crate) fn mirror_local_pose(
     slices: ClipSlices<'_>,
     plays: &[GpuPlayState],
     jobs: &[GpuSampleJob],
     cache_len: u32,
     joint_count: u32,
-    now: f32,
-    idle: Option<f32>,
-    chest_joint: u32,
-    torso_joint: u32,
-    corrections: &[(u32, GpuLocalPose)],
+    params: &BlendParams<'_>,
     mut held: Option<&mut [GpuLocalPose]>,
 ) -> Vec<GpuLocalPose> {
     let cache = mirror_pose_cache(slices, jobs, cache_len);
@@ -1267,18 +1272,7 @@ pub(crate) fn mirror_local_pose(
                     .ok()
                     .and_then(|index| rows.get_mut(index))
             });
-            mirror_blend_joint(
-                slices,
-                plays,
-                &cache,
-                joint,
-                now,
-                idle,
-                chest_joint,
-                torso_joint,
-                corrections,
-                held_row,
-            )
+            mirror_blend_joint(slices, plays, &cache, joint, params, held_row)
         })
         .collect()
 }

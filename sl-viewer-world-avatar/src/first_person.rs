@@ -139,6 +139,55 @@ impl FirstPersonLayers {
     }
 }
 
+/// What the first-person view is decided by, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the camera mode, the
+/// show-my-body preference and our own agent id.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub struct FirstPersonGate<'w> {
+    /// The camera mode, absent before the camera exists.
+    mode: Option<Res<'w, CameraMode>>,
+    /// Whether our own body shows in first person.
+    body_visible: Option<Res<'w, FirstPersonAvatarVisible>>,
+    /// Our own agent, whose body and attachments are affected.
+    identity: Option<Res<'w, SlIdentity>>,
+}
+
+/// The entities the first-person view hides and reveals, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[expect(
+    missing_debug_implementations,
+    reason = "`Commands` does not implement Debug; a hand-written impl could only print the \
+              field names"
+)]
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct FirstPersonTargets<'w, 's> {
+    /// The base body parts, whose render layers are switched.
+    parts: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static AvatarBodyPart,
+            Option<&'static FirstPersonLayers>,
+        ),
+    >,
+    /// The worn rigged submeshes, likewise.
+    submeshes: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static AvatarPickTarget,
+            &'static WornPickTarget,
+            Option<&'static FirstPersonLayers>,
+        ),
+    >,
+    /// The attachment-point nodes, hidden wholesale.
+    nodes: Query<'w, 's, (&'static AttachmentPointNode, &'static mut Visibility)>,
+    /// What writes the switched layers.
+    commands: Commands<'w, 's>,
+}
+
 /// Apply [`OwnAvatarView::Headless`] to the own avatar, and take it back off in
 /// any other view — see the [module documentation](self) for which lever each
 /// piece is moved with and why.
@@ -146,38 +195,25 @@ impl FirstPersonLayers {
 /// A poll rather than a change-driven pass: a part is rebuilt, an attachment
 /// worn or a mesh head re-rezzed while the camera stays in mouselook, and each
 /// of those arrives as a fresh entity with no override on it.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system: the two inputs deciding the view, the identity and the \
-              avatar and object mirrors it is resolved against, the three kinds of \
-              entity it moves, and the commands that move them"
-)]
 pub(crate) fn apply_first_person_view(
-    mode: Option<Res<CameraMode>>,
-    body_visible: Option<Res<FirstPersonAvatarVisible>>,
-    identity: Option<Res<SlIdentity>>,
+    gate: FirstPersonGate,
     avatars: Res<AvatarState>,
     objects: Res<ObjectState>,
-    parts: Query<(Entity, &AvatarBodyPart, Option<&FirstPersonLayers>)>,
-    submeshes: Query<(
-        Entity,
-        &AvatarPickTarget,
-        &WornPickTarget,
-        Option<&FirstPersonLayers>,
-    )>,
-    mut nodes: Query<(&AttachmentPointNode, &mut Visibility)>,
-    mut commands: Commands,
+    mut targets: FirstPersonTargets,
 ) {
-    let view = OwnAvatarView::current(mode.as_deref(), body_visible.as_deref());
-    let own = identity.as_deref().and_then(|identity| identity.agent_id);
+    let view = OwnAvatarView::current(gate.mode.as_deref(), gate.body_visible.as_deref());
+    let own = gate
+        .identity
+        .as_deref()
+        .and_then(|identity| identity.agent_id);
 
-    for (entity, part, current) in &parts {
+    for (entity, part, current) in &targets.parts {
         let wanted = if Some(part.agent()) == own {
             view.base_part_layers(part.region())
         } else {
             None
         };
-        reconcile_layers(&mut commands, entity, current, wanted);
+        reconcile_layers(&mut targets.commands, entity, current, wanted);
     }
 
     // The own body's points, each with its first-person flag, so a rigged
@@ -185,7 +221,7 @@ pub(crate) fn apply_first_person_view(
     let mut point_visible: HashMap<u8, bool> = HashMap::new();
     if let Some(own) = own {
         for (point, node) in avatars.attachment_nodes_of(own) {
-            let Ok((marker, mut visibility)) = nodes.get_mut(node) else {
+            let Ok((marker, mut visibility)) = targets.nodes.get_mut(node) else {
                 continue;
             };
             point_visible.insert(point, marker.visible_in_first_person);
@@ -198,14 +234,14 @@ pub(crate) fn apply_first_person_view(
         }
     }
 
-    for (entity, wearer, worn, current) in &submeshes {
+    for (entity, wearer, worn, current) in &targets.submeshes {
         let hidden = Some(wearer.agent) == own
             && objects
                 .attachment_point_of(worn.scoped)
                 .and_then(|point| point_visible.get(&point).copied())
                 .is_some_and(|visible| view.hides_worn_on(visible));
         let wanted = hidden.then_some(FirstPersonLayers::ProbeOnly);
-        reconcile_layers(&mut commands, entity, current, wanted);
+        reconcile_layers(&mut targets.commands, entity, current, wanted);
     }
 }
 

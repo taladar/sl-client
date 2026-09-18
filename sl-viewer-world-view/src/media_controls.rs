@@ -470,83 +470,126 @@ struct BarChrome<'w, 's> {
     layout_cx: ResMut<'w, LayoutCx>,
 }
 
+/// The media state the controls bar shows, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): what is focused or hovered,
+/// the per-object media data behind it, which faces hold a live surface, and
+/// those surfaces themselves.
+#[derive(bevy::ecs::system::SystemParam)]
+struct MediaBarState<'w> {
+    /// What the bar is showing: the focused face, else the hovered one.
+    focus: Res<'w, MediaFocus>,
+    /// The per-object media data (URL, permissions, controls).
+    data: Res<'w, MediaData>,
+    /// Which faces hold a live surface.
+    prim_state: Res<'w, MediaPrimState>,
+    /// The live surfaces, for the title / progress / secure state.
+    surfaces: NonSend<'w, MediaSurfaces>,
+}
+
+/// The bar's own mutable state, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the target and idle timer it
+/// shows itself by, and the media diagnostics it reports a stalled load through.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct BarRuntime<'w> {
+    /// The bar's target, zoom and inactivity timer.
+    state: ResMut<'w, MediaControlsState>,
+    /// The per-URL load diagnostics shown in the status line.
+    diagnostics: ResMut<'w, MediaDiagnostics>,
+}
+
+/// What places the bar over its face on screen, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the object model, the world
+/// camera the face is projected through, the face's bounds and pose, and the
+/// window the projection lands in.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct BarProjection<'w, 's> {
+    /// The object model, for the owner check.
+    objects: Res<'w, ObjectState>,
+    /// The world camera the face is projected through.
+    cameras: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<ViewerCamera>>,
+    /// The face's bounds and world pose.
+    face_geometry: Query<'w, 's, (&'static Aabb, &'static GlobalTransform)>,
+    /// The window the projection lands in.
+    windows: Query<'w, 's, &'static Window>,
+}
+
+/// The pointer activity the bar's auto-hide is driven by, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct BarPointer<'w, 's> {
+    /// Cursor motion, which resets the idle timer.
+    cursor_moves: MessageReader<'w, 's, bevy::window::CursorMoved>,
+    /// Mouse presses, likewise.
+    mouse: Res<'w, ButtonInput<MouseButton>>,
+    /// The focused widget, so the URL field keeps the keyboard.
+    input_focus: Res<'w, InputFocus>,
+}
+
 /// Show / place / sync the bar every frame.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the media \
-              state feeding the bar, the projection inputs (camera, face transforms), and the \
-              bundled chrome queries"
-)]
 fn update_media_controls(
     ui: Option<Res<MediaControlsUi>>,
-    mut bar_state: ResMut<MediaControlsState>,
-    focus: Res<MediaFocus>,
-    data: Res<MediaData>,
-    prim_state: Res<MediaPrimState>,
-    surfaces: NonSend<MediaSurfaces>,
-    mut diagnostics: ResMut<MediaDiagnostics>,
-    objects: Res<ObjectState>,
+    mut bar: BarRuntime,
+    media: MediaBarState,
     time: Res<Time>,
-    mut cursor_moves: MessageReader<bevy::window::CursorMoved>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    input_focus: Res<InputFocus>,
-    cameras: Query<(&Camera, &GlobalTransform), With<ViewerCamera>>,
-    face_geometry: Query<(&Aabb, &GlobalTransform)>,
-    windows: Query<&Window>,
+    mut pointer: BarPointer,
+    projection: BarProjection,
     mut chrome: BarChrome,
 ) {
     let Some(ui) = ui else {
         return;
     };
     // Pointer activity feeds the inactivity timer.
-    let moved = cursor_moves.read().next().is_some();
-    if moved || mouse.get_just_pressed().next().is_some() {
-        bar_state.idle = 0.0;
+    let moved = pointer.cursor_moves.read().next().is_some();
+    if moved || pointer.mouse.get_just_pressed().next().is_some() {
+        bar.state.idle = 0.0;
     } else {
-        bar_state.idle += time.delta_secs();
+        bar.state.idle += time.delta_secs();
     }
 
     // Which face the bar serves: focus first, then hover; keep the current
     // target while the cursor is over the bar itself (hover = None then).
-    let target = focus
-        .focused
-        .or(focus.hover)
-        .or(if bar_state.idle < INACTIVITY_HIDE_SECONDS {
-            bar_state.target
-        } else {
-            None
-        });
+    let target =
+        media
+            .focus
+            .focused
+            .or(media.focus.hover)
+            .or(if bar.state.idle < INACTIVITY_HIDE_SECONDS {
+                bar.state.target
+            } else {
+                None
+            });
 
     let mut show = false;
     'decide: {
         let Some(target) = target else {
             break 'decide;
         };
-        let Some(entry) = data.entry(target) else {
+        let Some(entry) = media.data.entry(target) else {
             break 'decide;
         };
-        let Some(active) = prim_state.active.get(&target) else {
+        let Some(active) = media.prim_state.active.get(&target) else {
             break 'decide;
         };
-        let Some(slot) = surfaces.get(active.surface) else {
+        let Some(slot) = media.surfaces.get(active.surface) else {
             break 'decide;
         };
-        let is_owner = objects
+        let is_owner = projection
+            .objects
             .update_flags_by_key(target.object)
             .is_some_and(|flags| flags & FLAGS_OBJECT_YOU_OWNER != 0);
         if !media_permission_allows(entry.perms_control, is_owner) {
             break 'decide;
         }
-        if bar_state.idle >= INACTIVITY_HIDE_SECONDS {
+        if bar.state.idle >= INACTIVITY_HIDE_SECONDS {
             break 'decide;
         }
-        bar_state.target = Some(target);
+        bar.state.target = Some(target);
         show = true;
 
         // ---- Placement: project the face's box, sit above its top edge.
-        if let Ok((camera, camera_transform)) = cameras.single()
-            && let Ok((aabb, face_transform)) = face_geometry.get(active.face_entity)
-            && let Ok(window) = windows.single()
+        if let Ok((camera, camera_transform)) = projection.cameras.single()
+            && let Ok((aabb, face_transform)) = projection.face_geometry.get(active.face_entity)
+            && let Ok(window) = projection.windows.single()
         {
             let mut min = Vec2::new(f32::MAX, f32::MAX);
             let mut max = Vec2::new(f32::MIN, f32::MIN);
@@ -657,7 +700,7 @@ fn update_media_controls(
             }
         }
         if let Ok(mut zoom) = chrome.texts.get_mut(ui.zoom_label) {
-            let want = if bar_state.zoomed == Some(target) {
+            let want = if bar.state.zoomed == Some(target) {
                 "⊖"
             } else {
                 "⊕"
@@ -677,7 +720,7 @@ fn update_media_controls(
             }
         }
         if !video
-            && input_focus.get() != Some(ui.url_field)
+            && pointer.input_focus.get() != Some(ui.url_field)
             && let Ok(mut editor) = chrome.editors.get_mut(ui.url_field)
             && editor.value().to_string() != status.url
         {
@@ -697,8 +740,8 @@ fn update_media_controls(
             let want = if video {
                 let load_error = status.load_error.clone().map(|generic| {
                     if status.network_diagnosable {
-                        diagnostics.request(&status.url);
-                        diagnostics
+                        bar.diagnostics.request(&status.url);
+                        bar.diagnostics
                             .reason(&status.url)
                             .map_or(generic, String::from)
                     } else {
@@ -726,7 +769,7 @@ fn update_media_controls(
     }
 
     if !show {
-        bar_state.target = None;
+        bar.state.target = None;
     }
     if let Ok(mut shown) = chrome.shown_panels.get_mut(ui.root)
         && shown.0 != show
@@ -758,19 +801,12 @@ fn set_display(nodes: &mut Query<&mut Node>, entity: Entity, shown: bool) {
 /// `Enter` in the bar's URL field: white-list-check the typed URL, navigate
 /// the surface, and broadcast the navigation to the region (the reference's
 /// shared MoaP navigation via `ObjectMediaNavigate`).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "an observer's parameters are its injected resources / queries: the key event, \
-              the field, the bar / media state, the surface table and the command channel"
-)]
 fn on_media_url_key(
     event: On<FocusedInput<KeyboardInput>>,
     editors: Query<&EditableText>,
     ui: Option<Res<MediaControlsUi>>,
     bar_state: Res<MediaControlsState>,
-    data: Res<MediaData>,
-    prim_state: Res<MediaPrimState>,
-    surfaces: NonSend<MediaSurfaces>,
+    media: MediaBarState,
     mut commands: MessageWriter<SlCommand>,
 ) {
     if !event.input.state.is_pressed() || event.input.key_code != KeyCode::Enter {
@@ -788,7 +824,7 @@ fn on_media_url_key(
     let Some(url) = normalize_web_url(&editor.value().to_string()) else {
         return;
     };
-    let Some(entry) = data.entry(target) else {
+    let Some(entry) = media.data.entry(target) else {
         return;
     };
     let Ok(parsed) = url::Url::parse(&url) else {
@@ -806,8 +842,8 @@ fn on_media_url_key(
     else {
         return;
     };
-    if let Some(active) = prim_state.active.get(&target)
-        && let Some(slot) = surfaces.get(active.surface)
+    if let Some(active) = media.prim_state.active.get(&target)
+        && let Some(slot) = media.surfaces.get(active.surface)
     {
         slot.surface.navigate(&validated);
     }
@@ -824,18 +860,10 @@ fn on_media_url_key(
 }
 
 /// Route the bar's button [`UiAction`]s.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "threaded resources: the action stream, the bar / media state, the surface \
-              table, and the camera pieces the zoom drives"
-)]
 fn handle_media_control_actions(
     mut actions: MessageReader<UiAction>,
     mut bar_state: ResMut<MediaControlsState>,
-    focus: Res<MediaFocus>,
-    data: Res<MediaData>,
-    prim_state: Res<MediaPrimState>,
-    surfaces: NonSend<MediaSurfaces>,
+    media: MediaBarState,
     face_geometry: Query<(&Aabb, &GlobalTransform)>,
     mut cameras: Query<(&Projection, &GlobalTransform, &mut CameraRig), With<ViewerCamera>>,
     mut camera_focus: ResMut<FocusTarget>,
@@ -847,10 +875,10 @@ fn handle_media_control_actions(
         let Some(target) = bar_state.target else {
             continue;
         };
-        let Some(active) = prim_state.active.get(&target) else {
+        let Some(active) = media.prim_state.active.get(&target) else {
             continue;
         };
-        let Some(slot) = surfaces.get(active.surface) else {
+        let Some(slot) = media.surfaces.get(active.surface) else {
             continue;
         };
         match action.action {
@@ -870,7 +898,8 @@ fn handle_media_control_actions(
                 }
             }
             "home" => {
-                if let Some(home) = data
+                if let Some(home) = media
+                    .data
                     .entry(target)
                     .and_then(|entry| entry.home_url.as_ref())
                     .and_then(|home| {
@@ -925,7 +954,8 @@ fn handle_media_control_actions(
                         camera_transform.translation().y - center.y,
                         camera_transform.translation().z - center.z,
                     );
-                    let normal = focus
+                    let normal = media
+                        .focus
                         .hover_normal
                         .filter(|normal| normal.dot(towards_camera) > 0.0)
                         .unwrap_or(towards_camera)

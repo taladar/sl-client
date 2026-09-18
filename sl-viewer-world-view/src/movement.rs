@@ -209,6 +209,54 @@ pub(crate) fn rotation_from_yaw(yaw: f32) -> Rotation {
     }
 }
 
+/// What the movement drive reads its **input** from, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the bound actions, the
+/// SpaceNavigator's axes with their settings and feathered state, and the user's
+/// movement tuning that says what each means.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub(crate) struct MovementInput<'w> {
+    /// The bound movement actions.
+    actions: Res<'w, ButtonInput<Action>>,
+    /// The SpaceNavigator's raw axes.
+    spacenav: Res<'w, SpacenavInput>,
+    /// The dead zone / scale / feathering applied to them.
+    avatar_axes: Res<'w, AvatarAxisSettings>,
+    /// The feathered per-frame device contribution.
+    nav_smoothing: ResMut<'w, AvatarNavSmoothing>,
+    /// The user's movement settings (tap-tap-hold run, turn rate, auto-fly).
+    tuning: Res<'w, MovementTuning>,
+}
+
+/// The world state the movement drive is gated and seeded by, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): who we are, the avatar
+/// mirror the own body is found in, the terrain the landing check reads, the
+/// parcel's fly permission and our seat, and the away presence folded into the
+/// control word.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub(crate) struct MovementWorld<'w> {
+    /// Our own agent.
+    identity: Res<'w, SlIdentity>,
+    /// The avatar mirror: our body root and seat state.
+    avatars: Res<'w, AvatarState>,
+    /// The terrain, for the ground under the avatar.
+    terrain: Res<'w, TerrainState>,
+    /// The parcel's fly permission and what we are seated on.
+    agent: Res<'w, SlAgentParcel>,
+    /// Our away state, which rides along in the same control word.
+    presence: Option<Res<'w, sl_viewer_social::PresenceState>>,
+}
+
+/// Where the camera is looking, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the mode that decides what
+/// the actions mean, and the mouselook aim the body turns to follow.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub(crate) struct CameraGaze<'w> {
+    /// The active camera mode.
+    mode: Res<'w, CameraMode>,
+    /// The published mouselook aim.
+    aim: Res<'w, CameraAim>,
+}
+
 /// Read the movement **actions** ([`crate::input_action`]) each frame and advertise
 /// the avatar's intent to the simulator: the [`ControlFlags`] for the held walk /
 /// fly actions (emitted only when they change) and, while turning, the body
@@ -239,28 +287,12 @@ pub(crate) fn rotation_from_yaw(yaw: f32) -> Rotation {
 /// its up axis flies up / down exactly as PageUp / PageDown do, and its twist turns
 /// the body. It only drives the avatar when flycam is off (in flycam it drives the
 /// camera instead, via `crate::camera::drive_flycam`).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system reading time, the actions, the camera mode / aim, the user movement \
-              tuning, identity, avatars, terrain, the fly permission + seat, the SpaceNavigator \
-              input + settings + smoothing, and the avatar motions plus the controls state and \
-              command writer"
-)]
 pub(crate) fn drive_avatar_controls(
-    actions: Res<ButtonInput<Action>>,
-    mode: Res<CameraMode>,
-    camera_aim: Res<CameraAim>,
-    tuning: Res<MovementTuning>,
+    mut input: MovementInput,
+    world: MovementWorld,
+    gaze: CameraGaze,
     time: Res<Time>,
-    identity: Res<SlIdentity>,
-    avatars: Res<AvatarState>,
-    terrain: Res<TerrainState>,
-    agent: Res<SlAgentParcel>,
-    spacenav: Res<SpacenavInput>,
-    avatar_axes: Res<AvatarAxisSettings>,
-    mut nav_smoothing: ResMut<AvatarNavSmoothing>,
     motions: Query<(Ref<AvatarMotion>, &Transform)>,
-    presence: Option<Res<sl_viewer_social::PresenceState>>,
     mut controls: ResMut<AvatarControls>,
     mut writer: MessageWriter<SlCommand>,
 ) {
@@ -268,7 +300,7 @@ pub(crate) fn drive_avatar_controls(
     // `AGENT_CONTROL_AWAY` in the same control word across its per-frame reset
     // (`LLAgent::resetControlFlags`), so it is folded in here rather than sent
     // by a second writer that would fight this one for the field.
-    let away_bit = if presence.is_some_and(|presence| presence.is_away()) {
+    let away_bit = if world.presence.is_some_and(|presence| presence.is_away()) {
         ControlFlags::AWAY
     } else {
         ControlFlags::empty()
@@ -283,7 +315,7 @@ pub(crate) fn drive_avatar_controls(
     // the simulator land the avatar, so a hovering avatar would plummet the moment
     // the camera switched to flycam. With `FLY` set and no motion bits the avatar
     // just hovers in place, which is what a spectator flycam wants.
-    if *mode == CameraMode::Flycam {
+    if *gaze.mode == CameraMode::Flycam {
         let parked = away_bit.union(if controls.flying {
             ControlFlags::FLY
         } else {
@@ -298,16 +330,22 @@ pub(crate) fn drive_avatar_controls(
 
     // The SpaceNavigator's walk / fly / turn contribution this frame (empty when no
     // device is connected — the axes are zero), composed with the keyboard below.
-    let nav = avatar_nav_drive(&spacenav, &avatar_axes, &mut nav_smoothing, dt);
+    let nav = avatar_nav_drive(
+        &input.spacenav,
+        &input.avatar_axes,
+        &mut input.nav_smoothing,
+        dt,
+    );
 
-    let seated = agent.seated_on.is_some();
-    let mouselook = *mode == CameraMode::Mouselook;
+    let seated = world.agent.seated_on.is_some();
+    let mouselook = *gaze.mode == CameraMode::Mouselook;
 
     // The own avatar's authoritative motion (facing, vertical speed, ground floor),
     // used to seed the walk heading and to auto-stop flying on landing.
-    let own_anchor = identity
+    let own_anchor = world
+        .identity
         .agent_id
-        .and_then(|own| avatars.body_root_of(own))
+        .and_then(|own| world.avatars.body_root_of(own))
         .and_then(|anchor| motions.get(anchor).ok());
     let own_motion = own_anchor.as_ref().map(|(motion, _transform)| motion);
 
@@ -324,7 +362,10 @@ pub(crate) fn drive_avatar_controls(
     // once — the simulator would otherwise keep the pre-sit one the keep-alive
     // re-sends. Not the simulator's own report of the stand: that is not the
     // seated facing, and seeding from it stood the avatar up facing somewhere else.
-    let body_seated = identity.agent_id.is_some_and(|own| avatars.is_seated(own));
+    let body_seated = world
+        .identity
+        .agent_id
+        .is_some_and(|own| world.avatars.is_seated(own));
     if body_seated {
         if let Some((_motion, transform)) = &own_anchor
             && let Some(yaw) = seated_heading(transform.rotation)
@@ -357,15 +398,15 @@ pub(crate) fn drive_avatar_controls(
     // Ascend / descend from PageUp / PageDown or the SpaceNavigator's up axis (a
     // lift ascends, a press descends — the same intent as the keys), so the two
     // sources compose and either flies the avatar up or down.
-    let ascend = actions.pressed(Action::MoveUp) || nav.vertical > 0;
-    let descend = actions.pressed(Action::MoveDown) || nav.vertical < 0;
+    let ascend = input.actions.pressed(Action::MoveUp) || nav.vertical > 0;
+    let descend = input.actions.pressed(Action::MoveDown) || nav.vertical < 0;
 
     // Flight is an avatar concern, not a vehicle one: skip the whole fly toggle /
     // take-off / auto-land machinery while seated (the vehicle owns vertical motion
     // via the up/down control bits below).
     if !seated {
         // The fly action toggles flying.
-        if actions.just_pressed(Action::ToggleFly) {
+        if input.actions.just_pressed(Action::ToggleFly) {
             controls.flying = !controls.flying;
         }
 
@@ -381,11 +422,11 @@ pub(crate) fn drive_avatar_controls(
         controls.ascend_hold_secs = hold_secs;
         controls.ascend_hold_frames = hold_frames;
         if should_take_off(
-            tuning.automatic_fly,
+            input.tuning.automatic_fly,
             controls.flying,
             controls.ascend_hold_secs,
             controls.ascend_hold_frames,
-            agent.can_fly,
+            world.agent.can_fly,
         ) {
             controls.flying = true;
             controls.ascend_hold_secs = 0.0;
@@ -400,7 +441,11 @@ pub(crate) fn drive_avatar_controls(
                 ascend,
                 descend,
                 motion.vertical_speed(),
-                crate::physics::avatar_at_ground_floor(motion, &terrain, LANDING_HEIGHT_MARGIN_M),
+                crate::physics::avatar_at_ground_floor(
+                    motion,
+                    &world.terrain,
+                    LANDING_HEIGHT_MARGIN_M,
+                ),
             )
         {
             controls.flying = false;
@@ -421,8 +466,8 @@ pub(crate) fn drive_avatar_controls(
     }
     // Walk forward / back from the keys or the SpaceNavigator's forward axis (push
     // walks forward, pull back walks back).
-    let forward = actions.pressed(Action::MoveForward) || nav.forward > 0;
-    let backward = actions.pressed(Action::MoveBackward) || nav.forward < 0;
+    let forward = input.actions.pressed(Action::MoveForward) || nav.forward > 0;
+    let backward = input.actions.pressed(Action::MoveBackward) || nav.forward < 0;
     if forward {
         flags = flags.union(ControlFlags::AT_POS);
     }
@@ -434,20 +479,20 @@ pub(crate) fn drive_avatar_controls(
     // their state fresh) and the preference gates only whether the latch counts.
     let tap_forward = double_tap_run(
         &mut controls.tap_run_forward,
-        actions.just_pressed(Action::MoveForward),
-        actions.pressed(Action::MoveForward),
+        input.actions.just_pressed(Action::MoveForward),
+        input.actions.pressed(Action::MoveForward),
         dt,
     );
     let tap_backward = double_tap_run(
         &mut controls.tap_run_backward,
-        actions.just_pressed(Action::MoveBackward),
-        actions.pressed(Action::MoveBackward),
+        input.actions.just_pressed(Action::MoveBackward),
+        input.actions.pressed(Action::MoveBackward),
         dt,
     );
-    let tap_run = tuning.allow_tap_tap_hold_run && (tap_forward || tap_backward);
+    let tap_run = input.tuning.allow_tap_tap_hold_run && (tap_forward || tap_backward);
     // Run from Shift, a forward push past the SpaceNavigator run threshold, or a
     // latched double-tap.
-    if (actions.pressed(Action::Run) || nav.run || tap_run) && (forward || backward) {
+    if (input.actions.pressed(Action::Run) || nav.run || tap_run) && (forward || backward) {
         flags = flags.union(ControlFlags::FAST_AT);
     }
     if ascend {
@@ -459,8 +504,8 @@ pub(crate) fn drive_avatar_controls(
 
     // Left / right: steer a vehicle, strafe in mouselook, or turn the avatar in
     // third person. `turning` marks that a body rotation should be advertised.
-    let left = actions.pressed(Action::MoveLeft);
-    let right = actions.pressed(Action::MoveRight);
+    let left = input.actions.pressed(Action::MoveLeft);
+    let right = input.actions.pressed(Action::MoveRight);
     let mut turning = false;
     if seated {
         // Steer the vehicle with the yaw bits; never turn the avatar body (which is
@@ -484,15 +529,15 @@ pub(crate) fn drive_avatar_controls(
         if right {
             flags = flags.union(ControlFlags::LEFT_NEG);
         }
-        controls.yaw = camera_aim.sl_yaw;
+        controls.yaw = gaze.aim.sl_yaw;
         turning = true;
     } else {
         if left {
-            controls.yaw += tuning.turn_rate_rad_per_sec * dt;
+            controls.yaw += input.tuning.turn_rate_rad_per_sec * dt;
             turning = true;
         }
         if right {
-            controls.yaw -= tuning.turn_rate_rad_per_sec * dt;
+            controls.yaw -= input.tuning.turn_rate_rad_per_sec * dt;
             turning = true;
         }
         // The SpaceNavigator's twist turns the body too (feathered per frame); it

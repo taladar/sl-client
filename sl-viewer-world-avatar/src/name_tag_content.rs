@@ -689,44 +689,64 @@ const DISTANCE_REFRESH_SECS: f32 = 0.25;
 /// two-decimal display grain).
 const DISTANCE_HYSTERESIS_METRES: f32 = 0.05;
 
+/// The per-avatar models a name tag's lines are composed from, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+///
+/// Every line of a tag comes from one of these — the name and title from the
+/// avatar model, the `T` glyph from the typing set, the away glyph from
+/// playback, the friend / muted colours from the social models, the complexity
+/// figure from the jellydoll scorer — so they travel as one rather than as six
+/// optional resources.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub struct NameTagFacts<'w> {
+    /// Names, usernames, group titles, seats.
+    avatars: Res<'w, sl_viewer_world_api::AvatarState>,
+    /// The typing set behind the `T` glyph.
+    statuses: Res<'w, NameTagStatuses>,
+    /// Playing animations, for the away glyph.
+    playback: Res<'w, crate::animations::AnimationPlayback>,
+    /// The friend roster (absent before login).
+    friends: Option<Res<'w, sl_viewer_social::FriendsModel>>,
+    /// The mute list, for the muted name colour.
+    mutes: Option<Res<'w, sl_viewer_social::MuteModel>>,
+    /// The group roster, for the active title.
+    groups: Option<Res<'w, sl_viewer_social::GroupsModel>>,
+    /// The render-cost scores shown beside the name.
+    complexity: Option<Res<'w, crate::avatar_complexity::AvatarComplexityModel>>,
+    /// Our own agent, whose tag is the one marked "self" and measured from.
+    identity: Option<Res<'w, sl_client_bevy::SlIdentity>>,
+    /// The settings store the content toggles and colours are read from.
+    settings: Option<Res<'w, sl_viewer_settings::ViewerSettings>>,
+}
+
 /// Recompose every labelled avatar's [`TagContent`] from the live inputs
 /// (names, title, friend/mute/typing/away state, own-avatar distance).
 /// Assembly runs each frame but the final compare-then-assign is the
 /// authoritative guard — the renderer only sees `Changed<TagContent>` when
 /// something the tag *shows* actually changed; the distance additionally
 /// refreshes at most at `DISTANCE_REFRESH_SECS` with a metre hysteresis.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the composer is the single fan-in of every tag-content source; \
-              splitting it would just move the arguments into a SystemParam \
-              with the same width"
-)]
 pub fn compose_name_tags(
     time: Res<Time>,
     mut next_distance_at: Local<f32>,
     mut distance_cache: Local<std::collections::HashMap<AgentKey, f32>>,
-    avatars: Res<sl_viewer_world_api::AvatarState>,
-    statuses: Res<NameTagStatuses>,
-    playback: Res<crate::animations::AnimationPlayback>,
-    friends: Option<Res<sl_viewer_social::FriendsModel>>,
-    mutes: Option<Res<sl_viewer_social::MuteModel>>,
-    groups: Option<Res<sl_viewer_social::GroupsModel>>,
-    complexity: Option<Res<crate::avatar_complexity::AvatarComplexityModel>>,
-    identity: Option<Res<sl_client_bevy::SlIdentity>>,
-    settings: Option<Res<sl_viewer_settings::ViewerSettings>>,
+    facts: NameTagFacts,
     anchors: Query<&Transform, With<sl_viewer_world_api::AvatarAnchor>>,
     mut contents: Query<&mut TagContent, With<NameTag>>,
 ) {
-    let toggles = TagToggles::from_settings(settings.as_deref());
-    let colors = TagColors::from_settings(settings.as_deref());
+    let toggles = TagToggles::from_settings(facts.settings.as_deref());
+    let colors = TagColors::from_settings(facts.settings.as_deref());
     // Autorespond is local-only state, so it can only ever mark the own tag.
-    let autoresponse = sl_viewer_world_api::shows_autoresponse(settings.as_deref());
-    let own_agent = identity.as_ref().and_then(|identity| identity.agent_id);
+    let autoresponse = sl_viewer_world_api::shows_autoresponse(facts.settings.as_deref());
+    let own_agent = facts
+        .identity
+        .as_ref()
+        .and_then(|identity| identity.agent_id);
     // The distance line measures from the OWN AVATAR (the reference's
     // behaviour) — the camera-based distances only govern fade/cut-off.
     let own_position = own_agent
         .and_then(|own| {
-            avatars
+            facts
+                .avatars
                 .labelled_avatars()
                 .find(|(agent, _, _)| *agent == own)
         })
@@ -738,7 +758,7 @@ pub fn compose_name_tags(
     if now >= *next_distance_at {
         *next_distance_at = now + DISTANCE_REFRESH_SECS;
         if let Some(own_position) = own_position {
-            for (agent, anchor, _) in avatars.labelled_avatars() {
+            for (agent, anchor, _) in facts.avatars.labelled_avatars() {
                 let Ok(transform) = anchors.get(anchor) else {
                     continue;
                 };
@@ -753,39 +773,43 @@ pub fn compose_name_tags(
         }
     }
 
-    for (agent, _, label) in avatars.labelled_avatars() {
+    for (agent, _, label) in facts.avatars.labelled_avatars() {
         let Ok(mut content) = contents.get_mut(label) else {
             continue;
         };
         let is_self = own_agent == Some(agent);
         let title = if is_self {
-            groups
+            facts
+                .groups
                 .as_ref()
                 .and_then(|groups| groups.own_title())
-                .or_else(|| avatars.title_of(agent))
+                .or_else(|| facts.avatars.title_of(agent))
         } else {
-            avatars.title_of(agent)
+            facts.avatars.title_of(agent)
         };
-        let measured = complexity
+        let measured = facts
+            .complexity
             .as_ref()
             .and_then(|complexity| complexity.complexity(agent));
         let inputs = TagInputs {
             is_self,
-            record: avatars.name_record(agent),
-            provisional: avatars.label_text(agent),
+            record: facts.avatars.name_record(agent),
+            provisional: facts.avatars.label_text(agent),
             title,
-            is_friend: friends
+            is_friend: facts
+                .friends
                 .as_ref()
                 .is_some_and(|friends| friends.is_friend(agent)),
-            is_muted: mutes
+            is_muted: facts
+                .mutes
                 .as_ref()
                 .is_some_and(|mutes| mutes.is_muted(agent.uuid())),
-            is_typing: statuses.is_typing(agent),
-            is_away: AWAY_ANIM.is_some_and(|away| playback.is_playing(agent, away)),
-            is_do_not_disturb: DND_ANIM.is_some_and(|busy| playback.is_playing(agent, busy)),
+            is_typing: facts.statuses.is_typing(agent),
+            is_away: AWAY_ANIM.is_some_and(|away| facts.playback.is_playing(agent, away)),
+            is_do_not_disturb: DND_ANIM.is_some_and(|busy| facts.playback.is_playing(agent, busy)),
             is_autoresponse: is_self && autoresponse,
             is_editing_appearance: CUSTOMIZE_ANIM
-                .is_some_and(|customize| playback.is_playing(agent, customize)),
+                .is_some_and(|customize| facts.playback.is_playing(agent, customize)),
             distance_m: if is_self {
                 None
             } else {
@@ -793,7 +817,8 @@ pub fn compose_name_tags(
             },
             complexity: measured.map(|cost| cost.score),
             attachment_area_m2: measured.map_or(0.0, |cost| cost.surface_area),
-            is_limited: complexity
+            is_limited: facts
+                .complexity
                 .as_ref()
                 .is_some_and(|complexity| complexity.is_jellied(agent)),
         };

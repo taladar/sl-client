@@ -428,6 +428,28 @@ impl Plugin for EditCreatePlugin {
     }
 }
 
+/// The three inputs the UI-occlusion guard reads, bundled as one
+/// [`SystemParam`] — the same trio
+/// [`CreatePointer`] carries, for the one system that needs the guard without
+/// the rest of the pointer.
+#[derive(bevy::ecs::system::SystemParam)]
+struct UiOcclusion<'w, 's> {
+    /// The `bevy_ui` hover map.
+    hover_map: Res<'w, HoverMap>,
+    /// Pickability of each hovered node.
+    pickables: Query<'w, 's, &'static Pickable>,
+    /// Node sizes, so a zero-size node does not block.
+    node_sizes: Query<'w, 's, &'static ComputedNode>,
+}
+
+impl UiOcclusion<'_, '_> {
+    /// Whether the pointer is over UI that blocks a world click
+    /// ([`pointer_over_blocking_ui`]).
+    fn blocks_pointer(&self) -> bool {
+        pointer_over_blocking_ui(&self.hover_map, &self.pickables, &self.node_sizes)
+    }
+}
+
 /// Show the magic-wand cursor while the Create tool is active and the pointer is
 /// over the world (not the floater), and hand the cursor back to the default
 /// otherwise. Writes only on a transition (the camera cursor system's pattern),
@@ -438,25 +460,17 @@ impl Plugin for EditCreatePlugin {
 /// appear the moment the Create tool is picked (that pick focuses the tool
 /// radio, which would leave the context non-world until the first world click),
 /// so it is gated on the pointer being over the world instead.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the tool state, \
-              the wand cursor, the keyboard, the UI-occlusion inputs, the window, and the \
-              transition guard"
-)]
 fn update_create_cursor(
     tool: Res<EditToolState>,
     cursor: Res<CreateCursor>,
     keyboard: Res<ButtonInput<KeyCode>>,
-    hover_map: Res<HoverMap>,
-    pickables: Query<&Pickable>,
-    node_sizes: Query<&ComputedNode>,
+    occlusion: UiOcclusion,
     windows: Query<Entity, With<PrimaryWindow>>,
     mut showing_wand: Local<bool>,
     mut commands: Commands,
 ) {
     let alt = keyboard.pressed(KeyCode::AltLeft) || keyboard.pressed(KeyCode::AltRight);
-    let over_ui = pointer_over_blocking_ui(&hover_map, &pickables, &node_sizes);
+    let over_ui = occlusion.blocks_pointer();
     let want_wand = tool.active && tool.tool == EditTool::Create && !alt && !over_ui;
     if want_wand == *showing_wand {
         return;
@@ -797,12 +811,26 @@ struct CreatePointer<'w, 's> {
 /// vs an avatar / attachment it may not build on).
 #[derive(SystemParam)]
 struct CreateScene<'w, 's> {
+    /// The ray cast that finds the build point.
+    ray_cast: MeshRayCast<'w, 's>,
     /// Object identities, to resolve a hit entity to its object.
     scene: Query<'w, 's, &'static SceneObject>,
     /// Parent links, to walk from a face entity up to its object.
     parents: Query<'w, 's, &'static ChildOf>,
     /// Motions, for the attachment test on the hit object.
     motions: Query<'w, 's, &'static ObjectSlMotion>,
+}
+
+/// What a rez sends and what remembers it, bundled as one
+/// [`SystemParam`]: the `RezObject` goes out and
+/// a matching pending entry waits for the simulator's echo to select the new
+/// object.
+#[derive(bevy::ecs::system::SystemParam)]
+struct RezOutbox<'w> {
+    /// The rezzes awaiting their echo.
+    pending: ResMut<'w, PendingRezzes>,
+    /// Where the `RezObject` goes.
+    commands: MessageWriter<'w, SlCommand>,
 }
 
 /// What the build ray struck, deciding whether a rez is allowed and where.
@@ -817,22 +845,14 @@ enum HitClass {
 
 /// The Create tool's placer: on a left click over a surface, rez the picked base
 /// type at the ray-cast build point.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the tool / create \
-              state, the bundled pointer + scene queries, the pick machinery, the clock, and the \
-              pending-rez + command writers"
-)]
 fn handle_create_pointer(
     tool: Res<EditToolState>,
     create: Res<CreateToolState>,
     gizmo: Res<GizmoInteraction>,
     pointer: CreatePointer,
-    scene: CreateScene,
-    mut ray_cast: MeshRayCast,
+    mut scene: CreateScene,
     time: Res<Time>,
-    mut pending: ResMut<PendingRezzes>,
-    mut commands: MessageWriter<SlCommand>,
+    mut outbox: RezOutbox,
 ) {
     if !tool.active || tool.tool != EditTool::Create {
         return;
@@ -873,7 +893,7 @@ fn handle_create_pointer(
         .collect();
     let world_filter = |entity: Entity| !exclude.contains(&entity);
     let settings = MeshRayCastSettings::default().with_filter(&world_filter);
-    let Some((entity, hit)) = ray_cast.cast_ray(ray, &settings).first().cloned() else {
+    let Some((entity, hit)) = scene.ray_cast.cast_ray(ray, &settings).first().cloned() else {
         return;
     };
     // Refuse to build on an avatar or a worn attachment (the reference's guard).
@@ -897,13 +917,13 @@ fn handle_create_pointer(
         shape.position.z,
         if shift { " (repeat)" } else { "" },
     );
-    pending.rezzes.push(PendingRez {
+    outbox.pending.rezzes.push(PendingRez {
         position: shape.position.clone(),
         pcode: shape.pcode,
         drop_into_edit: !shift,
         expires_at: time.elapsed_secs() + PENDING_REZ_TTL,
     });
-    commands.write(SlCommand(Command::RezObject {
+    outbox.commands.write(SlCommand(Command::RezObject {
         shape,
         group_id: None,
     }));

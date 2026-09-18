@@ -595,19 +595,23 @@ pub fn publish_rlv_avatar_sex(
     }
 }
 
+/// The two arrivals that advance an own-bake assembly, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): a fetched wearable asset and
+/// a decoded texture.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub struct BakeArrivals<'w, 's> {
+    /// Wearable assets whose parameters and textures just landed.
+    assets: MessageReader<'w, 's, WearableAssetFetched>,
+    /// Textures whose decode just completed.
+    textures: MessageReader<'w, 's, TextureDecoded>,
+}
+
 /// Drive the assembly half: parse each fetched wearable asset and request its
 /// layer textures; as those decode, once every asset and texture is resolved (or
 /// the grace period lapses) assemble the per-region layer lists.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's params are its dependencies; the bake-input driver reads time, both \
-              asset and texture message streams, the wearable manager, the avatar library, the \
-              texture manager and its decoded store, and writes the bake inputs"
-)]
 pub fn assemble_own_bake(
     time: Res<Time>,
-    mut asset_events: MessageReader<WearableAssetFetched>,
-    mut texture_events: MessageReader<TextureDecoded>,
+    mut arrivals: BakeArrivals,
     manager: Res<WearableAssetManager>,
     library: Option<Res<AvatarAssetLibrary>>,
     mut texture_manager: ResMut<TextureManager>,
@@ -615,7 +619,7 @@ pub fn assemble_own_bake(
     mut state: ResMut<OwnBakeInputs>,
 ) {
     // Parse newly fetched assets and request their layer textures.
-    for &WearableAssetFetched(id) in asset_events.read() {
+    for &WearableAssetFetched(id) in arrivals.assets.read() {
         if !state.pending_assets.remove(&id) {
             continue;
         }
@@ -624,7 +628,7 @@ pub fn assemble_own_bake(
         }
     }
     // As layer textures decode, clear them from the pending set.
-    for &TextureDecoded(id) in texture_events.read() {
+    for &TextureDecoded(id) in arrivals.textures.read() {
         let _removed = state.pending_textures.remove(&id);
     }
 

@@ -50,6 +50,90 @@ const TOUCH_BUTTON: MouseButton = MouseButton::Left;
 type FaceQuery<'world, 'state> =
     Query<'world, 'state, (&'static PrimFaceEntity, &'static FaceTextureDebug)>;
 
+/// The pointer a click is made with, bundled as one [`SystemParam`]: which
+/// buttons and modifiers are down, where the cursor is, and whether it is over a
+/// UI panel that claims the click.
+#[derive(Debug, SystemParam)]
+pub struct TouchPointer<'w, 's> {
+    /// The mouse buttons.
+    buttons: Res<'w, ButtonInput<MouseButton>>,
+    /// The modifier keys — `Alt` makes a left-click a camera gesture, not a touch.
+    keyboard: Res<'w, ButtonInput<KeyCode>>,
+    /// What the pointer is over this frame.
+    hover_map: Res<'w, HoverMap>,
+    /// Which of those entities are pickable.
+    pickables: Query<'w, 's, &'static Pickable>,
+    /// Their computed sizes, for the hit test.
+    node_sizes: Query<'w, 's, &'static ComputedNode>,
+    /// The window the cursor position is read from.
+    windows: Query<'w, 's, &'static Window>,
+}
+
+impl TouchPointer<'_, '_> {
+    /// Whether this frame begins a plain (un-modified) touch click. An
+    /// `Alt`-held left-click is the camera focus / orbit gesture
+    /// (`crate::camera::focus_on_object`), not a touch.
+    fn touch_started(&self) -> bool {
+        let alt =
+            self.keyboard.pressed(KeyCode::AltLeft) || self.keyboard.pressed(KeyCode::AltRight);
+        self.buttons.just_pressed(TOUCH_BUTTON) && !alt
+    }
+
+    /// Whether the cursor is over a solid UI element, which occludes the click.
+    ///
+    /// This pick casts its own ray instead of going through `bevy_picking`, so a
+    /// floater's `should_block_lower` never gets to stop it — without this guard a
+    /// click on a window drawn over the HUD would *also* touch the HUD attachment
+    /// (or world object) behind it. Only `bevy_ui` nodes are in the
+    /// [`HoverMap`] (no mesh-picking backend is installed), so a hovered
+    /// block-lower `Pickable` means the cursor is over a solid UI element.
+    fn over_blocking_ui(&self) -> bool {
+        pointer_over_blocking_ui(&self.hover_map, &self.pickables, &self.node_sizes)
+    }
+
+    /// The free cursor's position, or the screen centre when it is captured
+    /// (mouselook) — the crosshair the first-person view aims with.
+    fn cursor(&self) -> Option<Vec2> {
+        let window = self.windows.single().ok()?;
+        Some(
+            window
+                .cursor_position()
+                .unwrap_or_else(|| Vec2::new(window.width() * 0.5, window.height() * 0.5)),
+        )
+    }
+}
+
+/// What a touch pick resolves a hit through, bundled as one [`SystemParam`]: the
+/// struck face's markers, the linkset's scene identities, their world transforms,
+/// and the parent links walked between them.
+#[derive(Debug, SystemParam)]
+pub struct TouchTargets<'w, 's> {
+    /// The face / submesh child the ray struck.
+    faces: FaceQuery<'w, 's>,
+    /// The object entities carrying the scene identity.
+    scene: Query<'w, 's, &'static SceneObject>,
+    /// Their world transforms, to map the hit into the object's own frame.
+    globals: Query<'w, 's, &'static GlobalTransform>,
+    /// The parent links walked up the linkset.
+    parents: Query<'w, 's, &'static ChildOf>,
+}
+
+/// Where a resolved touch goes, bundled as one [`SystemParam`]: the wire command
+/// channel, and the media-click channel a media-enabled face claims the click
+/// through instead.
+#[expect(
+    missing_debug_implementations,
+    reason = "a Bevy `MessageWriter` has no Debug; a hand-written impl could only print the \
+              field names"
+)]
+#[derive(SystemParam)]
+pub struct TouchOut<'w> {
+    /// The command channel the touch is sent on.
+    writer: MessageWriter<'w, SlCommand>,
+    /// The media system's click channel.
+    media_clicks: MessageWriter<'w, MediaWorldClick>,
+}
+
 /// On a left click, touch the HUD face under the cursor — or, if none,
 /// request the **GPU ID-buffer pick** ([`crate::gpu_pick`]) of the world
 /// under it (the reference's HUD-first pick order); [`resolve_touch_pick`]
@@ -61,71 +145,28 @@ type FaceQuery<'world, 'state> =
 /// orthographic (through the HUD camera) and restricted to the HUD render layer;
 /// the world pick view excludes HUD-layer geometry, so the two passes never
 /// poach each other's geometry.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the \
-              mouse button, the Alt modifier, the hover map that says the click landed on UI, the \
-              window for the cursor, the HUD ray cast, the face / object components a HUD hit is resolved through, the GPU \
-              pick queue for the world fall-through, and the command channel the touch is sent on"
-)]
 pub fn pick_and_touch(
-    buttons: Res<ButtonInput<MouseButton>>,
-    keyboard: Res<ButtonInput<KeyCode>>,
-    hover_map: Res<HoverMap>,
-    pickables: Query<&Pickable>,
-    node_sizes: Query<&ComputedNode>,
-    windows: Query<&Window>,
+    pointer: TouchPointer,
     hud: HudRayCast,
-    faces: FaceQuery,
-    scene: Query<&SceneObject>,
-    globals: Query<&GlobalTransform>,
-    parents: Query<&ChildOf>,
+    targets: TouchTargets,
     mut picker: ResMut<crate::gpu_pick::GpuPicker>,
-    mut writer: MessageWriter<SlCommand>,
-    mut media_clicks: MessageWriter<MediaWorldClick>,
+    mut out: TouchOut,
 ) {
     // While the build tool is active a left click *selects* rather than
     // touches; that arbitration lives in the registration —
     // `pick_and_touch.run_if(edit_tool_inactive)` — because this system is at
     // Bevy's system-parameter limit.
-    // A plain left-click touches; an `Alt`-held left-click is the camera focus /
-    // orbit gesture (`crate::camera::focus_on_object`), not a touch, so ignore it.
-    let alt = keyboard.pressed(KeyCode::AltLeft) || keyboard.pressed(KeyCode::AltRight);
-    if !buttons.just_pressed(TOUCH_BUTTON) || alt {
+    if !pointer.touch_started() || pointer.over_blocking_ui() {
         return;
     }
-    // Respect UI occlusion. This pick casts its own ray instead of going through
-    // bevy_picking, so a floater's `should_block_lower` never gets to stop it —
-    // without this guard a click on a window drawn over the HUD would *also* touch
-    // the HUD attachment (or world object) behind it. Only `bevy_ui` nodes are in
-    // the hover map (no mesh-picking backend is installed), so a hovered
-    // block-lower Pickable means the cursor is over a solid UI element; skip.
-    if pointer_over_blocking_ui(&hover_map, &pickables, &node_sizes) {
-        return;
-    }
-    let Ok(window) = windows.single() else {
+    let Some(cursor) = pointer.cursor() else {
         return;
     };
-    // The free cursor's position, or the screen centre when it is captured
-    // (mouselook) — the crosshair the first-person view aims with.
-    let cursor = window
-        .cursor_position()
-        .unwrap_or_else(|| Vec2::new(window.width() * 0.5, window.height() * 0.5));
 
     // 1. HUD first: an orthographic ray through the HUD camera at the cursor,
     //    limited to the HUD subtree.
     if let Some((entity, hit)) = hud.hit(cursor)
-        && touch_hit(
-            entity,
-            &hit,
-            &faces,
-            &scene,
-            &globals,
-            &parents,
-            &mut writer,
-            &mut media_clicks,
-            "HUD",
-        )
+        && touch_hit(entity, &hit, &targets, &mut out, "HUD")
     {
         return;
     }
@@ -141,21 +182,11 @@ pub fn pick_and_touch(
 /// ST / UV / position / normal the sim's surface block wants) and touched;
 /// avatar / terrain / water hits touch nothing, exactly like the old ray
 /// walk resolving to no object.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the resolved \
-              pick channel, the ray caster for the surface refinement, the face / object \
-              components a hit is resolved through, and the command channels"
-)]
 pub fn resolve_touch_pick(
     mut picks: MessageReader<crate::gpu_pick::GpuPickResolved>,
     ray_cast: TargetedRayCast,
-    faces: FaceQuery,
-    scene: Query<&SceneObject>,
-    globals: Query<&GlobalTransform>,
-    parents: Query<&ChildOf>,
-    mut writer: MessageWriter<SlCommand>,
-    mut media_clicks: MessageWriter<MediaWorldClick>,
+    targets: TouchTargets,
+    mut out: TouchOut,
 ) {
     for pick in picks.read() {
         if pick.purpose != crate::gpu_pick::PickPurpose::Touch {
@@ -172,17 +203,7 @@ pub fn resolve_touch_pick(
         else {
             continue;
         };
-        touch_hit(
-            entity,
-            &ray_hit,
-            &faces,
-            &scene,
-            &globals,
-            &parents,
-            &mut writer,
-            &mut media_clicks,
-            "world",
-        );
+        touch_hit(entity, &ray_hit, &targets, &mut out, "world");
     }
 }
 
@@ -247,38 +268,30 @@ impl HudRayCast<'_, '_> {
 /// Resolve a ray hit to its object and touch it, carrying the surface the ray
 /// struck. Returns whether a touch was sent (a hit that resolves to no object —
 /// e.g. an avatar's own mesh — sends nothing).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the several components a hit is resolved through, threaded from the pick system"
-)]
 fn touch_hit(
     entity: Entity,
     hit: &bevy::picking::mesh_picking::ray_cast::RayMeshHit,
-    faces: &FaceQuery,
-    scene: &Query<&SceneObject>,
-    globals: &Query<&GlobalTransform>,
-    parents: &Query<&ChildOf>,
-    writer: &mut MessageWriter<SlCommand>,
-    media_clicks: &mut MessageWriter<MediaWorldClick>,
+    targets: &TouchTargets,
+    out: &mut TouchOut,
     which: &str,
 ) -> bool {
     // The ray strikes a face/submesh child entity: its Linden face index and the
     // per-face texture placement give the surface coordinates the sim wants.
-    let face = faces.get(entity).ok();
+    let face = targets.faces.get(entity).ok();
 
     // Walk up the linkset to the object entity carrying the scene identity, whose
     // global maps the world hit back into the object's own Second Life frame.
     let mut current = entity;
     let scoped = loop {
-        if let Ok(scene) = scene.get(current) {
+        if let Ok(scene) = targets.scene.get(current) {
             break Some(scene.scoped_id);
         }
-        let Ok(child_of) = parents.get(current) else {
+        let Ok(child_of) = targets.parents.get(current) else {
             break None;
         };
         current = child_of.parent();
     };
-    let (Some(scoped), Ok(object_global)) = (scoped, globals.get(current)) else {
+    let (Some(scoped), Ok(object_global)) = (scoped, targets.globals.get(current)) else {
         return false;
     };
 
@@ -295,7 +308,7 @@ fn touch_hit(
     if let Some((marker, FaceTextureDebug(tf))) = face
         && tf.media_enabled()
     {
-        media_clicks.write(MediaWorldClick {
+        out.media_clicks.write(MediaWorldClick {
             entity,
             scoped,
             face: marker.face_id,
@@ -307,7 +320,7 @@ fn touch_hit(
         "P35.3 touch ({which}) object {scoped:?} face={} pos=({:.2},{:.2},{:.2})",
         surface.face_index, surface.position.x, surface.position.y, surface.position.z,
     );
-    writer.write(SlCommand(Command::TouchObject {
+    out.writer.write(SlCommand(Command::TouchObject {
         local_id: scoped,
         surface: Some(surface),
     }));

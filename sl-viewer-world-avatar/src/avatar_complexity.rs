@@ -1177,6 +1177,19 @@ pub(crate) fn sync_complexity_exceptions(
     model.mirror_overrides(overrides);
 }
 
+/// The three streams that dirty a complexity score, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): an object or appearance
+/// change, a mesh decode, a texture decode.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub struct ComplexitySources<'w, 's> {
+    /// Object / appearance events.
+    events: MessageReader<'w, 's, SlEvent>,
+    /// Mesh decodes, which complete a rigged object's cost.
+    meshes: MessageReader<'w, 's, MeshDecoded>,
+    /// Texture decodes, which complete its surface-area term.
+    textures: MessageReader<'w, 's, TextureDecoded>,
+}
+
 /// Mark an avatar's score stale whenever something it is made of changed: one of
 /// its attachments arrived, moved between linksets or left; its appearance (and
 /// so its baked body regions) changed; or an asset a previous score was waiting
@@ -1184,14 +1197,8 @@ pub(crate) fn sync_complexity_exceptions(
 ///
 /// Runs **before** the scene mirror folds the frame's events, so a removed
 /// object can still be chased up to the avatar that was wearing it.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system: every stream that can stale a score, plus the state to resolve it"
-)]
 pub(crate) fn mark_complexity_dirty(
-    mut events: MessageReader<SlEvent>,
-    mut meshes: MessageReader<MeshDecoded>,
-    mut textures: MessageReader<TextureDecoded>,
+    mut sources: ComplexitySources,
     mut model: ResMut<AvatarComplexityModel>,
     objects: Res<ObjectState>,
     avatars: Res<AvatarState>,
@@ -1217,7 +1224,7 @@ pub(crate) fn mark_complexity_dirty(
             model.mark_dirty(agent);
         }
     };
-    for event in events.read() {
+    for event in sources.events.read() {
         match &event.0 {
             SlSessionEvent::ObjectAdded(object) | SlSessionEvent::ObjectUpdated(object) => {
                 // An attachment root names its avatar directly; a linked child of
@@ -1239,14 +1246,14 @@ pub(crate) fn mark_complexity_dirty(
             _other => {}
         }
     }
-    for MeshDecoded(mesh) in meshes.read() {
+    for MeshDecoded(mesh) in sources.meshes.read() {
         if let Some(waiting) = model.awaiting_mesh.remove(mesh) {
             for agent in waiting {
                 model.mark_dirty(agent);
             }
         }
     }
-    for TextureDecoded(texture) in textures.read() {
+    for TextureDecoded(texture) in sources.textures.read() {
         if let Some(waiting) = model.awaiting_texture.remove(texture) {
             for agent in waiting {
                 model.mark_dirty(agent);
@@ -1295,10 +1302,24 @@ impl CostLookup for SceneLookup<'_> {
 
 /// Re-score the avatars whose cost went stale — at most `RESCORE_BUDGET` per
 /// frame, and no more often than `RESCORE_INTERVAL_SECS` apiece.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system: the scene and asset state one avatar's cost is measured from"
-)]
+/// The asset stores a complexity score is computed from, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the decoded meshes behind
+/// the triangle and rig charges, the textures behind the surface-area term, and
+/// the particle systems behind the additive burst charge.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub struct ComplexityAssets<'w, 's> {
+    /// Decoded meshes: triangle counts, skins, LOD blocks.
+    meshes: Res<'w, MeshManager>,
+    /// The texture fetch state, for each face's resolved texture.
+    textures: Res<'w, TextureManager>,
+    /// The decoded textures themselves, for their dimensions.
+    store: Res<'w, DecodedTextures>,
+    /// The particle systems charged additively.
+    particles: Query<'w, 's, (Entity, &'static ObjectParticleSystem)>,
+}
+
+/// Re-score the avatars whose cost went stale — at most `RESCORE_BUDGET` per
+/// frame, and no more often than `RESCORE_INTERVAL_SECS` apiece.
 pub(crate) fn recompute_avatar_complexity(
     time: Res<Time>,
     mut model: ResMut<AvatarComplexityModel>,
@@ -1306,10 +1327,7 @@ pub(crate) fn recompute_avatar_complexity(
     avatars: Res<AvatarState>,
     own_bake: Option<Res<crate::avatars::OwnLocalBake>>,
     identity: Res<SlIdentity>,
-    meshes: Res<MeshManager>,
-    textures: Res<TextureManager>,
-    store: Res<DecodedTextures>,
-    particles: Query<(Entity, &ObjectParticleSystem)>,
+    assets: ComplexityAssets,
 ) {
     let known: HashSet<AgentKey> = avatars
         .known_agents()
@@ -1341,10 +1359,11 @@ pub(crate) fn recompute_avatar_complexity(
     }
     let worn = objects.attachment_roots_by_wearer();
     let lookup = SceneLookup {
-        meshes: &meshes,
-        textures: &textures,
-        store: &store,
-        particles: particles
+        meshes: &assets.meshes,
+        textures: &assets.textures,
+        store: &assets.store,
+        particles: assets
+            .particles
             .iter()
             .map(|(prim, source)| (prim, ParticleBurst::of(&source.system)))
             .collect(),
@@ -1473,6 +1492,32 @@ pub(crate) fn decide_avatar_appearance(
     }
 }
 
+/// What the jellydoll swap writes, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the flat material it hands
+/// the over-complex avatars, the visibilities it hides their attachments with,
+/// and the body parts it repaints.
+#[expect(
+    missing_debug_implementations,
+    reason = "the material store is a Bevy `Assets<T>` collection, which does not implement \
+              Debug; a hand-written impl could only print the field names"
+)]
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct JellydollTargets<'w, 's> {
+    /// The face materials, which the flat jellydoll material is added to.
+    materials: ResMut<'w, Assets<FaceMaterial>>,
+    /// Visibilities, for the attachments a jellydolled avatar hides.
+    visibilities: Query<'w, 's, &'static mut Visibility>,
+    /// The base body parts repainted flat.
+    parts: Query<
+        'w,
+        's,
+        (
+            &'static AvatarBodyPart,
+            &'static mut MeshMaterial3d<FaceMaterial>,
+        ),
+    >,
+}
+
 /// Draw the decision: hide every jellied avatar's attachments (their own faces
 /// included, since a rigged one's hang off the wearer's body root), paint their
 /// system body flat, and put both back exactly as they were when they are drawn
@@ -1480,18 +1525,12 @@ pub(crate) fn decide_avatar_appearance(
 ///
 /// Runs after the bake / BoM material passes and the base-region visibility
 /// pass, so it overrides what they settled rather than racing them.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system: the scene state it reads plus the two things it writes"
-)]
 pub(crate) fn apply_jellydoll(
     time: Res<Time>,
     mut model: ResMut<AvatarComplexityModel>,
     objects: Res<ObjectState>,
     mut avatars: ResMut<AvatarState>,
-    mut materials: ResMut<Assets<FaceMaterial>>,
-    mut visibilities: Query<&mut Visibility>,
-    mut parts: Query<(&AvatarBodyPart, &mut MeshMaterial3d<FaceMaterial>)>,
+    mut targets: JellydollTargets,
     mut applied_at: Local<Option<(u64, f64)>>,
 ) {
     // Nothing to draw and nothing to put back: the overwhelmingly common case
@@ -1542,12 +1581,14 @@ pub(crate) fn apply_jellydoll(
         .collect();
     for entity in released {
         let restored = model.hidden.remove(&entity);
-        if let (Some(restored), Ok(mut visibility)) = (restored, visibilities.get_mut(entity)) {
+        if let (Some(restored), Ok(mut visibility)) =
+            (restored, targets.visibilities.get_mut(entity))
+        {
             visibility.set_if_neq(restored);
         }
     }
     for entity in wanted {
-        let Ok(mut visibility) = visibilities.get_mut(entity) else {
+        let Ok(mut visibility) = targets.visibilities.get_mut(entity) else {
             continue;
         };
         if let std::collections::hash_map::Entry::Vacant(slot) = model.hidden.entry(entity) {
@@ -1560,12 +1601,12 @@ pub(crate) fn apply_jellydoll(
     let jelly = match model.material.clone() {
         Some(handle) => handle,
         None => {
-            let handle = materials.add(jelly_material());
+            let handle = targets.materials.add(jelly_material());
             model.material = Some(handle.clone());
             handle
         }
     };
-    for (part, mut material) in &mut parts {
+    for (part, mut material) in &mut targets.parts {
         if !model.jellied.contains_key(&part.agent()) {
             // Not jellied: the bake pass owns this material — leave it alone.
             continue;

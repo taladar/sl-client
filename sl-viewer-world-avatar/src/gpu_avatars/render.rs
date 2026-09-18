@@ -407,30 +407,38 @@ struct PreparedData {
     bounds: Option<(BindGroup, u32)>,
 }
 
+/// The render-world handles a compute dispatch needs, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the pipeline cache a
+/// specialized pipeline is resolved through, the device and queue it is
+/// recorded on, the skinning uniforms it reads, and the shader buffers its
+/// bind groups point at.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct ComputeContext<'w> {
+    /// The pipeline cache the compute pipeline is resolved through.
+    pub pipeline_cache: Res<'w, PipelineCache>,
+    /// The device the bind groups are created on.
+    pub render_device: Res<'w, RenderDevice>,
+    /// The queue the dispatch is recorded on.
+    pub render_queue: Res<'w, RenderQueue>,
+    /// The skinning uniforms the pass reads its joint palettes from.
+    pub skin_uniforms: Res<'w, SkinUniforms>,
+    /// The shader storage buffers the bind groups point at.
+    pub shader_buffers: Res<'w, RenderAssets<GpuShaderBuffer>>,
+}
+
 /// Upload the extracted staging into the GPU buffers, resolve each ghost's
 /// palette offset from [`SkinUniforms::skin_index`] (fresh, after
 /// `prepare_skins` ran in `PrepareResources`), and (re)build the bind groups
 /// against this frame's post-swap `current_buffer` — step 2 of the spike's
 /// §2.4 ordering.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy render-world system's inputs are its parameters: the extracted \
-              staging, the pipeline's own buffer/prepared/pipeline resources, Bevy's \
-              skin uniforms, the device/queue pair, the readback + bounds targets, and \
-              the shader-buffer lookup"
-)]
 pub(super) fn prepare_gpu_avatars(
     staging: Res<GpuAvatarStaging>,
     mut buffers: ResMut<GpuAvatarBuffers>,
     mut prepared: ResMut<PreparedGpuAvatars>,
     pipelines: Res<GpuAvatarPipelines>,
-    pipeline_cache: Res<PipelineCache>,
-    skin_uniforms: Res<SkinUniforms>,
-    render_device: Res<RenderDevice>,
-    render_queue: Res<RenderQueue>,
     readback_target: Option<Res<GpuAvatarReadbackTarget>>,
     bounds_target: Option<Res<GpuAvatarBoundsTarget>>,
-    shader_buffers: Res<RenderAssets<GpuShaderBuffer>>,
+    gpu: ComputeContext,
 ) {
     prepared.0 = None;
     if staging.joint_count == 0 || staging.frames.is_empty() {
@@ -445,7 +453,9 @@ pub(super) fn prepare_gpu_avatars(
     let mut max_skin_joints = 0_u32;
     let mut readback_instance = u32::MAX;
     for instance in &staging.instances {
-        let Some(palette_offset) = skin_uniforms.skin_index(MainEntity::from(instance.target))
+        let Some(palette_offset) = gpu
+            .skin_uniforms
+            .skin_index(MainEntity::from(instance.target))
         else {
             continue;
         };
@@ -480,7 +490,9 @@ pub(super) fn prepare_gpu_avatars(
 
     // Per-frame uploads.
     buffers.frames.set(staging.frames.clone());
-    buffers.frames.write_buffer(&render_device, &render_queue);
+    buffers
+        .frames
+        .write_buffer(&gpu.render_device, &gpu.render_queue);
     let rows_len = usize::try_from(staging.slot_capacity)
         .ok()
         .and_then(|slots| slots.checked_mul(usize::try_from(staging.joint_count).ok()?))
@@ -488,20 +500,25 @@ pub(super) fn prepare_gpu_avatars(
     if staging.blend {
         // Phase 2: the local pose is GPU-written by pass B — only the
         // allocation matters. (Re)size it on slot growth; never upload rows.
-        grow_local_pose(&mut buffers, rows_len, &render_device, &render_queue);
-        clear_reoccupied_held_rows(&mut buffers, &staging, &render_queue);
+        grow_local_pose(
+            &mut buffers,
+            rows_len,
+            &gpu.render_device,
+            &gpu.render_queue,
+        );
+        clear_reoccupied_held_rows(&mut buffers, &staging, &gpu.render_queue);
     } else {
         // Phase 1 upload (ghost placement / hand-staged tests): the CPU rows.
         buffers.local_pose.set(staging.local_pose.clone());
         buffers
             .local_pose
-            .write_buffer(&render_device, &render_queue);
+            .write_buffer(&gpu.render_device, &gpu.render_queue);
         buffers.local_pose_rows = staging.local_pose.len();
     }
     buffers.instances.set(gpu_instances);
     buffers
         .instances
-        .write_buffer(&render_device, &render_queue);
+        .write_buffer(&gpu.render_device, &gpu.render_queue);
     let job_count = u32::try_from(staging.jobs.len()).unwrap_or(0);
     let correction_count = u32::try_from(staging.corrections.len()).unwrap_or(0);
     // Where pass B's held block starts (blend mode only; no pass B runs
@@ -529,7 +546,9 @@ pub(super) fn prepare_gpu_avatars(
         pad1: 0,
         pad2: 0,
     });
-    buffers.params.write_buffer(&render_device, &render_queue);
+    buffers
+        .params
+        .write_buffer(&gpu.render_device, &gpu.render_queue);
 
     // Phase 2 per-frame uploads (tiny): the job list and corrections; the
     // playback rows only on a content bump; the clip arena only on growth.
@@ -541,7 +560,9 @@ pub(super) fn prepare_gpu_avatars(
             jobs.push(GpuSampleJob::default());
         }
         buffers.jobs.set(jobs);
-        buffers.jobs.write_buffer(&render_device, &render_queue);
+        buffers
+            .jobs
+            .write_buffer(&gpu.render_device, &gpu.render_queue);
         let mut corrections = staging.corrections.clone();
         if corrections.is_empty() {
             corrections.push(GpuCorrection::default());
@@ -549,14 +570,16 @@ pub(super) fn prepare_gpu_avatars(
         buffers.corrections.set(corrections);
         buffers
             .corrections
-            .write_buffer(&render_device, &render_queue);
+            .write_buffer(&gpu.render_device, &gpu.render_queue);
         if buffers.playback_generation != Some(staging.playback_generation) {
             let mut playback = (*staging.playback).clone();
             if playback.is_empty() {
                 playback.push(GpuPlayState::default());
             }
             buffers.playback.set(playback);
-            buffers.playback.write_buffer(&render_device, &render_queue);
+            buffers
+                .playback
+                .write_buffer(&gpu.render_device, &gpu.render_queue);
             buffers.playback_generation = Some(staging.playback_generation);
         }
         if buffers.clip_generation != Some(staging.clip_generation) {
@@ -567,7 +590,7 @@ pub(super) fn prepare_gpu_avatars(
             buffers.clip_headers.set(headers);
             buffers
                 .clip_headers
-                .write_buffer(&render_device, &render_queue);
+                .write_buffer(&gpu.render_device, &gpu.render_queue);
             let mut tracks = (*staging.clip_tracks).clone();
             if tracks.is_empty() {
                 tracks.push(GpuJointTrack::default());
@@ -575,7 +598,7 @@ pub(super) fn prepare_gpu_avatars(
             buffers.clip_tracks.set(tracks);
             buffers
                 .clip_tracks
-                .write_buffer(&render_device, &render_queue);
+                .write_buffer(&gpu.render_device, &gpu.render_queue);
             let mut track_of_joint = (*staging.track_of_joint).clone();
             if track_of_joint.is_empty() {
                 track_of_joint.push(0);
@@ -583,7 +606,7 @@ pub(super) fn prepare_gpu_avatars(
             buffers.track_of_joint.set(track_of_joint);
             buffers
                 .track_of_joint
-                .write_buffer(&render_device, &render_queue);
+                .write_buffer(&gpu.render_device, &gpu.render_queue);
             let mut key_times = (*staging.key_times).clone();
             if key_times.is_empty() {
                 key_times.push(0.0);
@@ -591,7 +614,7 @@ pub(super) fn prepare_gpu_avatars(
             buffers.key_times.set(key_times);
             buffers
                 .key_times
-                .write_buffer(&render_device, &render_queue);
+                .write_buffer(&gpu.render_device, &gpu.render_queue);
             let mut key_values = (*staging.key_values).clone();
             if key_values.is_empty() {
                 key_values.push(Vec4::ZERO);
@@ -599,7 +622,7 @@ pub(super) fn prepare_gpu_avatars(
             buffers.key_values.set(key_values);
             buffers
                 .key_values
-                .write_buffer(&render_device, &render_queue);
+                .write_buffer(&gpu.render_device, &gpu.render_queue);
             buffers.clip_generation = Some(staging.clip_generation);
         }
         // The GPU-only pose-cache scratch: grow-on-demand (transient within
@@ -610,7 +633,7 @@ pub(super) fn prepare_gpu_avatars(
             .as_ref()
             .is_none_or(|(_buffer, size)| *size < cache_bytes);
         if recreate_cache {
-            let buffer = render_device.create_buffer(&BufferDescriptor {
+            let buffer = gpu.render_device.create_buffer(&BufferDescriptor {
                 label: Some("gpu_avatar_pose_cache"),
                 size: cache_bytes,
                 usage: BufferUsages::STORAGE,
@@ -624,16 +647,20 @@ pub(super) fn prepare_gpu_avatars(
     // inverse-bindpose pools rewrite only when their staged generation moved.
     if buffers.rest_generation != Some(staging.rest_generation) {
         buffers.rest.set((*staging.rest).clone());
-        buffers.rest.write_buffer(&render_device, &render_queue);
+        buffers
+            .rest
+            .write_buffer(&gpu.render_device, &gpu.render_queue);
         buffers.rest_generation = Some(staging.rest_generation);
     }
     if buffers.pool_generation != Some(staging.pool_generation) {
         buffers.joint_map.set((*staging.joint_map).clone());
         buffers
             .joint_map
-            .write_buffer(&render_device, &render_queue);
+            .write_buffer(&gpu.render_device, &gpu.render_queue);
         buffers.ibps.set((*staging.ibps).clone());
-        buffers.ibps.write_buffer(&render_device, &render_queue);
+        buffers
+            .ibps
+            .write_buffer(&gpu.render_device, &gpu.render_queue);
         buffers.pool_generation = Some(staging.pool_generation);
     }
 
@@ -650,7 +677,7 @@ pub(super) fn prepare_gpu_avatars(
         .as_ref()
         .is_none_or(|(_buffer, size)| *size < needed);
     if recreate {
-        let buffer = render_device.create_buffer(&BufferDescriptor {
+        let buffer = gpu.render_device.create_buffer(&BufferDescriptor {
             label: Some("gpu_avatar_joint_world"),
             size: needed,
             usage: BufferUsages::STORAGE,
@@ -673,7 +700,9 @@ pub(super) fn prepare_gpu_avatars(
     // submission, making the CPU diff race-free).
     if let Some(request) = staging.readback.as_ref() {
         buffers.expected.set(request.expected.clone());
-        buffers.expected.write_buffer(&render_device, &render_queue);
+        buffers
+            .expected
+            .write_buffer(&gpu.render_device, &gpu.render_queue);
     }
 
     let (Some(params_binding), Some(frames_binding), Some(rest_binding)) = (
@@ -694,9 +723,9 @@ pub(super) fn prepare_gpu_avatars(
         return;
     };
 
-    let bind_group = render_device.create_bind_group(
+    let bind_group = gpu.render_device.create_bind_group(
         "gpu_avatar_pose_bind_group",
-        &pipeline_cache.get_bind_group_layout(&pipelines.layout),
+        &gpu.pipeline_cache.get_bind_group_layout(&pipelines.layout),
         &BindGroupEntries::sequential((
             params_binding.clone(),
             frames_binding.clone(),
@@ -706,7 +735,7 @@ pub(super) fn prepare_gpu_avatars(
             joint_map_binding,
             ibps_binding,
             instances_binding.clone(),
-            skin_uniforms.current_buffer.as_entire_binding(),
+            gpu.skin_uniforms.current_buffer.as_entire_binding(),
         )),
     );
 
@@ -717,11 +746,12 @@ pub(super) fn prepare_gpu_avatars(
     // AABB that frame — no cull until the first real bound lands).
     let bounds = bounds_target
         .as_ref()
-        .and_then(|target| shader_buffers.get(&target.buffer))
+        .and_then(|target| gpu.shader_buffers.get(&target.buffer))
         .map(|destination| {
-            let bind_group = render_device.create_bind_group(
+            let bind_group = gpu.render_device.create_bind_group(
                 "gpu_avatar_bounds_bind_group",
-                &pipeline_cache.get_bind_group_layout(&pipelines.bounds_layout),
+                &gpu.pipeline_cache
+                    .get_bind_group_layout(&pipelines.bounds_layout),
                 &BindGroupEntries::with_indices((
                     (0, params_binding.clone()),
                     (1, frames_binding.clone()),
@@ -768,9 +798,10 @@ pub(super) fn prepare_gpu_avatars(
             return;
         };
         if !staging.jobs.is_empty() {
-            let sample_bind_group = render_device.create_bind_group(
+            let sample_bind_group = gpu.render_device.create_bind_group(
                 "gpu_avatar_sample_bind_group",
-                &pipeline_cache.get_bind_group_layout(&pipelines.sample_layout),
+                &gpu.pipeline_cache
+                    .get_bind_group_layout(&pipelines.sample_layout),
                 &BindGroupEntries::with_indices((
                     (0, params_binding.clone()),
                     (11, jobs_binding),
@@ -800,9 +831,10 @@ pub(super) fn prepare_gpu_avatars(
                 ));
             }
         }
-        let blend_bind_group = render_device.create_bind_group(
+        let blend_bind_group = gpu.render_device.create_bind_group(
             "gpu_avatar_blend_bind_group",
-            &pipeline_cache.get_bind_group_layout(&pipelines.blend_layout),
+            &gpu.pipeline_cache
+                .get_bind_group_layout(&pipelines.blend_layout),
             &BindGroupEntries::with_indices((
                 (0, params_binding.clone()),
                 (1, frames_binding),
@@ -831,14 +863,15 @@ pub(super) fn prepare_gpu_avatars(
             .and_then(|expected_binding| {
                 let destination = readback_target
                     .as_ref()
-                    .and_then(|target| shader_buffers.get(&target.buffer))?;
-                let bind_group = render_device.create_bind_group(
+                    .and_then(|target| gpu.shader_buffers.get(&target.buffer))?;
+                let bind_group = gpu.render_device.create_bind_group(
                     "gpu_avatar_readback_bind_group",
-                    &pipeline_cache.get_bind_group_layout(&pipelines.readback_layout),
+                    &gpu.pipeline_cache
+                        .get_bind_group_layout(&pipelines.readback_layout),
                     &BindGroupEntries::with_indices((
                         (0, params_binding),
                         (7, instances_binding),
-                        (8, skin_uniforms.current_buffer.as_entire_binding()),
+                        (8, gpu.skin_uniforms.current_buffer.as_entire_binding()),
                         (9, expected_binding),
                         (10, destination.buffer.as_entire_binding()),
                     )),

@@ -1701,6 +1701,29 @@ fn gather_object_geometry(
     (points, indices)
 }
 
+/// What a prim's collider is built from, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the server physics shapes,
+/// the object model, the decoded-mesh cache the physics LOD comes out of, the
+/// Bevy mesh store, and the hierarchy walk from an object down to the rendered
+/// mesh handles a visual-geometry fallback reads.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct ColliderSources<'w, 's> {
+    /// The server-reported physics shapes.
+    shapes: Res<'w, ObjectPhysicsShapes>,
+    /// The object model, for a prim's mesh key and collider facts.
+    object_state: Res<'w, ObjectState>,
+    /// The decoded-mesh cache the physics LOD is fetched and read from.
+    mesh_manager: ResMut<'w, MeshManager>,
+    /// The Bevy mesh store, for the visual-geometry fallback.
+    meshes: Res<'w, Assets<Mesh>>,
+    /// Hierarchy links, walked from the object to its geometry holder.
+    children_q: Query<'w, 's, &'static Children>,
+    /// Which child is that holder.
+    holders: Query<'w, 's, (), With<GeometryHolder>>,
+    /// The face entities' mesh handles.
+    mesh_handles: Query<'w, 's, &'static Mesh3d>,
+}
+
 /// Replace the P31.2 placeholder cuboid on each physical object with a collider
 /// that matches its simulator `LLPhysicsShapeType` and geometry, once both the
 /// physics-shape data (`ObjectPhysicsShapes`) and the object's tessellated
@@ -1716,14 +1739,8 @@ fn gather_object_geometry(
 /// change — new shape data, a resize, or geometry finally arriving) and published
 /// each frame into the moving-collider set by [`sync_dynamic_colliders`], so
 /// camera collision and the prim–prim collision sounds see the physical prims.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "an ECS system's arguments are its injected queries / resources"
-)]
 pub(crate) fn refine_physical_colliders(
-    shapes: Res<ObjectPhysicsShapes>,
-    object_state: Res<ObjectState>,
-    mut mesh_manager: ResMut<MeshManager>,
+    mut sources: ColliderSources,
     objects: Query<
         (
             Entity,
@@ -1733,14 +1750,11 @@ pub(crate) fn refine_physical_colliders(
         ),
         With<PhysicsInterp>,
     >,
-    children_q: Query<&Children>,
-    holders: Query<(), With<GeometryHolder>>,
-    mesh_handles: Query<&Mesh3d>,
-    meshes: Res<Assets<Mesh>>,
     mut commands: Commands,
 ) {
     for (entity, scene, phys, existing) in &objects {
-        let desired = shapes
+        let desired = sources
+            .shapes
             .data
             .get(&phys.full_key)
             .map(|data| data.physics_shape_type);
@@ -1752,7 +1766,9 @@ pub(crate) fn refine_physical_colliders(
         // mesh object, until its lighter physics shape resolves — *not* every frame
         // for one that will never have one).
         let waiting = existing.is_some_and(|state| {
-            collider_wait_due(state.wait, |key| mesh_manager.physics_availability(key))
+            collider_wait_due(state.wait, |key| {
+                sources.mesh_manager.physics_availability(key)
+            })
         }) && desired.is_some_and(shape_wants_geometry);
         if !(scale_changed || shape_changed || waiting) {
             continue;
@@ -1789,14 +1805,19 @@ pub(crate) fn refine_physical_colliders(
                 // visual mesh (the switch [[viewer-physics-static-prim-colliders]]
                 // called for). Request it on demand and fall back to the visual
                 // geometry until it decodes.
-                let mesh_key = object_state
+                let mesh_key = sources
+                    .object_state
                     .static_collider_facts(&scene.scoped_id)
                     .and_then(|facts| facts.mesh);
                 let mut mesh = None;
                 if let Some(mesh_key) = mesh_key {
-                    mesh_manager.request_physics(mesh_key);
-                    mesh = Some((mesh_key, mesh_manager.physics_availability(mesh_key)));
-                    if let Some(collider) = mesh_manager
+                    sources.mesh_manager.request_physics(mesh_key);
+                    mesh = Some((
+                        mesh_key,
+                        sources.mesh_manager.physics_availability(mesh_key),
+                    ));
+                    if let Some(collider) = sources
+                        .mesh_manager
                         .physics(mesh_key)
                         .and_then(|physics| mesh_physics_collider(physics, scale))
                     {
@@ -1815,10 +1836,10 @@ pub(crate) fn refine_physical_colliders(
                 let (points, indices) = gather_object_geometry(
                     entity,
                     scale,
-                    &children_q,
-                    &holders,
-                    &mesh_handles,
-                    &meshes,
+                    &sources.children_q,
+                    &sources.holders,
+                    &sources.mesh_handles,
+                    &sources.meshes,
                 );
                 if points.is_empty() {
                     // Geometry not spawned / uploaded yet: keep a placeholder cuboid
@@ -2131,15 +2152,11 @@ struct ColliderWork {
 /// finished collider. A prim with no geometry yet gets a cheap placeholder cuboid
 /// (built inline — O(1)) and is retried.
 #[expect(
-    clippy::too_many_arguments,
     clippy::type_complexity,
-    reason = "an ECS system's arguments are its injected queries / resources"
+    reason = "an ECS query whose optional components spell out the exact build state"
 )]
 pub(crate) fn build_static_colliders(
-    object_state: Res<ObjectState>,
-    shapes: Res<ObjectPhysicsShapes>,
-    mut mesh_manager: ResMut<MeshManager>,
-    meshes: Res<Assets<Mesh>>,
+    mut sources: ColliderSources,
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
     // A prim whose build is already in flight carries a `StaticBuildTask`, so
     // "is one running for this prim?" comes out of the archetype with the rest of
@@ -2158,9 +2175,6 @@ pub(crate) fn build_static_colliders(
         ),
         Without<PhysicalObject>,
     >,
-    children_q: Query<&Children>,
-    holders: Query<(), With<GeometryHolder>>,
-    mesh_handles: Query<&Mesh3d>,
     mut commands: Commands,
 ) {
     // Gather the prims whose static collider is missing / stale, each tagged with
@@ -2168,7 +2182,7 @@ pub(crate) fn build_static_colliders(
     // build is already in flight is skipped (it is not re-queued until it lands).
     let mut work: Vec<ColliderWork> = Vec::new();
     for (entity, scene, sl_motion, global, existing, building) in &prims {
-        let facts = object_state.static_collider_facts(&scene.scoped_id);
+        let facts = sources.object_state.static_collider_facts(&scene.scoped_id);
         // Whether this prim should carry a static-index collider at all: a plain
         // prim / sculpt / mesh, not worn, not flexi, and tracked.
         let disqualified = !category_gets_collider(scene.category)
@@ -2199,7 +2213,8 @@ pub(crate) fn build_static_colliders(
             continue;
         };
         let scale = collider_extents(&sl_motion.scale);
-        let shape = shapes
+        let shape = sources
+            .shapes
             .data
             .get(&facts.full_key)
             .map(|data| data.physics_shape_type);
@@ -2210,8 +2225,9 @@ pub(crate) fn build_static_colliders(
         // re-queueing one whose mesh will never have a physics block rebuilds the
         // shape and the raycast BVH every frame for the life of the prim.
         let needs_build = existing.is_none_or(|state| {
-            collider_wait_due(state.wait, |key| mesh_manager.physics_availability(key))
-                || extents_differ(state.scale, scale)
+            collider_wait_due(state.wait, |key| {
+                sources.mesh_manager.physics_availability(key)
+            }) || extents_differ(state.scale, scale)
                 || state.non_solid != non_solid
                 || state.shape != shape
         });
@@ -2252,12 +2268,15 @@ pub(crate) fn build_static_colliders(
         // read alongside it is what tells "still fetching" (fall back and try again
         // later) from "there is no physics block" (fall back for good).
         let mesh = item.mesh.map(|mesh_key| {
-            mesh_manager.request_physics(mesh_key);
-            (mesh_key, mesh_manager.physics_availability(mesh_key))
+            sources.mesh_manager.request_physics(mesh_key);
+            (
+                mesh_key,
+                sources.mesh_manager.physics_availability(mesh_key),
+            )
         });
         let (job, wait): (Option<ColliderBuildJob>, ColliderWait) = match item
             .mesh
-            .and_then(|mesh_key| mesh_manager.physics(mesh_key))
+            .and_then(|mesh_key| sources.mesh_manager.physics(mesh_key))
         {
             Some(physics) => (
                 Some(ColliderBuildJob::MeshPhysics(
@@ -2270,10 +2289,10 @@ pub(crate) fn build_static_colliders(
                 let (points, indices) = gather_object_geometry(
                     item.entity,
                     item.scale,
-                    &children_q,
-                    &holders,
-                    &mesh_handles,
-                    &meshes,
+                    &sources.children_q,
+                    &sources.holders,
+                    &sources.mesh_handles,
+                    &sources.meshes,
                 );
                 let wait = geometry_collider_wait(mesh, points.is_empty());
                 if points.is_empty() {

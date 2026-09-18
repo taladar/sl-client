@@ -1179,27 +1179,46 @@ fn group_values(motion: &ObjectSlMotion, group: FieldGroup) -> [f32; 3] {
     }
 }
 
+/// The transform-field widgets the sync rewrites, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): which field each entity is,
+/// its editor, the row labels greyed alongside, the focus a rewrite must leave
+/// alone, and the contexts a programmatic rewrite relays through.
+#[derive(bevy::ecs::system::SystemParam)]
+struct NumericFieldWidgets<'w, 's> {
+    /// Which group / axis each field entity is.
+    markers: Query<'w, 's, &'static BuildNumericField>,
+    /// The field editors.
+    editors: Query<'w, 's, &'static mut EditableText>,
+    /// The row labels, greyed with their group.
+    labels: Query<'w, 's, (&'static BuildTransformLabel, &'static mut ClassList)>,
+    /// The focused field, which is never overwritten.
+    focus: Res<'w, InputFocus>,
+    /// The font context a programmatic [`EditableText`] rewrite relays through.
+    font_cx: ResMut<'w, FontCx>,
+    /// The layout context the same rewrite relays through.
+    layout_cx: ResMut<'w, LayoutCx>,
+}
+
+/// What a transform edit is resolved against, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(bevy::ecs::system::SystemParam)]
+struct TransformSource<'w, 's> {
+    /// The selection whose primary the fields show.
+    selection: Res<'w, SelectionSet>,
+    /// Object permissions, which gate each row.
+    objects: Res<'w, ObjectState>,
+    /// The live Second Life motion the fields display.
+    motions: Query<'w, 's, &'static ObjectSlMotion>,
+}
+
 /// Keep the nine transform fields (and the grid-unit field) displaying the
 /// live values — skipping whichever field the user is editing, so typing is
 /// never clobbered mid-edit.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the UI handles, \
-              the tool / selection / focus state, the motion mirror, the field queries, the \
-              text-layout contexts, plus the gate's transform-label query and last-state guard"
-)]
 fn sync_numeric_fields(
     ui: Option<Res<BuildToolsUi>>,
     state: Res<EditToolState>,
-    selection: Res<SelectionSet>,
-    focus: Res<InputFocus>,
-    motions: Query<&ObjectSlMotion>,
-    markers: Query<&BuildNumericField>,
-    mut editors: Query<&mut EditableText>,
-    mut font_cx: ResMut<FontCx>,
-    mut layout_cx: ResMut<LayoutCx>,
-    objects: Res<ObjectState>,
-    mut transform_labels: Query<(&BuildTransformLabel, &mut ClassList)>,
+    source: TransformSource,
+    mut widgets: NumericFieldWidgets,
     mut last_enabled: Local<Option<(bool, bool)>>,
     mut commands: Commands,
 ) {
@@ -1209,18 +1228,20 @@ fn sync_numeric_fields(
     if !state.active {
         return;
     }
-    let primary_motion = selection
+    let primary_motion = source
+        .selection
         .primary()
-        .and_then(|node| motions.get(node.entity).ok());
+        .and_then(|node| source.motions.get(node.entity).ok());
     // Gate each transform row by permission: nothing selected greys them all;
     // a no-move object greys position / rotation; a no-modify object greys size
     // (the reference disables the spinners you cannot use). Values still show —
     // only interaction is disabled. Applied only on a transition, so a stable
     // state does not churn archetypes every frame.
-    let primary = selection.primary();
-    let move_enabled = primary.is_some_and(|node| EditPerm::Move.granted(&objects, &node.scoped));
+    let primary = source.selection.primary();
+    let move_enabled =
+        primary.is_some_and(|node| EditPerm::Move.granted(&source.objects, &node.scoped));
     let modify_enabled =
-        primary.is_some_and(|node| EditPerm::Modify.granted(&objects, &node.scoped));
+        primary.is_some_and(|node| EditPerm::Modify.granted(&source.objects, &node.scoped));
     let enabled_for = |group: FieldGroup| match group {
         FieldGroup::Position | FieldGroup::Rotation => move_enabled,
         FieldGroup::Size => modify_enabled,
@@ -1228,7 +1249,8 @@ fn sync_numeric_fields(
     if *last_enabled != Some((move_enabled, modify_enabled)) {
         *last_enabled = Some((move_enabled, modify_enabled));
         for field in ui.fields {
-            let enabled = markers
+            let enabled = widgets
+                .markers
                 .get(field)
                 .is_ok_and(|marker| enabled_for(marker.group));
             if enabled {
@@ -1242,35 +1264,45 @@ fn sync_numeric_fields(
                     .insert((bevy::ui::InteractionDisabled, Pickable::IGNORE));
             }
         }
-        for (label, mut class_list) in &mut transform_labels {
+        for (label, mut class_list) in &mut widgets.labels {
             set_disabled_class(&mut class_list, !enabled_for(label.0));
         }
     }
     for field in ui.fields {
-        if focus.get() == Some(field) {
+        if widgets.focus.get() == Some(field) {
             continue;
         }
-        let Ok(marker) = markers.get(field) else {
+        let Ok(marker) = widgets.markers.get(field) else {
             continue;
         };
         let want = primary_motion.map_or_else(String::new, |motion| {
             let values = group_values(motion, marker.group);
             format_metres(*values.get(marker.axis).unwrap_or(&0.0))
         });
-        if let Ok(mut editor) = editors.get_mut(field)
+        if let Ok(mut editor) = widgets.editors.get_mut(field)
             && editor.value().to_string() != want
         {
-            set_editor_text(&mut editor, &want, &mut font_cx, &mut layout_cx);
+            set_editor_text(
+                &mut editor,
+                &want,
+                &mut widgets.font_cx,
+                &mut widgets.layout_cx,
+            );
         }
     }
     // The grid-unit field mirrors the state (it can be changed by a future
     // grid-options floater too).
-    if focus.get() != Some(ui.grid_field) {
+    if widgets.focus.get() != Some(ui.grid_field) {
         let want = format_metres(state.grid_unit);
-        if let Ok(mut editor) = editors.get_mut(ui.grid_field)
+        if let Ok(mut editor) = widgets.editors.get_mut(ui.grid_field)
             && editor.value().to_string() != want
         {
-            set_editor_text(&mut editor, &want, &mut font_cx, &mut layout_cx);
+            set_editor_text(
+                &mut editor,
+                &want,
+                &mut widgets.font_cx,
+                &mut widgets.layout_cx,
+            );
         }
     }
 }
@@ -1283,30 +1315,37 @@ struct BuildFieldFocus {
     last: Option<Entity>,
 }
 
+/// What a committed transform edit writes: the selection it applies to, the two
+/// mirrors it moves at once, and the two outgoing writers. Bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(bevy::ecs::system::SystemParam)]
+struct TransformCommit<'w, 's> {
+    /// The selection whose primary is moved.
+    selection: Res<'w, SelectionSet>,
+    /// Object permissions, which gate the commit.
+    objects: Res<'w, ObjectState>,
+    /// The Second Life motion state the edit rewrites.
+    motions: Query<'w, 's, (&'static mut ObjectSlMotion, &'static SceneObject)>,
+    /// The Bevy transforms it rewrites alongside.
+    transforms: crate::gizmos::EditTransformQuery<'w, 's>,
+    /// Where the `MultipleObjectUpdate` goes.
+    commands: MessageWriter<'w, SlCommand>,
+    /// Where the permission notice goes.
+    notices: MessageWriter<'w, crate::intents::LocalChatNotice>,
+}
+
 /// Commit numeric edits: on `Enter` in a focused transform field, or when
 /// focus leaves one, parse its row and send the corresponding
 /// `MultipleObjectUpdate` for the primary selection — the exact command the
 /// gizmos send. The grid-unit field commits into [`EditToolState`] instead.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the UI handles, \
-              the tool / selection / focus state, the field queries, and the outgoing command \
-              writer plus the local write-back queries"
-)]
 fn commit_numeric_fields(
     ui: Option<Res<BuildToolsUi>>,
     mut state: ResMut<EditToolState>,
-    selection: Res<SelectionSet>,
     focus: Res<InputFocus>,
     keyboard: Res<ButtonInput<KeyCode>>,
     mut focus_track: ResMut<BuildFieldFocus>,
-    markers: Query<&BuildNumericField>,
-    editors: Query<&EditableText>,
-    objects: Res<ObjectState>,
-    mut motions: Query<(&mut ObjectSlMotion, &SceneObject)>,
-    mut transforms: crate::gizmos::EditTransformQuery,
-    mut commands: MessageWriter<SlCommand>,
-    mut notices: MessageWriter<crate::intents::LocalChatNotice>,
+    fields: NumericFieldWidgets,
+    mut commit_to: TransformCommit,
 ) {
     let Some(ui) = ui else {
         return;
@@ -1334,7 +1373,7 @@ fn commit_numeric_fields(
 
     // Grid unit.
     if field == ui.grid_field {
-        if let Ok(editor) = editors.get(field)
+        if let Ok(editor) = fields.editors.get(field)
             && let Some(value) = parse_field(&editor.value().to_string())
         {
             state.grid_unit = value.clamp(0.01, 10.0);
@@ -1342,10 +1381,10 @@ fn commit_numeric_fields(
         return;
     }
 
-    let Ok(marker) = markers.get(field) else {
+    let Ok(marker) = fields.markers.get(field) else {
         return;
     };
-    let Some(primary) = selection.primary() else {
+    let Some(primary) = commit_to.selection.primary() else {
         return;
     };
     // Permission gate (mirrors the gizmo drags): a size edit needs **modify**;
@@ -1356,12 +1395,14 @@ fn commit_numeric_fields(
         FieldGroup::Position | FieldGroup::Rotation => EditPerm::Move,
         FieldGroup::Size => EditPerm::Modify,
     };
-    if !needed.granted(&objects, &primary.scoped) {
+    if !needed.granted(&commit_to.objects, &primary.scoped) {
         let name = primary
             .properties
             .as_ref()
             .map_or_else(String::new, |properties| properties.name.clone());
-        notices.write(LocalChatNotice::new(perm_notice(needed, &name)));
+        commit_to
+            .notices
+            .write(LocalChatNotice::new(perm_notice(needed, &name)));
         return;
     }
     // Parse the whole row (all three axes) so a single-axis edit keeps its
@@ -1369,13 +1410,14 @@ fn commit_numeric_fields(
     let mut values = [0.0_f32; 3];
     for axis in 0_usize..3_usize {
         let Some(entity) = ui.fields.iter().copied().find(|entity| {
-            markers
+            fields
+                .markers
                 .get(*entity)
                 .is_ok_and(|m| m.group == marker.group && m.axis == axis)
         }) else {
             return;
         };
-        let Ok(editor) = editors.get(entity) else {
+        let Ok(editor) = fields.editors.get(entity) else {
             return;
         };
         let Some(value) = parse_field(&editor.value().to_string()) else {
@@ -1410,7 +1452,7 @@ fn commit_numeric_fields(
     };
     // Local echo, so the scene (and the gizmo) follows immediately; the
     // simulator's own update confirms it.
-    if let Ok((mut motion, scene)) = motions.get_mut(primary.entity) {
+    if let Ok((mut motion, scene)) = commit_to.motions.get_mut(primary.entity) {
         match marker.group {
             FieldGroup::Position => {
                 motion.position = Vector { x, y, z };
@@ -1428,15 +1470,15 @@ fn commit_numeric_fields(
             &motion,
             scene,
             primary.entity,
-            objects.geometry_of(&primary.scoped),
-            &mut transforms,
+            commit_to.objects.geometry_of(&primary.scoped),
+            &mut commit_to.transforms,
         );
     }
     debug!(
         "build-tools: numeric {:?} commit on {:?}",
         marker.group, primary.scoped
     );
-    commands.write(SlCommand(Command::UpdateObject {
+    commit_to.commands.write(SlCommand(Command::UpdateObject {
         local_id: primary.scoped,
         transform,
     }));

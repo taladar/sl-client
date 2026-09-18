@@ -26,12 +26,9 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 use sl_client_bevy::{AgentKey, AnimationPose, RegionHandle, VolumeDeformations};
 
-use crate::avatars::AvatarBody;
-use sl_viewer_kit::avatar_assets::AvatarAssetLibrary;
 use sl_viewer_kit::coords::region_offset_bevy;
 
 use sl_viewer_world_api::AvatarMotion;
-use sl_viewer_world_api::AvatarState;
 use sl_viewer_world_api::TerrainState;
 
 /// How far **above** a sample point a resolved surface may sit and still count as the
@@ -215,14 +212,8 @@ fn ground_under(
 /// `AvatarGround::targets` for why using the posed ones instead sets the knees buzzing)
 /// from the terrain land height and the simulator's collision plane, and records it for
 /// [`crate::locomotion_ik`].
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries"
-)]
 pub(crate) fn probe_avatar_ground(
-    state: Res<AvatarState>,
-    body: Option<Res<AvatarBody>>,
-    library: Option<Res<AvatarAssetLibrary>>,
+    avatars: crate::avatars::AvatarRig,
     globals: Query<&GlobalTransform>,
     motions: Query<&AvatarMotion>,
     terrain: Res<TerrainState>,
@@ -232,11 +223,11 @@ pub(crate) fn probe_avatar_ground(
     mut logged_plane: Local<HashMap<AgentKey, bool>>,
 ) {
     ground.probes.clear();
-    let Some(body) = body else {
+    let Some(body) = avatars.body else {
         return;
     };
     let origin = terrain.origin();
-    let agents = state.rigged_agents();
+    let agents = avatars.state.rigged_agents();
     // Drop cached planes for avatars that are no longer rigged (despawned, or reverted to
     // a placeholder sphere), so the cache tracks the live set.
     ground.planes.retain(|agent, _plane| agents.contains(agent));
@@ -251,10 +242,10 @@ pub(crate) fn probe_avatar_ground(
         // A seated avatar's pose is owned by the sit animation, not the ground, so it
         // needs no probe. Safe because `locomotion_ik` gates the airborne branch on
         // `seated` — otherwise the absent ground would read as airborne.
-        if state.is_seated(agent) {
+        if avatars.state.is_seated(agent) {
             continue;
         }
-        let Some(root) = state.body_root_of(agent) else {
+        let Some(root) = avatars.state.body_root_of(agent) else {
             continue;
         };
         let Ok(root_global) = globals.get(root) else {
@@ -278,9 +269,12 @@ pub(crate) fn probe_avatar_ground(
                 // skeleton (Phase 4 removed the ankle joint entities) and read the
                 // ankle worlds, composing each avatar-frame position with the
                 // avatar-root global.
-                let rest = state.deformations(agent).and_then(|deform| {
-                    let overrides = state.effective_joint_overrides(agent).unwrap_or_default();
-                    let skeleton = library.as_deref()?.skeleton();
+                let rest = avatars.state.deformations(agent).and_then(|deform| {
+                    let overrides = avatars
+                        .state
+                        .effective_joint_overrides(agent)
+                        .unwrap_or_default();
+                    let skeleton = avatars.library.as_deref()?.skeleton();
                     Some(skeleton.deformed_world_matrices(
                         deform,
                         &VolumeDeformations::default(),

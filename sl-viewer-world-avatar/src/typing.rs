@@ -50,7 +50,6 @@ pub use sl_viewer_world_api::TypingState;
 use bevy::prelude::*;
 use sl_client_bevy::{AnimationKey, AssetKey, Command, SlCommand, SlIdentity};
 
-use crate::animations::{AnimationManager, AnimationPlayback};
 use sl_viewer_ui_core::ui_sounds::{PlayUiSound, UiSound};
 use sl_viewer_world_api::AvatarState;
 
@@ -73,19 +72,12 @@ const TYPE_ANIMATION: &str = "type";
 /// back as an `AvatarAnimation` the Phase 18 path also plays, but they share the
 /// one `ANIM_AGENT_TYPE` id so the pose merge collapses them to a single motion
 /// rather than doubling.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's params are its dependencies; the typing driver reads time, \
-              identity, avatars, its state, the animation manager + playback, and writes both \
-              the command stream and the UI-sound stream"
-)]
 pub(crate) fn drive_own_typing(
     time: Res<Time>,
     identity: Res<SlIdentity>,
     avatars: Res<AvatarState>,
     mut state: ResMut<TypingState>,
-    mut manager: ResMut<AnimationManager>,
-    mut playback: ResMut<AnimationPlayback>,
+    mut anim: crate::animations::AnimationState,
     mut writer: MessageWriter<SlCommand>,
     mut ui_sound: MessageWriter<PlayUiSound>,
 ) {
@@ -128,9 +120,9 @@ pub(crate) fn drive_own_typing(
         None
     };
     if let Some(id) = desired {
-        manager.request(AssetKey::from(id));
+        anim.manager.request(AssetKey::from(id));
     }
-    playback.set_client_typing(own, desired, now);
+    anim.playback.set_client_typing(own, desired, now);
 }
 
 #[cfg(test)]

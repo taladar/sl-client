@@ -644,61 +644,81 @@ fn loop_time(time: f32, duration: Option<f32>, looping: Option<bool>) -> Option<
     }
 }
 
+/// Everything a dump is photographed from, bundled as one
+/// [`SystemParam`]: the identities it is stamped
+/// with, the four world mirrors it describes, the settings its render section
+/// reports, the animation inputs, and the queries each section reads poses and
+/// components through.
+#[derive(SystemParam)]
+struct DumpSources<'w, 's> {
+    /// Who wrote the dump (viewer name / version / grid).
+    dump_identity: Res<'w, DumpIdentity>,
+    /// Our own agent and circuit, which says which objects are ours to report.
+    identity: Res<'w, SlIdentity>,
+    /// The object model.
+    objects: Res<'w, ObjectState>,
+    /// The avatar mirror.
+    avatars: Res<'w, AvatarState>,
+    /// The animesh control avatars.
+    animesh: Res<'w, ControlAvatarState>,
+    /// The environment the `environment` section states.
+    environment: Res<'w, EnvironmentState>,
+    /// The settings the `render` section states.
+    settings: Res<'w, ViewerSettings>,
+    /// The playback, decoded motions and clock the animation lists come from.
+    animations: AnimationInputs<'w>,
+    /// The current region, for the context block.
+    regions: Query<'w, 's, &'static SlRegionIdentity, With<sl_client_bevy::SlCurrentRegion>>,
+    /// The viewer camera, for the camera block.
+    cameras:
+        Query<'w, 's, (&'static GlobalTransform, Option<&'static Projection>), With<ViewerCamera>>,
+    /// The objects' reported Second Life motions.
+    motions: Query<'w, 's, &'static ObjectSlMotion>,
+    /// World transforms, for what was actually drawn.
+    transforms: Query<'w, 's, &'static GlobalTransform>,
+    /// The base body parts, which say which avatars have a body.
+    bodies: Query<'w, 's, &'static AvatarBodyPart>,
+    /// The scene identities of the tracked objects.
+    scene_objects: Query<'w, 's, &'static SceneObject>,
+}
+
+/// One avatar's entry as [`dump_avatar`] is handed it: its identity and the two
+/// flags that qualify it, whether a body was built, where the reference's
+/// document puts it, what this viewer drew, and what it is playing.
+struct AvatarEntry<'a> {
+    /// The agent id, or the animesh object id for a control avatar.
+    id: String,
+    /// Whether this is our own avatar.
+    is_self: bool,
+    /// Whether this is an animesh's control avatar rather than a resident.
+    is_control_avatar: bool,
+    /// Whether a rigged body was built for it.
+    has_body: bool,
+    /// Where the reference's document puts it — the avatar object's position.
+    placement: Option<ReferencePose>,
+    /// The body root this viewer drew.
+    transform: Option<&'a GlobalTransform>,
+    /// What it is playing, in the order the viewer applies it.
+    playing: &'a [PlayingAnimation],
+}
+
 /// Collect the dump. See [the module docs](self) for what the numbers mean.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a dump is a photograph of every part of the world at once; each argument is one \
-              of the sections it has to describe"
-)]
-fn build(
-    identity: &SlIdentity,
-    dump_identity: &DumpIdentity,
-    objects: &ObjectState,
-    avatars: &AvatarState,
-    animesh: &ControlAvatarState,
-    environment: &EnvironmentState,
-    settings: &ViewerSettings,
-    playback: &AnimationPlayback,
-    animation_manager: &AnimationManager,
-    now: f32,
-    region: Option<&SlRegionIdentity>,
-    camera: Option<(&GlobalTransform, Option<&Projection>)>,
-    motions: &Query<'_, '_, &ObjectSlMotion>,
-    transforms: &Query<'_, '_, &GlobalTransform>,
-    bodies: &Query<'_, '_, &AvatarBodyPart>,
-    scene_objects: &Query<'_, '_, &SceneObject>,
-) -> SceneDump {
-    let origin = objects.origin;
-    let handle = identity.region_handle;
+fn build(sources: &DumpSources) -> SceneDump {
+    let origin = sources.objects.origin;
+    let handle = sources.identity.region_handle;
     let offset = handle.map_or(Vec3::ZERO, |handle| region_offset_bevy(handle, origin));
     SceneDump {
         schema_version: SCHEMA_VERSION,
-        context: build_context(dump_identity, region, handle),
-        camera: build_camera(camera, offset, handle),
-        environment: build_environment(environment),
-        render: build_render(settings),
-        objects: build_objects(
-            identity,
-            objects,
-            avatars,
-            motions,
-            transforms,
-            scene_objects,
-            offset,
+        context: build_context(
+            &sources.dump_identity,
+            sources.regions.iter().next(),
+            handle,
         ),
-        avatars: build_avatars(
-            identity,
-            avatars,
-            animesh,
-            objects,
-            playback,
-            animation_manager,
-            now,
-            motions,
-            transforms,
-            bodies,
-            offset,
-        ),
+        camera: build_camera(sources.cameras.iter().next(), offset, handle),
+        environment: build_environment(&sources.environment),
+        render: build_render(&sources.settings),
+        objects: build_objects(sources, offset),
+        avatars: build_avatars(sources, offset),
     }
 }
 
@@ -925,28 +945,28 @@ fn level(store: &sl_settings::SettingsStore, name: &str) -> Option<i32> {
 /// dump that includes them compares their caching rather than their rendering.
 /// Sorted because an unstable iteration order turns every dump into a diff
 /// against itself and teaches its reader to ignore the comparison.
-fn build_objects(
-    identity: &SlIdentity,
-    objects: &ObjectState,
-    avatars: &AvatarState,
-    motions: &Query<'_, '_, &ObjectSlMotion>,
-    transforms: &Query<'_, '_, &GlobalTransform>,
-    scene_objects: &Query<'_, '_, &SceneObject>,
-    offset: Vec3,
-) -> Vec<ObjectDump> {
-    let mut dumped: Vec<ObjectDump> = objects
+fn build_objects(sources: &DumpSources, offset: Vec3) -> Vec<ObjectDump> {
+    let mut dumped: Vec<ObjectDump> = sources
+        .objects
         .objects
         .iter()
-        .filter(|(scoped, _tracked)| identity.circuit_id == Some(scoped.circuit))
+        .filter(|(scoped, _tracked)| sources.identity.circuit_id == Some(scoped.circuit))
         .filter(|(_scoped, tracked)| {
             // Avatars are reported separately, with their appearance state.
-            scene_objects
+            sources
+                .scene_objects
                 .get(tracked.entity)
                 .is_ok_and(|object| object.category != ObjectCategory::Avatar)
         })
         .map(|(scoped, tracked)| {
             dump_object(
-                scoped, tracked, objects, avatars, motions, transforms, offset,
+                scoped,
+                tracked,
+                &sources.objects,
+                &sources.avatars,
+                &sources.motions,
+                &sources.transforms,
+                offset,
             )
         })
         .collect();
@@ -1223,48 +1243,46 @@ fn dump_face(index: usize, face: &TextureFace) -> FaceDump {
 }
 
 /// The `avatars` section.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "one avatar entry states its identity, its placement and its appearance state, and \
-              each of those is read from a different resource"
-)]
-fn build_avatars(
-    identity: &SlIdentity,
-    avatars: &AvatarState,
-    animesh: &ControlAvatarState,
-    objects: &ObjectState,
-    playback: &AnimationPlayback,
-    animation_manager: &AnimationManager,
-    now: f32,
-    motions: &Query<'_, '_, &ObjectSlMotion>,
-    transforms: &Query<'_, '_, &GlobalTransform>,
-    bodies: &Query<'_, '_, &AvatarBodyPart>,
-    offset: Vec3,
-) -> Vec<AvatarDump> {
-    let with_bodies: Vec<AgentKey> = bodies.iter().map(AvatarBodyPart::agent).collect();
+fn build_avatars(sources: &DumpSources, offset: Vec3) -> Vec<AvatarDump> {
+    let now = sources.animations.time.elapsed_secs();
+    let with_bodies: Vec<AgentKey> = sources.bodies.iter().map(AvatarBodyPart::agent).collect();
     // The avatar *object* behind each agent, which is what the reference reports
     // a position for.
-    let objects_of: HashMap<AgentKey, ScopedObjectId> = avatars
+    let objects_of: HashMap<AgentKey, ScopedObjectId> = sources
+        .avatars
         .by_scoped
         .iter()
         .map(|(scoped, agent)| (*agent, *scoped))
         .collect();
-    let residents = avatars
+    let residents = sources
+        .avatars
         .objects
         .iter()
-        .chain(avatars.coarse.iter())
+        .chain(sources.avatars.coarse.iter())
         .map(|(agent, entities)| {
-            let placement = objects_of
-                .get(agent)
-                .and_then(|scoped| avatar_placement(*scoped, objects, motions, transforms, offset));
+            let placement = objects_of.get(agent).and_then(|scoped| {
+                avatar_placement(
+                    *scoped,
+                    &sources.objects,
+                    &sources.motions,
+                    &sources.transforms,
+                    offset,
+                )
+            });
             dump_avatar(
-                agent.to_string(),
-                identity.agent_id == Some(*agent),
-                false,
-                with_bodies.contains(agent),
-                placement,
-                transforms.get(entities.anchor).ok(),
-                &playback.playing_animations(*agent, now, animation_manager),
+                AvatarEntry {
+                    id: agent.to_string(),
+                    is_self: sources.identity.agent_id == Some(*agent),
+                    is_control_avatar: false,
+                    has_body: with_bodies.contains(agent),
+                    placement,
+                    transform: sources.transforms.get(entities.anchor).ok(),
+                    playing: &sources.animations.playback.playing_animations(
+                        *agent,
+                        now,
+                        &sources.animations.manager,
+                    ),
+                },
                 offset,
             )
         });
@@ -1272,18 +1290,25 @@ fn build_avatars(
     // grid identity of its own, and the reference's locally minted one cannot be
     // matched against anything. Whether the animesh rezzed *as* an animesh is
     // worth comparing, so it is listed rather than dropped.
-    let animated = animesh.animated_objects().map(|object| {
-        let anchor = objects
+    let animated = sources.animesh.animated_objects().map(|object| {
+        let anchor = sources
+            .objects
             .entity_of(object)
-            .and_then(|entity| transforms.get(entity).ok());
+            .and_then(|entity| sources.transforms.get(entity).ok());
         dump_avatar(
-            object.to_string(),
-            false,
-            true,
-            true,
-            None,
-            anchor,
-            &animesh.playing_animations(object, now, animation_manager),
+            AvatarEntry {
+                id: object.to_string(),
+                is_self: false,
+                is_control_avatar: true,
+                has_body: true,
+                placement: None,
+                transform: anchor,
+                playing: &sources.animesh.playing_animations(
+                    object,
+                    now,
+                    &sources.animations.manager,
+                ),
+            },
             offset,
         )
     });
@@ -1298,21 +1323,16 @@ fn build_avatars(
 /// own position — and `transform` is the body root this viewer drew, which sits
 /// a `root_drop` lower (see [`avatar_placement`]). A resident has both; a coarse
 /// dot, or an animesh's control avatar, has only what was drawn.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "an avatar entry is its identity, its two placements, what it is playing and its \
-              appearance state; a struct of them would only move the same arguments one call up"
-)]
-fn dump_avatar(
-    id: String,
-    is_self: bool,
-    is_control_avatar: bool,
-    has_body: bool,
-    placement: Option<ReferencePose>,
-    transform: Option<&GlobalTransform>,
-    playing: &[PlayingAnimation],
-    offset: Vec3,
-) -> AvatarDump {
+fn dump_avatar(entry: AvatarEntry<'_>, offset: Vec3) -> AvatarDump {
+    let AvatarEntry {
+        id,
+        is_self,
+        is_control_avatar,
+        has_body,
+        placement,
+        transform,
+        playing,
+    } = entry;
     let drawn = transform.map(|transform| {
         (
             region_point(transform.translation(), offset),
@@ -1361,51 +1381,13 @@ fn timestamp() -> String {
 }
 
 /// Write the dump when one has been asked for.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the dump describes every part of the world at once, and each parameter is one of \
-              its sections; splitting the system would only split the photograph"
-)]
-fn write_requested_scene_dump(
-    mut request: ResMut<SceneDumpRequest>,
-    dump_identity: Res<DumpIdentity>,
-    identity: Res<SlIdentity>,
-    objects: Res<ObjectState>,
-    avatars: Res<AvatarState>,
-    animesh: Res<ControlAvatarState>,
-    environment: Res<EnvironmentState>,
-    settings: Res<ViewerSettings>,
-    animations: AnimationInputs,
-    regions: Query<&SlRegionIdentity, With<sl_client_bevy::SlCurrentRegion>>,
-    cameras: Query<(&GlobalTransform, Option<&Projection>), With<ViewerCamera>>,
-    motions: Query<&ObjectSlMotion>,
-    transforms: Query<&GlobalTransform>,
-    bodies: Query<&AvatarBodyPart>,
-    scene_objects: Query<&SceneObject>,
-) {
+fn write_requested_scene_dump(mut request: ResMut<SceneDumpRequest>, sources: DumpSources) {
     if !request.pending {
         return;
     }
     request.pending = false;
     request.written = true;
-    let dump = build(
-        &identity,
-        &dump_identity,
-        &objects,
-        &avatars,
-        &animesh,
-        &environment,
-        &settings,
-        &animations.playback,
-        &animations.manager,
-        animations.time.elapsed_secs(),
-        regions.iter().next(),
-        cameras.iter().next(),
-        &motions,
-        &transforms,
-        &bodies,
-        &scene_objects,
-    );
+    let dump = build(&sources);
     match serde_json::to_string_pretty(&dump) {
         Ok(json) => match fs_err::write(&request.path, json.as_bytes()) {
             Ok(()) => info!("scene dump written to {}", request.path.display()),
@@ -1424,8 +1406,9 @@ mod tests {
     use sl_viewer_world_avatar::animations::PlayingAnimation;
 
     use super::{
-        FaceDump, LocalPose, ObjectDump, Point, ReferencePose, compose_worn, dump_avatar,
-        dump_face, dump_faces, loop_time, region_direction, region_point, region_rotation,
+        AvatarEntry, FaceDump, LocalPose, ObjectDump, Point, ReferencePose, compose_worn,
+        dump_avatar, dump_face, dump_faces, loop_time, region_direction, region_point,
+        region_rotation,
     };
     use sl_viewer_kit::coords::{sl_to_bevy_object_rotation, sl_to_bevy_vec};
 
@@ -1597,13 +1580,15 @@ mod tests {
     fn a_control_avatar_is_reported_by_the_object_it_rides() {
         let object = "00000000-0000-0000-0000-00000ca71011";
         let dumped = dump_avatar(
-            object.to_owned(),
-            false,
-            true,
-            true,
-            None,
-            None,
-            &[],
+            AvatarEntry {
+                id: object.to_owned(),
+                is_self: false,
+                is_control_avatar: true,
+                has_body: true,
+                placement: None,
+                transform: None,
+                playing: &[],
+            },
             Vec3::ZERO,
         );
         assert!(dumped.is_control_avatar);
@@ -1730,13 +1715,15 @@ mod tests {
             z: 25.009,
         })));
         let dumped = dump_avatar(
-            "id".to_owned(),
-            false,
-            false,
-            true,
-            Some(placement),
-            Some(&drawn),
-            &[],
+            AvatarEntry {
+                id: "id".to_owned(),
+                is_self: false,
+                is_control_avatar: false,
+                has_body: true,
+                placement: Some(placement),
+                transform: Some(&drawn),
+                playing: &[],
+            },
             Vec3::ZERO,
         );
         assert!(near(dumped.position, [104.0, 136.0, 25.95]));
@@ -1793,13 +1780,15 @@ mod tests {
             },
         ];
         let dumped = dump_avatar(
-            "id".to_owned(),
-            true,
-            false,
-            true,
-            None,
-            None,
-            &playing,
+            AvatarEntry {
+                id: "id".to_owned(),
+                is_self: true,
+                is_control_avatar: false,
+                has_body: true,
+                placement: None,
+                transform: None,
+                playing: &playing,
+            },
             Vec3::ZERO,
         );
         let first = dumped.animations.first().ok_or("no animation reported")?;

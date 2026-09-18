@@ -2328,53 +2328,74 @@ struct ParamWidgets<'w, 's> {
     swap_labels: SwapLabelQuery<'w, 's>,
     /// The feature sub-sections.
     feature_rows: FeatureRowQuery<'w, 's>,
+    /// The focused field, which a programmatic rewrite must leave alone.
+    focus: Res<'w, InputFocus>,
+    /// The font context a programmatic [`EditableText`] rewrite relays through.
+    font_cx: ResMut<'w, FontCx>,
+    /// The layout context the same rewrite relays through.
+    layout_cx: ResMut<'w, LayoutCx>,
+}
+
+/// The models a shown snapshot is built from, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(bevy::ecs::system::SystemParam)]
+struct ParamFacts<'w> {
+    /// The primary selection the panel mirrors.
+    selection: Res<'w, SelectionSet>,
+    /// Object properties and permissions.
+    objects: Res<'w, ObjectState>,
+    /// Avatar names, for the owner / creator lines (a lookup may be requested).
+    avatars: ResMut<'w, AvatarState>,
+    /// Group names, for the group line.
+    groups: Res<'w, GroupsModel>,
+    /// The land-impact / render-cost scores shown.
+    costs: ResMut<'w, crate::object_cost::ObjectCostModel>,
+}
+
+/// How the panel's text is worded, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): a localization or locale
+/// change re-runs the sync even when the shown snapshot has not moved.
+#[derive(bevy::ecs::system::SystemParam)]
+struct ParamText<'w> {
+    /// The translator every label goes through.
+    translator: Translator<'w>,
+    /// The loaded bundles, whose change forces a re-render.
+    localization: Res<'w, Localization>,
+    /// The active locale, likewise.
+    locale: Res<'w, crate::i18n::UiLocale>,
 }
 
 /// Mirror the primary selection into every parameter widget: field texts,
 /// toggle glyphs, cycle labels, the per-type row visibility, and the
 /// gated enabled / greyed-out state. Rewrites only when the `ShownSnapshot`
 /// changed (or the localization did), and never touches the focused field.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the tool / \
-              selection / object state, the snapshot, the focus, the bundled widget queries, \
-              the translator, and the text-layout contexts a programmatic rewrite needs"
-)]
 fn sync_param_widgets(
     state: Res<EditToolState>,
-    selection: Res<SelectionSet>,
-    objects: Res<ObjectState>,
-    mut avatars: ResMut<AvatarState>,
-    groups: Res<GroupsModel>,
-    mut costs: ResMut<crate::object_cost::ObjectCostModel>,
-    translator: Translator,
-    localization: Res<Localization>,
-    locale: Res<crate::i18n::UiLocale>,
+    mut facts: ParamFacts,
+    text: ParamText,
     mut snapshot: ResMut<ShownSnapshot>,
-    focus: Res<InputFocus>,
     mut widgets: ParamWidgets,
     mut commands: Commands,
     mut names: MessageWriter<SlCommand>,
-    mut font_cx: ResMut<FontCx>,
-    mut layout_cx: ResMut<LayoutCx>,
 ) {
     if !state.active {
         return;
     }
     let current = build_snapshot(
-        &selection,
-        &objects,
-        &mut avatars,
-        &groups,
-        &mut costs,
+        &facts.selection,
+        &facts.objects,
+        &mut facts.avatars,
+        &facts.groups,
+        &mut facts.costs,
         &mut names,
     );
     if snapshot.shown.as_ref() == current.as_ref()
-        && !localization.is_changed()
-        && !locale.is_changed()
+        && !text.localization.is_changed()
+        && !text.locale.is_changed()
     {
         return;
     }
+    let translator = &text.translator;
 
     let data = current.as_ref();
     let has_selection = data.is_some();
@@ -2438,7 +2459,7 @@ fn sync_param_widgets(
 
     // Field texts.
     for (entity, field, mut editor) in &mut widgets.editors {
-        if focus.get() == Some(entity) {
+        if widgets.focus.get() == Some(entity) {
             continue;
         }
         let want = match (field, data) {
@@ -2478,7 +2499,12 @@ fn sync_param_widgets(
             },
         };
         if editor.value().to_string() != want {
-            set_editor_text(&mut editor, &want, &mut font_cx, &mut layout_cx);
+            set_editor_text(
+                &mut editor,
+                &want,
+                &mut widgets.font_cx,
+                &mut widgets.layout_cx,
+            );
         }
     }
 
@@ -2653,25 +2679,32 @@ fn parse_numeric(kind: TextInputKind, text: &str) -> Option<f32> {
     }
 }
 
+/// What a committed parameter edit writes: the local models it applies the edit
+/// to at once (so the panel does not flicker back before the simulator echoes),
+/// the shown snapshot it invalidates, and the command it sends. Bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(bevy::ecs::system::SystemParam)]
+struct ParamCommit<'w> {
+    /// The selection, whose primary's name / description is set locally.
+    selection: ResMut<'w, SelectionSet>,
+    /// The object model, which takes the local extra-params edit.
+    objects: ResMut<'w, ObjectState>,
+    /// The shown snapshot, cleared so the sync re-reads the edited state.
+    snapshot: ResMut<'w, ShownSnapshot>,
+    /// Where the `SetObject*` command goes.
+    commands: MessageWriter<'w, SlCommand>,
+}
+
 /// Commit parameter-field edits on `Enter` or focus loss, dispatching by the
 /// field's [`CommitFamily`] — name / description sends, or a full shape /
 /// extra-params rebuild from the displayed fields.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the selection / \
-              object state, the focus tracking, the field queries, and the outgoing command \
-              writer"
-)]
 fn commit_param_fields(
     state: Res<EditToolState>,
-    mut selection: ResMut<SelectionSet>,
-    mut objects: ResMut<ObjectState>,
     focus: Res<InputFocus>,
     keyboard: Res<ButtonInput<KeyCode>>,
     mut focus_track: ResMut<ParamFieldFocus>,
     fields: Query<(Entity, &ParamField, &EditableText)>,
-    mut snapshot: ResMut<ShownSnapshot>,
-    mut commands: MessageWriter<SlCommand>,
+    mut commit_to: ParamCommit,
 ) {
     if !state.active {
         focus_track.last = None;
@@ -2694,7 +2727,7 @@ fn commit_param_fields(
     let Ok((_entity, field, editor)) = fields.get(entity) else {
         return;
     };
-    let Some(primary_scoped) = selection.primary().map(|primary| primary.scoped) else {
+    let Some(primary_scoped) = commit_to.selection.primary().map(|primary| primary.scoped) else {
         return;
     };
     let text = editor.value().to_string();
@@ -2710,21 +2743,27 @@ fn commit_param_fields(
 
     match field.family() {
         CommitFamily::Name => {
-            selection.set_primary_name_description(Some(&text), None);
-            commands.write(SlCommand(Command::SetObjectName {
+            commit_to
+                .selection
+                .set_primary_name_description(Some(&text), None);
+            commit_to.commands.write(SlCommand(Command::SetObjectName {
                 local_id: primary_scoped,
                 name: text,
             }));
         }
         CommitFamily::Description => {
-            selection.set_primary_name_description(None, Some(&text));
-            commands.write(SlCommand(Command::SetObjectDescription {
-                local_id: primary_scoped,
-                description: text,
-            }));
+            commit_to
+                .selection
+                .set_primary_name_description(None, Some(&text));
+            commit_to
+                .commands
+                .write(SlCommand(Command::SetObjectDescription {
+                    local_id: primary_scoped,
+                    description: text,
+                }));
         }
         CommitFamily::Shape => {
-            let Some(data) = owned_edit_data(&objects, &primary_scoped) else {
+            let Some(data) = owned_edit_data(&commit_to.objects, &primary_scoped) else {
                 return;
             };
             if data.pcode != pcode::PRIMITIVE {
@@ -2747,13 +2786,13 @@ fn commit_param_fields(
                 return;
             };
             debug!("build-params: shape commit on {primary_scoped:?}");
-            commands.write(SlCommand(Command::SetObjectShape {
+            commit_to.commands.write(SlCommand(Command::SetObjectShape {
                 local_id: primary_scoped,
                 shape,
             }));
         }
         CommitFamily::Flexi => {
-            let Some(data) = owned_edit_data(&objects, &primary_scoped) else {
+            let Some(data) = owned_edit_data(&commit_to.objects, &primary_scoped) else {
                 return;
             };
             if data.extra.flexible.is_none() {
@@ -2764,15 +2803,19 @@ fn commit_param_fields(
             };
             let mut extra = data.extra.clone();
             extra.flexible = Some(flexi);
-            objects.apply_local_extra_edit(&primary_scoped, extra.clone());
-            snapshot.shown = None;
-            commands.write(SlCommand(Command::SetObjectExtraParams {
-                local_id: primary_scoped,
-                params: extra,
-            }));
+            commit_to
+                .objects
+                .apply_local_extra_edit(&primary_scoped, extra.clone());
+            commit_to.snapshot.shown = None;
+            commit_to
+                .commands
+                .write(SlCommand(Command::SetObjectExtraParams {
+                    local_id: primary_scoped,
+                    params: extra,
+                }));
         }
         CommitFamily::Light => {
-            let Some(data) = owned_edit_data(&objects, &primary_scoped) else {
+            let Some(data) = owned_edit_data(&commit_to.objects, &primary_scoped) else {
                 return;
             };
             let Some(current) = data.extra.light else {
@@ -2783,15 +2826,19 @@ fn commit_param_fields(
             };
             let mut extra = data.extra.clone();
             extra.light = Some(light);
-            objects.apply_local_extra_edit(&primary_scoped, extra.clone());
-            snapshot.shown = None;
-            commands.write(SlCommand(Command::SetObjectExtraParams {
-                local_id: primary_scoped,
-                params: extra,
-            }));
+            commit_to
+                .objects
+                .apply_local_extra_edit(&primary_scoped, extra.clone());
+            commit_to.snapshot.shown = None;
+            commit_to
+                .commands
+                .write(SlCommand(Command::SetObjectExtraParams {
+                    local_id: primary_scoped,
+                    params: extra,
+                }));
         }
         CommitFamily::Spot => {
-            let Some(data) = owned_edit_data(&objects, &primary_scoped) else {
+            let Some(data) = owned_edit_data(&commit_to.objects, &primary_scoped) else {
                 return;
             };
             let Some(mut image) = data.extra.light_image.clone() else {
@@ -2811,12 +2858,16 @@ fn commit_param_fields(
             };
             let mut extra = data.extra.clone();
             extra.light_image = Some(image);
-            objects.apply_local_extra_edit(&primary_scoped, extra.clone());
-            snapshot.shown = None;
-            commands.write(SlCommand(Command::SetObjectExtraParams {
-                local_id: primary_scoped,
-                params: extra,
-            }));
+            commit_to
+                .objects
+                .apply_local_extra_edit(&primary_scoped, extra.clone());
+            commit_to.snapshot.shown = None;
+            commit_to
+                .commands
+                .write(SlCommand(Command::SetObjectExtraParams {
+                    local_id: primary_scoped,
+                    params: extra,
+                }));
         }
     }
 }

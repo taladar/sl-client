@@ -47,6 +47,20 @@ use sl_viewer_world_api::{
 /// object updates as before.
 const MIN_LOOK_AT_LENGTH: f32 = 1.0e-3;
 
+/// What a teleport arrival re-aims, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the camera mode it drops
+/// back to, the focus it returns to the avatar, and the rig whose orbit is
+/// slammed behind the arrival facing.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub struct ArrivalCamera<'w, 's> {
+    /// The camera mode, reset to third person on arrival.
+    mode: ResMut<'w, CameraMode>,
+    /// The focus target, returned to the avatar.
+    focus: ResMut<'w, FocusTarget>,
+    /// The rig whose orbit is slammed behind the new facing.
+    cameras: Query<'w, 's, &'static mut CameraRig, With<ViewerCamera>>,
+}
+
 /// Apply the arrival facing of a teleport to the own avatar the moment the
 /// simulator states it, instead of waiting for the destination's first
 /// `ObjectUpdate` to turn the body.
@@ -56,25 +70,17 @@ const MIN_LOOK_AT_LENGTH: f32 = 1.0e-3;
 /// anchor is posed from: an `ObjectUpdate` still echoing the *source* region's
 /// facing that arrives in the same batch as the arrival is overridden by it, and
 /// the rendered orientation the dead-reckoner writes is already at the target.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "an arrival writes the whole of what \"where am I facing\" means — the avatar's \
-              motion and its interpolation, the walk heading, and the camera's mode, focus and \
-              rig — and splitting it across systems would only spread one instant over several"
-)]
 pub fn slam_arrival_facing(
     mut events: MessageReader<SlEvent>,
     identity: Res<SlIdentity>,
     avatars: Res<AvatarState>,
     mut motions: Query<(&mut AvatarMotion, Option<&mut AvatarInterp>)>,
     mut controls: ResMut<AvatarControls>,
-    mut mode: ResMut<CameraMode>,
-    mut focus: ResMut<FocusTarget>,
-    mut cameras: Query<&mut CameraRig, With<ViewerCamera>>,
+    mut camera: ArrivalCamera,
 ) {
     let batch = arrivals_in(&mut events);
     if batch.world_replaced {
-        reset_camera(&mut mode, &mut focus, &mut cameras);
+        reset_camera(&mut camera);
     }
     let Some(yaw) = batch.yaw else {
         return;
@@ -108,7 +114,7 @@ pub fn slam_arrival_facing(
     // is behind the arrival facing on the first frame rather than orbiting around
     // to it (which is what rotates the minimap). Un-seeding is how this rig snaps:
     // the next pose it writes is taken whole instead of eased from the last one.
-    if let Ok(mut rig) = cameras.single_mut() {
+    if let Ok(mut rig) = camera.cameras.single_mut() {
         rig.seeded = false;
         // In mouselook the camera *is* the facing (the body follows the aim), so
         // the aim itself is what the arrival turns.
@@ -136,14 +142,10 @@ pub fn slam_arrival_facing(
 /// user just picked. The asymmetry decides the doubtful cases: a reset the user
 /// wanted and did not get is one `Escape` away, while nothing brings back a
 /// framing an over-eager reset discarded.
-fn reset_camera(
-    mode: &mut CameraMode,
-    focus: &mut FocusTarget,
-    cameras: &mut Query<&mut CameraRig, With<ViewerCamera>>,
-) {
-    *mode = CameraMode::ThirdPerson;
-    *focus = FocusTarget::Avatar;
-    if let Ok(mut rig) = cameras.single_mut() {
+fn reset_camera(camera: &mut ArrivalCamera) {
+    *camera.mode = CameraMode::ThirdPerson;
+    *camera.focus = FocusTarget::Avatar;
+    if let Ok(mut rig) = camera.cameras.single_mut() {
         rig.reset_orbit();
         rig.seeded = false;
     }

@@ -441,6 +441,38 @@ fn tip_toggles(settings: Option<&sl_viewer_settings::ViewerSettings>) -> (bool, 
     )
 }
 
+/// The cursor gesture the dwell is measured from, bundled as one
+/// [`SystemParam`]: the window the cursor is
+/// read from, the motion and buttons that dismiss a tip, the clock the dwell
+/// counts on, and the settings that switch the tips on at all.
+#[derive(Debug, SystemParam)]
+struct HoverGesture<'w, 's> {
+    /// The window the cursor position comes from.
+    windows: Query<'w, 's, &'static Window>,
+    /// This frame's pointer motion, which resets the dwell.
+    motion: Res<'w, AccumulatedMouseMotion>,
+    /// The mouse buttons: a held one is a drag, and shows no tip.
+    buttons: Res<'w, ButtonInput<MouseButton>>,
+    /// The clock the dwell and the pick throttle count on.
+    time: Res<'w, Time>,
+    /// The settings the tip toggles are read from.
+    settings: Option<Res<'w, sl_viewer_settings::ViewerSettings>>,
+}
+
+/// What the resolve writes, bundled as one
+/// [`SystemParam`]: the tooltip state the box is
+/// drawn from, the render-cost model a cost line is taken (and requested) from,
+/// and the command channel the fetches a missing line needs go out on.
+#[derive(SystemParam)]
+struct HoverOut<'w> {
+    /// The tooltip state: the dwell, the target and the desired content.
+    state: ResMut<'w, HoverTooltipState>,
+    /// The render-cost model, for the cost line.
+    costs: ResMut<'w, sl_viewer_world_objects::object_cost::ObjectCostModel>,
+    /// The command channel the missing-data fetches go out on.
+    sl_commands: MessageWriter<'w, SlCommand>,
+}
+
 /// Resolve the hover tooltip: accumulate dwell while the pointer rests, then
 /// keep a ~[`PICK_HZ`] Hz GPU pick refreshed at the cursor and stash the box's
 /// desired content in [`HoverTooltipState::render`] (or clear it when the
@@ -448,58 +480,51 @@ fn tip_toggles(settings: Option<&sl_viewer_settings::ViewerSettings>) -> (bool, 
 /// holds **no** overlay query — [`apply_hover_tooltip`] does the box write, so
 /// the pick machinery's `Visibility` reads never conflict with the box's
 /// `Visibility` write.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the resolve fuses the cursor / dwell inputs, the occlusion machinery, the \
-              GPU pick queue, the name resolvers, the held parcel and the settings"
-)]
 fn update_hover_tooltip(
-    windows: Query<&Window>,
-    motion: Res<AccumulatedMouseMotion>,
-    buttons: Res<ButtonInput<MouseButton>>,
-    time: Res<Time>,
+    gesture: HoverGesture,
     pick: HoverPick,
     mut picker: ResMut<GpuPicker>,
     names: HoverNames,
     object_data: HoverObjectData,
-    mut costs: ResMut<sl_viewer_world_objects::object_cost::ObjectCostModel>,
     parcel: Option<Res<SlAgentParcel>>,
-    settings: Option<Res<sl_viewer_settings::ViewerSettings>>,
-    mut state: ResMut<HoverTooltipState>,
-    mut sl_commands: MessageWriter<SlCommand>,
+    mut out: HoverOut,
 ) {
-    let (show_tips, show_land) = tip_toggles(settings.as_deref());
-    let cursor = windows.single().ok().and_then(Window::cursor_position);
+    let (show_tips, show_land) = tip_toggles(gesture.settings.as_deref());
+    let cursor = gesture
+        .windows
+        .single()
+        .ok()
+        .and_then(Window::cursor_position);
     // No tips while a button is held (a drag / click gesture), in mouselook (no
     // cursor), when disabled, or on real pointer motion (which also resets the
     // dwell and dismisses a shown tip).
     let dismiss = !show_tips
-        || buttons.pressed(MouseButton::Left)
-        || buttons.pressed(MouseButton::Right)
+        || gesture.buttons.pressed(MouseButton::Left)
+        || gesture.buttons.pressed(MouseButton::Right)
         || cursor.is_none()
-        || motion.delta.length() > MOTION_RESET_PX;
+        || gesture.motion.delta.length() > MOTION_RESET_PX;
     if dismiss {
-        state.idle_secs = 0.0;
-        state.since_pick = f32::MAX;
-        state.target = None;
-        state.render = None;
-        state.rendered_target = None;
-        state.prim_count = None;
+        out.state.idle_secs = 0.0;
+        out.state.since_pick = f32::MAX;
+        out.state.target = None;
+        out.state.render = None;
+        out.state.rendered_target = None;
+        out.state.prim_count = None;
         return;
     }
     let Some(cursor) = cursor else {
-        state.render = None;
+        out.state.render = None;
         return;
     };
-    state.idle_secs += time.delta_secs();
-    if state.idle_secs < DWELL_SECS {
+    out.state.idle_secs += gesture.time.delta_secs();
+    if out.state.idle_secs < DWELL_SECS {
         return;
     }
 
     // A blocking UI surface or HUD attachment under the cursor suppresses the
     // tip (checked only once dwelt, so the raycast is not run every frame).
     if pick.occluded(cursor) {
-        state.render = None;
+        out.state.render = None;
         return;
     }
 
@@ -507,26 +532,26 @@ fn update_hover_tooltip(
     // resolved answer arrives 1–2 frames later via `ingest_hover_picks`.
     // (`f32::MAX + dt` stays `f32::MAX`, so the post-dismiss sentinel simply
     // requests immediately on the first dwelt frame.)
-    state.since_pick += time.delta_secs();
-    let refresh = state.since_pick >= 1.0 / PICK_HZ;
+    out.state.since_pick += gesture.time.delta_secs();
+    let refresh = out.state.since_pick >= 1.0 / PICK_HZ;
     if refresh {
         picker.request(cursor, PickPurpose::Hover);
-        state.since_pick = 0.0;
+        out.state.since_pick = 0.0;
     }
 
     // The name-tag rect test wins over the world pick (the reference's tag →
     // world order); it is synchronous and exact, so it stays CPU.
     let target = match pick.tag_hit.agent_at(cursor) {
         Some(agent) => Some(HoverTarget::Avatar(agent)),
-        None => state.target,
+        None => out.state.target,
     };
     // The cursor is at rest, so between pick refreshes nothing the box shows
     // moves: keep the composed lines until the target changes or the next
     // refresh (which also picks up a properties / name / cost reply).
-    if !refresh && target == state.rendered_target && state.render.is_some() {
+    if !refresh && target == out.state.rendered_target && out.state.render.is_some() {
         return;
     }
-    state.rendered_target = target;
+    out.state.rendered_target = target;
 
     let lines = match target {
         Some(HoverTarget::Avatar(agent)) => Some(vec![names.avatars.label_text(agent)]),
@@ -535,11 +560,11 @@ fn update_hover_tooltip(
             root_scoped,
             flags,
         }) => {
-            let prim_count = match state.prim_count {
+            let prim_count = match out.state.prim_count {
                 Some((counted, count)) if counted == root_scoped => count,
                 _other => {
                     let count = object_data.state.linkset_prim_count(&root_scoped);
-                    state.prim_count = Some((root_scoped, count));
+                    out.state.prim_count = Some((root_scoped, count));
                     count
                 }
             };
@@ -549,18 +574,21 @@ fn update_hover_tooltip(
                 flags,
                 &extras,
                 &names,
-                &mut state,
-                &mut costs,
-                &mut sl_commands,
+                &mut out.state,
+                &mut out.costs,
+                &mut out.sl_commands,
             ))
         }
-        Some(HoverTarget::Land) if show_land => {
-            land_lines(parcel.as_deref(), &names, &mut state, &mut sl_commands)
-        }
+        Some(HoverTarget::Land) if show_land => land_lines(
+            parcel.as_deref(),
+            &names,
+            &mut out.state,
+            &mut out.sl_commands,
+        ),
         _ => None,
     };
 
-    state.render = lines
+    out.state.render = lines
         .filter(|lines| !lines.is_empty())
         .map(|lines| TooltipRender {
             lines,

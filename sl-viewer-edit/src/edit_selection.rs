@@ -419,33 +419,78 @@ impl SelectPointer<'_, '_> {
     }
 }
 
+/// The pick machinery a selection gesture resolves through, bundled as one
+/// [`SystemParam`].
+#[derive(bevy::ecs::system::SystemParam)]
+struct SelectTargets<'w, 's> {
+    /// The shared object picker: linkset roots, face indices, HUD exclusions.
+    picker: ObjectPicker<'w, 's>,
+    /// The ray cast it runs.
+    ray_cast: MeshRayCast<'w, 's>,
+    /// The object model, to resolve a hit's scoped id back to its entity.
+    state: Res<'w, ObjectState>,
+    /// Every selectable in-world volume object, swept by the rubber band.
+    candidates: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static SceneObject,
+            &'static ObjectSlMotion,
+            &'static GlobalTransform,
+        ),
+    >,
+}
+
+/// The rubber-band rectangle's own `bevy_ui` node, bundled as one
+/// [`SystemParam`].
+#[derive(bevy::ecs::system::SystemParam)]
+struct RubberBand<'w, 's> {
+    /// The spawned node, once there is one.
+    band: ResMut<'w, RubberBandNode>,
+    /// The UI root it hangs under (absent before the UI exists).
+    ui_root: Option<Res<'w, UiRoot>>,
+    /// Its layout and visibility.
+    nodes: Query<'w, 's, (&'static mut Node, &'static mut Visibility)>,
+    /// What spawns it.
+    commands: Commands<'w, 's>,
+}
+
+impl RubberBand<'_, '_> {
+    /// Show (spawning on first use) the band over the screen rectangle
+    /// `min`..`max` ([`show_rubber_band`]).
+    fn show(&mut self, min: Vec2, max: Vec2) {
+        show_rubber_band(
+            min,
+            max,
+            &mut self.band,
+            self.ui_root.as_deref(),
+            &mut self.nodes,
+            &mut self.commands,
+        );
+    }
+
+    /// Hide the band, if it has been spawned ([`hide_rubber_band`]).
+    fn hide(&mut self) {
+        hide_rubber_band(&self.band, &mut self.nodes);
+    }
+}
+
 /// The click / rubber-band pointer gesture of the selection tool. See the
 /// [module documentation](self) for the semantics.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the tool state, \
-              the gesture and selection state, the bundled pointer inputs, the pick machinery, \
-              and the candidate queries the rubber band sweeps"
-)]
 fn handle_select_pointer(
     tool: Res<EditToolState>,
     gizmo: Res<GizmoInteraction>,
     pointer: SelectPointer,
-    mut ray_cast: MeshRayCast,
-    picker: ObjectPicker,
-    state: Res<ObjectState>,
-    candidates: Query<(Entity, &SceneObject, &ObjectSlMotion, &GlobalTransform)>,
+    mut targets: SelectTargets,
     mut gesture: ResMut<SelectGesture>,
     mut selection: ResMut<SelectionSet>,
-    mut band: ResMut<RubberBandNode>,
-    ui_root: Option<Res<UiRoot>>,
-    mut band_nodes: Query<(&mut Node, &mut Visibility)>,
-    mut commands: Commands,
+    mut band: RubberBand,
 ) {
     if !tool.active {
         // Leaving edit mode cancels any live gesture and hides the band.
         if gesture.state.take().is_some() {
-            hide_rubber_band(&band, &mut band_nodes);
+            band.hide();
         }
         return;
     }
@@ -482,15 +527,7 @@ fn handle_select_pointer(
             let exclude = pointer.pick_exclusions();
             let shift =
                 keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight);
-            handle_face_pick(
-                ray,
-                shift,
-                &mut ray_cast,
-                &picker,
-                &state,
-                &exclude,
-                &mut selection,
-            );
+            handle_face_pick(ray, shift, &mut targets, &exclude, &mut selection);
         }
         return;
     }
@@ -512,26 +549,29 @@ fn handle_select_pointer(
         };
         // The world pick, excluding HUD geometry exactly as the touch pick does.
         let exclude = pointer.pick_exclusions();
-        let pressed_object = picker.pick(ray, &mut ray_cast, &exclude).and_then(|hit| {
-            // A worn attachment is not world-editable here (the attachment
-            // alignment tools are their own task); treat it as empty world.
-            if hit.summary.attachment {
-                return None;
-            }
-            if tool.edit_linked {
-                Some((
-                    hit.summary.picked_scoped,
-                    hit.summary.picked_full,
-                    state.entity_by_scoped(&hit.summary.picked_scoped)?,
-                ))
-            } else {
-                Some((
-                    hit.summary.root_scoped,
-                    hit.summary.root_full,
-                    state.entity_by_scoped(&hit.summary.root_scoped)?,
-                ))
-            }
-        });
+        let pressed_object = targets
+            .picker
+            .pick(ray, &mut targets.ray_cast, &exclude)
+            .and_then(|hit| {
+                // A worn attachment is not world-editable here (the attachment
+                // alignment tools are their own task); treat it as empty world.
+                if hit.summary.attachment {
+                    return None;
+                }
+                if tool.edit_linked {
+                    Some((
+                        hit.summary.picked_scoped,
+                        hit.summary.picked_full,
+                        targets.state.entity_by_scoped(&hit.summary.picked_scoped)?,
+                    ))
+                } else {
+                    Some((
+                        hit.summary.root_scoped,
+                        hit.summary.root_full,
+                        targets.state.entity_by_scoped(&hit.summary.root_scoped)?,
+                    ))
+                }
+            });
         gesture.state = Some(GestureState {
             anchor: cursor,
             extend: keyboard.pressed(KeyCode::ShiftLeft)
@@ -555,16 +595,9 @@ fn handle_select_pointer(
         if active.pressed_object.is_none() && (active.banding || moved > CLICK_SLOP) {
             active.banding = true;
             let (min, max) = crate::edit_math::rect_from_corners(active.anchor, cursor);
-            show_rubber_band(
-                min,
-                max,
-                &mut band,
-                ui_root.as_deref(),
-                &mut band_nodes,
-                &mut commands,
-            );
+            band.show(min, max);
             *selection.rect_pending_mut() =
-                sweep_candidates(min, max, camera, camera_transform, &candidates);
+                sweep_candidates(min, max, camera, camera_transform, &targets.candidates);
         }
         return;
     }
@@ -573,7 +606,7 @@ fn handle_select_pointer(
     let Some(finished) = gesture.state.take() else {
         return;
     };
-    hide_rubber_band(&band, &mut band_nodes);
+    band.hide();
     if finished.banding {
         // Commit the sweep: extend keeps the existing selection, plain replaces.
         // The sweep is taken **before** the replace, because `clear` empties the
@@ -585,7 +618,7 @@ fn handle_select_pointer(
             selection.clear();
         }
         for (scoped, entity) in pending {
-            if let Some(full) = state.full_key(&scoped) {
+            if let Some(full) = targets.state.full_key(&scoped) {
                 selection.insert(scoped, full, entity);
             }
         }
@@ -625,13 +658,11 @@ fn handle_select_pointer(
 fn handle_face_pick(
     ray: Ray3d,
     shift: bool,
-    ray_cast: &mut MeshRayCast,
-    picker: &ObjectPicker,
-    state: &ObjectState,
+    targets: &mut SelectTargets,
     exclude: &HashSet<Entity>,
     selection: &mut SelectionSet,
 ) {
-    let Some(hit) = picker.pick(ray, ray_cast, exclude) else {
+    let Some(hit) = targets.picker.pick(ray, &mut targets.ray_cast, exclude) else {
         // Empty world: a plain click clears the selection; shift leaves it.
         if !shift {
             selection.clear();
@@ -648,7 +679,7 @@ fn handle_face_pick(
     let face = PrimFaceId::new(face_index);
     let scoped = hit.summary.picked_scoped;
     let full = hit.summary.picked_full;
-    let Some(entity) = state.entity_by_scoped(&scoped) else {
+    let Some(entity) = targets.state.entity_by_scoped(&scoped) else {
         return;
     };
     if shift {
@@ -915,29 +946,16 @@ fn sync_selection_wire(
 /// is cheap — so a face rebuilt by an LOD swap (which despawns the old face
 /// entities, taking their overlays with them) regains its overlay without any
 /// extra bookkeeping.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the tool / \
-              selection state, the shared outline materials, and the hierarchy / face / overlay \
-              queries the reconcile walks"
-)]
 fn apply_selection_highlight(
     tool: Res<EditToolState>,
     selection: Res<SelectionSet>,
-    assets: Res<HighlightAssets>,
-    children: Query<&Children>,
-    scene: Query<&SceneObject>,
-    transforms: Query<&Transform>,
-    faces: HighlightFaceQuery,
-    worn: WornFaceQuery,
     mut overlays: Query<(
         Entity,
         &ChildOf,
         &mut SelectionHighlightOverlay,
         &mut MeshMaterial3d<FaceMaterial>,
     )>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut commands: Commands,
+    mut world: HighlightWorld,
 ) {
     // The desired overlay set: face entity → the outline it should wear. A
     // committed outline (primary, then root, then child) wins over a tentative one
@@ -960,12 +978,8 @@ fn apply_selection_highlight(
             } else {
                 HighlightKind::Root
             };
-            collect_faces(
+            world.collect_faces(
                 node.entity,
-                &children,
-                &scene,
-                &transforms,
-                &faces,
                 root_kind,
                 HighlightKind::Child,
                 &mut desired,
@@ -973,19 +987,15 @@ fn apply_selection_highlight(
             );
         }
         for (_scoped, entity) in selection.rect_pending() {
-            collect_faces(
+            world.collect_faces(
                 *entity,
-                &children,
-                &scene,
-                &transforms,
-                &faces,
                 HighlightKind::Pending,
                 HighlightKind::Pending,
                 &mut desired,
                 &mut objects,
             );
         }
-        collect_worn_faces(&objects, &worn, &mut desired);
+        collect_worn_faces(&objects, &world.worn, &mut desired);
     }
     // Despawn stale overlays; an overlay whose face is still highlighted stays,
     // taking the new colour in place rather than being rebuilt. That matters for
@@ -997,28 +1007,20 @@ fn apply_selection_highlight(
             Some(outline) => {
                 if outline.kind != marker.kind {
                     marker.kind = outline.kind;
-                    material.0 = assets.material(outline.kind);
+                    material.0 = world.assets.material(outline.kind);
                 }
             }
-            None => commands.entity(overlay).despawn(),
+            None => world.commands.entity(overlay).despawn(),
         }
     }
     // Spawn the missing ones: a wireframe of the face's mesh for a mesh object (or
     // a rigged face), a silhouette ribbon otherwise — see
-    // [`spawn_outline_overlay`].
+    // [`HighlightWorld::spawn_outline_overlay`].
     for (face, outline) in desired {
-        let Ok((mesh, skin)) = faces.get(face) else {
-            continue;
-        };
-        spawn_outline_overlay(
+        world.spawn_outline_overlay(
             face,
-            mesh,
-            skin,
             outline,
-            assets.material(outline.kind),
             SelectionHighlightOverlay { kind: outline.kind },
-            &mut meshes,
-            &mut commands,
         );
     }
 }
@@ -1033,6 +1035,202 @@ type HighlightFaceQuery<'w, 's> =
 /// **wearer's** body root, so nothing under the selected object's entity leads to
 /// them — see [`collect_worn_faces`].
 type WornFaceQuery<'w, 's> = Query<'w, 's, (Entity, &'static WornPickTarget), With<PrimFaceEntity>>;
+
+/// Everything an outline reconciler walks and writes through, bundled as one
+/// [`SystemParam`].
+///
+/// [`apply_selection_highlight`] and [`apply_drag_hover_highlight`] are the same
+/// reconcile in two colours under two markers, so they take the same eight
+/// things; what differs between them — which overlay marker, which trigger — is
+/// what stays in each system's own signature.
+#[derive(bevy::ecs::system::SystemParam)]
+struct HighlightWorld<'w, 's> {
+    /// The shared outline materials, one per [`HighlightKind`].
+    assets: Res<'w, HighlightAssets>,
+    /// Parent → children: the walk's edges.
+    children: Query<'w, 's, &'static Children>,
+    /// Scene identities, to tell a linkset child from its root.
+    scene: Query<'w, 's, &'static SceneObject>,
+    /// Local transforms, to accumulate the face-space → metres scale.
+    transforms: Query<'w, 's, &'static Transform>,
+    /// The faces and the skins that pose them.
+    faces: HighlightFaceQuery<'w, 's>,
+    /// The worn rigged faces the hierarchy walk cannot reach.
+    worn: WornFaceQuery<'w, 's>,
+    /// The mesh store a wireframe overlay is derived into.
+    meshes: ResMut<'w, Assets<Mesh>>,
+    /// What spawns and despawns the overlays.
+    commands: Commands<'w, 's>,
+}
+
+impl HighlightWorld<'_, '_> {
+    /// Collect every face-mesh entity under `root` (the object's own faces and its
+    /// linkset children's) into `desired`, colouring the selected object's own root
+    /// faces as `root_kind` and any linkset child's (a descendant carrying its own
+    /// [`SceneObject`]) as `child_kind` — the reference's parent / child silhouette
+    /// split, with the primary root distinguished. A stronger outline (primary,
+    /// then root, then child) wins over a tentative ([`HighlightKind::Pending`])
+    /// one when both apply.
+    ///
+    /// The walk also carries down the two things [`spawn_outline_overlay`] cannot
+    /// read off a face entity: which of the two highlights that face's **object**
+    /// takes ([`ObjectCategory::Mesh`] — the reference's `isMesh()`), and the scale
+    /// accumulated from the selection root down to the face, which is the object's
+    /// Second Life size (it sits on the object's geometry holder, not on the object
+    /// entity). Accumulating the local `Transform`s rather than reading the face's
+    /// `GlobalTransform` keeps this correct on the frame a face is rebuilt, before
+    /// transform propagation has run for it.
+    fn collect_faces(
+        &self,
+        root: Entity,
+        root_kind: HighlightKind,
+        child_kind: HighlightKind,
+        desired: &mut HashMap<Entity, DesiredOutline>,
+        worn: &mut HashMap<ScopedObjectId, HighlightKind>,
+    ) {
+        let scale_of = |entity: Entity| {
+            self.transforms
+                .get(entity)
+                .map_or(Vec3::ONE, |transform| transform.scale)
+        };
+        let mut stack = vec![(
+            root,
+            false,
+            self.scene.get(root).ok().map(|object| object.category),
+            scale_of(root),
+        )];
+        while let Some((entity, mut is_child, mut category, mut scale)) = stack.pop() {
+            // Crossing into a descendant that is its own scene object means the
+            // subtree below belongs to a linkset child, whose own kind decides its
+            // own highlight.
+            if entity != root
+                && let Ok(object) = self.scene.get(entity)
+            {
+                is_child = true;
+                category = Some(object.category);
+            }
+            // Every object the walk crosses is noted by scoped id, because its
+            // **rigged** faces are not in this subtree at all — a worn rigged submesh
+            // hangs off its wearer's body root, not its own object entity, and is
+            // reached through [`WornPickTarget`] after the walk.
+            if let Ok(object) = self.scene.get(entity) {
+                let kind = if is_child { child_kind } else { root_kind };
+                merge_kind(worn, object.scoped_id, kind);
+            }
+            if entity != root {
+                // Component-wise: the glam `Vec3` operators trip the workspace
+                // `arithmetic_side_effects` lint.
+                let step = scale_of(entity);
+                scale = Vec3::new(scale.x * step.x, scale.y * step.y, scale.z * step.z);
+            }
+            if self.faces.contains(entity) {
+                let kind = if is_child { child_kind } else { root_kind };
+                merge_outline(
+                    desired,
+                    entity,
+                    DesiredOutline {
+                        kind,
+                        mesh_object: category == Some(ObjectCategory::Mesh),
+                        scale,
+                    },
+                );
+            }
+            if let Ok(list) = self.children.get(entity) {
+                for child in list.iter() {
+                    stack.push((child, is_child, category, scale));
+                }
+            }
+        }
+    }
+
+    /// Spawn one outline overlay on `face` — the shared body of the selection
+    /// highlight and the drag-drop hover highlight, which draw the same two
+    /// highlights in different colours under different markers.
+    ///
+    /// The reference splits by **object kind**: `LLSelectMgr::renderSilhouettes`
+    /// sends every object whose volume `isMesh()` — an uploaded mesh asset, rigged or
+    /// not — to `renderMeshSelection_f`, which wireframes its selected faces, and
+    /// only prims, sculpts, trees and grass reach `renderOneSilhouette`. So a face of
+    /// an [`ObjectCategory::Mesh`] object (`outline.mesh_object`) gets
+    /// [`crate::selection_wireframe`]'s line-list derivation of its mesh, and every
+    /// other face wears the **silhouette ribbon**
+    /// ([`crate::selection_silhouette`]): its view-dependent silhouette edges,
+    /// widened into quads standing off the surface.
+    ///
+    /// A silhouette depends on where the camera is, which this spawn does not know —
+    /// it is [`update_selection_silhouettes`] that derives the geometry and inserts
+    /// the [`Mesh3d`], every frame the view has moved enough to matter. So the
+    /// overlay is spawned here with the marker component alone; a face is outlined
+    /// from the same frame, because that system runs after both reconcilers.
+    ///
+    /// A **rigged** face takes the wireframe whatever its object says, because a
+    /// silhouette derived from its mesh asset would be the *bind pose's* edge set:
+    /// the drawn geometry exists only in the GPU joint palette. It additionally
+    /// carries the skin that poses it and the [`SkinPoseTwin`] that earns that skin
+    /// the same GPU palette as the face. See that module for the details.
+    ///
+    /// A face whose mesh is not loaded (or is not an indexed triangle list) gets no
+    /// wireframe this frame; the reconciler runs every frame, so it gains one as soon
+    /// as the mesh is there.
+    fn spawn_outline_overlay(
+        &mut self,
+        face: Entity,
+        outline: DesiredOutline,
+        marker: impl Bundle,
+    ) {
+        let Ok((mesh, skin)) = self.faces.get(face) else {
+            return;
+        };
+        let material = self.assets.material(outline.kind);
+        if skin.is_none() && !outline.mesh_object {
+            self.commands.spawn((
+                MeshMaterial3d(material),
+                // The ribbon is built in the face's own space, so the overlay adds no
+                // transform of its own — as the wireframe does not either.
+                Transform::IDENTITY,
+                NotShadowCaster,
+                marker,
+                EditorOverlay,
+                SilhouetteOverlay::default(),
+                ChildOf(face),
+                OUTLINE_VISIBILITY,
+            ));
+            return;
+        }
+        // A rigged face's geometry is already in metres and its entity transform is
+        // ignored by the skinned draw; an unrigged mesh object's is in the asset's
+        // normalized space, with the object's Second Life size on the geometry holder
+        // above it. Only the latter has a scale for the lift to compensate for.
+        let scale = if skin.is_some() {
+            Vec3::ONE
+        } else {
+            outline.scale
+        };
+        let Some(wireframe) = self
+            .meshes
+            .get(&mesh.0)
+            .and_then(|source| crate::selection_wireframe::wireframe_mesh(source, scale))
+        else {
+            return;
+        };
+        let mut overlay = self.commands.spawn((
+            Mesh3d(self.meshes.add(wireframe)),
+            MeshMaterial3d(material),
+            // No inflate: the wireframe hugs the face it outlines, carrying its lift
+            // off the surface in the geometry — which is also the only lever left on a
+            // skinned draw, whose vertices come from the joint palette.
+            Transform::IDENTITY,
+            NotShadowCaster,
+            marker,
+            EditorOverlay,
+            ChildOf(face),
+            OUTLINE_VISIBILITY,
+        ));
+        if let Some(skin) = skin {
+            overlay.insert((skin.clone(), SkinPoseTwin { source: face }));
+        }
+    }
+}
 
 /// What one face's outline overlay should be, as [`collect_faces`] works it out
 /// from the object the face hangs under: its colour, whether that object is an
@@ -1049,98 +1247,6 @@ struct DesiredOutline {
     /// the selection root and the face. Only the wireframe path uses it, to keep
     /// its lift a world distance.
     scale: Vec3,
-}
-
-/// Spawn one outline overlay on `face` — the shared body of the selection
-/// highlight and the drag-drop hover highlight, which draw the same two
-/// highlights in different colours under different markers.
-///
-/// The reference splits by **object kind**: `LLSelectMgr::renderSilhouettes`
-/// sends every object whose volume `isMesh()` — an uploaded mesh asset, rigged or
-/// not — to `renderMeshSelection_f`, which wireframes its selected faces, and
-/// only prims, sculpts, trees and grass reach `renderOneSilhouette`. So a face of
-/// an [`ObjectCategory::Mesh`] object (`outline.mesh_object`) gets
-/// [`crate::selection_wireframe`]'s line-list derivation of its mesh, and every
-/// other face wears the **silhouette ribbon**
-/// ([`crate::selection_silhouette`]): its view-dependent silhouette edges,
-/// widened into quads standing off the surface.
-///
-/// A silhouette depends on where the camera is, which this spawn does not know —
-/// it is [`update_selection_silhouettes`] that derives the geometry and inserts
-/// the [`Mesh3d`], every frame the view has moved enough to matter. So the
-/// overlay is spawned here with the marker component alone; a face is outlined
-/// from the same frame, because that system runs after both reconcilers.
-///
-/// A **rigged** face takes the wireframe whatever its object says, because a
-/// silhouette derived from its mesh asset would be the *bind pose's* edge set:
-/// the drawn geometry exists only in the GPU joint palette. It additionally
-/// carries the skin that poses it and the [`SkinPoseTwin`] that earns that skin
-/// the same GPU palette as the face. See that module for the details.
-///
-/// A face whose mesh is not loaded (or is not an indexed triangle list) gets no
-/// wireframe this frame; the reconciler runs every frame, so it gains one as soon
-/// as the mesh is there.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the face and its mesh, its skin, what its object asks for, the colour, the caller's \
-              own marker, and the two stores the spawn writes through"
-)]
-fn spawn_outline_overlay(
-    face: Entity,
-    mesh: &Mesh3d,
-    skin: Option<&SkinnedMesh>,
-    outline: DesiredOutline,
-    material: Handle<FaceMaterial>,
-    marker: impl Bundle,
-    meshes: &mut Assets<Mesh>,
-    commands: &mut Commands,
-) {
-    if skin.is_none() && !outline.mesh_object {
-        commands.spawn((
-            MeshMaterial3d(material),
-            // The ribbon is built in the face's own space, so the overlay adds no
-            // transform of its own — as the wireframe does not either.
-            Transform::IDENTITY,
-            NotShadowCaster,
-            marker,
-            EditorOverlay,
-            SilhouetteOverlay::default(),
-            ChildOf(face),
-            OUTLINE_VISIBILITY,
-        ));
-        return;
-    }
-    // A rigged face's geometry is already in metres and its entity transform is
-    // ignored by the skinned draw; an unrigged mesh object's is in the asset's
-    // normalized space, with the object's Second Life size on the geometry holder
-    // above it. Only the latter has a scale for the lift to compensate for.
-    let scale = if skin.is_some() {
-        Vec3::ONE
-    } else {
-        outline.scale
-    };
-    let Some(wireframe) = meshes
-        .get(&mesh.0)
-        .and_then(|source| crate::selection_wireframe::wireframe_mesh(source, scale))
-    else {
-        return;
-    };
-    let mut overlay = commands.spawn((
-        Mesh3d(meshes.add(wireframe)),
-        MeshMaterial3d(material),
-        // No inflate: the wireframe hugs the face it outlines, carrying its lift
-        // off the surface in the geometry — which is also the only lever left on a
-        // skinned draw, whose vertices come from the joint palette.
-        Transform::IDENTITY,
-        NotShadowCaster,
-        marker,
-        EditorOverlay,
-        ChildOf(face),
-        OUTLINE_VISIBILITY,
-    ));
-    if let Some(skin) = skin {
-        overlay.insert((skin.clone(), SkinPoseTwin { source: face }));
-    }
 }
 
 /// An outline overlay drawing a [`crate::selection_silhouette`] ribbon, and what
@@ -1344,29 +1450,16 @@ impl SilhouetteInputs {
 /// its linkset family) gets an outline overlay — green when you may edit it, red
 /// when it is foreign (the reference's `highlightObjectAndFamily` during a drag).
 /// A separate overlay from the selection's, so the two reconcilers never fight.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the hover state, \
-              the shared outline materials, the hierarchy / face / overlay queries, the mesh \
-              store the rigged overlay derives into, and the stage the diagnostic dedups on"
-)]
 fn apply_drag_hover_highlight(
     hover: Res<DragHoverHighlight>,
-    assets: Res<HighlightAssets>,
-    children: Query<&Children>,
-    scene: Query<&SceneObject>,
-    transforms: Query<&Transform>,
-    faces: HighlightFaceQuery,
-    worn: WornFaceQuery,
     mut overlays: Query<(
         Entity,
         &ChildOf,
         &mut DragHoverOverlay,
         &mut MeshMaterial3d<FaceMaterial>,
     )>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut commands: Commands,
     mut last_target: Local<Option<Entity>>,
+    mut world: HighlightWorld,
 ) {
     let mut desired: HashMap<Entity, DesiredOutline> = HashMap::new();
     if let Some(target) = hover.hover {
@@ -1378,18 +1471,8 @@ fn apply_drag_hover_highlight(
         // One colour for the whole family (the drop targets this object) — pass
         // the same kind for the root and its children.
         let mut objects: HashMap<ScopedObjectId, HighlightKind> = HashMap::new();
-        collect_faces(
-            target.root,
-            &children,
-            &scene,
-            &transforms,
-            &faces,
-            kind,
-            kind,
-            &mut desired,
-            &mut objects,
-        );
-        collect_worn_faces(&objects, &worn, &mut desired);
+        world.collect_faces(target.root, kind, kind, &mut desired, &mut objects);
+        collect_worn_faces(&objects, &world.worn, &mut desired);
     }
     // The draw half of the same diagnostic the hover driver writes
     // (`sl_viewer::drag_hover`): with a target published, this says how many faces
@@ -1412,116 +1495,17 @@ fn apply_drag_hover_highlight(
             Some(outline) => {
                 if outline.kind != marker.kind {
                     marker.kind = outline.kind;
-                    material.0 = assets.material(outline.kind);
+                    material.0 = world.assets.material(outline.kind);
                 }
             }
-            None => commands.entity(overlay).despawn(),
+            None => world.commands.entity(overlay).despawn(),
         }
     }
     // Spawn the missing ones (the same overlay the selection outline draws —
     // a silhouette ribbon on a prim face, a wireframe on a mesh object's or a
     // rigged one).
     for (face, outline) in desired {
-        let Ok((mesh, skin)) = faces.get(face) else {
-            continue;
-        };
-        spawn_outline_overlay(
-            face,
-            mesh,
-            skin,
-            outline,
-            assets.material(outline.kind),
-            DragHoverOverlay { kind: outline.kind },
-            &mut meshes,
-            &mut commands,
-        );
-    }
-}
-
-/// Collect every face-mesh entity under `root` (the object's own faces and its
-/// linkset children's) into `desired`, colouring the selected object's own root
-/// faces as `root_kind` and any linkset child's (a descendant carrying its own
-/// [`SceneObject`]) as `child_kind` — the reference's parent / child silhouette
-/// split, with the primary root distinguished. A stronger outline (primary,
-/// then root, then child) wins over a tentative ([`HighlightKind::Pending`])
-/// one when both apply.
-///
-/// The walk also carries down the two things [`spawn_outline_overlay`] cannot
-/// read off a face entity: which of the two highlights that face's **object**
-/// takes ([`ObjectCategory::Mesh`] — the reference's `isMesh()`), and the scale
-/// accumulated from the selection root down to the face, which is the object's
-/// Second Life size (it sits on the object's geometry holder, not on the object
-/// entity). Accumulating the local `Transform`s rather than reading the face's
-/// `GlobalTransform` keeps this correct on the frame a face is rebuilt, before
-/// transform propagation has run for it.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the walk reads the hierarchy, the objects, their transforms and the faces, and is \
-              parameterised by the two colours it assigns and the map it fills"
-)]
-fn collect_faces(
-    root: Entity,
-    children: &Query<&Children>,
-    scene: &Query<&SceneObject>,
-    transforms: &Query<&Transform>,
-    faces: &HighlightFaceQuery,
-    root_kind: HighlightKind,
-    child_kind: HighlightKind,
-    desired: &mut HashMap<Entity, DesiredOutline>,
-    worn: &mut HashMap<ScopedObjectId, HighlightKind>,
-) {
-    let scale_of = |entity: Entity| {
-        transforms
-            .get(entity)
-            .map_or(Vec3::ONE, |transform| transform.scale)
-    };
-    let mut stack = vec![(
-        root,
-        false,
-        scene.get(root).ok().map(|object| object.category),
-        scale_of(root),
-    )];
-    while let Some((entity, mut is_child, mut category, mut scale)) = stack.pop() {
-        // Crossing into a descendant that is its own scene object means the
-        // subtree below belongs to a linkset child, whose own kind decides its
-        // own highlight.
-        if entity != root
-            && let Ok(object) = scene.get(entity)
-        {
-            is_child = true;
-            category = Some(object.category);
-        }
-        // Every object the walk crosses is noted by scoped id, because its
-        // **rigged** faces are not in this subtree at all — a worn rigged submesh
-        // hangs off its wearer's body root, not its own object entity, and is
-        // reached through [`WornPickTarget`] after the walk.
-        if let Ok(object) = scene.get(entity) {
-            let kind = if is_child { child_kind } else { root_kind };
-            merge_kind(worn, object.scoped_id, kind);
-        }
-        if entity != root {
-            // Component-wise: the glam `Vec3` operators trip the workspace
-            // `arithmetic_side_effects` lint.
-            let step = scale_of(entity);
-            scale = Vec3::new(scale.x * step.x, scale.y * step.y, scale.z * step.z);
-        }
-        if faces.contains(entity) {
-            let kind = if is_child { child_kind } else { root_kind };
-            merge_outline(
-                desired,
-                entity,
-                DesiredOutline {
-                    kind,
-                    mesh_object: category == Some(ObjectCategory::Mesh),
-                    scale,
-                },
-            );
-        }
-        if let Ok(list) = children.get(entity) {
-            for child in list.iter() {
-                stack.push((child, is_child, category, scale));
-            }
-        }
+        world.spawn_outline_overlay(face, outline, DragHoverOverlay { kind: outline.kind });
     }
 }
 
@@ -1727,28 +1711,35 @@ type CursorFaceQuery<'w, 's> = Query<
     ),
 >;
 
+/// Everything the face-cursor reconciler walks and writes through, bundled as
+/// one [`SystemParam`].
+#[derive(bevy::ecs::system::SystemParam)]
+struct FaceCursorWorld<'w, 's> {
+    /// The shared grid texture the cursor is drawn with.
+    assets: Res<'w, FaceCursorAssets>,
+    /// Parent → children: the walk's edges.
+    children: Query<'w, 's, &'static Children>,
+    /// Scene identities, to stop the walk at a linkset child object.
+    scene: Query<'w, 's, (), With<SceneObject>>,
+    /// The faces, their Linden indices and their texture placements.
+    faces: CursorFaceQuery<'w, 's>,
+    /// The material store one cursor's grid material is added to.
+    materials: ResMut<'w, Assets<FaceMaterial>>,
+    /// What spawns and despawns the cursors.
+    commands: Commands<'w, 's>,
+}
+
 /// Draw the white repeat-grid cursor on the selected faces while the Select Face
 /// tool is active: each chosen face gets an overlay child sharing its mesh, drawn
 /// with the grid texture under the face's own UV transform so the grid outlines
 /// every texture repeat. A node with no explicit face set (`faces == None`)
 /// cursors all of its own faces. Reconciled every frame like the silhouette
 /// overlays, so a face rebuilt by a texture edit / LOD swap regains its cursor.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the tool / \
-              selection state, the grid asset, the hierarchy / scene / face / overlay queries, and \
-              the material store the reconcile spawns into"
-)]
 fn apply_face_cursor_highlight(
     tool: Res<EditToolState>,
     selection: Res<SelectionSet>,
-    assets: Res<FaceCursorAssets>,
-    children: Query<&Children>,
-    scene: Query<(), With<SceneObject>>,
-    cursor_faces: CursorFaceQuery,
     overlays: Query<(Entity, &ChildOf), With<FaceCursorOverlay>>,
-    mut materials: ResMut<Assets<FaceMaterial>>,
-    mut commands: Commands,
+    mut cursor: FaceCursorWorld,
 ) {
     // The desired cursor set: face entity → its texture placement.
     let mut desired: HashMap<Entity, FaceTextureDebug> = HashMap::new();
@@ -1757,9 +1748,9 @@ fn apply_face_cursor_highlight(
             collect_own_face_ids(
                 node.entity,
                 node.faces.as_ref(),
-                &children,
-                &scene,
-                &cursor_faces,
+                &cursor.children,
+                &cursor.scene,
+                &cursor.faces,
                 &mut desired,
             );
         }
@@ -1767,21 +1758,21 @@ fn apply_face_cursor_highlight(
     // Despawn cursors whose face left the set, keep the rest.
     for (overlay, child_of) in overlays.iter() {
         if desired.remove(&child_of.parent()).is_none() {
-            commands.entity(overlay).despawn();
+            cursor.commands.entity(overlay).despawn();
         }
     }
     // Spawn the missing cursors: the face's mesh, the grid material carrying the
     // face's own UV transform, pulled in front of the face by a depth bias.
     for (face, FaceTextureDebug(texture_face)) in desired {
-        let Ok((mesh, _marker, _debug, skin)) = cursor_faces.get(face) else {
+        let Ok((mesh, _marker, _debug, skin)) = cursor.faces.get(face) else {
             continue;
         };
         // An inert `FaceMaterial` (bit-identical to the bare `StandardMaterial`) so
         // `SlFaceExt`'s `specialize` keeps this translucent grid cursor's coverage out
         // of the glow mask — an editor overlay must not bloom under the glow pass.
-        let material = materials.add(inert_face_material(StandardMaterial {
+        let material = cursor.materials.add(inert_face_material(StandardMaterial {
             base_color: Color::WHITE,
-            base_color_texture: Some(assets.grid.clone()),
+            base_color_texture: Some(cursor.assets.grid.clone()),
             unlit: true,
             alpha_mode: AlphaMode::Blend,
             // The grid follows the face's texture placement (repeats / offset /
@@ -1794,7 +1785,7 @@ fn apply_face_cursor_highlight(
             depth_bias: FACE_CURSOR_DEPTH_BIAS,
             ..Default::default()
         }));
-        let mut cursor = commands.spawn((
+        let mut overlay = cursor.commands.spawn((
             Mesh3d(mesh.0.clone()),
             MeshMaterial3d(material),
             NotShadowCaster,
@@ -1810,7 +1801,7 @@ fn apply_face_cursor_highlight(
         // ([`SkinPoseTwin`]); the cursor is coplanar with the face, so skinning it
         // identically is also exactly where it belongs.
         if let Some(skin) = skin {
-            cursor.insert((skin.clone(), SkinPoseTwin { source: face }));
+            overlay.insert((skin.clone(), SkinPoseTwin { source: face }));
         }
     }
 }

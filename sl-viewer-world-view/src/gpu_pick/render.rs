@@ -261,28 +261,41 @@ fn warm_gpu_pick_pipelines(
     });
 }
 
+/// The render-world handles the pick pass reads, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the pipeline cache a
+/// specialized pipeline is resolved through, the render meshes and their vertex
+/// allocator, Bevy's skinning uniforms, the image assets the ID target lives in,
+/// and the device / queue the pass is recorded on.
+#[derive(bevy::ecs::system::SystemParam)]
+struct PickRenderWorld<'w> {
+    /// The pipeline cache the specialized pipelines are resolved through.
+    pipeline_cache: Res<'w, PipelineCache>,
+    /// The render meshes a candidate's layout and buffers come from.
+    meshes: Res<'w, RenderAssets<RenderMesh>>,
+    /// Where those meshes' vertices and indices live.
+    mesh_allocator: Res<'w, MeshAllocator>,
+    /// Bevy's skinning uniforms, for a skinned candidate's palette offset.
+    skin_uniforms: Res<'w, SkinUniforms>,
+    /// The GPU images the ID target view is taken from.
+    gpu_images: Res<'w, RenderAssets<GpuImage>>,
+    /// The device the textures and bind groups are created on.
+    render_device: Res<'w, RenderDevice>,
+    /// The queue the uniform writes are recorded on.
+    render_queue: Res<'w, RenderQueue>,
+}
+
 /// Prepare this frame's pick pass from the extracted submission: specialize
 /// the pipelines against each candidate's mesh layout, resolve skinned
 /// candidates' palette offsets against **this frame's post-swap**
 /// `SkinUniforms` (this system runs in `PrepareBindGroups`, after Bevy's
 /// `prepare_skins`), write the per-draw uniforms, and build the bind groups.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy render-world system's inputs are its parameters: the extracted \
-              submission, the pipeline/buffer/prepared resources, the specializer + cache, \
-              the mesh assets, Bevy's skin uniforms and the device/queue pair"
-)]
 fn prepare_gpu_pick(
     submission: Res<GpuPickSubmission>,
     pipeline: Option<Res<GpuPickPipeline>>,
     mut buffers: ResMut<GpuPickBuffers>,
     mut prepared: ResMut<PreparedGpuPick>,
     mut specialized: ResMut<SpecializedMeshPipelines<GpuPickPipeline>>,
-    pipeline_cache: Res<PipelineCache>,
-    meshes: Res<RenderAssets<RenderMesh>>,
-    skin_uniforms: Res<SkinUniforms>,
-    render_device: Res<RenderDevice>,
-    render_queue: Res<RenderQueue>,
+    gpu: PickRenderWorld,
 ) {
     prepared.0 = None;
     if !submission.active {
@@ -296,14 +309,14 @@ fn prepare_gpu_pick(
     let mut draws = Vec::with_capacity(submission.items.len());
     let mut any_skinned = false;
     for item in &submission.items {
-        let Some(mesh) = meshes.get(item.mesh) else {
+        let Some(mesh) = gpu.meshes.get(item.mesh) else {
             continue;
         };
         if mesh.primitive_topology() != PrimitiveTopology::TriangleList {
             continue;
         }
         let skin_base = if item.skinned {
-            match skin_uniforms.skin_index(MainEntity::from(item.entity)) {
+            match gpu.skin_uniforms.skin_index(MainEntity::from(item.entity)) {
                 Some(offset) => offset,
                 // Not (yet) registered with Bevy's skin allocator: skip this
                 // frame; the next pick re-resolves.
@@ -315,7 +328,8 @@ fn prepare_gpu_pick(
         let key = GpuPickKey {
             skinned: item.skinned,
         };
-        let Ok(pipeline_id) = specialized.specialize(&pipeline_cache, &pipeline, key, &mesh.layout)
+        let Ok(pipeline_id) =
+            specialized.specialize(&gpu.pipeline_cache, &pipeline, key, &mesh.layout)
         else {
             // A mesh without the variant's attributes (e.g. a skinned draw
             // over a mesh missing joint data) cannot be picked; skip it.
@@ -348,11 +362,13 @@ fn prepare_gpu_pick(
             pad: 0,
         });
     }
-    buffers.uniforms.write_buffer(&render_device, &render_queue);
+    buffers
+        .uniforms
+        .write_buffer(&gpu.render_device, &gpu.render_queue);
 
     // The depth attachment, created once (the crop size is constant).
     if buffers.depth.is_none() {
-        let texture = render_device.create_texture(&TextureDescriptor {
+        let texture = gpu.render_device.create_texture(&TextureDescriptor {
             label: Some("gpu_pick_depth"),
             size: Extent3d {
                 width: CROP_SIZE,
@@ -374,18 +390,20 @@ fn prepare_gpu_pick(
     let Some(uniform_binding) = buffers.uniforms.binding() else {
         return;
     };
-    let static_bind = render_device.create_bind_group(
+    let static_bind = gpu.render_device.create_bind_group(
         "gpu_pick_static_bind_group",
-        &pipeline_cache.get_bind_group_layout(&pipeline.static_layout),
+        &gpu.pipeline_cache
+            .get_bind_group_layout(&pipeline.static_layout),
         &BindGroupEntries::sequential((uniform_binding.clone(),)),
     );
     let skinned_bind = any_skinned.then(|| {
-        render_device.create_bind_group(
+        gpu.render_device.create_bind_group(
             "gpu_pick_skinned_bind_group",
-            &pipeline_cache.get_bind_group_layout(&pipeline.skinned_layout),
+            &gpu.pipeline_cache
+                .get_bind_group_layout(&pipeline.skinned_layout),
             &BindGroupEntries::sequential((
                 uniform_binding,
-                skin_uniforms.current_buffer.as_entire_binding(),
+                gpu.skin_uniforms.current_buffer.as_entire_binding(),
             )),
         )
     });
@@ -403,20 +421,11 @@ fn prepare_gpu_pick(
 /// GPU-avatar compute (which runs first, in `Prepass`) wrote this frame's
 /// skin palettes. `Core3d` runs once per 3D view; the prepared data is
 /// `take`n so the pass encodes exactly once per frame.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy render-world system's inputs are its parameters: the prepared draws, \
-              the targets + GPU images, the buffers, the caches and allocator, and the \
-              render context"
-)]
 fn run_gpu_pick_pass(
     mut prepared: ResMut<PreparedGpuPick>,
     targets: Option<Res<GpuPickTargets>>,
-    gpu_images: Res<RenderAssets<GpuImage>>,
     buffers: Res<GpuPickBuffers>,
-    pipeline_cache: Res<PipelineCache>,
-    mesh_allocator: Res<MeshAllocator>,
-    meshes: Res<RenderAssets<RenderMesh>>,
+    gpu: PickRenderWorld,
     mut ctx: RenderContext,
 ) {
     let Some(data) = prepared.0.take() else {
@@ -425,7 +434,7 @@ fn run_gpu_pick_pass(
     let Some(targets) = targets else {
         return;
     };
-    let Some(id_view) = super::id_target_view(&targets, &gpu_images) else {
+    let Some(id_view) = super::id_target_view(&targets, &gpu.gpu_images) else {
         return;
     };
     let Some(depth_view) = buffers.depth.as_ref() else {
@@ -467,13 +476,13 @@ fn run_gpu_pick_pass(
     for draw in &data.draws {
         // A still-compiling pipeline skips its draw (the pick resolves without
         // this candidate; the next request re-tries a compiled pipeline).
-        let Some(pipeline) = pipeline_cache.get_render_pipeline(draw.pipeline) else {
+        let Some(pipeline) = gpu.pipeline_cache.get_render_pipeline(draw.pipeline) else {
             continue;
         };
-        let Some(gpu_mesh) = meshes.get(draw.mesh) else {
+        let Some(gpu_mesh) = gpu.meshes.get(draw.mesh) else {
             continue;
         };
-        let Some(vertex_slice) = mesh_allocator.mesh_vertex_slice(&draw.mesh) else {
+        let Some(vertex_slice) = gpu.mesh_allocator.mesh_vertex_slice(&draw.mesh) else {
             continue;
         };
         let bind_group = if draw.skinned {
@@ -492,7 +501,7 @@ fn run_gpu_pick_pass(
                 count,
                 index_format,
             } => {
-                let Some(index_slice) = mesh_allocator.mesh_index_slice(&draw.mesh) else {
+                let Some(index_slice) = gpu.mesh_allocator.mesh_index_slice(&draw.mesh) else {
                     continue;
                 };
                 let Ok(base_vertex) = i32::try_from(vertex_slice.range.start) else {

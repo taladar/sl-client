@@ -12,9 +12,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 310 |
+| ready | 309 |
 | blocked | 41 |
-| in-progress | 22 |
+| in-progress | 23 |
 | bugs | 5 |
 | done | 1185 |
 | deferred | 28 |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (310)
+## ready (309)
 
 ### protocol
 
@@ -937,9 +937,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### idiomatic
 
-- [`idiomatic-audit-bevy-system-param-bundles`](ready/idiomatic-audit-bevy-system-param-bundles.md)
-  — 128+ too_many_arguments suppressions are Bevy systems that want a
-  SystemParam bundle
 - [`idiomatic-audit-dead-forward-api`](ready/idiomatic-audit-dead-forward-api.md)
   — Decoded-but-never-read fields and write-only state across the workspace
 - [`idiomatic-audit-lsl-scope-duplication`](ready/idiomatic-audit-lsl-scope-duplication.md)
@@ -1095,7 +1092,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (22)
+## in-progress (23)
 
 ### viewer
 
@@ -1150,6 +1147,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
+
+### idiomatic
+
+- [`idiomatic-audit-bevy-system-param-bundles`](in-progress/idiomatic-audit-bevy-system-param-bundles.md)
+  — 128+ too_many_arguments suppressions are Bevy systems that want a
+  SystemParam bundle
 
 ### chat
 

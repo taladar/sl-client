@@ -1896,26 +1896,31 @@ fn on_palette_drag_leave(
     }
 }
 
+/// The saved palette and what a save writes through, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the in-memory row, the
+/// settings store it is persisted to, and the cell rims a drop repaints.
+#[derive(bevy::ecs::system::SystemParam)]
+struct PaletteStore<'w, 's> {
+    /// The palette row shown across every picker.
+    palette: ResMut<'w, ColorPalette>,
+    /// The settings store a saved cell is written through (absent headless).
+    settings: Option<ResMut<'w, ViewerSettings>>,
+    /// The cell rims, which a drag-over highlights and a drop restores.
+    borders: Query<'w, 's, &'static mut BorderColor, With<PaletteCell>>,
+}
+
 /// Dropping the current colour on a cell **saves** it there, and persists it —
 /// the reference's drag-from-the-swatch gesture, and its `LLUIColorTable`
 /// write-back.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy observer's parameters are its injected world access: the drop, what was \
-              dropped, the cell it landed on, the window found through the parent chain, the \
-              in-memory palette, the store it is written through, and the rim it restores"
-)]
 fn on_palette_drop(
     drop: On<Pointer<DragDrop>>,
     previews: Query<(), With<PreviewSwatch>>,
     cells: Query<&PaletteCell>,
     parents: Query<&ChildOf>,
     windows: Query<&ColorPickerState>,
-    mut palette: ResMut<ColorPalette>,
-    mut settings: Option<ResMut<ViewerSettings>>,
-    mut borders: Query<&mut BorderColor, With<PaletteCell>>,
+    mut store: PaletteStore,
 ) {
-    if let Ok(mut border) = borders.get_mut(drop.entity) {
+    if let Ok(mut border) = store.borders.get_mut(drop.entity) {
         *border = BorderColor::all(CONTROL_BORDER);
     }
     if !previews.contains(drop.dropped) {
@@ -1934,10 +1939,10 @@ fn on_palette_drop(
         return;
     };
     let color = state.current();
-    if let Some(slot) = palette.0.get_mut(cell.0) {
+    if let Some(slot) = store.palette.0.get_mut(cell.0) {
         *slot = color;
     }
-    if let Some(settings) = settings.as_mut() {
+    if let Some(settings) = store.settings.as_mut() {
         settings.set(
             Scope::Global,
             &palette_setting_name(cell.0),
@@ -2272,6 +2277,27 @@ fn thumb_offset(value: f32, range: &SliderRange) -> f32 {
     fraction * (TRACK_WIDTH - THUMB_WIDTH)
 }
 
+/// Every kind of node one picker's visual sync writes, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the fills, the gradients,
+/// the boxes, the thumb insets and the two kinds of text.
+#[derive(bevy::ecs::system::SystemParam)]
+struct PickerVisuals<'w, 's> {
+    /// Flat fills — swatches, the preview, the latched check marks.
+    backgrounds: Query<'w, 's, &'static mut BackgroundColor>,
+    /// The channel ramps.
+    gradients: Query<'w, 's, &'static mut BackgroundGradient>,
+    /// Layout, for the saturation / value square's marker.
+    nodes: Query<'w, 's, &'static mut Node>,
+    /// The slider thumbs' logical insets.
+    insets: Query<'w, 's, &'static mut LogicalInset, With<SliderThumb>>,
+    /// Plain texts — the channel read-outs.
+    texts: Query<'w, 's, &'static mut Text>,
+    /// The editable hex field.
+    editables: Query<'w, 's, &'static mut EditableText>,
+    /// What toggles the eyedropper / latched markers.
+    commands: Commands<'w, 's>,
+}
+
 /// Reconcile every open picker's visuals from its live state: the compare
 /// swatches, the field and strip markers, the strip's own gradient, both slider
 /// sets, the hex text, the palette fills, and the two latched controls.
@@ -2284,25 +2310,13 @@ fn thumb_offset(value: f32, range: &SliderRange) -> f32 {
 /// before it touches `Node`, so taffy was never re-entered — the waste was the
 /// resolver's own pass, small but permanent.) A closed picker is not on screen,
 /// so it does no work at all.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected world access: the windows and their \
-              state, the four kinds of node the sync writes (fills, gradients, boxes and text), \
-              the sliders it reads back, the palette and the settings the latched controls show"
-)]
 fn sync_color_picker_visual(
     windows: Query<(&ColorPickerState, &ColorPickerUi, Has<Eyedropper>)>,
     sliders: Query<(&SliderValue, &SliderRange, &ChannelAxis, &Children)>,
     palette: Res<ColorPalette>,
     apply_now: Res<ApplyColorImmediately>,
     focus: Option<Res<InputFocus>>,
-    mut backgrounds: Query<&mut BackgroundColor>,
-    mut gradients: Query<&mut BackgroundGradient>,
-    mut nodes: Query<&mut Node>,
-    mut insets: Query<&mut LogicalInset, With<SliderThumb>>,
-    mut texts: Query<&mut Text>,
-    mut editables: Query<&mut EditableText>,
-    mut commands: Commands,
+    mut visuals: PickerVisuals,
 ) {
     let focused = focus.as_ref().and_then(|focus| focus.get());
     for (state, ui, armed) in &windows {
@@ -2310,10 +2324,10 @@ fn sync_color_picker_visual(
             continue;
         }
         let current = state.current();
-        paint(&mut backgrounds, ui.preview, current);
-        paint(&mut backgrounds, ui.original, state.original);
+        paint(&mut visuals.backgrounds, ui.preview, current);
+        paint(&mut visuals.backgrounds, ui.original, state.original);
         paint(
-            &mut backgrounds,
+            &mut visuals.backgrounds,
             ui.pipette,
             if armed {
                 BUTTON_LATCHED
@@ -2324,7 +2338,7 @@ fn sync_color_picker_visual(
 
         // The strip is drawn around the current hue and saturation.
         let wanted = luminance_gradient(state.mid_luminance_color());
-        if let Ok(mut gradient) = gradients.get_mut(ui.strip)
+        if let Ok(mut gradient) = visuals.gradients.get_mut(ui.strip)
             && *gradient != wanted
         {
             *gradient = wanted;
@@ -2335,12 +2349,12 @@ fn sync_color_picker_visual(
         let saturation = state.hsl.get(1).copied().unwrap_or(0.0);
         let luminance = state.hsl.get(2).copied().unwrap_or(0.0);
         place(
-            &mut nodes,
+            &mut visuals.nodes,
             ui.field_marker,
             Vec2::new(hue * FIELD_SIZE, (1.0 - saturation) * FIELD_SIZE),
         );
         place(
-            &mut nodes,
+            &mut visuals.nodes,
             ui.strip_marker,
             Vec2::new(0.0, (1.0 - luminance) * FIELD_SIZE),
         );
@@ -2353,18 +2367,18 @@ fn sync_color_picker_visual(
             // `SliderValue` is an immutable component: it is replaced, not
             // written through, and only when it would change.
             if !slider_holds(value.0, wanted) {
-                commands.entity(*slider).insert(SliderValue(wanted));
+                visuals.commands.entity(*slider).insert(SliderValue(wanted));
             }
             let offset = Val::Px(thumb_offset(wanted, range));
             for child in children.iter() {
-                if let Ok(mut inset) = insets.get_mut(child)
+                if let Ok(mut inset) = visuals.insets.get_mut(child)
                     && inset.0.inline_start != offset
                 {
                     inset.0.inline_start = offset;
                 }
             }
             if let Some(label) = ui.labels.get(index)
-                && let Ok(mut text) = texts.get_mut(*label)
+                && let Ok(mut text) = visuals.texts.get_mut(*label)
             {
                 let want = format!("{}", wanted.round());
                 if text.0 != want {
@@ -2373,13 +2387,13 @@ fn sync_color_picker_visual(
             }
         }
 
-        seed_hex(&mut editables, focused, ui.hex, &hex_of(current));
+        seed_hex(&mut visuals.editables, focused, ui.hex, &hex_of(current));
 
         for (index, cell) in ui.palette.iter().enumerate() {
-            paint(&mut backgrounds, *cell, palette.entry(index));
+            paint(&mut visuals.backgrounds, *cell, palette.entry(index));
         }
 
-        if let Ok(mut glyph) = texts.get_mut(ui.apply_glyph) {
+        if let Ok(mut glyph) = visuals.texts.get_mut(ui.apply_glyph) {
             let want = if apply_now.0 {
                 CHECKED_GLYPH
             } else {

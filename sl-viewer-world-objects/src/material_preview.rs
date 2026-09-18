@@ -297,27 +297,35 @@ fn reclaim_removed_previews(
     }
 }
 
+/// What one preview sphere is shaded and shown through, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the stores a bound studio's
+/// sphere material and render target are built in, plus the two node writes that
+/// put the result on screen.
+#[derive(bevy::ecs::system::SystemParam)]
+struct PreviewStores<'w, 's> {
+    /// The texture fetch the sphere's maps go through.
+    textures: ResMut<'w, TextureManager>,
+    /// The sphere materials written.
+    materials: ResMut<'w, Assets<FaceMaterial>>,
+    /// The render targets the studios draw into.
+    images: ResMut<'w, Assets<Image>>,
+    /// The studio cameras, switched on and off as previews bind and release.
+    cameras: Query<'w, 's, &'static mut Camera>,
+    /// The node background, cleared when a preview shows no material.
+    backgrounds: Query<'w, 's, &'static mut BackgroundColor>,
+    /// What writes the node's `ImageNode`.
+    commands: Commands<'w, 's>,
+}
+
 /// Reconcile every previewing node to its studio each frame: resolve its
 /// [`MaterialPreview`] (decoding an asset id if needed), and — only when the
 /// resolution actually changes — bind or release a studio, shade its sphere, and
 /// point (or clear) the node's [`ImageNode`].
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the previews, \
-              the studio pool, the material manager + texture manager + material / image assets \
-              the sphere shading needs, the camera + background writes, and Commands for the \
-              node's ImageNode"
-)]
 fn drive_material_previews(
     previews: Query<(Entity, &MaterialPreview)>,
     pool: Option<ResMut<MaterialPreviewStudios>>,
     mut manager: ResMut<MaterialManager>,
-    mut textures: ResMut<TextureManager>,
-    mut materials: ResMut<Assets<FaceMaterial>>,
-    mut images: ResMut<Assets<Image>>,
-    mut cameras: Query<&mut Camera>,
-    mut backgrounds: Query<&mut BackgroundColor>,
-    mut commands: Commands,
+    mut studio: PreviewStores,
 ) {
     let Some(mut pool) = pool else {
         return;
@@ -342,21 +350,21 @@ fn drive_material_previews(
         }
         match &resolved {
             None => {
-                pool.release(owner, &mut cameras);
-                if let Ok(mut node) = commands.get_entity(owner) {
+                pool.release(owner, &mut studio.cameras);
+                if let Ok(mut node) = studio.commands.get_entity(owner) {
                     node.remove::<ImageNode>();
                 }
-                if let Ok(mut background) = backgrounds.get_mut(owner) {
+                if let Ok(mut background) = studio.backgrounds.get_mut(owner) {
                     background.0 = EMPTY_FILL;
                 }
             }
             Some(material) => {
                 let index = pool.bind(
                     owner,
-                    &mut commands,
-                    &mut images,
-                    &mut materials,
-                    &mut cameras,
+                    &mut studio.commands,
+                    &mut studio.images,
+                    &mut studio.materials,
+                    &mut studio.cameras,
                 );
                 let Some((sphere_material, image)) = pool
                     .studios
@@ -365,8 +373,13 @@ fn drive_material_previews(
                 else {
                     continue;
                 };
-                manager.apply_preview(&mut textures, &mut materials, &sphere_material, material);
-                if let Ok(mut node) = commands.get_entity(owner) {
+                manager.apply_preview(
+                    &mut studio.textures,
+                    &mut studio.materials,
+                    &sphere_material,
+                    material,
+                );
+                if let Ok(mut node) = studio.commands.get_entity(owner) {
                     node.insert(ImageNode::new(image));
                 }
             }

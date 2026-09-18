@@ -768,14 +768,6 @@ fn apply_to_pose(
     Quat::IDENTITY.angle_between(aim) * state.weight
 }
 
-/// Apply the head & eye look-at adjusters for one avatar, resolving its look-at
-/// direction (Bevy target → avatar-local Second Life frame) from `targets`.
-///
-/// `head_pos` / `eye_positions` are the joint translations in the avatar-local
-/// Second Life frame (from the deformed skeleton, before this fold); `root` is the
-/// avatar-root global (its rotation maps avatar-local Second Life vectors into Bevy
-/// world). Runs even without a target so the eyes keep their idle jitter and the
-/// head smoothly returns to rest.
 /// Debug switches read once per pose pass from the environment: force every
 /// avatar's look-at to a fixed strong side/up direction (`SL_VIEWER_LOOK_AT_TEST`)
 /// so the head-turn fold is unmistakable, and log each avatar's target / applied
@@ -806,27 +798,46 @@ impl LookAtDebug {
     }
 }
 
+/// Where the looking avatar's head and eyes stand this frame — the geometry a
+/// look-at fold aims from, as opposed to the target it aims at.
+#[derive(Clone, Copy)]
+pub(crate) struct LookAtFrom<'a> {
+    /// The avatar root's world transform.
+    pub root: &'a GlobalTransform,
+    /// The head's world position, absent before the pose has one.
+    pub head_pos: Option<Vec3>,
+    /// The two eyes' world positions, likewise.
+    pub eye_positions: Option<(Vec3, Vec3)>,
+    /// Which joints the fold writes.
+    pub joints: LookAtJoints,
+    /// The neck parent's world rotation, which the head yaw is relative to.
+    pub neck_parent_world: Quat,
+}
+
 /// Apply the head & eye look-at adjusters for one avatar, resolving its look-at
 /// direction (Bevy target → avatar-local Second Life frame) from `targets`.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the look-at fold needs the avatar's target, root frame, joint set, \
-              positions, per-avatar state and debug switches; grouping them into a \
-              struct would only move the argument list"
-)]
+///
+/// `head_pos` / `eye_positions` are the joint translations in the avatar-local
+/// Second Life frame (from the deformed skeleton, before this fold); `root` is the
+/// avatar-root global (its rotation maps avatar-local Second Life vectors into Bevy
+/// world). Runs even without a target so the eyes keep their idle jitter and the
+/// head smoothly returns to rest.
 pub(crate) fn apply(
     pose: &mut AnimationPose,
     agent: AgentKey,
     targets: &LookAtTargets,
     motion: &mut LookAtMotion,
-    root: &GlobalTransform,
-    head_pos: Option<Vec3>,
-    eye_positions: Option<(Vec3, Vec3)>,
-    joints: LookAtJoints,
-    neck_parent_world: Quat,
+    from: &LookAtFrom<'_>,
     dt: f32,
     debug: LookAtDebug,
 ) {
+    let &LookAtFrom {
+        root,
+        head_pos,
+        eye_positions,
+        joints,
+        neck_parent_world,
+    } = from;
     let real_dir = targets.point(agent).zip(head_pos).map(|(point, head)| {
         // Direction from the head to the target, in Bevy world space, rotated back
         // into the avatar-local Second Life frame the deformed skeleton uses.

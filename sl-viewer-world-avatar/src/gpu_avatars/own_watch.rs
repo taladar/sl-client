@@ -130,25 +130,55 @@ struct PartCensus {
     unbounded: u32,
 }
 
+/// What the own-avatar watch projects against, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub(crate) struct WatchedView<'w, 's> {
+    /// World transforms of the watched entities.
+    globals: Query<'w, 's, &'static GlobalTransform>,
+    /// The world camera's pose and frustum.
+    camera: Query<'w, 's, (&'static GlobalTransform, &'static Frustum), With<ViewerCamera>>,
+}
+
+/// The GPU-side state the own-avatar watch reports on, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): which slot our avatar
+/// occupies, the bounds the GPU computed for it, and the pose feed it was
+/// staged from.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct WatchedGpuState<'w> {
+    /// The slot registry: which GPU rows our avatar owns.
+    registry: Res<'w, GpuAvatarRegistry>,
+    /// The bounds the GPU pass computed for those rows.
+    bounds: Res<'w, GpuAvatarBounds>,
+    /// The published pose feed the rows were staged from.
+    feed: Res<'w, GpuAvatarPoseFeed>,
+}
+
+/// Who the watch is about and what it reports on outside the GPU, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): our own agent id, the avatar
+/// mirror the body root is resolved through, and the animation state the logged
+/// line names.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub(crate) struct OwnWatchFacts<'w> {
+    /// Our own agent, whose avatar is watched.
+    identity: Res<'w, SlIdentity>,
+    /// The avatar mirror, for the body root entity.
+    state: Res<'w, AvatarState>,
+    /// The reconciled playback sets, for the animations line.
+    playback: Res<'w, AnimationPlayback>,
+    /// The decoded-motion cache the animation names come from.
+    manager: Res<'w, AnimationManager>,
+}
+
 /// Record the own avatar's draw state for this frame, and log it around an
 /// anomaly — see the module docs. Runs after `CheckVisibility`. Inert unless
 /// the env flag is set.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a diagnostic joining the avatar, its pose feed, its read-back bound, its \
-              parts, the camera and the playing animations"
-)]
 pub(crate) fn watch_own_avatar_visibility(
     time: Res<Time>,
-    identity: Res<SlIdentity>,
-    state: Res<AvatarState>,
-    registry: Res<GpuAvatarRegistry>,
-    bounds: Res<GpuAvatarBounds>,
-    feed: Res<GpuAvatarPoseFeed>,
-    (playback, manager): (Res<AnimationPlayback>, Res<AnimationManager>),
+    facts: OwnWatchFacts,
+    gpu: WatchedGpuState,
     parts: PartQuery<'_, '_>,
-    globals: Query<&GlobalTransform>,
-    camera: Query<(&GlobalTransform, &Frustum), With<ViewerCamera>>,
+    screen: WatchedView,
     mut watch: Local<OwnWatch>,
 ) {
     let on = *watch
@@ -157,7 +187,7 @@ pub(crate) fn watch_own_avatar_visibility(
     if !on {
         return;
     }
-    let Some(own) = identity.agent_id else {
+    let Some(own) = facts.identity.agent_id else {
         return;
     };
     // A plain reborrow, so the episode and the counters borrow as disjoint
@@ -166,11 +196,11 @@ pub(crate) fn watch_own_avatar_visibility(
     watch.frame = watch.frame.saturating_add(1);
     let now = time.elapsed_secs();
     let slot = PoseSlotKey::Avatar(own);
-    let anchor = state.body_root_of(own);
+    let anchor = facts.state.body_root_of(own);
     let root = anchor
-        .and_then(|entity| globals.get(entity).ok())
+        .and_then(|entity| screen.globals.get(entity).ok())
         .map(GlobalTransform::translation);
-    let view = camera.single().ok();
+    let view = screen.camera.single().ok();
     let census = count_parts(&parts, slot, view.map(|(_camera, frustum)| frustum));
     let root_in_view = root.zip(view).is_some_and(|(root, (_camera, frustum))| {
         frustum.intersects_sphere(
@@ -187,7 +217,7 @@ pub(crate) fn watch_own_avatar_visibility(
     let travel = root
         .zip(watch.root)
         .map(|(root, previous)| root.distance(previous));
-    let animations = describe_animations(&playback, &manager, own, now);
+    let animations = describe_animations(&facts.playback, &facts.manager, own, now);
 
     let line = format!(
         "frame={} t={now:.3} dt_ms={:.1} anchor={anchor:?} root={} travel={} parts={} shown={} \
@@ -203,8 +233,8 @@ pub(crate) fn watch_own_avatar_visibility(
         census.in_main_view,
         census.unbounded,
         camera_distance.map_or_else(|| "none".to_owned(), |d| format!("{d:.2}")),
-        describe_bound(&registry, &bounds, &feed, slot, root),
-        describe_feed(&feed, slot, root),
+        describe_bound(&gpu.registry, &gpu.bounds, &gpu.feed, slot, root),
+        describe_feed(&gpu.feed, slot, root),
     );
 
     // What, if anything, is wrong this frame.

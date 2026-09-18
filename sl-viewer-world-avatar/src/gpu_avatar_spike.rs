@@ -2,7 +2,7 @@
 //! §9.1 risk 1; task `viewer-perf-gpu-avatar-keystone-skinuniforms-spike`): a
 //! de-risking experiment, not a feature. It proves — or disproves — the one
 //! assumption the whole GPU-avatar design leans on: that a compute pass can
-//! bind Bevy's [`SkinUniforms`]`.current_buffer` as `storage, read_write` and
+//! bind Bevy's [`SkinUniforms`](bevy::pbr::SkinUniforms)`.current_buffer` as `storage, read_write` and
 //! overwrite a skin's palette range **at the offset Bevy allocated**, with the
 //! normal draw path (`skinning.wgsl`, batching, prepass, shadows) then
 //! rendering from the compute-written matrices.
@@ -46,7 +46,7 @@
 //!    submitted command buffer**.
 //! 2. `Render` / `RenderSystems::PrepareBindGroups` (a later set in the same
 //!    chain, so after `prepare_skins`): `prepare_spike` re-resolves the
-//!    target's palette offset from [`SkinUniforms::skin_index`] (buffers can
+//!    target's palette offset from [`SkinUniforms::skin_index`](bevy::pbr::SkinUniforms::skin_index) (buffers can
 //!    reallocate and the allocator can move skins, so every frame), uploads
 //!    `SpikeParams`, and rebuilds the bind group against the **post-swap**
 //!    `current_buffer` (rebuilt every frame for the same reason).
@@ -82,21 +82,18 @@ use bevy::core_pipeline::Core3dSystems;
 use bevy::core_pipeline::prepass::node::early_prepass;
 use bevy::core_pipeline::schedule::Core3d;
 use bevy::mesh::skinning::SkinnedMesh;
-use bevy::pbr::{
-    EARLY_SHADOW_PASS, MAX_JOINTS, SkinUniforms, per_view_shadow_pass, shared_shadow_pass,
-};
+use bevy::pbr::{EARLY_SHADOW_PASS, MAX_JOINTS, per_view_shadow_pass, shared_shadow_pass};
 use bevy::prelude::*;
 use bevy::render::extract_resource::{ExtractResource, ExtractResourcePlugin};
 use bevy::render::gpu_readback::{Readback, ReadbackComplete};
-use bevy::render::render_asset::RenderAssets;
 use bevy::render::render_resource::binding_types::{storage_buffer_sized, uniform_buffer};
 use bevy::render::render_resource::{
     BindGroup, BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries,
     CachedComputePipelineId, ComputePassDescriptor, ComputePipelineDescriptor, PipelineCache,
     ShaderStages, ShaderType, UniformBuffer,
 };
-use bevy::render::renderer::{RenderContext, RenderDevice, RenderQueue};
-use bevy::render::storage::{GpuShaderBuffer, ShaderBuffer};
+use bevy::render::renderer::RenderContext;
+use bevy::render::storage::ShaderBuffer;
 use bevy::render::sync_world::MainEntity;
 use bevy::render::{Extract, Render, RenderApp, RenderStartup, RenderSystems};
 
@@ -301,7 +298,7 @@ struct ExtractedSpikeTarget(Option<SpikeTargetData>);
 
 /// What `prepare_spike` needs to know about the target.
 struct SpikeTargetData {
-    /// The target's main-world entity, the key [`SkinUniforms::skin_index`]
+    /// The target's main-world entity, the key [`SkinUniforms::skin_index`](bevy::pbr::SkinUniforms::skin_index)
     /// resolves offsets by.
     main_entity: MainEntity,
     /// How many joint matrices the target's palette range holds.
@@ -429,7 +426,7 @@ fn init_spike_pipeline(mut commands: Commands, pipeline_cache: Res<PipelineCache
 }
 
 /// Everything `run_spike_compute` needs this frame, or `None` when the
-/// target is missing or not (yet) registered in [`SkinUniforms`].
+/// target is missing or not (yet) registered in [`SkinUniforms`](bevy::pbr::SkinUniforms).
 #[derive(Resource, Default)]
 struct PreparedSpike(Option<PreparedSpikeData>);
 
@@ -447,26 +444,16 @@ struct PreparedSpikeData {
     readback_bind_group: Option<BindGroup>,
 }
 
-/// Resolve the target's palette offset (fresh from [`SkinUniforms`], after
+/// Resolve the target's palette offset (fresh from [`SkinUniforms`](bevy::pbr::SkinUniforms), after
 /// `prepare_skins` ran), upload `SpikeParams`, and rebuild the bind group
 /// against this frame's `current_buffer`.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy render-world system's inputs are its parameters; splitting this \
-              spike-only system into two would spread one frame's bind-group build \
-              over shared state for no reader's benefit"
-)]
 fn prepare_spike(
     mut prepared: ResMut<PreparedSpike>,
     mut pipeline: ResMut<SpikePipeline>,
     extracted: Res<ExtractedSpikeTarget>,
-    skin_uniforms: Res<SkinUniforms>,
-    pipeline_cache: Res<PipelineCache>,
-    render_device: Res<RenderDevice>,
-    render_queue: Res<RenderQueue>,
     mode: Res<SpikeMode>,
     readback: Option<Res<SpikeReadbackTarget>>,
-    buffers: Res<RenderAssets<GpuShaderBuffer>>,
+    gpu: crate::gpu_avatars::render::ComputeContext,
 ) {
     prepared.0 = None;
     let Some(target) = extracted.0.as_ref() else {
@@ -478,7 +465,7 @@ fn prepare_spike(
     // Re-resolved every frame: skins can be moved by the offset allocator
     // whenever meshes (de)register, and the buffers themselves reallocate on
     // growth.
-    let Some(offset) = skin_uniforms.skin_index(target.main_entity) else {
+    let Some(offset) = gpu.skin_uniforms.skin_index(target.main_entity) else {
         return;
     };
 
@@ -488,16 +475,18 @@ fn prepare_spike(
         count: target.joint_count,
         mode: mode.shader_mode(),
     });
-    pipeline.params.write_buffer(&render_device, &render_queue);
+    pipeline
+        .params
+        .write_buffer(&gpu.render_device, &gpu.render_queue);
     let Some(params_binding) = pipeline.params.binding() else {
         return;
     };
 
-    let bind_group = render_device.create_bind_group(
+    let bind_group = gpu.render_device.create_bind_group(
         "gpu_avatar_spike_bind_group",
-        &pipeline_cache.get_bind_group_layout(&pipeline.layout),
+        &gpu.pipeline_cache.get_bind_group_layout(&pipeline.layout),
         &BindGroupEntries::sequential((
-            skin_uniforms.current_buffer.as_entire_binding(),
+            gpu.skin_uniforms.current_buffer.as_entire_binding(),
             params_binding.clone(),
         )),
     );
@@ -506,13 +495,14 @@ fn prepare_spike(
     // registers the destination at startup, so with the spike on this exists
     // as soon as the buffer asset has prepared.
     let readback_bind_group = readback
-        .and_then(|readback| buffers.get(&readback.buffer))
+        .and_then(|readback| gpu.shader_buffers.get(&readback.buffer))
         .map(|destination| {
-            render_device.create_bind_group(
+            gpu.render_device.create_bind_group(
                 "gpu_avatar_spike_readback_bind_group",
-                &pipeline_cache.get_bind_group_layout(&pipeline.readback_layout),
+                &gpu.pipeline_cache
+                    .get_bind_group_layout(&pipeline.readback_layout),
                 &BindGroupEntries::sequential((
-                    skin_uniforms.current_buffer.as_entire_binding(),
+                    gpu.skin_uniforms.current_buffer.as_entire_binding(),
                     params_binding,
                     destination.buffer.as_entire_binding(),
                 )),

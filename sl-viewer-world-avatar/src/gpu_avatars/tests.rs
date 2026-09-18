@@ -42,10 +42,11 @@ use sl_client_bevy::{AssetKey, Uuid, sample_motion};
 use super::render::{GpuAvatarReadbackData, palette_worst_diff};
 use super::stage::{GpuAvatarStaging, StagedReadback, StagedSkinInstance};
 use super::types::{
-    ClipArena, GpuAvatarFrame, GpuClipHeader, GpuComputeParams, GpuCorrection, GpuJointTrack,
-    GpuLocalPose, GpuPlayState, GpuRestJoint, GpuSampleJob, GpuSkinInstance, JOINT_NONE,
-    MAX_ACTIVE_CLIPS, PLAY_STOPPED_NONE, POSE_FLAG_POS, POSE_FLAG_ROT, compose_rest_joints,
-    mirror_local_pose, mirror_playback_time, mirror_sample_track, pose_rows, reference_fk,
+    BlendParams, ClipArena, GpuAvatarFrame, GpuClipHeader, GpuComputeParams, GpuCorrection,
+    GpuJointTrack, GpuLocalPose, GpuPlayState, GpuRestJoint, GpuSampleJob, GpuSkinInstance,
+    JOINT_NONE, MAX_ACTIVE_CLIPS, PLAY_STOPPED_NONE, POSE_FLAG_POS, POSE_FLAG_ROT,
+    compose_rest_joints, mirror_local_pose, mirror_playback_time, mirror_sample_track, pose_rows,
+    reference_fk,
 };
 use super::{GpuAvatarsMode, GpuAvatarsPlugin};
 use sl_viewer_kit::face_material::{FaceMaterial, SlFaceMaterialPlugin, inert_face_material};
@@ -1511,11 +1512,13 @@ fn golden_mirror_blend_matches_blend_joint() -> Result<(), TestError> {
         &jobs,
         cache_len,
         4,
-        now,
-        None,
-        JOINT_NONE,
-        JOINT_NONE,
-        &[],
+        &BlendParams {
+            now,
+            idle: None,
+            chest_joint: JOINT_NONE,
+            torso_joint: JOINT_NONE,
+            corrections: &[],
+        },
         None,
     );
 
@@ -1619,11 +1622,13 @@ fn golden_mirror_idle_matches_procedural() -> Result<(), TestError> {
         &jobs,
         arena.track_count(clip_id),
         4,
-        now,
-        Some(idle_now),
-        2,
-        1,
-        &[],
+        &BlendParams {
+            now,
+            idle: Some(idle_now),
+            chest_joint: 2,
+            torso_joint: 1,
+            corrections: &[],
+        },
         None,
     );
 
@@ -1687,11 +1692,13 @@ fn golden_mirror_corrections_replace_channels() -> Result<(), TestError> {
         &[],
         0,
         4,
-        5.0,
-        None,
-        JOINT_NONE,
-        JOINT_NONE,
-        &[(3, correction)],
+        &BlendParams {
+            now: 5.0,
+            idle: None,
+            chest_joint: JOINT_NONE,
+            torso_joint: JOINT_NONE,
+            corrections: &[(3, correction)],
+        },
         None,
     );
     let corrected = rows.get(3).ok_or("corrected row")?;
@@ -1842,11 +1849,13 @@ fn golden_mirror_held_matches_pose_hold() -> Result<(), TestError> {
             &jobs,
             cache_len,
             4,
-            *now,
-            None,
-            JOINT_NONE,
-            JOINT_NONE,
-            &[],
+            &BlendParams {
+                now: *now,
+                idle: None,
+                chest_joint: JOINT_NONE,
+                torso_joint: JOINT_NONE,
+                corrections: &[],
+            },
             Some(mirror_held.as_mut_slice()),
         );
 
@@ -2286,11 +2295,13 @@ fn the_gpu_sampled_blended_palette_matches_the_cpu_mirror() -> Result<(), TestEr
         &jobs,
         cache_len,
         joint_count,
-        now,
-        Some(idle_now),
-        chest_u32,
-        torso_u32,
-        &[(hip_u32, correction_value)],
+        &BlendParams {
+            now,
+            idle: Some(idle_now),
+            chest_joint: chest_u32,
+            torso_joint: torso_u32,
+            corrections: &[(hip_u32, correction_value)],
+        },
         None,
     );
     // Teeth: the fixture actually exercises blend + idle + correction.
@@ -2608,11 +2619,13 @@ fn the_gpu_holds_a_stopped_motions_pose() -> Result<(), TestError> {
         &jobs,
         cache_len,
         joint_count,
-        now,
-        None,
-        JOINT_NONE,
-        JOINT_NONE,
-        &[],
+        &BlendParams {
+            now,
+            idle: None,
+            chest_joint: JOINT_NONE,
+            torso_joint: JOINT_NONE,
+            corrections: &[],
+        },
         Some(held.as_mut_slice()),
     );
     let phase_two_rows = mirror_local_pose(
@@ -2621,11 +2634,13 @@ fn the_gpu_holds_a_stopped_motions_pose() -> Result<(), TestError> {
         &[],
         0,
         joint_count,
-        now,
-        None,
-        JOINT_NONE,
-        JOINT_NONE,
-        &[(torso_u32, correction)],
+        &BlendParams {
+            now,
+            idle: None,
+            chest_joint: JOINT_NONE,
+            torso_joint: JOINT_NONE,
+            corrections: &[(torso_u32, correction)],
+        },
         Some(held.as_mut_slice()),
     );
     let unheld_rows = mirror_local_pose(
@@ -2634,11 +2649,13 @@ fn the_gpu_holds_a_stopped_motions_pose() -> Result<(), TestError> {
         &[],
         0,
         joint_count,
-        now,
-        None,
-        JOINT_NONE,
-        JOINT_NONE,
-        &[(torso_u32, correction)],
+        &BlendParams {
+            now,
+            idle: None,
+            chest_joint: JOINT_NONE,
+            torso_joint: JOINT_NONE,
+            corrections: &[(torso_u32, correction)],
+        },
         None,
     );
     let expected_one = palette(&phase_one_rows);

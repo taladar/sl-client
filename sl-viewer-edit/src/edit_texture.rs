@@ -745,20 +745,12 @@ struct MatModeSelected {
 /// behaviour where a PBR'd object opens in PBR mode and everything else in
 /// Material mode. Only runs on an object change, so the user's later manual
 /// matmedia pick stands.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the tool / \
-              selection state, the UI handles, the per-object guard, the render-material + \
-              hierarchy / scene queries the PBR test walks, and the combo the mode writes"
-)]
 fn auto_select_material_mode(
     tool: Res<EditToolState>,
     selection: Res<SelectionSet>,
     ui: Option<Res<BuildTextureUi>>,
     mut selected: ResMut<MatModeSelected>,
-    render_materials: Query<&crate::materials::ObjectRenderMaterials>,
-    children: Query<&Children>,
-    scene: Query<(), With<crate::objects::SceneObject>>,
+    faces: crate::edit_material::RenderFaceLookup,
     mut strips: Query<&mut TabStrip>,
 ) {
     if !tool.active {
@@ -777,13 +769,7 @@ fn auto_select_material_mode(
     }
     selected.last_object = Some(primary.scoped);
     let face_id = primary_face_index(&selection);
-    let has_pbr = face_has_render_material(
-        primary.entity,
-        face_id,
-        &render_materials,
-        &children,
-        &scene,
-    );
+    let has_pbr = faces.material_id(primary.entity, face_id).is_some();
     let want = if has_pbr {
         MatMedia::Pbr
     } else {
@@ -805,35 +791,6 @@ pub(crate) fn primary_face_index(selection: &SelectionSet) -> u8 {
         .and_then(|set| set.iter().map(|face| face.get()).min())
         .unwrap_or(0);
     u8::try_from(index).unwrap_or(0)
-}
-
-/// Whether face `face_id` of the object rooted at `root` carries a GLTF render
-/// material — walked from the object's [`crate::materials::ObjectRenderMaterials`]
-/// holder(s), stopping at any linkset-child scene object.
-fn face_has_render_material(
-    root: Entity,
-    face_id: u8,
-    render_materials: &Query<&crate::materials::ObjectRenderMaterials>,
-    children: &Query<&Children>,
-    scene: &Query<(), With<crate::objects::SceneObject>>,
-) -> bool {
-    let mut stack = vec![root];
-    while let Some(entity) = stack.pop() {
-        if entity != root && scene.get(entity).is_ok() {
-            continue;
-        }
-        if let Ok(holder) = render_materials.get(entity)
-            && holder.faces.iter().any(|(face, _id)| *face == face_id)
-        {
-            return true;
-        }
-        if let Ok(list) = children.get(entity) {
-            for child in list.iter() {
-                stack.push(child);
-            }
-        }
-    }
-    false
 }
 
 /// Mirror the three selector widgets' current values into [`MatModeState`] each
@@ -1135,6 +1092,70 @@ struct TexWidgets<'w, 's> {
     class_lists: Query<'w, 's, &'static mut ClassList>,
     /// Commands, to toggle the controls' `InteractionDisabled` / `Pickable`.
     commands: Commands<'w, 's>,
+    /// The focused field, which a programmatic rewrite must leave alone.
+    focus: Res<'w, InputFocus>,
+    /// The font context a programmatic [`EditableText`] rewrite relays through.
+    font_cx: ResMut<'w, FontCx>,
+    /// The layout context the same rewrite relays through.
+    layout_cx: ResMut<'w, LayoutCx>,
+}
+
+/// The selection-wide texture-entry edit path: apply an edit to every selected
+/// face and send each object's modified entry ([`apply_to_selection`]).
+#[derive(bevy::ecs::system::SystemParam)]
+struct TexFaceEdit<'w, 's> {
+    /// The faces the edit applies to.
+    selection: Res<'w, SelectionSet>,
+    /// Object properties, for the modify-permission check.
+    objects: Res<'w, ObjectState>,
+    /// The rendered per-face values the sent entry is rebuilt from.
+    prim_faces: PrimFaceLookup<'w, 's>,
+    /// Where the `ObjectImage` goes.
+    commands: MessageWriter<'w, SlCommand>,
+}
+
+impl TexFaceEdit<'_, '_> {
+    /// Apply `edit` to every selected face and send each object's entry.
+    fn apply(&mut self, edit: impl Fn(&mut TextureFace)) {
+        apply_to_selection(
+            &self.selection,
+            &self.objects,
+            &self.prim_faces,
+            &mut self.commands,
+            edit,
+        );
+    }
+}
+
+/// The per-face walk a live preview paints through, and what it paints — the
+/// picker previews and the revert that ends them.
+#[derive(bevy::ecs::system::SystemParam)]
+struct PreviewPaint<'w, 's> {
+    /// Parent → children, to walk a selected object's own faces.
+    children: Query<'w, 's, &'static Children>,
+    /// Scene identities, to stop that walk at a linkset child object.
+    scene: Query<'w, 's, (), With<crate::objects::SceneObject>>,
+    /// Each face's Linden index and its material handle — what a preview paints.
+    face_materials: Query<
+        'w,
+        's,
+        (
+            &'static PrimFaceEntity,
+            &'static MeshMaterial3d<FaceMaterial>,
+        ),
+    >,
+    /// Each face's *real* decoded value and its material handle — what a revert
+    /// repaints from.
+    face_textures: Query<
+        'w,
+        's,
+        (
+            &'static FaceTextureDebug,
+            &'static MeshMaterial3d<FaceMaterial>,
+        ),
+    >,
+    /// The face materials painted.
+    materials: ResMut<'w, Assets<FaceMaterial>>,
 }
 
 /// Grey (or un-grey) every label / value text under the Texture page by toggling
@@ -1165,23 +1186,14 @@ fn grey_texture_tab(
 /// face — skipping whichever field the user is editing, and only when the shown
 /// snapshot changes (so a just-committed edit is not clobbered before the
 /// simulator's confirming update lands).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the tool / \
-              selection / object state, the snapshot guard, the focus, the widget queries, the \
-              translator, and the text-layout contexts a programmatic field rewrite needs"
-)]
 fn sync_texture_widgets(
     tool: Res<EditToolState>,
     selection: Res<SelectionSet>,
     objects: Res<ObjectState>,
     ui: Option<Res<BuildTextureUi>>,
     mut snapshot: ResMut<TexShownSnapshot>,
-    focus: Res<InputFocus>,
     mut widgets: TexWidgets,
     translator: Translator,
-    mut font_cx: ResMut<FontCx>,
-    mut layout_cx: ResMut<LayoutCx>,
 ) {
     if !tool.active {
         return;
@@ -1230,11 +1242,16 @@ fn sync_texture_widgets(
         // Deselected: clear the Texture tab to its neutral state so it never
         // shows a stale prim's details.
         for (entity, _field, mut editor) in &mut widgets.fields {
-            if focus.get() == Some(entity) {
+            if widgets.focus.get() == Some(entity) {
                 continue;
             }
             if !editor.value().to_string().is_empty() {
-                set_editor_text(&mut editor, "", &mut font_cx, &mut layout_cx);
+                set_editor_text(
+                    &mut editor,
+                    "",
+                    &mut widgets.font_cx,
+                    &mut widgets.layout_cx,
+                );
             }
         }
         for (_glyph, mut text) in &mut widgets.glyphs {
@@ -1270,12 +1287,17 @@ fn sync_texture_widgets(
     };
 
     for (entity, field, mut editor) in &mut widgets.fields {
-        if focus.get() == Some(entity) {
+        if widgets.focus.get() == Some(entity) {
             continue;
         }
         let want = format_tex_value(*field, field.display_value(&face));
         if editor.value().to_string() != want {
-            set_editor_text(&mut editor, &want, &mut font_cx, &mut layout_cx);
+            set_editor_text(
+                &mut editor,
+                &want,
+                &mut widgets.font_cx,
+                &mut widgets.layout_cx,
+            );
         }
     }
     for (glyph, mut text) in &mut widgets.glyphs {
@@ -1349,22 +1371,13 @@ fn format_tex_value(field: TexField, value: f32) -> String {
 /// Commit numeric Texture-tab edits: on `Enter` in a focused field or when focus
 /// leaves one, apply the one attribute to the selected faces and send the
 /// modified entry.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the tool / \
-              selection / object state, the focus and its blur tracker, the field query, the \
-              keyboard, and the outgoing command writer"
-)]
 fn commit_texture_fields(
     tool: Res<EditToolState>,
-    selection: Res<SelectionSet>,
-    objects: Res<ObjectState>,
     focus: Res<InputFocus>,
     keyboard: Res<ButtonInput<KeyCode>>,
     mut focus_track: ResMut<TexFieldFocus>,
     fields: Query<(Entity, &TexField, &EditableText)>,
-    prim_faces: PrimFaceLookup,
-    mut commands: MessageWriter<SlCommand>,
+    mut tex: TexFaceEdit,
 ) {
     if !tool.active {
         focus_track.last = None;
@@ -1390,7 +1403,7 @@ fn commit_texture_fields(
     let Some(value) = parse_tex_value(field.input_kind(), &editor.value().to_string()) else {
         return;
     };
-    apply_to_selection(&selection, &objects, &prim_faces, &mut commands, |face| {
+    tex.apply(|face| {
         field.apply(face, value);
     });
 }
@@ -1399,10 +1412,7 @@ fn commit_texture_fields(
 fn handle_tex_toggle_press(
     press: On<Pointer<Press>>,
     toggles: Query<&TexToggle>,
-    selection: Res<SelectionSet>,
-    objects: Res<ObjectState>,
-    prim_faces: PrimFaceLookup,
-    mut commands: MessageWriter<SlCommand>,
+    mut tex: TexFaceEdit,
 ) {
     if press.button != PointerButton::Primary {
         return;
@@ -1412,9 +1422,9 @@ fn handle_tex_toggle_press(
     };
     // Read the current value off the primary's representative face, then flip it
     // for every selected face.
-    let current = representative_face(&selection, &objects)
+    let current = representative_face(&tex.selection, &tex.objects)
         .is_some_and(|(_scoped, face, _sig)| toggle.get(&face));
-    apply_to_selection(&selection, &objects, &prim_faces, &mut commands, |face| {
+    tex.apply(|face| {
         toggle.set(face, !current);
     });
 }
@@ -1426,10 +1436,7 @@ fn handle_tex_toggle_press(
 fn apply_tex_combo_changes(
     mut changes: MessageReader<ComboChanged>,
     combos: Query<&TexCombo>,
-    selection: Res<SelectionSet>,
-    objects: Res<ObjectState>,
-    prim_faces: PrimFaceLookup,
-    mut commands: MessageWriter<SlCommand>,
+    mut tex: TexFaceEdit,
 ) {
     for change in changes.read() {
         let Ok(combo) = combos.get(change.combo) else {
@@ -1437,7 +1444,7 @@ fn apply_tex_combo_changes(
         };
         let cycle = combo.0;
         let value = change.active;
-        apply_to_selection(&selection, &objects, &prim_faces, &mut commands, |face| {
+        tex.apply(|face| {
             cycle.set(face, value);
         });
     }
@@ -1449,23 +1456,11 @@ fn apply_tex_combo_changes(
 /// wire send, so a drag does not flood the simulator — and only the **committed**
 /// (OK) colour is sent as an `ObjectImage`; a Cancel's revert preview restores
 /// the opened-on colour. Ignores a reply for any other requester.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the picker replies, \
-              the UI handles, the selection / object state and the commit's face lookup, plus the \
-              hierarchy / face-material queries and the material store the live preview mutates"
-)]
 fn apply_color_picked(
     mut picks: MessageReader<ColorPicked>,
     ui: Option<Res<BuildTextureUi>>,
-    selection: Res<SelectionSet>,
-    objects: Res<ObjectState>,
-    prim_faces: PrimFaceLookup,
-    children: Query<&Children>,
-    face_materials: Query<(&PrimFaceEntity, &MeshMaterial3d<FaceMaterial>)>,
-    scene: Query<(), With<crate::objects::SceneObject>>,
-    mut materials: ResMut<Assets<FaceMaterial>>,
-    mut commands: MessageWriter<SlCommand>,
+    mut tex: TexFaceEdit,
+    mut paint: PreviewPaint,
 ) {
     let Some(ui) = ui else {
         return;
@@ -1483,7 +1478,7 @@ fn apply_color_picked(
                 round_to_byte(srgba.green * 255.0),
                 round_to_byte(srgba.blue * 255.0),
             ];
-            apply_to_selection(&selection, &objects, &prim_faces, &mut commands, |face| {
+            tex.apply(|face| {
                 for (index, byte) in rgb.iter().enumerate() {
                     set_byte(&mut face.color, index, *byte);
                 }
@@ -1492,12 +1487,12 @@ fn apply_color_picked(
             // Live preview: tint the selected faces' materials in place, keeping
             // each face's current alpha (transparency).
             preview_face_tint(
-                &selection,
+                &tex.selection,
                 pick.color,
-                &children,
-                &scene,
-                &face_materials,
-                &mut materials,
+                &paint.children,
+                &paint.scene,
+                &paint.face_materials,
+                &mut paint.materials,
             );
         }
     }
@@ -1559,21 +1554,12 @@ struct TexturePreview {
 /// `ObjectImage` (the reference's `sendTexture` / `selectionSetImage`); a
 /// Cancel's revert preview restores the opened-on texture. Ignores a reply for
 /// any other requester.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the picker replies, \
-              the UI handles, the selection / object state and the commit's face lookup, the \
-              live-preview state, the texture store, and the outgoing command writer"
-)]
 fn apply_texture_picked(
     mut picks: MessageReader<TexturePicked>,
     ui: Option<Res<BuildTextureUi>>,
-    selection: Res<SelectionSet>,
-    objects: Res<ObjectState>,
-    prim_faces: PrimFaceLookup,
     mut preview: ResMut<TexturePreview>,
     mut textures: ResMut<crate::textures::TextureManager>,
-    mut commands: MessageWriter<SlCommand>,
+    mut tex: TexFaceEdit,
 ) {
     let Some(ui) = ui else {
         return;
@@ -1586,7 +1572,7 @@ fn apply_texture_picked(
             // Commit: send the whole modified entry; the sim echo re-tessellates
             // the faces with the final texture, so stop previewing.
             let texture = pick.texture;
-            apply_to_selection(&selection, &objects, &prim_faces, &mut commands, |face| {
+            tex.apply(|face| {
                 face.texture_id = texture;
             });
             preview.texture = None;
@@ -1596,7 +1582,7 @@ fn apply_texture_picked(
             // decodes ([`drive_texture_preview`]); request the decode now.
             textures.request_boosted(pick.texture, AVATAR_BOOST_PRIORITY);
             preview.texture = Some(pick.texture);
-            preview.object = selection.primary().map(|node| node.entity);
+            preview.object = tex.selection.primary().map(|node| node.entity);
         }
         preview.applied = false;
     }
@@ -1606,21 +1592,12 @@ fn apply_texture_picked(
 /// image decodes: an absent texture clears the material's texture (flat tint), a
 /// decoded one swaps it in, and a not-yet-decoded one waits. Runs only while a
 /// preview is active and unpainted, so it is a no-op once settled.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the preview state, \
-              the selection, the texture decode store and the image assets it uploads into, the \
-              hierarchy / face-material queries and the material store the preview paints into"
-)]
 fn drive_texture_preview(
     mut preview: ResMut<TexturePreview>,
     selection: Res<SelectionSet>,
     store: Res<crate::world_api::DecodedTextures>,
     mut images: ResMut<Assets<Image>>,
-    children: Query<&Children>,
-    face_materials: Query<(&PrimFaceEntity, &MeshMaterial3d<FaceMaterial>)>,
-    scene: Query<(), With<crate::objects::SceneObject>>,
-    mut materials: ResMut<Assets<FaceMaterial>>,
+    mut paint: PreviewPaint,
 ) {
     let Some(texture) = preview.texture else {
         return;
@@ -1637,10 +1614,10 @@ fn drive_texture_preview(
     preview_face_texture(
         &selection,
         image,
-        &children,
-        &scene,
-        &face_materials,
-        &mut materials,
+        &paint.children,
+        &paint.scene,
+        &paint.face_materials,
+        &mut paint.materials,
     );
     preview.applied = true;
 }
@@ -1650,21 +1627,12 @@ fn drive_texture_preview(
 /// open): restore that object's faces' `base_color_texture` to their real
 /// (`FaceTextureDebug`) texture, since the entry was never committed. A no-op
 /// while the previewed object is still primary, or when nothing is previewing.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the preview state, \
-              the selection, the texture decode store and image assets, the hierarchy / face \
-              queries, and the material store the revert repaints"
-)]
 fn revert_texture_preview_on_deselect(
     mut preview: ResMut<TexturePreview>,
     selection: Res<SelectionSet>,
     store: Res<crate::world_api::DecodedTextures>,
     mut images: ResMut<Assets<Image>>,
-    children: Query<&Children>,
-    faces: Query<(&FaceTextureDebug, &MeshMaterial3d<FaceMaterial>)>,
-    scene: Query<(), With<crate::objects::SceneObject>>,
-    mut materials: ResMut<Assets<FaceMaterial>>,
+    mut paint: PreviewPaint,
 ) {
     let Some(object) = preview.object else {
         return;
@@ -1678,10 +1646,10 @@ fn revert_texture_preview_on_deselect(
     }
     let mut stack = vec![object];
     while let Some(entity) = stack.pop() {
-        if entity != object && scene.get(entity).is_ok() {
+        if entity != object && paint.scene.get(entity).is_ok() {
             continue;
         }
-        if let Ok((FaceTextureDebug(face), material)) = faces.get(entity) {
+        if let Ok((FaceTextureDebug(face), material)) = paint.face_textures.get(entity) {
             let image = match store.diffuse_image(face.texture_id, &mut images) {
                 crate::textures::DiffuseImage::Absent => None,
                 crate::textures::DiffuseImage::Ready(handle) => Some(handle),
@@ -1689,11 +1657,11 @@ fn revert_texture_preview_on_deselect(
                 // leave it, a later re-tessellation restores it.
                 crate::textures::DiffuseImage::Pending => continue,
             };
-            if let Some(mut standard) = materials.get_mut(&material.0) {
+            if let Some(mut standard) = paint.materials.get_mut(&material.0) {
                 standard.base.base_color_texture = image;
             }
         }
-        if let Ok(list) = children.get(entity) {
+        if let Ok(list) = paint.children.get(entity) {
             for child in list.iter() {
                 stack.push(child);
             }
@@ -1897,33 +1865,23 @@ fn apply_edit_to_faces(
 }
 
 /// The Align-planar-faces action (implemented in [`crate::edit_texture_align`]).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy observer's parameters are its injected resources / queries: the press and its \
-              button marker, the selection / object state the walk reads, the per-face lookup, the \
-              legacy materials an aligned face's normal / specular transforms come from, the world \
-              transforms the inter-object term needs, and the command writer"
-)]
 fn handle_tex_align_press(
     press: On<Pointer<Press>>,
     _buttons: Query<&TexAlignButton>,
-    selection: Res<SelectionSet>,
-    objects: Res<ObjectState>,
-    prim_faces: PrimFaceLookup,
     legacy: Res<crate::legacy_materials::LegacyMaterialManager>,
     globals: Query<&GlobalTransform>,
-    mut commands: MessageWriter<SlCommand>,
+    mut tex: TexFaceEdit,
 ) {
     if press.button != PointerButton::Primary {
         return;
     }
     crate::edit_texture_align::align_planar_faces(
-        &selection,
-        &objects,
-        &prim_faces,
+        &tex.selection,
+        &tex.objects,
+        &tex.prim_faces,
         &legacy,
         &globals,
-        &mut commands,
+        &mut tex.commands,
     );
 }
 

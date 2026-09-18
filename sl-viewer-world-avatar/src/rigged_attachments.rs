@@ -51,7 +51,7 @@ use sl_viewer_world_objects::objects::{
     SceneObject, WornPickTarget,
 };
 use sl_viewer_world_objects::textures::{
-    PrimTextures, TextureAlpha, TextureManager, face_material,
+    FaceStores, PrimTextures, TextureAlpha, TextureManager, face_material,
 };
 
 /// Parent every tracked attachment that is not yet parented to its avatar's
@@ -528,6 +528,51 @@ pub fn route_in_world_rigged_meshes(
     }
 }
 
+/// The three world mirrors a skinned bind updates, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the object model the
+/// attachment and its linkset are read from, the avatar mirror a worn rig's
+/// wearer and joint overrides are recorded against, and the animesh control
+/// avatars a non-worn rig drives instead.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub struct RiggedMirrors<'w> {
+    /// The object model: the attachment, its linkset and its build state.
+    state: ResMut<'w, ObjectState>,
+    /// The avatar mirror: wearers, body roots and per-wearer joint overrides.
+    avatars: ResMut<'w, AvatarState>,
+    /// The animesh control avatars a non-worn rigged mesh drives.
+    control: ResMut<'w, ControlAvatarState>,
+}
+
+/// The stores a skinned attachment build spawns and writes through, bundled as
+/// one [`SystemParam`](bevy::ecs::system::SystemParam): the mesh and bindpose
+/// stores the rig is uploaded into, the four stores a face's material is
+/// composed through, the tessellation cache, and the commands that spawn the
+/// submeshes.
+#[expect(
+    missing_debug_implementations,
+    reason = "the asset stores here are Bevy `Assets<T>` collections, none of which implements \
+              Debug; a hand-written impl could only print the field names"
+)]
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct RiggedStores<'w, 's> {
+    /// What spawns the submesh entities.
+    commands: Commands<'w, 's>,
+    /// The mesh store the skinned geometry is uploaded into.
+    meshes: ResMut<'w, Assets<Mesh>>,
+    /// The inverse-bindpose sets a skinned draw needs.
+    bindposes: ResMut<'w, Assets<SkinnedMeshInverseBindposes>>,
+    /// The face materials written.
+    materials: ResMut<'w, Assets<FaceMaterial>>,
+    /// The fetch / priority side of the texture pipeline.
+    manager: ResMut<'w, TextureManager>,
+    /// The decoded textures a face's alpha is read from.
+    store: Res<'w, DecodedTextures>,
+    /// The per-prim texture bookkeeping.
+    prim_textures: ResMut<'w, PrimTextures>,
+    /// The cross-object tessellation cache.
+    cache: ResMut<'w, GeometryCache>,
+}
+
 /// Bind every worn rigged mesh attachment whose skeleton instance is now
 /// available (P17.2): for each object holding a `PendingGeometry::RiggedMesh`,
 /// resolve the wearer avatar's skeleton-instance joint entities and spawn the
@@ -551,26 +596,13 @@ pub fn route_in_world_rigged_meshes(
 /// a crowd's rigged bodies bind over several frames; the not-yet-built rest
 /// stays pending and is re-collected next frame (the cheap not-ready retries
 /// — skeleton or finest LOD still loading — are free, as before).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system joining the object, avatar, and mesh state with the ECS resources the skinned build needs"
-)]
 pub fn apply_rigged_attachments(
-    mut state: ResMut<ObjectState>,
+    mut mirrors: RiggedMirrors,
     mut builds: PendingBuilds,
-    mut avatars: ResMut<AvatarState>,
-    mut control: ResMut<ControlAvatarState>,
     body: Option<Res<AvatarBody>>,
     mesh_manager: Res<MeshManager>,
     mut budget: ResMut<MeshUploadBudget>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<FaceMaterial>>,
-    mut bindposes: ResMut<Assets<SkinnedMeshInverseBindposes>>,
-    mut manager: ResMut<TextureManager>,
-    store: Res<DecodedTextures>,
-    mut prim_textures: ResMut<PrimTextures>,
-    mut cache: ResMut<GeometryCache>,
+    mut stores: RiggedStores,
     mut skip_log: ResMut<RiggedBindSkipLog>,
 ) {
     // The worn-attachment bind trace (off unless SL_VIEWER_LOG_ATTACHMENT_BIND=1),
@@ -593,7 +625,7 @@ pub fn apply_rigged_attachments(
         if budget.remaining == 0 {
             break;
         }
-        if !state.objects.contains_key(&scoped) {
+        if !mirrors.state.objects.contains_key(&scoped) {
             continue;
         }
         let Some(PendingGeometry::RiggedMesh(build)) = builds.pending(entity) else {
@@ -618,13 +650,15 @@ pub fn apply_rigged_attachments(
         // wearer avatar it hangs off. The `bind_agent` (the wearer, keying its baked
         // textures for a bake-on-mesh face) is `None` for an animesh — an animated
         // object has no wearer bake, so its faces texture from ordinary fetches.
-        let animesh = animesh_root(&state, scoped);
+        let animesh = animesh_root(&mirrors.state, scoped);
         let (root, joints, bind_agent, slot) = if let Some((object, object_entity)) = animesh {
             // The animesh control avatar's root (a child of the linkset root, so
             // the skeleton tracks the object). Phase 4/§5: no per-object joint
             // entities — the submeshes bind every palette slot to the shared
             // dummy and are GPU-posed in place on the `Animesh` pose slot.
-            let root = control.ensure_spawned(object, object_entity, &mut commands);
+            let root = mirrors
+                .control
+                .ensure_spawned(object, object_entity, &mut stores.commands);
             let joints = vec![body.dummy_joint(); body.skeleton_joint_count()];
             (
                 root,
@@ -637,17 +671,17 @@ pub fn apply_rigged_attachments(
             // avatar root — a mesh body is worn as a multi-prim linkset whose parts
             // parent to the linkset root prim, not the avatar directly, so its direct
             // `parent` is not the avatar (P17.2 fix; verified live on a real mesh body).
-            let Some(agent) = avatars.wearer_of(scoped) else {
+            let Some(agent) = mirrors.avatars.wearer_of(scoped) else {
                 if trace && skip_log.changed(scoped, "wearer avatar not resolved (parent chain)") {
                     // Classify the failure by walking the parent chain to where it
                     // stopped: a *tracked in-world* terminus means the object is
                     // genuinely not worn (an in-world rigged mesh that should never
                     // be in the attachment bind); an *untracked* terminus means the
                     // wearer / linkset-root object never arrived (a parenting gap).
-                    match avatars.avatar_root_walk(scoped) {
+                    match mirrors.avatars.avatar_root_walk(scoped) {
                         Ok(_resolved) => {}
                         Err((terminus, hops)) => {
-                            let kind = match state.objects.get(&terminus) {
+                            let kind = match mirrors.state.objects.get(&terminus) {
                                 Some(tracked) => format!(
                                     "tracked in-world object (is_root={}, attach_point={:?}, {})",
                                     tracked.is_root,
@@ -663,10 +697,10 @@ pub fn apply_rigged_attachments(
                             // it to a spawned avatar's name (when present) names which
                             // avatar is rendering wrong — e.g. a mesh head whose root
                             // is one of the UNTRACKED termini.
-                            let (attach, owner) = state.objects.get(&scoped).map_or_else(
+                            let (attach, owner) = mirrors.state.objects.get(&scoped).map_or_else(
                                 || ("?".to_owned(), "?".to_owned()),
                                 |worn| {
-                                    let owner = avatars.name_of(worn.owner_id).map_or_else(
+                                    let owner = mirrors.avatars.name_of(worn.owner_id).map_or_else(
                                         || worn.owner_id.to_string(),
                                         |name| format!("{name} [{}]", worn.owner_id),
                                     );
@@ -690,9 +724,10 @@ pub fn apply_rigged_attachments(
             // ride the `GpuSkinBinding` below), so a full-skeleton-length vec of
             // dummies is all the skin mapping needs — `joints.get(index)` still
             // resolves any valid skeleton index to a (dummy) entity.
-            let Some(root) = avatars
+            let Some(root) = mirrors
+                .avatars
                 .body_root_of(agent)
-                .filter(|_| avatars.is_rigged(agent))
+                .filter(|_| mirrors.avatars.is_rigged(agent))
             else {
                 if trace {
                     skip_log.note(scoped, "wearer body / skeleton not spawned yet");
@@ -771,26 +806,21 @@ pub fn apply_rigged_attachments(
         // animesh has no wearer bake (`bind_agent` is `None`), so its faces texture
         // from ordinary fetches.
         let face_entities = build_rigged_submeshes(
-            &decoded,
-            &skin,
-            &joint_entities,
-            &canonical,
-            &texture_entry,
-            root,
-            slot,
-            bind_agent,
-            // A worn mesh's submeshes carry their worn-object identity for the
-            // attachment pies; an animesh (`bind_agent` `None`) is not worn.
-            bind_agent.is_some().then_some(scoped),
-            key,
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            &mut bindposes,
-            &mut manager,
-            &store,
-            &mut prim_textures,
-            &mut cache,
+            &RiggedBind {
+                decoded: &decoded,
+                skin: &skin,
+                joint_entities: &joint_entities,
+                canonical: &canonical,
+                texture_entry: &texture_entry,
+                root,
+                slot,
+                agent: bind_agent,
+                // A worn mesh's submeshes carry their worn-object identity for the
+                // attachment pies; an animesh (`bind_agent` `None`) is not worn.
+                worn: bind_agent.is_some().then_some(scoped),
+                mesh_key: key,
+            },
+            &mut stores,
         );
         budget.remaining = budget.remaining.saturating_sub(1);
         if trace {
@@ -802,8 +832,8 @@ pub fn apply_rigged_attachments(
         // one); dropping it also drops the object's whole queue entry, since a
         // rigged mesh carries no LOD-rebuild inputs.
         let _built = builds.take_pending(entity);
-        builds.drop_if_resolved(entity, &mut commands);
-        if let Some(tracked) = state.objects.get_mut(&scoped) {
+        builds.drop_if_resolved(entity, &mut stores.commands);
+        if let Some(tracked) = mirrors.state.objects.get_mut(&scoped) {
             tracked.face_entities = face_entities;
             // The skinned mesh follows the skeleton joints directly, so the object
             // must not also be pinned to a rigid attachment-point node.
@@ -888,12 +918,18 @@ pub fn apply_rigged_attachments(
             debug!("rigged mesh {key}: binds no collision volume (not a fitted rig)");
         }
         match (animesh, bind_agent) {
-            (Some((object, _entity)), _) => control.record_overrides(object, key.uuid(), overrides),
+            (Some((object, _entity)), _) => {
+                mirrors
+                    .control
+                    .record_overrides(object, key.uuid(), overrides);
+            }
             (None, Some(agent)) => {
-                avatars.record_joint_overrides(agent, key.uuid(), overrides);
+                mirrors
+                    .avatars
+                    .record_joint_overrides(agent, key.uuid(), overrides);
                 // Record the worn rigged mesh for the avatar-state dump
                 // (viewer-avatar-state-dump-replay).
-                avatars.record_worn_rigged_mesh(agent, key.uuid());
+                mirrors.avatars.record_worn_rigged_mesh(agent, key.uuid());
             }
             (None, None) => {}
         }
@@ -966,6 +1002,31 @@ pub(crate) fn prune_control_avatars(
     control.bound_signalled(|part| live.contains(&part));
 }
 
+/// One skinned attachment's identity and rig: what it is, whose skeleton it
+/// binds to, and which entities that skeleton's joints are.
+struct RiggedBind<'a> {
+    /// The decoded mesh asset.
+    decoded: &'a DecodedMesh,
+    /// Its skin block: joint names, weights, bindposes.
+    skin: &'a MeshSkin,
+    /// The joint entities of the skeleton it binds to, in canonical order.
+    joint_entities: &'a [Entity],
+    /// The canonical joint indices the skin's names resolve to.
+    canonical: &'a [u32],
+    /// The object's `TextureEntry`, which textures the submeshes.
+    texture_entry: &'a [u8],
+    /// The entity the submeshes are spawned under.
+    root: Entity,
+    /// The pose slot the GPU path publishes this rig under.
+    slot: sl_viewer_world_api::PoseSlotKey,
+    /// The wearer, or `None` for an animesh.
+    agent: Option<AgentKey>,
+    /// The worn object's id, carried onto the submeshes for the attachment pies.
+    worn: Option<ScopedObjectId>,
+    /// The mesh asset key, part of the geometry cache key.
+    mesh_key: MeshKey,
+}
+
 /// Spawn one skinned child entity per non-empty submesh of a decoded rigged mesh
 /// under the wearer avatar's body `root` (P17.2), each a Bevy `SkinnedMesh` bound
 /// to the shared `joint_entities` (the avatar's skeleton-instance joints, in the
@@ -986,45 +1047,36 @@ pub(crate) fn prune_control_avatars(
 /// per-entity: `SkinnedMesh::joints` is this wearer's own skeleton-instance
 /// joint entities, and the per-face materials / bake textures are built per
 /// spawn as before.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "threads the several ECS resources the skinned build needs"
-)]
-fn build_rigged_submeshes(
-    decoded: &DecodedMesh,
-    skin: &MeshSkin,
-    joint_entities: &[Entity],
-    canonical: &[u32],
-    texture_entry: &[u8],
-    root: Entity,
-    slot: sl_viewer_world_api::PoseSlotKey,
-    agent: Option<AgentKey>,
-    worn: Option<ScopedObjectId>,
-    mesh_key: MeshKey,
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<FaceMaterial>,
-    bindposes: &mut Assets<SkinnedMeshInverseBindposes>,
-    manager: &mut TextureManager,
-    store: &DecodedTextures,
-    prim_textures: &mut PrimTextures,
-    cache: &mut GeometryCache,
-) -> Vec<Entity> {
+fn build_rigged_submeshes(bind: &RiggedBind<'_>, stores: &mut RiggedStores) -> Vec<Entity> {
+    let &RiggedBind {
+        decoded,
+        skin,
+        joint_entities,
+        canonical,
+        texture_entry,
+        root,
+        slot,
+        agent,
+        worn,
+        mesh_key,
+    } = bind;
     let entry = decode_texture_entry(texture_entry, decoded.submeshes.len());
     // The slot every face falls back to when the object carries no texture entry.
     let default_face = TextureFace::new(TextureKey::from(Uuid::nil()));
     // Shared across wearers of the same mesh asset at this decoded level: the
     // second wearer revives the first wearer's asset instead of minting its own.
     let rigged_key = (mesh_key, decoded.lod);
-    let inverse_bindposes = cache
-        .revive_rigged_bindposes(rigged_key, bindposes)
-        .unwrap_or_else(|| {
-            let built = bindposes.add(SkinnedMeshInverseBindposes::from(rigged_inverse_bindposes(
-                skin,
-            )));
-            cache.record_rigged_bindposes(rigged_key, built.id());
-            built
-        });
+    let inverse_bindposes =
+        stores
+            .cache
+            .revive_rigged_bindposes(rigged_key, &mut stores.bindposes)
+            .unwrap_or_else(|| {
+                let built = stores.bindposes.add(SkinnedMeshInverseBindposes::from(
+                    rigged_inverse_bindposes(skin),
+                ));
+                stores.cache.record_rigged_bindposes(rigged_key, built.id());
+                built
+            });
     let log_faces = agent.is_some() && log_avatar_faces_enabled();
     // The GPU-avatar real-skin binding's canonical joint map (Phase 4
     // groundwork), shared by every submesh of this rig (they all skin to the
@@ -1043,11 +1095,14 @@ fn build_rigged_submeshes(
         // Revive the shared converted submesh, or convert once and record it
         // for the next wearer. The handle — not a per-wearer copy — is what
         // Bevy's draw batching keys on.
-        let mesh = cache
-            .revive_rigged_submesh(rigged_key, index, meshes)
+        let mesh = stores
+            .cache
+            .revive_rigged_submesh(rigged_key, index, &mut stores.meshes)
             .unwrap_or_else(|| {
-                let converted = meshes.add(to_bevy_rigged_mesh(submesh, skin));
-                cache.record_rigged_submesh(rigged_key, index, converted.id());
+                let converted = stores.meshes.add(to_bevy_rigged_mesh(submesh, skin));
+                stores
+                    .cache
+                    .record_rigged_submesh(rigged_key, index, converted.id());
                 converted
             });
         let texture_face = entry.face(index).unwrap_or(&default_face);
@@ -1075,16 +1130,20 @@ fn build_rigged_submeshes(
             // A BoM face owns its material so `apply_bom_face_materials` can give it
             // the reference per-face tint / blend / hide on the sampled bake; until
             // then it shows the neutral fallback (not the reddish skin placeholder).
-            Some(bom) => materials.add(bom_face_material(bom.tint(), bom.uv())),
+            Some(bom) => stores
+                .materials
+                .add(bom_face_material(bom.tint(), bom.uv())),
             // A rigged mesh is always a worn attachment, so its face textures are
             // boosted (P20.2) — its skinned entity transform does not reflect its
             // on-screen size, so the pixel-area pass cannot rank it.
             None => face_material(
                 texture_face,
-                materials,
-                manager,
-                store,
-                prim_textures,
+                &mut FaceStores {
+                    materials: &mut stores.materials,
+                    manager: &mut stores.manager,
+                    store: &stores.store,
+                    prim_textures: &mut stores.prim_textures,
+                },
                 AVATAR_BOOST_PRIORITY,
                 // A rigged face cannot alpha-mask (reference: `canRenderAsMask` is
                 // false for rigged), so one with a genuinely transparent texture
@@ -1097,7 +1156,7 @@ fn build_rigged_submeshes(
         // The submesh index is the Linden face index; a mesh has few faces, so the
         // widening never saturates in practice (a clamp keeps it lint-clean).
         let face_id = PrimFaceId::new(u16::try_from(index).unwrap_or(u16::MAX));
-        let mut spawned = commands.spawn((
+        let mut spawned = stores.commands.spawn((
             Mesh3d(mesh),
             MeshMaterial3d(material),
             SkinnedMesh {

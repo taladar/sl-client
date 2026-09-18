@@ -548,6 +548,45 @@ pub struct AvatarPlaceholderAssets {
     assets: Option<AvatarAssets>,
 }
 
+/// The three stores a baked avatar texture is composed and shown through,
+/// bundled as one [`SystemParam`](bevy::ecs::system::SystemParam).
+///
+/// Every path that paints a bake onto a body — the server bake, the own-avatar
+/// local bake, and the Bakes-on-Mesh face sampling — writes through exactly
+/// these: the per-agent bake material registry, the image store an assembled
+/// bake is uploaded into, and the face materials it is then handed to.
+#[expect(
+    missing_debug_implementations,
+    reason = "the two asset stores are Bevy `Assets<T>` collections, neither of which \
+              implements Debug; a hand-written impl could only print the field names"
+)]
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct BakePaint<'w> {
+    /// The per-agent bake materials, keyed by body region.
+    pub bake_mats: ResMut<'w, AvatarBakeMaterials>,
+    /// The image store an assembled bake is uploaded into.
+    pub images: ResMut<'w, Assets<Image>>,
+    /// The face materials the bake is handed to.
+    pub materials: ResMut<'w, Assets<FaceMaterial>>,
+}
+
+/// The avatar model and the two shared asset stores a posed avatar is built
+/// from, bundled as one [`SystemParam`](bevy::ecs::system::SystemParam).
+///
+/// Several systems across this crate reach for exactly these three together —
+/// the per-agent model, the shared rigged body (absent without
+/// `--viewer-assets`) and the skeleton / morph library behind it — because none
+/// of them can do anything useful with one without the others.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub struct AvatarRig<'w> {
+    /// The per-agent avatar model: appearance, seats, names, skeletons.
+    pub state: Res<'w, AvatarState>,
+    /// The shared rigged base body, absent when no viewer assets loaded.
+    pub body: Option<Res<'w, AvatarBody>>,
+    /// The skeleton / morph / wearable library the body was built from.
+    pub library: Option<Res<'w, AvatarAssetLibrary>>,
+}
+
 /// The shared, per-avatar-invariant render assets for the rigged base body,
 /// built once from [`AvatarAssetLibrary`] and reused by every avatar body: one
 /// mesh / material / inverse-bindposes set, plus the joint rest data a fresh
@@ -996,14 +1035,8 @@ const AVATAR_HOVER_PARAM: i32 = 11001;
 /// `SL_VIEWER_CAMERA_DISTANCE` sets how far back to stand (default 3 m).
 ///
 /// Runs after the fly-camera (so it overrides the login snap and the input pose).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries"
-)]
 pub(crate) fn focus_camera_on_volume_shape(
-    state: Res<AvatarState>,
-    body: Option<Res<AvatarBody>>,
-    library: Option<Res<AvatarAssetLibrary>>,
+    avatars: AvatarRig,
     roots: Query<&GlobalTransform>,
     mut mode: ResMut<sl_viewer_world_api::CameraMode>,
     mut camera: Query<
@@ -1033,7 +1066,8 @@ pub(crate) fn focus_camera_on_volume_shape(
     // The pinned avatar, else the one with the largest total displacement (summed
     // over every volume, the scale deltas and the position deltas in metres alike —
     // both move a mesh body).
-    let Some((agent, score)) = state
+    let Some((agent, score)) = avatars
+        .state
         .volume_deformations
         .iter()
         .filter(|(agent, _)| pinned.is_none_or(|id| agent.uuid().to_string() == id))
@@ -1049,18 +1083,25 @@ pub(crate) fn focus_camera_on_volume_shape(
     // Resolve the chest world from a one-shot rest solve of the shaped skeleton
     // (Phase 4 removed the joint entities), composed with the avatar-root global
     // — its translation is chest height, its rotation the avatar's facing.
-    let Some(global) = body.as_ref().and_then(|body| {
+    let Some(global) = avatars.body.as_ref().and_then(|body| {
         let index = body.joint_index("mChest")?;
-        let root = state.body_root_of(agent)?;
+        let root = avatars.state.body_root_of(agent)?;
         let root_global = roots.get(root).ok()?;
-        let deform = state.deformations(agent)?;
-        let overrides = state.effective_joint_overrides(agent).unwrap_or_default();
-        let world = library.as_deref()?.skeleton().deformed_world_matrices(
-            deform,
-            &VolumeDeformations::default(),
-            &overrides,
-            &AnimationPose::default(),
-        );
+        let deform = avatars.state.deformations(agent)?;
+        let overrides = avatars
+            .state
+            .effective_joint_overrides(agent)
+            .unwrap_or_default();
+        let world = avatars
+            .library
+            .as_deref()?
+            .skeleton()
+            .deformed_world_matrices(
+                deform,
+                &VolumeDeformations::default(),
+                &overrides,
+                &AnimationPose::default(),
+            );
         let chest_sl = world.get(index)?;
         Some(GlobalTransform::from(Transform::from_matrix(
             root_global.to_matrix().mul_mat4(chest_sl),
@@ -2836,18 +2877,12 @@ const fn classify_bake_alpha(decoded: &DecodedTexture) -> BakeAlpha {
 /// bake ingested before the body still lands once the body exists. The baked
 /// image itself is filled in when it decodes ([`apply_avatar_bake_textures`]). A
 /// no-op when no avatar asset library / body loaded (avatars stay spheres).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system reading the tracked bakes and the ECS resources the region materials need"
-)]
 pub(crate) fn assign_avatar_bake_materials(
     mut state: ResMut<AvatarState>,
     body: Option<Res<AvatarBody>>,
-    mut bake_mats: ResMut<AvatarBakeMaterials>,
     store: Res<DecodedTextures>,
     complexity: Res<crate::avatar_complexity::AvatarComplexityModel>,
-    mut images: ResMut<Assets<Image>>,
-    mut materials: ResMut<Assets<FaceMaterial>>,
+    mut paint: BakePaint,
     added: Query<&AvatarBodyPart, Added<AvatarBodyPart>>,
     mut parts: Query<(&AvatarBodyPart, &mut MeshMaterial3d<FaceMaterial>)>,
 ) {
@@ -2883,9 +2918,14 @@ pub(crate) fn assign_avatar_bake_materials(
             .and_then(|bakes| bakes.get(&slot))
         {
             // A published bake for this region: its per-avatar region material.
-            Some(&id) => {
-                bake_mats.region_material(part.agent, slot, id, &store, &mut images, &mut materials)
-            }
+            Some(&id) => paint.bake_mats.region_material(
+                part.agent,
+                slot,
+                id,
+                &store,
+                &mut paint.images,
+                &mut paint.materials,
+            ),
             // No bake for this region: the shared un-textured skin material.
             None => body.material.clone(),
         };
@@ -3154,19 +3194,13 @@ struct LocalBakeJob {
 /// whose material actually differs, so it self-heals after
 /// [`assign_avatar_bake_materials`] resets a part on a fresh appearance, and lands
 /// on parts that spawn after the composite is ready.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system compositing our own bake and draping it over the body-region materials"
-)]
 pub(crate) fn apply_own_local_bake(
     identity: Res<SlIdentity>,
     inputs: Res<OwnBakeInputs>,
     state: Res<AvatarState>,
     body: Option<Res<AvatarBody>>,
     mut local: ResMut<OwnLocalBake>,
-    mut bake_mats: ResMut<AvatarBakeMaterials>,
-    mut images: ResMut<Assets<Image>>,
-    mut materials: ResMut<Assets<FaceMaterial>>,
+    mut paint: BakePaint,
     mut parts: Query<(&AvatarBodyPart, &mut MeshMaterial3d<FaceMaterial>)>,
 ) {
     // Nothing to drape until the body assets loaded, the bake inputs are ready,
@@ -3216,7 +3250,7 @@ pub(crate) fn apply_own_local_bake(
     if let Some((task_generation, composited)) = finished {
         let mut regions = HashMap::new();
         for (slot, image, alpha) in composited {
-            let handle = images.add(image);
+            let handle = paint.images.add(image);
             let _prev = regions.insert(slot, (handle, alpha));
         }
         local.regions = regions;
@@ -3244,8 +3278,13 @@ pub(crate) fn apply_own_local_bake(
         let Some((image, alpha)) = local.regions.get(&slot) else {
             continue;
         };
-        let desired =
-            bake_mats.local_region_material(agent, slot, image.clone(), *alpha, &mut materials);
+        let desired = paint.bake_mats.local_region_material(
+            agent,
+            slot,
+            image.clone(),
+            *alpha,
+            &mut paint.materials,
+        );
         if material.0 != desired {
             *material = MeshMaterial3d(desired);
             draped = draped.saturating_add(1);
@@ -3327,6 +3366,73 @@ impl Default for AppearanceApplyBudget {
     }
 }
 
+/// The three read-only facts an appearance fold is paced by, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the clock, the per-frame
+/// budget that spreads a crowd across frames, and our own agent id (whose
+/// appearance jumps the queue).
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub struct AppearanceFold<'w> {
+    /// The frame clock.
+    time: Res<'w, Time>,
+    /// How many avatars may re-fold per frame.
+    budget: Res<'w, AppearanceApplyBudget>,
+    /// Our own agent, folded first.
+    identity: Res<'w, SlIdentity>,
+}
+
+/// What an appearance fold is rebuilt *from*, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the avatar asset library the
+/// morph targets and skeleton come out of, the decoded textures a clothing mask
+/// is sampled from, and the debug gain applied to the collision-volume
+/// displacement.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub struct AppearanceAssets<'w> {
+    /// The skeleton / morph / wearable library; absent when none loaded, which
+    /// makes the whole fold a no-op.
+    library: Option<Res<'w, AvatarAssetLibrary>>,
+    /// The decoded textures, for the baked clothing masks.
+    store: Res<'w, DecodedTextures>,
+    /// The live A/B gain on the collision-volume displacement (P34.3).
+    volume_gain: Res<'w, VolumeMorphGain>,
+}
+
+/// The body entities an appearance fold rebuilds, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the parts whose morphed
+/// meshes are replaced, the roots re-planted by a shoe lift, the mesh store the
+/// new geometry is uploaded into, and the commands that carry the rest.
+#[expect(
+    missing_debug_implementations,
+    reason = "the mesh store is a Bevy `Assets<T>` collection, which does not implement \
+              Debug; a hand-written impl could only print the field names"
+)]
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct AppearanceBody<'w, 's> {
+    /// The mesh store the re-morphed geometry is uploaded into.
+    meshes: ResMut<'w, Assets<Mesh>>,
+    /// What re-describes the rebuilt parts.
+    commands: Commands<'w, 's>,
+    /// Newly spawned parts, which need their first morphed mesh.
+    added: Query<'w, 's, &'static AvatarBodyPart, Added<AvatarBodyPart>>,
+    /// Every base body part and the mesh it draws.
+    parts: Query<'w, 's, (Entity, &'static AvatarBodyPart, &'static mut Mesh3d)>,
+    /// The rigged body roots, re-planted when their shoe lift changes (R17);
+    /// disjoint from the sphere anchors and the body parts.
+    #[expect(
+        clippy::type_complexity,
+        reason = "a Bevy query whose disjointness filters spell out the exact anchor archetype"
+    )]
+    anchors: Query<
+        'w,
+        's,
+        &'static mut Transform,
+        (
+            With<AvatarAnchor>,
+            Without<AvatarSphere>,
+            Without<AvatarBodyPart>,
+        ),
+    >,
+}
+
 /// Apply each rigged avatar's appearance (P13.3 morphs + P13.4 skeletal shape):
 /// resolve an `AvatarAppearance.visual_params` vector once into its
 /// driver-propagated, sex-gated weights, then (a) rebuild every affected base
@@ -3348,38 +3454,13 @@ impl Default for AppearanceApplyBudget {
 /// body-spawn → bake-decode cascade coalesces instead of re-meshing the whole
 /// body once per trigger. Deferral is safe: a later pass re-reads the newest
 /// cached appearance vector.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system folding appearances and bakes into the morphed body meshes"
-)]
-#[expect(
-    clippy::type_complexity,
-    reason = "a Bevy query whose disjointness filters spell out the exact anchor archetype"
-)]
 pub(crate) fn apply_avatar_appearance(
     mut events: MessageReader<SlEvent>,
     mut decoded: MessageReader<TextureDecoded>,
-    library: Option<Res<AvatarAssetLibrary>>,
-    store: Res<DecodedTextures>,
+    assets: AppearanceAssets,
     mut state: ResMut<AvatarState>,
-    volume_gain: Res<VolumeMorphGain>,
-    time: Res<Time>,
-    budget: Res<AppearanceApplyBudget>,
-    identity: Res<SlIdentity>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut commands: Commands,
-    added: Query<&AvatarBodyPart, Added<AvatarBodyPart>>,
-    mut parts: Query<(Entity, &AvatarBodyPart, &mut Mesh3d)>,
-    // The rigged body roots, re-planted when their shoe lift changes (R17);
-    // disjoint from the sphere anchors and the body parts.
-    mut anchors: Query<
-        &mut Transform,
-        (
-            With<AvatarAnchor>,
-            Without<AvatarSphere>,
-            Without<AvatarBodyPart>,
-        ),
-    >,
+    fold: AppearanceFold,
+    mut bodies: AppearanceBody,
 ) {
     // A decoded baked texture of a masked body region (head / upper / lower)
     // supplies the clothing-morph mask, so re-shape any avatar wearing it: its
@@ -3432,7 +3513,7 @@ pub(crate) fn apply_avatar_appearance(
     // A body part that just spawned needs its cached appearance applied (the
     // appearance can arrive before the body object does). The joints spawn with
     // the same body, so this one signal covers both morphs and skeleton.
-    for part in &added {
+    for part in &bodies.added {
         if state.appearances.contains_key(&part.agent) {
             state.appearance_dirty.insert(part.agent);
         }
@@ -3441,7 +3522,7 @@ pub(crate) fn apply_avatar_appearance(
     // sites stay cheap set-inserts; draining the set here means a re-mark of
     // a still-pending avatar refreshes its `last` stamp and restarts the
     // quiet window.
-    let now = time.elapsed_secs_f64();
+    let now = fold.time.elapsed_secs_f64();
     let marks = std::mem::take(&mut state.appearance_dirty);
     for agent in marks {
         state
@@ -3456,7 +3537,7 @@ pub(crate) fn apply_avatar_appearance(
     if state.appearance_pending.is_empty() {
         return;
     }
-    let Some(library) = library else {
+    let Some(library) = assets.library else {
         state.appearance_pending.clear();
         return;
     };
@@ -3478,12 +3559,12 @@ pub(crate) fn apply_avatar_appearance(
     if eligible.is_empty() {
         return;
     }
-    if let Some(own) = identity.agent_id
+    if let Some(own) = fold.identity.agent_id
         && let Some(position) = eligible.iter().position(|&agent| agent == own)
     {
         eligible.swap(0, position);
     }
-    eligible.truncate(budget.per_frame);
+    eligible.truncate(fold.budget.per_frame);
     // The chosen avatars' deformations / volumes / physics are about to be
     // re-resolved below: wake the pose gate so it re-poses them next frame.
     state.bump_pose_inputs();
@@ -3506,7 +3587,7 @@ pub(crate) fn apply_avatar_appearance(
     let force_physics = crate::body_physics::force_enabled();
     // The debug A/B knob for the collision-volume displacement (P34.3), live-toggled
     // by the `V` key.
-    let volume_gain = volume_gain.gain;
+    let volume_gain = assets.volume_gain.gain;
     let mut morph_weights: HashMap<AgentKey, MorphWeights> = HashMap::new();
     // The rest weights of the per-frame runtime morph params (P31.12a), kept
     // apart from the baked shape so a part's render-time morph targets start at
@@ -3613,7 +3694,7 @@ pub(crate) fn apply_avatar_appearance(
         let previous = state.root_drops.insert(agent, drop).unwrap_or(rest_drop);
         if (drop - previous).abs() > f32::EPSILON
             && let Some(entities) = state.objects.get(&agent)
-            && let Ok(mut transform) = anchors.get_mut(entities.anchor)
+            && let Ok(mut transform) = bodies.anchors.get_mut(entities.anchor)
         {
             transform.translation.y -= drop - previous;
         }
@@ -3663,13 +3744,13 @@ pub(crate) fn apply_avatar_appearance(
     // Rebuild the mesh of every part belonging to a resolved avatar, masking its
     // clothing morphs by the region's decoded bake where one is available (P14.5).
     let mut morphed_parts = 0_usize;
-    for (entity, part, mut mesh) in &mut parts {
+    for (entity, part, mut mesh) in &mut bodies.parts {
         if let Some(weights) = morph_weights.get(&part.agent)
             && let Some(loaded) = library.parts().get(part.part)
         {
             let morphed = match part_clothing_mask(
                 &library,
-                &store,
+                &assets.store,
                 state.baked_textures.get(&part.agent),
                 part.region,
                 &loaded.mesh,
@@ -3698,13 +3779,13 @@ pub(crate) fn apply_avatar_appearance(
             // an un-driven avatar renders identically while a driver can still
             // animate blink / physics without re-baking the body.
             attach_runtime_morphs(
-                &mut commands,
+                &mut bodies.commands,
                 entity,
                 &mut bevy_mesh,
                 &loaded.mesh,
                 runtime_weights.get(&part.agent),
             );
-            *mesh = Mesh3d(meshes.add(bevy_mesh));
+            *mesh = Mesh3d(bodies.meshes.add(bevy_mesh));
             morphed_parts = morphed_parts.saturating_add(1);
         }
     }
@@ -4111,16 +4192,10 @@ pub(crate) fn apply_avatar_part_visibility(
 /// use), falling back to the material draped on the wearer's matching base-body
 /// region by the client-side composite (OpenSim own avatar,
 /// [`apply_own_local_bake`]). Runs every frame and is idempotent.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system: the ECS resources / queries it needs plus a diagnostic Local"
-)]
 pub(crate) fn apply_bom_face_materials(
     state: Res<AvatarState>,
-    mut bake_mats: ResMut<AvatarBakeMaterials>,
     store: Res<DecodedTextures>,
-    mut images: ResMut<Assets<Image>>,
-    mut materials: ResMut<Assets<FaceMaterial>>,
+    mut paint: BakePaint,
     parts: Query<(&AvatarBodyPart, &MeshMaterial3d<FaceMaterial>), Without<BomFace>>,
     mut faces: Query<
         (&BomFace, &MeshMaterial3d<FaceMaterial>, &mut Visibility),
@@ -4156,13 +4231,13 @@ pub(crate) fn apply_bom_face_materials(
             .baked_textures
             .get(&agent)
             .and_then(|bakes| bakes.get(&slot))
-            && let Some((image, alpha)) = bake_mats.ensure_bake(id, &store, &mut images)
+            && let Some((image, alpha)) = paint.bake_mats.ensure_bake(id, &store, &mut paint.images)
         {
             let _prev = region_bake.insert((agent, slot), (image, alpha != BakeAlpha::Opaque));
             continue;
         }
         if let Some(handle) = part_materials.get(&(agent, slot))
-            && let Some(material) = materials.get(handle)
+            && let Some(material) = paint.materials.get(handle)
             && let Some(image) = material.base.base_color_texture.clone()
         {
             let has_alpha = !matches!(material.base.alpha_mode, AlphaMode::Opaque);
@@ -4205,7 +4280,10 @@ pub(crate) fn apply_bom_face_materials(
             // Diagnostic (R22): render the mesh's UV mapping as a grid, so a broken
             // grid (UV-mapping problem) can be told apart from a continuous one
             // (seams are baked skin content). Same per-face UV transform as the bake.
-            (Some(bake_mats.debug_grid(&mut images)), Color::WHITE)
+            (
+                Some(paint.bake_mats.debug_grid(&mut paint.images)),
+                Color::WHITE,
+            )
         } else if debug_avatar_flat() {
             // Diagnostic (R22): drop the bake and render a flat neutral skin so a
             // texture/UV-seam artifact (vanishes) can be told apart from a
@@ -4230,7 +4308,7 @@ pub(crate) fn apply_bom_face_materials(
         // Only touch the material when something actually changed — `get_mut` marks
         // the asset modified (rebuilding its bind group), so an unconditional write
         // every frame would needlessly re-upload every BoM face.
-        let up_to_date = materials.get(&material.0).is_some_and(|current| {
+        let up_to_date = paint.materials.get(&material.0).is_some_and(|current| {
             current.base.base_color_texture == texture
                 && current.base.base_color == base_color
                 && current.base.alpha_mode == alpha_mode
@@ -4239,7 +4317,7 @@ pub(crate) fn apply_bom_face_materials(
         if up_to_date {
             continue;
         }
-        let Some(mut material) = materials.get_mut(&material.0) else {
+        let Some(mut material) = paint.materials.get_mut(&material.0) else {
             continue;
         };
         material.base.base_color_texture = texture;

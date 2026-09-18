@@ -993,34 +993,92 @@ fn drive_contents_fetch(
 // Rebuild the flattened views
 // ---------------------------------------------------------------------------
 
+/// The object-contents model, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the object properties every
+/// permission gate reads, the server listing cache, and the optimistic
+/// pending-mutation overlay each view is rendered through.
+#[derive(bevy::ecs::system::SystemParam)]
+struct ContentsStore<'w> {
+    /// Object properties and permissions.
+    objects: Res<'w, ObjectState>,
+    /// The server's per-object task-inventory listing.
+    cache: ResMut<'w, TaskInventoryCache>,
+    /// The in-flight mutations layered over it.
+    pending: ResMut<'w, PendingMutations>,
+}
+
+/// What the two contents surfaces currently show, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(bevy::ecs::system::SystemParam)]
+struct ContentsModel<'w> {
+    /// The rendered rows of each surface.
+    views: ResMut<'w, ContentsViews>,
+    /// Which row each surface has picked.
+    selection: ResMut<'w, ContentsSelection>,
+    /// The in-place rename, if one is open.
+    rename: ResMut<'w, ContentsRename>,
+}
+
+/// The two places object contents is shown — the Build tab and the Open-object
+/// floater — bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam). Either may be absent, its
+/// surface not having been built yet.
+#[derive(bevy::ecs::system::SystemParam)]
+struct ContentsSurfaces<'w> {
+    /// The Build tab's handles.
+    tab_ui: Option<Res<'w, ContentsTabUi>>,
+    /// The Open-object floater's handles.
+    open_ui: Option<Res<'w, OpenObjectFloaterUi>>,
+}
+
+/// What a contents action sends and how its text is worded, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(bevy::ecs::system::SystemParam)]
+struct ContentsOutbox<'w> {
+    /// The translator every notice goes through.
+    translator: Translator<'w>,
+    /// The outgoing simulator commands.
+    commands: MessageWriter<'w, SlCommand>,
+    /// The local-chat notices a refused action writes.
+    notices: MessageWriter<'w, LocalChatNotice>,
+    /// Opens for a notecard picked out of contents.
+    notecard_opens: MessageWriter<'w, crate::intents::OpenNotecard>,
+    /// Opens for a script picked out of contents.
+    script_opens: MessageWriter<'w, crate::intents::OpenScript>,
+}
+
+/// The in-place rename row's widgets, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(bevy::ecs::system::SystemParam)]
+struct RenameWidgets<'w, 's> {
+    /// The virtual rows and their parts, to find the renamed row.
+    rows: Query<'w, 's, (&'static VirtualRow, &'static ContentsRowParts)>,
+    /// The rename field's text.
+    fields: Query<'w, 's, &'static EditableText>,
+    /// The row parts' layout, swapped between label and field.
+    nodes: Query<'w, 's, &'static mut Node>,
+    /// What focuses and unfocuses the field.
+    commands: Commands<'w, 's>,
+}
+
 /// Recompute both surfaces' views from the current build selection / open target
 /// and the cache, and set each list's item count. Cheap when nothing changed:
 /// the whole body only runs on a change to the selection, the tool state, the
 /// open target, or the cache.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the tool + \
-              selection + open-target state, the object state, the cache, the two UI handles, \
-              the views output, the selection reset, and the list-count queries"
-)]
 fn rebuild_contents_views(
     tool: Res<EditToolState>,
     selection: Res<SelectionSet>,
     open_state: Res<OpenObjectFloaterState>,
-    objects: Res<ObjectState>,
-    cache: Res<TaskInventoryCache>,
-    pending: Res<PendingMutations>,
-    tab_ui: Option<Res<ContentsTabUi>>,
-    open_ui: Option<Res<OpenObjectFloaterUi>>,
-    mut views: ResMut<ContentsViews>,
-    mut contents_selection: ResMut<ContentsSelection>,
+    store: ContentsStore,
+    surfaces: ContentsSurfaces,
+    mut model: ContentsModel,
     mut lists: Query<&mut VirtualList>,
 ) {
     if !(selection.is_changed()
         || tool.is_changed()
         || open_state.is_changed()
-        || cache.is_changed()
-        || pending.is_changed())
+        || store.cache.is_changed()
+        || store.pending.is_changed())
     {
         return;
     }
@@ -1032,47 +1090,47 @@ fn rebuild_contents_views(
         None
     };
     rebuild_one_view(
-        &mut views.build,
+        &mut model.views.build,
         build_target,
-        &objects,
-        &cache,
-        &pending,
+        &store.objects,
+        &store.cache,
+        &store.pending,
         &selection,
     );
     rebuild_one_view(
-        &mut views.open,
+        &mut model.views.open,
         open_state.target,
-        &objects,
-        &cache,
-        &pending,
+        &store.objects,
+        &store.cache,
+        &store.pending,
         &selection,
     );
 
     // Keep each surface's selection valid: drop it if its item is gone.
     for (surface, view) in [
-        (ContentsSurface::BuildTab, &views.build),
-        (ContentsSurface::OpenFloater, &views.open),
+        (ContentsSurface::BuildTab, &model.views.build),
+        (ContentsSurface::OpenFloater, &model.views.open),
     ] {
-        if let Some(selected) = contents_selection.get(surface)
+        if let Some(selected) = model.selection.get(surface)
             && !view.rows.iter().any(|row| row.item_id == selected)
         {
-            contents_selection.set(surface, None);
+            model.selection.set(surface, None);
         }
     }
 
-    if let Some(ui) = tab_ui
+    if let Some(ui) = surfaces.tab_ui
         && let Ok(mut list) = lists.get_mut(ui.viewport)
     {
-        let count = views.build.rows.len();
+        let count = model.views.build.rows.len();
         if list.item_count != count {
             list.item_count = count;
             list.scroll_to_top();
         }
     }
-    if let Some(ui) = open_ui
+    if let Some(ui) = surfaces.open_ui
         && let Ok(mut list) = lists.get_mut(ui.viewport)
     {
-        let count = views.open.rows.len();
+        let count = model.views.open.rows.len();
         if list.item_count != count {
             list.item_count = count;
             list.scroll_to_top();
@@ -1386,24 +1444,16 @@ fn set_row_text(text: &mut Text, value: &str) {
 
 /// Keep the Content-tab count line current and gate the action buttons by the
 /// resolved permissions / selection.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the views + selection to \
-              read state from, the two UI handles, the translator, the text query, the \
-              transition guard, and the command channel that toggles the buttons"
-)]
 fn gate_contents_buttons(
-    views: Res<ContentsViews>,
-    selection: Res<ContentsSelection>,
-    tab_ui: Option<Res<ContentsTabUi>>,
-    open_ui: Option<Res<OpenObjectFloaterUi>>,
+    surfaces: ContentsSurfaces,
+    model: ContentsModel,
     translator: Translator,
     mut texts: Query<&mut Text>,
     mut last_enabled: Local<Option<[bool; 3]>>,
     mut commands: Commands,
 ) {
-    if let Some(ui) = &tab_ui {
-        let view = &views.build;
+    if let Some(ui) = &surfaces.tab_ui {
+        let view = &model.views.build;
         if let Ok(mut text) = texts.get_mut(ui.count_text) {
             let want = contents_summary(view, &translator);
             if text.0 != want {
@@ -1412,8 +1462,8 @@ fn gate_contents_buttons(
         }
         let has_target = view.target.is_some();
         // A pending (in-flight) selection cannot be re-edited until it clears.
-        let selected = selection.build.is_some()
-            && !selection_is_pending(ContentsSurface::BuildTab, &views, &selection);
+        let selected = model.selection.build.is_some()
+            && !selection_is_pending(ContentsSurface::BuildTab, &model.views, &model.selection);
         // Only touch the buttons' interaction state on a transition, so a stable
         // selection does not churn archetypes every frame.
         let enabled = [
@@ -1429,8 +1479,8 @@ fn gate_contents_buttons(
             set_button_enabled(&mut commands, ui.remove, remove);
         }
     }
-    if let Some(ui) = &open_ui {
-        let view = &views.open;
+    if let Some(ui) = &surfaces.open_ui {
+        let view = &model.views.open;
         if let Ok(mut text) = texts.get_mut(ui.name_text) {
             let want = if view.target.is_none() {
                 translator.get("object-contents-none")
@@ -1543,41 +1593,29 @@ struct ContentsActionRequest {
 }
 
 /// Dispatch a fired contents action to its command(s).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the action stream, the \
-              views + cache + selection + identity + inventory model to resolve the target, the \
-              rename state, and the command / notice channels"
-)]
 fn run_contents_actions(
     mut requests: MessageReader<ContentsActionRequest>,
-    views: Res<ContentsViews>,
-    mut cache: ResMut<TaskInventoryCache>,
-    mut pending: ResMut<PendingMutations>,
-    selection: Res<ContentsSelection>,
     identity: Res<SlIdentity>,
     inventory: Res<InventoryModel>,
-    mut rename: ResMut<ContentsRename>,
-    translator: Translator,
-    mut commands: MessageWriter<SlCommand>,
-    mut notices: MessageWriter<LocalChatNotice>,
-    mut notecard_opens: MessageWriter<crate::intents::OpenNotecard>,
-    mut script_opens: MessageWriter<crate::intents::OpenScript>,
+    mut store: ContentsStore,
+    mut model: ContentsModel,
+    mut outbox: ContentsOutbox,
 ) {
     for request in requests.read() {
-        let view = views.view(request.surface);
+        let view = model.views.view(request.surface);
         let Some((scoped, full)) = view.target else {
             continue;
         };
         match request.action {
             ContentsAction::Refresh => {
-                reconcile_after_mutation(&mut cache, &mut commands, scoped, full);
+                reconcile_after_mutation(&mut store.cache, &mut outbox.commands, scoped, full);
             }
             ContentsAction::Open => {
-                let Some(item_id) = selection.get(request.surface) else {
+                let Some(item_id) = model.selection.get(request.surface) else {
                     continue;
                 };
-                let Some(item) = cache
+                let Some(item) = store
+                    .cache
                     .get(&full)
                     .and_then(|entry| entry.items.iter().find(|it| it.item_id == item_id))
                 else {
@@ -1594,8 +1632,8 @@ fn run_contents_actions(
                 // A redacted (nil) asset id means the grid withheld it — the item
                 // cannot be fetched, so there is nothing to open.
                 let Some(asset_id) = item.asset_id else {
-                    notices.write(LocalChatNotice::new(
-                        translator.get("build-content-no-modify"),
+                    outbox.notices.write(LocalChatNotice::new(
+                        outbox.translator.get("build-content-no-modify"),
                     ));
                     continue;
                 };
@@ -1604,7 +1642,7 @@ fn run_contents_actions(
                 // item opens read-only.
                 let editable = view.perms.can_modify && item_modifiable(item);
                 if item.inv_type == InventoryType::Script {
-                    script_opens.write(crate::intents::OpenScript {
+                    outbox.script_opens.write(crate::intents::OpenScript {
                         name: item.name.clone(),
                         asset_id: asset_id.uuid(),
                         editable,
@@ -1617,7 +1655,7 @@ fn run_contents_actions(
                         ),
                     });
                 } else {
-                    notecard_opens.write(crate::intents::OpenNotecard {
+                    outbox.notecard_opens.write(crate::intents::OpenNotecard {
                         name: item.name.clone(),
                         asset_id: asset_id.uuid(),
                         editable,
@@ -1630,20 +1668,20 @@ fn run_contents_actions(
             }
             ContentsAction::NewScript => {
                 if !view.perms.can_add() {
-                    notices.write(LocalChatNotice::new(
-                        translator.get("build-content-no-modify"),
+                    outbox.notices.write(LocalChatNotice::new(
+                        outbox.translator.get("build-content-no-modify"),
                     ));
                     continue;
                 }
                 let Some(creator) = identity.agent_id else {
                     continue;
                 };
-                let name = translator.get("build-content-new-script-name");
+                let name = outbox.translator.get("build-content-new-script-name");
                 // A fresh id keys the "…adding" phantom until the simulator (which
                 // assigns the real task id) confirms the new script in the listing.
                 let phantom_id = InventoryKey::from(Uuid::new_v4());
                 let item = RestoreItem::new_script(creator, full, &name, Uuid::new_v4());
-                commands.write(SlCommand(Command::RezScript {
+                outbox.commands.write(SlCommand(Command::RezScript {
                     target: scoped,
                     params: Box::new(RezScriptParams {
                         group_id: None,
@@ -1651,7 +1689,7 @@ fn run_contents_actions(
                         item,
                     }),
                 }));
-                pending.set(
+                store.pending.set(
                     full,
                     phantom_id,
                     PendingKind::Adding {
@@ -1659,21 +1697,21 @@ fn run_contents_actions(
                         icon: item_icon(InventoryType::Script),
                     },
                 );
-                reconcile_after_mutation(&mut cache, &mut commands, scoped, full);
+                reconcile_after_mutation(&mut store.cache, &mut outbox.commands, scoped, full);
             }
             ContentsAction::Rename => {
-                if let Some(item) = selection.get(request.surface)
-                    && !pending.is_pending(&full, &item)
+                if let Some(item) = model.selection.get(request.surface)
+                    && !store.pending.is_pending(&full, &item)
                 {
-                    rename.pending = Some(item);
+                    model.rename.pending = Some(item);
                 }
             }
             ContentsAction::Remove => {
-                let Some(item_id) = selection.get(request.surface) else {
+                let Some(item_id) = model.selection.get(request.surface) else {
                     continue;
                 };
                 // Already in flight — do not race the change already sent.
-                if pending.is_pending(&full, &item_id) {
+                if store.pending.is_pending(&full, &item_id) {
                     continue;
                 }
                 if !view.perms.can_remove_menu() {
@@ -1682,32 +1720,32 @@ fn run_contents_actions(
                 // The reference offers Remove to an owner but only *applies* it
                 // with object modify — an owner-without-modify gets the notice.
                 if !view.perms.can_modify {
-                    notices.write(LocalChatNotice::new(
-                        translator.get("build-content-no-modify"),
+                    outbox.notices.write(LocalChatNotice::new(
+                        outbox.translator.get("build-content-no-modify"),
                     ));
                     continue;
                 }
-                commands.write(SlCommand(Command::RemoveTaskInventory {
-                    target: scoped,
-                    item_id,
-                }));
-                pending.set(full, item_id, PendingKind::Deleting);
-                reconcile_after_mutation(&mut cache, &mut commands, scoped, full);
+                outbox
+                    .commands
+                    .write(SlCommand(Command::RemoveTaskInventory {
+                        target: scoped,
+                        item_id,
+                    }));
+                store.pending.set(full, item_id, PendingKind::Deleting);
+                reconcile_after_mutation(&mut store.cache, &mut outbox.commands, scoped, full);
             }
             ContentsAction::CopyToInventory | ContentsAction::CopyAndWear => {
                 copy_contents_out(
                     &full,
                     scoped,
-                    &cache,
+                    &store.cache,
                     &inventory,
                     request.action == ContentsAction::CopyAndWear,
-                    &mut commands,
-                    &translator,
-                    &mut notices,
+                    &mut outbox,
                 );
                 // Moving a no-copy item out empties it from the prim, so reconcile
                 // the prim's own cache against what actually left.
-                reconcile_after_mutation(&mut cache, &mut commands, scoped, full);
+                reconcile_after_mutation(&mut store.cache, &mut outbox.commands, scoped, full);
             }
         }
     }
@@ -1732,24 +1770,17 @@ fn reconcile_after_mutation(
 /// floater's Copy actions) by moving each item into the system Objects folder.
 /// A no-copy item is moved out of the prim; a copyable one is copied — the
 /// simulator arbitrates per item's permissions.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the target keys, the cache + inventory model to resolve the folder + items, the \
-              wear flag, and the command / translator / notice channels"
-)]
 fn copy_contents_out(
     full: &ObjectKey,
     scoped: ScopedObjectId,
     cache: &TaskInventoryCache,
     inventory: &InventoryModel,
     wear: bool,
-    commands: &mut MessageWriter<SlCommand>,
-    translator: &Translator,
-    notices: &mut MessageWriter<LocalChatNotice>,
+    outbox: &mut ContentsOutbox,
 ) {
     let Some(folder) = inventory.folder_by_type(FolderType::Object) else {
-        notices.write(LocalChatNotice::new(
-            translator.get("object-contents-no-folder"),
+        outbox.notices.write(LocalChatNotice::new(
+            outbox.translator.get("object-contents-no-folder"),
         ));
         return;
     };
@@ -1757,7 +1788,7 @@ fn copy_contents_out(
         return;
     };
     for item in &entry.items {
-        commands.write(SlCommand(Command::MoveTaskInventory {
+        outbox.commands.write(SlCommand(Command::MoveTaskInventory {
             target: scoped,
             folder_id: folder,
             item_id: item.item_id,
@@ -1767,8 +1798,8 @@ fn copy_contents_out(
     // as inventory updates, so a follow-up wear needs the new agent-inventory
     // ids — surfaced to the user for now rather than silently dropped.
     if wear {
-        notices.write(LocalChatNotice::new(
-            translator.get("object-contents-wear-note"),
+        outbox.notices.write(LocalChatNotice::new(
+            outbox.translator.get("object-contents-wear-note"),
         ));
     }
 }
@@ -1857,39 +1888,32 @@ fn start_contents_rename(
 /// Drive the open Content-tab rename: `Enter` commits (an `UpdateTaskInventory`
 /// re-sending the item with its new name), `Escape` cancels, and the row
 /// scrolling away / rebinding cancels.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the rename state, the \
-              keyboard, the views + cache to resolve the item, the field to read, the label to \
-              restore, and the command / notice channels"
-)]
 fn drive_contents_rename(
     keyboard: Res<ButtonInput<KeyCode>>,
-    views: Res<ContentsViews>,
-    mut cache: ResMut<TaskInventoryCache>,
-    mut pending: ResMut<PendingMutations>,
-    rows: Query<(&VirtualRow, &ContentsRowParts)>,
-    fields: Query<&EditableText>,
-    mut nodes: Query<&mut Node>,
-    mut rename: ResMut<ContentsRename>,
-    translator: Translator,
-    mut commands_bevy: Commands,
-    mut commands: MessageWriter<SlCommand>,
-    mut notices: MessageWriter<LocalChatNotice>,
+    mut widgets: RenameWidgets,
+    mut store: ContentsStore,
+    mut model: ContentsModel,
+    mut outbox: ContentsOutbox,
 ) {
     if keyboard.just_pressed(KeyCode::Escape) {
-        rename.pending = None;
-        if let Some(active) = rename.active.take() {
-            end_contents_rename(&active, &rows, &mut nodes, &mut commands_bevy);
+        model.rename.pending = None;
+        if let Some(active) = model.rename.active.take() {
+            end_contents_rename(
+                &active,
+                &widgets.rows,
+                &mut widgets.nodes,
+                &mut widgets.commands,
+            );
         }
         return;
     }
-    let Some(active) = rename.active else {
+    let Some(active) = model.rename.active else {
         return;
     };
-    let view = &views.build;
+    let view = &model.views.build;
     // Cancel when the hosting row no longer shows the renamed item.
-    let still_bound = rows
+    let still_bound = widgets
+        .rows
         .get(active.row)
         .is_ok_and(|(row, _parts)| row.index == Some(active.index))
         && view
@@ -1897,14 +1921,20 @@ fn drive_contents_rename(
             .get(active.index)
             .is_some_and(|display| display.item_id == active.item_id);
     if !still_bound {
-        rename.active = None;
-        end_contents_rename(&active, &rows, &mut nodes, &mut commands_bevy);
+        model.rename.active = None;
+        end_contents_rename(
+            &active,
+            &widgets.rows,
+            &mut widgets.nodes,
+            &mut widgets.commands,
+        );
         return;
     }
     if !keyboard.just_pressed(KeyCode::Enter) {
         return;
     }
-    let new_name = fields
+    let new_name = widgets
+        .fields
         .get(active.field)
         .map(|field| field.value().to_string().trim().to_owned())
         .unwrap_or_default();
@@ -1912,20 +1942,27 @@ fn drive_contents_rename(
         active.item_id,
         &new_name,
         view,
-        &cache,
-        &translator,
-        &mut commands,
-        &mut notices,
+        &store.cache,
+        &outbox.translator,
+        &mut outbox.commands,
+        &mut outbox.notices,
     );
     // Reconcile the prim's cache against the server after a rename we sent, so a
     // rejected rename reverts to the real name instead of drifting; show the new
     // name flagged "…refreshing" meanwhile, and block a second rename of it.
     if sent && let Some((scoped, full)) = view.target {
-        pending.set(full, active.item_id, PendingKind::Renaming(new_name));
-        reconcile_after_mutation(&mut cache, &mut commands, scoped, full);
+        store
+            .pending
+            .set(full, active.item_id, PendingKind::Renaming(new_name));
+        reconcile_after_mutation(&mut store.cache, &mut outbox.commands, scoped, full);
     }
-    rename.active = None;
-    end_contents_rename(&active, &rows, &mut nodes, &mut commands_bevy);
+    model.rename.active = None;
+    end_contents_rename(
+        &active,
+        &widgets.rows,
+        &mut widgets.nodes,
+        &mut widgets.commands,
+    );
 }
 
 /// Send the rename `UpdateTaskInventory` for `item_id`, gated on the item's own

@@ -452,26 +452,39 @@ const ROTATE_SNAP_GUIDE_RADIUS_RIG: f32 = 1.35;
 /// specially.
 const CORNER_FACTOR_STEP: f32 = 0.25;
 
-/// Spawn the snap-guide ruler for an axis drag: two lines parallel to the
-/// (world) `axis` through the pivot, offset by ±`snap_offset` along `perp`,
-/// each carrying tick marks at absolute-grid multiples of `grid_unit`.
-/// Everything is world-sized (not rig-scaled), so the ticks measure real
-/// metres.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the ruler is built from the drag's full geometry: pivots in both spaces, the two \
-              in-plane directions, the snap offset and the grid unit"
-)]
-fn spawn_snap_guide(
-    commands: &mut Commands,
-    assets: &GizmoAssets,
+/// The geometry one axis snap-guide ruler is built from — the drag's pivot in
+/// both spaces, the two in-plane directions, the offset and the grid step.
+#[derive(Clone, Copy, Debug)]
+struct AxisRuler {
+    /// The drag pivot in Bevy space — where the ruler's root sits.
     pivot_bevy: Vec3,
+    /// The same pivot in Second Life space, which anchors the tick ladder on
+    /// the absolute grid.
     pivot_sl: Vec3,
+    /// The dragged axis, in world Second Life space.
     axis_world_sl: Vec3,
+    /// The in-plane perpendicular the two lines are offset along.
     perp_world_sl: Vec3,
+    /// How far off the axis each of the two lines sits.
     snap_offset: f32,
+    /// The grid step the ticks mark.
     grid_unit: f32,
-) {
+}
+
+/// Spawn the snap-guide ruler for an axis drag: two lines parallel to the
+/// (world) axis through the pivot, offset by ±`snap_offset` along the
+/// perpendicular, each carrying tick marks at absolute-grid multiples of the
+/// grid unit. Everything is world-sized (not rig-scaled), so the ticks measure
+/// real metres.
+fn spawn_snap_guide(commands: &mut Commands, assets: &GizmoAssets, ruler: &AxisRuler) {
+    let AxisRuler {
+        pivot_bevy,
+        pivot_sl,
+        axis_world_sl,
+        perp_world_sl,
+        snap_offset,
+        grid_unit,
+    } = *ruler;
     let root = commands
         .spawn((
             SnapGuideRoot,
@@ -842,32 +855,41 @@ struct GizmoReadoutUi {
     text: Option<Entity>,
 }
 
+/// The readout label's own world, bundled as one
+/// [`SystemParam`]: the label is spawned lazily,
+/// so its bookkeeping, the root it hangs under and the three queries that place
+/// it all travel together.
+#[derive(bevy::ecs::system::SystemParam)]
+struct GizmoReadout<'w, 's> {
+    /// The spawned label, once there is one.
+    ui: ResMut<'w, GizmoReadoutUi>,
+    /// The UI root it hangs under (absent before the UI exists).
+    root: Option<Res<'w, crate::ui::UiRoot>>,
+    /// Its layout, to park it under the projected pivot.
+    nodes: Query<'w, 's, &'static mut Node>,
+    /// Its text, filled from [`GizmoDrag::readout`].
+    texts: Query<'w, 's, &'static mut Text>,
+    /// Its visibility, hidden between drags.
+    visibilities: Query<'w, 's, &'static mut Visibility>,
+    /// What spawns it.
+    commands: Commands<'w, 's>,
+}
+
 /// Show the live drag value beside the gizmo: project the selection pivot to
 /// the viewport and park a small label under it, filled from
 /// [`GizmoDrag::readout`].
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the drag state, \
-              the lazily spawned label's bookkeeping, the camera / window to project with, and \
-              the node / text / visibility queries that place it"
-)]
 fn update_gizmo_readout(
     interaction: Res<GizmoInteraction>,
-    mut ui: ResMut<GizmoReadoutUi>,
-    root: Option<Res<crate::ui::UiRoot>>,
     cameras: Query<(&Camera, &GlobalTransform), With<ViewerCamera>>,
-    mut nodes: Query<&mut Node>,
-    mut texts: Query<&mut Text>,
-    mut visibilities: Query<&mut Visibility>,
-    mut commands: Commands,
+    mut readout: GizmoReadout,
 ) {
     let shown = interaction
         .drag
         .as_ref()
         .filter(|drag| !drag.readout.is_empty());
     let Some(drag) = shown else {
-        if let Some(node) = ui.node
-            && let Ok(mut visibility) = visibilities.get_mut(node)
+        if let Some(node) = readout.ui.node
+            && let Ok(mut visibility) = readout.visibilities.get_mut(node)
         {
             *visibility = Visibility::Hidden;
         }
@@ -881,11 +903,12 @@ fn update_gizmo_readout(
         return;
     };
     // Lazily spawn the label on first use.
-    if ui.node.is_none() {
-        let Some(root) = root.map(|root| root.0) else {
+    if readout.ui.node.is_none() {
+        let Some(root) = readout.root.as_ref().map(|root| root.0) else {
             return;
         };
-        let node = commands
+        let node = readout
+            .commands
             .spawn((
                 Node {
                     position_type: PositionType::Absolute,
@@ -899,7 +922,8 @@ fn update_gizmo_readout(
                 ChildOf(root),
             ))
             .id();
-        let text = commands
+        let text = readout
+            .commands
             .spawn((
                 Text::default(),
                 crate::ui_font::UiFont::Mono.at(13.0),
@@ -908,25 +932,25 @@ fn update_gizmo_readout(
                 ChildOf(node),
             ))
             .id();
-        ui.node = Some(node);
-        ui.text = Some(text);
+        readout.ui.node = Some(node);
+        readout.ui.text = Some(text);
         return;
     }
-    if let Some(node) = ui.node
-        && let Ok(mut layout) = nodes.get_mut(node)
+    if let Some(node) = readout.ui.node
+        && let Ok(mut layout) = readout.nodes.get_mut(node)
     {
         // Park the label a little under the pivot so it never hides the
         // handle being dragged.
         layout.left = Val::Px(at.x + 18.0);
         layout.top = Val::Px(at.y + 26.0);
     }
-    if let Some(node) = ui.node
-        && let Ok(mut visibility) = visibilities.get_mut(node)
+    if let Some(node) = readout.ui.node
+        && let Ok(mut visibility) = readout.visibilities.get_mut(node)
     {
         *visibility = Visibility::Visible;
     }
-    if let Some(text) = ui.text
-        && let Ok(mut value) = texts.get_mut(text)
+    if let Some(text) = readout.ui.text
+        && let Ok(mut value) = readout.texts.get_mut(text)
         && value.0 != drag.readout
     {
         value.0.clone_from(&drag.readout);
@@ -1269,27 +1293,32 @@ fn spawn_gizmo_camera(
     debug!("gizmos: spawned overlay camera {overlay:?}");
 }
 
+/// The two cameras the overlay mirrors between, bundled as one
+/// [`SystemParam`]: the gizmo is drawn by its own
+/// camera, which must carry the world camera's projection or picking and
+/// rendering disagree.
+#[derive(bevy::ecs::system::SystemParam)]
+struct GizmoCameras<'w, 's> {
+    /// The world camera's projection, when it has changed.
+    main: ChangedMainProjectionQuery<'w, 's>,
+    /// The overlay camera's projection, which takes it.
+    overlay: Query<'w, 's, &'static mut Projection, With<GizmoCamera>>,
+}
+
 /// Spawn / despawn / rebuild the rig to match the tool state and selection,
 /// and keep the overlay camera's projection identical to the main camera's so
 /// gizmo picking (main-camera rays) and gizmo rendering agree.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the tool / \
-              selection state the rig mirrors, the shared assets, the rig / interaction \
-              bookkeeping, and the two camera queries the projection mirror reads"
-)]
 fn maintain_gizmo_rig(
     tool: Res<EditToolState>,
     selection: Res<SelectionSet>,
     assets: Res<GizmoAssets>,
     mut built: ResMut<BuiltRig>,
     mut interaction: ResMut<GizmoInteraction>,
-    main_camera: ChangedMainProjectionQuery,
-    mut overlay_camera: Query<&mut Projection, With<GizmoCamera>>,
+    mut cameras: GizmoCameras,
     mut commands: Commands,
 ) {
     // Mirror a main-camera projection change onto the overlay camera.
-    if let (Ok(main), Ok(mut overlay)) = (main_camera.single(), overlay_camera.single_mut()) {
+    if let (Ok(main), Ok(mut overlay)) = (cameras.main.single(), cameras.overlay.single_mut()) {
         *overlay = main.clone();
     }
 
@@ -1565,42 +1594,59 @@ pub(crate) fn sl_world_rotation(bevy_rotation: Quat) -> Quat {
     sl_to_bevy_rotation().inverse().mul_quat(bevy_rotation)
 }
 
+/// Where the selection *is*, bundled as one
+/// [`SystemParam`]: the world transforms the
+/// pivot and the manipulation frame come from, and the Second Life sizes the
+/// stretch box is fitted to.
+#[derive(bevy::ecs::system::SystemParam)]
+struct SelectionPose<'w, 's> {
+    /// World transforms, for the pivot and the frame.
+    globals: Query<'w, 's, &'static GlobalTransform>,
+    /// Second Life sizes, for the stretch bounding box.
+    motions: Query<'w, 's, &'static ObjectSlMotion>,
+}
+
+/// The view the constant-screen-size scale is computed against, bundled as one
+/// [`SystemParam`].
+#[derive(bevy::ecs::system::SystemParam)]
+struct ScreenView<'w, 's> {
+    /// The world camera's pose and projection.
+    cameras: Query<'w, 's, (&'static GlobalTransform, &'static Projection), With<ViewerCamera>>,
+    /// The window, for the viewport height the scale is in pixels of.
+    windows: Query<'w, 's, &'static Window>,
+}
+
 /// Place the rig at the live selection pivot, grid-frame orientation, and
 /// constant-screen-size scale.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the tool / \
-              selection state, the camera / window for the constant-screen scale, the rig root, \
-              and the handle / box-edge children the stretch tool repositions live"
-)]
 fn place_gizmo_rig(
     tool: Res<EditToolState>,
     selection: Res<SelectionSet>,
     interaction: Res<GizmoInteraction>,
-    globals: Query<&GlobalTransform>,
-    motions: Query<&ObjectSlMotion>,
-    cameras: Query<(&GlobalTransform, &Projection), With<ViewerCamera>>,
-    windows: Query<&Window>,
+    pose: SelectionPose,
+    view: ScreenView,
     mut rigs: Query<&mut Transform, With<GizmoRoot>>,
     mut parts: GizmoPartsQuery,
 ) {
     let Ok(mut rig) = rigs.single_mut() else {
         return;
     };
-    let Some(pivot) = selection_pivot_bevy(&selection, &globals) else {
+    let Some(pivot) = selection_pivot_bevy(&selection, &pose.globals) else {
         return;
     };
     // Move / rotate follow the grid frame; stretch is always object-local (so its
     // box aligns with the object's axes in World mode too, like the reference).
-    let frame = manipulation_frame(&tool, &selection, &globals);
-    let Ok((camera_transform, projection)) = cameras.single() else {
+    let frame = manipulation_frame(&tool, &selection, &pose.globals);
+    let Ok((camera_transform, projection)) = view.cameras.single() else {
         return;
     };
     let fov = match projection {
         Projection::Perspective(perspective) => perspective.fov,
         _other => core::f32::consts::FRAC_PI_4,
     };
-    let height = windows.single().map_or(720.0, bevy::window::Window::height);
+    let height = view
+        .windows
+        .single()
+        .map_or(720.0, bevy::window::Window::height);
 
     // The stretch rig mounts on the live selection BOUNDING BOX (world units,
     // the reference's stretch-tool box): a single object's own oriented box,
@@ -1614,7 +1660,7 @@ fn place_gizmo_rig(
         .drag
         .as_ref()
         .and_then(|drag| drag.live_box)
-        .or_else(|| bbox_live(&selection, box_frame, &globals, &motions));
+        .or_else(|| bbox_live(&selection, box_frame, &pose.globals, &pose.motions));
     if tool.effective_tool() == EditTool::Stretch
         && let Some((center, ext)) = stretch_box
     {
@@ -1697,42 +1743,65 @@ pub(crate) struct GizmoPointer<'w, 's> {
     cameras: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<ViewerCamera>>,
 }
 
+/// The rig's own entities, bundled as one
+/// [`SystemParam`]: the handles a pick hits, the
+/// root whose scale sets the drag's screen-to-world ratio, the snap guides a drag
+/// owns, and the assets and commands that spawn and despawn them.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct GizmoRig<'w, 's> {
+    /// The handle entities and which part each is.
+    handles: Query<'w, 's, (Entity, &'static GizmoHandle)>,
+    /// The ray cast that hits them.
+    ray_cast: MeshRayCast<'w, 's>,
+    /// The rig root, whose scale is the constant-screen-size factor.
+    rigs: Query<'w, 's, &'static Transform, With<GizmoRoot>>,
+    /// The snap-guide rulers, which live exactly as long as a drag.
+    guides: Query<'w, 's, Entity, With<SnapGuideRoot>>,
+    /// The shared meshes / materials a ruler is built from.
+    assets: Res<'w, GizmoAssets>,
+    /// What spawns and despawns them.
+    commands: Commands<'w, 's>,
+}
+
+/// What a drag reads and writes, bundled as one
+/// [`SystemParam`]: the selected objects, their
+/// world and Second Life state, and the wire updates the drag streams.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct DragTargets<'w, 's> {
+    /// The objects being dragged.
+    selection: Res<'w, SelectionSet>,
+    /// The object model, for permissions, parents and geometry.
+    state: Res<'w, ObjectState>,
+    /// World transforms, for the pivot and each object's start pose.
+    globals: Query<'w, 's, &'static GlobalTransform>,
+    /// The Second Life motion state the drag rewrites.
+    motions: Query<'w, 's, (&'static mut ObjectSlMotion, &'static SceneObject)>,
+    /// The Bevy transforms it rewrites alongside.
+    transforms: EditTransformQuery<'w, 's>,
+    /// Where the `ObjectUpdate`s go.
+    commands: MessageWriter<'w, SlCommand>,
+}
+
 /// The hover + drag state machine. Runs before the selection's pointer
 /// handler ([`crate::edit_selection`] orders itself after this) so a press on
 /// a handle claims the pointer first.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the tool / \
-              selection state, the bundled pointer inputs, the pick machinery, the handle / \
-              object queries, the time source for the stream throttle, and the outgoing command \
-              writer"
-)]
 pub(crate) fn drive_gizmo_interaction(
     tool: Res<EditToolState>,
-    selection: Res<SelectionSet>,
     pointer: GizmoPointer,
-    handles: Query<(Entity, &GizmoHandle)>,
-    mut ray_cast: MeshRayCast,
-    state: Res<ObjectState>,
-    globals: Query<&GlobalTransform>,
     time: Res<Time>,
-    assets: Res<GizmoAssets>,
-    rigs: Query<&Transform, With<GizmoRoot>>,
-    guides: Query<Entity, With<SnapGuideRoot>>,
     mut interaction: ResMut<GizmoInteraction>,
-    mut motions: Query<(&mut ObjectSlMotion, &SceneObject)>,
-    mut transforms: EditTransformQuery,
-    mut ecs: Commands,
-    mut commands: MessageWriter<SlCommand>,
+    mut rig: GizmoRig,
+    mut targets: DragTargets,
 ) {
     // The snap-guide ruler lives exactly as long as a translate drag: no
     // drag, no ruler (covers release, tool switch, and deactivation alike).
     if interaction.drag.is_none() {
-        for guide in guides.iter() {
-            ecs.entity(guide).despawn();
+        let stale: Vec<Entity> = rig.guides.iter().collect();
+        for guide in stale {
+            rig.commands.entity(guide).despawn();
         }
     }
-    if !tool.active || selection.is_empty() {
+    if !tool.active || targets.selection.is_empty() {
         interaction.hovered = None;
         interaction.drag = None;
         return;
@@ -1754,7 +1823,7 @@ pub(crate) fn drive_gizmo_interaction(
             if let Some(drag) = interaction.drag.take()
                 && drag.moved
             {
-                send_drag_updates(&drag, &tool, &motions, &mut commands);
+                send_drag_updates(&drag, &tool, &targets.motions, &mut targets.commands);
             }
             return;
         }
@@ -1767,9 +1836,9 @@ pub(crate) fn drive_gizmo_interaction(
                     &mut drag,
                     ray,
                     &tool,
-                    &globals,
-                    &mut motions,
-                    &mut transforms,
+                    &targets.globals,
+                    &mut targets.motions,
+                    &mut targets.transforms,
                 );
                 // Shift-drag copy: on the first movement, queue a copy of the
                 // selection to leave behind (the reference's `MASK_COPY`
@@ -1791,7 +1860,7 @@ pub(crate) fn drive_gizmo_interaction(
                     && now - drag.last_stream >= SCALE_STREAM_INTERVAL
                 {
                     drag.last_stream = now;
-                    send_drag_updates(&drag, &tool, &motions, &mut commands);
+                    send_drag_updates(&drag, &tool, &targets.motions, &mut targets.commands);
                 }
                 interaction.drag = Some(drag);
             }
@@ -1813,17 +1882,19 @@ pub(crate) fn drive_gizmo_interaction(
     let Ok(ray) = camera.viewport_to_world(camera_transform, cursor) else {
         return;
     };
-    let handle_entities: HashSet<Entity> = handles.iter().map(|(entity, _handle)| entity).collect();
+    let handle_entities: HashSet<Entity> =
+        rig.handles.iter().map(|(entity, _handle)| entity).collect();
     let handle_filter = |entity: Entity| handle_entities.contains(&entity);
     let settings = MeshRayCastSettings::default()
         // The rig is drawn by the overlay camera; the main camera's view
         // visibility for it reads false, so use inherited visibility.
         .with_visibility(bevy::picking::mesh_picking::ray_cast::RayCastVisibility::Visible)
         .with_filter(&handle_filter);
-    let hovered = ray_cast
+    let hovered = rig
+        .ray_cast
         .cast_ray(ray, &settings)
         .first()
-        .and_then(|(entity, _hit)| handles.get(*entity).ok())
+        .and_then(|(entity, _hit)| rig.handles.get(*entity).ok())
         .map(|(_entity, handle)| handle.part);
     interaction.hovered = hovered;
 
@@ -1841,28 +1912,28 @@ pub(crate) fn drive_gizmo_interaction(
         } else {
             EditPerm::Move
         };
-        if let Some(name) = selection_lacking(&selection, &state, needed) {
+        if let Some(name) = selection_lacking(&targets.selection, &targets.state, needed) {
             interaction.pending_notice = Some(perm_notice(needed, &name));
             return;
         }
-        let rig_scale = rigs
+        let rig_scale = rig
+            .rigs
             .single()
             .map_or(1.0, |transform| transform.scale.x.max(1.0e-3));
         // A held `Shift` on a move handle (whole-object mode) arms the
         // shift-drag copy (the reference's `MASK_COPY`).
         let shift = keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight);
         interaction.drag = begin_drag(
-            part,
-            ray,
-            camera_transform,
+            &DragStart {
+                part,
+                ray,
+                camera_transform,
+                rig_scale,
+                shift,
+                now: time.elapsed_secs(),
+            },
             &tool,
-            &selection,
-            &state,
-            &globals,
-            &motions,
-            rig_scale,
-            shift,
-            time.elapsed_secs(),
+            &targets,
         );
         // A translate drag with snapping on shows the reference's white
         // snap-guide ruler; a ring drag its detent tick circle. Crossing
@@ -1876,22 +1947,24 @@ pub(crate) fn drive_gizmo_interaction(
                     let perp = drag.plane_normal.cross(axis_world).normalize_or_zero();
                     if perp != Vec3::ZERO {
                         spawn_snap_guide(
-                            &mut ecs,
-                            &assets,
-                            sl_to_bevy_vec(&vec3_sl(drag.pivot)),
-                            drag.pivot,
-                            axis_world,
-                            perp,
-                            drag.snap_offset,
-                            tool.grid_unit,
+                            &mut rig.commands,
+                            &rig.assets,
+                            &AxisRuler {
+                                pivot_bevy: sl_to_bevy_vec(&vec3_sl(drag.pivot)),
+                                pivot_sl: drag.pivot,
+                                axis_world_sl: axis_world,
+                                perp_world_sl: perp,
+                                snap_offset: drag.snap_offset,
+                                grid_unit: tool.grid_unit,
+                            },
                         );
                     }
                 }
                 GizmoPart::RotateRing(axis) => {
                     let (axis_a, axis_b) = ring_axes(drag.frame, axis);
                     spawn_rotate_snap_guide(
-                        &mut ecs,
-                        &assets,
+                        &mut rig.commands,
+                        &rig.assets,
                         sl_to_bevy_vec(&vec3_sl(drag.pivot)),
                         axis_a,
                         axis_b,
@@ -1919,8 +1992,8 @@ pub(crate) fn drive_gizmo_interaction(
                         let ticks =
                             face_scale_ticks(drag.start_param, p_extent, tool.grid_unit, per_size);
                         spawn_scale_snap_guide(
-                            &mut ecs,
-                            &assets,
+                            &mut rig.commands,
+                            &rig.assets,
                             sl_to_bevy_vec(&vec3_sl(drag.pivot)),
                             dir,
                             normal.cross(dir).normalize_or_zero(),
@@ -1935,8 +2008,8 @@ pub(crate) fn drive_gizmo_interaction(
                     if let Some(normal) = manip_plane_normal(dir, camera_forward) {
                         let ticks = corner_scale_ticks(drag.start_param, tool.stretch_both);
                         spawn_scale_snap_guide(
-                            &mut ecs,
-                            &assets,
+                            &mut rig.commands,
+                            &rig.assets,
                             sl_to_bevy_vec(&vec3_sl(drag.pivot)),
                             dir,
                             normal.cross(dir).normalize_or_zero(),
@@ -1951,24 +2024,38 @@ pub(crate) fn drive_gizmo_interaction(
     }
 }
 
-/// Snapshot the selection and the drag geometry at press.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the drag snapshot reads the same state bundle the interaction system holds"
-)]
-fn begin_drag(
+/// The press that starts a drag: which handle, the ray through the cursor, the
+/// view it was cast from, and the three scalars the drag is parameterised by.
+#[derive(Clone, Copy)]
+struct DragStart<'a> {
+    /// The handle pressed.
     part: GizmoPart,
+    /// The pick ray through the cursor.
     ray: Ray3d,
-    camera_transform: &GlobalTransform,
-    tool: &EditToolState,
-    selection: &SelectionSet,
-    state: &ObjectState,
-    globals: &Query<&GlobalTransform>,
-    motions: &Query<(&mut ObjectSlMotion, &SceneObject)>,
+    /// The camera the ray came from, whose forward picks the drag plane.
+    camera_transform: &'a GlobalTransform,
+    /// The rig root's scale — the screen-to-world ratio the drag works in.
     rig_scale: f32,
+    /// Whether `Shift` was held, arming the shift-drag copy.
     shift: bool,
+    /// The press time, which seeds the stream throttle.
     now: f32,
-) -> Option<GizmoDrag> {
+}
+
+/// Snapshot the selection and the drag geometry at press.
+fn begin_drag(start: &DragStart, tool: &EditToolState, targets: &DragTargets) -> Option<GizmoDrag> {
+    let &DragStart {
+        part,
+        ray,
+        camera_transform,
+        rig_scale,
+        shift,
+        now,
+    } = start;
+    let selection = &targets.selection;
+    let state = &targets.state;
+    let globals = &targets.globals;
+    let motions = &targets.motions;
     let pivot_bevy = selection_pivot_bevy(selection, globals)?;
     let pivot = sl_vec3(bevy_to_sl_vec(pivot_bevy));
     // The drag must run in the SAME frame as the drawn rig: stretch object-local,

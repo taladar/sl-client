@@ -51,7 +51,9 @@ use crate::objects::{FaceTextureDebug, PrimFaceEntity};
 use crate::texture_anim::{
     ObjectTextureAnimation, anim_applies_to_face, running_texture_animation,
 };
-use crate::textures::{PrimTextures, TextureAlpha, TextureManager, face_material};
+use crate::textures::{
+    FaceStores, FaceStoresParam, PrimTextures, TextureAlpha, TextureManager, face_material,
+};
 use sl_viewer_kit::face_material::FaceMaterial;
 use sl_viewer_world_api::{SelectionSet, on_hud_layer};
 
@@ -282,10 +284,12 @@ fn detach_face(
 ) {
     let private = face_material(
         texture_face,
-        materials,
-        manager,
-        store,
-        prim_textures,
+        &mut FaceStores {
+            materials,
+            manager,
+            store,
+            prim_textures,
+        },
         Priority::IDLE,
         TextureAlpha::Mask,
     );
@@ -293,6 +297,31 @@ fn detach_face(
         .entity(face)
         .insert(MeshMaterial3d(private))
         .remove::<SharedFaceMaterial>();
+}
+
+/// The four sources a shared face material is detached for, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): a started texture animation,
+/// an assigned render material, a face routed onto the HUD layer, and the
+/// selection whose faces the edit floaters preview onto.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub struct DetachSources<'w, 's> {
+    /// Holders whose texture animation just started.
+    anim_holders: Query<'w, 's, (Entity, &'static ObjectTextureAnimation)>,
+    /// Holders that just gained render materials.
+    pbr_holders: Query<'w, 's, (Entity, &'static ObjectRenderMaterials)>,
+    /// Parent → children, to reach a holder's faces.
+    children: Query<'w, 's, &'static Children>,
+    /// The still-shared faces, and what each renders.
+    shared_faces: Query<
+        'w,
+        's,
+        (&'static PrimFaceEntity, &'static FaceTextureDebug),
+        With<SharedFaceMaterial>,
+    >,
+    /// Shared faces that carry a render layer (the HUD routing).
+    hud_faces: Query<'w, 's, (Entity, &'static RenderLayers), With<SharedFaceMaterial>>,
+    /// The selection whose faces the edit floaters write onto.
+    selection: Res<'w, SelectionSet>,
 }
 
 /// System (`PreUpdate`): copy-on-write **detach net** for the mutation sources
@@ -305,33 +334,21 @@ fn detach_face(
 /// mutators run — the trigger components / layers are themselves applied at an
 /// earlier frame boundary, so the swap always lands first. The marker filter
 /// makes the steady-state sweep free (all queries converge to empty).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system joining the mutation-source queries with the ECS resources the recompose needs"
-)]
 pub fn detach_shared_face_materials(
     mut commands: Commands,
-    anim_holders: Query<(Entity, &ObjectTextureAnimation)>,
-    pbr_holders: Query<(Entity, &ObjectRenderMaterials)>,
-    children: Query<&Children>,
-    shared_faces: Query<(&PrimFaceEntity, &FaceTextureDebug), With<SharedFaceMaterial>>,
-    hud_faces: Query<(Entity, &RenderLayers), With<SharedFaceMaterial>>,
-    selection: Res<SelectionSet>,
-    mut materials: ResMut<Assets<FaceMaterial>>,
-    mut manager: ResMut<TextureManager>,
-    store: Res<DecodedTextures>,
-    mut prim_textures: ResMut<PrimTextures>,
+    sources: DetachSources,
+    mut paint: FaceStoresParam,
 ) {
     // A face can match several sources at once (an animated face on a selected
     // HUD, say); detach it once.
     let mut detached: HashSet<Entity> = HashSet::new();
     // A running animation's target faces get per-instance GPU anim params.
-    for (holder, tex_anim) in &anim_holders {
-        let Ok(face_entities) = children.get(holder) else {
+    for (holder, tex_anim) in &sources.anim_holders {
+        let Ok(face_entities) = sources.children.get(holder) else {
             continue;
         };
         for &face in face_entities {
-            let Ok((prim_face, texture)) = shared_faces.get(face) else {
+            let Ok((prim_face, texture)) = sources.shared_faces.get(face) else {
                 continue;
             };
             if !tex_anim.applies_to_face(prim_face.face_id.get()) {
@@ -342,22 +359,22 @@ pub fn detach_shared_face_materials(
                     face,
                     &texture.0,
                     &mut commands,
-                    &mut materials,
-                    &mut manager,
-                    &store,
-                    &mut prim_textures,
+                    &mut paint.materials,
+                    &mut paint.manager,
+                    &paint.store,
+                    &mut paint.prim_textures,
                 );
             }
         }
     }
     // A PBR-covered face's material is rewritten by the render-material
     // pipeline.
-    for (holder, render_materials) in &pbr_holders {
-        let Ok(face_entities) = children.get(holder) else {
+    for (holder, render_materials) in &sources.pbr_holders {
+        let Ok(face_entities) = sources.children.get(holder) else {
             continue;
         };
         for &face in face_entities {
-            let Ok((prim_face, texture)) = shared_faces.get(face) else {
+            let Ok((prim_face, texture)) = sources.shared_faces.get(face) else {
                 continue;
             };
             let covered = render_materials
@@ -372,20 +389,20 @@ pub fn detach_shared_face_materials(
                     face,
                     &texture.0,
                     &mut commands,
-                    &mut materials,
-                    &mut manager,
-                    &store,
-                    &mut prim_textures,
+                    &mut paint.materials,
+                    &mut paint.manager,
+                    &paint.store,
+                    &mut paint.prim_textures,
                 );
             }
         }
     }
     // A face routed onto the HUD layer is forced fullbright in place.
-    for (face, layers) in &hud_faces {
+    for (face, layers) in &sources.hud_faces {
         if !on_hud_layer(Some(layers)) {
             continue;
         }
-        let Ok((_prim_face, texture)) = shared_faces.get(face) else {
+        let Ok((_prim_face, texture)) = sources.shared_faces.get(face) else {
             continue;
         };
         if detached.insert(face) {
@@ -393,19 +410,19 @@ pub fn detach_shared_face_materials(
                 face,
                 &texture.0,
                 &mut commands,
-                &mut materials,
-                &mut manager,
-                &store,
-                &mut prim_textures,
+                &mut paint.materials,
+                &mut paint.manager,
+                &paint.store,
+                &mut paint.prim_textures,
             );
         }
     }
     // Every selected object's faces go private pre-emptively, so the edit
     // floaters' live previews (colour / glow / fullbright writes on the
     // selection) never touch a shared material.
-    for node in selection.iter() {
-        for descendant in children.iter_descendants(node.entity) {
-            let Ok((_prim_face, texture)) = shared_faces.get(descendant) else {
+    for node in sources.selection.iter() {
+        for descendant in sources.children.iter_descendants(node.entity) {
+            let Ok((_prim_face, texture)) = sources.shared_faces.get(descendant) else {
                 continue;
             };
             if detached.insert(descendant) {
@@ -413,10 +430,10 @@ pub fn detach_shared_face_materials(
                     descendant,
                     &texture.0,
                     &mut commands,
-                    &mut materials,
-                    &mut manager,
-                    &store,
-                    &mut prim_textures,
+                    &mut paint.materials,
+                    &mut paint.manager,
+                    &paint.store,
+                    &mut paint.prim_textures,
                 );
             }
         }

@@ -438,32 +438,107 @@ struct Candidate {
     startable: bool,
 }
 
+/// Everything a media surface is started, painted and closed through, bundled as
+/// one [`SystemParam`](bevy::ecs::system::SystemParam): the per-face runtime
+/// state, the engine and its surface table, the image and material stores a face
+/// material is composed from, the face lookups it is keyed by, and the commands
+/// that swap it onto the entity.
+#[derive(bevy::ecs::system::SystemParam)]
+struct MediaStores<'w, 's> {
+    /// The per-face runtime state (which faces hold a surface).
+    state: ResMut<'w, MediaPrimState>,
+    /// The media engine the surfaces are created on.
+    engine: NonSendMut<'w, MediaEngine>,
+    /// The live surfaces and their images.
+    surfaces: NonSendMut<'w, MediaSurfaces>,
+    /// The image store a surface's texture is allocated in.
+    images: ResMut<'w, Assets<Image>>,
+    /// The material store the media material is added to.
+    materials: ResMut<'w, Assets<FaceMaterial>>,
+    /// The prim faces, for the face index and its texture placement.
+    faces: Query<'w, 's, (&'static PrimFaceEntity, &'static FaceTextureDebug)>,
+    /// The face's current material, recorded as the restore point.
+    mesh_materials: Query<'w, 's, &'static MeshMaterial3d<FaceMaterial>>,
+    /// What swaps the material onto the face entity.
+    commands: Commands<'w, 's>,
+}
+
+/// The pieces that paint one media surface onto a face, borrowed **disjointly**
+/// from the per-face state so a caller can hold that face's [`ActiveMedia`]
+/// while it paints — see [`MediaStores::split`].
+struct MediaPaint<'a, 'w, 's> {
+    /// The live surfaces and their images.
+    surfaces: &'a mut MediaSurfaces,
+    /// The material store the media material is added to.
+    materials: &'a mut Assets<FaceMaterial>,
+    /// The prim faces, for the face's texture placement.
+    faces: &'a Query<'w, 's, (&'static PrimFaceEntity, &'static FaceTextureDebug)>,
+    /// The face's current material, recorded as the restore point.
+    mesh_materials: &'a Query<'w, 's, &'static MeshMaterial3d<FaceMaterial>>,
+    /// What swaps the material onto the face entity.
+    commands: &'a mut Commands<'w, 's>,
+}
+
+impl<'w, 's> MediaStores<'w, 's> {
+    /// The per-face state and the paint pieces as **disjoint** borrows, so one
+    /// face's [`ActiveMedia`] can be held while that face is repainted.
+    fn split(&mut self) -> (&mut MediaPrimState, MediaPaint<'_, 'w, 's>) {
+        (
+            &mut self.state,
+            MediaPaint {
+                surfaces: &mut self.surfaces,
+                materials: &mut self.materials,
+                faces: &self.faces,
+                mesh_materials: &self.mesh_materials,
+                commands: &mut self.commands,
+            },
+        )
+    }
+}
+
+/// The world lookups the surface driver ranks media faces by, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the object model, the world
+/// transforms the distance is measured between, and the viewer camera it is
+/// measured from.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct MediaWorld<'w, 's> {
+    /// The object model, for a media object's entity.
+    objects: Res<'w, ObjectState>,
+    /// World transforms, for the interest distance.
+    transforms: Query<'w, 's, &'static GlobalTransform>,
+    /// The viewer camera the distance is measured from.
+    cameras: Query<'w, 's, &'static GlobalTransform, With<ViewerCamera>>,
+}
+
+/// The pointer state a media surface is fed, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam) — the modifier keys and
+/// buttons a forwarded move / click carries.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct MediaInput<'w> {
+    /// The modifier keys.
+    keyboard: Res<'w, ButtonInput<KeyCode>>,
+    /// The mouse buttons.
+    mouse: Res<'w, ButtonInput<MouseButton>>,
+}
+
+impl MediaInput<'_> {
+    /// The modifier mask a forwarded pointer event carries.
+    fn modifiers(&self) -> sl_cef::Modifiers {
+        current_modifiers(&self.keyboard, &self.mouse)
+    }
+}
+
 /// The periodic surface driver: rank media faces by interest, keep surfaces
 /// for the top auto-play / user-started entries within the cap, tier their
 /// paint rates, apply / restore face materials, and reap dead faces.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the media data \
-              and runtime state, the engine and surface tables, the object/face/camera lookups, \
-              and the asset stores the face materials live in"
-)]
 fn drive_media_surfaces(
     time: Res<Time>,
     mut timer: Local<f32>,
     data: Res<MediaData>,
-    mut state: ResMut<MediaPrimState>,
     mut focus: ResMut<MediaFocus>,
-    mut engine: NonSendMut<MediaEngine>,
-    mut surfaces: NonSendMut<MediaSurfaces>,
-    objects: Res<ObjectState>,
-    faces: Query<(&PrimFaceEntity, &FaceTextureDebug)>,
-    mesh_materials: Query<&MeshMaterial3d<FaceMaterial>>,
-    transforms: Query<&GlobalTransform>,
-    cameras: Query<&GlobalTransform, With<ViewerCamera>>,
-    mut images: ResMut<Assets<Image>>,
-    mut materials: ResMut<Assets<FaceMaterial>>,
+    mut stores: MediaStores,
+    world: MediaWorld,
     settings: Option<Res<sl_viewer_settings::ViewerSettings>>,
-    mut commands: Commands,
 ) {
     *timer += time.delta_secs();
     if *timer < 0.5 {
@@ -478,7 +553,8 @@ fn drive_media_surfaces(
         .and_then(|settings| settings.store().get_bool(MEDIA_AUTO_PLAY_SETTING).ok())
         .unwrap_or(false);
 
-    let camera_position = cameras
+    let camera_position = world
+        .cameras
         .single()
         .map(|transform| transform.translation())
         .unwrap_or_default();
@@ -497,14 +573,16 @@ fn drive_media_surfaces(
                 object: *key,
                 face: PrimFaceId::new(face),
             };
-            let user_started = state
+            let user_started = stores
+                .state
                 .active
                 .get(&target)
                 .is_some_and(|active| active.user_started);
             let startable = (entry.auto_play && auto_play_enabled) || user_started;
-            let distance = objects
+            let distance = world
+                .objects
                 .entity_of(*key)
-                .and_then(|entity| transforms.get(entity).ok())
+                .and_then(|entity| world.transforms.get(entity).ok())
                 .map_or(f32::MAX, |transform| {
                     let d = transform.translation();
                     let dx = d.x - camera_position.x;
@@ -536,14 +614,16 @@ fn drive_media_surfaces(
         .collect();
 
     // Close surfaces that fell out of the wanted set or whose data vanished.
-    let stale: Vec<MediaTarget> = state
+    let stale: Vec<MediaTarget> = stores
+        .state
         .active
         .keys()
         .copied()
         .filter(|target| !wanted.contains(target))
         .collect();
     for target in stale {
-        close_media_surface(target, &mut state, &mut surfaces, &mut commands);
+        let (state, paint) = stores.split();
+        close_media_surface(target, state, paint.surfaces, paint.commands);
         if focus.focused == Some(target) {
             focus.focused = None;
             focus.focused_takes_keyboard = false;
@@ -555,79 +635,48 @@ fn drive_media_surfaces(
         let Some(entry) = data.entry(*target).cloned() else {
             continue;
         };
-        let face_entity = resolve_face_entity(&objects, *target, &faces);
-        if let Some(active) = state.active.get_mut(target) {
-            let fps = if focus.focused == Some(*target) {
-                FPS_TIERS[0]
-            } else {
-                *FPS_TIERS.get(rank / 2).unwrap_or(&1)
-            };
-            let mut surface_size = active.applied_size;
-            if let Some(slot) = surfaces.get(active.surface) {
-                slot.surface.set_max_fps(fps);
-                surface_size = slot.size;
-            }
-            // Re-apply the media material when the face entity was rebuilt (a
-            // shape change) or the surface image was re-allocated at a new
-            // size (its first real paint, or a resize): a fresh material on a
-            // changed component is what rebinds the new GPU texture.
-            match face_entity {
-                Some(entity)
-                    if entity == active.face_entity && surface_size == active.applied_size => {}
-                Some(entity) => {
-                    apply_media_material(
-                        entity,
-                        target,
-                        active,
-                        &faces,
-                        &mesh_materials,
-                        &mut surfaces,
-                        &mut materials,
-                        &mut commands,
-                    );
+        let face_entity = resolve_face_entity(&world.objects, *target, &stores.faces);
+        {
+            let (state, mut paint) = stores.split();
+            if let Some(active) = state.active.get_mut(target) {
+                let fps = if focus.focused == Some(*target) {
+                    FPS_TIERS[0]
+                } else {
+                    *FPS_TIERS.get(rank / 2).unwrap_or(&1)
+                };
+                let mut surface_size = active.applied_size;
+                if let Some(slot) = paint.surfaces.get(active.surface) {
+                    slot.surface.set_max_fps(fps);
+                    surface_size = slot.size;
                 }
-                None => {
-                    close_media_surface(*target, &mut state, &mut surfaces, &mut commands);
+                // Re-apply the media material when the face entity was rebuilt (a
+                // shape change) or the surface image was re-allocated at a new
+                // size (its first real paint, or a resize): a fresh material on a
+                // changed component is what rebinds the new GPU texture.
+                let unchanged =
+                    face_entity == Some(active.face_entity) && surface_size == active.applied_size;
+                match face_entity {
+                    Some(_entity) if unchanged => {}
+                    Some(entity) => apply_media_material(entity, target, active, &mut paint),
+                    None => {
+                        close_media_surface(*target, state, paint.surfaces, paint.commands);
+                    }
                 }
+                continue;
             }
-            continue;
         }
         let Some(entity) = face_entity else { continue };
-        start_media_surface(
-            *target,
-            &entry,
-            entity,
-            false,
-            &mut state,
-            &mut engine,
-            &mut surfaces,
-            &mut images,
-            &mut materials,
-            &faces,
-            &mesh_materials,
-            &mut commands,
-        );
+        start_media_surface(*target, &entry, entity, false, &mut stores);
     }
 }
 
 /// Create the engine surface for `target` and put its image on the face.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "threaded resources from the driver / click systems that own them"
-)]
 fn start_media_surface(
     target: MediaTarget,
     entry: &MediaEntry,
     face_entity: Entity,
     user_started: bool,
-    state: &mut MediaPrimState,
-    engine: &mut MediaEngine,
-    surfaces: &mut MediaSurfaces,
-    images: &mut Assets<Image>,
-    materials: &mut Assets<FaceMaterial>,
-    faces: &Query<(&PrimFaceEntity, &FaceTextureDebug)>,
-    mesh_materials: &Query<&MeshMaterial3d<FaceMaterial>>,
-    commands: &mut Commands,
+    stores: &mut MediaStores,
 ) -> bool {
     let url = entry.current_url.as_ref().or(entry.home_url.as_ref());
     let Some(url) = url else {
@@ -657,7 +706,11 @@ fn start_media_surface(
     };
     // Prim media is spatialised at the prim — the positional media-on-a-prim
     // audio no reference viewer manages.
-    let Some(id) = surfaces.create_kind(engine, images, &config, kind, true) else {
+    let Some(id) =
+        stores
+            .surfaces
+            .create_kind(&mut stores.engine, &mut stores.images, &config, kind, true)
+    else {
         return false;
     };
     debug!("media surface started for {target:?} at {url} ({kind:?})");
@@ -672,46 +725,30 @@ fn start_media_surface(
         bounces: 0,
         last_good_url: Some(url),
     };
-    apply_media_material(
-        face_entity,
-        &target,
-        &mut active,
-        faces,
-        mesh_materials,
-        surfaces,
-        materials,
-        commands,
-    );
-    state.active.insert(target, active);
+    apply_media_material(face_entity, &target, &mut active, &mut stores.split().1);
+    stores.state.active.insert(target, active);
     true
 }
 
 /// Swap `entity`'s material for the media material sampling the surface's
 /// image (recording the original for restore). Also used to re-apply after a
 /// face rebuild.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "threaded resources from the driver / click systems that own them"
-)]
 fn apply_media_material(
     entity: Entity,
     target: &MediaTarget,
     active: &mut ActiveMedia,
-    faces: &Query<(&PrimFaceEntity, &FaceTextureDebug)>,
-    mesh_materials: &Query<&MeshMaterial3d<FaceMaterial>>,
-    surfaces: &mut MediaSurfaces,
-    materials: &mut Assets<FaceMaterial>,
-    commands: &mut Commands,
+    paint: &mut MediaPaint<'_, '_, '_>,
 ) {
-    let Some(slot) = surfaces.get_mut(active.surface) else {
+    let Some(slot) = paint.surfaces.get_mut(active.surface) else {
         return;
     };
     active.applied_size = slot.size;
-    let uv_transform = faces
+    let uv_transform = paint
+        .faces
         .get(entity)
         .map(|(_face, FaceTextureDebug(tf))| texture_face_uv_transform(tf))
         .unwrap_or_default();
-    let material = materials.add(inert_face_material(StandardMaterial {
+    let material = paint.materials.add(inert_face_material(StandardMaterial {
         base_color: Color::WHITE,
         base_color_texture: Some(slot.image.clone()),
         // Media renders fullbright in the reference viewer.
@@ -724,16 +761,16 @@ fn apply_media_material(
     // happen), then record the new one. `get`, not `get_mut`: a prune must not
     // mark a live material changed and re-prepare it for nothing.
     slot.touch_materials
-        .retain(|worn| materials.get(*worn).is_some());
+        .retain(|worn| paint.materials.get(*worn).is_some());
     slot.touch_materials.push(material.id());
-    let Ok(mut entity_commands) = commands.get_entity(entity) else {
+    let Ok(mut entity_commands) = paint.commands.get_entity(entity) else {
         return;
     };
     entity_commands.insert(MediaFace { target: *target });
     // Record the face's current (non-media) material as the restore point: on
     // first application that is the object's own material, and on a re-apply
     // after a face rebuild the rebuilt entity carries a fresh original too.
-    if let Ok(current) = mesh_materials.get(entity)
+    if let Ok(current) = paint.mesh_materials.get(entity)
         && current.0 != active.material
     {
         active.restore = current.0.clone();
@@ -792,40 +829,59 @@ struct HoverPick<'w, 's> {
     scene: Query<'w, 's, &'static SceneObject>,
 }
 
+/// The GPU-pick plumbing of the hover, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the picker a Media pick is
+/// requested on, this frame's resolved picks, the clock the ~[`PICK_HZ`] throttle
+/// counts on, and the two `Local`s that carry the throttle and the media face the
+/// last pick landed on between frames.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct MediaPickIo<'w, 's> {
+    /// The picker the Media pick is requested on.
+    picker: ResMut<'w, GpuPicker>,
+    /// This frame's resolved picks.
+    picks: MessageReader<'w, 's, GpuPickResolved>,
+    /// The clock the throttle counts on.
+    time: Res<'w, Time>,
+    /// The media face the last Media pick landed on (occlusion-correct), held
+    /// between picks; the per-frame ray refines the surface UV against just this.
+    hovered: Local<'s, Option<Entity>>,
+    /// Seconds since the last Media pick request, for the ~[`PICK_HZ`] throttle.
+    since_pick: Local<'s, f32>,
+}
+
+/// The media state the hover reads, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): which faces are live, their
+/// surfaces, the per-object media data the interact permission comes from, the
+/// object model that owner checks go through, and the two face lookups.
+#[derive(bevy::ecs::system::SystemParam)]
+struct MediaHoverState<'w, 's> {
+    /// The per-face runtime state.
+    state: Res<'w, MediaPrimState>,
+    /// The live surfaces, for the hovered face's pixel size.
+    surfaces: NonSend<'w, MediaSurfaces>,
+    /// The per-object media data (permissions, first-click-interact).
+    data: Res<'w, MediaData>,
+    /// The object model, for the owner check.
+    objects: Res<'w, ObjectState>,
+    /// The faces currently showing a live surface.
+    media_faces: Query<'w, 's, &'static MediaFace>,
+    /// The prim faces, for the struck face's texture placement.
+    faces: Query<'w, 's, (&'static PrimFaceEntity, &'static FaceTextureDebug)>,
+}
+
 /// Hover: find the media face under the cursor via the GPU pick (occlusion-
 /// correct, so an avatar / wall in front of a media screen suppresses it),
 /// refine the surface UV with a single-mesh ray against just that face, update
 /// [`MediaFocus`]'s hover state, and forward pointer motion to its page when
 /// interaction is allowed.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the pick \
-              plumbing plus the media state the hover updates"
-)]
 fn hover_media_faces(
     pick: HoverPick,
     mut ray_cast: MeshRayCast,
-    media_faces: Query<&MediaFace>,
-    faces: Query<(&PrimFaceEntity, &FaceTextureDebug)>,
     mut focus: ResMut<MediaFocus>,
-    state: Res<MediaPrimState>,
-    surfaces: NonSend<MediaSurfaces>,
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    data: Res<MediaData>,
-    objects: Res<ObjectState>,
-    // The GPU-pick plumbing, bundled into one tuple param (a Bevy system caps at
-    // 16 params): the picker to refresh the Media pick, this frame's resolved
-    // picks, and the clock for the ~PICK_HZ throttle.
-    pick_io: (ResMut<GpuPicker>, MessageReader<GpuPickResolved>, Res<Time>),
-    // The media face the last Media pick landed on (occlusion-correct), held
-    // between picks; the per-frame ray refines the surface UV against just this.
-    mut hovered: Local<Option<Entity>>,
-    // Seconds since the last Media pick request, for the ~PICK_HZ throttle.
-    mut since_pick: Local<f32>,
+    input: MediaInput,
+    mut pick_io: MediaPickIo,
+    media: MediaHoverState,
 ) {
-    let (mut picker, mut picks, time) = pick_io;
-
     // Occlusion + selection come from the Phase 3 GPU pick: it renders the real
     // scene under the cursor, so an avatar / wall in front of a media face
     // correctly suppresses it (posed avatars included) — no whole-scene
@@ -833,12 +889,12 @@ fn hover_media_faces(
     // [[viewer-perf-media-hover-gpu-pick]]). Consume this frame's Media picks and
     // remember the media face the pick landed on, or clear it (a miss, or the
     // nearest hit is not a media face — occluded / non-media).
-    for resolved in picks.read() {
+    for resolved in pick_io.picks.read() {
         if resolved.purpose != PickPurpose::Media {
             continue;
         }
-        *hovered = resolved.hit.as_ref().and_then(|hit| match &hit.resolution {
-            PickResolution::ObjectFace { entity, .. } if media_faces.contains(*entity) => {
+        *pick_io.hovered = resolved.hit.as_ref().and_then(|hit| match &hit.resolution {
+            PickResolution::ObjectFace { entity, .. } if media.media_faces.contains(*entity) => {
                 Some(*entity)
             }
             _ => None,
@@ -850,13 +906,13 @@ fn hover_media_faces(
 
     // Keep a ~PICK_HZ Media pick refreshed while the cursor is over world content
     // (the 1–2 frame readback latency is invisible for hover).
-    *since_pick += time.delta_secs();
+    *pick_io.since_pick += pick_io.time.delta_secs();
     if let Some(cursor) = cursor
         && !over_ui
-        && *since_pick >= 1.0 / PICK_HZ
+        && *pick_io.since_pick >= 1.0 / PICK_HZ
     {
-        picker.request(cursor, PickPurpose::Media);
-        *since_pick = 0.0;
+        pick_io.picker.request(cursor, PickPurpose::Media);
+        *pick_io.since_pick = 0.0;
     }
 
     let previous = focus.hover;
@@ -870,7 +926,7 @@ fn hover_media_faces(
         // per-frame ray only refines the current surface UV against that one
         // entity (the pick's `ObjectFace` "surface-refinement ray test"), so it
         // is a single-mesh cast, not a whole-scene one.
-        let Some(hovered_entity) = *hovered else {
+        let Some(hovered_entity) = *pick_io.hovered else {
             break 'pick;
         };
         if over_ui {
@@ -890,7 +946,7 @@ fn hover_media_faces(
         let Some((entity, hit)) = ray_cast.cast_ray(ray, &settings).first().cloned() else {
             break 'pick;
         };
-        let Ok(media_face) = media_faces.get(entity) else {
+        let Ok(media_face) = media.media_faces.get(entity) else {
             break 'pick;
         };
         let target = media_face.target;
@@ -905,7 +961,7 @@ fn hover_media_faces(
         let Ok(object_global) = pick.globals.get(object_entity) else {
             break 'pick;
         };
-        let face = faces.get(entity).ok();
+        let face = media.faces.get(entity).ok();
         let info = surface_info_from_hit(
             &hit,
             face.map(|(marker, _tf)| marker.face_id),
@@ -914,38 +970,40 @@ fn hover_media_faces(
         );
         focus.hover = Some(target);
         focus.hover_normal = Some(hit.normal);
-        let Some(active) = state.active.get(&target) else {
+        let Some(active) = media.state.active.get(&target) else {
             break 'pick;
         };
-        let Some(slot) = surfaces.get(active.surface) else {
+        let Some(slot) = media.surfaces.get(active.surface) else {
             break 'pick;
         };
         let pixel = media_pixel_from_uv(Vec2::new(info.uv[0], info.uv[1]), slot.size);
         focus.hover_pixel = Some(pixel);
         // Forward motion when the face is focused, or first-click-interact
         // (with permission) would let a click through anyway.
-        let is_owner = objects
+        let is_owner = media
+            .objects
             .update_flags_by_key(target.object)
             .is_some_and(|flags| flags & FLAGS_OBJECT_YOU_OWNER != 0);
-        let may_interact = data
+        let may_interact = media
+            .data
             .entry(target)
             .is_some_and(|entry| media_permission_allows(entry.perms_interact, is_owner));
         if may_interact
             && (focus.focused == Some(target)
-                || data
+                || media
+                    .data
                     .entry(target)
                     .is_some_and(|entry| entry.first_click_interact))
         {
-            slot.surface
-                .mouse_move(pixel.0, pixel.1, current_modifiers(&keyboard, &mouse));
+            slot.surface.mouse_move(pixel.0, pixel.1, input.modifiers());
         }
     }
 
     if previous.is_some()
         && focus.hover != previous
         && let Some(target) = previous
-        && let Some(active) = state.active.get(&target)
-        && let Some(slot) = surfaces.get(active.surface)
+        && let Some(active) = media.state.active.get(&target)
+        && let Some(slot) = media.surfaces.get(active.surface)
     {
         slot.surface.mouse_leave();
     }
@@ -953,26 +1011,13 @@ fn hover_media_faces(
 
 /// Handle a claimed media click: focus the face, start its surface when
 /// needed, and forward the press when interaction is allowed.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "threaded resources: the click stream, media data / state, the engine tables, \
-              object / face lookups and the asset stores for surface start"
-)]
 fn handle_media_clicks(
     mut clicks: MessageReader<MediaWorldClick>,
     mut data: ResMut<MediaData>,
-    mut state: ResMut<MediaPrimState>,
     mut focus: ResMut<MediaFocus>,
-    mut engine: NonSendMut<MediaEngine>,
-    mut surfaces: NonSendMut<MediaSurfaces>,
+    mut stores: MediaStores,
     objects: Res<ObjectState>,
-    faces: Query<(&PrimFaceEntity, &FaceTextureDebug)>,
-    mesh_materials: Query<&MeshMaterial3d<FaceMaterial>>,
-    mut images: ResMut<Assets<Image>>,
-    mut materials: ResMut<Assets<FaceMaterial>>,
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    mut commands: Commands,
+    input: MediaInput,
     mut sl_commands: MessageWriter<SlCommand>,
 ) {
     for click in clicks.read() {
@@ -1001,37 +1046,25 @@ fn handle_media_clicks(
         let was_focused = focus.focused == Some(target);
         focus.focused = Some(target);
         focus.focused_takes_keyboard = false;
-        if !state.active.contains_key(&target) {
+        if !stores.state.active.contains_key(&target) {
             // First interaction starts the media (the reference's click-to-play).
-            let started = start_media_surface(
-                target,
-                &entry,
-                click.entity,
-                true,
-                &mut state,
-                &mut engine,
-                &mut surfaces,
-                &mut images,
-                &mut materials,
-                &faces,
-                &mesh_materials,
-                &mut commands,
-            );
+            let started = start_media_surface(target, &entry, click.entity, true, &mut stores);
             if !started {
                 continue;
             }
-        } else if let Some(active) = state.active.get_mut(&target) {
+        } else if let Some(active) = stores.state.active.get_mut(&target) {
             active.user_started = true;
         }
-        focus.focused_takes_keyboard = state
+        focus.focused_takes_keyboard = stores
+            .state
             .active
             .get(&target)
             .is_some_and(|active| active.kind == MediaEngineKind::Web);
         // Forward the press when already focused, or on the first click with
         // `first_click_interact`.
         if (was_focused || entry.first_click_interact)
-            && let Some(active) = state.active.get(&target)
-            && let Some(slot) = surfaces.get(active.surface)
+            && let Some(active) = stores.state.active.get(&target)
+            && let Some(slot) = stores.surfaces.get(active.surface)
         {
             let pixel = media_pixel_from_uv(click.uv, slot.size);
             slot.surface.set_focus(true);
@@ -1041,7 +1074,7 @@ fn handle_media_clicks(
                 sl_cef::MouseButton::Left,
                 true,
                 1,
-                current_modifiers(&keyboard, &mouse),
+                input.modifiers(),
             );
             focus.pressed = Some(target);
         }

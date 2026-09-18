@@ -60,9 +60,11 @@ use crate::legacy_materials::{
     preview_legacy_material,
 };
 use crate::material_preview::MaterialPreview;
-use crate::materials::{MaterialManager, ObjectRenderMaterials};
+use crate::materials::{MaterialManager, ObjectRenderMaterials, PreviewedFace};
 use crate::objects::{FaceTextureDebug, PrimFaceEntity, SceneObject};
-use crate::textures::{PrimTextures, TextureAlpha, TextureManager, compose_face_material};
+use crate::textures::{
+    FaceStores, PrimTextures, TextureAlpha, TextureManager, compose_face_material,
+};
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_text::set_editor_text;
@@ -1057,6 +1059,230 @@ fn spawn_pbr_field_row(
 }
 
 // ---------------------------------------------------------------------------
+// The four worlds a material edit reaches for, bundled.
+// ---------------------------------------------------------------------------
+//
+// Every system below is one of four shapes — read the shown material, write a
+// legacy (Blinn-Phong) edit, write a PBR override, or repaint the faces — and
+// each shape wants the *same* half-dozen resources and queries every time. As
+// bundles, each system's own signature is what is actually specific to it (which
+// picker, which combo, which field), and the shared verb (`allowed`, `commit`,
+// `apply_override`) is a method rather than a free function taking the world
+// apart again at every call site.
+
+/// The per-face render-material lookup: which faces of a selected object carry a
+/// GLTF material, and which material.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct RenderFaceLookup<'w, 's> {
+    /// Each object's render-material holder (`face → asset id`).
+    render_materials: Query<'w, 's, &'static ObjectRenderMaterials>,
+    /// Parent → children, to walk an object's own faces.
+    children: Query<'w, 's, &'static Children>,
+    /// Scene identities, to stop that walk at a linkset child object.
+    scene: Query<'w, 's, (), With<crate::objects::SceneObject>>,
+}
+
+/// What the sync pass reads to decide what the widgets should show: the primary
+/// selection, and the two material managers its representative face resolves
+/// through.
+#[derive(bevy::ecs::system::SystemParam)]
+struct MatShownFacts<'w, 's> {
+    /// The selection whose primary face is shown.
+    selection: Res<'w, SelectionSet>,
+    /// Object properties, for the permission and representative-face reads.
+    objects: Res<'w, ObjectState>,
+    /// The Blinn-Phong materials behind the legacy fields.
+    legacy_manager: Res<'w, LegacyMaterialManager>,
+    /// The GLTF materials and overrides behind the PBR fields.
+    material_manager: Res<'w, MaterialManager>,
+    /// Which faces carry a render material.
+    faces: RenderFaceLookup<'w, 's>,
+}
+
+/// The selection-wide **legacy** (Blinn-Phong) material edit path: preview it on
+/// the faces, and send it over the `RenderMaterials` PUT.
+#[derive(bevy::ecs::system::SystemParam)]
+struct LegacyFaceEdit<'w, 's> {
+    /// The faces the edit applies to.
+    selection: Res<'w, SelectionSet>,
+    /// Object properties, for the modify-permission check.
+    objects: Res<'w, ObjectState>,
+    /// The materials the edit starts from.
+    manager: Res<'w, LegacyMaterialManager>,
+    /// The rendered per-face values a PUT is rebuilt from.
+    prim_faces: PrimFaceLookup<'w, 's>,
+    /// The live in-place preview shown before (and during) the commit.
+    preview: ResMut<'w, LegacyPreview>,
+    /// Where the reference's no-modify notice goes.
+    notices: MessageWriter<'w, LocalChatNotice>,
+    /// Where the PUT goes.
+    commands: MessageWriter<'w, SlCommand>,
+}
+
+/// The selection-wide **PBR** override edit path: amend each selected face's
+/// [`MaterialOverride`] and send it over `ModifyMaterialParams`.
+#[derive(bevy::ecs::system::SystemParam)]
+struct PbrFaceEdit<'w, 's> {
+    /// The faces the edit applies to.
+    selection: Res<'w, SelectionSet>,
+    /// Object properties, for the modify-permission check.
+    objects: Res<'w, ObjectState>,
+    /// The overrides amended, and applied locally for instant feedback.
+    manager: ResMut<'w, MaterialManager>,
+    /// Which faces carry a render material an override can sit on.
+    faces: RenderFaceLookup<'w, 's>,
+    /// Where the reference's no-modify notice goes.
+    notices: MessageWriter<'w, LocalChatNotice>,
+    /// Where `ModifyMaterialParams` goes.
+    commands: MessageWriter<'w, SlCommand>,
+}
+
+/// The stores a face **repaint** composes through — the live previews and the
+/// revert that ends them.
+#[derive(bevy::ecs::system::SystemParam)]
+struct FacePaint<'w, 's> {
+    /// Fetch and priority for the maps a repaint needs.
+    textures: ResMut<'w, TextureManager>,
+    /// The decoded textures those maps come from.
+    store: Res<'w, crate::world_api::DecodedTextures>,
+    /// The per-prim texture bookkeeping a recompose updates.
+    prim_textures: ResMut<'w, PrimTextures>,
+    /// Where an uploaded (linear / sRGB) map image lands.
+    images: ResMut<'w, Assets<Image>>,
+    /// The face materials painted.
+    materials: ResMut<'w, Assets<FaceMaterial>>,
+    /// Parent → children, to walk an object's own faces.
+    children: Query<'w, 's, &'static Children>,
+    /// Scene identities, to stop that walk at a linkset child object.
+    scene: Query<'w, 's, (), With<SceneObject>>,
+}
+
+impl RenderFaceLookup<'_, '_> {
+    /// The GLTF render-material asset id of face `face_id` on the object rooted
+    /// at `root`, walked from its [`ObjectRenderMaterials`] holder(s).
+    pub(crate) fn material_id(&self, root: Entity, face_id: u8) -> Option<Uuid> {
+        let mut stack = vec![root];
+        while let Some(entity) = stack.pop() {
+            if entity != root && self.scene.get(entity).is_ok() {
+                continue;
+            }
+            if let Ok(holder) = self.render_materials.get(entity)
+                && let Some((_face, id)) = holder.faces.iter().find(|(face, _id)| *face == face_id)
+            {
+                return Some(*id);
+            }
+            if let Ok(list) = self.children.get(entity) {
+                for child in list.iter() {
+                    stack.push(child);
+                }
+            }
+        }
+        None
+    }
+
+    /// The selected face indices of a node that carry a GLTF render material (the
+    /// faces a PBR transform edit can touch): the chosen faces filtered to those
+    /// in the object's [`ObjectRenderMaterials`] holder, or every render-material
+    /// face for a whole-object selection.
+    fn pbr_faces_of(&self, node: &crate::world_api::SelectedNode) -> Vec<u8> {
+        let mut material_faces: Vec<u8> = Vec::new();
+        let mut stack = vec![node.entity];
+        while let Some(entity) = stack.pop() {
+            if entity != node.entity && self.scene.get(entity).is_ok() {
+                continue;
+            }
+            if let Ok(holder) = self.render_materials.get(entity) {
+                for (face, _id) in &holder.faces {
+                    material_faces.push(*face);
+                }
+            }
+            if let Ok(list) = self.children.get(entity) {
+                for child in list.iter() {
+                    stack.push(child);
+                }
+            }
+        }
+        match &node.faces {
+            None => material_faces,
+            Some(set) => {
+                let chosen: std::collections::HashSet<u16> =
+                    set.iter().map(|face| face.get()).collect();
+                material_faces
+                    .into_iter()
+                    .filter(|face| chosen.contains(&u16::from(*face)))
+                    .collect()
+            }
+        }
+    }
+}
+
+impl MatShownFacts<'_, '_> {
+    /// The representative PBR state of the primary selection
+    /// ([`representative_pbr`]).
+    fn representative_pbr(&self) -> (Option<Uuid>, GltfMaterial, Option<MaterialOverride>) {
+        representative_pbr(&self.selection, &self.material_manager, &self.faces)
+    }
+}
+
+impl LegacyFaceEdit<'_, '_> {
+    /// Whether the primary selection may be modified, writing the reference's
+    /// no-modify notice when it may not.
+    fn allowed(&mut self) -> bool {
+        material_edit_allowed(&self.selection, &self.objects, &mut self.notices)
+    }
+
+    /// Show `edit` on the selected faces at once, sending nothing
+    /// ([`preview_legacy_edit`]).
+    fn preview(&mut self, edit: impl Fn(&mut LegacyMaterial)) {
+        preview_legacy_edit(
+            &mut self.preview,
+            &self.selection,
+            &self.objects,
+            &self.manager,
+            edit,
+        );
+    }
+
+    /// Send `edit` as each selected face's `RenderMaterials` PUT
+    /// ([`apply_legacy_edit`]).
+    fn commit(&mut self, edit: impl Fn(&mut LegacyMaterial)) {
+        apply_legacy_edit(
+            &self.selection,
+            &self.manager,
+            &self.prim_faces,
+            &mut self.commands,
+            edit,
+        );
+    }
+}
+
+impl PbrFaceEdit<'_, '_> {
+    /// Whether the primary selection may be modified, writing the reference's
+    /// no-modify notice when it may not.
+    fn allowed(&mut self) -> bool {
+        material_edit_allowed(&self.selection, &self.objects, &mut self.notices)
+    }
+
+    /// The representative PBR state of the primary selection
+    /// ([`representative_pbr`]).
+    fn representative(&self) -> (Option<Uuid>, GltfMaterial, Option<MaterialOverride>) {
+        representative_pbr(&self.selection, &self.manager, &self.faces)
+    }
+
+    /// Amend every selected PBR face's override with `edit` and send them
+    /// ([`apply_pbr_override`]).
+    fn apply_override(&mut self, edit: impl Fn(&mut MaterialOverride)) {
+        apply_pbr_override(
+            &self.selection,
+            &mut self.manager,
+            &self.faces,
+            &mut self.commands,
+            edit,
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Reading the resolved material of the representative face.
 // ---------------------------------------------------------------------------
 
@@ -1076,18 +1302,14 @@ fn legacy_material_of(face: &TextureFace, manager: &LegacyMaterialManager) -> Le
 /// render material.
 fn representative_pbr(
     selection: &SelectionSet,
-    render_materials: &Query<&ObjectRenderMaterials>,
     material_manager: &MaterialManager,
-    children: &Query<&Children>,
-    scene: &Query<(), With<crate::objects::SceneObject>>,
+    faces: &RenderFaceLookup,
 ) -> (Option<Uuid>, GltfMaterial, Option<MaterialOverride>) {
     let Some(primary) = selection.primary() else {
         return (None, GltfMaterial::default(), None);
     };
     let face_id = primary_face_index(selection);
-    let Some(material_id) =
-        face_material_id(primary.entity, face_id, render_materials, children, scene)
-    else {
+    let Some(material_id) = faces.material_id(primary.entity, face_id) else {
         return (None, GltfMaterial::default(), None);
     };
     let base = material_manager
@@ -1132,34 +1354,6 @@ fn effective_channel_transform(
         }
     }
     Some(transform)
-}
-
-/// The GLTF render-material asset id of face `face_id` on the object rooted at
-/// `root`, walked from its [`ObjectRenderMaterials`] holder(s).
-fn face_material_id(
-    root: Entity,
-    face_id: u8,
-    render_materials: &Query<&ObjectRenderMaterials>,
-    children: &Query<&Children>,
-    scene: &Query<(), With<crate::objects::SceneObject>>,
-) -> Option<Uuid> {
-    let mut stack = vec![root];
-    while let Some(entity) = stack.pop() {
-        if entity != root && scene.get(entity).is_ok() {
-            continue;
-        }
-        if let Ok(holder) = render_materials.get(entity)
-            && let Some((_face, id)) = holder.faces.iter().find(|(face, _id)| *face == face_id)
-        {
-            return Some(*id);
-        }
-        if let Ok(list) = children.get(entity) {
-            for child in list.iter() {
-                stack.push(child);
-            }
-        }
-    }
-    None
 }
 
 /// The `KHR_texture_transform` of a decoded material's channel, if that channel
@@ -1210,6 +1404,10 @@ struct MatWidgets<'w, 's> {
     color_swatches: Query<'w, 's, &'static mut ColorSwatchValue>,
     /// The double-sided toggle glyph text.
     double_sided_glyph: Query<'w, 's, &'static mut Text, With<DoubleSidedGlyph>>,
+    /// The font context a programmatic [`EditableText`] rewrite relays through.
+    font_cx: ResMut<'w, FontCx>,
+    /// The layout context the same rewrite relays through.
+    layout_cx: ResMut<'w, LayoutCx>,
 }
 
 /// Enable or disable every [`MatControl`] material-channel control on the same
@@ -1288,29 +1486,14 @@ fn material_edit_allowed(
 /// Populate the material-channel widgets from the primary selection's
 /// representative face — skipping the field the user is editing, and only when
 /// the shown snapshot changes.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the tool / \
-              selection / object state, the two material managers, the render-material + \
-              hierarchy queries, the snapshot guard, the focus, the widget queries, the UI \
-              handles, and the text-layout contexts a programmatic rewrite needs"
-)]
 fn sync_material_widgets(
     tool: Res<EditToolState>,
-    selection: Res<SelectionSet>,
-    objects: Res<ObjectState>,
-    legacy_manager: Res<LegacyMaterialManager>,
-    material_manager: Res<MaterialManager>,
     mode: Res<MatModeState>,
     ui: Option<Res<BuildMaterialUi>>,
-    render_materials: Query<&ObjectRenderMaterials>,
-    children: Query<&Children>,
-    scene: Query<(), With<crate::objects::SceneObject>>,
     mut snapshot: ResMut<MatShownSnapshot>,
     focus: Res<InputFocus>,
     mut widgets: MatWidgets,
-    mut font_cx: ResMut<FontCx>,
-    mut layout_cx: ResMut<LayoutCx>,
+    facts: MatShownFacts,
 ) {
     if !tool.active {
         return;
@@ -1318,24 +1501,19 @@ fn sync_material_widgets(
     let Some(ui) = ui else {
         return;
     };
-    let current = representative_face(&selection, &objects).map(|(_scoped, face, signature)| {
-        let legacy = legacy_material_of(&face, &legacy_manager);
-        let (pbr_material, pbr_base, pbr_override) = representative_pbr(
-            &selection,
-            &render_materials,
-            &material_manager,
-            &children,
-            &scene,
-        );
-        MatShown {
-            signature,
-            mode: *mode,
-            legacy,
-            pbr_material,
-            pbr_base,
-            pbr_override,
-        }
-    });
+    let current =
+        representative_face(&facts.selection, &facts.objects).map(|(_scoped, face, signature)| {
+            let legacy = legacy_material_of(&face, &facts.legacy_manager);
+            let (pbr_material, pbr_base, pbr_override) = facts.representative_pbr();
+            MatShown {
+                signature,
+                mode: *mode,
+                legacy,
+                pbr_material,
+                pbr_base,
+                pbr_override,
+            }
+        });
     if snapshot.shown == current {
         return;
     }
@@ -1352,7 +1530,12 @@ fn sync_material_widgets(
         }
         let want = format_field(field.input_kind(), field.display_value(&shown.legacy));
         if editor.value().to_string() != want {
-            set_editor_text(&mut editor, &want, &mut font_cx, &mut layout_cx);
+            set_editor_text(
+                &mut editor,
+                &want,
+                &mut widgets.font_cx,
+                &mut widgets.layout_cx,
+            );
         }
     }
     // PBR transform fields: the active channel's effective transform (base +
@@ -1366,7 +1549,12 @@ fn sync_material_widgets(
         }
         let want = format_field(TextInputKind::Float, field.display_value(&transform));
         if editor.value().to_string() != want {
-            set_editor_text(&mut editor, &want, &mut font_cx, &mut layout_cx);
+            set_editor_text(
+                &mut editor,
+                &want,
+                &mut widgets.font_cx,
+                &mut widgets.layout_cx,
+            );
         }
     }
     // PBR scalar fields (metallic / roughness / alpha cutoff).
@@ -1376,7 +1564,12 @@ fn sync_material_widgets(
         }
         let want = format!("{:.3}", field.display_value(&effective));
         if editor.value().to_string() != want {
-            set_editor_text(&mut editor, &want, &mut font_cx, &mut layout_cx);
+            set_editor_text(
+                &mut editor,
+                &want,
+                &mut widgets.font_cx,
+                &mut widgets.layout_cx,
+            );
         }
     }
     // Legacy alpha-mode combo.
@@ -1557,26 +1750,13 @@ fn set_material_preview(
 /// Commit numeric legacy-material edits on `Enter` in a focused field or when
 /// focus leaves one: apply the one attribute to each selected face's material and
 /// send them over the `RenderMaterials` PUT.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the tool / \
-              selection / object state, the legacy manager, the focus + its blur tracker, the \
-              field query, the per-face lookup, the keyboard, the no-modify notice writer, and the \
-              command writer"
-)]
 fn commit_legacy_fields(
     tool: Res<EditToolState>,
-    selection: Res<SelectionSet>,
-    objects: Res<ObjectState>,
-    legacy_manager: Res<LegacyMaterialManager>,
     focus: Res<InputFocus>,
     keyboard: Res<ButtonInput<KeyCode>>,
     mut focus_track: Local<Option<Entity>>,
     fields: Query<(Entity, &LegacyField, &EditableText)>,
-    prim_faces: PrimFaceLookup,
-    mut preview: ResMut<LegacyPreview>,
-    mut notices: MessageWriter<LocalChatNotice>,
-    mut commands: MessageWriter<SlCommand>,
+    mut legacy: LegacyFaceEdit,
 ) {
     if !tool.active {
         *focus_track = None;
@@ -1602,40 +1782,21 @@ fn commit_legacy_fields(
     let Some(value) = parse_tex_value(field.input_kind(), &editor.value().to_string()) else {
         return;
     };
-    if !material_edit_allowed(&selection, &objects, &mut notices) {
+    if !legacy.allowed() {
         return;
     }
     let edit = move |material: &mut LegacyMaterial| field.apply(material, value);
-    preview_legacy_edit(&mut preview, &selection, &objects, &legacy_manager, edit);
-    apply_legacy_edit(
-        &selection,
-        &legacy_manager,
-        &prim_faces,
-        &mut commands,
-        edit,
-    );
+    legacy.preview(edit);
+    legacy.commit(edit);
 }
 
 /// Apply an alpha-mode combo pick to the selected faces' materials (previewed live
 /// and sent over the PUT).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the combo changes + \
-              its marker, the UI handle, the selection / object state, the legacy manager, the \
-              per-face lookup, the live-preview state, the no-modify notice writer, and the command \
-              writer"
-)]
 fn apply_alpha_mode_change(
     mut changes: MessageReader<ComboChanged>,
     combos: Query<(), With<AlphaModeCombo>>,
     ui: Option<Res<BuildMaterialUi>>,
-    selection: Res<SelectionSet>,
-    objects: Res<ObjectState>,
-    legacy_manager: Res<LegacyMaterialManager>,
-    prim_faces: PrimFaceLookup,
-    mut preview: ResMut<LegacyPreview>,
-    mut notices: MessageWriter<LocalChatNotice>,
-    mut commands: MessageWriter<SlCommand>,
+    mut legacy: LegacyFaceEdit,
 ) {
     let Some(ui) = ui else {
         return;
@@ -1644,19 +1805,13 @@ fn apply_alpha_mode_change(
         if change.combo != ui.alpha_combo || !combos.contains(change.combo) {
             continue;
         }
-        if !material_edit_allowed(&selection, &objects, &mut notices) {
+        if !legacy.allowed() {
             continue;
         }
         let mode = clamp_to_byte(from_usize(change.active)).min(ALPHA_MODE_EMISSIVE);
         let edit = move |material: &mut LegacyMaterial| material.diffuse_alpha_mode = mode;
-        preview_legacy_edit(&mut preview, &selection, &objects, &legacy_manager, edit);
-        apply_legacy_edit(
-            &selection,
-            &legacy_manager,
-            &prim_faces,
-            &mut commands,
-            edit,
-        );
+        legacy.preview(edit);
+        legacy.commit(edit);
     }
 }
 
@@ -1817,22 +1972,11 @@ fn resolve_preview_map(
 /// scalars (once), then each map as its texture decodes, turning on its re-sample
 /// bit. Settles once the scalars and both maps are applied, after which it is a
 /// no-op — so a held preview does not re-prepare the material every frame.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the preview state, \
-              the selection, the texture store + image assets it uploads maps into, the hierarchy \
-              / face-material queries, and the material store the preview paints into"
-)]
 fn drive_legacy_preview(
     mut preview: ResMut<LegacyPreview>,
     selection: Res<SelectionSet>,
-    mut textures: ResMut<TextureManager>,
-    store: Res<crate::world_api::DecodedTextures>,
-    mut images: ResMut<Assets<Image>>,
-    children: Query<&Children>,
     face_materials: Query<(&PrimFaceEntity, &MeshMaterial3d<FaceMaterial>)>,
-    scene: Query<(), With<SceneObject>>,
-    mut materials: ResMut<Assets<FaceMaterial>>,
+    mut paint: FacePaint,
 ) {
     // Reborrow to a plain `&mut` so the two map resolves below can each take a
     // disjoint pair of fields (`*_image` + `*_requested`) — a borrow the `ResMut`
@@ -1845,11 +1989,18 @@ fn drive_legacy_preview(
         return;
     };
     if !preview.scalars_done {
-        for_selected_face_materials(&selection, &children, &scene, &face_materials, |handle| {
-            if let Some(mut face) = materials.get_mut(handle) {
-                let _override = apply_legacy_scalars(&mut face, &material);
-            }
-        });
+        let materials = &mut paint.materials;
+        for_selected_face_materials(
+            &selection,
+            &paint.children,
+            &paint.scene,
+            &face_materials,
+            |handle| {
+                if let Some(mut face) = materials.get_mut(handle) {
+                    let _override = apply_legacy_scalars(&mut face, &material);
+                }
+            },
+        );
         preview.scalars_done = true;
     }
     let normal_ready = resolve_preview_map(
@@ -1857,34 +2008,48 @@ fn drive_legacy_preview(
         &mut preview.normal_requested,
         material.normal_map,
         false,
-        &mut textures,
-        &store,
-        &mut images,
+        &mut paint.textures,
+        &paint.store,
+        &mut paint.images,
     );
     let spec_ready = resolve_preview_map(
         &mut preview.spec_image,
         &mut preview.spec_requested,
         material.specular_map,
         true,
-        &mut textures,
-        &store,
-        &mut images,
+        &mut paint.textures,
+        &paint.store,
+        &mut paint.images,
     );
     if let Some(image) = preview.normal_image.clone() {
-        for_selected_face_materials(&selection, &children, &scene, &face_materials, |handle| {
-            if let Some(mut face) = materials.get_mut(handle) {
-                face.extension.normal_map = image.clone();
-                face.extension.params.map_flags |= MAP_FLAG_NORMAL;
-            }
-        });
+        let materials = &mut paint.materials;
+        for_selected_face_materials(
+            &selection,
+            &paint.children,
+            &paint.scene,
+            &face_materials,
+            |handle| {
+                if let Some(mut face) = materials.get_mut(handle) {
+                    face.extension.normal_map = image.clone();
+                    face.extension.params.map_flags |= MAP_FLAG_NORMAL;
+                }
+            },
+        );
     }
     if let Some(image) = preview.spec_image.clone() {
-        for_selected_face_materials(&selection, &children, &scene, &face_materials, |handle| {
-            if let Some(mut face) = materials.get_mut(handle) {
-                face.extension.specular_map = image.clone();
-                face.extension.params.map_flags |= MAP_FLAG_SPEC;
-            }
-        });
+        let materials = &mut paint.materials;
+        for_selected_face_materials(
+            &selection,
+            &paint.children,
+            &paint.scene,
+            &face_materials,
+            |handle| {
+                if let Some(mut face) = materials.get_mut(handle) {
+                    face.extension.specular_map = image.clone();
+                    face.extension.params.map_flags |= MAP_FLAG_SPEC;
+                }
+            },
+        );
     }
     preview.settled = normal_ready && spec_ready;
 }
@@ -1894,26 +2059,14 @@ fn drive_legacy_preview(
 /// mode has been left. Recomposes each previewed face from scratch: its diffuse
 /// Blinn-Phong look ([`compose_face_material`]) plus its real cached legacy material,
 /// exactly as the face was composed before the preview.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the preview state, \
-              the tool / mode / selection driving the end-of-preview test, the legacy / texture / \
-              prim-texture stores the revert recomposes through, and the hierarchy / face / \
-              material queries"
-)]
 fn revert_legacy_preview(
     mut preview: ResMut<LegacyPreview>,
     tool: Res<EditToolState>,
     mode: Res<MatModeState>,
     selection: Res<SelectionSet>,
     mut legacy_manager: ResMut<LegacyMaterialManager>,
-    mut textures: ResMut<TextureManager>,
-    store: Res<crate::world_api::DecodedTextures>,
-    mut prim_textures: ResMut<PrimTextures>,
-    children: Query<&Children>,
     faces: Query<(&FaceTextureDebug, &MeshMaterial3d<FaceMaterial>)>,
-    scene: Query<(), With<SceneObject>>,
-    mut materials: ResMut<Assets<FaceMaterial>>,
+    mut paint: FacePaint,
 ) {
     let Some(object) = preview.object else {
         return;
@@ -1929,17 +2082,19 @@ fn revert_legacy_preview(
     // real appearance.
     let mut stack = vec![object];
     while let Some(entity) = stack.pop() {
-        if entity != object && scene.get(entity).is_ok() {
+        if entity != object && paint.scene.get(entity).is_ok() {
             continue;
         }
         if let Ok((FaceTextureDebug(texture_face), material)) = faces.get(entity) {
             compose_face_material(
                 &material.0,
                 texture_face,
-                &mut materials,
-                &mut textures,
-                &store,
-                &mut prim_textures,
+                &mut FaceStores {
+                    materials: &mut paint.materials,
+                    manager: &mut paint.textures,
+                    store: &paint.store,
+                    prim_textures: &mut paint.prim_textures,
+                },
                 TERRAIN_BOOST_PRIORITY,
                 TextureAlpha::Mask,
             );
@@ -1948,14 +2103,14 @@ fn revert_legacy_preview(
             {
                 preview_legacy_material(
                     &mut legacy_manager,
-                    &mut textures,
-                    &mut materials,
+                    &mut paint.textures,
+                    &mut paint.materials,
                     &material.0,
                     material_id,
                 );
             }
         }
-        if let Ok(list) = children.get(entity) {
+        if let Ok(list) = paint.children.get(entity) {
             for child in list.iter() {
                 stack.push(child);
             }
@@ -1967,22 +2122,10 @@ fn revert_legacy_preview(
 /// (non-final) pick previews the edited material on the faces in place (via
 /// [`LegacyPreview`]) so the bump / specular renders at once; the **committed** (OK)
 /// pick previews it and also sends the `RenderMaterials` PUT.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the picker replies, \
-              the UI handle, the selection / object state, the legacy manager, the per-face lookup, \
-              the live-preview state, the no-modify notice writer, and the command writer"
-)]
 fn apply_normal_specular_picked(
     mut picks: MessageReader<TexturePicked>,
     ui: Option<Res<BuildMaterialUi>>,
-    selection: Res<SelectionSet>,
-    objects: Res<ObjectState>,
-    legacy_manager: Res<LegacyMaterialManager>,
-    prim_faces: PrimFaceLookup,
-    mut preview: ResMut<LegacyPreview>,
-    mut notices: MessageWriter<LocalChatNotice>,
-    mut commands: MessageWriter<SlCommand>,
+    mut legacy: LegacyFaceEdit,
 ) {
     let Some(ui) = ui else {
         return;
@@ -1996,18 +2139,12 @@ fn apply_normal_specular_picked(
         } else {
             continue;
         };
-        if !material_edit_allowed(&selection, &objects, &mut notices) {
+        if !legacy.allowed() {
             continue;
         }
-        preview_legacy_edit(&mut preview, &selection, &objects, &legacy_manager, &edit);
+        legacy.preview(&edit);
         if pick.final_pick {
-            apply_legacy_edit(
-                &selection,
-                &legacy_manager,
-                &prim_faces,
-                &mut commands,
-                &edit,
-            );
+            legacy.commit(&edit);
         }
     }
 }
@@ -2015,23 +2152,10 @@ fn apply_normal_specular_picked(
 /// Apply a specular-colour pick to the selected faces' materials (RGB, keeping full
 /// alpha). A live (non-final) pick previews the highlight tint in place; the
 /// committed pick previews it and sends the PUT.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the colour-picker \
-              replies, the UI handle, the selection / object state, the legacy manager, the \
-              per-face lookup, the live-preview state, the no-modify notice writer, and the command \
-              writer"
-)]
 fn apply_spec_color_picked(
     mut picks: MessageReader<ColorPicked>,
     ui: Option<Res<BuildMaterialUi>>,
-    selection: Res<SelectionSet>,
-    objects: Res<ObjectState>,
-    legacy_manager: Res<LegacyMaterialManager>,
-    prim_faces: PrimFaceLookup,
-    mut preview: ResMut<LegacyPreview>,
-    mut notices: MessageWriter<LocalChatNotice>,
-    mut commands: MessageWriter<SlCommand>,
+    mut legacy: LegacyFaceEdit,
 ) {
     let Some(ui) = ui else {
         return;
@@ -2040,7 +2164,7 @@ fn apply_spec_color_picked(
         if pick.requester != ui.spec_color_swatch {
             continue;
         }
-        if !material_edit_allowed(&selection, &objects, &mut notices) {
+        if !legacy.allowed() {
             continue;
         }
         let srgba = pick.color.to_srgba();
@@ -2051,15 +2175,9 @@ fn apply_spec_color_picked(
             255,
         ];
         let edit = move |material: &mut LegacyMaterial| material.specular_color = color;
-        preview_legacy_edit(&mut preview, &selection, &objects, &legacy_manager, edit);
+        legacy.preview(edit);
         if pick.final_pick {
-            apply_legacy_edit(
-                &selection,
-                &legacy_manager,
-                &prim_faces,
-                &mut commands,
-                edit,
-            );
+            legacy.commit(edit);
         }
     }
 }
@@ -2105,28 +2223,17 @@ fn apply_pbr_material_picked(
 /// ([`MaterialManager::preview_face_material`]); the final OK pick, handled by
 /// [`apply_pbr_material_picked`], is what actually sends the assignment. The nil
 /// id a Cancel carries for a face that had no material reverts it to Blinn-Phong.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters: the picker replies, the UI handles, the selection, the \
-              three material resources the preview composes through, and the scene / hierarchy / \
-              face queries the per-face walk reads"
-)]
 fn preview_pbr_material_picked(
     mut picks: MessageReader<TexturePicked>,
     ui: Option<Res<BuildMaterialUi>>,
     selection: Res<SelectionSet>,
     mut manager: ResMut<MaterialManager>,
-    mut textures: ResMut<TextureManager>,
-    store: Res<crate::world_api::DecodedTextures>,
-    mut prim_textures: ResMut<PrimTextures>,
-    mut materials: ResMut<Assets<FaceMaterial>>,
-    scene: Query<(), With<crate::objects::SceneObject>>,
-    children: Query<&Children>,
     faces: Query<(
         &PrimFaceEntity,
         &MeshMaterial3d<FaceMaterial>,
         &FaceTextureDebug,
     )>,
+    mut paint: FacePaint,
 ) {
     let Some(ui) = ui else {
         return;
@@ -2137,29 +2244,35 @@ fn preview_pbr_material_picked(
         }
         let id = AssetKey::from(pick.texture.uuid());
         for node in selection.iter() {
-            for (face_id, entity) in prim_faces_of_node(node, &scene, &children, &faces) {
+            for (face_id, entity) in prim_faces_of_node(node, &paint.scene, &paint.children, &faces)
+            {
                 let Ok((_face, material, FaceTextureDebug(texture_face))) = faces.get(entity)
                 else {
                     continue;
                 };
                 let handle = material.0.clone();
-                let base_uv = materials
+                let base_uv = paint
+                    .materials
                     .get(&handle)
                     .map_or(bevy::math::Affine2::IDENTITY, |standard| {
                         standard.base.uv_transform
                     });
                 let texture_face = *texture_face;
                 manager.preview_face_material(
-                    (node.scoped, face_id),
-                    id,
-                    &handle,
-                    base_uv,
-                    entity,
-                    &texture_face,
-                    &mut textures,
-                    &store,
-                    &mut prim_textures,
-                    &mut materials,
+                    &PreviewedFace {
+                        key: (node.scoped, face_id),
+                        id,
+                        handle: &handle,
+                        base_uv,
+                        entity,
+                        texture_face: &texture_face,
+                    },
+                    &mut FaceStores {
+                        materials: &mut paint.materials,
+                        manager: &mut paint.textures,
+                        store: &paint.store,
+                        prim_textures: &mut paint.prim_textures,
+                    },
                 );
             }
         }
@@ -2215,28 +2328,14 @@ fn prim_faces_of_node(
 /// focus leaves one: amend each selected PBR face's override with the changed
 /// transform component and send it over `ModifyMaterialParams`. Only faces that
 /// already carry a render material are touched.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the tool / \
-              selection / object state, the active mode, the material manager, the focus + its blur \
-              tracker, the field query, the render-material + hierarchy / scene queries the \
-              per-face material lookup walks, the no-modify notice writer, and the command writer"
-)]
 fn commit_pbr_fields(
     tool: Res<EditToolState>,
-    selection: Res<SelectionSet>,
-    objects: Res<ObjectState>,
     mode: Res<MatModeState>,
-    mut material_manager: ResMut<MaterialManager>,
     focus: Res<InputFocus>,
     keyboard: Res<ButtonInput<KeyCode>>,
     mut focus_track: Local<Option<Entity>>,
     fields: Query<(Entity, &PbrField, &EditableText)>,
-    render_materials: Query<&ObjectRenderMaterials>,
-    children: Query<&Children>,
-    scene: Query<(), With<crate::objects::SceneObject>>,
-    mut notices: MessageWriter<LocalChatNotice>,
-    mut commands: MessageWriter<SlCommand>,
+    mut pbr: PbrFaceEdit,
 ) {
     if !tool.active {
         *focus_track = None;
@@ -2262,21 +2361,20 @@ fn commit_pbr_fields(
     let Some(value) = parse_tex_value(TextInputKind::Float, &editor.value().to_string()) else {
         return;
     };
-    if !material_edit_allowed(&selection, &objects, &mut notices) {
+    if !pbr.allowed() {
         return;
     }
     let slots = pbr_channel_slots(mode.pbr_type);
     let mut updates: Vec<MaterialOverrideUpdate> = Vec::new();
-    for node in selection.iter() {
+    for node in pbr.selection.iter() {
         let object_id: ObjectKey = node.full;
-        for face_id in pbr_faces_of(node, &render_materials, &children, &scene) {
-            let Some(material_id) =
-                face_material_id(node.entity, face_id, &render_materials, &children, &scene)
-            else {
+        for face_id in pbr.faces.pbr_faces_of(node) {
+            let Some(material_id) = pbr.faces.material_id(node.entity, face_id) else {
                 continue;
             };
-            let base = material_manager.decoded_material(AssetKey::from(material_id));
-            let existing = material_manager
+            let base = pbr.manager.decoded_material(AssetKey::from(material_id));
+            let existing = pbr
+                .manager
                 .face_override(node.scoped, face_id)
                 .unwrap_or_default();
             let mut new_override = existing;
@@ -2297,51 +2395,13 @@ fn commit_pbr_fields(
                 asset_id: None,
             });
             // Show the transform edit at once, before the sim echoes it.
-            material_manager.apply_local_override(node.scoped, face_id, &new_override);
+            pbr.manager
+                .apply_local_override(node.scoped, face_id, &new_override);
         }
     }
     if !updates.is_empty() {
-        commands.write(SlCommand(Command::ModifyMaterialParams { updates }));
-    }
-}
-
-/// The selected face indices of a node that carry a GLTF render material (the
-/// faces a PBR transform edit can touch): the chosen faces filtered to those in
-/// the object's [`ObjectRenderMaterials`] holder, or every render-material face
-/// for a whole-object selection.
-fn pbr_faces_of(
-    node: &crate::world_api::SelectedNode,
-    render_materials: &Query<&ObjectRenderMaterials>,
-    children: &Query<&Children>,
-    scene: &Query<(), With<crate::objects::SceneObject>>,
-) -> Vec<u8> {
-    let mut material_faces: Vec<u8> = Vec::new();
-    let mut stack = vec![node.entity];
-    while let Some(entity) = stack.pop() {
-        if entity != node.entity && scene.get(entity).is_ok() {
-            continue;
-        }
-        if let Ok(holder) = render_materials.get(entity) {
-            for (face, _id) in &holder.faces {
-                material_faces.push(*face);
-            }
-        }
-        if let Ok(list) = children.get(entity) {
-            for child in list.iter() {
-                stack.push(child);
-            }
-        }
-    }
-    match &node.faces {
-        None => material_faces,
-        Some(set) => {
-            let chosen: std::collections::HashSet<u16> =
-                set.iter().map(|face| face.get()).collect();
-            material_faces
-                .into_iter()
-                .filter(|face| chosen.contains(&u16::from(*face)))
-                .collect()
-        }
+        pbr.commands
+            .write(SlCommand(Command::ModifyMaterialParams { updates }));
     }
 }
 
@@ -2419,16 +2479,14 @@ fn pbr_updates_for_node(
 fn apply_pbr_override(
     selection: &SelectionSet,
     material_manager: &mut MaterialManager,
-    render_materials: &Query<&ObjectRenderMaterials>,
-    children: &Query<&Children>,
-    scene: &Query<(), With<crate::objects::SceneObject>>,
+    faces: &RenderFaceLookup,
     commands: &mut MessageWriter<SlCommand>,
     edit: impl Fn(&mut MaterialOverride),
 ) {
     let mut updates: Vec<MaterialOverrideUpdate> = Vec::new();
     for node in selection.iter() {
         let object_id: ObjectKey = node.full;
-        for face_id in pbr_faces_of(node, render_materials, children, scene) {
+        for face_id in faces.pbr_faces_of(node) {
             let mut over = material_manager
                 .face_override(node.scoped, face_id)
                 .unwrap_or_default();
@@ -2451,23 +2509,10 @@ fn apply_pbr_override(
 /// Assign a base / metallic-roughness / emissive / normal texture (final pick) to
 /// the selected PBR faces via an override — the reference material editor's
 /// per-channel texture pickers. A nil pick clears the slot's texture.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters: the picker replies, the UI handles, the selection / \
-              object state + material manager, the render-material / hierarchy / scene queries the \
-              per-face lookup walks, the no-modify notice writer, and the command writer"
-)]
 fn apply_pbr_texture_picked(
     mut picks: MessageReader<TexturePicked>,
     ui: Option<Res<BuildMaterialUi>>,
-    selection: Res<SelectionSet>,
-    objects: Res<ObjectState>,
-    mut material_manager: ResMut<MaterialManager>,
-    render_materials: Query<&ObjectRenderMaterials>,
-    children: Query<&Children>,
-    scene: Query<(), With<crate::objects::SceneObject>>,
-    mut notices: MessageWriter<LocalChatNotice>,
-    mut commands: MessageWriter<SlCommand>,
+    mut pbr: PbrFaceEdit,
 ) {
     let Some(ui) = ui else {
         return;
@@ -2487,49 +2532,28 @@ fn apply_pbr_texture_picked(
         } else {
             continue;
         };
-        if !material_edit_allowed(&selection, &objects, &mut notices) {
+        if !pbr.allowed() {
             continue;
         }
         let texture = pick.texture;
-        apply_pbr_override(
-            &selection,
-            &mut material_manager,
-            &render_materials,
-            &children,
-            &scene,
-            &mut commands,
-            |over| {
-                if let Some(slot_ref) = over.textures.get_mut(slot) {
-                    *slot_ref = Some(if texture.uuid().is_nil() {
-                        TextureOverride::Clear
-                    } else {
-                        TextureOverride::Set(texture)
-                    });
-                }
-            },
-        );
+        pbr.apply_override(|over| {
+            if let Some(slot_ref) = over.textures.get_mut(slot) {
+                *slot_ref = Some(if texture.uuid().is_nil() {
+                    TextureOverride::Clear
+                } else {
+                    TextureOverride::Set(texture)
+                });
+            }
+        });
     }
 }
 
 /// Assign a base-colour or emissive tint (final pick) to the selected PBR faces
 /// via an override — the reference material editor's colour swatches.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters: the picker replies, the UI handles, the selection / \
-              object state + material manager, the render-material / hierarchy / scene queries, the \
-              no-modify notice writer, and the command writer"
-)]
 fn apply_pbr_tint_picked(
     mut picks: MessageReader<ColorPicked>,
     ui: Option<Res<BuildMaterialUi>>,
-    selection: Res<SelectionSet>,
-    objects: Res<ObjectState>,
-    mut material_manager: ResMut<MaterialManager>,
-    render_materials: Query<&ObjectRenderMaterials>,
-    children: Query<&Children>,
-    scene: Query<(), With<crate::objects::SceneObject>>,
-    mut notices: MessageWriter<LocalChatNotice>,
-    mut commands: MessageWriter<SlCommand>,
+    mut pbr: PbrFaceEdit,
 ) {
     let Some(ui) = ui else {
         return;
@@ -2541,54 +2565,25 @@ fn apply_pbr_tint_picked(
         if pick.requester != ui.pbr_base_tint && pick.requester != ui.pbr_emissive_tint {
             continue;
         }
-        if !material_edit_allowed(&selection, &objects, &mut notices) {
+        if !pbr.allowed() {
             continue;
         }
         if pick.requester == ui.pbr_base_tint {
             let rgba = linear_rgba_of(pick.color);
-            apply_pbr_override(
-                &selection,
-                &mut material_manager,
-                &render_materials,
-                &children,
-                &scene,
-                &mut commands,
-                |over| over.base_color = Some(rgba),
-            );
+            pbr.apply_override(|over| over.base_color = Some(rgba));
         } else if pick.requester == ui.pbr_emissive_tint {
             let rgb = linear_rgb_of(pick.color);
-            apply_pbr_override(
-                &selection,
-                &mut material_manager,
-                &render_materials,
-                &children,
-                &scene,
-                &mut commands,
-                |over| over.emissive_factor = Some(rgb),
-            );
+            pbr.apply_override(|over| over.emissive_factor = Some(rgb));
         }
     }
 }
 
 /// Apply a PBR alpha-mode combo pick to the selected faces via an override.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters: the combo changes, the tagging query, the UI handles, \
-              the selection / object state + material manager, the render-material / hierarchy / \
-              scene queries, the no-modify notice writer, and the command writer"
-)]
 fn apply_pbr_alpha_change(
     mut changes: MessageReader<ComboChanged>,
     combos: Query<(), With<PbrAlphaCombo>>,
     ui: Option<Res<BuildMaterialUi>>,
-    selection: Res<SelectionSet>,
-    objects: Res<ObjectState>,
-    mut material_manager: ResMut<MaterialManager>,
-    render_materials: Query<&ObjectRenderMaterials>,
-    children: Query<&Children>,
-    scene: Query<(), With<crate::objects::SceneObject>>,
-    mut notices: MessageWriter<LocalChatNotice>,
-    mut commands: MessageWriter<SlCommand>,
+    mut pbr: PbrFaceEdit,
 ) {
     let Some(ui) = ui else {
         return;
@@ -2597,45 +2592,23 @@ fn apply_pbr_alpha_change(
         if change.combo != ui.pbr_alpha_combo || !combos.contains(change.combo) {
             continue;
         }
-        if !material_edit_allowed(&selection, &objects, &mut notices) {
+        if !pbr.allowed() {
             continue;
         }
         let mode = pbr_alpha_mode(change.active);
-        apply_pbr_override(
-            &selection,
-            &mut material_manager,
-            &render_materials,
-            &children,
-            &scene,
-            &mut commands,
-            |over| over.alpha_mode = Some(mode),
-        );
+        pbr.apply_override(|over| over.alpha_mode = Some(mode));
     }
 }
 
 /// Commit a PBR scalar factor edit (metallic / roughness / alpha cutoff) on Enter
 /// or blur via an override.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters: the tool / selection / object state, the material \
-              manager, the focus + its blur tracker, the field query, the render-material / \
-              hierarchy / scene queries, the keyboard, the no-modify notice writer, and the command \
-              writer"
-)]
 fn commit_pbr_scalars(
     tool: Res<EditToolState>,
-    selection: Res<SelectionSet>,
-    objects: Res<ObjectState>,
-    mut material_manager: ResMut<MaterialManager>,
     focus: Res<InputFocus>,
     keyboard: Res<ButtonInput<KeyCode>>,
     mut focus_track: Local<Option<Entity>>,
     fields: Query<(Entity, &PbrScalarField, &EditableText)>,
-    render_materials: Query<&ObjectRenderMaterials>,
-    children: Query<&Children>,
-    scene: Query<(), With<crate::objects::SceneObject>>,
-    mut notices: MessageWriter<LocalChatNotice>,
-    mut commands: MessageWriter<SlCommand>,
+    mut pbr: PbrFaceEdit,
 ) {
     if !tool.active {
         *focus_track = None;
@@ -2661,63 +2634,28 @@ fn commit_pbr_scalars(
     let Some(value) = parse_tex_value(TextInputKind::Float, &editor.value().to_string()) else {
         return;
     };
-    if !material_edit_allowed(&selection, &objects, &mut notices) {
+    if !pbr.allowed() {
         return;
     }
-    apply_pbr_override(
-        &selection,
-        &mut material_manager,
-        &render_materials,
-        &children,
-        &scene,
-        &mut commands,
-        |over| field.apply(over, value),
-    );
+    pbr.apply_override(|over| field.apply(over, value));
 }
 
 /// Toggle the double-sided flag on the selected PBR faces (reads the primary
 /// face's current effective value, flips it).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy observer's parameters: the press event, the button tag, the selection / \
-              object state + material manager, the render-material / hierarchy / scene queries, the \
-              no-modify notice writer, and the command writer"
-)]
 fn handle_double_sided_press(
     press: On<Pointer<Press>>,
     buttons: Query<(), With<DoubleSidedButton>>,
-    selection: Res<SelectionSet>,
-    objects: Res<ObjectState>,
-    mut material_manager: ResMut<MaterialManager>,
-    render_materials: Query<&ObjectRenderMaterials>,
-    children: Query<&Children>,
-    scene: Query<(), With<crate::objects::SceneObject>>,
-    mut notices: MessageWriter<LocalChatNotice>,
-    mut commands: MessageWriter<SlCommand>,
+    mut pbr: PbrFaceEdit,
 ) {
     if press.button != PointerButton::Primary || !buttons.contains(press.entity) {
         return;
     }
-    if !material_edit_allowed(&selection, &objects, &mut notices) {
+    if !pbr.allowed() {
         return;
     }
-    let (_id, base, over) = representative_pbr(
-        &selection,
-        &render_materials,
-        &material_manager,
-        &children,
-        &scene,
-    );
+    let (_id, base, over) = pbr.representative();
     let current = effective_pbr_material(base, over.as_ref()).double_sided;
-    apply_pbr_override(
-        &selection,
-        &mut material_manager,
-        &render_materials,
-        &children,
-        &scene,
-        &mut commands,
-        |over| over.double_sided = Some(!current),
-    );
+    pbr.apply_override(|over| over.double_sided = Some(!current));
 }
 
 /// Assign the blank GLTF material to the selected faces — the "New material"
@@ -2751,33 +2689,19 @@ fn handle_pbr_new_press(
 /// upload it into the agent's Materials folder over `NewFileAgentInventory`. The
 /// new asset lands in inventory; the user assigns it to faces via the
 /// render-material swatch (auto-assign-on-save is not wired).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy observer's parameters: the press event, the button tag, the selection + \
-              material manager + inventory model, the render-material / hierarchy / scene \
-              queries, and the command writer"
-)]
 fn handle_pbr_save_press(
     press: On<Pointer<Press>>,
     buttons: Query<(), With<PbrSaveButton>>,
     selection: Res<SelectionSet>,
     material_manager: Res<MaterialManager>,
     inventory: Res<crate::inventory::InventoryModel>,
-    render_materials: Query<&ObjectRenderMaterials>,
-    children: Query<&Children>,
-    scene: Query<(), With<crate::objects::SceneObject>>,
+    faces: RenderFaceLookup,
     mut commands: MessageWriter<SlCommand>,
 ) {
     if press.button != PointerButton::Primary || !buttons.contains(press.entity) {
         return;
     }
-    let (material_id, base, over) = representative_pbr(
-        &selection,
-        &render_materials,
-        &material_manager,
-        &children,
-        &scene,
-    );
+    let (material_id, base, over) = representative_pbr(&selection, &material_manager, &faces);
     if material_id.is_none() {
         // No PBR material on the face to save.
         return;

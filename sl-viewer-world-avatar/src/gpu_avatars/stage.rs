@@ -38,9 +38,6 @@ use super::types::{
 };
 use crate::animations::{AnimationManager, AnimationPlayback};
 use crate::animesh::ControlAvatarState;
-use crate::avatars::AvatarBody;
-use sl_viewer_kit::avatar_assets::AvatarAssetLibrary;
-use sl_viewer_world_api::AvatarState;
 use sl_viewer_world_api::PoseSlotKey;
 use sl_viewer_world_api::SkinPoseTwin;
 
@@ -507,6 +504,20 @@ pub(crate) struct BlendInputs<'w, 's> {
     camera: Query<'w, 's, &'static GlobalTransform, With<sl_viewer_world_api::ViewerCamera>>,
 }
 
+/// The three stores a staging pass writes into, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the published pose feed, the
+/// slot registry that owns the GPU rows, and the staging buffers the rows are
+/// written into.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct StageTargets<'w> {
+    /// The published per-slot pose feed.
+    feed: ResMut<'w, GpuAvatarPoseFeed>,
+    /// The slot registry: which avatar owns which GPU row block.
+    registry: ResMut<'w, GpuAvatarRegistry>,
+    /// The staging buffers the rows are written into.
+    staging: ResMut<'w, GpuAvatarStaging>,
+}
+
 /// Assemble this frame's [`GpuAvatarStaging`] snapshot: free/allocate avatar
 /// slots, re-compose rest rows on a `pose_inputs_generation` bump, build the
 /// per-avatar frame rows and roots, resolve each in-place skin into the shared
@@ -516,22 +527,10 @@ pub(crate) struct BlendInputs<'w, 's> {
 /// Runs in `PostUpdate` after
 /// [`pose_avatar_skeletons`](crate::animations::pose_avatar_skeletons), so the
 /// feed holds this frame's corrections + roots.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries; the \
-              scheduling inputs are already bundled into one `BlendInputs` param and \
-              what remains is the avatar state, the asset library, the pipeline's \
-              own three resources, the source query, the mode, the bindpose assets, \
-              and the debug synthetic-crowd resource"
-)]
 pub(crate) fn stage_gpu_avatars(
-    state: Res<AvatarState>,
-    library: Option<Res<AvatarAssetLibrary>>,
-    body: Option<Res<AvatarBody>>,
+    avatars: crate::avatars::AvatarRig,
     mode: Res<GpuAvatarsMode>,
-    mut feed: ResMut<GpuAvatarPoseFeed>,
-    mut registry: ResMut<GpuAvatarRegistry>,
-    mut staging: ResMut<GpuAvatarStaging>,
+    mut targets: StageTargets,
     queries: StageQueries<'_, '_>,
     bindposes: Res<Assets<SkinnedMeshInverseBindposes>>,
     blend_inputs: BlendInputs<'_, '_>,
@@ -540,11 +539,11 @@ pub(crate) fn stage_gpu_avatars(
     // The startup capability check demoted this device (no compute / storage
     // skinning): stage nothing, so the render half never dispatches.
     if !mode.active {
-        *staging = GpuAvatarStaging::default();
+        *targets.staging = GpuAvatarStaging::default();
         return;
     }
-    let Some(library) = library else {
-        *staging = GpuAvatarStaging::default();
+    let Some(library) = avatars.library else {
+        *targets.staging = GpuAvatarStaging::default();
         return;
     };
     let skeleton = library.skeleton();
@@ -553,25 +552,26 @@ pub(crate) fn stage_gpu_avatars(
         return;
     };
     if joint_count == 0 {
-        *staging = GpuAvatarStaging::default();
+        *targets.staging = GpuAvatarStaging::default();
         return;
     }
     if joint_count_u32 > MAX_GPU_JOINTS {
-        if !registry.warned_joint_overflow {
-            registry.warned_joint_overflow = true;
+        if !targets.registry.warned_joint_overflow {
+            targets.registry.warned_joint_overflow = true;
             warn!(
                 "GPU avatars: the skeleton has {joint_count} joints, more than the \
                  shader's {MAX_GPU_JOINTS}-joint FK arrays — the GPU pose pipeline \
                  stays idle"
             );
         }
-        *staging = GpuAvatarStaging::default();
+        *targets.staging = GpuAvatarStaging::default();
         return;
     }
 
     // The combined rigged slot set: every rigged avatar plus every animesh
     // control avatar. Both ride the one passes-A–D pipeline.
-    let mut rigged: HashSet<PoseSlotKey> = state
+    let mut rigged: HashSet<PoseSlotKey> = avatars
+        .state
         .rigged_agents()
         .into_iter()
         .map(PoseSlotKey::Avatar)
@@ -585,22 +585,23 @@ pub(crate) fn stage_gpu_avatars(
     // The synthetic debug crowd (`SL_VIEWER_CROWD`): each spawned copy is its
     // own rigged slot. Empty unless the env selected a crowd.
     rigged.extend(crowd.slots().map(PoseSlotKey::Crowd));
-    feed.retain_rigged(&rigged);
+    targets.feed.retain_rigged(&rigged);
 
     // Free the slots (and cached rest rows) of slots that de-rigged.
-    let gone: Vec<(PoseSlotKey, u32)> = registry
+    let gone: Vec<(PoseSlotKey, u32)> = targets
+        .registry
         .slots
         .iter()
         .filter(|(slot_key, _slot)| !rigged.contains(*slot_key))
         .map(|(slot_key, slot)| (*slot_key, *slot))
         .collect();
     for (slot_key, slot) in gone {
-        let _slot = registry.slots.remove(&slot_key);
-        let _rows = registry.rest_rows.remove(&slot_key);
-        let _occupancy = registry.occupancy.remove(&slot_key);
-        let _held = registry.mirror_held.remove(&slot_key);
-        registry.free.push(slot);
-        registry.rest_dirty = true;
+        let _slot = targets.registry.slots.remove(&slot_key);
+        let _rows = targets.registry.rest_rows.remove(&slot_key);
+        let _occupancy = targets.registry.occupancy.remove(&slot_key);
+        let _held = targets.registry.mirror_held.remove(&slot_key);
+        targets.registry.free.push(slot);
+        targets.registry.rest_dirty = true;
     }
 
     // Allocate slots and (re)compose rest rows for every rigged slot that has
@@ -608,34 +609,42 @@ pub(crate) fn stage_gpu_avatars(
     // generation moved — an avatar's `pose_inputs_generation` (shape edit,
     // appearance, override add/remove, volume morphs) or an animesh's override
     // generation (a rigged mesh binding / re-binding its joint positions).
-    let avatar_generation = state.pose_inputs_generation();
+    let avatar_generation = avatars.state.pose_inputs_generation();
     let no_volumes = VolumeDeformations::default();
     let no_deform = SkeletalDeformations::default();
     let mut active: Vec<(PoseSlotKey, u32)> = Vec::new();
     // Rigged avatars.
-    for agent in state.rigged_agents() {
+    for agent in avatars.state.rigged_agents() {
         let slot_key = PoseSlotKey::Avatar(agent);
-        if feed.get(slot_key).is_none() {
+        if targets.feed.get(slot_key).is_none() {
             continue;
         }
-        let Some(deform) = state.deformations(agent) else {
+        let Some(deform) = avatars.state.deformations(agent) else {
             continue;
         };
-        let Some(slot) = registry.slot_for(slot_key) else {
+        let Some(slot) = targets.registry.slot_for(slot_key) else {
             continue;
         };
-        let stale = registry
+        let stale = targets
+            .registry
             .rest_rows
             .get(&slot_key)
             .is_none_or(|(at, _rows)| *at != avatar_generation);
         if stale {
-            let volumes = state.volume_deformations(agent).unwrap_or(&no_volumes);
-            let overrides = state.effective_joint_overrides(agent).unwrap_or_default();
+            let volumes = avatars
+                .state
+                .volume_deformations(agent)
+                .unwrap_or(&no_volumes);
+            let overrides = avatars
+                .state
+                .effective_joint_overrides(agent)
+                .unwrap_or_default();
             let rows = Arc::new(compose_rest_joints(skeleton, deform, volumes, &overrides));
-            let _prev = registry
+            let _prev = targets
+                .registry
                 .rest_rows
                 .insert(slot_key, (avatar_generation, rows));
-            registry.rest_dirty = true;
+            targets.registry.rest_dirty = true;
         }
         active.push((slot_key, slot));
     }
@@ -643,14 +652,15 @@ pub(crate) fn stage_gpu_avatars(
     // only the joint position overrides the linkset's own rigged meshes impose.
     for object in blend_inputs.control.animesh_roots() {
         let slot_key = PoseSlotKey::Animesh(object);
-        if feed.get(slot_key).is_none() {
+        if targets.feed.get(slot_key).is_none() {
             continue;
         }
         let generation = blend_inputs.control.overrides_generation(object);
-        let Some(slot) = registry.slot_for(slot_key) else {
+        let Some(slot) = targets.registry.slot_for(slot_key) else {
             continue;
         };
-        let stale = registry
+        let stale = targets
+            .registry
             .rest_rows
             .get(&slot_key)
             .is_none_or(|(at, _rows)| *at != generation);
@@ -662,8 +672,11 @@ pub(crate) fn stage_gpu_avatars(
                 &no_volumes,
                 &overrides,
             ));
-            let _prev = registry.rest_rows.insert(slot_key, (generation, rows));
-            registry.rest_dirty = true;
+            let _prev = targets
+                .registry
+                .rest_rows
+                .insert(slot_key, (generation, rows));
+            targets.registry.rest_dirty = true;
         }
         active.push((slot_key, slot));
     }
@@ -672,25 +685,31 @@ pub(crate) fn stage_gpu_avatars(
     // block (composed at most once per frame, only when a slot is stale) at the
     // template's `pose_inputs_generation`.
     let crowd_template = crowd.template().and_then(|template| {
-        state
+        avatars
+            .state
             .deformations(template)
             .map(|deform| (template, deform))
     });
     if let Some((template, deform)) = crowd_template {
-        let volumes = state.volume_deformations(template).unwrap_or(&no_volumes);
-        let overrides = state
+        let volumes = avatars
+            .state
+            .volume_deformations(template)
+            .unwrap_or(&no_volumes);
+        let overrides = avatars
+            .state
             .effective_joint_overrides(template)
             .unwrap_or_default();
         let mut shared_rest: Option<Arc<Vec<GpuRestJoint>>> = None;
         for index in crowd.slots() {
             let slot_key = PoseSlotKey::Crowd(index);
-            if feed.get(slot_key).is_none() {
+            if targets.feed.get(slot_key).is_none() {
                 continue;
             }
-            let Some(slot) = registry.slot_for(slot_key) else {
+            let Some(slot) = targets.registry.slot_for(slot_key) else {
                 continue;
             };
-            let stale = registry
+            let stale = targets
+                .registry
                 .rest_rows
                 .get(&slot_key)
                 .is_none_or(|(at, _rows)| *at != avatar_generation);
@@ -698,10 +717,11 @@ pub(crate) fn stage_gpu_avatars(
                 let rows = shared_rest.get_or_insert_with(|| {
                     Arc::new(compose_rest_joints(skeleton, deform, volumes, &overrides))
                 });
-                let _prev = registry
+                let _prev = targets
+                    .registry
                     .rest_rows
                     .insert(slot_key, (avatar_generation, Arc::clone(rows)));
-                registry.rest_dirty = true;
+                targets.registry.rest_dirty = true;
             }
             active.push((slot_key, slot));
         }
@@ -709,16 +729,16 @@ pub(crate) fn stage_gpu_avatars(
     // Deterministic frame order (HashSet iteration is not).
     active.sort_by_key(|(_slot_key, slot)| *slot);
 
-    let capacity = usize::try_from(registry.slot_capacity).unwrap_or(0);
+    let capacity = usize::try_from(targets.registry.slot_capacity).unwrap_or(0);
     let Some(rows_len) = capacity.checked_mul(joint_count) else {
         return;
     };
 
     // Reassemble the slot-indexed rest block only when something changed.
-    if registry.rest_dirty {
+    if targets.registry.rest_dirty {
         let mut assembled = vec![GpuRestJoint::default(); rows_len];
         for (slot_key, slot) in &active {
-            let Some((_at, rows)) = registry.rest_rows.get(slot_key) else {
+            let Some((_at, rows)) = targets.registry.rest_rows.get(slot_key) else {
                 continue;
             };
             let Some(start) = usize::try_from(*slot)
@@ -731,9 +751,9 @@ pub(crate) fn stage_gpu_avatars(
                 *dst = *src;
             }
         }
-        registry.assembled_rest = Arc::new(assembled);
-        registry.rest_generation = registry.rest_generation.wrapping_add(1);
-        registry.rest_dirty = false;
+        targets.registry.assembled_rest = Arc::new(assembled);
+        targets.registry.rest_generation = targets.registry.rest_generation.wrapping_add(1);
+        targets.registry.rest_dirty = false;
     }
 
     // The per-frame uploads: one frame row per posed slot. The local pose is
@@ -749,10 +769,10 @@ pub(crate) fn stage_gpu_avatars(
     let local_pose: Vec<GpuLocalPose> = Vec::new();
     let mut frame_occupancy: Vec<u64> = Vec::with_capacity(active.len());
     for (slot_key, slot) in &active {
-        let Some(entry) = feed.get(*slot_key) else {
+        let Some(entry) = targets.feed.get(*slot_key) else {
             continue;
         };
-        let Some(occupancy) = registry.occupancy.get(slot_key).copied() else {
+        let Some(occupancy) = targets.registry.occupancy.get(slot_key).copied() else {
             continue;
         };
         frames.push(GpuAvatarFrame {
@@ -780,7 +800,9 @@ pub(crate) fn stage_gpu_avatars(
     let idle_now =
         (now * crate::animations::POSE_IDLE_HZ).floor() / crate::animations::POSE_IDLE_HZ;
     let joint_of = |name: &str| -> u32 {
-        body.as_deref()
+        avatars
+            .body
+            .as_deref()
             .and_then(|body| body.joint_index(name))
             .and_then(|index| u32::try_from(index).ok())
             .unwrap_or(JOINT_NONE)
@@ -804,7 +826,7 @@ pub(crate) fn stage_gpu_avatars(
             let (Some(playback), Some(manager), Some(body)) = (
                 blend_inputs.playback.as_deref(),
                 blend_inputs.manager.as_deref(),
-                body.as_deref(),
+                avatars.body.as_deref(),
             ) else {
                 break;
             };
@@ -836,7 +858,7 @@ pub(crate) fn stage_gpu_avatars(
             }
             states.sort_by_key(|(id, _play)| *id);
             let far = camera_pos.is_some_and(|camera| {
-                feed.get(*slot_key).is_some_and(|entry| {
+                targets.feed.get(*slot_key).is_some_and(|entry| {
                     entry.root.w_axis.truncate().distance(camera) > PHASE_SYNC_DISTANCE_METRES
                 })
             });
@@ -844,7 +866,7 @@ pub(crate) fn stage_gpu_avatars(
                 let Some(motion) = manager.motion(AssetKey::from(*anim_id)) else {
                     continue;
                 };
-                let Some(clip_id) = registry.clips.ensure_clip(
+                let Some(clip_id) = targets.registry.clips.ensure_clip(
                     AssetKey::from(*anim_id),
                     motion,
                     joint_count_u32,
@@ -875,7 +897,8 @@ pub(crate) fn stage_gpu_avatars(
                             phase,
                             pad0: 0,
                         });
-                        cache_len = cache_len.saturating_add(registry.clips.track_count(clip_id));
+                        cache_len =
+                            cache_len.saturating_add(targets.registry.clips.track_count(clip_id));
                         *entry.insert(base)
                     }
                 };
@@ -904,7 +927,7 @@ pub(crate) fn stage_gpu_avatars(
         // the per-slot lists sorted by joint at publish; animesh publishes
         // none).
         for (frame_index, slot_key) in frame_of_slot.iter().enumerate() {
-            let Some(entry) = feed.get(*slot_key) else {
+            let Some(entry) = targets.feed.get(*slot_key) else {
                 continue;
             };
             let Ok(avatar) = u32::try_from(frame_index) else {
@@ -924,9 +947,10 @@ pub(crate) fn stage_gpu_avatars(
         }
         // Re-upload the playback buffer only when its content changed
         // (§1.3(d)): steady-state loops keep bit-identical rows.
-        if *registry.playback_rows != playback_rows {
-            registry.playback_rows = Arc::new(playback_rows.clone());
-            registry.playback_generation = registry.playback_generation.wrapping_add(1);
+        if *targets.registry.playback_rows != playback_rows {
+            targets.registry.playback_rows = Arc::new(playback_rows.clone());
+            targets.registry.playback_generation =
+                targets.registry.playback_generation.wrapping_add(1);
         }
     }
 
@@ -940,7 +964,8 @@ pub(crate) fn stage_gpu_avatars(
     // invalidating on a SkinnedMesh / binding swap).
     {
         let sources = &queries.sources;
-        registry
+        targets
+            .registry
             .real_skins
             .retain(|source, _record| sources.get(*source).is_ok());
     }
@@ -951,7 +976,8 @@ pub(crate) fn stage_gpu_avatars(
             continue;
         };
         let fingerprint = (skin.inverse_bindposes.id(), binding.canonical.len());
-        let cached = registry
+        let cached = targets
+            .registry
             .real_skins
             .get(&source)
             .filter(|record| record.fingerprint == fingerprint && record.slot == slot_key)
@@ -960,9 +986,13 @@ pub(crate) fn stage_gpu_avatars(
             Some(resolved) => Some(resolved),
             None => {
                 let resolved = bindposes.get(&skin.inverse_bindposes).and_then(|ibp| {
-                    registry.intern_skin_pools(skin.inverse_bindposes.id(), &binding.canonical, ibp)
+                    targets.registry.intern_skin_pools(
+                        skin.inverse_bindposes.id(),
+                        &binding.canonical,
+                        ibp,
+                    )
                 });
-                let _prev = registry.real_skins.insert(
+                let _prev = targets.registry.real_skins.insert(
                     source,
                     RealSkinRecord {
                         slot: slot_key,
@@ -1005,37 +1035,45 @@ pub(crate) fn stage_gpu_avatars(
             torso_joint,
         };
         for (frame_index, slot_key) in frame_of_slot.iter().enumerate() {
-            let rows = mirror_slot_local_pose(&mut registry, &feed, &frame, frame_index, *slot_key);
+            let rows = mirror_slot_local_pose(
+                &mut targets.registry,
+                &targets.feed,
+                &frame,
+                frame_index,
+                *slot_key,
+            );
             if let Some(rows) = rows {
                 let _prev = mirrored.insert(*slot_key, rows);
             }
         }
     } else {
-        registry.mirror_held.clear();
+        targets.registry.mirror_held.clear();
     }
-    let registry = &*registry;
+    let registry = &*targets.registry;
     let readback = if mode.readback {
         instances
             .iter()
             .max_by_key(|instance| instance.joint_count)
-            .and_then(|instance| real_readback_expected(instance, registry, &feed, &mirrored))
+            .and_then(|instance| {
+                real_readback_expected(instance, registry, &targets.feed, &mirrored)
+            })
     } else {
         None
     };
 
     let (clip_headers, clip_tracks, track_of_joint, key_times, key_values, clip_generation) =
-        registry.clips.staged();
-    *staging = GpuAvatarStaging {
+        targets.registry.clips.staged();
+    *targets.staging = GpuAvatarStaging {
         joint_count: joint_count_u32,
-        slot_capacity: registry.slot_capacity,
+        slot_capacity: targets.registry.slot_capacity,
         frames,
         frame_occupancy,
         local_pose,
-        rest: Arc::clone(&registry.assembled_rest),
-        rest_generation: registry.rest_generation,
-        joint_map: Arc::clone(&registry.pool_joint_map),
-        ibps: Arc::clone(&registry.pool_ibps),
-        pool_generation: registry.pool_generation,
+        rest: Arc::clone(&targets.registry.assembled_rest),
+        rest_generation: targets.registry.rest_generation,
+        joint_map: Arc::clone(&targets.registry.pool_joint_map),
+        ibps: Arc::clone(&targets.registry.pool_ibps),
+        pool_generation: targets.registry.pool_generation,
         instances,
         readback,
         blend,
@@ -1047,8 +1085,8 @@ pub(crate) fn stage_gpu_avatars(
         clip_generation,
         jobs,
         cache_len,
-        playback: Arc::clone(&registry.playback_rows),
-        playback_generation: registry.playback_generation,
+        playback: Arc::clone(&targets.registry.playback_rows),
+        playback_generation: targets.registry.playback_generation,
         corrections,
         now,
         idle_now,
@@ -1110,11 +1148,13 @@ fn mirror_slot_local_pose(
         frame.jobs,
         frame.cache_len,
         frame.joint_count,
-        frame.now,
-        frame.idle,
-        frame.chest_joint,
-        frame.torso_joint,
-        &entry.corrections,
+        &crate::gpu_avatars::types::BlendParams {
+            now: frame.now,
+            idle: frame.idle,
+            chest_joint: frame.chest_joint,
+            torso_joint: frame.torso_joint,
+            corrections: &entry.corrections,
+        },
         frame.idle.is_some().then_some(held.as_mut_slice()),
     );
     let _prev = registry.mirror_held.insert(slot_key, held);
@@ -1388,27 +1428,43 @@ pub(crate) fn log_avatar_bounds(
 /// (roadmap `viewer-animesh-intermittent-render`).
 const ENV_LOG_ANIMESH: &str = "SL_VIEWER_LOG_ANIMESH";
 
+/// What the animesh census reads, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the objects and their
+/// deferred builds, the decoded meshes behind them, the control avatars driving
+/// them, the GPU slot registry, and the faces whose binding and visibility the
+/// census reports.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct AnimeshCensus<'w, 's> {
+    /// The object model.
+    state: Res<'w, sl_viewer_world_api::ObjectState>,
+    /// The decoded meshes, for each animesh's rig.
+    mesh_manager: Res<'w, sl_viewer_world_objects::meshes::MeshManager>,
+    /// The control avatars driving the animeshes.
+    control: Res<'w, ControlAvatarState>,
+    /// The GPU slot registry, for the slot each is staged into.
+    registry: Res<'w, GpuAvatarRegistry>,
+    /// Outstanding deferred builds, for the ones not yet rigged.
+    builds: Query<'w, 's, &'static sl_viewer_world_objects::objects::ObjectBuilds>,
+    /// Each face's GPU binding, bounds and visibility.
+    faces: Query<
+        'w,
+        's,
+        (
+            Option<&'static GpuSkinBinding>,
+            Option<&'static Aabb>,
+            &'static InheritedVisibility,
+            &'static bevy::camera::visibility::ViewVisibility,
+        ),
+    >,
+}
+
 /// Log each animesh's stage census when [`ENV_LOG_ANIMESH`] is set, once per
 /// second at most and only for an animesh whose census **changed** — so a run
 /// that goes wrong ends with the stuck state as the last block logged for it,
 /// rather than burying it under a repeat every second. Inert otherwise (the env
 /// is read once into a `Local`).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a diagnostic joining the object, mesh, control-avatar and GPU-slot state it reports on"
-)]
 pub(crate) fn log_animesh_census(
-    state: Res<sl_viewer_world_api::ObjectState>,
-    mesh_manager: Res<sl_viewer_world_objects::meshes::MeshManager>,
-    control: Res<ControlAvatarState>,
-    registry: Res<GpuAvatarRegistry>,
-    builds: Query<&sl_viewer_world_objects::objects::ObjectBuilds>,
-    faces: Query<(
-        Option<&GpuSkinBinding>,
-        Option<&Aabb>,
-        &InheritedVisibility,
-        &bevy::camera::visibility::ViewVisibility,
-    )>,
+    facts: AnimeshCensus,
     time: Res<Time>,
     mut enabled: Local<Option<bool>>,
     mut next_log: Local<f32>,
@@ -1428,16 +1484,17 @@ pub(crate) fn log_animesh_census(
     // whose root has not arrived resolves to no animesh and so is not listed —
     // the bind trace reports it as a worn attachment with no wearer instead.
     let mut roots: HashMap<sl_client_bevy::ObjectKey, Vec<String>> = HashMap::new();
-    for (&scoped, tracked) in &state.objects {
+    for (&scoped, tracked) in &facts.state.objects {
         let Some(sl_client_bevy::SculptOrMeshKey::Mesh(key)) =
             tracked.extra.sculpt.map(|sculpt| sculpt.texture)
         else {
             continue;
         };
-        let Some((root, _root_entity)) = crate::animesh::animesh_root(&state, scoped) else {
+        let Some((root, _root_entity)) = crate::animesh::animesh_root(&facts.state, scoped) else {
             continue;
         };
-        let stage = match builds
+        let stage = match facts
+            .builds
             .get(tracked.entity)
             .ok()
             .and_then(sl_viewer_world_objects::objects::ObjectBuilds::pending)
@@ -1453,10 +1510,12 @@ pub(crate) fn log_animesh_census(
                 "waiting on sculpt map"
             }
         };
-        let decoded = mesh_manager
+        let decoded = facts
+            .mesh_manager
             .decoded(key)
             .map_or_else(|| "none".to_owned(), |mesh| format!("{:?}", mesh.lod));
-        let best = mesh_manager
+        let best = facts
+            .mesh_manager
             .header(key)
             .and_then(|header| header.best_lod(sl_client_bevy::MeshLod::FINEST))
             .map_or_else(|| "?".to_owned(), |lod| format!("{lod:?}"));
@@ -1465,7 +1524,8 @@ pub(crate) fn log_animesh_census(
         let mut inherited = 0_u32;
         let mut visible = 0_u32;
         for &face in &tracked.face_entities {
-            let Ok((binding, aabb, inherited_visibility, view_visibility)) = faces.get(face) else {
+            let Ok((binding, aabb, inherited_visibility, view_visibility)) = facts.faces.get(face)
+            else {
                 continue;
             };
             if binding.is_some_and(|binding| binding.slot == PoseSlotKey::Animesh(root)) {
@@ -1488,12 +1548,12 @@ pub(crate) fn log_animesh_census(
              {best}), skin {}, LOD change in flight {}; {} face(s): {posed} posed on this \
              animesh, {real_bound} with a read-back bound, {inherited} not hidden, {visible} \
              in view",
-            if mesh_manager.skin(key).is_some() {
+            if facts.mesh_manager.skin(key).is_some() {
                 "decoded"
             } else {
                 "none"
             },
-            mesh_manager.lod_change_inflight(key),
+            facts.mesh_manager.lod_change_inflight(key),
             tracked.face_entities.len(),
         ));
     }
@@ -1501,12 +1561,17 @@ pub(crate) fn log_animesh_census(
     last.retain(|root, _census| roots.contains_key(root));
     for (root, mut parts) in roots {
         parts.sort();
-        let slot = registry
+        let slot = facts
+            .registry
             .slot_index(PoseSlotKey::Animesh(root))
             .map_or_else(|| "unallocated".to_owned(), |slot| slot.to_string());
         let census = format!(
             "control avatar {}, pose slot {slot}\n{}",
-            if control.animated_objects().any(|object| object == root) {
+            if facts
+                .control
+                .animated_objects()
+                .any(|object| object == root)
+            {
                 "spawned"
             } else {
                 "not spawned"
@@ -1519,7 +1584,7 @@ pub(crate) fn log_animesh_census(
         if last.get(&root) != Some(&census) {
             info!(
                 "animesh census {root}: {} animation(s) playing, {census}",
-                control.merged_active(root).len()
+                facts.control.merged_active(root).len()
             );
             let _previous = last.insert(root, census);
         }

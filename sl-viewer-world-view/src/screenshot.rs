@@ -772,6 +772,37 @@ fn unpin_capture_target(
 #[derive(Debug, Component)]
 pub(crate) struct ScreenshotSaveTask(Task<Result<PathBuf, String>>);
 
+/// The capture rig, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the session and command
+/// channel the run logs out through, the saves still in flight, the pinned
+/// render target frames are taken from and the overlay cameras aimed at it, the
+/// scene dump the last frame asks for, and the commands that spawn the capture.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct CaptureRig<'w, 's> {
+    /// The viewer session, which the run logs out of when it is done.
+    session: ResMut<'w, ViewerSession>,
+    /// The command channel that logout goes out on.
+    sl_commands: MessageWriter<'w, SlCommand>,
+    /// The saves still writing to disk, which the run waits out.
+    pending_saves: Query<'w, 's, (), With<ScreenshotSaveTask>>,
+    /// The pinned render target the frames are taken from.
+    pinned: Option<ResMut<'w, PinnedCapture>>,
+    /// The scene dump the last frame asks for, when one was requested.
+    scene_dump: Option<ResMut<'w, crate::scene_dump::SceneDumpRequest>>,
+    /// The overlay cameras aimed at the pinned target, unpinned with it.
+    overlays: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static OverlayCamera,
+            Option<&'static RenderTarget>,
+        ),
+    >,
+    /// What spawns the capture and re-aims the cameras.
+    commands: Commands<'w, 's>,
+}
+
 /// Capture a frame to `frame_NNN.png` on the schedule, then request a clean grid
 /// logout once the last frame is taken **and** its write has finished.
 ///
@@ -789,23 +820,11 @@ pub(crate) struct ScreenshotSaveTask(Task<Result<PathBuf, String>>);
 /// the next login is then rejected until the grid times the stale presence out. The
 /// actual exit is driven by the session systems (on `LoggedOut`, or the quit-deadline
 /// fallback), the same as a Menu ▸ Quit / `Ctrl+Q` request.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "one system owns the whole schedule: when to arm (time, quiescence, schedule), what \
-              to capture (the pinned target and the cameras drawing into it), and what to do when \
-              the last frame has drained (session, commands)"
-)]
 pub(crate) fn capture_screenshots(
     time: Res<Time>,
     quiescence: SceneQuiescence,
     mut schedule: ResMut<ScreenshotSchedule>,
-    mut commands: Commands,
-    mut session: ResMut<ViewerSession>,
-    mut sl_commands: MessageWriter<SlCommand>,
-    pending_saves: Query<(), With<ScreenshotSaveTask>>,
-    mut pinned: Option<ResMut<PinnedCapture>>,
-    mut scene_dump: Option<ResMut<crate::scene_dump::SceneDumpRequest>>,
-    overlays: Query<(Entity, &OverlayCamera, Option<&RenderTarget>)>,
+    mut rig: CaptureRig,
     environment: Option<Res<sl_viewer_world_scene::environment::EnvironmentState>>,
 ) {
     let now = time.elapsed_secs();
@@ -821,9 +840,9 @@ pub(crate) fn capture_screenshots(
         // Hold the logout until every write in flight has drained, as the normal
         // end of a run does: an abrupt exit truncates the last PNG, and a
         // truncated frame is a rendering bug that never happened.
-        if pending_saves.is_empty() {
+        if rig.pending_saves.is_empty() {
             schedule.write_status();
-            request_logout(&mut session, &mut sl_commands, now);
+            request_logout(&mut rig.session, &mut rig.sl_commands, now);
         }
         return;
     }
@@ -853,7 +872,7 @@ pub(crate) fn capture_screenshots(
             error!("screenshot: {reason}");
             schedule.failure = Some(reason);
             schedule.write_status();
-            request_logout(&mut session, &mut sl_commands, now);
+            request_logout(&mut rig.session, &mut rig.sl_commands, now);
             return;
         }
         schedule.quiet_frames = if quiescence.is_quiet() {
@@ -886,7 +905,7 @@ pub(crate) fn capture_screenshots(
     if schedule.index >= schedule.max_frames {
         // Don't log out (and so quit) while a frame's PNG is still being written
         // off-thread — dropping the task at exit would truncate the file.
-        if !pending_saves.is_empty() {
+        if !rig.pending_saves.is_empty() {
             return;
         }
         info!(
@@ -900,15 +919,15 @@ pub(crate) fn capture_screenshots(
         // And the scene the last frame was taken from, if this run writes one.
         // The dump itself is written at the end of this frame (`Last`), where
         // the transforms it reads back are the ones the frame was rendered with.
-        if let Some(dump) = scene_dump.as_mut() {
+        if let Some(dump) = rig.scene_dump.as_mut() {
             dump.request();
         }
         // Every frame is written: give the window back to the world camera, so the
         // logout's grace period is watchable.
-        if let Some(pinned) = pinned.as_mut() {
-            unpin_capture_target(&mut commands, pinned, &overlays);
+        if let Some(pinned) = rig.pinned.as_mut() {
+            unpin_capture_target(&mut rig.commands, pinned, &rig.overlays);
         }
-        request_logout(&mut session, &mut sl_commands, now);
+        request_logout(&mut rig.session, &mut rig.sl_commands, now);
         return;
     }
     let path = schedule
@@ -918,11 +937,11 @@ pub(crate) fn capture_screenshots(
     // The cameras of the capture already point at the pinned target every frame,
     // so capturing that image is capturing this frame at the size and with the
     // layers the run asked for.
-    let Some(pinned) = pinned else {
+    let Some(pinned) = rig.pinned else {
         // `pin_capture_target` said why; do not silently capture something else.
         return;
     };
-    commands
+    rig.commands
         .spawn(Screenshot::image(pinned.target.clone()))
         .observe(save_off_thread(path));
     schedule.index = schedule.index.saturating_add(1);

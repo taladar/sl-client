@@ -87,7 +87,8 @@ use sl_viewer_kit::probe_layers::{dynamic_render_layers, world_geom_render_layer
 // longer depend on the object layer's systems; re-exported here so the
 // call sites that address them through this module are unchanged.
 use crate::textures::{
-    PrimTextures, TextureAlpha, TextureDecoded, TextureManager, face_material, intern_face_material,
+    FaceStores, PrimTextures, TextureAlpha, TextureDecoded, TextureManager, face_material,
+    intern_face_material,
 };
 pub use sl_viewer_world_api::{ObjectCategory, ObjectDebugInfo, SceneObject};
 
@@ -1234,10 +1235,6 @@ fn drain_budgeted<T>(
 /// parenting — draining any earlier-frame backlog first, then applying new events
 /// inline (no clone) while the queue is empty and the [`MeshUploadBudget`] holds, else
 /// buffering the overflow into [`PendingObjectEvents`] for a later frame.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system reading the object stream and the ECS resources the geometry build needs"
-)]
 pub fn update_objects(
     mut events: MessageReader<SlEvent>,
     mut state: ResMut<ObjectState>,
@@ -1245,16 +1242,9 @@ pub fn update_objects(
     derender: Res<sl_viewer_world_api::DerenderList>,
     mut pending: ResMut<PendingObjectEvents>,
     mut mesh_budget: ResMut<MeshUploadBudget>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<FaceMaterial>>,
-    mut manager: ResMut<TextureManager>,
-    store: Res<DecodedTextures>,
-    mut prim_textures: ResMut<PrimTextures>,
-    mut mesh_manager: ResMut<MeshManager>,
-    mut cache: ResMut<GeometryCache>,
-    mut material_cache: ResMut<MaterialCache>,
+    mut stores: GeometryStores,
 ) {
+    let build = &mut stores.build();
     // Object spawns draw from the shared per-frame mesh-upload lane, in schedule
     // order with the other mesh-inserting systems — seed a local counter from what
     // the lane has left and write the remainder back so later systems see it spent.
@@ -1279,20 +1269,7 @@ pub fn update_objects(
                 if derender.is_suppressed(scoped) {
                     return false;
                 }
-                apply_object(
-                    &mut state,
-                    &object,
-                    &faces,
-                    &mut commands,
-                    &mut meshes,
-                    &mut materials,
-                    &mut manager,
-                    &store,
-                    &mut prim_textures,
-                    &mut mesh_manager,
-                    &mut cache,
-                    &mut material_cache,
-                )
+                apply_object(&mut state, &object, &faces, build)
             }
             PendingObjectEvent::Remove(scoped) => {
                 if let Some(count) = queued_removes.get_mut(&scoped) {
@@ -1301,7 +1278,7 @@ pub fn update_objects(
                         let _empty = queued_removes.remove(&scoped);
                     }
                 }
-                let _removed = state.remove_object(scoped, &mut commands);
+                let _removed = state.remove_object(scoped, build.commands);
                 false
             }
         })
@@ -1327,23 +1304,10 @@ pub fn update_objects(
         if pending.queue.is_empty() && budget > 0 {
             let built = match &event.0 {
                 SlSessionEvent::ObjectAdded(object) | SlSessionEvent::ObjectUpdated(object) => {
-                    apply_object(
-                        &mut state,
-                        object,
-                        &faces,
-                        &mut commands,
-                        &mut meshes,
-                        &mut materials,
-                        &mut manager,
-                        &store,
-                        &mut prim_textures,
-                        &mut mesh_manager,
-                        &mut cache,
-                        &mut material_cache,
-                    )
+                    apply_object(&mut state, object, &faces, build)
                 }
                 SlSessionEvent::ObjectRemoved { local_id, .. } => {
-                    let _removed = state.remove_object(*local_id, &mut commands);
+                    let _removed = state.remove_object(*local_id, build.commands);
                     false
                 }
                 _other => false,
@@ -1475,6 +1439,53 @@ pub(crate) struct PickTextures<'w> {
     store: Res<'w, DecodedTextures>,
 }
 
+/// What the crosshair probe reports about the **object** it hit, bundled as one
+/// [`SystemParam`].
+#[derive(Debug, SystemParam)]
+pub(crate) struct PickedObject<'w, 's> {
+    /// Object identities, to name the object and its linkset root.
+    scene: Query<'w, 's, &'static SceneObject>,
+    /// The probe's own identity record: full id, asset, scale, position.
+    infos: Query<'w, 's, &'static ObjectDebugInfo>,
+    /// The light block, reported when the object carries one.
+    lights: Query<'w, 's, &'static ObjectLight>,
+    /// The texture-animation block, likewise.
+    tex_anims: Query<'w, 's, &'static ObjectTextureAnimation>,
+    /// World transforms, for the reported world position.
+    globals: Query<'w, 's, &'static GlobalTransform>,
+    /// Parent links, to walk a hit face up to its object.
+    parents: Query<'w, 's, &'static ChildOf>,
+}
+
+/// What the crosshair probe reports about the **face** it hit, bundled as one
+/// [`SystemParam`].
+#[derive(SystemParam)]
+pub(crate) struct PickedFace<'w, 's> {
+    /// The face's own components, plus whether it is actually shown: the
+    /// fully-transparent cull hides a face, and a probe that could not say so
+    /// would read as a renderer bug rather than as the cull doing its job.
+    debug: Query<
+        'w,
+        's,
+        (
+            &'static PrimFaceEntity,
+            &'static FaceTextureDebug,
+            &'static InheritedVisibility,
+            Has<TransparencyCulled>,
+        ),
+    >,
+    /// The face's material handle.
+    handles: Query<'w, 's, &'static MeshMaterial3d<FaceMaterial>>,
+    /// The composed materials the handle resolves to.
+    materials: Res<'w, Assets<FaceMaterial>>,
+    /// The legacy (Blinn-Phong) materials a face's bump / specular come from.
+    legacy: Res<'w, LegacyMaterialManager>,
+    /// The texture fetch state and decoded images, for the level-of-detail line.
+    textures: PickTextures<'w>,
+    /// The decoded-mesh store, for the mesh's own level-of-detail line.
+    mesh_manager: Res<'w, MeshManager>,
+}
+
 /// Crosshair pick tool (press **`P`**): casts a ray straight out of the camera
 /// and logs the object under the centre of the screen — its full id, mesh/sculpt
 /// asset id, kind, scale, and Second Life position — so a wrongly rendered object can
@@ -1486,38 +1497,14 @@ pub(crate) struct PickTextures<'w> {
 /// texture's current discard level (P21.1) and, for a mesh, its decoded geometry
 /// LOD (P21.2). Aim at a face and press the key while walking toward it to confirm
 /// the discard level falls (finer) and the mesh LOD rises as it should.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system querying the several components the pick report reads"
-)]
 pub(crate) fn pick_object(
     keyboard: Res<ButtonInput<KeyCode>>,
     // `ViewerCamera`, not `Camera3d`: the probe-capture cameras (P33.2) also carry
     // `Camera3d`, and `single()` fails once more than one matches.
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
     mut ray_cast: MeshRayCast,
-    scene: Query<&SceneObject>,
-    infos: Query<&ObjectDebugInfo>,
-    lights: Query<&ObjectLight>,
-    tex_anims: Query<&ObjectTextureAnimation>,
-    globals: Query<&GlobalTransform>,
-    parents: Query<&ChildOf>,
-    // The face's own components, plus whether it is actually shown: the
-    // fully-transparent cull hides a face, and a probe that could not say so
-    // would read as a renderer bug rather than as the cull doing its job.
-    // Bundled into this query rather than taken as a seventeenth parameter,
-    // which is one past what a Bevy system accepts.
-    face_debug: Query<(
-        &PrimFaceEntity,
-        &FaceTextureDebug,
-        &InheritedVisibility,
-        Has<TransparencyCulled>,
-    )>,
-    face_materials: Query<&MeshMaterial3d<FaceMaterial>>,
-    materials: Res<Assets<FaceMaterial>>,
-    legacy: Res<LegacyMaterialManager>,
-    textures: PickTextures,
-    mesh_manager: Res<MeshManager>,
+    hit_object: PickedObject,
+    hit_face: PickedFace,
     state: Res<ObjectState>,
 ) {
     if !keyboard.just_pressed(KeyCode::KeyP) {
@@ -1540,9 +1527,10 @@ pub(crate) fn pick_object(
     // Recognised by shape rather than by a marker component, since the crates
     // that spawn them depend on this one.
     let not_a_face_decoration = |entity: Entity| {
-        !parents
+        !hit_object
+            .parents
             .get(entity)
-            .is_ok_and(|child_of| face_debug.contains(child_of.parent()))
+            .is_ok_and(|child_of| hit_face.debug.contains(child_of.parent()))
     };
     let settings = MeshRayCastSettings::default()
         // Reach a face the fully-transparent cull hid, and say so below rather
@@ -1561,7 +1549,7 @@ pub(crate) fn pick_object(
     // object's texture animation (P28.1), reported below, can say whether it
     // targets this particular face.
     let mut picked_face: Option<PrimFaceId> = None;
-    if let Ok((face, FaceTextureDebug(tf), shown, culled)) = face_debug.get(*entity) {
+    if let Ok((face, FaceTextureDebug(tf), shown, culled)) = hit_face.debug.get(*entity) {
         picked_face = Some(face.face_id);
         warn!(
             "pick face {}: texture={} repeats=({:.3},{:.3}) offset=({:.3},{:.3}) \
@@ -1593,8 +1581,8 @@ pub(crate) fn pick_object(
         // for a legacy face, the composed base colour for a PBR one). `shown`
         // without `culled` means something *else* hid it — a derender, a hidden
         // ancestor — which is a different bug entirely.
-        if let Ok(material) = face_materials.get(*entity)
-            && let Some(standard) = materials.get(&material.0)
+        if let Ok(material) = hit_face.handles.get(*entity)
+            && let Some(standard) = hit_face.materials.get(&material.0)
         {
             warn!(
                 "pick face render: alpha_mode={:?} base_color_alpha={:.3} unlit={} \
@@ -1608,7 +1596,7 @@ pub(crate) fn pick_object(
             );
         }
         if let Some(material_id) = tf.material_id {
-            match legacy.decoded_material(&material_id) {
+            match hit_face.legacy.decoded_material(&material_id) {
                 Some(fetched) => warn!(
                     "pick face legacy material {material_id}: diffuse_alpha_mode={} \
                      alpha_mask_cutoff={} normal_map={} specular_map={}",
@@ -1627,7 +1615,11 @@ pub(crate) fn pick_object(
         // current discard level should *fall* (toward 0 = full resolution) as the
         // camera moves toward the face. Aim and press the pick key while walking in
         // to confirm the texture actually refines.
-        match textures.manager.lod_debug(tf.texture_id, &textures.store) {
+        match hit_face
+            .textures
+            .manager
+            .lod_debug(tf.texture_id, &hit_face.textures.store)
+        {
             Some(lod) => warn!(
                 "pick texture {}: discard={} current={}x{} native={:?} header_native={:?} managed={}",
                 tf.texture_id,
@@ -1648,8 +1640,9 @@ pub(crate) fn pick_object(
     // object root that carries the identity component.
     let mut current = *entity;
     loop {
-        if let Ok(info) = infos.get(current) {
-            let kind = scene
+        if let Ok(info) = hit_object.infos.get(current) {
+            let kind = hit_object
+                .scene
                 .get(current)
                 .map_or("?", |scene| match scene.category {
                     ObjectCategory::Prim => "prim",
@@ -1663,7 +1656,8 @@ pub(crate) fn pick_object(
             // The object entity's actual world scale — if it is much larger than
             // `scale` below, the linkset root's scale is wrongly propagating to
             // this child (Bevy composes parent scale; Second Life does not).
-            let world_scale = globals
+            let world_scale = hit_object
+                .globals
                 .get(current)
                 .map(|global| global.to_scale_rotation_translation().0);
             warn!(
@@ -1685,9 +1679,9 @@ pub(crate) fn pick_object(
             // geometry block should move toward `High` as the camera approaches. A
             // boosted (worn attachment) mesh stays at the finest level and is not
             // LOD managed.
-            if matches!(scene.get(current), Ok(obj) if obj.category == ObjectCategory::Mesh)
+            if matches!(hit_object.scene.get(current), Ok(obj) if obj.category == ObjectCategory::Mesh)
                 && let Some(asset) = info.render_asset()
-                && let Some((lod, managed)) = mesh_manager.lod_debug(MeshKey::from(asset))
+                && let Some((lod, managed)) = hit_face.mesh_manager.lod_debug(MeshKey::from(asset))
             {
                 warn!("pick mesh {asset}: lod={lod:?} managed={managed}");
             }
@@ -1695,7 +1689,7 @@ pub(crate) fn pick_object(
             // tessellation level should move toward `High` as the camera
             // approaches. Aim at a prim face and press the pick key while walking
             // in to confirm it refines.
-            if let Ok(obj) = scene.get(current)
+            if let Ok(obj) = hit_object.scene.get(current)
                 && obj.category == ObjectCategory::Prim
                 && let Some(tracked) = state.objects.get(&obj.scoped_id)
             {
@@ -1705,7 +1699,7 @@ pub(crate) fn pick_object(
             // decoded colour / intensity / radius / falloff and, for a spotlight,
             // its projector texture + cone params — the ground truth for the
             // P25.2 render pass.
-            if let Ok(light) = lights.get(current) {
+            if let Ok(light) = hit_object.lights.get(current) {
                 let emitted = light.effective_linear_color();
                 warn!(
                     "pick light {}: spotlight={} linear_color=[{:.3},{:.3},{:.3}] \
@@ -1730,9 +1724,9 @@ pub(crate) fn pick_object(
             // `llSetTextureAnim` reports its decoded mode / frame-grid / timing —
             // the ground truth for the P28.2 UV / flipbook driver — plus whether
             // it targets the face under the crosshair (`face == -1` = all faces).
-            if let Ok(obj) = scene.get(current)
+            if let Ok(obj) = hit_object.scene.get(current)
                 && let Some(tracked) = state.objects.get(&obj.scoped_id)
-                && let Ok(tex_anim) = tex_anims.get(tracked.geometry)
+                && let Ok(tex_anim) = hit_object.tex_anims.get(tracked.geometry)
             {
                 let anim = tex_anim.anim;
                 let targets_face = picked_face.map(|face| tex_anim.applies_to_face(face.get()));
@@ -1752,7 +1746,7 @@ pub(crate) fn pick_object(
             }
             return;
         }
-        let Ok(child_of) = parents.get(current) else {
+        let Ok(child_of) = hit_object.parents.get(current) else {
             warn!("pick: hit an entity with no object identity");
             return;
         };
@@ -1885,26 +1879,12 @@ struct ObjectGeometryBuild {
 /// inputs ([`PendingSculpt`]) — or, for a **flexi** prim, its seeded
 /// [`FlexiChain`] (P32.2, in place of `PendingPrim`: a flexi prim is
 /// chain-driven, not pixel-area LOD managed).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "threads the several ECS resources the geometry build needs"
-)]
 fn build_object_geometry(
     object: &Object,
     category: ObjectCategory,
     entity: Entity,
     is_hud: bool,
-    reuse: &mut FaceReuse,
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<FaceMaterial>,
-    manager: &mut TextureManager,
-    store: &DecodedTextures,
-    prim_textures: &mut PrimTextures,
-    mesh_manager: &mut MeshManager,
-    cache: &mut GeometryCache,
-    intern: &MaterialInternContext,
-    material_cache: &mut MaterialCache,
+    build: &mut FaceBuild,
 ) -> ObjectGeometryBuild {
     // A worn attachment's textures / mesh are boosted so they load with the
     // avatar rather than queued behind the surrounding scene (P20.2).
@@ -1915,20 +1895,7 @@ fn build_object_geometry(
         // is NOT on the pixel-area LOD re-tessellation path (no `PendingPrim`); the
         // returned chain seeds its [`FlexiSimState`].
         ObjectCategory::Prim if object.extra.flexible.is_some() => {
-            let (faces, chain) = build_flexi_faces(
-                object,
-                entity,
-                reuse,
-                commands,
-                meshes,
-                materials,
-                manager,
-                store,
-                prim_textures,
-                priority,
-                intern,
-                material_cache,
-            );
+            let (faces, chain) = build_flexi_faces(object, entity, priority, build);
             ObjectGeometryBuild {
                 face_entities: faces,
                 flexi_chain: Some(chain),
@@ -1939,18 +1906,9 @@ fn build_object_geometry(
             face_entities: build_prim_faces(
                 object,
                 entity,
-                reuse,
-                commands,
-                meshes,
-                materials,
-                manager,
-                store,
-                prim_textures,
                 priority,
                 INITIAL_MANAGED_PRIM_LOD,
-                cache,
-                intern,
-                material_cache,
+                build,
             ),
             builds: ObjectBuilds {
                 // Retain the re-tessellation inputs so the pixel-area LOD driver
@@ -1961,7 +1919,7 @@ fn build_object_geometry(
                     texture_entry: object.texture_entry.clone(),
                     scale: [object.scale.x, object.scale.y, object.scale.z],
                     priority,
-                    intern: intern.clone(),
+                    intern: build.intern.clone(),
                 }),
                 ..ObjectBuilds::default()
             },
@@ -1971,11 +1929,11 @@ fn build_object_geometry(
             let Some(key) = mesh_key(object) else {
                 return ObjectGeometryBuild::default();
             };
-            mesh_manager.request(key, priority);
+            build.mesh_manager.request(key, priority);
             // The store hands back an `Arc`; clone it out so the immutable borrow
             // of `mesh_manager` ends before the submesh build borrows the other
             // resources.
-            match mesh_manager.decoded(key).map(Arc::clone) {
+            match build.mesh_manager.decoded(key).map(Arc::clone) {
                 // A rigged mesh (one carrying a skin block) is worn by an avatar and
                 // must be skinned to its skeleton, never built as a static child —
                 // even when its asset is already warm in the cache, which is the
@@ -1987,8 +1945,8 @@ fn build_object_geometry(
                 // the decode path: defer to the rigged build (and upgrade to the
                 // finest block, since a skinned mesh cannot be pixel-area LOD ranked)
                 // unless it is worn on a HUD, which has no skeleton to skin to.
-                Some(_decoded) if !is_hud && mesh_manager.skin(key).is_some() => {
-                    mesh_manager.upgrade_to_finest(key);
+                Some(_decoded) if !is_hud && build.mesh_manager.skin(key).is_some() => {
+                    build.mesh_manager.upgrade_to_finest(key);
                     ObjectGeometryBuild {
                         builds: ObjectBuilds {
                             pending: Some(PendingGeometry::RiggedMesh(PendingRiggedMesh {
@@ -1997,7 +1955,7 @@ fn build_object_geometry(
                                     texture_entry: object.texture_entry.clone(),
                                     scale: [object.scale.x, object.scale.y, object.scale.z],
                                     priority,
-                                    intern: intern.clone(),
+                                    intern: build.intern.clone(),
                                     in_world_rig: false,
                                 },
                             })),
@@ -2013,17 +1971,8 @@ fn build_object_geometry(
                         &object.texture_entry,
                         [object.scale.x, object.scale.y, object.scale.z],
                         entity,
-                        reuse,
-                        commands,
-                        meshes,
-                        materials,
-                        manager,
-                        store,
-                        prim_textures,
                         priority,
-                        cache,
-                        intern,
-                        material_cache,
+                        build,
                     ),
                     builds: ObjectBuilds {
                         // Warm cache: the submeshes were built immediately above,
@@ -2037,7 +1986,7 @@ fn build_object_geometry(
                             texture_entry: object.texture_entry.clone(),
                             scale: [object.scale.x, object.scale.y, object.scale.z],
                             priority,
-                            intern: intern.clone(),
+                            intern: build.intern.clone(),
                             in_world_rig: false,
                         }),
                         ..ObjectBuilds::default()
@@ -2051,7 +2000,7 @@ fn build_object_geometry(
                             texture_entry: object.texture_entry.clone(),
                             scale: [object.scale.x, object.scale.y, object.scale.z],
                             priority,
-                            intern: intern.clone(),
+                            intern: build.intern.clone(),
                             in_world_rig: false,
                         })),
                         ..ObjectBuilds::default()
@@ -2064,7 +2013,7 @@ fn build_object_geometry(
             let Some((map, sculpt_type)) = sculpt_key(object) else {
                 return ObjectGeometryBuild::default();
             };
-            manager.request_boosted(map, priority);
+            build.faces.manager.request_boosted(map, priority);
             let rebuild = PendingSculpt {
                 map,
                 sculpt_type,
@@ -2072,32 +2021,25 @@ fn build_object_geometry(
                 texture_entry: object.texture_entry.clone(),
                 scale: [object.scale.x, object.scale.y, object.scale.z],
                 priority,
-                intern: intern.clone(),
+                intern: build.intern.clone(),
             };
             // The store hands back an `Arc`; clone it out so the immutable borrow
             // of `manager` ends before the face build borrows it mutably.
-            match store.get(map).map(Arc::clone) {
+            match build.faces.store.get(map).map(Arc::clone) {
                 Some(map_image) => ObjectGeometryBuild {
                     face_entities: build_sculpt_faces(
-                        &map_image,
-                        map,
-                        sculpt_type,
-                        object.shape,
-                        &object.texture_entry,
-                        [object.scale.x, object.scale.y, object.scale.z],
+                        &SculptSource {
+                            map: &map_image,
+                            map_key: map,
+                            sculpt_type,
+                            shape: object.shape,
+                            texture_entry: &object.texture_entry,
+                            scale: [object.scale.x, object.scale.y, object.scale.z],
+                        },
                         entity,
-                        reuse,
-                        commands,
-                        meshes,
-                        materials,
-                        manager,
-                        store,
-                        prim_textures,
                         priority,
                         INITIAL_MANAGED_PRIM_LOD,
-                        cache,
-                        intern,
-                        material_cache,
+                        build,
                     ),
                     builds: ObjectBuilds {
                         // Retain the re-stitch inputs so the pixel-area LOD driver
@@ -2124,14 +2066,8 @@ fn build_object_geometry(
                 tree_species_byte(object),
                 INITIAL_TREE_TIER,
                 entity,
-                reuse,
-                commands,
-                meshes,
-                materials,
-                manager,
-                store,
-                prim_textures,
                 priority,
+                build,
             ),
             builds: ObjectBuilds {
                 // Retain the regeneration inputs so the pixel-area LOD driver can
@@ -2153,14 +2089,8 @@ fn build_object_geometry(
                 object.state,
                 [object.scale.x, object.scale.y],
                 entity,
-                reuse,
-                commands,
-                meshes,
-                materials,
-                manager,
-                store,
-                prim_textures,
                 priority,
+                build,
             ),
             ..ObjectGeometryBuild::default()
         },
@@ -2193,25 +2123,12 @@ fn build_object_geometry(
 /// The geometry is shared across identical instances through the
 /// [`GeometryCache`] keyed by `(shape, lod)` — tessellation only runs when no
 /// live instance already holds the same geometry.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "threads the several ECS resources the geometry build needs, plus the fetch priority and LOD"
-)]
 fn build_prim_faces(
     object: &Object,
     parent: Entity,
-    reuse: &mut FaceReuse,
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<FaceMaterial>,
-    manager: &mut TextureManager,
-    store: &DecodedTextures,
-    prim_textures: &mut PrimTextures,
     priority: Priority,
     lod: PrimLod,
-    cache: &mut GeometryCache,
-    intern: &MaterialInternContext,
-    material_cache: &mut MaterialCache,
+    build: &mut FaceBuild,
 ) -> Vec<Entity> {
     let shape = object.shape;
     spawn_cached_prim_faces(
@@ -2220,17 +2137,8 @@ fn build_prim_faces(
         &object.texture_entry,
         [object.scale.x, object.scale.y, object.scale.z],
         parent,
-        reuse,
-        commands,
-        meshes,
-        materials,
-        manager,
-        store,
-        prim_textures,
         priority,
-        cache,
-        intern,
-        material_cache,
+        build,
     )
 }
 
@@ -2269,23 +2177,11 @@ const DEFAULT_FLEXI: FlexiAttributes = FlexiAttributes {
 /// bounds are exact. Keeping the `Aabb` is also what makes a flexi **pickable**:
 /// `MeshRayCast` reads it non-optionally, so the old opt-out silently excluded
 /// flexi prims from left-click touch and the object context menu entirely.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "threads the several ECS resources the geometry build needs, like the sibling build fns"
-)]
 fn build_flexi_faces(
     object: &Object,
     parent: Entity,
-    reuse: &mut FaceReuse,
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<FaceMaterial>,
-    manager: &mut TextureManager,
-    store: &DecodedTextures,
-    prim_textures: &mut PrimTextures,
     priority: Priority,
-    intern: &MaterialInternContext,
-    material_cache: &mut MaterialCache,
+    build: &mut FaceBuild,
 ) -> (Vec<Entity>, FlexiChain) {
     let shape = PrimShapeFloat::from_params(&object.shape);
     let attributes = object
@@ -2313,22 +2209,8 @@ fn build_flexi_faces(
     let prim = tessellate_with_path(&shape, FLEXI_LOD, &path);
     // A flexi prim's per-frame deformation rewrites its *meshes*, not its
     // materials, so its faces intern like any other prim's.
-    let face_entities = spawn_prim_faces(
-        &prim,
-        &object.texture_entry,
-        scale,
-        parent,
-        reuse,
-        commands,
-        meshes,
-        materials,
-        manager,
-        store,
-        prim_textures,
-        priority,
-        intern,
-        material_cache,
-    );
+    let face_entities =
+        spawn_prim_faces(&prim, &object.texture_entry, scale, parent, priority, build);
     (face_entities, chain)
 }
 
@@ -2393,31 +2275,21 @@ fn apply_flexi_sim(
 /// [`GeometryCache`] keyed by the shape, the map asset (`map_key`), sculpt type,
 /// the decoded map's pixel size, and the level — copies of one sculpt stitch the map once, and
 /// a re-decode at another discard level (or a LOD swap) is a clean different key.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "threads the several ECS resources the geometry build needs, plus the fetch priority and LOD"
-)]
 fn build_sculpt_faces(
-    map: &DecodedTexture,
-    map_key: TextureKey,
-    sculpt_type: u8,
-    shape: PrimShapeParams,
-    texture_entry: &[u8],
-    scale: [f32; 3],
+    sculpt: &SculptSource,
     parent: Entity,
-    reuse: &mut FaceReuse,
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<FaceMaterial>,
-    manager: &mut TextureManager,
-    store: &DecodedTextures,
-    prim_textures: &mut PrimTextures,
     priority: Priority,
     lod: PrimLod,
-    cache: &mut GeometryCache,
-    intern: &MaterialInternContext,
-    material_cache: &mut MaterialCache,
+    build: &mut FaceBuild,
 ) -> Vec<Entity> {
+    let &SculptSource {
+        map,
+        map_key,
+        sculpt_type,
+        shape,
+        texture_entry,
+        scale,
+    } = sculpt;
     spawn_cached_prim_faces(
         GeometryKey::Sculpt {
             shape,
@@ -2431,17 +2303,8 @@ fn build_sculpt_faces(
         texture_entry,
         scale,
         parent,
-        reuse,
-        commands,
-        meshes,
-        materials,
-        manager,
-        store,
-        prim_textures,
         priority,
-        cache,
-        intern,
-        material_cache,
+        build,
     )
 }
 
@@ -2482,22 +2345,12 @@ fn tree_species_byte(object: &Object) -> u8 {
 /// leaves), fetched and applied exactly as a prim face's — a synthetic white
 /// [`TextureFace`] carrying the species texture drives `face_material`, so a
 /// tree's leaf alpha upgrades it to blending on decode like any other face.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "threads the several ECS resources the geometry build needs"
-)]
 fn build_tree_faces(
     species_byte: u8,
     tier: TreeTier,
     parent: Entity,
-    reuse: &mut FaceReuse,
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<FaceMaterial>,
-    manager: &mut TextureManager,
-    store: &DecodedTextures,
-    prim_textures: &mut PrimTextures,
     priority: Priority,
+    build: &mut FaceBuild,
 ) -> Vec<Entity> {
     // Clamp an unknown species to 0, as the reference viewer does (species 0 is
     // always defined, so the fallback resolves).
@@ -2508,15 +2361,12 @@ fn build_tree_faces(
         TreeTier::Lod(lod) => tree_geometry(species, lod),
         TreeTier::Billboard => tree_billboard_geometry(species),
     };
-    let mesh = meshes.add(to_bevy_tree_mesh(&tree));
+    let mesh = build.meshes.add(to_bevy_tree_mesh(&tree));
     // The tree's single diffuse comes from the species table, not a `TextureEntry`.
     let texture_face = TextureFace::new(species.texture_id);
     let material = face_material(
         &texture_face,
-        materials,
-        manager,
-        store,
-        prim_textures,
+        &mut build.faces,
         priority,
         TextureAlpha::Mask,
     );
@@ -2525,11 +2375,11 @@ fn build_tree_faces(
     // clips each leaf to its shape (transparent around the edges) rather than
     // showing a solid quad. A fixed cutoff clips the trunk (opaque) cleanly too.
     // Set here so it is not overridden by the tint-based opaque/blend default.
-    if let Some(mut tree_material) = materials.get_mut(&material) {
+    if let Some(mut tree_material) = build.faces.materials.get_mut(&material) {
         tree_material.base.alpha_mode = AlphaMode::Mask(TREE_ALPHA_CUTOFF);
     }
     let face_id = PrimFaceId::new(0);
-    let mut face = face_commands(face_id, reuse, commands);
+    let mut face = face_commands(face_id, &mut build.reuse, build.commands);
     face.try_insert((
         Mesh3d(mesh),
         MeshMaterial3d(material),
@@ -2556,22 +2406,12 @@ fn build_tree_faces(
 /// Grass renders in the reference viewer's **alpha-blend** pool (`PASS_GRASS` /
 /// `POOL_ALPHA`), so the material is forced to [`AlphaMode::Blend`] here (rather
 /// than the cutout mask used for trees) to reproduce the soft-edged blades.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "threads the several ECS resources the geometry build needs"
-)]
 fn build_grass_faces(
     species_byte: u8,
     scale: [f32; 2],
     parent: Entity,
-    reuse: &mut FaceReuse,
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<FaceMaterial>,
-    manager: &mut TextureManager,
-    store: &DecodedTextures,
-    prim_textures: &mut PrimTextures,
     priority: Priority,
+    build: &mut FaceBuild,
 ) -> Vec<Entity> {
     // Clamp an unknown species to 0, as the reference viewer does (species 0 is
     // always defined, so the fallback resolves).
@@ -2579,26 +2419,23 @@ fn build_grass_faces(
         return Vec::new();
     };
     let clump = grass_geometry(species, scale[0], scale[1], GRASS_MAX_BLADES);
-    let mesh = meshes.add(to_bevy_grass_mesh(&clump));
+    let mesh = build.meshes.add(to_bevy_grass_mesh(&clump));
     // The clump's single diffuse comes from the species table, not a `TextureEntry`.
     let texture_face = TextureFace::new(species.texture_id);
     let material = face_material(
         &texture_face,
-        materials,
-        manager,
-        store,
-        prim_textures,
+        &mut build.faces,
         priority,
         TextureAlpha::Mask,
     );
     // Grass is alpha-**blended** (the reference's `PASS_GRASS` / `POOL_ALPHA`), so
     // the soft blade-card edges fade rather than clip. Set here so it is not
     // overridden by the tint-based opaque default.
-    if let Some(mut grass_material) = materials.get_mut(&material) {
+    if let Some(mut grass_material) = build.faces.materials.get_mut(&material) {
         grass_material.base.alpha_mode = AlphaMode::Blend;
     }
     let face_id = PrimFaceId::new(0);
-    let mut face = face_commands(face_id, reuse, commands);
+    let mut face = face_commands(face_id, &mut build.reuse, build.commands);
     face.try_insert((
         Mesh3d(mesh),
         MeshMaterial3d(material),
@@ -2655,25 +2492,13 @@ fn apply_planar_texgen(
 /// the material in `prim_textures` until it decodes (Phase 6). A face whose slot is
 /// missing (an object with no texture entry) falls back to an untextured white
 /// material. The face geometry stays in the object's local Second Life space.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "threads the several ECS resources the geometry build needs"
-)]
 fn spawn_prim_faces(
     prim: &PrimMesh,
     texture_entry: &[u8],
     scale: [f32; 3],
     parent: Entity,
-    reuse: &mut FaceReuse,
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<FaceMaterial>,
-    manager: &mut TextureManager,
-    store: &DecodedTextures,
-    prim_textures: &mut PrimTextures,
     priority: Priority,
-    intern: &MaterialInternContext,
-    material_cache: &mut MaterialCache,
+    build: &mut FaceBuild,
 ) -> Vec<Entity> {
     let entry = decode_texture_entry(texture_entry, prim.faces.len());
     // The slot every face falls back to when the object carries no texture entry:
@@ -2693,22 +2518,8 @@ fn spawn_prim_faces(
             texture_face,
             scale,
         );
-        let mesh = meshes.add(bevy_mesh);
-        let entity = spawn_face_entity(
-            mesh,
-            texture_face,
-            face.face_id,
-            parent,
-            reuse,
-            commands,
-            materials,
-            manager,
-            store,
-            prim_textures,
-            priority,
-            intern,
-            material_cache,
-        );
+        let mesh = build.meshes.add(bevy_mesh);
+        let entity = spawn_face_entity(mesh, texture_face, face.face_id, parent, priority, build);
         face_entities.push(entity);
     }
     face_entities
@@ -2718,6 +2529,113 @@ fn spawn_prim_faces(
 /// rebuild reads to hand each replacement face the entity that drew it (see
 /// `FaceReuse`). Every system that can re-tessellate an object takes one.
 pub type FaceIds<'w, 's> = Query<'w, 's, &'static PrimFaceEntity>;
+
+// ---------------------------------------------------------------------------
+// The stores a geometry build writes through, bundled.
+// ---------------------------------------------------------------------------
+
+/// The stores one geometry build spawns and writes through, taken straight from
+/// the world by the five systems that build object geometry.
+///
+/// Twelve builders in this module used to thread these nine by hand, which is
+/// what made every one of them a fourteen-parameter signature. They travel as
+/// one [`FaceBuild`] instead (`GeometryStores::build`).
+#[expect(
+    missing_debug_implementations,
+    reason = "the asset stores here are Bevy `Assets<T>` collections, none of which implements \
+              Debug; a hand-written impl could only print the field names"
+)]
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct GeometryStores<'w, 's> {
+    /// What spawns and despawns the object / face entities.
+    commands: Commands<'w, 's>,
+    /// The mesh store a tessellation is uploaded into.
+    meshes: ResMut<'w, Assets<Mesh>>,
+    /// The face materials written.
+    materials: ResMut<'w, Assets<FaceMaterial>>,
+    /// The fetch / priority side of the texture pipeline.
+    manager: ResMut<'w, TextureManager>,
+    /// The decoded textures a face's alpha is read from.
+    store: Res<'w, DecodedTextures>,
+    /// The per-prim texture bookkeeping.
+    prim_textures: ResMut<'w, PrimTextures>,
+    /// The decoded-mesh store a rigged / mesh object builds from.
+    mesh_manager: ResMut<'w, MeshManager>,
+    /// The cross-object tessellation cache.
+    cache: ResMut<'w, GeometryCache>,
+    /// The cross-object interned-material cache.
+    material_cache: ResMut<'w, MaterialCache>,
+}
+
+impl<'w, 's> GeometryStores<'w, 's> {
+    /// The per-object build context the builder chain takes: the stores borrowed
+    /// together, an empty reuse pool and the neutral intern decision. Each object
+    /// the run builds re-seeds [`FaceBuild::reuse`] and [`FaceBuild::intern`].
+    fn build(&mut self) -> FaceBuild<'_, 'w, 's> {
+        FaceBuild {
+            commands: &mut self.commands,
+            meshes: &mut self.meshes,
+            faces: FaceStores {
+                materials: &mut self.materials,
+                manager: &mut self.manager,
+                store: &self.store,
+                prim_textures: &mut self.prim_textures,
+            },
+            mesh_manager: &mut self.mesh_manager,
+            cache: &mut self.cache,
+            material_cache: &mut self.material_cache,
+            reuse: FaceReuse::none(),
+            intern: MaterialInternContext::default(),
+        }
+    }
+}
+
+/// Everything one object's face build reads, writes and spawns through.
+///
+/// The stores are borrowed once per system run (`GeometryStores::build`); the
+/// last two are per-object and re-seeded for each object a run builds.
+#[expect(
+    missing_debug_implementations,
+    reason = "the asset stores here are Bevy `Assets<T>` collections, none of which implements \
+              Debug; a hand-written impl could only print the field names"
+)]
+pub struct FaceBuild<'a, 'w, 's> {
+    /// What spawns and despawns the face entities.
+    commands: &'a mut Commands<'w, 's>,
+    /// The mesh store a tessellation is uploaded into.
+    meshes: &'a mut Assets<Mesh>,
+    /// The four stores a face's material is composed through.
+    faces: FaceStores<'a>,
+    /// The decoded-mesh store.
+    mesh_manager: &'a mut MeshManager,
+    /// The cross-object tessellation cache.
+    cache: &'a mut GeometryCache,
+    /// The cross-object interned-material cache.
+    material_cache: &'a mut MaterialCache,
+    /// The faces this object had, offered to the faces it is about to have.
+    reuse: FaceReuse,
+    /// The object-level inputs of the per-face material-intern decision.
+    intern: MaterialInternContext,
+}
+
+/// The sculpt map and shape one [`build_sculpt_faces`] call tessellates: the
+/// decoded map and its key, the sculpt type, and the prim shape / texture entry
+/// / scale the resulting geometry is textured and sized by.
+#[derive(Clone, Copy)]
+struct SculptSource<'a> {
+    /// The decoded sculpt map.
+    map: &'a DecodedTexture,
+    /// Its texture key, part of the geometry cache key.
+    map_key: TextureKey,
+    /// The sculpt stitching type.
+    sculpt_type: u8,
+    /// The prim shape parameters the sculpt is cut by.
+    shape: PrimShapeParams,
+    /// The object's `TextureEntry`, which textures the resulting faces.
+    texture_entry: &'a [u8],
+    /// The object's Second Life scale.
+    scale: [f32; 3],
+}
 
 /// The face entities an object already has, offered to its own rebuild so each
 /// replacement face **updates the entity that drew it** rather than despawning it
@@ -2858,33 +2776,19 @@ pub(crate) fn is_fully_transparent(texture_face: &TextureFace) -> bool {
 /// Reuses this face's previous entity when `reuse` still holds one (see
 /// [`FaceReuse`]), overwriting its geometry, material and face description in
 /// place; only a face with no predecessor spawns a new entity.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "threads the several ECS resources the material build needs"
-)]
 fn spawn_face_entity(
     mesh: Handle<Mesh>,
     texture_face: &TextureFace,
     face_id: PrimFaceId,
     parent: Entity,
-    reuse: &mut FaceReuse,
-    commands: &mut Commands,
-    materials: &mut Assets<FaceMaterial>,
-    manager: &mut TextureManager,
-    store: &DecodedTextures,
-    prim_textures: &mut PrimTextures,
     priority: Priority,
-    intern: &MaterialInternContext,
-    material_cache: &mut MaterialCache,
+    build: &mut FaceBuild,
 ) -> Entity {
     let (material, shared) = intern_face_material(
         texture_face,
-        intern.internable(face_id, texture_face),
-        material_cache,
-        materials,
-        manager,
-        store,
-        prim_textures,
+        build.intern.internable(face_id, texture_face),
+        build.material_cache,
+        &mut build.faces,
         priority,
     );
     // The per-face half of the texture-edit diagnostics (off unless
@@ -2923,7 +2827,7 @@ fn spawn_face_entity(
             Visibility::Inherited
         },
     );
-    let mut face = face_commands(face_id, reuse, commands);
+    let mut face = face_commands(face_id, &mut build.reuse, build.commands);
     face.try_insert(built);
     if culled {
         face.try_insert(TransparencyCulled);
@@ -2949,35 +2853,22 @@ fn spawn_face_entity(
 /// Otherwise return the partial revival (`Err`): the handles that *did* revive,
 /// keyed by face id, so the caller's geometry build reuses them and only builds
 /// the rest. An unrecorded key yields an empty map.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "threads the several ECS resources the face spawn needs"
-)]
 fn spawn_revived_faces(
     key: &GeometryKey,
     texture_entry: &[u8],
     quantized: ScaleMm,
     parent: Entity,
-    reuse: &mut FaceReuse,
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<FaceMaterial>,
-    manager: &mut TextureManager,
-    store: &DecodedTextures,
-    prim_textures: &mut PrimTextures,
     priority: Priority,
-    cache: &mut GeometryCache,
-    intern: &MaterialInternContext,
-    material_cache: &mut MaterialCache,
+    build: &mut FaceBuild,
 ) -> Result<Vec<Entity>, HashMap<PrimFaceId, Handle<Mesh>>> {
-    let Some(face_count) = cache.cached_face_count(key) else {
+    let Some(face_count) = build.cache.cached_face_count(key) else {
         return Err(HashMap::new());
     };
     let entry = decode_texture_entry(texture_entry, face_count);
     // The slot every face falls back to when the object carries no texture entry:
     // an untextured, opaque-white (untinted, non-planar) face.
     let default_face = TextureFace::new(TextureKey::from(Uuid::nil()));
-    let Some(revived) = cache.revive(
+    let Some(revived) = build.cache.revive(
         key,
         quantized,
         |face_id| {
@@ -2986,7 +2877,7 @@ fn spawn_revived_faces(
                 .unwrap_or(&default_face)
                 .is_planar_texgen()
         },
-        meshes,
+        build.meshes,
     ) else {
         return Err(HashMap::new());
     };
@@ -2997,7 +2888,7 @@ fn spawn_revived_faces(
             .filter_map(|face| face.mesh.map(|mesh| (face.face_id, mesh)))
             .collect());
     }
-    cache.note_hit();
+    build.cache.note_hit();
     let face_entities = revived
         .faces
         .into_iter()
@@ -3009,15 +2900,8 @@ fn spawn_revived_faces(
                 texture_face,
                 face.face_id,
                 parent,
-                reuse,
-                commands,
-                materials,
-                manager,
-                store,
-                prim_textures,
                 priority,
-                intern,
-                material_cache,
+                build,
             ))
         })
         .collect();
@@ -3032,56 +2916,28 @@ fn spawn_revived_faces(
 /// recorded for the next instance). A planar-texgen face bakes the object
 /// scale into its UVs ([`apply_planar_texgen`]), so it shares per quantized
 /// scale rather than unconditionally.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "threads the several ECS resources the geometry build needs"
-)]
 fn spawn_cached_prim_faces(
     key: GeometryKey,
     tessellate_geometry: impl FnOnce() -> PrimMesh,
     texture_entry: &[u8],
     scale: [f32; 3],
     parent: Entity,
-    reuse: &mut FaceReuse,
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<FaceMaterial>,
-    manager: &mut TextureManager,
-    store: &DecodedTextures,
-    prim_textures: &mut PrimTextures,
     priority: Priority,
-    cache: &mut GeometryCache,
-    intern: &MaterialInternContext,
-    material_cache: &mut MaterialCache,
+    build: &mut FaceBuild,
 ) -> Vec<Entity> {
     let quantized = scale_mm(scale);
-    let mut revived = match spawn_revived_faces(
-        &key,
-        texture_entry,
-        quantized,
-        parent,
-        reuse,
-        commands,
-        meshes,
-        materials,
-        manager,
-        store,
-        prim_textures,
-        priority,
-        cache,
-        intern,
-        material_cache,
-    ) {
-        Ok(face_entities) => return face_entities,
-        Err(partial) => partial,
-    };
+    let mut revived =
+        match spawn_revived_faces(&key, texture_entry, quantized, parent, priority, build) {
+            Ok(face_entities) => return face_entities,
+            Err(partial) => partial,
+        };
     let any_revived = !revived.is_empty();
     let prim = tessellate_geometry();
     let entry = decode_texture_entry(texture_entry, prim.faces.len());
     // The slot every face falls back to when the object carries no texture entry:
     // an untextured, opaque-white (untinted) face.
     let default_face = TextureFace::new(TextureKey::from(Uuid::nil()));
-    cache.ensure_entry(key, prim.faces.len());
+    build.cache.ensure_entry(key, prim.faces.len());
     let mut face_entities = Vec::new();
     for face in &prim.faces {
         if face.is_empty() {
@@ -3104,32 +2960,20 @@ fn spawn_cached_prim_faces(
                 // scale-dependent variant.
                 let planar =
                     texture_face.is_planar_texgen() && face.normals.len() == face.positions.len();
-                let mesh = meshes.add(bevy_mesh);
-                cache.record_face(key, face.face_id, planar.then_some(quantized), mesh.id());
+                let mesh = build.meshes.add(bevy_mesh);
+                build
+                    .cache
+                    .record_face(key, face.face_id, planar.then_some(quantized), mesh.id());
                 mesh
             }
         };
-        let entity = spawn_face_entity(
-            mesh,
-            texture_face,
-            face.face_id,
-            parent,
-            reuse,
-            commands,
-            materials,
-            manager,
-            store,
-            prim_textures,
-            priority,
-            intern,
-            material_cache,
-        );
+        let entity = spawn_face_entity(mesh, texture_face, face.face_id, parent, priority, build);
         face_entities.push(entity);
     }
     if any_revived {
-        cache.note_partial_hit();
+        build.cache.note_partial_hit();
     } else {
-        cache.note_miss();
+        build.cache.note_miss();
     }
     face_entities
 }
@@ -3153,59 +2997,31 @@ fn spawn_cached_prim_faces(
 /// asset (which already share the *decoded* geometry via `MeshManager`)
 /// additionally share one converted, GPU-uploaded mesh per submesh instead of
 /// each re-converting and re-uploading their own.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "threads the several ECS resources the geometry build needs"
-)]
 fn build_mesh_submeshes(
     decoded: &DecodedMesh,
     mesh_key: MeshKey,
     texture_entry: &[u8],
     scale: [f32; 3],
     parent: Entity,
-    reuse: &mut FaceReuse,
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<FaceMaterial>,
-    manager: &mut TextureManager,
-    store: &DecodedTextures,
-    prim_textures: &mut PrimTextures,
     priority: Priority,
-    cache: &mut GeometryCache,
-    intern: &MaterialInternContext,
-    material_cache: &mut MaterialCache,
+    build: &mut FaceBuild,
 ) -> Vec<Entity> {
     let key = GeometryKey::Mesh {
         mesh: mesh_key,
         lod: decoded.lod,
     };
     let quantized = scale_mm(scale);
-    let mut revived = match spawn_revived_faces(
-        &key,
-        texture_entry,
-        quantized,
-        parent,
-        reuse,
-        commands,
-        meshes,
-        materials,
-        manager,
-        store,
-        prim_textures,
-        priority,
-        cache,
-        intern,
-        material_cache,
-    ) {
-        Ok(face_entities) => return face_entities,
-        Err(partial) => partial,
-    };
+    let mut revived =
+        match spawn_revived_faces(&key, texture_entry, quantized, parent, priority, build) {
+            Ok(face_entities) => return face_entities,
+            Err(partial) => partial,
+        };
     let any_revived = !revived.is_empty();
     let entry = decode_texture_entry(texture_entry, decoded.submeshes.len());
     // The slot every face falls back to when the object carries no texture entry:
     // an untextured, opaque-white (untinted) face.
     let default_face = TextureFace::new(TextureKey::from(Uuid::nil()));
-    cache.ensure_entry(key, decoded.submeshes.len());
+    build.cache.ensure_entry(key, decoded.submeshes.len());
     let mut face_entities = Vec::new();
     for (index, submesh) in decoded.submeshes.iter().enumerate() {
         // Skip a submesh with no renderable geometry — the explicit `NoGeometry`
@@ -3235,32 +3051,20 @@ fn build_mesh_submeshes(
                 // scale-dependent variant.
                 let planar = texture_face.is_planar_texgen()
                     && submesh.normals.len() == submesh.positions.len();
-                let mesh = meshes.add(bevy_mesh);
-                cache.record_face(key, face_id, planar.then_some(quantized), mesh.id());
+                let mesh = build.meshes.add(bevy_mesh);
+                build
+                    .cache
+                    .record_face(key, face_id, planar.then_some(quantized), mesh.id());
                 mesh
             }
         };
-        let entity = spawn_face_entity(
-            mesh,
-            texture_face,
-            face_id,
-            parent,
-            reuse,
-            commands,
-            materials,
-            manager,
-            store,
-            prim_textures,
-            priority,
-            intern,
-            material_cache,
-        );
+        let entity = spawn_face_entity(mesh, texture_face, face_id, parent, priority, build);
         face_entities.push(entity);
     }
     if any_revived {
-        cache.note_partial_hit();
+        build.cache.note_partial_hit();
     } else {
-        cache.note_miss();
+        build.cache.note_miss();
     }
     face_entities
 }
@@ -3434,10 +3238,6 @@ fn apply_light(entity: Entity, light: Option<ObjectLight>, commands: &mut Comman
 
 /// Spawn or update the entity for `object`, keeping its transform, classification,
 /// and linkset parenting current.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "threads the several ECS resources the geometry build needs"
-)]
 /// Apply one object update — spawn a new object, or move / reshape / retexture a
 /// known one. Returns `true` when it **built geometry** (a new spawn, or a known
 /// object's shape/texture re-tessellation), which creates the object's face materials
@@ -3447,15 +3247,7 @@ fn apply_object(
     state: &mut ObjectState,
     object: &Object,
     faces: &FaceIds,
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<FaceMaterial>,
-    manager: &mut TextureManager,
-    store: &DecodedTextures,
-    prim_textures: &mut PrimTextures,
-    mesh_manager: &mut MeshManager,
-    cache: &mut GeometryCache,
-    material_cache: &mut MaterialCache,
+    build: &mut FaceBuild,
 ) -> bool {
     let scoped = object.scoped_id();
     let parent = object.scoped_parent_id();
@@ -3491,7 +3283,7 @@ fn apply_object(
     // The object-level inputs of the per-face material-intern decision, threaded
     // into every face build this update runs (and retained by the deferred mesh /
     // sculpt / LOD rebuilds).
-    let intern = MaterialInternContext::for_object(object, is_hud);
+    build.intern = MaterialInternContext::for_object(object, is_hud);
 
     // The per-block components (light P25.1, particles P30.1, flexi P32.1,
     // reflection probe P33) are derived from the object where they are applied
@@ -3535,7 +3327,7 @@ fn apply_object(
     // is gone: drop the stale entry and fall through to the spawn path, re-creating
     // it if the simulator still streams it (else its imminent `KillObject` reaps it).
     if let Some(stale) =
-        state.drop_stale_tracked_entity(scoped, |entity| commands.get_entity(entity).is_ok())
+        state.drop_stale_tracked_entity(scoped, |entity| build.commands.get_entity(entity).is_ok())
     {
         // The stale entry's deferred builds went with the entity Bevy despawned —
         // they are a component on it — so there is nothing to drop by name here.
@@ -3555,7 +3347,8 @@ fn apply_object(
         // (HUD) object whose script draws a steady update stream, that reverted
         // the wearer's driver-written joint globals to rest every update and
         // pinned the pose gate awake.
-        commands
+        build
+            .commands
             .entity(existing.entity)
             .entry::<Transform>()
             .and_modify(move |mut current| {
@@ -3565,7 +3358,8 @@ fn apply_object(
         // The pick/edit mirrors go through `set_if_neq` too: they genuinely
         // change on every motion packet for a mover, but a repeated identical
         // update (a select echo on a static object) must not mark them changed.
-        commands
+        build
+            .commands
             .entity(existing.entity)
             .entry::<ObjectDebugInfo>()
             .and_modify(move |mut current| {
@@ -3573,7 +3367,8 @@ fn apply_object(
             })
             .or_insert(debug_info);
         let sl_motion_modify = sl_motion.clone();
-        commands
+        build
+            .commands
             .entity(existing.entity)
             .entry::<ObjectSlMotion>()
             .and_modify(move |mut current| {
@@ -3581,7 +3376,8 @@ fn apply_object(
             })
             .or_insert(sl_motion);
         let holder = holder_transform(object, category);
-        commands
+        build
+            .commands
             .entity(existing.geometry)
             .entry::<Transform>()
             .and_modify(move |mut current| {
@@ -3611,7 +3407,7 @@ fn apply_object(
         let refresh_blocks = rebuilt
             || existing.non_motion_blocks_changed(object, is_root, parent, attachment_point);
         if refresh_blocks {
-            commands.entity(existing.entity).insert(SceneObject {
+            build.commands.entity(existing.entity).insert(SceneObject {
                 scoped_id: scoped,
                 category,
             });
@@ -3619,33 +3415,37 @@ fn apply_object(
             // [`recenter_objects`] re-bases exactly the roots (a child that just
             // became a root gains it; a root demoted to a child loses it) — an
             // is_root change always lands here via the fingerprint.
-            sync_world_root_marker(existing.entity, is_root, commands);
-            apply_render_materials(existing.geometry, scoped, object, commands);
-            apply_texture_animation(existing.geometry, object, commands);
+            sync_world_root_marker(existing.entity, is_root, build.commands);
+            apply_render_materials(existing.geometry, scoped, object, build.commands);
+            apply_texture_animation(existing.geometry, object, build.commands);
             // The light (P25.1) / particle (P30.1) / flexi (P32.1) / probe
             // (P33) blocks: each helper inserts its component when the block is
             // present and removes it when absent, so one toggled off / retuned
             // in-world is reflected.
-            apply_light(existing.entity, light_from_object(object), commands);
-            apply_particles(existing.entity, particles_from_object(object), commands);
-            apply_flexi(existing.entity, flexi_from_object(object), commands);
+            apply_light(existing.entity, light_from_object(object), build.commands);
+            apply_particles(
+                existing.entity,
+                particles_from_object(object),
+                build.commands,
+            );
+            apply_flexi(existing.entity, flexi_from_object(object), build.commands);
             apply_reflection_probe(
                 existing.entity,
                 reflection_probe_from_object(object),
-                commands,
+                build.commands,
             );
             // Attach / refresh / drop the physics body marker (P31.2) so a prim
             // toggled physical is driven kinematically.
-            apply_physics(existing.entity, object, commands);
+            apply_physics(existing.entity, object, build.commands);
             // Mirror the object's floating text (`llSetText`, viewer-hover-text)
             // so a script setting / changing / clearing it is reflected live.
-            apply_floating_text(existing.entity, object, is_hud, commands);
+            apply_floating_text(existing.entity, object, is_hud, build.commands);
         } else {
             // Motion-only: a physical mover still needs its authoritative
             // motion snapshot re-seeded (a fresh `PhysicalObject` insert
             // restarts the dead-reckoning); the physics flag itself is known
             // unchanged, so the non-physical case pays nothing.
-            refresh_physical_motion(existing.entity, object, commands);
+            refresh_physical_motion(existing.entity, object, build.commands);
         }
         if rebuilt {
             // A genuine shape (or category) change, or a texture change:
@@ -3656,38 +3456,23 @@ fn apply_object(
             // re-texture or a shape tweak re-describes the entities the scene
             // already knows rather than swapping in nameless new ones
             // ([[viewer-prim-rebuild-drops-a-click]]).
-            let mut reuse = FaceReuse::of(&existing.face_entities, faces);
-            let build = build_object_geometry(
-                object,
-                category,
-                existing.geometry,
-                is_hud,
-                &mut reuse,
-                commands,
-                meshes,
-                materials,
-                manager,
-                store,
-                prim_textures,
-                mesh_manager,
-                cache,
-                &intern,
-                material_cache,
-            );
+            build.reuse = FaceReuse::of(&existing.face_entities, faces);
+            let geometry_build =
+                build_object_geometry(object, category, existing.geometry, is_hud, build);
             // Seed or clear the flexi chain state (P32.2): a prim that is (still) flexi
             // gets a fresh chain at the new softness / geometry; one toggled rigid drops
             // it so [`simulate_flexi`] stops driving stale faces.
             apply_flexi_sim(
                 existing.entity,
-                build.flexi_chain,
+                geometry_build.flexi_chain,
                 object,
-                &build.face_entities,
-                commands,
+                &geometry_build.face_entities,
+                build.commands,
             );
             // Whatever the new geometry did not claim is a face this object no
             // longer has (a category change, a cut that dropped one) and goes.
-            reuse.despawn_unused(commands);
-            existing.face_entities = build.face_entities;
+            core::mem::take(&mut build.reuse).despawn_unused(build.commands);
+            existing.face_entities = geometry_build.face_entities;
             // The geometry was re-requested from scratch; any prior deferred build
             // is stale (the mesh key, scale, or category may have changed) and the
             // whole record is replaced by what the new build asked for: a
@@ -3697,7 +3482,7 @@ fn apply_object(
             // tree's (P26.2). An object that changed category drops the rebuild
             // inputs it no longer has (each is `None`), and one that now needs no
             // deferred work at all drops its entry entirely.
-            set_object_builds(existing.entity, build.builds, commands);
+            set_object_builds(existing.entity, geometry_build.builds, build.commands);
             existing.prim_lod = INITIAL_MANAGED_PRIM_LOD;
             existing.tree_tier = INITIAL_TREE_TIER;
             existing.shape = shape;
@@ -3710,7 +3495,13 @@ fn apply_object(
         // a linkset root.
         if attachment_point.is_none() {
             let parent_changed = existing.parent != parent;
-            reconcile_parent(existing, is_root, parent_entity, parent_changed, commands);
+            reconcile_parent(
+                existing,
+                is_root,
+                parent_entity,
+                parent_changed,
+                build.commands,
+            );
         }
         existing.parent = parent;
         existing.is_root = is_root;
@@ -3756,7 +3547,8 @@ fn apply_object(
         ObjectCategory::Avatar => dynamic_render_layers(),
         _ => world_geom_render_layers(),
     };
-    let entity = commands
+    let entity = build
+        .commands
         .spawn((
             SceneObject {
                 scoped_id: scoped,
@@ -3774,36 +3566,37 @@ fn apply_object(
         .id();
     // A fresh root carries the re-base marker (see [`recenter_objects`]); a child
     // / attachment does not (its parent re-bases it).
-    sync_world_root_marker(entity, is_root, commands);
+    sync_world_root_marker(entity, is_root, build.commands);
     let parented = match parent_entity {
         Some(root_entity) => {
-            commands.entity(entity).insert(ChildOf(root_entity));
+            build.commands.entity(entity).insert(ChildOf(root_entity));
             true
         }
         None => false,
     };
     // A light-source prim carries its decoded light block (P25.1); a plain prim
     // gets nothing.
-    apply_light(entity, light_from_object(object), commands);
+    apply_light(entity, light_from_object(object), build.commands);
     // A particle-source prim carries its decoded particle system (P30.1); a plain
     // prim gets nothing.
-    apply_particles(entity, particles_from_object(object), commands);
+    apply_particles(entity, particles_from_object(object), build.commands);
     // A flexi prim carries its decoded flexible-object block (P32.1); a rigid prim
     // gets nothing.
-    apply_flexi(entity, flexi_from_object(object), commands);
+    apply_flexi(entity, flexi_from_object(object), build.commands);
     // A reflection-probe prim carries its decoded probe block (P33); any other
     // object gets nothing.
-    apply_reflection_probe(entity, reflection_probe_from_object(object), commands);
+    apply_reflection_probe(entity, reflection_probe_from_object(object), build.commands);
     // A server-flagged physical root prim gets the kinematic-body marker (P31.2);
     // any other object gets nothing (the marker's absence is the signal).
-    apply_physics(entity, object, commands);
+    apply_physics(entity, object, build.commands);
     // Mirror the object's floating text (`llSetText`, viewer-hover-text) onto the
     // fresh entity so [`crate::hover_text`] spawns its billboard.
-    apply_floating_text(entity, object, is_hud, commands);
+    apply_floating_text(entity, object, is_hud, build.commands);
     // The geometry holder: a child of the object entity carrying only the object's
     // scale, so the object's own faces are scaled while linkset children (which
     // parent to the object entity, not this) are not.
-    let geometry = commands
+    let geometry = build
+        .commands
         .spawn((
             GeometryHolder,
             holder_transform(object, category),
@@ -3811,39 +3604,24 @@ fn apply_object(
             ChildOf(entity),
         ))
         .id();
-    apply_render_materials(geometry, scoped, object, commands);
-    apply_texture_animation(geometry, object, commands);
+    apply_render_materials(geometry, scoped, object, build.commands);
+    apply_texture_animation(geometry, object, build.commands);
     // A plain prim tessellates immediately; a mesh or sculpt requests its asset and
     // builds its geometry now if already decoded, else on decode; an avatar grows
     // its placeholder in a later phase.
-    let build = build_object_geometry(
-        object,
-        category,
-        geometry,
-        is_hud,
-        // A first build: the object has no faces yet, so nothing to hand back.
-        &mut FaceReuse::none(),
-        commands,
-        meshes,
-        materials,
-        manager,
-        store,
-        prim_textures,
-        mesh_manager,
-        cache,
-        &intern,
-        material_cache,
-    );
+    // A first build: the object has no faces yet, so nothing to hand back.
+    build.reuse = FaceReuse::none();
+    let geometry_build = build_object_geometry(object, category, geometry, is_hud, build);
     // A flexi prim carries its seeded chain state so [`simulate_flexi`] can drive it
     // (P32.2); a rigid prim gets nothing.
     apply_flexi_sim(
         entity,
-        build.flexi_chain,
+        geometry_build.flexi_chain,
         object,
-        &build.face_entities,
-        commands,
+        &geometry_build.face_entities,
+        build.commands,
     );
-    let face_entities = build.face_entities;
+    let face_entities = geometry_build.face_entities;
     // What this build still owes: a cold-cache mesh / sculpt's fetch (`pending`),
     // a warm-cache mesh's LOD-rebuild inputs (`mesh_rebuild` — set only when the
     // mesh built immediately, since a cold-cache one has it set on decode in
@@ -3852,7 +3630,7 @@ fn apply_object(
     // tree's regeneration inputs (`tree_rebuild`), a sculpt's re-stitch inputs
     // (`sculpt_rebuild`). An object that owes none — an avatar, a grass clump —
     // gets no entry at all.
-    set_object_builds(entity, build.builds, commands);
+    set_object_builds(entity, geometry_build.builds, build.commands);
     state.objects.insert(
         scoped,
         TrackedObject {
@@ -3899,7 +3677,7 @@ fn apply_object(
         );
     }
     if is_root {
-        adopt_pending_children(state, scoped, entity, commands);
+        adopt_pending_children(state, scoped, entity, build.commands);
     }
     // A new object always built its geometry (spawned its faces).
     true
@@ -3982,10 +3760,6 @@ fn adopt_pending_children(
 /// login resolves everything at once) builds a few keys per frame instead of
 /// the whole backlog in one. Deferral is safe — the apply reads the store's
 /// current (newest) block when its key's turn comes.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system reading decoded meshes and the ECS resources the geometry build needs"
-)]
 pub fn apply_object_meshes(
     mut decoded: MessageReader<MeshDecoded>,
     mut pending_keys: ResMut<PendingDecodedMeshes>,
@@ -3993,16 +3767,9 @@ pub fn apply_object_meshes(
     mut state: ResMut<ObjectState>,
     faces: FaceIds,
     mut builds: PendingBuilds,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<FaceMaterial>>,
-    mut manager: ResMut<TextureManager>,
-    store: Res<DecodedTextures>,
-    mut prim_textures: ResMut<PrimTextures>,
-    mut mesh_manager: ResMut<MeshManager>,
-    mut cache: ResMut<GeometryCache>,
-    mut material_cache: ResMut<MaterialCache>,
+    mut stores: GeometryStores,
 ) {
+    let build = &mut stores.build();
     for &MeshDecoded(key) in decoded.read() {
         pending_keys.requeue(key);
     }
@@ -4013,7 +3780,7 @@ pub fn apply_object_meshes(
         };
         let _was_queued = pending_keys.queued.remove(&key);
         scans = scans.saturating_add(1);
-        let Some(mesh) = mesh_manager.decoded(key).map(Arc::clone) else {
+        let Some(mesh) = build.mesh_manager.decoded(key).map(Arc::clone) else {
             // The fetch failed: objects pending on this key stay geometry-less.
             continue;
         };
@@ -4023,7 +3790,7 @@ pub fn apply_object_meshes(
         // wearer by walking the parent chain to an avatar root — or, finding the
         // chain ends at an ordinary in-world root, hands it back here as static
         // geometry (`PendingMesh::in_world_rig`).
-        let is_rigged = mesh_manager.skin(key).is_some();
+        let is_rigged = build.mesh_manager.skin(key).is_some();
         // The objects this key resolves for, snapshotted before any of them is
         // built: those waiting on its first build, and those already built from it
         // whose stored block the mesh store just swapped for another level of
@@ -4077,7 +3844,7 @@ pub fn apply_object_meshes(
                 // must render at the finest block and never be LOD reduced —
                 // upgrade it now in case its worn status was unknown when the
                 // fetch began and it started on the managed, coarse-block path.
-                mesh_manager.upgrade_to_finest(key);
+                build.mesh_manager.upgrade_to_finest(key);
                 builds.set_pending(
                     entity,
                     PendingGeometry::RiggedMesh(PendingRiggedMesh { mesh: pending }),
@@ -4092,26 +3859,18 @@ pub fn apply_object_meshes(
             // whose *key* changed (a re-textured or re-shaped mesh) is re-pending
             // with the previous mesh's faces still standing: offer them, and drop
             // whatever the new block does not claim.
-            let mut reuse = FaceReuse::of(&tracked.face_entities, &faces);
+            build.reuse = FaceReuse::of(&tracked.face_entities, &faces);
+            build.intern = pending.intern.clone();
             let face_entities = build_mesh_submeshes(
                 &mesh,
                 key,
                 &pending.texture_entry,
                 pending.scale,
                 geometry,
-                &mut reuse,
-                &mut commands,
-                &mut meshes,
-                &mut materials,
-                &mut manager,
-                &store,
-                &mut prim_textures,
                 pending.priority,
-                &mut cache,
-                &pending.intern,
-                &mut material_cache,
+                build,
             );
-            reuse.despawn_unused(&mut commands);
+            core::mem::take(&mut build.reuse).despawn_unused(build.commands);
             budget.remaining = budget.remaining.saturating_sub(1);
             debug!("built mesh {key}: {} submesh entities", face_entities.len());
             if let Some(tracked) = state.objects.get_mut(&scoped) {
@@ -4146,26 +3905,11 @@ pub fn apply_object_meshes(
             // The level changes, the faces do not: each submesh re-describes the
             // entity that drew it, so a prim mid-LOD-swap stays pickable and keeps
             // every per-face component ([[viewer-object-face-entity-respawn-churn]]).
-            let mut reuse = FaceReuse::of(&tracked.face_entities, &faces);
-            tracked.face_entities = build_mesh_submeshes(
-                &mesh,
-                key,
-                &texture_entry,
-                scale,
-                geometry,
-                &mut reuse,
-                &mut commands,
-                &mut meshes,
-                &mut materials,
-                &mut manager,
-                &store,
-                &mut prim_textures,
-                priority,
-                &mut cache,
-                &intern,
-                &mut material_cache,
-            );
-            reuse.despawn_unused(&mut commands);
+            build.reuse = FaceReuse::of(&tracked.face_entities, &faces);
+            build.intern = intern;
+            tracked.face_entities =
+                build_mesh_submeshes(&mesh, key, &texture_entry, scale, geometry, priority, build);
+            core::mem::take(&mut build.reuse).despawn_unused(build.commands);
             budget.remaining = budget.remaining.saturating_sub(1);
             debug!(
                 "rebuilt mesh {key} at new LOD: {} submesh entities",
@@ -4195,25 +3939,15 @@ pub fn apply_object_meshes(
 /// instead of re-tessellating (the camera-move LOD-thrash win). A target for an
 /// object with neither set, an untracked (removed) one, or one already at the
 /// desired level is a no-op.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system reading the LOD targets and the ECS resources the geometry build needs"
-)]
 pub fn apply_prim_lod(
     mut targets: ResMut<PrimLodTargets>,
     mut budget: ResMut<MeshUploadBudget>,
     mut state: ResMut<ObjectState>,
     builds: PendingBuilds,
     faces: FaceIds,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<FaceMaterial>>,
-    mut manager: ResMut<TextureManager>,
-    store: Res<DecodedTextures>,
-    mut prim_textures: ResMut<PrimTextures>,
-    mut cache: ResMut<GeometryCache>,
-    mut material_cache: ResMut<MaterialCache>,
+    mut stores: GeometryStores,
 ) {
+    let build = &mut stores.build();
     // Budgeted so a tick's worth of re-tessellations spreads across frames
     // instead of a single command-flush spike (see `MeshUploadBudget`). Shared
     // with `apply_tree_lod`, which runs after and sees the remaining budget.
@@ -4245,7 +3979,7 @@ pub fn apply_prim_lod(
             // entities rather than swapping in untagged replacements, so a click
             // landing on the rebuild frame still resolves
             // ([[viewer-prim-rebuild-drops-a-click]]).
-            let mut reuse = FaceReuse::of(&tracked.face_entities, &faces);
+            build.reuse = FaceReuse::of(&tracked.face_entities, &faces);
             // Each arm builds only once its replacement geometry is certain: a
             // sculpt's decoded map can have left the store since the first build,
             // and rebuilding before finding that out would leave it with no faces
@@ -4254,6 +3988,7 @@ pub fn apply_prim_lod(
             tracked.face_entities = match rebuild {
                 ClientTessellated::Prim(prim) => {
                     let shape = prim.shape;
+                    build.intern = prim.intern.clone();
                     spawn_cached_prim_faces(
                         GeometryKey::Prim {
                             shape,
@@ -4263,47 +3998,32 @@ pub fn apply_prim_lod(
                         &prim.texture_entry,
                         prim.scale,
                         geometry,
-                        &mut reuse,
-                        &mut commands,
-                        &mut meshes,
-                        &mut materials,
-                        &mut manager,
-                        &store,
-                        &mut prim_textures,
                         prim.priority,
-                        &mut cache,
-                        &prim.intern,
-                        &mut material_cache,
+                        build,
                     )
                 }
                 ClientTessellated::Sculpt(sculpt) => {
-                    let Some(map) = store.get(sculpt.map).map(Arc::clone) else {
+                    let Some(map) = build.faces.store.get(sculpt.map).map(Arc::clone) else {
                         return LodOutcome::Resolved;
                     };
+                    build.intern = sculpt.intern.clone();
                     build_sculpt_faces(
-                        &map,
-                        sculpt.map,
-                        sculpt.sculpt_type,
-                        sculpt.shape,
-                        &sculpt.texture_entry,
-                        sculpt.scale,
+                        &SculptSource {
+                            map: &map,
+                            map_key: sculpt.map,
+                            sculpt_type: sculpt.sculpt_type,
+                            shape: sculpt.shape,
+                            texture_entry: &sculpt.texture_entry,
+                            scale: sculpt.scale,
+                        },
                         geometry,
-                        &mut reuse,
-                        &mut commands,
-                        &mut meshes,
-                        &mut materials,
-                        &mut manager,
-                        &store,
-                        &mut prim_textures,
                         sculpt.priority,
                         desired,
-                        &mut cache,
-                        &sculpt.intern,
-                        &mut material_cache,
+                        build,
                     )
                 }
             };
-            reuse.despawn_unused(&mut commands);
+            core::mem::take(&mut build.reuse).despawn_unused(build.commands);
             tracked.prim_lod = desired;
             debug!(
                 "re-tessellated {scoped} at {desired:?}: {} faces",
@@ -4320,23 +4040,15 @@ pub fn apply_prim_lod(
 /// [`MeshUploadBudget`]. For any tree whose desired tier differs from its current
 /// one, regenerates its face's branch / leaf geometry (or the
 /// billboard imposter) at the new tier, up to the remaining per-frame budget.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system reading the LOD targets and the ECS resources the geometry build needs"
-)]
 pub fn apply_tree_lod(
     mut targets: ResMut<TreeLodTargets>,
     mut budget: ResMut<MeshUploadBudget>,
     mut state: ResMut<ObjectState>,
     builds: PendingBuilds,
     faces: FaceIds,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<FaceMaterial>>,
-    mut manager: ResMut<TextureManager>,
-    store: Res<DecodedTextures>,
-    mut prim_textures: ResMut<PrimTextures>,
+    mut stores: GeometryStores,
 ) {
+    let build = &mut stores.build();
     // Budgeted from the shared `MeshUploadBudget`, spent after `apply_prim_lod`.
     let builds = retain_lod_budgeted(
         &mut targets.0,
@@ -4364,21 +4076,9 @@ pub fn apply_tree_lod(
             let geometry = tracked.geometry;
             // A tier swap is a rebuild like any other: the tree's one face keeps
             // its entity, so it stays pickable across the change.
-            let mut reuse = FaceReuse::of(&tracked.face_entities, &faces);
-            tracked.face_entities = build_tree_faces(
-                species,
-                desired,
-                geometry,
-                &mut reuse,
-                &mut commands,
-                &mut meshes,
-                &mut materials,
-                &mut manager,
-                &store,
-                &mut prim_textures,
-                priority,
-            );
-            reuse.despawn_unused(&mut commands);
+            build.reuse = FaceReuse::of(&tracked.face_entities, &faces);
+            tracked.face_entities = build_tree_faces(species, desired, geometry, priority, build);
+            core::mem::take(&mut build.reuse).despawn_unused(build.commands);
             tracked.tree_tier = desired;
             debug!("regenerated tree {scoped} at {desired:?}");
             LodOutcome::Rebuilt
@@ -4403,10 +4103,6 @@ pub fn apply_tree_lod(
 /// the shared [`MeshUploadBudget`] (and the per-frame scan cap, since most
 /// decoded textures are not sculpt maps), spreading a decode burst's sculpt
 /// tessellation across frames.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system reading decoded sculpt maps and the ECS resources the geometry build needs"
-)]
 pub fn apply_object_sculpts(
     mut decoded: MessageReader<TextureDecoded>,
     mut pending_keys: ResMut<PendingDecodedSculpts>,
@@ -4414,15 +4110,9 @@ pub fn apply_object_sculpts(
     mut state: ResMut<ObjectState>,
     mut builds: PendingBuilds,
     faces: FaceIds,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<FaceMaterial>>,
-    mut manager: ResMut<TextureManager>,
-    store: Res<DecodedTextures>,
-    mut prim_textures: ResMut<PrimTextures>,
-    mut cache: ResMut<GeometryCache>,
-    mut material_cache: ResMut<MaterialCache>,
+    mut stores: GeometryStores,
 ) {
+    let build = &mut stores.build();
     for &TextureDecoded(id) in decoded.read() {
         if pending_keys.queued.insert(id) {
             pending_keys.queue.push_back(id);
@@ -4448,7 +4138,7 @@ pub fn apply_object_sculpts(
         scans = scans.saturating_add(1);
         // The decoded sculpt-map pixels; clone the `Arc` out so the immutable
         // borrow of `manager` ends before the face build borrows it mutably.
-        let Some(map) = store.get(id).map(Arc::clone) else {
+        let Some(map) = build.faces.store.get(id).map(Arc::clone) else {
             // The fetch failed: sculpts pending on this map stay geometry-less.
             continue;
         };
@@ -4470,29 +4160,23 @@ pub fn apply_object_sculpts(
             // A sculpt waiting on its map usually has no faces yet; one whose map
             // *changed* is re-pending with the previous map's face still standing,
             // so offer it rather than churning the entity.
-            let mut reuse = FaceReuse::of(&tracked.face_entities, &faces);
+            build.reuse = FaceReuse::of(&tracked.face_entities, &faces);
+            build.intern = pending.intern.clone();
             let face_entities = build_sculpt_faces(
-                &map,
-                pending.map,
-                pending.sculpt_type,
-                pending.shape,
-                &pending.texture_entry,
-                pending.scale,
+                &SculptSource {
+                    map: &map,
+                    map_key: pending.map,
+                    sculpt_type: pending.sculpt_type,
+                    shape: pending.shape,
+                    texture_entry: &pending.texture_entry,
+                    scale: pending.scale,
+                },
                 geometry,
-                &mut reuse,
-                &mut commands,
-                &mut meshes,
-                &mut materials,
-                &mut manager,
-                &store,
-                &mut prim_textures,
                 pending.priority,
                 INITIAL_MANAGED_PRIM_LOD,
-                &mut cache,
-                &pending.intern,
-                &mut material_cache,
+                build,
             );
-            reuse.despawn_unused(&mut commands);
+            core::mem::take(&mut build.reuse).despawn_unused(build.commands);
             budget.remaining = budget.remaining.saturating_sub(1);
             debug!("built sculpt {id}: {} face entities", face_entities.len());
             // Hand the same inputs on as the sculpt's LOD-rebuild inputs, so the
@@ -4981,22 +4665,11 @@ mod tests {
         use crate::textures::{PrimTextures, TextureManager};
         use bevy::camera::visibility::NoFrustumCulling;
         use bevy::ecs::system::SystemState;
-        use bevy::prelude::{Assets, Commands, Mesh, Mesh3d, Res, ResMut, World};
+        use bevy::prelude::{Assets, Mesh, Mesh3d, World};
         use sl_client_bevy::{FlexibleData, Priority};
         use sl_viewer_world_api::DecodedTextures;
 
         use sl_viewer_kit::face_material::FaceMaterial;
-
-        /// The resources [`build_flexi_faces`](super::build_flexi_faces) takes,
-        /// as one `SystemState` tuple (named to satisfy `type_complexity`).
-        type BuildParams<'w, 's> = (
-            Commands<'w, 's>,
-            ResMut<'w, Assets<Mesh>>,
-            ResMut<'w, Assets<FaceMaterial>>,
-            ResMut<'w, TextureManager>,
-            Res<'w, DecodedTextures>,
-            ResMut<'w, PrimTextures>,
-        );
 
         let mut world = World::new();
         world.init_resource::<Assets<Mesh>>();
@@ -5004,6 +4677,9 @@ mod tests {
         world.init_resource::<TextureManager>();
         world.init_resource::<DecodedTextures>();
         world.init_resource::<PrimTextures>();
+        world.init_resource::<crate::meshes::MeshManager>();
+        world.init_resource::<super::GeometryCache>();
+        world.init_resource::<crate::material_cache::MaterialCache>();
         let parent = world.spawn_empty().id();
 
         let mut object = bare_object(pcode::PRIMITIVE);
@@ -5016,27 +4692,13 @@ mod tests {
             user_force: zero(),
         });
 
-        let mut state: SystemState<BuildParams> = SystemState::new(&mut world);
-        let (mut commands, mut meshes, mut materials, mut manager, store, mut prim_textures) =
-            state
-                .get_mut(&mut world)
-                .map_err(|error| format!("system params: {error}"))?;
-        let intern = crate::material_cache::MaterialInternContext::for_object(&object, false);
-        let mut material_cache = crate::material_cache::MaterialCache::default();
-        let (faces, _chain) = super::build_flexi_faces(
-            &object,
-            parent,
-            &mut super::FaceReuse::none(),
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            &mut manager,
-            &store,
-            &mut prim_textures,
-            Priority::IDLE,
-            &intern,
-            &mut material_cache,
-        );
+        let mut state: SystemState<super::GeometryStores> = SystemState::new(&mut world);
+        let mut stores = state
+            .get_mut(&mut world)
+            .map_err(|error| format!("system params: {error}"))?;
+        let build = &mut stores.build();
+        build.intern = crate::material_cache::MaterialInternContext::for_object(&object, false);
+        let (faces, _chain) = super::build_flexi_faces(&object, parent, Priority::IDLE, build);
         state.apply(&mut world);
 
         assert!(
@@ -5211,21 +4873,7 @@ mod tests {
 
     /// The resources [`apply_object`](super::apply_object) takes, as one
     /// `SystemState` tuple (named to satisfy `type_complexity`).
-    type ApplyParams<'w, 's> = (
-        bevy::prelude::Commands<'w, 's>,
-        super::FaceIds<'w, 's>,
-        bevy::prelude::ResMut<'w, bevy::prelude::Assets<bevy::prelude::Mesh>>,
-        bevy::prelude::ResMut<
-            'w,
-            bevy::prelude::Assets<sl_viewer_kit::face_material::FaceMaterial>,
-        >,
-        bevy::prelude::ResMut<'w, crate::textures::TextureManager>,
-        bevy::prelude::Res<'w, sl_viewer_world_api::DecodedTextures>,
-        bevy::prelude::ResMut<'w, crate::textures::PrimTextures>,
-        bevy::prelude::ResMut<'w, crate::meshes::MeshManager>,
-        bevy::prelude::ResMut<'w, sl_viewer_kit::geometry_cache::GeometryCache>,
-        bevy::prelude::ResMut<'w, crate::material_cache::MaterialCache>,
-    );
+    type ApplyParams<'w, 's> = (super::FaceIds<'w, 's>, super::GeometryStores<'w, 's>);
 
     /// Initialises every resource [`apply_one`] needs, so a bare
     /// [`World`](bevy::prelude::World) can run the real ingest path.
@@ -5252,34 +4900,10 @@ mod tests {
         use bevy::ecs::system::SystemState;
 
         let mut params: SystemState<ApplyParams> = SystemState::new(world);
-        let (
-            mut commands,
-            faces,
-            mut meshes,
-            mut materials,
-            mut manager,
-            store,
-            mut prim_textures,
-            mut mesh_manager,
-            mut cache,
-            mut material_cache,
-        ) = params
+        let (faces, mut stores) = params
             .get_mut(world)
             .map_err(|error| format!("system params: {error}"))?;
-        super::apply_object(
-            state,
-            object,
-            &faces,
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            &mut manager,
-            &store,
-            &mut prim_textures,
-            &mut mesh_manager,
-            &mut cache,
-            &mut material_cache,
-        );
+        super::apply_object(state, object, &faces, &mut stores.build());
         params.apply(world);
         Ok(())
     }
@@ -5790,25 +5414,14 @@ mod tests {
         use crate::meshes::MeshManager;
         use crate::textures::{PrimTextures, TextureManager};
         use bevy::ecs::system::SystemState;
-        use bevy::prelude::{Assets, Commands, Mesh, Res, ResMut, World};
+        use bevy::prelude::{Assets, Commands, Mesh, World};
         use sl_viewer_kit::face_material::FaceMaterial;
         use sl_viewer_kit::geometry_cache::GeometryCache;
         use sl_viewer_world_api::DecodedTextures;
 
         /// The resources `apply_object`(super::apply_object) takes, as one
         /// `SystemState` tuple (named to satisfy `type_complexity`).
-        type ApplyParams<'w, 's> = (
-            Commands<'w, 's>,
-            super::FaceIds<'w, 's>,
-            ResMut<'w, Assets<Mesh>>,
-            ResMut<'w, Assets<FaceMaterial>>,
-            ResMut<'w, TextureManager>,
-            Res<'w, DecodedTextures>,
-            ResMut<'w, PrimTextures>,
-            ResMut<'w, MeshManager>,
-            ResMut<'w, GeometryCache>,
-            ResMut<'w, MaterialCache>,
-        );
+        type ApplyParams<'w, 's> = (super::FaceIds<'w, 's>, super::GeometryStores<'w, 's>);
 
         /// How many object entities still carry outstanding deferred build work.
         fn queued(world: &mut World) -> usize {
@@ -5836,34 +5449,10 @@ mod tests {
                      object: &Object|
          -> Result<(), Box<dyn core::error::Error>> {
             let mut params: SystemState<ApplyParams> = SystemState::new(world);
-            let (
-                mut commands,
-                faces,
-                mut meshes,
-                mut materials,
-                mut manager,
-                store,
-                mut prim_textures,
-                mut mesh_manager,
-                mut cache,
-                mut material_cache,
-            ) = params
+            let (faces, mut stores) = params
                 .get_mut(world)
                 .map_err(|error| format!("system params: {error}"))?;
-            super::apply_object(
-                state,
-                object,
-                &faces,
-                &mut commands,
-                &mut meshes,
-                &mut materials,
-                &mut manager,
-                &store,
-                &mut prim_textures,
-                &mut mesh_manager,
-                &mut cache,
-                &mut material_cache,
-            );
+            super::apply_object(state, object, &faces, &mut stores.build());
             params.apply(world);
             Ok(())
         };
@@ -5957,9 +5546,7 @@ mod tests {
         use crate::meshes::MeshManager;
         use crate::textures::{PrimTextures, TextureManager};
         use bevy::ecs::system::SystemState;
-        use bevy::prelude::{
-            Assets, Changed, Commands, Component, Entity, Mesh, Query, Res, ResMut, World,
-        };
+        use bevy::prelude::{Assets, Changed, Component, Entity, Mesh, Query, World};
         use sl_viewer_kit::face_material::FaceMaterial;
         use sl_viewer_kit::geometry_cache::GeometryCache;
         use sl_viewer_world_api::DecodedTextures;
@@ -5972,18 +5559,7 @@ mod tests {
 
         /// The resources `apply_object`(super::apply_object) takes, as one
         /// `SystemState` tuple (named to satisfy `type_complexity`).
-        type ApplyParams<'w, 's> = (
-            Commands<'w, 's>,
-            super::FaceIds<'w, 's>,
-            ResMut<'w, Assets<Mesh>>,
-            ResMut<'w, Assets<FaceMaterial>>,
-            ResMut<'w, TextureManager>,
-            Res<'w, DecodedTextures>,
-            ResMut<'w, PrimTextures>,
-            ResMut<'w, MeshManager>,
-            ResMut<'w, GeometryCache>,
-            ResMut<'w, MaterialCache>,
-        );
+        type ApplyParams<'w, 's> = (super::FaceIds<'w, 's>, super::GeometryStores<'w, 's>);
 
         let mut world = World::new();
         world.init_resource::<Assets<Mesh>>();
@@ -6000,34 +5576,10 @@ mod tests {
                      object: &Object|
          -> Result<(), Box<dyn core::error::Error>> {
             let mut params: SystemState<ApplyParams> = SystemState::new(world);
-            let (
-                mut commands,
-                faces,
-                mut meshes,
-                mut materials,
-                mut manager,
-                store,
-                mut prim_textures,
-                mut mesh_manager,
-                mut cache,
-                mut material_cache,
-            ) = params
+            let (faces, mut stores) = params
                 .get_mut(world)
                 .map_err(|error| format!("system params: {error}"))?;
-            super::apply_object(
-                state,
-                object,
-                &faces,
-                &mut commands,
-                &mut meshes,
-                &mut materials,
-                &mut manager,
-                &store,
-                &mut prim_textures,
-                &mut mesh_manager,
-                &mut cache,
-                &mut material_cache,
-            );
+            super::apply_object(state, object, &faces, &mut stores.build());
             params.apply(world);
             Ok(())
         };
@@ -6160,7 +5712,7 @@ mod tests {
         use crate::meshes::MeshManager;
         use crate::textures::{PrimTextures, TextureManager};
         use bevy::ecs::system::SystemState;
-        use bevy::prelude::{Assets, Commands, Mesh, Res, ResMut, Visibility, World};
+        use bevy::prelude::{Assets, Mesh, Visibility, World};
         use sl_client_bevy::{TextureEntry, encode_texture_entry};
         use sl_viewer_kit::face_material::FaceMaterial;
         use sl_viewer_kit::geometry_cache::GeometryCache;
@@ -6168,18 +5720,7 @@ mod tests {
 
         /// The resources `apply_object`(super::apply_object) takes, as one
         /// `SystemState` tuple (named to satisfy `type_complexity`).
-        type ApplyParams<'w, 's> = (
-            Commands<'w, 's>,
-            super::FaceIds<'w, 's>,
-            ResMut<'w, Assets<Mesh>>,
-            ResMut<'w, Assets<FaceMaterial>>,
-            ResMut<'w, TextureManager>,
-            Res<'w, DecodedTextures>,
-            ResMut<'w, PrimTextures>,
-            ResMut<'w, MeshManager>,
-            ResMut<'w, GeometryCache>,
-            ResMut<'w, MaterialCache>,
-        );
+        type ApplyParams<'w, 's> = (super::FaceIds<'w, 's>, super::GeometryStores<'w, 's>);
 
         let mut world = World::new();
         world.init_resource::<Assets<Mesh>>();
@@ -6196,34 +5737,10 @@ mod tests {
                      object: &Object|
          -> Result<(), Box<dyn core::error::Error>> {
             let mut params: SystemState<ApplyParams> = SystemState::new(world);
-            let (
-                mut commands,
-                faces,
-                mut meshes,
-                mut materials,
-                mut manager,
-                store,
-                mut prim_textures,
-                mut mesh_manager,
-                mut cache,
-                mut material_cache,
-            ) = params
+            let (faces, mut stores) = params
                 .get_mut(world)
                 .map_err(|error| format!("system params: {error}"))?;
-            super::apply_object(
-                state,
-                object,
-                &faces,
-                &mut commands,
-                &mut meshes,
-                &mut materials,
-                &mut manager,
-                &store,
-                &mut prim_textures,
-                &mut mesh_manager,
-                &mut cache,
-                &mut material_cache,
-            );
+            super::apply_object(state, object, &faces, &mut stores.build());
             params.apply(world);
             Ok(())
         };

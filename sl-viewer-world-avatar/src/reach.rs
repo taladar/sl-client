@@ -755,6 +755,29 @@ pub(crate) fn log_enabled() -> bool {
     std::env::var("SL_VIEWER_LOG_REACH").as_deref() == Ok("1")
 }
 
+/// What a crosshair pick resolves through, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the ray cast, the hierarchy
+/// it walks from a hit face up to its object, and that object's identity and
+/// world pose.
+#[expect(
+    missing_debug_implementations,
+    reason = "`MeshRayCast` does not implement Debug; a hand-written impl could only print \
+              the field names"
+)]
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct ReachPick<'w, 's> {
+    /// The ray cast itself.
+    ray_cast: MeshRayCast<'w, 's>,
+    /// Parent links, walked from the hit face to its object.
+    parents: Query<'w, 's, &'static ChildOf>,
+    /// Object identities, to name what was hit.
+    scene: Query<'w, 's, &'static SceneObject>,
+    /// World transforms, for the reach distance.
+    globals: Query<'w, 's, &'static GlobalTransform>,
+    /// The object model, for the pointed-at object's record.
+    objects: Res<'w, ObjectState>,
+}
+
 /// Select the object under the crosshair as the own avatar's editing target (`SELECT_KEY`),
 /// or clear the selection when the key is pressed with nothing under it.
 ///
@@ -762,20 +785,10 @@ pub(crate) fn log_enabled() -> bool {
 /// feeds its point-at effect: it records the object *and* where on it the ray struck, in the
 /// object's own frame, so the reach follows the object as it moves and the offset can be sent
 /// on the wire verbatim.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the key, the \
-              camera to cast from, the ray caster, the parent / object components the hit is \
-              resolved through, and the selection it writes"
-)]
 pub(crate) fn select_object_under_crosshair(
     keyboard: Res<ButtonInput<KeyCode>>,
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
-    mut ray_cast: MeshRayCast,
-    parents: Query<&ChildOf>,
-    scene: Query<&SceneObject>,
-    globals: Query<&GlobalTransform>,
-    objects: Res<ObjectState>,
+    mut pick: ReachPick,
     mut selection: ResMut<PointAtSelection>,
 ) {
     if !keyboard.just_pressed(SELECT_KEY) {
@@ -788,7 +801,7 @@ pub(crate) fn select_object_under_crosshair(
         return;
     };
     let ray = Ray3d::new(camera.translation(), camera.forward());
-    let hits = ray_cast.cast_ray(ray, &MeshRayCastSettings::default());
+    let hits = pick.ray_cast.cast_ray(ray, &MeshRayCastSettings::default());
     let Some((entity, hit)) = hits.first() else {
         info!("P31.15 select: nothing under the crosshair — selection cleared");
         selection.selected = None;
@@ -798,19 +811,19 @@ pub(crate) fn select_object_under_crosshair(
     // object, which is the one the point-at effect names.
     let mut current = *entity;
     let object = loop {
-        if let Ok(object) = scene.get(current) {
+        if let Ok(object) = pick.scene.get(current) {
             break Some((current, object.scoped_id));
         }
-        let Ok(child_of) = parents.get(current) else {
+        let Ok(child_of) = pick.parents.get(current) else {
             break None;
         };
         current = child_of.parent();
     };
-    let (Some((entity, scoped)), Ok(global)) = (object, globals.get(current)) else {
+    let (Some((entity, scoped)), Ok(global)) = (object, pick.globals.get(current)) else {
         warn!("P31.15 select: hit an entity with no object identity");
         return;
     };
-    let Some(key) = objects.full_key(&scoped) else {
+    let Some(key) = pick.objects.full_key(&scoped) else {
         warn!("P31.15 select: object {scoped:?} has no full key yet");
         return;
     };

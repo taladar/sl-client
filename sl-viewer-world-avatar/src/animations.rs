@@ -51,7 +51,7 @@ use sl_client_bevy::{
     SlCapabilities, SlEvent, SlSessionEvent, StoreStats, Uuid, VolumeDeformations, sample_motion,
 };
 
-use crate::avatars::{AvatarBody, AvatarBodyPart, AvatarRuntimeMorphs};
+use crate::avatars::{AvatarBody, AvatarBodyPart, AvatarRig, AvatarRuntimeMorphs};
 use crate::body_physics::{BodyPhysicsInput, BodyPhysicsMotion};
 use crate::ground::AvatarGround;
 use crate::locomotion_ik::{AdjustInput, AdjusterAnims, LegJoints, LocomotionAdjust};
@@ -59,7 +59,6 @@ use crate::look_at::{
     BLINK_LEFT_PARAM, BLINK_RIGHT_PARAM, LookAtJoints, LookAtMotion, LookAtTargets,
 };
 use crate::reach::{PointAtTargets, ReachInput, ReachJoints, ReachMotion};
-use sl_viewer_kit::avatar_assets::AvatarAssetLibrary;
 use sl_viewer_world_api::AvatarState;
 use sl_viewer_world_api::{AvatarMotion, DerenderKind, WorldPhase, world_has_keyboard};
 
@@ -768,6 +767,23 @@ pub(crate) fn playing_animations_of(
     playing.into_iter().map(|(_order, anim)| anim).collect()
 }
 
+/// The clip library and the playback it drives, bundled as one
+/// [`SystemParam`].
+///
+/// The five systems that start, stop, sample or report an animation all take
+/// exactly this pair: the decoded clips plus the per-agent play state that
+/// indexes into them. Taken as `ResMut` throughout — the two samplers only read
+/// the clip library, which costs them a scheduling slot against the two starters
+/// they are already ordered against, and keeps one bundle where two would
+/// otherwise differ only in mutability.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub struct AnimationState<'w> {
+    /// The decoded clip library and its fetches.
+    pub manager: ResMut<'w, AnimationManager>,
+    /// The per-agent play state indexing into it.
+    pub playback: ResMut<'w, AnimationPlayback>,
+}
+
 /// Per-avatar animation *playback* state (P18.3 / P18.4), distinct from the
 /// [`AnimationManager`]'s asset resolve/cache: which animations each avatar is
 /// playing, their timing / activation order, and the per-joint pose the driver
@@ -1377,27 +1393,18 @@ fn mini_pose_subset(
 /// animation gave it after that animation stops, as the reference's joints do;
 /// the held poses are stored on the [`AnimationPlayback`] resource. An avatar no
 /// animation has ever posed is omitted and keeps its deformed rest pose.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources; the GPU hooks are \
-              already bundled into one `GpuAvatarHooks` param, and the rest is the \
-              animation pipeline, the adjuster feedback, and the avatar state / assets"
-)]
 pub(crate) fn drive_avatar_skeletons(
     time: Res<Time>,
     mut events: MessageReader<SlEvent>,
-    manager: Res<AnimationManager>,
-    mut playback: ResMut<AnimationPlayback>,
+    mut anim: AnimationState,
     adjust: Res<LocomotionAdjust>,
-    state: Res<AvatarState>,
     derender: Res<sl_viewer_world_api::DerenderList>,
-    body: Option<Res<AvatarBody>>,
-    library: Option<Res<AvatarAssetLibrary>>,
+    avatars: AvatarRig,
     gpu: GpuAvatarHooks<'_, '_>,
 ) {
     let now = time.elapsed_secs();
     let dt = time.delta_secs();
-    let playback = playback.as_mut();
+    let playback = anim.playback.as_mut();
     // Reconcile the playback clock with each authoritative animation set.
     for event in events.read() {
         if let SlSessionEvent::AvatarAnimation {
@@ -1431,16 +1438,16 @@ pub(crate) fn drive_avatar_skeletons(
         &mut playback.client_typing,
     ] {
         set.retain(|_agent, anims| {
-            retain_active(anims, now, &manager);
+            retain_active(anims, now, &anim.manager);
             !anims.is_empty()
         });
     }
     // Advance the walk-class motions' speed-scaled playback clocks by the walk speed
     // the previous frame's walk-adjust servo published (P31.14). Every other motion
     // keeps wall time.
-    playback.advance_walk_speed(now, dt, &manager, |agent| adjust.walk_speed(agent));
+    playback.advance_walk_speed(now, dt, &anim.manager, |agent| adjust.walk_speed(agent));
     // Without the avatar asset library there are no skeleton instances to pose.
-    let Some(body) = body else {
+    let Some(body) = avatars.body else {
         playback.poses.clear();
         return;
     };
@@ -1459,7 +1466,9 @@ pub(crate) fn drive_avatar_skeletons(
     // A held pose outlives its animations but not its avatar: an avatar that is
     // no longer rigged starts from rest when it is rigged again, as a fresh GPU
     // slot does.
-    playback.held.retain(|agent, _held| state.is_rigged(*agent));
+    playback
+        .held
+        .retain(|agent, _held| avatars.state.is_rigged(*agent));
     let mut agents: HashSet<AgentKey> = playback.playing.keys().copied().collect();
     agents.extend(playback.client_locomotion.keys().copied());
     agents.extend(playback.client_typing.keys().copied());
@@ -1469,7 +1478,7 @@ pub(crate) fn drive_avatar_skeletons(
     let mut poses: HashMap<AgentKey, AnimationPose> = HashMap::new();
     for agent in agents {
         // Only a rigged avatar (with a spawned body) can be posed.
-        if !state.is_rigged(agent) {
+        if !avatars.state.is_rigged(agent) {
             continue;
         }
         let merged = merge_playing(
@@ -1478,13 +1487,13 @@ pub(crate) fn drive_avatar_skeletons(
             playback.client_typing.get(&agent),
         );
         let subset = if gpu_real {
-            library
-                .as_deref()
-                .map(|library| mini_pose_subset(library.skeleton(), &body, &state, &gpu, agent))
+            avatars.library.as_deref().map(|library| {
+                mini_pose_subset(library.skeleton(), &body, &avatars.state, &gpu, agent)
+            })
         } else {
             None
         };
-        let resolved = resolve_pose(&merged, now, &manager, |name| {
+        let resolved = resolve_pose(&merged, now, &anim.manager, |name| {
             let index = body.joint_index(name)?;
             match subset.as_ref() {
                 Some(subset) if !subset.contains(&index) => None,
@@ -1642,6 +1651,41 @@ pub(crate) struct AvatarAdjusters<'w> {
     runtime_morphs: ResMut<'w, AvatarRuntimeMorphs>,
 }
 
+/// The entities a posed avatar's **sockets** are written through, bundled as one
+/// [`SystemParam`].
+///
+/// The socket writer seats every attachment-point node, rigid base part and the
+/// head socket by their *local* `Transform`, so ordinary propagation carries the
+/// worn subtrees — and reads the avatar root's `GlobalTransform` and the avatar's
+/// motion to compose them under. `globals` and `socket_transforms` are disjoint
+/// components of the same entities, which is why both are here.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub struct AvatarSockets<'w, 's> {
+    /// Each avatar's Second Life motion, for the root frame.
+    pub motions: Query<'w, 's, &'static AvatarMotion>,
+    /// The base body parts, each seated at its own socket.
+    pub parts: Query<'w, 's, (Entity, &'static AvatarBodyPart)>,
+    /// The avatar root's `GlobalTransform`, composed under. Read-only: Phase 4
+    /// writes no joint globals.
+    pub globals: Query<'w, 's, &'static GlobalTransform>,
+    /// The socket entities' **local** transforms, which the writer places.
+    pub transforms:
+        Query<'w, 's, &'static mut Transform, Without<sl_viewer_world_api::AvatarAnchor>>,
+}
+
+/// The one avatar a [`write_socket_locals`] call writes: the skeleton its joints
+/// index into, the agent whose sockets they are, and the head socket the camera
+/// focuses on (absent for an avatar with none).
+#[derive(Clone, Copy)]
+struct SocketTarget<'a> {
+    /// The skeleton the posed joint indices resolve against.
+    skeleton: &'a BevySkeleton,
+    /// The agent whose sockets are written.
+    agent: AgentKey,
+    /// The camera's head-focus socket, if this avatar has one.
+    head_socket: Option<Entity>,
+}
+
 /// Drive each rigged avatar's **socket subset** and publish its GPU-pose feed
 /// (Phase 4, `roadmap/context/gpu-avatars.md` §5.3–§5.4). The per-avatar
 /// skinning joints are gone — the GPU samples, blends and FK-poses the palette
@@ -1662,36 +1706,16 @@ pub(crate) struct AvatarAdjusters<'w> {
 /// Runs in `PostUpdate` after transform propagation, so it seats the sockets on
 /// the just-propagated avatar root. A downlevel device (no GPU path) has no
 /// skinning at all, so the whole system is a no-op there.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries; the \
-              procedural folds' own resources are already bundled into one \
-              `AvatarAdjusters`, and what is left is the animation pipeline, the avatar \
-              asset library and state, the ground, the part query, the root globals, \
-              and the socket transforms"
-)]
 pub(crate) fn pose_avatar_skeletons(
     time: Res<Time>,
-    manager: Res<AnimationManager>,
-    playback: Res<AnimationPlayback>,
-    library: Option<Res<AvatarAssetLibrary>>,
-    body: Option<Res<AvatarBody>>,
-    state: Res<AvatarState>,
+    anim: AnimationState,
+    avatars: AvatarRig,
     mut ground: ResMut<AvatarGround>,
     mut adjusters: AvatarAdjusters,
-    motions: Query<&AvatarMotion>,
-    parts: Query<(Entity, &AvatarBodyPart)>,
-    // The avatar root's `GlobalTransform`, read to compose each socket and the
-    // published feed root under. Read-only: Phase 4 writes no joint globals.
-    globals: Query<&GlobalTransform>,
-    // The socket entities (attachment-point nodes, rigid base parts, the head
-    // socket) are avatar-root children the socket writer places by their **local**
-    // `Transform` (§5.4), so ordinary propagation seats the worn/rigid subtrees.
-    // A different component from `globals`.
-    mut socket_transforms: Query<&mut Transform, Without<sl_viewer_world_api::AvatarAnchor>>,
+    mut sockets: AvatarSockets,
     mut gpu: GpuAvatarHooks<'_, '_>,
 ) {
-    let (Some(library), Some(body)) = (library, body) else {
+    let (Some(library), Some(body)) = (avatars.library, avatars.body) else {
         return;
     };
     // A downlevel device runs no GPU skinning and has no joint entities, so
@@ -1706,7 +1730,7 @@ pub(crate) fn pose_avatar_skeletons(
     let log_ik = crate::locomotion_ik::log_enabled();
     let log_reach = crate::reach::log_enabled();
     let log_physics = crate::body_physics::log_enabled();
-    let rigged = state.rigged_agents();
+    let rigged = avatars.state.rigged_agents();
     // Forget the adjuster state (and the runtime morph overrides) of avatars that
     // have despawned.
     adjusters
@@ -1731,14 +1755,14 @@ pub(crate) fn pose_avatar_skeletons(
     // The quantised procedural idle clock (see [`POSE_IDLE_HZ`]).
     let idle_now = (now * POSE_IDLE_HZ).floor() / POSE_IDLE_HZ;
     for agent in rigged {
-        let Some(root) = state.body_root_of(agent) else {
+        let Some(root) = avatars.state.body_root_of(agent) else {
             continue;
         };
-        let Some(deform) = state.deformations(agent) else {
+        let Some(deform) = avatars.state.deformations(agent) else {
             continue;
         };
         // The camera's head-focus socket (§5.4), placed by the socket writer.
-        let head_socket = state.head_socket_of(agent);
+        let head_socket = avatars.state.head_socket_of(agent);
 
         // Advance the eye saccade / blink timers **every frame**: blinks drive the
         // (equality-guarded) runtime-morph path, not the skeleton, and stalling the
@@ -1756,7 +1780,7 @@ pub(crate) fn pose_avatar_skeletons(
                 .runtime_morphs
                 .set(agent, BLINK_RIGHT_PARAM, blink.right);
         }
-        let anims: AdjusterAnims = playback.adjuster_anims(agent, now, &manager);
+        let anims: AdjusterAnims = anim.playback.adjuster_anims(agent, now, &anim.manager);
 
         // Start from the resolved keyframe pose (or an empty rest pose), then fold
         // in the always-on procedural idle adjusters (P31.8) so every avatar
@@ -1765,7 +1789,7 @@ pub(crate) fn pose_avatar_skeletons(
         let mut pose = if t_pose {
             AnimationPose::default()
         } else {
-            let mut pose = playback.poses.get(&agent).cloned().unwrap_or_default();
+            let mut pose = anim.playback.poses.get(&agent).cloned().unwrap_or_default();
             sl_viewer_kit::procedural::apply_idle_adjustments(&mut pose, idle_now, |name| {
                 body.joint_index(name)
             });
@@ -1773,12 +1797,18 @@ pub(crate) fn pose_avatar_skeletons(
         };
         // The shape's collision-volume displacements (P34.3) ride the same
         // recurrence; an avatar whose shape displaces none has no entry.
-        let volumes = state.volume_deformations(agent).unwrap_or(&no_volumes);
-        let overrides = state.effective_joint_overrides(agent).unwrap_or_default();
+        let volumes = avatars
+            .state
+            .volume_deformations(agent)
+            .unwrap_or(&no_volumes);
+        let overrides = avatars
+            .state
+            .effective_joint_overrides(agent)
+            .unwrap_or_default();
         // The avatar-root global carries the SL → Bevy axis change and the world
         // placement; each joint's Bevy global is that composed with its Second Life
         // world matrix. Copied out so it survives the mutable joint writes below.
-        let Ok(root_global) = globals.get(root) else {
+        let Ok(root_global) = sockets.globals.get(root) else {
             continue;
         };
         let root_global = *root_global;
@@ -1791,14 +1821,15 @@ pub(crate) fn pose_avatar_skeletons(
             // scheduler mirrors the freeze GPU-side (no playback staged, idle
             // disabled), so no corrections are needed.
             write_socket_locals(
-                &mut socket_transforms,
-                &parts,
+                &mut sockets,
                 &gpu,
-                &state,
+                &avatars.state,
                 &body,
-                skeleton,
-                agent,
-                head_socket,
+                &SocketTarget {
+                    skeleton,
+                    agent,
+                    head_socket,
+                },
                 (deform, volumes, &overrides, &pose),
             );
             gpu.publish_real(agent, root_global.to_matrix(), Vec::new());
@@ -1875,11 +1906,13 @@ pub(crate) fn pose_avatar_skeletons(
             agent,
             &adjusters.look_targets,
             &mut adjusters.look_motion,
-            &root_global,
-            head_pos,
-            eye_positions,
-            look_joints,
-            neck_parent_world,
+            &crate::look_at::LookAtFrom {
+                root: &root_global,
+                head_pos,
+                eye_positions,
+                joints: look_joints,
+                neck_parent_world,
+            },
             dt,
             look_debug,
         );
@@ -1897,7 +1930,7 @@ pub(crate) fn pose_avatar_skeletons(
                 joints: reach_joints,
                 point_at: adjusters.point_at_targets.point(agent),
                 look_at: adjusters.look_targets.point(agent),
-                aiming: playback.is_aiming(agent),
+                aiming: anim.playback.is_aiming(agent),
                 dt,
             },
         );
@@ -1914,7 +1947,7 @@ pub(crate) fn pose_avatar_skeletons(
                 reach_report.aim_dir.x,
                 reach_report.aim_dir.y,
                 reach_report.aim_dir.z,
-                playback.is_aiming(agent),
+                anim.playback.is_aiming(agent),
                 adjusters.point_at_targets.point(agent).is_some(),
             );
         }
@@ -1923,9 +1956,10 @@ pub(crate) fn pose_avatar_skeletons(
         // standing avatar's ankles on it, the landing recovery's ground alignment, and
         // the fly bank. They read the leg geometry out of `world0` — the pose as it
         // stands after the keyframe, idle and look-at folds — and correct it.
-        let avatar_motion = state
+        let avatar_motion = avatars
+            .state
             .body_root_of(agent)
-            .and_then(|anchor| motions.get(anchor).ok());
+            .and_then(|anchor| sockets.motions.get(anchor).ok());
         // Publish this avatar's **pre-IK** ankle world positions for the next frame's
         // ground probe. `world0` is the pose *before* the locomotion fold, so the probe
         // stays a function of the animation alone and the foot IK cannot perturb its own
@@ -1955,7 +1989,7 @@ pub(crate) fn pose_avatar_skeletons(
                 motion: avatar_motion,
                 ground: ground.get(agent),
                 anims,
-                seated: state.is_seated(agent),
+                seated: avatars.state.is_seated(agent),
                 dt,
             },
         );
@@ -1992,7 +2026,7 @@ pub(crate) fn pose_avatar_skeletons(
         // `*_Driven` morph weights through the runtime-morph pipeline and the rigged
         // body's collision-volume displacements into the pose as position deltas —
         // which is why this runs before the final world matrices below.
-        if let Some(physics) = state.body_physics(agent) {
+        if let Some(physics) = avatars.state.body_physics(agent) {
             let report = crate::body_physics::apply(
                 &mut pose,
                 &mut adjusters.body_physics,
@@ -2020,14 +2054,15 @@ pub(crate) fn pose_avatar_skeletons(
         // — and the adjusters' channel changes are published as sparse
         // corrections pass B folds in.
         write_socket_locals(
-            &mut socket_transforms,
-            &parts,
+            &mut sockets,
             &gpu,
-            &state,
+            &avatars.state,
             &body,
-            skeleton,
-            agent,
-            head_socket,
+            &SocketTarget {
+                skeleton,
+                agent,
+                head_socket,
+            },
             (deform, volumes, &overrides, &pose),
         );
         let corrections = pose_corrections(&baseline, &pose);
@@ -2057,22 +2092,13 @@ pub(crate) fn pose_avatar_skeletons(
 /// change + placement), so no root composition is needed here.
 ///
 /// `chain_inputs` bundles the recurrence inputs `(deform, volumes, overrides,
-/// pose)` to stay inside the argument-count lint.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the socket writer takes the pose driver's own borrowed context (queries, \
-              state, skeleton, per-avatar identifiers); packing them into a struct would \
-              only move the argument list into a struct literal at the call sites"
-)]
+/// pose)`; `target` names the one avatar being written.
 fn write_socket_locals(
-    socket_transforms: &mut Query<&mut Transform, Without<sl_viewer_world_api::AvatarAnchor>>,
-    parts: &Query<(Entity, &AvatarBodyPart)>,
+    sockets: &mut AvatarSockets,
     hooks: &GpuAvatarHooks<'_, '_>,
     state: &AvatarState,
     body: &AvatarBody,
-    skeleton: &BevySkeleton,
-    agent: AgentKey,
-    head_socket: Option<Entity>,
+    target: &SocketTarget<'_>,
     chain_inputs: (
         &SkeletalDeformations,
         &VolumeDeformations,
@@ -2080,12 +2106,17 @@ fn write_socket_locals(
         &AnimationPose,
     ),
 ) {
+    let &SocketTarget {
+        skeleton,
+        agent,
+        head_socket,
+    } = target;
     let (deform, volumes, overrides, pose) = chain_inputs;
     // The socket subset and, per socket, the joint whose posed world places it.
     let mut targets: Vec<usize> = Vec::new();
     // Rigid base parts (the eyeballs), placed straight from their bound joint.
     let mut rigid_parts: Vec<(Entity, usize)> = Vec::new();
-    for (entity, part) in parts {
+    for (entity, part) in &sockets.parts {
         if part.agent() != agent {
             continue;
         }
@@ -2120,7 +2151,7 @@ fn write_socket_locals(
     // Rigid parts: local (root-relative) = the joint's avatar-frame world.
     for (entity, index) in rigid_parts {
         if let Some(matrix) = world.get(&index)
-            && let Ok(mut transform) = socket_transforms.get_mut(entity)
+            && let Ok(mut transform) = sockets.transforms.get_mut(entity)
         {
             *transform = Transform::from_matrix(*matrix);
         }
@@ -2130,7 +2161,7 @@ fn write_socket_locals(
     // `arithmetic_side_effects` lint).
     for (node, index, offset) in worn_nodes {
         if let Some(matrix) = world.get(&index)
-            && let Ok(mut transform) = socket_transforms.get_mut(node)
+            && let Ok(mut transform) = sockets.transforms.get_mut(node)
         {
             *transform = Transform::from_matrix(matrix.mul_mat4(&offset));
         }
@@ -2138,7 +2169,7 @@ fn write_socket_locals(
     // The head socket: local = the `mHead` joint's world.
     if let (Some(socket), Some(index)) = (head_socket, head_index)
         && let Some(matrix) = world.get(&index)
-        && let Ok(mut transform) = socket_transforms.get_mut(socket)
+        && let Ok(mut transform) = sockets.transforms.get_mut(socket)
     {
         *transform = Transform::from_matrix(*matrix);
     }

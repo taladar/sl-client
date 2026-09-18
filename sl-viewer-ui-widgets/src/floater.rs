@@ -1851,37 +1851,53 @@ fn chrome_button(
 // Systems
 // ---------------------------------------------------------------------------
 
+/// The floater stack one chrome command restacks, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): raising, closing, docking
+/// and tearing off all move the same four things together.
+#[derive(bevy::ecs::system::SystemParam)]
+struct FloaterStack<'w, 's> {
+    /// The floaters themselves.
+    floaters: Query<'w, 's, &'static mut Floater>,
+    /// Their z-order.
+    z_indices: Query<'w, 's, &'static mut GlobalZIndex>,
+    /// The top of the stack, handed out on a raise.
+    z_top: ResMut<'w, FloaterZTop>,
+    /// Which floater is active (highlighted, and the keyboard's).
+    active: ResMut<'w, ActiveFloater>,
+}
+
+/// Where a floater is parented, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the UI root a torn-off
+/// floater returns to, and the shared host a dock falls back to.
+#[derive(bevy::ecs::system::SystemParam)]
+struct FloaterParents<'w> {
+    /// The shared default dock host.
+    dock_host: Res<'w, DefaultDockHost>,
+    /// The UI root a torn-off floater reparents to.
+    root: Res<'w, UiRoot>,
+}
+
 /// Carry out the chrome commands: raise / close / minimize / dock.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the reparent-and-restack commands genuinely touch the floater state, the z-order, \
-              the active floater, the dock host, the root and the panel-shown flag; splitting them \
-              would only scatter one coherent operation across several systems"
-)]
 fn apply_floater_commands(
     mut messages: MessageReader<FloaterCommand>,
     mut commands: Commands,
-    mut floaters: Query<&mut Floater>,
-    mut z_indices: Query<&mut GlobalZIndex>,
-    mut z_top: ResMut<FloaterZTop>,
-    mut active: ResMut<ActiveFloater>,
+    mut stack: FloaterStack,
     mut panels: Query<&mut UiPanelShown>,
     guards: Query<&FloaterCloseGuard>,
     mut held_back: MessageWriter<FloaterCloseRequested>,
-    dock_host: Res<DefaultDockHost>,
-    root: Res<UiRoot>,
+    parents: FloaterParents,
 ) {
     for command in messages.read() {
-        let Ok(mut floater) = floaters.get_mut(command.floater) else {
+        let Ok(mut floater) = stack.floaters.get_mut(command.floater) else {
             continue;
         };
         match command.op {
             FloaterOp::BringToFront => {
                 // A docked floater is in its host's flow and does not restack.
                 if floater.docked_in.is_none() {
-                    raise(command.floater, &mut z_indices, &mut z_top);
+                    raise(command.floater, &mut stack.z_indices, &mut stack.z_top);
                 }
-                active.0 = Some(command.floater);
+                stack.active.0 = Some(command.floater);
             }
             FloaterOp::Close | FloaterOp::CloseNow => {
                 if !floater.caps.closable {
@@ -1901,8 +1917,8 @@ fn apply_floater_commands(
                     });
                     continue;
                 }
-                if active.0 == Some(command.floater) {
-                    active.0 = None;
+                if stack.active.0 == Some(command.floater) {
+                    stack.active.0 = None;
                 }
                 // A **keyed** instance is transient: it exists because a subject
                 // was opened, so closing it ends it, exactly as the reference
@@ -1938,13 +1954,15 @@ fn apply_floater_commands(
                         command.floater,
                         &mut floater,
                         &mut commands,
-                        root.0,
-                        &mut z_indices,
-                        &mut z_top,
+                        parents.root.0,
+                        &mut stack.z_indices,
+                        &mut stack.z_top,
                     );
-                    active.0 = Some(command.floater);
-                } else if let Some(host) =
-                    floater.preferred_host.or(floater.last_host).or(dock_host.0)
+                    stack.active.0 = Some(command.floater);
+                } else if let Some(host) = floater
+                    .preferred_host
+                    .or(floater.last_host)
+                    .or(parents.dock_host.0)
                 {
                     // Dock into this floater's own preferred host if it has one,
                     // else the last host it was docked in (the reference's
@@ -1954,11 +1972,11 @@ fn apply_floater_commands(
                         &mut floater,
                         &mut commands,
                         host,
-                        &mut z_indices,
+                        &mut stack.z_indices,
                     );
                     // A just-docked floater is the one the user acted on, so keep
                     // it active rather than leaving the highlight on nothing.
-                    active.0 = Some(command.floater);
+                    stack.active.0 = Some(command.floater);
                 }
             }
         }

@@ -51,7 +51,7 @@ use crate::objects::{
     FaceTextureDebug, PrimFaceEntity, SceneObject, TransparencyCulled, is_fully_transparent,
 };
 use crate::textures::{
-    DerivedImage, PrimTextures, TextureAlpha, TextureApplyBudget, TextureManager,
+    DerivedImage, FaceStores, FaceStoresParam, TextureAlpha, TextureApplyBudget, TextureManager,
     compose_face_material, refresh_derived_images,
 };
 use sl_viewer_kit::face_material::{
@@ -309,6 +309,26 @@ impl Default for MaterialManager {
     }
 }
 
+/// The one face a [`MaterialManager::preview_face_material`] call acts on: which
+/// face, the material previewed on it, and the three things either composition
+/// path reads off it.
+#[derive(Clone, Copy, Debug)]
+pub struct PreviewedFace<'a> {
+    /// The face being previewed.
+    pub key: FaceKey,
+    /// The material asset shown on it (the nil id reverts).
+    pub id: AssetKey,
+    /// The face's material handle, written in place.
+    pub handle: &'a Handle<FaceMaterial>,
+    /// The diffuse UV placement a newly registered face keeps.
+    pub base_uv: Affine2,
+    /// The face entity, recorded with a new registration.
+    pub entity: Entity,
+    /// The face's `TextureEntry` value, which the Blinn-Phong revert recomposes
+    /// from and whose glow a new registration keeps.
+    pub texture_face: &'a TextureFace,
+}
+
 impl MaterialManager {
     /// Build the manager over a fresh [`BevyAssetFetcher`], backed by the on-disk
     /// asset cache when available (falling back to an in-memory-only store).
@@ -435,36 +455,18 @@ impl MaterialManager {
     /// so re-previewing never double-applies a `KHR_texture_transform`. The eventual
     /// OK sends the assignment for real; the simulator's echo then reconciles
     /// idempotently ([`register_changed_render_materials`]).
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the preview needs the face key + previewed id, the face's handle / diffuse UV / \
-                  TextureEntry for either composition, and the three material resources it \
-                  composes through"
-    )]
-    pub fn preview_face_material(
-        &mut self,
-        key: FaceKey,
-        id: AssetKey,
-        handle: &Handle<FaceMaterial>,
-        base_uv: Affine2,
-        entity: Entity,
-        texture_face: &TextureFace,
-        textures: &mut TextureManager,
-        store: &DecodedTextures,
-        prim_textures: &mut PrimTextures,
-        materials: &mut Assets<FaceMaterial>,
-    ) {
+    pub fn preview_face_material(&mut self, face: &PreviewedFace, stores: &mut FaceStores) {
+        let &PreviewedFace {
+            key,
+            id,
+            handle,
+            base_uv,
+            entity,
+            texture_face,
+        } = face;
         if id.uuid().is_nil() {
             // Revert a face that had no material back to its Blinn-Phong layer.
-            let _reverted = self.revert_face_to_diffuse(
-                key,
-                handle,
-                texture_face,
-                textures,
-                store,
-                prim_textures,
-                materials,
-            );
+            let _reverted = self.revert_face_to_diffuse(key, handle, texture_face, stores);
             return;
         }
         match self.face_slots.get_mut(&key) {
@@ -488,7 +490,7 @@ impl MaterialManager {
             }
         }
         self.request(id);
-        recompose_face(self, textures, materials, key);
+        recompose_face(self, stores.manager, stores.materials, key);
     }
 
     /// Drop a face's PBR render material and recompose its Blinn-Phong / diffuse
@@ -500,21 +502,12 @@ impl MaterialManager {
     /// specular/normal material only for a real revert). Used by the picker's
     /// nil-id revert ([`preview_face_material`]) and Phase 3's in-world clear
     /// ([`revert_removed_render_materials`]).
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "reverting one face touches its key, handle and texture entry plus the texture \
-                  manager, the decoded store, the prim-texture bookkeeping and the material \
-                  assets -- splitting them into a struct would only move the same list"
-    )]
     pub(crate) fn revert_face_to_diffuse(
         &mut self,
         key: FaceKey,
         handle: &Handle<FaceMaterial>,
         texture_face: &TextureFace,
-        textures: &mut TextureManager,
-        store: &DecodedTextures,
-        prim_textures: &mut PrimTextures,
-        materials: &mut Assets<FaceMaterial>,
+        stores: &mut FaceStores,
     ) -> bool {
         let _hidden = self.hidden.remove(&key);
         let _over = self.overrides.remove(&key);
@@ -534,10 +527,7 @@ impl MaterialManager {
         compose_face_material(
             handle,
             texture_face,
-            materials,
-            textures,
-            store,
-            prim_textures,
+            stores,
             MATERIAL_TEXTURE_PRIORITY,
             TextureAlpha::Mask,
         );
@@ -933,6 +923,32 @@ pub fn register_changed_render_materials(
     }
 }
 
+/// The queries a linkset's PBR-face walk reads, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the geometry holders that
+/// say which faces carry a render material, the hierarchy the walk descends,
+/// and the faces themselves.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub struct LinksetFaces<'w, 's> {
+    /// Each geometry holder's `face → material id` table.
+    holders: Query<'w, 's, &'static ObjectRenderMaterials>,
+    /// Parent links, to resolve a holder to the object carrying the scoped id.
+    parents: Query<'w, 's, &'static ChildOf>,
+    /// Scene identities, for that scoped id.
+    scene: Query<'w, 's, &'static SceneObject>,
+    /// Parent → children, the walk's edges.
+    children: Query<'w, 's, &'static Children>,
+    /// The faces: their Linden index, their `TextureEntry` value, their handle.
+    faces: Query<
+        'w,
+        's,
+        (
+            &'static PrimFaceEntity,
+            &'static FaceTextureDebug,
+            &'static MeshMaterial3d<FaceMaterial>,
+        ),
+    >,
+}
+
 /// Revert a face to its Blinn-Phong appearance when its object's PBR render
 /// material is cleared **in-world** (Phase 3): [`apply_render_materials`](crate::objects)
 /// removes the [`ObjectRenderMaterials`] holder the moment an object update
@@ -953,53 +969,36 @@ pub fn register_changed_render_materials(
 /// [`SceneObject`] lookup fails once the entity is gone, and a re-added holder
 /// (the component removed and re-inserted in one frame) is skipped because the
 /// live query still finds it.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the removed-holder \
-              reader, the material / legacy / texture / prim-texture / asset resources it \
-              recomposes through, and the holder / parent / scene / hierarchy / face queries the \
-              scoped-id resolution and face walk read"
-)]
 pub fn revert_removed_render_materials(
     mut removed: RemovedComponents<ObjectRenderMaterials>,
     mut manager: ResMut<MaterialManager>,
     mut legacy: ResMut<LegacyMaterialManager>,
-    mut textures: ResMut<TextureManager>,
-    store: Res<DecodedTextures>,
-    mut prim_textures: ResMut<PrimTextures>,
-    mut materials: ResMut<Assets<FaceMaterial>>,
-    holders: Query<&ObjectRenderMaterials>,
-    parents: Query<&ChildOf>,
-    scene: Query<&SceneObject>,
-    children: Query<&Children>,
-    faces: Query<(
-        &PrimFaceEntity,
-        &FaceTextureDebug,
-        &MeshMaterial3d<FaceMaterial>,
-    )>,
+    mut paint: FaceStoresParam,
+    linkset: LinksetFaces,
 ) {
     for holder_entity in removed.read() {
         // A holder whose component was removed and re-added in the same frame (a
         // material swapped, not cleared) still has a live `ObjectRenderMaterials`;
         // `register_changed_render_materials` handles it, so skip the revert.
-        if holders.get(holder_entity).is_ok() {
+        if linkset.holders.get(holder_entity).is_ok() {
             continue;
         }
         // The geometry holder is a child of the object entity, which carries the
         // scoped id; the lookup fails (and the holder is skipped) once the object
         // has despawned.
-        let Ok(child_of) = parents.get(holder_entity) else {
+        let Ok(child_of) = linkset.parents.get(holder_entity) else {
             continue;
         };
-        let Ok(scene_object) = scene.get(child_of.parent()) else {
+        let Ok(scene_object) = linkset.scene.get(child_of.parent()) else {
             continue;
         };
         let scoped = scene_object.scoped_id;
-        let Ok(face_entities) = children.get(holder_entity) else {
+        let Ok(face_entities) = linkset.children.get(holder_entity) else {
             continue;
         };
         for &face_entity in face_entities {
-            let Ok((face, FaceTextureDebug(texture_face), material)) = faces.get(face_entity)
+            let Ok((face, FaceTextureDebug(texture_face), material)) =
+                linkset.faces.get(face_entity)
             else {
                 continue;
             };
@@ -1009,15 +1008,8 @@ pub fn revert_removed_render_materials(
                 continue;
             };
             let key = (scoped, face_index);
-            if !manager.revert_face_to_diffuse(
-                key,
-                &material.0,
-                texture_face,
-                &mut textures,
-                &store,
-                &mut prim_textures,
-                &mut materials,
-            ) {
+            if !manager.revert_face_to_diffuse(key, &material.0, texture_face, &mut paint.stores())
+            {
                 continue;
             }
             // The legacy material was superseded (never applied) while the PBR
@@ -1028,8 +1020,8 @@ pub fn revert_removed_render_materials(
             {
                 preview_legacy_material(
                     &mut legacy,
-                    &mut textures,
-                    &mut materials,
+                    &mut paint.manager,
+                    &mut paint.materials,
                     &material.0,
                     material_id,
                 );
@@ -1216,6 +1208,21 @@ pub fn drive_local_overrides(
     }
 }
 
+/// What decides whether the Blinn-Phong hide is on, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the build tool, the material
+/// mode it is showing, and the selection whose linksets are previewed.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub struct HideGate<'w> {
+    /// Whether the build tool is open.
+    tool: Res<'w, EditToolState>,
+    /// Which material mode its Texture tab shows.
+    mode: Res<'w, MatModeState>,
+    /// The selection whose whole linkset is previewed.
+    selection: Res<'w, SelectionSet>,
+    /// The object model, to resolve a selected part to its linkset root.
+    objects: Res<'w, ObjectState>,
+}
+
 /// Hide or restore each PBR face's render material for the build tool's
 /// Blinn-Phong editing mode — the Firestorm FIRE-35138 behaviour ("show the
 /// selection in Blinn-Phong"): while the Build Tools floater is open **and** its
@@ -1238,31 +1245,20 @@ pub fn drive_local_overrides(
 ///
 /// Only recomputed when its inputs change (the tool, the mode, the selection) or a
 /// new face registered, so the linkset walk is not paid every frame.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the tool / mode / \
-              selection state driving the hide, the three material resources it recomposes \
-              through, and the hierarchy / holder / face queries the linkset walk reads"
-)]
 pub fn apply_blinn_phong_hide(
-    tool: Res<EditToolState>,
-    mode: Res<MatModeState>,
-    selection: Res<SelectionSet>,
-    objects: Res<ObjectState>,
+    gate: HideGate,
     new_faces: Query<(), Changed<PrimFaceEntity>>,
     mut manager: ResMut<MaterialManager>,
-    mut textures: ResMut<TextureManager>,
-    store: Res<DecodedTextures>,
-    mut prim_textures: ResMut<PrimTextures>,
-    mut materials: ResMut<Assets<FaceMaterial>>,
     mut legacy: ResMut<LegacyMaterialManager>,
-    children: Query<&Children>,
-    holders: Query<&ObjectRenderMaterials>,
-    faces: Query<(&PrimFaceEntity, &FaceTextureDebug)>,
+    mut paint: FaceStoresParam,
+    linkset: LinksetFaces,
 ) {
     // Recompute only on a real change; a face already hidden stays hidden without
     // work (its PBR recomposition is suppressed, so nothing un-hides it silently).
-    if !(tool.is_changed() || mode.is_changed() || selection.is_changed() || !new_faces.is_empty())
+    if !(gate.tool.is_changed()
+        || gate.mode.is_changed()
+        || gate.selection.is_changed()
+        || !new_faces.is_empty())
     {
         return;
     }
@@ -1272,19 +1268,23 @@ pub fn apply_blinn_phong_hide(
     // (Material) mode. Keyed like `face_slots`, carrying the face entity so its
     // `TextureEntry` is read when it is (re)composed as Blinn-Phong.
     let mut want: HashMap<FaceKey, Entity> = HashMap::new();
-    if tool.active && mode.is_material() {
-        for node in selection.iter() {
+    if gate.tool.active && gate.mode.is_material() {
+        for node in gate.selection.iter() {
             // Hide the **whole linkset**, not just the selected prim: a Select-Face
             // (or edit-linked) selection carries the clicked *part*, whose subtree
             // holds only its own faces — resolve to the linkset root so a sibling
             // prim of a multi-prim build is previewed in Blinn-Phong too (the whole
             // house, not one wall). Falls back to the node's own entity when the
             // root is not resolvable.
-            let root_scoped = objects.linkset_root_of(&node.scoped).unwrap_or(node.scoped);
-            let root_entity = objects
+            let root_scoped = gate
+                .objects
+                .linkset_root_of(&node.scoped)
+                .unwrap_or(node.scoped);
+            let root_entity = gate
+                .objects
                 .entity_by_scoped(&root_scoped)
                 .unwrap_or(node.entity);
-            collect_linkset_pbr_faces(root_entity, &children, &holders, &faces, &mut want);
+            collect_linkset_pbr_faces(root_entity, &linkset, &mut want);
         }
     }
     let want_keys: HashSet<FaceKey> = want.keys().copied().collect();
@@ -1297,13 +1297,13 @@ pub fn apply_blinn_phong_hide(
         let _present = manager.hidden.remove(&key);
         if let Some(slot) = manager.face_slots.get(&key) {
             let handle = slot.handle.clone();
-            prim_textures.drop_pending_material(&handle);
+            paint.prim_textures.drop_pending_material(&handle);
             // Also drop anything the Blinn-Phong preview parked (the on-demand
             // material fetch and any legacy map still in flight), so nothing lands on
             // the extension of the now-restored PBR face.
             legacy.drop_pending_preview(&handle);
         }
-        recompose_face(&mut manager, &mut textures, &mut materials, key);
+        recompose_face(&mut manager, &mut paint.manager, &mut paint.materials, key);
     }
 
     // Hide PBR on faces that entered the set: drop any parked PBR map so a late one
@@ -1321,7 +1321,8 @@ pub fn apply_blinn_phong_hide(
             drop_texture_patches(&mut manager, &handle, pbr_slot);
         }
         let _absent = manager.hidden.insert(key);
-        let Ok((_face, FaceTextureDebug(texture_face))) = faces.get(entity) else {
+        let Ok((_face, FaceTextureDebug(texture_face), _material)) = linkset.faces.get(entity)
+        else {
             continue;
         };
         let texture_face = *texture_face;
@@ -1336,10 +1337,7 @@ pub fn apply_blinn_phong_hide(
         compose_face_material(
             &handle,
             &texture_face,
-            &mut materials,
-            &mut textures,
-            &store,
-            &mut prim_textures,
+            &mut paint.stores(),
             MATERIAL_TEXTURE_PRIORITY,
             TextureAlpha::Mask,
         );
@@ -1352,8 +1350,8 @@ pub fn apply_blinn_phong_hide(
         {
             preview_legacy_material(
                 &mut legacy,
-                &mut textures,
-                &mut materials,
+                &mut paint.manager,
+                &mut paint.materials,
                 &handle,
                 material_id,
             );
@@ -1368,18 +1366,16 @@ pub fn apply_blinn_phong_hide(
 /// build's every PBR face is included.
 fn collect_linkset_pbr_faces(
     root: Entity,
-    children: &Query<&Children>,
-    holders: &Query<&ObjectRenderMaterials>,
-    faces: &Query<(&PrimFaceEntity, &FaceTextureDebug)>,
+    linkset: &LinksetFaces,
     out: &mut HashMap<FaceKey, Entity>,
 ) {
     let mut stack = vec![root];
     while let Some(entity) = stack.pop() {
-        if let Ok(holder) = holders.get(entity)
-            && let Ok(holder_children) = children.get(entity)
+        if let Ok(holder) = linkset.holders.get(entity)
+            && let Ok(holder_children) = linkset.children.get(entity)
         {
             for child in holder_children.iter() {
-                let Ok((face, _debug)) = faces.get(child) else {
+                let Ok((face, _debug, _material)) = linkset.faces.get(child) else {
                     continue;
                 };
                 let face_index = face.face_id.as_usize();
@@ -1392,7 +1388,7 @@ fn collect_linkset_pbr_faces(
                 }
             }
         }
-        if let Ok(list) = children.get(entity) {
+        if let Ok(list) = linkset.children.get(entity) {
             for child in list.iter() {
                 stack.push(child);
             }
