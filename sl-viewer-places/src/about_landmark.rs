@@ -229,27 +229,88 @@ fn landmark_key(item: InventoryKey) -> FloaterKey {
 // Open: rebuild the content column on an item.
 // ---------------------------------------------------------------------------
 
+/// The name sources a landmark window renders through, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): our own agent, the avatar
+/// mirror the owner line resolves in, and the translator.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct LandmarkNames<'w> {
+    /// Our own agent, for the "you own this" line.
+    identity: Res<'w, SlIdentity>,
+    /// The avatar mirror, for the owner's name.
+    avatars: Res<'w, AvatarState>,
+    /// The translator, for the rendered labels.
+    translator: Translator<'w>,
+}
+
+/// The content nodes a landmark window is rebuilt through, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the children a re-open tears
+/// down, and the texts the rebuilt content writes.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct LandmarkContent<'w, 's> {
+    /// The content's children, torn down on a re-open.
+    children: Query<'w, 's, &'static Children>,
+    /// The texts the rebuilt content writes.
+    texts: Query<'w, 's, &'static mut Text>,
+}
+
+/// The name sources one landmark's content is rendered from, borrowed as one
+/// struct: our own agent, the avatar mirror and the translator.
+#[derive(Clone, Copy)]
+struct LandmarkRefs<'a, 't> {
+    /// Our own agent, for the "you own this" line.
+    identity: &'a SlIdentity,
+    /// The avatar mirror, for the owner's name.
+    avatars: &'a AvatarState,
+    /// The translator, for the rendered labels.
+    translator: &'a Translator<'t>,
+}
+
+/// The same for a parcel reply's repaint: the avatar and group rosters the owner
+/// line resolves in, and the translator.
+#[derive(Clone, Copy)]
+struct DetailRefs<'a, 't> {
+    /// The avatar mirror, for a resident owner.
+    avatars: &'a AvatarState,
+    /// The group roster, for a deeded parcel.
+    groups: &'a GroupsModel,
+    /// The translator, for the rendered labels.
+    translator: &'a Translator<'t>,
+}
+
+/// What a parcel reply repaints a landmark window through, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the avatar and group
+/// rosters the owner line resolves in, and the translator.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct LandmarkReplyNames<'w> {
+    /// The avatar mirror, for a resident owner.
+    avatars: Res<'w, AvatarState>,
+    /// The group roster, for a deeded parcel.
+    groups: Res<'w, GroupsModel>,
+    /// The translator, for the rendered labels.
+    translator: Translator<'w>,
+}
+
 /// Rebuild and show the floater on the last open request: tear the old
 /// content down, spawn the row skeleton seeded with the item-side values and
 /// "(loading)" placeholders, and start the landmark asset fetch.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the open stream, the \
-              floater state and handles, the identity and name sources, the translator, and \
-              the spawn / visibility outputs"
-)]
 fn open_about_landmark(
     mut opens: MessageReader<OpenAboutLandmark>,
     mut floaters: KeyedFloaters,
     mut windows: Query<(&mut AboutLandmarkState, &mut AboutLandmarkUi)>,
-    identity: Res<SlIdentity>,
-    avatars: Res<AvatarState>,
-    translator: Translator,
-    children: Query<&Children>,
-    mut texts: Query<&mut Text>,
+    names: LandmarkNames,
+    content: LandmarkContent,
     mut commands: Commands,
     mut sl_commands: MessageWriter<SlCommand>,
 ) {
+    let LandmarkNames {
+        identity,
+        avatars,
+        translator,
+    } = names;
+    let LandmarkContent {
+        children,
+        mut texts,
+    } = content;
     for open in opens.read().cloned() {
         let item = open.item;
         let opened = floaters.open(about_landmark_floater_spec(), landmark_key(item.item_id));
@@ -263,9 +324,11 @@ fn open_about_landmark(
                     handle.content,
                     handle.title_text,
                     &item,
-                    &identity,
-                    &avatars,
-                    &translator,
+                    LandmarkRefs {
+                        identity: &identity,
+                        avatars: &avatars,
+                        translator: &translator,
+                    },
                     &mut texts,
                     &mut sl_commands,
                 );
@@ -286,9 +349,11 @@ fn open_about_landmark(
                     ui.content,
                     ui.title_text,
                     &item,
-                    &identity,
-                    &avatars,
-                    &translator,
+                    LandmarkRefs {
+                        identity: &identity,
+                        avatars: &avatars,
+                        translator: &translator,
+                    },
                     &mut texts,
                     &mut sl_commands,
                 );
@@ -302,22 +367,20 @@ fn open_about_landmark(
 /// Build one landmark window's content under `content` and return the state and
 /// handles it produced — the same body for a window just spawned and for one
 /// being re-opened on another landmark.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the content build takes what it draws from: the spawn target and title node, the \
-              item, the identity and name sources, the translator, and the text / command sinks"
-)]
 fn fill_landmark_content(
     commands: &mut Commands,
     content: Entity,
     title_text: Entity,
     item: &ItemInfo,
-    identity: &SlIdentity,
-    avatars: &AvatarState,
-    translator: &Translator,
+    refs: LandmarkRefs<'_, '_>,
     texts: &mut Query<&mut Text>,
     sl_commands: &mut MessageWriter<SlCommand>,
 ) -> (AboutLandmarkState, AboutLandmarkUi) {
+    let LandmarkRefs {
+        identity,
+        avatars,
+        translator,
+    } = refs;
     // The window's title is the landmark's own name.
     if let Ok(mut text) = texts.get_mut(title_text) {
         item.name.clone_into(&mut text.0);
@@ -615,23 +678,20 @@ fn ingest_landmark_asset(
 /// Fold the parcel resolve replies in: a `RemoteParcelId` advances the chain
 /// to `RequestParcelInfo`; the matching `ParcelDetails` fills every
 /// destination row, the SLURL and the snapshot request.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the event stream, the \
-              floater state and handles, the name caches, the translator, and the text / \
-              command / spawn outputs"
-)]
 fn ingest_parcel_replies(
     mut events: MessageReader<SlEvent>,
     mut windows: Query<(Entity, &mut AboutLandmarkState, &AboutLandmarkUi)>,
-    avatars: Res<AvatarState>,
-    groups: Res<GroupsModel>,
-    translator: Translator,
+    names: LandmarkReplyNames,
     time: Res<Time>,
     mut texts: Query<&mut Text>,
     mut sl_commands: MessageWriter<SlCommand>,
     mut commands: Commands,
 ) {
+    let LandmarkReplyNames {
+        avatars,
+        groups,
+        translator,
+    } = names;
     let frame: Vec<&SlEvent> = events.read().collect();
     if frame.is_empty() {
         return;
@@ -690,9 +750,11 @@ fn ingest_parcel_replies(
                         details,
                         &mut state,
                         ui,
-                        &avatars,
-                        &groups,
-                        &translator,
+                        DetailRefs {
+                            avatars: &avatars,
+                            groups: &groups,
+                            translator: &translator,
+                        },
                         &mut texts,
                         &mut sl_commands,
                         &mut commands,
@@ -707,21 +769,20 @@ fn ingest_parcel_replies(
 
 /// Write a `ParcelDetails` into the floater: every destination row, the
 /// SLURL, and the snapshot request.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a helper extracted from a Bevy system inherits the system's injected resources"
-)]
 fn apply_details(
     details: &ParcelDetails,
     state: &mut AboutLandmarkState,
     ui: &AboutLandmarkUi,
-    avatars: &AvatarState,
-    groups: &GroupsModel,
-    translator: &Translator,
+    refs: DetailRefs<'_, '_>,
     texts: &mut Query<&mut Text>,
     sl_commands: &mut MessageWriter<SlCommand>,
     commands: &mut Commands,
 ) {
+    let DetailRefs {
+        avatars,
+        groups,
+        translator,
+    } = refs;
     let position = state.landmark.map_or((0.0, 0.0, 0.0), |mark| mark.position);
     let region_id = state.landmark.map_or_else(Uuid::nil, |mark| mark.region_id);
     set_text(

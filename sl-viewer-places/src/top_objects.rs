@@ -134,8 +134,8 @@ use sl_client_bevy::{
 
 use crate::about_region::region_key;
 use crate::floater::{
-    Floater, FloaterCaps, FloaterHandle, FloaterKey, FloaterSpec, FloaterSystems, KeyedFloaterOpen,
-    KeyedFloaters, host_floater,
+    FloaterCaps, FloaterHandle, FloaterHost, FloaterKey, FloaterSpec, FloaterSystems,
+    KeyedFloaterOpen, KeyedFloaters,
 };
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::inventory_properties::format_unix_date;
@@ -151,10 +151,10 @@ use crate::ui_table::{
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{SCROLLBAR_THICKNESS, VirtualList, VirtualRow, layout_virtual_lists};
 
-/// The Top Scripts window's stable [`Floater::id`].
+/// The Top Scripts window's stable [`Floater::id`](crate::floater::Floater::id).
 pub const TOP_SCRIPTS_FLOATER_ID: &str = "top-scripts";
 
-/// The Top Colliders window's stable [`Floater::id`].
+/// The Top Colliders window's stable [`Floater::id`](crate::floater::Floater::id).
 pub const TOP_COLLIDERS_FLOATER_ID: &str = "top-colliders";
 
 /// The reference's `STAT_FILTER_BY_OWNER`: the filter string names an owner.
@@ -1599,29 +1599,66 @@ const fn window_action_enabled(
         )
 }
 
+/// What a top-objects action raises, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the wire the report / return
+/// commands go out on, the confirmation a destructive return raises, and the map
+/// tracking a Show On Map sets.
+#[derive(bevy::ecs::system::SystemParam)]
+struct TopObjectsActionOut<'w> {
+    /// The wire the report and return commands go out on.
+    commands: MessageWriter<'w, SlCommand>,
+    /// The confirmation a destructive return raises.
+    notifications: MessageWriter<'w, ShowNotification>,
+    /// The map tracking a Show On Map sets.
+    tracking: ResMut<'w, MapTracking>,
+}
+
+/// The controls a top-objects enable pass greys, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the action buttons, which
+/// already carry the disabled marker, and the children whose label colour
+/// follows.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct TopObjectsButtons<'w, 's> {
+    /// The action buttons and what each does.
+    buttons: Query<'w, 's, (Entity, &'static TopObjectsAction)>,
+    /// Which of them already carry the disabled marker.
+    disabled: Query<'w, 's, (), With<InteractionDisabled>>,
+    /// Their children, whose label colour follows the gate.
+    children: Query<'w, 's, &'static Children>,
+}
+
+/// What a top-objects action reads besides its window, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the current region a report
+/// is addressed to, the window's filter fields, and our own agent.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct TopObjectsFacts<'w, 's> {
+    /// The current region a report request is addressed to.
+    regions: Query<'w, 's, &'static SlRegionIdentity, With<SlCurrentRegion>>,
+    /// The window's filter fields.
+    fields: Query<'w, 's, &'static EditableText>,
+    /// Our own agent, the estate owner check.
+    identity: Res<'w, SlIdentity>,
+    /// The report table, for the rows an action acts on.
+    tables: Query<'w, 's, &'static TableState>,
+}
+
 /// Grey out and refuse the buttons whose action cannot be taken, per window.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the windows, the \
-              region rights, the buttons and the ancestry walk that finds each one's window, the \
-              disabled marker, and the label recolouring"
-)]
 fn update_button_enable(
     windows: Query<&TopObjectsState>,
     regions: Query<&SlRegionIdentity, With<SlCurrentRegion>>,
-    buttons: Query<(Entity, &TopObjectsAction)>,
-    parents: Query<&ChildOf>,
-    floaters: Query<(Entity, &Floater)>,
-    disabled: Query<(), With<InteractionDisabled>>,
-    children: Query<&Children>,
+    controls: TopObjectsButtons,
+    host: FloaterHost,
     mut texts: Query<&mut TextColor>,
     mut commands: Commands,
 ) {
+    let TopObjectsButtons {
+        buttons,
+        disabled,
+        children,
+    } = controls;
     let manage = can_manage(&regions);
     for (entity, action) in &buttons {
-        let Some(state) =
-            host_floater(entity, &parents, &floaters).and_then(|window| windows.get(window).ok())
-        else {
+        let Some(state) = host.of(entity).and_then(|window| windows.get(window).ok()) else {
             continue;
         };
         let enabled = window_action_enabled(*action, manage, state);
@@ -1650,18 +1687,10 @@ fn update_button_enable(
 
 /// A press on a pooled row: the table widget already owns the selection, so this
 /// only adds the reference's double-click, which shows the beacon.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "an observer's parameters are its injected resources / queries: the press, the \
-              pressed row, the ancestry walk that finds its window, the windows themselves, the \
-              clock the double-click is measured with, the identity the position is global \
-              against, and the tracking beacon it sets"
-)]
 fn on_top_objects_row_press(
     mut press: On<Pointer<Press>>,
     rows: Query<&VirtualRow>,
-    parents: Query<&ChildOf>,
-    floaters: Query<(Entity, &Floater)>,
+    host: FloaterHost,
     mut windows: Query<(&TopObjectsState, &TopObjectsView, &mut TopObjectsClicks)>,
     time: Res<Time>,
     identity: Res<SlIdentity>,
@@ -1673,7 +1702,7 @@ fn on_top_objects_row_press(
     let Ok(row) = rows.get(press.entity) else {
         return;
     };
-    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+    let Some(window) = host.of(press.entity) else {
         return;
     };
     let Ok((state, view, mut clicks)) = windows.get_mut(window) else {
@@ -1718,31 +1747,27 @@ fn track_item(item: &LandStatItem, identity: &SlIdentity, tracking: &mut MapTrac
 
 /// `Enter` in a filter field runs that window's filter (see the module header
 /// for why this is not the reference's default-button behaviour).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the keyboard and \
-              focus the gesture is read from, the ancestry walk that finds the focused field's \
-              window, the windows and region rights, the field the filter is read out of, the \
-              identity the request is scoped by, and the command output"
-)]
 fn filter_on_enter(
     mut keyboard: ResMut<ButtonInput<KeyCode>>,
     focus: Res<InputFocus>,
-    parents: Query<&ChildOf>,
-    floaters: Query<(Entity, &Floater)>,
+    host: FloaterHost,
     mut windows: Query<(&TopObjectsKind, &mut TopObjectsState, &TopObjectsUi)>,
-    regions: Query<&SlRegionIdentity, With<SlCurrentRegion>>,
-    fields: Query<&EditableText>,
-    identity: Res<SlIdentity>,
+    facts: TopObjectsFacts,
     mut commands: MessageWriter<SlCommand>,
 ) {
+    let TopObjectsFacts {
+        regions,
+        fields,
+        identity,
+        ..
+    } = facts;
     if !keyboard.just_pressed(KeyCode::Enter) {
         return;
     }
     let Some(focused) = focus.get() else {
         return;
     };
-    let Some(window) = host_floater(focused, &parents, &floaters) else {
+    let Some(window) = host.of(focused) else {
         return;
     };
     let Ok((kind, mut state, ui)) = windows.get_mut(window) else {
@@ -1780,41 +1805,38 @@ fn arm_filter(
 }
 
 /// Send the pressed button's command, on behalf of the window it sits in.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "an observer's parameters are its injected resources / queries: the press, the \
-              pressed button's action, the ancestry walk that finds its window, the windows and \
-              their lists, the region rights, the filter fields, the identity the commands are \
-              scoped by, the pending confirmation, and the command / notification / tracking \
-              outputs"
-)]
 fn on_top_objects_action(
     press: On<Pointer<Press>>,
     actions: Query<&TopObjectsAction>,
-    parents: Query<&ChildOf>,
-    floaters: Query<(Entity, &Floater)>,
+    host: FloaterHost,
     mut windows: Query<(
         &TopObjectsKind,
         &mut TopObjectsState,
         &TopObjectsView,
         &TopObjectsUi,
     )>,
-    regions: Query<&SlRegionIdentity, With<SlCurrentRegion>>,
-    fields: Query<&EditableText>,
-    identity: Res<SlIdentity>,
-    tables: Query<&TableState>,
+    facts: TopObjectsFacts,
     mut confirm: ResMut<TopObjectsConfirm>,
-    mut commands: MessageWriter<SlCommand>,
-    mut notifications: MessageWriter<ShowNotification>,
-    mut tracking: ResMut<MapTracking>,
+    out: TopObjectsActionOut,
 ) {
+    let TopObjectsFacts {
+        regions,
+        fields,
+        identity,
+        tables,
+    } = facts;
+    let TopObjectsActionOut {
+        mut commands,
+        mut notifications,
+        mut tracking,
+    } = out;
     if press.button != PointerButton::Primary {
         return;
     }
     let Ok(action) = actions.get(press.entity).copied() else {
         return;
     };
-    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+    let Some(window) = host.of(press.entity) else {
         return;
     };
     let Ok((kind, mut state, view, ui)) = windows.get_mut(window) else {

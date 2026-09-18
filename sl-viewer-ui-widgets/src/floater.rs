@@ -1091,6 +1091,30 @@ pub fn floater_panel(floaters: &Query<(Entity, &Floater)>, id: &str) -> Option<E
         .find_map(|(entity, floater)| (floater.id == id && floater.key.is_none()).then_some(entity))
 }
 
+/// The walk from a clicked node up to the window it lives in, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the parent links and the
+/// floaters themselves.
+///
+/// The injected form of [`host_floater`], which every keyed window's observers
+/// want: a press arrives with an entity, and the observer has to reach *its*
+/// instance's state rather than a resource that could only hold one window's
+/// worth.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub struct FloaterHost<'w, 's> {
+    /// Parent links, walked up from the node the press landed on.
+    parents: Query<'w, 's, &'static ChildOf>,
+    /// The windows, so the walk knows when it has arrived.
+    floaters: Query<'w, 's, (Entity, &'static Floater)>,
+}
+
+impl FloaterHost<'_, '_> {
+    /// The floater `entity` lives in — see [`host_floater`].
+    #[must_use]
+    pub fn of(&self, entity: Entity) -> Option<Entity> {
+        host_floater(entity, &self.parents, &self.floaters)
+    }
+}
+
 /// The floater `entity` lives in — itself, or the nearest ancestor carrying a
 /// [`Floater`].
 ///

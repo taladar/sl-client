@@ -351,24 +351,40 @@ fn route_gallery_actions(
     }
 }
 
+/// What the grid is rebuilt from, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the gallery's own state, the
+/// inventory model, the selection the tiles highlight, and the window's handles
+/// plus its show / hide switch.
+#[derive(bevy::ecs::system::SystemParam)]
+struct GallerySources<'w, 's> {
+    /// The folder the gallery is showing.
+    state: Res<'w, GalleryState>,
+    /// The inventory model the tiles are folded out of.
+    model: Res<'w, InventoryModel>,
+    /// The selection the tiles highlight.
+    selection: Res<'w, InventorySelection>,
+    /// The window's handles, absent before it is built.
+    ui: Option<Res<'w, GalleryUi>>,
+    /// Whether the window is shown; a hidden gallery rebuilds nothing.
+    panels: Query<'w, 's, &'static UiPanelShown>,
+}
+
 /// Rebuild the grid whenever the shown folder, the model or the selection
 /// changed while the gallery is open.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the state / model / \
-              selection inputs, the floater handles and the spawn outputs"
-)]
 fn rebuild_gallery(
-    state: Res<GalleryState>,
-    model: Res<InventoryModel>,
-    selection: Res<InventorySelection>,
-    ui: Option<Res<GalleryUi>>,
-    panels: Query<&UiPanelShown>,
+    sources: GallerySources,
     children: Query<&Children>,
     mut texts: Query<&mut Text>,
     mut commands: Commands,
     mut sl_commands: MessageWriter<SlCommand>,
 ) {
+    let GallerySources {
+        state,
+        model,
+        selection,
+        ui,
+        panels,
+    } = sources;
     let Some(ui) = ui else {
         return;
     };
@@ -539,21 +555,11 @@ fn on_tile_press(
 
 /// A right-click on a tile: select it and open the same context menu the
 /// tree rows use, targeting the tile's folder / item.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy observer's parameters are its injected resources: the tile key, the \
-              model and every context-menu fact source, plus the target stash and the open \
-              channel"
-)]
 fn on_tile_context(
     mut press: On<Pointer<Press>>,
     tiles: Query<&TileKey>,
-    model: Res<InventoryModel>,
-    clipboard: Res<crate::inventory_actions::InventoryClipboard>,
-    worn: Res<crate::inventory_actions::WornAttachments>,
-    gestures: Res<crate::inventory_actions::ActiveGestures>,
-    mut selection: ResMut<InventorySelection>,
-    mut target: ResMut<crate::inventory_actions::InventoryMenuTarget>,
+    facts: crate::inventory_actions::InventoryMenuFacts,
+    mut pick: crate::inventory_actions::InventoryMenuPick,
     mut menus: MessageWriter<crate::menu::OpenContextMenu>,
 ) {
     if press.button != PointerButton::Secondary {
@@ -563,20 +569,17 @@ fn on_tile_context(
         return;
     };
     press.propagate(false);
-    if !selection.contains(tile.0) {
-        selection.select_single(tile.0, 0);
+    if !pick.selection.contains(tile.0) {
+        pick.selection.select_single(tile.0, 0);
     }
     let _opened = crate::inventory_actions::open_inventory_context_menu(
         &[tile.0],
         press.pointer_location.position,
-        &model,
-        &clipboard,
-        &worn,
-        &gestures,
+        &facts,
         // The gallery is a flat single view with no Worn / Recent membership
         // tabs, so it never offers the "Show in Main view" jump.
         false,
-        &mut target,
+        &mut pick,
         &mut menus,
     );
 }

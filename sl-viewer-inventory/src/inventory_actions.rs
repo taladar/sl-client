@@ -1514,33 +1514,57 @@ fn resolve_row_target(
     }
 }
 
+/// Every fact a context menu's conditions are drawn from, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the model the rows resolve
+/// through, the cut / copy clipboard, the tracked worn set, and the gestures
+/// currently active.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub(crate) struct InventoryMenuFacts<'w> {
+    /// The inventory model every row resolves through.
+    pub(crate) model: Res<'w, InventoryModel>,
+    /// The cut / copy clipboard, for the Paste conditions.
+    pub(crate) clipboard: Res<'w, InventoryClipboard>,
+    /// The tracked worn set, for Wear / Take Off.
+    pub(crate) worn: Res<'w, WornAttachments>,
+    /// The gestures currently active, for Activate / Deactivate.
+    pub(crate) gestures: Res<'w, ActiveGestures>,
+}
+
+/// What a right-click leaves behind, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the selection the click may
+/// have moved, and the target stash the menu actions read.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub(crate) struct InventoryMenuPick<'w> {
+    /// The selection, which an out-of-selection right-click replaces.
+    pub(crate) selection: ResMut<'w, InventorySelection>,
+    /// What the opened menu will act on.
+    pub(crate) target: ResMut<'w, InventoryMenuTarget>,
+}
+
 /// Resolve a set of row keys (the clicked row, or the whole selection) to
 /// snapshots + intersected conditions and open the matching context menu —
 /// shared by the tree rows and the gallery tiles. An all-folder selection
 /// opens the folder menu; anything else the item menu. Returns `None` when
 /// nothing resolved.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the resolution reads every fact source the conditions draw on: the model, the \
-              clipboard, the tracked worn / gesture sets, and the two output channels"
-)]
 pub(crate) fn open_inventory_context_menu(
     keys: &[RowKey],
     at: Vec2,
-    model: &InventoryModel,
-    clipboard: &InventoryClipboard,
-    worn: &WornAttachments,
-    gestures: &ActiveGestures,
+    facts: &InventoryMenuFacts,
     in_membership_tab: bool,
-    target: &mut InventoryMenuTarget,
+    pick: &mut InventoryMenuPick,
     menus: &mut MessageWriter<OpenContextMenu>,
 ) -> Option<()> {
     let mut snapshots = Vec::new();
     let mut condition_sets = Vec::new();
     for &key in keys {
-        if let Some((snapshot, conditions)) =
-            resolve_row_target(key, model, clipboard, worn, gestures, in_membership_tab)
-        {
+        if let Some((snapshot, conditions)) = resolve_row_target(
+            key,
+            &facts.model,
+            &facts.clipboard,
+            &facts.worn,
+            &facts.gestures,
+            in_membership_tab,
+        ) {
             snapshots.push(snapshot);
             condition_sets.push(conditions);
         }
@@ -1557,7 +1581,7 @@ pub(crate) fn open_inventory_context_menu(
         &INVENTORY_ITEM_MENU
     };
     let conditions = intersect_conditions(&condition_sets);
-    target.targets = snapshots;
+    pick.target.targets = snapshots;
     menus.write(OpenContextMenu {
         menu,
         at,
@@ -1569,22 +1593,13 @@ pub(crate) fn open_inventory_context_menu(
 
 /// A right-click on a pooled inventory row: resolve the row it currently
 /// presents and open the matching context menu at the pointer.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy observer's parameters are its injected resources: the row pool, the view, \
-              the model and the fact sources, plus the target stash and the open channel"
-)]
 pub(crate) fn on_row_context(
     mut press: On<Pointer<Press>>,
     rows: Query<&VirtualRow>,
     view: Res<InventoryView>,
-    model: Res<InventoryModel>,
     state: Res<crate::inventory::InventoryState>,
-    clipboard: Res<InventoryClipboard>,
-    worn: Res<WornAttachments>,
-    gestures: Res<ActiveGestures>,
-    mut selection: ResMut<InventorySelection>,
-    mut target: ResMut<InventoryMenuTarget>,
+    facts: InventoryMenuFacts,
+    mut pick: InventoryMenuPick,
     mut menus: MessageWriter<OpenContextMenu>,
 ) {
     if press.button != PointerButton::Secondary {
@@ -1605,23 +1620,20 @@ pub(crate) fn on_row_context(
     // The usual list semantics: a right-click on an unselected row selects it;
     // a right-click **inside** the selection keeps it, and the menu acts on
     // the whole selection.
-    if !selection.contains(display.key()) {
-        selection.select_single(display.key(), index);
+    if !pick.selection.contains(display.key()) {
+        pick.selection.select_single(display.key(), index);
     }
-    let keys = if selection.count() > 1 {
-        selection.keys_in_view_order(view.rows())
+    let keys = if pick.selection.count() > 1 {
+        pick.selection.keys_in_view_order(view.rows())
     } else {
         vec![display.key()]
     };
     let _opened = open_inventory_context_menu(
         &keys,
         press.pointer_location.position,
-        &model,
-        &clipboard,
-        &worn,
-        &gestures,
+        &facts,
         state.tab().is_membership(),
-        &mut target,
+        &mut pick,
         &mut menus,
     );
 }
@@ -1743,47 +1755,95 @@ fn write_cof_commands(
     }
 }
 
+/// The eight stashes a menu action mutates, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the cut / copy clipboard,
+/// the worn set and active gestures a Wear / Activate updates, the inline
+/// rename a New Folder starts, and the four pending-operation stashes the
+/// asynchronous actions leave their state in.
+#[derive(bevy::ecs::system::SystemParam)]
+struct InventoryStashes<'w> {
+    /// The cut / copy clipboard.
+    clipboard: ResMut<'w, InventoryClipboard>,
+    /// The tracked worn set.
+    worn: ResMut<'w, WornAttachments>,
+    /// The active gestures.
+    gestures: ResMut<'w, ActiveGestures>,
+    /// The inline rename a freshly created item starts in.
+    rename: ResMut<'w, crate::inventory::InlineRename>,
+    /// Who a share is waiting on a picker for.
+    pending_share: ResMut<'w, PendingShare>,
+    /// The item creations waiting on their `UpdateCreateInventoryItem`.
+    pending_creations: ResMut<'w, PendingItemCreations>,
+    /// The settings creations, likewise.
+    settings_creations: ResMut<'w, PendingSettingsCreations>,
+    /// The reveal a "Show in Main view" is waiting to perform.
+    pending_reveal: ResMut<'w, crate::inventory::PendingReveal>,
+}
+
+/// Everything a menu action raises or writes, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the ten message channels its
+/// arms write, plus the two stores an action edits directly (the viewer settings
+/// a toggle flips, and the system clipboard a Copy UUID fills).
+#[derive(bevy::ecs::system::SystemParam)]
+struct InventoryMenuOut<'w> {
+    /// The window's own UI actions (refresh, scroll-to, …).
+    ui_actions: MessageWriter<'w, crate::inventory::InventoryUiAction>,
+    /// An IM conversation.
+    conversations: MessageWriter<'w, OpenConversation>,
+    /// An ad-hoc conference.
+    conferences: MessageWriter<'w, StartConference>,
+    /// The shared avatar picker, for Share.
+    picker_opens: MessageWriter<'w, crate::intents::OpenAvatarPicker>,
+    /// The item preview floater.
+    previews: MessageWriter<'w, crate::inventory_properties::OpenItemPreview>,
+    /// The item properties floater.
+    properties: MessageWriter<'w, crate::inventory_properties::OpenItemProperties>,
+    /// The wire.
+    commands: MessageWriter<'w, SlCommand>,
+    /// The wearable editor.
+    wearable_editor: MessageWriter<'w, crate::inventory::OpenWearableEditor>,
+    /// The material editor.
+    material_editor: MessageWriter<'w, crate::inventory::OpenMaterialEditor>,
+    /// The landmark's About Land floater.
+    landmark_opens: MessageWriter<'w, crate::inventory::OpenAboutLandmark>,
+    /// The viewer settings a menu toggle flips.
+    settings: ResMut<'w, crate::settings::ViewerSettings>,
+    /// The system clipboard a Copy UUID fills, absent on a headless host.
+    system_clipboard: Option<ResMut<'w, bevy::clipboard::Clipboard>>,
+}
+
+/// The read-only sources a menu action resolves against, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the inventory model, our own
+/// agent, the avatar asset library a new wearable's defaults come from, and
+/// which settings asset types this grid supports.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct MenuActionContext<'w> {
+    /// The inventory model every target resolves through.
+    model: Res<'w, InventoryModel>,
+    /// Our own agent, the owner of anything created.
+    identity: Res<'w, SlIdentity>,
+    /// The avatar asset library a new wearable's default params come from.
+    library: Option<Res<'w, crate::avatar_assets::AvatarAssetLibrary>>,
+    /// Which settings asset types this grid supports.
+    settings_support: Res<'w, SettingsInventorySupport>,
+}
+
 /// Handle a picked inventory context-menu entry.
-#[expect(
-    clippy::too_many_arguments,
-    clippy::type_complexity,
-    reason = "a Bevy system's parameters are its injected resources — grouped into tuples by \
-              role (the mutated stashes, the message outputs) to fit the SystemParam arity"
-)]
 fn handle_inventory_menu_actions(
     mut actions: MessageReader<UiAction>,
     target: Res<InventoryMenuTarget>,
-    model: Res<InventoryModel>,
-    identity: Res<SlIdentity>,
-    stashes: (
-        ResMut<InventoryClipboard>,
-        ResMut<WornAttachments>,
-        ResMut<ActiveGestures>,
-        ResMut<crate::inventory::InlineRename>,
-        ResMut<PendingShare>,
-        ResMut<PendingItemCreations>,
-        ResMut<PendingSettingsCreations>,
-        ResMut<crate::inventory::PendingReveal>,
-    ),
-    library: Option<Res<crate::avatar_assets::AvatarAssetLibrary>>,
-    settings_support: Res<SettingsInventorySupport>,
+    context: MenuActionContext,
+    stashes: InventoryStashes,
     floaters: Query<(Entity, &crate::floater::Floater)>,
-    mut settings: ResMut<crate::settings::ViewerSettings>,
-    mut system_clipboard: Option<ResMut<bevy::clipboard::Clipboard>>,
-    outputs: (
-        MessageWriter<crate::inventory::InventoryUiAction>,
-        MessageWriter<OpenConversation>,
-        MessageWriter<StartConference>,
-        MessageWriter<crate::intents::OpenAvatarPicker>,
-        MessageWriter<crate::inventory_properties::OpenItemPreview>,
-        MessageWriter<crate::inventory_properties::OpenItemProperties>,
-        MessageWriter<SlCommand>,
-        MessageWriter<crate::inventory::OpenWearableEditor>,
-        MessageWriter<crate::inventory::OpenMaterialEditor>,
-        MessageWriter<crate::inventory::OpenAboutLandmark>,
-    ),
+    outputs: InventoryMenuOut,
 ) {
-    let (
+    let MenuActionContext {
+        model,
+        identity,
+        library,
+        settings_support,
+    } = context;
+    let InventoryStashes {
         mut clipboard,
         mut worn,
         mut gestures,
@@ -1792,8 +1852,8 @@ fn handle_inventory_menu_actions(
         mut pending_creations,
         mut settings_creations,
         mut pending_reveal,
-    ) = stashes;
-    let (
+    } = stashes;
+    let InventoryMenuOut {
         mut ui_actions,
         mut conversations,
         mut conferences,
@@ -1804,7 +1864,9 @@ fn handle_inventory_menu_actions(
         mut wearable_editor,
         mut material_editor,
         mut landmark_opens,
-    ) = outputs;
+        mut settings,
+        mut system_clipboard,
+    } = outputs;
     for action in actions.read() {
         if action.element != INVENTORY_MENU_ELEMENT {
             continue;
@@ -2111,11 +2173,13 @@ fn handle_inventory_menu_actions(
                     identity.agent_id,
                     library.as_ref().map(|library| library.params()),
                     *settings_support,
-                    &mut pending_creations,
-                    &mut settings_creations,
-                    &mut commands,
-                    &mut ui_actions,
-                    &mut rename,
+                    CreateSinks {
+                        pending_creations: &mut pending_creations,
+                        settings_creations: &mut settings_creations,
+                        commands: &mut commands,
+                        ui_actions: &mut ui_actions,
+                        rename: &mut rename,
+                    },
                 );
             }
             "teleport" => {
@@ -2925,27 +2989,41 @@ pub fn new_settings_item(kind: SettingsKind, name: &str, dest: InventoryFolderKe
     })
 }
 
+/// Where a creation's pending state and its messages go, bundled as one plain
+/// borrow struct: the two pending-creation queues its reply is matched against,
+/// the wire and UI channels it writes, and the inline rename the fresh row
+/// opens in.
+struct CreateSinks<'a, 'wire, 'ui> {
+    /// The item creations waiting on their `UpdateCreateInventoryItem`.
+    pending_creations: &'a mut PendingItemCreations,
+    /// The settings creations, likewise.
+    settings_creations: &'a mut PendingSettingsCreations,
+    /// The wire the upload / create goes out on.
+    commands: &'a mut MessageWriter<'wire, SlCommand>,
+    /// The window's own UI actions.
+    ui_actions: &'a mut MessageWriter<'ui, crate::inventory::InventoryUiAction>,
+    /// The inline rename the fresh row opens in.
+    rename: &'a mut crate::inventory::InlineRename,
+}
+
 /// Issue the create commands for a New Folder / Script / Notecard / Gesture
 /// action into `dest` — shared by the folder context menu and the toolbar's
 /// **+** menu. Returns whether the action was one of the creators.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the shared create dispatcher takes every creation input: the action, the \
-              destination, the identity, the wearable param source, whether the grid does \
-              settings at all, the pending-upload queue and the three output channels"
-)]
 fn dispatch_create(
     action: &str,
     dest: InventoryFolderKey,
     own_agent: Option<AgentKey>,
     params: Option<&VisualParams>,
     settings: SettingsInventorySupport,
-    pending_creations: &mut PendingItemCreations,
-    settings_creations: &mut PendingSettingsCreations,
-    commands: &mut MessageWriter<SlCommand>,
-    ui_actions: &mut MessageWriter<crate::inventory::InventoryUiAction>,
-    rename: &mut crate::inventory::InlineRename,
+    sinks: CreateSinks<'_, '_, '_>,
 ) -> bool {
+    let CreateSinks {
+        pending_creations,
+        settings_creations,
+        commands,
+        ui_actions,
+        rename,
+    } = sinks;
     // The wearable creators: author the slot's default asset, upload it (the
     // uploader creates the item), and stamp the flags when the reply lands.
     if let Some((slot, name)) = wearable_slot_of(action) {
@@ -3046,29 +3124,55 @@ fn dispatch_create(
     }
 }
 
+/// The read-only sources the add menu resolves a destination from, bundled as
+/// one [`SystemParam`](bevy::ecs::system::SystemParam): the model, the current
+/// selection, our own agent, the avatar asset library and the grid's settings
+/// support.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct AddActionFacts<'w> {
+    /// The inventory model the destination folder is resolved in.
+    model: Res<'w, InventoryModel>,
+    /// The current selection, whose containing folder is the default target.
+    selection: Res<'w, InventorySelection>,
+    /// Our own agent, the owner of anything created.
+    identity: Res<'w, SlIdentity>,
+    /// The avatar asset library a new wearable's default params come from.
+    library: Option<Res<'w, crate::avatar_assets::AvatarAssetLibrary>>,
+    /// Which settings asset types this grid supports.
+    settings_support: Res<'w, SettingsInventorySupport>,
+}
+
+/// The stores a creation leaves its pending state in, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam) — the two pending-creation
+/// queues and the inline rename the fresh row opens in.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct CreateStores<'w> {
+    /// The item creations waiting on their `UpdateCreateInventoryItem`.
+    pending_creations: ResMut<'w, PendingItemCreations>,
+    /// The settings creations, likewise.
+    settings_creations: ResMut<'w, PendingSettingsCreations>,
+    /// The inline rename the fresh row opens in.
+    rename: ResMut<'w, crate::inventory::InlineRename>,
+}
+
 /// Route the toolbar **+** menu's picks: a create action lands in the
 /// **selected** folder — the selected folder row itself, a selected item's
 /// containing folder — or the agent root when nothing is selected, the
 /// reference's behaviour for the add menu.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the pick stream, the \
-              model / selection, the identity, the wearable param source, the pending queue \
-              and the output channels"
-)]
 fn handle_inventory_add_actions(
     mut actions: MessageReader<UiAction>,
-    model: Res<InventoryModel>,
-    selection: Res<InventorySelection>,
-    identity: Res<SlIdentity>,
-    library: Option<Res<crate::avatar_assets::AvatarAssetLibrary>>,
-    settings_support: Res<SettingsInventorySupport>,
-    mut pending_creations: ResMut<PendingItemCreations>,
-    mut settings_creations: ResMut<PendingSettingsCreations>,
-    mut rename: ResMut<crate::inventory::InlineRename>,
+    facts: AddActionFacts,
+    mut stores: CreateStores,
     mut ui_actions: MessageWriter<crate::inventory::InventoryUiAction>,
     mut commands: MessageWriter<SlCommand>,
 ) {
+    let AddActionFacts {
+        model,
+        selection,
+        identity,
+        library,
+        settings_support,
+    } = facts;
     for action in actions.read() {
         if action.element != INVENTORY_ADD_ELEMENT {
             continue;
@@ -3090,11 +3194,13 @@ fn handle_inventory_add_actions(
             identity.agent_id,
             library.as_ref().map(|lib| lib.params()),
             *settings_support,
-            &mut pending_creations,
-            &mut settings_creations,
-            &mut commands,
-            &mut ui_actions,
-            &mut rename,
+            CreateSinks {
+                pending_creations: &mut stores.pending_creations,
+                settings_creations: &mut stores.settings_creations,
+                commands: &mut commands,
+                ui_actions: &mut ui_actions,
+                rename: &mut stores.rename,
+            },
         );
     }
 }
@@ -3198,6 +3304,24 @@ impl Plugin for InventoryActionsPlugin {
     }
 }
 
+/// The focus gate a hotkey has to pass, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the keys themselves, the
+/// input context and focused widget that say the keystroke is the list's, the
+/// window handles, and the hierarchy the focused node is walked up.
+#[derive(bevy::ecs::system::SystemParam)]
+struct HotkeyGate<'w, 's> {
+    /// The keys pressed this frame.
+    keyboard: Res<'w, ButtonInput<KeyCode>>,
+    /// Where input is going, so a typed key never reaches the list.
+    context: Res<'w, InputContext>,
+    /// The focused widget, walked up to see whether it is inside the list.
+    focus: Res<'w, InputFocus>,
+    /// The inventory window's handles, absent before it is built.
+    ui: Option<Res<'w, InventoryUi>>,
+    /// Parent links, for that walk.
+    child_of: Query<'w, 's, &'static ChildOf>,
+}
+
 /// **F2** renames the single selected inventory row and **Delete / Backspace**
 /// moves the selection to the Trash — but only while the inventory list is the
 /// focused widget (the reference's `LLPanelMainInventory` accelerators), so the
@@ -3206,24 +3330,21 @@ impl Plugin for InventoryActionsPlugin {
 /// predicate the context menu's Delete entry is enabled on: Library rows,
 /// system folders and rows *already* in the Trash are never trashed (a trashed
 /// row is purged instead, and the menu offers exactly that).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the keyboard + input \
-              context + focus + hierarchy for the focus gate, the inventory UI + selection + \
-              view + model to resolve the rows, the rename state, and the command channel"
-)]
 fn inventory_hotkeys(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    context: Res<InputContext>,
-    focus: Res<InputFocus>,
-    ui: Option<Res<InventoryUi>>,
+    gate: HotkeyGate,
     selection: Res<InventorySelection>,
     view: Res<InventoryView>,
     model: Res<InventoryModel>,
-    child_of: Query<&ChildOf>,
     mut rename: ResMut<InlineRename>,
     mut commands: MessageWriter<SlCommand>,
 ) {
+    let HotkeyGate {
+        keyboard,
+        context,
+        focus,
+        ui,
+        child_of,
+    } = gate;
     if *context == InputContext::TextEntry {
         return;
     }

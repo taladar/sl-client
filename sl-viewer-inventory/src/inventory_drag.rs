@@ -407,27 +407,196 @@ fn report_broken_links(broken: &[String], notices: &mut MessageWriter<LocalChatN
 // Observers: drag start / end on the pooled rows.
 // ---------------------------------------------------------------------------
 
+/// What a drag start resolves the dragged rows from, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the row pool the press
+/// landed on, the view and model the row resolves through, the selection a
+/// multi-row drag carries, the UI root the ghost is parented under, and the
+/// clock the drag is stamped with.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct DragStartFacts<'w, 's> {
+    /// The pooled rows, for the one the press landed on.
+    rows: Query<'w, 's, &'static VirtualRow>,
+    /// The built rows, for what that row presents.
+    view: Res<'w, InventoryView>,
+    /// The inventory model the dragged keys resolve through.
+    model: Res<'w, InventoryModel>,
+    /// The selection a multi-row drag carries.
+    selection: Res<'w, InventorySelection>,
+    /// The UI root the drag ghost is parented under.
+    root: Res<'w, UiRoot>,
+    /// The clock the drag is stamped with.
+    time: Res<'w, Time>,
+}
+
+/// The window and list geometry a live drag is tracked against, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the pointer's window, the
+/// modifier keys, the viewport and list the auto-scroll reads, the pooled rows
+/// the hover highlight paints, and the ghost node it moves.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct DragHover<'w, 's> {
+    /// The window the pointer position is read from.
+    windows: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
+    /// The modifier keys (`Escape` cancels, `Ctrl` copies).
+    keyboard: Res<'w, ButtonInput<KeyCode>>,
+    /// The viewport's laid-out box, for the hit test and the auto-scroll edges.
+    viewports: Query<'w, 's, (&'static ComputedNode, &'static UiGlobalTransform)>,
+    /// The virtual list the auto-scroll drives.
+    lists: Query<'w, 's, &'static mut VirtualList>,
+    /// The pooled rows, whose backgrounds carry the drop highlight.
+    rows: Query<
+        'w,
+        's,
+        (
+            &'static VirtualRow,
+            &'static ChildOf,
+            &'static mut BackgroundColor,
+        ),
+    >,
+    /// The ghost node the drag drags around.
+    nodes: Query<'w, 's, &'static mut Node>,
+}
+
+/// The inventory window and its two models, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct DragModel<'w> {
+    /// The window's handles, absent before it is built.
+    ui: Option<Res<'w, InventoryUi>>,
+    /// The built rows, for what is under the cursor.
+    view: Res<'w, InventoryView>,
+    /// The inventory model the hit row resolves through.
+    model: Res<'w, InventoryModel>,
+}
+
+/// The dragging session's own state, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the window, the two models
+/// the dropped keys resolve through, our own agent, and the worn set a
+/// drag-to-wear updates.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct DragSession<'w> {
+    /// The window's handles, absent before it is built.
+    ui: Option<Res<'w, InventoryUi>>,
+    /// The built rows, for the row a drop landed on.
+    view: Res<'w, InventoryView>,
+    /// The inventory model the dropped keys resolve through.
+    model: Res<'w, InventoryModel>,
+    /// Our own agent, the giver of anything handed over.
+    identity: Res<'w, SlIdentity>,
+    /// The tracked worn set, which a drag-onto-avatar updates.
+    worn: ResMut<'w, WornAttachments>,
+}
+
+/// The list geometry a drop is resolved against, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub(crate) struct DragGeometry<'w, 's> {
+    /// Laid-out boxes, for the viewport hit test.
+    viewports: Query<'w, 's, (&'static ComputedNode, &'static UiGlobalTransform)>,
+    /// The virtual list, for the row under the pointer.
+    lists: Query<'w, 's, &'static VirtualList>,
+    /// The pooled rows, whose drop highlights are cleared.
+    rows: Query<
+        'w,
+        's,
+        (
+            &'static VirtualRow,
+            &'static ChildOf,
+            &'static mut BackgroundColor,
+        ),
+    >,
+}
+
+/// Everything a drop can land **on**, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the UI-occlusion guard (the
+/// hover map, the pickables and their sizes, and the hierarchy walked up from a
+/// hit), and the four kinds of drop target a drag can be released over.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub(crate) struct DropTargets<'w, 's> {
+    /// What the pointer is over this frame.
+    hover_map: Res<'w, HoverMap>,
+    /// Which of those are pickable.
+    pickables: Query<'w, 's, &'static Pickable>,
+    /// Their sizes, for the hit test.
+    node_sizes: Query<'w, 's, &'static ComputedNode>,
+    /// Parent links, walked up from a hit node to its target.
+    child_of: Query<'w, 's, &'static ChildOf>,
+    /// An avatar row / tag: give the item to that resident.
+    agent_targets: Query<'w, 's, &'static AgentDropTarget>,
+    /// An avatar's rendered body, likewise.
+    pick_targets: Query<'w, 's, &'static AvatarPickTarget>,
+    /// An object's Contents tab: copy the item into the prim.
+    contents_targets: Query<'w, 's, &'static ContentsDropTarget>,
+    /// A notecard's body: embed the item in it.
+    notecard_targets: Query<'w, 's, &'static crate::intents::NotecardDropTarget>,
+}
+
+/// What a drop into the **world** is resolved through, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the world camera, the latest
+/// GPU pick, the modifier keys, and the scene identity plus object model the hit
+/// prim is looked up in.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub(crate) struct WorldDrop<'w, 's> {
+    /// The world camera the drop ray is cast from.
+    camera: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<ViewerCamera>>,
+    /// The latest GPU pick under the cursor.
+    world_pick: Res<'w, DragWorldPick>,
+    /// The modifier keys (`Ctrl` copies rather than moves).
+    keyboard: Res<'w, ButtonInput<KeyCode>>,
+    /// The scene identity of the hit prim.
+    scene: Query<'w, 's, &'static crate::world_api::SceneObject>,
+    /// The object model, for the permission check.
+    objects: Res<'w, crate::world_api::ObjectState>,
+}
+
+/// Everything a resolved drop raises, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct DragOutputs<'w, 's> {
+    /// The window's own UI actions.
+    actions: MessageWriter<'w, InventoryUiAction>,
+    /// The wire.
+    commands: MessageWriter<'w, SlCommand>,
+    /// A prim's Contents changed.
+    contents_mutations: MessageWriter<'w, crate::intents::ContentsMutated>,
+    /// What despawns the drag ghost.
+    commands_bevy: Commands<'w, 's>,
+    /// An item embedded into an open notecard.
+    add_embedded: MessageWriter<'w, crate::inventory::AddEmbeddedItem>,
+    /// The local-chat line a refused drop explains itself with.
+    notices: MessageWriter<'w, LocalChatNotice>,
+}
+
+/// The UI-occlusion guard, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): what the pointer is over,
+/// which of those are pickable, and their laid-out sizes.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub(crate) struct PointerOcclusion<'w, 's> {
+    /// What the pointer is over this frame.
+    hover_map: Res<'w, HoverMap>,
+    /// Which of those are pickable.
+    pickables: Query<'w, 's, &'static Pickable>,
+    /// Their laid-out sizes.
+    node_sizes: Query<'w, 's, &'static ComputedNode>,
+}
+
 /// A primary-button drag began on a row: snapshot it, spawn the ghost, and —
 /// for a folder row — revert the expand-toggle its press already fired (a drag
 /// is not a click, but the press arrived first).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy observer's parameters are its injected resources: the row pool, the view / \
-              model to resolve the row, the UI root for the ghost, the drag state, and the \
-              toggle-revert channel"
-)]
 pub(crate) fn on_row_drag_start(
     drag: On<Pointer<DragStart>>,
-    rows: Query<&VirtualRow>,
-    view: Res<InventoryView>,
-    model: Res<InventoryModel>,
-    selection: Res<InventorySelection>,
-    root: Res<UiRoot>,
-    time: Res<Time>,
+    facts: DragStartFacts,
     mut state: ResMut<InventoryDragState>,
     mut actions: MessageWriter<InventoryUiAction>,
     mut commands: Commands,
 ) {
+    let DragStartFacts {
+        rows,
+        view,
+        model,
+        selection,
+        root,
+        time,
+    } = facts;
     if drag.button != PointerButton::Primary || state.active.is_some() {
         return;
     }
@@ -569,27 +738,23 @@ fn drop_folder_at(
 /// Drive the in-progress drag each frame: move the ghost with the pointer,
 /// highlight the hovered destination folder, auto-scroll at the list's edges,
 /// auto-expand a collapsed folder lingered over, and cancel on `Escape`.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the drag state, the window \
-              pointer, the clock, the list / viewport geometry, the view / model for the hit \
-              test, the row pool for the highlight, the ghost node, and the expand channel"
-)]
 pub(crate) fn drive_inventory_drag(
     mut state: ResMut<InventoryDragState>,
-    windows: Query<&Window, With<PrimaryWindow>>,
     time: Res<Time>,
-    keyboard: Res<ButtonInput<KeyCode>>,
-    ui: Option<Res<InventoryUi>>,
-    view: Res<InventoryView>,
-    model: Res<InventoryModel>,
-    viewports: Query<(&ComputedNode, &UiGlobalTransform)>,
-    mut lists: Query<&mut VirtualList>,
-    mut rows: Query<(&VirtualRow, &ChildOf, &mut BackgroundColor)>,
-    mut nodes: Query<&mut Node>,
+    hover: DragHover,
+    inventory: DragModel,
     mut actions: MessageWriter<InventoryUiAction>,
     mut commands: Commands,
 ) {
+    let DragHover {
+        windows,
+        keyboard,
+        viewports,
+        mut lists,
+        mut rows,
+        mut nodes,
+    } = hover;
+    let DragModel { ui, view, model } = inventory;
     let Some(ui) = ui else {
         return;
     };
@@ -683,73 +848,52 @@ fn clear_row_highlights(
 
 /// The drag ended: resolve the drop in the reference's occlusion order (the
 /// list, an avatar in the UI, blocking UI, the world) and issue the commands.
-#[expect(
-    clippy::too_many_arguments,
-    clippy::type_complexity,
-    reason = "a Bevy observer's parameters are its injected resources — here every drop-target \
-              source a drag can land on (the list geometry, the hover map and occlusion \
-              queries, the avatar targets, the world camera / picker / ray caster) — grouped \
-              into tuples by role to fit the SystemParam arity"
-)]
 pub(crate) fn on_row_drag_end(
     drag: On<Pointer<DragEnd>>,
     mut state: ResMut<InventoryDragState>,
-    ui: Option<Res<InventoryUi>>,
-    session: (
-        Res<InventoryView>,
-        Res<InventoryModel>,
-        Res<SlIdentity>,
-        ResMut<WornAttachments>,
-    ),
-    geometry: (
-        Query<(&ComputedNode, &UiGlobalTransform)>,
-        Query<&VirtualList>,
-        Query<(&VirtualRow, &ChildOf, &mut BackgroundColor)>,
-    ),
-    occlusion: (
-        Res<HoverMap>,
-        Query<&Pickable>,
-        Query<&ComputedNode>,
-        Query<&ChildOf>,
-    ),
-    targets: (
-        Query<&AgentDropTarget>,
-        Query<&AvatarPickTarget>,
-        Query<&ContentsDropTarget>,
-        Query<&crate::intents::NotecardDropTarget>,
-    ),
-    world: (
-        Query<(&Camera, &GlobalTransform), With<ViewerCamera>>,
-        Res<DragWorldPick>,
-    ),
-    resolve: (
-        Res<ButtonInput<KeyCode>>,
-        Query<&crate::world_api::SceneObject>,
-        Res<crate::world_api::ObjectState>,
-    ),
-    outputs: (
-        MessageWriter<InventoryUiAction>,
-        MessageWriter<SlCommand>,
-        MessageWriter<crate::intents::ContentsMutated>,
-        Commands,
-        MessageWriter<crate::inventory::AddEmbeddedItem>,
-        MessageWriter<LocalChatNotice>,
-    ),
+    session: DragSession,
+    geometry: DragGeometry,
+    drop_targets: DropTargets,
+    world: WorldDrop,
+    outputs: DragOutputs,
 ) {
-    let (view, model, identity, mut worn) = session;
-    let (viewports, lists, mut rows) = geometry;
-    let (hover_map, pickables, node_sizes, child_of) = occlusion;
-    let (agent_targets, pick_targets, contents_targets, notecard_targets) = targets;
-    let (camera, world_pick) = world;
-    let (keyboard, scene, objects) = resolve;
-    let (
+    let DragSession {
+        ui,
+        view,
+        model,
+        identity,
+        mut worn,
+    } = session;
+    let DragGeometry {
+        viewports,
+        lists,
+        mut rows,
+    } = geometry;
+    let DropTargets {
+        hover_map,
+        pickables,
+        node_sizes,
+        child_of,
+        agent_targets,
+        pick_targets,
+        contents_targets,
+        notecard_targets,
+    } = drop_targets;
+    let WorldDrop {
+        camera,
+        world_pick,
+        keyboard,
+        scene,
+        objects,
+    } = world;
+    let DragOutputs {
         mut actions,
         mut commands,
         mut contents_mutations,
         mut commands_bevy,
         mut add_embedded,
         mut notices,
-    ) = outputs;
+    } = outputs;
     let Some(ui) = ui else {
         return;
     };
@@ -1242,24 +1386,26 @@ fn publish_drag_pick_active(state: Res<InventoryDragState>, mut active: ResMut<D
 /// `highlightObjectAndFamily` during a drag). Publishes the target to
 /// [`DragHoverHighlight`], which [`crate::edit_selection`] renders; clears it when
 /// no valid target is under the cursor or no drag is in progress.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the drag state, \
-              the latest GPU world pick, the scene / hierarchy / object-state to resolve + \
-              permission-check it, the keyboard for the Ctrl modifier, the UI-occlusion guard, \
-              and the hover output"
-)]
 fn drive_drag_object_hover(
     state: Res<InventoryDragState>,
-    world_pick: Res<DragWorldPick>,
-    scene: Query<&crate::world_api::SceneObject>,
+    world: WorldDrop,
     child_of: Query<&ChildOf>,
-    objects: Res<crate::world_api::ObjectState>,
-    keyboard: Res<ButtonInput<KeyCode>>,
-    occlusion: (Res<HoverMap>, Query<&Pickable>, Query<&ComputedNode>),
+    occlusion: PointerOcclusion,
     mut hover_out: ResMut<crate::intents::DragHoverHighlight>,
     mut last_stage: Local<Option<&'static str>>,
 ) {
+    let WorldDrop {
+        camera: _camera,
+        world_pick,
+        keyboard,
+        scene,
+        objects,
+    } = world;
+    let PointerOcclusion {
+        hover_map,
+        pickables,
+        node_sizes,
+    } = occlusion;
     // Where this frame's answer comes from, for [`DRAG_HOVER_LOG_TARGET`]: every
     // bail names itself, so a missing outline is one log line rather than a
     // guess between the drag, the modifier rule, the pick and the draw.
@@ -1269,7 +1415,6 @@ fn drive_drag_object_hover(
             stage = "no drag in flight";
             break 'decide None;
         };
-        let (hover_map, pickables, node_sizes) = occlusion;
         // Over a floater / the list itself, the list-drop path owns the drop — no
         // world outline.
         if pointer_over_blocking_ui(&hover_map, &pickables, &node_sizes) {

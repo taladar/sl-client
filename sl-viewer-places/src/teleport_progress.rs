@@ -545,34 +545,42 @@ fn on_overlay_button(
     }
 }
 
-/// Render the overlay from the flow state: title colour + text, status, detail,
-/// message/warning line, button visibility, and the whole overlay's visibility;
-/// auto-hide a success confirmation after it has lingered.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "one text/visibility query per overlay part; splitting would not simplify"
-)]
+/// The overlay's parts, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the root whose visibility is
+/// the overlay itself, the title, the status and detail lines, the message /
+/// warning line, and the buttons.
+///
+/// The `Without<>` filters are what make the per-part queries disjoint, which is
+/// what Bevy's borrow rules want when several of them mention `Text`.
 #[expect(
     clippy::type_complexity,
-    reason = "the disjoint per-part text/visibility queries need Without<> filters to \
+    reason = "the disjoint per-part text / visibility queries need Without<> filters to \
               satisfy Bevy's borrow rules; a type alias per part would not read clearer"
 )]
-fn render_overlay(
-    time: Res<Time>,
-    mut flow: ResMut<TeleportFlow>,
-    mut root: Query<&mut Visibility, With<OverlayRoot>>,
-    mut titles: Query<(&mut Text, &mut TextColor), With<OverlayTitle>>,
-    mut statuses: Query<&mut Text, (With<OverlayStatus>, Without<OverlayTitle>)>,
-    mut details: Query<
-        &mut Text,
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct OverlayParts<'w, 's> {
+    /// The overlay root, whose visibility is the overlay's own.
+    root: Query<'w, 's, &'static mut Visibility, With<OverlayRoot>>,
+    /// The title line and its colour.
+    titles: Query<'w, 's, (&'static mut Text, &'static mut TextColor), With<OverlayTitle>>,
+    /// The status line.
+    statuses: Query<'w, 's, &'static mut Text, (With<OverlayStatus>, Without<OverlayTitle>)>,
+    /// The detail line.
+    details: Query<
+        'w,
+        's,
+        &'static mut Text,
         (
             With<OverlayDetail>,
             Without<OverlayTitle>,
             Without<OverlayStatus>,
         ),
     >,
-    mut messages: Query<
-        (&mut Text, &mut Visibility),
+    /// The message / warning line, which hides when there is nothing to say.
+    messages: Query<
+        'w,
+        's,
+        (&'static mut Text, &'static mut Visibility),
         (
             With<OverlayMessage>,
             Without<OverlayRoot>,
@@ -581,15 +589,31 @@ fn render_overlay(
             Without<OverlayDetail>,
         ),
     >,
-    mut overlay_buttons: Query<
-        (&OverlayButton, &mut Visibility),
+    /// The buttons, shown per flow phase.
+    overlay_buttons: Query<
+        'w,
+        's,
+        (&'static OverlayButton, &'static mut Visibility),
         (
             Without<OverlayRoot>,
             Without<OverlayMessage>,
             Without<OverlayTitle>,
         ),
     >,
-) {
+}
+
+/// Render the overlay from the flow state: title colour + text, status, detail,
+/// message/warning line, button visibility, and the whole overlay's visibility;
+/// auto-hide a success confirmation after it has lingered.
+fn render_overlay(time: Res<Time>, mut flow: ResMut<TeleportFlow>, parts: OverlayParts) {
+    let OverlayParts {
+        mut root,
+        mut titles,
+        mut statuses,
+        mut details,
+        mut messages,
+        mut overlay_buttons,
+    } = parts;
     let now = time.elapsed_secs_f64();
 
     // Auto-hide a lingering success confirmation.

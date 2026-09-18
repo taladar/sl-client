@@ -727,27 +727,44 @@ fn action_enabled(
     }
 }
 
+/// What a telehub action reads, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the telehub model and its
+/// window, the current region an estate command is addressed to, the build
+/// selection a Connect / Add acts on, the object model those objects live in,
+/// and the table the picked row is read from.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct TelehubFacts<'w, 's> {
+    /// The telehub model: the hub and its spawn points.
+    state: Res<'w, TelehubState>,
+    /// The window's handles, absent before it is built.
+    ui: Option<Res<'w, TelehubUi>>,
+    /// The current region an estate command is addressed to.
+    regions: Query<'w, 's, &'static SlRegionIdentity, With<SlCurrentRegion>>,
+    /// The build selection a Connect / Add Spawn acts on.
+    selection: Res<'w, SelectionSet>,
+    /// The object model the selected objects live in.
+    objects: Res<'w, ObjectState>,
+    /// The spawn-point table, for the picked row.
+    tables: Query<'w, 's, &'static TableState>,
+}
+
 /// Grey out and refuse the buttons whose action cannot be taken.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the telehub \
-              state and window handles, the region rights, the selection and object table the \
-              preconditions read, the table's selection, the buttons and their disabled marker, \
-              and the label / command outputs"
-)]
 fn update_button_enable(
-    state: Res<TelehubState>,
-    ui: Option<Res<TelehubUi>>,
-    regions: Query<&SlRegionIdentity, With<SlCurrentRegion>>,
-    selection: Res<SelectionSet>,
-    objects: Res<ObjectState>,
-    tables: Query<&TableState>,
+    facts: TelehubFacts,
     buttons: Query<(Entity, &TelehubAction)>,
     disabled: Query<(), With<InteractionDisabled>>,
     children: Query<&Children>,
     mut texts: Query<&mut TextColor>,
     mut commands: Commands,
 ) {
+    let TelehubFacts {
+        state,
+        ui,
+        regions,
+        selection,
+        objects,
+        tables,
+    } = facts;
     let Some(ui) = ui.as_deref() else {
         return;
     };
@@ -860,23 +877,20 @@ fn publish_beacons(
 // ---------------------------------------------------------------------------
 
 /// Send the pressed button's command.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "an observer's parameters are its injected resources / queries: the press, the \
-              pressed button's action, the telehub state and window handles, the region rights, \
-              the selection and object table, the table's selection, and the command sink"
-)]
 fn on_telehub_action(
     press: On<Pointer<Press>>,
     actions: Query<&TelehubAction>,
-    state: Res<TelehubState>,
-    ui: Option<Res<TelehubUi>>,
-    regions: Query<&SlRegionIdentity, With<SlCurrentRegion>>,
-    selection: Res<SelectionSet>,
-    objects: Res<ObjectState>,
-    tables: Query<&TableState>,
+    facts: TelehubFacts,
     mut commands: MessageWriter<SlCommand>,
 ) {
+    let TelehubFacts {
+        state,
+        ui,
+        regions,
+        selection,
+        objects,
+        tables,
+    } = facts;
     if press.button != PointerButton::Primary {
         return;
     }

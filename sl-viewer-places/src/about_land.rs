@@ -73,8 +73,8 @@ use sl_client_bevy::{
 
 use crate::edit_fields::{FieldSeed, seed_one_field, set_combo};
 use crate::floater::{
-    Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterKey, FloaterOp, FloaterSpec,
-    FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater,
+    Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterHost, FloaterKey, FloaterOp,
+    FloaterSpec, FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater,
 };
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::intents::{AvatarPicked, OpenAvatarPicker};
@@ -1698,26 +1698,118 @@ fn point_key(x: f32, y: f32) -> FloaterKey {
     FloaterKey::subject(&format!("point/{x:.1}/{y:.1}"))
 }
 
+/// The world an About Land window is opened against, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): our own agent, the parcels
+/// the bound one is found among, the current region's children they hang under,
+/// and the parcel we are standing in.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct LandWorld<'w, 's> {
+    /// Our own agent, which decides what is editable.
+    identity: Res<'w, SlIdentity>,
+    /// The parcels the request's bound one is looked up among.
+    parcels: Query<'w, 's, &'static SlParcel>,
+    /// The current region's children, which those parcels hang under.
+    regions: Query<'w, 's, &'static Children, With<SlCurrentRegion>>,
+    /// The parcel we are standing in, the default subject.
+    agent_parcel: Res<'w, SlAgentParcel>,
+}
+
+/// What an About Land open records, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the request sequence a reply
+/// is matched against, and the owner tallies it queues.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct LandOpenState<'w> {
+    /// The per-window request sequence a `ParcelProperties` reply is matched to.
+    sequence: ResMut<'w, LandSequence>,
+    /// The owner tallies an open queues.
+    tallies: ResMut<'w, OwnerTallyQueue>,
+}
+
+/// What one land open writes, borrowed as one struct so [`start_land_open`]
+/// takes the request rather than its pieces.
+struct LandOpenSinks<'a, 'w> {
+    /// The per-window request sequence a reply is matched to.
+    sequence: &'a mut LandSequence,
+    /// The owner tallies the open queues.
+    tallies: &'a mut OwnerTallyQueue,
+    /// The wire the property / tally requests go out on.
+    commands: &'a mut MessageWriter<'w, SlCommand>,
+}
+
+/// The facts an About Land event fold is judged against, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): our own agent, the parcel we
+/// stand in, and the group roster a deeded parcel's name comes from.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct LandFacts<'w> {
+    /// Our own agent, which decides what is editable.
+    identity: Res<'w, SlIdentity>,
+    /// The parcel we are standing in.
+    agent_parcel: Res<'w, SlAgentParcel>,
+    /// The group roster, for a deeded parcel's owner line.
+    groups: Res<'w, GroupsModel>,
+}
+
+/// The controls an enable pass greys, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the write buttons, the
+/// edit-gated nodes, and which of them already carry the disabled marker.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct EnableGates<'w, 's> {
+    /// The buttons that write to the parcel.
+    write_buttons: Query<'w, 's, Entity, With<WriteButton>>,
+    /// The nodes an edit gate greys, and which gate each is on.
+    gated: Query<'w, 's, (Entity, &'static EditGate)>,
+    /// Which of them already carry the disabled marker.
+    disabled: Query<'w, 's, (), With<InteractionDisabled>>,
+}
+
+/// What an About Land action reads, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): our own agent, where we are
+/// standing, the fields a commit reads, and the owner tallies a report queues.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct LandActionFacts<'w, 's> {
+    /// Our own agent, which decides what is permitted.
+    identity: Res<'w, SlIdentity>,
+    /// Where we are standing, for the parcel-relative actions.
+    agent_position: Res<'w, AgentRegionPosition>,
+    /// The window's edit fields, read on commit.
+    fields: Query<'w, 's, &'static EditableText>,
+    /// The owner tallies a report queues.
+    tallies: ResMut<'w, OwnerTallyQueue>,
+}
+
+/// The three pickers an About Land action opens, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(bevy::ecs::system::SystemParam)]
+struct LandPickers<'w> {
+    /// The avatar picker (Set owner, add to a list).
+    pickers: MessageWriter<'w, OpenAvatarPicker>,
+    /// The group picker (Set group, deed).
+    group_pickers: MessageWriter<'w, OpenGroupPicker>,
+    /// The texture picker (the ground textures, the media texture).
+    texture_pickers: MessageWriter<'w, OpenTexturePicker>,
+}
+
 /// Open a window on the requested parcel — this parcel's window if it is
 /// already up — and request its tab data.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the open reads the identity / parcel model to resolve the subject, spawns or \
-              reuses the subject's window, and fires every tab's fetch"
-)]
 fn open_about_land(
     mut requests: MessageReader<OpenAboutLand>,
     mut windows: KeyedFloaters,
     mut lands: Query<(&mut AboutLandState, &mut AboutLandDirty)>,
-    mut sequence: ResMut<LandSequence>,
-    mut tallies: ResMut<OwnerTallyQueue>,
-    identity: Res<SlIdentity>,
-    parcels: Query<&SlParcel>,
-    regions: Query<&Children, With<SlCurrentRegion>>,
-    agent_parcel: Res<SlAgentParcel>,
+    open_state: LandOpenState,
+    world: LandWorld,
     mut spawner: Commands,
     mut commands: MessageWriter<SlCommand>,
 ) {
+    let LandOpenState {
+        mut sequence,
+        mut tallies,
+    } = open_state;
+    let LandWorld {
+        identity,
+        parcels,
+        regions,
+        agent_parcel,
+    } = world;
     for request in requests.read().copied().collect::<Vec<_>>() {
         // What the window will show, and what it is keyed by. A point open
         // knows neither yet — it opens under a provisional key and is re-keyed
@@ -1764,9 +1856,11 @@ fn open_about_land(
                 request,
                 bound,
                 &identity,
-                &mut sequence,
-                &mut tallies,
-                &mut commands,
+                LandOpenSinks {
+                    sequence: &mut sequence,
+                    tallies: &mut tallies,
+                    commands: &mut commands,
+                },
             );
             spawner.entity(handle.root).insert((
                 state,
@@ -1789,9 +1883,11 @@ fn open_about_land(
             request,
             bound,
             &identity,
-            &mut sequence,
-            &mut tallies,
-            &mut commands,
+            LandOpenSinks {
+                sequence: &mut sequence,
+                tallies: &mut tallies,
+                commands: &mut commands,
+            },
         );
     }
 }
@@ -1803,11 +1899,6 @@ fn open_about_land(
 /// parcel whose read-only window is up (or the other way round) re-gates its
 /// controls rather than leaving the resident in a window that will not let them
 /// do what they asked for.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the shared open path threads the window, its state and dirty flags, the request, \
-              the resolved parcel, the identity, and the sequence / tally books"
-)]
 fn start_land_open(
     window: Entity,
     state: &mut AboutLandState,
@@ -1815,10 +1906,13 @@ fn start_land_open(
     request: OpenAboutLand,
     bound: Option<ParcelInfo>,
     identity: &SlIdentity,
-    sequence: &mut LandSequence,
-    tallies: &mut OwnerTallyQueue,
-    commands: &mut MessageWriter<SlCommand>,
+    sinks: LandOpenSinks<'_, '_>,
 ) {
+    let LandOpenSinks {
+        sequence,
+        tallies,
+        commands,
+    } = sinks;
     let already = state.target.is_some() && state.target == bound.as_ref().map(|p| p.local_id);
     if already {
         // The same parcel's window, re-opened: keep its data and its pending
@@ -1930,23 +2024,20 @@ fn find_parcel<'a>(
 /// A frame's events are collected once and replayed per window: a
 /// [`MessageReader`] is consumed by the first pass over it, so with two windows
 /// open the second would see nothing.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the event stream, every \
-              window's model, the identity, the sequence / tally books, the keying outputs and \
-              the command writer"
-)]
 fn ingest_about_land_events(
     mut events: MessageReader<SlEvent>,
     mut windows: Query<(Entity, &mut AboutLandState, &mut AboutLandDirty)>,
     mut floaters: Query<&mut Floater>,
     mut tallies: ResMut<OwnerTallyQueue>,
-    identity: Res<SlIdentity>,
-    agent_parcel: Res<SlAgentParcel>,
-    groups: Res<GroupsModel>,
+    facts: LandFacts,
     mut closes: MessageWriter<FloaterCommand>,
     mut commands: MessageWriter<SlCommand>,
 ) {
+    let LandFacts {
+        identity,
+        agent_parcel,
+        groups,
+    } = facts;
     let frame: Vec<&SlEvent> = events.read().collect();
     if frame.is_empty() {
         return;
@@ -2425,22 +2516,19 @@ fn seed_edit_fields(
 /// "not built". The reference greys them instead
 /// (`LLPanelLandGeneral::refresh` walks its buttons with `setEnabled`), and so
 /// does this.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "reconciling control enable needs every window, the write buttons and their labels, \
-              the gated controls, the disabled set, and the two ancestry walks together"
-)]
 fn update_control_enable(
     mut windows: Query<(Entity, &mut AboutLandDirty, &AboutLandState)>,
-    write_buttons: Query<Entity, With<WriteButton>>,
-    gated: Query<(Entity, &EditGate)>,
-    disabled: Query<(), With<InteractionDisabled>>,
-    parents: Query<&ChildOf>,
+    gates: EnableGates,
+    host: FloaterHost,
     children: Query<&Children>,
-    floaters: Query<(Entity, &Floater)>,
     mut texts: Query<&mut TextColor>,
     mut commands: Commands,
 ) {
+    let EnableGates {
+        write_buttons,
+        gated,
+        disabled,
+    } = gates;
     // The windows repainting this frame, and what each one allows.
     let mut repainting: Vec<(Entity, bool)> = Vec::new();
     for (window, mut dirty, state) in &mut windows {
@@ -2454,10 +2542,10 @@ fn update_control_enable(
         return;
     }
     let can_edit = |entity: Entity| {
-        let host = host_floater(entity, &parents, &floaters)?;
+        let hosting = host.of(entity)?;
         repainting
             .iter()
-            .find_map(|(window, can_edit)| (*window == host).then_some(*can_edit))
+            .find_map(|(window, can_edit)| (*window == hosting).then_some(*can_edit))
     };
     for entity in &write_buttons {
         let Some(can_edit) = can_edit(entity) else {
@@ -3197,33 +3285,33 @@ fn on_about_land_check(
 }
 
 /// Dispatch a floater button press, in the window it was pressed in.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the dispatcher fans out to every button kind, reading the pressed window, the edit \
-              fields and the agent position to route each"
-)]
 fn on_about_land_action(
     press: On<Pointer<Press>>,
     actions: Query<&AboutLandAction>,
     mut windows: Query<(&mut AboutLandState, &AboutLandUi)>,
-    parents: Query<&ChildOf>,
-    floaters: Query<(Entity, &Floater)>,
-    identity: Res<SlIdentity>,
-    agent_position: Res<AgentRegionPosition>,
-    mut tallies: ResMut<OwnerTallyQueue>,
-    fields: Query<&EditableText>,
+    host: FloaterHost,
+    facts: LandActionFacts,
     mut sl_commands: MessageWriter<SlCommand>,
-    mut pickers: MessageWriter<OpenAvatarPicker>,
-    mut group_pickers: MessageWriter<OpenGroupPicker>,
-    mut texture_pickers: MessageWriter<OpenTexturePicker>,
+    open_pickers: LandPickers,
 ) {
+    let LandActionFacts {
+        identity,
+        agent_position,
+        fields,
+        mut tallies,
+    } = facts;
+    let LandPickers {
+        mut pickers,
+        mut group_pickers,
+        mut texture_pickers,
+    } = open_pickers;
     if press.button != PointerButton::Primary {
         return;
     }
     let Ok(action) = actions.get(press.entity) else {
         return;
     };
-    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+    let Some(window) = host.of(press.entity) else {
         return;
     };
     let Ok((mut state, ui)) = windows.get_mut(window) else {
@@ -3298,18 +3386,12 @@ fn on_about_land_action(
 
 /// Resolve and act on a per-row access Remove press, in the window it was
 /// pressed in.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the remove observer reads the pressed button, its row, its window's views and \
-              state, the identity, and the command writer"
-)]
 fn on_remove_access(
     press: On<Pointer<Press>>,
     buttons: Query<&RemoveAccessButton>,
     rows: Query<&VirtualRow>,
     mut windows: Query<(&AllowView, &BanView, &mut AboutLandState)>,
-    parents: Query<&ChildOf>,
-    floaters: Query<(Entity, &Floater)>,
+    host: FloaterHost,
     identity: Res<SlIdentity>,
     mut commands: MessageWriter<SlCommand>,
 ) {
@@ -3319,7 +3401,7 @@ fn on_remove_access(
     let Ok(button) = buttons.get(press.entity) else {
         return;
     };
-    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+    let Some(window) = host.of(press.entity) else {
         return;
     };
     let Ok((allow, ban, mut state)) = windows.get_mut(window) else {

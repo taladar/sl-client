@@ -990,7 +990,18 @@ impl InventoryModel {
         let mut rows = Vec::new();
         for &root in &self.roots {
             if keep.contains(&root) {
-                self.emit_filtered_folder(root, 0, needle, &keep, worn, sort, passes, &mut rows);
+                self.emit_filtered_folder(
+                    root,
+                    0,
+                    EmitFiltered {
+                        needle,
+                        keep: &keep,
+                        worn,
+                        sort,
+                        passes,
+                    },
+                    &mut rows,
+                );
             }
         }
         rows
@@ -1047,22 +1058,20 @@ impl InventoryModel {
 
     /// Emit a kept folder (shown expanded) and, recursively, its kept child
     /// folders and its matching items, indented one level deeper.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "a recursive tree emitter threading the query, filter, sort, kept-folder and \
-                  worn sets through each level"
-    )]
     fn emit_filtered_folder(
         &self,
         folder: InventoryFolderKey,
         depth: usize,
-        needle: &str,
-        keep: &HashSet<InventoryFolderKey>,
-        worn: &HashSet<InventoryKey>,
-        sort: SortSpec,
-        passes: &dyn Fn(&ItemInfo) -> bool,
+        cx: EmitFiltered<'_>,
         rows: &mut Vec<DisplayRow>,
     ) {
+        let EmitFiltered {
+            needle,
+            keep,
+            worn,
+            sort,
+            passes,
+        } = cx;
         if depth >= MAX_FOLDER_DEPTH {
             return;
         }
@@ -1070,16 +1079,7 @@ impl InventoryModel {
         let child_depth = depth.saturating_add(1);
         for child in self.ordered_children(folder, sort) {
             if keep.contains(&child) {
-                self.emit_filtered_folder(
-                    child,
-                    child_depth,
-                    needle,
-                    keep,
-                    worn,
-                    sort,
-                    passes,
-                    rows,
-                );
+                self.emit_filtered_folder(child, child_depth, cx, rows);
             }
         }
         for item in self.ordered_items(folder, sort) {
@@ -1117,13 +1117,15 @@ impl InventoryModel {
                 self.emit_member_folder(
                     root,
                     0,
-                    &members,
-                    worn,
-                    &keep,
+                    EmitMembers {
+                        members: &members,
+                        worn,
+                        keep: &keep,
+                        needle,
+                        sort,
+                        passes,
+                    },
                     &mut placed,
-                    needle,
-                    sort,
-                    passes,
                     &mut rows,
                 );
             }
@@ -1241,25 +1243,22 @@ impl InventoryModel {
     /// expanded, and, recursively, its kept child folders and its member
     /// items, narrowed by the query and the filter. `members` selects the
     /// items shown; `worn` only decorates.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "a recursive tree emitter threading the member / worn sets, the kept-folder \
-                  set, the placed-item record, the sort, the filter and the query through \
-                  each level"
-    )]
     fn emit_member_folder(
         &self,
         folder: InventoryFolderKey,
         depth: usize,
-        members: &HashSet<InventoryKey>,
-        worn: &HashSet<InventoryKey>,
-        keep: &HashSet<InventoryFolderKey>,
+        cx: EmitMembers<'_>,
         placed: &mut HashSet<InventoryKey>,
-        needle: &str,
-        sort: SortSpec,
-        passes: &dyn Fn(&ItemInfo) -> bool,
         rows: &mut Vec<DisplayRow>,
     ) {
+        let EmitMembers {
+            members,
+            worn,
+            keep,
+            needle,
+            sort,
+            passes,
+        } = cx;
         if depth >= MAX_FOLDER_DEPTH {
             return;
         }
@@ -1267,18 +1266,7 @@ impl InventoryModel {
         let child_depth = depth.saturating_add(1);
         for child in self.ordered_children(folder, sort) {
             if keep.contains(&child) {
-                self.emit_member_folder(
-                    child,
-                    child_depth,
-                    members,
-                    worn,
-                    keep,
-                    placed,
-                    needle,
-                    sort,
-                    passes,
-                    rows,
-                );
+                self.emit_member_folder(child, child_depth, cx, placed, rows);
             }
         }
         for item in self.ordered_items(folder, sort) {
@@ -1316,13 +1304,15 @@ impl InventoryModel {
                 self.emit_member_folder(
                     root,
                     0,
-                    worn,
-                    worn,
-                    &keep,
+                    EmitMembers {
+                        members: worn,
+                        worn,
+                        keep: &keep,
+                        needle,
+                        sort,
+                        passes,
+                    },
                     &mut placed,
-                    needle,
-                    sort,
-                    passes,
                     &mut rows,
                 );
             }
@@ -1335,6 +1325,41 @@ impl InventoryModel {
         }
         rows
     }
+}
+
+/// The fixed context a **filtered** tree emit threads through every level: the
+/// query, the folders the filter kept, the worn set the decorations read, the
+/// sort, and the filter predicate itself.
+#[derive(Clone, Copy)]
+struct EmitFiltered<'a> {
+    /// The lower-cased search query.
+    needle: &'a str,
+    /// The folders the filter pass decided to keep.
+    keep: &'a HashSet<InventoryFolderKey>,
+    /// The worn set, for the row decorations.
+    worn: &'a HashSet<InventoryKey>,
+    /// The item sort order.
+    sort: SortSpec,
+    /// The filter predicate an item has to pass.
+    passes: &'a dyn Fn(&ItemInfo) -> bool,
+}
+
+/// The same for a **membership** tree emit (the Worn and Recent tabs): which
+/// items are members, plus the query / kept-folder / sort / filter context.
+#[derive(Clone, Copy)]
+struct EmitMembers<'a> {
+    /// The items this tab is a view of.
+    members: &'a HashSet<InventoryKey>,
+    /// The worn set, for the row decorations.
+    worn: &'a HashSet<InventoryKey>,
+    /// The folders on a path to a member.
+    keep: &'a HashSet<InventoryFolderKey>,
+    /// The lower-cased search query.
+    needle: &'a str,
+    /// The item sort order.
+    sort: SortSpec,
+    /// The filter predicate an item has to pass.
+    passes: &'a dyn Fn(&ItemInfo) -> bool,
 }
 
 /// The item sort order the gear menu drives — the reference's
@@ -2051,30 +2076,43 @@ fn update_add_conditions(
     }
 }
 
+/// The gear menu's widgets, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the floaters an item opens,
+/// the filters floater's own handles, the panels it shows, and the fields a
+/// reset clears.
+#[derive(bevy::ecs::system::SystemParam)]
+struct GearWidgets<'w, 's> {
+    /// The open floaters, for the one an entry opens or toggles.
+    floaters: Query<'w, 's, (Entity, &'static crate::floater::Floater)>,
+    /// The filters floater's handles; the field reset needs its content built.
+    filters_ui: Option<Res<'w, crate::inventory_filters::InventoryFiltersUi>>,
+    /// The panels a toggle shows or hides.
+    panels: Query<'w, 's, &'static mut UiPanelShown>,
+    /// The filter fields a reset clears.
+    fields: Query<'w, 's, &'static mut EditableText>,
+}
+
 /// Route the gear menu's picks (a [`UiAction`]): the expand / collapse and
 /// sort toggles act on the window state, Show / Reset Filters drive the
 /// filters floater ([`crate::inventory_filters`]), and the two emptiers issue
 /// the same purge the context menu does.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the pick stream, the \
-              window / filter state, the filters floater, the model for the emptiers, and the \
-              command / action channels"
-)]
 fn route_gear_menu(
     mut picks: MessageReader<UiAction>,
     mut actions: MessageWriter<InventoryUiAction>,
     mut state: ResMut<InventoryState>,
     mut filter_state: ResMut<crate::inventory_filters::InventoryFilterState>,
-    floaters: Query<(Entity, &crate::floater::Floater)>,
-    // Still wanted alongside the by-id toggle: the field-text reset below only
-    // has fields to clear once the filters content is built.
-    filters_ui: Option<Res<crate::inventory_filters::InventoryFiltersUi>>,
+    widgets: GearWidgets,
     model: Res<InventoryModel>,
-    mut panels: Query<&mut UiPanelShown>,
-    mut fields: Query<&mut EditableText>,
     mut commands: MessageWriter<SlCommand>,
 ) {
+    let GearWidgets {
+        floaters,
+        // Still wanted alongside the by-id toggle: the field-text reset below
+        // only has fields to clear once the filters content is built.
+        filters_ui,
+        mut panels,
+        mut fields,
+    } = widgets;
     for pick in picks.read() {
         if pick.element != INVENTORY_GEAR_ELEMENT {
             continue;
@@ -2674,6 +2712,22 @@ fn apply_ui_actions(
     }
 }
 
+/// What a reveal moves, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the selection it lands on,
+/// the keyboard focus it takes, the tab strip it may switch, and the virtual
+/// list it scrolls.
+#[derive(bevy::ecs::system::SystemParam)]
+struct RevealTargets<'w, 's> {
+    /// The selection the revealed row becomes.
+    selection: ResMut<'w, InventorySelection>,
+    /// The keyboard focus, which the list takes.
+    focus: ResMut<'w, InputFocus>,
+    /// The tab strip, switched to the tab the row lives in.
+    strips: Query<'w, 's, &'static mut TabStrip>,
+    /// The virtual list, scrolled to the revealed row.
+    lists: Query<'w, 's, &'static mut VirtualList>,
+}
+
 /// Carry out a pending **"Show in Main view"** jump ([`PendingReveal`]): switch
 /// to the Everything tab, expand the target item's ancestor folders (fetching
 /// any whose contents are not held), select it and scroll it into view.
@@ -2684,24 +2738,21 @@ fn apply_ui_actions(
 /// found to scroll to. A folder whose page must still be fetched resolves the
 /// same way once it arrives; a target that never appears is abandoned after
 /// [`REVEAL_MAX_FRAMES`] so it cannot hold the tab switched forever.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the pending jump, the \
-              window handles, the tab / model / view state, the selection, the strip and list \
-              queries and the fetch channel"
-)]
 fn apply_pending_reveal(
     mut pending: ResMut<PendingReveal>,
     ui: Option<Res<InventoryUi>>,
     state: Res<InventoryState>,
     mut model: ResMut<InventoryModel>,
     view: Res<InventoryView>,
-    mut selection: ResMut<InventorySelection>,
-    mut focus: ResMut<InputFocus>,
-    mut strips: Query<&mut TabStrip>,
-    mut lists: Query<&mut VirtualList>,
+    targets: RevealTargets,
     mut commands: MessageWriter<SlCommand>,
 ) {
+    let RevealTargets {
+        mut selection,
+        mut focus,
+        mut strips,
+        mut lists,
+    } = targets;
     let Some(item) = pending.item else {
         return;
     };
@@ -2792,6 +2843,24 @@ fn read_search_field(
 /// other trigger (tab, sort, filter, model change) stays immediate.
 const QUERY_DEBOUNCE_SECS: f32 = 0.15;
 
+/// What the row list is rebuilt from, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the inventory model, the
+/// window's own tab / query state, the worn set the decorations read, the active
+/// filters, and the login clock the Recent tab is measured from.
+#[derive(bevy::ecs::system::SystemParam)]
+struct RebuildSources<'w> {
+    /// The inventory model the rows are folded out of.
+    model: Res<'w, InventoryModel>,
+    /// The window's tab, query and sort.
+    state: Res<'w, InventoryState>,
+    /// The worn set, for the row decorations and the Worn tab.
+    worn: Res<'w, crate::inventory_actions::WornAttachments>,
+    /// The active filters a row has to pass.
+    filters: Res<'w, crate::inventory_filters::InventoryFilterState>,
+    /// The login time the Recent tab's window starts at.
+    login_time: Res<'w, crate::inventory_filters::SessionLoginTime>,
+}
+
 /// Recompute the flattened view whenever the model, tab or query changed, keep
 /// the list's item count in step, and reset the scroll so a shorter new list is
 /// not left scrolled past its end. A query-text edit is debounced by
@@ -2803,17 +2872,8 @@ const QUERY_DEBOUNCE_SECS: f32 = 0.15;
 /// Change ticks accumulate across the skipped frames, and
 /// [`refresh_inventory_on_show`] marks the model on every open transition, so
 /// the panel always opens onto exactly one catch-up rebuild.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the model, the window / \
-              filter / worn state, the login clock, the UI handles and the list"
-)]
 fn rebuild_view(
-    model: Res<InventoryModel>,
-    state: Res<InventoryState>,
-    worn: Res<crate::inventory_actions::WornAttachments>,
-    filters: Res<crate::inventory_filters::InventoryFilterState>,
-    login_time: Res<crate::inventory_filters::SessionLoginTime>,
+    sources: RebuildSources,
     ui: Option<Res<InventoryUi>>,
     mut view: ResMut<InventoryView>,
     mut lists: Query<&mut VirtualList>,
@@ -2821,6 +2881,13 @@ fn rebuild_view(
     mut last_query: Local<String>,
     mut deferred_since: Local<Option<f32>>,
 ) {
+    let RebuildSources {
+        model,
+        state,
+        worn,
+        filters,
+        login_time,
+    } = sources;
     // A state change that ONLY moved the query text defers behind the typing
     // debounce; any other change (or a ripe deferral) rebuilds now.
     let mut due = model.is_changed() || worn.is_changed() || filters.is_changed();
@@ -3314,31 +3381,57 @@ fn point_in_node(point: Vec2, computed: &ComputedNode, transform: &UiGlobalTrans
     (point.x - centre_x).abs() <= half_width && (point.y - centre_y).abs() <= half_height
 }
 
+/// The row geometry a press is resolved against, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the pooled rows and their
+/// parts, and the expand arrows' laid-out boxes for the arrow hit test.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct RowPressGeometry<'w, 's> {
+    /// The pooled rows and the parts a press can land on.
+    rows: Query<'w, 's, (&'static VirtualRow, &'static RowParts)>,
+    /// The arrows' boxes, for "was this press on the arrow?".
+    arrows: Query<'w, 's, (&'static ComputedNode, &'static UiGlobalTransform)>,
+}
+
+/// What decides and records a click, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the modifier keys and clock
+/// the click semantics read, the last click the double-click test compares
+/// against, and the selection and focus the press moves.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct RowPressState<'w, 's> {
+    /// The modifiers (`Ctrl` toggles, `Shift` extends).
+    keyboard: Res<'w, ButtonInput<KeyCode>>,
+    /// The clock the double-click window is measured on.
+    time: Res<'w, Time>,
+    /// The last press, for the double-click test.
+    last_click: Local<'s, Option<(f64, usize)>>,
+    /// The selection the press moves.
+    selection: ResMut<'w, InventorySelection>,
+    /// The keyboard focus, which the clicked list takes.
+    focus: ResMut<'w, InputFocus>,
+}
+
 /// A row was clicked: focus the window (so the wheel scrolls the list, not the
 /// camera), update the **selection** with the usual list semantics — click
 /// selects one, `Ctrl`-click toggles, `Shift`-click extends from the anchor —
 /// and toggle a folder on its **arrow** or on a **double-click** (the
 /// reference's `llfolderview` behaviour; a plain click no longer toggles, it
 /// selects).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy observer's parameters are its injected resources: the row pool and its \
-              parts, the arrow geometry for the hit test, the view, the modifier keys and \
-              clock for the click semantics, and the selection / focus / action outputs"
-)]
 fn on_row_press(
     press: On<Pointer<Press>>,
-    rows: Query<(&VirtualRow, &RowParts)>,
-    arrows: Query<(&ComputedNode, &UiGlobalTransform)>,
+    geometry: RowPressGeometry,
     view: Res<InventoryView>,
     ui: Res<InventoryUi>,
-    keyboard: Res<ButtonInput<KeyCode>>,
-    time: Res<Time>,
-    mut last_click: Local<Option<(f64, usize)>>,
-    mut selection: ResMut<InventorySelection>,
-    mut focus: ResMut<InputFocus>,
+    click: RowPressState,
     mut actions: MessageWriter<InventoryUiAction>,
 ) {
+    let RowPressGeometry { rows, arrows } = geometry;
+    let RowPressState {
+        keyboard,
+        time,
+        mut last_click,
+        mut selection,
+        mut focus,
+    } = click;
     if press.button != PointerButton::Primary {
         return;
     }
@@ -3474,27 +3567,40 @@ fn start_inline_rename(
     }
 }
 
+/// The widgets an inline rename reads and restores, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the pooled rows and their
+/// parts, the field the new name is read from, the nodes the label and field are
+/// swapped through, and the commands that tear the field down.
+#[derive(bevy::ecs::system::SystemParam)]
+struct RenameWidgets<'w, 's> {
+    /// The pooled rows, for the one being renamed.
+    rows: Query<'w, 's, (&'static VirtualRow, &'static RowParts)>,
+    /// The edit field the committed name is read from.
+    fields: Query<'w, 's, &'static EditableText>,
+    /// The label / field nodes swapped on commit or cancel.
+    nodes: Query<'w, 's, &'static mut Node>,
+    /// What despawns the field.
+    commands_bevy: Commands<'w, 's>,
+}
+
 /// Drive the open inline rename: `Enter` commits (an item renames through a
 /// same-folder `MoveInventoryItem`, a folder through `UpdateInventoryFolder`),
 /// `Escape` cancels, and the row scrolling away / rebinding cancels (its
 /// pooled entity is about to show something else).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the rename state, the \
-              keyboard, the view / model to resolve the renamed row, the field to read, the \
-              label to restore, and the command channels"
-)]
 fn drive_inline_rename(
     keyboard: Res<ButtonInput<KeyCode>>,
     view: Res<InventoryView>,
     model: Res<InventoryModel>,
-    rows: Query<(&VirtualRow, &RowParts)>,
-    fields: Query<&EditableText>,
-    mut nodes: Query<&mut Node>,
+    widgets: RenameWidgets,
     mut rename: ResMut<InlineRename>,
-    mut commands_bevy: Commands,
     mut commands: MessageWriter<SlCommand>,
 ) {
+    let RenameWidgets {
+        rows,
+        fields,
+        mut nodes,
+        mut commands_bevy,
+    } = widgets;
     if keyboard.just_pressed(KeyCode::Escape) {
         rename.pending = None;
         if let Some(active) = rename.active.take() {
@@ -3847,41 +3953,59 @@ pub fn spawn_inventory_row_sample(
         commands,
         list,
         cx,
-        0,
-        RowArrow::Expanded,
-        folder_icon(FolderType::Clothing, true),
-        "Clothing",
-        "",
+        SampleRow {
+            depth: 0,
+            arrow: RowArrow::Expanded,
+            icon: folder_icon(FolderType::Clothing, true),
+            label: "Clothing",
+            suffix: "",
+        },
     );
     spawn_sample_row(
         commands,
         list,
         cx,
-        1,
-        RowArrow::Leaf,
-        item_icon(InventoryType::Wearable),
-        "A shirt",
-        "(no copy) (worn)",
+        SampleRow {
+            depth: 1,
+            arrow: RowArrow::Leaf,
+            icon: item_icon(InventoryType::Wearable),
+            label: "A shirt",
+            suffix: "(no copy) (worn)",
+        },
     );
     list
 }
 
+/// One static sample row's look — the live row's parts, minus the live data.
+#[derive(Debug, Clone, Copy)]
+struct SampleRow<'a> {
+    /// How far the row is indented.
+    depth: usize,
+    /// Its expand arrow (or none, for a leaf).
+    arrow: RowArrow,
+    /// Its type icon.
+    icon: &'a str,
+    /// Its label.
+    label: &'a str,
+    /// The decoration suffix, empty for none.
+    suffix: &'a str,
+}
+
 /// Spawn one static sample row (indent, arrow, icon, label, suffix) for the
 /// registry sample.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a static sample spawner mirroring the live row's parts, each an argument"
-)]
 fn spawn_sample_row(
     commands: &mut Commands,
     parent: Entity,
     cx: crate::ui_element::ElementCx,
-    depth: usize,
-    arrow: RowArrow,
-    icon: &str,
-    label: &str,
-    suffix: &str,
+    sample: SampleRow<'_>,
 ) {
+    let SampleRow {
+        depth,
+        arrow,
+        icon,
+        label,
+        suffix,
+    } = sample;
     let row_entity = commands
         .spawn((
             Node {

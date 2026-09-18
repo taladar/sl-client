@@ -286,6 +286,31 @@ fn properties_key(item: InventoryKey) -> FloaterKey {
     FloaterKey::subject(&item)
 }
 
+/// What a properties window is filled from, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): our own agent and the name
+/// mirror the owner / creator lines are resolved through, and the hierarchy a
+/// rebuilt tab is torn down along.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct PropertiesSources<'w, 's> {
+    /// Our own agent, which decides what is editable.
+    identity: Res<'w, SlIdentity>,
+    /// The name mirror, for the owner and creator lines.
+    avatars: Res<'w, crate::world_api::AvatarState>,
+    /// Hierarchy links, for tearing a rebuilt tab down.
+    children: Query<'w, 's, &'static Children>,
+}
+
+/// The hierarchy a properties press is resolved through, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the parent links walked from
+/// the pressed toggle up to its floater, and the floaters themselves.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct PropertiesHost<'w, 's> {
+    /// Parent links, walked from the toggle to its window.
+    parents: Query<'w, 's, &'static ChildOf>,
+    /// The windows, so the walk knows when it has arrived.
+    floaters: Query<'w, 's, (Entity, &'static Floater)>,
+}
+
 /// Open (or repaint) an item's properties window.
 ///
 /// Every open of the frame is honoured, and an item already on screen is
@@ -293,22 +318,19 @@ fn properties_key(item: InventoryKey) -> FloaterKey {
 /// re-open would discard unsaved text. Here the re-open *is* the repaint: a
 /// permission toggle sends its update and re-opens the floater on the new
 /// snapshot, which is how every checkbox in the window follows the change.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the open stream, the \
-              keyed-window opener, the per-window state and handles, the identity and name \
-              sources, and the spawn / command outputs"
-)]
 fn open_properties(
     mut opens: MessageReader<OpenItemProperties>,
     mut floaters: KeyedFloaters,
     mut windows: Query<(&mut ItemPropertiesState, &mut ItemPropertiesUi)>,
-    identity: Res<SlIdentity>,
-    avatars: Res<crate::world_api::AvatarState>,
-    children: Query<&Children>,
+    sources: PropertiesSources,
     mut commands: Commands,
     mut sl_commands: MessageWriter<SlCommand>,
 ) {
+    let PropertiesSources {
+        identity,
+        avatars,
+        children,
+    } = sources;
     for open in opens.read().cloned() {
         let item = open.item;
         let opened = floaters.open(item_properties_floater_spec(), properties_key(item.item_id));
@@ -780,22 +802,16 @@ fn spawn_props_toggle(
 /// A permission / sale toggle was clicked: flip the bit on the shown item,
 /// send the update, and re-open the floater on the updated snapshot (which
 /// repaints every toggle).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy observer's parameters are its injected resources: the pressed toggle, \
-              the two queries that resolve which window it sits in, that window's state and \
-              handles, the field values, and the update / repaint outputs"
-)]
 fn on_toggle_press(
     press: On<Pointer<Press>>,
     toggles: Query<&PropsToggle>,
-    parents: Query<&ChildOf>,
-    floaters: Query<(Entity, &Floater)>,
+    host: PropertiesHost,
     mut windows: Query<(&mut ItemPropertiesState, &ItemPropertiesUi)>,
     fields: Query<&EditableText>,
     mut commands: MessageWriter<SlCommand>,
     mut reopen: MessageWriter<OpenItemProperties>,
 ) {
+    let PropertiesHost { parents, floaters } = host;
     if press.button != PointerButton::Primary {
         return;
     }

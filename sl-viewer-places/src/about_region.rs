@@ -120,8 +120,8 @@ use sl_viewer_notices::experience_profile::{OpenExperienceProfile, maturity_key}
 
 use crate::edit_fields::{FieldSeed, seed_one_field, set_combo};
 use crate::floater::{
-    Floater, FloaterCaps, FloaterHandle, FloaterKey, FloaterSpec, FloaterSystems, KeyedFloaterOpen,
-    KeyedFloaters, host_floater,
+    Floater, FloaterCaps, FloaterHandle, FloaterHost, FloaterKey, FloaterSpec, FloaterSystems,
+    KeyedFloaterOpen, KeyedFloaters, host_floater,
 };
 use crate::i18n::{Translated, Translator};
 use crate::intents::TexturePicked;
@@ -2628,6 +2628,53 @@ fn set_swatch(swatches: &mut Query<&mut TextureSwatchValue>, node: Option<Entity
 // Control enable.
 // ---------------------------------------------------------------------------
 
+/// The controls an enable pass greys, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the write buttons, the
+/// edit-gated nodes, which already carry the disabled marker, and the checkboxes
+/// whose glyph follows the gate.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct RegionEnableGates<'w, 's> {
+    /// The buttons that write to the region.
+    write_buttons: Query<'w, 's, Entity, With<WriteButton>>,
+    /// The nodes an edit gate greys.
+    gated: Query<'w, 's, Entity, With<EditGate>>,
+    /// Which of them already carry the disabled marker.
+    disabled: Query<'w, 's, (), With<InteractionDisabled>>,
+    /// The checkboxes whose glyph follows the gate.
+    checks: Query<'w, 's, (Entity, &'static AboutRegionCheck)>,
+}
+
+/// The name sources an access row is resolved through, bundled as one plain
+/// borrow struct: the avatar mirror, the group roster, and the name revisions
+/// that say whether either moved.
+#[derive(Clone, Copy)]
+struct AccessNames<'a> {
+    /// The avatar mirror, for a resident row's name.
+    avatars: &'a AvatarState,
+    /// The group roster, for a group row's name.
+    groups: &'a GroupsModel,
+    /// The revisions that say whether either moved since the last build.
+    names: NameRevisions,
+}
+
+/// The four pickers and two reports an About Region action opens, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(bevy::ecs::system::SystemParam)]
+struct RegionActionOut<'w> {
+    /// The wire, for the estate / region commands.
+    sl_commands: MessageWriter<'w, SlCommand>,
+    /// The avatar picker (estate managers, the access lists).
+    pickers: MessageWriter<'w, OpenAvatarPicker>,
+    /// The group picker (the allowed-group list).
+    group_pickers: MessageWriter<'w, OpenGroupPicker>,
+    /// The experience picker (the allowed / blocked experiences).
+    experience_pickers: MessageWriter<'w, OpenExperiencePicker>,
+    /// The telehub floater.
+    telehubs: MessageWriter<'w, OpenTelehub>,
+    /// The top-objects report.
+    reports: MessageWriter<'w, OpenTopObjects>,
+}
+
 /// Grey each window's write buttons and every editable control to follow the
 /// agent's estate rights **in that window's region**, and repaint its checkbox
 /// glyphs.
@@ -2647,23 +2694,20 @@ fn set_swatch(swatches: &mut Query<&mut TextureSwatchValue>, node: Option<Entity
 /// Access panel for a non-manager (`setCtrlsEnabled(false)`) and leaves every
 /// control where it is; so does this, through the same [`InteractionDisabled`]
 /// the gated controls take.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "reconciling control enable needs every window, the write buttons, gated controls, \
-              disabled set, checks, the ancestry walk, and the text query together"
-)]
 fn update_control_enable(
     mut windows: Query<(Entity, &mut AboutRegionDirty, &AboutRegionState)>,
-    write_buttons: Query<Entity, With<WriteButton>>,
-    gated: Query<Entity, With<EditGate>>,
-    disabled: Query<(), With<InteractionDisabled>>,
-    checks: Query<(Entity, &AboutRegionCheck)>,
-    parents: Query<&ChildOf>,
+    gates: RegionEnableGates,
+    host: FloaterHost,
     children: Query<&Children>,
-    floaters: Query<(Entity, &Floater)>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
     mut commands: Commands,
 ) {
+    let RegionEnableGates {
+        write_buttons,
+        gated,
+        disabled,
+        checks,
+    } = gates;
     // The windows repainting this frame, and what each one allows.
     let mut repainting: Vec<(Entity, bool)> = Vec::new();
     for (window, mut dirty, state) in &mut windows {
@@ -2677,10 +2721,10 @@ fn update_control_enable(
         return;
     }
     let can_manage = |entity: Entity| {
-        let host = host_floater(entity, &parents, &floaters)?;
+        let hosting = host.of(entity)?;
         repainting
             .iter()
-            .find_map(|(window, can_manage)| (*window == host).then_some(*can_manage))
+            .find_map(|(window, can_manage)| (*window == hosting).then_some(*can_manage))
     };
     for entity in write_buttons.iter().chain(gated.iter()) {
         let Some(can_manage) = can_manage(entity) else {
@@ -2713,16 +2757,16 @@ fn update_control_enable(
         }
     }
     for (entity, check) in &checks {
-        let Some(host) = host_floater(entity, &parents, &floaters) else {
+        let Some(hosting) = host.of(entity) else {
             continue;
         };
         let Some(can_manage) = repainting
             .iter()
-            .find_map(|(window, can_manage)| (*window == host).then_some(*can_manage))
+            .find_map(|(window, can_manage)| (*window == hosting).then_some(*can_manage))
         else {
             continue;
         };
-        let Ok((_window, _dirty, state)) = windows.get(host) else {
+        let Ok((_window, _dirty, state)) = windows.get(hosting) else {
             continue;
         };
         let on = check.kind.checked(state);
@@ -2988,9 +3032,11 @@ fn sync_managers_view(
             &state.managers,
             &view.rows,
             &mut built.managers,
-            &avatars,
-            &groups,
-            names,
+            AccessNames {
+                avatars: &avatars,
+                groups: &groups,
+                names,
+            },
         ) else {
             continue;
         };
@@ -3020,9 +3066,11 @@ fn sync_allowed_view(
             &state.allowed,
             &view.rows,
             &mut built.allowed,
-            &avatars,
-            &groups,
-            names,
+            AccessNames {
+                avatars: &avatars,
+                groups: &groups,
+                names,
+            },
         ) else {
             continue;
         };
@@ -3074,9 +3122,11 @@ fn sync_allowed_groups_view(
             &state.allowed_groups,
             &view.rows,
             &mut built.allowed_groups,
-            &avatars,
-            &groups,
-            names,
+            AccessNames {
+                avatars: &avatars,
+                groups: &groups,
+                names,
+            },
         ) else {
             continue;
         };
@@ -3110,9 +3160,11 @@ fn sync_banned_view(
             &state.banned,
             &view.rows,
             &mut built.banned,
-            &avatars,
-            &groups,
-            names,
+            AccessNames {
+                avatars: &avatars,
+                groups: &groups,
+                names,
+            },
         ) else {
             continue;
         };
@@ -3129,21 +3181,19 @@ fn sync_banned_view(
 /// resolved rows are compared with what the view shows, so a name that did
 /// resolve re-binds this list only when it belongs to somebody in it — and most
 /// names belong to nobody in it.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the shared access-view resolve threads the list kind, its revision, the ids, the \
-              rows to compare against, the build record, and the avatar / group name sources"
-)]
 fn resolved_access_rows(
     list: AccessList,
     revision: u64,
     ids: &[Uuid],
     current: &[AccessRowData],
     built: &mut ViewBuilt,
-    avatars: &AvatarState,
-    groups: &GroupsModel,
-    names: NameRevisions,
+    sources: AccessNames<'_>,
 ) -> Option<Vec<AccessRowData>> {
+    let AccessNames {
+        avatars,
+        groups,
+        names,
+    } = sources;
     if !built.due(revision, names) {
         return None;
     }
@@ -3550,18 +3600,12 @@ fn spawn_experience_row_button(
 
 /// Resolve and act on a per-row experience button press, in the window it was
 /// pressed in.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the observer reads the pressed button, its row, the window it belongs to, \
-              that window's view and state, and the two message sinks"
-)]
 fn on_experience_row_button(
     press: On<Pointer<Press>>,
     buttons: Query<&ExperienceRowButton>,
     rows: Query<&VirtualRow>,
     mut windows: Query<(&ExperiencesView, &mut AboutRegionState)>,
-    parents: Query<&ChildOf>,
-    floaters: Query<(Entity, &Floater)>,
+    host: FloaterHost,
     mut profiles: MessageWriter<OpenExperienceProfile>,
     mut commands: MessageWriter<SlCommand>,
 ) {
@@ -3571,7 +3615,7 @@ fn on_experience_row_button(
     let Ok(button) = buttons.get(press.entity) else {
         return;
     };
-    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+    let Some(window) = host.of(press.entity) else {
         return;
     };
     let Ok((view, mut state)) = windows.get_mut(window) else {
@@ -3687,33 +3731,30 @@ fn on_about_region_check(
 
 /// Dispatch a floater action-button press.
 /// Dispatch a floater action-button press, in the window it was pressed in.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the dispatcher fans out to every button kind, reading the pressed window, its \
-              fields and the picker / command outputs"
-)]
 fn on_about_region_action(
     press: On<Pointer<Press>>,
     actions: Query<&AboutRegionAction>,
     mut windows: Query<(&mut AboutRegionState, &AboutRegionUi)>,
-    parents: Query<&ChildOf>,
-    floaters: Query<(Entity, &Floater)>,
+    host: FloaterHost,
     fields: Query<&EditableText>,
     regions: Query<&SlRegionIdentity, With<SlCurrentRegion>>,
-    mut sl_commands: MessageWriter<SlCommand>,
-    mut pickers: MessageWriter<OpenAvatarPicker>,
-    mut group_pickers: MessageWriter<OpenGroupPicker>,
-    mut experience_pickers: MessageWriter<OpenExperiencePicker>,
-    mut telehubs: MessageWriter<OpenTelehub>,
-    mut reports: MessageWriter<OpenTopObjects>,
+    out: RegionActionOut,
 ) {
+    let RegionActionOut {
+        mut sl_commands,
+        mut pickers,
+        mut group_pickers,
+        mut experience_pickers,
+        mut telehubs,
+        mut reports,
+    } = out;
     if press.button != PointerButton::Primary {
         return;
     }
     let Ok(action) = actions.get(press.entity) else {
         return;
     };
-    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+    let Some(window) = host.of(press.entity) else {
         return;
     };
     let Ok((mut state, ui)) = windows.get_mut(window) else {

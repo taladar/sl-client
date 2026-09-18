@@ -20,9 +20,9 @@ Scope: sweep the largest clusters into `SystemParam` bundles, in a codebase
 whose stated convention is no `#[expect]`. Start with `menu.rs`, then
 `sl-viewer-edit`.
 
-## Swept so far (2026-09-18): 338 → 161
+## Swept so far (2026-09-18): 338 → 118
 
-Six crates are now at **zero** suppressions (`sl-viewer-world-objects` keeps
+Eight crates are now at **zero** suppressions (`sl-viewer-world-objects` keeps
 two, both deliberate — see below):
 
 - **`sl-viewer-ui-widgets` (16)** — `menu.rs`'s thirteen collapse into one
@@ -94,6 +94,33 @@ two, both deliberate — see below):
   `ActivityInput` / `AutoRespondFacts`, `PeopleChrome` — and the one non-Bevy
   case, an eight-scalar `triangle` rasteriser that now takes its three vertices
   as one array.
+- **`sl-viewer-inventory` (22)** — the crate that had already hit **Bevy's own**
+  16-parameter cap and answered it with anonymous tuple params. Those become
+  named, documented bundles with the same field names, so the bodies did not
+  move: `InventoryStashes` / `InventoryMenuOut` / `MenuActionContext` in
+  `inventory_actions.rs`, and in `inventory_drag.rs` the six of
+  `on_row_drag_end` — `DragSession` / `DragGeometry` / `DropTargets` /
+  `WorldDrop` / `DragOutputs`, plus `DragStartFacts` / `DragHover` / `DragModel`
+  / `PointerOcclusion`. Also `InventoryMenuFacts` / `InventoryMenuPick` (shared
+  with the gallery), `CreateSinks` / `CreateStores` / `AddActionFacts`,
+  `HotkeyGate`, `GearWidgets`, `RevealTargets`, `RebuildSources`,
+  `RowPressGeometry` / `RowPressState`, `RenameWidgets`, `GallerySources`,
+  `PropertiesSources` / `PropertiesHost`, the two recursive tree emitters'
+  `EmitFiltered` / `EmitMembers`, and `SampleRow`.
+- **`sl-viewer-places` (21)** — `about_land.rs` around `LandWorld` /
+  `LandOpenState` / `LandOpenSinks` / `LandFacts` / `EnableGates` /
+  `LandActionFacts` / `LandPickers`; `about_region.rs` `RegionEnableGates` /
+  `AccessNames` / `RegionActionOut`; `about_landmark.rs` `LandmarkNames` /
+  `LandmarkContent` / `LandmarkRefs` / `DetailRefs`; `telehub.rs`
+  `TelehubFacts`; `top_objects.rs` `TopObjectsButtons` / `TopObjectsFacts` /
+  `TopObjectsActionOut`; and `teleport_progress.rs`'s six per-part overlay
+  queries as one `OverlayParts`.
+
+This crate also produced the sweep's one **shared** bundle: `FloaterHost` in
+`sl-viewer-ui-widgets::floater`, the injected form of `host_floater`'s
+`parents` + `floaters` pair. That pair has 51 call sites across the workspace
+and three crates had each grown a private copy of it during this sweep, so it
+now lives beside the function it wraps.
 
 Patterns worth reusing:
 
@@ -112,19 +139,23 @@ Patterns worth reusing:
   `MessageWriter` needs no `#[expect]`; a `pub` one does.
 - A `Local<'s, T>` is a `SystemParam` and belongs inside the bundle whose state
   it carries (`MediaPickIo`'s throttle, `SeatCamera`'s was-engaged flag).
+- A plain borrow struct must not put two **invariant** Bevy types under one
+  lifetime: `MessageWriter<'w, T>`, `Query<'w, 's, ..>` and `Commands<'w, 's>`
+  are invariant, so `&'a mut MessageWriter<'w, A>` beside
+  `&'a mut MessageWriter<'w, B>` forces the two `'w`s equal and the call site
+  cannot satisfy it. Give each its own lifetime (`CreateSinks<'a, 'wire, 'ui>`)
+  — or bundle the **shared references** instead, which are covariant and just
+  work (`LandmarkRefs`, `AccessNames`).
+- Destructure a bundle **by value** (`let Facts { a, b } = facts;`), not by
+  reference: `= &facts` leaves each binding a `&Res<T>`, and every `&a` at a
+  call site then trips `needless_borrow`.
 
-## Still to sweep (161)
+## Still to sweep (118)
 
-By crate, largest first: `sl-viewer-inventory` 22, `sl-viewer-places` 21,
-`sl-viewer-world-scene` 15, `sl-viewer-map` 13, `sl-proto` 13,
-`sl-viewer-environment` 11, `sl-viewer-notices` 10,
+By crate, largest first: `sl-viewer-world-scene` 15, `sl-viewer-map` 13,
+`sl-proto` 13, `sl-viewer-environment` 11, `sl-viewer-notices` 10,
 `sl-viewer-ui-context-menus` 8, `sl-client-bevy-viewer` 7, then singles and
 pairs across the rest.
-
-`sl-viewer-inventory` is the interesting one left: several of its systems are
-already past Bevy's own 16-parameter cap and carry **anonymous tuple params**
-(`stashes`, `outputs`, `session`, `geometry`, `occlusion`, `targets`) — the same
-shape this sweep replaces, only unnamed and undocumented.
 
 Not in scope, and worth recording so it is not re-litigated: the remaining cast
 suppressions (152 `as_conversions`, 105 `cast_possible_truncation`, 63
