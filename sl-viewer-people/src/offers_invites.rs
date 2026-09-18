@@ -244,35 +244,55 @@ struct DeferredOffers {
     was_busy: bool,
 }
 
+/// Where an offer card is put, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the channel root it is
+/// spawned under, the manager that owns the toast, and the commands that build
+/// it.
+#[derive(bevy::ecs::system::SystemParam)]
+struct OfferSinks<'w, 's> {
+    /// The notification channel the card is spawned under.
+    channel: Option<Res<'w, NotificationChannelRoot>>,
+    /// The manager that owns the toast.
+    manager: ResMut<'w, NotificationManager>,
+    /// What builds the card.
+    commands: Commands<'w, 's>,
+}
+
+/// What an offer is judged by, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the settings that hold the
+/// auto-accept and auto-reject policies, our do-not-disturb state, the friend
+/// and group rosters an offer is classified against, and the inventory an
+/// auto-accepted item is filed into.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct OfferFacts<'w> {
+    /// The auto-accept / auto-reject settings.
+    settings: Option<Res<'w, crate::settings::ViewerSettings>>,
+    /// Our presence, which defers an offer while do-not-disturb is on.
+    presence: Option<Res<'w, crate::social::PresenceState>>,
+    /// The friend roster, which the from-friends-only policies split on.
+    friends: Option<Res<'w, crate::social::FriendsModel>>,
+    /// The group roster, likewise for a group invite.
+    groups: Option<Res<'w, crate::social::GroupsModel>>,
+    /// The inventory an auto-accepted item is filed into.
+    inventory: Res<'w, InventoryModel>,
+}
+
 /// Read the event stream; for each received offer / invite IM, build its card and
 /// raise it into the shared toast channel (or, for an inventory offer under
 /// [`SETTING_AUTO_ACCEPT_INVENTORY`], file it silently).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the event stream, the \
-              shared channel + manager, i18n, the auto-accept setting with the inventory model \
-              + command writer it files through, the friend and group models the auto-reject \
-              policy reads, the do-not-disturb state and its deferral queue, and the commands \
-              the cards spawn with"
-)]
 fn ingest_offers_invites(
     mut events: MessageReader<SlEvent>,
-    channel: Option<Res<NotificationChannelRoot>>,
-    mut manager: ResMut<NotificationManager>,
+    mut sinks: OfferSinks,
     translator: Translator,
-    settings: Option<Res<crate::settings::ViewerSettings>>,
-    presence: Option<Res<crate::social::PresenceState>>,
-    friends: Option<Res<crate::social::FriendsModel>>,
-    groups: Option<Res<crate::social::GroupsModel>>,
+    facts: OfferFacts,
     mut deferred: ResMut<DeferredOffers>,
-    inventory: Res<InventoryModel>,
     mut sl: MessageWriter<SlCommand>,
-    mut commands: Commands,
 ) {
-    let Some(channel) = channel else {
+    let Some(channel) = sinks.channel.as_deref().copied() else {
         return;
     };
-    let auto_accept = settings
+    let auto_accept = facts
+        .settings
         .as_deref()
         .and_then(|settings| {
             settings
@@ -281,10 +301,12 @@ fn ingest_offers_invites(
                 .ok()
         })
         .unwrap_or(false);
-    let policy = crate::auto_reject::RejectPolicy::from_settings(settings.as_deref());
+    let policy = crate::auto_reject::RejectPolicy::from_settings(facts.settings.as_deref());
     // Do Not Disturb defers the cards and replays them on the way out, so this
     // frame's work is the fresh offers plus, on the falling edge, the held ones.
-    let busy = presence.is_some_and(|presence| presence.is_do_not_disturb());
+    let busy = facts
+        .presence
+        .is_some_and(|presence| presence.is_do_not_disturb());
     let mut pending: Vec<InstantMessage> = if !busy && deferred.was_busy {
         let held = std::mem::take(&mut deferred.held);
         if !held.is_empty() {
@@ -319,18 +341,20 @@ fn ingest_offers_invites(
         // class of offer before it can raise a card: the canned reply goes out,
         // the offer is declined on the wire, and nothing reaches the screen.
         if let Some(class) = offer_class(im.dialog) {
-            let is_friend = friends
+            let is_friend = facts
+                .friends
                 .as_deref()
                 .is_some_and(|friends| friends.is_friend(im.from_agent_id));
             let already_member = im.group_invitation().is_some_and(|invite| {
-                groups
+                facts
+                    .groups
                     .as_deref()
                     .is_some_and(|groups| groups.is_member(invite.group_id))
             });
             if let Some(kind) =
                 crate::auto_reject::reject_for(policy, class, is_friend, already_member)
             {
-                auto_reject_offer(im, kind, settings.as_deref(), &mut sl);
+                auto_reject_offer(im, kind, facts.settings.as_deref(), &mut sl);
                 continue;
             }
         }
@@ -345,7 +369,8 @@ fn ingest_offers_invites(
                 // there is nothing to defer.
                 if auto_accept
                     && let Some(offer) = im.inventory_offer()
-                    && let Some(folder_id) = inventory_destination(&inventory, offer.asset_type)
+                    && let Some(folder_id) =
+                        inventory_destination(&facts.inventory, offer.asset_type)
                 {
                     sl.write(SlCommand(Command::AcceptInventoryOffer {
                         offer,
@@ -357,7 +382,13 @@ fn ingest_offers_invites(
                     deferred.held.push(im.clone());
                     continue;
                 }
-                spawn_inventory_offer_card(&mut commands, &channel, &mut manager, &translator, im);
+                spawn_inventory_offer_card(
+                    &mut sinks.commands,
+                    &channel,
+                    &mut sinks.manager,
+                    &translator,
+                    im,
+                );
             }
             ImDialog::LureUser | ImDialog::FriendshipOffered | ImDialog::GroupInvitation
                 if busy =>
@@ -365,13 +396,31 @@ fn ingest_offers_invites(
                 deferred.held.push(im.clone());
             }
             ImDialog::LureUser => {
-                spawn_lure_card(&mut commands, &channel, &mut manager, &translator, im);
+                spawn_lure_card(
+                    &mut sinks.commands,
+                    &channel,
+                    &mut sinks.manager,
+                    &translator,
+                    im,
+                );
             }
             ImDialog::FriendshipOffered => {
-                spawn_friendship_card(&mut commands, &channel, &mut manager, &translator, im);
+                spawn_friendship_card(
+                    &mut sinks.commands,
+                    &channel,
+                    &mut sinks.manager,
+                    &translator,
+                    im,
+                );
             }
             ImDialog::GroupInvitation => {
-                spawn_group_invite_card(&mut commands, &channel, &mut manager, &translator, im);
+                spawn_group_invite_card(
+                    &mut sinks.commands,
+                    &channel,
+                    &mut sinks.manager,
+                    &translator,
+                    im,
+                );
             }
             _ => {}
         }

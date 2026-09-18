@@ -281,6 +281,55 @@ impl Plugin for PresencePlugin {
     }
 }
 
+/// What counts as activity, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the keys and buttons held,
+/// and the pointer motion and wheel of this frame.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct ActivityInput<'w> {
+    /// Held keys.
+    keys: Res<'w, ButtonInput<KeyCode>>,
+    /// Held mouse buttons.
+    buttons: Res<'w, ButtonInput<MouseButton>>,
+    /// This frame's pointer motion.
+    motion: Res<'w, AccumulatedMouseMotion>,
+    /// This frame's wheel scroll.
+    scroll: Res<'w, AccumulatedMouseScroll>,
+}
+
+impl ActivityInput<'_> {
+    /// Whether the user did anything this frame — what resets the idle timer.
+    fn is_active(&self) -> bool {
+        self.keys.get_pressed().next().is_some()
+            || self.buttons.get_pressed().next().is_some()
+            || self.motion.delta != Vec2::ZERO
+            || self.scroll.delta != Vec2::ZERO
+    }
+}
+
+/// What an auto-reply is decided by, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the settings that switch each
+/// mode on, the friend and mute lists the sender is classified against, the
+/// contact sets a per-set reply comes from, the inventory an attached item is
+/// resolved in, the conversations that say whether this sender has had a reply,
+/// and our own agent id.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct AutoRespondFacts<'w> {
+    /// The settings that switch each reply mode on and hold its text.
+    settings: Option<Res<'w, ViewerSettings>>,
+    /// The friend roster, which the non-friend mode splits on.
+    friends: Option<Res<'w, crate::social::FriendsModel>>,
+    /// The mute list, which selects the blocked-sender reply.
+    mutes: Option<Res<'w, crate::social::MuteModel>>,
+    /// The contact sets, for a per-set reply.
+    sets: Option<Res<'w, ContactSets>>,
+    /// The inventory an attached autoresponse item is resolved in.
+    inventory: Res<'w, crate::inventory::InventoryModel>,
+    /// The open conversations: an open one means this sender already had a reply.
+    conversations: Res<'w, ConversationModel>,
+    /// Our own agent, so our own IMs are never answered.
+    identity: Res<'w, SlIdentity>,
+}
+
 /// Advance the idle / away clocks, note any user input, and apply the two
 /// timeouts: go away after `SETTING_AFK_TIMEOUT` idle seconds, and log out
 /// after [`SETTING_QUIT_AFTER_AFK`] away seconds.
@@ -289,19 +338,9 @@ impl Plugin for PresencePlugin {
 /// or scroll — the same breadth the reference's window handlers cover.
 ///
 /// `SETTING_AFK_TIMEOUT`: crate::world_api::SETTING_AFK_TIMEOUT
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its dependencies: the clock, the four input \
-              sources activity is read from, the settings holding both timeouts, identity (no \
-              session, no away state), the presence state, and the quit request the \
-              quit-after-AFK timeout writes"
-)]
 fn track_presence_activity(
     time: Res<Time>,
-    keys: Res<ButtonInput<KeyCode>>,
-    buttons: Res<ButtonInput<MouseButton>>,
-    motion: Res<AccumulatedMouseMotion>,
-    scroll: Res<AccumulatedMouseScroll>,
+    input: ActivityInput,
     settings: Option<Res<ViewerSettings>>,
     identity: Res<SlIdentity>,
     mut state: ResMut<PresenceState>,
@@ -309,11 +348,7 @@ fn track_presence_activity(
 ) {
     let dt = time.delta_secs();
     state.tick(dt);
-    let active = keys.get_pressed().next().is_some()
-        || buttons.get_pressed().next().is_some()
-        || motion.delta != Vec2::ZERO
-        || scroll.delta != Vec2::ZERO;
-    if active {
+    if input.is_active() {
         state.note_activity();
     }
     // Nothing is timed until there is a session to be away in (the reference's
@@ -421,38 +456,23 @@ fn apply_sit_on_away(
 
 /// Answer an incoming IM with the canned reply of whichever mode is on, once
 /// per conversation, and note the reply in that conversation's transcript.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its dependencies: the event stream, the presence \
-              state, the settings the replies come from, the friend and block lists the \
-              decision reads, the contact sets a per-set reply comes from, the inventory the \
-              optional autoresponse item is resolved in, the conversation model that says \
-              whether a session is already open, and the two streams it writes (the wire reply \
-              and the transcript notice)"
-)]
 fn auto_respond_to_ims(
     mut events: MessageReader<SlEvent>,
     presence: Res<PresenceState>,
-    settings: Option<Res<ViewerSettings>>,
-    friends: Option<Res<crate::social::FriendsModel>>,
-    mutes: Option<Res<crate::social::MuteModel>>,
-    sets: Option<Res<ContactSets>>,
-    inventory: Res<crate::inventory::InventoryModel>,
-    conversations: Res<ConversationModel>,
-    identity: Res<SlIdentity>,
+    facts: AutoRespondFacts,
     mut commands: MessageWriter<SlCommand>,
     mut notices: MessageWriter<ConversationNotice>,
 ) {
     let modes = ReplyModes {
         away: presence.is_away(),
-        send_away: bool_setting(settings.as_deref(), SETTING_SEND_AWAY_RESPONSE),
+        send_away: bool_setting(facts.settings.as_deref(), SETTING_SEND_AWAY_RESPONSE),
         do_not_disturb: presence.is_do_not_disturb(),
-        autorespond: bool_setting(settings.as_deref(), SETTING_AUTORESPOND_MODE),
+        autorespond: bool_setting(facts.settings.as_deref(), SETTING_AUTORESPOND_MODE),
         autorespond_non_friends: bool_setting(
-            settings.as_deref(),
+            facts.settings.as_deref(),
             SETTING_AUTORESPOND_NON_FRIENDS_MODE,
         ),
-        send_muted: bool_setting(settings.as_deref(), SETTING_SEND_MUTED_RESPONSE),
+        send_muted: bool_setting(facts.settings.as_deref(), SETTING_SEND_MUTED_RESPONSE),
     };
     for event in events.read() {
         let SlSessionEvent::InstantMessageReceived(im) = &event.0 else {
@@ -466,14 +486,16 @@ fn auto_respond_to_ims(
             || im.from_group
             || im.offline
             || im.from_agent_id.uuid().is_nil()
-            || identity.agent_id == Some(im.from_agent_id)
+            || facts.identity.agent_id == Some(im.from_agent_id)
         {
             continue;
         }
-        let is_friend = friends
+        let is_friend = facts
+            .friends
             .as_deref()
             .is_some_and(|friends| friends.is_friend(im.from_agent_id));
-        let is_blocked = mutes
+        let is_blocked = facts
+            .mutes
             .as_deref()
             .is_some_and(|mutes| mutes.is_muted(im.from_agent_id.uuid()));
         let Some(mode) = reply_for(modes, is_friend, is_blocked) else {
@@ -482,12 +504,15 @@ fn auto_respond_to_ims(
         // Once per conversation, as the reference does: an already-open
         // conversation means this resident has had the reply.
         let key = ConversationKey::Direct(im.from_agent_id);
-        if conversations.has_conversation(key) {
+        if facts.conversations.has_conversation(key) {
             continue;
         }
-        let Some(message) =
-            reply_text(settings.as_deref(), sets.as_deref(), im.from_agent_id, mode)
-        else {
+        let Some(message) = reply_text(
+            facts.settings.as_deref(),
+            facts.sets.as_deref(),
+            im.from_agent_id,
+            mode,
+        ) else {
             continue;
         };
         commands.write(SlCommand(Command::AutoResponse {
@@ -504,8 +529,11 @@ fn auto_respond_to_ims(
         // blocked-sender reply exists to tell someone they are blocked, and
         // handing them a gift with it would be absurd.
         if mode != ReplyMode::Muted
-            && let Some((item, command)) =
-                autoresponse_item(settings.as_deref(), &inventory, im.from_agent_id)
+            && let Some((item, command)) = autoresponse_item(
+                facts.settings.as_deref(),
+                &facts.inventory,
+                im.from_agent_id,
+            )
         {
             commands.write(SlCommand(command));
             notices.write(ConversationNotice {

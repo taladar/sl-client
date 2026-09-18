@@ -520,7 +520,7 @@ fn icon_eye(nx: f32, ny: f32) -> f32 {
 /// The see-on-map icon: a location pin — a disc over a triangle, with a hole.
 fn icon_pin(nx: f32, ny: f32) -> f32 {
     let head = disc(nx, ny, 0.5, 0.4, 0.24);
-    let tip = triangle(nx, ny, 0.5, 0.86, 0.3, 0.5, 0.7, 0.5);
+    let tip = triangle(nx, ny, [(0.5, 0.86), (0.3, 0.5), (0.7, 0.5)]);
     let hole = disc(nx, ny, 0.5, 0.4, 0.10);
     cut(union(head, tip), hole)
 }
@@ -554,14 +554,11 @@ fn square_ring(nx: f32, ny: f32) -> f32 {
     stroke - (chebyshev - half).abs()
 }
 
-/// Signed coverage (inside-positive) of a filled triangle, via the sign of the
-/// three edge half-planes (assumes the vertices wind consistently).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a triangle is its point plus three vertices as x/y scalars; grouping them into \
-              tuples would obscure the per-coordinate rasteriser math"
-)]
-fn triangle(px: f32, py: f32, ax: f32, ay: f32, bx: f32, by: f32, cx: f32, cy: f32) -> f32 {
+/// Signed coverage (inside-positive) of a filled triangle at `(px, py)`, via the
+/// sign of the three edge half-planes (assumes the `vertices` wind
+/// consistently).
+fn triangle(px: f32, py: f32, vertices: [(f32, f32); 3]) -> f32 {
+    let [(ax, ay), (bx, by), (cx, cy)] = vertices;
     let e0 = edge(px, py, ax, ay, bx, by);
     let e1 = edge(px, py, bx, by, cx, cy);
     let e2 = edge(px, py, cx, cy, ax, ay);
@@ -2289,24 +2286,31 @@ fn refresh_friend_actions(
     }
 }
 
+/// The People pane's chrome, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the tab background and
+/// border, the display flags of the pane and its four sub-tab contents, and the
+/// two sort arrows' glyphs.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct PeopleChrome<'w, 's> {
+    /// The tab button's background.
+    backgrounds: Query<'w, 's, &'static mut BackgroundColor>,
+    /// Its border.
+    borders: Query<'w, 's, &'static mut BorderColor>,
+    /// The pane's and the sub-tab contents' display flags.
+    nodes: Query<'w, 's, &'static mut Node>,
+    /// The two sort arrows.
+    texts: Query<'w, 's, &'static mut Text>,
+}
+
 /// Keep the People surface in step: the tab colours (active while the strip focus
 /// is external), the pane visibility, the Friends / Groups sub-content switch, and
 /// the Name / Status sort-direction arrows from the primary sort key.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "reflecting the model + focus into the People chrome touches the tab background, \
-              border, pane / content display, sub-strip selection and the two sort arrows — \
-              distinct node aspects that belong in one coherent refresh"
-)]
 fn refresh_people(
     focus: Res<StripFocus>,
     ui: Option<Res<PeopleUi>>,
     sort: Res<SortState>,
     strips: Query<&TabStrip>,
-    mut backgrounds: Query<&mut BackgroundColor>,
-    mut borders: Query<&mut BorderColor>,
-    mut nodes: Query<&mut Node>,
-    mut texts: Query<&mut Text>,
+    mut chrome: PeopleChrome,
 ) {
     let Some(ui) = ui else {
         return;
@@ -2316,12 +2320,12 @@ fn refresh_people(
     // Sort-direction arrows: only the primary (most-significant) column shows one.
     let primary = sort.primary();
     set_arrow(
-        &mut texts,
+        &mut chrome.texts,
         ui.name_arrow,
         sort_arrow(primary, SortColumn::Name),
     );
     set_arrow(
-        &mut texts,
+        &mut chrome.texts,
         ui.status_arrow,
         sort_arrow(primary, SortColumn::Online),
     );
@@ -2331,15 +2335,15 @@ fn refresh_people(
     } else {
         (TAB_INACTIVE_BACKGROUND, TAB_BORDER)
     };
-    set_background(&mut backgrounds, ui.tab_button, background);
-    if let Ok(mut color) = borders.get_mut(ui.tab_button) {
+    set_background(&mut chrome.backgrounds, ui.tab_button, background);
+    if let Ok(mut color) = chrome.borders.get_mut(ui.tab_button) {
         let wanted = BorderColor::all(border);
         if *color != wanted {
             *color = wanted;
         }
     }
 
-    set_display(&mut nodes, ui.pane, active);
+    set_display(&mut chrome.nodes, ui.pane, active);
 
     // Switch the Friends / Groups / Blocked / Contact Sets content from the
     // sub-strip's active tab (an unreadable strip falls back to Friends, the
@@ -2347,11 +2351,23 @@ fn refresh_people(
     let sub_tab = strips
         .get(ui.sub_strip)
         .map_or(FRIENDS_TAB_INDEX, |strip| strip.active);
-    set_display(&mut nodes, ui.friends_content, sub_tab == FRIENDS_TAB_INDEX);
-    set_display(&mut nodes, ui.groups_content, sub_tab == GROUPS_TAB_INDEX);
-    set_display(&mut nodes, ui.blocked_content, sub_tab == BLOCKED_TAB_INDEX);
     set_display(
-        &mut nodes,
+        &mut chrome.nodes,
+        ui.friends_content,
+        sub_tab == FRIENDS_TAB_INDEX,
+    );
+    set_display(
+        &mut chrome.nodes,
+        ui.groups_content,
+        sub_tab == GROUPS_TAB_INDEX,
+    );
+    set_display(
+        &mut chrome.nodes,
+        ui.blocked_content,
+        sub_tab == BLOCKED_TAB_INDEX,
+    );
+    set_display(
+        &mut chrome.nodes,
         ui.contact_sets_content,
         sub_tab == CONTACT_SETS_TAB_INDEX,
     );

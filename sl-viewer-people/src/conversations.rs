@@ -1772,6 +1772,62 @@ fn text_muted(mutes: Option<&MuteModel>, id: Uuid, name: &str) -> bool {
     mutes.is_some_and(|mutes| mutes.text_muted(id, name))
 }
 
+/// What an incoming conversation event is judged against, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): our own agent, the settings
+/// and friend roster the auto-reject reads, the object mirror the RLV owner-say
+/// gate reads, and the mute list the block filter reads.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub(crate) struct ConversationFacts<'w> {
+    /// Our own agent, so our own lines are recognised.
+    identity: Res<'w, SlIdentity>,
+    /// The settings the auto-reject and chat filters read.
+    settings: Option<Res<'w, crate::settings::ViewerSettings>>,
+    /// The friend roster the from-friends-only policies split on.
+    friends: Option<Res<'w, crate::social::FriendsModel>>,
+    /// The object mirror the RLV owner-say gate reads.
+    objects: Option<Res<'w, crate::world_api::ObjectState>>,
+    /// The mute list the block filter reads.
+    mutes: Option<Res<'w, MuteModel>>,
+}
+
+/// The transcript view's widgets, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the tab labels and typing
+/// lines, the tab backgrounds and borders, the panes' display flags, the
+/// transcript scroll, the skin's chat-band colours, and the commands that
+/// respawn a changed transcript.
+#[derive(bevy::ecs::system::SystemParam)]
+struct ConversationChrome<'w, 's> {
+    /// The tab labels and typing lines.
+    texts: Query<'w, 's, &'static mut Text>,
+    /// The tab buttons' backgrounds.
+    backgrounds: Query<'w, 's, &'static mut BackgroundColor>,
+    /// Their borders.
+    borders: Query<'w, 's, &'static mut BorderColor>,
+    /// The panes' and bars' display flags.
+    nodes: Query<'w, 's, &'static mut Node>,
+    /// The transcript scroll, pinned to the newest line.
+    scrolls: Query<'w, 's, &'static mut ScrollPosition>,
+    /// The skin's chat-band colours.
+    band_colors: Query<'w, 's, &'static SkinChatBands>,
+    /// What respawns a changed transcript.
+    commands: Commands<'w, 's>,
+}
+
+/// The refresh's own cadence, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the clock the unread flash
+/// blinks on, plus the palette and alias revision the transcripts were last
+/// rendered against — so a change to either re-renders them and nothing else
+/// does.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct RefreshMemo<'w, 's> {
+    /// The clock the unread flash blinks on.
+    time: Res<'w, Time>,
+    /// The palette the transcripts were last rendered with.
+    last_palette: Local<'s, Option<[Color; 5]>>,
+    /// The alias revision they were last rendered against.
+    last_alias_revision: Local<'s, Option<u64>>,
+}
+
 /// Fold every relevant inbound event into the model: chat / IM / group /
 /// conference lines, typing notifications, invites, and the name caches behind
 /// the tab titles.
@@ -1788,26 +1844,14 @@ fn text_muted(mutes: Option<&MuteModel>, id: Uuid, name: &str) -> bool {
 /// ([`ConversationModel::set_typing`]), so letting it through would put a
 /// blocked resident's name on screen with nothing said. See [`text_muted`]
 /// for what "blocked" means per aspect.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the event \
-              stream, the conversation model and avatar-name cache it fills, the identity, \
-              the settings and friends model the auto-reject reads, the object mirror the \
-              RLV owner-say gate reads, the mute list the block filter reads, and the \
-              command writer a refusal answers on"
-)]
 pub(crate) fn ingest_conversation_events(
     mut events: MessageReader<SlEvent>,
     mut model: ResMut<ConversationModel>,
     mut avatars: ResMut<crate::world_api::AvatarState>,
-    identity: Res<SlIdentity>,
-    settings: Option<Res<crate::settings::ViewerSettings>>,
-    friends: Option<Res<crate::social::FriendsModel>>,
-    objects: Option<Res<crate::world_api::ObjectState>>,
-    mutes: Option<Res<MuteModel>>,
+    facts: ConversationFacts,
     mut sl: MessageWriter<SlCommand>,
 ) {
-    let mutes = mutes.as_deref();
+    let mutes = facts.mutes.as_deref();
     for event in events.read() {
         match &event.0 {
             SlSessionEvent::ChatReceived(message) => {
@@ -1821,8 +1865,8 @@ pub(crate) fn ingest_conversation_events(
                 // a leak of what it is doing.
                 if is_displayable(&message.chat_type, &message.message)
                     && !swallows_owner_say(
-                        settings.as_deref(),
-                        objects.as_deref(),
+                        facts.settings.as_deref(),
+                        facts.objects.as_deref(),
                         message.source,
                         message.chat_type,
                         &message.message,
@@ -1888,7 +1932,7 @@ pub(crate) fn ingest_conversation_events(
                 // echo it locally as "You:" on send (`route_conversation_input`),
                 // so drop the self-echo to avoid showing it twice (once as "You:"
                 // and once under our own name).
-                if identity.agent_id != Some(*from_agent_id)
+                if facts.identity.agent_id != Some(*from_agent_id)
                     && !text_muted(mutes, from_agent_id.uuid(), from_name)
                 {
                     avatars.note_legacy_name(*from_agent_id, from_name);
@@ -1908,7 +1952,7 @@ pub(crate) fn ingest_conversation_events(
             } => {
                 // Same self-echo suppression as group sessions (a conference
                 // session likewise echoes the sender's own line back).
-                if identity.agent_id != Some(*from_agent_id)
+                if facts.identity.agent_id != Some(*from_agent_id)
                     && !text_muted(mutes, from_agent_id.uuid(), from_name)
                 {
                     avatars.note_legacy_name(*from_agent_id, from_name);
@@ -1953,11 +1997,12 @@ pub(crate) fn ingest_conversation_events(
                     // Unlike a group, an ad-hoc conference *is* the person who
                     // opened it, so there is nothing left to stay for — the
                     // reference leaves such a session outright.
-                    let is_friend = friends
+                    let is_friend = facts
+                        .friends
                         .as_deref()
                         .is_some_and(|friends| friends.is_friend(*from_agent_id));
                     if invited_by_blocked
-                        || crate::auto_reject::ignores_ad_hoc(settings.as_deref(), is_friend)
+                        || crate::auto_reject::ignores_ad_hoc(facts.settings.as_deref(), is_friend)
                     {
                         info!(
                             "conversations: ignoring ad-hoc conference invite from {from_agent_id}"
@@ -2044,7 +2089,12 @@ pub(crate) fn ingest_conversation_events(
                     .iter()
                     .rev()
                     .map(|message| {
-                        transcript_line_for(&avatars, &identity, message.sender, &message.text)
+                        transcript_line_for(
+                            &avatars,
+                            &facts.identity,
+                            message.sender,
+                            &message.text,
+                        )
                     })
                     .collect();
                 model.set_recall(key, recalled);
@@ -2069,7 +2119,7 @@ pub(crate) fn ingest_conversation_events(
                     })
                     .map(|message| {
                         avatars.note_legacy_name(message.sender, &message.sender_name);
-                        let own = identity.agent_id == Some(message.sender);
+                        let own = facts.identity.agent_id == Some(message.sender);
                         TranscriptLine {
                             own,
                             speaker: if own {
@@ -2500,29 +2550,14 @@ struct RefreshContext<'w> {
 /// Keep the view in step with the model: each tab's label + colours (with the
 /// unread flash), the active pane's visibility, the invite bar, the typing line,
 /// and each transcript node when its revision has advanced.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "reflecting one model into its view genuinely touches the model, the view map, the \
-              translator, the blink clock, and the node aspects it writes — text, background, \
-              border and display/scroll; splitting them would scatter one coherent refresh across \
-              systems"
-)]
 fn refresh_conversations(
     model: Res<ConversationModel>,
     focus: Res<StripFocus>,
     mut ui: Option<ResMut<ConversationsUi>>,
     translator: Translator,
-    time: Res<Time>,
-    mut commands: Commands,
-    mut texts: Query<&mut Text>,
-    mut backgrounds: Query<&mut BackgroundColor>,
-    mut borders: Query<&mut BorderColor>,
-    mut nodes: Query<&mut Node>,
-    mut scrolls: Query<&mut ScrollPosition>,
+    mut chrome: ConversationChrome,
     context: RefreshContext,
-    mut last_palette: Local<Option<[Color; 5]>>,
-    mut last_alias_revision: Local<Option<u64>>,
-    band_colors: Query<&SkinChatBands>,
+    mut memo: RefreshMemo,
 ) {
     let RefreshContext {
         settings,
@@ -2562,13 +2597,13 @@ fn refresh_conversations(
             settings.as_deref(),
         ),
     ];
-    if *last_palette != Some(palette) {
-        if last_palette.is_some() {
+    if *memo.last_palette != Some(palette) {
+        if memo.last_palette.is_some() {
             for view in ui.views.values_mut() {
                 view.rendered_revision = u64::MAX;
             }
         }
-        *last_palette = Some(palette);
+        *memo.last_palette = Some(palette);
     }
     // The same force-rebuild when the user's names for people move: an alias
     // given (or cleared) renames that speaker throughout the transcript at once,
@@ -2576,18 +2611,19 @@ fn refresh_conversations(
     let alias_revision = sets
         .as_deref()
         .map(crate::contact_sets::ContactSets::alias_revision);
-    if *last_alias_revision != alias_revision {
-        if last_alias_revision.is_some() {
+    if *memo.last_alias_revision != alias_revision {
+        if memo.last_alias_revision.is_some() {
             for view in ui.views.values_mut() {
                 view.rendered_revision = u64::MAX;
             }
         }
-        *last_alias_revision = alias_revision;
+        *memo.last_alias_revision = alias_revision;
     }
     // The skin's transcript band colours, landed on the floater root by the
     // `.sk-conversations` CSS rule; the reference values are the fallback for a
     // skin that does not style them.
-    let bands = band_colors
+    let bands = chrome
+        .band_colors
         .get(ui.floater_root)
         .copied()
         .unwrap_or_default();
@@ -2595,7 +2631,7 @@ fn refresh_conversations(
     let you = translator.get(YOU_LABEL_KEY);
     let nearby_title = translator.get(NEARBY_TITLE_KEY);
     // The blink phase: on for the first half of each period, off for the second.
-    let blink_on = (time.elapsed_secs() * BLINK_HZ).fract() < 0.5;
+    let blink_on = (memo.time.elapsed_secs() * BLINK_HZ).fract() < 0.5;
 
     for entry in &model.entries {
         let Some(view) = ui.views.get_mut(&entry.key) else {
@@ -2623,7 +2659,7 @@ fn refresh_conversations(
             },
         };
         let label = tab_label(&title, entry.unread, is_active);
-        set_text(&mut texts, view.tab_label, &label);
+        set_text(&mut chrome.texts, view.tab_label, &label);
 
         // Tab colours track the active one, and flash while it has unread lines.
         let (background, border) = if is_active {
@@ -2633,8 +2669,8 @@ fn refresh_conversations(
         } else {
             (TAB_INACTIVE_BACKGROUND, TAB_BORDER)
         };
-        set_background(&mut backgrounds, view.tab_button, background);
-        if let Ok(mut color) = borders.get_mut(view.tab_button) {
+        set_background(&mut chrome.backgrounds, view.tab_button, background);
+        if let Ok(mut color) = chrome.borders.get_mut(view.tab_button) {
             let wanted = BorderColor::all(border);
             if *color != wanted {
                 *color = wanted;
@@ -2642,16 +2678,16 @@ fn refresh_conversations(
         }
 
         // Pane visibility — only the active pane is laid out.
-        set_display(&mut nodes, view.panel, is_active);
+        set_display(&mut chrome.nodes, view.panel, is_active);
 
         // The pending-invite bar shows only while invited.
-        set_display(&mut nodes, view.invite_bar, entry.pending_invite);
+        set_display(&mut chrome.nodes, view.invite_bar, entry.pending_invite);
 
         // The typing line: "X is typing…", hidden when nobody is.
         let typing = typing_status(&translator, &entry.typing);
-        set_display(&mut nodes, view.typing_text, typing.is_some());
+        set_display(&mut chrome.nodes, view.typing_text, typing.is_some());
         if let Some(status) = typing {
-            set_text(&mut texts, view.typing_text, &status);
+            set_text(&mut chrome.texts, view.typing_text, &status);
         }
 
         // Transcript, only when a new line landed: rebuild the line column — one
@@ -2665,7 +2701,8 @@ fn refresh_conversations(
         // the live transcript is bounded by `HISTORY_CAP`.
         if view.rendered_revision != entry.revision {
             view.rendered_revision = entry.revision;
-            commands
+            chrome
+                .commands
                 .entity(view.transcript_column)
                 .despawn_related::<Children>();
             // The historical bands keep their skin colours (grey local recall,
@@ -2700,14 +2737,14 @@ fn refresh_conversations(
                     SpeakerLink::Own | SpeakerLink::Object(_) | SpeakerLink::None => None,
                 };
                 spawn_linkified_text(
-                    &mut commands,
+                    &mut chrome.commands,
                     view.transcript_column,
                     &line_text(line, &you, alias.as_deref()),
                     style,
                 );
             }
             // Pin the scroll to the newest line.
-            if let Ok(mut scroll) = scrolls.get_mut(view.transcript_scroll) {
+            if let Ok(mut scroll) = chrome.scrolls.get_mut(view.transcript_scroll) {
                 scroll.0.y = SCROLL_TO_BOTTOM;
             }
         }

@@ -2627,18 +2627,22 @@ fn bind_notice_rows(
     }
 }
 
+/// The hierarchy a group-profile press is resolved through, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the parent links walked from
+/// the pressed control up to its floater, and the floaters themselves.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct GroupProfileHost<'w, 's> {
+    /// Parent links, walked from the control to its window.
+    parents: Query<'w, 's, &'static ChildOf>,
+    /// The windows, so the walk knows when it has arrived.
+    floaters: Query<'w, 's, (Entity, &'static Floater)>,
+}
+
 /// Select a notice on press: show it, and request its full body if not cached.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "an observer's parameters are its injected queries / resources: the pick, the row \
-              query, the UI handles, the focus, the state + dirty flags, the requested-notice \
-              set it records into, and the command writer it fetches through"
-)]
 fn on_notice_row_press(
     press: On<Pointer<Press>>,
     rows: Query<&BoundNotice>,
-    parents: Query<&ChildOf>,
-    floaters: Query<(Entity, &Floater)>,
+    host: GroupProfileHost,
     mut windows: Query<(
         &mut GroupProfileState,
         &mut GroupProfileDirty,
@@ -2651,7 +2655,7 @@ fn on_notice_row_press(
     if press.button != PointerButton::Primary {
         return;
     }
-    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+    let Some(window) = host_floater(press.entity, &host.parents, &host.floaters) else {
         return;
     };
     let Ok((mut state, mut dirty, ui)) = windows.get_mut(window) else {
@@ -2686,16 +2690,10 @@ fn on_notice_row_press(
     clippy::too_many_lines,
     reason = "one dispatch over every group-profile button kind, each arm a few lines"
 )]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy observer's parameters are its injected resources: the action marker, \
-              the state, the UI field handles, the clipboard, and the command output"
-)]
 fn on_group_profile_action(
     press: On<Pointer<Press>>,
     actions: Query<&GroupProfileAction>,
-    parents: Query<&ChildOf>,
-    floaters: Query<(Entity, &Floater)>,
+    host: GroupProfileHost,
     mut windows: Query<(
         &mut GroupProfileState,
         &mut GroupProfileDirty,
@@ -2713,7 +2711,7 @@ fn on_group_profile_action(
     };
     // Which window this button belongs to — with two group profiles open, Save
     // means save *this* window's group, from *this* window's fields.
-    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+    let Some(window) = host_floater(press.entity, &host.parents, &host.floaters) else {
         return;
     };
     let Ok((mut state, mut dirty, ui)) = windows.get_mut(window) else {

@@ -20,9 +20,9 @@ Scope: sweep the largest clusters into `SystemParam` bundles, in a codebase
 whose stated convention is no `#[expect]`. Start with `menu.rs`, then
 `sl-viewer-edit`.
 
-## Swept so far (2026-09-18): 338 → 189
+## Swept so far (2026-09-18): 338 → 161
 
-Five crates are now at **zero** suppressions (`sl-viewer-world-objects` keeps
+Six crates are now at **zero** suppressions (`sl-viewer-world-objects` keeps
 two, both deliberate — see below):
 
 - **`sl-viewer-ui-widgets` (16)** — `menu.rs`'s thirteen collapse into one
@@ -81,6 +81,19 @@ two, both deliberate — see below):
   `PickRenderWorld`; `movement.rs` `MovementInput` / `MovementWorld` /
   `CameraGaze`; `arrival.rs` `ArrivalCamera`; `hover_tooltip.rs` `HoverGesture`
   / `HoverOut`; `screenshot.rs` `CaptureRig`.
+- **`sl-viewer-people` (28)** — the panel clusters. `contact_sets_panel.rs`
+  around `ContactSetsList` / `ContactSetsPanelState` / `ContactSetsIntents` /
+  `AddToSetFloater` / `ConfigWidgets`; `radar.rs` around `RadarSweepWorld` /
+  `RadarSweepOut` / `RadarAlertChannels` / `RadarViewState` / `RadarWidgets` /
+  `RadarClick` / `RadarNames` / `RadarMenuOut` / `RadarActionModel` /
+  `RadarActionOut`; `avatar_profile.rs` around `ProfileSources` / `ProfileHost`
+  / `ProfileActionFacts` / `ProfileActionOut` / `WebStatusSources`;
+  `conversations.rs` around `ConversationFacts` / `ConversationChrome` /
+  `RefreshMemo`; plus `BlockedSelection` / `BlockedOut`, `GroupRowClick`,
+  `GroupProfileHost`, `NoticeSinks` / `NoticeOut`, `OfferSinks` / `OfferFacts`,
+  `ActivityInput` / `AutoRespondFacts`, `PeopleChrome` — and the one non-Bevy
+  case, an eight-scalar `triangle` rasteriser that now takes its three vertices
+  as one array.
 
 Patterns worth reusing:
 
@@ -100,13 +113,18 @@ Patterns worth reusing:
 - A `Local<'s, T>` is a `SystemParam` and belongs inside the bundle whose state
   it carries (`MediaPickIo`'s throttle, `SeatCamera`'s was-engaged flag).
 
-## Still to sweep (189)
+## Still to sweep (161)
 
-By crate, largest first: `sl-viewer-people` 28, `sl-viewer-inventory` 22,
-`sl-viewer-places` 21, `sl-viewer-world-scene` 15, `sl-viewer-map` 13,
-`sl-proto` 13, `sl-viewer-environment` 11, `sl-viewer-notices` 10,
+By crate, largest first: `sl-viewer-inventory` 22, `sl-viewer-places` 21,
+`sl-viewer-world-scene` 15, `sl-viewer-map` 13, `sl-proto` 13,
+`sl-viewer-environment` 11, `sl-viewer-notices` 10,
 `sl-viewer-ui-context-menus` 8, `sl-client-bevy-viewer` 7, then singles and
 pairs across the rest.
+
+`sl-viewer-inventory` is the interesting one left: several of its systems are
+already past Bevy's own 16-parameter cap and carry **anonymous tuple params**
+(`stashes`, `outputs`, `session`, `geometry`, `occlusion`, `targets`) — the same
+shape this sweep replaces, only unnamed and undocumented.
 
 Not in scope, and worth recording so it is not re-litigated: the remaining cast
 suppressions (152 `as_conversions`, 105 `cast_possible_truncation`, 63

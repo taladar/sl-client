@@ -637,6 +637,8 @@ struct RadarRowFacts<'w> {
     mutes: Res<'w, MuteModel>,
     /// The render-cost scores behind the Complexity cell.
     complexity: Res<'w, crate::avatar_complexity::AvatarComplexityModel>,
+    /// Our own agent, whose region the Region cell is stated relative to.
+    identity: Res<'w, SlIdentity>,
 }
 
 /// The facts a radar row menu's conditions are read from, bundled as one
@@ -653,6 +655,171 @@ struct RadarMenuFacts<'w> {
     mutes: Res<'w, MuteModel>,
     /// The model, for whether a full position is known (Teleport To).
     state: Res<'w, RadarState>,
+}
+
+/// The per-agent labels a multi-select radar menu carries, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the avatar mirror the names
+/// come from (and are requested through), and the translator that renders a
+/// name still on its way.
+#[derive(bevy::ecs::system::SystemParam)]
+struct RadarNames<'w> {
+    /// The avatar mirror, which also requests a name it has not seen.
+    avatars: ResMut<'w, AvatarState>,
+    /// The translator, for a placeholder while a name resolves.
+    translator: Translator<'w>,
+}
+
+impl RadarNames<'_> {
+    /// The labels the per-agent menu entries carry, and whether any of them is
+    /// still waiting on a name — see [`crate::minimap::menu_agent_labels`].
+    fn labels(&mut self, agents: &[AgentKey]) -> (Vec<String>, bool) {
+        crate::minimap::menu_agent_labels(agents, &mut self.avatars, &self.translator)
+    }
+}
+
+/// What a press on a radar row moves, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the double-click clock and
+/// stash, the keyboard focus the viewport takes, the radar's own selection and
+/// the table selection it is expressed against, and the menu target a
+/// right-click leaves for [`handle_radar_actions`].
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct RadarClick<'w, 's> {
+    /// The clock the double-click window is measured on.
+    time: Res<'w, Time>,
+    /// The keyboard focus, which the clicked viewport takes.
+    focus: ResMut<'w, InputFocus>,
+    /// The radar's own selection.
+    selection: ResMut<'w, RadarSelection>,
+    /// The last primary click, for the double-click test.
+    clicks: ResMut<'w, RadarClickTracker>,
+    /// What a right-click leaves for the menu actions.
+    target: ResMut<'w, RadarMenuTarget>,
+    /// The table's selection, which the radar's is expressed against.
+    tables: Query<'w, 's, &'static mut TableState>,
+}
+
+/// What a radar row press raises, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the context menu, the
+/// per-agent labels its multi-select entries carry, and the profile a
+/// double-click opens.
+#[derive(bevy::ecs::system::SystemParam)]
+struct RadarMenuOut<'w> {
+    /// The context menu a right-click opens.
+    menus: MessageWriter<'w, OpenContextMenu>,
+    /// The dynamic labels its per-agent entries carry.
+    labels: MessageWriter<'w, SetMenuDynamicLabels>,
+    /// The profile a double-click opens.
+    profiles: MessageWriter<'w, OpenAvatarProfile>,
+}
+
+/// What the radar's model and view are, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the scanned model the rows
+/// are folded from, the built rows themselves, and the selection projected
+/// across a rebuild.
+#[derive(bevy::ecs::system::SystemParam)]
+struct RadarViewState<'w> {
+    /// The scanned model, its filter and its chat ranges.
+    state: Res<'w, RadarState>,
+    /// The built rows and the counts line.
+    view: ResMut<'w, RadarView>,
+    /// The selection, re-projected onto the rebuilt rows.
+    selection: ResMut<'w, RadarSelection>,
+}
+
+/// The radar's row widgets, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the sortable header, the
+/// virtualized viewport and the counts line.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct RadarWidgets<'w, 's> {
+    /// The table header, for the sort and the selection.
+    tables: Query<'w, 's, &'static mut TableState>,
+    /// The virtualized viewport, whose item count the rows drive.
+    lists: Query<'w, 's, &'static mut VirtualList>,
+    /// The counts line.
+    texts: Query<'w, 's, &'static mut Text>,
+}
+
+/// Where the radar's sweep reads the world, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the avatar mirror it scans
+/// and requests names through, our own agent, the terrain that gives the region
+/// origin, and the transforms the positions come from.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct RadarSweepWorld<'w, 's> {
+    /// The avatar mirror the sweep scans and requests names through.
+    avatars: ResMut<'w, AvatarState>,
+    /// Our own agent, which the ranges are measured from.
+    identity: Res<'w, SlIdentity>,
+    /// The terrain, for the scene's region origin.
+    terrain: Res<'w, TerrainState>,
+    /// The world transforms each avatar's position is read from.
+    transforms: Query<'w, 's, &'static GlobalTransform>,
+}
+
+/// What one sweep raises, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the alert stream
+/// [`report_radar_alerts`] renders, and the wire requests for a name the mirror
+/// has never seen.
+#[derive(bevy::ecs::system::SystemParam)]
+struct RadarSweepOut<'w> {
+    /// The alerts one sweep raised.
+    alerts: MessageWriter<'w, RadarAlertMessage>,
+    /// The wire, for an unknown resident's properties.
+    sl_commands: MessageWriter<'w, SlCommand>,
+}
+
+/// The four ways a radar alert is told, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): local chat, the nearby-chat
+/// transcript, a toast, and the alert sound.
+#[derive(bevy::ecs::system::SystemParam)]
+struct RadarAlertChannels<'w> {
+    /// The local-chat line.
+    notices: MessageWriter<'w, LocalChatNotice>,
+    /// The nearby-chat transcript.
+    transcript: MessageWriter<'w, NearbyChatNotice>,
+    /// The toast.
+    toasts: MessageWriter<'w, ShowNotification>,
+    /// The alert sound.
+    sounds: MessageWriter<'w, PlayUiSound>,
+}
+
+/// What a radar menu action reads, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the scanned model, the
+/// avatar mirror the names come from, the mute list a Block / Unblock keys off,
+/// and the friend roster.
+#[derive(bevy::ecs::system::SystemParam)]
+struct RadarActionModel<'w> {
+    /// The scanned model, for a target's known position.
+    state: Res<'w, RadarState>,
+    /// The avatar mirror, for the names an action carries.
+    avatars: Res<'w, AvatarState>,
+    /// The mute list, which Block and Unblock split on.
+    mutes: Res<'w, MuteModel>,
+    /// The friend roster, which Add / Remove Friend splits on.
+    friends: Option<Res<'w, FriendsModel>>,
+}
+
+/// Everything a radar menu action raises, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the wire, the block /
+/// friendship / derender / render-exception requests, the conference, the
+/// profile, and the add-to-set floater.
+#[derive(bevy::ecs::system::SystemParam)]
+struct RadarActionOut<'w> {
+    /// The wire (teleport, offer teleport, unmute, terminate friendship).
+    sl_commands: MessageWriter<'w, SlCommand>,
+    /// A Block.
+    blocks: MessageWriter<'w, RequestBlock>,
+    /// An Add Friend.
+    friendships: MessageWriter<'w, RequestFriendship>,
+    /// A Derender.
+    derenders: MessageWriter<'w, RequestDerender>,
+    /// A conference IM over the selection.
+    conferences: MessageWriter<'w, StartConference>,
+    /// The profile floater.
+    profiles: MessageWriter<'w, OpenAvatarProfile>,
+    /// The add-to-set floater.
+    contact_sets: MessageWriter<'w, OpenAddToContactSet>,
+    /// A per-avatar render exception.
+    exceptions: MessageWriter<'w, RequestRenderException>,
 }
 
 // --- Plugin ---------------------------------------------------------------
@@ -1035,34 +1202,25 @@ fn spawn_radar_action_button(
 /// Tick the sweep timer; on each fire, sample the merged nearby-avatar list,
 /// run the pure model sweep, emit its alerts, and backfill names / profile
 /// properties for tracked avatars. Runs whether or not the floater is open.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the clock, the model \
-              state, the avatar / terrain / identity sources, the thresholds, and the \
-              alert / command outputs"
-)]
 fn sweep_radar(
     time: Res<Time>,
     mut state: ResMut<RadarState>,
-    mut avatars: ResMut<AvatarState>,
-    identity: Res<SlIdentity>,
-    terrain: Res<TerrainState>,
+    mut world: RadarSweepWorld,
     ranges: Res<ChatRanges>,
     settings: Option<Res<ViewerSettings>>,
-    transforms: Query<&GlobalTransform>,
-    mut alerts: MessageWriter<RadarAlertMessage>,
-    mut sl_commands: MessageWriter<SlCommand>,
+    mut out: RadarSweepOut,
 ) {
     if !state.timer.tick(time.delta()).just_finished() {
         return;
     }
-    let Some(own_agent) = identity.agent_id else {
+    let Some(own_agent) = world.identity.agent_id else {
         return;
     };
-    let origin = origin_global(terrain.origin().or(identity.region_handle));
-    let Some((own_east, own_north, own_up)) = avatars
+    let origin = origin_global(world.terrain.origin().or(world.identity.region_handle));
+    let Some((own_east, own_north, own_up)) = world
+        .avatars
         .root_entity_of(own_agent)
-        .and_then(|entity| transforms.get(entity).ok())
+        .and_then(|entity| world.transforms.get(entity).ok())
         .map(|transform| global_from_bevy(origin, transform.translation()))
     else {
         return;
@@ -1085,11 +1243,11 @@ fn sweep_radar(
     state.draw_distance = draw_distance;
 
     let mut samples: Vec<RadarSample> = Vec::new();
-    for avatar in avatars.map_avatars() {
+    for avatar in world.avatars.map_avatars() {
         if avatar.agent == own_agent {
             continue;
         }
-        let Ok(transform) = transforms.get(avatar.anchor) else {
+        let Ok(transform) = world.transforms.get(avatar.anchor) else {
             continue;
         };
         let (east, north, up) = global_from_bevy(origin, transform.translation());
@@ -1120,21 +1278,22 @@ fn sweep_radar(
         age_alert_days,
     };
     for alert in state.model.sweep(&samples, &cfg) {
-        alerts.write(RadarAlertMessage(alert));
+        out.alerts.write(RadarAlertMessage(alert));
     }
     // Backfill: names for unresolved rows (batched by the avatar module) and
     // a throttled trickle of profile-properties requests (age / payment).
     let pending_names: Vec<AgentKey> = state
         .model
         .entries()
-        .filter(|(agent, _entry)| avatars.name_record(**agent).is_none())
+        .filter(|(agent, _entry)| world.avatars.name_record(**agent).is_none())
         .map(|(agent, _entry)| *agent)
         .collect();
     for agent in pending_names {
-        avatars.request_name(agent);
+        world.avatars.request_name(agent);
     }
     for agent in state.model.take_property_requests(PROPERTIES_PER_SWEEP) {
-        sl_commands.write(SlCommand(Command::RequestAvatarProperties(agent)));
+        out.sl_commands
+            .write(SlCommand(Command::RequestAvatarProperties(agent)));
     }
 }
 
@@ -1165,21 +1324,13 @@ fn ingest_radar_properties(mut events: MessageReader<SlEvent>, mut state: ResMut
 /// opt-in toggle; the output preference picks a Nearby Chat line (overlay +
 /// transcript, clickable name) or a `RadarAlert` toast. Any reported alert
 /// also raises the radar UI sound (its own enable lives with the UI sounds).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the alert stream, the \
-              setting gates, the name source, and the three output channels plus the sound"
-)]
 fn report_radar_alerts(
     mut alerts: MessageReader<RadarAlertMessage>,
     state: Res<RadarState>,
     settings: Option<Res<ViewerSettings>>,
     avatars: Res<AvatarState>,
     translator: Translator,
-    mut notices: MessageWriter<LocalChatNotice>,
-    mut transcript: MessageWriter<NearbyChatNotice>,
-    mut toasts: MessageWriter<ShowNotification>,
-    mut sounds: MessageWriter<PlayUiSound>,
+    mut channels: RadarAlertChannels,
 ) {
     let Some(settings) = settings.as_deref() else {
         // No settings store (the gallery): drop the alerts unreported.
@@ -1206,15 +1357,17 @@ fn report_radar_alerts(
         let message = alert_message(&translator, &state, alert);
         let name = avatars.label_text(alert.agent);
         if toast_output {
-            toasts.write(
+            channels.toasts.write(
                 ShowNotification::new("RadarAlert")
                     .arg("NAME", name)
                     .arg("MESSAGE", message)
                     .with_context(alert.agent.uuid().to_string()),
             );
         } else {
-            notices.write(LocalChatNotice::new(format!("{name} {message}")));
-            transcript.write(NearbyChatNotice {
+            channels
+                .notices
+                .write(LocalChatNotice::new(format!("{name} {message}")));
+            channels.transcript.write(NearbyChatNotice {
                 speaker: name,
                 speaker_agent: Some(alert.agent),
                 body: message,
@@ -1223,7 +1376,7 @@ fn report_radar_alerts(
         reported = true;
     }
     if reported {
-        sounds.write(PlayUiSound(UiSound::RadarAlert));
+        channels.sounds.write(PlayUiSound(UiSound::RadarAlert));
     }
 }
 
@@ -1327,30 +1480,20 @@ fn sync_radar_limit_checkbox(
 /// filter, or the range limit moved: project every tracked avatar plus its
 /// live statuses into display rows, filter, sort by the widget's key stack,
 /// and keep the counts line and the virtual list's item count in step.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the model, the view, \
-              the UI handles, the bundled per-avatar status sources the rows project, and \
-              the selection the rebuild re-keys"
-)]
 fn rebuild_radar_view(
-    state: Res<RadarState>,
-    mut view: ResMut<RadarView>,
+    mut radar: RadarViewState,
     ui: Option<Res<RadarUi>>,
     settings: Option<Res<ViewerSettings>>,
     facts: RadarRowFacts,
-    identity: Res<SlIdentity>,
     time: Res<Time>,
     translator: Translator,
-    mut selection: ResMut<RadarSelection>,
-    mut tables: Query<&mut TableState>,
-    mut lists: Query<&mut VirtualList>,
-    mut texts: Query<&mut Text>,
+    mut widgets: RadarWidgets,
 ) {
     let Some(ui) = ui else {
         return;
     };
-    let sort = tables
+    let sort = widgets
+        .tables
         .get(ui.table)
         .ok()
         .map(|table| (table.sort_revision(), table.sort().keys().to_vec()));
@@ -1363,23 +1506,24 @@ fn rebuild_radar_view(
             None
         }
     });
-    if view.built_revision == state.model.revision()
-        && view.built_sort_revision == sort_revision
-        && view.built_filter == state.filter
-        && view.built_limit == limit
-        && view.built_complexity_revision == facts.complexity.revision()
+    if radar.view.built_revision == radar.state.model.revision()
+        && radar.view.built_sort_revision == sort_revision
+        && radar.view.built_filter == radar.state.filter
+        && radar.view.built_limit == limit
+        && radar.view.built_complexity_revision == facts.complexity.revision()
     {
         return;
     }
-    view.built_revision = state.model.revision();
-    view.built_sort_revision = sort_revision;
-    view.built_filter.clone_from(&state.filter);
-    view.built_limit = limit;
-    view.built_complexity_revision = facts.complexity.revision();
+    radar.view.built_revision = radar.state.model.revision();
+    radar.view.built_sort_revision = sort_revision;
+    radar.view.built_filter.clone_from(&radar.state.filter);
+    radar.view.built_limit = limit;
+    radar.view.built_complexity_revision = facts.complexity.revision();
 
-    let own_region = identity.region_handle;
+    let own_region = facts.identity.region_handle;
     let now = time.elapsed_secs_f64();
-    let mut rows: Vec<RadarRow> = state
+    let mut rows: Vec<RadarRow> = radar
+        .state
         .model
         .entries()
         .map(|(agent, entry)| {
@@ -1415,8 +1559,8 @@ fn rebuild_radar_view(
             }
         })
         .collect();
-    view.counts = counts(&rows, state.chat_range);
-    rows.retain(|row| matches_filter(row, &state.filter) && within_limit(row, limit));
+    radar.view.counts = counts(&rows, radar.state.chat_range);
+    rows.retain(|row| matches_filter(row, &radar.state.filter) && within_limit(row, limit));
     let keys: Vec<(SortColumn, bool)> = sort
         .map(|(_revision, keys)| keys)
         .unwrap_or_default()
@@ -1430,22 +1574,22 @@ fn rebuild_radar_view(
         })
         .collect();
     sort_rows(&mut rows, &keys);
-    view.rows = rows;
+    radar.view.rows = rows;
 
     // Re-key the selection onto the order that just replaced the one it was
     // clicked in.
-    if let Ok(mut table) = tables.get_mut(ui.table) {
-        let (indices, anchor) = selection.reproject(&view);
+    if let Ok(mut table) = widgets.tables.get_mut(ui.table) {
+        let (indices, anchor) = radar.selection.reproject(&radar.view);
         table.set_selection(indices, anchor);
         // The re-projection is not a selection *event* — it is the same people
         // at new indices — so the mirror must not read it back as one.
-        selection.read_revision = table.selection_revision();
+        radar.selection.read_revision = table.selection_revision();
     }
 
-    if let Ok(mut list) = lists.get_mut(ui.viewport) {
-        list.item_count = view.rows.len();
+    if let Ok(mut list) = widgets.lists.get_mut(ui.viewport) {
+        list.item_count = radar.view.rows.len();
     }
-    let (total, in_region, in_chat) = view.counts;
+    let (total, in_region, in_chat) = radar.view.counts;
     let label = translator.format(
         "radar-counts",
         &TransArgs::new()
@@ -1453,7 +1597,7 @@ fn rebuild_radar_view(
             .int("region", i64::try_from(in_region).unwrap_or(i64::MAX))
             .int("chat", i64::try_from(in_chat).unwrap_or(i64::MAX)),
     );
-    if let Ok(mut text) = texts.get_mut(ui.counts_text)
+    if let Ok(mut text) = widgets.texts.get_mut(ui.counts_text)
         && text.0 != label
     {
         text.0 = label;
@@ -1750,65 +1894,51 @@ pub fn spawn_radar_specimen(
 /// rule itself: right-clicking **inside** the selection keeps it and acts on all
 /// of it, right-clicking **outside** makes that row the selection first. Which
 /// menu then opens is a matter of how many rows are in it.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy observer's parameters are its injected resources: the row pool, the \
-              view / table the selection is expressed against, the double-click and \
-              menu-target stashes, and the fact sources the condition snapshot reads"
-)]
 fn on_radar_row_press(
     mut press: On<Pointer<Press>>,
     rows: Query<&BoundRadar>,
     ui: Res<RadarUi>,
-    time: Res<Time>,
     facts: RadarMenuFacts,
-    mut avatars: ResMut<AvatarState>,
-    translator: Translator,
-    mut tables: Query<&mut TableState>,
-    mut focus: ResMut<InputFocus>,
-    mut selection: ResMut<RadarSelection>,
-    mut clicks: ResMut<RadarClickTracker>,
-    mut target: ResMut<RadarMenuTarget>,
-    mut menus: MessageWriter<OpenContextMenu>,
-    mut labels: MessageWriter<SetMenuDynamicLabels>,
-    mut profiles: MessageWriter<OpenAvatarProfile>,
+    mut names: RadarNames,
+    mut click: RadarClick,
+    mut out: RadarMenuOut,
 ) {
     let Ok(BoundRadar(Some(agent))) = rows.get(press.entity).copied() else {
         return;
     };
     press.propagate(false);
-    focus.set(ui.viewport, FocusCause::Navigated);
+    click.focus.set(ui.viewport, FocusCause::Navigated);
     match press.button {
         PointerButton::Primary => {
-            let now = time.elapsed_secs();
-            if clicks.agent == Some(agent) && now - clicks.time <= DOUBLE_CLICK_SECS {
-                profiles.write(OpenAvatarProfile { agent });
-                clicks.agent = None;
+            let now = click.time.elapsed_secs();
+            if click.clicks.agent == Some(agent) && now - click.clicks.time <= DOUBLE_CLICK_SECS {
+                out.profiles.write(OpenAvatarProfile { agent });
+                click.clicks.agent = None;
             } else {
-                clicks.agent = Some(agent);
-                clicks.time = now;
+                click.clicks.agent = Some(agent);
+                click.clicks.time = now;
             }
         }
         PointerButton::Secondary => {
-            if !selection.agents.contains(&agent) {
-                selection.agents = vec![agent];
-                selection.anchor = Some(agent);
+            if !click.selection.agents.contains(&agent) {
+                click.selection.agents = vec![agent];
+                click.selection.anchor = Some(agent);
                 if let Some(index) = facts.view.index_of(agent)
-                    && let Ok(mut table) = tables.get_mut(ui.table)
+                    && let Ok(mut table) = click.tables.get_mut(ui.table)
                 {
                     table.set_selection(vec![index], Some(index));
-                    selection.read_revision = table.selection_revision();
+                    click.selection.read_revision = table.selection_revision();
                 }
             }
-            let agents = selection.agents.clone();
-            let (names, pending) = if agents.len() > 1 {
-                crate::minimap::menu_agent_labels(&agents, &mut avatars, &translator)
+            let agents = click.selection.agents.clone();
+            let (labels, pending) = if agents.len() > 1 {
+                names.labels(&agents)
             } else {
                 (Vec::new(), false)
             };
-            labels.write(SetMenuDynamicLabels {
+            out.labels.write(SetMenuDynamicLabels {
                 slot: SLOT_PROFILES,
-                labels: names,
+                labels,
             });
             let conditions = radar_menu_conditions(&agents, &facts);
             let menu = if agents.len() > 1 {
@@ -1816,11 +1946,11 @@ fn on_radar_row_press(
             } else {
                 &RADAR_MENU
             };
-            *target = RadarMenuTarget {
+            *click.target = RadarMenuTarget {
                 agents,
                 names_pending: pending,
             };
-            menus.write(OpenContextMenu {
+            out.menus.write(OpenContextMenu {
                 menu,
                 at: press.pointer_location.position,
                 element: RADAR_ELEMENT,
@@ -1963,29 +2093,13 @@ fn handle_radar_profile_picks(
 /// already takes a list for (a teleport offer) sends one message, and the arms
 /// that only make sense pointed at one row read the first — those entries only
 /// appear in the single-row menu, which is what makes that safe.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the action dispatch fans out to the tracking / mark resources, the mute and \
-              friend facts a mixed selection is filtered by, and the shared avatar-action \
-              message / command channels"
-)]
 fn handle_radar_actions(
     mut actions: MessageReader<UiAction>,
     target: Res<RadarMenuTarget>,
-    state: Res<RadarState>,
-    avatars: Res<AvatarState>,
-    mutes: Res<MuteModel>,
-    friends: Option<Res<FriendsModel>>,
+    model: RadarActionModel,
     mut tracking: ResMut<MapTracking>,
     mut marks: ResMut<MinimapMarks>,
-    mut sl_commands: MessageWriter<SlCommand>,
-    mut blocks: MessageWriter<RequestBlock>,
-    mut friendships: MessageWriter<RequestFriendship>,
-    mut derenders: MessageWriter<RequestDerender>,
-    mut conferences: MessageWriter<StartConference>,
-    mut profiles: MessageWriter<OpenAvatarProfile>,
-    mut contact_sets: MessageWriter<OpenAddToContactSet>,
-    mut exceptions: MessageWriter<RequestRenderException>,
+    mut out: RadarActionOut,
 ) {
     for action in actions.read() {
         if action.element != RADAR_ELEMENT {
@@ -1999,7 +2113,8 @@ fn handle_radar_actions(
         // in the one-row menu, so the first of the selection *is* the row.
         let first = agents.first().copied();
         let name_of = |agent: AgentKey| {
-            avatars
+            model
+                .avatars
                 .name_of(agent)
                 .map(ToOwned::to_owned)
                 .unwrap_or_default()
@@ -2007,14 +2122,15 @@ fn handle_radar_actions(
         match action.action {
             "profile" => {
                 if let Some(agent) = first {
-                    profiles.write(OpenAvatarProfile { agent });
+                    out.profiles.write(OpenAvatarProfile { agent });
                 }
             }
             "im" => {
                 // One row is a one-to-one IM, several are one ad-hoc
                 // conference — the count branch the reference's `Avatar.IM`
                 // makes, and which the shared verb makes for us.
-                conferences.write(StartConference::with(agents.to_vec()));
+                out.conferences
+                    .write(StartConference::with(agents.to_vec()));
             }
             "start-tracking" => {
                 if let Some(agent) = first {
@@ -2026,7 +2142,7 @@ fn handle_radar_actions(
             }
             "teleport-to" => {
                 let Some((east, north, up)) = first
-                    .and_then(|agent| state.model.entry(agent))
+                    .and_then(|agent| model.state.model.entry(agent))
                     .and_then(|entry| entry.position)
                 else {
                     continue;
@@ -2035,7 +2151,7 @@ fn handle_radar_actions(
                 let Some((grid, local)) = global.split() else {
                     continue;
                 };
-                sl_commands.write(SlCommand(Command::Teleport {
+                out.sl_commands.write(SlCommand(Command::Teleport {
                     region_handle: sl_client_bevy::RegionHandle::from_grid(grid.x(), grid.y()),
                     position: local,
                     look_at: Vector {
@@ -2047,7 +2163,7 @@ fn handle_radar_actions(
             }
             "offer-teleport" => {
                 // One offer naming everyone — the message already carries a list.
-                sl_commands.write(SlCommand(Command::OfferTeleport {
+                out.sl_commands.write(SlCommand(Command::OfferTeleport {
                     targets: agents.to_vec(),
                     message: String::new(),
                 }));
@@ -2057,23 +2173,26 @@ fn handle_radar_actions(
                 // offer above is one message naming it: `crate::add_friend`
                 // asks for the accompanying message, drops the rows that are
                 // already friends, and confirms what it sent.
-                friendships.write(RequestFriendship::many(agents.to_vec()));
+                out.friendships
+                    .write(RequestFriendship::many(agents.to_vec()));
             }
             "remove-friend" => {
                 for agent in agents.iter().filter(|agent| {
-                    friends
+                    model
+                        .friends
                         .as_deref()
                         .is_some_and(|friends| friends.is_friend(**agent))
                 }) {
-                    sl_commands.write(SlCommand(Command::TerminateFriendship(FriendKey::from(
-                        agent.uuid(),
-                    ))));
+                    out.sl_commands
+                        .write(SlCommand(Command::TerminateFriendship(FriendKey::from(
+                            agent.uuid(),
+                        ))));
                 }
             }
             "add-to-set" => {
                 // The floater asks for the one set and files the lot under it —
                 // one resident or ten, the same request.
-                contact_sets.write(OpenAddToContactSet::many(
+                out.contact_sets.write(OpenAddToContactSet::many(
                     agents
                         .iter()
                         .map(|agent| (*agent, name_of(*agent)))
@@ -2087,8 +2206,11 @@ fn handle_radar_actions(
                 marks.clear_all();
             }
             "block" => {
-                for agent in agents.iter().filter(|agent| !mutes.is_muted(agent.uuid())) {
-                    blocks.write(RequestBlock::new(
+                for agent in agents
+                    .iter()
+                    .filter(|agent| !model.mutes.is_muted(agent.uuid()))
+                {
+                    out.blocks.write(RequestBlock::new(
                         agent.uuid(),
                         name_of(*agent),
                         MuteType::Agent,
@@ -2096,8 +2218,11 @@ fn handle_radar_actions(
                 }
             }
             "unblock" => {
-                for agent in agents.iter().filter(|agent| mutes.is_muted(agent.uuid())) {
-                    sl_commands.write(SlCommand(Command::Unmute {
+                for agent in agents
+                    .iter()
+                    .filter(|agent| model.mutes.is_muted(agent.uuid()))
+                {
+                    out.sl_commands.write(SlCommand(Command::Unmute {
                         id: agent.uuid(),
                         name: name_of(*agent),
                     }));
@@ -2105,7 +2230,7 @@ fn handle_radar_actions(
             }
             action @ ("derender" | "derender-blacklist") => {
                 for agent in agents {
-                    derenders.write(RequestDerender::new(
+                    out.derenders.write(RequestDerender::new(
                         agent.uuid(),
                         name_of(*agent),
                         DerenderKind::Resident,
@@ -2120,7 +2245,7 @@ fn handle_radar_actions(
                     _normally => RenderOverride::Normal,
                 };
                 for agent in agents {
-                    exceptions.write(RequestRenderException {
+                    out.exceptions.write(RequestRenderException {
                         agent: *agent,
                         name: name_of(*agent),
                         setting,

@@ -190,30 +190,45 @@ impl Plugin for GroupNoticePlugin {
     }
 }
 
+/// Where a group notice card is put, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the channel root it is
+/// spawned under, the manager that owns the toast, and the commands that build
+/// it.
+#[derive(bevy::ecs::system::SystemParam)]
+struct NoticeSinks<'w, 's> {
+    /// The notification channel the card is spawned under.
+    channel: Option<Res<'w, NotificationChannelRoot>>,
+    /// The manager that owns the toast.
+    manager: ResMut<'w, NotificationManager>,
+    /// What builds the card.
+    commands: Commands<'w, 's>,
+}
+
+/// What one ingested notice raises, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the wire request for a group
+/// name the roster has not seen, and the persistence of the notice itself.
+#[derive(bevy::ecs::system::SystemParam)]
+struct NoticeOut<'w> {
+    /// The wire, for a missing group name.
+    sl_commands: MessageWriter<'w, SlCommand>,
+    /// The notice's persistence.
+    persist: MessageWriter<'w, PersistNotification>,
+}
+
 /// Read the event stream; for each received group notice (that the Notices tab did
 /// not itself request), decode it and raise a card into the shared toast channel —
 /// so a group notice stacks, orders and overflow-cycles alongside the catalogue
 /// notifications ([`crate::notification_host`]) rather than in a channel of its own.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the event \
-              stream, the shared channel + manager it raises into, the group model + \
-              translator it renders from, the requested-notice set it consults, the \
-              toast-gate settings, and the command writer + commands it acts through"
-)]
 fn ingest_group_notices(
     mut events: MessageReader<SlEvent>,
     settings: Option<Res<crate::settings::ViewerSettings>>,
-    channel: Option<Res<NotificationChannelRoot>>,
-    mut manager: ResMut<NotificationManager>,
+    mut sinks: NoticeSinks,
     groups: Res<GroupsModel>,
     mut requested: ResMut<RequestedGroupNotices>,
     translator: Translator,
-    mut sl_commands: MessageWriter<SlCommand>,
-    mut persist: MessageWriter<PersistNotification>,
-    mut commands: Commands,
+    mut out: NoticeOut,
 ) {
-    let Some(channel) = channel else {
+    let Some(channel) = sinks.channel.as_deref().copied() else {
         return;
     };
     for event in events.read() {
@@ -244,17 +259,17 @@ fn ingest_group_notices(
         // is not in the membership cache (unusual — notices come from member
         // groups — but a name is better than a raw id).
         if groups.group_name(notice.group_id).is_none() {
-            groups.request_name(notice.group_id, &mut sl_commands);
+            groups.request_name(notice.group_id, &mut out.sl_commands);
         }
         let id = spawn_group_notice_card(
-            &mut commands,
+            &mut sinks.commands,
             &channel,
-            &mut manager,
+            &mut sinks.manager,
             &notice,
             &groups,
             &translator,
         );
-        persist_group_notice(&mut persist, id, &notice);
+        persist_group_notice(&mut out.persist, id, &notice);
     }
 }
 

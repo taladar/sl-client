@@ -891,22 +891,39 @@ fn bind_blocked_rows(
 
 // --- Interaction ----------------------------------------------------------
 
+/// What a press on a blocked row moves, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the keyboard focus the
+/// viewport takes, the row the list marks selected, and the menu target a
+/// right-click leaves for the action handler.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct BlockedSelection<'w> {
+    /// The keyboard focus, which the clicked viewport takes.
+    focus: ResMut<'w, InputFocus>,
+    /// The selected row.
+    selected: ResMut<'w, SelectedBlocked>,
+    /// What a right-click leaves for the menu actions.
+    target: ResMut<'w, BlockedMenuTarget>,
+}
+
+/// What a blocked-list button raises, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the avatar picker a
+/// **Block Resident** opens, and the wire an **Unblock** goes out on.
+#[derive(bevy::ecs::system::SystemParam)]
+struct BlockedOut<'w> {
+    /// The shared avatar picker.
+    pickers: MessageWriter<'w, OpenAvatarPicker>,
+    /// The wire, for the unmute.
+    sl_commands: MessageWriter<'w, SlCommand>,
+}
+
 /// A press on a pooled row: primary selects; secondary selects and opens the
 /// gear menu with the open-time condition snapshot.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy observer's parameters are its injected resources: the row pool, the \
-              list UI, the mute model, and the focus / selection / menu-target stashes the \
-              press writes"
-)]
 fn on_blocked_row_press(
     mut press: On<Pointer<Press>>,
     rows: Query<&BoundBlocked>,
     ui: Res<BlockedUi>,
     model: Res<MuteModel>,
-    mut focus: ResMut<InputFocus>,
-    mut selected: ResMut<SelectedBlocked>,
-    mut target: ResMut<BlockedMenuTarget>,
+    mut selection: BlockedSelection,
     mut menus: MessageWriter<OpenContextMenu>,
 ) {
     let Ok(BoundBlocked(Some(key))) = rows.get(press.entity) else {
@@ -914,8 +931,8 @@ fn on_blocked_row_press(
     };
     let key = key.clone();
     press.propagate(false);
-    focus.set(ui.viewport, FocusCause::Navigated);
-    selected.0 = Some(key.clone());
+    selection.focus.set(ui.viewport, FocusCause::Navigated);
+    selection.selected.0 = Some(key.clone());
     if press.button != PointerButton::Secondary {
         return;
     }
@@ -936,7 +953,7 @@ fn on_blocked_row_press(
             conditions.push(condition);
         }
     }
-    target.0 = Some(key);
+    selection.target.0 = Some(key);
     menus.write(OpenContextMenu {
         menu: &BLOCKED_MENU,
         at: press.pointer_location.position,
@@ -946,12 +963,6 @@ fn on_blocked_row_press(
 }
 
 /// A press on one of the trailing action buttons.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy observer's parameters are its injected resources: the button pool, the \
-              mute model and selection the Unblock action reads, and the picker / floater / \
-              command channels the three buttons write"
-)]
 fn on_blocked_button_press(
     mut press: On<Pointer<Press>>,
     buttons: Query<&BlockedButton>,
@@ -959,8 +970,7 @@ fn on_blocked_button_press(
     selected: Res<SelectedBlocked>,
     mut panels: Query<&mut UiPanelShown>,
     by_name: Option<Res<BlockByNameUi>>,
-    mut pickers: MessageWriter<OpenAvatarPicker>,
-    mut sl_commands: MessageWriter<SlCommand>,
+    mut out: BlockedOut,
 ) {
     if press.button != PointerButton::Primary {
         return;
@@ -977,7 +987,7 @@ fn on_blocked_button_press(
             let Some(entry) = model.entry(key.id, &key.name) else {
                 return;
             };
-            sl_commands.write(SlCommand(Command::Unmute {
+            out.sl_commands.write(SlCommand(Command::Unmute {
                 id: entry.id,
                 name: entry.name.clone(),
             }));
@@ -985,7 +995,8 @@ fn on_blocked_button_press(
         BlockedButton::BlockResident => {
             // Single, as the reference's is (`allow_multiple = false`); blocking
             // several at once belongs with the multi-select block *list*.
-            pickers.write(OpenAvatarPicker::one(press.entity, PICKER_REQUESTER));
+            out.pickers
+                .write(OpenAvatarPicker::one(press.entity, PICKER_REQUESTER));
         }
         BlockedButton::BlockObject => {
             if let Some(by_name) = by_name

@@ -884,87 +884,80 @@ fn track_list_selection(
 // Rebuild.
 // ---------------------------------------------------------------------------
 
+/// The shared sources every profile window's rebuild reads and writes through,
+/// bundled as one [`SystemParam`](bevy::ecs::system::SystemParam): who we are,
+/// the name / friendship / group models a tab is filled from, the hierarchy a
+/// retained tab is torn down through, the texts it writes, and the commands that
+/// spawn the rest.
+#[derive(bevy::ecs::system::SystemParam)]
+struct ProfileSources<'w, 's> {
+    /// Our own agent, which decides whether a window is our own profile.
+    identity: Res<'w, SlIdentity>,
+    /// The name mirror, for the title and the Second Life tab.
+    avatars: Res<'w, AvatarState>,
+    /// The friend roster, for the friendship-dependent controls.
+    friends: Res<'w, FriendsModel>,
+    /// The group roster, for the Second Life tab's group rows.
+    groups_model: Res<'w, GroupsModel>,
+    /// Hierarchy links, for tearing a tab's children down.
+    children: Query<'w, 's, &'static Children>,
+    /// The texts a rebuilt tab writes.
+    texts: Query<'w, 's, &'static mut Text>,
+    /// What spawns the tab contents.
+    commands: Commands<'w, 's>,
+}
+
 /// Rebuild every open window's dirty tabs from that window's own state.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the per-window state / \
-              dirty flags / UI handles, the identity / name / friendship sources, the texture \
-              pipeline, and the spawn outputs"
-)]
 fn rebuild_profile_tabs(
     mut instances: Query<(Entity, &mut ProfileState, &mut ProfileDirty, &mut ProfileUi)>,
-    identity: Res<SlIdentity>,
-    avatars: Res<AvatarState>,
-    friends: Res<FriendsModel>,
-    groups_model: Res<GroupsModel>,
-    children: Query<&Children>,
-    mut texts: Query<&mut Text>,
-    mut commands: Commands,
+    mut sources: ProfileSources,
 ) {
     for (panel, mut state, mut dirty, mut ui) in &mut instances {
         if !dirty.any() {
             continue;
         }
-        rebuild_one_profile(
-            panel,
-            &mut state,
-            &mut dirty,
-            &mut ui,
-            &identity,
-            &avatars,
-            &friends,
-            &groups_model,
-            &children,
-            &mut texts,
-            &mut commands,
-        );
+        rebuild_one_profile(panel, &mut state, &mut dirty, &mut ui, &mut sources);
     }
 }
 
 /// Rebuild one window's dirty tabs (see [`rebuild_profile_tabs`]).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "this is `rebuild_profile_tabs`'s body with the window's own three pieces of \
-              state taken by reference instead of by query — splitting it further would only \
-              scatter one repaint across several functions"
-)]
 fn rebuild_one_profile(
     window: Entity,
     state: &mut ProfileState,
     dirty: &mut ProfileDirty,
     ui: &mut ProfileUi,
-    identity: &SlIdentity,
-    avatars: &AvatarState,
-    friends: &FriendsModel,
-    groups_model: &GroupsModel,
-    children: &Query<&Children>,
-    texts: &mut Query<&mut Text>,
-    commands: &mut Commands,
+    sources: &mut ProfileSources,
 ) {
     let target = state.target;
-    let own = identity.agent_id == Some(target);
+    let own = sources.identity.agent_id == Some(target);
     // Title: the avatar's shown name once known (a plain string, not a Fluent
     // key) — the alias the user gave them, else the display name, else legacy.
-    if let Some(name) = avatars.shown_name_of(target)
-        && let Ok(mut text) = texts.get_mut(ui.title_text)
+    if let Some(name) = sources.avatars.shown_name_of(target)
+        && let Ok(mut text) = sources.texts.get_mut(ui.title_text)
     {
         name.clone_into(&mut text.0);
-        commands.entity(ui.title_text).remove::<Translated>();
+        sources
+            .commands
+            .entity(ui.title_text)
+            .remove::<Translated>();
     }
     let dirty_tabs = dirty.take();
     // Dropping a dragged inventory row anywhere on another avatar's profile
     // floater gives them the item (`viewer-inventory-give-via-profile`) — the
     // root carries the target and the drop resolution walks up to it.
     if own {
-        commands.entity(window).remove::<AgentDropTarget>();
+        sources.commands.entity(window).remove::<AgentDropTarget>();
     } else {
-        commands.entity(window).insert(AgentDropTarget(target));
+        sources
+            .commands
+            .entity(window)
+            .insert(AgentDropTarget(target));
     }
     let build = BuildContext {
         target,
         own,
-        avatars,
-        friends,
+        avatars: &sources.avatars,
+        friends: &sources.friends,
     };
     for tab in ProfileTab::ALL {
         if !dirty_tabs.contains(&tab) {
@@ -979,13 +972,20 @@ fn rebuild_one_profile(
         // exactly the same-frame build+teardown that races bevy_flair.
         if tab == ProfileTab::SecondLife {
             if ui.sl_built != Some(own) {
-                despawn_children(children, commands, panel);
+                despawn_children(&sources.children, &mut sources.commands, panel);
                 ui.sl_handles = SecondLifeHandles::default();
                 ui.sl_group_rows.clear();
-                build_second_life_structure(commands, panel, &build, ui);
+                build_second_life_structure(&mut sources.commands, panel, &build, ui);
                 ui.sl_built = Some(own);
             }
-            update_second_life(commands, &build, state, ui, texts, groups_model);
+            update_second_life(
+                &mut sources.commands,
+                &build,
+                state,
+                ui,
+                &mut sources.texts,
+                &sources.groups_model,
+            );
             continue;
         }
         // The other five tabs are single-source (properties / notes) or user-paced
@@ -998,17 +998,17 @@ fn rebuild_one_profile(
         if let Some(slot) = ui.tab_sig.get_mut(tab.index()) {
             *slot = Some(sig);
         }
-        despawn_children(children, commands, panel);
+        despawn_children(&sources.children, &mut sources.commands, panel);
         match tab {
-            ProfileTab::Web => build_web_tab(commands, panel, &build, state, ui),
-            ProfileTab::Picks => build_picks_tab(commands, panel, &build, state, ui),
+            ProfileTab::Web => build_web_tab(&mut sources.commands, panel, &build, state, ui),
+            ProfileTab::Picks => build_picks_tab(&mut sources.commands, panel, &build, state, ui),
             ProfileTab::Classifieds => {
-                build_classifieds_tab(commands, panel, &build, state, ui);
+                build_classifieds_tab(&mut sources.commands, panel, &build, state, ui);
             }
             ProfileTab::FirstLife => {
-                build_first_life_tab(commands, panel, &build, state, ui);
+                build_first_life_tab(&mut sources.commands, panel, &build, state, ui);
             }
-            ProfileTab::Notes => build_notes_tab(commands, panel, state, ui),
+            ProfileTab::Notes => build_notes_tab(&mut sources.commands, panel, state, ui),
             ProfileTab::SecondLife => {}
         }
     }
@@ -2548,32 +2548,62 @@ fn spawn_category_label_on(commands: &mut Commands, button: Entity, category: Cl
 // Actions.
 // ---------------------------------------------------------------------------
 
+/// The hierarchy a profile action is resolved through, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the parent links walked from
+/// the pressed control up to its floater, and the floaters themselves.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct ProfileHost<'w, 's> {
+    /// Parent links, walked from the control to its window.
+    parents: Query<'w, 's, &'static ChildOf>,
+    /// The windows, so the walk knows when it has arrived.
+    floaters: Query<'w, 's, (Entity, &'static Floater)>,
+}
+
+/// What a profile action reads besides the window it acts on, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the edit fields it commits,
+/// the name mirror an action labels its target with, and the clipboard a copy
+/// writes to.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct ProfileActionFacts<'w, 's> {
+    /// The window's edit fields, read on commit.
+    fields: Query<'w, 's, &'static EditableText>,
+    /// The name mirror, for the label an action carries.
+    avatars: Res<'w, AvatarState>,
+    /// The clipboard a copy action writes to.
+    clipboard: Res<'w, crate::clipboard::ViewerClipboard>,
+}
+
+/// Everything a profile action raises, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the wire (most of the
+/// tab actions are protocol commands), the block and friendship requests, the IM
+/// conversation, and the add-to-set floater.
+#[derive(bevy::ecs::system::SystemParam)]
+struct ProfileActionOut<'w> {
+    /// The wire: profile / notes / pick / classified updates, teleports, money.
+    sl_commands: MessageWriter<'w, SlCommand>,
+    /// A Block.
+    blocks: MessageWriter<'w, RequestBlock>,
+    /// An Add Friend.
+    friendships: MessageWriter<'w, RequestFriendship>,
+    /// The IM conversation.
+    conversations: MessageWriter<'w, OpenConversation>,
+    /// The add-to-set floater.
+    contact_sets: MessageWriter<'w, crate::intents::OpenAddToContactSet>,
+}
+
 /// Dispatch a clicked profile button to the behaviour behind it, **in the
 /// window it was clicked in**.
 ///
 /// Which window that is comes from the tree ([`host_floater`]) rather than from
 /// a resource: with two profiles open, "Pay" means pay *this* window's
 /// resident, and the amount is *this* window's field.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy observer's parameters are its injected resources: the action marker, \
-              the window lookup, its per-window state / UI handles, the field values, the \
-              identity / name sources, and the command and repaint outputs"
-)]
 fn on_profile_action(
     press: On<Pointer<Press>>,
     actions: Query<&ProfileAction>,
-    parents: Query<&ChildOf>,
-    floaters: Query<(Entity, &Floater)>,
+    host: ProfileHost,
     mut instances: Query<(&mut ProfileState, &mut ProfileDirty, &ProfileUi)>,
-    fields: Query<&EditableText>,
-    avatars: Res<AvatarState>,
-    clipboard: Res<crate::clipboard::ViewerClipboard>,
-    mut sl_commands: MessageWriter<SlCommand>,
-    mut blocks: MessageWriter<RequestBlock>,
-    mut friendships: MessageWriter<RequestFriendship>,
-    mut conversations: MessageWriter<OpenConversation>,
-    mut contact_sets: MessageWriter<crate::intents::OpenAddToContactSet>,
+    facts: ProfileActionFacts,
+    mut out: ProfileActionOut,
 ) {
     if press.button != PointerButton::Primary {
         return;
@@ -2581,7 +2611,7 @@ fn on_profile_action(
     let Ok(action) = actions.get(press.entity) else {
         return;
     };
-    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+    let Some(window) = host_floater(press.entity, &host.parents, &host.floaters) else {
         return;
     };
     let Ok((mut state, mut dirty, ui)) = instances.get_mut(window) else {
@@ -2590,17 +2620,17 @@ fn on_profile_action(
     let target = state.target;
     let read = |entity: Option<Entity>| {
         entity
-            .and_then(|field| fields.get(field).ok())
+            .and_then(|field| facts.fields.get(field).ok())
             .map(|field| field.value().to_string())
     };
     match action {
         ProfileAction::Im => {
-            conversations.write(OpenConversation {
+            out.conversations.write(OpenConversation {
                 key: ConversationKey::Direct(target),
             });
         }
         ProfileAction::OfferTeleport => {
-            sl_commands.write(SlCommand(Command::OfferTeleport {
+            out.sl_commands.write(SlCommand(Command::OfferTeleport {
                 targets: vec![target],
                 message: String::new(),
             }));
@@ -2609,34 +2639,39 @@ fn on_profile_action(
             // The prompted path (`crate::add_friend`) asks for the offer's
             // message and confirms the send; writing the command here would be
             // the silent offer the bug records.
-            friendships.write(RequestFriendship::one(target));
+            out.friendships.write(RequestFriendship::one(target));
         }
         ProfileAction::AddToContactSet => {
-            contact_sets.write(crate::intents::OpenAddToContactSet::one(
-                target,
-                avatars
-                    .name_of(target)
-                    .map(ToOwned::to_owned)
-                    .unwrap_or_default(),
-            ));
+            out.contact_sets
+                .write(crate::intents::OpenAddToContactSet::one(
+                    target,
+                    facts
+                        .avatars
+                        .name_of(target)
+                        .map(ToOwned::to_owned)
+                        .unwrap_or_default(),
+                ));
         }
         ProfileAction::CopySlurl => {
             crate::clipboard::copy_to_clipboard(
-                &clipboard,
+                &facts.clipboard,
                 &format!("secondlife:///app/agent/{}/about", target.uuid()),
             );
         }
         ProfileAction::RemoveFriend => {
-            sl_commands.write(SlCommand(Command::TerminateFriendship(FriendKey::from(
-                target.uuid(),
-            ))));
+            out.sl_commands
+                .write(SlCommand(Command::TerminateFriendship(FriendKey::from(
+                    target.uuid(),
+                ))));
         }
         ProfileAction::Block => {
-            let name = avatars
+            let name = facts
+                .avatars
                 .name_of(target)
                 .map(ToOwned::to_owned)
                 .unwrap_or_default();
-            blocks.write(RequestBlock::new(target.uuid(), name, MuteType::Agent));
+            out.blocks
+                .write(RequestBlock::new(target.uuid(), name, MuteType::Agent));
         }
         ProfileAction::Pay => {
             let Some(amount) = read(ui.pay_amount_field)
@@ -2645,7 +2680,7 @@ fn on_profile_action(
             else {
                 return;
             };
-            sl_commands.write(SlCommand(Command::SendMoneyTransfer {
+            out.sl_commands.write(SlCommand(Command::SendMoneyTransfer {
                 dest: target.uuid(),
                 amount: LindenAmount(amount),
                 kind: MoneyTransactionType::Gift,
@@ -2679,7 +2714,8 @@ fn on_profile_action(
                 props.fl_about_text.clone_from(&update.fl_about_text);
                 props.profile_url.clone_from(&update.profile_url);
             }
-            sl_commands.write(SlCommand(Command::UpdateProfile(update)));
+            out.sl_commands
+                .write(SlCommand(Command::UpdateProfile(update)));
         }
         ProfileAction::DiscardProfile => {
             state.show_in_search = state
@@ -2695,7 +2731,7 @@ fn on_profile_action(
                 return;
             };
             state.notes = Some(notes.clone());
-            sl_commands.write(SlCommand(Command::UpdateAvatarNotes {
+            out.sl_commands.write(SlCommand(Command::UpdateAvatarNotes {
                 target_id: target,
                 notes,
             }));
@@ -2703,24 +2739,28 @@ fn on_profile_action(
         ProfileAction::NewPick => {
             // Created at the agent's current parcel / position (the simulator
             // fills both in), then refreshed from the volunteered replies.
-            sl_commands.write(SlCommand(Command::UpdatePick(PickUpdate {
-                pick_id: PickKey::from(Uuid::new_v4()),
-                name: "New Pick".to_owned(),
-                ..PickUpdate::default()
-            })));
-            sl_commands.write(SlCommand(Command::RequestAvatarPicks(target)));
+            out.sl_commands
+                .write(SlCommand(Command::UpdatePick(PickUpdate {
+                    pick_id: PickKey::from(Uuid::new_v4()),
+                    name: "New Pick".to_owned(),
+                    ..PickUpdate::default()
+                })));
+            out.sl_commands
+                .write(SlCommand(Command::RequestAvatarPicks(target)));
         }
         ProfileAction::DeletePick => {
             let Some(pick_id) = state.selected_pick_entry().map(|pick| pick.pick_id) else {
                 return;
             };
-            sl_commands.write(SlCommand(Command::DeletePick(pick_id)));
+            out.sl_commands
+                .write(SlCommand(Command::DeletePick(pick_id)));
             if let Some(picks) = state.picks.as_mut() {
                 picks.retain(|pick| pick.pick_id != pick_id);
             }
             state.selected_pick = 0;
             dirty.mark(ProfileTab::Picks);
-            sl_commands.write(SlCommand(Command::RequestAvatarPicks(target)));
+            out.sl_commands
+                .write(SlCommand(Command::RequestAvatarPicks(target)));
         }
         ProfileAction::SavePick => {
             let Some(info) = state
@@ -2749,7 +2789,8 @@ fn on_profile_action(
                 sort_order: info.sort_order,
                 enabled: info.enabled,
             };
-            sl_commands.write(SlCommand(Command::UpdatePick(update)));
+            out.sl_commands
+                .write(SlCommand(Command::UpdatePick(update)));
         }
         ProfileAction::SetPickLocation => {
             let Some(pick_id) = state.selected_pick_entry().map(|pick| pick.pick_id) else {
@@ -2765,7 +2806,7 @@ fn on_profile_action(
             else {
                 return;
             };
-            teleport_to(&info.pos_global, &mut sl_commands);
+            teleport_to(&info.pos_global, &mut out.sl_commands);
         }
         ProfileAction::NewClassified => {
             state.new_classified = Some(ClassifiedDraft::default());
@@ -2782,13 +2823,15 @@ fn on_profile_action(
             else {
                 return;
             };
-            sl_commands.write(SlCommand(Command::DeleteClassified(id)));
+            out.sl_commands
+                .write(SlCommand(Command::DeleteClassified(id)));
             if let Some(classifieds) = state.classifieds.as_mut() {
                 classifieds.retain(|classified| classified.classified_id != id);
             }
             state.selected_classified = 0;
             dirty.mark(ProfileTab::Classifieds);
-            sl_commands.write(SlCommand(Command::RequestAvatarClassifieds(target)));
+            out.sl_commands
+                .write(SlCommand(Command::RequestAvatarClassifieds(target)));
         }
         ProfileAction::SaveClassified => {
             if let Some(draft) = state.new_classified {
@@ -2797,19 +2840,22 @@ fn on_profile_action(
                     .and_then(|price| price.trim().parse::<u64>().ok())
                     .unwrap_or(0);
                 let id = ClassifiedKey::from(Uuid::new_v4());
-                sl_commands.write(SlCommand(Command::UpdateClassified(ClassifiedUpdate {
-                    classified_id: id,
-                    category: draft.category,
-                    name: read(ui.classified_name_field).unwrap_or_default(),
-                    description: read(ui.classified_desc_field).unwrap_or_default(),
-                    classified_flags: pack_classified_flags(draft.mature, draft.auto_renew),
-                    price_for_listing: LindenAmount(price),
-                    ..ClassifiedUpdate::default()
-                })));
+                out.sl_commands
+                    .write(SlCommand(Command::UpdateClassified(ClassifiedUpdate {
+                        classified_id: id,
+                        category: draft.category,
+                        name: read(ui.classified_name_field).unwrap_or_default(),
+                        description: read(ui.classified_desc_field).unwrap_or_default(),
+                        classified_flags: pack_classified_flags(draft.mature, draft.auto_renew),
+                        price_for_listing: LindenAmount(price),
+                        ..ClassifiedUpdate::default()
+                    })));
                 state.new_classified = None;
                 dirty.mark(ProfileTab::Classifieds);
-                sl_commands.write(SlCommand(Command::RequestAvatarClassifieds(target)));
-                sl_commands.write(SlCommand(Command::RequestClassifiedInfo(id)));
+                out.sl_commands
+                    .write(SlCommand(Command::RequestAvatarClassifieds(target)));
+                out.sl_commands
+                    .write(SlCommand(Command::RequestClassifiedInfo(id)));
                 return;
             }
             let Some(info) = state
@@ -2825,29 +2871,31 @@ fn on_profile_action(
                 .copied()
                 .unwrap_or_else(|| ClassifiedDraft::from_info(&info));
             let use_current = state.classified_use_current.remove(&info.classified_id);
-            sl_commands.write(SlCommand(Command::UpdateClassified(ClassifiedUpdate {
-                classified_id: info.classified_id,
-                category: draft.category,
-                name: read(ui.classified_name_field).unwrap_or_else(|| info.name.clone()),
-                description: read(ui.classified_desc_field)
-                    .unwrap_or_else(|| info.description.clone()),
-                parcel_id: if use_current {
-                    None
-                } else {
-                    Some(info.parcel_id)
-                },
-                snapshot_id: info.snapshot_id,
-                pos_global: if use_current {
-                    GlobalCoordinates::new(0.0, 0.0, 0.0)
-                } else {
-                    info.pos_global
-                },
-                classified_flags: pack_classified_flags(draft.mature, draft.auto_renew),
-                price_for_listing: info.price_for_listing,
-            })));
-            sl_commands.write(SlCommand(Command::RequestClassifiedInfo(
-                info.classified_id,
-            )));
+            out.sl_commands
+                .write(SlCommand(Command::UpdateClassified(ClassifiedUpdate {
+                    classified_id: info.classified_id,
+                    category: draft.category,
+                    name: read(ui.classified_name_field).unwrap_or_else(|| info.name.clone()),
+                    description: read(ui.classified_desc_field)
+                        .unwrap_or_else(|| info.description.clone()),
+                    parcel_id: if use_current {
+                        None
+                    } else {
+                        Some(info.parcel_id)
+                    },
+                    snapshot_id: info.snapshot_id,
+                    pos_global: if use_current {
+                        GlobalCoordinates::new(0.0, 0.0, 0.0)
+                    } else {
+                        info.pos_global
+                    },
+                    classified_flags: pack_classified_flags(draft.mature, draft.auto_renew),
+                    price_for_listing: info.price_for_listing,
+                })));
+            out.sl_commands
+                .write(SlCommand(Command::RequestClassifiedInfo(
+                    info.classified_id,
+                )));
         }
         ProfileAction::SetClassifiedLocation => {
             let Some(id) = state
@@ -2866,7 +2914,7 @@ fn on_profile_action(
             else {
                 return;
             };
-            teleport_to(&info.pos_global, &mut sl_commands);
+            teleport_to(&info.pos_global, &mut out.sl_commands);
         }
         ProfileAction::CycleCategory => {
             if let Some(draft) = edited_classified_draft(&mut state) {
@@ -2920,6 +2968,22 @@ fn teleport_to(pos_global: &GlobalCoordinates, sl_commands: &mut MessageWriter<S
     }));
 }
 
+/// What the Web tab's status line is read from, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the open windows' UI
+/// handles, the browser views they host, the media surfaces behind those views,
+/// and the clock the load timer counts on.
+#[derive(bevy::ecs::system::SystemParam)]
+struct WebStatusSources<'w, 's> {
+    /// The open profile windows.
+    instances: Query<'w, 's, &'static ProfileUi>,
+    /// The browser view each Web tab hosts.
+    views: Query<'w, 's, &'static crate::browser_widget::BrowserView>,
+    /// The media surfaces behind those views.
+    surfaces: bevy::ecs::system::NonSend<'w, crate::media_engine::MediaSurfaces>,
+    /// The clock the "still loading" timer counts on.
+    time: Res<'w, Time>,
+}
+
 /// Keep every open Web tab's load-status line current: "loading" while the
 /// embedded page loads, then the reference's load-time string ("Page loaded in
 /// N s") once it finishes.
@@ -2928,25 +2992,16 @@ fn teleport_to(pos_global: &GlobalCoordinates, sl_commands: &mut MessageWriter<S
 /// spawns a new view and so restarts its own clock, and two open profiles are
 /// two views timed independently. Views that have gone (a rebuild, a closed
 /// window) are dropped each pass, so the map is as small as the open tabs.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the open \
-              windows' handles, the browser view / surface lookups, the clock, the \
-              translator, the per-view timers and the status label"
-)]
 fn update_profile_web_status(
-    instances: Query<&ProfileUi>,
-    views: Query<&crate::browser_widget::BrowserView>,
-    surfaces: bevy::ecs::system::NonSend<crate::media_engine::MediaSurfaces>,
-    time: Res<Time>,
+    sources: WebStatusSources,
     translator: crate::i18n::Translator,
     mut tracked: Local<HashMap<Entity, (f64, bool)>>,
     mut texts: Query<&mut Text>,
     mut commands: Commands,
 ) {
-    let now = time.elapsed_secs_f64();
+    let now = sources.time.elapsed_secs_f64();
     let mut live: HashSet<Entity> = HashSet::new();
-    for ui in &instances {
+    for ui in &sources.instances {
         let (Some(view_entity), Some(status_entity)) = (ui.web_view, ui.web_status) else {
             continue;
         };
@@ -2955,10 +3010,10 @@ fn update_profile_web_status(
         if *done {
             continue;
         }
-        let Ok(view) = views.get(view_entity) else {
+        let Ok(view) = sources.views.get(view_entity) else {
             continue;
         };
-        let Some(slot) = view.surface.and_then(|id| surfaces.get(id)) else {
+        let Some(slot) = view.surface.and_then(|id| sources.surfaces.get(id)) else {
             continue;
         };
         if slot.status.loading || slot.status.progress < 1.0 {

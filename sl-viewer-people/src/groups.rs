@@ -1117,49 +1117,55 @@ fn open_group_im(
     sl.write(SlCommand(Command::StartGroupSession(group)));
 }
 
+/// What a press on a group row moves, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the double-click clock and
+/// stash, the keyboard focus the viewport takes, and the selected row.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct GroupRowClick<'w> {
+    /// The clock the double-click window is measured on.
+    time: Res<'w, Time>,
+    /// The last click, for the double-click test.
+    tracker: ResMut<'w, GroupClickTracker>,
+    /// The keyboard focus, which the clicked viewport takes.
+    focus: ResMut<'w, InputFocus>,
+    /// The selected row.
+    selected: ResMut<'w, SelectedGroup>,
+}
+
 /// A group row was clicked: focus the list (so the wheel scrolls it), select the
 /// group it presents, and — on a **double-click** (two presses on the same group
 /// within [`DOUBLE_CLICK_SECS`]) — open its IM, exactly like the IM button.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "an observer's parameters are its injected queries / resources: the picked row, the \
-              viewport to focus, the click clock + tracker for double-click detection, the \
-              selection to set, and the two writers a double-click opens the IM through"
-)]
 fn on_group_row_press(
     press: On<Pointer<Press>>,
     rows: Query<&BoundGroup>,
     ui: Res<GroupsUi>,
-    time: Res<Time>,
-    mut tracker: ResMut<GroupClickTracker>,
-    mut focus: ResMut<InputFocus>,
-    mut selected: ResMut<SelectedGroup>,
+    mut click: GroupRowClick,
     mut open: MessageWriter<OpenConversation>,
     mut sl: MessageWriter<SlCommand>,
 ) {
     if press.button != PointerButton::Primary {
         return;
     }
-    focus.set(ui.viewport, FocusCause::Navigated);
+    click.focus.set(ui.viewport, FocusCause::Navigated);
     let Ok(bound) = rows.get(press.entity) else {
         return;
     };
     let Some(choice) = bound.0 else {
         return;
     };
-    selected.0 = Some(choice);
-    let now = time.elapsed_secs();
-    if tracker.group == Some(choice) && now - tracker.time <= DOUBLE_CLICK_SECS {
+    click.selected.0 = Some(choice);
+    let now = click.time.elapsed_secs();
+    if click.tracker.group == Some(choice) && now - click.tracker.time <= DOUBLE_CLICK_SECS {
         // Second quick click on the same row: open its IM — for a real group only,
         // since the "no group" row has no conversation to open. Clear the tracker
         // so a third click does not re-fire either way.
         if let GroupChoice::Group(group) = choice {
             open_group_im(group, &mut open, &mut sl);
         }
-        tracker.group = None;
+        click.tracker.group = None;
     } else {
-        tracker.group = Some(choice);
-        tracker.time = now;
+        click.tracker.group = Some(choice);
+        click.tracker.time = now;
     }
 }
 

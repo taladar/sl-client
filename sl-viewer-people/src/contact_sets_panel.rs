@@ -1330,28 +1330,120 @@ fn handle_chooser_picks(
     }
 }
 
+/// The virtualized member table's widgets, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the sort the header holds,
+/// the list whose item count the rows drive, and the texts the count line is
+/// written into.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct ContactSetsList<'w, 's> {
+    /// The table header, for the sort the rows are ordered by.
+    tables: Query<'w, 's, &'static TableState>,
+    /// The virtualized viewport, whose item count the row set drives.
+    lists: Query<'w, 's, &'static mut VirtualList>,
+    /// The panel's texts, for the count line.
+    texts: Query<'w, 's, &'static mut Text>,
+}
+
+/// What the panel is showing and what it is waiting on, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the chosen set and its rows,
+/// the member picked in them, the prompt a button is waiting on an answer to,
+/// and the set the settings floater is pointed at.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct ContactSetsPanelState<'w> {
+    /// The chosen set, the filter and the built rows.
+    view: Res<'w, ContactSetsView>,
+    /// The member picked in the table, which most buttons act on.
+    selected: Res<'w, SelectedMember>,
+    /// The prompt whose answer a button is waiting for.
+    pending: ResMut<'w, PendingAction>,
+    /// The set the settings floater is pointed at.
+    config: ResMut<'w, ConfigTarget>,
+}
+
+/// Everything a contact-sets button raises, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the prompts and toasts, the
+/// avatar picker, the two floaters, the model requests, and the profile / IM /
+/// teleport a member row offers.
+#[derive(bevy::ecs::system::SystemParam)]
+struct ContactSetsIntents<'w> {
+    /// The reference's own prompts and confirmations.
+    notifications: MessageWriter<'w, ShowNotification>,
+    /// The shared avatar picker, for **Add Resident…**.
+    pickers: MessageWriter<'w, OpenAvatarPicker>,
+    /// The add-to-set floater, for **Move to Set…**.
+    adds: MessageWriter<'w, OpenAddToContactSet>,
+    /// The alias prompt, for **Set Alias…**.
+    aliases: MessageWriter<'w, OpenSetPseudonym>,
+    /// The model requests every button ultimately goes through.
+    requests: MessageWriter<'w, RequestContactSet>,
+    /// The profile floater.
+    profiles: MessageWriter<'w, OpenAvatarProfile>,
+    /// The IM conversation.
+    conversations: MessageWriter<'w, OpenConversation>,
+    /// The wire, for the teleport offer.
+    sl_commands: MessageWriter<'w, SlCommand>,
+}
+
+/// The add-to-set floater's state and chrome, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): who is being filed and
+/// where, the prompt that stands in when there is no set to file them under, the
+/// panel / prompt / combo widgets it draws through, and the two channels a press
+/// writes.
+#[derive(bevy::ecs::system::SystemParam)]
+struct AddToSetFloater<'w, 's> {
+    /// Who is being filed, into which set, and where from in move mode.
+    target: ResMut<'w, AddToSetTarget>,
+    /// The make-a-set prompt raised when there is no set yet.
+    pending: ResMut<'w, PendingAction>,
+    /// The floater's show / hide switch.
+    panels: Query<'w, 's, &'static mut UiPanelShown>,
+    /// Its prompt line.
+    texts: Query<'w, 's, &'static mut Text>,
+    /// The set chooser's selection.
+    selections: Query<'w, 's, &'static mut ComboSelection>,
+    /// The chooser's option list.
+    combo_options: MessageWriter<'w, SetComboOptions>,
+    /// The prompts and the success toast.
+    notifications: MessageWriter<'w, ShowNotification>,
+    /// The model requests an **Add** writes.
+    set_requests: MessageWriter<'w, RequestContactSet>,
+}
+
+/// The settings floater's chrome, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): its show / hide switch, its
+/// title and checkbox glyphs, the colour swatch, the name and reply fields, and
+/// parley's two contexts a field needs to be set programmatically.
+#[derive(bevy::ecs::system::SystemParam)]
+struct ConfigWidgets<'w, 's> {
+    /// The floater's show / hide switch.
+    panels: Query<'w, 's, &'static mut UiPanelShown>,
+    /// Its title and checkbox glyphs.
+    texts: Query<'w, 's, &'static mut Text>,
+    /// The set's colour swatch.
+    swatches: Query<'w, 's, (&'static mut ColorSwatchValue, &'static mut BackgroundColor)>,
+    /// The name field and the four reply fields.
+    editors: Query<'w, 's, &'static mut EditableText>,
+    /// Parley's font context, for a programmatic field rewrite.
+    font_cx: ResMut<'w, FontCx>,
+    /// Parley's layout context, likewise.
+    layout_cx: ResMut<'w, LayoutCx>,
+}
+
 /// Rebuild the ordered, filtered member rows when the sets, the friends roster,
 /// the chosen set, the sort or the filter moved, and refresh the count line.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system: the two models the rows are read from, the panel UI, the \
-              translator for the count line, and the view / table / list / text state it \
-              writes"
-)]
 fn rebuild_contact_sets_view(
     sets: Res<ContactSets>,
     friends: Res<FriendsModel>,
     ui: Option<Res<ContactSetsUi>>,
     translator: Translator,
     mut view: ResMut<ContactSetsView>,
-    tables: Query<&TableState>,
-    mut lists: Query<&mut VirtualList>,
-    mut texts: Query<&mut Text>,
+    mut widgets: ContactSetsList,
 ) {
     let Some(ui) = ui else {
         return;
     };
-    let sort = tables
+    let sort = widgets
+        .tables
         .get(ui.table)
         .ok()
         .map(|table| (table.sort_revision(), table.sort().keys().to_vec()));
@@ -1391,7 +1483,7 @@ fn rebuild_contact_sets_view(
         .is_some_and(ContactSet::sorts_by_online_status);
     sort_rows(&mut view.rows, &keys, online_first);
 
-    if let Ok(mut list) = lists.get_mut(ui.viewport) {
+    if let Ok(mut list) = widgets.lists.get_mut(ui.viewport) {
         list.item_count = view.rows.len();
     }
     let label = translator.format(
@@ -1400,7 +1492,7 @@ fn rebuild_contact_sets_view(
             .int("shown", i64::try_from(view.rows.len()).unwrap_or(i64::MAX))
             .int("total", i64::try_from(total).unwrap_or(i64::MAX)),
     );
-    if let Ok(mut text) = texts.get_mut(ui.count_text)
+    if let Ok(mut text) = widgets.texts.get_mut(ui.count_text)
         && text.0 != label
     {
         text.0 = label;
@@ -1555,29 +1647,12 @@ fn on_member_row_press(
 }
 
 /// A press on one of the panel's buttons.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy observer's parameters are its injected resources: the button pool, the \
-              sets and the view / selection the actions read, and the channels the twelve \
-              buttons write (prompts, picker, floaters, aliases, requests, profile, IM, \
-              teleport)"
-)]
 fn on_panel_button_press(
     mut press: On<Pointer<Press>>,
     buttons: Query<&ContactSetsButton>,
     sets: Res<ContactSets>,
-    view: Res<ContactSetsView>,
-    selected: Res<SelectedMember>,
-    mut pending: ResMut<PendingAction>,
-    mut notifications: MessageWriter<ShowNotification>,
-    mut pickers: MessageWriter<OpenAvatarPicker>,
-    mut adds: MessageWriter<OpenAddToContactSet>,
-    mut aliases: MessageWriter<OpenSetPseudonym>,
-    mut requests: MessageWriter<RequestContactSet>,
-    mut config: ResMut<ConfigTarget>,
-    mut profiles: MessageWriter<OpenAvatarProfile>,
-    mut conversations: MessageWriter<OpenConversation>,
-    mut sl_commands: MessageWriter<SlCommand>,
+    mut state: ContactSetsPanelState,
+    mut intents: ContactSetsIntents,
 ) {
     if press.button != PointerButton::Primary {
         return;
@@ -1589,29 +1664,32 @@ fn on_panel_button_press(
     // The greyed buttons are inert. `InteractionDisabled` is advisory for a
     // hand-rolled button, so the same predicate that greys them decides here —
     // one source of truth, and no way for the look and the behaviour to drift.
-    if !button.is_enabled(&sets, &view.choice, selected.0) {
+    if !button.is_enabled(&sets, &state.view.choice, state.selected.0) {
         return;
     }
-    let real_set = is_real_set(&sets, &view.choice).then(|| view.choice.clone());
+    let real_set = is_real_set(&sets, &state.view.choice).then(|| state.view.choice.clone());
     match button {
         ContactSetsButton::NewSet => {
-            *pending = PendingAction::Create {
+            *state.pending = PendingAction::Create {
                 then_add: Vec::new(),
                 move_from: None,
             };
-            notifications.write(ShowNotification::new("AddNewContactSet"));
+            intents
+                .notifications
+                .write(ShowNotification::new("AddNewContactSet"));
         }
         ContactSetsButton::DeleteSet => {
             let Some(name) = real_set else {
                 return;
             };
-            *pending = PendingAction::RemoveSet { name: name.clone() };
-            notifications
+            *state.pending = PendingAction::RemoveSet { name: name.clone() };
+            intents
+                .notifications
                 .write(ShowNotification::new("RemoveContactSet").arg("SET_NAME", name.clone()));
         }
         ContactSetsButton::Configure => {
             if let Some(name) = real_set {
-                config.0 = Some(name);
+                state.config.0 = Some(name);
             }
         }
         ContactSetsButton::AddResident => {
@@ -1619,12 +1697,14 @@ fn on_panel_button_press(
                 // The reference's Add Avatar picker is a multi-picker: a set is
                 // exactly the sort of thing one files several people into at
                 // once.
-                pickers.write(OpenAvatarPicker::many(press.entity, PICKER_REQUESTER));
+                intents
+                    .pickers
+                    .write(OpenAvatarPicker::many(press.entity, PICKER_REQUESTER));
             }
         }
         ContactSetsButton::MoveMember => {
-            if let (Some(name), Some(agent)) = (real_set, selected.0) {
-                adds.write(
+            if let (Some(name), Some(agent)) = (real_set, state.selected.0) {
+                intents.adds.write(
                     OpenAddToContactSet::one(
                         agent,
                         sets.label_of(agent)
@@ -1636,45 +1716,45 @@ fn on_panel_button_press(
             }
         }
         ContactSetsButton::RemoveMember => {
-            let (Some(set), Some(agent)) = (real_set, selected.0) else {
+            let (Some(set), Some(agent)) = (real_set, state.selected.0) else {
                 return;
             };
             let name = sets
                 .label_of(agent)
                 .map_or_else(|| short_id(agent), ToOwned::to_owned);
-            *pending = PendingAction::RemoveMember {
+            *state.pending = PendingAction::RemoveMember {
                 set: set.clone(),
                 agent,
             };
-            notifications.write(
+            intents.notifications.write(
                 ShowNotification::new("RemoveContactFromSet")
                     .arg("TARGET", name)
                     .arg("SET_NAME", set),
             );
         }
         ContactSetsButton::Profile => {
-            if let Some(agent) = selected.0 {
-                profiles.write(OpenAvatarProfile { agent });
+            if let Some(agent) = state.selected.0 {
+                intents.profiles.write(OpenAvatarProfile { agent });
             }
         }
         ContactSetsButton::Im => {
-            if let Some(agent) = selected.0 {
-                conversations.write(OpenConversation {
+            if let Some(agent) = state.selected.0 {
+                intents.conversations.write(OpenConversation {
                     key: ConversationKey::Direct(agent),
                 });
             }
         }
         ContactSetsButton::OfferTeleport => {
-            if let Some(agent) = selected.0 {
-                sl_commands.write(SlCommand(Command::OfferTeleport {
+            if let Some(agent) = state.selected.0 {
+                intents.sl_commands.write(SlCommand(Command::OfferTeleport {
                     targets: vec![agent],
                     message: String::new(),
                 }));
             }
         }
         ContactSetsButton::SetAlias => {
-            if let Some(agent) = selected.0 {
-                aliases.write(OpenSetPseudonym {
+            if let Some(agent) = state.selected.0 {
+                intents.aliases.write(OpenSetPseudonym {
                     agent,
                     name: sets
                         .label_of(agent)
@@ -1685,23 +1765,27 @@ fn on_panel_button_press(
         ContactSetsButton::ClearAlias => {
             // Nothing to clear is nothing to do — as with Delete Set on a
             // pseudo-set, the button is simply inert until it applies.
-            if let Some(agent) = selected.0
+            if let Some(agent) = state.selected.0
                 && sets.has_alias(agent)
             {
-                requests.write(RequestContactSet::ClearPseudonym { agent });
+                intents
+                    .requests
+                    .write(RequestContactSet::ClearPseudonym { agent });
             }
         }
         ContactSetsButton::RemoveDisplayName => {
-            if let Some(agent) = selected.0
+            if let Some(agent) = state.selected.0
                 && !sets.has_display_name_removed(agent)
             {
-                requests.write(RequestContactSet::RemoveDisplayName {
-                    agent,
-                    name: sets
-                        .label_of(agent)
-                        .map(ToOwned::to_owned)
-                        .unwrap_or_default(),
-                });
+                intents
+                    .requests
+                    .write(RequestContactSet::RemoveDisplayName {
+                        agent,
+                        name: sets
+                            .label_of(agent)
+                            .map(ToOwned::to_owned)
+                            .unwrap_or_default(),
+                    });
             }
         }
     }
@@ -1709,24 +1793,12 @@ fn on_panel_button_press(
 
 /// Open the add-to-set floater for a resident (the avatar pie's **Add to Set**,
 /// or the panel's **Move to Set…**), seeding its combo with the sets there are.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system: the request stream, the sets it seeds the combo from, the \
-              floater's UI / target / translator, and the panel / text / combo / prompt \
-              channels one open writes"
-)]
 fn handle_open_add_to_set(
     mut requests: MessageReader<OpenAddToContactSet>,
     sets: Res<ContactSets>,
     ui: Option<ResMut<AddToSetUi>>,
     translator: Translator,
-    mut target: ResMut<AddToSetTarget>,
-    mut panels: Query<&mut UiPanelShown>,
-    mut texts: Query<&mut Text>,
-    mut selections: Query<&mut ComboSelection>,
-    mut options: MessageWriter<SetComboOptions>,
-    mut notifications: MessageWriter<ShowNotification>,
-    mut pending: ResMut<PendingAction>,
+    mut floater: AddToSetFloater,
 ) {
     let Some(mut ui) = ui else {
         return;
@@ -1752,15 +1824,17 @@ fn handle_open_add_to_set(
         // With no set to file them under, the useful thing is the make-a-set
         // prompt rather than a floater whose only control is empty.
         if sets.set_count() == 0 {
-            *pending = PendingAction::Create {
+            *floater.pending = PendingAction::Create {
                 then_add: residents,
                 move_from: request.move_from.clone(),
             };
-            notifications.write(ShowNotification::new("AddNewContactSet"));
+            floater
+                .notifications
+                .write(ShowNotification::new("AddNewContactSet"));
             continue;
         }
-        target.agents = residents;
-        target.move_from.clone_from(&request.move_from);
+        floater.target.agents = residents;
+        floater.target.move_from.clone_from(&request.move_from);
 
         let labels: Vec<String> = sets.sets().map(|set| set.name().to_owned()).collect();
         let active = request
@@ -1768,14 +1842,21 @@ fn handle_open_add_to_set(
             .as_ref()
             .and_then(|from| labels.iter().position(|name| name == from))
             .unwrap_or_default();
-        target.chosen = labels.get(active).cloned().unwrap_or_default();
-        options.write(SetComboOptions::new(ui.chooser, labels.clone()));
-        select_combo_option(&mut selections, ui.chooser, &labels, &target.chosen);
+        floater.target.chosen = labels.get(active).cloned().unwrap_or_default();
+        floater
+            .combo_options
+            .write(SetComboOptions::new(ui.chooser, labels.clone()));
+        select_combo_option(
+            &mut floater.selections,
+            ui.chooser,
+            &labels,
+            &floater.target.chosen,
+        );
         ui.options = labels;
 
         // The reference's own split: one resident is named in the prompt, several
         // are counted (the names are on the lines the user just picked from).
-        let prompt = match target.single() {
+        let prompt = match floater.target.single() {
             Some((_agent, name)) => translator.format(
                 if request.move_from.is_some() {
                     "move-to-contact-set-prompt"
@@ -1788,16 +1869,16 @@ fn handle_open_add_to_set(
                 "add-to-contact-set-prompt-multiple",
                 &TransArgs::new().int(
                     "count",
-                    i64::try_from(target.agents.len()).unwrap_or(i64::MAX),
+                    i64::try_from(floater.target.agents.len()).unwrap_or(i64::MAX),
                 ),
             ),
         };
-        if let Ok(mut text) = texts.get_mut(ui.prompt)
+        if let Ok(mut text) = floater.texts.get_mut(ui.prompt)
             && text.0 != prompt
         {
             text.0 = prompt;
         }
-        if let Ok(mut shown) = panels.get_mut(ui.panel) {
+        if let Ok(mut shown) = floater.panels.get_mut(ui.panel) {
             shown.0 = true;
         }
     }
@@ -1829,21 +1910,11 @@ fn handle_open_set_pseudonym(
 /// A press on the add-to-set floater's buttons: **Add** files the target (and,
 /// in move mode, unfiles them from where they were), **New Set…** prompts for a
 /// set to file them under, **Cancel** just closes.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy observer's parameters are its injected resources: the button pool, the \
-              floater UI and its target, and the request / prompt / panel channels the three \
-              buttons write"
-)]
 fn on_add_to_set_press(
     mut press: On<Pointer<Press>>,
     buttons: Query<&AddToSetButton>,
     ui: Option<Res<AddToSetUi>>,
-    mut target: ResMut<AddToSetTarget>,
-    mut pending: ResMut<PendingAction>,
-    mut requests: MessageWriter<RequestContactSet>,
-    mut notifications: MessageWriter<ShowNotification>,
-    mut panels: Query<&mut UiPanelShown>,
+    mut floater: AddToSetFloater,
 ) {
     if press.button != PointerButton::Primary {
         return;
@@ -1855,41 +1926,45 @@ fn on_add_to_set_press(
         return;
     };
     press.propagate(false);
-    if target.agents.is_empty() {
+    if floater.target.agents.is_empty() {
         return;
     }
     match button {
         AddToSetButton::Add => {
-            if target.chosen.is_empty() {
+            if floater.target.chosen.is_empty() {
                 return;
             }
-            for (agent, name) in target.agents.clone() {
-                match target.move_from.clone() {
-                    Some(from) => requests.write(RequestContactSet::Move {
+            for (agent, name) in floater.target.agents.clone() {
+                match floater.target.move_from.clone() {
+                    Some(from) => floater.set_requests.write(RequestContactSet::Move {
                         from,
-                        to: target.chosen.clone(),
+                        to: floater.target.chosen.clone(),
                         agent,
                     }),
-                    None => requests.write(RequestContactSet::Add {
-                        set: target.chosen.clone(),
+                    None => floater.set_requests.write(RequestContactSet::Add {
+                        set: floater.target.chosen.clone(),
                         agent,
                         name,
                     }),
                 };
             }
-            notifications.write(add_success_notification(&target));
+            floater
+                .notifications
+                .write(add_success_notification(&floater.target));
         }
         AddToSetButton::NewSet => {
-            *pending = PendingAction::Create {
-                then_add: target.agents.clone(),
-                move_from: target.move_from.clone(),
+            *floater.pending = PendingAction::Create {
+                then_add: floater.target.agents.clone(),
+                move_from: floater.target.move_from.clone(),
             };
-            notifications.write(ShowNotification::new("AddNewContactSet"));
+            floater
+                .notifications
+                .write(ShowNotification::new("AddNewContactSet"));
         }
         AddToSetButton::Cancel => {}
     }
-    target.agents.clear();
-    if let Ok(mut shown) = panels.get_mut(ui.panel) {
+    floater.target.agents.clear();
+    if let Ok(mut shown) = floater.panels.get_mut(ui.panel) {
         shown.0 = false;
     }
 }
@@ -1912,21 +1987,14 @@ fn add_success_notification(target: &AddToSetTarget) -> ShowNotification {
 /// A press on the settings floater's buttons: **Rename** asks for the rename
 /// (the model refuses a name that is taken, and says so through the reference's
 /// notification), **Close** shuts the floater.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy observer's parameters are its injected resources: the button pool, the \
-              floater UI / target / name field the rename reads, and the request / pending / \
-              panel state it writes"
-)]
 fn on_config_button_press(
     mut press: On<Pointer<Press>>,
     buttons: Query<&ConfigButton>,
     ui: Option<Res<ConfigUi>>,
-    fields: Query<&EditableText>,
     mut target: ResMut<ConfigTarget>,
     mut pending_rename: ResMut<PendingRename>,
     mut requests: MessageWriter<RequestContactSet>,
-    mut panels: Query<&mut UiPanelShown>,
+    mut widgets: ConfigWidgets,
 ) {
     if press.button != PointerButton::Primary {
         return;
@@ -1943,7 +2011,8 @@ fn on_config_button_press(
             let Some(from) = target.0.clone() else {
                 return;
             };
-            let to = fields
+            let to = widgets
+                .editors
                 .get(ui.name_field)
                 .map(|field| field.value().to_string())
                 .unwrap_or_default();
@@ -1956,7 +2025,7 @@ fn on_config_button_press(
         }
         ConfigButton::Close => {
             target.0 = None;
-            if let Ok(mut shown) = panels.get_mut(ui.panel) {
+            if let Ok(mut shown) = widgets.panels.get_mut(ui.panel) {
                 shown.0 = false;
             }
         }
@@ -2117,23 +2186,12 @@ fn commit_config_autoresponses(
 
 /// Show / hide the settings floater with its target, and keep its title, name
 /// field and swatch showing that set.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system: the sets and the target it follows, the floater's UI, and the \
-              panel / title / swatch / name-field state it writes (the field needing parley's \
-              two contexts to be set programmatically)"
-)]
 fn sync_config_floater(
     sets: Res<ContactSets>,
     ui: Option<Res<ConfigUi>>,
     mut target: ResMut<ConfigTarget>,
     translator: Translator,
-    mut panels: Query<&mut UiPanelShown>,
-    mut texts: Query<&mut Text>,
-    mut swatches: Query<(&mut ColorSwatchValue, &mut BackgroundColor)>,
-    mut editors: Query<&mut EditableText>,
-    mut font_cx: ResMut<FontCx>,
-    mut layout_cx: ResMut<LayoutCx>,
+    mut widgets: ConfigWidgets,
     mut shown_for: Local<Option<String>>,
 ) {
     let Some(ui) = ui else {
@@ -2148,7 +2206,7 @@ fn sync_config_floater(
     {
         target.0 = None;
     }
-    let Ok(mut shown) = panels.get_mut(ui.panel) else {
+    let Ok(mut shown) = widgets.panels.get_mut(ui.panel) else {
         return;
     };
     let Some(name) = target.0.clone() else {
@@ -2175,7 +2233,7 @@ fn sync_config_floater(
     // The swatch follows the set on every change (a recolour lands here too);
     // the name field is seeded only when the floater turns to a new set, so a
     // half-typed rename is not overwritten under the user's hands.
-    if let Ok((mut value, mut background)) = swatches.get_mut(ui.swatch) {
+    if let Ok((mut value, mut background)) = widgets.swatches.get_mut(ui.swatch) {
         if value.0 != set.color() {
             value.0 = set.color();
         }
@@ -2185,11 +2243,15 @@ fn sync_config_floater(
     }
     // The five checkboxes follow the set on every change too — each is flipped
     // through the model, so this is what actually draws the new state.
-    set_config_check(&mut texts, ui.notify_glyph, set.notify());
-    set_config_check(&mut texts, ui.sort_glyph, set.sorts_by_online_status());
+    set_config_check(&mut widgets.texts, ui.notify_glyph, set.notify());
+    set_config_check(
+        &mut widgets.texts,
+        ui.sort_glyph,
+        set.sorts_by_online_status(),
+    );
     for mode in AUTORESPONSE_MODES {
         set_config_check(
-            &mut texts,
+            &mut widgets.texts,
             ui.autoresponse(*mode).glyph,
             set.autoresponse(*mode).enabled(),
         );
@@ -2198,23 +2260,33 @@ fn sync_config_floater(
         return;
     }
     *shown_for = Some(name.clone());
-    if let Ok(mut editor) = editors.get_mut(ui.name_field) {
-        crate::ui_text::set_editor_text(&mut editor, &name, &mut font_cx, &mut layout_cx);
+    if let Ok(mut editor) = widgets.editors.get_mut(ui.name_field) {
+        crate::ui_text::set_editor_text(
+            &mut editor,
+            &name,
+            &mut widgets.font_cx,
+            &mut widgets.layout_cx,
+        );
     }
     // The reply fields are seeded on the same edge as the name field, for the
     // same reason: they are edited in place, and re-seeding them every frame
     // would fight the user's typing.
     for mode in AUTORESPONSE_MODES {
         let text = set.autoresponse(*mode).text().to_owned();
-        if let Ok(mut editor) = editors.get_mut(ui.autoresponse(*mode).field) {
-            crate::ui_text::set_editor_text(&mut editor, &text, &mut font_cx, &mut layout_cx);
+        if let Ok(mut editor) = widgets.editors.get_mut(ui.autoresponse(*mode).field) {
+            crate::ui_text::set_editor_text(
+                &mut editor,
+                &text,
+                &mut widgets.font_cx,
+                &mut widgets.layout_cx,
+            );
         }
     }
     let title = translator.format(
         "contact-set-config-title",
         &TransArgs::new().text("name", &name),
     );
-    if let Ok(mut text) = texts.get_mut(ui.title)
+    if let Ok(mut text) = widgets.texts.get_mut(ui.title)
         && text.0 != title
     {
         text.0 = title;
