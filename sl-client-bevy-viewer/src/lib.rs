@@ -397,10 +397,6 @@ use crate::avatar_picker::AvatarPickerPlugin;
 use crate::avatar_profile::AvatarProfilePlugin;
 use crate::blocked::BlockedPlugin;
 use crate::camera::{CameraSpin, CameraStart, SpinAxis};
-use crate::chat::{
-    ChatOverlay, position_chat_overlay, restyle_chat_overlay, setup_chat_overlay,
-    tick_chat_overlay, update_chat_overlay,
-};
 use crate::chat_input::ChatInputPlugin;
 use crate::conversations::ConversationsPlugin;
 use crate::derender::DerenderPlugin;
@@ -428,35 +424,21 @@ use crate::inventory_properties::InventoryPropertiesPlugin;
 use crate::load_url::LoadUrlPlugin;
 use crate::local_chat_input::LocalChatInputPlugin;
 use crate::nearby_chat_bar::NearbyChatBarPlugin;
-use crate::notification_host::{
-    NotificationHostPlugin, announce_command_failures, apply_diagnostics_setting,
-    ingest_alert_messages, ingest_protocol_diagnostics, spawn_notification_demo,
-};
+use crate::notification_host::{NotificationHostPlugin, NotificationSourcesPlugin};
 use crate::notification_persist::NotificationPersistPlugin;
 use crate::offers_invites::OffersInvitesPlugin;
 use crate::people::PeoplePlugin;
 use crate::script_dialog::ScriptDialogPlugin;
 use crate::script_permission::ScriptPermissionPlugin;
-use crate::session::{
-    PlayOnLogin, ViewerSession, apply_draw_distance, drive_session, enforce_quit_deadline,
-    handle_quit_requests, repeat_debug_animation, report_agent_viewport, report_camera_interest,
-    save_settings_on_exit,
-};
-use crate::settings::{AccountContext, ViewerSettings, flush_settings, load_account_settings};
+use crate::session::PlayOnLogin;
+use crate::settings::{AccountContext, SettingsPersistPlugin, ViewerSettings};
 use crate::settings_binding::SettingsBindingPlugin;
 use crate::settings_index::SettingsIndexPlugin;
 use crate::stand_stop_button::StandStopButtonPlugin;
-use crate::ui::{UiScaffoldSystems, ViewerUiPlugin};
-use crate::ui_element::UiAction;
+use crate::ui::ViewerUiPlugin;
 use crate::ui_tab::TabWidgetPlugin;
 use crate::ui_table::TableWidgetPlugin;
-use crate::ui_text::{
-    TextDemoVisible, apply_text_demo_visibility, setup_text_demo, toggle_text_demo,
-};
-use crate::ui_text_input::{
-    TextInputDemoVisible, TextInputPlugin, apply_text_input_demo_visibility, setup_text_input_demo,
-    toggle_text_input_demo, update_demo_value_readouts,
-};
+use crate::ui_text_input::TextInputPlugin;
 use crate::viewer_camera::viewer_camera_bundle;
 use crate::viewer_plugins::{
     ViewerEditPlugins, ViewerInputPlugins, ViewerRenderPlugins, ViewerWorldPlugins,
@@ -1437,32 +1419,18 @@ fn run_session(
     // The toast / notification host (viewer-ui-notification-host): the screen
     // channel that stacks, times out, fades and dismisses transient
     // notifications from the declarative catalogue, plus the modal-alert scrim —
-    // the shared substrate the specific dialogs sit in. The live source
-    // (`ingest_alert_messages`) and the `SL_VIEWER_NOTIFICATION_DEMO` trigger are
-    // added below as viewer-only systems, since the plugin itself must host
-    // without the session `SlEvent` stream (so the login-free gallery can use it).
+    // the shared substrate the specific dialogs sit in.
     .add_plugins(NotificationHostPlugin)
+    // The live sources that raise into it — simulator alerts, failed commands,
+    // protocol diagnostics and the demo spread. A separate plugin because all
+    // of them read the session, which the host deliberately does not (so the
+    // login-free gallery can still host toast specimens).
+    .add_plugins(NotificationSourcesPlugin)
     // The persistent-notification store (viewer-notification-persistence): saves
     // the open (unacknowledged) sticky notifications to a per-account file and
     // re-displays them on next login (the reference LLPersistentNotificationStorage).
     // After the host, whose PersistNotification / NotificationResponse it records.
     .add_plugins(NotificationPersistPlugin)
-    // Surface the simulator's `AlertMessage` / `AgentAlertMessage` (a stream
-    // nothing consumed before) as notifications. The `SL_VIEWER_NOTIFICATION_DEMO`
-    // sample spread is registered conditionally with the other env-gated debug
-    // systems below.
-    .add_systems(Update, ingest_alert_messages)
-    // Surface a queued command whose send failed (no circuit, a stale scoped id,
-    // an encode error), so an action that never reached the simulator says so
-    // instead of looking as if it worked.
-    .add_systems(Update, announce_command_failures)
-    // Drain the protocol diagnostics the session collects — decode failures,
-    // unhandled messages, unknown capability events, missing replies — into the
-    // log, and push the developer switch that turns their collection on or off.
-    .add_systems(
-        Update,
-        (ingest_protocol_diagnostics, apply_diagnostics_setting),
-    )
     // The bottom toolbar (viewer-ui-bottom-toolbar): the persistent strip of
     // toggle buttons that open the main floaters (Inventory wired today, the rest
     // disabled placeholders until their tasks land), and the bottom-area layout
@@ -1697,19 +1665,10 @@ fn run_session(
     ))
     // Gate bevy_ui's unconditional full-tree stack rebuild and layout walk
     // behind "did any of that system's inputs actually change (visibly)"
-    // (viewer-perf-ui-layout-per-frame-relayout); each gated system is its
-    // set's sole member, so this needs no fork. The conditions and their
-    // rationale live in `crate::ui_perf`.
-    .configure_sets(
-        PostUpdate,
-        bevy::ui::UiSystems::Stack.run_if(ui_perf::ui_stack_dirty),
-    )
-    .configure_sets(
-        PostUpdate,
-        bevy::ui::UiSystems::Layout.run_if(ui_perf::ui_layout_dirty),
-    )
-    // `SL_VIEWER_LOG_UI_DIRTY=1` names what tripped the layout gate per frame.
-    .add_plugins(ui_perf::UiPerfDiagnosticsPlugin)
+    // (viewer-perf-ui-layout-per-frame-relayout), and bring the env-gated
+    // skip-rate meter that says whether the gate is behaving with it.
+    // `SL_VIEWER_LOG_UI_DIRTY=1` names what tripped it per frame.
+    .add_plugins(ui_perf::UiLayoutGatePlugin)
     // Frame-time / FPS instruments — the smoothed FPS the status area
     // (`crate::status_bar`) shows and the frame budget the fetch/decode pipeline
     // work is watched against.
@@ -1743,10 +1702,6 @@ fn run_session(
     #[cfg(feature = "profile-tracy")]
     app.add_plugins(crate::tracy_plots::TracyProfilingPlugin);
     app
-        // P24.1: a larger sun/moon shadow map than the 2048 default, so the four
-        // region-scale cascades (see `sky::shadow_cascades`) keep enough texels per
-        // world unit to shadow an avatar crisply across a whole region.
-        .init_resource::<ViewerSession>()
         // The per-avatar account identity (grid + name + accounts root), used by
         // `load_account_settings` to locate the account-scope settings once the
         // agent UUID is known at login.
@@ -1757,9 +1712,11 @@ fn run_session(
         })
         // The viewer settings store (viewer-ui-settings-store), the reference's
         // `gSavedSettings`: registers each feature's settings and loads any persisted
-        // global overrides (e.g. SpaceNavigator sensitivities). The per-avatar account
-        // scope loads at login via `load_account_settings`.
+        // global overrides (e.g. SpaceNavigator sensitivities). `REGISTRARS` is the
+        // binary's to hold — a store that named its own users would depend on all of
+        // them — so the store is inserted here and only its *persistence* is a plugin.
         .insert_resource(ViewerSettings::load_with(REGISTRARS))
+        .add_plugins(SettingsPersistPlugin)
         // The debug camera override (`--camera-position` / `--camera-look-at` /
         // `--camera-spin`): `setup_scene` reads the start pose, `drive_flycam` reads
         // the spin, and third-person auto-follows when no pose is fixed. The world
@@ -1769,32 +1726,14 @@ fn run_session(
         .insert_resource(camera_start)
         .insert_resource(camera_spin)
         .init_resource::<LoginOutcome>()
-        // The live A/B state of the shape's collision-volume displacement (P34.3), seeded
-        // from `SL_VIEWER_VOLUME_MORPH_GAIN` and toggled by the `V` key.
-        // One shared per-frame mesh-upload lane spent by object spawn / geometry /
-        // LOD / terrain apply (replaces their old independent budgets).
-        // The deferred geometry builds of the objects `ObjectState` tracks, kept
-        // beside it rather than inside a tracked object: an in-flight asset fetch
-        // or a retained LOD rebuild is machinery, not world state.
-        // The screen-space HUD hierarchy (P35.1), spawned by `setup_hud_screen`.
-        // The water-render bookkeeping (P23.1) is created by `setup_water` at
-        // startup, so no `init_resource` is needed here; the surface level the
-        // underwater-fog pass reads is a small resource published by `drive_water`.
-        // The cross-instance geometry cache: shared mesh handles for identical
-        // prim / sculpt / mesh geometry (`viewer-perf-prim-tessellation-cache`).
-        // The cross-instance material cache: shared face-material handles for
-        // identical face content, so matched copies batch into instanced draws
-        // (`viewer-perf-material-intern`).
-        .init_resource::<ChatOverlay>()
         .insert_resource(AnimationManager::new())
-        // The UI text & font foundation demo (viewer-ui-text-foundation): a
-        // toggleable `EditableText` panel, seeded shown/hidden from
-        // `SL_VIEWER_TEXT_DEMO` so the screenshot harness can capture it.
-        .insert_resource(TextDemoVisible::from_env())
-        // The reusable text-input widget demo (viewer-ui-text-input-widget): a
-        // toggleable panel of single- / multi-line and numeric fields, seeded
-        // shown/hidden from `SL_VIEWER_TEXT_INPUT_DEMO` for the screenshot harness.
-        .insert_resource(TextInputDemoVisible::from_env())
+        // The session driver and its shutdown: the `SlEvent` fold, the draw
+        // distance and interest-camera reports, the graceful logout every quit
+        // path routes through, and the synchronous exit save. `--repeat-animation`
+        // is the one part that is a run's choice rather than the session's.
+        .add_plugins(crate::session::SessionDriverPlugin { repeat_animation })
+        // The debug animations to play on the own avatar once it lands
+        // (`--play-animation`), over the plugin's "play nothing" default.
         .insert_resource(PlayOnLogin {
             animations: play_animation
                 .iter()
@@ -1803,136 +1742,19 @@ fn run_session(
                 .collect(),
             repeat: repeat_animation,
         })
-        // Menu ▸ Quit writes this; `handle_quit_requests` turns it (and a window
-        // close) into a graceful logout.
-        .add_message::<crate::session::QuitRequested>()
-        // The pie-menu widget's `commit_pie_selection` runs every frame and writes a
-        // `UiAction`, so the message must be registered here too — it was previously
-        // only registered in the gallery / test apps, where the pie menu had been
-        // exercised, so the live viewer panicked on the unregistered writer.
-        .add_message::<UiAction>()
-        .add_systems(
-            Startup,
-            (
-                setup_scene,
-                // The chat overlay now parents itself under the scaffold's
-                // `UiRoot` (so the snapshot include-UI-off hide covers it), and so
-                // must see the root.
-                setup_chat_overlay.after(UiScaffoldSystems::SpawnRoot),
-                // The UI text & font foundation demo panel (viewer-ui-text-foundation),
-                // which parents itself to the scaffold's `UiRoot` and so must see it.
-                setup_text_demo.after(UiScaffoldSystems::SpawnRoot),
-                // The reusable text-input widget demo panel (viewer-ui-text-input-widget),
-                // likewise parented to the scaffold's `UiRoot`.
-                setup_text_input_demo.after(UiScaffoldSystems::SpawnRoot),
-            ),
-        )
-        // The material cache's copy-on-write detach net: give any interned
-        // (shared-material) face a private material before this frame's
-        // `Update` mutators — texture animation, PBR registration, HUD
-        // fullbright, the edit floaters' live previews — can write into the
-        // shared asset. Scheduled in `PreUpdate` so the swap's commands are
-        // applied at the schedule boundary, ahead of every mutator.
-        // Refill the shared per-frame asset-upload budgets in `PreUpdate`, ahead of
-        // every `Update` apply system that spends from them — the image lane
-        // (`TextureApplyBudget`, drawn by the texture / PBR-map / bump / legacy / bake
-        // systems) and the mesh lane (`MeshUploadBudget`, drawn by object spawn /
-        // geometry / LOD / terrain). Resetting here rather than inside the scattered
-        // Update tuples guarantees the refill precedes all consumers regardless of
-        // their relative order.
-        .add_systems(
-            Update,
-            (
-                capture_login_outcome,
-                drive_session,
-                // Announce the (user-tunable) draw distance on handshake and
-                // whenever the quick-preferences slider moves it.
-                apply_draw_distance,
-                // Append newly received local chat to the on-screen overlay, age each
-                // line so it fades and despawns once chat goes quiet
-                // (viewer-chat-overlay-fade), and keep the overlay pinned just above the
-                // bottom area (toolbar + nearby-chat bar) so they never overlap as the
-                // bar grows / shrinks / toggles.
-                (
-                    update_chat_overlay,
-                    tick_chat_overlay,
-                    restyle_chat_overlay,
-                    position_chat_overlay,
-                ),
-                // Quit handling: request a clean logout, then force the exit once the
-                // grace period lapses. Nested into one tuple to stay within Bevy's
-                // per-tuple system limit. `Ctrl+Q` is no longer a system of its own:
-                // it is the accelerator drawn against Avatar ▸ Quit, dispatched to
-                // that entry by `sl_viewer_ui_widgets::menu_accel` like every other
-                // menu shortcut.
-                (
-                    // Menu ▸ Quit (whether picked or reached by its accelerator) and
-                    // the window close button / compositor close all route through a
-                    // graceful logout here.
-                    handle_quit_requests,
-                    // A harness (or a `Ctrl-C` in the terminal a run is watched
-                    // from) asks for the same graceful logout with a signal.
-                    crate::session::quit_on_termination_signal,
-                    enforce_quit_deadline,
-                    // Load the per-avatar account settings once the agent UUID is
-                    // known at login (once; a no-op every frame thereafter).
-                    load_account_settings,
-                ),
-            ),
-        )
-        // Settings persistence. The in-session flush runs in `PostUpdate`, after
-        // every system that can change a setting, and writes on the `IoTaskPool`
-        // with at most one write in flight. The exit save runs in `Last` and is
-        // synchronous, because Bevy checks for `AppExit` only once the whole
-        // schedule has run, so there is no later point at which the newest state
-        // can still reach the disk.
-        .add_systems(PostUpdate, flush_settings)
-        .add_systems(Last, save_settings_on_exit)
-        // UI text & font foundation and the text-input widget demo panels.
-        .add_systems(
-            Update,
-            (
-                // UI text & font foundation (viewer-ui-text-foundation): toggle /
-                // apply the demo panel's visibility (the F4 key). Nested into one
-                // tuple to stay within Bevy's per-tuple system limit.
-                (
-                    toggle_text_demo,
-                    apply_text_demo_visibility
-                        .run_if(resource_changed::<TextDemoVisible>)
-                        .after(toggle_text_demo),
-                ),
-                // Reusable text-input widget (viewer-ui-text-input-widget): toggle /
-                // apply the demo panel's visibility (the F8 key), and keep the numeric
-                // rows' live parsed-value read-outs current.
-                (
-                    toggle_text_input_demo,
-                    apply_text_input_demo_visibility
-                        .run_if(resource_changed::<TextInputDemoVisible>)
-                        .after(toggle_text_input_demo),
-                    update_demo_value_readouts.run_if(crate::ui_text_input::text_input_demo_active),
-                ),
-            ),
-        )
-        // Terrain lighting (viewer-clouds-sun-occlusion): drive each region's ground
-        // with the sky frame's atmospheric sun / ambient colours, like the reference
-        // legacy terrain, after the camera so it reads the current altitude's sky
-        // frame. The sky, water, water-exclusion and underwater-fog stacks schedule
-        // themselves — see `SkyPlugin` and its siblings.
-        // The EEP settings-asset fetch cap for the World ▸ Environment Modern
-        // presets, and the session's camera-interest / viewport reports. The avatar
-        // animation pipeline that used to share this call schedules itself — see
-        // `AvatarAnimationPlugin`.
-        .add_systems(
-            Update,
-            (
-                // The interest camera is the viewpoint the simulator builds the
-                // agent's object stream around, so it must be *this* frame's pose:
-                // after the camera, or every report describes where the camera was a
-                // frame ago (a whole report interval at its ~45 Hz cadence).
-                report_camera_interest.after(world_api::WorldPhase::CameraPositioned),
-                report_agent_viewport,
-            ),
-        );
+        // The on-screen nearby-chat overlay, and the two demo panels the
+        // screenshot harness captures (`SL_VIEWER_TEXT_DEMO`, F4;
+        // `SL_VIEWER_TEXT_INPUT_DEMO`, F8).
+        .add_plugins((
+            crate::chat::ChatOverlayPlugin,
+            crate::ui_text::TextDemoPlugin,
+            crate::ui_text_input::TextInputDemoPlugin,
+        ))
+        // Avatar-state capture (viewer-avatar-state-dump-replay), which adds
+        // nothing at all unless `SL_VIEWER_DUMP_DIR` is set.
+        .add_plugins(crate::avatar_dump::AvatarDumpPlugin)
+        .add_systems(Startup, setup_scene)
+        .add_systems(Update, capture_login_outcome);
     // (Worn rigid attachments no longer need a hand re-propagation: their
     // attachment-point node is an avatar-root child whose local `Transform` the
     // pose driver's socket writer sets each frame, so ordinary change-gated
@@ -1943,37 +1765,11 @@ fn run_session(
     if let Some(library) = load_avatar_library(viewer_assets) {
         app.insert_resource(library);
     }
-    // Env-gated debug / demo systems, registered only when their switch is set
-    // (the `capture_screenshots` pattern) — a normal session pays no scheduler
-    // dispatch for them at all. Each predicate mirrors the system's own
-    // internal env check.
-    if std::env::var_os(crate::notification_host::DEMO_ENV).is_some() {
-        // Raise a sample notification spread on startup so the live stacking /
-        // fade / modal behaviour can be watched without a server alert.
-        app.add_systems(Update, spawn_notification_demo);
-    }
-    if repeat_animation && !play_animation.is_empty() {
-        // Keep re-issuing the `--play-animation` motions (`--repeat-animation`)
-        // so a one-shot animation still plays once the avatar has loaded.
-        app.add_systems(Update, repeat_debug_animation);
-    } else if repeat_animation {
+    if repeat_animation && play_animation.is_empty() {
         // There is nothing to repeat, and a silent no-op looks exactly like a
         // run that worked — the same reasoning as the `--capture-*` warnings.
+        // (The repeat *system* is `SessionDriverPlugin`'s to add or not.)
         warn!("--repeat-animation has no effect without --play-animation");
-    }
-    // Avatar-state capture (viewer-avatar-state-dump-replay): only when
-    // `SL_VIEWER_DUMP_DIR` is set — retain the raw avatar/appearance/animation
-    // events each frame, and write a bundle per avatar on Ctrl+Alt+D. Off (zero
-    // cost) in a normal session.
-    if std::env::var_os("SL_VIEWER_DUMP_DIR").is_some() {
-        app.init_resource::<crate::avatar_dump::ReplayCaptureStore>()
-            .add_systems(
-                Update,
-                (
-                    crate::avatar_dump::capture_replay_inputs,
-                    crate::avatar_dump::dump_avatars_on_key,
-                ),
-            );
     }
     // Avatar-state replay (viewer-avatar-state-dump-replay): inject the bundle's
     // captured events once and drive the optional test rig (orbit light /

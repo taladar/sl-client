@@ -374,6 +374,36 @@ fn log_layout_skip_rate(
     *last = Some((frames.0, runs.0));
 }
 
+/// The layout gate itself: `bevy_ui`'s unconditional full-tree stack rebuild and
+/// layout walk, put behind "did any of that system's inputs actually change
+/// (visibly)" (`viewer-perf-ui-layout-per-frame-relayout`).
+///
+/// Each gated system is its sole member of the set it is gated through, so this
+/// needs no fork of `bevy_ui`. The conditions and the reasoning behind what
+/// counts as a visible change are [`ui_stack_dirty`] and [`ui_layout_dirty`]
+/// above — which is exactly why the gate belongs beside them rather than in
+/// whichever binary happened to want it.
+///
+/// It brings [`UiPerfDiagnosticsPlugin`] with it: a gate whose skip rate cannot
+/// be read is a gate nobody can tell is misbehaving, and that half is env-gated
+/// so it costs a run nothing.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct UiLayoutGatePlugin;
+
+impl Plugin for UiLayoutGatePlugin {
+    fn build(&self, app: &mut App) {
+        app.configure_sets(
+            PostUpdate,
+            bevy::ui::UiSystems::Stack.run_if(ui_stack_dirty),
+        )
+        .configure_sets(
+            PostUpdate,
+            bevy::ui::UiSystems::Layout.run_if(ui_layout_dirty),
+        )
+        .add_plugins(UiPerfDiagnosticsPlugin);
+    }
+}
+
 /// Registers the (env-gated) layout-gate cause logger and skip-rate meter.
 #[derive(Debug)]
 pub struct UiPerfDiagnosticsPlugin;

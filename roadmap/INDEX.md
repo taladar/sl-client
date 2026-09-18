@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 311 |
+| ready | 310 |
 | blocked | 41 |
 | in-progress | 22 |
 | bugs | 5 |
-| done | 1184 |
+| done | 1185 |
 | deferred | 28 |
 | wont-do | 16 |
 | **total** | **1707** |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (311)
+## ready (310)
 
 ### protocol
 
@@ -319,8 +319,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-object-children-index`](ready/viewer-audit-object-children-index.md)
   — ObjectState has no children index, so every linkset query full-scans the
   region
-- [`viewer-audit-plugins-own-their-schedule`](ready/viewer-audit-plugins-own-their-schedule.md)
-  — Most viewer crates export loose systems instead of owning a plugin
 - [`viewer-audit-preferences-hub-decoupling`](ready/viewer-audit-preferences-hub-decoupling.md)
   — sl-viewer-preferences is a 12-crate hub whose own decoupling mechanism is
   under-applied
@@ -1176,7 +1174,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 
-## done (1184)
+## done (1185)
 
 ### protocol
 
@@ -1519,6 +1517,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Two instances of one window share a picker, and both claim its answer
 - [`viewer-audit-plugin-resource-registration`](done/viewer-audit-plugin-resource-registration.md)
   — Two plugins read resources they never register
+- [`viewer-audit-plugins-own-their-schedule`](done/viewer-audit-plugins-own-their-schedule.md)
+  — Most viewer crates export loose systems instead of owning a plugin
 - [`viewer-audit-probe-ambient-multiply`](done/viewer-audit-probe-ambient-multiply.md)
   — suppress_global_ambient multiplies an absolute producer and decays it
   geometrically

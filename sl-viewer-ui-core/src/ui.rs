@@ -197,6 +197,16 @@ impl Plugin for ViewerUiPlugin {
             // The keyboard half of focus. `DefaultPlugins` brings `InputFocus`
             // and dispatch, but not navigation, so `Tab` is inert without this.
             .add_plugins(TabNavigationPlugin)
+            // The action channel every UI surface writes into. It is declared
+            // in this crate (`ui_element`) and written by widgets, panels,
+            // floaters and pie menus across a dozen others — none of which is
+            // the owner. The scaffold they all require is, and it has to be
+            // registered unconditionally: `commit_pie_selection` writes a
+            // `UiAction` every frame, so an app that has a pie menu and no
+            // registration fails that system's param validation on the first
+            // pick (it used to be registered only in the gallery and the test
+            // apps, which is exactly how the live viewer came to panic on it).
+            .add_message::<crate::ui_element::UiAction>()
             .insert_resource(UiDirection::from_env())
             .insert_resource(UiDemoVisible::from_env())
             .init_resource::<UiDemoLabelLong>()

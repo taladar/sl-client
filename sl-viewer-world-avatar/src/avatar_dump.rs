@@ -27,6 +27,10 @@ use crate::replay_bundle::{
     MANIFEST_VERSION, ReplayManifest, copy_cache_assets, run_texture_fetch, texture_fetch_urls,
 };
 
+/// The environment variable that arms the capture: the directory a bundle is
+/// written into. Unset, [`AvatarDumpPlugin`] adds nothing at all.
+pub const DUMP_DIR_ENV: &str = "SL_VIEWER_DUMP_DIR";
+
 /// The retained raw session events a capture needs: the avatar objects and their
 /// attachment/linkset prims, each avatar's latest appearance, and each avatar's
 /// latest animation set. Folded from the [`SlEvent`] stream every frame (only
@@ -49,6 +53,29 @@ pub struct ReplayCaptureStore {
     /// referenced texture at full resolution (the local cache holds only the
     /// low-LOD prefix the live viewer happened to load).
     get_texture_cap: Option<String>,
+}
+
+/// Avatar-state capture (`viewer-avatar-state-dump-replay`): retain the raw
+/// avatar / appearance / animation events each frame and write a bundle per
+/// avatar on **Ctrl+Alt+D**.
+///
+/// Present only when `SL_VIEWER_DUMP_DIR` is set, so a normal session pays
+/// nothing — neither the per-frame retention nor a scheduler dispatch. The
+/// variable is read here rather than by the caller because it is this module's
+/// switch: the dump systems check it too, and having one place decide whether
+/// they exist and another decide whether they act is how a capture comes to be
+/// half-armed.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct AvatarDumpPlugin;
+
+impl Plugin for AvatarDumpPlugin {
+    fn build(&self, app: &mut App) {
+        if std::env::var_os(DUMP_DIR_ENV).is_none() {
+            return;
+        }
+        app.init_resource::<ReplayCaptureStore>()
+            .add_systems(Update, (capture_replay_inputs, dump_avatars_on_key));
+    }
 }
 
 /// Fold the object / appearance / animation session events into
@@ -112,7 +139,7 @@ pub fn dump_avatars_on_key(
     store: Res<ReplayCaptureStore>,
     identity: Res<SlIdentity>,
 ) {
-    let Some(dir) = std::env::var_os("SL_VIEWER_DUMP_DIR") else {
+    let Some(dir) = std::env::var_os(DUMP_DIR_ENV) else {
         return;
     };
     let chord = keyboard.pressed(KeyCode::ControlLeft) && keyboard.pressed(KeyCode::AltLeft);

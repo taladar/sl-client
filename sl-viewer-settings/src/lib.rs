@@ -485,6 +485,29 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     }
 }
 
+/// Settings persistence: the in-session flush and the per-avatar account load.
+///
+/// The store itself is inserted by whoever knows which features declare
+/// settings — the viewer binary, with its `REGISTRARS` list — so this plugin
+/// registers no resource. What it owns is *when* the two systems run, which is
+/// the part every host was otherwise restating.
+///
+/// The flush is in `PostUpdate`, after every system that can change a setting.
+/// The exit save is **not** here: it runs in `Last` as part of the session
+/// teardown (`sl_viewer_world_view::session::SessionDriverPlugin` — a crate
+/// above this one, so this is a name rather than a link), because
+/// Bevy checks for `AppExit` only once the whole schedule has run, so there is
+/// no later point at which the newest state can still reach the disk.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct SettingsPersistPlugin;
+
+impl Plugin for SettingsPersistPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Update, load_account_settings)
+            .add_systems(PostUpdate, flush_settings);
+    }
+}
+
 /// Write the settings files when an override has changed, at most one write in
 /// flight at a time.
 ///

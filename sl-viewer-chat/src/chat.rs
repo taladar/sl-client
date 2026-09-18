@@ -36,6 +36,7 @@ use crate::settings::ViewerSettings;
 use crate::social::MuteModel;
 use crate::ui::BottomArea;
 use crate::ui::UiRoot;
+use crate::ui::UiScaffoldSystems;
 use crate::ui_font::UiFont;
 use crate::world_api::rlv::swallows_owner_say;
 use crate::world_api::{
@@ -159,6 +160,41 @@ pub struct ChatOverlayLine {
 pub struct ChatOverlay {
     /// The sequence number the next arriving line will be stamped with.
     next_seq: u64,
+}
+
+/// The on-screen nearby-chat overlay: the lines that appear over the world as
+/// people speak, fade as chat goes quiet, and sit just above the bottom area.
+///
+/// One plugin rather than a resource plus five loose systems, because the five
+/// are a sequence with a shared surface — a new line is appended, every line is
+/// aged, the styling is refreshed from the skin, and the whole stack is
+/// repositioned as the bottom area grows, shrinks or toggles. A host that took
+/// four of the five would get an overlay that never faded, or one that overlaps
+/// the chat bar, and nothing would fail.
+///
+/// It spawns into the UI scaffold's [`UiRoot`], so it orders itself after
+/// [`UiScaffoldSystems::SpawnRoot`] — which also puts it inside the subtree the
+/// snapshot harness's include-UI-off hide covers.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ChatOverlayPlugin;
+
+impl Plugin for ChatOverlayPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<ChatOverlay>()
+            .add_systems(
+                Startup,
+                setup_chat_overlay.after(UiScaffoldSystems::SpawnRoot),
+            )
+            .add_systems(
+                Update,
+                (
+                    update_chat_overlay,
+                    tick_chat_overlay,
+                    restyle_chat_overlay,
+                    position_chat_overlay,
+                ),
+            );
+    }
 }
 
 /// Format one chat message as an overlay line: `"{from_name}: {message}"`, with

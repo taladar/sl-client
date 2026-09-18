@@ -151,6 +151,37 @@ impl TextDemoVisible {
 #[derive(Component, Debug, Clone, Copy)]
 pub struct TextDemoRoot;
 
+/// The text & font foundation demo panel (`viewer-ui-text-foundation`): a
+/// toggleable [`EditableText`] specimen, seeded shown or hidden from
+/// `SL_VIEWER_TEXT_DEMO` so the screenshot harness can capture it, and toggled live
+/// with `TEXT_DEMO_TOGGLE_KEY`.
+///
+/// Separate from [`crate::ui::ViewerUiPlugin`] because it is a specimen, not
+/// scaffolding: a host that wants the text stack without a demo panel on screen
+/// leaves it out.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct TextDemoPlugin;
+
+impl Plugin for TextDemoPlugin {
+    fn build(&self, app: &mut App) {
+        app.insert_resource(TextDemoVisible::from_env())
+            .add_systems(
+                Startup,
+                // It parents itself to the scaffold's `UiRoot` and so must see it.
+                setup_text_demo.after(crate::ui::UiScaffoldSystems::SpawnRoot),
+            )
+            .add_systems(
+                Update,
+                (
+                    toggle_text_demo,
+                    apply_text_demo_visibility
+                        .run_if(resource_changed::<TextDemoVisible>)
+                        .after(toggle_text_demo),
+                ),
+            );
+    }
+}
+
 /// Startup system: spawn the demo panel — a title plus one prefilled multi-line
 /// [`EditableText`] — starting shown or hidden per [`TextDemoVisible`]. The
 /// fonts it renders with are installed by [`crate::ui_font::register_ui_fonts`],

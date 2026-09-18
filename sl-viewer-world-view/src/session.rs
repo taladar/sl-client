@@ -27,7 +27,7 @@ use sl_settings::SettingValue;
 
 use sl_viewer_kit::coords::bevy_to_sl_vec;
 use sl_viewer_settings::ViewerSettings;
-use sl_viewer_world_api::ViewerCamera;
+use sl_viewer_world_api::{ViewerCamera, WorldPhase};
 
 /// The persisted-settings section the draw-distance setting lives under.
 const RENDER_SECTION: &[&str] = &["render"];
@@ -81,6 +81,71 @@ pub struct ViewerSession {
     /// forces an exit even without a `LoggedOut`; `None` until quit is
     /// requested.
     quit_deadline: Option<f32>,
+}
+
+/// The session driver: what turns a live grid connection into the frame's world,
+/// and what brings the session down cleanly again.
+///
+/// Its two halves are one plugin because they are one lifetime. The driver folds
+/// the `SlEvent` stream and advertises the agent's draw distance and viewpoint;
+/// the shutdown answers a quit request — the menu's Quit, the window's close
+/// button, or a termination signal — with a real `LogoutRequest`, enforces a
+/// grace deadline so a lost `LogoutReply` cannot wedge the window open, and gets
+/// the newest settings onto disk in `Last`, the only point after which nothing
+/// can still change them.
+///
+/// It needs a session, so an app without `SlClientPlugin` must leave it out.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct SessionDriverPlugin {
+    /// Whether to keep re-issuing the `--play-animation` motions, so a short or
+    /// non-looping one is still playing once the (slower) avatar load and bake
+    /// have finished. The system is only registered when this is set: a normal
+    /// session should not pay a scheduler dispatch for a debug affordance.
+    pub repeat_animation: bool,
+}
+
+impl Plugin for SessionDriverPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<ViewerSession>()
+            // The viewer inserts the real one from its command line; this is
+            // the "play nothing" default every other host wants.
+            .init_resource::<PlayOnLogin>()
+            // Menu ▸ Quit writes this; `handle_quit_requests` turns it (and a
+            // window close) into a graceful logout.
+            .add_message::<QuitRequested>()
+            .add_systems(
+                Update,
+                (
+                    drive_session,
+                    // Announce the (user-tunable) draw distance on handshake and
+                    // whenever the quick-preferences slider moves it.
+                    apply_draw_distance,
+                    // The interest camera is the viewpoint the simulator builds
+                    // the agent's object stream around, so it must be *this*
+                    // frame's pose: after the camera, or every report describes
+                    // where the camera was a frame ago (a whole report interval
+                    // at its ~45 Hz cadence).
+                    report_camera_interest.after(WorldPhase::CameraPositioned),
+                    report_agent_viewport,
+                    // Quit handling: request a clean logout, then force the exit
+                    // once the grace period lapses. `Ctrl+Q` is not a system of
+                    // its own — it is the accelerator drawn against Avatar ▸
+                    // Quit, dispatched to that entry like every other menu
+                    // shortcut.
+                    handle_quit_requests,
+                    // A harness (or a `Ctrl-C` in the terminal a run is watched
+                    // from) asks for the same graceful logout with a signal.
+                    quit_on_termination_signal,
+                    enforce_quit_deadline,
+                ),
+            )
+            // Synchronous, and in `Last`, because Bevy checks for `AppExit` only
+            // once the whole schedule has run.
+            .add_systems(Last, save_settings_on_exit);
+        if self.repeat_animation {
+            app.add_systems(Update, repeat_debug_animation);
+        }
+    }
 }
 
 /// Debug animations to play on the agent's **own** avatar once it lands (the

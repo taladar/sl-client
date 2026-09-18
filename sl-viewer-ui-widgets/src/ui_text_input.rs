@@ -1348,6 +1348,39 @@ enum DemoStance {
 #[derive(Resource, Debug, Clone, Copy, Default)]
 pub struct TextInputDemoVisible(pub bool);
 
+/// The reusable text-input widget's demo panel
+/// (`viewer-ui-text-input-widget`): single- / multi-line and numeric fields,
+/// seeded shown or hidden from the environment for the screenshot harness and
+/// toggled live.
+///
+/// Separate from [`TextInputPlugin`] for the same reason the text demo is
+/// separate from the UI scaffold: the widget is machinery every host wants, the
+/// panel is a specimen only some do.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct TextInputDemoPlugin;
+
+impl Plugin for TextInputDemoPlugin {
+    fn build(&self, app: &mut App) {
+        app.insert_resource(TextInputDemoVisible::from_env())
+            .add_systems(
+                Startup,
+                // Parented to the scaffold's `UiRoot`, so it must see it.
+                setup_text_input_demo.after(sl_viewer_ui_core::ui::UiScaffoldSystems::SpawnRoot),
+            )
+            .add_systems(
+                Update,
+                (
+                    toggle_text_input_demo,
+                    apply_text_input_demo_visibility
+                        .run_if(resource_changed::<TextInputDemoVisible>)
+                        .after(toggle_text_input_demo),
+                    // Keep the numeric rows' live parsed-value read-outs current.
+                    update_demo_value_readouts.run_if(text_input_demo_active),
+                ),
+            );
+    }
+}
+
 /// Run condition for [`update_demo_value_readouts`]: only while the demo panel
 /// is shown — the parsed-value read-outs are invisible otherwise, and they
 /// re-derive from the live field state on the first shown frame.

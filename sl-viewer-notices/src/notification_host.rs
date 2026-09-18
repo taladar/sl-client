@@ -296,6 +296,50 @@ impl Plugin for NotificationHostPlugin {
     }
 }
 
+/// The live sources that raise notifications from the session, kept apart from
+/// [`NotificationHostPlugin`] on purpose.
+///
+/// The host draws, stacks, ages and dismisses; it must be addable by an app with
+/// no grid at all — the login-free gallery hosts it to render toast specimens.
+/// Everything here reads the session (`SlEvent`, `SlCommandFailed`,
+/// `SlDiagnostic`), so in such an app each of these systems would fail its
+/// param validation on the first frame.
+///
+/// So the split is not tidiness: it is which apps can take which half.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct NotificationSourcesPlugin;
+
+impl Plugin for NotificationSourcesPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            (
+                // Surface the simulator's `AlertMessage` / `AgentAlertMessage`
+                // (a stream nothing consumed before) as notifications.
+                ingest_alert_messages,
+                // Surface a queued command whose send failed (no circuit, a
+                // stale scoped id, an encode error), so an action that never
+                // reached the simulator says so instead of looking as if it
+                // worked.
+                announce_command_failures,
+                // Drain the protocol diagnostics the session collects — decode
+                // failures, unhandled messages, unknown capability events,
+                // missing replies — into the log, and push the developer switch
+                // that turns their collection on or off.
+                ingest_protocol_diagnostics,
+                apply_diagnostics_setting,
+            ),
+        );
+        // A sample spread on startup, so the live stacking / fade / modal
+        // behaviour can be watched without a server alert. Registered only when
+        // the switch is set, so a normal session pays no scheduler dispatch for
+        // it; the system re-checks the variable itself.
+        if std::env::var_os(DEMO_ENV).is_some() {
+            app.add_systems(Update, spawn_notification_demo);
+        }
+    }
+}
+
 /// Notifications held back while **Do Not Disturb** is on
 /// ([`crate::presence`]) — the reference's muted notification channels plus its
 /// `LLDoNotDisturbNotificationStorage`: a corner toast raised while the mode is
