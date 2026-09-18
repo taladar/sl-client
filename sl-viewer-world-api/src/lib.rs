@@ -32,6 +32,7 @@ pub mod object_flags;
 pub mod object_graph;
 pub mod phases;
 pub mod rlv;
+pub mod schedule_order;
 pub mod settings;
 pub mod targeted_ray_cast;
 pub mod terrain;

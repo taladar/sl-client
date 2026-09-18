@@ -9,6 +9,20 @@ use crate::short_id;
 use bevy::prelude::*;
 use sl_client_bevy::{Command, GroupKey, GroupMembership, SlCommand, TextureKey, Uuid};
 
+/// The point in a frame at which [`GroupsModel`] is settled for the frame.
+///
+/// The model is filled by the People surface's group list, which sits well
+/// above the world; the avatar name tags, which draw the active group's title,
+/// sit inside it. Neither may name the other's systems, so the tag composer
+/// orders itself after this set and the ingest declares itself a member of it.
+/// A set is the only vocabulary the two share.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GroupsSystems {
+    /// This frame's `SlEvent` group traffic — memberships, resolved names,
+    /// notice preferences — has been folded into [`GroupsModel`].
+    Ingested,
+}
+
 /// The pure groups model: the agent's group memberships keyed by group id (to its
 /// display name), the active (worn) group, and a revision stamp bumped on every
 /// change so the view rebuilds only when something actually moved. Fed solely from

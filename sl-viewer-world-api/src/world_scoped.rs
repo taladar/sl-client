@@ -59,7 +59,7 @@ use std::collections::BTreeMap;
 
 use bevy::ecs::component::Mutable;
 use bevy::prelude::*;
-use sl_client_bevy::{AgentKey, SlEvent, SlIdentity, SlSessionEvent};
+use sl_client_bevy::{AgentKey, SlClientSystems, SlEvent, SlIdentity, SlSessionEvent};
 
 /// What a purge needs to know about the world being left behind.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -242,9 +242,23 @@ impl Plugin for WorldScopedPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<WorldResetFrame>()
             .init_resource::<WorldScopedRegistry>()
+            // `Detect` is pinned **after** the session drain, and that edge is
+            // the load-bearing one. Both `detect_world_reset` and every fold
+            // that builds the world read the same `SlEvent` channel, and
+            // neither was ordered against the system that writes it — so the
+            // scheduler was free to run the detector before the writer and the
+            // object fold after it, which puts them a whole frame apart on the
+            // same batch. The arrival then went: fold the destination's objects
+            // (frame N), notice the reset (frame N+1), purge the scene that had
+            // just been built. A teleport landed in an empty region and nothing
+            // failed, because the flag that drives all of this had never once
+            // been true against a real grid. See the roadmap task
+            // `viewer-teleport-never-resets-the-world`.
             .configure_sets(
                 Update,
-                (WorldResetSystems::Detect, WorldResetSystems::Purge).chain(),
+                (WorldResetSystems::Detect, WorldResetSystems::Purge)
+                    .chain()
+                    .after(SlClientSystems::SessionDrained),
             )
             .add_systems(Startup, log_world_scoped_registry)
             .add_systems(Update, detect_world_reset.in_set(WorldResetSystems::Detect));

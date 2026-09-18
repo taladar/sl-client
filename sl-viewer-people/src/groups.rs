@@ -346,7 +346,11 @@ impl Plugin for GroupsPlugin {
                 Update,
                 (
                     spawn_groups_panel.after(UiScaffoldSystems::SpawnRoot),
-                    ingest_group_events,
+                    // Declared a member of the shared set so the world's name
+                    // tags can order their group-title composition after it
+                    // without naming a system in this crate, which sits above
+                    // them.
+                    ingest_group_events.in_set(sl_viewer_social::groups::GroupsSystems::Ingested),
                     rebuild_groups_view,
                     refresh_groups,
                     refresh_group_actions,

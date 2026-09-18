@@ -74,7 +74,8 @@ impl Plugin for AvatarMovementPlugin {
         // `SpacenavInput` is a centred, un-pressed device), so the driver declares
         // the reads it makes rather than requiring either plugin. `init_resource`
         // is idempotent, so where those plugins are present they still own these.
-        app.init_resource::<MovementTuning>()
+        app.init_resource::<sl_viewer_world_api::AvatarControls>()
+            .init_resource::<MovementTuning>()
             .init_resource::<SpacenavInput>()
             .init_resource::<AvatarAxisSettings>()
             .init_resource::<AvatarNavSmoothing>()

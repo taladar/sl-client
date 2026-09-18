@@ -34,6 +34,9 @@ pub mod meshes;
 pub mod name_tag_billboard;
 pub mod object_cost;
 pub mod objects;
+mod plugin;
 pub mod render_priority;
 pub mod texture_anim;
 pub mod textures;
+
+pub use plugin::WorldObjectsPlugin;

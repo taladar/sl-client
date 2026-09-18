@@ -1165,7 +1165,10 @@ pub struct EditGizmoPlugin;
 impl Plugin for EditGizmoPlugin {
     /// Register the gizmo resources and systems.
     fn build(&self, app: &mut App) {
-        app.init_resource::<GizmoAssets>()
+        // A drag refused for want of a permission says so in local chat, so
+        // the channel is registered by the crate that writes it.
+        app.add_message::<LocalChatNotice>()
+            .init_resource::<GizmoAssets>()
             .init_resource::<GizmoInteraction>()
             .init_resource::<BuiltRig>()
             .init_resource::<GizmoReadoutUi>()

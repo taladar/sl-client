@@ -571,7 +571,10 @@ impl Plugin for EditMaterialPlugin {
     /// Run the material-channel sync + commit systems (the widgets are spawned by
     /// `spawn_material_channels`, called from the Texture-tab spawn).
     fn build(&self, app: &mut App) {
-        app.init_resource::<MatShownSnapshot>()
+        // This crate's material commits report a refusal as a local-chat
+        // notice, so the channel is registered by the crate that writes it.
+        app.add_message::<LocalChatNotice>()
+            .init_resource::<MatShownSnapshot>()
             .init_resource::<LegacyPreview>()
             .add_systems(
                 Update,

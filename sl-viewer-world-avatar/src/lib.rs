@@ -54,7 +54,10 @@ pub mod locomotion_ik;
 pub mod look_at;
 pub mod motion_stops;
 pub mod name_tag_content;
+mod plugin;
 pub mod reach;
 pub mod replay_bundle;
 pub mod rigged_attachments;
 pub mod typing;
+
+pub use plugin::WorldAvatarPlugin;

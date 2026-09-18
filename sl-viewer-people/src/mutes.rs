@@ -48,6 +48,39 @@ use crate::intents::RequestBlock;
 use crate::notifications::ShowNotification;
 use crate::social::MuteModel;
 
+/// The mute list: the model, the one guarded way into it, and the four systems
+/// that keep it current.
+///
+/// It is a plugin rather than four loose systems because the model is read
+/// from inside the world — a muted avatar's name tag goes grey, a muted
+/// object's sounds are dropped — while the surfaces that *edit* it (the block
+/// list, every Block affordance) sit far above. Neither end should have to
+/// know where the ingest was scheduled.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct MutesPlugin;
+
+impl Plugin for MutesPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<MuteModel>()
+            // The one guarded way in. Registered here because this is where it
+            // is answered; the affordances that write it are scattered over
+            // half the viewer and none of them owns the channel.
+            .add_message::<RequestBlock>()
+            .add_systems(
+                Update,
+                (
+                    request_mute_list,
+                    ingest_mute_list,
+                    // Before `note_local_mutes`, so a just-guarded block is
+                    // mirrored in the same frame it is sent.
+                    apply_block_requests,
+                    note_local_mutes,
+                )
+                    .chain(),
+            );
+    }
+}
+
 /// Request the mute list once the session is up (the login handshake has
 /// produced an agent id).
 pub fn request_mute_list(

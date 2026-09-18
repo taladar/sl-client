@@ -825,6 +825,14 @@ impl Plugin for AvatarMenuPlugin {
             .init_resource::<RightClickGesture>()
             .init_resource::<SelfGroundSit>()
             .add_message::<OpenAvatarMenu>()
+            // The two prompted actions a slice of this pie raises. The
+            // features that answer them (the mute list, the friendship
+            // offer) register them too — `add_message` is idempotent — but
+            // an unregistered `Messages<T>` fails this crate's own systems'
+            // param validation the moment a slice is picked, so the writer
+            // declares them rather than assuming its answerers are present.
+            .add_message::<sl_viewer_intents::RequestBlock>()
+            .add_message::<sl_viewer_intents::RequestFriendship>()
             .add_systems(
                 Update,
                 (

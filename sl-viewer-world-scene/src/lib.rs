@@ -31,6 +31,7 @@ pub mod glow;
 pub mod lights;
 pub mod parcel_borders;
 pub mod particles;
+mod plugin;
 pub mod probes;
 pub mod render_overrides;
 pub mod render_scene;
@@ -45,3 +46,5 @@ pub mod water_clip;
 pub mod water_exclusion;
 pub mod water_fog;
 pub mod water_scene_depth;
+
+pub use plugin::WorldScenePlugin;

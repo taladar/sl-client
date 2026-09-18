@@ -250,7 +250,8 @@ impl Plugin for NotificationHostPlugin {
     /// per-frame systems (ordered so a raise, an expiry and a dismiss all resolve
     /// in the same frame they occur).
     fn build(&self, app: &mut App) {
-        app.add_message::<ShowNotification>()
+        app.add_message::<LocalChatNotice>()
+            .add_message::<ShowNotification>()
             .add_message::<NotificationResponse>()
             .add_message::<DismissNotification>()
             .add_message::<ResolveNotification>()

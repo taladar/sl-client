@@ -58,7 +58,8 @@ pub struct HudScreenPlugin;
 
 impl Plugin for HudScreenPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_hud_screen)
+        app.init_resource::<sl_viewer_world_api::HudState>()
+            .add_systems(Startup, setup_hud_screen)
             .add_systems(Update, (fit_hud_points, apply_hud_fullbright));
         // The HUD census, gated by the shared worn-attachment trace: a HUD that
         // is routed onto its screen node and still draws nothing is silent

@@ -663,7 +663,10 @@ pub struct RadarPlugin;
 
 impl Plugin for RadarPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<RadarState>()
+        // The radar's arrival / departure announcements go to local chat, so
+        // the channel is registered by the crate that writes them.
+        app.add_message::<LocalChatNotice>()
+            .init_resource::<RadarState>()
             .init_resource::<RadarView>()
             .init_resource::<RadarSelection>()
             .init_resource::<RadarClickTracker>()

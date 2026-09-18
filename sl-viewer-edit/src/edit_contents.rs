@@ -561,7 +561,10 @@ impl Plugin for EditContentsPlugin {
     /// Register the cache / views / selection resources, spawn both surfaces,
     /// and run the ingest / fetch / rebuild / bind / action systems.
     fn build(&self, app: &mut App) {
-        app.init_resource::<TaskInventoryCache>()
+        // This crate's contents actions report a refusal as a local-chat
+        // notice, so the channel is registered by the crate that writes it.
+        app.add_message::<LocalChatNotice>()
+            .init_resource::<TaskInventoryCache>()
             .init_resource::<ContentsViews>()
             .init_resource::<ContentsSelection>()
             .init_resource::<ContentsLastClick>()
