@@ -27,8 +27,6 @@ bytes = { workspace = true }
 fs-err = { workspace = true }
 # TGA decode for the avatar asset directory's baked textures.
 image = { version = "0.25.10", default-features = false, features = ["tga"] }
-# Civil dates, for turning a profile's "born on" string into an age in days.
-jiff = { version = "0.2.35" }
 parry3d = { version = "0.27.0" }
 # `FixedSky` is written to the account's saved personal environment, so the menu
 # pin survives a relog along with the settings it pins.
@@ -39,8 +37,6 @@ sl-client-bevy = { workspace = true, features = ["bevy_pbr"] }
 # Enabled unconditionally rather than behind a forwarding feature: these are
 # render materials, so there is no build of this crate that would not want it.
 sl-l10n = { path = "../sl-l10n", version = "0.1.0" }
-# The appearance refresh raises the reference's "attempting to fix this" tip.
-sl-viewer-notifications = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 

@@ -174,3 +174,203 @@ pub fn local_probe_camera_render_layers(include_dynamic: bool) -> RenderLayers {
         layers
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use bevy::camera::visibility::RenderLayers;
+    use pretty_assertions::assert_eq;
+
+    use super::{
+        MAIN_LAYER, PROBE_DYNAMIC_LAYER, PROBE_ENV_LAYER, PROBE_GEOM_LAYER, SUN_SHADOW_ONLY_LAYER,
+        WATER_EXCLUSION_LAYER, all_render_layers, default_probe_camera_render_layers,
+        dynamic_probe_only_render_layers, dynamic_render_layers, dynamic_shadow_only_render_layers,
+        environment_render_layers, local_probe_camera_render_layers, mirror_sun_render_layers,
+        scene_sun_render_layers, world_geom_render_layers,
+    };
+
+    /// The main camera, which renders [`MAIN_LAYER`] and nothing else.
+    fn main_camera() -> RenderLayers {
+        RenderLayers::layer(MAIN_LAYER)
+    }
+
+    /// Every probe capture camera the scheme can build, named for the assertion
+    /// messages.
+    fn probe_cameras() -> [(&'static str, RenderLayers); 3] {
+        [
+            ("the default probe", default_probe_camera_render_layers()),
+            ("a local probe", local_probe_camera_render_layers(false)),
+            (
+                "a local probe with dynamic content",
+                local_probe_camera_render_layers(true),
+            ),
+        ]
+    }
+
+    /// Each kind of world-visible content and the layers it is tagged with.
+    fn content() -> [(&'static str, RenderLayers); 3] {
+        [
+            ("environment", environment_render_layers()),
+            ("static world geometry", world_geom_render_layers()),
+            ("dynamic content", dynamic_render_layers()),
+        ]
+    }
+
+    #[test]
+    /// The invariant the whole module exists for: Bevy builds sun shadow
+    /// cascades for every active camera whose layers meet the light's, and
+    /// re-specializes them on every capture cycle. A probe camera sharing one
+    /// layer with the shadow-casting sun is the pipeline stall this scheme was
+    /// written to remove, and it would be invisible in a picture.
+    fn no_probe_camera_shares_a_layer_with_the_shadow_casting_sun() {
+        let sun = scene_sun_render_layers();
+        for (name, camera) in probe_cameras() {
+            assert!(
+                !camera.intersects(&sun),
+                "{name} meets the shadow-casting sun, so Bevy builds cascades for it"
+            );
+        }
+    }
+
+    #[test]
+    /// The mirror sun is the other half of that trade: it must light every probe
+    /// capture (or the captures go black) and must never reach the main view (or
+    /// the main view is lit twice).
+    fn the_mirror_sun_lights_every_probe_capture_and_never_the_main_view() {
+        let mirror = mirror_sun_render_layers();
+        for (name, camera) in probe_cameras() {
+            assert!(
+                camera.intersects(&mirror),
+                "{name} is not lit by the shadow-free mirror sun"
+            );
+        }
+        assert!(
+            !mirror.intersects(&main_camera()),
+            "the mirror sun double-lights the main view"
+        );
+    }
+
+    #[test]
+    /// The main view is the part the scheme promises to leave alone: everything
+    /// world-visible still renders there, and the shadow-casting sun still
+    /// lights it.
+    fn every_kind_of_content_stays_in_the_main_view() {
+        let sun = scene_sun_render_layers();
+        for (name, layers) in content() {
+            assert!(
+                layers.intersects(&main_camera()),
+                "{name} dropped out of the main view"
+            );
+            assert!(layers.intersects(&sun), "{name} lost its real-time shadow");
+        }
+    }
+
+    #[test]
+    /// Which probe captures which content: the default (ambient) probe is
+    /// environment-only, mirroring the reference; a local probe adds static
+    /// geometry, and dynamic content only when the runtime setting asks.
+    fn each_probe_captures_exactly_the_content_it_is_meant_to() {
+        let default_probe = default_probe_camera_render_layers();
+        let [(_, environment), (_, geometry), (_, dynamic)] = content();
+
+        assert!(environment.intersects(&default_probe));
+        assert!(!geometry.intersects(&default_probe));
+        assert!(!dynamic.intersects(&default_probe));
+
+        let local = local_probe_camera_render_layers(false);
+        assert!(environment.intersects(&local));
+        assert!(geometry.intersects(&local));
+        assert!(!dynamic.intersects(&local));
+
+        assert!(dynamic.intersects(&local_probe_camera_render_layers(true)));
+    }
+
+    #[test]
+    /// The own avatar's head in mouselook: not drawn, but still casting the
+    /// shadow the reference keeps (`renderSkinned` gates on
+    /// `needsRenderHead() || sShadowRender`). A `Visibility::Hidden` head would
+    /// lose the shadow with the picture, which is why it is a layer and not a
+    /// visibility flag.
+    fn the_mouselook_head_casts_a_sun_shadow_without_being_drawn() {
+        let head = dynamic_shadow_only_render_layers();
+        assert!(
+            !head.intersects(&main_camera()),
+            "the mouselook head is drawn in the view from inside it"
+        );
+        assert!(
+            head.intersects(&scene_sun_render_layers()),
+            "the mouselook head casts no sun shadow"
+        );
+        assert!(
+            head.intersects(&local_probe_camera_render_layers(true)),
+            "the mouselook head vanishes from a probe that captures dynamic content"
+        );
+    }
+
+    #[test]
+    /// Its counterpart, for content that must show in a probe and nowhere else:
+    /// neither drawn nor shadow-casting.
+    fn probe_only_dynamic_content_is_neither_drawn_nor_shadow_casting() {
+        let probe_only = dynamic_probe_only_render_layers();
+        assert!(!probe_only.intersects(&main_camera()));
+        assert!(!probe_only.intersects(&scene_sun_render_layers()));
+        assert!(probe_only.intersects(&local_probe_camera_render_layers(true)));
+    }
+
+    #[test]
+    /// Water-exclusion surfaces render **only** to the mask camera: they are
+    /// invisible in the main view, in every probe, and in the sun's shadow — a
+    /// leak into any of those is a visible black hole in the world.
+    fn water_exclusion_surfaces_are_invisible_to_every_ordinary_view() {
+        let exclusion = RenderLayers::layer(WATER_EXCLUSION_LAYER);
+        assert!(!exclusion.intersects(&main_camera()));
+        assert!(!exclusion.intersects(&scene_sun_render_layers()));
+        assert!(!exclusion.intersects(&mirror_sun_render_layers()));
+        assert!(
+            !exclusion.intersects(&all_render_layers()),
+            "the harness layer set would draw water-exclusion surfaces"
+        );
+        for (name, camera) in probe_cameras() {
+            assert!(
+                !exclusion.intersects(&camera),
+                "{name} captures a water-exclusion surface"
+            );
+        }
+    }
+
+    #[test]
+    /// The headless harnesses build a synthetic scene outside the real pipeline
+    /// and propagate one layer set onto its root, so that set has to reach the
+    /// main camera and every probe camera at once.
+    fn the_harness_layer_set_reaches_the_main_camera_and_every_probe() {
+        let all = all_render_layers();
+        assert!(all.intersects(&main_camera()));
+        for (name, camera) in probe_cameras() {
+            assert!(
+                all.intersects(&camera),
+                "{name} sees nothing in a harness scene"
+            );
+        }
+    }
+
+    #[test]
+    /// Two roles sharing a layer number would silently merge them — the failure
+    /// every assertion above is written against, caught at its source.
+    fn every_role_has_its_own_layer() {
+        let roles = [
+            MAIN_LAYER,
+            PROBE_ENV_LAYER,
+            PROBE_GEOM_LAYER,
+            PROBE_DYNAMIC_LAYER,
+            WATER_EXCLUSION_LAYER,
+            SUN_SHADOW_ONLY_LAYER,
+        ];
+        let mut distinct = roles.to_vec();
+        distinct.sort_unstable();
+        distinct.dedup();
+        assert_eq!(
+            distinct.len(),
+            roles.len(),
+            "two roles share a render layer"
+        );
+    }
+}

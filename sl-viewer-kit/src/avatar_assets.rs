@@ -558,3 +558,118 @@ fn decode_tga(bytes: &[u8]) -> Result<DecodedTexture, image::ImageError> {
         None,
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::{BASE_PARTS, BodyRegion, PartBinding};
+
+    /// Every baked region a base part can belong to.
+    const ALL_REGIONS: [BodyRegion; 6] = [
+        BodyRegion::Head,
+        BodyRegion::Hair,
+        BodyRegion::Eyes,
+        BodyRegion::Upper,
+        BodyRegion::Lower,
+        BodyRegion::Skirt,
+    ];
+
+    #[test]
+    /// Region visibility keys off the baked slot, so two regions sharing a slot
+    /// would hide each other: wear a skirt and lose your head.
+    fn every_region_keys_off_its_own_baked_slot() {
+        let mut slots: Vec<usize> = ALL_REGIONS.iter().map(|r| r.baked_slot()).collect();
+        let count = slots.len();
+        slots.sort_unstable();
+        slots.dedup();
+        assert_eq!(slots.len(), count, "two body regions share a baked slot");
+    }
+
+    #[test]
+    /// Only the head, upper body and lower body carry clothing morphs; the
+    /// eyelashes ride with the head region but define no masked morphs of their
+    /// own, and hair / eyes / skirt define none at all. A region that wrongly
+    /// claimed a mask name would look one up that `avatar_lad.xml` never
+    /// declares.
+    fn only_the_three_clothed_regions_name_a_morph_mask() {
+        let masked: Vec<(BodyRegion, Option<&str>)> = ALL_REGIONS
+            .iter()
+            .map(|region| (*region, region.morph_mask_region()))
+            .collect();
+        assert_eq!(
+            masked,
+            vec![
+                (BodyRegion::Head, Some("head")),
+                (BodyRegion::Hair, None),
+                (BodyRegion::Eyes, None),
+                (BodyRegion::Upper, Some("upper_body")),
+                (BodyRegion::Lower, Some("lower_body")),
+                (BodyRegion::Skirt, None),
+            ]
+        );
+    }
+
+    #[test]
+    /// Every baked region must be covered by at least one base part, or that
+    /// region's bake is fetched and draped over nothing.
+    fn every_region_has_a_base_part() {
+        for region in ALL_REGIONS {
+            assert!(
+                BASE_PARTS.iter().any(|part| part.region == region),
+                "{region:?} has no base part to texture"
+            );
+        }
+    }
+
+    #[test]
+    /// The eyeballs are the only rigid parts, they share one mesh file, and they
+    /// pin to *different* joints — pinning both to one joint would stack them in
+    /// the same socket.
+    fn the_two_eyeballs_are_the_only_rigid_parts_and_pin_to_different_joints() {
+        let joints: Vec<&str> = BASE_PARTS
+            .iter()
+            .filter_map(|part| match part.binding {
+                PartBinding::Rigid(joint) => Some(joint),
+                PartBinding::Skinned => None,
+            })
+            .collect();
+        assert_eq!(joints, vec!["mEyeLeft", "mEyeRight"]);
+
+        let eye_files: Vec<&str> = BASE_PARTS
+            .iter()
+            .filter(|part| part.region == BodyRegion::Eyes)
+            .map(|part| part.file)
+            .collect();
+        assert_eq!(eye_files, vec!["avatar_eye.llm", "avatar_eye.llm"]);
+    }
+
+    #[test]
+    /// `declares_skinned` is reconciled against the mesh file's own
+    /// `has_weights` at load, because a mismatch is a wgpu validation error
+    /// rather than a wrong picture. It must therefore report the binding it was
+    /// built from.
+    fn the_skinned_claim_follows_the_binding() {
+        for part in BASE_PARTS {
+            assert_eq!(
+                part.declares_skinned(),
+                matches!(part.binding, PartBinding::Skinned),
+                "{} misreports whether it carries skin weights",
+                part.label
+            );
+        }
+    }
+
+    #[test]
+    /// The eyelashes are hidden with the head, matching the reference's
+    /// `updateMeshVisibility` — they are a separate mesh but not a separate
+    /// region, which is the whole reason [`BodyRegion`] is not one-per-part.
+    fn the_eyelashes_ride_with_the_head() {
+        let eyelashes = BASE_PARTS.iter().find(|part| part.label == "eyelashes");
+        assert_eq!(
+            eyelashes.map(|part| part.region),
+            Some(BodyRegion::Head),
+            "the eyelashes are missing, or no longer hidden with the head"
+        );
+    }
+}

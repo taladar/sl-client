@@ -568,7 +568,7 @@ fn flush_shadow_cull_diag(pipeline: &mut ShadowCullPipeline) {
 /// `check_dir_light_mesh_visibility`. `SL_VIEWER_SHADOW_CULL=off` keeps stock
 /// Bevy (the A/B baseline); `SL_VIEWER_LOG_SHADOW_CULL` enables the readout.
 #[derive(Debug)]
-pub struct ShadowVisibilityPlugin;
+pub(crate) struct ShadowVisibilityPlugin;
 
 impl Plugin for ShadowVisibilityPlugin {
     fn build(&self, app: &mut App) {

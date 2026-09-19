@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 305 |
+| ready | 304 |
 | blocked | 41 |
 | in-progress | 22 |
 | bugs | 5 |
-| done | 1189 |
+| done | 1190 |
 | deferred | 29 |
 | wont-do | 16 |
 | **total** | **1707** |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (305)
+## ready (304)
 
 ### protocol
 
@@ -308,8 +308,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   crates
 - [`viewer-audit-extract-and-test-pure-logic`](ready/viewer-audit-extract-and-test-pure-logic.md)
   — Extract the pure logic trapped inside viewer systems and test it
-- [`viewer-audit-kit-single-consumer-split`](ready/viewer-audit-kit-single-consumer-split.md)
-  — sl-viewer-kit is a grab-bag: 39% of it has exactly one consumer
 - [`viewer-audit-lsp-position-roundtrip`](ready/viewer-audit-lsp-position-roundtrip.md)
   — The LSP position-to-byte direction has zero tests
 - [`viewer-audit-menu-label-i18n`](ready/viewer-audit-menu-label-i18n.md) — Menu
@@ -1162,7 +1160,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 
-## done (1189)
+## done (1190)
 
 ### protocol
 
@@ -1481,6 +1479,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-inventory-merge-and-tree-walks`](done/viewer-audit-inventory-merge-and-tree-walks.md)
   — The chunked inventory merge is quadratic, and the downward tree walks have
   no cycle guard
+- [`viewer-audit-kit-single-consumer-split`](done/viewer-audit-kit-single-consumer-split.md)
+  — sl-viewer-kit is a grab-bag: 39% of it has exactly one consumer
 - [`viewer-audit-map-tile-transient-error`](done/viewer-audit-map-tile-transient-error.md)
   — A transient map-tile fetch error is cached as permanently missing
 - [`viewer-audit-media-url-scheme-allowlist`](done/viewer-audit-media-url-scheme-allowlist.md)

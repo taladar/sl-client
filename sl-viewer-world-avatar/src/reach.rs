@@ -62,10 +62,10 @@ use sl_client_bevy::{
     ViewerEffectData, ViewerEffectType,
 };
 
+use crate::ik::{Chain, JointSolver};
 use crate::locomotion_ik::clamp_rescale;
 use crate::look_at::{basis_rotation, constrain, smooth_interpolant};
 use sl_viewer_kit::coords::{metres_to_f32, sl_to_bevy_vec};
-use sl_viewer_kit::ik::{Chain, JointSolver};
 use sl_viewer_world_api::ObjectState;
 use sl_viewer_world_api::ViewerCamera;
 use sl_viewer_world_objects::objects::SceneObject;

@@ -87,3 +87,82 @@ impl FixedSky {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::{FixedSky, PRESET_DAY_KEYFRAMES};
+
+    /// The four fixed skies in day order — the order
+    /// [`PRESET_DAY_KEYFRAMES`] schedules them in.
+    const IN_DAY_ORDER: [FixedSky; 4] = [
+        FixedSky::Midnight,
+        FixedSky::Sunrise,
+        FixedSky::Midday,
+        FixedSky::Sunset,
+    ];
+
+    #[test]
+    /// The menu's pin position and the day cycle's keyframe are two encodings of
+    /// one fact, written in two crates. If they drift, **World ▸ Environment ▸
+    /// Sunset** freezes the region's own cycle at some other time of day while
+    /// still calling itself Sunset — a wrong picture with no error anywhere.
+    fn each_pin_position_matches_the_keyframe_its_preset_is_scheduled_at() {
+        let scheduled: Vec<(f32, &str)> = PRESET_DAY_KEYFRAMES
+            .iter()
+            .map(|(keyframe, preset)| (*keyframe, preset.label))
+            .collect();
+        let pinned: Vec<(f32, &str)> = IN_DAY_ORDER
+            .iter()
+            .map(|sky| (sky.day_position(), sky.frame_name()))
+            .collect();
+        assert_eq!(pinned, scheduled);
+    }
+
+    #[test]
+    /// Four distinct times of day must name four distinct presets and four
+    /// distinct reference sky assets. A copy-paste in either table would make
+    /// two menu entries load the same sky.
+    fn the_four_times_of_day_are_four_different_skies() {
+        let names: Vec<&str> = IN_DAY_ORDER.iter().map(|sky| sky.frame_name()).collect();
+        let mut distinct_names = names.clone();
+        distinct_names.sort_unstable();
+        distinct_names.dedup();
+        assert_eq!(
+            distinct_names.len(),
+            names.len(),
+            "two times share a preset"
+        );
+
+        let mut assets: Vec<_> = IN_DAY_ORDER.iter().map(|sky| sky.modern_asset()).collect();
+        assets.sort_unstable();
+        assets.dedup();
+        assert_eq!(assets.len(), IN_DAY_ORDER.len(), "two times share an asset");
+    }
+
+    #[test]
+    /// The renderable frame carries the preset's own name, so the day cycle
+    /// [`FixedSky`] pins into can find the frame it just filed.
+    fn a_rendered_frame_is_filed_under_the_presets_name() {
+        for sky in IN_DAY_ORDER {
+            assert_eq!(sky.settings().name, sky.frame_name());
+        }
+    }
+
+    #[test]
+    /// Night is darker than noon — the one property that makes these four
+    /// presets worth having rather than one. Guards against every entry being
+    /// wired to the same preset, which the distinctness test above would not
+    /// catch if the *labels* stayed distinct.
+    fn midnight_is_darker_than_midday() {
+        let midnight = FixedSky::Midnight.settings().sunlight_color;
+        let midday = FixedSky::Midday.settings().sunlight_color;
+        assert!(
+            midnight.red() < midday.red()
+                && midnight.green() < midday.green()
+                && midnight.blue() < midday.blue(),
+            "midnight sunlight {midnight:?} is not darker than midday {midday:?}"
+        );
+    }
+}

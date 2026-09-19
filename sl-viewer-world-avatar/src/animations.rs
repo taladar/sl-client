@@ -1790,7 +1790,7 @@ pub(crate) fn pose_avatar_skeletons(
             AnimationPose::default()
         } else {
             let mut pose = anim.playback.poses.get(&agent).cloned().unwrap_or_default();
-            sl_viewer_kit::procedural::apply_idle_adjustments(&mut pose, idle_now, |name| {
+            crate::procedural::apply_idle_adjustments(&mut pose, idle_now, |name| {
                 body.joint_index(name)
             });
             pose

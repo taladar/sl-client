@@ -510,3 +510,171 @@ impl Plugin for SlFaceMaterialPlugin {
         app.add_plugins(MaterialPlugin::<FaceMaterial>::default());
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use bevy::math::{Affine2, Vec2, Vec3, Vec4};
+    use pretty_assertions::assert_eq;
+
+    use super::{
+        MAP_FLAG_EMISSIVE, MAP_FLAG_MR, MAP_FLAG_NORMAL, MAP_FLAG_SPEC, SL_FACE_MODE_DIFFUSE,
+        SL_FACE_MODE_LEGACY, SL_FACE_MODE_PBR, SlFaceParams,
+    };
+
+    /// The identity 2x2 packed the way the shader reads it.
+    const IDENTITY: Vec4 = Vec4::new(1.0, 0.0, 0.0, 1.0);
+
+    /// A recognisable, non-identity UV transform: scale, rotate, translate.
+    fn transform(scale: f32, radians: f32, translation: Vec2) -> Affine2 {
+        Affine2::from_scale_angle_translation(Vec2::splat(scale), radians, translation)
+    }
+
+    #[test]
+    /// The fallback entry of the bindless data array: a face that has not been
+    /// composed yet must render as a plain, unfogged, untransformed diffuse
+    /// face rather than sampling maps it does not have.
+    fn the_inert_params_re_sample_nothing() {
+        let inert = SlFaceParams::inert();
+        assert_eq!(inert.mode, SL_FACE_MODE_DIFFUSE);
+        assert_eq!(inert.map_flags, 0);
+        assert_eq!(inert.uv_normal_mat, IDENTITY);
+        assert_eq!(inert.uv_mr_mat, IDENTITY);
+        assert_eq!(inert.uv_emissive_mat, IDENTITY);
+        assert_eq!(inert.uv_spec_mat, IDENTITY);
+        assert_eq!(inert.uv_translations_a, Vec4::ZERO);
+        assert_eq!(inert.uv_translations_b, Vec4::ZERO);
+        assert_eq!(inert.water_fog_color, Vec4::ZERO);
+        // `Default` is the same thing, since it is what the array is filled with.
+        assert_eq!(SlFaceParams::default().mode, inert.mode);
+    }
+
+    #[test]
+    /// The three modes are what route a face to a lighting model, so no two may
+    /// collide, and the flags are single distinct bits of one word.
+    fn modes_are_distinct_and_map_flags_are_disjoint_bits() {
+        let modes = [SL_FACE_MODE_PBR, SL_FACE_MODE_LEGACY, SL_FACE_MODE_DIFFUSE];
+        let mut distinct = modes.to_vec();
+        distinct.sort_unstable();
+        distinct.dedup();
+        assert_eq!(distinct.len(), modes.len(), "two face modes collide");
+
+        let flags = [
+            MAP_FLAG_NORMAL,
+            MAP_FLAG_MR,
+            MAP_FLAG_EMISSIVE,
+            MAP_FLAG_SPEC,
+        ];
+        for flag in flags {
+            assert_eq!(flag.count_ones(), 1, "{flag:#x} is not a single bit");
+        }
+        let union = flags.iter().fold(0_u32, |acc, flag| acc | flag);
+        assert_eq!(union.count_ones(), 4, "two map flags share a bit");
+    }
+
+    #[test]
+    /// `has_water_fog` is what stops the per-frame water sweep rewriting every
+    /// face material — and a rewrite re-creates the material's bind group. It
+    /// must answer "yes" only for the exact values last written, so an
+    /// over-eager "yes" cannot leave a face fogged for the wrong water.
+    fn water_fog_is_recognised_only_when_every_component_matches() {
+        let color = Vec3::new(0.1, 0.2, 0.3);
+        let (above, submerged, level) = (0.25_f32, 4.0_f32, 20.5_f32);
+
+        let mut params = SlFaceParams::inert();
+        assert!(
+            !params.has_water_fog(color, above, submerged, level),
+            "an inert face claims to already carry this water fog"
+        );
+
+        params.set_water_fog(color, above, submerged, level);
+        assert!(params.has_water_fog(color, above, submerged, level));
+
+        assert!(!params.has_water_fog(Vec3::new(0.1, 0.2, 0.4), above, submerged, level));
+        assert!(!params.has_water_fog(color, 0.26, submerged, level));
+        assert!(!params.has_water_fog(color, above, 4.5, level));
+        assert!(!params.has_water_fog(color, above, submerged, 20.0));
+    }
+
+    #[test]
+    /// The comparison is deliberately bit-exact, not approximate: an
+    /// approximate one would either rewrite a material forever or leave one
+    /// stale. `-0.0 == 0.0` numerically, so it is the case that tells the two
+    /// apart.
+    fn water_fog_comparison_is_bit_exact() {
+        let mut params = SlFaceParams::inert();
+        params.set_water_fog(Vec3::ZERO, 0.0, 0.0, 0.0);
+        assert!(params.has_water_fog(Vec3::ZERO, 0.0, 0.0, 0.0));
+        assert!(
+            !params.has_water_fog(Vec3::ZERO, 0.0, 0.0, -0.0),
+            "a numerically-equal but differently-written value was taken as already stored"
+        );
+    }
+
+    #[test]
+    /// The PBR path packs three transforms into two `Vec4` translation slots,
+    /// and the specular translation shares the second one. Writing the PBR
+    /// transforms must leave the legacy specular half of that slot alone.
+    fn setting_the_pbr_transforms_leaves_the_legacy_specular_translation_alone() {
+        let mut params = SlFaceParams::inert();
+        let specular = transform(3.0, 0.0, Vec2::new(0.7, 0.8));
+        params.set_legacy([1.0, 1.0, 1.0], 0.5, 0.25, Affine2::IDENTITY, specular);
+        let specular_translation = params.uv_translations_b;
+
+        params.set_pbr_transforms(
+            transform(2.0, 0.0, Vec2::new(0.1, 0.2)),
+            transform(4.0, 0.0, Vec2::new(0.3, 0.4)),
+            transform(8.0, 0.0, Vec2::new(0.5, 0.6)),
+        );
+
+        assert_eq!(params.uv_normal_mat, Vec4::new(2.0, 0.0, 0.0, 2.0));
+        assert_eq!(params.uv_mr_mat, Vec4::new(4.0, 0.0, 0.0, 4.0));
+        assert_eq!(params.uv_emissive_mat, Vec4::new(8.0, 0.0, 0.0, 8.0));
+        assert_eq!(params.uv_translations_a, Vec4::new(0.1, 0.2, 0.3, 0.4));
+        assert_eq!(
+            params.uv_translations_b,
+            Vec4::new(0.5, 0.6, specular_translation.z, specular_translation.w),
+            "the legacy specular translation was overwritten by the PBR path"
+        );
+    }
+
+    #[test]
+    /// And the mirror image: the legacy path writes the normal and specular
+    /// slots and must leave the metallic-roughness translation (the other half
+    /// of `uv_translations_a`) untouched.
+    #[expect(
+        clippy::float_cmp,
+        reason = "the question is whether the exact value written is the one stored, \
+                  which is what an approximate comparison would stop answering"
+    )]
+    fn setting_the_legacy_workflow_leaves_the_metallic_roughness_translation_alone() {
+        let mut params = SlFaceParams::inert();
+        params.set_pbr_transforms(
+            Affine2::IDENTITY,
+            transform(1.0, 0.0, Vec2::new(0.3, 0.4)),
+            Affine2::IDENTITY,
+        );
+        let mr_translation = params.uv_translations_a;
+
+        params.set_legacy(
+            [0.25, 0.5, 0.75],
+            0.125,
+            0.375,
+            transform(2.0, 0.0, Vec2::new(0.1, 0.2)),
+            transform(5.0, 0.0, Vec2::new(0.7, 0.8)),
+        );
+
+        assert_eq!(params.mode, SL_FACE_MODE_LEGACY);
+        assert_eq!(params.specular_color, Vec4::new(0.25, 0.5, 0.75, 1.0));
+        assert_eq!(params.glossiness, 0.125);
+        assert_eq!(params.env_intensity, 0.375);
+        assert_eq!(params.uv_normal_mat, Vec4::new(2.0, 0.0, 0.0, 2.0));
+        assert_eq!(params.uv_spec_mat, Vec4::new(5.0, 0.0, 0.0, 5.0));
+        assert_eq!(
+            params.uv_translations_a,
+            Vec4::new(0.1, 0.2, mr_translation.z, mr_translation.w),
+            "the metallic-roughness translation was overwritten by the legacy path"
+        );
+        assert_eq!(params.uv_translations_b.z, 0.7);
+        assert_eq!(params.uv_translations_b.w, 0.8);
+    }
+}

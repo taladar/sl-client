@@ -45,6 +45,8 @@ sl-texture = { path = "../sl-texture", version = "0.1.0", features = [
 ] }
 sl-viewer-intents = { workspace = true }
 sl-viewer-kit = { workspace = true }
+# The appearance refresh raises the reference's "attempting to fix this" tip.
+sl-viewer-notifications = { workspace = true }
 sl-viewer-platform = { workspace = true }
 sl-viewer-settings = { workspace = true }
 sl-viewer-social = { workspace = true }

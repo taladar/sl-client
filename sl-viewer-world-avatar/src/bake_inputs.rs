@@ -418,7 +418,7 @@ enum OutfitAction {
 
 /// Decide how to handle a runtime `AgentWearables` update at `stage`. No
 /// update-`serial` dedup on purpose (mirroring the server-bake path,
-/// [`drive_server_bake`](sl_viewer_kit::appearance::drive_server_bake)): live on aditi the
+/// [`drive_server_bake`](crate::appearance::drive_server_bake)): live on aditi the
 /// sim re-broadcasts our wearables on an outfit change *without* advancing the
 /// serial, so a serial guard would silently drop real changes; a redundant
 /// re-fetch of an unchanged outfit is merely a cache-hit re-composite, whereas a

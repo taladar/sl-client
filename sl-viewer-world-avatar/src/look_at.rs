@@ -1,7 +1,7 @@
 //! Head & eye look-at tracking (P31.12): the reference viewer's `LLHeadRotMotion`
 //! and `LLEyeMotion` procedural adjusters, ported to run on top of every rigged
 //! avatar's sampled keyframe pose (P18.3) — the same pose-apply seam the P31.8
-//! idle adjusters ([`sl_viewer_kit::procedural`]) use.
+//! idle adjusters ([`crate::procedural`]) use.
 //!
 //! Both motions turn the avatar toward a **world look-at target**. Two sources
 //! provide it:

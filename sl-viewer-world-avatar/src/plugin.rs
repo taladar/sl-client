@@ -28,8 +28,8 @@
 //! its floater, the derender blacklist, the replay rig — is its own plugin, so a
 //! CPU-only harness takes the fold without any of it.
 
+use crate::appearance::{ServerBakeState, drive_server_bake};
 use bevy::prelude::*;
-use sl_viewer_kit::appearance::{ServerBakeState, drive_server_bake};
 use sl_viewer_world_api::world_scoped::{WorldResetSystems, WorldScopedAppExt as _};
 use sl_viewer_world_api::{AvatarState, WorldPhase, world_has_keyboard};
 use sl_viewer_world_objects::objects::{apply_object_meshes, update_objects};

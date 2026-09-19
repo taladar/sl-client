@@ -305,7 +305,7 @@ pub(crate) use sl_viewer_settings as settings;
 pub(crate) use sl_viewer_ui_widgets::settings_binding;
 #[cfg(test)]
 mod settings_golden;
-pub(crate) use sl_viewer_kit::shadow_visibility;
+mod shadow_visibility;
 pub(crate) use sl_viewer_kit::sky_presets;
 pub(crate) use sl_viewer_kit::slt;
 pub(crate) use sl_viewer_ui_core::skin;

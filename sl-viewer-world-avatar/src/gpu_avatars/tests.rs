@@ -1576,7 +1576,7 @@ fn golden_mirror_blend_matches_blend_joint() -> Result<(), TestError> {
 }
 
 /// **Idle golden**: the mirror's chest/torso composition reproduces
-/// [`sl_viewer_kit::procedural::apply_idle_adjustments`] bit-for-bit, both over an
+/// [`crate::procedural::apply_idle_adjustments`] bit-for-bit, both over an
 /// empty base (identity) and over a blended keyframe base.
 #[test]
 fn golden_mirror_idle_matches_procedural() -> Result<(), TestError> {
@@ -1649,7 +1649,7 @@ fn golden_mirror_idle_matches_procedural() -> Result<(), TestError> {
             pose.set_position(index, position);
         }
     }
-    sl_viewer_kit::procedural::apply_idle_adjustments(&mut pose, idle_now, golden_joint_index);
+    crate::procedural::apply_idle_adjustments(&mut pose, idle_now, golden_joint_index);
     let expected_chest = pose.rotation(2).ok_or("chest rotation")?;
     let chest_row = rows.get(2).ok_or("chest row")?;
     for (component, (got, want)) in chest_row

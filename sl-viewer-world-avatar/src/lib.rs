@@ -30,6 +30,7 @@
 
 pub mod animations;
 pub mod animesh;
+pub mod appearance;
 pub mod asset_blacklist;
 pub mod avatar_asset_stats;
 pub mod avatar_complexity;
@@ -49,12 +50,14 @@ pub mod ground;
 pub mod hand_pose;
 #[cfg(test)]
 mod headless_gpu;
+pub mod ik;
 pub mod locomotion;
 pub mod locomotion_ik;
 pub mod look_at;
 pub mod motion_stops;
 pub mod name_tag_content;
 mod plugin;
+pub mod procedural;
 pub mod reach;
 pub mod replay_bundle;
 pub mod rigged_attachments;

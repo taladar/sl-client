@@ -55,18 +55,25 @@ either side of anything that reaches the renderer.
 Each is cheap, and each removes a conflict class the parallel rounds would
 otherwise keep hitting.
 
-- `viewer-audit-plugins-own-their-schedule` — a crate owning its own plugin
-  means feature work stops editing the binary's wiring, which is the main
-  world-agent / UI-agent collision.
-- `idiomatic-audit-bevy-system-param-bundles` (128+ sites) and
-  `idiomatic-audit-dead-forward-api` (10 crates) — mechanical but
+- ~~`viewer-audit-plugins-own-their-schedule`~~ — **done**. A crate owning its
+  own plugin means feature work stops editing the binary's wiring, which was the
+  main world-agent / UI-agent collision.
+- ~~`idiomatic-audit-bevy-system-param-bundles`~~ (128+ sites) and
+  ~~`idiomatic-audit-dead-forward-api`~~ (10 crates) — **done**. Mechanical but
   workspace-wide: miserable as merge fodder, easy as a solo sweep.
-- `viewer-audit-ui-spawn-helper-consolidation` and
-  `viewer-audit-table-sort-consolidation` — the UI agent's ~130 tasks would keep
-  multiplying the existing 5–7 copies.
-- `viewer-audit-kit-single-consumer-split` and
-  `viewer-audit-ui-core-sound-coupling` (three lines) — the shared hubs the
-  world and UI agents both pull in.
+- ~~`viewer-audit-ui-spawn-helper-consolidation`~~ and
+  ~~`viewer-audit-table-sort-consolidation`~~ — **done**. The forty-odd copied
+  spawn helpers are one `ui_spawn` module and the eleven copies of the sort
+  comparator are one `ui_table::order_by_sort_keys`, so the UI agent's ~130
+  tasks no longer multiply them.
+- ~~`viewer-audit-kit-single-consumer-split`~~ — **done**. The eight modules
+  with exactly one consumer crate (4,230 lines, 36% of `sl-viewer-kit`) now live
+  in the crate that calls them, so a radar, shadow-cull or map-math edit stops
+  rebuilding the twenty-odd crates stacked above the kit to reach one caller.
+  What is left there is shared vocabulary.
+- `viewer-audit-ui-core-sound-coupling` (three lines) — the last of the shared
+  hubs the world and UI agents both pull in, and **the next open item in this
+  section**.
 
 `build-audit-ci-pipeline` was listed here — "worth having before three branches
 are in flight" — and is now **deferred**: on a workspace developed on one

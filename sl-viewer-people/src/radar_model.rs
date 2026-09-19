@@ -1,6 +1,6 @@
-//! Pure nearby-avatar radar model — no Bevy, no I/O.
+//! Pure nearby-avatar radar model — no ECS, no I/O.
 //!
-//! The radar (`radar`) is the Firestorm-style presence tool: a live
+//! The radar ([`crate::radar`]) is the Firestorm-style presence tool: a live
 //! list of who is nearby with distances, plus enter / leave alerts. This
 //! module holds everything unit-testable about it: the per-sweep set diff and
 //! threshold-crossing detection (the reference's `FSRadar::updateRadarList`
@@ -27,6 +27,8 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
 use sl_client_bevy::{AgentKey, RegionHandle};
+
+use crate::ui_table::order_by_sort_keys;
 
 /// Payment-info status from the profile flags (`AVATAR_IDENTIFIED` /
 /// `AVATAR_TRANSACTED`), shown as the reference's `$` / `$$` column.
@@ -631,24 +633,23 @@ fn compare_rows(column: SortColumn, a: &RadarRow, b: &RadarRow) -> Ordering {
 
 /// Sort rows by a multi-key order (each key a column plus ascending flag),
 /// tie-breaking by case-folded name and finally agent id for a total order.
+///
+/// The key loop itself is the table widget's [`order_by_sort_keys`] — the same
+/// one every other sorted list in the viewer runs, reachable now that this
+/// module sits beside its caller. What is local is the per-column comparator
+/// and the tie-break.
 pub fn sort_rows(rows: &mut [RadarRow], keys: &[(SortColumn, bool)]) {
-    rows.sort_by(|a, b| {
-        for (column, ascending) in keys {
-            let ordering = compare_rows(*column, a, b);
-            let ordering = if *ascending {
-                ordering
-            } else {
-                ordering.reverse()
-            };
-            if ordering != Ordering::Equal {
-                return ordering;
-            }
-        }
-        a.name
-            .to_lowercase()
-            .cmp(&b.name.to_lowercase())
-            .then_with(|| a.agent.uuid().cmp(&b.agent.uuid()))
-    });
+    order_by_sort_keys(
+        rows,
+        keys,
+        |column, left, right| compare_rows(*column, left, right),
+        |left, right| {
+            left.name
+                .to_lowercase()
+                .cmp(&right.name.to_lowercase())
+                .then_with(|| left.agent.uuid().cmp(&right.agent.uuid()))
+        },
+    );
 }
 
 #[cfg(test)]
