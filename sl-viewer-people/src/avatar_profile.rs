@@ -76,10 +76,12 @@ use crate::social::FriendsModel;
 use crate::social::GroupsModel;
 use crate::ui::{column, row};
 use crate::ui_font::UiFont;
+use crate::ui_spawn::{self, ButtonSpec, LabeledRowSpec, UiLabel};
 use crate::ui_tab::{
     DEFAULT_ELLIPSIS, TabContainerHandle, TabPlacement, TabSpec, TabStrip, fill_tab_container,
     spawn_tab_container,
 };
+use crate::ui_text;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::world_api::AvatarState;
 use crate::world_api::ui_texture::{PendingUiTexture, UiTexturePlugin};
@@ -899,8 +901,6 @@ struct ProfileSources<'w, 's> {
     friends: Res<'w, FriendsModel>,
     /// The group roster, for the Second Life tab's group rows.
     groups_model: Res<'w, GroupsModel>,
-    /// Hierarchy links, for tearing a tab's children down.
-    children: Query<'w, 's, &'static Children>,
     /// The texts a rebuilt tab writes.
     texts: Query<'w, 's, &'static mut Text>,
     /// What spawns the tab contents.
@@ -972,7 +972,7 @@ fn rebuild_one_profile(
         // exactly the same-frame build+teardown that races bevy_flair.
         if tab == ProfileTab::SecondLife {
             if ui.sl_built != Some(own) {
-                despawn_children(&sources.children, &mut sources.commands, panel);
+                sources.commands.entity(panel).despawn_related::<Children>();
                 ui.sl_handles = SecondLifeHandles::default();
                 ui.sl_group_rows.clear();
                 build_second_life_structure(&mut sources.commands, panel, &build, ui);
@@ -998,7 +998,7 @@ fn rebuild_one_profile(
         if let Some(slot) = ui.tab_sig.get_mut(tab.index()) {
             *slot = Some(sig);
         }
-        despawn_children(&sources.children, &mut sources.commands, panel);
+        sources.commands.entity(panel).despawn_related::<Children>();
         match tab {
             ProfileTab::Web => build_web_tab(&mut sources.commands, panel, &build, state, ui),
             ProfileTab::Picks => build_picks_tab(&mut sources.commands, panel, &build, state, ui),
@@ -1098,15 +1098,6 @@ struct BuildContext<'world> {
     avatars: &'world AvatarState,
     /// Friendship state (Add vs Remove Friend).
     friends: &'world FriendsModel,
-}
-
-/// Despawn every child of `parent`.
-fn despawn_children(children: &Query<&Children>, commands: &mut Commands, parent: Entity) {
-    if let Ok(existing) = children.get(parent) {
-        for child in existing.iter().collect::<Vec<_>>() {
-            commands.entity(child).despawn();
-        }
-    }
 }
 
 /// Build the 2nd Life tab's fixed skeleton once for `own`: name / key / picture box
@@ -1404,14 +1395,14 @@ fn update_second_life(
     texts: &mut Query<&mut Text>,
     groups_model: &GroupsModel,
 ) {
-    set_value_node(
+    ui_text::set_node_text(
         texts,
         ui.sl_handles.name,
         &build.avatars.label_text(build.target),
     );
     fill_second_life_from_properties(commands, build, state, ui);
     if let Some(partner) = state.properties.as_ref().and_then(|props| props.partner_id) {
-        set_value_node(
+        ui_text::set_node_text(
             texts,
             ui.sl_handles.partner,
             &build.avatars.label_text(partner),
@@ -2121,24 +2112,15 @@ fn build_notes_tab(
 
 /// A labelled row: the translated label leading, the caller's content after.
 fn spawn_labeled_row(commands: &mut Commands, parent: Entity, label_key: &'static str) -> Entity {
-    let row_entity = commands
-        .spawn((
-            Node {
-                align_items: AlignItems::Center,
-                flex_wrap: FlexWrap::Wrap,
-                ..row(Val::Px(6.0))
-            },
-            ChildOf(parent),
-        ))
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(PROFILE_FONT_SIZE),
-        TextColor(DIM_LABEL_COLOR),
-        ChildOf(row_entity),
-    ));
-    row_entity
+    ui_spawn::spawn_labeled_row(
+        commands,
+        parent,
+        LabeledRowSpec::new(UiLabel::key(label_key))
+            .label_color(DIM_LABEL_COLOR)
+            .font_size(PROFILE_FONT_SIZE)
+            .wrap(),
+    )
+    .row
 }
 
 /// A translated section label on its own line.
@@ -2163,7 +2145,7 @@ fn spawn_value_label(commands: &mut Commands, parent: Entity, value: String, col
 }
 
 /// An empty value label, returning it so a value-update path can set its text in
-/// place ([`set_value_node`]).
+/// place ([`ui_text::set_node_text`]).
 fn spawn_value_node(commands: &mut Commands, parent: Entity, color: Color) -> Entity {
     commands
         .spawn((
@@ -2174,16 +2156,6 @@ fn spawn_value_node(commands: &mut Commands, parent: Entity, color: Color) -> En
             ChildOf(parent),
         ))
         .id()
-}
-
-/// Set a retained value node's text in place (only on change).
-fn set_value_node(texts: &mut Query<&mut Text>, node: Option<Entity>, value: &str) {
-    if let Some(node) = node
-        && let Ok(mut text) = texts.get_mut(node)
-        && text.0 != value
-    {
-        value.clone_into(&mut text.0);
-    }
 }
 
 /// A translated label.
@@ -2249,32 +2221,23 @@ fn spawn_action_button(
     action: ProfileAction,
     tab_index: i32,
 ) -> Entity {
-    let button = commands
-        .spawn((
-            Button,
-            TabIndex(tab_index),
-            action,
-            Node {
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(BUTTON_BORDER),
-            BackgroundColor(BUTTON_BACKGROUND),
-            Pickable::default(),
-            Name::new(format!("profile-button:{label_key}")),
-            ChildOf(parent),
-        ))
-        .observe(on_profile_action)
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(PROFILE_FONT_SIZE),
-        TextColor(LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(button),
-    ));
+    let button = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(
+            UiLabel::key(label_key),
+            format!("profile-button:{label_key}"),
+        )
+        .tab_index(tab_index)
+        .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
+        .label_color(LABEL_COLOR)
+        .font_size(PROFILE_FONT_SIZE),
+    )
+    .button;
+    commands
+        .entity(button)
+        .insert(action)
+        .observe(on_profile_action);
     button
 }
 

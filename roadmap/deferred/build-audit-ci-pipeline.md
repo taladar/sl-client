@@ -2,7 +2,7 @@
 id: build-audit-ci-pipeline
 title: There is no CI — every quality gate is a local pre-commit hook
 topic: viewer
-status: ready
+status: deferred
 origin: static code audit (2026-08-26)
 points: 8
 ---
@@ -29,3 +29,12 @@ concurrently OOM on constrained runners, so the job needs `-j` limited.
 
 Worth adding once green: `cargo deny check advisories`, which the sibling
 `sl-map-tools` workspace already gates on.
+
+## Deferred (2026-09-19)
+
+Not while the workspace is developed exclusively on one machine and takes a
+dozen commits a day: building 815k lines of Rust on every push to GitHub buys
+nothing the `ggh` pre-commit hook has not already checked on the same tree, and
+costs minutes per push. The two things CI would genuinely add — *does a fresh
+checkout build* and *does it build somewhere other than here* — are release
+preparation concerns, so this comes back with the first release, not before.

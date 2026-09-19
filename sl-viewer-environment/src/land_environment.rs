@@ -92,6 +92,7 @@ use sl_viewer_notifications::{NotificationResponse, ShowNotification};
 use sl_viewer_ui_core::i18n::{Translated, Translator};
 use sl_viewer_ui_core::ui::{column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
+use sl_viewer_ui_core::ui_text::set_node_text;
 use sl_viewer_ui_widgets::ui_slider::{SliderStyle, spawn_slider};
 use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 
@@ -1466,7 +1467,7 @@ fn reseed_land_widgets(
                 || translator.get("land-env-loading"),
                 |(hour, minute, percent)| format!("{hour:02}:{minute:02} ({percent}%)"),
             );
-        set_text(&mut texts, ui.apparent_time, &apparent);
+        set_node_text(&mut texts, ui.apparent_time, &apparent);
         if !state.reseed {
             continue;
         }
@@ -1538,7 +1539,7 @@ fn reseed_land_widgets(
                 }
                 (None, None, None) => loading.clone(),
             };
-            set_text(&mut texts, node, &name);
+            set_node_text(&mut texts, node, &name);
         }
     }
 }
@@ -1617,7 +1618,7 @@ fn paint_land_controls(
             && let Some(node) = kids.iter().next()
         {
             let text = translator.get(reason);
-            set_text(&mut texts, node, &text);
+            set_node_text(&mut texts, node, &text);
         }
         let enabled = reason.is_none() && subject.editable && state.current.is_some();
         let colour_pair = |on: bool| {
@@ -1877,15 +1878,6 @@ fn resolve_land_confirmation(
 // Small writers.
 // ---------------------------------------------------------------------------
 
-/// Set a text node's content, only on change.
-fn set_text(texts: &mut Query<&mut Text>, node: Entity, value: &str) {
-    if let Ok(mut text) = texts.get_mut(node)
-        && text.0 != value
-    {
-        value.clone_into(&mut text.0);
-    }
-}
-
 /// Show or hide a node, only on change.
 fn show_node(nodes: &mut Query<&mut Node>, node: Entity, shown: bool) {
     let wanted = if shown { Display::Flex } else { Display::None };
@@ -1905,7 +1897,7 @@ fn set_check_visual(
     enabled: bool,
 ) {
     let glyph = if on { CHECKED_GLYPH } else { UNCHECKED_GLYPH };
-    set_text(texts, check.glyph, glyph);
+    set_node_text(texts, check.glyph, glyph);
     let glyph_colour = if !enabled {
         DISABLED_COLOR
     } else if on {

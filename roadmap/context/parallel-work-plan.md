@@ -67,8 +67,12 @@ otherwise keep hitting.
 - `viewer-audit-kit-single-consumer-split` and
   `viewer-audit-ui-core-sound-coupling` (three lines) — the shared hubs the
   world and UI agents both pull in.
-- `build-audit-ci-pipeline` — worth having before three branches are in flight,
-  so each is checked by something other than the local pre-commit hook.
+
+`build-audit-ci-pipeline` was listed here — "worth having before three branches
+are in flight" — and is now **deferred**: on a workspace developed on one
+machine at a dozen commits a day, a push-triggered build of 815k lines re-checks
+what the `ggh` pre-commit hook already checked on the same tree. Fresh-checkout
+and portability cover comes with release preparation.
 
 ## Phase 3 — the three-way split
 

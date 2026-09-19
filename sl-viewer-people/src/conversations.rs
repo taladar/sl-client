@@ -80,7 +80,7 @@ use crate::intents::{
 use crate::linkified_text::{LinkTextStyle, spawn_linkified_text};
 use crate::local_chat_input::{LocalChatSubmit, spawn_local_chat_input};
 use crate::skin::SkinChatBands;
-use crate::social::MuteModel;
+use crate::social::{MuteModel, short_id};
 use crate::ui::BOTTOM_BAR_Z;
 use crate::ui::BottomArea;
 use crate::ui::{
@@ -88,6 +88,7 @@ use crate::ui::{
 };
 use crate::ui_font::UiFont;
 use crate::ui_tab::{TabDivider, TabPlacement, TabStrip, TabStripWidth, resize_strip_width};
+use crate::ui_text::set_node_text;
 use crate::world_api::rlv::swallows_owner_say;
 
 /// The hosting floater's [`crate::floater::FloaterSpec::id`] — it also keys the
@@ -763,11 +764,6 @@ impl ConversationModel {
         }
         ConversationKey::Direct(from_agent_id)
     }
-}
-
-/// A short, readable stand-in for an unresolved id — the first eight hex digits.
-fn short_id(id: Uuid) -> String {
-    id.simple().to_string().chars().take(8).collect()
 }
 
 /// The [`Command`] that sends `message` into the conversation `key`, or `None`
@@ -2659,7 +2655,7 @@ fn refresh_conversations(
             },
         };
         let label = tab_label(&title, entry.unread, is_active);
-        set_text(&mut chrome.texts, view.tab_label, &label);
+        set_node_text(&mut chrome.texts, view.tab_label, &label);
 
         // Tab colours track the active one, and flash while it has unread lines.
         let (background, border) = if is_active {
@@ -2687,7 +2683,7 @@ fn refresh_conversations(
         let typing = typing_status(&translator, &entry.typing);
         set_display(&mut chrome.nodes, view.typing_text, typing.is_some());
         if let Some(status) = typing {
-            set_text(&mut chrome.texts, view.typing_text, &status);
+            set_node_text(&mut chrome.texts, view.typing_text, &status);
         }
 
         // Transcript, only when a new line landed: rebuild the line column — one
@@ -2779,15 +2775,6 @@ fn typing_status(translator: &Translator, typing: &BTreeMap<AgentKey, String>) -
         Some(translator.get(TYPING_MANY_KEY))
     } else {
         Some(translator.format(TYPING_ONE_KEY, &TransArgs::new().text("name", first)))
-    }
-}
-
-/// Write a text node's string only on a real change.
-fn set_text(texts: &mut Query<&mut Text>, entity: Entity, value: &str) {
-    if let Ok(mut text) = texts.get_mut(entity)
-        && text.0 != value
-    {
-        value.clone_into(&mut text.0);
     }
 }
 

@@ -37,6 +37,8 @@ use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, row};
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_font::UiFont;
 use crate::ui_slider::{SliderStyle, SliderWidgetPlugin, spawn_slider};
+use crate::ui_spawn::{self, ButtonSpec, LabeledRowSpec, UiLabel};
+use crate::ui_text::set_node_text;
 use crate::ui_texture_picker::{TextureSwatchValue, spawn_texture_swatch};
 
 /// The chrome font size, in logical pixels.
@@ -512,27 +514,16 @@ fn populate_material_editor(
 
 /// Spawn a labelled row and return the row entity to parent the control into.
 fn spawn_labeled_row(commands: &mut Commands, parent: Entity, label: &str) -> Entity {
-    let row_entity = commands
-        .spawn((
-            Node {
-                align_items: AlignItems::Center,
-                margin: UiRect::bottom(Val::Px(3.0)),
-                ..row(Val::Px(6.0))
-            },
-            ChildOf(parent),
-        ))
-        .id();
-    commands.spawn((
-        Text::new(label.to_owned()),
-        UiFont::Sans.at(FONT),
-        TextColor(LABEL_COLOR),
-        Node {
-            width: Val::Px(110.0),
-            ..Default::default()
-        },
-        ChildOf(row_entity),
-    ));
-    row_entity
+    ui_spawn::spawn_labeled_row(
+        commands,
+        parent,
+        LabeledRowSpec::new(UiLabel::literal(label))
+            .label_color(LABEL_COLOR)
+            .font_size(FONT)
+            .label_width(Val::Px(110.0))
+            .margin(UiRect::bottom(Val::Px(3.0))),
+    )
+    .row
 }
 
 /// Spawn a factor slider row (`0..=1`) tagged with its [`MatFactor`].
@@ -588,35 +579,21 @@ fn spawn_text_button(
     marker: impl Component,
     tab: &mut i32,
 ) -> Entity {
-    let button = commands
-        .spawn((
-            Button,
-            TabIndex(*tab),
-            Node {
-                padding: UiRect::axes(Val::Px(10.0), Val::Px(3.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..Default::default()
-            },
-            BorderColor::all(CONTROL_BORDER),
-            BackgroundColor(BUTTON_BACKGROUND),
-            marker,
-            Pickable::default(),
-            Name::new("material-text-button"),
-            ChildOf(parent),
-        ))
-        .observe(on_mat_toggle)
-        .id();
-    let text = commands
-        .spawn((
-            Text::new(label.to_owned()),
-            UiFont::Sans.at(FONT),
-            TextColor(LABEL_COLOR),
-            Pickable::IGNORE,
-            ChildOf(button),
-        ))
-        .id();
-    *tab = tab.saturating_add(1);
-    text
+    let spawned = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(UiLabel::literal(label), "material-text-button")
+            .tab_from(tab)
+            .padding(10.0, 3.0)
+            .colors(BUTTON_BACKGROUND, CONTROL_BORDER)
+            .label_color(LABEL_COLOR)
+            .font_size(FONT),
+    );
+    commands
+        .entity(spawned.button)
+        .insert(marker)
+        .observe(on_mat_toggle);
+    spawned.label
 }
 
 /// Spawn one chrome action button (Save / Revert).
@@ -760,7 +737,7 @@ fn on_mat_toggle(
     };
     if alpha.get(press.entity).is_ok() {
         edit.edited.alpha_mode = next_alpha_mode(edit.edited.alpha_mode);
-        set_text(
+        set_node_text(
             &mut texts,
             edit.alpha_label,
             alpha_mode_name(edit.edited.alpha_mode),
@@ -768,7 +745,7 @@ fn on_mat_toggle(
         edit.dirty = true;
     } else if double.get(press.entity).is_ok() {
         edit.edited.double_sided = !edit.edited.double_sided;
-        set_text(
+        set_node_text(
             &mut texts,
             edit.double_label,
             toggle_glyph(edit.edited.double_sided),
@@ -839,14 +816,14 @@ fn on_mat_action_button(
                 data: encode_material_asset(&edit.edited),
             }));
             edit.saving = true;
-            set_text(&mut texts, edit.status, "Saving…");
+            set_node_text(&mut texts, edit.status, "Saving…");
         }
         MatButton::Revert => {
             edit.edited = edit.original;
             // Rebuild the swatches / sliders from the restored material.
             edit.phase = MatPhase::Rebuild;
             edit.dirty = true;
-            set_text(&mut texts, edit.status, "Reverted.");
+            set_node_text(&mut texts, edit.status, "Reverted.");
         }
     }
 }
@@ -869,11 +846,11 @@ fn report_material_save(
         match &event.0 {
             SlSessionEvent::AssetUploaded { .. } => {
                 edit.saving = false;
-                set_text(&mut texts, edit.status, "Saved.");
+                set_node_text(&mut texts, edit.status, "Saved.");
             }
             SlSessionEvent::AssetUploadFailed { .. } => {
                 edit.saving = false;
-                set_text(&mut texts, edit.status, "Save failed.");
+                set_node_text(&mut texts, edit.status, "Save failed.");
             }
             _other => {}
         }
@@ -945,13 +922,4 @@ const fn next_alpha_mode(mode: GltfAlphaMode) -> GltfAlphaMode {
 /// The checkbox glyph for a boolean.
 const fn toggle_glyph(on: bool) -> &'static str {
     if on { CHECKED_GLYPH } else { UNCHECKED_GLYPH }
-}
-
-/// Set a node's text if present.
-fn set_text(texts: &mut Query<&mut Text>, node: Option<Entity>, message: &str) {
-    if let Some(node) = node
-        && let Ok(mut text) = texts.get_mut(node)
-    {
-        message.clone_into(&mut text.0);
-    }
 }

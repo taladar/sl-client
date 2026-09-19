@@ -40,7 +40,6 @@ use std::collections::BTreeMap;
 use std::collections::HashSet;
 
 use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 use bevy::ui_widgets::{Slider, SliderRange, SliderStep, SliderValue, ValueChange};
@@ -67,6 +66,7 @@ use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_font::UiFont;
 use crate::ui_radio::{RadioLayout, RadioSelection, RadioSpec, spawn_radio_group};
 use crate::ui_slider::{SliderStyle, SliderWidgetPlugin, spawn_slider};
+use crate::ui_spawn::{self, ButtonSpec, LabeledRowSpec, UiLabel};
 use crate::ui_texture_picker::{TextureSwatchValue, spawn_texture_swatch};
 use crate::world_api::DecodedTextures;
 
@@ -662,26 +662,15 @@ fn tint_color(asset: &WearableAsset, [r, g, b]: [i32; 3]) -> Color {
 /// Spawn a labelled row (a left label plus a slot for the control) and return
 /// the row entity to parent the control into.
 fn spawn_labeled_row(commands: &mut Commands, parent: Entity, label: &str) -> Entity {
-    let row_entity = commands
-        .spawn((
-            Node {
-                align_items: AlignItems::Center,
-                ..row(Val::Px(6.0))
-            },
-            ChildOf(parent),
-        ))
-        .id();
-    commands.spawn((
-        Text::new(label.to_owned()),
-        UiFont::Sans.at(FONT),
-        TextColor(LABEL_COLOR),
-        Node {
-            width: Val::Px(120.0),
-            ..Default::default()
-        },
-        ChildOf(row_entity),
-    ));
-    row_entity
+    ui_spawn::spawn_labeled_row(
+        commands,
+        parent,
+        LabeledRowSpec::new(UiLabel::literal(label))
+            .label_color(LABEL_COLOR)
+            .font_size(FONT)
+            .label_width(Val::Px(120.0)),
+    )
+    .row
 }
 
 /// Spawn one param slider row: a label, a slider track + thumb (over
@@ -745,32 +734,18 @@ fn spawn_action_button(
     label: &str,
     tab: &mut i32,
 ) {
-    let button = commands
-        .spawn((
-            Button,
-            TabIndex(*tab),
-            Node {
-                padding: UiRect::axes(Val::Px(10.0), Val::Px(3.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..Default::default()
-            },
-            BorderColor::all(CONTROL_BORDER),
-            BackgroundColor(BUTTON_BACKGROUND),
-            kind,
-            Pickable::default(),
-            Name::new(format!("wearable-button:{label}")),
-            ChildOf(parent),
-        ))
-        .observe(on_wear_button)
-        .id();
-    commands.spawn((
-        Text::new(label.to_owned()),
-        UiFont::Sans.at(FONT),
-        TextColor(LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(button),
-    ));
-    *tab = tab.saturating_add(1);
+    let button = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(UiLabel::literal(label), format!("wearable-button:{label}"))
+            .tab_from(tab)
+            .padding(10.0, 3.0)
+            .colors(BUTTON_BACKGROUND, CONTROL_BORDER)
+            .label_color(LABEL_COLOR)
+            .font_size(FONT),
+    )
+    .button;
+    commands.entity(button).insert(kind).observe(on_wear_button);
 }
 
 // ---------------------------------------------------------------------------

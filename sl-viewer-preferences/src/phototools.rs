@@ -75,6 +75,7 @@ use crate::ui_combo::{ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_element::ElementCx;
 use crate::ui_font::UiFont;
 use crate::ui_slider::{SliderStyle, spawn_slider};
+use crate::ui_spawn::{self, UiLabel};
 use crate::ui_tab::{
     DEFAULT_ELLIPSIS, TabPlacement, TabSpec, fill_tab_container, spawn_tab_container,
 };
@@ -1294,14 +1295,7 @@ fn spawn_section(commands: &mut Commands, parent: Entity, key: &'static str) {
 
 /// Spawn a row's translated label.
 fn spawn_label(commands: &mut Commands, parent: Entity, key: &'static str) {
-    commands.spawn((
-        Text::default(),
-        Translated::new(key),
-        UiFont::Sans.at(FONT),
-        TextColor(LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(parent),
-    ));
+    ui_spawn::spawn_label(commands, parent, UiLabel::key(key), LABEL_COLOR, FONT);
 }
 
 /// Spawn a checkbox row.

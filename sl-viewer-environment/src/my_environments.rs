@@ -81,6 +81,7 @@ use sl_viewer_ui_core::i18n::{TransArgs, Translated, Translator};
 use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems, column, row};
 use sl_viewer_ui_core::ui_element::UiAction;
 use sl_viewer_ui_core::ui_font::UiFont;
+use sl_viewer_ui_core::ui_spawn::{self, ButtonSpec, UiLabel};
 use sl_viewer_ui_core::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 use sl_viewer_ui_widgets::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, floater_shown, spawn_floater,
@@ -679,46 +680,33 @@ fn spawn_action_button(
     tab: i32,
     disabled: bool,
 ) -> Entity {
+    let background = if disabled {
+        DISABLED_BACKGROUND
+    } else {
+        ACTION_BACKGROUND
+    };
+    let spawned = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::flat(
+            UiLabel::key(button.label_key()),
+            format!("my-environments-{}:button", button.slug()),
+        )
+        .tab_index(tab)
+        .colors(background, background)
+        .label_color(if disabled {
+            DISABLED_LABEL
+        } else {
+            LABEL_COLOR
+        })
+        .font_size(FONT_SIZE)
+        .no_wrap(),
+    );
     commands
-        .spawn((
-            Node {
-                flex_shrink: 0.0,
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            BackgroundColor(if disabled {
-                DISABLED_BACKGROUND
-            } else {
-                ACTION_BACKGROUND
-            }),
-            TabIndex(tab),
-            Pickable {
-                should_block_lower: true,
-                is_hoverable: true,
-            },
-            button,
-            Name::new(format!("my-environments-{}:button", button.slug())),
-            ChildOf(parent),
-        ))
-        .with_child((
-            Text::default(),
-            Translated::new(button.label_key()),
-            TextLayout {
-                linebreak: LineBreak::NoWrap,
-                ..default()
-            },
-            UiFont::Sans.at(FONT_SIZE),
-            TextColor(if disabled {
-                DISABLED_LABEL
-            } else {
-                LABEL_COLOR
-            }),
-            Pickable::IGNORE,
-        ))
-        .observe(on_my_environments_button)
-        .id()
+        .entity(spawned.button)
+        .insert(button)
+        .observe(on_my_environments_button);
+    spawned.button
 }
 
 /// Grey the window's action buttons on a grid that cannot store a settings

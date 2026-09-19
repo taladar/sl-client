@@ -121,7 +121,6 @@
 //! (`LLPanelRegionDebugInfo::onClickTopScripts`), `llparcel.h` (`RT_NONE`).
 
 use bevy::input_focus::InputFocus;
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui::InteractionDisabled;
@@ -144,6 +143,7 @@ use crate::social::{MapTracking, TrackTarget};
 use crate::ui::{column, row};
 use crate::ui_font::UiFont;
 use crate::ui_format::format_duration_units;
+use crate::ui_spawn::{ButtonSpec, UiLabel, spawn_button};
 use crate::ui_table::{
     TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells, TableSelectionMode,
     TableSortDefault, TableSpec, TableState, set_table_cell, spawn_table, spawn_table_row,
@@ -1073,32 +1073,23 @@ fn spawn_action_button(
     action: TopObjectsAction,
     tab_index: i32,
 ) {
-    let button = commands
-        .spawn((
-            Button,
-            TabIndex(tab_index),
-            action,
-            Node {
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(BUTTON_BORDER),
-            BackgroundColor(BUTTON_BACKGROUND),
-            Pickable::default(),
-            Name::new(format!("top-objects-button:{label_key}")),
-            ChildOf(parent),
-        ))
-        .observe(on_top_objects_action)
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(FONT_SIZE),
-        TextColor(LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(button),
-    ));
+    let button = spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(
+            UiLabel::key(label_key),
+            format!("top-objects-button:{label_key}"),
+        )
+        .tab_index(tab_index)
+        .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
+        .label_color(LABEL_COLOR)
+        .font_size(FONT_SIZE),
+    )
+    .button;
+    commands
+        .entity(button)
+        .insert(action)
+        .observe(on_top_objects_action);
 }
 
 // ---------------------------------------------------------------------------

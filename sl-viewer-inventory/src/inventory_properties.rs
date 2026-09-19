@@ -56,7 +56,6 @@
 //! `llpreview{notecard,texture,anim}.cpp`, "About Landmark".
 
 use bevy::input_focus::InputFocus;
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use sl_client_bevy::{
@@ -73,6 +72,7 @@ use crate::i18n::Translated;
 use crate::inventory::query_folder_page;
 use crate::ui::row;
 use crate::ui_font::UiFont;
+use crate::ui_spawn::{self, ButtonSpec, LabeledRowSpec, UiLabel};
 use crate::world_api::ui_texture::{PendingUiTexture, UiTexturePlugin};
 
 /// The chrome font size, in logical pixels.
@@ -693,27 +693,15 @@ const fn sale_type_key(sale_type: SaleType) -> &'static str {
 
 /// A labelled row: the translated label leading, the caller's content after.
 fn spawn_labeled_row(commands: &mut Commands, parent: Entity, label_key: &'static str) -> Entity {
-    let row_entity = commands
-        .spawn((
-            Node {
-                align_items: AlignItems::Center,
-                ..row(Val::Px(6.0))
-            },
-            ChildOf(parent),
-        ))
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(PROPS_FONT_SIZE),
-        TextColor(DIM_LABEL_COLOR),
-        Node {
-            min_width: Val::Px(90.0),
-            ..default()
-        },
-        ChildOf(row_entity),
-    ));
-    row_entity
+    ui_spawn::spawn_labeled_row(
+        commands,
+        parent,
+        LabeledRowSpec::new(UiLabel::key(label_key))
+            .label_color(DIM_LABEL_COLOR)
+            .font_size(PROPS_FONT_SIZE)
+            .label_min_width(Val::Px(90.0)),
+    )
+    .row
 }
 
 /// A plain value label.
@@ -1257,33 +1245,23 @@ fn spawn_text_button(
     tab_index: i32,
     enabled: bool,
 ) -> Entity {
-    commands
-        .spawn((
-            Button,
-            TabIndex(tab_index),
-            Node {
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(BUTTON_BORDER),
-            BackgroundColor(BUTTON_BACKGROUND),
-            Pickable::default(),
-            Name::new(format!("preview-button:{label_key}")),
-            ChildOf(parent),
-        ))
-        .with_child((
-            Text::default(),
-            Translated::new(label_key),
-            UiFont::Sans.at(PROPS_FONT_SIZE),
-            TextColor(if enabled {
-                LABEL_COLOR
-            } else {
-                DIM_LABEL_COLOR
-            }),
-            Pickable::IGNORE,
-        ))
-        .id()
+    ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(
+            UiLabel::key(label_key),
+            format!("preview-button:{label_key}"),
+        )
+        .tab_index(tab_index)
+        .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
+        .label_color(if enabled {
+            LABEL_COLOR
+        } else {
+            DIM_LABEL_COLOR
+        })
+        .font_size(PROPS_FONT_SIZE),
+    )
+    .button
 }
 
 /// A parsed landmark asset: the tiny `Landmark version 2` text body.

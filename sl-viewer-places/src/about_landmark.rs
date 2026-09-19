@@ -53,6 +53,8 @@ use crate::name_revisions::NameRevisions;
 use crate::social::GroupsModel;
 use crate::ui::{column, row};
 use crate::ui_font::UiFont;
+use crate::ui_spawn::{self, ButtonSpec, LabeledRowSpec, UiLabel};
+use crate::ui_text::set_node_text;
 use crate::world_api::AvatarState;
 use crate::world_api::ui_texture::{PendingUiTexture, UiTexturePlugin};
 use crate::world_map::OpenWorldMap;
@@ -647,14 +649,14 @@ fn ingest_landmark_asset(
             state.pending_asset = None;
             let text = String::from_utf8_lossy(&asset.data).into_owned();
             let Some(landmark) = parse_landmark(&text) else {
-                set_text(
+                set_node_text(
                     &mut texts,
                     ui.region_text,
                     &translator.get("about-landmark-unreadable"),
                 );
                 continue;
             };
-            set_text(
+            set_node_text(
                 &mut texts,
                 ui.region_text,
                 &region_line(None, landmark.region_id, landmark.position),
@@ -785,7 +787,7 @@ fn apply_details(
     } = refs;
     let position = state.landmark.map_or((0.0, 0.0, 0.0), |mark| mark.position);
     let region_id = state.landmark.map_or_else(Uuid::nil, |mark| mark.region_id);
-    set_text(
+    set_node_text(
         texts,
         ui.region_text,
         &region_line(details.sim_name.as_ref(), region_id, position),
@@ -795,14 +797,14 @@ fn apply_details(
     } else {
         details.name.clone()
     };
-    set_text(texts, ui.parcel_text, &parcel_name);
-    set_text(texts, ui.description_text, &details.description);
-    set_text(
+    set_node_text(texts, ui.parcel_text, &parcel_name);
+    set_node_text(texts, ui.description_text, &details.description);
+    set_node_text(
         texts,
         ui.maturity_text,
         &translator.get(maturity_key(details.flags)),
     );
-    set_text(
+    set_node_text(
         texts,
         ui.owner_text,
         &parcel_owner_label(details, avatars, groups),
@@ -817,13 +819,13 @@ fn apply_details(
             sl_commands.write(SlCommand(Command::RequestAvatarNames(vec![owner])));
         }
     }
-    set_text(texts, ui.traffic_text, &format!("{:.0}", details.dwell));
-    set_text(texts, ui.area_text, &details.actual_area.to_string());
+    set_node_text(texts, ui.traffic_text, &format!("{:.0}", details.dwell));
+    set_node_text(texts, ui.area_text, &details.actual_area.to_string());
     // The SLURL uses the landmark's own saved position (the reference
     // behaviour), not the parcel anchor.
     if let Some(name) = details.sim_name.as_ref() {
         let slurl = landmark_slurl(name, position);
-        set_text(texts, ui.slurl_text, &slurl);
+        set_node_text(texts, ui.slurl_text, &slurl);
         state.slurl = Some(slurl);
     }
     // Snapshot through the shared texture pipeline; a parcel without one
@@ -838,7 +840,7 @@ fn apply_details(
                 .insert(PendingUiTexture::over_placeholder(key));
         }
         _no_snapshot => {
-            set_text(
+            set_node_text(
                 texts,
                 ui.snapshot_label,
                 &translator.get("about-landmark-no-image"),
@@ -861,14 +863,14 @@ fn refresh_names(
     }
     for (state, ui) in &windows {
         if let Some(item) = state.item.as_ref() {
-            set_text(
+            set_node_text(
                 &mut texts,
                 ui.creator_text,
                 &avatars.label_text(item.creator_id),
             );
         }
         if let Some(details) = state.details.as_ref() {
-            set_text(
+            set_node_text(
                 &mut texts,
                 ui.owner_text,
                 &parcel_owner_label(details, &avatars, &groups),
@@ -946,7 +948,7 @@ fn expire_resolve(
         // Only this window gives up: with the answers correlated there is no
         // shared slot for an unanswered request to hold.
         info!("about landmark: parcel resolve timed out");
-        set_text(
+        set_node_text(
             &mut texts,
             ui.parcel_text,
             &translator.get("about-landmark-unavailable"),
@@ -960,27 +962,15 @@ fn expire_resolve(
 
 /// A labelled row: the translated label leading, the caller's value after.
 fn spawn_labeled_row(commands: &mut Commands, parent: Entity, label_key: &'static str) -> Entity {
-    let row_entity = commands
-        .spawn((
-            Node {
-                align_items: AlignItems::Center,
-                ..row(Val::Px(6.0))
-            },
-            ChildOf(parent),
-        ))
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(ABOUT_FONT_SIZE),
-        TextColor(DIM_LABEL_COLOR),
-        Node {
-            min_width: Val::Px(90.0),
-            ..default()
-        },
-        ChildOf(row_entity),
-    ));
-    row_entity
+    ui_spawn::spawn_labeled_row(
+        commands,
+        parent,
+        LabeledRowSpec::new(UiLabel::key(label_key))
+            .label_color(DIM_LABEL_COLOR)
+            .font_size(ABOUT_FONT_SIZE)
+            .label_min_width(Val::Px(90.0)),
+    )
+    .row
 }
 
 /// A plain value label, returning its text entity for in-place updates.
@@ -1002,39 +992,18 @@ fn spawn_button(
     label_key: &'static str,
     tab_index: i32,
 ) -> Entity {
-    commands
-        .spawn((
-            Button,
-            bevy::input_focus::tab_navigation::TabIndex(tab_index),
-            Node {
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(Color::srgb(0.34, 0.40, 0.52)),
-            BackgroundColor(Color::srgb(0.13, 0.15, 0.20)),
-            Pickable::default(),
-            Name::new(format!("about-landmark:{label_key}")),
-            ChildOf(parent),
-        ))
-        .with_child((
-            Text::default(),
-            Translated::new(label_key),
-            UiFont::Sans.at(ABOUT_FONT_SIZE),
-            TextColor(LABEL_COLOR),
-            Pickable::IGNORE,
-        ))
-        .id()
-}
-
-/// Write `value` into an optional text node, only on a real change.
-fn set_text(texts: &mut Query<&mut Text>, node: Option<Entity>, value: &str) {
-    if let Some(node) = node
-        && let Ok(mut text) = texts.get_mut(node)
-        && text.0 != value
-    {
-        value.clone_into(&mut text.0);
-    }
+    ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(
+            UiLabel::key(label_key),
+            format!("about-landmark:{label_key}"),
+        )
+        .tab_index(tab_index)
+        .label_color(LABEL_COLOR)
+        .font_size(ABOUT_FONT_SIZE),
+    )
+    .button
 }
 
 /// The parcel owner's display label: the group / agent name per the reply's

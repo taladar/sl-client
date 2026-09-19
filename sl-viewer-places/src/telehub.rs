@@ -69,7 +69,6 @@
 //! `floater_telehub.xml`, `panel_region_general.xml` (`manage_telehub_btn`),
 //! `llselectmgr.cpp` (`sendGodlikeRequest`).
 
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui::InteractionDisabled;
 use sl_client_bevy::{
@@ -84,6 +83,7 @@ use crate::i18n::{TransArgs, Translated, Translator};
 use crate::social::{DebugBeacon, DebugBeacons};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
+use crate::ui_spawn::{self, ButtonSpec, UiLabel, spawn_button};
 use crate::ui_table::{
     TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableSelectionMode, TableSpec,
     TableState, set_table_cell, spawn_table, spawn_table_row,
@@ -418,14 +418,13 @@ fn spawn_line(commands: &mut Commands, parent: Entity, color: Color) -> Entity {
 
 /// A translated label on its own line.
 fn spawn_label(commands: &mut Commands, parent: Entity, key: &'static str) {
-    commands.spawn((
-        Text::default(),
-        Translated::new(key),
-        UiFont::Sans.at(FONT_SIZE),
-        TextColor(DIM_LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(parent),
-    ));
+    ui_spawn::spawn_label(
+        commands,
+        parent,
+        UiLabel::key(key),
+        DIM_LABEL_COLOR,
+        FONT_SIZE,
+    );
 }
 
 /// The wrapped explanatory footer.
@@ -455,32 +454,23 @@ fn spawn_action_button(
     action: TelehubAction,
     tab_index: i32,
 ) {
-    let button = commands
-        .spawn((
-            Button,
-            TabIndex(tab_index),
-            action,
-            Node {
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(BUTTON_BORDER),
-            BackgroundColor(BUTTON_BACKGROUND),
-            Pickable::default(),
-            Name::new(format!("telehub-button:{label_key}")),
-            ChildOf(parent),
-        ))
-        .observe(on_telehub_action)
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(FONT_SIZE),
-        TextColor(LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(button),
-    ));
+    let button = spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(
+            UiLabel::key(label_key),
+            format!("telehub-button:{label_key}"),
+        )
+        .tab_index(tab_index)
+        .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
+        .label_color(LABEL_COLOR)
+        .font_size(FONT_SIZE),
+    )
+    .button;
+    commands
+        .entity(button)
+        .insert(action)
+        .observe(on_telehub_action);
 }
 
 // ---------------------------------------------------------------------------

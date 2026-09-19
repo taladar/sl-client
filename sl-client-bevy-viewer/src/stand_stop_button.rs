@@ -48,16 +48,14 @@
 
 use bevy::ecs::system::SystemParam;
 use bevy::input_focus::InputFocus;
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
-use bevy::ui_widgets::{Activate, Button};
+use bevy::ui_widgets::Activate;
 
 use sl_client_bevy::{Command, SlAgentParcel, SlCommand};
 
 use crate::camera::FocusTarget;
-use crate::i18n::Translated;
 use crate::ui::BottomArea;
-use crate::ui_font::UiFont;
+use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use crate::world_api::SelfGroundSit;
 use crate::world_api::{AvatarControls, CameraMode, CameraRig, ViewerCamera};
 
@@ -149,48 +147,47 @@ fn spawn_button(
     kind: StateButtonKind,
     label_key: &'static str,
 ) {
-    commands
-        .spawn((
-            Button,
-            TabIndex(0),
-            kind,
-            Node {
-                padding: UiRect::axes(Val::Px(10.0), Val::Px(5.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                // Size to the label and never be compressed below it, so the whole
-                // label stays on one line (the slot is wide enough to hold it).
-                flex_shrink: 0.0,
-                // Removed from layout until the state calls for it — NOT
-                // `Visibility::Hidden`, which only stops rendering and leaves the
-                // node occupying its full width in the slot's flex row. With every
-                // button `Hidden` they all laid out side by side, overflowed the
-                // fixed-width slot, and the overflow drew over the neighbouring
-                // Chat button (viewer-flycam-stop-button-overlaps-chat). `None`
-                // collapses an inactive button so only the shown ones take space —
-                // and the slot is sized for the most that can be shown at once.
-                display: Display::None,
-                ..default()
-            },
-            BorderColor::all(BORDER),
-            BackgroundColor(BACKGROUND),
-            Name::new(match kind {
+    let button = ui_spawn::spawn_button(
+        commands,
+        slot,
+        ButtonSpec::bordered(
+            UiLabel::key(label_key),
+            match kind {
                 StateButtonKind::Stand => "state-button:stand",
                 StateButtonKind::StopFlycam => "state-button:stop-flycam",
                 StateButtonKind::StopFlying => "state-button:stop-flying",
-            }),
-            ChildOf(slot),
-        ))
-        .with_child((
-            Text::default(),
-            Translated::new(label_key),
-            UiFont::Sans.at(FONT_SIZE),
-            TextColor(Color::WHITE),
-            // Keep the label on a single line — the text measure otherwise
-            // under-allocates in a flex slot and wraps a two-word label.
-            TextLayout::no_wrap(),
-        ))
+            },
+        )
+        .kind(ButtonKind::Headless)
+        .tab_index(0)
+        .padding(10.0, 5.0)
+        .colors(BACKGROUND, BORDER)
+        .label_color(Color::WHITE)
+        .font_size(FONT_SIZE)
+        // Keep the label on a single line — the text measure otherwise
+        // under-allocates in a flex slot and wraps a two-word label.
+        .no_wrap()
+        .layout(|node| {
+            node.align_items = AlignItems::Center;
+            node.justify_content = JustifyContent::Center;
+            // Size to the label and never be compressed below it, so the whole
+            // label stays on one line (the slot is wide enough to hold it).
+            node.flex_shrink = 0.0;
+            // Removed from layout until the state calls for it — NOT
+            // `Visibility::Hidden`, which only stops rendering and leaves the
+            // node occupying its full width in the slot's flex row. With every
+            // button `Hidden` they all laid out side by side, overflowed the
+            // fixed-width slot, and the overflow drew over the neighbouring
+            // Chat button (viewer-flycam-stop-button-overlaps-chat). `None`
+            // collapses an inactive button so only the shown ones take space —
+            // and the slot is sized for the most that can be shown at once.
+            node.display = Display::None;
+        }),
+    )
+    .button;
+    commands
+        .entity(button)
+        .insert(kind)
         .observe(on_state_button);
 }
 

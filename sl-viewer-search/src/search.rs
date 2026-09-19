@@ -62,6 +62,7 @@ use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_combo::{ComboChanged, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
 use crate::ui_radio::{RadioLayout, RadioSelection, RadioSpec, spawn_radio_group};
+use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use crate::ui_tab::{
     DEFAULT_ELLIPSIS, TabContainerHandle, TabPlacement, TabSpec, TabStrip, fill_tab_container,
     spawn_tab_container,
@@ -1806,13 +1807,7 @@ fn spawn_paging_button(
 
 /// Spawn a translated static label.
 fn spawn_label(commands: &mut Commands, parent: Entity, key: &'static str, color: Color) {
-    commands.spawn((
-        Text::default(),
-        Translated::new(key),
-        UiFont::Sans.at(FONT),
-        TextColor(color),
-        ChildOf(parent),
-    ));
+    ui_spawn::spawn_label(commands, parent, UiLabel::key(key), color, FONT);
 }
 
 /// Spawn a bordered translated push button; the caller attaches the observer.
@@ -1822,30 +1817,18 @@ fn spawn_text_button(
     key: &'static str,
     tab_index: i32,
 ) -> Entity {
-    let button = commands
-        .spawn((
-            Button,
-            bevy::input_focus::tab_navigation::TabIndex(tab_index),
-            Node {
-                padding: UiRect::axes(Val::Px(12.0), Val::Px(3.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(BUTTON_BORDER),
-            BackgroundColor(BUTTON_BACKGROUND),
-            Pickable::default(),
-            ChildOf(parent),
-        ))
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new(key),
-        UiFont::Sans.at(FONT),
-        TextColor(LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(button),
-    ));
-    button
+    ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(UiLabel::key(key), format!("search-button:{key}"))
+            .kind(ButtonKind::Headless)
+            .tab_index(tab_index)
+            .padding(12.0, 3.0)
+            .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
+            .label_color(LABEL_COLOR)
+            .font_size(FONT),
+    )
+    .button
 }
 
 /// Spawn a details-pane action button with a translated label and its action tag.
@@ -1855,29 +1838,18 @@ fn spawn_action_button(
     key: &'static str,
     action: DetailAction,
 ) -> Entity {
-    let button = commands
-        .spawn((
-            Button,
-            Node {
-                padding: UiRect::axes(Val::Px(10.0), Val::Px(3.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(BUTTON_BORDER),
-            BackgroundColor(BUTTON_BACKGROUND),
-            Pickable::default(),
-            action,
-            ChildOf(parent),
-        ))
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new(key),
-        UiFont::Sans.at(FONT),
-        TextColor(LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(button),
-    ));
+    let button = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(UiLabel::key(key), format!("search-detail-button:{key}"))
+            .kind(ButtonKind::Headless)
+            .padding(10.0, 3.0)
+            .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
+            .label_color(LABEL_COLOR)
+            .font_size(FONT),
+    )
+    .button;
+    commands.entity(button).insert(action);
     button
 }
 

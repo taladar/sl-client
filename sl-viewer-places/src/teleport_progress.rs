@@ -37,15 +37,16 @@
 //! `llagent` / `llviewermessage` (`TeleportStart` / `TeleportProgress` /
 //! `TeleportLocal` / `TeleportFinish` / `TeleportFailed` handling).
 
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
-use bevy::ui_widgets::{Activate, Button};
+use bevy::ui_widgets::Activate;
 
 use sl_client_bevy::{Command, SlCommand, SlEvent, SlSessionEvent};
 
 use crate::intents::{BeginTeleportFlow, TeleportTarget, issue_teleport};
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
+use crate::ui_spawn::{ButtonKind, ButtonSpec, UiLabel, spawn_button as spawn_ui_button};
+use crate::ui_text::set_text;
 
 /// Seconds a live teleport may run before the overlay flags it as slow (and
 /// nudges the user that they can cancel). Below the server's 30 s timeout so the
@@ -361,35 +362,34 @@ fn spawn_button(
     label: &str,
     background: Color,
 ) {
-    commands
-        .spawn((
-            Button,
-            TabIndex(0),
-            kind,
-            Node {
-                padding: UiRect::axes(Val::Px(12.0), Val::Px(5.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                flex_shrink: 0.0,
-                ..default()
-            },
-            BorderColor::all(PANEL_BORDER),
-            BackgroundColor(background),
-            Visibility::Hidden,
-            Name::new(match kind {
+    let button = spawn_ui_button(
+        commands,
+        row,
+        ButtonSpec::bordered(
+            UiLabel::literal(label),
+            match kind {
                 OverlayButton::Cancel => "teleport-button:cancel",
                 OverlayButton::Dismiss => "teleport-button:dismiss",
                 OverlayButton::Retry => "teleport-button:retry",
-            }),
-            ChildOf(row),
-        ))
-        .with_child((
-            Text::new(label.to_owned()),
-            UiFont::Sans.at(13.0),
-            TextColor(Color::WHITE),
-            TextLayout::no_wrap(),
-        ))
+            },
+        )
+        .kind(ButtonKind::Headless)
+        .tab_index(0)
+        .padding(12.0, 5.0)
+        .colors(background, PANEL_BORDER)
+        .label_color(Color::WHITE)
+        .no_wrap()
+        .layout(|node| {
+            node.align_items = AlignItems::Center;
+            node.justify_content = JustifyContent::Center;
+            // Sized to its label and never compressed below it.
+            node.flex_shrink = 0.0;
+        }),
+    )
+    .button;
+    commands
+        .entity(button)
+        .insert((kind, Visibility::Hidden))
         .observe(on_overlay_button);
 }
 
@@ -730,14 +730,6 @@ fn message_line(entry: &Entry) -> Option<String> {
                 entry.message.clone()
             }
         }
-    }
-}
-
-/// Set a UI [`Text`] only when it actually changes, so the overlay does not dirty
-/// layout every frame (the FixedSlot / layout-gate discipline).
-fn set_text(text: &mut Text, value: &str) {
-    if text.0 != value {
-        value.clone_into(&mut text.0);
     }
 }
 

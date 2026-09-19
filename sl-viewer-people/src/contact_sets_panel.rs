@@ -83,7 +83,13 @@ use crate::intents::{ConversationKey, OpenConversation};
 use crate::notifications::{NotificationResponse, ShowNotification};
 use crate::people::PeopleUi;
 use crate::settings::ViewerSettings;
-use crate::social::FriendsModel;
+use crate::social::{FriendsModel, short_id};
+
+/// A short, readable stand-in for an unresolved agent id — the shared
+/// [`short_id`] placeholder, taken off an [`AgentKey`].
+fn short_id_of(agent: AgentKey) -> String {
+    short_id(agent.uuid())
+}
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, SetComboOptions, spawn_combo};
@@ -279,15 +285,6 @@ fn chooser_options(sets: &ContactSets) -> Vec<String> {
 /// gates the buttons that change one.
 fn is_real_set(sets: &ContactSets, choice: &str) -> bool {
     sets.set(choice).is_some()
-}
-
-/// A short, readable stand-in for an unresolved agent id — its first eight hex
-/// digits, matching the People pane's own placeholder.
-fn short_id(agent: AgentKey) -> String {
-    let text = agent.uuid().to_string();
-    text.split('-')
-        .next()
-        .map_or_else(|| text.clone(), ToOwned::to_owned)
 }
 
 // --- Resources ------------------------------------------------------------
@@ -1542,7 +1539,7 @@ fn build_rows(
         let name = sets
             .shown_label_of(agent)
             .or_else(|| roster.get(&agent).cloned())
-            .unwrap_or_else(|| short_id(agent));
+            .unwrap_or_else(|| short_id_of(agent));
         matches_filter(&name, filter).then(|| MemberRow {
             agent,
             sets: sets.sets_of(agent).join(", "),
@@ -1721,7 +1718,7 @@ fn on_panel_button_press(
             };
             let name = sets
                 .label_of(agent)
-                .map_or_else(|| short_id(agent), ToOwned::to_owned);
+                .map_or_else(|| short_id_of(agent), ToOwned::to_owned);
             *state.pending = PendingAction::RemoveMember {
                 set: set.clone(),
                 agent,
@@ -1758,7 +1755,7 @@ fn on_panel_button_press(
                     agent,
                     name: sets
                         .label_of(agent)
-                        .map_or_else(|| short_id(agent), ToOwned::to_owned),
+                        .map_or_else(|| short_id_of(agent), ToOwned::to_owned),
                 });
             }
         }
@@ -1811,7 +1808,7 @@ fn handle_open_add_to_set(
             .iter()
             .map(|(agent, name)| {
                 let label = if name.is_empty() {
-                    short_id(*agent)
+                    short_id_of(*agent)
                 } else {
                     name.clone()
                 };
@@ -1895,7 +1892,7 @@ fn handle_open_set_pseudonym(
 ) {
     for request in requests.read() {
         let label = if request.name.is_empty() {
-            short_id(request.agent)
+            short_id_of(request.agent)
         } else {
             request.name.clone()
         };
@@ -2482,7 +2479,7 @@ fn handle_contact_set_notifications(
 mod tests {
     use super::{
         AddToSetTarget, MemberRow, add_success_notification, chooser_options, is_real_set,
-        matches_filter, short_id, sort_rows,
+        matches_filter, short_id_of, sort_rows,
     };
     use crate::contact_sets::{
         ALL_SETS_LABEL, ContactSetRefusal, ContactSets, NO_SETS_LABEL, PSEUDONYMS_KEY,
@@ -2720,7 +2717,7 @@ mod tests {
     /// is still filterable.
     #[test]
     fn an_unresolved_member_is_labelled_by_its_id() {
-        let label = short_id(agent(1));
+        let label = short_id_of(agent(1));
         assert_eq!(label, "00000000");
         assert!(matches_filter(&label, "0000"));
     }

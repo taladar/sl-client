@@ -71,7 +71,6 @@ use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
 use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use bevy::ui_widgets::{Activate, Button};
-use bevy_flair::style::components::ClassList;
 
 use crate::hud::HudScreen;
 use crate::i18n::{TransArgs, Translated, Translator};
@@ -82,6 +81,7 @@ use crate::status_bar::BalanceReadout;
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
+use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use crate::ui_tab::{
     DEFAULT_ELLIPSIS, TabContainerHandle, TabPlacement, TabSpec, fill_tab_container,
     spawn_tab_container,
@@ -665,32 +665,21 @@ fn spawn_text_button(
     label_key: &'static str,
     tab: i32,
 ) -> Entity {
-    let button = commands
-        .spawn((
-            Button,
-            TabIndex(tab),
-            Node {
-                padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
-                border: UiRect::all(Val::Px(2.0)),
-                align_self: AlignSelf::Start,
-                ..default()
-            },
-            BackgroundColor(BUTTON_BACKGROUND),
-            BorderColor::all(BUTTON_BORDER),
-            ClassList::new_with_classes([BUTTON_CLASS]),
-            Name::new("snapshot-button"),
-            ChildOf(parent),
-        ))
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(FONT_SIZE),
-        TextColor(LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(button),
-    ));
-    button
+    ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(UiLabel::key(label_key), "snapshot-button")
+            .kind(ButtonKind::Headless)
+            .tab_index(tab)
+            .padding(10.0, 4.0)
+            .border(2.0)
+            .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
+            .label_color(LABEL_COLOR)
+            .font_size(FONT_SIZE)
+            .class(BUTTON_CLASS)
+            .layout(|node| node.align_self = AlignSelf::Start),
+    )
+    .button
 }
 
 /// Spawn a glyph checkbox (a clickable box with a ☐/☑ glyph then a label),

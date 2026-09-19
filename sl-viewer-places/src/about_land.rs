@@ -90,6 +90,7 @@ use crate::ui::{column, row};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
 use crate::ui_name_link::{NameLink, NameLinkSpec, NameTarget, set_name_link, spawn_name_link};
+use crate::ui_spawn::{self, ButtonSpec, LabeledRowSpec, UiLabel, spawn_button};
 use crate::ui_tab::{
     DEFAULT_ELLIPSIS, TabContainerHandle, TabPlacement, TabSpec, fill_tab_container,
     spawn_tab_container,
@@ -98,6 +99,7 @@ use crate::ui_table::{
     TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableSelectionMode, TableSpec,
     set_table_cell, spawn_table, spawn_table_row,
 };
+use crate::ui_text::set_text;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 use crate::world_api::AgentRegionPosition;
@@ -3937,16 +3939,16 @@ fn spawn_row(commands: &mut Commands, parent: Entity) -> Entity {
 
 /// A wrapping row leading with a translated dim label.
 fn spawn_labeled_row(commands: &mut Commands, parent: Entity, label_key: &'static str) -> Entity {
-    let row_entity = spawn_row(commands, parent);
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(FONT_SIZE),
-        TextColor(DIM_LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(row_entity),
-    ));
-    row_entity
+    ui_spawn::spawn_labeled_row(
+        commands,
+        parent,
+        LabeledRowSpec::new(UiLabel::key(label_key))
+            .label_color(DIM_LABEL_COLOR)
+            .font_size(FONT_SIZE)
+            .gap(Val::Px(8.0))
+            .wrap(),
+    )
+    .row
 }
 
 /// A translated section label on its own line.
@@ -4101,35 +4103,24 @@ fn spawn_action_button(
     tab_index: i32,
     write: bool,
 ) -> Entity {
-    let button = commands
-        .spawn((
-            Button,
-            TabIndex(tab_index),
-            action,
-            Node {
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(BUTTON_BORDER),
-            BackgroundColor(BUTTON_BACKGROUND),
-            Pickable::default(),
-            Name::new(format!("about-land-button:{label_key}")),
-            ChildOf(parent),
-        ))
-        .observe(on_about_land_action)
-        .id();
+    let button = spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(
+            UiLabel::key(label_key),
+            format!("about-land-button:{label_key}"),
+        )
+        .tab_index(tab_index)
+        .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
+        .label_color(LABEL_COLOR)
+        .font_size(FONT_SIZE),
+    )
+    .button;
+    commands.entity(button).insert(action);
     if write {
         commands.entity(button).insert(WriteButton);
     }
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(FONT_SIZE),
-        TextColor(LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(button),
-    ));
+    commands.entity(button).observe(on_about_land_action);
     button
 }
 
@@ -4279,9 +4270,8 @@ fn set_value_node(
 ) {
     if let Some(node) = node
         && let Ok((mut text, _color)) = texts.get_mut(node)
-        && text.0 != value
     {
-        value.clone_into(&mut text.0);
+        set_text(&mut text, value);
     }
 }
 

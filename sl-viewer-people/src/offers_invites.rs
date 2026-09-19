@@ -85,6 +85,7 @@ use crate::notifications::{NotificationKind, NotificationManager, NotificationPr
 use crate::ui::{column, row};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
+use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 
 /// The catalogue-template sentinel an inventory-offer card reports as. Like the
 /// sibling bespoke cards these are not real [`crate::notifications::NOTIFICATIONS`]
@@ -1072,27 +1073,23 @@ fn spawn_action_button(
     border: Color,
     tab: i32,
 ) -> Entity {
-    commands
-        .spawn((
-            Button,
-            TabIndex(tab),
-            Node {
-                padding: UiRect::axes(Val::Px(10.0), Val::Px(5.0)),
-                border: UiRect::all(Val::Px(2.0)),
-                ..default()
-            },
-            BackgroundColor(BUTTON_BACKGROUND),
-            BorderColor::all(border),
-            ClassList::new_with_classes([BUTTON_CLASS]),
-            Name::new(format!("offer-invite-action:{label}")),
-            ChildOf(parent),
-        ))
-        .with_child((
-            Text::new(label.to_owned()),
-            UiFont::Sans.at(FONT_SIZE),
-            TextColor(TEXT_COLOR),
-        ))
-        .id()
+    ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(
+            UiLabel::literal(label),
+            format!("offer-invite-action:{label}"),
+        )
+        .kind(ButtonKind::Headless)
+        .tab_index(tab)
+        .padding(10.0, 5.0)
+        .border(2.0)
+        .colors(BUTTON_BACKGROUND, border)
+        .label_color(TEXT_COLOR)
+        .font_size(FONT_SIZE)
+        .class(BUTTON_CLASS),
+    )
+    .button
 }
 
 /// Spawn the close (×) button in a top-trailing row, returning its box for the

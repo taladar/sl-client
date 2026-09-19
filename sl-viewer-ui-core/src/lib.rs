@@ -13,7 +13,11 @@
 //!   emoji font is bundled because the system one is usually COLRv1, which
 //!   swash cannot rasterise; the rest are bundled so text renders identically
 //!   on a host with no fonts installed.
-//! - [`ui_text`], [`virtual_list`] — text nodes and a windowed list.
+//! - [`ui_text`], [`virtual_list`] — text nodes and a windowed list, plus the
+//!   one guarded [`ui_text::set_text`] every panel re-binds its rows through.
+//! - [`ui_spawn`] — the three shapes a panel assembles its chrome from (a push
+//!   button, a labelled row, a label), which were reimplemented in a dozen
+//!   crates before they lived here.
 //! - [`ui_format`] — how a value reads in a cell (a duration in mixed units,
 //!   `humantime`-style), pure and shared by whichever panels show the same kind
 //!   of number.
@@ -48,5 +52,6 @@ pub mod ui_font;
 pub mod ui_format;
 pub mod ui_pseudoloc;
 pub mod ui_sounds;
+pub mod ui_spawn;
 pub mod ui_text;
 pub mod virtual_list;

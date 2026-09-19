@@ -69,11 +69,13 @@ use crate::settings::{ViewerSettings, load_account_settings};
 use crate::social::{FriendRow, FriendsModel, short_id};
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
+use crate::ui_spawn::{self, ButtonSpec, UiLabel};
 use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab_strip};
 use crate::ui_table::{
     TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableSelectionMode, TableSpec,
     TableState, register_table_settings, spawn_table, spawn_table_row,
 };
+use crate::ui_text::set_text;
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 
 /// A friend-list row's uniform height, in logical pixels — matched to the
@@ -1745,107 +1747,88 @@ fn spawn_action_button(
     actions: Entity,
     action: FriendAction,
 ) -> FriendActionButton {
-    let label = commands
-        .spawn((
-            Text::new(String::new()),
-            UiFont::Sans.at(CHROME_FONT_SIZE),
-            TextColor(LABEL_COLOR),
-            Translated::new(action.label_key()),
-            Pickable::IGNORE,
-        ))
-        .id();
-    let button = commands
-        .spawn((
-            Node {
-                flex_shrink: 0.0,
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            BackgroundColor(ACTION_BACKGROUND),
-            Pickable {
-                should_block_lower: true,
-                is_hoverable: true,
-            },
-            Name::new("people-friends-action"),
-            ChildOf(actions),
-        ))
-        .add_child(label)
-        .observe(
-            move |mut press: On<Pointer<Press>>,
-                  selected: Res<SelectedFriend>,
-                  view: Res<FriendsView>,
-                  model: Res<FriendsModel>,
-                  mut sl: MessageWriter<SlCommand>,
-                  mut blocks: MessageWriter<RequestBlock>,
-                  mut conferences: MessageWriter<StartConference>,
-                  mut profiles: MessageWriter<OpenAvatarProfile>| {
-                press.propagate(false);
-                if press.button != PointerButton::Primary {
-                    return;
+    let spawned = ui_spawn::spawn_button(
+        commands,
+        actions,
+        ButtonSpec::flat(UiLabel::key(action.label_key()), "people-friends-action")
+            .colors(ACTION_BACKGROUND, ACTION_BACKGROUND)
+            .label_color(LABEL_COLOR)
+            .font_size(CHROME_FONT_SIZE),
+    );
+    let (button, label) = (spawned.button, spawned.label);
+    commands.entity(button).observe(
+        move |mut press: On<Pointer<Press>>,
+              selected: Res<SelectedFriend>,
+              view: Res<FriendsView>,
+              model: Res<FriendsModel>,
+              mut sl: MessageWriter<SlCommand>,
+              mut blocks: MessageWriter<RequestBlock>,
+              mut conferences: MessageWriter<StartConference>,
+              mut profiles: MessageWriter<OpenAvatarProfile>| {
+            press.propagate(false);
+            if press.button != PointerButton::Primary {
+                return;
+            }
+            let friends = selected.all();
+            let Some(primary) = selected.primary() else {
+                return;
+            };
+            // A greyed button must really be inert: Bevy's disabled marker is
+            // advisory, so the refusal lives here and the greying in
+            // `refresh_friend_actions` reads the same predicate.
+            if !friend_action_enabled(action, friends, &view) {
+                return;
+            }
+            match action {
+                // One row is an IM, several are one ad-hoc conference —
+                // the reference's own count branch, made by the shared
+                // verb rather than here.
+                FriendAction::Im => {
+                    conferences.write(StartConference::with(
+                        friends.iter().copied().map(AgentKey::from).collect(),
+                    ));
                 }
-                let friends = selected.all();
-                let Some(primary) = selected.primary() else {
-                    return;
-                };
-                // A greyed button must really be inert: Bevy's disabled marker is
-                // advisory, so the refusal lives here and the greying in
-                // `refresh_friend_actions` reads the same predicate.
-                if !friend_action_enabled(action, friends, &view) {
-                    return;
+                // A profile is one avatar's window, so it opens for the
+                // row the selection leads with.
+                FriendAction::Profile => {
+                    profiles.write(OpenAvatarProfile {
+                        agent: AgentKey::from(primary),
+                    });
                 }
-                match action {
-                    // One row is an IM, several are one ad-hoc conference —
-                    // the reference's own count branch, made by the shared
-                    // verb rather than here.
-                    FriendAction::Im => {
-                        conferences.write(StartConference::with(
-                            friends.iter().copied().map(AgentKey::from).collect(),
-                        ));
+                // Blocking is per resident, and each goes through the
+                // guarded request (which confirms before muting).
+                FriendAction::Block => {
+                    for friend in friends {
+                        let agent = AgentKey::from(*friend);
+                        let name = model.name_of(agent).unwrap_or_default().to_owned();
+                        blocks.write(RequestBlock::new(agent.uuid(), name, MuteType::Agent));
                     }
-                    // A profile is one avatar's window, so it opens for the
-                    // row the selection leads with.
-                    FriendAction::Profile => {
-                        profiles.write(OpenAvatarProfile {
-                            agent: AgentKey::from(primary),
-                        });
-                    }
-                    // Blocking is per resident, and each goes through the
-                    // guarded request (which confirms before muting).
-                    FriendAction::Block => {
-                        for friend in friends {
-                            let agent = AgentKey::from(*friend);
-                            let name = model.name_of(agent).unwrap_or_default().to_owned();
-                            blocks.write(RequestBlock::new(agent.uuid(), name, MuteType::Agent));
-                        }
-                    }
-                    // One offer names everyone it can reach — the message's
-                    // target is already a list, and the reference filters that
-                    // list to whoever can receive an offer rather than naming
-                    // offline friends the grid will drop.
-                    FriendAction::OfferTeleport => {
-                        sl.write(SlCommand(Command::OfferTeleport {
-                            targets: friends
-                                .iter()
-                                .copied()
-                                .filter(|friend| can_offer_teleport(*friend, &view))
-                                .map(AgentKey::from)
-                                .collect(),
-                            message: String::new(),
-                        }));
-                    }
-                    FriendAction::RemoveFriend => {
-                        for friend in friends {
-                            if let Some(command) = friend_command(action, *friend) {
-                                sl.write(SlCommand(command));
-                            }
+                }
+                // One offer names everyone it can reach — the message's
+                // target is already a list, and the reference filters that
+                // list to whoever can receive an offer rather than naming
+                // offline friends the grid will drop.
+                FriendAction::OfferTeleport => {
+                    sl.write(SlCommand(Command::OfferTeleport {
+                        targets: friends
+                            .iter()
+                            .copied()
+                            .filter(|friend| can_offer_teleport(*friend, &view))
+                            .map(AgentKey::from)
+                            .collect(),
+                        message: String::new(),
+                    }));
+                }
+                FriendAction::RemoveFriend => {
+                    for friend in friends {
+                        if let Some(command) = friend_command(action, *friend) {
+                            sl.write(SlCommand(command));
                         }
                     }
                 }
-            },
-        )
-        .id();
+            }
+        },
+    );
     FriendActionButton {
         action,
         button,
@@ -2731,14 +2714,6 @@ fn on_friend_row_press(
 /// The presence-dot glyph for an online / offline friend.
 const fn presence_glyph(online: bool) -> &'static str {
     if online { ONLINE_GLYPH } else { OFFLINE_GLYPH }
-}
-
-/// Set a text node's string only when it actually changed, so a re-bind of an
-/// unchanged row does not needlessly re-measure it.
-fn set_text(text: &mut Text, value: &str) {
-    if text.0 != value {
-        value.clone_into(&mut text.0);
-    }
 }
 
 #[cfg(test)]

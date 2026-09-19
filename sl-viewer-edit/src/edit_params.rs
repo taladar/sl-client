@@ -62,6 +62,7 @@ use crate::intents::{GroupPicked, OpenGroupPicker};
 use crate::social::GroupsModel;
 use crate::ui::{UiPanelShown, column, row};
 use crate::ui_font::UiFont;
+use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use crate::ui_text::set_editor_text;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, TextInputValue, spawn_text_input};
 use crate::world_api::AvatarState;
@@ -1077,38 +1078,36 @@ fn spawn_action_button(
 ) {
     let index = *tab_index;
     *tab_index = tab_index.saturating_add(1);
-    let button = commands
-        .spawn((
-            bevy::ui_widgets::Button,
-            bevy::input_focus::tab_navigation::TabIndex(index),
-            Node {
-                padding: UiRect::axes(Val::Px(10.0), Val::Px(2.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..row(Val::ZERO)
-            },
-            BorderColor::all(Color::srgba(0.4, 0.4, 0.45, 1.0)),
-            BackgroundColor(Color::srgba(0.18, 0.18, 0.2, 1.0)),
+    let button = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(
+            UiLabel::key(label_key),
+            format!("build-params:action:{label_key}"),
+        )
+        .kind(ButtonKind::Headless)
+        .tab_index(index)
+        .padding(10.0, 2.0)
+        .colors(
+            Color::srgba(0.18, 0.18, 0.2, 1.0),
+            Color::srgba(0.4, 0.4, 0.45, 1.0),
+        )
+        // A skinless fallback; the skin recolours via the class token.
+        .label_color(Color::WHITE)
+        .font_size(TOOL_FONT_SIZE)
+        .label_class(VALUE_CLASS),
+    )
+    .button;
+    commands
+        .entity(button)
+        .insert((
             action,
             match action {
                 ParamAction::Deed => ParamGate::Deed,
                 ParamAction::SetGroup => ParamGate::Selection,
             },
-            Pickable::default(),
-            Name::new(format!("build-params:action:{label_key}")),
-            ChildOf(parent),
         ))
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(TOOL_FONT_SIZE),
-        // A skinless fallback; the skin recolours via the class token.
-        TextColor(Color::WHITE),
-        ClassList::new_with_classes([VALUE_CLASS]),
-        Pickable::IGNORE,
-        ChildOf(button),
-    ));
-    commands.entity(button).observe(handle_action_press);
+        .observe(handle_action_press);
 }
 
 /// Spawn one read-only info row: a translated label plus the value text the

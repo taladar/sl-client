@@ -346,6 +346,7 @@ pub(crate) use sl_viewer_notices::ui_name_link;
 pub(crate) use sl_viewer_platform::ui_perf;
 pub(crate) use sl_viewer_ui_core::ui_font;
 pub(crate) use sl_viewer_ui_core::ui_sounds;
+pub(crate) use sl_viewer_ui_core::ui_spawn;
 pub(crate) use sl_viewer_ui_widgets::ui_radio;
 pub(crate) use sl_viewer_ui_widgets::ui_search;
 pub(crate) use sl_viewer_ui_widgets::ui_tab;

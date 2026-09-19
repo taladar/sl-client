@@ -43,6 +43,8 @@ pub(crate) use sl_viewer_ui_core::ui;
 pub(crate) use sl_viewer_ui_core::ui_font;
 pub(crate) use sl_viewer_ui_core::ui_format;
 pub(crate) use sl_viewer_ui_core::ui_sounds;
+pub(crate) use sl_viewer_ui_core::ui_spawn;
+pub(crate) use sl_viewer_ui_core::ui_text;
 pub(crate) use sl_viewer_ui_core::virtual_list;
 pub(crate) use sl_viewer_ui_widgets::floater;
 pub(crate) use sl_viewer_ui_widgets::ui_combo;

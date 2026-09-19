@@ -85,6 +85,7 @@ use sl_viewer_ui_core::ui::{
     LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row,
 };
 use sl_viewer_ui_core::ui_font::UiFont;
+use sl_viewer_ui_core::ui_text::set_node_text;
 use sl_viewer_ui_widgets::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterCommand, FloaterHandle, FloaterOp, FloaterSpec,
     FloaterSystems, spawn_floater,
@@ -2158,13 +2159,13 @@ fn sync_day_chrome(
             let readout = session.map_or_else(String::new, |session| {
                 time_label(&translator, session.position, day_length)
             });
-            set_text(&mut texts, ui.readout, &readout);
+            set_node_text(&mut texts, ui.readout, &readout);
         }
         if relocalised || shown_ticks != Some(day_length) {
             shown_ticks = Some(day_length);
             for (entity, tick) in &ticks {
                 let label = time_label(&translator, tick_fraction(tick.0), day_length);
-                set_text(&mut texts, Some(entity), &label);
+                set_node_text(&mut texts, Some(entity), &label);
             }
         }
 
@@ -2428,19 +2429,9 @@ fn retranslate(
     }
 }
 
-/// Write a one-line message into a text node, only when it would change.
-fn set_text(texts: &mut Query<&mut Text>, entity: Option<Entity>, message: &str) {
-    if let Some(entity) = entity
-        && let Ok(mut text) = texts.get_mut(entity)
-        && text.0 != message
-    {
-        message.clone_into(&mut text.0);
-    }
-}
-
 /// Write a one-line message into the window's status readout.
 fn set_status(texts: &mut Query<&mut Text>, status: Option<Entity>, message: &str) {
-    set_text(texts, status, message);
+    set_node_text(texts, status, message);
 }
 
 // ---------------------------------------------------------------------------

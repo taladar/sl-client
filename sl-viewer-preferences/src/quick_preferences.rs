@@ -59,6 +59,7 @@ use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_element::ElementCx;
 use crate::ui_font::UiFont;
 use crate::ui_slider::{SliderStyle, spawn_slider};
+use crate::ui_spawn::{self, UiLabel};
 use sl_viewer_ui_widgets::floater_persist::FloaterOpenExempt;
 
 /// The stable floater id (its geometry-persistence key and lookup handle).
@@ -892,14 +893,7 @@ fn spawn_env_combo_row(
 
 /// Spawn a row's translated label.
 fn spawn_label(commands: &mut Commands, parent: Entity, label_key: &'static str) {
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(FONT),
-        TextColor(LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(parent),
-    ));
+    ui_spawn::spawn_label(commands, parent, UiLabel::key(label_key), LABEL_COLOR, FONT);
 }
 
 /// Spawn a setting entry's row: a checkbox row or a slider row.

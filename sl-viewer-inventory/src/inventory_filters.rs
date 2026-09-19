@@ -31,6 +31,7 @@ use crate::floater::{
 use crate::i18n::Translated;
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
+use crate::ui_spawn::{self, ButtonSpec, UiLabel};
 
 /// The floater's [`crate::floater::FloaterSpec::id`].
 pub(crate) const FILTERS_FLOATER_ID: &str = "inventory-filters";
@@ -649,40 +650,30 @@ fn spawn_text_button(
     label_key: &'static str,
     tab_index: i32,
 ) -> Entity {
-    commands
-        .spawn((
-            Button,
-            TabIndex(tab_index),
-            Node {
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(BUTTON_BORDER),
-            BackgroundColor(BUTTON_BACKGROUND),
-            Pickable::default(),
-            Name::new(format!("inventory-filter-button:{label_key}")),
-            ChildOf(parent),
-        ))
-        .with_child((
-            Text::default(),
-            Translated::new(label_key),
-            UiFont::Sans.at(FILTER_FONT_SIZE),
-            TextColor(LABEL_COLOR),
-            Pickable::IGNORE,
-        ))
-        .id()
+    ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(
+            UiLabel::key(label_key),
+            format!("inventory-filter-button:{label_key}"),
+        )
+        .tab_index(tab_index)
+        .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
+        .label_color(LABEL_COLOR)
+        .font_size(FILTER_FONT_SIZE),
+    )
+    .button
 }
 
 /// Spawn a plain translated label.
 fn spawn_label(commands: &mut Commands, parent: Entity, label_key: &'static str) {
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(FILTER_FONT_SIZE),
-        TextColor(LABEL_COLOR),
-        ChildOf(parent),
-    ));
+    ui_spawn::spawn_label(
+        commands,
+        parent,
+        UiLabel::key(label_key),
+        LABEL_COLOR,
+        FILTER_FONT_SIZE,
+    );
 }
 
 /// Fold the hours / days numeric fields into the state when they change.

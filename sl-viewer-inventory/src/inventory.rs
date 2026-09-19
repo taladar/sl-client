@@ -60,6 +60,7 @@ use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab_strip};
+use crate::ui_text::set_text;
 use crate::virtual_list::{
     VirtualList, VirtualRow, VirtualViewport, amend_row_node, index_to_f32, layout_virtual_lists,
 };
@@ -3678,14 +3679,6 @@ fn end_inline_rename(
         && let Ok(mut label) = nodes.get_mut(parts.label)
     {
         label.display = Display::Flex;
-    }
-}
-
-/// Set a text node's string only when it actually changed, so a re-bind of an
-/// unchanged row does not needlessly re-measure it.
-fn set_text(text: &mut Text, value: &str) {
-    if text.0 != value {
-        value.clone_into(&mut text.0);
     }
 }
 

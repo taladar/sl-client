@@ -39,7 +39,7 @@ use sl_client_bevy::{
 
 use crate::gpu_pick::{GpuPickResolved, GpuPicker, PICK_HZ, PickPurpose, PickResolution};
 use crate::hud_pick::HudRayCast;
-use sl_viewer_social::GroupsModel;
+use sl_viewer_social::{GroupsModel, short_id};
 use sl_viewer_ui_core::i18n::Translator;
 use sl_viewer_world_api::AvatarState;
 use sl_viewer_world_api::ObjectState;
@@ -356,11 +356,6 @@ impl HoverNames<'_> {
             }
         }
     }
-}
-
-/// The leading fragment of a UUID, for a not-yet-resolved name fallback.
-fn short_id(id: Uuid) -> String {
-    id.to_string().chars().take(8).collect()
 }
 
 /// One object's tooltip extras — the reference's advanced-tooltip prim count,

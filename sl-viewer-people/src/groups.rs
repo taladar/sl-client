@@ -47,15 +47,17 @@
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
-use sl_client_bevy::{Command, GroupKey, SlCommand, SlEvent, SlSessionEvent, Uuid};
+use sl_client_bevy::{Command, GroupKey, SlCommand, SlEvent, SlSessionEvent};
 
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::intents::OpenGroupProfile;
 use crate::intents::{ConversationKey, OpenConversation};
 use crate::people::PeopleUi;
-use crate::social::{GroupChoice, GroupRow, GroupsModel};
+use crate::social::{GroupChoice, GroupRow, GroupsModel, short_id};
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
+use crate::ui_spawn::{self, ButtonSpec, UiLabel};
+use crate::ui_text::set_text;
 use crate::virtual_list::{
     VirtualList, VirtualRow, VirtualViewport, amend_row_node, layout_virtual_lists,
 };
@@ -160,12 +162,6 @@ const LEAVE_CONFIRM_NO_KEY: &str = "groups-leave-confirm-no";
 // ---------------------------------------------------------------------------
 // Pure model
 // ---------------------------------------------------------------------------
-
-/// A short, readable stand-in for a group with no name yet — its first eight hex
-/// digits (mirrors [`crate::people`]'s placeholder).
-fn short_id(id: Uuid) -> String {
-    id.simple().to_string().chars().take(8).collect()
-}
 
 // ---------------------------------------------------------------------------
 // Row actions
@@ -552,86 +548,67 @@ fn spawn_action_button(
     actions: Entity,
     action: GroupAction,
 ) -> ActionButton {
-    let label = commands
-        .spawn((
-            Text::new(String::new()),
-            UiFont::Sans.at(CHROME_FONT_SIZE),
-            TextColor(LABEL_COLOR),
-            Translated::new(action.label_key()),
-            Pickable::IGNORE,
-        ))
-        .id();
-    let button = commands
-        .spawn((
-            Node {
-                flex_shrink: 0.0,
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            BackgroundColor(ACTION_BACKGROUND),
-            Pickable {
-                should_block_lower: true,
-                is_hoverable: true,
-            },
-            Name::new("groups-action"),
-            ChildOf(actions),
-        ))
-        .add_child(label)
-        .observe(
-            move |mut press: On<Pointer<Press>>,
-                  selected: Res<SelectedGroup>,
-                  view: Res<GroupsView>,
-                  mut pending: ResMut<PendingLeaveConfirm>,
-                  mut sl: MessageWriter<SlCommand>,
-                  mut open: MessageWriter<OpenConversation>,
-                  mut profile: MessageWriter<OpenGroupProfile>| {
-                press.propagate(false);
-                if press.button != PointerButton::Primary {
-                    return;
-                }
-                let Some(choice) = selected.0 else {
-                    return;
-                };
-                // A greyed button must really be inert: Bevy's disabled marker is
-                // advisory, so the refusal lives here and the greying in
-                // `refresh_group_actions` reads from the same predicate.
-                if !action_enabled(action, Some(choice), &view) {
-                    return;
-                }
-                match action {
-                    // Info opens the subject-bound group profile floater.
-                    GroupAction::Info => {
-                        if let GroupChoice::Group(group) = choice {
-                            profile.write(OpenGroupProfile { group });
-                        }
-                    }
-                    // IM opens (and joins) the group's chat tab. Mirrors the
-                    // Friends list's IM, which opens a one-to-one tab.
-                    GroupAction::Im => {
-                        if let GroupChoice::Group(group) = choice {
-                            open_group_im(group, &mut open, &mut sl);
-                        }
-                    }
-                    // Leaving is destructive — open the confirm modal instead of
-                    // sending straight away.
-                    GroupAction::Leave => {
-                        if let GroupChoice::Group(group) = choice {
-                            pending.0 = Some(group);
-                        }
-                    }
-                    // Activate fires immediately — including for the "no group"
-                    // row, which is what takes the title off.
-                    GroupAction::Activate => {
-                        if let Some(command) = group_command(action, choice) {
-                            sl.write(SlCommand(command));
-                        }
+    let spawned = ui_spawn::spawn_button(
+        commands,
+        actions,
+        ButtonSpec::flat(UiLabel::key(action.label_key()), "groups-action")
+            .colors(ACTION_BACKGROUND, ACTION_BACKGROUND)
+            .label_color(LABEL_COLOR)
+            .font_size(CHROME_FONT_SIZE),
+    );
+    let (button, label) = (spawned.button, spawned.label);
+    commands.entity(button).observe(
+        move |mut press: On<Pointer<Press>>,
+              selected: Res<SelectedGroup>,
+              view: Res<GroupsView>,
+              mut pending: ResMut<PendingLeaveConfirm>,
+              mut sl: MessageWriter<SlCommand>,
+              mut open: MessageWriter<OpenConversation>,
+              mut profile: MessageWriter<OpenGroupProfile>| {
+            press.propagate(false);
+            if press.button != PointerButton::Primary {
+                return;
+            }
+            let Some(choice) = selected.0 else {
+                return;
+            };
+            // A greyed button must really be inert: Bevy's disabled marker is
+            // advisory, so the refusal lives here and the greying in
+            // `refresh_group_actions` reads from the same predicate.
+            if !action_enabled(action, Some(choice), &view) {
+                return;
+            }
+            match action {
+                // Info opens the subject-bound group profile floater.
+                GroupAction::Info => {
+                    if let GroupChoice::Group(group) = choice {
+                        profile.write(OpenGroupProfile { group });
                     }
                 }
-            },
-        )
-        .id();
+                // IM opens (and joins) the group's chat tab. Mirrors the
+                // Friends list's IM, which opens a one-to-one tab.
+                GroupAction::Im => {
+                    if let GroupChoice::Group(group) = choice {
+                        open_group_im(group, &mut open, &mut sl);
+                    }
+                }
+                // Leaving is destructive — open the confirm modal instead of
+                // sending straight away.
+                GroupAction::Leave => {
+                    if let GroupChoice::Group(group) = choice {
+                        pending.0 = Some(group);
+                    }
+                }
+                // Activate fires immediately — including for the "no group"
+                // row, which is what takes the title off.
+                GroupAction::Activate => {
+                    if let Some(command) = group_command(action, choice) {
+                        sl.write(SlCommand(command));
+                    }
+                }
+            }
+        },
+    );
     ActionButton {
         action,
         button,
@@ -1166,14 +1143,6 @@ fn on_group_row_press(
     } else {
         click.tracker.group = Some(choice);
         click.tracker.time = now;
-    }
-}
-
-/// Set a text node's string only when it actually changed, so a re-bind of an
-/// unchanged row does not needlessly re-measure it.
-fn set_text(text: &mut Text, value: &str) {
-    if text.0 != value {
-        value.clone_into(&mut text.0);
     }
 }
 

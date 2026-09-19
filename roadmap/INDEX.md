@@ -12,12 +12,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 308 |
+| ready | 306 |
 | blocked | 41 |
 | in-progress | 22 |
 | bugs | 5 |
-| done | 1187 |
-| deferred | 28 |
+| done | 1188 |
+| deferred | 29 |
 | wont-do | 16 |
 | **total** | **1707** |
 
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (308)
+## ready (306)
 
 ### protocol
 
@@ -273,8 +273,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
-- [`build-audit-ci-pipeline`](ready/build-audit-ci-pipeline.md) — There is no CI
-  — every quality gate is a local pre-commit hook
 - [`viewer-360-snapshot`](ready/viewer-360-snapshot.md) — 360-degree
   (equirectangular) snapshot
 - [`viewer-about-land-objects-return`](ready/viewer-about-land-objects-return.md)
@@ -337,8 +335,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   reimplements TableSortState
 - [`viewer-audit-ui-core-sound-coupling`](ready/viewer-audit-ui-core-sound-coupling.md)
   — Three lines in ui_sounds.rs put the protocol stack behind 22 crates
-- [`viewer-audit-ui-spawn-helper-consolidation`](ready/viewer-audit-ui-spawn-helper-consolidation.md)
-  — The same widget spawn helpers are reimplemented in five to seven crates
 - [`viewer-audit-web-auth-preference`](ready/viewer-audit-web-auth-preference.md)
   — Whether the grid session cookie is injected into the browser is a CLI flag,
   not a preference
@@ -1169,7 +1165,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 
-## done (1187)
+## done (1188)
 
 ### protocol
 
@@ -1554,6 +1550,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   unbounded
 - [`viewer-audit-tonemap-legacy-sky`](done/viewer-audit-tonemap-legacy-sky.md) —
   ACES tonemapping is applied to legacy skies the reference exempts
+- [`viewer-audit-ui-spawn-helper-consolidation`](done/viewer-audit-ui-spawn-helper-consolidation.md)
+  — The same widget spawn helpers are reimplemented in five to seven crates
 - [`viewer-audit-ui-texture-poll-leak`](done/viewer-audit-ui-texture-poll-leak.md)
   — Eight copied texture-poll systems each leak Image assets for the session
 - [`viewer-audit-ui-widget-per-frame-writes`](done/viewer-audit-ui-widget-per-frame-writes.md)
@@ -3775,7 +3773,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Fake grid — a top-objects report with rows in it, and a return that finds
   them
 
-## deferred (28)
+## deferred (29)
 
 ### protocol
 
@@ -3784,6 +3782,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`build-audit-ci-pipeline`](deferred/build-audit-ci-pipeline.md) — There is no
+  CI — every quality gate is a local pre-commit hook
 - [`viewer-attachment-menu-reorder-when-implemented`](deferred/viewer-attachment-menu-reorder-when-implemented.md)
   — Re-lay the attachment pies by meaning once most actions are implemented
   (blocked by `viewer-attachment-context-menu` (done))

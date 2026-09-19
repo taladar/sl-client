@@ -67,6 +67,7 @@ use crate::textures::{
 };
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
+use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use crate::ui_text::set_editor_text;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::ui_texture_picker::{
@@ -974,32 +975,24 @@ fn spawn_action_button(
     label_key: &'static str,
     tab_index: i32,
 ) -> Entity {
-    let button = commands
-        .spawn((
-            bevy::ui_widgets::Button,
-            bevy::input_focus::tab_navigation::TabIndex(tab_index),
-            Node {
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(2.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..crate::ui::row(Val::ZERO)
-            },
-            BorderColor::all(Color::srgba(0.4, 0.4, 0.45, 1.0)),
-            BackgroundColor(Color::srgba(0.18, 0.18, 0.2, 1.0)),
-            Pickable::default(),
-            MatControl,
-            Name::new(format!("build-pbr:{label_key}")),
-            ChildOf(parent),
-        ))
-        .id();
-    commands.spawn((
-        Text::default(),
-        crate::i18n::Translated::new(label_key),
-        crate::ui_font::UiFont::Sans.at(TOOL_FONT_SIZE),
-        TextColor(Color::WHITE),
-        bevy_flair::style::components::ClassList::new_with_classes([VALUE_CLASS]),
-        Pickable::IGNORE,
-        ChildOf(button),
-    ));
+    let button = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(UiLabel::key(label_key), format!("build-pbr:{label_key}"))
+            .kind(ButtonKind::Headless)
+            .tab_index(tab_index)
+            .padding(8.0, 2.0)
+            .colors(
+                Color::srgba(0.18, 0.18, 0.2, 1.0),
+                Color::srgba(0.4, 0.4, 0.45, 1.0),
+            )
+            // A skinless fallback; the skin recolours via the class token.
+            .label_color(Color::WHITE)
+            .font_size(TOOL_FONT_SIZE)
+            .label_class(VALUE_CLASS),
+    )
+    .button;
+    commands.entity(button).insert(MatControl);
     button
 }
 

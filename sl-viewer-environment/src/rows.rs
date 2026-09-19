@@ -13,7 +13,6 @@
 //! without a line of code. What a window keeps for itself is the component
 //! naming its own knob, which is what its write-back and its re-seed query on.
 
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui_widgets::{Slider, SliderRange, SliderStep, SliderValue};
 use sl_client_bevy::TextureKey;
@@ -21,6 +20,7 @@ use sl_viewer_pickers::ui_texture_picker::spawn_texture_swatch;
 use sl_viewer_ui_core::i18n::Translated;
 use sl_viewer_ui_core::ui::{column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
+use sl_viewer_ui_core::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use sl_viewer_ui_widgets::ui_color_picker::spawn_color_swatch;
 use sl_viewer_ui_widgets::ui_slider::{SliderStyle, SliderWidgetPlugin, spawn_slider};
 use sl_viewer_ui_widgets::ui_trackball::{TrackballAim, TrackballPlugin, spawn_trackball};
@@ -331,29 +331,26 @@ pub fn spawn_action_button(
     label_key: String,
     tab: &mut i32,
 ) -> Entity {
-    let button = commands
-        .spawn((
-            Button,
-            TabIndex(*tab),
-            Node {
-                padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
-                align_self: AlignSelf::FlexStart,
-                ..Default::default()
-            },
-            BackgroundColor(ACTION_BACKGROUND),
-            Name::new(format!("{element}-{slug}:button")),
-            ChildOf(parent),
-        ))
-        .with_child((
-            Text::new(String::new()),
-            UiFont::Sans.at(FONT_SIZE),
-            TextColor(LABEL_COLOR),
-            Translated::new(label_key),
-            Pickable::IGNORE,
-        ))
-        .id();
-    *tab = tab.saturating_add(1);
-    button
+    ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::flat(UiLabel::Key(label_key), format!("{element}-{slug}:button"))
+            .kind(ButtonKind::Interaction)
+            .tab_from(tab)
+            .padding(10.0, 4.0)
+            .colors(ACTION_BACKGROUND, ACTION_BACKGROUND)
+            .label_color(LABEL_COLOR)
+            .font_size(FONT_SIZE)
+            .layout(|node| {
+                node.align_self = AlignSelf::FlexStart;
+                // The flat shape centres its caption; this one is a lone
+                // button in a column and simply hugs the leading edge.
+                node.align_items = AlignItems::default();
+                node.justify_content = JustifyContent::default();
+                node.flex_shrink = 1.0;
+            }),
+    )
+    .button
 }
 
 /// What [`paint_action_button`] writes through: a button's own background, its

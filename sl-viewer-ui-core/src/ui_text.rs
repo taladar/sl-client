@@ -291,6 +291,37 @@ pub fn apply_text_demo_visibility(
     }
 }
 
+/// Write `value` into a [`Text`] node, **only when it would change**.
+///
+/// The guard is the point. A panel re-binds its rows whenever its model
+/// updates, and most of those rows say the same thing they said last frame;
+/// writing the same string back still marks `Text` changed, which re-measures
+/// the node and re-runs layout for nothing. This was written six times across
+/// the viewer, and one of the six had lost the guard — hence one shared copy.
+pub fn set_text(text: &mut Text, value: &str) {
+    if text.0 != value {
+        value.clone_into(&mut text.0);
+    }
+}
+
+/// Write `value` into the [`Text`] of `node`, only when it would change.
+///
+/// [`set_text`] for a panel holding a query rather than the component: the node
+/// may be `None` (a row the panel has not built yet) and may have been
+/// despawned, and both are ordinary rather than an error — a refresh that runs
+/// before its panel is built has nothing to write to.
+pub fn set_node_text<F: bevy::ecs::query::QueryFilter>(
+    texts: &mut Query<&mut Text, F>,
+    node: impl Into<Option<Entity>>,
+    value: &str,
+) {
+    if let Some(node) = node.into()
+        && let Ok(mut text) = texts.get_mut(node)
+    {
+        set_text(&mut text, value);
+    }
+}
+
 /// Programmatically replace an [`EditableText`]'s content: parley `set_text`
 /// plus a layout refresh and caret-to-end, the same sequence the numeric
 /// fields revert with.

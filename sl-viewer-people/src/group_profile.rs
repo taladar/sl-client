@@ -73,6 +73,7 @@ use crate::settings::ViewerSettings;
 use crate::social::GroupsModel;
 use crate::ui::{column, row};
 use crate::ui_font::UiFont;
+use crate::ui_spawn::{self, ButtonSpec, LabeledRowSpec, UiLabel};
 use crate::ui_tab::{
     DEFAULT_ELLIPSIS, TabContainerHandle, TabPlacement, TabSpec, fill_tab_container,
     spawn_tab_container,
@@ -82,6 +83,7 @@ use crate::ui_table::{
     TableSortDefault, TableSortKey, TableSpec, TableState, register_table_settings, set_table_cell,
     spawn_table, spawn_table_row,
 };
+use crate::ui_text::set_text;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 use crate::world_api::AvatarState;
@@ -1596,7 +1598,6 @@ fn build_general_tab(
     )>,
     avatars: Res<AvatarState>,
     groups: Res<GroupsModel>,
-    children: Query<&Children>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
     mut commands: Commands,
 ) {
@@ -1643,7 +1644,7 @@ fn build_general_tab(
         // (Re)build the structure only when the layout could differ — first profile,
         // or a powers/membership change on a re-fetch (both rare and user-paced).
         if ui.general_sig != Some(sig) {
-            despawn_children(&children, &mut commands, panel);
+            commands.entity(panel).despawn_related::<Children>();
             ui.charter_field = None;
             ui.fee_field = None;
             ui.general_handles = GeneralHandles::default();
@@ -2087,7 +2088,6 @@ fn rebuild_details_area(
         &mut GroupProfileUi,
     )>,
     avatars: Res<AvatarState>,
-    children: Query<&Children>,
     mut commands: Commands,
 ) {
     for (state, mut dirty, mut ui) in &mut windows {
@@ -2102,7 +2102,7 @@ fn rebuild_details_area(
         }
         ui.details_built = Some(state.focus);
         let area = ui.details_area;
-        despawn_children(&children, &mut commands, area);
+        commands.entity(area).despawn_related::<Children>();
         ui.role_name_field = None;
         ui.role_title_field = None;
         ui.role_desc_field = None;
@@ -2297,7 +2297,6 @@ fn rebuild_compose_area(
         &mut GroupProfileDirty,
         &mut GroupProfileUi,
     )>,
-    children: Query<&Children>,
     mut commands: Commands,
 ) {
     for (state, mut dirty, mut ui) in &mut windows {
@@ -2312,7 +2311,7 @@ fn rebuild_compose_area(
         }
         ui.compose_can_send = Some(can_send);
         let area = ui.compose_area;
-        despawn_children(&children, &mut commands, area);
+        commands.entity(area).despawn_related::<Children>();
         ui.notice_subject_field = None;
         ui.notice_message_field = None;
         if !can_send {
@@ -2361,7 +2360,6 @@ fn rebuild_notice_body(
         &mut GroupProfileDirty,
         &mut GroupProfileUi,
     )>,
-    children: Query<&Children>,
     mut commands: Commands,
 ) {
     for (state, mut dirty, mut ui) in &mut windows {
@@ -2381,7 +2379,7 @@ fn rebuild_notice_body(
         }
         ui.notice_body_built = Some(sig);
         let area = ui.notice_body_area;
-        despawn_children(&children, &mut commands, area);
+        commands.entity(area).despawn_related::<Children>();
         let Some(index) = state.selected_notice else {
             spawn_key_label(&mut commands, area, "group-notice-hint", DIM_LABEL_COLOR);
             continue;
@@ -2993,25 +2991,15 @@ fn spawn_insignia(commands: &mut Commands, parent: Entity, insignia_id: Option<T
 
 /// A labelled row: the translated label leading, the caller's content after.
 fn spawn_labeled_row(commands: &mut Commands, parent: Entity, label_key: &'static str) -> Entity {
-    let row_entity = commands
-        .spawn((
-            Node {
-                align_items: AlignItems::Center,
-                flex_wrap: FlexWrap::Wrap,
-                ..row(Val::Px(6.0))
-            },
-            ChildOf(parent),
-        ))
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(FONT_SIZE),
-        TextColor(DIM_LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(row_entity),
-    ));
-    row_entity
+    ui_spawn::spawn_labeled_row(
+        commands,
+        parent,
+        LabeledRowSpec::new(UiLabel::key(label_key))
+            .label_color(DIM_LABEL_COLOR)
+            .font_size(FONT_SIZE)
+            .wrap(),
+    )
+    .row
 }
 
 /// A translated section label on its own line.
@@ -3039,14 +3027,7 @@ fn spawn_value_label(commands: &mut Commands, parent: Entity, value: String, col
 
 /// A translated label.
 fn spawn_key_label(commands: &mut Commands, parent: Entity, key: &'static str, color: Color) {
-    commands.spawn((
-        Text::default(),
-        Translated::new(key),
-        UiFont::Sans.at(FONT_SIZE),
-        TextColor(color),
-        Pickable::IGNORE,
-        ChildOf(parent),
-    ));
+    ui_spawn::spawn_label(commands, parent, UiLabel::key(key), color, FONT_SIZE);
 }
 
 /// A wrapped read-only text block (charter, descriptions, notice bodies).
@@ -3091,32 +3072,23 @@ fn spawn_action_button(
     action: GroupProfileAction,
     tab_index: i32,
 ) {
-    let button = commands
-        .spawn((
-            Button,
-            TabIndex(tab_index),
-            action,
-            Node {
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(BUTTON_BORDER),
-            BackgroundColor(BUTTON_BACKGROUND),
-            Pickable::default(),
-            Name::new(format!("group-profile-button:{label_key}")),
-            ChildOf(parent),
-        ))
-        .observe(on_group_profile_action)
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(FONT_SIZE),
-        TextColor(LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(button),
-    ));
+    let button = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(
+            UiLabel::key(label_key),
+            format!("group-profile-button:{label_key}"),
+        )
+        .tab_index(tab_index)
+        .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
+        .label_color(LABEL_COLOR)
+        .font_size(FONT_SIZE),
+    )
+    .button;
+    commands
+        .entity(button)
+        .insert(action)
+        .observe(on_group_profile_action);
 }
 
 /// A borderless cycle button, returning the entity the caller labels.
@@ -3290,18 +3262,8 @@ fn set_value_node(
 ) {
     if let Some(node) = node
         && let Ok((mut text, _)) = texts.get_mut(node)
-        && text.0 != value
     {
-        value.clone_into(&mut text.0);
-    }
-}
-
-/// Despawn every child of `parent`.
-fn despawn_children(children: &Query<&Children>, commands: &mut Commands, parent: Entity) {
-    if let Ok(existing) = children.get(parent) {
-        for child in existing.iter().collect::<Vec<_>>() {
-            commands.entity(child).despawn();
-        }
+        set_text(&mut text, value);
     }
 }
 

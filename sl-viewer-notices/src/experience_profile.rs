@@ -85,6 +85,7 @@ use crate::ui::{column, row};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
 use crate::ui_name_link::{NameLink, NameLinkSpec, NameTarget, set_name_link, spawn_name_link};
+use crate::ui_text::set_node_text;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::world_api::AgentRegionPosition;
 
@@ -1357,7 +1358,7 @@ fn paint_profile_windows(
         state.painted = Some(state.revision);
         let seed = core::mem::take(&mut state.edit.seed);
         let info = state.info.as_ref();
-        set_text(
+        set_node_text(
             &mut texts,
             ui.name_text,
             &info.map_or_else(
@@ -1365,12 +1366,12 @@ fn paint_profile_windows(
                 |info| experience_display_name(info, &translator),
             ),
         );
-        set_text(
+        set_node_text(
             &mut texts,
             ui.description_text,
             info.map_or("", |info| info.description.as_str()),
         );
-        set_text(
+        set_node_text(
             &mut texts,
             ui.rating_text,
             &info.map_or_else(String::new, |info| {
@@ -1382,12 +1383,12 @@ fn paint_profile_windows(
             Some(ui.owner_link),
             NameTarget::from_option(info.is_some(), info.and_then(|info| info.owner)),
         );
-        set_text(
+        set_node_text(
             &mut texts,
             ui.location_text,
             &location_text(info.and_then(|info| info.slurl.as_ref()), &translator),
         );
-        set_text(
+        set_node_text(
             &mut texts,
             ui.scope_text,
             &info.map_or_else(String::new, |info| {
@@ -1413,7 +1414,7 @@ fn paint_profile_windows(
             set_label_enabled(&mut colors, action.label, !redundant);
         }
         show(&mut nodes, ui.edit_button, state.can_edit && !privileged);
-        set_text(
+        set_node_text(
             &mut texts,
             ui.status_text,
             &state
@@ -1440,13 +1441,13 @@ fn paint_profile_windows(
         {
             combo.active = state.edit.maturity;
         }
-        set_text(
+        set_node_text(
             &mut texts,
             ui.edit_location_text,
             &location_text(state.edit.location.as_ref(), &translator),
         );
-        set_text(&mut texts, ui.enable_glyph, glyph_for(state.edit.enabled));
-        set_text(&mut texts, ui.private_glyph, glyph_for(state.edit.private));
+        set_node_text(&mut texts, ui.enable_glyph, glyph_for(state.edit.enabled));
+        set_node_text(&mut texts, ui.private_glyph, glyph_for(state.edit.private));
     }
 }
 
@@ -1471,15 +1472,6 @@ fn location_text(slurl: Option<&url::Url>, translator: &Translator) -> String {
         || translator.get("experience-profile-location-none"),
         url::Url::to_string,
     )
-}
-
-/// Write a text node's value, only on a real change.
-fn set_text(texts: &mut Query<&mut Text>, entity: Entity, value: &str) {
-    if let Ok(mut text) = texts.get_mut(entity)
-        && text.0 != value
-    {
-        value.clone_into(&mut text.0);
-    }
 }
 
 /// Write an edit field's value, only on a real change (so a repaint never moves
