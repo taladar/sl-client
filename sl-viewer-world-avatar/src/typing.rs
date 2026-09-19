@@ -50,7 +50,7 @@ pub use sl_viewer_world_api::TypingState;
 use bevy::prelude::*;
 use sl_client_bevy::{AnimationKey, AssetKey, Command, SlCommand, SlIdentity};
 
-use sl_viewer_ui_core::ui_sounds::{PlayUiSound, UiSound};
+use sl_viewer_ui_sounds::ui_sounds::{PlayUiSound, UiSound};
 use sl_viewer_world_api::AvatarState;
 
 /// The short name of the built-in `ANIM_AGENT_TYPE` animation in the [`sl_anim`]

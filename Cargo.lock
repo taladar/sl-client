@@ -8590,6 +8590,7 @@ dependencies = [
  "sl-viewer-ui-context-menus",
  "sl-viewer-ui-core",
  "sl-viewer-ui-pie-menu",
+ "sl-viewer-ui-sounds",
  "sl-viewer-ui-widgets",
  "sl-viewer-world-api",
  "sl-viewer-world-avatar",
@@ -9441,6 +9442,7 @@ dependencies = [
  "sl-viewer-settings",
  "sl-viewer-social",
  "sl-viewer-ui-core",
+ "sl-viewer-ui-sounds",
  "sl-viewer-ui-widgets",
  "sl-viewer-world-api",
  "sl-viewer-world-avatar",
@@ -9485,6 +9487,7 @@ dependencies = [
  "sl-viewer-platform",
  "sl-viewer-social",
  "sl-viewer-ui-core",
+ "sl-viewer-ui-sounds",
  "sl-viewer-ui-widgets",
  "sl-viewer-world-api",
  "url",
@@ -9589,10 +9592,9 @@ dependencies = [
  "fs-err",
  "pretty_assertions",
  "sl-account-dirs",
- "sl-client-bevy",
  "sl-settings",
- "sl-viewer-platform",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -9663,11 +9665,8 @@ dependencies = [
  "fs-err",
  "parley",
  "pretty_assertions",
- "sl-audio",
- "sl-client-bevy",
  "sl-l10n",
  "sl-settings",
- "sl-viewer-platform",
  "sl-viewer-settings",
  "tracing",
  "unic-langid",
@@ -9680,6 +9679,21 @@ dependencies = [
  "bevy",
  "pretty_assertions",
  "sl-viewer-testkit",
+ "sl-viewer-ui-core",
+]
+
+[[package]]
+name = "sl-viewer-ui-sounds"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_flair",
+ "pretty_assertions",
+ "sl-audio",
+ "sl-client-bevy",
+ "sl-settings",
+ "sl-viewer-platform",
+ "sl-viewer-settings",
  "sl-viewer-ui-core",
 ]
 
@@ -9740,6 +9754,7 @@ dependencies = [
  "sl-viewer-social",
  "sl-viewer-testkit",
  "sl-viewer-ui-core",
+ "sl-viewer-ui-sounds",
  "sl-viewer-ui-widgets",
  "sl-viewer-world-api",
  "sl-viewer-world-objects",

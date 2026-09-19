@@ -9,10 +9,12 @@
 //! Two scopes are persisted, mirroring the reference viewer's `gSavedSettings` /
 //! `gSavedPerAccountSettings` split:
 //!
-//! - The [`Global`](Scope::Global) scope loads from and saves to the platform
-//!   config directory's `viewer-settings.toml` (`paths`).
+//! - The [`Global`](Scope::Global) scope loads from and saves to the file the
+//!   caller names ([`ViewerSettings::load_with`]); the viewer passes the
+//!   platform config directory's `viewer-settings.toml`.
 //! - The [`Account`](Scope::Account) scope is per-avatar: once the agent UUID is
-//!   known at login, [`load_account_settings`] resolves the avatar's directory
+//!   known at login (mirrored in as [`SettingsAgent`]),
+//!   [`load_account_settings`] resolves the avatar's directory
 //!   (keyed by grid + avatar name, with rename discovery — [`sl_account_dirs`])
 //!   and loads its `settings.toml`. It resolves over the global scope.
 //!
@@ -28,6 +30,13 @@
 //! [`env_pins`] records which of those settings a `SL_VIEWER_*` debug knob is
 //! currently holding, so the preferences control bound to one can say so
 //! instead of moving and doing nothing.
+//!
+//! Nearly every crate in the viewer reads a setting, so this crate is a floor
+//! the whole build stands on. It therefore names **no** runtime: the two facts
+//! it once reached into `sl-viewer-platform` and `sl-client-bevy` for — where
+//! the global file lives, and who is logged in — are handed to it by the
+//! composition root instead ([`ViewerSettings::load_with`] and
+//! [`SettingsAgent`]). Anything added here should keep that true.
 
 pub mod env_pins;
 pub mod keys;
@@ -38,9 +47,9 @@ use std::sync::Mutex;
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on};
-use sl_client_bevy::SlIdentity;
 use sl_settings::{Scope, SettingValue, SettingsStore};
 use tracing::{info, warn};
+use uuid::Uuid;
 
 /// The account-scope settings filename within a per-avatar account directory.
 const ACCOUNT_SETTINGS_FILE: &str = "settings.toml";
@@ -58,6 +67,22 @@ pub struct AccountContext {
     /// The readable avatar segment (from `sl_account_dirs::avatar_dir_name`).
     pub avatar: String,
 }
+
+/// The logged-in agent's UUID, once login has produced one — the post-login
+/// half of the identity [`AccountContext`] holds the pre-login half of, and the
+/// only fact [`load_account_settings`] needs from the protocol runtime.
+///
+/// The composition root mirrors it in here (the viewer's `mirror_agent_id`)
+/// rather than this crate reading the runtime's own `SlIdentity` resource.
+/// Naming that one type put `sl-proto`, `sl-wire`, `sl-asset`, `reqwest` and
+/// `tokio` underneath every crate that reads a setting — which is nearly every
+/// crate in the viewer — for a `Uuid`.
+///
+/// `None` until login, and the loader simply waits, so the mirror being a frame
+/// behind the runtime costs nothing: [`load_account_settings`] already runs
+/// every frame until it succeeds.
+#[derive(Debug, Resource, Default, Clone, Copy)]
+pub struct SettingsAgent(pub Option<Uuid>);
 
 /// The viewer's settings store, a Bevy resource.
 #[derive(Debug, Resource)]
@@ -422,8 +447,15 @@ impl ViewerSettings {
     /// Not a [`FromWorld`] initializer, because pre-app code (the login-request
     /// construction in `run_viewer`, which needs the stored start location
     /// before the Bevy [`World`] exists) reads the same store.
-    pub fn load_with(registrars: &[fn(&mut Self)]) -> Self {
-        let mut settings = Self::empty(sl_viewer_platform::paths::global_settings_file());
+    ///
+    /// `global_path` is where the global scope persists. The caller names it
+    /// (the viewer passes `sl_viewer_platform::paths::global_settings_file()`)
+    /// rather than this crate resolving it, because resolving it meant
+    /// depending on `sl-viewer-platform` for one call — and through it on the
+    /// audio engine and the whole protocol runtime, underneath every crate that
+    /// reads a setting.
+    pub fn load_with(global_path: PathBuf, registrars: &[fn(&mut Self)]) -> Self {
+        let mut settings = Self::empty(global_path);
         settings.run_registrars(registrars);
         settings.load_global();
         settings
@@ -503,7 +535,8 @@ pub struct SettingsPersistPlugin;
 
 impl Plugin for SettingsPersistPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, load_account_settings)
+        app.init_resource::<SettingsAgent>()
+            .add_systems(Update, load_account_settings)
             .add_systems(PostUpdate, flush_settings);
     }
 }
@@ -533,24 +566,19 @@ pub fn flush_settings(settings: Res<ViewerSettings>) {
 pub fn load_account_settings(
     mut settings: ResMut<ViewerSettings>,
     context: Res<AccountContext>,
-    identity: Res<SlIdentity>,
+    agent: Res<SettingsAgent>,
 ) {
     // Already loaded, not logged in yet, or no per-avatar directory available.
     if settings.account_path.is_some() {
         return;
     }
-    let Some(agent) = identity.agent_id else {
+    let Some(agent) = agent.0 else {
         return;
     };
     let Some(base) = context.accounts_base.clone() else {
         return;
     };
-    match sl_account_dirs::reconcile_account_dir(
-        &base,
-        &context.grid,
-        &context.avatar,
-        agent.uuid(),
-    ) {
+    match sl_account_dirs::reconcile_account_dir(&base, &context.grid, &context.avatar, agent) {
         Ok(dir) => {
             if let Some(collision) = dir.outcome.collision_warning(&context.avatar) {
                 warn!("settings: {collision}");
@@ -566,13 +594,17 @@ pub fn load_account_settings(
 
 #[cfg(test)]
 mod tests {
-    use super::{ACCOUNT_SETTINGS_FILE, ViewerSettings};
+    use super::{
+        ACCOUNT_SETTINGS_FILE, AccountContext, SettingsAgent, ViewerSettings, load_account_settings,
+    };
+    use bevy::prelude::*;
     use bevy::tasks::{IoTaskPool, TaskPool};
     use core::sync::atomic::{AtomicBool, Ordering};
     use pretty_assertions::assert_eq;
     use sl_settings::{Scope, SettingValue, SettingsStore};
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
+    use uuid::Uuid;
 
     /// A boxed error so tests can use `?` instead of the disallowed
     /// `unwrap` / `expect`.
@@ -884,6 +916,52 @@ mod tests {
         settings.save_async();
         settings.save();
         assert!(!settings.dirty.load(Ordering::Relaxed));
+        Ok(())
+    }
+
+    /// The account scope loads exactly when the agent UUID arrives — not
+    /// before — and lands under the configured accounts root.
+    ///
+    /// The loader used to read the agent id straight out of the protocol
+    /// runtime's `SlIdentity`. It reads the [`SettingsAgent`] mirror the
+    /// composition root fills instead, which is what keeps `sl-proto` and
+    /// `tokio` from sitting under every crate that reads a setting — so the two
+    /// states of that mirror, and what each does to the store, are pinned here.
+    #[test]
+    fn the_account_scope_loads_once_the_agent_id_arrives() -> Result<(), TestError> {
+        let base = tempdir("account-load")?;
+        let accounts = base.join("accounts");
+        let mut app = App::new();
+        app.insert_resource(ViewerSettings::empty(base.join("viewer-settings.toml")))
+            .insert_resource(AccountContext {
+                accounts_base: Some(accounts.clone()),
+                grid: "test.grid".to_owned(),
+                avatar: "avatar1".to_owned(),
+            })
+            .init_resource::<SettingsAgent>()
+            .add_systems(Update, load_account_settings);
+
+        // Pre-login: the mirror is empty, so the loader waits rather than
+        // resolving a directory for nobody.
+        app.update();
+        assert!(!app.world().resource::<ViewerSettings>().account_loaded());
+
+        // Login fills the mirror, and the next frame resolves and loads.
+        app.world_mut().resource_mut::<SettingsAgent>().0 = Some(Uuid::from_u128(0x5eed));
+        app.update();
+        let settings = app.world().resource::<ViewerSettings>();
+        assert!(settings.account_loaded());
+        let path = settings
+            .account_path
+            .as_deref()
+            .ok_or("account path unset after a successful load")?;
+        assert!(
+            path.starts_with(&accounts),
+            "account settings at {} are not under the accounts root {}",
+            path.display(),
+            accounts.display()
+        );
+        assert_eq!(path.file_name(), Some(ACCOUNT_SETTINGS_FILE.as_ref()));
         Ok(())
     }
 }

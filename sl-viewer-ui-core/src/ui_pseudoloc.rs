@@ -137,7 +137,7 @@ const fn accent(character: char) -> char {
 /// See the [module documentation](self) for why each of the three matters. The
 /// empty string is returned as a bare pair of fences — an empty label is still a
 /// label, and its fences still say whether it was clipped.
-pub fn pseudolocalise(text: &str) -> String {
+pub(crate) fn pseudolocalise(text: &str) -> String {
     let original: usize = text.chars().count();
     // Counted in `char`s, not bytes: the accented output is multi-byte, and a
     // byte-length target would over-pad by a factor of two on Latin text and do

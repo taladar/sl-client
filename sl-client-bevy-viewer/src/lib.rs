@@ -345,8 +345,8 @@ pub mod ui_elements;
 pub(crate) use sl_viewer_notices::ui_name_link;
 pub(crate) use sl_viewer_platform::ui_perf;
 pub(crate) use sl_viewer_ui_core::ui_font;
-pub(crate) use sl_viewer_ui_core::ui_sounds;
 pub(crate) use sl_viewer_ui_core::ui_spawn;
+pub(crate) use sl_viewer_ui_sounds::ui_sounds;
 pub(crate) use sl_viewer_ui_widgets::ui_radio;
 pub(crate) use sl_viewer_ui_widgets::ui_search;
 pub(crate) use sl_viewer_ui_widgets::ui_tab;
@@ -432,7 +432,9 @@ use crate::people::PeoplePlugin;
 use crate::script_dialog::ScriptDialogPlugin;
 use crate::script_permission::ScriptPermissionPlugin;
 use crate::session::PlayOnLogin;
-use crate::settings::{AccountContext, SettingsPersistPlugin, ViewerSettings};
+use crate::settings::{
+    AccountContext, SettingsAgent, SettingsPersistPlugin, ViewerSettings, load_account_settings,
+};
 use crate::settings_binding::SettingsBindingPlugin;
 use crate::settings_index::SettingsIndexPlugin;
 use crate::stand_stop_button::StandStopButtonPlugin;
@@ -1735,8 +1737,16 @@ fn run_session(
         // global overrides (e.g. SpaceNavigator sensitivities). `REGISTRARS` is the
         // binary's to hold — a store that named its own users would depend on all of
         // them — so the store is inserted here and only its *persistence* is a plugin.
-        .insert_resource(ViewerSettings::load_with(REGISTRARS))
+        .insert_resource(ViewerSettings::load_with(
+            crate::paths::global_settings_file(),
+            REGISTRARS,
+        ))
         .add_plugins(SettingsPersistPlugin)
+        // Hand the settings store the one runtime fact its account-scope loader
+        // needs. It reads this mirror rather than `SlIdentity` so that the
+        // protocol stack does not sit underneath every crate that reads a
+        // setting.
+        .add_systems(Update, mirror_agent_id.before(load_account_settings))
         // The debug camera override (`--camera-position` / `--camera-look-at` /
         // `--camera-spin`): `setup_scene` reads the start pose, `drive_flycam` reads
         // the spin, and third-person auto-follows when no pose is fixed. The world
@@ -1863,6 +1873,22 @@ fn run_session(
     }
 }
 
+/// Mirror the logged-in agent's UUID from the runtime's `SlIdentity` into
+/// [`SettingsAgent`], which is all `sl-viewer-settings`' account-scope loader
+/// needs to know about login.
+///
+/// The settings store is a floor nearly every crate in the viewer stands on, so
+/// it names no runtime: reading `SlIdentity` there put `sl-proto`, `sl-wire`,
+/// `sl-asset`, `reqwest` and `tokio` underneath all of them for one `Uuid`. The
+/// composition root is the one place that legitimately knows both sides, so the
+/// mirroring lives here.
+fn mirror_agent_id(identity: Res<sl_client_bevy::SlIdentity>, mut agent: ResMut<SettingsAgent>) {
+    let current = identity.agent_id.map(|id| id.uuid());
+    if agent.0 != current {
+        agent.0 = current;
+    }
+}
+
 /// Run the viewer end-to-end, restarting the windowed app once per MFA
 /// challenge with the acquired token folded in.
 ///
@@ -1889,7 +1915,10 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
     // read from a throwaway store load: the Bevy app — and with it the
     // `ViewerSettings` resource — does not exist yet at login-request time.
     let (start, stored_skin, stored_theme) = {
-        let settings = crate::settings::ViewerSettings::load_with(crate::REGISTRARS);
+        let settings = crate::settings::ViewerSettings::load_with(
+            crate::paths::global_settings_file(),
+            crate::REGISTRARS,
+        );
         // The network & cache tab's restart-scoped knobs (cache root and
         // size ceilings, chat-log root, HTTP proxy, a pending clear-cache
         // request) are consumed from this same pre-app load, before any
@@ -2104,7 +2133,10 @@ fn run_replay(options: &Options, bundle_dir: &Path) -> Result<(), Error> {
             selection: {
                 // The persisted skin choice dresses the replay UI too; the
                 // throwaway pre-app load is the `run_viewer` idiom.
-                let settings = crate::settings::ViewerSettings::load_with(crate::REGISTRARS);
+                let settings = crate::settings::ViewerSettings::load_with(
+                    crate::paths::global_settings_file(),
+                    crate::REGISTRARS,
+                );
                 let (stored_skin, stored_theme) =
                     crate::preferences_colors_skins::stored_skin_choice(&settings);
                 crate::skin::SkinSelection::resolve(

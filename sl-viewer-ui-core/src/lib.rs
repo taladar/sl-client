@@ -27,11 +27,15 @@
 //!   ([`ui_element::UiElement`], [`ui_element::ElementCx`]) plus the generic
 //!   spawners. The registry *of* elements lives in the binary crate, because it
 //!   names three dozen feature modules.
-//! - [`i18n`], [`ui_pseudoloc`] — Fluent lookup and the pseudo-localization
-//!   that makes an untranslated string obvious.
+//! - [`i18n`] — Fluent lookup, including the pseudo-localization (the private
+//!   `ui_pseudoloc`) that makes an untranslated string obvious.
 //! - [`skin`], [`skin_colors`] — the CSS skin system and the palette bridge
 //!   that feeds a skin's colours to the settings store as defaults.
-//! - [`ui_sounds`] — the UI's own sound effects.
+//!
+//! The UI's own **sound effects** used to be a module here. They are
+//! `sl-viewer-ui-sounds` now: three lines of them named the audio engine and
+//! the protocol runtime, and put both behind every crate that reads this
+//! vocabulary for `ui::column()`.
 
 #![expect(
     clippy::module_name_repetitions,
@@ -50,8 +54,7 @@ pub mod ui_element;
 pub mod ui_ellipsis;
 pub mod ui_font;
 pub mod ui_format;
-pub mod ui_pseudoloc;
-pub mod ui_sounds;
+pub(crate) mod ui_pseudoloc;
 pub mod ui_spawn;
 pub mod ui_text;
 pub mod virtual_list;

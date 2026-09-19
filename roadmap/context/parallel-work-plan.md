@@ -71,9 +71,14 @@ otherwise keep hitting.
   in the crate that calls them, so a radar, shadow-cull or map-math edit stops
   rebuilding the twenty-odd crates stacked above the kit to reach one caller.
   What is left there is shared vocabulary.
-- `viewer-audit-ui-core-sound-coupling` (three lines) — the last of the shared
-  hubs the world and UI agents both pull in, and **the next open item in this
-  section**.
+- ~~`viewer-audit-ui-core-sound-coupling`~~ — **done**, and it was not three
+  lines. `ui_sounds` is its own crate, but that on its own moved nothing:
+  `sl-viewer-settings` carried `sl-client-bevy` (and the whole protocol stack
+  behind it) back under ui-core. Cutting its two runtime couplings as well took
+  ui-core's dependency closure from 559 packages to 420, and left
+  `sl-viewer-settings` — a floor nearly every crate stands on — naming no
+  runtime at all. **This was the last item in this section**, so Phase 3 can
+  start.
 
 `build-audit-ci-pipeline` was listed here — "worth having before three branches
 are in flight" — and is now **deferred**: on a workspace developed on one

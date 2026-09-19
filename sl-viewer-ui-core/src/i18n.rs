@@ -42,9 +42,9 @@
 //!
 //! # Pseudolocalisation
 //!
-//! [`crate::ui_pseudoloc`] is folded in here as a pseudo-*locale*: with
-//! [`UiLocale::pseudo`] set, every [`Translator`] lookup is post-processed by
-//! [`pseudolocalise`], so the whole UI turns pseudo from one switch rather than
+//! The crate-private `ui_pseudoloc` transform is folded in here as a
+//! pseudo-*locale*: with [`UiLocale::pseudo`] set, every [`Translator`] lookup
+//! is post-processed by it, so the whole UI turns pseudo from one switch rather than
 //! each call site opting in. The transform runs on the formatted result, after
 //! the arguments are interpolated, so an expanded, accented, fenced string is
 //! exactly what a real panel would have to survive.
@@ -232,8 +232,8 @@ pub enum LocaleChoice {
     /// Polish — for the `one`/`few`/`many` plural rules the reference viewer
     /// gets wrong.
     Polish,
-    /// The pseudolocale: English words run through [`pseudolocalise`] at lookup
-    /// (see [`crate::ui_pseudoloc`]).
+    /// The pseudolocale: English words run through the crate-private
+    /// `ui_pseudoloc` transform at lookup.
     Pseudo,
 }
 

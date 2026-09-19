@@ -170,7 +170,7 @@ pub enum SampleText {
     #[default]
     Native,
     /// Pseudolocalised: accented, ~40% longer, fenced. Stands in for a real
-    /// translation before one exists ([`crate::ui_pseudoloc`]).
+    /// translation before one exists (the crate-private `ui_pseudoloc`).
     Pseudo,
     /// Replaced with a sample in another writing system.
     Script(&'static ScriptSample),

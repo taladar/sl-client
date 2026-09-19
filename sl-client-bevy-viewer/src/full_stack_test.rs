@@ -1049,7 +1049,7 @@ fn build_viewer_app(params: LoginParams, options: HarnessOptions) -> (App, Captu
     // in a full session is the moment a menu is dispatched or a sound is asked
     // for — not at startup, where it would be found.
     app.add_message::<sl_viewer_ui_core::ui_element::UiAction>();
-    app.add_message::<sl_viewer_ui_core::ui_sounds::PlayUiSound>();
+    app.add_message::<sl_viewer_ui_sounds::ui_sounds::PlayUiSound>();
     app.add_message::<sl_viewer_notifications::ShowNotification>();
     app.add_message::<crate::derender::RequestDerender>();
     app.add_message::<crate::about_land::OpenAboutLand>();

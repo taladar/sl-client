@@ -155,7 +155,7 @@ pub(crate) fn world_app() -> App {
     app.add_message::<crate::intents::StartConference>();
     // UI-sound requests (typing / menu feedback); the audio bridge that
     // consumes them lives in the shell group.
-    app.add_message::<sl_viewer_ui_core::ui_sounds::PlayUiSound>();
+    app.add_message::<sl_viewer_ui_sounds::ui_sounds::PlayUiSound>();
     // Notification toasts (the block/mute handlers raise them); the
     // notification UI that consumes them is in the UI group.
     app.add_message::<sl_viewer_notifications::ShowNotification>();

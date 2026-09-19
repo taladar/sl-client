@@ -52,9 +52,9 @@ use sl_audio::{AudioMixer as _, Bus, ClipParams, DecodedClip, Importance, Mixer,
 use sl_client_bevy::{AssetKey, Uuid};
 use sl_settings::SettingValue;
 
-use crate::ui::UiRoot;
 use sl_viewer_platform::sound_cache::SoundCache;
 use sl_viewer_settings::ViewerSettings;
+use sl_viewer_ui_core::ui::UiRoot;
 
 /// The persisted-settings section the UI-sound overrides live under
 /// (`[audio.ui_sounds]`), kept distinct from the bus levels (`[audio.bus]`) and
@@ -389,14 +389,21 @@ pub fn drive_ui_sounds(
 }
 
 /// The UI-sounds plugin: the [`PlayUiSound`] message, the login prefetch, the
-/// skin-sound decode, and the per-frame driver. Settings are registered from
-/// `ViewerSettings::load`; the skin CSS properties are registered from the skin
-/// plugin (which owns `bevy_flair`).
+/// skin-sound decode, the per-frame driver, and the `-sk-uisnd-<key>` CSS
+/// properties. Settings are registered from `ViewerSettings::load`.
+///
+/// **Add this after `sl_viewer_ui_core::skin::ViewerSkinPlugin`**: the CSS
+/// property registration ([`register_skin_sound_properties`]) extends the
+/// `bevy_flair` registries that plugin's `FlairPlugin` creates, and panics if
+/// they are absent. It is still early enough — `bevy_flair` snapshots the
+/// registry into its CSS loader in `Plugin::finish`, after every `build` has
+/// run.
 #[derive(Debug)]
 pub struct UiSoundsPlugin;
 
 impl Plugin for UiSoundsPlugin {
     fn build(&self, app: &mut App) {
+        register_skin_sound_properties(app);
         app.add_message::<PlayUiSound>()
             .init_resource::<SkinSoundClips>()
             .add_systems(
@@ -553,9 +560,10 @@ fn parse_skin_ui_sound(parser: &mut Parser) -> Result<ReflectValue, CssError> {
 }
 
 /// Register the `-sk-uisnd-<key>` CSS properties on the `bevy_flair` registries,
-/// mapping each onto a [`SkinUiSounds`] field. Called from the skin plugin's
-/// `build` (which owns `bevy_flair`), before the CSS loader snapshots the
-/// registry.
+/// mapping each onto a [`SkinUiSounds`] field. Called from [`UiSoundsPlugin`]'s
+/// `build`, which is why that plugin has to be added after the skin plugin that
+/// stands `bevy_flair` up — and which is still before the CSS loader snapshots
+/// the registry, because `bevy_flair` takes that snapshot in `Plugin::finish`.
 pub fn register_skin_sound_properties(app: &mut App) {
     {
         let parse =
@@ -580,6 +588,27 @@ pub fn register_skin_sound_properties(app: &mut App) {
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
+
+    /// Building [`UiSoundsPlugin`] puts **every** `-sk-uisnd-<key>` property on
+    /// the CSS registry. Registering them used to be the skin plugin's job, and
+    /// it moved here when this catalogue left `sl-viewer-ui-core`; an
+    /// unregistered property is not a compile error but a skin rule that parses
+    /// to nothing, so the wiring is asserted rather than assumed.
+    #[test]
+    fn the_plugin_registers_every_skin_css_property() {
+        let mut app = App::new();
+        // `FlairPlugin` stands up the registries this extends — in the viewer it
+        // arrives with `sl_viewer_ui_core::skin::ViewerSkinPlugin`, which is why
+        // that one is added first there.
+        app.add_plugins((AssetPlugin::default(), FlairPlugin, UiSoundsPlugin));
+        let css = app.world().resource::<CssPropertyRegistry>();
+        for (property, _field) in UI_SOUND_CSS_PROPERTIES {
+            assert!(
+                css.get_property(property).is_some(),
+                "`{property}` is not on the CSS property registry"
+            );
+        }
+    }
 
     /// Every UI sound has a unique setting key and a real (non-nil) default
     /// asset — a nil id is how the reference spells "this sound is off", which
