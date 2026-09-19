@@ -419,6 +419,12 @@ fn parse_abuse_report_type(field: &str, value: &str) -> Result<AbuseReportType, 
 /// Builds an [`AbuseReport`] from the shared `send_abuse_report` /
 /// `send_abuse_report_caps` argument list, so both the UDP and capability
 /// commands parse identically.
+///
+/// The seven fields a report is normally written with are positional; the five
+/// the reference viewer fills in for you — the free-text body, the viewer
+/// version string, an already-uploaded snapshot's asset id, the abuse region's
+/// id and the "checkbox" flags — are keyword-only (`args::KEYWORD_ONLY`), since
+/// they have no natural argument order and are rarely set by hand.
 fn abuse_report_from_args(
     args: &Args,
     ctx: &dyn ReplContext,
@@ -438,8 +444,8 @@ fn abuse_report_from_args(
             y: 0.0,
             z: 0.0,
         }),
-        check_flags: 0,
-        screenshot_id: Uuid::nil(),
+        check_flags: args.parse_or(ctx, "check_flags", args::KEYWORD_ONLY + 4, "u8", 0)?,
+        screenshot_id: args.uuid_or_nil(ctx, "screenshot_id", args::KEYWORD_ONLY + 2)?,
         object_id: args.object_or_nil(ctx, "object_id", 5)?,
         abuser_id: args.uuid_or_nil(ctx, "abuser_id", 1)?,
         abuse_region_name: {
@@ -452,10 +458,14 @@ fn abuse_report_from_args(
                 }
             })?
         },
-        abuse_region_id: Uuid::nil(),
+        abuse_region_id: args.uuid_or_nil(ctx, "abuse_region_id", args::KEYWORD_ONLY + 3)?,
         summary: args.req_str(ctx, "summary", 0)?,
-        details: String::new(),
-        version_string: String::new(),
+        details: args
+            .opt_str(ctx, "details", args::KEYWORD_ONLY)?
+            .unwrap_or_default(),
+        version_string: args
+            .opt_str(ctx, "version_string", args::KEYWORD_ONLY + 1)?
+            .unwrap_or_default(),
     }))
 }
 
@@ -4112,14 +4122,17 @@ fn all_specs() -> Vec<CommandSpec> {
         CommandSpec {
             name: "send_abuse_report",
             usage: "<summary> [abuser_id=nil] [region_name] [category=0] \
-                    [report_type=complaint|bug] [object_id=nil] [position=<x,y,z>]",
+                    [report_type=complaint|bug] [object_id=nil] [position=<x,y,z>] \
+                    [details=] [version_string=] [screenshot_id=nil] \
+                    [abuse_region_id=nil] [check_flags=0]",
             build: |args, ctx| Ok(Command::SendAbuseReport(abuse_report_from_args(args, ctx)?)),
         },
         CommandSpec {
             name: "send_abuse_report_caps",
             usage: "<summary> [abuser_id=nil] [region_name] [category=0] \
                     [report_type=complaint|bug] [object_id=nil] [position=<x,y,z>] \
-                    [screenshot=<hex>]",
+                    [screenshot=<hex>] [details=] [version_string=] [screenshot_id=nil] \
+                    [abuse_region_id=nil] [check_flags=0]",
             build: |args, ctx| {
                 Ok(Command::SendAbuseReportViaCaps {
                     report: abuse_report_from_args(args, ctx)?,
@@ -6533,6 +6546,37 @@ mod tests {
             build("send_abuse_report_caps Griefing screenshot=deadbeef"),
             Ok(Command::SendAbuseReportViaCaps { report, screenshot: Some(bytes) })
                 if report.summary == "Griefing" && bytes == [0xde, 0xad, 0xbe, 0xef]
+        ));
+    }
+
+    /// The five fields the reference viewer fills in for the reporter are
+    /// keyword-only: reachable by name, never by position (a report whose
+    /// summary happens to be the hundredth token must not set `details`).
+    #[test]
+    fn abuse_report_parses_the_keyword_only_fields() {
+        assert!(matches!(
+            build(&format!(
+                "send_abuse_report Griefing details=he+kept+pushing+me \
+                 version_string=sl-repl/0.1 screenshot_id={ONE} \
+                 abuse_region_id={TWO} check_flags=3"
+            )),
+            Ok(Command::SendAbuseReport(report))
+                if report.summary == "Griefing"
+                    && report.details == "he+kept+pushing+me"
+                    && report.version_string == "sl-repl/0.1"
+                    && report.screenshot_id == uuid(ONE)
+                    && report.abuse_region_id == uuid(TWO)
+                    && report.check_flags == 3
+        ));
+        // Unset, they keep the empty/nil defaults the grid expects.
+        assert!(matches!(
+            build("send_abuse_report_caps Griefing"),
+            Ok(Command::SendAbuseReportViaCaps { report, .. })
+                if report.details.is_empty()
+                    && report.version_string.is_empty()
+                    && report.screenshot_id.is_nil()
+                    && report.abuse_region_id.is_nil()
+                    && report.check_flags == 0
         ));
     }
 

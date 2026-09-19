@@ -2391,6 +2391,7 @@ impl Session {
                 self.push_diagnostic(Diagnostic::UnhandledMessage {
                     id: message.id(),
                     name: message.name(),
+                    status: message.status(),
                     child: true,
                 });
             }
@@ -5584,6 +5585,7 @@ impl Session {
                 self.push_diagnostic(Diagnostic::UnhandledMessage {
                     id: message.id(),
                     name: message.name(),
+                    status: message.status(),
                     child: false,
                 });
             }

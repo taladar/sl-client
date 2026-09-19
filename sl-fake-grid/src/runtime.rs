@@ -66,6 +66,12 @@ impl Default for GridIdentity {
     }
 }
 
+/// What the simulator reports as its channel/version in
+/// `AgentMovementComplete` — the string a viewer shows as the region's server
+/// build. The fake grid names itself (and its version) so a capture taken
+/// against it is never mistaken for one taken against a real simulator.
+const SERVER_CHANNEL_VERSION: &str = concat!("sl-fake-grid ", env!("CARGO_PKG_VERSION"));
+
 /// One region a [`FakeGridBuilder`] defines.
 #[derive(Debug, Clone)]
 pub struct RegionConfig {
@@ -201,7 +207,7 @@ pub(crate) struct RegionEntry {
 
 impl RegionEntry {
     /// The region handle derived from the grid coordinates.
-    pub(crate) fn handle(&self) -> RegionHandle {
+    pub(crate) const fn handle(&self) -> RegionHandle {
         RegionHandle::from_grid(self.config.grid_x, self.config.grid_y)
     }
 
@@ -653,6 +659,7 @@ impl GridCore {
 
         let now = (self.clock)();
         let mut sim = SimSession::new(region.handle(), now);
+        sim.set_channel_version(SERVER_CHANNEL_VERSION.as_bytes());
         sim.set_secure_session_id(ids.secure_session_id);
         sim.set_region_id(region.region_id);
         sim.set_update_completion_names_item(self.update_completion_item.names_item());

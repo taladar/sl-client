@@ -40,6 +40,26 @@ pub enum Trust {
     NotTrusted,
 }
 
+/// What the template's trailing flags say about a message's standing: whether
+/// it is still current, deprecated outright, deprecated over LLUDP (the grid
+/// carries it some other way — typically the CAPS event queue), or blacklisted
+/// over LLUDP entirely.
+///
+/// The four states are mutually exclusive and ordered by severity, so the
+/// harshest flag on a header line wins when more than one appears.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum MessageStatus {
+    /// No deprecation flag: an ordinary, current message.
+    #[default]
+    Current,
+    /// `Deprecated` — the message is obsolete on every transport.
+    Deprecated,
+    /// `UDPDeprecated` — obsolete over LLUDP; the grid has moved it elsewhere.
+    UdpDeprecated,
+    /// `UDPBlackListed` — refused over LLUDP.
+    UdpBlackListed,
+}
+
 /// The default body encoding for a message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Encoding {
@@ -71,12 +91,32 @@ pub struct MessageDef {
 }
 
 impl MessageDef {
-    /// Returns `true` if the message carries any flag marking it deprecated.
+    /// The standing the message's trailing [`flags`](Self::flags) declare — the
+    /// harshest of them when a header line carries more than one, and
+    /// [`MessageStatus::Current`] when it carries none.
     #[must_use]
-    pub fn is_deprecated(&self) -> bool {
+    pub fn status(&self) -> MessageStatus {
         self.flags
             .iter()
-            .any(|flag| flag == "Deprecated" || flag == "UDPDeprecated")
+            .filter_map(|flag| match flag.as_str() {
+                "Deprecated" => Some(MessageStatus::Deprecated),
+                "UDPDeprecated" => Some(MessageStatus::UdpDeprecated),
+                "UDPBlackListed" => Some(MessageStatus::UdpBlackListed),
+                _other => None,
+            })
+            .max()
+            .unwrap_or_default()
+    }
+
+    /// Returns `true` if the message carries any flag marking it deprecated —
+    /// `Deprecated` or `UDPDeprecated`, but not `UDPBlackListed` (which is a
+    /// transport refusal rather than an obsolescence marker).
+    #[must_use]
+    pub fn is_deprecated(&self) -> bool {
+        matches!(
+            self.status(),
+            MessageStatus::Deprecated | MessageStatus::UdpDeprecated
+        )
     }
 }
 

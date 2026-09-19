@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 309 |
+| ready | 308 |
 | blocked | 41 |
 | in-progress | 22 |
 | bugs | 5 |
-| done | 1186 |
+| done | 1187 |
 | deferred | 28 |
 | wont-do | 16 |
 | **total** | **1707** |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (309)
+## ready (308)
 
 ### protocol
 
@@ -937,8 +937,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### idiomatic
 
-- [`idiomatic-audit-dead-forward-api`](ready/idiomatic-audit-dead-forward-api.md)
-  — Decoded-but-never-read fields and write-only state across the workspace
 - [`idiomatic-audit-lsl-scope-duplication`](ready/idiomatic-audit-lsl-scope-duplication.md)
   — LSL scope resolution is implemented twice, with nothing pinning them equal
 - [`idiomatic-audit-session-facade`](ready/idiomatic-audit-session-facade.md) —
@@ -1171,7 +1169,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 
-## done (1186)
+## done (1187)
 
 ### protocol
 
@@ -3056,6 +3054,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`idiomatic-audit-bevy-system-param-bundles`](done/idiomatic-audit-bevy-system-param-bundles.md)
   — 128+ too_many_arguments suppressions are Bevy systems that want a
   SystemParam bundle
+- [`idiomatic-audit-dead-forward-api`](done/idiomatic-audit-dead-forward-api.md)
+  — Decoded-but-never-read fields and write-only state across the workspace
 - [`idiomatic-batched-sl-types`](done/idiomatic-batched-sl-types-batched-sl-types-migration-post-roadmap-follow-up.md)
   — Batched sl-types migration (post-roadmap follow-up)
 - [`idiomatic-p1-01`](done/idiomatic-p1-01-new-permissions-bitflags-type-the-sl-perm-set.md)

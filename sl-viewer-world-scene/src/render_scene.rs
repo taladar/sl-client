@@ -2382,7 +2382,7 @@ const TERRAIN_PATCH_SIZE: u32 = 16;
 /// rather than a nominal zero, because the composition's Perlin transition band is
 /// sampled at the region's **global** origin — so at zero the fixture would be
 /// looking at a corner of the noise field no real region ever sits on.
-fn terrain_region() -> RegionHandle {
+const fn terrain_region() -> RegionHandle {
     RegionHandle::from_global(256_000, 256_000)
 }
 

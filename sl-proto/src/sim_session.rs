@@ -4225,6 +4225,24 @@ impl SimSession {
         self.region_id = region_id;
     }
 
+    /// Sets the channel/version string this simulator reports in
+    /// `AgentMovementComplete`.
+    ///
+    /// The reference simulator answers with its own build identity (`"Second
+    /// Life Server 2024-…"`, `"OpenSim 0.9…"`), and a viewer shows it as the
+    /// region's server version, so a server built on this session names
+    /// *itself* here rather than inheriting `sl-proto`'s placeholder.
+    pub fn set_channel_version(&mut self, channel_version: &[u8]) {
+        self.channel_version = channel_version.to_vec();
+    }
+
+    /// The channel/version string this simulator reports
+    /// ([`set_channel_version`](Self::set_channel_version)).
+    #[must_use]
+    pub fn channel_version(&self) -> &[u8] {
+        &self.channel_version
+    }
+
     /// This region's id ([`set_region_id`](Self::set_region_id)); nil until
     /// set.
     #[must_use]

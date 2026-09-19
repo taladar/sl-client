@@ -6,8 +6,6 @@
 //! ever runs, so cancelling one request never starves another. This is the
 //! intricate concurrency worth not duplicating across the per-asset stores.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
-
 use keyed_priority_queue::KeyedPriorityQueue;
 use parking_lot::Mutex;
 
@@ -37,8 +35,9 @@ pub struct PriorityGate {
     state: Mutex<GateState>,
     /// Signalled whenever a slot frees or priorities change, to re-poll waiters.
     wake: event_listener::Event,
-    /// Total concurrency, for reporting.
-    capacity: AtomicUsize,
+    /// Total concurrency: the slot count the gate was built with, fixed for its
+    /// lifetime and the ceiling [`Self::release`] returns slots up to.
+    capacity: usize,
 }
 
 impl PriorityGate {
@@ -52,7 +51,7 @@ impl PriorityGate {
                 waiters: KeyedPriorityQueue::new(),
             }),
             wake: event_listener::Event::new(),
-            capacity: AtomicUsize::new(capacity),
+            capacity,
         }
     }
 
@@ -115,7 +114,7 @@ impl PriorityGate {
     /// figures.
     #[must_use]
     pub fn stats(&self) -> GateStats {
-        let capacity = self.capacity.load(Ordering::Relaxed);
+        let capacity = self.capacity;
         let state = self.state.lock();
         let slots = state.slots;
         let waiting = state.waiters.len();
@@ -131,10 +130,7 @@ impl PriorityGate {
     fn release(&self) {
         {
             let mut state = self.state.lock();
-            state.slots = state
-                .slots
-                .saturating_add(1)
-                .min(self.capacity.load(Ordering::Relaxed));
+            state.slots = state.slots.saturating_add(1).min(self.capacity);
         }
         let _notified = self.wake.notify(usize::MAX);
     }

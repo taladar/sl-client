@@ -176,8 +176,8 @@ pub use material::{
     parse_modify_material_params_request, parse_render_materials_put_request,
     parse_render_materials_request, parse_render_materials_response,
 };
-pub use message::{Message, MessageId};
-pub use messages::{AnyMessage, message_name};
+pub use message::{Message, MessageId, MessageStatus};
+pub use messages::{AnyMessage, message_name, message_status};
 pub use object_cost::{
     ObjectCost, SelectedCostKind, SelectedResourceCost, build_get_object_cost_request,
     build_get_object_cost_response, build_resource_cost_selected_request,
@@ -268,7 +268,7 @@ mod test {
     use pretty_assertions::assert_eq;
 
     use super::{
-        AssetUploadResponse, MediaEntry, MessageId, NewFileAgentInventoryRequest,
+        AssetUploadResponse, MediaEntry, MessageId, MessageStatus, NewFileAgentInventoryRequest,
         ObjectMediaRequest, ObjectMediaResponse, PacketFlags, Permissions, Reader, SequenceNumber,
         UploadGrantedPermissions, WireError, Writer, build_asset_upload_response,
         build_group_notice_bucket, build_new_file_agent_inventory_request,
@@ -276,12 +276,13 @@ mod test {
         build_object_media_update_request, build_update_avatar_appearance_request,
         build_update_item_asset_request, build_update_script_agent_request,
         build_update_script_task_request, build_update_task_item_asset_request, combine_uuids,
-        encode_datagram, ends_in_zero_run, message_name, parse_asset_upload_response,
-        parse_datagram, parse_llsd_xml, parse_new_file_agent_inventory_request,
-        parse_object_media_navigate_request, parse_object_media_request,
-        parse_update_avatar_appearance_request, parse_update_item_asset_request,
-        parse_update_script_agent_request, parse_update_script_task_request,
-        parse_update_task_item_asset_request, zero_decode, zero_encode,
+        encode_datagram, ends_in_zero_run, message_name, message_status,
+        parse_asset_upload_response, parse_datagram, parse_llsd_xml,
+        parse_new_file_agent_inventory_request, parse_object_media_navigate_request,
+        parse_object_media_request, parse_update_avatar_appearance_request,
+        parse_update_item_asset_request, parse_update_script_agent_request,
+        parse_update_script_task_request, parse_update_task_item_asset_request, zero_decode,
+        zero_encode,
     };
 
     #[test]
@@ -412,6 +413,49 @@ mod test {
             message_name(MessageId::Fixed(0xFFFF_FFFB)),
             Some("PacketAck")
         );
+    }
+
+    #[test]
+    fn message_status_carries_the_template_flags() {
+        // One message per flag the template uses, plus an unflagged one. These
+        // are the values `Message::STATUS` is generated from, so a template
+        // update that changes a message's standing changes them here.
+        assert_eq!(
+            message_status(MessageId::High(1)),
+            Some(MessageStatus::Current),
+            "StartPingCheck carries no flag"
+        );
+        assert_eq!(
+            message_status(MessageId::High(23)),
+            Some(MessageStatus::UdpDeprecated),
+            "ParcelProperties is UDPDeprecated (Second Life sends it over CAPS)"
+        );
+        assert_eq!(
+            message_status(MessageId::Medium(4)),
+            Some(MessageStatus::Deprecated),
+            "ObjectPosition is Deprecated"
+        );
+        assert_eq!(
+            message_status(MessageId::Low(69)),
+            Some(MessageStatus::UdpBlackListed),
+            "TeleportFinish is UDPBlackListed"
+        );
+        assert_eq!(message_status(MessageId::High(0)), None);
+    }
+
+    #[test]
+    fn message_status_labels_read_back_as_template_flags() {
+        assert_eq!(MessageStatus::Current.flag(), None);
+        assert_eq!(MessageStatus::Current.to_string(), "Current");
+        assert_eq!(
+            MessageStatus::UdpDeprecated.flag(),
+            Some("UDPDeprecated"),
+            "the label is the template's own spelling"
+        );
+        assert!(MessageStatus::Deprecated.is_deprecated());
+        assert!(MessageStatus::UdpDeprecated.is_deprecated());
+        assert!(!MessageStatus::UdpBlackListed.is_deprecated());
+        assert!(MessageStatus::UdpBlackListed.is_udp_blacklisted());
     }
 
     #[test]

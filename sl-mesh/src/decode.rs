@@ -176,9 +176,18 @@ pub struct Submesh {
     pub indices: Vec<u32>,
     /// Per-vertex rig influences, if this is a rigged submesh.
     pub weights: Option<Vec<VertexWeights>>,
-    /// The per-axis normalized scale the uploader recorded (default `[1, 1, 1]`).
-    /// Retained as metadata; positions are dequantized to the position domain
-    /// and are *not* pre-multiplied by it, matching the viewer's core unpack.
+    /// The per-axis scale the uploader normalised this face's geometry by
+    /// (default `[1, 1, 1]`), read back out by [`encode`](crate::encode) so a
+    /// decoded mesh re-uploads as the mesh it was.
+    ///
+    /// Positions are dequantized to the position domain and are *not*
+    /// pre-multiplied by it, matching the reference's own unpack
+    /// (`LLVolumeFace::unpackVolumeFaces`). The reference's one *reader* of the
+    /// value un-normalises positions before running MikkTSpace and re-normalises
+    /// the tangents afterwards (`LLVolumeFace::cacheOptimize`); this viewer
+    /// deliberately transports no vertex tangents and reconstructs the tangent
+    /// basis per fragment from screen-space derivatives instead, so nothing on
+    /// the render path reads it.
     pub normalized_scale: [f32; 3],
     /// Whether the submesh is an explicit empty face (`NoGeometry`).
     pub no_geometry: bool,
@@ -248,7 +257,10 @@ pub struct MeshSkin {
     pub bind_shape_matrix: [f32; 16],
     /// Optional per-joint alternate inverse-bind matrices.
     pub alt_inverse_bind_matrix: Vec<[f32; 16]>,
-    /// The optional pelvis Z offset.
+    /// The optional pelvis Z offset: how far the rig asks its *wearer* to be
+    /// lifted while it is worn, in Second Life Z-up metres (the mesh uploader's
+    /// "pelvis offset" field). Applied as the avatar's pelvis fixup, not as a
+    /// joint override — see `sl_client_bevy::JointOverrides::pelvis_fixup`.
     pub pelvis_offset: Option<f32>,
     /// Whether joint scale is locked when a joint position is overridden.
     pub lock_scale_if_joint_position: bool,

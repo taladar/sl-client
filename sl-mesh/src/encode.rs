@@ -1067,6 +1067,42 @@ mod tests {
         Ok(())
     }
 
+    /// The two rig/geometry values with no reader on the render path —
+    /// `Submesh::normalized_scale` and `MeshSkin::pelvis_offset` — survive the
+    /// round trip, which is what keeps them in the structs: re-uploading a
+    /// decoded mesh must not quietly reset the uploader's normalisation or drop
+    /// the wearer's height adjustment.
+    #[test]
+    fn normalized_scale_and_pelvis_offset_survive_the_round_trip() -> Result<(), TestError> {
+        let mut face = triangle();
+        face.normalized_scale = [2.5, 0.5, 1.25];
+        let skin = MeshSkin {
+            joint_names: vec!["mPelvis".to_owned()],
+            pelvis_offset: Some(0.08),
+            ..MeshSkin::default()
+        };
+        let asset = encode_mesh(&MeshModel::new(vec![face]).with_skin(skin))?;
+        let Decoded {
+            lods,
+            skin: decoded_skin,
+            ..
+        } = round_trip(&asset)?;
+        let high = lods
+            .get(usize::from(MeshLod::High.index()))
+            .and_then(Option::as_ref)
+            .ok_or("no high lod")?;
+        let decoded = high.submeshes.first().ok_or("no face")?;
+        for (got, want) in decoded.normalized_scale.iter().zip(&[2.5_f32, 0.5, 1.25]) {
+            assert!((got - want).abs() < 1.0e-6, "{got} != {want}");
+        }
+        let offset = decoded_skin
+            .ok_or("no skin block")?
+            .pelvis_offset
+            .ok_or("no pelvis offset")?;
+        assert!((offset - 0.08).abs() < 1.0e-6);
+        Ok(())
+    }
+
     /// An influence naming a joint index past 254 cannot be written: `0xFF` is
     /// the terminator, so such a stream would decode as a shorter list.
     #[test]

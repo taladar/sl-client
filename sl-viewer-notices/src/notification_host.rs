@@ -2344,8 +2344,8 @@ mod tests {
 
     use bevy::time::Time;
     use sl_client_bevy::{
-        Command, Diagnostic, MessageId, SessionError, SlCommand, SlCommandFailed, SlDiagnostic,
-        WireError,
+        Command, Diagnostic, MessageId, MessageStatus, SessionError, SlCommand, SlCommandFailed,
+        SlDiagnostic, WireError,
     };
 
     use bevy::ecs::schedule::IntoScheduleConfigs as _;
@@ -2790,6 +2790,7 @@ mod tests {
             Diagnostic::UnhandledMessage {
                 id: MessageId::High(1),
                 name: "SomeMessage",
+                status: MessageStatus::Current,
                 child: false,
             },
             Diagnostic::UnknownCapsEvent {

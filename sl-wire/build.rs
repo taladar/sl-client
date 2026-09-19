@@ -8,7 +8,9 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-use sl_msg_template::{BlockDef, Cardinality, FieldType, MessageDef, Template, parse};
+use sl_msg_template::{
+    BlockDef, Cardinality, FieldType, MessageDef, MessageStatus, Template, parse,
+};
 
 /// Entry point: read the template, generate code, write it to `OUT_DIR`.
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -41,7 +43,7 @@ fn emit(out: &mut String, args: core::fmt::Arguments<'_>) {
 const PREAMBLE: &str = "\
 use crate::error::WireError;
 use crate::field::{Reader, Writer};
-use crate::message::{Message, MessageId};
+use crate::message::{Message, MessageId, MessageStatus};
 
 ";
 
@@ -56,7 +58,37 @@ fn generate(template: &Template) -> String {
 
     push_any_message(&mut out, template);
     push_message_name(&mut out, template);
+    push_message_status(&mut out, template);
     out
+}
+
+/// Emits the standalone `message_status` lookup, mapping a [`MessageId`] to the
+/// standing the template gives the message that bears it.
+///
+/// The companion of `message_name`: it answers for an id whose body never
+/// decoded, so a diagnostic can say that the traffic it is complaining about is
+/// a message the grid itself considers obsolete. Duplicate ids are emitted once
+/// (first wins), matching `message_name` and `AnyMessage::decode`.
+fn push_message_status(out: &mut String, template: &Template) {
+    out.push_str("/// Returns the template standing of the message with the given id, if known.\n");
+    out.push_str(
+        "pub fn message_status(id: MessageId) -> Option<MessageStatus> {\n        match id {\n",
+    );
+    let mut seen = BTreeSet::new();
+    for message in &template.messages {
+        let pattern = message_id_pattern(message);
+        if seen.insert(pattern.clone()) {
+            emit(
+                out,
+                format_args!(
+                    "            {pattern} => Some({0}::STATUS),\n",
+                    message.name
+                ),
+            );
+        }
+    }
+    out.push_str("            _ => None,\n");
+    out.push_str("        }\n}\n");
 }
 
 /// Emits the standalone `message_name` lookup, mapping a [`MessageId`] to the
@@ -83,6 +115,16 @@ fn push_message_name(out: &mut String, template: &Template) {
     }
     out.push_str("            _ => None,\n");
     out.push_str("        }\n}\n");
+}
+
+/// The `MessageStatus` variant path a template status generates.
+const fn status_expr(status: MessageStatus) -> &'static str {
+    match status {
+        MessageStatus::Current => "MessageStatus::Current",
+        MessageStatus::Deprecated => "MessageStatus::Deprecated",
+        MessageStatus::UdpDeprecated => "MessageStatus::UdpDeprecated",
+        MessageStatus::UdpBlackListed => "MessageStatus::UdpBlackListed",
+    }
 }
 
 /// Emits the block structs, the message struct, and the `Message` impl.
@@ -148,8 +190,15 @@ fn push_message_impl(out: &mut String, message: &MessageDef) {
     emit(
         out,
         format_args!(
-            "    const ZEROCODED: bool = {};\n\n",
+            "    const ZEROCODED: bool = {};\n",
             matches!(message.encoding, sl_msg_template::Encoding::Zerocoded)
+        ),
+    );
+    emit(
+        out,
+        format_args!(
+            "    const STATUS: MessageStatus = {};\n\n",
+            status_expr(message.status())
         ),
     );
 
@@ -287,6 +336,16 @@ fn push_any_message(out: &mut String, template: &Template) {
         emit(
             out,
             format_args!("            Self::{0}(_) => {0}::NAME,\n", message.name),
+        );
+    }
+    out.push_str("        }\n    }\n\n");
+
+    // status()
+    out.push_str("    pub fn status(&self) -> MessageStatus {\n        match self {\n");
+    for message in &template.messages {
+        emit(
+            out,
+            format_args!("            Self::{0}(_) => {0}::STATUS,\n", message.name),
         );
     }
     out.push_str("        }\n    }\n\n");

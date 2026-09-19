@@ -201,6 +201,11 @@ const BOM_FALLBACK_COLOR: Color = Color::srgb(0.75, 0.75, 0.75);
 /// sampling a bake's alpha for the clothing-morph masks (P14.5).
 const RGBA_CHANNELS: usize = 4;
 
+/// The channel count of a decoded bake's auxiliary clothing-coverage plane — one
+/// byte per pixel, the stride used when a 5-component server bake supplies the
+/// clothing-morph mask (P14.5) directly rather than through the RGBA alpha.
+const MASK_CHANNELS: usize = 1;
+
 /// A marker component tagging an entity as an avatar placeholder sphere.
 #[derive(Component, Debug, Clone, Copy)]
 pub(crate) struct AvatarSphere;
@@ -860,7 +865,7 @@ pub fn setup_avatar_body(
             .body_size_metrics(&SkeletalDeformations::default(), &JointOverrides::default())
             .map_or_else(
                 || library.pelvis_height(),
-                |metrics| root_drop_from_metrics(&metrics, 0.0),
+                |metrics| root_drop_from_metrics(&metrics, 0.0, 0.0),
             ),
         // The rest-shape seat drop: the pelvis's rest height above the body root
         // (the sit offset targets the hips, so a seated body drops by this). The
@@ -1010,8 +1015,18 @@ fn drop_to_hips(offset: Transform, seat_drop: f32) -> Transform {
 /// ([`AVATAR_HOVER_PARAM`]); the region-side hover preference
 /// (`getHoverOffset()`, the `AgentPreferences` capability) is not ingested
 /// yet and is omitted.
-fn root_drop_from_metrics(metrics: &BodySizeMetrics, hover: f32) -> f32 {
-    0.5 * metrics.body_size_z - metrics.pelvis_to_foot + metrics.pelvis_local_z - hover
+///
+/// `pelvis_fixup` is the worn rig's
+/// [`JointOverrides::pelvis_fixup`](sl_client_bevy::JointOverrides::pelvis_fixup)
+/// — a mesh body uploaded with a pelvis offset asks its wearer to stand that
+/// much higher. The reference keeps it out of `updateCharacter` entirely and
+/// adds it in `LLVOAvatar::getRenderPosition`, but the effect is the same Z
+/// shift of the planted body, so it folds into the drop beside `hover` rather
+/// than as a second offset applied later.
+fn root_drop_from_metrics(metrics: &BodySizeMetrics, hover: f32, pelvis_fixup: f32) -> f32 {
+    0.5 * metrics.body_size_z - metrics.pelvis_to_foot + metrics.pelvis_local_z
+        - hover
+        - pelvis_fixup
 }
 
 /// The `Hover` visual param id (`avatar_lad.xml` id 11001, the reference's
@@ -3654,7 +3669,10 @@ pub(crate) fn apply_avatar_appearance(
             // through the metrics' foot term.
             if let Some(metrics) = library.skeleton().body_size_metrics(&deform, &overrides) {
                 let hover = resolved.weight(AVATAR_HOVER_PARAM).unwrap_or(0.0);
-                root_drops.insert(agent, root_drop_from_metrics(&metrics, hover));
+                root_drops.insert(
+                    agent,
+                    root_drop_from_metrics(&metrics, hover, overrides.pelvis_fixup()),
+                );
                 seat_drops.insert(agent, metrics.pelvis_local_z);
             }
             if log_geometry {
@@ -3688,7 +3706,7 @@ pub(crate) fn apply_avatar_appearance(
         .body_size_metrics(&SkeletalDeformations::default(), &JointOverrides::default())
         .map_or_else(
             || library.pelvis_height(),
-            |metrics| root_drop_from_metrics(&metrics, 0.0),
+            |metrics| root_drop_from_metrics(&metrics, 0.0, 0.0),
         );
     for (agent, drop) in root_drops {
         let previous = state.root_drops.insert(agent, drop).unwrap_or(rest_drop);
@@ -4059,18 +4077,36 @@ fn part_clothing_mask(
     }
     let id = *baked?.get(&region.baked_slot())?;
     let decoded = store.get(id)?;
-    // The decoded pixels are always expanded to RGBA8 (stride 4, alpha at offset
-    // 3) regardless of the source component count; a source with no alpha channel
-    // decodes to opaque alpha (255), which masks nothing — the correct fallback
-    // when a bake carries no clothing-coverage mask (Firestorm's null-aux path).
-    let texture = MaskTexture {
-        pixels: &decoded.pixels,
-        width: usize::try_from(decoded.width).unwrap_or(0),
-        height: usize::try_from(decoded.height).unwrap_or(0),
-        components: RGBA_CHANNELS,
-    };
+    let texture = morph_mask_texture(decoded);
     let mask = library.masks().sample_part(mesh, region_name, &texture);
     if mask.is_empty() { None } else { Some(mask) }
+}
+
+/// The channel of a decoded region bake the clothing-morph mask (P14.5) samples.
+///
+/// A Second Life server bake is a **5-component** `R G B alpha M` image: the
+/// fifth channel is the clothing-coverage mask, which the reference viewer
+/// decodes separately (`decodeChannels(aux, .., 4, ..)` into `mAuxRawImage`) and
+/// feeds to `LLAvatarAppearance::applyMorphMask` as a single-component image. So
+/// when the decode kept that channel, the mask is the aux plane at stride 1.
+///
+/// Everything else — a four-component bake, an OpenSim region that never
+/// composites a fifth channel, a placeholder texture — samples the RGBA alpha at
+/// stride 4 instead. A source with no alpha channel at all decodes to opaque
+/// alpha (255), which masks nothing: the correct fallback when a bake carries no
+/// clothing coverage (Firestorm's null-aux path), where the morphs apply at full
+/// flare.
+fn morph_mask_texture(decoded: &DecodedTexture) -> MaskTexture<'_> {
+    let (pixels, components) = decoded.aux.as_ref().map_or_else(
+        || (&*decoded.pixels, RGBA_CHANNELS),
+        |aux| (&**aux, MASK_CHANNELS),
+    );
+    MaskTexture {
+        pixels,
+        width: usize::try_from(decoded.width).unwrap_or(0),
+        height: usize::try_from(decoded.height).unwrap_or(0),
+        components,
+    }
 }
 
 /// Show or hide each rigged base-part mesh from the avatar's worn items (P13.5
@@ -4350,11 +4386,11 @@ pub(crate) fn apply_bom_face_materials(
 mod tests {
     use super::{
         AvatarEntities, AvatarState, BAKE_ALPHA_MASK_THRESHOLD, BakeAlpha, BodySizeMetrics,
-        HashMap, HashSet, SeatChainQuery, Seated, SeatedTarget, SlEvent, SlIdentity,
-        SlSessionEvent, TextureManager, bake_slot_ids, body_root_transform, bom_face_alpha_mode,
-        classify_bake_alpha, coarse_translation, drop_to_hips, ingest_avatar_bakes,
-        invisible_body_slots, root_drop_from_metrics, seat_world_transform, seated_offset,
-        should_refetch_bakes, visible_body_bakes,
+        HashMap, HashSet, MASK_CHANNELS, RGBA_CHANNELS, SeatChainQuery, Seated, SeatedTarget,
+        SlEvent, SlIdentity, SlSessionEvent, TextureManager, bake_slot_ids, body_root_transform,
+        bom_face_alpha_mode, classify_bake_alpha, coarse_translation, drop_to_hips,
+        ingest_avatar_bakes, invisible_body_slots, morph_mask_texture, root_drop_from_metrics,
+        seat_world_transform, seated_offset, should_refetch_bakes, visible_body_bakes,
     };
     use bevy::ecs::message::Messages;
     use bevy::ecs::system::RunSystemOnce as _;
@@ -4934,7 +4970,7 @@ mod tests {
             body_size_z: 1.707,
             pelvis_local_z: 1.067,
         };
-        let drop = root_drop_from_metrics(&metrics, 0.0);
+        let drop = root_drop_from_metrics(&metrics, 0.0, 0.0);
         // Sole (SL Z) for a report at z: `z − drop` is the root; the pelvis sits
         // `pelvis_local_z` above it and the sole `pelvis_to_foot` below that.
         let sole = -drop + metrics.pelvis_local_z - metrics.pelvis_to_foot;
@@ -4947,11 +4983,16 @@ mod tests {
             body_size_z: 1.707 + 0.08,
             pelvis_local_z: 1.067,
         };
-        let shod_drop = root_drop_from_metrics(&shod, 0.0);
+        let shod_drop = root_drop_from_metrics(&shod, 0.0, 0.0);
         assert!((drop - shod_drop - 0.04).abs() < 1.0e-6);
         // Hover lifts the whole body directly.
-        let hovered = root_drop_from_metrics(&metrics, 0.25);
+        let hovered = root_drop_from_metrics(&metrics, 0.25, 0.0);
         assert!((drop - hovered - 0.25).abs() < 1.0e-6);
+        // So does a worn rig's pelvis fixup, and the two add.
+        let fixed_up = root_drop_from_metrics(&metrics, 0.0, 0.1);
+        assert!((drop - fixed_up - 0.1).abs() < 1.0e-6);
+        let both = root_drop_from_metrics(&metrics, 0.25, 0.1);
+        assert!((drop - both - 0.35).abs() < 1.0e-6);
     }
 
     /// Each body region keys its visibility off its own baked slot — the head
@@ -5283,6 +5324,43 @@ mod tests {
             Some(&hair)
         );
         Ok(())
+    }
+
+    /// The clothing-morph mask (P14.5) samples a server bake's **auxiliary**
+    /// plane when the decode kept one — the fifth `M` channel of an `RGBHM`
+    /// bake, at stride 1 — and falls back to the RGBA alpha at stride 4 only
+    /// when there is none. Sampling the alpha of a 5-component bake would read
+    /// composited transparency where the reference reads clothing coverage.
+    #[test]
+    fn morph_mask_prefers_the_auxiliary_plane() {
+        /// A 2x1 bake with `components` source channels and an optional aux plane.
+        fn bake(components: u16, aux: Option<&[u8]>) -> sl_client_bevy::DecodedTexture {
+            sl_client_bevy::DecodedTexture::new(
+                2,
+                1,
+                components,
+                sl_client_bevy::DiscardLevel::FULL,
+                // Two opaque pixels: alpha 255, which masks nothing.
+                bytes::Bytes::from_static(&[10, 20, 30, 255, 40, 50, 60, 255]),
+                aux.map(bytes::Bytes::copy_from_slice),
+            )
+        }
+        // A four-component bake has no aux plane: the alpha channel is the mask,
+        // read at the RGBA stride, and an opaque bake masks nothing.
+        let rgba = bake(4, None);
+        let texture = morph_mask_texture(&rgba);
+        assert_eq!(texture.components, RGBA_CHANNELS);
+        assert!((texture.alpha_at([0.0, 0.0]) - 1.0).abs() < 1.0e-6);
+        assert!((texture.alpha_at([1.0, 0.0]) - 1.0).abs() < 1.0e-6);
+        // A five-component server bake carries the coverage mask in its aux
+        // plane: stride 1, and the carved texel reads as carved even though the
+        // RGBA alpha beside it is fully opaque.
+        let server = bake(5, Some(&[0, 255]));
+        let texture = morph_mask_texture(&server);
+        assert_eq!(texture.components, MASK_CHANNELS);
+        assert_eq!(texture.width, 2);
+        assert!(texture.alpha_at([0.0, 0.0]).abs() < 1.0e-6);
+        assert!((texture.alpha_at([1.0, 0.0]) - 1.0).abs() < 1.0e-6);
     }
 
     /// A baked texture's composited alpha (P14.3) is classified from its source

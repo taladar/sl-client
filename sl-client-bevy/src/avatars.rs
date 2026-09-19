@@ -1162,7 +1162,8 @@ const JOINT_POS_OVERRIDE_THRESHOLD: f32 = 0.0001;
 
 /// A worn rigged mesh's **joint position overrides** (R1): the skeleton joint
 /// index → its rig-supplied local (parent-relative) rest position (Second Life
-/// Z-up metres), plus whether the rig locks bone scale to the default.
+/// Z-up metres), whether the rig locks bone scale to the default, and the
+/// pelvis fixup the rig asks the whole avatar to be lifted by.
 ///
 /// Built by [`joint_position_overrides`] from a mesh's [`MeshSkin`] and consumed by
 /// [`BevySkeleton::deformed_local_transforms_with`]. A mesh body/head or fitted
@@ -1175,13 +1176,17 @@ pub struct JointOverrides {
     positions: HashMap<usize, Vec3>,
     /// Whether the rig locks overridden joints to their default scale.
     lock_scale: bool,
+    /// The rig's pelvis fixup in Second Life Z-up metres (0.0 for none).
+    pelvis_fixup: f32,
 }
 
 impl JointOverrides {
-    /// Whether no joint is overridden.
+    /// Whether the rig imposes nothing at all — no joint override *and* no
+    /// pelvis fixup. A rig may carry only the latter, and dropping it because
+    /// no joint deviated would lose the avatar's height adjustment.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.positions.is_empty()
+        self.positions.is_empty() && self.pelvis_fixup == 0.0
     }
 
     /// The number of overridden joints.
@@ -1212,14 +1217,38 @@ impl JointOverrides {
         self.lock_scale = lock_scale;
     }
 
+    /// The rig's **pelvis fixup** in Second Life Z-up metres: how far the whole
+    /// avatar is lifted while this rig is worn (`0.0` for none).
+    ///
+    /// A rigged mesh uploaded with a pelvis offset asks the wearer to stand that
+    /// much higher — the reference viewer's `addPelvisFixup` / `hasPelvisFixup`,
+    /// applied in `LLVOAvatar::getRenderPosition` as a straight Z shift of the
+    /// rendered body rather than as a joint override. It is *not* a skeleton
+    /// edit: the pose is unchanged, only where that pose is planted.
+    #[must_use]
+    pub const fn pelvis_fixup(&self) -> f32 {
+        self.pelvis_fixup
+    }
+
+    /// Record the rig's pelvis fixup, in Second Life Z-up metres.
+    pub const fn set_pelvis_fixup(&mut self, fixup: f32) {
+        self.pelvis_fixup = fixup;
+    }
+
     /// Merge another mesh's overrides into this set (a shared skeleton accumulates
     /// the overrides of every worn rigged mesh): a later mesh's override of the same
-    /// joint wins, and the scale lock is sticky once any rig requests it.
+    /// joint wins, the scale lock is sticky once any rig requests it, and a later
+    /// mesh's pelvis fixup replaces an earlier one (the reference's
+    /// `hasPelvisFixup`, which answers with the most recently added entry) while a
+    /// rig carrying none leaves the standing fixup alone.
     pub fn merge(&mut self, other: &Self) {
         for (&index, &position) in &other.positions {
             let _prev = self.positions.insert(index, position);
         }
         self.lock_scale = self.lock_scale || other.lock_scale;
+        if other.pelvis_fixup != 0.0 {
+            self.pelvis_fixup = other.pelvis_fixup;
+        }
     }
 }
 
@@ -1236,6 +1265,12 @@ impl JointOverrides {
 /// `LLJoint::aboveJointPosThreshold`. `lookup` and `default_locals` come
 /// from the same skeleton the overrides will be applied to (e.g.
 /// [`BevySkeleton::lookup`] / [`BevySkeleton::local_transforms`]).
+///
+/// The same alternate-bind gate carries the skin's
+/// [`pelvis_offset`](MeshSkin::pelvis_offset) through as the rig's
+/// [`pelvis_fixup`](JointOverrides::pelvis_fixup) — the reference applies both
+/// inside its one `bindCnt == jointCnt` branch, so a rig that supplies no joint
+/// positions supplies no height adjustment either.
 #[must_use]
 pub fn joint_position_overrides(
     skin: &MeshSkin,
@@ -1244,8 +1279,16 @@ pub fn joint_position_overrides(
 ) -> JointOverrides {
     let mut overrides = JointOverrides::default();
     // No per-joint alternate-bind matrices (or a malformed count) → no overrides.
-    if skin.alt_inverse_bind_matrix.len() != skin.joint_names.len() {
+    if skin.alt_inverse_bind_matrix.is_empty()
+        || skin.alt_inverse_bind_matrix.len() != skin.joint_names.len()
+    {
         return overrides;
+    }
+    // The rig's pelvis fixup rides on the same gate, and is independent of
+    // whether any joint actually deviated: the reference adds it whenever the
+    // skin names a non-zero offset.
+    if let Some(offset) = skin.pelvis_offset.filter(|offset| *offset != 0.0) {
+        overrides.set_pelvis_fixup(offset);
     }
     for (name, matrix) in skin
         .joint_names
@@ -2009,6 +2052,50 @@ mod tests {
         assert!(
             joint_position_overrides(&skin2, bevy.lookup(), bevy.local_transforms()).is_empty()
         );
+        Ok(())
+    }
+
+    /// A rig's pelvis offset rides the same alternate-bind gate the joint
+    /// positions do, and reaches the caller as the pelvis fixup: it survives
+    /// even when no joint deviated enough to override (so `is_empty` must not
+    /// discard it), and a later worn rig's fixup replaces an earlier one while
+    /// a rig carrying none leaves the standing fixup alone.
+    #[test]
+    fn pelvis_offset_becomes_the_pelvis_fixup() -> Result<(), TestError> {
+        let skeleton = Skeleton::from_xml(MINI_SKELETON)?;
+        let bevy = BevySkeleton::from_skeleton(&skeleton);
+        // Every joint sits at its skeleton default, so nothing overrides — but
+        // the rig still asks its wearer to stand 8 cm higher.
+        let mut skin = skin_with_alt(
+            &[("mChest", translation_matrix(-0.015, 0.0, 0.205_01))],
+            false,
+        );
+        skin.pelvis_offset = Some(0.08);
+        let overrides = joint_position_overrides(&skin, bevy.lookup(), bevy.local_transforms());
+        assert_eq!(overrides.len(), 0, "no joint deviated");
+        assert!(!overrides.is_empty(), "the fixup alone is an imposition");
+        assert!((overrides.pelvis_fixup() - 0.08).abs() < 1.0e-6);
+
+        // Without alternate-bind matrices the reference never reaches its
+        // `addPelvisFixup`, so neither do we.
+        let mut unfitted = skin.clone();
+        unfitted.alt_inverse_bind_matrix.clear();
+        let none = joint_position_overrides(&unfitted, bevy.lookup(), bevy.local_transforms());
+        assert!(none.is_empty());
+        assert!(none.pelvis_fixup().abs() < 1.0e-6);
+
+        // A second rig with a fixup of its own wins; one without leaves it be.
+        let mut other = skin.clone();
+        other.pelvis_offset = Some(0.02);
+        let mut merged = overrides.clone();
+        merged.merge(&joint_position_overrides(
+            &other,
+            bevy.lookup(),
+            bevy.local_transforms(),
+        ));
+        assert!((merged.pelvis_fixup() - 0.02).abs() < 1.0e-6);
+        merged.merge(&none);
+        assert!((merged.pelvis_fixup() - 0.02).abs() < 1.0e-6);
         Ok(())
     }
 

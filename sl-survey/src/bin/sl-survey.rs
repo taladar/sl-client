@@ -33,13 +33,6 @@ const ARRIVAL_LOOK_AT: Vector = Vector {
 /// Error enum for the application.
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    /// error in clap
-    #[error("error in CLI option parsing: {0}")]
-    ClapError(
-        #[source]
-        #[from]
-        clap::Error,
-    ),
     /// error parsing log filter
     #[error("error parsing log filter: {0}")]
     LogFilterParseError(

@@ -342,6 +342,29 @@ Go here: \u{100000}\n\
         Ok(())
     }
 
+    /// Every one of the 128 high-bit bytes a version 1 text body can carry maps
+    /// to an embedded-item marker — the `byte & 0x7f` index never leaves the
+    /// `FIRST_EMBEDDED_CHAR..=LAST_EMBEDDED_CHAR` range, so the decoder has no
+    /// "malformed marker" case that would silently shorten the text.
+    #[test]
+    fn v1_maps_every_high_bit_byte() -> TestResult {
+        let body: Vec<u8> = (0x80_u8..=0xFF).collect();
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(
+            b"Linden text version 1\n{\nLLEmbeddedItems version 1\n{\ncount 0\n}\nText length 128\n",
+        );
+        bytes.extend_from_slice(&body);
+        bytes.extend_from_slice(b"}\n");
+        let decoded = Notecard::decode(&bytes)?;
+        let chars: Vec<char> = decoded.text.chars().collect();
+        assert_eq!(chars.len(), body.len(), "no marker byte was dropped");
+        for (offset, character) in chars.iter().enumerate() {
+            let index = u32::try_from(offset)?;
+            assert_eq!(crate::embedded_char_index(*character), Some(index));
+        }
+        Ok(())
+    }
+
     #[test]
     fn empty_notecard_round_trips() -> TestResult {
         let empty = Notecard {

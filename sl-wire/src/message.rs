@@ -71,6 +71,65 @@ impl MessageId {
     }
 }
 
+/// What `message_template.msg` says about a message's standing over LLUDP.
+///
+/// The template marks 26 of its messages: 5 `Deprecated`, 17 `UDPDeprecated`
+/// and 4 `UDPBlackListed`. Every one of them is still code-generated — a
+/// simulator may well send it, and OpenSim sends several of the blacklisted
+/// ones routinely — but the flag is the wire-level record of *why* the client
+/// should not be reaching for it, so it travels with the generated type rather
+/// than being discarded at parse time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum MessageStatus {
+    /// No deprecation flag: an ordinary, current message.
+    #[default]
+    Current,
+    /// `Deprecated`: obsolete on every transport.
+    Deprecated,
+    /// `UDPDeprecated`: obsolete over LLUDP. Second Life carries these over the
+    /// CAPS event queue instead (`ParcelProperties`, `ScriptRunningReply`,
+    /// `LargeGenericMessage`, …), though OpenSim still sends some over UDP.
+    UdpDeprecated,
+    /// `UDPBlackListed`: refused over LLUDP (`TeleportFinish`, `CrossedRegion`,
+    /// `EnableSimulator`, `OpenCircuit`).
+    UdpBlackListed,
+}
+
+impl MessageStatus {
+    /// The template flag this status came from, or `None` for
+    /// [`Self::Current`] — the spelling used in `message_template.msg`.
+    #[must_use]
+    pub const fn flag(self) -> Option<&'static str> {
+        match self {
+            Self::Current => None,
+            Self::Deprecated => Some("Deprecated"),
+            Self::UdpDeprecated => Some("UDPDeprecated"),
+            Self::UdpBlackListed => Some("UDPBlackListed"),
+        }
+    }
+
+    /// Whether the template marks this message obsolete (`Deprecated` or
+    /// `UDPDeprecated`). A blacklisted message is *refused*, not obsolete, so
+    /// it answers `false` here — test [`Self::is_udp_blacklisted`] for that.
+    #[must_use]
+    pub const fn is_deprecated(self) -> bool {
+        matches!(self, Self::Deprecated | Self::UdpDeprecated)
+    }
+
+    /// Whether the template blacklists this message over LLUDP.
+    #[must_use]
+    pub const fn is_udp_blacklisted(self) -> bool {
+        matches!(self, Self::UdpBlackListed)
+    }
+}
+
+impl core::fmt::Display for MessageStatus {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.flag().unwrap_or("Current"))
+    }
+}
+
 /// A decodable, encodable LLUDP message body.
 ///
 /// Implemented by every generated message struct. The associated constants
@@ -84,6 +143,8 @@ pub trait Message: Sized {
     const ID: MessageId;
     /// Whether the message is zero-coded by default.
     const ZEROCODED: bool;
+    /// What the template's trailing flags say about the message's standing.
+    const STATUS: MessageStatus;
 
     /// Serializes the message body (its blocks) to `writer`.
     ///

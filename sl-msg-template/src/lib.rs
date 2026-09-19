@@ -6,7 +6,8 @@ mod lexer;
 mod parser;
 
 pub use ast::{
-    BlockDef, Cardinality, Encoding, FieldDef, FieldType, Frequency, MessageDef, Template, Trust,
+    BlockDef, Cardinality, Encoding, FieldDef, FieldType, Frequency, MessageDef, MessageStatus,
+    Template, Trust,
 };
 pub use error::ParseError;
 pub use parser::parse;

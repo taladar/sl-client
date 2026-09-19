@@ -36,13 +36,6 @@ const TICK_INTERVAL: Duration = Duration::from_millis(10);
 /// An error from the REPL binary.
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    /// A command-line parsing error.
-    #[error("error in CLI option parsing: {0}")]
-    Clap(
-        #[source]
-        #[from]
-        clap::Error,
-    ),
     /// A credentials-file or MFA-acquisition error.
     #[error("authentication error: {0}")]
     Auth(

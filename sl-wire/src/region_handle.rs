@@ -8,6 +8,8 @@
 //! bare `u64`, so a region handle can't be transposed with any other 64-bit
 //! field and the grid-coordinate decode is a method on the value itself.
 
+use crate::endian;
+
 /// A Second Life / OpenSim region handle: the region's global south-west corner
 /// in metres packed as `(global_x << 32) | global_y`.
 ///
@@ -32,13 +34,16 @@ impl RegionHandle {
 
     /// Splits the handle into its global south-west corner in metres,
     /// `(global_x, global_y)`.
+    ///
+    /// The split is the handle's big-endian byte layout — the high four bytes
+    /// are `global_x`, the low four `global_y` — so it is total: there is no
+    /// out-of-range handle and hence no fallback value to invent.
     #[must_use]
-    pub fn global_coordinates(self) -> (u32, u32) {
-        let high = self.0.checked_shr(32).unwrap_or(0);
-        let low = self.0 & 0xFFFF_FFFF;
+    pub const fn global_coordinates(self) -> (u32, u32) {
+        let [x0, x1, x2, x3, y0, y1, y2, y3] = endian::u64_to_be(self.0);
         (
-            u32::try_from(high).unwrap_or(u32::MAX),
-            u32::try_from(low).unwrap_or(u32::MAX),
+            endian::u32_from_be([x0, x1, x2, x3]),
+            endian::u32_from_be([y0, y1, y2, y3]),
         )
     }
 
@@ -46,12 +51,9 @@ impl RegionHandle {
     /// global south-west corner in metres divided by the 256 m region size. For
     /// the typed form, use `sl_types::map::GridCoordinates::from`.
     #[must_use]
-    pub fn grid_coordinates(self) -> (u32, u32) {
+    pub const fn grid_coordinates(self) -> (u32, u32) {
         let (global_x, global_y) = self.global_coordinates();
-        (
-            global_x.checked_div(256).unwrap_or(0),
-            global_y.checked_div(256).unwrap_or(0),
-        )
+        (global_x.wrapping_div(256), global_y.wrapping_div(256))
     }
 
     /// Builds a region handle from its global south-west corner in metres,
@@ -59,9 +61,15 @@ impl RegionHandle {
     /// Unlike [`RegionHandle::from_grid`], the inputs are already in metres (not
     /// region indices), e.g. the `region_x` / `region_y` fields of the login
     /// response.
+    ///
+    /// The exact inverse of [`RegionHandle::global_coordinates`], and total for
+    /// the same reason: the two coordinates are the handle's high and low four
+    /// bytes.
     #[must_use]
-    pub fn from_global(global_x: u32, global_y: u32) -> Self {
-        Self(u64::from(global_x).checked_shl(32).unwrap_or(0) | u64::from(global_y))
+    pub const fn from_global(global_x: u32, global_y: u32) -> Self {
+        let [x0, x1, x2, x3] = endian::u32_to_be(global_x);
+        let [y0, y1, y2, y3] = endian::u32_to_be(global_y);
+        Self(endian::u64_from_be([x0, x1, x2, x3, y0, y1, y2, y3]))
     }
 
     /// Whether `other` is this region or one of its eight immediate neighbours —
@@ -79,7 +87,7 @@ impl RegionHandle {
     /// its south-west grid index, so a hop to the far side of a big neighbour can
     /// read as distant. A zero (unknown) handle on either side is never adjacent.
     #[must_use]
-    pub fn is_adjacent_to(self, other: Self) -> bool {
+    pub const fn is_adjacent_to(self, other: Self) -> bool {
         if self.0 == 0 || other.0 == 0 {
             return false;
         }
@@ -91,11 +99,13 @@ impl RegionHandle {
     /// Builds a region handle from its grid coordinates (region indices) — the
     /// inverse of [`RegionHandle::grid_coordinates`]. The
     /// `From<sl_types::map::GridCoordinates>` impl is the equivalent typed form.
+    ///
+    /// A grid index past `u32::MAX / 256` has no representable corner, so it
+    /// saturates rather than wrapping into a different region's handle — the
+    /// grid is nowhere near that wide.
     #[must_use]
-    pub fn from_grid(grid_x: u32, grid_y: u32) -> Self {
-        let global_x = u64::from(grid_x).checked_mul(256).unwrap_or(0);
-        let global_y = u64::from(grid_y).checked_mul(256).unwrap_or(0);
-        Self(global_x.checked_shl(32).unwrap_or(0) | global_y)
+    pub const fn from_grid(grid_x: u32, grid_y: u32) -> Self {
+        Self::from_global(grid_x.saturating_mul(256), grid_y.saturating_mul(256))
     }
 }
 

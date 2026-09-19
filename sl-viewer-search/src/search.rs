@@ -388,7 +388,10 @@ const EVENT_CATEGORIES: [(u32, &str); 13] = [
 // Table specs (one per category).
 // ---------------------------------------------------------------------------
 
-/// A leading icon column (unused for now; kept for reference-column parity).
+/// One widget-owned text column of a results table: a translated header, the
+/// row token its cell reads, a width and an alignment. Every column of every
+/// directory table is built through this — the tables carry no icon or custom
+/// columns.
 const fn text_column(
     header_key: &'static str,
     token: &'static str,

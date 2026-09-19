@@ -744,7 +744,7 @@ impl InventoryCursor {
 /// `(global_x, global_y)`. Thin `u64` wrapper around
 /// [`RegionHandle::global_coordinates`] for raw-wire contexts.
 #[must_use]
-pub fn handle_to_global(handle: u64) -> (u32, u32) {
+pub const fn handle_to_global(handle: u64) -> (u32, u32) {
     RegionHandle(handle).global_coordinates()
 }
 
@@ -752,7 +752,7 @@ pub fn handle_to_global(handle: u64) -> (u32, u32) {
 /// global south-west corner in metres divided by 256. Thin `u64` wrapper around
 /// [`RegionHandle::grid_coordinates`] for raw-wire contexts.
 #[must_use]
-pub fn handle_to_grid(handle: u64) -> (u32, u32) {
+pub const fn handle_to_grid(handle: u64) -> (u32, u32) {
     RegionHandle(handle).grid_coordinates()
 }
 
@@ -762,14 +762,14 @@ pub fn handle_to_grid(handle: u64) -> (u32, u32) {
 /// e.g. the `region_x` / `region_y` fields of the login response. Thin `u64`
 /// wrapper around [`RegionHandle::from_global`].
 #[must_use]
-pub fn global_to_handle(global_x: u32, global_y: u32) -> u64 {
+pub const fn global_to_handle(global_x: u32, global_y: u32) -> u64 {
     RegionHandle::from_global(global_x, global_y).0
 }
 
 /// Builds a region handle from grid coordinates (region indices). Thin `u64`
 /// wrapper around [`RegionHandle::from_grid`].
 #[must_use]
-pub fn grid_to_handle(grid_x: u32, grid_y: u32) -> u64 {
+pub const fn grid_to_handle(grid_x: u32, grid_y: u32) -> u64 {
     RegionHandle::from_grid(grid_x, grid_y).0
 }
 

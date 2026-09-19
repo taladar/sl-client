@@ -542,8 +542,15 @@ fn decode_text(bytes: &[u8], version: NotecardVersion) -> Result<String, Notecar
             for &byte in bytes {
                 if byte & 0x80 == 0 {
                     text.push(char::from(byte));
-                } else if let Some(character) = embedded_char(u32::from(byte & 0x7f)) {
-                    text.push(character);
+                } else {
+                    // A high bit marks embedded item `byte & 0x7f`, so the index
+                    // is at most `0x7f` and `FIRST_EMBEDDED_CHAR + index` always
+                    // lands inside the embedded range on a valid code point:
+                    // `embedded_char` is `Some` for every byte a version 1 body
+                    // can carry, and `extend` therefore never drops one. There is
+                    // no malformed-marker case here — `v1_maps_every_high_bit_byte`
+                    // pins all 128 of them.
+                    text.extend(embedded_char(u32::from(byte & 0x7f)));
                 }
             }
             Ok(text)

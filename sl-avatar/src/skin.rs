@@ -29,11 +29,13 @@
 //! transforms from a posed skeleton instance and consumes the skinned vertices.
 //!
 //! The [`MeshSkin`] `alt_inverse_bind_matrix`, `pelvis_offset`, and
-//! `lock_scale_if_joint_position` fields are consumed **upstream**, when the
-//! caller builds the skeleton instance's joint world transforms (joint-position
-//! overrides and the pelvis fixup): they shape the `joint_world_matrix` inputs
-//! rather than the palette algebra here, so this module only reads
-//! `joint_names`, `inverse_bind_matrix`, and `bind_shape_matrix`.
+//! `lock_scale_if_joint_position` fields are consumed **upstream**, by
+//! `sl_client_bevy::joint_position_overrides`: the first and third shape the
+//! `joint_world_matrix` inputs (joint-position overrides), and the second
+//! becomes the wearer's pelvis fixup, a plant-height shift that moves the whole
+//! posed body rather than any joint in it. None of the three touches the palette
+//! algebra here, so this module reads only `joint_names`,
+//! `inverse_bind_matrix`, and `bind_shape_matrix`.
 
 use sl_mesh::{MeshSkin, VertexWeights};
 

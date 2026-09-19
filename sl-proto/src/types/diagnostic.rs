@@ -1,6 +1,6 @@
 //! Protocol-level diagnostics: anomalies the session noticed in inbound data.
 
-use sl_wire::{MessageId, SequenceNumber, WireError};
+use sl_wire::{MessageId, MessageStatus, SequenceNumber, WireError};
 
 /// A protocol-level anomaly the session noticed while processing inbound data.
 ///
@@ -46,6 +46,12 @@ pub enum Diagnostic {
         id: MessageId,
         /// The message name.
         name: &'static str,
+        /// What `message_template.msg` says about the message's standing. An
+        /// unmodelled message the template itself marks deprecated or
+        /// blacklisted over LLUDP is expected traffic the client is right not
+        /// to act on (Second Life carries it over CAPS instead); an unmodelled
+        /// *current* message is a gap.
+        status: MessageStatus,
         /// Whether it arrived on a child-agent circuit (a neighbouring region)
         /// rather than the root circuit.
         child: bool,
@@ -106,8 +112,17 @@ impl std::fmt::Display for Diagnostic {
                      failed_offset={failed_offset}"
                 )
             }
-            Self::UnhandledMessage { id, name, child } => {
-                write!(f, "UnhandledMessage id={id:?} name={name} child={child}")
+            Self::UnhandledMessage {
+                id,
+                name,
+                status,
+                child,
+            } => {
+                write!(f, "UnhandledMessage id={id:?} name={name} child={child}")?;
+                match status.flag() {
+                    Some(flag) => write!(f, " status={flag}"),
+                    None => Ok(()),
+                }
             }
             Self::UnknownCapsEvent { message } => {
                 write!(f, "UnknownCapsEvent message={message}")

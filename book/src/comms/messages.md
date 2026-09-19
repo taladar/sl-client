@@ -40,7 +40,15 @@ The message header line is:
 - **Encoding** — `Zerocoded` or `Unencoded`: the *default*
   [zero-coding](lludp-transport.md#zero-coding) for this message's body.
 - **Extra flags** — occasional trailing markers such as `Deprecated` or
-  `UDPDeprecated`.
+  `UDPDeprecated`. The template marks 26 of its messages this way: 5
+  `Deprecated` (obsolete on every transport), 17 `UDPDeprecated` (obsolete over
+  LLUDP — Second Life carries them over the CAPS event queue, though OpenSim
+  often still sends them) and 4 `UDPBlackListed` (refused over LLUDP:
+  `TeleportFinish`, `CrossedRegion`, `EnableSimulator`, `OpenCircuit`). Every
+  one of them is still code-generated — a simulator may well send it — and the
+  flag travels with the generated type as `Message::STATUS` /
+  `AnyMessage::status()` / `message_status(id)`, so a diagnostic can say that
+  the traffic it is reporting is something the grid itself considers obsolete.
 
 ### Frequency and the id encoding
 
