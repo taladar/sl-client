@@ -200,10 +200,10 @@ use crate::types::{
     GestureActivation, GodRegionUpdate, GroupAccountDetails, GroupAccountSummary,
     GroupAccountTransactions, GroupActiveProposalItem, GroupName, GroupVoteHistoryItem, ImDialog,
     InstantMessage, InventoryFolder, InventoryItem, InventoryItemMove, InventoryType, Kick,
-    LandBrushAction, LandBrushSize, LandEdit, LandSearchType, LandStatItem, LandStatReportType,
-    MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Material, MeanCollision,
-    MovementMode, NavMeshStatus, NewInventoryLink, NotecardRez, Object, ObjectBuyItem,
-    ObjectExtraParams, ObjectFlagSettings, ObjectPlayingAnimation, ObjectProperties,
+    LandBrushAction, LandBrushRadius, LandBrushSize, LandEdit, LandSearchType, LandStatItem,
+    LandStatReportType, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Material,
+    MeanCollision, MovementMode, NavMeshStatus, NewInventoryLink, NotecardRez, Object,
+    ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectPlayingAnimation, ObjectProperties,
     ObjectPropertiesFamily, ObjectTransform, OpenRegionInfo, ParcelAccessEntry, ParcelAccessFlags,
     ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelInfo, ParcelObjectOwner,
     ParcelReturnType, ParcelUpdate, PermissionField, PlacesResult, PlayingAnimation, Postcard,
@@ -11764,14 +11764,19 @@ impl SimSession {
             }
             AnyMessage::ModifyLand(modify) => {
                 let block = &modify.modify_block;
-                // Prefer the authoritative metre radius from the extended block,
-                // falling back to the deprecated legacy index byte, then the
-                // default brush for an unrecognised value.
-                let brush_size = modify
+                // Prefer the authoritative metre radius from the extended block —
+                // verbatim, because the reference's bulldozer slider runs
+                // continuously and most of its radii are none of the three LSL
+                // constants. Only an old client that sends no extended block
+                // falls back to the deprecated legacy index byte, and then to
+                // the default brush for an unrecognised one.
+                let brush_radius = modify
                     .modify_block_extended
                     .first()
-                    .and_then(|extended| LandBrushSize::from_metres(extended.brush_size))
-                    .or_else(|| LandBrushSize::from_index(block.brush_size))
+                    .map(|extended| LandBrushRadius::new(extended.brush_size))
+                    .or_else(|| {
+                        LandBrushSize::from_index(block.brush_size).map(LandBrushRadius::from)
+                    })
                     .unwrap_or_default();
                 // The viewer sends exactly one ParcelData block; treat a missing
                 // block as a free brush stroke at the region origin.
@@ -11787,7 +11792,7 @@ impl SimSession {
                 self.events.push_back(ServerEvent::ModifyLand {
                     edit: LandEdit {
                         action: LandBrushAction::from_code(block.action).unwrap_or_default(),
-                        brush_size,
+                        brush_radius,
                         strength: block.seconds,
                         height: block.height,
                         parcel,

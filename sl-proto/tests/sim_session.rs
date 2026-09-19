@@ -24,17 +24,17 @@ mod test {
         GroupAccountTransactions, GroupActiveProposalItem, GroupKey, GroupName, GroupRequestId,
         GroupRoleKey, GroupVote, GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder,
         InventoryFolderKey, InventoryItem, InventoryItemMove, InventoryItemOrFolderKey,
-        InventoryKey, InventoryType, InvoiceId, Kick, LandArea, LandBrushAction, LandBrushSize,
+        InventoryKey, InventoryType, InvoiceId, Kick, LandArea, LandBrushAction, LandBrushRadius,
         LandEdit, LandSearchType, LandStatItem, LandStatReportType, LandStatScore, LandingType,
         LightData, LindenAmount, LindenBalance, Llsd, LoginParams, MAX_FACES, MapItem, MapItemType,
         MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MeanCollision, MeanCollisionType,
         MovementMode, NavMeshBuildStatus, NavMeshStatus, NewInventoryLink, NotecardRez,
         ObjectBuyItem, ObjectExtraParams, ObjectKey, ObjectPlayingAnimation,
         ObjectPropertiesFamily, OpenRegionInfo, OwnerKey, ParcelCategory, ParcelDetails,
-        ParcelInfo, ParcelKey, ParcelObjectOwner, ParcelRequestResult, ParcelReturnType,
-        ParcelStatus, Permissions, Permissions5, PingId, PlacesResult, PointAtType, Postcard,
-        PrimShape, PrimShapeParams, ProductType, QueryId, RegionCoordinates, RegionHandle,
-        RegionIdentity, RegionLocalObjectId, RegionLocalParcelId, RegionStats,
+        ParcelInfo, ParcelKey, ParcelObjectOwner, ParcelRect, ParcelRequestResult,
+        ParcelReturnType, ParcelStatus, Permissions, Permissions5, PingId, PlacesResult,
+        PointAtType, Postcard, PrimShape, PrimShapeParams, ProductType, QueryId, RegionCoordinates,
+        RegionHandle, RegionIdentity, RegionLocalObjectId, RegionLocalParcelId, RegionStats,
         RegionTerrainComposition, RejectionReason, RequiredVoiceVersion, RestoreItem,
         RezAttachment, RezObjectParams, RezScriptParams, SaleType, ScopedObjectId, ScopedParcelId,
         ScriptControl, ScriptControlAction, ScriptPermissionRequest, ScriptPermissionStatus,
@@ -3672,10 +3672,13 @@ mod test {
 
         let circuit = client.root_circuit_id().ok_or("no circuit")?;
 
-        // ModifyLand: a whole-parcel raise stroke with a large brush.
+        // ModifyLand: a whole-parcel raise stroke. The radius is deliberately
+        // *not* one of the three LSL constants — it is what the reference's
+        // continuous bulldozer slider sends, and it has to survive the decode as
+        // itself rather than being rounded to the nearest constant brush.
         let edit = LandEdit {
             action: LandBrushAction::Raise,
-            brush_size: LandBrushSize::Large,
+            brush_radius: LandBrushRadius::new(7.5),
             strength: 0.5,
             height: 23.0,
             parcel: Some(RegionLocalParcelId(9)),
@@ -8065,14 +8068,21 @@ mod test {
         drain_server(&mut sim);
         drain_client(&mut client);
 
-        // The client's rectangle request decodes server-side.
-        client.request_parcel_properties(4.0, 8.0, 12.0, 16.0, -50_000, now)?;
+        // The client's rectangle request decodes server-side — including the
+        // `SnapSelection` flag, which the viewer sets when a click should select
+        // the whole parcel rather than the rectangle it drew.
+        client.request_parcel_properties(
+            ParcelRect::new(4.0, 8.0, 12.0, 16.0),
+            -50_000,
+            true,
+            now,
+        )?;
         pump(&mut client, &mut sim, now)?;
         let server_events = drain_server(&mut sim);
         assert!(
             server_events.iter().any(|e| matches!(
                 e,
-                ServerEvent::RequestParcelProperties { west, north, sequence_id: -50_000, snap_selection: false, .. }
+                ServerEvent::RequestParcelProperties { west, north, sequence_id: -50_000, snap_selection: true, .. }
                     if west.to_bits() == 4.0_f32.to_bits() && north.to_bits() == 16.0_f32.to_bits()
             )),
             "expected RequestParcelProperties, got {server_events:?}"

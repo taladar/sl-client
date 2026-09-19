@@ -10,6 +10,11 @@ refs: [viewer-ui-radial-menu, viewer-avatar-menu-reorder-when-implemented]
 
 Context: [context/viewer.md](../context/viewer.md).
 
+Update (2026-09-19): **Edit Terrain** is live — it opens the Build Tools
+floater on the Land tool ([[viewer-terrain-edit-brushes]]) — so one more slice
+has left the greyed set. Still placeholders: Go Here, Mute Part. Own.,
+Buy Pass, Buy This Land.
+
 [[viewer-land-context-menu]] lays the land pie at the **reference's** compass
 positions while most slices are greyed placeholders. Once most land actions
 are real (about-land, buy flows, terraforming, build), **re-lay the pie by

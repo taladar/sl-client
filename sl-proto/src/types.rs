@@ -519,7 +519,7 @@ pub use inventory::{
     NewInventoryItem, NewInventoryLink, SaleInfo, global_to_handle, grid_to_handle,
     handle_to_global, handle_to_grid, saved_item_rebinding, uploaded_inventory_item,
 };
-pub use land::{LandBrushAction, LandBrushSize, LandEdit, TerraformArea};
+pub use land::{LandBrushAction, LandBrushRadius, LandBrushSize, LandEdit, TerraformArea};
 pub use map::{
     EjectAction, EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateFlags, EstateInfo,
     EstateInfoUpdate, FreezeAction, GodRegionUpdate, MapItem, MapItemType, MapLayer, MapRegionInfo,
@@ -543,8 +543,8 @@ pub use parcel::{
     LandingType, PARCEL_GRID_STEP_METRES, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
     ParcelCategory, ParcelDetails, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo,
     ParcelObjectOwner, ParcelObjectOwnersPart, ParcelOverlayCell, ParcelOverlayError,
-    ParcelOverlayGrid, ParcelOverlayInfo, ParcelOwnership, ParcelRequestResult, ParcelReturnType,
-    ParcelStatus, ParcelUpdate,
+    ParcelOverlayGrid, ParcelOverlayInfo, ParcelOwnership, ParcelRect, ParcelRequestResult,
+    ParcelReturnType, ParcelStatus, ParcelUpdate,
 };
 pub use pathfinding::{NavMeshBuildStatus, NavMeshStatus};
 pub use region::{

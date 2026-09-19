@@ -77,9 +77,9 @@ pub use sl_proto::{
     InventoryCacheConfig, InventoryCallbackId, InventoryCursor, InventoryFolder,
     InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey, InventoryOffer,
     InventoryOwner, InventoryType, InviteChannel, ItemInfo, Key, Kilobits, LandArea,
-    LandBrushAction, LandBrushSize, LandEdit, LandImpact, LandSearchType, LandStatExtended,
-    LandStatItem, LandStatReportType, LandStatScore, LandingType, LegacyMaterial, LightData,
-    LightImage, LindenAmount, LindenBalance, Listing, ListingId, Llsd, LoadUrlRequest,
+    LandBrushAction, LandBrushRadius, LandBrushSize, LandEdit, LandImpact, LandSearchType,
+    LandStatExtended, LandStatItem, LandStatReportType, LandStatScore, LandingType, LegacyMaterial,
+    LightData, LightImage, LindenAmount, LindenBalance, Listing, ListingId, Llsd, LoadUrlRequest,
     LoggedChatType, LoginAccount, LoginParams, LoginRejectKind, LoginRequest, LoginResponse,
     LureId, MAX_FACES, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE,
     MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, MarketplaceApiError,
@@ -93,31 +93,32 @@ pub use sl_proto::{
     OpenSimExtras, OwnerKey, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
     ParcelCategory, ParcelDetails, ParcelFlags, ParcelInfo, ParcelKey, ParcelMediaCommand,
     ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelObjectOwnersPart, ParcelOverlayCell,
-    ParcelOverlayGrid, ParcelOverlayInfo, ParcelOwnership, ParcelRequestResult, ParcelReturnType,
-    ParcelStatus, ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField, Permissions,
-    Permissions5, PhysicsShapeType, PhysicsShapeTypes, PickInfo, PickKey, PickUpdate, PingId,
-    PlayingAnimation, PrimShape, PrimShapeParams, ProductType, ProfileUpdate, ProposalCandidateId,
-    ProposalVoteId, QueryId, ReflectionProbe, ReflectionProbeFlags, RegionChatSettings,
-    RegionCombatSettings, RegionCoordinates, RegionDebugUpdate, RegionFlags, RegionHandle,
-    RegionIdentity, RegionInfoUpdate, RegionLimits, RegionLocalObjectId, RegionLocalParcelId,
-    RegionName, RegionTerrainComposition, RegionTerrainUpdate, Reliability, RemoteParcelRequest,
-    RenderMaterialEntry, RenderMaterialRef, RestoreItem, RezAttachment, RezObjectParams,
-    RezScriptParams, Rotation, SaleType, ScopedObjectId, ScopedParcelId, ScriptCompileError,
-    ScriptControl, ScriptControlAction, ScriptDialog, ScriptLanguage, ScriptPermissionRequest,
-    ScriptPermissions, ScriptTarget, ScriptTeleportRequest, ScriptUploadLocation, SculptData,
-    SculptOrMeshKey, SequenceNumber, SessionMessage, SetDisplayNameReply, SimulatorFeatures,
-    SkySettings, SoundFlags, SoundPreload, StartLocation, StartLocationParseError,
-    StartLocationSlot, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TerraformArea,
-    TerrainLayerType, TerrainPatch, Texture, TextureAnimation, TextureEntry, TextureFace,
-    TextureKey, Throttle, ThrottleBuilder, ThrottleError, TimestampFormat, TransactionId,
-    TransferId, TransferStatus, Transmit, UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER,
-    UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN, UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT,
-    UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT, UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE,
-    UI_SOUND_WINDOW_OPEN, UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, UserInfo, Uuid,
-    Vector, VoiceAccountInfo, VoiceProvisionRequest, WaterSettings, Wearable, WearableType, XferId,
-    avatar_texture, decode_particle_system, decode_texture_anim, decode_texture_entry,
-    encode_texture_entry, grid_to_handle, group_powers, handle_to_global, handle_to_grid, j2c,
-    particle_pattern, pcode, sim_access, texture_anim_mode,
+    ParcelOverlayGrid, ParcelOverlayInfo, ParcelOwnership, ParcelRect, ParcelRequestResult,
+    ParcelReturnType, ParcelStatus, ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField,
+    Permissions, Permissions5, PhysicsShapeType, PhysicsShapeTypes, PickInfo, PickKey, PickUpdate,
+    PingId, PlayingAnimation, PrimShape, PrimShapeParams, ProductType, ProfileUpdate,
+    ProposalCandidateId, ProposalVoteId, QueryId, ReflectionProbe, ReflectionProbeFlags,
+    RegionChatSettings, RegionCombatSettings, RegionCoordinates, RegionDebugUpdate, RegionFlags,
+    RegionHandle, RegionIdentity, RegionInfoUpdate, RegionLimits, RegionLocalObjectId,
+    RegionLocalParcelId, RegionName, RegionTerrainComposition, RegionTerrainUpdate, Reliability,
+    RemoteParcelRequest, RenderMaterialEntry, RenderMaterialRef, RestoreItem, RezAttachment,
+    RezObjectParams, RezScriptParams, Rotation, SaleType, ScopedObjectId, ScopedParcelId,
+    ScriptCompileError, ScriptControl, ScriptControlAction, ScriptDialog, ScriptLanguage,
+    ScriptPermissionRequest, ScriptPermissions, ScriptTarget, ScriptTeleportRequest,
+    ScriptUploadLocation, SculptData, SculptOrMeshKey, SequenceNumber, SessionMessage,
+    SetDisplayNameReply, SimulatorFeatures, SkySettings, SoundFlags, SoundPreload, StartLocation,
+    StartLocationParseError, StartLocationSlot, TaskInventoryItem, TaskInventoryKey,
+    TaskInventoryReply, TerraformArea, TerrainLayerType, TerrainPatch, Texture, TextureAnimation,
+    TextureEntry, TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError,
+    TimestampFormat, TransactionId, TransferId, TransferStatus, Transmit, UI_SOUND_ALERT,
+    UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER, UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN,
+    UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT, UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT,
+    UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE, UI_SOUND_WINDOW_OPEN, UpdatableAssetType,
+    UpdateGroupInfoParams, UpdateListing, UserInfo, Uuid, Vector, VoiceAccountInfo,
+    VoiceProvisionRequest, WaterSettings, Wearable, WearableType, XferId, avatar_texture,
+    decode_particle_system, decode_texture_anim, decode_texture_entry, encode_texture_entry,
+    grid_to_handle, group_powers, handle_to_global, handle_to_grid, j2c, particle_pattern, pcode,
+    sim_access, texture_anim_mode,
 };
 // `sl_texture::TextureEntry` (the store's LOD-aware texture object) and
 // `TextureReadLease` are reachable as `sl_texture::…`; they are not re-exported
@@ -1525,9 +1526,12 @@ impl Client {
                                 dest, amount, kind, &description, Instant::now(),
                             )?;
                         }
-                        Some(Command::RequestParcelProperties { west, south, east, north, sequence_id }) => {
+                        Some(Command::RequestParcelProperties { west, south, east, north, sequence_id, snap_selection }) => {
                             self.session.request_parcel_properties(
-                                west, south, east, north, sequence_id, Instant::now(),
+                                ParcelRect::new(west, south, east, north),
+                                sequence_id,
+                                snap_selection,
+                                Instant::now(),
                             )?;
                         }
                         Some(Command::RequestParcelPropertiesById { local_id, sequence_id }) => {
@@ -1772,6 +1776,9 @@ impl Client {
                         }
                         Some(Command::SetRegionTerrain(update)) => {
                             self.session.set_region_terrain(&update, Instant::now())?;
+                        }
+                        Some(Command::BakeRegionTerrain) => {
+                            self.session.bake_region_terrain(Instant::now())?;
                         }
                         Some(Command::SetEstateInfo(update)) => {
                             self.session.set_estate_info(&update, Instant::now())?;

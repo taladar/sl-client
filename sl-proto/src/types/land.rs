@@ -120,6 +120,86 @@ impl LandBrushSize {
     }
 }
 
+/// The terraform brush radius actually carried on the wire, in metres — the
+/// `ModifyLand` `ModifyBlockExtended` block's `BrushSize` float.
+///
+/// [`LandBrushSize`] names the three **LSL constant** radii, and is what a
+/// script or a three-way size picker deals in. The wire field is a plain float,
+/// and the reference viewer's bulldozer slider runs continuously from 1 m to
+/// 11 m (`LandBrushSize` in its settings, `floater_tools.xml`'s
+/// `slider brush size`), so a radius arriving from — or going to — a real viewer
+/// is very often none of the three. This is that value: the three constants
+/// convert into it, and [`size`](Self::size) classifies one back out when it
+/// happens to be exact.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
+pub struct LandBrushRadius(f32);
+
+impl LandBrushRadius {
+    /// The smallest radius the reference's slider offers, in metres.
+    pub const MIN_METRES: f32 = 1.0;
+
+    /// The largest radius the reference's slider offers, in metres.
+    pub const MAX_METRES: f32 = 11.0;
+
+    /// A brush radius of `metres`, clamped into
+    /// [`MIN_METRES`](Self::MIN_METRES)`..=`[`MAX_METRES`](Self::MAX_METRES).
+    /// A zero or negative radius would be a no-op stroke and a huge one a
+    /// region-wide edit, neither of which any viewer can ask for.
+    #[must_use]
+    pub const fn new(metres: f32) -> Self {
+        Self(metres.clamp(Self::MIN_METRES, Self::MAX_METRES))
+    }
+
+    /// The radius in metres, as sent in the `ModifyBlockExtended` block.
+    #[must_use]
+    pub const fn to_metres(self) -> f32 {
+        self.0
+    }
+
+    /// The legacy `BrushSize` index byte (`0`/`1`/`2`), bucketed by which of the
+    /// three constant radii this one is nearest.
+    ///
+    /// The byte is deprecated — a modern simulator reads the metre radius from
+    /// [`to_metres`](Self::to_metres) — and the reference viewer's own
+    /// `LLToolBrushLand::getBrushIndex` derives it with a strict `>` loop that
+    /// lands *below* the constant at each exact value (its 2 m brush sends `0`,
+    /// its 4 m brush `1`). Bucketing by nearest instead keeps the three LSL
+    /// constants on the bytes they are named for, which is what an old
+    /// simulator reading the byte actually wants, and agrees with
+    /// [`LandBrushSize::to_index`].
+    #[must_use]
+    pub fn to_index(self) -> u8 {
+        if self.0 < 1.5 {
+            0
+        } else if self.0 < 3.0 {
+            1
+        } else {
+            2
+        }
+    }
+
+    /// The [`LandBrushSize`] this radius is exactly one of, or `None` for any
+    /// other radius the slider can produce.
+    #[must_use]
+    pub const fn size(self) -> Option<LandBrushSize> {
+        LandBrushSize::from_metres(self.0)
+    }
+}
+
+impl Default for LandBrushRadius {
+    /// The default brush, matching [`LandBrushSize::default`] — a 1 m radius.
+    fn default() -> Self {
+        Self(LandBrushSize::Small.to_metres())
+    }
+}
+
+impl From<LandBrushSize> for LandBrushRadius {
+    /// The constant size's radius in metres.
+    fn from(size: LandBrushSize) -> Self {
+        Self(size.to_metres())
+    }
+}
+
 /// The region-local ground rectangle a `ModifyLand` brush stroke covers, in
 /// metres measured from the region's south-west corner. The reference viewer
 /// sends a zero-area rectangle (`west == east`, `south == north`) at the cursor
@@ -166,8 +246,10 @@ impl TerraformArea {
 pub struct LandEdit {
     /// The terraform operation to apply.
     pub action: LandBrushAction,
-    /// The brush radius.
-    pub brush_size: LandBrushSize,
+    /// The brush radius. A [`LandBrushSize`] converts in
+    /// (`LandBrushSize::Large.into()`); the reference's bulldozer slider sends
+    /// any radius from 1 m to 11 m.
+    pub brush_radius: LandBrushRadius,
     /// How strongly to apply the edit — the wire `Seconds` field. The viewer
     /// sends `(1 / fps) * LandBrushForce`, i.e. how long the brush is held
     /// scaled by the configured force; larger values move terrain further per
@@ -187,7 +269,7 @@ pub struct LandEdit {
 mod tests {
     use pretty_assertions::assert_eq;
 
-    use super::{LandBrushAction, LandBrushSize, TerraformArea};
+    use super::{LandBrushAction, LandBrushRadius, LandBrushSize, TerraformArea};
 
     /// Each [`LandBrushAction`] round-trips through its `E_LAND_*` wire byte.
     #[test]
@@ -240,6 +322,58 @@ mod tests {
         }
         assert_eq!(LandBrushSize::from_metres(3.0), None);
         assert_eq!(LandBrushSize::from_index(3), None);
+    }
+
+    /// The three [`LandBrushSize`] constants convert into a [`LandBrushRadius`]
+    /// keeping both their metre radius and the legacy index byte they are named
+    /// for, and classify back out of it.
+    #[test]
+    fn land_brush_radius_carries_the_constant_sizes() {
+        for size in [
+            LandBrushSize::Small,
+            LandBrushSize::Medium,
+            LandBrushSize::Large,
+        ] {
+            let radius = LandBrushRadius::from(size);
+            assert_eq!(radius.to_metres().to_bits(), size.to_metres().to_bits());
+            assert_eq!(radius.to_index(), size.to_index());
+            assert_eq!(radius.size(), Some(size));
+        }
+        assert_eq!(LandBrushRadius::default(), LandBrushSize::default().into());
+    }
+
+    /// A radius off the three constants — what the reference's 1 m…11 m
+    /// bulldozer slider mostly sends — survives as itself, buckets to a legacy
+    /// byte, and classifies as no constant size.
+    #[test]
+    fn land_brush_radius_keeps_an_off_constant_slider_value() {
+        let radius = LandBrushRadius::new(7.5);
+        assert_eq!(radius.to_metres().to_bits(), 7.5_f32.to_bits());
+        assert_eq!(radius.size(), None);
+        assert_eq!(radius.to_index(), 2);
+        // The buckets sit between the constants, so each constant keeps its own
+        // byte and a slider value takes the nearest one.
+        assert_eq!(LandBrushRadius::new(1.4).to_index(), 0);
+        assert_eq!(LandBrushRadius::new(2.9).to_index(), 1);
+        assert_eq!(LandBrushRadius::new(3.0).to_index(), 2);
+    }
+
+    /// A radius outside the reference slider's travel is clamped to it rather
+    /// than sent as a no-op (or region-wide) stroke.
+    #[test]
+    fn land_brush_radius_clamps_to_the_slider_travel() {
+        assert_eq!(
+            LandBrushRadius::new(0.0).to_metres().to_bits(),
+            LandBrushRadius::MIN_METRES.to_bits()
+        );
+        assert_eq!(
+            LandBrushRadius::new(-3.0).to_metres().to_bits(),
+            LandBrushRadius::MIN_METRES.to_bits()
+        );
+        assert_eq!(
+            LandBrushRadius::new(1000.0).to_metres().to_bits(),
+            LandBrushRadius::MAX_METRES.to_bits()
+        );
     }
 
     /// [`TerraformArea::point`] makes a zero-area rectangle at the point.

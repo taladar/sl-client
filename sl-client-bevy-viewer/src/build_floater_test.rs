@@ -1380,7 +1380,7 @@ mod tests {
             "an ordinary object selection edits every face, and must say so"
         );
 
-        // Select Face is the last of `BUILD_TOOLS`.
+        // Addressed by its own index into `BUILD_TOOLS`, not by position.
         let select_face = EditTool::SelectFace.radio_index();
         interact::click_node(&mut app, &format!("build-tool:radio:{select_face}"))?;
         settle(&mut app, 3);

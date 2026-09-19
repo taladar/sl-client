@@ -71,11 +71,11 @@ use sl_proto::{
     FlexibleData, FolderType, FreezeAction, FriendRights, GestureActivation, GodRegionUpdate,
     GridCoordinates, GroupNoticeAttachment, GroupNoticeKey, GroupRoleChange, GroupRoleEdit,
     GroupRoleMemberChange, InterestsUpdate, InventoryItem, InventoryOffer, InventoryType,
-    LandBrushAction, LandBrushSize, LandEdit, LandSearchType, LandStatReportType, LegacyMaterial,
-    LightData, LightImage, LindenAmount, ListingId, LoggedChatType, LookAtType, MapItemType,
-    MarketplaceAssociateInventoryInfo, MarketplaceInventoryInfo, Material, MaterialOverrideUpdate,
-    Maturity, MediaEntry, MoneyTransactionType, MovementMode, MuteFlags, MuteType,
-    NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams,
+    LandBrushAction, LandBrushRadius, LandBrushSize, LandEdit, LandSearchType, LandStatReportType,
+    LegacyMaterial, LightData, LightImage, LindenAmount, ListingId, LoggedChatType, LookAtType,
+    MapItemType, MarketplaceAssociateInventoryInfo, MarketplaceInventoryInfo, Material,
+    MaterialOverrideUpdate, Maturity, MediaEntry, MoneyTransactionType, MovementMode, MuteFlags,
+    MuteType, NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams,
     ObjectFlagSettings, ObjectPermMasks, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
     ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelReturnType, ParcelUpdate,
     PermissionField, Permissions, Permissions5, PickKey, PickUpdate, PointAtType, Postcard,
@@ -619,14 +619,35 @@ fn parse_land_brush_action(field: &str, value: &str) -> Result<LandBrushAction, 
     })
 }
 
-/// Parse a [`LandBrushSize`] from its name or index (`0`/`small`, `1`/`medium`,
-/// `2`/`large`).
-fn parse_land_brush_size(field: &str, value: &str) -> Result<LandBrushSize, ReplError> {
-    Ok(match norm(value).as_str() {
-        "small" | "0" => LandBrushSize::Small,
-        "medium" | "1" => LandBrushSize::Medium,
-        "large" | "2" => LandBrushSize::Large,
-        _ => return Err(invalid(field, value, "land brush size")),
+/// Parse a [`LandBrushRadius`] from one of the three LSL constant names
+/// (`small` = 1 m, `medium` = 2 m, `large` = 4 m) or a radius **in metres**,
+/// which is what the wire carries and what the reference's continuous bulldozer
+/// slider sends.
+///
+/// A number outside the slider's 1 m…11 m travel is **rejected**, where
+/// [`LandBrushRadius::new`] would clamp it: this parses what a person typed, and
+/// silently brushing at a radius nobody asked for is the kind of quiet
+/// correction that makes a probe's result a lie. The type still clamps for
+/// callers that compute a radius rather than read one.
+fn parse_land_brush_radius(field: &str, value: &str) -> Result<LandBrushRadius, ReplError> {
+    let normalised = norm(value);
+    Ok(match normalised.as_str() {
+        "small" => LandBrushSize::Small.into(),
+        "medium" => LandBrushSize::Medium.into(),
+        "large" => LandBrushSize::Large.into(),
+        metres => {
+            let parsed: f32 = metres
+                .parse()
+                .map_err(|_error| invalid(field, value, "land brush radius"))?;
+            if !(LandBrushRadius::MIN_METRES..=LandBrushRadius::MAX_METRES).contains(&parsed) {
+                return Err(invalid(
+                    field,
+                    value,
+                    "land brush radius in metres (1..=11), or small / medium / large",
+                ));
+            }
+            LandBrushRadius::new(parsed)
+        }
     })
 }
 
@@ -3522,7 +3543,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "request_parcel_properties",
-            usage: "<west> <south> <east> <north> [sequence_id=0]",
+            usage: "<west> <south> <east> <north> [sequence_id=0] [snap_selection=false]",
             build: |args, ctx| {
                 Ok(Command::RequestParcelProperties {
                     west: args.req_parse(ctx, "west", 0, "f32")?,
@@ -3530,6 +3551,7 @@ fn all_specs() -> Vec<CommandSpec> {
                     east: args.req_parse(ctx, "east", 2, "f32")?,
                     north: args.req_parse(ctx, "north", 3, "f32")?,
                     sequence_id: args.parse_or(ctx, "sequence_id", 4, "i32", 0)?,
+                    snap_selection: args.parse_or(ctx, "snap_selection", 5, "bool", false)?,
                 })
             },
         },
@@ -3558,12 +3580,12 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "modify_land",
-            usage: "<action> <brush_size> <west> <south> <east> <north> [strength=1.0] \
-                    [height=0.0] [parcel=]",
+            usage: "<action> <brush_radius: small|medium|large|metres> <west> <south> <east> \
+                    <north> [strength=1.0] [height=0.0] [parcel=]",
             build: |args, ctx| {
                 Ok(Command::ModifyLand(LandEdit {
                     action: enum_arg(args, ctx, "action", 0, parse_land_brush_action)?,
-                    brush_size: enum_arg(args, ctx, "brush_size", 1, parse_land_brush_size)?,
+                    brush_radius: enum_arg(args, ctx, "brush_radius", 1, parse_land_brush_radius)?,
                     strength: args.parse_or(ctx, "strength", 6, "f32", 1.0)?,
                     height: args.parse_or(ctx, "height", 7, "f32", 0.0)?,
                     parcel: args
@@ -3943,6 +3965,11 @@ fn all_specs() -> Vec<CommandSpec> {
                     args, ctx,
                 )?))
             },
+        },
+        CommandSpec {
+            name: "bake_region_terrain",
+            usage: "",
+            build: |_args, _ctx| Ok(Command::BakeRegionTerrain),
         },
         CommandSpec {
             name: "set_estate_info",
@@ -7212,18 +7239,41 @@ mod tests {
             build("modify_land raise large 16 32 48 64 strength=2.5 height=21 parcel=7"),
             Ok(Command::ModifyLand(LandEdit {
                 action: LandBrushAction::Raise,
-                brush_size: LandBrushSize::Large,
+                brush_radius,
                 strength,
                 height,
                 parcel: Some(RegionLocalParcelId(7)),
                 area: TerraformArea { west, south, east, north },
             }))
-                if strength.to_bits() == 2.5_f32.to_bits()
+                if brush_radius == LandBrushSize::Large.into()
+                    && strength.to_bits() == 2.5_f32.to_bits()
                     && height.to_bits() == 21.0_f32.to_bits()
                     && west.to_bits() == 16.0_f32.to_bits()
                     && south.to_bits() == 32.0_f32.to_bits()
                     && east.to_bits() == 48.0_f32.to_bits()
                     && north.to_bits() == 64.0_f32.to_bits()
+        ));
+    }
+
+    /// The brush argument also takes a radius in metres — the continuous form
+    /// the reference's bulldozer slider sends — and rejects one outside the
+    /// slider's travel rather than quietly clamping it to the nearest end.
+    #[test]
+    fn modify_land_takes_a_brush_radius_in_metres() {
+        assert!(matches!(
+            build("modify_land smooth 7.5 16 32 48 64"),
+            Ok(Command::ModifyLand(LandEdit { brush_radius, .. }))
+                if brush_radius.to_metres().to_bits() == 7.5_f32.to_bits()
+        ));
+        // Out of the slider's travel at either end: refused by name, so the
+        // failure says which argument and what was expected.
+        assert!(matches!(
+            build("modify_land smooth 0 16 32 48 64"),
+            Err(ReplError::InvalidArg { ref field, .. }) if field == "brush_radius"
+        ));
+        assert!(matches!(
+            build("modify_land smooth 12 16 32 48 64"),
+            Err(ReplError::InvalidArg { ref field, .. }) if field == "brush_radius"
         ));
     }
 

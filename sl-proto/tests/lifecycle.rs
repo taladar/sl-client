@@ -25,17 +25,17 @@ mod test {
         INVENTORY_FETCH_TIMEOUT, ImDialog, ImSessionId, ImageCodec, InterestsUpdate,
         InventoryCallbackId, InventoryFolder, InventoryFolderKey, InventoryItem, InventoryItemMove,
         InventoryItemOrFolderKey, InventoryKey, InventoryOwner, InventoryType, InviteChannel,
-        ItemInfo, LandArea, LandBrushAction, LandBrushSize, LandEdit, LandImpact, LandingType,
-        LightData, LindenAmount, LindenBalance, LoginAccount, LoginParams, LoginRedirect,
-        LookAtType, LureId, MapItemType, Material, Maturity, MeanCollisionType, MeshKey,
-        MoneyTransactionType, MovementMode, MuteFlags, MuteType, NavMeshBuildStatus, NavMeshStatus,
-        NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams,
-        ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey, ParcelAccessEntry,
-        ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelKey,
-        ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate,
-        PendingInvite, PermissionField, Permissions, Permissions5, PickUpdate, PointAtType,
-        Postcard, PrimShape, PrimShapeParams, ProductType, ProfileUpdate, QueryId,
-        ReflectionProbeFlags, RegionCoordinates, RegionHandle, RegionInfoUpdate,
+        ItemInfo, LandArea, LandBrushAction, LandBrushRadius, LandBrushSize, LandEdit, LandImpact,
+        LandingType, LightData, LindenAmount, LindenBalance, LoginAccount, LoginParams,
+        LoginRedirect, LookAtType, LureId, MapItemType, Material, Maturity, MeanCollisionType,
+        MeshKey, MoneyTransactionType, MovementMode, MuteFlags, MuteType, NavMeshBuildStatus,
+        NavMeshStatus, NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem,
+        ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey,
+        ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags,
+        ParcelKey, ParcelMediaCommand, ParcelRect, ParcelRequestResult, ParcelReturnType,
+        ParcelStatus, ParcelUpdate, PendingInvite, PermissionField, Permissions, Permissions5,
+        PickUpdate, PointAtType, Postcard, PrimShape, PrimShapeParams, ProductType, ProfileUpdate,
+        QueryId, ReflectionProbeFlags, RegionCoordinates, RegionHandle, RegionInfoUpdate,
         RegionLocalParcelId, RegionName, Reliability, RequiredVoiceVersion, RestoreItem,
         RezAttachment, RezObjectParams, RezScriptParams, SaleInfo, SaleType, Scale, ScopedObjectId,
         ScopedParcelId, ScriptControlAction, ScriptPermissionStatus, ScriptPermissions,
@@ -8479,7 +8479,7 @@ mod test {
         session.modify_land(
             &LandEdit {
                 action: LandBrushAction::Raise,
-                brush_size: LandBrushSize::Large,
+                brush_radius: LandBrushRadius::new(7.5),
                 strength: 2.5,
                 height: 21.0,
                 parcel: Some(sl_proto::RegionLocalParcelId(7)),
@@ -8504,6 +8504,8 @@ mod test {
             })
             .ok_or("expected a ModifyLand")?;
         assert_eq!(modify.modify_block.action, LandBrushAction::Raise.to_code());
+        // The legacy byte buckets the radius; the extended block below carries
+        // it exactly, which is what a modern simulator reads.
         assert_eq!(
             modify.modify_block.brush_size,
             LandBrushSize::Large.to_index()
@@ -8518,10 +8520,7 @@ mod test {
             .modify_block_extended
             .first()
             .ok_or("expected ModifyBlockExtended")?;
-        assert_eq!(
-            extended.brush_size.to_bits(),
-            LandBrushSize::Large.to_metres().to_bits()
-        );
+        assert_eq!(extended.brush_size.to_bits(), 7.5_f32.to_bits());
 
         assert!(
             sent.iter().any(|m| matches!(m, AnyMessage::UndoLand(_))),
@@ -13092,7 +13091,7 @@ mod test {
         drain(&mut session)?;
 
         session.request_region_info(now)?;
-        session.request_parcel_properties(0.0, 0.0, 64.0, 48.0, 77, now)?;
+        session.request_parcel_properties(ParcelRect::new(0.0, 0.0, 64.0, 48.0), 77, true, now)?;
         let sent = drain(&mut session)?;
 
         let region = sent.iter().find_map(|m| match m {
@@ -13112,6 +13111,9 @@ mod test {
         assert_eq!(parcel.parcel_data.sequence_id, 77);
         assert_eq!(parcel.parcel_data.east.to_bits(), 64.0_f32.to_bits());
         assert_eq!(parcel.parcel_data.north.to_bits(), 48.0_f32.to_bits());
+        // The caller's `SnapSelection` rides the wire rather than a hard-coded
+        // `false`: it is what makes the reply's echoed flag mean anything.
+        assert!(parcel.parcel_data.snap_selection);
         Ok(())
     }
 

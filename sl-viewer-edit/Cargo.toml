@@ -22,10 +22,13 @@ bevy_fluent = { version = "0.15.0" }
 sl-client-bevy = { workspace = true, features = [
   "bevy_pbr",
 ] }
+sl-settings = { workspace = true }
 sl-viewer-intents = { workspace = true }
 sl-viewer-inventory = { workspace = true }
 sl-viewer-kit = { workspace = true }
+sl-viewer-notifications = { workspace = true }
 sl-viewer-pickers = { workspace = true }
+sl-viewer-settings = { workspace = true }
 sl-viewer-social = { workspace = true }
 sl-viewer-ui-core = { workspace = true }
 sl-viewer-ui-widgets = { workspace = true }

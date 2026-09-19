@@ -271,6 +271,7 @@ impl Plugin for EditToolPlugin {
                     apply_tool_modifier_override,
                     sync_build_tool_from_radio,
                     sync_radio_from_build_tool,
+                    sync_tab_visibility,
                     update_toggle_glyphs,
                     promote_selection_when_whole_linkset,
                     sync_link_part_nav,
@@ -283,6 +284,41 @@ impl Plugin for EditToolPlugin {
                     .after(mirror_floater_into_state)
                     .run_if(edit_tool_active_or_settling),
             );
+    }
+}
+
+/// Marks the Build Tools tab container, so [`sync_tab_visibility`] can hide the
+/// per-aspect tabs while a tool's own panel stands in for them. Inserted by
+/// [`spawn_build_floater`].
+#[derive(Component, Debug, Clone, Copy)]
+pub(crate) struct BuildTabContainer;
+
+/// Whether `tool` brings a panel of its own that stands in for the per-aspect
+/// tabs — the Create tool's base-type picker ([`crate::edit_create`]) and the
+/// Land tool's brush / parcel panel ([`crate::edit_land`]).
+///
+/// The one place this is decided. Each panel used to hide the tabs itself,
+/// which meant that with either tool picked the *other* panel's sync was busy
+/// showing them again, and which won came down to system order.
+const fn tool_replaces_tabs(tool: EditTool) -> bool {
+    matches!(tool, EditTool::Create | EditTool::SelectLand)
+}
+
+/// Hide the per-aspect tabs while the active tool has a panel of its own, and
+/// show them again otherwise.
+fn sync_tab_visibility(
+    state: Res<EditToolState>,
+    mut tabs: Query<&mut Node, With<BuildTabContainer>>,
+) {
+    let display = if state.active && tool_replaces_tabs(state.tool) {
+        Display::None
+    } else {
+        Display::Flex
+    };
+    for mut node in &mut tabs {
+        if node.display != display {
+            node.display = display;
+        }
     }
 }
 
@@ -420,12 +456,13 @@ fn build_build_tools_content(
     // this content is built on the floater's first open, by which time that open
     // may already have chosen Create (`mirror_floater_into_state`), and a group
     // spawned on the default would show a dot the world is not in.
-    let tool_labels: [String; 5] = [
+    let tool_labels: [String; 6] = [
         "build-tool-create".to_owned(),
         "build-tool-move".to_owned(),
         "build-tool-rotate".to_owned(),
         "build-tool-stretch".to_owned(),
         "build-tool-select-face".to_owned(),
+        "build-tool-select-land".to_owned(),
     ];
     let tool_radio = spawn_radio_group(
         &mut commands,
@@ -499,6 +536,12 @@ fn build_build_tools_content(
     // sits above the tab shell so, when shown, it reads as the floater's body.
     crate::edit_create::spawn_create_panel(&mut commands, content);
 
+    // The Land-tool panel (viewer-terrain-edit-brushes / viewer-parcel-join-split):
+    // the brush picker, the bulldozer sliders and the parcel actions, shown only
+    // while the Land tool is active and standing in for the per-aspect tabs the
+    // same way the Create panel does.
+    crate::edit_land::spawn_land_panel(&mut commands, content);
+
     // The tab shell: the reference's per-aspect editor tabs, in its order —
     // General (name / description; permissions are their own tasks), Object
     // (the transform fields, as the reference's `llpanelobject` places them,
@@ -530,11 +573,9 @@ fn build_build_tools_content(
     // track it rather than content-size — the bar widens with the window and
     // the panels grow and scroll (the profile floater's arrangement).
     fill_tab_container(&mut commands, TabPlacement::BlockStart, &tabs);
-    // Mark the tab container so the Create tool can hide the tabs while its
-    // panel ([`crate::edit_create`]) stands in for them.
-    commands
-        .entity(tabs.container)
-        .insert(crate::edit_create::BuildTabContainer);
+    // Mark the tab container so [`sync_tab_visibility`] can hide the tabs while
+    // a tool's own panel (Create's, Land's) stands in for them.
+    commands.entity(tabs.container).insert(BuildTabContainer);
     // Inside each container panel, a page wrapper carrying `UiPanelShown`:
     // the container toggles panels with `Visibility` (they stay laid out),
     // which alone would leave a hidden page's fields Tab-reachable — the

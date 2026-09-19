@@ -1268,6 +1268,9 @@ enum AboutRegionAction {
     ApplyDebug,
     /// Commit the region-terrain draft via [`Command::SetRegionTerrain`].
     ApplyTerrain,
+    /// Bake the region's current heightmap as its revert baseline via
+    /// [`Command::BakeRegionTerrain`].
+    BakeTerrain,
     /// Commit the estate-flags draft via [`Command::SetEstateInfo`].
     ApplyEstate,
     /// Open the avatar picker to teleport one resident home.
@@ -1771,6 +1774,16 @@ fn build_terrain_tab(commands: &mut Commands, panel: Entity) -> TerrainHandles {
         "about-region-apply",
         AboutRegionAction::ApplyTerrain,
         7,
+    );
+    // Bake: the current heightmap becomes the region's revert baseline, which
+    // is what the Land tool's Revert brush restores to. It commits nothing from
+    // the draft above, so it is its own button rather than part of Apply.
+    spawn_row_action_button(
+        commands,
+        panel,
+        "about-region-terrain-bake",
+        AboutRegionAction::BakeTerrain,
+        8,
     );
     handles
 }
@@ -3795,6 +3808,13 @@ fn on_about_region_action(
             sl_commands.write(SlCommand(Command::SetRegionTerrain(
                 state.terrain_draft.clone(),
             )));
+        }
+        // The reference's estate `Bake Terrain`: make the ground as it stands
+        // now the baseline a Revert brush restores to. Region-wide and
+        // unconfirmed by the simulator -- there is no reply to wait for -- so
+        // nothing is re-requested after it.
+        AboutRegionAction::BakeTerrain => {
+            sl_commands.write(SlCommand(Command::BakeRegionTerrain));
         }
         AboutRegionAction::ApplyEstate => {
             let Some(estate) = &state.estate else {

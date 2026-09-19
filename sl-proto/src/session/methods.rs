@@ -87,8 +87,8 @@ use crate::types::{
     ObjectPlayingAnimation, ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry,
     ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelInfo,
     ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelObjectOwnersPart,
-    ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField, PickKey, PickUpdate,
-    PlacesResult, Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId,
+    ParcelOverlayInfo, ParcelRect, ParcelReturnType, ParcelUpdate, PermissionField, PickKey,
+    PickUpdate, PlacesResult, Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId,
     RegionDebugUpdate, RegionInfoUpdate, RegionStats, RegionTerrainUpdate, Reliability,
     RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType, ScriptControl,
     ScriptControlAction, ScriptControlsInfo, ScriptGrantInfo, ScriptLanguage,
@@ -11740,10 +11740,17 @@ impl Session {
         Ok(())
     }
 
-    /// Requests `ParcelProperties` for the parcel overlapping the given metre
-    /// rectangle (region-local coordinates). `sequence_id` is echoed back in the
-    /// reply ([`Event::ParcelProperties`]) so callers can match outstanding
-    /// queries.
+    /// Requests `ParcelProperties` for the parcel overlapping `rect`, a
+    /// region-local metre rectangle. `sequence_id` is echoed back in the reply
+    /// ([`Event::ParcelProperties`]) so callers can match outstanding queries.
+    ///
+    /// `snap_selection` asks the simulator to answer for the **whole** parcel
+    /// the rectangle lands in rather than the rectangle as drawn. It is echoed
+    /// back on the reply as [`ParcelInfo::snap_selection`], where a viewer that
+    /// sent `true` replaces its selection rectangle with the reply's
+    /// [`aabb_min`](ParcelInfo::aabb_min) / [`aabb_max`](ParcelInfo::aabb_max).
+    /// The reference viewer sends `true` for a click that should select a whole
+    /// parcel and `false` for a land drag-select, which keeps its rectangle.
     ///
     /// # Errors
     ///
@@ -11751,15 +11758,13 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn request_parcel_properties(
         &mut self,
-        west: f32,
-        south: f32,
-        east: f32,
-        north: f32,
+        rect: ParcelRect,
         sequence_id: i32,
+        snap_selection: bool,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_parcel_properties_request(west, south, east, north, sequence_id, now)?;
+        circuit.send_parcel_properties_request(rect, sequence_id, snap_selection, now)?;
         Ok(())
     }
 
@@ -12487,6 +12492,30 @@ impl Session {
         circuit.send_estate_owner_message("textureheights", &heights, now)?;
         // texturecommit: apply.
         circuit.send_estate_owner_message("texturecommit", &[], now)?;
+        Ok(())
+    }
+
+    /// Bakes the region's **current** heightmap as its revert baseline via
+    /// `EstateOwnerMessage`/`terrain` (`["bake"]`), so a later
+    /// [`LandBrushAction::Revert`] brush stroke ([`modify_land`]) restores the
+    /// ground to how it stands now.
+    ///
+    /// Region-owner / estate-manager gated, and **region-wide**: the `bake`
+    /// estate message carries no rectangle, so unlike the six brush actions
+    /// there is no per-area form of it. A successful bake is answered with
+    /// silence — the simulator sends no confirmation and no terrain re-broadcast
+    /// (the heights are unchanged; only the baseline moved).
+    ///
+    /// [`LandBrushAction::Revert`]: crate::LandBrushAction::Revert
+    /// [`modify_land`]: Self::modify_land
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn bake_region_terrain(&mut self, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_estate_owner_message("terrain", &["bake".to_owned()], now)?;
         Ok(())
     }
 

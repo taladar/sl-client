@@ -13,7 +13,8 @@
 use bevy::prelude::*;
 use sl_client_bevy::{
     AgentKey, ChatSessionKind, Command, ExperienceKey, ExperienceProperties, GroupKey, ImSessionId,
-    MuteFlags, MuteType, RegionCoordinates, RegionHandle, SlCommand, TextureKey, Uuid, Vector,
+    MuteFlags, MuteType, RegionCoordinates, RegionHandle, RegionLocalParcelId, SlCommand,
+    TextureKey, Uuid, Vector,
 };
 
 /// A request to block a target: the single **guarded** entry point every Block
@@ -613,4 +614,32 @@ impl OpenAddToContactSet {
         self.move_from = Some(set);
         self
     }
+}
+
+/// A request to open the About Land floater.
+#[derive(Message, Debug, Clone, Copy)]
+pub struct OpenAboutLand {
+    /// Which parcel to describe.
+    pub subject: AboutLandSubject,
+    /// Open without edit affordances (the read-only "About this location" view).
+    pub read_only: bool,
+}
+
+/// How the About Land floater's subject parcel is identified.
+#[derive(Debug, Clone, Copy)]
+pub enum AboutLandSubject {
+    /// A known region-local parcel id (the agent's current parcel -- the top-bar
+    /// read-out, the World menu, the Land tool's selection). Its data is
+    /// already local.
+    CurrentParcel(RegionLocalParcelId),
+    /// A region-local ground point (a land-pie right-click). The parcel is
+    /// resolved by asking the simulator for the parcel at that point
+    /// (`ParcelPropertiesRequest`), so a click on **any** parcel -- not just one
+    /// already fetched -- opens on that parcel, not the agent's own.
+    AtPoint {
+        /// The region-local east metre.
+        x: f32,
+        /// The region-local north metre.
+        y: f32,
+    },
 }

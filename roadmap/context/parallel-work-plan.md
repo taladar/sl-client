@@ -77,8 +77,17 @@ otherwise keep hitting.
   behind it) back under ui-core. Cutting its two runtime couplings as well took
   ui-core's dependency closure from 559 packages to 420, and left
   `sl-viewer-settings` — a floor nearly every crate stands on — naming no
-  runtime at all. **This was the last item in this section**, so Phase 3 can
-  start.
+  runtime at all. This was the last *decoupling* item in this section.
+- ~~The land tool~~ — **done** (2026-09-19), added to this section after the
+  fact. `viewer-terrain-edit-brushes`, `viewer-parcel-join-split`,
+  `viewer-parcel-owners-terrain-overlay` and `viewer-terrain-edit-bake-revert`
+  are one feature that straddles the split: the ground drag-select and the
+  terraform brushes are **A**'s (`sl-viewer-world-scene`'s terrain material and
+  shader), the Land panel and its Subdivide / Join are **B**'s, and the two
+  protocol gaps they exposed — `snap_selection` unrepresentable on
+  `RequestParcelProperties`, and a brush radius that could only be one of three
+  LSL constants — are **C**'s. Splitting it three ways would have meant three
+  branches blocked on each other, so it went solo.
 
 `build-audit-ci-pipeline` was listed here — "worth having before three branches
 are in flight" — and is now **deferred**: on a workspace developed on one

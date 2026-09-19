@@ -468,6 +468,51 @@ fn block_index(coord: f32, block: f32) -> Option<usize> {
     Some(index)
 }
 
+/// A region-local ground rectangle in metres, measured from the region's
+/// south-west corner — the shape every parcel query and parcel edit is
+/// addressed by.
+///
+/// The four edges travel together through
+/// [`Session::request_parcel_properties`](crate::Session::request_parcel_properties),
+/// `ParcelJoin` and `ParcelDivide`, and a caller that transposed two of six
+/// positional `f32`s would get a silently different rectangle; as one argument
+/// the compiler carries them.
+///
+/// Distinct from [`TerraformArea`](crate::TerraformArea), which is the same four
+/// numbers with a different meaning: that one is the ground a *brush stroke*
+/// covers, and is routinely a zero-area point.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ParcelRect {
+    /// The western edge (region-local X, metres).
+    pub west: f32,
+    /// The southern edge (region-local Y, metres).
+    pub south: f32,
+    /// The eastern edge (region-local X, metres).
+    pub east: f32,
+    /// The northern edge (region-local Y, metres).
+    pub north: f32,
+}
+
+impl ParcelRect {
+    /// A rectangle from its four region-local metre edges.
+    #[must_use]
+    pub const fn new(west: f32, south: f32, east: f32, north: f32) -> Self {
+        Self {
+            west,
+            south,
+            east,
+            north,
+        }
+    }
+
+    /// A zero-area rectangle at a single region-local ground point — what the
+    /// reference viewer sends to ask "which parcel contains this spot?".
+    #[must_use]
+    pub const fn point(x: f32, y: f32) -> Self {
+        Self::new(x, y, x, y)
+    }
+}
+
 /// A region parcel-ownership overlay chunk, parsed from `ParcelOverlay`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ParcelOverlayInfo {

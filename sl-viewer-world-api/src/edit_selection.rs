@@ -341,6 +341,12 @@ pub enum EditTool {
     /// the create panel (`edit_create`) at the ray-cast build point and
     /// drops into edit on the new object.
     Create,
+    /// The **Land** tool (the reference's `radio select land`, backed by
+    /// `LLToolSelectLand` and `LLToolBrushLand`): no transform gizmo and no
+    /// object selection at all — the pointer drags a rectangle of *ground*, or
+    /// sculpts it, depending on the brush picked in the Land panel
+    /// (`sl_viewer_edit::edit_land`).
+    SelectLand,
 }
 
 impl EditTool {
@@ -566,12 +572,13 @@ pub const DEFAULT_GRID_UNIT: f32 = 0.5;
 /// The tool-mode radio options, in the order they appear in the floater (the
 /// reference's `move` / `rotate` / `stretch`). The one place the index↔tool
 /// mapping lives, so `spawn_build_floater` and the two sync systems agree.
-pub const BUILD_TOOLS: [EditTool; 5] = [
+pub const BUILD_TOOLS: [EditTool; 6] = [
     EditTool::Create,
     EditTool::Move,
     EditTool::Rotate,
     EditTool::Stretch,
     EditTool::SelectFace,
+    EditTool::SelectLand,
 ];
 
 /// The grid frame the gizmos align to and snap in.

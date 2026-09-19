@@ -146,6 +146,10 @@ const AVATAR_RENDER_SETTINGS_OPEN: &str = "avatar-render-settings-open";
 /// drives the check mark on the World ▸ Property Lines entry.
 const PROPERTY_LINES_ON: &str = "property-lines-on";
 
+/// The condition name set while the in-world **Land Owners** ground tint is on,
+/// so the World menu's check mark follows the setting.
+const LAND_OWNERS_ON: &str = "land-owners-on";
+
 /// Condition key: protocol-diagnostic collection is on — drives the check mark
 /// on the Advanced ▸ Collect Protocol Diagnostics entry.
 const COLLECT_DIAGNOSTICS_ON: &str = "collect-diagnostics-on";
@@ -526,6 +530,13 @@ static WORLD_MENU: MenuDef = MenuDef {
         MenuItemDef::Command(
             MenuCommand::new("Property Lines", "toggle-property-lines")
                 .checked_when(PROPERTY_LINES_ON),
+        ),
+        // The in-world ownership tint on the ground itself
+        // (viewer-parcel-owners-terrain-overlay); the reference's
+        // World ▸ Show More ▸ Land Owners, also reachable from the Land tool's
+        // "Show owners" checkbox.
+        MenuItemDef::Command(
+            MenuCommand::new("Land Owners", "toggle-land-owners").checked_when(LAND_OWNERS_ON),
         ),
         MenuItemDef::Separator,
         // The About Land floater (viewer-parcel-options-general) on the agent's
@@ -914,6 +925,9 @@ struct TopMenuFacts<'w> {
     selection: Res<'w, crate::world_api::SelectionSet>,
     /// The current build tool.
     edit_tool: Res<'w, crate::world_api::EditToolState>,
+    /// The Land tool's picked action, which decides whether Undo undoes a
+    /// terraform stroke rather than an object edit.
+    land_tool: Res<'w, crate::edit_land::LandToolState>,
     /// The settings the toggles reflect.
     settings: Res<'w, crate::settings::ViewerSettings>,
     /// Our presence, for Away / Do Not Disturb.
@@ -976,6 +990,7 @@ fn update_top_menu_conditions(
         environment,
         selection,
         edit_tool,
+        land_tool,
         settings,
         presence,
         rlv_session,
@@ -1120,6 +1135,15 @@ fn update_top_menu_conditions(
     {
         wanted.push(PROPERTY_LINES_ON);
     }
+    // The World ▸ Land Owners check mark, from the ground ownership tint's
+    // setting (default off, as the reference's `ShowParcelOwners` is).
+    if settings
+        .store()
+        .get_bool(crate::parcel_borders::SETTING_SHOW_PARCEL_OWNERS)
+        .unwrap_or(false)
+    {
+        wanted.push(LAND_OWNERS_ON);
+    }
     // The Advanced ▸ Collect Protocol Diagnostics check mark (default on).
     if settings
         .store()
@@ -1136,8 +1160,12 @@ fn update_top_menu_conditions(
         wanted.push(CAN_UNLINK);
     }
     // The Build ▸ Undo / Redo enable gates, from the current selection's
-    // per-object permissions (the reference's `canUndo` / `canRedo`).
-    if crate::edit_undo::can_undo(&selection, &edit_tool) {
+    // per-object permissions (the reference's `canUndo` / `canRedo`) — or, while
+    // a land brush is picked, unconditionally: Undo then sends `UndoLand`, which
+    // needs no selection at all (the reference's `gEditMenuHandler` swap).
+    if crate::edit_undo::can_undo(&selection, &edit_tool)
+        || crate::edit_undo::land_undo_is_active(&edit_tool, &land_tool)
+    {
         wanted.push(CAN_UNDO);
     }
     if crate::edit_undo::can_redo(&selection, &edit_tool) {
@@ -1363,6 +1391,15 @@ fn handle_top_menu_actions(
             "toggle-property-lines" => {
                 let name = crate::parcel_borders::SETTING_SHOW_PROPERTY_LINES;
                 let current = settings.store().get_bool(name).unwrap_or(true);
+                settings.set(
+                    sl_settings::Scope::Global,
+                    name,
+                    sl_settings::SettingValue::Bool(!current),
+                );
+            }
+            "toggle-land-owners" => {
+                let name = crate::parcel_borders::SETTING_SHOW_PARCEL_OWNERS;
+                let current = settings.store().get_bool(name).unwrap_or(false);
                 settings.set(
                     sl_settings::Scope::Global,
                     name,
@@ -1700,6 +1737,7 @@ mod tests {
             ("World".to_owned(), "toggle-radar"),
             ("World".to_owned(), "toggle-world-map"),
             ("World".to_owned(), "toggle-property-lines"),
+            ("World".to_owned(), "toggle-land-owners"),
             ("World".to_owned(), "about-land"),
             ("World".to_owned(), "place-profile"),
             ("World".to_owned(), "about-region"),

@@ -615,6 +615,7 @@ const fn command_name(command: &Command) -> &'static str {
         Command::SetRegionInfo(..) => "set_region_info",
         Command::SetRegionDebug(..) => "set_region_debug",
         Command::SetRegionTerrain(..) => "set_region_terrain",
+        Command::BakeRegionTerrain => "bake_region_terrain",
         Command::SetEstateInfo(..) => "set_estate_info",
         Command::RequestEstateCovenant => "request_estate_covenant",
         Command::RequestTelehubInfo => "request_telehub_info",

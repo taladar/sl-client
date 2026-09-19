@@ -30,6 +30,7 @@ pub mod exposure;
 pub mod glow;
 pub mod lights;
 pub mod parcel_borders;
+pub mod parcel_owners;
 pub mod particles;
 mod plugin;
 pub mod probes;

@@ -46,8 +46,9 @@ use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{
-    ATTRIBUTE_TERRAIN_WEIGHTS, RegionHandle, RegionIdentity, SKY_LIGHTING_IMAGE, SlEvent,
-    SlIdentity, SlSessionEvent, TerrainMaterial, TerrainPatch, TextureKey, Vector, to_bevy_image,
+    ATTRIBUTE_TERRAIN_WEIGHTS, DETAIL_TILE_METRES, RegionHandle, RegionIdentity,
+    SKY_LIGHTING_IMAGE, SlEvent, SlIdentity, SlSessionEvent, TerrainMaterial, TerrainOwnership,
+    TerrainPatch, TextureKey, Vector, to_bevy_image,
 };
 
 use sl_terrain::TerrainComposition;
@@ -67,11 +68,6 @@ const REGION_SIZE_METRES: f32 = 256.0;
 /// The region edge length in metres as an integer, for the patch/region grid
 /// arithmetic that must stay in `u32` (mirrors [`REGION_SIZE_METRES`]).
 const REGION_SIZE_METRES_U32: u32 = 256;
-
-/// The world span, in metres, over which a detail texture repeats once. Terrain
-/// detail textures tile far more finely than the whole region, so the mesh's UVs
-/// wrap every few metres rather than stretching one texture across 256 m.
-const DETAIL_TILE_METRES: f32 = 8.0;
 
 /// The flat placeholder colour of the terrain material — a muted olive, shown
 /// until a region's detail textures decode and are swapped in.
@@ -110,6 +106,24 @@ impl TerrainTextures {
     /// destination also uses need not be refetched.
     pub fn purge_materials(&mut self) {
         self.materials.clear();
+    }
+
+    /// Every region's splat material, paired with the region it belongs to — the
+    /// entry point for a pass that writes something per region into its ground
+    /// material (the Land Owners tint, [`crate::parcel_owners`]).
+    pub fn materials_by_region(
+        &self,
+    ) -> impl Iterator<Item = (RegionHandle, Handle<TerrainMaterial>)> + '_ {
+        self.materials
+            .iter()
+            .map(|(region, handle)| (*region, handle.clone()))
+    }
+
+    /// Every region's splat material, for a pass that writes the same thing into
+    /// all of them and does not care which region is which (switching the Land
+    /// Owners tint off).
+    pub fn material_handles(&self) -> impl Iterator<Item = Handle<TerrainMaterial>> + '_ {
+        self.materials.values().cloned()
     }
 }
 
@@ -366,8 +380,14 @@ fn ensure_region(
             detail0: placeholder.clone(),
             detail1: placeholder.clone(),
             detail2: placeholder.clone(),
-            detail3: placeholder,
+            detail3: placeholder.clone(),
             sky_lighting: SKY_LIGHTING_IMAGE,
+            // The Land Owners tint starts **off**, and its zero strength makes
+            // the shader skip the map entirely — so the binding only has to be
+            // something valid until `crate::parcel_owners` puts this region's
+            // real ownership map there.
+            ownership: TerrainOwnership::default(),
+            ownership_map: placeholder,
         })
     });
     reconcile_region(state, textures, region, materials);

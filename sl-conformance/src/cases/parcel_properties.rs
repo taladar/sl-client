@@ -79,6 +79,7 @@ impl GridTest for ParcelProperties {
                     east: SQUARE_EAST_NORTH,
                     north: SQUARE_EAST_NORTH,
                     sequence_id: SEQUENCE_ID,
+                    snap_selection: false,
                 })
                 .await?;
             let parcel: ParcelInfo = session

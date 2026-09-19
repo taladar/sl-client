@@ -487,8 +487,13 @@ fn handle_select_pointer(
     mut selection: ResMut<SelectionSet>,
     mut band: RubberBand,
 ) {
-    if !tool.active {
-        // Leaving edit mode cancels any live gesture and hides the band.
+    // The Land tool works on the ground, never on objects: its own drag builds a
+    // land rectangle ([`crate::edit_land`]), so the object gesture must not also
+    // claim the press — the reference likewise captures the mouse in
+    // `LLToolSelectLand` / `LLToolBrushLand` and never reaches object selection.
+    if !tool.active || tool.tool == EditTool::SelectLand {
+        // Leaving edit mode (or switching to Land) cancels any live gesture and
+        // hides the band.
         if gesture.state.take().is_some() {
             band.hide();
         }

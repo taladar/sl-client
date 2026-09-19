@@ -19,11 +19,12 @@
 use bevy::app::{App, Plugin};
 use bevy::asset::{Asset, Handle, load_internal_asset, uuid_handle};
 use bevy::image::Image;
+use bevy::math::Vec2;
 use bevy::mesh::{Mesh, MeshVertexAttribute, MeshVertexBufferLayoutRef, VertexFormat};
 use bevy::pbr::{Material, MaterialPipeline, MaterialPipelineKey, MaterialPlugin};
 use bevy::reflect::TypePath;
 use bevy::render::render_resource::{
-    AsBindGroup, RenderPipelineDescriptor, SpecializedMeshPipelineError,
+    AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
 };
 use bevy::shader::{Shader, ShaderRef};
 
@@ -79,7 +80,69 @@ pub struct TerrainMaterial {
     #[texture(8)]
     #[sampler(9)]
     pub sky_lighting: Handle<Image>,
+    /// How the parcel-ownership tint below is mapped and how strongly it is
+    /// applied. Its [`strength`](TerrainOwnership::strength) is the on/off
+    /// switch, so toggling the overlay rewrites one uniform rather than every
+    /// region's ownership map.
+    #[uniform(10)]
+    pub ownership: TerrainOwnership,
+    /// The region's parcel-ownership map: one texel per 4 m parcel-overlay
+    /// square, carrying that square's ownership-class colour and the overlay's
+    /// alpha (the reference's `LLViewerParcelOverlay` texture). Left as a 1×1
+    /// transparent placeholder where a region has no decoded overlay yet.
+    #[texture(11)]
+    #[sampler(12)]
+    pub ownership_map: Handle<Image>,
 }
+
+/// How a [`TerrainMaterial`]'s parcel-ownership tint is mapped onto the ground
+/// and how strongly it shows.
+///
+/// The terrain mesh's UV is region-local metres over a fixed detail tile, and
+/// the ownership map spans the whole region, so the two differ by a per-region
+/// scale — which is why this is a material uniform rather than a constant.
+#[derive(Clone, Copy, Debug, ShaderType)]
+#[expect(
+    clippy::module_name_repetitions,
+    reason = "re-exported at the crate root as `TerrainOwnership`, where the name reads \
+              clearly — the same reason `TerrainMaterial` beside it carries this"
+)]
+pub struct TerrainOwnership {
+    /// Multiply the mesh's detail UV by this to get the ownership map's UV:
+    /// `detail tile metres / region width metres`.
+    pub uv_scale: f32,
+    /// How strongly the tint is blended over the lit ground, `0.0` for off —
+    /// the `ShowParcelOwners` switch.
+    pub strength: f32,
+    /// Padding to the uniform's 16-byte stride. Never read by the shader.
+    pub padding: Vec2,
+}
+
+impl Default for TerrainOwnership {
+    /// The tint off, mapped for a standard 256 m region — the state a material
+    /// built before its region's overlay has arrived should be in.
+    fn default() -> Self {
+        Self {
+            uv_scale: DETAIL_TILE_METRES / DEFAULT_REGION_WIDTH_METRES,
+            strength: 0.0,
+            padding: Vec2::ZERO,
+        }
+    }
+}
+
+/// The world span, in metres, over which a ground detail texture repeats once —
+/// the scale the terrain mesh's UV is built at (`local metres / this`), and so
+/// the numerator of [`TerrainOwnership::uv_scale`].
+///
+/// Detail textures tile far more finely than the whole region, so the mesh's
+/// UVs wrap every few metres rather than stretching one texture across 256 m.
+/// It lives here, beside the material and the vertex attribute it pairs with,
+/// because the ownership uniform is computed from it and the mesh builder is a
+/// layer above.
+pub const DETAIL_TILE_METRES: f32 = 8.0;
+
+/// The region width, in metres, a standard (non-var) region has.
+pub const DEFAULT_REGION_WIDTH_METRES: f32 = 256.0;
 
 impl Material for TerrainMaterial {
     /// Use the bundled terrain shader for the vertex stage (it carries the blend

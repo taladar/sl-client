@@ -262,32 +262,10 @@ const fn access_table(element: &'static str) -> TableSpec {
 // Open request.
 // ---------------------------------------------------------------------------
 
-/// A request to open the About Land floater.
-#[derive(Message, Debug, Clone, Copy)]
-pub struct OpenAboutLand {
-    /// Which parcel to describe.
-    pub subject: AboutLandSubject,
-    /// Open without edit affordances (the read-only "About this location" view).
-    pub read_only: bool,
-}
-
-/// How the About Land floater's subject parcel is identified.
-#[derive(Debug, Clone, Copy)]
-pub enum AboutLandSubject {
-    /// A known region-local parcel id (the agent's current parcel — the top-bar
-    /// read-out and the World menu). Its data is already local.
-    CurrentParcel(RegionLocalParcelId),
-    /// A region-local ground point (a land-pie right-click). The parcel is
-    /// resolved by asking the simulator for the parcel at that point
-    /// (`ParcelPropertiesRequest`), so a click on **any** parcel — not just one
-    /// already fetched — opens on that parcel, not the agent's own.
-    AtPoint {
-        /// The region-local east metre.
-        x: f32,
-        /// The region-local north metre.
-        y: f32,
-    },
-}
+/// The open request and its subject live in the shared intents crate: the Land
+/// tool asks for this window too, and a crate that only *asks* must not have to
+/// depend on the one that answers.
+pub use crate::intents::{AboutLandSubject, OpenAboutLand};
 
 // ---------------------------------------------------------------------------
 // State.
@@ -1961,6 +1939,9 @@ fn start_land_open(
                 east: x,
                 north: y,
                 sequence_id,
+                // Snap: About Land is about a whole parcel, never a drawn
+                // rectangle — the reference's `selectParcelAt` sends the same.
+                snap_selection: true,
             }));
         }
     }

@@ -936,6 +936,18 @@ pub enum Command {
         north: f32,
         /// A sequence id echoed back in the reply for matching.
         sequence_id: i32,
+        /// Ask the simulator to answer for the **whole** parcel the rectangle
+        /// lands in rather than the rectangle as drawn: the reply's
+        /// [`ParcelInfo::snap_selection`](crate::ParcelInfo::snap_selection)
+        /// echoes this back, and a viewer that sent `true` replaces its
+        /// selection rectangle with the reply's
+        /// [`aabb_min`](crate::ParcelInfo::aabb_min) /
+        /// [`aabb_max`](crate::ParcelInfo::aabb_max). The reference viewer
+        /// sends `true` when a click or an About Land open should select a
+        /// whole parcel (`LLViewerParcelMgr::selectParcelAt`,
+        /// `selectParcelInRectangle`) and `false` for a land drag-select, which
+        /// keeps the drawn rectangle (`LLToolSelectLand::handleMouseUp`).
+        snap_selection: bool,
     },
     /// Request a parcel's properties by its region-local id
     /// (`ParcelPropertiesRequestByID`); the reply arrives as
@@ -1181,6 +1193,15 @@ pub enum Command {
     /// (`setregionterrain` + `texturedetail` + `textureheights` +
     /// `texturecommit`).
     SetRegionTerrain(RegionTerrainUpdate),
+    /// Bake the region's **current** heightmap as its revert baseline
+    /// (`EstateOwnerMessage`/`terrain` `["bake"]`), so a later
+    /// [`LandBrushAction::Revert`](crate::LandBrushAction::Revert) brush stroke
+    /// restores the ground to how it stands now. Region-owner / estate-manager
+    /// gated, and region-wide: the `bake` estate message carries no rectangle,
+    /// so unlike the six [`ModifyLand`](Self::ModifyLand) brushes there is no
+    /// per-area form of it. Nothing is echoed back — the simulator answers a
+    /// successful bake with silence.
+    BakeRegionTerrain,
     /// Update the estate's settings — access / limit / voice / teleport flags
     /// and the fixed-sun hour (`estatechangeinfo`).
     SetEstateInfo(EstateInfoUpdate),
@@ -3044,6 +3065,7 @@ impl Command {
             Self::SetRegionInfo(..) => "SetRegionInfo",
             Self::SetRegionDebug(..) => "SetRegionDebug",
             Self::SetRegionTerrain(..) => "SetRegionTerrain",
+            Self::BakeRegionTerrain => "BakeRegionTerrain",
             Self::SetEstateInfo(..) => "SetEstateInfo",
             Self::RequestEstateCovenant => "RequestEstateCovenant",
             Self::RequestTelehubInfo => "RequestTelehubInfo",

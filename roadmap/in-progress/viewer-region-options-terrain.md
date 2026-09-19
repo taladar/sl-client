@@ -37,9 +37,11 @@ Parity-audit additions to this tab: the **Download RAW / Upload RAW**
 buttons — the Xfer protocol side is done
 (`test-terrain-raw-transfer-download` / `-upload`) but
 `sl-client-bevy-viewer/src/about_region.rs` has no raw
-terrain-file UI at all; the estate **Bake Terrain** button (set the
-current heightmap as the region's baked revert baseline — distinct from
-the area-brush bake of viewer-terrain-edit-bake-revert); and the
+terrain-file UI at all; the estate **Bake Terrain** button — **done 2026-09-19**
+with [[viewer-terrain-edit-bake-revert]]: `Command::BakeRegionTerrain`
+sends `EstateOwnerMessage`/`terrain` `["bake"]` from a button on this
+tab (there is no per-area form of it — `ModifyLand` carries no bake
+action); and the
 PBR-terrain material variant's **elevation/transform sub-tabs**
 (`panel_region_terrain_texture_transform.xml`, material_detail_*) on
 top of the already-noted PBR material variant (refs viewer-pbr-terrain).

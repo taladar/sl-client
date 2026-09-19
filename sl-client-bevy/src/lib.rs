@@ -81,53 +81,54 @@ pub use sl_proto::{
     ImSessionId, InstantMessage, InterestsUpdate, InventoryCacheConfig, InventoryCallbackId,
     InventoryCursor, InventoryFolder, InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey,
     InventoryKey, InventoryOffer, InventoryOwner, InventoryType, ItemInfo, KEYFRAME_SLOP, Key,
-    Kilobits, LandArea, LandImpact, LandSearchType, LandStatExtended, LandStatItem,
-    LandStatReportType, LandStatScore, LandingType, LegacyMaterial, LegacyPresetError, LightData,
-    LightImage, LindenAmount, LindenBalance, Listing, ListingId, Llsd, LoadUrlRequest,
-    LoggedChatType, LoginAccount, LoginFailure, LoginParams, LoginRejectKind, LoginRequest,
-    LookAtType, LureId, MAX_FACES, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP,
-    MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MUTE_LIST_LIMIT, MapItem, MapItemType, MapRegionInfo,
-    MarketplaceApiError, MarketplaceApiErrorKind, MarketplaceAssociateInventoryInfo,
-    MarketplaceInventoryInfo, MarketplaceOperation, Material, MaterialOverrideUpdate, Maturity,
-    MediaEntry, MerchantStatus, MeshKey, MessageCursor, MessageId, MessageStatus, MfaChallenge,
-    MoneyBalance, MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags,
-    MuteList, MuteType, NearbyHistoryLine, NegativeBalanceError, NeighborInfo, NewInventoryItem,
-    NewInventoryLink, Object, ObjectExtraParams, ObjectFlagSettings, ObjectKey,
-    ObjectMediaResponse, ObjectMotion, ObjectPermMasks, ObjectPhysicsData, ObjectPlayingAnimation,
-    ObjectProperties, ObjectPropertiesFamily, ObjectTransform, OpenRegionInfo, OpenSimExtras,
-    OwnerKey, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
-    ParcelDetails, ParcelFlags, ParcelInfo, ParcelKey, ParcelMediaCommand, ParcelMediaUpdateInfo,
+    Kilobits, LandArea, LandBrushAction, LandBrushRadius, LandBrushSize, LandEdit, LandImpact,
+    LandSearchType, LandStatExtended, LandStatItem, LandStatReportType, LandStatScore, LandingType,
+    LegacyMaterial, LegacyPresetError, LightData, LightImage, LindenAmount, LindenBalance, Listing,
+    ListingId, Llsd, LoadUrlRequest, LoggedChatType, LoginAccount, LoginFailure, LoginParams,
+    LoginRejectKind, LoginRequest, LookAtType, LureId, MAX_FACES, MEDIA_PERM_ALL,
+    MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MUTE_LIST_LIMIT,
+    MapItem, MapItemType, MapRegionInfo, MarketplaceApiError, MarketplaceApiErrorKind,
+    MarketplaceAssociateInventoryInfo, MarketplaceInventoryInfo, MarketplaceOperation, Material,
+    MaterialOverrideUpdate, Maturity, MediaEntry, MerchantStatus, MeshKey, MessageCursor,
+    MessageId, MessageStatus, MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType,
+    MovementMode, MuteEntry, MuteFlags, MuteList, MuteType, NearbyHistoryLine,
+    NegativeBalanceError, NeighborInfo, NewInventoryItem, NewInventoryLink, Object,
+    ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectMediaResponse, ObjectMotion,
+    ObjectPermMasks, ObjectPhysicsData, ObjectPlayingAnimation, ObjectProperties,
+    ObjectPropertiesFamily, ObjectTransform, OpenRegionInfo, OpenSimExtras, OwnerKey,
+    ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelDetails,
+    ParcelFlags, ParcelInfo, ParcelKey, ParcelMediaCommand, ParcelMediaUpdateInfo,
     ParcelObjectOwner, ParcelObjectOwnersPart, ParcelOverlayCell, ParcelOverlayGrid,
-    ParcelOverlayInfo, ParcelOwnership, ParcelRequestResult, ParcelReturnType, ParcelStatus,
-    ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField, Permissions, Permissions5,
-    PhysicsShapeType, PhysicsShapeTypes, PickInfo, PickKey, PickUpdate, PingId, PlayingAnimation,
-    PointAtType, PrimShape, PrimShapeParams, ProductType, ProfileUpdate, ProposalCandidateId,
-    ProposalVoteId, QueryId, ReflectionProbe, ReflectionProbeFlags, RegionChatSettings,
-    RegionCombatSettings, RegionCoordinates, RegionDebugUpdate, RegionFlags, RegionHandle,
-    RegionIdentity, RegionInfoUpdate, RegionLimits, RegionLocalObjectId, RegionLocalParcelId,
-    RegionName, RegionTerrainComposition, RegionTerrainUpdate, Reliability, RemoteParcelRequest,
-    RenderMaterialEntry, RenderMaterialRef, RestoreItem, RezAttachment, RezObjectParams,
-    RezScriptParams, Rotation, SKY_TRACK_COUNT, SaleInfo, SaleType, Scale, ScopedObjectId,
-    ScopedParcelId, ScriptCompileError, ScriptControl, ScriptControlAction, ScriptDialog,
-    ScriptLanguage, ScriptPermissionRequest, ScriptPermissions, ScriptTarget,
+    ParcelOverlayInfo, ParcelOwnership, ParcelRect, ParcelRequestResult, ParcelReturnType,
+    ParcelStatus, ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField, Permissions,
+    Permissions5, PhysicsShapeType, PhysicsShapeTypes, PickInfo, PickKey, PickUpdate, PingId,
+    PlayingAnimation, PointAtType, PrimShape, PrimShapeParams, ProductType, ProfileUpdate,
+    ProposalCandidateId, ProposalVoteId, QueryId, ReflectionProbe, ReflectionProbeFlags,
+    RegionChatSettings, RegionCombatSettings, RegionCoordinates, RegionDebugUpdate, RegionFlags,
+    RegionHandle, RegionIdentity, RegionInfoUpdate, RegionLimits, RegionLocalObjectId,
+    RegionLocalParcelId, RegionName, RegionTerrainComposition, RegionTerrainUpdate, Reliability,
+    RemoteParcelRequest, RenderMaterialEntry, RenderMaterialRef, RestoreItem, RezAttachment,
+    RezObjectParams, RezScriptParams, Rotation, SKY_TRACK_COUNT, SaleInfo, SaleType, Scale,
+    ScopedObjectId, ScopedParcelId, ScriptCompileError, ScriptControl, ScriptControlAction,
+    ScriptDialog, ScriptLanguage, ScriptPermissionRequest, ScriptPermissions, ScriptTarget,
     ScriptTeleportRequest, ScriptUploadLocation, SculptData, SculptOrMeshKey, SequenceNumber,
     ServerHistoryMessage, SetDisplayNameReply, SettingsKind, SimulatorFeatures, SkySettings,
     SoundFlags, SoundPreload, StartLocation, StartLocationParseError, StartLocationSlot,
     SurfaceInfo, TRACK_MAX, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo,
-    TerrainLayerType, TerrainPatch, TextureAnimation, TextureEntry, TextureFace, TextureKey,
-    Throttle, ThrottleBuilder, ThrottleError, TimestampFormat, TransactionId, TransferId, Transmit,
-    UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER, UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN,
-    UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT, UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT,
-    UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE, UI_SOUND_WINDOW_OPEN, UpdatableAssetType,
-    UpdateGroupInfoParams, UpdateListing, UserInfo, Uuid, Vector, ViewerEffect, ViewerEffectData,
-    ViewerEffectType, VoiceAccountInfo, VoiceProvisionRequest, WaterSettings, Wearable,
-    WearableType, WireError, XferId, avatar_texture, azimuth_altitude_to_rotation, chat_text_muted,
-    decode_particle_system, decode_texture_anim, decode_texture_entry, encode_texture_entry,
-    environment_asset_from_bytes, environment_asset_to_bytes, grid_to_handle, group_powers,
-    handle_to_global, handle_to_grid, legacy_day_cycle_from_bytes, legacy_preset_from_bytes,
-    legacy_preset_name, particle_pattern, pcode, rotation_to_azimuth_altitude, sim_access,
-    sky_with_blended_values, sky_with_pushed_values, texture_anim_mode, water_with_blended_values,
-    water_with_pushed_values,
+    TerraformArea, TerrainLayerType, TerrainPatch, TextureAnimation, TextureEntry, TextureFace,
+    TextureKey, Throttle, ThrottleBuilder, ThrottleError, TimestampFormat, TransactionId,
+    TransferId, Transmit, UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER,
+    UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN, UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT,
+    UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT, UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE,
+    UI_SOUND_WINDOW_OPEN, UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, UserInfo, Uuid,
+    Vector, ViewerEffect, ViewerEffectData, ViewerEffectType, VoiceAccountInfo,
+    VoiceProvisionRequest, WaterSettings, Wearable, WearableType, WireError, XferId,
+    avatar_texture, azimuth_altitude_to_rotation, chat_text_muted, decode_particle_system,
+    decode_texture_anim, decode_texture_entry, encode_texture_entry, environment_asset_from_bytes,
+    environment_asset_to_bytes, grid_to_handle, group_powers, handle_to_global, handle_to_grid,
+    legacy_day_cycle_from_bytes, legacy_preset_from_bytes, legacy_preset_name, particle_pattern,
+    pcode, rotation_to_azimuth_altitude, sim_access, sky_with_blended_values,
+    sky_with_pushed_values, texture_anim_mode, water_with_blended_values, water_with_pushed_values,
 };
 // Linden's four ported WindLight sky presets and the day cycle that schedules
 // them: content both halves of the protocol need, so it lives in `sl-proto`
@@ -316,7 +317,10 @@ pub use crate::stars::{StarMaterial, StarMaterialPlugin, StarParams};
 #[cfg(feature = "bevy_pbr")]
 pub use crate::sun_disc::{SunDiscMaterial, SunDiscMaterialPlugin, SunDiscParams};
 #[cfg(feature = "bevy_pbr")]
-pub use crate::terrain::{ATTRIBUTE_TERRAIN_WEIGHTS, TerrainMaterial, TerrainMaterialPlugin};
+pub use crate::terrain::{
+    ATTRIBUTE_TERRAIN_WEIGHTS, DEFAULT_REGION_WIDTH_METRES, DETAIL_TILE_METRES, TerrainMaterial,
+    TerrainMaterialPlugin, TerrainOwnership,
+};
 pub use crate::textures::{
     BevyTextureFetcher, planar_texgen_uv, texture_face_uv_transform, texture_uv_transform,
     to_bevy_image,
@@ -2651,8 +2655,14 @@ fn apply_command(
             east,
             north,
             sequence_id,
+            snap_selection,
         } => {
-            session.request_parcel_properties(*west, *south, *east, *north, *sequence_id, now)?;
+            session.request_parcel_properties(
+                ParcelRect::new(*west, *south, *east, *north),
+                *sequence_id,
+                *snap_selection,
+                now,
+            )?;
         }
         Command::RequestParcelPropertiesById {
             local_id,
@@ -3004,6 +3014,9 @@ fn apply_command(
         }
         Command::SetRegionTerrain(update) => {
             session.set_region_terrain(update, now)?;
+        }
+        Command::BakeRegionTerrain => {
+            session.bake_region_terrain(now)?;
         }
         Command::SetEstateInfo(update) => {
             session.set_estate_info(update, now)?;

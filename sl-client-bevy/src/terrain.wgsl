@@ -41,6 +41,23 @@
 @group(#{MATERIAL_BIND_GROUP}) @binding(8) var sky_lighting_texture: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(9) var sky_lighting_sampler: sampler;
 
+// How the parcel-ownership tint is mapped and how strongly it shows
+// (`sl_client_bevy::TerrainOwnership`). `uv_scale` converts the mesh's tiled
+// detail UV into the ownership map's whole-region UV; `strength` is the
+// `ShowParcelOwners` switch, zero when the overlay is off.
+struct TerrainOwnership {
+    uv_scale: f32,
+    strength: f32,
+    padding: vec2<f32>,
+};
+@group(#{MATERIAL_BIND_GROUP}) @binding(10) var<uniform> ownership: TerrainOwnership;
+
+// One texel per 4 m parcel-overlay square: that square's ownership-class colour
+// in RGB and the overlay's alpha in A (the reference's
+// `LLViewerParcelOverlay` texture, drawn by its `renderOwnership` pass).
+@group(#{MATERIAL_BIND_GROUP}) @binding(11) var ownership_texture: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(12) var ownership_sampler: sampler;
+
 // The flat light the ground falls back to before any sky has been resolved (a test
 // scene with no environment): the texture's seed `sunlit` and `amblit` as a plain
 // sun term and ambient.
@@ -145,6 +162,15 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     } else {
         let diffuse = max(dot(normal, sun_dir), 0.0);
         color = base.rgb * fallback_light(lighting.sunlit, lighting.amblit, diffuse, shadow);
+    }
+
+    // The parcel-ownership tint (`ShowParcelOwners`): blended over the *lit*
+    // ground, like the reference's alpha-blended `renderOwnership` pass, so the
+    // classes stay legible in shadow rather than being darkened with the albedo.
+    if (ownership.strength > 0.0) {
+        let owner_uv = in.uv * ownership.uv_scale;
+        let owner = textureSample(ownership_texture, ownership_sampler, owner_uv);
+        color = mix(color, owner.rgb, owner.a * ownership.strength);
     }
     // Alpha carries the SL glow mask (the viewer's `glow` pass): terrain never
     // glows, so it writes 0. The surface is opaque, so this alpha is not a blend

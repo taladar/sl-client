@@ -3,9 +3,10 @@
 //! Terraforming ("land editing") is driven by the `ModifyLand`
 //! ([`Command::ModifyLand`]) message: a single brush stroke described by a
 //! [`LandEdit`] — a [`LandBrushAction`] (raise / lower / smooth / revert / …), a
-//! [`LandBrushSize`] radius, a strength, and the region-local ground rectangle it
-//! covers ([`TerraformArea`]). The reference viewer sends a *zero-area* rectangle
-//! at the cursor for a click-drag brush ([`TerraformArea::point`]); the simulator
+//! [`LandBrushRadius`](sl_client_tokio::LandBrushRadius) radius, a strength, and
+//! the region-local ground rectangle it covers ([`TerraformArea`]). The
+//! reference viewer sends a *zero-area* rectangle at the cursor for a
+//! click-drag brush ([`TerraformArea::point`]); the simulator
 //! then applies a cos-falloff sphere centred on that point, so the very centre
 //! cell moves by the full strength. An `UndoLand` ([`Command::UndoLand`]) rolls
 //! back the agent's last terraform edit.
@@ -147,6 +148,7 @@ impl GridTest for ModifyLand {
                     east: SQUARE_EAST_NORTH,
                     north: SQUARE_EAST_NORTH,
                     sequence_id: SEQUENCE_ID,
+                    snap_selection: false,
                 })
                 .await?;
             let parcel: ParcelInfo = session
@@ -254,10 +256,10 @@ impl GridTest for ModifyLand {
 /// Builds a point brush [`LandEdit`] at the region centre with the given action
 /// and strength, targeting `parcel`. Uses the large brush radius and a zero-area
 /// rectangle at the centre, as the viewer sends for a click-drag stroke.
-const fn brush(action: LandBrushAction, strength: f32, parcel: RegionLocalParcelId) -> LandEdit {
+fn brush(action: LandBrushAction, strength: f32, parcel: RegionLocalParcelId) -> LandEdit {
     LandEdit {
         action,
-        brush_size: LandBrushSize::Large,
+        brush_radius: LandBrushSize::Large.into(),
         strength,
         // The reference height is only used by the level/flatten actions; the
         // raise and revert brushes ignore it.

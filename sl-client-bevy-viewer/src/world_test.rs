@@ -98,6 +98,10 @@ pub(crate) fn world_app() -> App {
     // The agent's current parcel (a `SlClientPlugin` world resource) and the
     // friends model (people-plugin-owned): the context menus consult both.
     app.init_resource::<sl_client_bevy::SlAgentParcel>();
+    // The decoded parcel-overlay grid, another `SlClientPlugin` world resource:
+    // the Land tool reads it for the region's width, so its selection cannot be
+    // dragged past a region edge.
+    app.init_resource::<sl_client_bevy::SlParcelOverlay>();
     app.init_resource::<crate::social::FriendsModel>();
     // The build-tool state the `edit_tool_inactive` run condition reads; its
     // owner (`EditToolPlugin`) is in the edit group. Tests that drive the
@@ -159,6 +163,11 @@ pub(crate) fn world_app() -> App {
     // Notification toasts (the block/mute handlers raise them); the
     // notification UI that consumes them is in the UI group.
     app.add_message::<sl_viewer_notifications::ShowNotification>();
+    // The answers to those toasts, which the same UI group publishes: the Land
+    // tool's Subdivide / Join wait on an `OK` here before sending their
+    // `ParcelDivide` / `ParcelJoin`, and an unregistered `MessageReader` fails
+    // parameter validation rather than simply reading nothing.
+    app.add_message::<sl_viewer_notifications::NotificationResponse>();
     record::<SlCommand>(&mut app);
     app.add_plugins(ViewerWorldPlugins::cpu_pick());
     app
@@ -431,8 +440,13 @@ pub(crate) fn world_app_with_build_tools() -> Result<App, Box<dyn core::error::E
     app.add_message::<crate::about_region::OpenAboutRegion>();
     app.add_message::<crate::people::OpenPeopleSubTab>();
     app.add_message::<crate::session::QuitRequested>();
-    // The build tools: the shell, the five tabs' editors, the Create tool, and
-    // the linking / undo shortcuts that act on the same selection.
+    // The build tools: the shell, the five tabs' editors, the Create and Land
+    // tools, and the linking / undo shortcuts that act on the same selection.
+    //
+    // The Land tool is not optional here even for a test that never touches it:
+    // `edit_undo` and the menu bar read its `LandToolState` to decide whether
+    // Undo undoes a terraform stroke, and an unregistered resource fails
+    // parameter validation and takes the whole schedule down.
     app.add_plugins((
         crate::edit_tool::EditToolPlugin,
         crate::edit_params::EditParamsPlugin,
@@ -440,6 +454,7 @@ pub(crate) fn world_app_with_build_tools() -> Result<App, Box<dyn core::error::E
         crate::edit_material::EditMaterialPlugin,
         crate::edit_contents::EditContentsPlugin,
         crate::edit_create::EditCreatePlugin,
+        crate::edit_land::EditLandPlugin,
         crate::edit_link::EditLinkPlugin,
         crate::edit_undo::EditUndoPlugin,
     ));

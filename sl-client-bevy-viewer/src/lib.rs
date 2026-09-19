@@ -56,6 +56,7 @@ pub(crate) const REGISTRARS: &[fn(&mut crate::settings::ViewerSettings)] = &[
     crate::minimap::register_settings,
     crate::double_click_teleport::register_settings,
     crate::parcel_borders::register_settings,
+    crate::edit_land::register_settings,
     crate::world_map::register_settings,
     crate::search::register_settings,
     crate::tonemap::register_settings,
@@ -141,6 +142,7 @@ pub(crate) use sl_viewer_asset_editors::edit_script;
 pub(crate) use sl_viewer_asset_editors::edit_wearable;
 pub(crate) use sl_viewer_edit::edit_contents;
 pub(crate) use sl_viewer_edit::edit_create;
+pub(crate) use sl_viewer_edit::edit_land;
 pub(crate) use sl_viewer_edit::edit_link;
 pub(crate) use sl_viewer_edit::edit_material;
 pub(crate) use sl_viewer_edit::edit_material_asset;
@@ -271,6 +273,7 @@ pub(crate) use sl_viewer_ui_pie_menu::pie_menu;
 pub(crate) use sl_viewer_world_api::rlv;
 pub(crate) use sl_viewer_world_objects::render_priority;
 pub(crate) use sl_viewer_world_scene::parcel_borders;
+pub(crate) use sl_viewer_world_scene::parcel_owners;
 pub(crate) use sl_viewer_world_scene::particles;
 pub(crate) use sl_viewer_world_scene::probes;
 pub(crate) use sl_viewer_world_view::physics;

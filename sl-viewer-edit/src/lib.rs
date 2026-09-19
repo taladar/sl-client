@@ -7,8 +7,9 @@
 //! Blinn-Phong maps and the PBR ones ([`edit_texture`], [`edit_material`],
 //! [`edit_texture_align`], [`edit_material_asset`]); an object's contents
 //! ([`edit_contents`]); rez ([`edit_create`]); link and unlink
-//! ([`edit_link`]); and the undo stack the whole floater writes through
-//! ([`edit_undo`]).
+//! ([`edit_link`]); the land tool -- the ground drag-select, the terraform
+//! brushes and the parcel subdivide / join ([`edit_land`]); and the undo stack
+//! the whole floater writes through ([`edit_undo`]).
 //!
 //! Everything here reads the world and asks the inventory and the pickers for
 //! what it needs; nothing below it reads back.
@@ -59,6 +60,7 @@ pub(crate) use sl_viewer_world_view::camera;
 
 pub mod edit_contents;
 pub mod edit_create;
+pub mod edit_land;
 pub mod edit_link;
 pub mod edit_material;
 pub mod edit_material_asset;

@@ -19,7 +19,9 @@
 //! (the muscle memory) is laid down now and each slice lights up when its
 //! feature lands — one `when` edit, address unchanged:
 //!
-//! - **Edit Terrain** waits for the terraform tools.
+//! - **Edit Terrain** opens the Build Tools floater on the Land tool, whose
+//!   panel carries the six terraform brushes and the parcel subdivide / join
+//!   (`sl_viewer_edit::edit_land`).
 //! - **Go Here** waits for autopilot.
 //! - **Mute Part. Own.** waits for particle picking
 //!   (`viewer-particle-pick-mute`), like the object pie's twin slice.
@@ -129,12 +131,15 @@ pub static LAND_PIE: PieMenuDef = PieMenuDef {
                 when: Some(UNIMPLEMENTED),
             }),
         },
+        // The reference's `Land.Edit` -> `LLLandEdit`: show the build floater
+        // and select the land tool. Always offered; whether this ground may
+        // actually be sculpted is the simulator's answer to the brush stroke.
         PieEntry {
             at: Compass::South,
             content: PieContent::Action(PieAction {
                 label: "Edit Terrain",
                 action: "edit-terrain",
-                when: Some(UNIMPLEMENTED),
+                when: None,
             }),
         },
         PieEntry {
@@ -238,6 +243,10 @@ fn handle_land_menu_actions(
             // this viewer holds no parcel selection to drop.
             "build" => {
                 build_tools.open_with(EditTool::Create);
+            }
+            // The reference's `LLLandEdit`: the same floater, on the land tool.
+            "edit-terrain" => {
+                build_tools.open_with(EditTool::SelectLand);
             }
             "sit-here" => {
                 // The reference's `LLLandSit` stands an already-seated avatar up
@@ -369,11 +378,16 @@ mod tests {
         let create = slot_at(&plain, Compass::NorthEast)?;
         assert_eq!(create.outcome, SlotOutcome::Action("build"));
         assert!(create.enabled, "Create must be live unconditionally");
+        // Edit Terrain is wired (viewer-terrain-edit-brushes): live
+        // unconditionally — whether this ground may actually be sculpted is the
+        // simulator's answer to the brush stroke, not a menu condition.
+        let terrain = slot_at(&plain, Compass::South)?;
+        assert_eq!(terrain.outcome, SlotOutcome::Action("edit-terrain"));
+        assert!(terrain.enabled, "Edit Terrain must be live unconditionally");
         for (point, name) in [
             (Compass::North, "Go Here"),
             (Compass::West, "Mute Part. Own."),
             (Compass::SouthWest, "Buy Pass"),
-            (Compass::South, "Edit Terrain"),
             (Compass::SouthEast, "Buy This Land"),
         ] {
             assert!(

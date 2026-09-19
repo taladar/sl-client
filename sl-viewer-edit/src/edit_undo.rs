@@ -50,9 +50,10 @@
 use bevy::prelude::*;
 use sl_client_bevy::{Command, Permissions, ScopedObjectId, SlCommand};
 
+use crate::edit_land::LandToolState;
 use crate::menu::TOP_MENU_ELEMENT;
 use crate::ui_element::UiAction;
-use crate::world_api::EditToolState;
+use crate::world_api::{EditTool, EditToolState};
 use crate::world_api::{SelectedNode, SelectionSet};
 
 /// The Build-menu action string the Undo entry emits.
@@ -89,6 +90,19 @@ pub fn can_undo(selection: &SelectionSet, tool: &EditToolState) -> bool {
         && selection
             .iter()
             .any(|node| node_modifiable(node) || node_movable(node))
+}
+
+/// Whether Undo would undo a **terraform** stroke rather than an object edit:
+/// the Land tool is active with a brush picked, not its rectangle select.
+///
+/// This is the reference's `gEditMenuHandler` swap — `LLToolBrushLand` claims
+/// the Edit menu's Undo on `handleSelect`, so while it is the current tool
+/// `Ctrl+Z` sends `UndoLand` and the object undo stack is not touched. The two
+/// stacks are of different things and the simulator keeps them apart; mixing
+/// them would let one eat the other's step.
+#[must_use]
+pub fn land_undo_is_active(tool: &EditToolState, land: &LandToolState) -> bool {
+    tool.active && tool.tool == EditTool::SelectLand && land.action.brush().is_some()
 }
 
 /// Whether the current selection can be **redone** — the reference's `canRedo`
@@ -171,6 +185,7 @@ impl Plugin for EditUndoPlugin {
 /// far too fast at frame rate.
 fn drive_undo_redo(
     tool: Res<EditToolState>,
+    land: Res<LandToolState>,
     selection: Res<SelectionSet>,
     mut actions: MessageReader<UiAction>,
     mut commands: MessageWriter<SlCommand>,
@@ -192,7 +207,14 @@ fn drive_undo_redo(
     }
 
     if do_undo {
-        undo_selection(&selection, &tool, &mut commands);
+        if land_undo_is_active(&tool, &land) {
+            // A terraform stroke: the simulator's own land undo, one stroke at
+            // a time. There is no Redo counterpart — the reference's `RedoLand`
+            // is commented out in `lltoolbrush.cpp` and no simulator answers it.
+            commands.write(SlCommand(Command::UndoLand));
+        } else {
+            undo_selection(&selection, &tool, &mut commands);
+        }
     }
     if do_redo {
         redo_selection(&selection, &tool, &mut commands);
@@ -201,9 +223,9 @@ fn drive_undo_redo(
 
 #[cfg(test)]
 mod tests {
-    use super::{can_redo, can_undo, undo_ids};
-    use crate::world_api::EditToolState;
-    use crate::world_api::SelectionSet;
+    use super::{can_redo, can_undo, land_undo_is_active, undo_ids};
+    use crate::edit_land::{LandAction, LandToolState};
+    use crate::world_api::{EditTool, EditToolState, SelectionSet};
     use bevy::prelude::Entity;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{CircuitId, ObjectKey, RegionLocalObjectId, ScopedObjectId, Uuid};
@@ -271,5 +293,39 @@ mod tests {
         set.insert(scoped(4), full(4), Entity::PLACEHOLDER);
         set.insert(scoped(5), full(5), Entity::PLACEHOLDER);
         assert_eq!(undo_ids(&set), vec![scoped(3), scoped(4), scoped(5)]);
+    }
+
+    /// Undo routes to the **land** undo exactly while a land brush is picked —
+    /// the reference's `gEditMenuHandler` swap. Not for the Land tool's
+    /// rectangle select (which edits nothing), not for any other tool, and not
+    /// while the build floater is closed.
+    #[test]
+    fn a_land_brush_claims_undo_and_nothing_else_does() {
+        let brushing = LandToolState {
+            action: LandAction::Brush(sl_client_bevy::LandBrushAction::Raise),
+            ..LandToolState::default()
+        };
+        let selecting = LandToolState::default();
+
+        let mut land_tool = active_tool();
+        land_tool.tool = EditTool::SelectLand;
+        assert!(
+            land_undo_is_active(&land_tool, &brushing),
+            "a brush under the Land tool owns Undo"
+        );
+        assert!(
+            !land_undo_is_active(&land_tool, &selecting),
+            "Select Land edits no ground, so it leaves Undo to the objects"
+        );
+
+        // Another tool, with a brush still picked in the Land panel: the brush
+        // is not in effect, so Undo is the object undo again.
+        assert!(!land_undo_is_active(&active_tool(), &brushing));
+
+        // Floater closed: neither undo runs.
+        let mut closed = active_tool();
+        closed.active = false;
+        closed.tool = EditTool::SelectLand;
+        assert!(!land_undo_is_active(&closed, &brushing));
     }
 }

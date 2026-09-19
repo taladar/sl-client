@@ -268,6 +268,7 @@ async fn query_parcel(session: &mut Session, sequence_id: i32) -> Result<ParcelI
             east: CENTRE_EAST_NORTH,
             north: CENTRE_EAST_NORTH,
             sequence_id,
+            snap_selection: false,
         })
         .await?;
     let parcel: ParcelInfo = session

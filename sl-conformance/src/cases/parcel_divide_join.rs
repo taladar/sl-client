@@ -374,6 +374,7 @@ async fn query_parcel(
             east: square.east,
             north: square.north,
             sequence_id,
+            snap_selection: false,
         })
         .await?;
     let parcel: ParcelInfo = session

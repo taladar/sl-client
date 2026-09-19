@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 303 |
-| blocked | 41 |
+| ready | 300 |
+| blocked | 40 |
 | in-progress | 22 |
 | bugs | 5 |
-| done | 1191 |
+| done | 1195 |
 | deferred | 29 |
 | wont-do | 16 |
 | **total** | **1707** |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (303)
+## ready (300)
 
 ### protocol
 
@@ -679,11 +679,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Flood-fill the parcel-overlay grid into per-parcel footprints
 - [`viewer-parcel-icon-hover-tips`](ready/viewer-parcel-icon-hover-tips.md) —
   Hover-tips over the parcel permission icons in the top bar
-- [`viewer-parcel-join-split`](ready/viewer-parcel-join-split.md) — Parcel join
-  / split (blocked by `viewer-input-action-map` (done),
-  `viewer-parcel-overlay-decode` (done))
-- [`viewer-parcel-owners-terrain-overlay`](ready/viewer-parcel-owners-terrain-overlay.md)
-  — Land Owners — in-world terrain ownership colour fill
 - [`viewer-particle-editor`](ready/viewer-particle-editor.md) — Particle-system
   editor (blocked by `viewer-ui-texture-picker` (done), `viewer-ui-color-picker`
   (done))
@@ -866,9 +861,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-about-floater` (done))
 - [`viewer-table-widget-remaining`](ready/viewer-table-widget-remaining.md) —
   Remaining table-widget migrations (inventory columns, full friends rights)
-- [`viewer-terrain-edit-brushes`](ready/viewer-terrain-edit-brushes.md) —
-  Terrain editing — sculpt brushes (blocked by `viewer-input-action-map` (done),
-  `viewer-region-options-debug` (done))
 - [`viewer-terrain-land-cache-on-disk`](ready/viewer-terrain-land-cache-on-disk.md)
   — Persist the land-height cache to disk (ground floor available at login)
 - [`viewer-text-field-context-menu`](ready/viewer-text-field-context-menu.md) —
@@ -952,7 +944,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
   The two REPL binaries share ~400 near-verbatim lines and have already drifted
 
-## blocked (41)
+## blocked (40)
 
 ### viewer
 
@@ -1046,8 +1038,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-task-inventory-open-and-save-back`](blocked/viewer-task-inventory-open-and-save-back.md)
   — Open a task-inventory item into its editor + Save Back to Object (blocked by
   `viewer-notecard-editor`, `viewer-lsl-editor-save-compile`)
-- [`viewer-terrain-edit-bake-revert`](blocked/viewer-terrain-edit-bake-revert.md)
-  — Terrain editing — bake / revert (blocked by `viewer-terrain-edit-brushes`)
 - [`viewer-usb-route-comments`](blocked/viewer-usb-route-comments.md) — USB
   waypoint comments in the viewer (blocked by `viewer-usb-route-map-display`)
 - [`viewer-usb-route-following`](blocked/viewer-usb-route-following.md) — USB
@@ -1158,7 +1148,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 
-## done (1191)
+## done (1195)
 
 ### protocol
 
@@ -2380,6 +2370,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-borders-render`](done/viewer-parcel-borders-render.md) —
   In-world parcel borders (property lines) (blocked by
   `viewer-parcel-overlay-decode` (done))
+- [`viewer-parcel-join-split`](done/viewer-parcel-join-split.md) — Parcel join /
+  split (blocked by `viewer-input-action-map` (done),
+  `viewer-parcel-overlay-decode` (done))
 - [`viewer-parcel-music-stream-internal-data-error`](done/viewer-parcel-music-stream-internal-data-error.md)
   — Parcel music stream fails to play ("Internal data stream error")
 - [`viewer-parcel-object-owners-uncorrelated`](done/viewer-parcel-object-owners-uncorrelated.md)
@@ -2392,6 +2385,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-parcel-overlay-decode`](done/viewer-parcel-overlay-decode.md) —
   Decode ParcelOverlay into a 64×64 grid resource
+- [`viewer-parcel-owners-terrain-overlay`](done/viewer-parcel-owners-terrain-overlay.md)
+  — Land Owners — in-world terrain ownership colour fill
 - [`viewer-particle-water-ordering`](done/viewer-particle-water-ordering.md) —
   Translucent content (particles) orders wrong against the water surface
 - [`viewer-pbr-blinn-phong-build-preview`](done/viewer-pbr-blinn-phong-build-preview.md)
@@ -2835,6 +2830,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   destination first
 - [`viewer-terrain-ambient-probe-classic-fidelity`](done/viewer-terrain-ambient-probe-classic-fidelity.md)
   — Terrain lighting — add the reference probe term + classic-mode blend
+- [`viewer-terrain-edit-bake-revert`](done/viewer-terrain-edit-bake-revert.md) —
+  Terrain editing — bake / revert (blocked by `viewer-terrain-edit-brushes`
+  (done))
+- [`viewer-terrain-edit-brushes`](done/viewer-terrain-edit-brushes.md) — Terrain
+  editing — sculpt brushes (blocked by `viewer-input-action-map` (done),
+  `viewer-region-options-debug` (done))
 - [`viewer-terrain-region-edge-seam-slope`](done/viewer-terrain-region-edge-seam-slope.md)
   — Terrain seam / misalignment at region edges on slopes
 - [`viewer-test-baseline-format`](done/viewer-test-baseline-format.md) — One

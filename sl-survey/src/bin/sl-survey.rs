@@ -888,6 +888,7 @@ impl Survey {
                 east,
                 north,
                 sequence_id,
+                snap_selection: false,
             })
             .await
             .ok();

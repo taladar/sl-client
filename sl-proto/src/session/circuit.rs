@@ -25,10 +25,10 @@ use crate::types::{
     InterestsUpdate, InventoryItem, InventoryType, LandEdit, LandSearchType, MapRequestFlags,
     Material, MovementMode, NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem,
     ObjectExtraParams, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelCategory,
-    ParcelUpdate, PermissionField, PickKey, PickUpdate, Postcard, PrimShape, PrimShapeParams,
-    ProfileUpdate, Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
-    SaleType, ScriptPermissions, StartLocationSlot, SurfaceInfo, TaskInventoryKey, TeleportFlags,
-    TextureEntry, Throttle, UpdateGroupInfoParams, ViewerEffect, Wearable,
+    ParcelRect, ParcelUpdate, PermissionField, PickKey, PickUpdate, Postcard, PrimShape,
+    PrimShapeParams, ProfileUpdate, Reliability, RestoreItem, RezAttachment, RezObjectParams,
+    RezScriptParams, SaleType, ScriptPermissions, StartLocationSlot, SurfaceInfo, TaskInventoryKey,
+    TeleportFlags, TextureEntry, Throttle, UpdateGroupInfoParams, ViewerEffect, Wearable,
 };
 use crate::types::{GroupNoticeKey, ProposalVoteId};
 use sl_types::chat::ChatChannel;
@@ -3807,11 +3807,9 @@ impl Circuit {
     /// Queues a `ParcelPropertiesRequest` reliably for the given metre rectangle.
     pub(crate) fn send_parcel_properties_request(
         &mut self,
-        west: f32,
-        south: f32,
-        east: f32,
-        north: f32,
+        rect: ParcelRect,
         sequence_id: i32,
+        snap_selection: bool,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ParcelPropertiesRequest(ParcelPropertiesRequest {
@@ -3821,11 +3819,11 @@ impl Circuit {
             },
             parcel_data: ParcelPropertiesRequestParcelDataBlock {
                 sequence_id,
-                west,
-                south,
-                east,
-                north,
-                snap_selection: false,
+                west: rect.west,
+                south: rect.south,
+                east: rect.east,
+                north: rect.north,
+                snap_selection,
             },
         });
         self.send(&message, Reliability::Reliable, now)
@@ -5834,7 +5832,7 @@ impl Circuit {
             },
             modify_block: ModifyLandModifyBlockBlock {
                 action: edit.action.to_code(),
-                brush_size: edit.brush_size.to_index(),
+                brush_size: edit.brush_radius.to_index(),
                 seconds: edit.strength,
                 height: edit.height,
             },
@@ -5846,7 +5844,7 @@ impl Circuit {
                 north: edit.area.north,
             }],
             modify_block_extended: vec![ModifyLandModifyBlockExtendedBlock {
-                brush_size: edit.brush_size.to_metres(),
+                brush_size: edit.brush_radius.to_metres(),
             }],
         });
         self.send(&message, Reliability::Reliable, now)

@@ -58,6 +58,14 @@ use sl_viewer_world_api::TerrainState;
 /// `ShowPropertyLines`). Registered in [`register_settings`].
 pub const SETTING_SHOW_PROPERTY_LINES: &str = "ShowPropertyLines";
 
+/// The setting name gating the in-world **ownership tint** — the terrain itself
+/// shaded by parcel-ownership class, the reference viewer's `ShowParcelOwners`
+/// (World ▸ Show More ▸ Land Owners, and the Land tool's *Show owners*
+/// checkbox). Registered here beside [`SETTING_SHOW_PROPERTY_LINES`] because the
+/// two are the same overlay family fed from the same decoded grid; the tint
+/// itself is drawn by [`crate::terrain`], which reads this.
+pub const SETTING_SHOW_PARCEL_OWNERS: &str = "ShowParcelOwners";
+
 /// The settings section the property-lines toggle lives under.
 const PARCEL_SECTION: &[&str] = &["world"];
 
@@ -257,6 +265,14 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         sl_settings::SettingValue::Bool(true),
         "Show the in-world parcel property lines (colour-coded by ownership)",
     );
+    settings.register_in(
+        PARCEL_SECTION,
+        SETTING_SHOW_PARCEL_OWNERS,
+        sl_settings::SettingValue::Bool(false),
+        "Tint the ground itself by parcel-ownership class (green = yours, \
+         aqua = your group's, red = someone else's, orange = for sale, \
+         violet = auction, grey = public)",
+    );
 }
 
 /// The property-line tint for an ownership class. The owned classes mirror the
@@ -264,7 +280,7 @@ pub fn register_settings(settings: &mut ViewerSettings) {
 /// public / unassigned land — which the reference draws nothing for — is drawn in
 /// [`PUBLIC_COLOR`] so its extent stays legible (unlike the reference, every
 /// parcel boundary is shown).
-const fn ownership_color(ownership: ParcelOwnership) -> [f32; 3] {
+pub(crate) const fn ownership_color(ownership: ParcelOwnership) -> [f32; 3] {
     match ownership {
         ParcelOwnership::SelfOwned => [0.0, 1.0, 0.0],
         ParcelOwnership::Group => [0.0, 0.72, 0.72],

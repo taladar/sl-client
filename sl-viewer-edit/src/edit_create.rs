@@ -326,12 +326,6 @@ struct PendingRezzes {
     rezzes: Vec<PendingRez>,
 }
 
-/// Marks the Build Tools tab container, so `sync_create_panel` can hide the
-/// per-aspect tabs while the Create tool's panel stands in for them. Inserted by
-/// [`crate::edit_tool::spawn_build_floater`].
-#[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct BuildTabContainer;
-
 /// Marks the create panel's base-type radio group, so [`sync_create_base`] finds
 /// it to mirror its selection into [`CreateToolState::base`].
 #[derive(Component, Debug, Clone, Copy)]
@@ -739,7 +733,6 @@ fn sync_create_panel(
     create: Res<CreateToolState>,
     ui: Option<Res<CreatePanelUi>>,
     mut panels: Query<&mut UiPanelShown>,
-    mut tabs: Query<&mut Node, With<BuildTabContainer>>,
 ) {
     if !(tool.is_changed() || create.is_changed()) {
         return;
@@ -759,17 +752,10 @@ fn sync_create_panel(
         ui.grass_row,
         creating && create.base == GRASS_BASE,
     );
-    // Hide the tabs while creating; restore them otherwise.
-    let display = if creating {
-        Display::None
-    } else {
-        Display::Flex
-    };
-    for mut node in &mut tabs {
-        if node.display != display {
-            node.display = display;
-        }
-    }
+    // The per-aspect tabs this panel stands in for are hidden by
+    // [`crate::edit_tool::sync_tab_visibility`], which is the one place that
+    // decides — two panels each toggling them would disagree whenever the other
+    // one's tool was picked.
 }
 
 /// Set a panel's [`UiPanelShown`] only on a real change, so a stable state does

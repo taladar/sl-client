@@ -413,6 +413,7 @@ mod test {
                 east: 11.0,
                 north: 11.0,
                 sequence_id: -50_000,
+                snap_selection: false,
             })
             .await?;
         let echoed = running

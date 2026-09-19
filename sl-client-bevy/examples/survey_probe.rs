@@ -110,6 +110,7 @@ fn on_events(
                     east: 256.0,
                     north: 256.0,
                     sequence_id: 1,
+                    snap_selection: false,
                 }));
                 commands.write(SlCommand(Command::RequestMapBlocks {
                     min_x: 999,

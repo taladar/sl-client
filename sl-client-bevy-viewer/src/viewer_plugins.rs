@@ -175,6 +175,10 @@ impl Plugin for ViewerRenderPlugins {
             // colour-coded vertical bands draped along parcel boundaries, driven by the
             // `parcel_borders` module's system below.
             app.add_plugins(crate::parcel_borders::ParcelBordersPlugin);
+            // The in-world Land Owners tint (viewer-parcel-owners-terrain-overlay):
+            // the ground itself shaded by parcel-ownership class, off the same
+            // decoded overlay grid the property lines use.
+            app.add_plugins(crate::parcel_owners::ParcelOwnerOverlayPlugin);
             // The in-world tracking beacon (viewer-beacons-beam-render): the vertical
             // beam + label + off-screen arrow drawn at the tracked position from the
             // shared `MapTracking` resource.
@@ -470,6 +474,10 @@ impl Plugin for ViewerEditPlugins {
         // The Create tool (viewer-prim-creation): the create panel's base-type
         // picker and the click-to-rez placer for prims / trees / grass.
         app.add_plugins(crate::edit_create::EditCreatePlugin);
+        // The Land tool (viewer-terrain-edit-brushes / viewer-parcel-join-split):
+        // the ground drag-select, the six terraform brushes, and the parcel
+        // subdivide / join the selected rectangle feeds.
+        app.add_plugins(crate::edit_land::EditLandPlugin);
         // The object selection core (viewer-object-selection-core): click /
         // rubber-band selection, the selection set + highlight, and the
         // ObjectSelect / ObjectDeselect / ObjectProperties wire sync.

@@ -37,6 +37,7 @@ pub fn smoke_battery(self_agent: AgentKey) -> Vec<Command> {
             east: 256.0,
             north: 256.0,
             sequence_id: 0,
+            snap_selection: false,
         },
         // The agent's own appearance and baked-texture cache.
         Command::RequestWearables,

@@ -1328,12 +1328,19 @@ fn maintain_gizmo_rig(
     if interaction.drag.is_some() {
         return;
     }
-    // The Select Face and Create tools ([`crate::world_api::EditTool::SelectFace`]
-    // / [`EditTool::Create`]) drive no transform gizmo — one picks per-face
-    // texture-entry selections, the other rezzes new objects — so neither rigs.
+    // The Select Face, Create and Land tools
+    // ([`crate::world_api::EditTool::SelectFace`] / [`EditTool::Create`] /
+    // [`EditTool::SelectLand`]) drive no transform gizmo — one picks per-face
+    // texture-entry selections, one rezzes new objects, and the third works on
+    // the ground rather than on any object — so none of them rigs.
     let want = (tool.active && !selection.is_empty())
         .then_some(tool.effective_tool())
-        .filter(|effective| *effective != EditTool::SelectFace && *effective != EditTool::Create);
+        .filter(|effective| {
+            !matches!(
+                effective,
+                EditTool::SelectFace | EditTool::Create | EditTool::SelectLand
+            )
+        });
     let up_to_date = match (built.current, want) {
         (None, None) => true,
         (Some((_root, current)), Some(target)) => current == target,
@@ -1382,9 +1389,9 @@ fn spawn_rig(commands: &mut Commands, assets: &GizmoAssets, tool: EditTool) -> E
         ));
     };
     match tool {
-        // The Select Face and Create tools rig no handles (the caller never asks
-        // for them, but the match stays exhaustive).
-        EditTool::SelectFace | EditTool::Create => {}
+        // The Select Face, Create and Land tools rig no handles (the caller
+        // never asks for them, but the match stays exhaustive).
+        EditTool::SelectFace | EditTool::Create | EditTool::SelectLand => {}
         EditTool::Move => {
             for axis in GizmoAxis::ALL {
                 let material = assets.axis.get(axis.index()).unwrap_or(&assets.corner);
