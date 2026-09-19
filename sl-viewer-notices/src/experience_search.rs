@@ -28,7 +28,9 @@ use crate::experience_profile::maturity_key;
 use crate::i18n::Translator;
 use crate::intents::ExperiencePickerFilter;
 use crate::social::GroupsModel;
-use crate::ui_table::{TableAlign, TableColumn, TableColumnKind, TableColumnWidth};
+use crate::ui_table::{
+    TableAlign, TableColumn, TableColumnKind, TableColumnWidth, keep_order, order_by_sort_keys,
+};
 use crate::world_api::AvatarState;
 
 /// How many leading hex characters of an experience id stand in for its name
@@ -204,25 +206,17 @@ pub(crate) fn short_experience_id(id: ExperienceKey) -> String {
 /// Order rendered experience rows by a table's sort keys, most significant
 /// first. An unknown token leaves the order alone rather than inventing one.
 pub(crate) fn sort_experience_rows(rows: &mut [ExperienceRow], keys: &[(&'static str, bool)]) {
-    rows.sort_by(|left, right| {
-        for (token, ascending) in keys {
-            let ordering = match *token {
-                "name" => compare_ci(&left.name, &right.name),
-                "rating" => compare_ci(&left.rating, &right.rating),
-                "owner" => compare_ci(&left.owner, &right.owner),
-                _unknown => core::cmp::Ordering::Equal,
-            };
-            let ordering = if *ascending {
-                ordering
-            } else {
-                ordering.reverse()
-            };
-            if ordering != core::cmp::Ordering::Equal {
-                return ordering;
-            }
-        }
-        core::cmp::Ordering::Equal
-    });
+    order_by_sort_keys(
+        rows,
+        keys,
+        |token, left, right| match *token {
+            "name" => compare_ci(&left.name, &right.name),
+            "rating" => compare_ci(&left.rating, &right.rating),
+            "owner" => compare_ci(&left.owner, &right.owner),
+            _unknown => core::cmp::Ordering::Equal,
+        },
+        keep_order,
+    );
 }
 
 /// Case-insensitive comparison, the way the reference's name comparator

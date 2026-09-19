@@ -554,11 +554,10 @@ fn rebuild_picker_rows(
         return;
     };
     for (mut state, ui) in &mut windows {
-        let sort = tables
+        let (sort_revision, keys) = tables
             .get(ui.table)
-            .ok()
-            .map(|table| (table.sort_revision(), table.sort().keys().to_vec()));
-        let sort_revision = sort.as_ref().map_or(0, |(revision, _keys)| *revision);
+            .map(TableState::sort_stamp)
+            .unwrap_or_default();
         if state.built
             && state.built_sort_revision == sort_revision
             && state.built_filters.as_ref() == Some(&state.filters)
@@ -573,17 +572,6 @@ fn rebuild_picker_rows(
         state.built_index = Some(index.clone());
 
         let mut rows = project(&index, &model, &state.filters);
-        let keys: Vec<(&str, bool)> = sort
-            .map(|(_revision, keys)| keys)
-            .unwrap_or_default()
-            .iter()
-            .filter_map(|key| {
-                SETTINGS_PICKER_TABLE
-                    .columns
-                    .get(key.column)
-                    .map(|column| (column.token, key.ascending))
-            })
-            .collect();
         sort_rows(&mut rows, &keys);
         state.rows = rows;
 

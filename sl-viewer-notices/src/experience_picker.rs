@@ -806,7 +806,11 @@ fn rebuild_picker_view(
             })
             .collect();
         let mut rows = render_rows(&state.infos, &visible, &avatars, &groups, &translator);
-        sort_experience_rows(&mut rows, &picker_sort_keys(&tables, ui.table));
+        let keys = tables
+            .get(ui.table)
+            .map(TableState::sort_tokens)
+            .unwrap_or_default();
+        sort_experience_rows(&mut rows, &keys);
         view.rows = rows;
 
         if let Ok(mut list) = lists.get_mut(ui.viewport)
@@ -815,24 +819,6 @@ fn rebuild_picker_view(
             list.item_count = view.rows.len();
         }
     }
-}
-
-/// A results table's sort, as (column token, ascending) pairs.
-fn picker_sort_keys(tables: &Query<&TableState>, table: Entity) -> Vec<(&'static str, bool)> {
-    let Ok(state) = tables.get(table) else {
-        return Vec::new();
-    };
-    state
-        .sort()
-        .keys()
-        .iter()
-        .filter_map(|key| {
-            PICKER_TABLE
-                .columns
-                .get(key.column)
-                .map(|column| (column.token, key.ascending))
-        })
-        .collect()
 }
 
 /// Build the table cells of each freshly-pooled row, in whichever window's list

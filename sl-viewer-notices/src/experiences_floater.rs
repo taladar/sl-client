@@ -128,8 +128,8 @@ use crate::ui_tab::{
 };
 use crate::ui_table::{
     TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells, TableSelectionMode,
-    TableSortDefault, TableSpec, TableState, register_table_settings, set_table_cell, spawn_table,
-    spawn_table_row,
+    TableSortDefault, TableSpec, TableState, keep_order, order_by_sort_keys,
+    register_table_settings, set_table_cell, spawn_table, spawn_table_row,
 };
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 use crate::world_api::AvatarState;
@@ -1492,7 +1492,7 @@ fn rebuild_experience_views(
         .iter()
         .map(|entry| (entry.unix, render_event(entry, &state, &log, &translator)))
         .collect();
-    sort_event_rows(&mut events, sort_keys(&ui, &tables, Pane::Events));
+    sort_event_rows(&mut events, &sort_keys(&ui, &tables, Pane::Events));
     view.events = events.into_iter().map(|(_unix, row)| row).collect();
 
     for pane in every_pane() {
@@ -1515,24 +1515,11 @@ fn sort_keys(
     tables: &Query<&TableState>,
     pane: Pane,
 ) -> Vec<(&'static str, bool)> {
-    let Some(state) = ui
-        .panes
+    ui.panes
         .get(pane_index(pane))
         .and_then(|handles| tables.get(handles.table).ok())
-    else {
-        return Vec::new();
-    };
-    state
-        .sort()
-        .keys()
-        .iter()
-        .filter_map(|key| {
-            pane.spec()
-                .columns
-                .get(key.column)
-                .map(|column| (column.token, key.ascending))
-        })
-        .collect()
+        .map(TableState::sort_tokens)
+        .unwrap_or_default()
 }
 
 /// Render one logged event into its four cells.
@@ -1569,27 +1556,19 @@ fn render_event(
 /// Order rendered event rows. Time orders by the entry's own timestamp rather
 /// than its rendered text, because a localized date string does not sort
 /// chronologically.
-fn sort_event_rows(rows: &mut [(i64, EventRow)], keys: Vec<(&'static str, bool)>) {
-    rows.sort_by(|left, right| {
-        for (token, ascending) in &keys {
-            let ordering = match *token {
-                "time" => left.0.cmp(&right.0),
-                "event" => compare_ci(&left.1.kind, &right.1.kind),
-                "experience" => compare_ci(&left.1.experience, &right.1.experience),
-                "object" => compare_ci(&left.1.object, &right.1.object),
-                _unknown => core::cmp::Ordering::Equal,
-            };
-            let ordering = if *ascending {
-                ordering
-            } else {
-                ordering.reverse()
-            };
-            if ordering != core::cmp::Ordering::Equal {
-                return ordering;
-            }
-        }
-        core::cmp::Ordering::Equal
-    });
+fn sort_event_rows(rows: &mut [(i64, EventRow)], keys: &[(&'static str, bool)]) {
+    order_by_sort_keys(
+        rows,
+        keys,
+        |token, left, right| match *token {
+            "time" => left.0.cmp(&right.0),
+            "event" => compare_ci(&left.1.kind, &right.1.kind),
+            "experience" => compare_ci(&left.1.experience, &right.1.experience),
+            "object" => compare_ci(&left.1.object, &right.1.object),
+            _unknown => core::cmp::Ordering::Equal,
+        },
+        keep_order,
+    );
 }
 
 // ---------------------------------------------------------------------------

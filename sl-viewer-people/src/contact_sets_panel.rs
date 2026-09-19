@@ -97,8 +97,8 @@ use crate::ui_font::UiFont;
 use crate::ui_search::{SearchFieldSpec, spawn_search_field};
 use crate::ui_table::{
     TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells, TableSelectionMode,
-    TableSortDefault, TableSpec, TableState, register_table_settings, set_table_cell, spawn_table,
-    spawn_table_row,
+    TableSortDefault, TableSpec, TableState, compare_by_sort_keys, register_table_settings,
+    set_table_cell, spawn_table, spawn_table_row,
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
@@ -251,21 +251,16 @@ fn sort_rows(rows: &mut [MemberRow], keys: &[(&str, bool)], online_first: bool) 
             // `true` sorts first, which `bool`'s own order has backwards.
             return right.online.cmp(&left.online);
         }
-        for (token, ascending) in keys {
-            let ordering = match *token {
+        compare_by_sort_keys(
+            keys,
+            left,
+            right,
+            |token, left, right| match *token {
                 "sets" => left.sets.to_lowercase().cmp(&right.sets.to_lowercase()),
                 _name => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
-            };
-            let ordering = if *ascending {
-                ordering
-            } else {
-                ordering.reverse()
-            };
-            if ordering != core::cmp::Ordering::Equal {
-                return ordering;
-            }
-        }
-        left.name.to_lowercase().cmp(&right.name.to_lowercase())
+            },
+            |left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()),
+        )
     });
 }
 
@@ -1439,12 +1434,11 @@ fn rebuild_contact_sets_view(
     let Some(ui) = ui else {
         return;
     };
-    let sort = widgets
+    let (sort_revision, keys) = widgets
         .tables
         .get(ui.table)
-        .ok()
-        .map(|table| (table.sort_revision(), table.sort().keys().to_vec()));
-    let sort_revision = sort.as_ref().map_or(0, |(revision, _keys)| *revision);
+        .map(TableState::sort_stamp)
+        .unwrap_or_default();
     if view.built_revision == sets.revision()
         && view.built_friends_revision == friends.revision()
         && view.built_sort_revision == sort_revision
@@ -1463,17 +1457,6 @@ fn rebuild_contact_sets_view(
     view.built_choice.clone_from(&view.choice);
 
     let total = build_rows(&sets, &friends, &view.choice, &mut view.rows, &view.filter);
-    let keys: Vec<(&str, bool)> = sort
-        .map(|(_revision, keys)| keys)
-        .unwrap_or_default()
-        .iter()
-        .filter_map(|key| {
-            CONTACT_SETS_TABLE
-                .columns
-                .get(key.column)
-                .map(|column| (column.token, key.ascending))
-        })
-        .collect();
     // Only a real set carries the flag; the pseudo-sets are views, not sets.
     let online_first = sets
         .set(&view.choice)

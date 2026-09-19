@@ -52,8 +52,8 @@ use sl_viewer_ui_widgets::floater::{
 use sl_viewer_ui_widgets::ui_search::{SearchFieldSpec, spawn_search_field};
 use sl_viewer_ui_widgets::ui_table::{
     TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells, TableSelectionMode,
-    TableSortDefault, TableSpec, TableState, register_table_settings, set_table_cell, spawn_table,
-    spawn_table_row,
+    TableSortDefault, TableSpec, TableState, order_by_sort_keys, register_table_settings,
+    set_table_cell, spawn_table, spawn_table_row,
 };
 use sl_viewer_world_api::{DerenderEntry, DerenderList};
 
@@ -183,26 +183,18 @@ pub fn matches_filter(entry: &DerenderEntry, filter: &str) -> bool {
 /// Order `rows` by the table's sort keys (most significant first), falling back
 /// to a case-insensitive name compare so the order is total.
 pub fn sort_rows(rows: &mut [DerenderEntry], keys: &[(&str, bool)]) {
-    rows.sort_by(|left, right| {
-        for (token, ascending) in keys {
-            let ordering = match *token {
-                "region" => left.region.to_lowercase().cmp(&right.region.to_lowercase()),
-                "type" => left.kind.rank().cmp(&right.kind.rank()),
-                "date" => left.added_epoch_secs.cmp(&right.added_epoch_secs),
-                "permanent" => left.permanent.cmp(&right.permanent),
-                _name => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
-            };
-            let ordering = if *ascending {
-                ordering
-            } else {
-                ordering.reverse()
-            };
-            if ordering != core::cmp::Ordering::Equal {
-                return ordering;
-            }
-        }
-        left.name.to_lowercase().cmp(&right.name.to_lowercase())
-    });
+    order_by_sort_keys(
+        rows,
+        keys,
+        |token, left, right| match *token {
+            "region" => left.region.to_lowercase().cmp(&right.region.to_lowercase()),
+            "type" => left.kind.rank().cmp(&right.kind.rank()),
+            "date" => left.added_epoch_secs.cmp(&right.added_epoch_secs),
+            "permanent" => left.permanent.cmp(&right.permanent),
+            _name => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
+        },
+        |left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()),
+    );
 }
 
 /// The local-time `YYYY-MM-DD hh:mm` stamp of an entry's epoch seconds, or an
@@ -551,11 +543,10 @@ fn rebuild_blacklist_view(
     let Some(ui) = ui else {
         return;
     };
-    let sort = tables
+    let (sort_revision, keys) = tables
         .get(ui.table)
-        .ok()
-        .map(|table| (table.sort_revision(), table.sort().keys().to_vec()));
-    let sort_revision = sort.as_ref().map_or(0, |(revision, _keys)| *revision);
+        .map(TableState::sort_stamp)
+        .unwrap_or_default();
     if view.built_revision == list.revision()
         && view.built_sort_revision == sort_revision
         && view.built_filter == view.filter
@@ -575,17 +566,6 @@ fn rebuild_blacklist_view(
         .iter()
         .filter(|entry| matches_filter(entry, &view.filter))
         .cloned()
-        .collect();
-    let keys: Vec<(&str, bool)> = sort
-        .map(|(_revision, keys)| keys)
-        .unwrap_or_default()
-        .iter()
-        .filter_map(|key| {
-            BLACKLIST_TABLE
-                .columns
-                .get(key.column)
-                .map(|column| (column.token, key.ascending))
-        })
         .collect();
     sort_rows(&mut rows, &keys);
     view.rows = rows;

@@ -1492,12 +1492,11 @@ fn rebuild_radar_view(
     let Some(ui) = ui else {
         return;
     };
-    let sort = widgets
+    let (sort_revision, sort_keys) = widgets
         .tables
         .get(ui.table)
-        .ok()
-        .map(|table| (table.sort_revision(), table.sort().keys().to_vec()));
-    let sort_revision = sort.as_ref().map_or(0, |(revision, _keys)| *revision);
+        .map(TableState::sort_stamp)
+        .unwrap_or_default();
     let limit = settings.as_deref().and_then(|settings| {
         let store = settings.store();
         if store.get_bool(SETTING_LIMIT).ok()? {
@@ -1561,16 +1560,12 @@ fn rebuild_radar_view(
         .collect();
     radar.view.counts = counts(&rows, radar.state.chat_range);
     rows.retain(|row| matches_filter(row, &radar.state.filter) && within_limit(row, limit));
-    let keys: Vec<(SortColumn, bool)> = sort
-        .map(|(_revision, keys)| keys)
-        .unwrap_or_default()
+    // The radar model names its own columns, so the table's tokens are mapped
+    // back onto them (a column the model does not sort by simply drops out).
+    let keys: Vec<(SortColumn, bool)> = sort_keys
         .iter()
-        .filter_map(|key| {
-            RADAR_TABLE
-                .columns
-                .get(key.column)
-                .and_then(|column| SortColumn::from_token(column.token))
-                .map(|column| (column, key.ascending))
+        .filter_map(|(token, ascending)| {
+            SortColumn::from_token(token).map(|column| (column, *ascending))
         })
         .collect();
     sort_rows(&mut rows, &keys);

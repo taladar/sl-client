@@ -48,7 +48,6 @@
 //! members header shows "loaded N of TOTAL" beside a **Refresh** button that
 //! re-issues the fetch to pull the rest.
 
-use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use bevy::input_focus::tab_navigation::TabIndex;
@@ -80,8 +79,8 @@ use crate::ui_tab::{
 };
 use crate::ui_table::{
     TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells, TableSelectionMode,
-    TableSortDefault, TableSortKey, TableSpec, TableState, register_table_settings, set_table_cell,
-    spawn_table, spawn_table_row,
+    TableSortDefault, TableSpec, TableState, order_by_sort_keys, register_table_settings,
+    set_table_cell, spawn_table, spawn_table_row,
 };
 use crate::ui_text::set_text;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
@@ -173,8 +172,8 @@ const ROLES_SORT_SETTING: &str = "roles_sort";
 const ROLES_WIDTHS_SETTING: &str = "roles_widths";
 
 /// The members table: a flexible Name over fixed Title / Land / Status columns,
-/// all sortable, defaulting to name-ascending. Column indices match
-/// [`member_column_ordering`].
+/// all sortable, defaulting to name-ascending. The column tokens are what
+/// [`order_members`] orders by.
 const MEMBERS_TABLE: TableSpec = TableSpec {
     element: "group-members",
     selection: TableSelectionMode::None,
@@ -234,8 +233,8 @@ const MEMBERS_TABLE: TableSpec = TableSpec {
 };
 
 /// The notices table: a flexible Subject over fixed From / Date columns, all
-/// sortable, defaulting to date-descending (newest first). Column indices match
-/// [`notice_column_ordering`].
+/// sortable, defaulting to date-descending (newest first). The column tokens
+/// are what [`order_notices`] orders by.
 const NOTICES_TABLE: TableSpec = TableSpec {
     element: "group-notices",
     selection: TableSelectionMode::None,
@@ -285,8 +284,8 @@ const NOTICES_TABLE: TableSpec = TableSpec {
 };
 
 /// The roles table: a flexible Name over fixed Title / Members columns, all
-/// sortable, defaulting to name-ascending. Column indices match
-/// [`role_column_ordering`].
+/// sortable, defaulting to name-ascending. The column tokens are what
+/// [`order_roles`] orders by.
 const ROLES_TABLE: TableSpec = TableSpec {
     element: "group-roles",
     selection: TableSelectionMode::None,
@@ -1414,11 +1413,10 @@ fn sync_members_view(
     for (state, mut view, ui) in &mut windows {
         // The current sort (revision + keys) from the widget; an empty default before
         // the table exists just leaves the roster in arrival order.
-        let sort = tables
+        let (sort_revision, keys) = tables
             .get(ui.members_table)
-            .ok()
-            .map(|table| (table.sort_revision(), table.sort().keys().to_vec()));
-        let sort_revision = sort.as_ref().map_or(0, |(revision, _keys)| *revision);
+            .map(TableState::sort_stamp)
+            .unwrap_or_default();
         if view.built_revision == state.members_revision
             && view.built_sort_revision == sort_revision
         {
@@ -1438,9 +1436,7 @@ fn sync_members_view(
                 is_owner: member.is_owner,
             })
             .collect();
-        let keys = sort.map(|(_revision, keys)| keys).unwrap_or_default();
-        view.rows
-            .sort_by(|left, right| compare_members(&keys, left, right, &avatars));
+        order_members(&mut view.rows, &keys, &avatars);
         if let Ok(mut list) = lists.get_mut(ui.members_viewport) {
             list.item_count = view.rows.len();
             list.scroll_to_top();
@@ -1459,40 +1455,29 @@ fn sync_members_view(
     }
 }
 
-/// Order two member rows by the table's full sort-key stack, breaking ties by
-/// resolved name then agent id so the order is stable across rebinds.
-fn compare_members(
-    keys: &[TableSortKey],
-    left: &MemberRow,
-    right: &MemberRow,
-    avatars: &AvatarState,
-) -> Ordering {
-    for key in keys {
-        let base = member_column_ordering(key.column, left, right, avatars);
-        let ord = if key.ascending { base } else { base.reverse() };
-        if ord != Ordering::Equal {
-            return ord;
-        }
-    }
-    member_sort_key(left.agent, avatars)
-        .cmp(&member_sort_key(right.agent, avatars))
-        .then_with(|| left.agent.to_string().cmp(&right.agent.to_string()))
-}
-
-/// Order two member rows by a single column (before the direction is applied):
+/// Order member rows by the table's sort keys, breaking ties by resolved name
+/// then agent id so the order is stable across rebinds. Each column orders
 /// name / title / status case-folded, contribution numerically.
-fn member_column_ordering(
-    column: usize,
-    left: &MemberRow,
-    right: &MemberRow,
-    avatars: &AvatarState,
-) -> Ordering {
-    match column {
-        1 => left.title.to_lowercase().cmp(&right.title.to_lowercase()),
-        2 => contribution_value(&left.contribution).cmp(&contribution_value(&right.contribution)),
-        3 => left.status.to_lowercase().cmp(&right.status.to_lowercase()),
-        _name => member_sort_key(left.agent, avatars).cmp(&member_sort_key(right.agent, avatars)),
-    }
+fn order_members(rows: &mut [MemberRow], keys: &[(&str, bool)], avatars: &AvatarState) {
+    order_by_sort_keys(
+        rows,
+        keys,
+        |token, left, right| match *token {
+            "title" => left.title.to_lowercase().cmp(&right.title.to_lowercase()),
+            "land" => {
+                contribution_value(&left.contribution).cmp(&contribution_value(&right.contribution))
+            }
+            "status" => left.status.to_lowercase().cmp(&right.status.to_lowercase()),
+            _name => {
+                member_sort_key(left.agent, avatars).cmp(&member_sort_key(right.agent, avatars))
+            }
+        },
+        |left, right| {
+            member_sort_key(left.agent, avatars)
+                .cmp(&member_sort_key(right.agent, avatars))
+                .then_with(|| left.agent.to_string().cmp(&right.agent.to_string()))
+        },
+    );
 }
 
 /// The numeric value of a contribution cell (the leading integer), for sorting
@@ -1519,11 +1504,10 @@ fn sync_notices_view(
     mut lists: Query<&mut VirtualList>,
 ) {
     for (state, mut view, ui) in &mut windows {
-        let sort = tables
+        let (sort_revision, keys) = tables
             .get(ui.notices_table)
-            .ok()
-            .map(|table| (table.sort_revision(), table.sort().keys().to_vec()));
-        let sort_revision = sort.as_ref().map_or(0, |(revision, _keys)| *revision);
+            .map(TableState::sort_stamp)
+            .unwrap_or_default();
         if view.built_revision == state.notices_revision
             && view.built_sort_revision == sort_revision
         {
@@ -1544,8 +1528,7 @@ fn sync_notices_view(
                 has_attachment: notice.has_attachment,
             })
             .collect();
-        let keys = sort.map(|(_revision, keys)| keys).unwrap_or_default();
-        rows.sort_by(|left, right| compare_notices(&keys, left, right));
+        order_notices(&mut rows, &keys);
         view.rows = rows;
         if let Ok(mut list) = lists.get_mut(ui.notices_viewport) {
             list.item_count = view.rows.len();
@@ -1554,33 +1537,26 @@ fn sync_notices_view(
     }
 }
 
-/// Order two notice rows by the table's full sort-key stack, breaking ties by the
-/// timestamp (newest first) so the order is stable.
-fn compare_notices(keys: &[TableSortKey], left: &NoticeRow, right: &NoticeRow) -> Ordering {
-    for key in keys {
-        let base = notice_column_ordering(key.column, left, right);
-        let ord = if key.ascending { base } else { base.reverse() };
-        if ord != Ordering::Equal {
-            return ord;
-        }
-    }
-    right.timestamp.cmp(&left.timestamp)
-}
-
-/// Order two notice rows by a single column (before the direction is applied):
-/// subject / from case-folded, date by timestamp.
-fn notice_column_ordering(column: usize, left: &NoticeRow, right: &NoticeRow) -> Ordering {
-    match column {
-        0 => left
-            .subject
-            .to_lowercase()
-            .cmp(&right.subject.to_lowercase()),
-        1 => left
-            .from_name
-            .to_lowercase()
-            .cmp(&right.from_name.to_lowercase()),
-        _date => left.timestamp.cmp(&right.timestamp),
-    }
+/// Order notice rows by the table's sort keys, breaking ties by the timestamp
+/// (newest first) so the order is stable. Subject / from order case-folded, the
+/// date column by the timestamp behind the rendered date.
+fn order_notices(rows: &mut [NoticeRow], keys: &[(&str, bool)]) {
+    order_by_sort_keys(
+        rows,
+        keys,
+        |token, left, right| match *token {
+            "subject" => left
+                .subject
+                .to_lowercase()
+                .cmp(&right.subject.to_lowercase()),
+            "from" => left
+                .from_name
+                .to_lowercase()
+                .cmp(&right.from_name.to_lowercase()),
+            _date => left.timestamp.cmp(&right.timestamp),
+        },
+        |left, right| right.timestamp.cmp(&left.timestamp),
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1879,11 +1855,10 @@ fn sync_roles_view(
     mut lists: Query<&mut VirtualList>,
 ) {
     for (state, mut view, ui) in &mut windows {
-        let sort = tables
+        let (sort_revision, keys) = tables
             .get(ui.roles_table)
-            .ok()
-            .map(|table| (table.sort_revision(), table.sort().keys().to_vec()));
-        let sort_revision = sort.as_ref().map_or(0, |(revision, _keys)| *revision);
+            .map(TableState::sort_stamp)
+            .unwrap_or_default();
         if view.built_revision == state.roles_revision && view.built_sort_revision == sort_revision
         {
             continue;
@@ -1900,9 +1875,7 @@ fn sync_roles_view(
                 members: role.members,
             })
             .collect();
-        let keys = sort.map(|(_revision, keys)| keys).unwrap_or_default();
-        view.rows
-            .sort_by(|left, right| compare_roles(&keys, left, right));
+        order_roles(&mut view.rows, &keys);
         if let Ok(mut list) = lists.get_mut(ui.roles_viewport) {
             list.item_count = view.rows.len();
             list.scroll_to_top();
@@ -1910,27 +1883,19 @@ fn sync_roles_view(
     }
 }
 
-/// Order two role rows by the table's full sort-key stack, breaking ties by name
-/// (case-folded) so the order is stable.
-fn compare_roles(keys: &[TableSortKey], left: &RoleRowData, right: &RoleRowData) -> Ordering {
-    for key in keys {
-        let base = role_column_ordering(key.column, left, right);
-        let ord = if key.ascending { base } else { base.reverse() };
-        if ord != Ordering::Equal {
-            return ord;
-        }
-    }
-    left.name.to_lowercase().cmp(&right.name.to_lowercase())
-}
-
-/// Order two role rows by a single column (before the direction is applied):
-/// name / title case-folded, members numerically.
-fn role_column_ordering(column: usize, left: &RoleRowData, right: &RoleRowData) -> Ordering {
-    match column {
-        1 => left.title.to_lowercase().cmp(&right.title.to_lowercase()),
-        2 => left.members.cmp(&right.members),
-        _name => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
-    }
+/// Order role rows by the table's sort keys, breaking ties by name (case-folded)
+/// so the order is stable. Name / title order case-folded, members numerically.
+fn order_roles(rows: &mut [RoleRowData], keys: &[(&str, bool)]) {
+    order_by_sort_keys(
+        rows,
+        keys,
+        |token, left, right| match *token {
+            "title" => left.title.to_lowercase().cmp(&right.title.to_lowercase()),
+            "members" => left.members.cmp(&right.members),
+            _name => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
+        },
+        |left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()),
+    );
 }
 
 /// Build the New Role button once, when the create power is known — its own

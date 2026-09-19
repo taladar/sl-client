@@ -36,10 +36,20 @@
 //! The widget knows nothing about what a row *contains* or how two rows *order*.
 //! It owns the header, the columns, the resize/sort gestures, the ellipsis, and
 //! the scroll; the consumer owns its item model, projects each row's cell text on
-//! bind, and re-sorts its own data when the table's [`TableSort`] revision
-//! advances (mapping a column index to its own comparator). That keeps the
-//! ordering logic — which is domain-specific — out of the widget while the
-//! widget owns everything that was being re-solved inconsistently.
+//! bind, and re-sorts its own data when the table's sort revision advances
+//! ([`TableState::sort_stamp`] hands it the revision and the sort as
+//! `(column token, ascending)` pairs, which its comparator matches on). That
+//! keeps the ordering logic — which is domain-specific — out of the widget while
+//! the widget owns everything that was being re-solved inconsistently.
+//!
+//! The *loop* over those keys is not domain-specific, and is here once:
+//! [`order_by_sort_keys`] (and [`compare_by_sort_keys`] for a list with a key
+//! ahead of the table's, as the contact sets' online-first order has). So is the
+//! click stack behind them, [`MultiSort`] — generic in how a column is named, so
+//! a consumer whose clickable columns are not the table's own (the People
+//! friends list) shares the same click / encode / parse rather than repeating it.
+
+use core::cmp::Ordering;
 
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
@@ -196,8 +206,10 @@ pub struct TableSpec {
     /// Whether the widget owns the sort: clickable sortable headers, `▲`/`▼`
     /// arrows, and (with [`sort_setting`](Self::sort_setting)) persistence. Set to
     /// `false` for a table whose consumer drives its own ordering — the People
-    /// friends list keeps its bespoke 8-way sort, so the widget adds no sort
-    /// observers or arrows and the consumer wires its own header clicks.
+    /// friends list's eight sortable columns live inside four table columns (two
+    /// of them grouped permission triads), so it keeps its own [`MultiSort`] over
+    /// its own column enum: the widget adds no sort observers or arrows and the
+    /// consumer wires its own header clicks.
     pub builtin_sort: bool,
     /// The uniform row height, in logical pixels.
     pub row_height: f32,
@@ -241,126 +253,232 @@ pub enum TableSelectionMode {
 }
 
 // ---------------------------------------------------------------------------
-// Pure sort state (generalised from the People friends list, keyed by column
-// index instead of a bespoke enum).
+// Pure multi-column sort. Generic in how a column is *named*: a table names its
+// own columns by index ([`TableSort`]), a consumer whose clickable columns do
+// not line up one-for-one with the table's — the People friends list's six
+// permission sub-columns live inside two grouped custom columns — names them by
+// its own enum. The machinery (click, encode, parse, the comparator loop) is the
+// same either way, and lives here once.
 // ---------------------------------------------------------------------------
 
 /// The most sort levels a table remembers; clicks past this drop the least
-/// significant.
-const MAX_SORT_KEYS: usize = 6;
+/// significant. Public because it bounds what a consumer driving its own
+/// [`MultiSort`] can build up — six levels of tie-break is already more than a
+/// user tracks, and an unbounded stack would grow a persisted string forever.
+pub const MAX_SORT_KEYS: usize = 6;
 
-/// One level of a multi-column sort: a column and its direction.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TableSortKey {
-    /// The column index this level orders by.
-    pub column: usize,
-    /// Ascending (else descending).
-    pub ascending: bool,
+/// Order two rows by a multi-column sort: `keys` most-significant first, each a
+/// column and whether that level orders ascending, with `column_ordering` giving
+/// the *undirected* order by one column and `tie_break` deciding rows every key
+/// leaves equal.
+///
+/// This is the loop that was hand-written at every sorted list in the viewer.
+/// The direction is applied per level and only a non-equal level returns, so a
+/// descending level never inverts the *next* one.
+pub fn compare_by_sort_keys<Row, Column>(
+    keys: &[(Column, bool)],
+    left: &Row,
+    right: &Row,
+    column_ordering: impl Fn(&Column, &Row, &Row) -> Ordering,
+    tie_break: impl Fn(&Row, &Row) -> Ordering,
+) -> Ordering {
+    for (column, ascending) in keys {
+        let base = column_ordering(column, left, right);
+        let ordering = if *ascending { base } else { base.reverse() };
+        if ordering != Ordering::Equal {
+            return ordering;
+        }
+    }
+    tie_break(left, right)
 }
 
-/// The ordered multi-column sort — most-significant key first. A header click
-/// promotes its column to the front (or flips its direction if already front),
-/// demoting the previous order to tie-breakers: "sort by the last-clicked column,
-/// then the one before that, …". Persisted per avatar.
+/// Sort `rows` by a multi-column sort — [`compare_by_sort_keys`] over the whole
+/// list. A **stable** sort, so rows the keys and the tie-break both leave equal
+/// keep the order they arrived in.
+pub fn order_by_sort_keys<Row, Column>(
+    rows: &mut [Row],
+    keys: &[(Column, bool)],
+    column_ordering: impl Fn(&Column, &Row, &Row) -> Ordering,
+    tie_break: impl Fn(&Row, &Row) -> Ordering,
+) {
+    rows.sort_by(|left, right| {
+        compare_by_sort_keys(keys, left, right, &column_ordering, &tie_break)
+    });
+}
+
+/// A tie-break that leaves rows every sort key left equal in the order they
+/// arrived in — for a list whose source order is already the one to fall back on.
+///
+/// Named rather than a `|_left, _right| Ordering::Equal` at each call site, so
+/// "this list has no final tie-break" reads as a decision rather than a stub.
+pub const fn keep_order<Row>(_left: &Row, _right: &Row) -> Ordering {
+    Ordering::Equal
+}
+
+/// The ordered multi-column sort — most-significant key first, each level a
+/// column and whether it orders ascending. A header click promotes its column to
+/// the front (or flips its direction if already front), demoting the previous
+/// order to tie-breakers: "sort by the last-clicked column, then the one before
+/// that, …". Persisted per avatar.
 ///
 /// Pure and Bevy-free so it is unit-tested in isolation; the widget carries one
 /// on each table's [`TableState`].
-#[derive(Debug, Clone, Default)]
-pub struct TableSort {
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MultiSort<Column> {
     /// The sort levels, most-significant first.
-    keys: Vec<TableSortKey>,
+    keys: Vec<(Column, bool)>,
 }
 
-impl TableSort {
-    /// A sort seeded from a spec's [`TableSpec::default_sort`].
-    fn from_defaults(defaults: &[TableSortDefault]) -> Self {
-        Self {
-            keys: defaults
-                .iter()
-                .map(|level| TableSortKey {
-                    column: level.column,
-                    ascending: level.ascending,
-                })
-                .collect(),
-        }
+impl<Column: Copy + PartialEq> MultiSort<Column> {
+    /// A sort over `keys`, most-significant first (anything past
+    /// [`MAX_SORT_KEYS`] dropped, as a click stack is).
+    pub fn new(keys: impl IntoIterator<Item = (Column, bool)>) -> Self {
+        let mut keys: Vec<(Column, bool)> = keys.into_iter().collect();
+        keys.truncate(MAX_SORT_KEYS);
+        Self { keys }
+    }
+
+    /// Whether the sort orders by nothing at all — what a parse of an
+    /// unrecognised persisted string leaves, so the caller can fall back to its
+    /// own defaults.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.keys.is_empty()
+    }
+
+    /// The primary (most-significant) sort level, if any — what a header arrow
+    /// reflects.
+    #[must_use]
+    pub fn primary(&self) -> Option<(Column, bool)> {
+        self.keys.first().copied()
+    }
+
+    /// The full key stack, most-significant first.
+    #[must_use]
+    pub fn keys(&self) -> &[(Column, bool)] {
+        &self.keys
     }
 
     /// Apply a header click on `column`: flip the front column's direction if it
     /// is already primary, else promote `column` to the front (demoting the rest,
-    /// dropping the least significant past [`MAX_SORT_KEYS`]). A freshly-promoted
-    /// column starts ascending.
-    fn click(&mut self, column: usize) {
-        if let Some(front) = self.keys.first_mut()
-            && front.column == column
+    /// dropping the least significant past [`MAX_SORT_KEYS`]). `ascending` is the
+    /// direction a *freshly promoted* column starts in — ascending for almost
+    /// every column, but the friends list's Online column starts descending,
+    /// because "online first" is what a click on it is asking for.
+    pub fn click(&mut self, column: Column, ascending: bool) {
+        if let Some((front, direction)) = self.keys.first_mut()
+            && *front == column
         {
-            front.ascending = !front.ascending;
+            *direction = !*direction;
             return;
         }
-        self.keys.retain(|key| key.column != column);
-        self.keys.insert(
-            0,
-            TableSortKey {
-                column,
-                ascending: true,
-            },
-        );
+        self.keys.retain(|(key, _ascending)| *key != column);
+        self.keys.insert(0, (column, ascending));
         self.keys.truncate(MAX_SORT_KEYS);
     }
 
-    /// The primary (most-significant) sort key, if any — what the header arrow
-    /// reflects.
-    #[must_use]
-    pub fn primary(&self) -> Option<TableSortKey> {
-        self.keys.first().copied()
-    }
-
-    /// The full key stack, most-significant first — the consumer walks it to
-    /// order two rows (comparing by each column until one breaks the tie).
-    #[must_use]
-    pub fn keys(&self) -> &[TableSortKey] {
-        &self.keys
-    }
-
-    /// Encode the sort as a compact `token:dir,token:dir` string (columns named
-    /// by their stable [`TableColumn::token`], so persistence survives a reorder).
-    fn encode(&self, columns: &[TableColumn]) -> String {
+    /// Encode the sort as a compact `token:dir,token:dir` string, naming each
+    /// column by a stable token so persistence survives a later reorder. A level
+    /// `token_of` cannot name is dropped.
+    pub fn encode_with(&self, token_of: impl Fn(Column) -> Option<&'static str>) -> String {
         self.keys
             .iter()
-            .filter_map(|key| {
-                columns.get(key.column).map(|column| {
-                    let dir = if key.ascending { "a" } else { "d" };
-                    format!("{}:{dir}", column.token)
+            .filter_map(|(column, ascending)| {
+                token_of(*column).map(|token| {
+                    let dir = if *ascending { "a" } else { "d" };
+                    format!("{token}:{dir}")
                 })
             })
             .collect::<Vec<_>>()
             .join(",")
     }
 
-    /// Parse a persisted sort string against `columns`, falling back to the
-    /// spec's defaults when it is empty or wholly unrecognised (dropping
-    /// duplicate / unknown tokens).
-    fn parse(text: &str, columns: &[TableColumn], defaults: &[TableSortDefault]) -> Self {
-        let mut keys: Vec<TableSortKey> = Vec::new();
+    /// Parse a persisted `token:dir,…` string, dropping unknown and duplicate
+    /// tokens. Wholly unrecognised input parses to an [empty](Self::is_empty)
+    /// sort, which the caller replaces with its defaults.
+    pub fn parse_with(text: &str, column_of: impl Fn(&str) -> Option<Column>) -> Self {
+        let mut keys: Vec<(Column, bool)> = Vec::new();
         for part in text.split(',') {
             let mut fields = part.split(':');
             let (Some(token), Some(dir)) = (fields.next(), fields.next()) else {
                 continue;
             };
-            let Some(column) = columns.iter().position(|column| column.token == token) else {
+            let Some(column) = column_of(token) else {
                 continue;
             };
-            if keys.iter().any(|key| key.column == column) {
+            if keys.iter().any(|(key, _ascending)| *key == column) {
                 continue;
             }
-            keys.push(TableSortKey {
-                column,
-                ascending: dir == "a",
-            });
+            keys.push((column, dir == "a"));
         }
-        if keys.is_empty() {
+        keys.truncate(MAX_SORT_KEYS);
+        Self { keys }
+    }
+
+    /// Order two rows by this sort — [`compare_by_sort_keys`] over its keys.
+    pub fn compare<Row>(
+        &self,
+        left: &Row,
+        right: &Row,
+        column_ordering: impl Fn(&Column, &Row, &Row) -> Ordering,
+        tie_break: impl Fn(&Row, &Row) -> Ordering,
+    ) -> Ordering {
+        compare_by_sort_keys(&self.keys, left, right, column_ordering, tie_break)
+    }
+
+    /// Sort `rows` into this order — [`order_by_sort_keys`] over its keys.
+    pub fn order_by<Row>(
+        &self,
+        rows: &mut [Row],
+        column_ordering: impl Fn(&Column, &Row, &Row) -> Ordering,
+        tie_break: impl Fn(&Row, &Row) -> Ordering,
+    ) {
+        order_by_sort_keys(rows, &self.keys, column_ordering, tie_break);
+    }
+}
+
+/// The sort a table widget owns: its columns named by their index into
+/// [`TableSpec::columns`]. A consumer reads it as `(token, ascending)` pairs
+/// ([`TableState::sort_stamp`]) rather than by index, so its comparator names the
+/// columns the same way the spec and the persisted string do.
+pub type TableSort = MultiSort<usize>;
+
+impl MultiSort<usize> {
+    /// A sort seeded from a spec's [`TableSpec::default_sort`].
+    fn from_defaults(defaults: &[TableSortDefault]) -> Self {
+        Self::new(defaults.iter().map(|level| (level.column, level.ascending)))
+    }
+
+    /// The sort as `(column token, ascending)` pairs, most-significant first —
+    /// the form a consumer's comparator takes. A level whose column is out of
+    /// range (a persisted index cannot be, but a default can name a column that
+    /// is not there) is dropped.
+    #[must_use]
+    pub fn tokens(&self, columns: &[TableColumn]) -> Vec<(&'static str, bool)> {
+        self.keys
+            .iter()
+            .filter_map(|(column, ascending)| {
+                columns.get(*column).map(|spec| (spec.token, *ascending))
+            })
+            .collect()
+    }
+
+    /// Encode the sort for persistence, naming columns by their stable
+    /// [`TableColumn::token`].
+    fn encode(&self, columns: &[TableColumn]) -> String {
+        self.encode_with(|column| columns.get(column).map(|spec| spec.token))
+    }
+
+    /// Parse a persisted sort string against `columns`, falling back to the
+    /// spec's defaults when it is empty or wholly unrecognised.
+    fn parse(text: &str, columns: &[TableColumn], defaults: &[TableSortDefault]) -> Self {
+        let parsed = Self::parse_with(text, |token| {
+            columns.iter().position(|column| column.token == token)
+        });
+        if parsed.is_empty() {
             Self::from_defaults(defaults)
         } else {
-            Self { keys }
+            parsed
         }
     }
 }
@@ -423,6 +541,25 @@ impl TableState {
     #[must_use]
     pub const fn sort(&self) -> &TableSort {
         &self.sort
+    }
+
+    /// The current sort as `(column token, ascending)` pairs, most-significant
+    /// first — what a consumer's comparator takes.
+    #[must_use]
+    pub fn sort_tokens(&self) -> Vec<(&'static str, bool)> {
+        self.sort.tokens(self.spec.columns)
+    }
+
+    /// The sort *revision* and the sort itself, in one read: the pair every
+    /// consumer's view rebuild needs — the revision to decide whether to rebuild
+    /// at all, the tokens to order by once it does.
+    ///
+    /// A missing table (the query has not caught up with the spawn) reads as
+    /// `(0, [])`, which leaves the consumer's list in its natural order — the
+    /// same as an unsorted table.
+    #[must_use]
+    pub fn sort_stamp(&self) -> (u64, Vec<(&'static str, bool)>) {
+        (self.sort_revision, self.sort_tokens())
     }
 
     /// The sort revision — a consumer stores the value it last sorted at and
@@ -1238,7 +1375,9 @@ fn sort_header_on_press(
             return;
         }
         if let Ok(mut state) = tables.get_mut(table) {
-            state.sort.click(column);
+            // A freshly promoted column starts ascending; a consumer wanting
+            // another first direction drives its own sort (see [`MultiSort::click`]).
+            state.sort.click(column, true);
             state.sort_revision = state.sort_revision.wrapping_add(1);
             state.dirty = true;
         }
@@ -1403,8 +1542,8 @@ fn drive_table_sort_arrows(
             continue;
         };
         let glyph = match state.sort.primary() {
-            Some(primary) if primary.column == arrow.column => {
-                if primary.ascending {
+            Some((column, ascending)) if column == arrow.column => {
+                if ascending {
                     SORT_ASCENDING_GLYPH
                 } else {
                     SORT_DESCENDING_GLYPH
@@ -1483,18 +1622,21 @@ fn seed_tables_from_settings(
 
 /// Apply a persisted `token:px,token:px` width string onto a table's fixed
 /// columns (unknown tokens ignored, each width clamped to the legal range).
+///
+/// A **flexible** column is skipped even when the string names it: its slot in
+/// [`TableState::widths`] is its unchanging grow factor, not a pixel width, and
+/// [`encode_widths`] never writes one — so a string that names it is a
+/// hand-edited settings file, and taking it would silently redo the row's
+/// layout split.
 fn apply_persisted_widths(state: &mut TableState, encoded: &str) {
     for part in encoded.split(',') {
         let mut fields = part.split(':');
         let (Some(token), Some(value)) = (fields.next(), fields.next()) else {
             continue;
         };
-        let Some(index) = state
-            .spec
-            .columns
-            .iter()
-            .position(|column| column.token == token)
-        else {
+        let Some(index) = state.spec.columns.iter().position(|column| {
+            column.token == token && matches!(column.width, TableColumnWidth::Fixed { .. })
+        }) else {
             continue;
         };
         let Ok(width) = value.parse::<f32>() else {
@@ -1683,9 +1825,10 @@ fn apply_table_selection_highlight(
 #[cfg(test)]
 mod tests {
     use super::{
-        DISABLED_TEXT_COLOR, MAX_COLUMN_WIDTH, MIN_COLUMN_WIDTH, TableAlign, TableColumn,
-        TableColumnKind, TableColumnWidth, TableHandle, TableHeaderText, TableSelectionMode,
-        TableSort, TableSortDefault, TableSpec, TableState, TableWidgetPlugin, resize_column_width,
+        DISABLED_TEXT_COLOR, MAX_COLUMN_WIDTH, MAX_SORT_KEYS, MIN_COLUMN_WIDTH, Ordering,
+        TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableHandle, TableHeaderText,
+        TableSelectionMode, TableSort, TableSortDefault, TableSpec, TableState, TableWidgetPlugin,
+        apply_persisted_widths, encode_widths, keep_order, order_by_sort_keys, resize_column_width,
         spawn_table, spawn_table_row,
     };
     use bevy::camera::NormalizedRenderTarget;
@@ -1738,29 +1881,93 @@ mod tests {
     #[test]
     fn click_promotes_to_front_ascending() {
         let mut sort = TableSort::from_defaults(DEFAULTS);
-        sort.click(2);
-        assert_eq!(sort.primary().map(|key| key.column), Some(2));
-        assert_eq!(sort.primary().map(|key| key.ascending), Some(true));
+        sort.click(2, true);
+        assert_eq!(sort.primary(), Some((2, true)));
         // The old primary is demoted to a tie-breaker, not dropped.
-        assert_eq!(sort.keys().len(), 2);
-        assert_eq!(sort.keys().get(1).map(|key| key.column), Some(0));
+        assert_eq!(sort.keys(), &[(2, true), (0, true)]);
     }
 
     /// Re-clicking the primary column flips its direction in place.
     #[test]
     fn reclick_flips_direction() {
         let mut sort = TableSort::from_defaults(DEFAULTS);
-        assert!(sort.primary().is_some_and(|key| key.ascending));
-        sort.click(0);
-        assert!(sort.primary().is_some_and(|key| !key.ascending));
+        assert_eq!(sort.primary(), Some((0, true)));
+        sort.click(0, true);
+        assert_eq!(sort.primary(), Some((0, false)));
         assert_eq!(sort.keys().len(), 1);
+    }
+
+    /// A column promoted with `ascending: false` — the friends list's Online
+    /// column, where a click means "online first" — starts descending, and
+    /// re-clicking it still flips.
+    #[test]
+    fn click_honours_the_first_direction() {
+        let mut sort = TableSort::from_defaults(DEFAULTS);
+        sort.click(2, false);
+        assert_eq!(sort.primary(), Some((2, false)));
+        sort.click(2, false);
+        assert_eq!(sort.primary(), Some((2, true)));
+    }
+
+    /// The click stack never grows past [`MAX_SORT_KEYS`]: the least significant
+    /// key falls off the end.
+    #[test]
+    fn click_stack_is_bounded() {
+        let mut sort = TableSort::default();
+        for column in 0..MAX_SORT_KEYS + 3 {
+            sort.click(column, true);
+        }
+        assert_eq!(sort.keys().len(), MAX_SORT_KEYS);
+        assert_eq!(sort.primary(), Some((MAX_SORT_KEYS + 2, true)));
+    }
+
+    /// The sort reads back as `(token, ascending)` pairs for a consumer's
+    /// comparator, in key order.
+    #[test]
+    fn tokens_name_the_columns() {
+        let mut sort = TableSort::from_defaults(DEFAULTS);
+        sort.click(2, false);
+        assert_eq!(sort.tokens(COLUMNS), vec![("land", false), ("name", true)]);
+    }
+
+    /// The shared comparator applies each level's direction, stops at the first
+    /// level that breaks the tie, and falls through to the tie-break.
+    #[test]
+    fn sort_keys_order_by_each_level_in_turn() {
+        let mut rows = vec![("b", 1_i32), ("a", 2), ("a", 1), ("c", 1)];
+        order_by_sort_keys(
+            &mut rows,
+            &[("count", false), ("name", true)],
+            |token, left, right| match *token {
+                "count" => left.1.cmp(&right.1),
+                _name => left.0.cmp(right.0),
+            },
+            keep_order,
+        );
+        // Count descending first, then name ascending inside the tie.
+        assert_eq!(rows, vec![("a", 2), ("a", 1), ("b", 1), ("c", 1)]);
+    }
+
+    /// With no keys at all the order is the tie-break's alone — and
+    /// [`keep_order`] leaves the list exactly as it arrived.
+    #[test]
+    fn no_sort_keys_keeps_the_arrival_order() {
+        let mut rows = vec![3_i32, 1, 2];
+        let no_keys: [(&str, bool); 0] = [];
+        order_by_sort_keys(
+            &mut rows,
+            &no_keys,
+            |_token, _left, _right| Ordering::Equal,
+            keep_order,
+        );
+        assert_eq!(rows, vec![3, 1, 2]);
     }
 
     /// The sort survives an encode → parse round-trip, named by stable tokens.
     #[test]
     fn encode_parse_round_trip() {
         let mut sort = TableSort::from_defaults(DEFAULTS);
-        sort.click(1); // title asc, then name asc
+        sort.click(1, true); // title asc, then name asc
         let encoded = sort.encode(COLUMNS);
         assert_eq!(encoded, "title:a,name:a");
         let parsed = TableSort::parse(&encoded, COLUMNS, DEFAULTS);
@@ -1775,9 +1982,42 @@ mod tests {
         assert_eq!(fallback.keys(), TableSort::from_defaults(DEFAULTS).keys());
         // A known token beside an unknown one keeps only the known.
         let mixed = TableSort::parse("land:d,bogus:a,land:a", COLUMNS, DEFAULTS);
-        assert_eq!(mixed.keys().len(), 1);
-        assert_eq!(mixed.keys().first().map(|key| key.column), Some(2));
-        assert!(mixed.keys().first().is_some_and(|key| !key.ascending));
+        assert_eq!(mixed.keys(), &[(2, false)]);
+    }
+
+    /// Persisted widths survive a round-trip through the `token:px` string: each
+    /// fixed column is named by its stable token, the flexible column (which owns
+    /// the row's slack, not a width) is left out, and a width outside the legal
+    /// range is clamped on the way back in rather than rejected.
+    #[test]
+    fn widths_round_trip_and_clamp() {
+        let mut state = state(&SINGLE_SPEC);
+        state.widths = vec![1.0, 110.0, 64.0];
+        assert_eq!(encode_widths(&state), "title:110,land:64");
+
+        apply_persisted_widths(&mut state, "land:200,title:90");
+        assert_eq!(state.widths, vec![1.0, 90.0, 200.0]);
+
+        // Out of range clamps at both ends; the flexible column's grow factor is
+        // not a width and is left alone even when the string names it.
+        apply_persisted_widths(&mut state, "title:5000,land:1,name:99");
+        assert_eq!(state.widths, vec![1.0, MAX_COLUMN_WIDTH, MIN_COLUMN_WIDTH]);
+    }
+
+    /// A malformed or unknown persisted width string changes nothing — each part
+    /// is dropped on its own, so one bad field does not lose the good ones.
+    #[test]
+    fn malformed_widths_are_dropped_part_by_part() {
+        let mut state = state(&SINGLE_SPEC);
+        state.widths = vec![1.0, 110.0, 64.0];
+        apply_persisted_widths(&mut state, "");
+        apply_persisted_widths(&mut state, "garbage");
+        apply_persisted_widths(&mut state, "title:not-a-number");
+        apply_persisted_widths(&mut state, "bogus:50");
+        assert_eq!(state.widths, vec![1.0, 110.0, 64.0]);
+        // A good field beside a bad one still lands.
+        apply_persisted_widths(&mut state, "title:oops,land:70");
+        assert_eq!(state.widths, vec![1.0, 110.0, 70.0]);
     }
 
     /// A resize drag widens with a rightward delta and clamps to the range.
@@ -2073,7 +2313,7 @@ mod tests {
     fn primary_column(app: &App, table: Entity) -> Option<usize> {
         app.world()
             .get::<TableState>(table)
-            .and_then(|state| state.sort().primary().map(|key| key.column))
+            .and_then(|state| state.sort().primary().map(|(column, _ascending)| column))
     }
 
     /// A table's live width for column `index`.
@@ -2384,8 +2624,7 @@ mod tests {
 
         /// The primary sort level: the column ordered by, and its direction.
         fn primary_sort(app: &mut App) -> Option<(usize, bool)> {
-            let key = state(app)?.sort().primary()?;
-            Some((key.column, key.ascending))
+            state(app)?.sort().primary()
         }
 
         /// The glyph the named column's sort arrow is showing.

@@ -26,6 +26,12 @@ That is **4256 of 10985 lines (39%)** meeting the same single-consumer test the
 defence is real, but it does not explain why `radar_model` compiles for
 `sl-viewer-world-scene`.
 
+`radar_model` also still hand-writes the multi-column sort loop that
+[[viewer-audit-table-sort-consolidation]] replaced everywhere else, because
+`sl-viewer-kit` cannot reach `ui_table::order_by_sort_keys` in
+`sl-viewer-ui-widgets`. Once it lands in `sl-viewer-people` the helper is in
+scope, and `radar.rs` stops mapping table tokens onto `SortColumn` by hand.
+
 Zero-test files here worth naming while the modules move: `avatar_assets.rs`
 (514), `face_material.rs` (375), `sky_presets.rs` (322), `probe_layers.rs`
 (136).

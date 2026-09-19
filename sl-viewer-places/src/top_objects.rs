@@ -146,7 +146,8 @@ use crate::ui_format::format_duration_units;
 use crate::ui_spawn::{ButtonSpec, UiLabel, spawn_button};
 use crate::ui_table::{
     TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells, TableSelectionMode,
-    TableSortDefault, TableSpec, TableState, set_table_cell, spawn_table, spawn_table_row,
+    TableSortDefault, TableSpec, TableState, keep_order, order_by_sort_keys, set_table_cell,
+    spawn_table, spawn_table_row,
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{SCROLLBAR_THICKNESS, VirtualList, VirtualRow, layout_virtual_lists};
@@ -1198,63 +1199,46 @@ fn extended_str(item: &LandStatItem, read: impl Fn(&LandStatExtended) -> String)
     item.extended.as_ref().map_or_else(String::new, read)
 }
 
-/// The item order for a sort, most-significant key first.
-fn sorted_order(items: &[LandStatItem], keys: &[(&'static str, bool)]) -> Vec<usize> {
+/// The item order for a sort, most-significant key first. The rows sorted are
+/// *indices* into `items`, because the selection and the row pool address a row
+/// by its position in the report rather than by the ordered list.
+fn sorted_order(items: &[LandStatItem], keys: &[(&str, bool)]) -> Vec<usize> {
     let mut order: Vec<usize> = (0..items.len()).collect();
-    order.sort_by(|left, right| {
-        let (Some(left), Some(right)) = (items.get(*left), items.get(*right)) else {
-            return std::cmp::Ordering::Equal;
-        };
-        for (token, ascending) in keys {
-            let ordering = compare_rows(left, right, token);
-            if ordering != std::cmp::Ordering::Equal {
-                return if *ascending {
-                    ordering
-                } else {
-                    ordering.reverse()
-                };
-            }
-        }
-        std::cmp::Ordering::Equal
-    });
+    order_by_sort_keys(
+        &mut order,
+        keys,
+        |token, left, right| {
+            let (Some(left), Some(right)) = (items.get(*left), items.get(*right)) else {
+                return std::cmp::Ordering::Equal;
+            };
+            compare_rows(left, right, token)
+        },
+        keep_order,
+    );
     order
 }
 
 /// Rebuild each window's sorted view when its report or its sort changed, and
 /// put the selection back on the same objects at their new positions.
 fn rebuild_top_objects_views(
-    mut windows: Query<(
-        &TopObjectsKind,
-        &mut TopObjectsState,
-        &mut TopObjectsView,
-        &TopObjectsUi,
-    )>,
+    mut windows: Query<
+        (&mut TopObjectsState, &mut TopObjectsView, &TopObjectsUi),
+        With<TopObjectsKind>,
+    >,
     mut tables: Query<&mut TableState>,
     mut lists: Query<&mut VirtualList>,
 ) {
-    for (kind, mut state, mut view, ui) in &mut windows {
-        let sort = tables
+    for (mut state, mut view, ui) in &mut windows {
+        let (sort_revision, keys) = tables
             .get(ui.table)
-            .ok()
-            .map(|table| (table.sort_revision(), table.sort().keys().to_vec()));
-        let sort_revision = sort.as_ref().map_or(0, |(revision, _keys)| *revision);
+            .map(TableState::sort_stamp)
+            .unwrap_or_default();
         if !state.dirty && view.built_sort_revision == sort_revision {
             continue;
         }
         state.dirty = false;
         view.built_sort_revision = sort_revision;
 
-        let keys: Vec<(&'static str, bool)> = sort
-            .map(|(_revision, keys)| keys)
-            .unwrap_or_default()
-            .iter()
-            .filter_map(|key| {
-                kind.table()
-                    .columns
-                    .get(key.column)
-                    .map(|column| (column.token, key.ascending))
-            })
-            .collect();
         view.order = sorted_order(&state.items, &keys);
 
         if let Ok(mut list) = lists.get_mut(ui.viewport) {

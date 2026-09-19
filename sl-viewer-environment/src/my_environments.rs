@@ -838,11 +838,10 @@ fn rebuild_my_environments_view(
     let (Some(ui), Some(model)) = (ui, model) else {
         return;
     };
-    let sort = tables
+    let (sort_revision, keys) = tables
         .get(ui.table)
-        .ok()
-        .map(|table| (table.sort_revision(), table.sort().keys().to_vec()));
-    let sort_revision = sort.as_ref().map_or(0, |(revision, _keys)| *revision);
+        .map(TableState::sort_stamp)
+        .unwrap_or_default();
     if view.built
         && view.built_sort_revision == sort_revision
         && view.built_filters.as_ref() == Some(&*filters)
@@ -857,17 +856,6 @@ fn rebuild_my_environments_view(
     view.built_index = Some(index.clone());
 
     let mut rows = project(&index, &model, &filters);
-    let keys: Vec<(&str, bool)> = sort
-        .map(|(_revision, keys)| keys)
-        .unwrap_or_default()
-        .iter()
-        .filter_map(|key| {
-            MY_ENVIRONMENTS_TABLE
-                .columns
-                .get(key.column)
-                .map(|column| (column.token, key.ascending))
-        })
-        .collect();
     sort_rows(&mut rows, &keys);
     view.rows = rows;
     view.total = total(&index);

@@ -72,8 +72,8 @@ use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonSpec, UiLabel};
 use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab_strip};
 use crate::ui_table::{
-    TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableSelectionMode, TableSpec,
-    TableState, register_table_settings, spawn_table, spawn_table_row,
+    MultiSort, TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableSelectionMode,
+    TableSpec, TableState, register_table_settings, spawn_table, spawn_table_row,
 };
 use crate::ui_text::set_text;
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
@@ -282,9 +282,12 @@ pub use sl_viewer_settings::keys::people::{SETTING_CONTACT_SET_NOTIFY, SETTING_F
 /// columns are widget-owned **text** cells (Name gains the locale ellipsis); the
 /// two permission groups are widget **custom** columns the People code fills with
 /// its rights icon grid and grouped sub-headers. The widget's built-in sort is
-/// **off** — the friends list keeps its bespoke 8-way [`SortState`] and wires its
-/// own header clicks — but the widget still owns the header alignment, column
-/// widths (draggable + persisted), scroll, row pool and selection.
+/// **off**: a header click here can name any of *eight* columns — the six
+/// permission icons inside those two grouped cells included — so the list keeps
+/// its own [`SortState`] (the widget's [`MultiSort`] machinery, keyed by
+/// [`SortColumn`] instead of a column index) and wires its own header clicks.
+/// The widget still owns the header alignment, column widths (draggable +
+/// persisted), scroll, row pool and selection.
 const FRIENDS_TABLE: TableSpec = TableSpec {
     element: "people-friends",
     selection: TableSelectionMode::Multi,
@@ -639,129 +642,68 @@ enum SortColumn {
 /// unresolved name sorts by its short-id placeholder.
 fn ordered(model: &FriendsModel, sort: &SortState) -> Vec<FriendRow> {
     let mut rows = model.rows();
-    rows.sort_by(|left, right| sort.compare(left, right));
+    sort.0.order_by(
+        &mut rows,
+        |column, left, right| column_ordering(*column, left, right),
+        |left, right| {
+            left.name
+                .to_lowercase()
+                .cmp(&right.name.to_lowercase())
+                .then_with(|| left.friend.uuid().cmp(&right.friend.uuid()))
+        },
+    );
     rows
 }
 
-/// One level of the multi-column sort: a column and its direction.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct SortKey {
-    /// The column this level orders by.
-    column: SortColumn,
-    /// Ascending (else descending).
-    ascending: bool,
-}
-
-/// The most sort levels remembered; clicks past this drop the least significant.
-const MAX_SORT_KEYS: usize = 6;
-
-/// The ordered multi-column sort — most-significant key first. A header click
-/// promotes its column to the front (or flips its direction if already front),
-/// demoting the previous order to tie-breakers: "sort by the last-clicked column,
-/// then the one before that, …". Persisted per avatar
+/// The friends list's ordered multi-column sort, persisted per avatar
 /// ([`FRIENDS_SORT_SETTING`]).
+///
+/// The machinery is the table widget's [`MultiSort`] — the same click stack,
+/// encode and parse every other table uses. What is bespoke is only the *column*
+/// it is keyed by: the six permission columns live inside the two grouped custom
+/// columns of [`FRIENDS_TABLE`], so the eight columns a header click can name do
+/// not line up one-for-one with the table's four, and the list drives its own
+/// clicks (`builtin_sort: false`) over its own [`SortColumn`].
 #[derive(Resource, Debug, Clone)]
-struct SortState {
-    /// The sort levels, most-significant first.
-    keys: Vec<SortKey>,
-}
+struct SortState(MultiSort<SortColumn>);
 
 impl Default for SortState {
     fn default() -> Self {
         // The viewer's original order, expressed as a two-level sort: online first
         // (descending, so online precedes offline), then name ascending.
-        Self {
-            keys: vec![
-                SortKey {
-                    column: SortColumn::Online,
-                    ascending: false,
-                },
-                SortKey {
-                    column: SortColumn::Name,
-                    ascending: true,
-                },
-            ],
-        }
+        Self(MultiSort::new([
+            (SortColumn::Online, false),
+            (SortColumn::Name, true),
+        ]))
     }
 }
 
 impl SortState {
     /// Apply a header click: toggle the front column's direction if it is already
-    /// primary, else promote `column` to the front (demoting the rest).
+    /// primary, else promote `column` to the front (demoting the rest), in the
+    /// direction that column starts in.
     fn click(&mut self, column: SortColumn) {
-        if let Some(front) = self.keys.first_mut()
-            && front.column == column
-        {
-            front.ascending = !front.ascending;
-            return;
-        }
-        self.keys.retain(|key| key.column != column);
-        self.keys.insert(
-            0,
-            SortKey {
-                column,
-                ascending: default_ascending(column),
-            },
-        );
-        self.keys.truncate(MAX_SORT_KEYS);
+        self.0.click(column, default_ascending(column));
     }
 
     /// The primary (most-significant) sort key, if any.
-    fn primary(&self) -> Option<SortKey> {
-        self.keys.first().copied()
-    }
-
-    /// Order two rows by the full key stack, with a stable name / id tie-break.
-    fn compare(&self, left: &FriendRow, right: &FriendRow) -> Ordering {
-        for key in &self.keys {
-            let base = column_ordering(key.column, left, right);
-            let ord = if key.ascending { base } else { base.reverse() };
-            if ord != Ordering::Equal {
-                return ord;
-            }
-        }
-        left.name
-            .to_lowercase()
-            .cmp(&right.name.to_lowercase())
-            .then_with(|| left.friend.uuid().cmp(&right.friend.uuid()))
+    fn primary(&self) -> Option<(SortColumn, bool)> {
+        self.0.primary()
     }
 
     /// Encode the sort as a compact `col:dir,col:dir` string for persistence.
     fn encode(&self) -> String {
-        self.keys
-            .iter()
-            .map(|key| {
-                let dir = if key.ascending { "a" } else { "d" };
-                format!("{}:{dir}", column_token(key.column))
-            })
-            .collect::<Vec<_>>()
-            .join(",")
+        self.0.encode_with(|column| Some(column_token(column)))
     }
 
     /// Parse a persisted sort string, falling back to [`Self::default`] when it is
     /// empty or wholly unrecognised (dropping duplicate / unknown columns).
     fn parse(text: &str) -> Self {
-        let mut keys: Vec<SortKey> = Vec::new();
-        for part in text.split(',') {
-            let mut fields = part.split(':');
-            let (Some(token), Some(dir)) = (fields.next(), fields.next()) else {
-                continue;
-            };
-            let Some(column) = parse_column_token(token) else {
-                continue;
-            };
-            if keys.iter().any(|key| key.column == column) {
-                continue;
-            }
-            keys.push(SortKey {
-                column,
-                ascending: dir == "a",
-            });
-        }
-        if keys.is_empty() {
+        let parsed = MultiSort::parse_with(text, parse_column_token);
+        if parsed.is_empty() {
             Self::default()
         } else {
-            Self { keys }
+            Self(parsed)
         }
     }
 }
@@ -2377,10 +2319,10 @@ fn set_display(nodes: &mut Query<&mut Node>, entity: Entity, shown: bool) {
 
 /// The arrow glyph a header shows: an up / down arrow when `column` is the primary
 /// sort key, else empty (only the most-significant column is marked).
-fn sort_arrow(primary: Option<SortKey>, column: SortColumn) -> &'static str {
+fn sort_arrow(primary: Option<(SortColumn, bool)>, column: SortColumn) -> &'static str {
     match primary {
-        Some(key) if key.column == column => {
-            if key.ascending {
+        Some((key, ascending)) if key == column => {
+            if ascending {
                 SORT_ASCENDING_GLYPH
             } else {
                 SORT_DESCENDING_GLYPH
@@ -2881,23 +2823,17 @@ mod tests {
     fn sort_click_promotes_and_toggles() {
         let mut sort = super::SortState::default();
         // Default primary is Online, descending (online-first).
-        let primary = sort.primary();
-        assert_eq!(
-            primary.map(|key| (key.column, key.ascending)),
-            Some((super::SortColumn::Online, false))
-        );
+        assert_eq!(sort.primary(), Some((super::SortColumn::Online, false)));
         // Click Name → Name primary ascending.
         sort.click(super::SortColumn::Name);
-        assert_eq!(
-            sort.primary().map(|key| (key.column, key.ascending)),
-            Some((super::SortColumn::Name, true))
-        );
+        assert_eq!(sort.primary(), Some((super::SortColumn::Name, true)));
         // Click Name again → same column, direction flips to descending.
         sort.click(super::SortColumn::Name);
-        assert_eq!(
-            sort.primary().map(|key| (key.column, key.ascending)),
-            Some((super::SortColumn::Name, false))
-        );
+        assert_eq!(sort.primary(), Some((super::SortColumn::Name, false)));
+        // Online is the one column a fresh click starts *descending* on, because
+        // a click on it is asking for the online friends first.
+        sort.click(super::SortColumn::Online);
+        assert_eq!(sort.primary(), Some((super::SortColumn::Online, false)));
     }
 
     /// The sort round-trips through its persisted string form.

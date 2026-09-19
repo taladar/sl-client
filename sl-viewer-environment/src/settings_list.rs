@@ -25,6 +25,7 @@
 use sl_client_bevy::{InventoryKey, SettingsKind, Uuid};
 use sl_viewer_inventory::inventory::InventoryModel;
 use sl_viewer_inventory::settings_index::{SettingsAsset, SettingsIndex};
+use sl_viewer_ui_widgets::ui_table::order_by_sort_keys;
 
 /// The three kinds in the reference's filter-row order (`chk_days`,
 /// `chk_skies`, `chk_water`) — which is also the order [`SettingsListFilters`]
@@ -193,24 +194,16 @@ pub const fn kind_slug(kind: SettingsKind) -> &'static str {
 /// the name, which is what a one-column list wants and what a token added to a
 /// spec and forgotten here degrades to.
 pub fn sort_rows(rows: &mut [SettingsListRow], keys: &[(&str, bool)]) {
-    rows.sort_by(|left, right| {
-        for (token, ascending) in keys {
-            let ordering = match *token {
-                "kind" => kind_rank(left.kind).cmp(&kind_rank(right.kind)),
-                "where" => left.folder.to_lowercase().cmp(&right.folder.to_lowercase()),
-                _name => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
-            };
-            let ordering = if *ascending {
-                ordering
-            } else {
-                ordering.reverse()
-            };
-            if ordering != core::cmp::Ordering::Equal {
-                return ordering;
-            }
-        }
-        left.name.to_lowercase().cmp(&right.name.to_lowercase())
-    });
+    order_by_sort_keys(
+        rows,
+        keys,
+        |token, left, right| match *token {
+            "kind" => kind_rank(left.kind).cmp(&kind_rank(right.kind)),
+            "where" => left.folder.to_lowercase().cmp(&right.folder.to_lowercase()),
+            _name => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
+        },
+        |left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()),
+    );
 }
 
 /// Project the settings index onto a list, filtered but not yet sorted.

@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 306 |
+| ready | 305 |
 | blocked | 41 |
 | in-progress | 22 |
 | bugs | 5 |
-| done | 1188 |
+| done | 1189 |
 | deferred | 29 |
 | wont-do | 16 |
 | **total** | **1707** |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (306)
+## ready (305)
 
 ### protocol
 
@@ -330,9 +330,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   sl-viewer-search depends on sl-viewer-map for one two-field struct
 - [`viewer-audit-skin-token-coverage`](ready/viewer-audit-skin-token-coverage.md)
   — The skin system covers two widgets
-- [`viewer-audit-table-sort-consolidation`](ready/viewer-audit-table-sort-consolidation.md)
-  — The multi-column sort comparator is hand-written six times, and People
-  reimplements TableSortState
 - [`viewer-audit-ui-core-sound-coupling`](ready/viewer-audit-ui-core-sound-coupling.md)
   — Three lines in ui_sounds.rs put the protocol stack behind 22 crates
 - [`viewer-audit-web-auth-preference`](ready/viewer-audit-web-auth-preference.md)
@@ -1165,7 +1162,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 
-## done (1188)
+## done (1189)
 
 ### protocol
 
@@ -1543,6 +1540,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Inactive tab panels keep their keyboard tab stops
 - [`viewer-audit-table-interaction-disabled`](done/viewer-audit-table-interaction-disabled.md)
   — The table widget ignores InteractionDisabled
+- [`viewer-audit-table-sort-consolidation`](done/viewer-audit-table-sort-consolidation.md)
+  — The multi-column sort comparator is hand-written six times, and People
+  reimplements TableSortState
 - [`viewer-audit-texture-align-material-channels`](done/viewer-audit-texture-align-material-channels.md)
   — Align planar faces does not propagate to the normal and specular transforms
 - [`viewer-audit-toast-starvation-dnd-queue`](done/viewer-audit-toast-starvation-dnd-queue.md)
