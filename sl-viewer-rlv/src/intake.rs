@@ -617,26 +617,47 @@ fn apply_blocked_behaviours(
     }
 }
 
+/// What running an RLV command line needs, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): our own agent (the issuer a
+/// console line is attributed to), the settings that decide whether a line is
+/// taken at all, the two facts the debug-setting allowlist reads, the movement
+/// controls a forced rotation writes, the environment seam the sky family
+/// writes through, and the session it all lands in.
+///
+/// A command line reaches the state machine from two places — an object's
+/// owner-say and the console's input field — and both need exactly this, so
+/// neither spells it out.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct RlvRun<'w> {
+    /// Our own agent, whose id a console line is issued under.
+    pub(crate) identity: Option<Res<'w, SlIdentity>>,
+    /// The settings, which hold the master switch and the debug flags.
+    pub(crate) settings: Option<Res<'w, ViewerSettings>>,
+    /// The two facts the debug-setting allowlist reads.
+    pub(crate) facts: Option<Res<'w, RlvExtFacts>>,
+    /// The movement controls a `@setrot` writes a forced heading on.
+    pub(crate) controls: Option<ResMut<'w, AvatarControls>>,
+    /// The environment seam the sky family writes through.
+    pub(crate) environment: ResMut<'w, RlvEnvironmentSlot>,
+    /// The session every restriction, reply and console line lands in.
+    pub(crate) session: ResMut<'w, RlvSession>,
+}
+
 /// Feed every arriving owner-say `@`-line to the state machine as the object
 /// that said it.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the event stream, the \
-              identity and settings that decide whether a line is taken at all, the two facts \
-              the debug-setting allowlist reads, the world mirror an issuer is resolved \
-              against, the movement controls a forced rotation writes, the environment seam \
-              the sky family writes through, and the session it all lands in"
-)]
 fn take_rlv_owner_say(
     mut events: MessageReader<SlEvent>,
-    identity: Option<Res<SlIdentity>>,
-    settings: Option<Res<ViewerSettings>>,
-    facts: Option<Res<RlvExtFacts>>,
     objects: Option<Res<ObjectState>>,
-    mut controls: Option<ResMut<AvatarControls>>,
-    mut environment: ResMut<RlvEnvironmentSlot>,
-    mut session: ResMut<RlvSession>,
+    run: RlvRun,
 ) {
+    let RlvRun {
+        identity,
+        settings,
+        facts,
+        mut controls,
+        mut environment,
+        mut session,
+    } = run;
     if !rlv_is_enabled(settings.as_deref()) {
         // Drain, so flipping the master switch on does not replay everything an
         // object said while it was off.

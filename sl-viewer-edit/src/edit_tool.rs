@@ -310,6 +310,35 @@ pub fn build_tools_floater_spec() -> FloaterSpec {
     }
 }
 
+/// The three surfaces the Build Tools floater is opened through, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the floaters it is found
+/// among, the panels its show switch lives on, and the edit-tool state its tab
+/// is set in.
+///
+/// The injected form of [`open_build_tools_with`], which the context menus'
+/// Create / Edit slices all want together.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub struct BuildToolsSurfaces<'w, 's> {
+    /// The open floaters, for the Build Tools one.
+    floaters: Query<'w, 's, (Entity, &'static Floater)>,
+    /// The panels its show switch lives on.
+    panels: Query<'w, 's, &'static mut UiPanelShown>,
+    /// The edit-tool state whose tab the open sets.
+    state: ResMut<'w, EditToolState>,
+}
+
+impl BuildToolsSurfaces<'_, '_> {
+    /// Open the Build Tools floater on `tool` — see [`open_build_tools_with`].
+    pub fn open_with(&mut self, tool: EditTool) {
+        open_build_tools_with(tool, &self.floaters, &mut self.panels, &mut self.state);
+    }
+
+    /// The edit-tool state, for a caller that also reads or writes it directly.
+    pub fn state(&mut self) -> &mut EditToolState {
+        &mut self.state
+    }
+}
+
 /// Open the Build Tools floater **on `tool`** — the body every entry point that
 /// opens the window with a manipulator already in mind shares (the object and
 /// land pies' **Create** slices, the object and attachment pies' **Edit**

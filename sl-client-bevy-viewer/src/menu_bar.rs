@@ -902,33 +902,86 @@ fn spawn_top_menu_bar(mut commands: Commands, root: Res<UiRoot>, asset_server: R
     crate::status_bar::spawn_status_area(&mut commands, &asset_server, bar);
 }
 
+/// What the top menu bar's conditions are read from, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): everything that can grey an
+/// entry — the environment, the build selection and tool, the settings, our
+/// presence, the RLV session, a running bulk import, and the camera mode.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct TopMenuFacts<'w> {
+    /// The environment, for the Environment entries.
+    environment: Option<Res<'w, crate::environment::EnvironmentState>>,
+    /// The build selection, which gates the Edit entries.
+    selection: Res<'w, crate::world_api::SelectionSet>,
+    /// The current build tool.
+    edit_tool: Res<'w, crate::world_api::EditToolState>,
+    /// The settings the toggles reflect.
+    settings: Res<'w, crate::settings::ViewerSettings>,
+    /// Our presence, for Away / Do Not Disturb.
+    presence: Option<Res<'w, crate::social::PresenceState>>,
+    /// The RLV session, which can refuse an entry outright.
+    rlv_session: Option<Res<'w, crate::world_api::rlv::RlvSession>>,
+    /// A running bulk import, which greys its own entry.
+    bulk_import: Option<Res<'w, crate::bulk_import::BulkImportRun>>,
+    /// The camera mode, for the flycam toggle.
+    camera_mode: Option<Res<'w, crate::world_api::CameraMode>>,
+}
+
+/// The mutable state a top-menu action flips, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the environment, the
+/// settings, our presence, and the panels an entry shows or hides.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct TopMenuState<'w, 's> {
+    /// The environment an entry edits.
+    environment: Option<ResMut<'w, crate::environment::EnvironmentState>>,
+    /// The settings a toggle flips.
+    settings: ResMut<'w, crate::settings::ViewerSettings>,
+    /// Our presence, for Away / Do Not Disturb.
+    presence: Option<ResMut<'w, crate::social::PresenceState>>,
+    /// The panels an entry shows or hides.
+    panels: Query<'w, 's, &'static mut UiPanelShown>,
+}
+
+/// Everything a top-menu action raises, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(bevy::ecs::system::SystemParam)]
+struct TopMenuOut<'w> {
+    /// The About Land floater.
+    about_land: MessageWriter<'w, crate::about_land::OpenAboutLand>,
+    /// The About Region floater.
+    about_region: MessageWriter<'w, crate::about_region::OpenAboutRegion>,
+    /// The People pane's sub-tab an entry jumps to.
+    people_tabs: MessageWriter<'w, crate::people::OpenPeopleSubTab>,
+    /// The toast a refusal reports through.
+    notify: MessageWriter<'w, crate::notifications::ShowNotification>,
+    /// The quit an Exit raises.
+    quit: MessageWriter<'w, crate::session::QuitRequested>,
+    /// The Windlight bulk import an entry starts.
+    bulk_import: MessageWriter<'w, crate::bulk_import::StartWindlightBulkImport>,
+    /// The flycam toggle.
+    flycam: MessageWriter<'w, crate::world_api::ToggleFlycam>,
+}
+
 /// Recompute the bar's live conditions each frame from the world.
 ///
 /// Cheap — one small `Vec` and only written on a real change — and read only
 /// when a menu opens ([`crate::menu`] rebuilds a popup from the conditions that
 /// hold at open time), so nothing here needs to run against an open menu.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries, and this one is \
-              the fan-in of every condition the bar's check marks and enable gates read: the \
-              floaters, the environment, the selection and edit tool, the settings, the \
-              presence modes, the RLV state that can take the environment menu away, the \
-              WindLight bulk importer's run state, the camera mode, the panel-shown query, and \
-              the bar itself"
-)]
 fn update_top_menu_conditions(
     floaters: Query<(Entity, &crate::floater::Floater)>,
-    environment: Option<Res<crate::environment::EnvironmentState>>,
-    selection: Res<crate::world_api::SelectionSet>,
-    edit_tool: Res<crate::world_api::EditToolState>,
-    settings: Res<crate::settings::ViewerSettings>,
-    presence: Option<Res<crate::social::PresenceState>>,
-    rlv_session: Option<Res<crate::world_api::rlv::RlvSession>>,
-    bulk_import: Option<Res<crate::bulk_import::BulkImportRun>>,
-    camera_mode: Option<Res<crate::world_api::CameraMode>>,
+    facts: TopMenuFacts,
     panels: Query<&UiPanelShown>,
     mut bars: Query<&mut MenuConditions, With<TopMenuBar>>,
 ) {
+    let TopMenuFacts {
+        environment,
+        selection,
+        edit_tool,
+        settings,
+        presence,
+        rlv_session,
+        bulk_import,
+        camera_mode,
+    } = facts;
     // A floater's open state, resolved by stable id — not through its module's
     // `XUi` resource, which a lazily-built floater only gains on first open.
     let open = |id: &str| {
@@ -1170,32 +1223,30 @@ const fn environment_condition(
 /// placeholder's `noop`, and any future entry whose handler is not written yet)
 /// fall through harmlessly, which is exactly what lets a future task add an
 /// entry to a `static` menu above and wire it here in one place.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the action \
-              stream, the by-id floater lookup, the environment state, the parcel, the two \
-              open-request channels, the settings, the panel-shown query, the People sub-tab \
-              request, the presence modes and their notification channel, the flycam-toggle \
-              request, and the quit-request writer"
-)]
 fn handle_top_menu_actions(
     mut actions: MessageReader<UiAction>,
     floaters: Query<(Entity, &crate::floater::Floater)>,
-    mut environment: Option<ResMut<crate::environment::EnvironmentState>>,
     agent_parcel: Res<sl_client_bevy::SlAgentParcel>,
-    mut about_land: MessageWriter<crate::about_land::OpenAboutLand>,
-    mut about_region: MessageWriter<crate::about_region::OpenAboutRegion>,
-    mut settings: ResMut<crate::settings::ViewerSettings>,
-    mut panels: Query<&mut UiPanelShown>,
-    mut people_tabs: MessageWriter<crate::people::OpenPeopleSubTab>,
-    mut presence: Option<ResMut<crate::social::PresenceState>>,
-    mut notify: MessageWriter<crate::notifications::ShowNotification>,
-    mut quit: MessageWriter<crate::session::QuitRequested>,
-    mut bulk_import: MessageWriter<crate::bulk_import::StartWindlightBulkImport>,
-    mut flycam: MessageWriter<crate::world_api::ToggleFlycam>,
+    state: TopMenuState,
+    out: TopMenuOut,
 ) {
     use crate::environment::FixedEnvironment;
     use crate::sky_presets::FixedSky;
+    let TopMenuState {
+        mut environment,
+        mut settings,
+        mut presence,
+        mut panels,
+    } = state;
+    let TopMenuOut {
+        mut about_land,
+        mut about_region,
+        mut people_tabs,
+        mut notify,
+        mut quit,
+        mut bulk_import,
+        mut flycam,
+    } = out;
     // Whether picking the environment already pinned reverts to the shared one
     // (`EnvironmentRepeatedTogglesShared`). Read once, before the loop, because
     // it is the same answer for every action in the batch.

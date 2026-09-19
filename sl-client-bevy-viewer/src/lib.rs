@@ -956,11 +956,6 @@ struct CameraStartup {
     field_of_view: Option<f32>,
 }
 
-/// The unattended capture harness's configuration for a viewer session: where
-/// the PNG sequence goes, and what its frames hold. Bundled alongside
-/// [`CameraStartup`] to keep [`run_session`] within the argument-count lint —
-/// and because capture settings without a directory are meaningless, which reads
-/// better as one value than as several arguments that have to agree.
 /// What this run's captured frames hold, from the `--capture-*` options: the
 /// pixel grid, and each layer of the composited frame independently.
 fn capture_content(options: &Options) -> crate::screenshot::CaptureContent {
@@ -975,7 +970,10 @@ fn capture_content(options: &Options) -> crate::screenshot::CaptureContent {
 }
 
 /// The unattended capture harness's configuration for a viewer session: where
-/// the PNG sequence goes, and what its frames hold.
+/// the PNG sequence goes, and what its frames hold. Bundled alongside
+/// [`CameraStartup`] to keep [`run_session`] within the argument-count lint —
+/// and because capture settings without a directory are meaningless, which reads
+/// better as one value than as several arguments that have to agree.
 #[derive(Clone, Copy)]
 struct CaptureStartup<'a> {
     /// The screenshot directory (`--screenshot-dir`), or `None` for an ordinary
@@ -1016,6 +1014,29 @@ struct MediaRuntime {
     web_auth: bool,
 }
 
+/// What a viewer session is fed at startup, beside the login parameters: where
+/// its art comes from, which animations it plays on the own avatar, whether it
+/// backfills group chat history from the server, and whether the whole run is
+/// an offline replay rather than a login. Bundled alongside [`CameraStartup`]
+/// to keep [`run_session`] within the argument-count lint.
+struct SessionContent<'a> {
+    /// The viewer-asset root (`--viewer-assets`), or `None` for the vendored
+    /// `viewer-assets/` tree.
+    viewer_assets: Option<&'a Path>,
+    /// The animations to start on the own avatar once logged in
+    /// (`--play-animation`).
+    play_animation: &'a [Uuid],
+    /// Whether those animations loop rather than playing once
+    /// (`--repeat-animation`).
+    repeat_animation: bool,
+    /// Whether to ask the server for group chat history at login; cleared by
+    /// `--no-group-chat-history`.
+    fetch_server_chat_history: bool,
+    /// The avatar-state replay bundle (`--replay`), or `None` for a live login.
+    /// Its presence is what puts the session in offline mode.
+    replay: Option<crate::avatar_replay::ReplayConfig>,
+}
+
 /// Run one windowed session to completion, returning any recoverable login
 /// outcome (an MFA challenge or a retryable rejection) it stopped on.
 ///
@@ -1026,23 +1047,21 @@ struct MediaRuntime {
 /// cannot write them has already failed. Returns [`Error::AppFailed`] if the
 /// Bevy app exited with a failing status, which is **not** a recoverable
 /// outcome: the caller must not retry it the way it retries an MFA challenge.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the viewer's startup knobs, already bundled where they group naturally \
-              (camera, skin, media)"
-)]
 fn run_session(
     params: &LoginParams,
-    viewer_assets: Option<&Path>,
-    play_animation: &[Uuid],
-    repeat_animation: bool,
+    content: SessionContent<'_>,
     capture: CaptureStartup<'_>,
     camera: CameraStartup,
     skin: SkinRuntime,
     media: MediaRuntime,
-    fetch_server_chat_history: bool,
-    replay: Option<crate::avatar_replay::ReplayConfig>,
 ) -> Result<LoginOutcome, Error> {
+    let SessionContent {
+        viewer_assets,
+        play_animation,
+        repeat_animation,
+        fetch_server_chat_history,
+        replay,
+    } = content;
     // Offline (avatar-state replay) mode: the plugin registers its event/resource
     // substrate but never logs in; the session is fed synthetic events from the
     // bundle instead (see `crate::avatar_replay`).
@@ -1927,9 +1946,13 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
         };
         let outcome = run_session(
             &params,
-            options.viewer_assets.as_deref(),
-            &options.play_animation,
-            options.repeat_animation,
+            SessionContent {
+                viewer_assets: options.viewer_assets.as_deref(),
+                play_animation: &options.play_animation,
+                repeat_animation: options.repeat_animation,
+                fetch_server_chat_history: !options.no_group_chat_history,
+                replay: None,
+            },
             CaptureStartup {
                 dir: options.screenshot_dir.as_deref(),
                 content: capture_content(options),
@@ -1955,8 +1978,6 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
                 video: !options.disable_video_media,
                 web_auth: !options.no_web_auth,
             },
-            !options.no_group_chat_history,
-            None,
         )?;
         if let Some(challenge) = outcome.challenge {
             info!(
@@ -2058,9 +2079,15 @@ fn run_replay(options: &Options, bundle_dir: &Path) -> Result<(), Error> {
     };
     let _outcome = run_session(
         &params,
-        options.viewer_assets.as_deref(),
-        &options.play_animation,
-        options.repeat_animation,
+        SessionContent {
+            viewer_assets: options.viewer_assets.as_deref(),
+            play_animation: &options.play_animation,
+            repeat_animation: options.repeat_animation,
+            // Offline there is no session thread, so the flag is inert; false
+            // keeps the no-network intent explicit.
+            fetch_server_chat_history: false,
+            replay: Some(config),
+        },
         CaptureStartup {
             dir: options.screenshot_dir.as_deref(),
             content: capture_content(options),
@@ -2094,10 +2121,6 @@ fn run_replay(options: &Options, bundle_dir: &Path) -> Result<(), Error> {
             video: false,
             web_auth: false,
         },
-        // Offline there is no session thread, so the flag is inert; false keeps
-        // the no-network intent explicit.
-        false,
-        Some(config),
     )?;
     info!("replay ended");
     Ok(())

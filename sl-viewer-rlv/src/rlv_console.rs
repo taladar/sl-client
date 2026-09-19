@@ -53,7 +53,6 @@ use sl_rlv::{
     RLV_PREFIX, RlvCommand, RlvEnvCommand, RlvEnvSource, RlvExtCommand, RlvExtSource, RlvOutcome,
     RlvParam, RlvReply, RlvState, parse_chat_line,
 };
-use sl_viewer_settings::ViewerSettings;
 use sl_viewer_ui_core::i18n::Translated;
 use sl_viewer_ui_core::ui::UiPanelShown;
 use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems, column, row};
@@ -67,10 +66,9 @@ use sl_viewer_ui_widgets::floater::{
     floater_shown, spawn_floater,
 };
 use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
-use sl_viewer_world_api::AvatarControls;
 use sl_viewer_world_api::rlv::{
-    RlvConsoleKind, RlvEnvironmentSlot, RlvExtFacts, RlvSession,
-    SETTING_DEBUG_HIDE_UNSET_DUPLICATE, ViewerRlvExt, rlv_flag, rlv_is_enabled,
+    RlvConsoleKind, RlvSession, SETTING_DEBUG_HIDE_UNSET_DUPLICATE, ViewerRlvExt, rlv_flag,
+    rlv_is_enabled,
 };
 use uuid::Uuid;
 
@@ -557,27 +555,22 @@ fn spawn_clear_button(commands: &mut Commands, parent: Entity) {
 /// bar relies on that too), so the console owns the key: on a press while the
 /// input has focus, take the text, clear the field, and run it. The press is
 /// consumed so nothing downstream sees it as a second submit.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the keyboard and \
-              focus that decide a submit happened, the UI handles, the identity and settings the \
-              run needs, the two facts the debug-setting allowlist reads, the movement controls a \
-              forced rotation writes, the environment seam the sky family writes through, the \
-              session it writes to, and the field plus the two text contexts clearing it requires"
-)]
 fn submit_console_line(
     mut keyboard: ResMut<ButtonInput<KeyCode>>,
     focus: Res<InputFocus>,
     ui: Option<Res<ConsoleUi>>,
-    identity: Option<Res<SlIdentity>>,
-    settings: Option<Res<ViewerSettings>>,
-    facts: Option<Res<RlvExtFacts>>,
-    mut controls: Option<ResMut<AvatarControls>>,
-    mut environment: ResMut<RlvEnvironmentSlot>,
-    mut session: ResMut<RlvSession>,
+    run: crate::intake::RlvRun,
     mut fields: Query<&mut EditableText>,
     mut contexts: (ResMut<FontCx>, ResMut<LayoutCx>),
 ) {
+    let crate::intake::RlvRun {
+        identity,
+        settings,
+        facts,
+        mut controls,
+        mut environment,
+        mut session,
+    } = run;
     let Some(ui) = ui else {
         return;
     };

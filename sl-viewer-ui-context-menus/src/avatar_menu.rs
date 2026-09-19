@@ -86,7 +86,7 @@
 use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
-use sl_client_bevy::{AgentKey, Command, MuteType, SlAgentParcel, SlCommand, SlIdentity};
+use sl_client_bevy::{AgentKey, Command, MuteType, SlCommand};
 
 use crate::attachment_menu::{ATTACHMENT_MENU_ELEMENT, OpenAttachmentMenu};
 use crate::avatars::RefetchAvatarTextures;
@@ -100,11 +100,11 @@ use crate::intents::RequestFriendship;
 use crate::intents::{ConversationKey, OpenConversation};
 use crate::land_menu::OpenLandMenu;
 use crate::menu::UNIMPLEMENTED;
+use crate::menu_params::MenuConditionFacts;
 use crate::name_tag_billboard::NameTagHitTest;
 use crate::object_menu::OpenObjectMenu;
 use crate::objects::ObjectPicker;
 use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, PieMenuDef};
-use crate::social::FriendsModel;
 use crate::ui_element::UiAction;
 use crate::ui_font::UiFont;
 use crate::world_api::AvatarState;
@@ -885,33 +885,79 @@ fn setup_pick_inspector(mut commands: Commands) {
     ));
 }
 
+/// What stands between the cursor and a world pick, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the window the cursor is
+/// read from, the HUD ray that occludes the world behind it, the UI hover map
+/// and its pickables, and the name-tag hit test — in the reference's occlusion
+/// order, UI then HUD then name tag then world.
+#[derive(bevy::ecs::system::SystemParam)]
+struct PickOcclusion<'w, 's> {
+    /// The window the cursor position is read from.
+    windows: Query<'w, 's, &'static Window>,
+    /// The HUD ray, which occludes the world behind a worn HUD.
+    hud: HudRayCast<'w, 's>,
+    /// What the pointer is over this frame.
+    hover_map: Res<'w, HoverMap>,
+    /// Which of those are pickable.
+    pickables: Query<'w, 's, &'static Pickable>,
+    /// The name-tag hit test, which claims a click on a tag.
+    tag_hit: NameTagHitTest<'w, 's>,
+    /// The pickables' laid-out sizes, for the hit test.
+    node_sizes: Query<'w, 's, &'static ComputedNode>,
+}
+
+/// What a right-click raises, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the avatar pie and, when the
+/// pick landed on something worn, the attachment pie instead.
+#[derive(bevy::ecs::system::SystemParam)]
+struct RightClickOut<'w> {
+    /// The avatar pie a right-click on an avatar opens.
+    requests: MessageWriter<'w, OpenAvatarMenu>,
+    /// The attachment pie a right-click on something worn opens.
+    attachment_requests: MessageWriter<'w, OpenAttachmentMenu>,
+}
+
+/// Everything an avatar-menu action raises, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(bevy::ecs::system::SystemParam)]
+struct AvatarMenuOut<'w> {
+    /// The wire.
+    commands: MessageWriter<'w, SlCommand>,
+    /// A Block.
+    blocks: MessageWriter<'w, RequestBlock>,
+    /// An Add / Remove Friend.
+    friendships: MessageWriter<'w, RequestFriendship>,
+    /// A Derender.
+    derenders: MessageWriter<'w, RequestDerender>,
+    /// A per-avatar render exception.
+    exceptions: MessageWriter<'w, crate::avatar_render_settings::RequestRenderException>,
+    /// An IM conversation.
+    conversations: MessageWriter<'w, OpenConversation>,
+    /// The profile floater.
+    profiles: MessageWriter<'w, OpenAvatarProfile>,
+    /// A texture refetch.
+    refetch: MessageWriter<'w, RefetchAvatarTextures>,
+    /// The add-to-set floater.
+    contact_sets: MessageWriter<'w, crate::intents::OpenAddToContactSet>,
+    /// The alias prompt.
+    aliases: MessageWriter<'w, crate::contact_sets_panel::OpenSetPseudonym>,
+}
+
 /// Rewrite the pick inspector each frame with what a pick at the cursor would
 /// hit: the name-tag hit, the UI-occlusion verdict, the HUD-occlusion
 /// verdict, and the latest resolved GPU ID-buffer pick (requested at
 /// ~[`crate::gpu_pick::PICK_HZ`] Hz while the inspector runs), so the failing
 /// stage is visible without a click.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a debug system reading everything a pick reads: the window, the HUD ray \
-              cast, the hover map / pickables / node sizes for UI occlusion, the \
-              name-tag hit test, the GPU pick queue + its \
-              resolved channel, and the overlay node it writes"
-)]
 fn update_pick_inspector(
     time: Res<Time>,
-    windows: Query<&Window>,
-    hud: HudRayCast,
-    hover_map: Res<HoverMap>,
-    pickables: Query<&Pickable>,
-    tag_hit: NameTagHitTest,
-    node_sizes: Query<&ComputedNode>,
+    occlusion: PickOcclusion,
     mut picker: ResMut<GpuPicker>,
     mut picks: MessageReader<GpuPickResolved>,
     mut last_pick: Local<Option<GpuPickResolved>>,
     mut since_pick: Local<f32>,
     mut inspector: Query<(&mut Node, &mut Text), With<PickInspector>>,
 ) {
-    let Ok(window) = windows.single() else {
+    let Ok(window) = occlusion.windows.single() else {
         return;
     };
     let Ok((mut node, mut text)) = inspector.single_mut() else {
@@ -935,12 +981,16 @@ fn update_pick_inspector(
         }
     }
 
-    let ui_blocked = pointer_over_blocking_ui(&hover_map, &pickables, &node_sizes);
-    let hud = hud.over(cursor);
+    let ui_blocked = pointer_over_blocking_ui(
+        &occlusion.hover_map,
+        &occlusion.pickables,
+        &occlusion.node_sizes,
+    );
+    let hud = occlusion.hud.over(cursor);
     let mut lines = vec![
         format!("cursor {:.0},{:.0}", cursor.x, cursor.y),
         format!("UI blocked={ui_blocked}  HUD={hud}"),
-        match tag_hit.agent_at(cursor) {
+        match occlusion.tag_hit.agent_at(cursor) {
             Some(agent) => format!("tag (2d)→ {agent}"),
             None => "tag (2d)→ (none)".to_owned(),
         },
@@ -1014,29 +1064,19 @@ fn update_pick_inspector(
 /// A right-click over a **blocking** UI element (an open floater) that is *not* a
 /// name tag suppresses the pick, so a menu drawn over the world does not also open
 /// an avatar or object pie behind it.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the mouse button \
-              and motion plus the click/drag tracker, the hover map / pickables / node sizes for \
-              the UI occlusion, the name-tag hit test, the window for the \
-              cursor, the HUD ray cast, the object picker for the HUD resolve, the GPU pick queue for the world \
-              resolve, and the avatar / attachment open channels"
-)]
 fn request_avatar_menu_on_right_click(
     buttons: Res<ButtonInput<MouseButton>>,
     motion: Res<AccumulatedMouseMotion>,
     mut gesture: ResMut<RightClickGesture>,
-    hover_map: Res<HoverMap>,
-    pickables: Query<&Pickable>,
-    tag_hit: NameTagHitTest,
-    node_sizes: Query<&ComputedNode>,
-    windows: Query<&Window>,
-    hud: HudRayCast,
+    occlusion: PickOcclusion,
     object_picker: ObjectPicker,
     mut picker: ResMut<GpuPicker>,
-    mut requests: MessageWriter<OpenAvatarMenu>,
-    mut attachment_requests: MessageWriter<OpenAttachmentMenu>,
+    out: RightClickOut,
 ) {
+    let RightClickOut {
+        mut requests,
+        mut attachment_requests,
+    } = out;
     // Track the gesture: a press starts it, motion accumulates, a release decides.
     if buttons.just_pressed(MouseButton::Right) {
         gesture.down = true;
@@ -1054,7 +1094,7 @@ fn request_avatar_menu_on_right_click(
     if !was_click {
         return;
     }
-    let Ok(window) = windows.single() else {
+    let Ok(window) = occlusion.windows.single() else {
         return;
     };
     let Some(cursor) = window.cursor_position() else {
@@ -1062,20 +1102,24 @@ fn request_avatar_menu_on_right_click(
     };
 
     // 1. The name tag: the screen-space rect test against the visible tags.
-    let tag_agent = tag_hit.agent_at(cursor);
+    let tag_agent = occlusion.tag_hit.agent_at(cursor);
 
     // Occlusion order: tag, then UI, then HUD attachments, then the world (the
     // reference's order too). The name tag above is the avatar's own overlay
     // and wins first.
     let agent = if let Some(agent) = tag_agent {
         Some(agent)
-    } else if pointer_over_blocking_ui(&hover_map, &pickables, &node_sizes) {
+    } else if pointer_over_blocking_ui(
+        &occlusion.hover_map,
+        &occlusion.pickables,
+        &occlusion.node_sizes,
+    ) {
         // A blocking UI surface (a floater, or the open pie's own ring) is under
         // the cursor: this click is for it, not for an avatar behind it. Passive
         // overlays (the chat heads-up) and non-UI / zero-area hover entries opt out
         // and do not suppress this.
         return;
-    } else if let Some((entity, hit)) = hud.hit(cursor) {
+    } else if let Some((entity, hit)) = occlusion.hud.hit(cursor) {
         // A HUD attachment is under the cursor: it occludes the world (so no
         // avatar or object pie opens behind it), and — only the agent's own
         // HUDs being routed to the screen and shown — it gets the
@@ -1194,22 +1238,19 @@ pub fn resolve_right_click_pick(
 
 /// Turn a resolved pick into an open pie: choose self vs other, snapshot the
 /// conditions, and stash the target for the action handler.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system: the pick stream plus every piece of state a slice's \
-              condition is read from (own identity, seat, ground-sit, friendship, \
-              the target's standing render exception), and the two things written"
-)]
 fn open_avatar_menu(
     mut requests: MessageReader<OpenAvatarMenu>,
-    identity: Res<SlIdentity>,
-    parcel: Res<SlAgentParcel>,
-    ground_sit: Res<SelfGroundSit>,
-    friends: Res<FriendsModel>,
+    facts: MenuConditionFacts,
     exceptions: Res<crate::avatar_render_settings::AvatarRenderSettings>,
     mut target: ResMut<AvatarMenuTarget>,
     mut pies: MessageWriter<OpenPieMenu>,
 ) {
+    let MenuConditionFacts {
+        identity,
+        parcel,
+        ground_sit,
+        friends,
+    } = facts;
     for request in requests.read() {
         target.agent = Some(request.agent);
         let is_self = identity.agent_id == Some(request.agent);
@@ -1253,28 +1294,25 @@ fn open_avatar_menu(
 /// Only the actions this viewer can honour today are matched; every other slice
 /// is a disabled placeholder that never emits, so the fall-through is the whole of
 /// the not-yet-implemented set and is intentionally silent.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system reading the picked target / avatar state and the several action \
-              channels each wired slice dispatches on (command, conversation, profile, \
-              tex-refresh, contact set)"
-)]
 fn handle_avatar_menu_actions(
     mut actions: MessageReader<UiAction>,
     target: Res<AvatarMenuTarget>,
     avatars: Res<AvatarState>,
     mut ground_sit: ResMut<SelfGroundSit>,
-    mut commands: MessageWriter<SlCommand>,
-    mut blocks: MessageWriter<RequestBlock>,
-    mut friendships: MessageWriter<RequestFriendship>,
-    mut derenders: MessageWriter<RequestDerender>,
-    mut exceptions: MessageWriter<crate::avatar_render_settings::RequestRenderException>,
-    mut conversations: MessageWriter<OpenConversation>,
-    mut profiles: MessageWriter<OpenAvatarProfile>,
-    mut refetch: MessageWriter<RefetchAvatarTextures>,
-    mut contact_sets: MessageWriter<crate::intents::OpenAddToContactSet>,
-    mut aliases: MessageWriter<crate::contact_sets_panel::OpenSetPseudonym>,
+    out: AvatarMenuOut,
 ) {
+    let AvatarMenuOut {
+        mut commands,
+        mut blocks,
+        mut friendships,
+        mut derenders,
+        mut exceptions,
+        mut conversations,
+        mut profiles,
+        mut refetch,
+        mut contact_sets,
+        mut aliases,
+    } = out;
     for action in actions.read() {
         if action.element != AVATAR_MENU_ELEMENT && action.element != ATTACHMENT_MENU_ELEMENT {
             continue;

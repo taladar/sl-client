@@ -1513,16 +1513,19 @@ fn build_parcel_layer(input: &ParcelLayerInput) -> LayerRaster {
         let grids_per_edge = grid.map_or(0, ParcelOverlayGrid::grids_per_edge);
         minimap_math::render_parcel_region(
             &mut raster,
-            input.tpm,
-            region.origin_east,
-            region.origin_north,
-            minimap_math::REGION_WIDTH_METRES,
-            COLOR_PARCEL_LINE,
-            input.show_sale,
-            // A region without a decoded overlay (a neighbour) draws its full
-            // outline, since no edge cells supply its south / west lines.
-            grid.is_none(),
-            grids_per_edge,
+            &minimap_math::ParcelRegionSpec {
+                texels_per_metre: input.tpm,
+                origin_east: region.origin_east,
+                origin_north: region.origin_north,
+                region_width: minimap_math::REGION_WIDTH_METRES,
+                line_color: COLOR_PARCEL_LINE,
+                show_for_sale: input.show_sale,
+                // A region without a decoded overlay (a neighbour) draws its
+                // full outline, since no edge cells supply its south / west
+                // lines.
+                full_border: grid.is_none(),
+                grids_per_edge,
+            },
             &cell,
         );
     }

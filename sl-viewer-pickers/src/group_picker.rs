@@ -77,8 +77,8 @@ use sl_client_bevy::{
 };
 
 use crate::floater::{
-    Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterOp, FloaterOwner, FloaterSpec,
-    FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater, picker_identity,
+    Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterHost, FloaterOp, FloaterOwner,
+    FloaterSpec, FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater, picker_identity,
 };
 use crate::i18n::Translated;
 use crate::intents::{GroupPicked, GroupPickerScope, OpenGroupPicker};
@@ -440,31 +440,40 @@ enum PickerButton {
     Cancel,
 }
 
+/// The three channels a picker press can write to, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the answer, the floater
+/// command that closes the window, and the session a fresh search goes out on.
+#[derive(bevy::ecs::system::SystemParam)]
+struct GroupPickOut<'w> {
+    /// The answer — the picked group — sent to whoever asked.
+    picked: MessageWriter<'w, GroupPicked>,
+    /// The floater command that closes the window once it is answered.
+    chrome: MessageWriter<'w, FloaterCommand>,
+    /// The session a **Go** search goes out on.
+    sl: MessageWriter<'w, SlCommand>,
+}
+
 /// Act on a press of one of a window's buttons, in the window it was pressed in.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy observer's parameters are its injected world access: the press, the \
-              button's action, the window it lives in (found through the parent chain), the \
-              search field it reads, and the three channels a press can write to"
-)]
 fn on_picker_button(
     press: On<Pointer<Press>>,
     buttons: Query<&PickerButton>,
     mut windows: Query<(&mut GroupPickerState, &GroupPickerUi)>,
-    parents: Query<&ChildOf>,
-    floaters: Query<(Entity, &Floater)>,
+    host: FloaterHost,
     fields: Query<&EditableText>,
-    mut picked: MessageWriter<GroupPicked>,
-    mut chrome: MessageWriter<FloaterCommand>,
-    mut sl: MessageWriter<SlCommand>,
+    out: GroupPickOut,
 ) {
+    let GroupPickOut {
+        mut picked,
+        mut chrome,
+        mut sl,
+    } = out;
     if press.button != PointerButton::Primary {
         return;
     }
     let Ok(button) = buttons.get(press.entity) else {
         return;
     };
-    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+    let Some(window) = host.of(press.entity) else {
         return;
     };
     let Ok((mut state, ui)) = windows.get_mut(window) else {

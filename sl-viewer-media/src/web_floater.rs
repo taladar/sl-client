@@ -358,29 +358,48 @@ fn handle_web_actions(
         }
     }
 }
+/// The floater's chrome, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam) — one query per piece
+/// updated, plus the shown flag that says whether to update any of it and the
+/// two text contexts a rewritten address bar is re-laid-out through.
+#[derive(bevy::ecs::system::SystemParam)]
+struct WebChrome<'w, 's> {
+    /// The status row and the button glyphs.
+    texts: Query<'w, 's, &'static mut Text>,
+    /// Their colours, which grey a disabled Back / Forward.
+    colors: Query<'w, 's, &'static mut TextColor>,
+    /// The address bar, rewritten while it is not being edited.
+    editors: Query<'w, 's, &'static mut EditableText>,
+    /// The secure lock, shown only for a secure page.
+    visibilities: Query<'w, 's, &'static mut Visibility>,
+    /// Whether the floater is shown at all — a hidden one is left alone.
+    panels: Query<'w, 's, &'static UiPanelShown>,
+    /// The font context a rewritten address bar is re-laid-out through.
+    font_cx: ResMut<'w, FontCx>,
+    /// Its layout context.
+    layout_cx: ResMut<'w, LayoutCx>,
+}
 
 /// Mirror the view's status into the chrome: title, address (unless being
 /// edited), back/forward enablement, stop-vs-reload glyph, the secure lock,
 /// and the status row. Also routes a page's popup request into this same
 /// view (popups are suppressed engine-side).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the floater's \
-              entity table, the surface table, and one query per piece of chrome updated"
-)]
 fn sync_web_floater(
     ui: Option<Res<WebFloaterUi>>,
     views: Query<&BrowserView>,
     surfaces: NonSend<MediaSurfaces>,
     focus: Res<InputFocus>,
-    mut texts: Query<&mut Text>,
-    mut colors: Query<&mut TextColor>,
-    mut editors: Query<&mut EditableText>,
-    mut visibilities: Query<&mut Visibility>,
-    panels: Query<&UiPanelShown>,
-    mut font_cx: ResMut<FontCx>,
-    mut layout_cx: ResMut<LayoutCx>,
+    chrome: WebChrome,
 ) {
+    let WebChrome {
+        mut texts,
+        mut colors,
+        mut editors,
+        mut visibilities,
+        panels,
+        mut font_cx,
+        mut layout_cx,
+    } = chrome;
     let Some(ui) = ui else {
         return;
     };

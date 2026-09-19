@@ -357,15 +357,19 @@ impl SharedSim {
                 let minter = state.minter.clone();
                 let mut world = state.world.lock();
                 let mut changes = answer_world_request(
-                    &mut world,
-                    &state.avatar,
-                    &state.identity,
-                    &state.assets,
-                    state.object_assets,
-                    state.inventory_announcement,
-                    &move || minter.uuid(),
-                    &mut state.selection,
-                    &mut state.sim,
+                    crate::world::WorldStores {
+                        world: &mut world,
+                        assets: &state.assets,
+                        selection: &mut state.selection,
+                        sim: &mut state.sim,
+                    },
+                    crate::world::WorldPolicies {
+                        identity: &state.avatar,
+                        region: &state.identity,
+                        object_assets: state.object_assets,
+                        announcement: state.inventory_announcement,
+                        mint: &move || minter.uuid(),
+                    },
                     &event,
                     now,
                 );

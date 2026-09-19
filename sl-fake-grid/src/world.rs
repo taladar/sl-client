@@ -1631,6 +1631,34 @@ fn push_terrain(terrain: &TerrainFixture, sim: &mut SimSession, now: Instant) {
         tracing::warn!("sending the cloud layer failed: {error}");
     }
 }
+/// The stores an answer reads and writes: the region's world, the grid's
+/// assets, and this session's selection and machine.
+pub(crate) struct WorldStores<'a> {
+    /// The region's world — its objects, parcels and terrain.
+    pub(crate) world: &'a mut SceneFixtures,
+    /// The grid's assets, which an object asset is served from.
+    pub(crate) assets: &'a crate::assets::GridAssets,
+    /// This session's current selection.
+    pub(crate) selection: &'a mut crate::object_edits::Selection,
+    /// The session's own machine, which every answer is sent on.
+    pub(crate) sim: &'a mut SimSession,
+}
+
+/// The identities and policies that decide what an answer says: who is asking,
+/// where, where the simulator's own ids come from, and which live grid this one
+/// imitates for an object asset and its announcement.
+pub(crate) struct WorldPolicies<'a> {
+    /// The agent whose session this is.
+    pub(crate) identity: &'a AvatarIdentity,
+    /// The region it is in.
+    pub(crate) region: &'a RegionIdentity,
+    /// Which live grid's object-asset behaviour to imitate.
+    pub(crate) object_assets: crate::assets::ObjectAssetPolicy,
+    /// How a new inventory item is announced to the client.
+    pub(crate) announcement: crate::inventory::InventoryAnnouncement,
+    /// Where the simulator's own ids come from.
+    pub(crate) mint: &'a dyn Fn() -> uuid::Uuid,
+}
 
 /// Answers one drained [`ServerEvent`] against the region's world, under the
 /// session lock.
@@ -1664,30 +1692,25 @@ fn push_terrain(terrain: &TerrainFixture, sim: &mut SimSession, now: Instant) {
 /// item is handed to the client
 /// ([`InventoryAnnouncement`](crate::inventory::InventoryAnnouncement)), and the
 /// derez arm is likewise the only reader.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the parameters are the stores an answer reads and writes -- the \
-              region's world, the grid's assets, and this session's machine \
-              and selection -- over the identities and policies that decide what \
-              the answer says (the agent, the region, the minter the simulator's \
-              own ids come from, and which live grid this one imitates for an \
-              object asset and its announcement); bundling them would hide which \
-              of them a given arm touches, which is the one thing this switch is \
-              read for"
-)]
 pub(crate) fn answer_world_request(
-    world: &mut SceneFixtures,
-    identity: &AvatarIdentity,
-    region: &RegionIdentity,
-    assets: &crate::assets::GridAssets,
-    object_assets: crate::assets::ObjectAssetPolicy,
-    announcement: crate::inventory::InventoryAnnouncement,
-    mint: &dyn Fn() -> uuid::Uuid,
-    selection: &mut crate::object_edits::Selection,
-    sim: &mut SimSession,
+    stores: WorldStores<'_>,
+    policies: WorldPolicies<'_>,
     event: &ServerEvent,
     now: Instant,
 ) -> Vec<RegionChange> {
+    let WorldStores {
+        world,
+        assets,
+        selection,
+        sim,
+    } = stores;
+    let WorldPolicies {
+        identity,
+        region,
+        object_assets,
+        announcement,
+        mint,
+    } = policies;
     // The object and parcel edit families are bodies of work of their own; each
     // answers first and says so, so nothing here has to enumerate what they
     // cover.

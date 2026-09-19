@@ -535,30 +535,58 @@ fn handle_input(raw: &str, ctx: &mut SessionContext, commands: &mut MessageWrite
         Err(error) => warn!("could not parse line: {error}"),
     }
 }
+/// The plugin's several report streams, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam) — everything the driver fans
+/// into the context and the log.
+#[derive(bevy::ecs::system::SystemParam)]
+struct ReplStreams<'w, 's> {
+    /// Session events — everything the grid said.
+    events: MessageReader<'w, 's, SlEvent>,
+    /// Diagnostics about the link itself.
+    diagnostics: MessageReader<'w, 's, SlDiagnostic>,
+    /// The capability grants, as they arrive.
+    capabilities: MessageReader<'w, 's, SlCapabilities>,
+    /// An MFA challenge the login stopped on.
+    mfa: MessageReader<'w, 's, SlMfaChallenge>,
+    /// A login the grid refused.
+    rejected: MessageReader<'w, 's, SlLoginRejected>,
+}
+
+/// What the driver writes, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the commands a typed line
+/// dispatches into, and the exit the session's end raises.
+#[derive(bevy::ecs::system::SystemParam)]
+struct ReplOut<'w> {
+    /// Where a dispatched command goes.
+    commands: MessageWriter<'w, SlCommand>,
+    /// The app exit raised when the session ends.
+    exit: MessageWriter<'w, AppExit>,
+}
 
 /// The Bevy `Update` system driving the REPL: it folds login facts, capabilities,
 /// events, and diagnostics into the context/log, fires the smoke battery, drains
 /// input lines into dispatched commands, captures an MFA challenge, and exits the
 /// app when the session ends.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the driver fans the plugin's several event streams into the \
-              context, log, command writer, and exit signal"
-)]
 fn repl_driver(
     mut state: ResMut<ReplState>,
     mut recorder: NonSendMut<Recorder>,
     mut outcome: ResMut<MfaOutcome>,
     line_input: Res<LineInput>,
-    mut events: MessageReader<SlEvent>,
-    mut diagnostics: MessageReader<SlDiagnostic>,
-    mut capabilities: MessageReader<SlCapabilities>,
+    streams: ReplStreams,
     identity: Res<SlIdentity>,
-    mut mfa: MessageReader<SlMfaChallenge>,
-    mut rejected: MessageReader<SlLoginRejected>,
-    mut commands: MessageWriter<SlCommand>,
-    mut exit: MessageWriter<AppExit>,
+    out: ReplOut,
 ) {
+    let ReplStreams {
+        mut events,
+        mut diagnostics,
+        mut capabilities,
+        mut mfa,
+        mut rejected,
+    } = streams;
+    let ReplOut {
+        mut commands,
+        mut exit,
+    } = out;
     // The identity facts now live in a resource the plugin updates in place, so
     // fold them into the REPL context only when they change (login, region
     // change) rather than draining a one-shot event.

@@ -467,27 +467,44 @@ fn prepare_particle_bind_groups(
     }
 }
 
+/// What specialising a particle cloud's pipeline needs, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the pipeline and its
+/// specialisation cache, the pipeline cache a specialised id is queued in, and
+/// the render meshes a cloud's key is read from.
+#[derive(bevy::ecs::system::SystemParam)]
+struct ParticlePipelines<'w> {
+    /// The particle pipeline itself.
+    pipeline: Res<'w, ParticlePipeline>,
+    /// Its per-key specialisations.
+    specialized: ResMut<'w, SpecializedMeshPipelines<ParticlePipeline>>,
+    /// Where a specialised pipeline is queued for compilation.
+    pipeline_cache: Res<'w, PipelineCache>,
+    /// The render meshes a cloud's mesh key is read from.
+    meshes: Res<'w, RenderAssets<RenderMesh>>,
+    /// Which render mesh each cloud instance uses.
+    render_mesh_instances: Res<'w, RenderMeshInstances>,
+}
+
 /// `QueueMeshes`: queue every visible particle cloud into each view's transparent phase,
 /// specialized for its blend / lit variant. Only clouds in a view's
 /// [`RenderVisibleEntities`] are queued, which is what scopes a HUD cloud to the HUD
 /// camera and a world cloud to the fly camera (the render-layer filter already ran in
 /// `check_visibility`).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's arguments are its resource/query dependencies"
-)]
 fn queue_particles(
     draw_functions: Res<DrawFunctions<Transparent3d>>,
-    pipeline: Res<ParticlePipeline>,
-    mut specialized: ResMut<SpecializedMeshPipelines<ParticlePipeline>>,
-    pipeline_cache: Res<PipelineCache>,
-    meshes: Res<RenderAssets<RenderMesh>>,
-    render_mesh_instances: Res<RenderMeshInstances>,
+    pipelines: ParticlePipelines,
     clouds: Query<(Entity, &MainEntity, &ParticleDrawParams)>,
     mut transparent_phases: ResMut<ViewSortedRenderPhases<Transparent3d>>,
     view_key_cache: Res<ViewKeyCache>,
     views: Query<(&ExtractedView, &RenderVisibleEntities, &ExtractedCamera)>,
 ) {
+    let ParticlePipelines {
+        pipeline,
+        mut specialized,
+        pipeline_cache,
+        meshes,
+        render_mesh_instances,
+    } = pipelines;
     let draw_particles = draw_functions.read().id::<DrawParticles>();
 
     for (view, visible_entities, camera) in &views {

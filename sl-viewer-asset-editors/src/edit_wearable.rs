@@ -362,24 +362,35 @@ fn prettify(name: &str) -> String {
 // Open — rebuild the content from the worn wearable.
 // ---------------------------------------------------------------------------
 
+/// What opening the editor rebuilds, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the panel it shows, the
+/// title it rewrites, and the commands the whole control list is spawned
+/// through.
+#[derive(bevy::ecs::system::SystemParam)]
+struct WearOpenWidgets<'w, 's> {
+    /// The floater's panel, shown once the controls are up.
+    panels: Query<'w, 's, &'static mut UiPanelShown>,
+    /// The title text, rewritten to the opened item.
+    texts: Query<'w, 's, &'static mut Text>,
+    /// What the control list is spawned through.
+    commands: Commands<'w, 's>,
+}
+
 /// Handle an [`OpenWearableEditor`]: seed the edit state from the worn wearable
 /// and rebuild the floater's controls.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the rebuild-on-open reads the whole editor context: the request, the UI handles, \
-              the worn bake inputs, the avatar-param library, the edit state, and the two spawn \
-              channels"
-)]
 fn open_wearable_editor(
     mut opens: MessageReader<OpenWearableEditor>,
     ui: Option<Res<WearEditorUi>>,
     inputs: Res<OwnBakeInputs>,
     library: Option<Res<AvatarAssetLibrary>>,
     mut state: ResMut<WearEditState>,
-    mut panels: Query<&mut UiPanelShown>,
-    mut texts: Query<&mut Text>,
-    mut commands: Commands,
+    widgets: WearOpenWidgets,
 ) {
+    let WearOpenWidgets {
+        mut panels,
+        mut texts,
+        mut commands,
+    } = widgets;
     let (Some(ui), Some(open)) = (ui, opens.read().last()) else {
         return;
     };
@@ -410,12 +421,12 @@ fn open_wearable_editor(
 
     // Fill in every editable group param at its current (or default) value, so
     // the saved asset is complete and the sliders start at the right place.
-    let sliders: Vec<(i32, bool, f32, f32, f32, String)> = library
+    let sliders: Vec<ParamSliderSpec> = library
         .as_deref()
         .map(|library| editable_params(library, slot, sex, tint_params))
         .unwrap_or_default();
-    for &(id, _is_bake, _min, _max, value, ref _label) in &sliders {
-        let _prev = edited.params.entry(id).or_insert(value);
+    for slider in &sliders {
+        let _prev = edited.params.entry(slider.id).or_insert(slider.value);
     }
 
     // --- Build the controls. ---
@@ -527,18 +538,8 @@ fn open_wearable_editor(
         tab = tab.saturating_add(1);
     }
 
-    for (id, is_bake, min, max, value, label) in sliders {
-        spawn_param_slider(
-            &mut commands,
-            list,
-            &label,
-            id,
-            is_bake,
-            min,
-            max,
-            value,
-            &mut tab,
-        );
+    for slider in &sliders {
+        spawn_param_slider(&mut commands, list, slider, &mut tab);
     }
 
     state.active = Some(WearEdit {
@@ -564,15 +565,34 @@ fn open_wearable_editor(
     }
 }
 
+/// One editable visual param, and everything its slider row is built from: the
+/// param's id and label, whether it feeds the bake, the range the track spans,
+/// and the value the thumb starts at.
+#[derive(Debug, Clone)]
+struct ParamSliderSpec {
+    /// The visual-param id the slider writes.
+    id: i32,
+    /// Whether moving it invalidates the bake (a colour or alpha param) rather
+    /// than only the shape.
+    is_bake: bool,
+    /// The bottom of the track.
+    min: f32,
+    /// The top of it.
+    max: f32,
+    /// Where the thumb starts — the worn value, or the param's default.
+    value: f32,
+    /// The row's label, from `avatar_lad` or prettified from the param name.
+    label: String,
+}
+
 /// The editor-tweakable params of a slot, filtered by the avatar's sex and
-/// excluding those the tint swatch already covers. Each entry is
-/// `(id, feeds_bake, min, max, current_value, label)`.
+/// excluding those the tint swatch already covers.
 fn editable_params(
     library: &AvatarAssetLibrary,
     slot: WearableType,
     sex: ParamSex,
     tint_params: Option<[i32; 3]>,
-) -> Vec<(i32, bool, f32, f32, f32, String)> {
+) -> Vec<ParamSliderSpec> {
     let group = wearable_param_group(slot);
     library
         .params()
@@ -593,14 +613,14 @@ fn editable_params(
         .map(|param| {
             let is_bake = matches!(param.effect, ParamEffect::Color(_) | ParamEffect::Alpha);
             let label = param.label.clone().unwrap_or_else(|| prettify(&param.name));
-            (
-                param.id,
+            ParamSliderSpec {
+                id: param.id,
                 is_bake,
-                param.min,
-                param.max,
-                param.default,
+                min: param.min,
+                max: param.max,
+                value: param.default,
                 label,
-            )
+            }
         })
         .collect()
 }
@@ -666,22 +686,20 @@ fn spawn_labeled_row(commands: &mut Commands, parent: Entity, label: &str) -> En
 
 /// Spawn one param slider row: a label, a slider track + thumb (over
 /// `[min, max]`), and a value readout, tagged [`WearParamSlider`].
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a slider row is fully described by its label, param id, bake flag, range, start \
-              value, and the shared tab-index cursor"
-)]
 fn spawn_param_slider(
     commands: &mut Commands,
     parent: Entity,
-    label: &str,
-    id: i32,
-    is_bake: bool,
-    min: f32,
-    max: f32,
-    value: f32,
+    spec: &ParamSliderSpec,
     tab: &mut i32,
 ) {
+    let &ParamSliderSpec {
+        id,
+        is_bake,
+        min,
+        max,
+        value,
+        ref label,
+    } = spec;
     let row_entity = spawn_labeled_row(commands, parent, label);
     let readout = commands
         .spawn((
@@ -964,27 +982,20 @@ fn sync_wearable_sliders(
 /// [`save_wearable`], the same message the unsaved-work confirmation's "Save"
 /// answer writes, so the button and the confirmation cannot come to save
 /// different things.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "Save As and Revert touch the whole editor context: the button, the edit state, the \
-              bake inputs and local bake for a Revert preview, the avatar-param library, the \
-              pending-upload queue, and the command channel"
-)]
 fn on_wear_button(
     press: On<Pointer<Press>>,
     buttons: Query<&WearButton>,
     ui: Option<Res<WearEditorUi>>,
     mut state: ResMut<WearEditState>,
-    mut inputs: ResMut<OwnBakeInputs>,
-    mut texture_manager: ResMut<TextureManager>,
-    store: Res<DecodedTextures>,
-    library: Option<Res<AvatarAssetLibrary>>,
-    mut local_bake: ResMut<OwnLocalBake>,
-    mut pending: ResMut<PendingItemCreations>,
-    mut commands: MessageWriter<SlCommand>,
-    mut saves: MessageWriter<SaveEditorWindow>,
+    mut preview: WearPreview,
+    out: WearSaveOut,
     mut texts: Query<&mut Text>,
 ) {
+    let WearSaveOut {
+        mut pending,
+        mut commands,
+        mut saves,
+    } = out;
     if press.button != PointerButton::Primary {
         return;
     }
@@ -1031,16 +1042,64 @@ fn on_wear_button(
         WearButton::Revert => {
             edit.edited.clone_from(&edit.original);
             // Re-derive the preview from the restored asset.
-            inputs.set_preview_asset(edit.original.clone());
-            inputs.request_asset_textures(&edit.original, &mut texture_manager, &store);
-            inputs.reassemble(&store, library.as_deref());
-            local_bake.invalidate();
+            preview.restore(&edit.original);
             edit.shape_dirty = true;
             // Back to what was opened on, so there is nothing unsaved left to
             // ask about on a close.
             edit.dirty = false;
             set_status(&mut texts, edit.status, "Reverted.");
         }
+    }
+}
+
+/// Where a save leaves, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the ordered creation queue
+/// a Save As takes a ticket in, the session the upload goes out on, and the
+/// in-place save request the Save button raises.
+#[derive(bevy::ecs::system::SystemParam)]
+struct WearSaveOut<'w> {
+    /// The ordered creation queue a Save As claims a ticket in, so the reply
+    /// can be told from somebody else's.
+    pending: ResMut<'w, PendingItemCreations>,
+    /// The session a Save As's upload goes out on.
+    commands: MessageWriter<'w, SlCommand>,
+    /// The in-place save request, which is also what the unsaved-work
+    /// confirmation's "Save" answer writes.
+    saves: MessageWriter<'w, SaveEditorWindow>,
+}
+
+/// What the worn preview is re-derived through, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the bake inputs, the
+/// texture manager and decoded store the asset's textures are fetched and read
+/// from, the avatar-param library the layers are reassembled against, and the
+/// local bake the result invalidates.
+///
+/// Revert and a close-without-saving both put the *original* asset back on the
+/// avatar, so both go through [`WearPreview::restore`] rather than repeating
+/// the four calls.
+#[derive(bevy::ecs::system::SystemParam)]
+struct WearPreview<'w> {
+    /// The bake inputs the preview asset is set on.
+    inputs: ResMut<'w, OwnBakeInputs>,
+    /// The texture manager the asset's textures are requested through.
+    texture_manager: ResMut<'w, TextureManager>,
+    /// The decoded textures the reassembly reads.
+    store: Res<'w, DecodedTextures>,
+    /// The avatar-param library the layers are reassembled against.
+    library: Option<Res<'w, AvatarAssetLibrary>>,
+    /// The local bake, invalidated so the next frame re-bakes.
+    local_bake: ResMut<'w, OwnLocalBake>,
+}
+
+impl WearPreview<'_> {
+    /// Re-derive the worn preview from `original`, the asset the editor was
+    /// opened on.
+    fn restore(&mut self, original: &WearableAsset) {
+        self.inputs.set_preview_asset(original.clone());
+        self.inputs
+            .request_asset_textures(original, &mut self.texture_manager, &self.store);
+        self.inputs.reassemble(&self.store, self.library.as_deref());
+        self.local_bake.invalidate();
     }
 }
 
@@ -1154,20 +1213,11 @@ fn report_wearable_save_as(
 /// outfit, so leaving it in place keeps the avatar wearing an unsaved edit with
 /// no window left to save, revert or even see it in — and the next open would
 /// read that preview back as if it were what is worn.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "restoring the preview is the Revert path, which reads the edit state, the bake \
-              inputs, the texture manager and store, the param library and the local bake"
-)]
 fn end_wearable_edit_on_close(
     ui: Option<Res<WearEditorUi>>,
     panels: Query<&UiPanelShown, Changed<UiPanelShown>>,
     mut state: ResMut<WearEditState>,
-    mut inputs: ResMut<OwnBakeInputs>,
-    mut texture_manager: ResMut<TextureManager>,
-    store: Res<DecodedTextures>,
-    library: Option<Res<AvatarAssetLibrary>>,
-    mut local_bake: ResMut<OwnLocalBake>,
+    mut preview: WearPreview,
     mut works: Query<&mut UnsavedWork>,
 ) {
     let Some(ui) = ui.as_deref() else {
@@ -1182,10 +1232,7 @@ fn end_wearable_edit_on_close(
     let Some(edit) = state.active.take() else {
         return;
     };
-    inputs.set_preview_asset(edit.original.clone());
-    inputs.request_asset_textures(&edit.original, &mut texture_manager, &store);
-    inputs.reassemble(&store, library.as_deref());
-    local_bake.invalidate();
+    preview.restore(&edit.original);
     if let Ok(mut work) = works.get_mut(ui.panel) {
         *work = UnsavedWork::default();
     }

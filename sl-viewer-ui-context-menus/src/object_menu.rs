@@ -112,6 +112,7 @@ use sl_client_bevy::{
 
 use crate::avatar_menu::{SELF_SITTING, SELF_STANDING};
 use crate::derender::RequestDerender;
+use crate::edit_tool::BuildToolsSurfaces;
 use crate::intents::RequestBlock;
 use crate::inventory::InventoryModel;
 use crate::menu::UNIMPLEMENTED;
@@ -119,9 +120,9 @@ use crate::objects::ObjectRayHit;
 use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, PieMenuDef};
 use crate::ui_element::UiAction;
 use crate::world_api::DerenderKind;
+use crate::world_api::EditTool;
 use crate::world_api::ObjectState;
 use crate::world_api::SelfGroundSit;
-use crate::world_api::{EditTool, EditToolState};
 
 /// The `element` the object pie attributes its [`UiAction`]s to.
 pub const OBJECT_MENU_ELEMENT: &str = "object-menu";
@@ -918,14 +919,12 @@ fn capture_object_menu_name(
 /// "Edit linked parts" on, the picked prim is selected, otherwise its root.
 pub fn edit_picked_object(
     summary: &crate::world_api::ObjectPickSummary,
-    tool: &mut EditToolState,
-    floaters: &Query<(Entity, &crate::floater::Floater)>,
-    panels: &mut Query<&mut crate::ui::UiPanelShown>,
+    build_tools: &mut BuildToolsSurfaces,
     selection: &mut crate::world_api::SelectionSet,
     state: &ObjectState,
 ) {
-    let edit_linked = tool.edit_linked;
-    crate::edit_tool::open_build_tools_with(EditTool::Move, floaters, panels, tool);
+    let edit_linked = build_tools.state().edit_linked;
+    build_tools.open_with(EditTool::Move);
     let (scoped, full) = if edit_linked {
         (summary.picked_scoped, summary.picked_full)
     } else {
@@ -937,34 +936,83 @@ pub fn edit_picked_object(
     }
 }
 
+/// What an object-menu action resolves against, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the inventory folders a
+/// derez needs, the object model the picked object lives in, and the build
+/// selection an Edit sets.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct ObjectMenuModel<'w> {
+    /// The inventory folders a derez destination is resolved in.
+    inventory: Res<'w, InventoryModel>,
+    /// The object model the picked object lives in.
+    state: Res<'w, ObjectState>,
+    /// The build selection an Edit sets.
+    selection: ResMut<'w, crate::world_api::SelectionSet>,
+}
+
+/// What an object-menu action writes, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the wire, the block a Mute
+/// raises, the derender a Blocked slice raises, and the Contents floater an
+/// Open opens.
+#[derive(bevy::ecs::system::SystemParam)]
+struct ObjectMenuOut<'w> {
+    /// The wire.
+    commands: MessageWriter<'w, SlCommand>,
+    /// The block a Mute raises.
+    blocks: MessageWriter<'w, RequestBlock>,
+    /// The derender a Blocked slice raises.
+    derenders: MessageWriter<'w, RequestDerender>,
+    /// The Contents floater an Open opens.
+    open_contents: MessageWriter<'w, crate::edit_contents::OpenObjectContents>,
+}
+
+/// Where a Sit lands, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the seat's world pose and
+/// reported motion, and the camera the sit offset is measured from.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct SeatPoses<'w, 's> {
+    /// The seat's world pose and its reported Second Life motion.
+    seat_poses: Query<
+        'w,
+        's,
+        (
+            &'static GlobalTransform,
+            &'static crate::objects::ObjectSlMotion,
+        ),
+    >,
+    /// The camera the sit offset is measured from.
+    seat_cameras: Query<'w, 's, &'static GlobalTransform, With<crate::world_api::ViewerCamera>>,
+}
+
 /// Dispatch a picked object-menu slice to the command behind it.
 ///
 /// Only the wired actions are matched; every other slice is a disabled
 /// placeholder that never emits, so the fall-through is the whole of the
 /// not-yet-implemented set and is intentionally silent.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the action \
-              stream, the pie target, the inventory folders a derez needs, the seated state, \
-              the edit-tool / selection state the Edit slice drives, and the command writer"
-)]
 fn handle_object_menu_actions(
     mut actions: MessageReader<UiAction>,
     target: Res<ObjectMenuTarget>,
-    inventory: Res<InventoryModel>,
     mut ground_sit: ResMut<SelfGroundSit>,
-    mut tool: ResMut<EditToolState>,
-    floaters: Query<(Entity, &crate::floater::Floater)>,
-    mut panels: Query<&mut crate::ui::UiPanelShown>,
-    mut selection: ResMut<crate::world_api::SelectionSet>,
-    state: Res<ObjectState>,
-    seat_poses: Query<(&GlobalTransform, &crate::objects::ObjectSlMotion)>,
-    seat_cameras: Query<&GlobalTransform, With<crate::world_api::ViewerCamera>>,
-    mut commands: MessageWriter<SlCommand>,
-    mut blocks: MessageWriter<RequestBlock>,
-    mut derenders: MessageWriter<RequestDerender>,
-    mut open_contents: MessageWriter<crate::edit_contents::OpenObjectContents>,
+    mut build_tools: BuildToolsSurfaces,
+    model: ObjectMenuModel,
+    seats: SeatPoses,
+    out: ObjectMenuOut,
 ) {
+    let ObjectMenuModel {
+        inventory,
+        state,
+        mut selection,
+    } = model;
+    let SeatPoses {
+        seat_poses,
+        seat_cameras,
+    } = seats;
+    let ObjectMenuOut {
+        mut commands,
+        mut blocks,
+        mut derenders,
+        mut open_contents,
+    } = out;
     for action in actions.read() {
         if action.element != OBJECT_MENU_ELEMENT {
             continue;
@@ -986,14 +1034,7 @@ fn handle_object_menu_actions(
         // which *is* edit mode — on the move manipulator, and make the picked
         // object the selection.
         if action.action == "edit" {
-            edit_picked_object(
-                &hit.summary,
-                &mut tool,
-                &floaters,
-                &mut panels,
-                &mut selection,
-                &state,
-            );
+            edit_picked_object(&hit.summary, &mut build_tools, &mut selection, &state);
             continue;
         }
         // Create (the reference's pie Create → `LLObjectBuild`): open the Build
@@ -1002,12 +1043,7 @@ fn handle_object_menu_actions(
         // and so does this: the window opens on Create whatever is selected,
         // because the slice *says* create.
         if action.action == "build" {
-            crate::edit_tool::open_build_tools_with(
-                EditTool::Create,
-                &floaters,
-                &mut panels,
-                &mut tool,
-            );
+            build_tools.open_with(EditTool::Create);
             continue;
         }
         // The derez destinations that need a folder: take (and take-copy) land

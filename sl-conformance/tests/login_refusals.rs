@@ -440,16 +440,16 @@ mod test {
             grid.login_uri()
         ))?;
         let avatar = credentials.select(Some("primary"))?;
-        let session = sl_conformance::context::login(
-            sl_conformance::Grid::Opensim,
+        let session = sl_conformance::context::login(sl_conformance::context::LoginSpec {
+            grid: sl_conformance::Grid::Opensim,
             avatar,
-            CHANNEL,
-            "0.0",
-            "last",
-            &std::env::temp_dir(),
-            false,
-            None,
-        )
+            channel: CHANNEL,
+            version: "0.0",
+            start_location: "last",
+            state_dir: &std::env::temp_dir(),
+            force: false,
+            cache_dir: None,
+        })
         .await?;
         session.logout().await?;
         Ok(())

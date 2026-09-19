@@ -572,9 +572,11 @@ pub(crate) fn run_timeline(
                 arrival,
                 previous,
                 marker,
-                &mut events,
-                &mut closed_rx,
-                &mut shutdown_rx,
+                WaitChannels {
+                    events: &mut events,
+                    closed_rx: &mut closed_rx,
+                    shutdown_rx: &mut shutdown_rx,
+                },
             )
             .await;
             if matches!(waited, Wait::Stop) {
@@ -687,22 +689,33 @@ async fn wait_for_arrival(
     }
 }
 
+/// The channels a wait listens on: the server events an `At::OnEvent` matches
+/// against, and the two cancels every wait gives up on — the circuit closing
+/// and the sim shutting down.
+#[derive(Debug)]
+struct WaitChannels<'a> {
+    /// The server events an `At::OnEvent` predicate is matched against.
+    events: &'a mut broadcast::Receiver<ServerEvent>,
+    /// The circuit-closed signal, which ends a wait wherever it is.
+    closed_rx: &'a mut watch::Receiver<bool>,
+    /// The sim-shutdown signal, likewise.
+    shutdown_rx: &'a mut watch::Receiver<bool>,
+}
+
 /// Waits for a step's [`At`].
-#[expect(
-    clippy::too_many_arguments,
-    reason = "one argument per thing an `At` variant measures itself against, each a different \
-              type; bundling them would name the same six values twice"
-)]
 async fn wait_until(
     shared: &SharedSim,
     at: &At,
     arrival: Instant,
     previous: Instant,
     marker: Option<SequenceNumber>,
-    events: &mut broadcast::Receiver<ServerEvent>,
-    closed_rx: &mut watch::Receiver<bool>,
-    shutdown_rx: &mut watch::Receiver<bool>,
+    channels: WaitChannels<'_>,
 ) -> Wait {
+    let WaitChannels {
+        events,
+        closed_rx,
+        shutdown_rx,
+    } = channels;
     match at {
         At::AfterArrival(after) => sleep_past(arrival, *after, closed_rx, shutdown_rx).await,
         At::AfterPrevious(after) => sleep_past(previous, *after, closed_rx, shutdown_rx).await,

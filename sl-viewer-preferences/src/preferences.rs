@@ -925,24 +925,44 @@ fn track_preferences_open_close(
     state.open = shown;
 }
 
+/// The walk that finds every bound widget under the shell, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the bindings themselves and
+/// the parent links that say which of them belong to this floater.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct BindingWalk<'w, 's> {
+    /// Every widget bound to a setting, anywhere in the UI.
+    bindings: Query<'w, 's, (Entity, &'static SettingBinding)>,
+    /// The parent links the walk climbs to keep only this floater's.
+    parents: Query<'w, 's, &'static ChildOf>,
+}
+
+/// What closing the shell writes to, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the floater command that
+/// shuts it and the applied notice its listeners act on.
+#[derive(bevy::ecs::system::SystemParam)]
+struct PreferencesOkOut<'w> {
+    /// The floater command that closes the shell.
+    floater_commands: MessageWriter<'w, FloaterCommand>,
+    /// The notice that the settings have been applied.
+    applied: MessageWriter<'w, PreferencesApplied>,
+}
+
 /// Observer: **OK** — re-snapshot the current values (so the close-edge revert
 /// becomes a no-op and a later Cancel reverts to *these* values), save both
 /// scopes to disk, fire the per-tab apply hook, and close.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy observer's parameters are its injected resources: the shell's state and \
-              store, the binding walk (bindings + parents), and the two outgoing messages"
-)]
 fn on_preferences_ok(
     _activate: On<Activate>,
     ui: Option<Res<PreferencesUi>>,
     mut state: ResMut<PreferencesState>,
     settings: Option<Res<ViewerSettings>>,
-    bindings: Query<(Entity, &SettingBinding)>,
-    parents: Query<&ChildOf>,
-    mut floater_commands: MessageWriter<FloaterCommand>,
-    mut applied: MessageWriter<PreferencesApplied>,
+    walk: BindingWalk,
+    out: PreferencesOkOut,
 ) {
+    let BindingWalk { bindings, parents } = walk;
+    let PreferencesOkOut {
+        mut floater_commands,
+        mut applied,
+    } = out;
     let Some(ui) = ui else {
         return;
     };
@@ -1133,35 +1153,70 @@ pub(crate) fn mirror_preferences_filter(
     }
 }
 
+///
+/// Runs when the term changes **or** any row label's resolved text changes (a
+/// locale switch, the bundle first loading), so the match set is always
+/// against the text the user actually sees.
+/// The searchable rows and what the filter does to them, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the change guard that keeps
+/// the sweep off an unchanged frame, the rows it shows or hides, and the label
+/// text and colour a hit is matched and highlighted through.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub(crate) struct PrefFilterRows<'w, 's> {
+    /// Whether any row label changed this frame, which is what makes a re-run
+    /// worth doing at all.
+    changed_labels: Query<'w, 's, (), (Changed<Text>, With<PrefRowLabel>)>,
+    /// The searchable rows, shown or hidden by the term.
+    rows: Query<'w, 's, (Entity, &'static PrefSearchRow, &'static mut Node)>,
+    /// The label texts a row is matched on.
+    labels: Query<'w, 's, &'static Text>,
+    /// Their colours, which highlight a hit.
+    colors: Query<'w, 's, &'static mut TextColor>,
+}
+
+/// The tab tree the filter reports into, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the parent and child links
+/// that say which tab a row sits under, and the panels, strip and buttons the
+/// per-tab hit counts and the selection jump are written through.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub(crate) struct PrefTabTree<'w, 's> {
+    /// The parent links climbed from a row to its tab panel.
+    parents: Query<'w, 's, &'static ChildOf>,
+    /// The tab panels themselves.
+    tab_panels: Query<'w, 's, &'static TabPanel>,
+    /// The strip, whose selection jumps to the first tab with a hit.
+    strips: Query<'w, 's, &'static mut TabStrip>,
+    /// The tab buttons, which carry the per-tab hit counts.
+    tab_buttons: Query<'w, 's, (Entity, &'static TabButton)>,
+    /// The child links walked down to a button's label.
+    children: Query<'w, 's, &'static Children>,
+}
+
 /// Apply the filter to every searchable row: a miss collapses
 /// (`Display::None`), a hit stays and its label is highlighted; a tab left
 /// with no hit is dimmed in the strip, and if the *active* tab has no hit the
 /// first tab that does is selected. An empty term restores everything (and the
 /// selection stays where the filter left it, like the reference).
-///
-/// Runs when the term changes **or** any row label's resolved text changes (a
-/// locale switch, the bundle first loading), so the match set is always
-/// against the text the user actually sees.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the filter term, the rows \
-              with their labels and colours, and the tab tree (panels, strip, buttons) the \
-              per-tab hit counts and the selection jump need"
-)]
 pub(crate) fn apply_preferences_filter(
     ui: Option<Res<PreferencesUi>>,
     state: Res<PreferencesState>,
     extra_hits: Res<PreferencesExtraHits>,
-    changed_labels: Query<(), (Changed<Text>, With<PrefRowLabel>)>,
-    mut rows: Query<(Entity, &PrefSearchRow, &mut Node)>,
-    labels: Query<&Text>,
-    mut colors: Query<&mut TextColor>,
-    parents: Query<&ChildOf>,
-    tab_panels: Query<&TabPanel>,
-    mut strips: Query<&mut TabStrip>,
-    tab_buttons: Query<(Entity, &TabButton)>,
-    children: Query<&Children>,
+    filter_rows: PrefFilterRows,
+    tabs: PrefTabTree,
 ) {
+    let PrefFilterRows {
+        changed_labels,
+        mut rows,
+        labels,
+        mut colors,
+    } = filter_rows;
+    let PrefTabTree {
+        parents,
+        tab_panels,
+        mut strips,
+        tab_buttons,
+        children,
+    } = tabs;
     let Some(ui) = ui else {
         return;
     };

@@ -445,16 +445,16 @@ impl Session {
             let label = avatar_label(&avatar);
             wait_out_cooldown(&state_dir, &label, force).await?;
         }
-        *self = connect_and_spawn(
+        *self = connect_and_spawn(LoginSpec {
             grid,
-            &avatar,
-            &channel,
-            &version,
-            &start_location,
-            &state_dir,
+            avatar: &avatar,
+            channel: &channel,
+            version: &version,
+            start_location: &start_location,
+            state_dir: &state_dir,
             force,
             cache_dir,
-        )
+        })
         .await?;
         Ok(())
     }
@@ -466,38 +466,64 @@ fn avatar_label(avatar: &Avatar) -> String {
     format!("{} {}", avatar.first(), avatar.last())
 }
 
-/// Log in to `grid` as `avatar`, answering any MFA challenge, and spawn the run
+/// One conformance login, named rather than passed positionally: at the call
+/// sites the tail is `&state_dir, args.force, None` — three values whose types
+/// say nothing about which is which.
+#[derive(Debug, Clone)]
+pub struct LoginSpec<'a> {
+    /// The grid to log in to.
+    pub grid: Grid,
+    /// The account to log in as.
+    pub avatar: &'a Avatar,
+    /// The viewer channel reported at login.
+    pub channel: &'a str,
+    /// The version reported with it.
+    pub version: &'a str,
+    /// The `start` wire string the avatar logs in at (`"last"` for almost every
+    /// case; a fixed `"uri:Region&x&y&z"` for a case that must be co-located
+    /// with an in-world resource).
+    pub start_location: &'a str,
+    /// Where the per-avatar cooldown stamps live; retained on the session so a
+    /// later [`Session::relogin`] can honour the aditi login cooldown.
+    pub state_dir: &'a Path,
+    /// Whether to log in despite an unexpired cooldown stamp; likewise
+    /// retained.
+    pub force: bool,
+    /// The per-account inventory disk-cache directory, or `None` to leave the
+    /// inventory disk cache off (what every case but `inventory-cache-skip`
+    /// passes). When `Some`, the runtime caches the agent's inventory tree
+    /// there across the session's [`Session::disconnect`] /
+    /// [`Session::relogin`] cycle.
+    pub cache_dir: Option<PathBuf>,
+}
+
+/// Log in as the spec says, answering any MFA challenge, and spawn the run
 /// loop, returning the live [`Session`].
-///
-/// `start_location` is the `start` wire string the avatar logs in at (`"last"`
-/// for almost every case; a fixed `"uri:Region&x&y&z"` for a case that must be
-/// co-located with an in-world resource).
-///
-/// `cache_dir` is the per-account inventory disk-cache directory, or `None` to
-/// leave the inventory disk cache off (what every case but `inventory-cache-skip`
-/// passes). When `Some`, the runtime caches the agent's inventory tree there
-/// across the session's [`Session::disconnect`]/[`Session::relogin`] cycle.
 ///
 /// # Errors
 ///
 /// Returns a [`TestFailure`] if the login URI is invalid, the start location
 /// cannot be parsed, MFA is required but unavailable, or the login fails.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the login parameters are all independent scalars threaded from the runner; \
-              a wrapper struct would only relocate them without simplifying the call"
-)]
-pub async fn login(
-    grid: Grid,
-    avatar: &Avatar,
-    channel: &str,
-    version: &str,
-    start_location: &str,
-    state_dir: &Path,
-    force: bool,
-    cache_dir: Option<PathBuf>,
-) -> Result<Session, TestFailure> {
-    connect_and_spawn(
+pub async fn login(spec: LoginSpec<'_>) -> Result<Session, TestFailure> {
+    connect_and_spawn(spec).await
+}
+
+/// Perform the XML-RPC login, spawn the run loop and its drains, and assemble a
+/// live [`Session`]. This is the shared core of [`login`] and
+/// [`Session::relogin`].
+///
+/// [`LoginSpec::state_dir`] and [`LoginSpec::force`] are retained on the
+/// returned session so a later [`Session::relogin`] can honour the aditi login
+/// cooldown. This function does not itself enforce the cooldown — the runner
+/// gates the initial logins and [`Session::relogin`] waits it out for
+/// reconnections.
+///
+/// # Errors
+///
+/// Returns a [`TestFailure`] if the login URI is invalid, the start location
+/// cannot be parsed, MFA is required but unavailable, or the login fails.
+async fn connect_and_spawn(spec: LoginSpec<'_>) -> Result<Session, TestFailure> {
+    let LoginSpec {
         grid,
         avatar,
         channel,
@@ -506,38 +532,7 @@ pub async fn login(
         state_dir,
         force,
         cache_dir,
-    )
-    .await
-}
-
-/// Perform the XML-RPC login, spawn the run loop and its drains, and assemble a
-/// live [`Session`]. This is the shared core of [`login`] and
-/// [`Session::relogin`].
-///
-/// `state_dir` and `force` are retained on the returned session so a later
-/// [`Session::relogin`] can honour the aditi login cooldown. This function does
-/// not itself enforce the cooldown — the runner gates the initial logins and
-/// [`Session::relogin`] waits it out for reconnections.
-///
-/// # Errors
-///
-/// Returns a [`TestFailure`] if the login URI is invalid, the start location
-/// cannot be parsed, MFA is required but unavailable, or the login fails.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the login parameters are all independent scalars threaded from the runner; \
-              a wrapper struct would only relocate them without simplifying the call"
-)]
-async fn connect_and_spawn(
-    grid: Grid,
-    avatar: &Avatar,
-    channel: &str,
-    version: &str,
-    start_location: &str,
-    state_dir: &Path,
-    force: bool,
-    cache_dir: Option<PathBuf>,
-) -> Result<Session, TestFailure> {
+    } = spec;
     // The avatar's own URI wins; otherwise the grid's fixed address. The fake
     // grid has none — it binds an ephemeral port, and the credentials
     // `crate::fake::FakeGridHarness` synthesises carry the URI it bound — so an

@@ -1972,76 +1972,86 @@ fn events_query_text(mode: EventsMode, day_offset: i32, category: u32, text: &st
     format!("{day}|{category}|{text}")
 }
 
+/// What running a search needs, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the floater's handles and
+/// its query fields, the search state, the settings the maturity filter is read
+/// from, the Web tab's browser view and surfaces, the login session and UI
+/// language the templated SL search URL is built from, and the command writer a
+/// directory query goes out on.
+///
+/// The Search button and the Enter shortcut are the same action behind two
+/// triggers, so each takes this rather than repeating the list.
+#[derive(bevy::ecs::system::SystemParam)]
+struct SearchRun<'w, 's> {
+    /// The floater's widget handles, absent until it is built.
+    ui: Option<Res<'w, SearchUi>>,
+    /// Every editable field, which the query and the two land limits are read
+    /// from.
+    fields: Query<'w, 's, &'static EditableText>,
+    /// The search state the committed query and page are written to.
+    state: ResMut<'w, SearchState>,
+    /// The settings, for the maturity filter a directory query carries.
+    settings: Option<Res<'w, ViewerSettings>>,
+    /// The Web tab's browser view.
+    views: Query<'w, 's, &'static BrowserView>,
+    /// The media surfaces that view's page is navigated through.
+    surfaces: NonSend<'w, MediaSurfaces>,
+    /// Our own agent, for the session id the templated SL search URL carries.
+    identity: Res<'w, SlIdentity>,
+    /// The UI language that URL is localised to.
+    ui_locale: Res<'w, UiLocale>,
+    /// Where a directory query is written.
+    commands: MessageWriter<'w, SlCommand>,
+}
+
+impl SearchRun<'_, '_> {
+    /// The query field's entity, or `None` before the floater is built.
+    fn search_field(&self) -> Option<Entity> {
+        self.ui.as_ref().map(|ui| ui.search_field)
+    }
+
+    /// Commit the field's text and run the active tab (a directory query, or a
+    /// web navigation for the Web tab).
+    fn run(&mut self) {
+        let Some(ui) = self.ui.as_ref() else {
+            return;
+        };
+        let text = self
+            .fields
+            .get(ui.search_field)
+            .map(|field| field.value().to_string().trim().to_owned())
+            .unwrap_or_default();
+        self.state.query = text;
+        self.state.land_price_limit = read_limit(&self.fields, ui.land_price_field);
+        self.state.land_area_limit = read_limit(&self.fields, ui.land_area_field);
+        match self.state.active.category() {
+            Some(category) => {
+                self.state.set_query_start(category, 0);
+                dispatch_query(
+                    category,
+                    &mut self.state,
+                    self.settings.as_deref(),
+                    &mut self.commands,
+                );
+            }
+            None => navigate_web(
+                ui,
+                &self.state,
+                &self.views,
+                &self.surfaces,
+                self.identity.session_id,
+                &self.ui_locale.lang.to_string(),
+            ),
+        }
+    }
+}
+
 /// The search button: run a new search on the active category from page 0.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "one observer that runs the active search — it needs the query field, the state, \
-              the settings for maturity, and the browser view + surfaces for the Web tab"
-)]
-fn on_search_press(
-    press: On<Pointer<Press>>,
-    ui: Option<Res<SearchUi>>,
-    fields: Query<&EditableText>,
-    mut state: ResMut<SearchState>,
-    settings: Option<Res<ViewerSettings>>,
-    views: Query<&BrowserView>,
-    surfaces: NonSend<MediaSurfaces>,
-    identity: Res<SlIdentity>,
-    ui_locale: Res<UiLocale>,
-    mut commands: MessageWriter<SlCommand>,
-) {
+fn on_search_press(press: On<Pointer<Press>>, mut search: SearchRun) {
     if press.button != PointerButton::Primary {
         return;
     }
-    let Some(ui) = ui else {
-        return;
-    };
-    run_new_search(
-        &ui,
-        &fields,
-        &mut state,
-        settings.as_deref(),
-        &views,
-        &surfaces,
-        identity.session_id,
-        &ui_locale.lang.to_string(),
-        &mut commands,
-    );
-}
-
-/// Commit the field's text and run the active tab (a directory query, or a web
-/// navigation for the Web tab).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "commits the field and runs the active tab: the UI table, query field, state, \
-              settings, the browser view + surfaces for the Web tab, the session id and language \
-              for the templated SL search URL, and the command writer"
-)]
-fn run_new_search(
-    ui: &SearchUi,
-    fields: &Query<&EditableText>,
-    state: &mut SearchState,
-    settings: Option<&ViewerSettings>,
-    views: &Query<&BrowserView>,
-    surfaces: &MediaSurfaces,
-    session_id: Option<Uuid>,
-    language: &str,
-    commands: &mut MessageWriter<SlCommand>,
-) {
-    let text = fields
-        .get(ui.search_field)
-        .map(|field| field.value().to_string().trim().to_owned())
-        .unwrap_or_default();
-    state.query = text;
-    state.land_price_limit = read_limit(fields, ui.land_price_field);
-    state.land_area_limit = read_limit(fields, ui.land_area_field);
-    match state.active.category() {
-        Some(category) => {
-            state.set_query_start(category, 0);
-            dispatch_query(category, state, settings, commands);
-        }
-        None => navigate_web(ui, state, views, surfaces, session_id, language),
-    }
+    search.run();
 }
 
 /// Read a numeric limit field as a non-negative `i32` (0 when empty / invalid).
@@ -2352,44 +2362,21 @@ fn on_events_day_press(
 }
 
 /// Run a new search when `Enter` is pressed while the query field is focused.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the Enter shortcut mirrors the Search button: query field, focus, state, settings, \
-              and the browser view + surfaces for the Web tab"
-)]
 fn enter_to_search(
     mut keyboard: ResMut<ButtonInput<KeyCode>>,
     focus: Res<InputFocus>,
-    ui: Option<Res<SearchUi>>,
-    fields: Query<&EditableText>,
-    mut state: ResMut<SearchState>,
-    settings: Option<Res<ViewerSettings>>,
-    views: Query<&BrowserView>,
-    surfaces: NonSend<MediaSurfaces>,
-    identity: Res<SlIdentity>,
-    ui_locale: Res<UiLocale>,
-    mut commands: MessageWriter<SlCommand>,
+    mut search: SearchRun,
 ) {
     if !keyboard.just_pressed(KeyCode::Enter) {
         return;
     }
-    let Some(ui) = ui else {
+    let Some(field) = search.search_field() else {
         return;
     };
-    if focus.get() != Some(ui.search_field) {
+    if focus.get() != Some(field) {
         return;
     }
-    run_new_search(
-        &ui,
-        &fields,
-        &mut state,
-        settings.as_deref(),
-        &views,
-        &surfaces,
-        identity.session_id,
-        &ui_locale.lang.to_string(),
-        &mut commands,
-    );
+    search.run();
     keyboard.clear_just_pressed(KeyCode::Enter);
 }
 
@@ -2482,24 +2469,52 @@ fn pending_matches(pending: Option<QueryId>, reply: Uuid) -> bool {
     pending.is_some_and(|query| query.get() == reply)
 }
 
+/// What the per-frame row pump touches, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the parent link and the
+/// freshly-pooled rows it adopts, the viewport lists and table states it resets
+/// on a new page, and the pooled rows plus the texts it binds their cells from.
+#[derive(bevy::ecs::system::SystemParam)]
+struct SearchRowWidgets<'w, 's> {
+    /// Each row's parent, which says whose viewport a pooled row belongs to.
+    child_of: Query<'w, 's, &'static ChildOf>,
+    /// The rows pooled since the last run, which still need their cells.
+    added: Query<'w, 's, Entity, Added<VirtualRow>>,
+    /// The viewport lists, whose item count follows the result count.
+    lists: Query<'w, 's, &'static mut VirtualList>,
+    /// The table states, whose selection is cleared when the page is replaced.
+    tables: Query<'w, 's, &'static mut TableState>,
+    /// Every pooled row and the cells it binds into.
+    rows: Query<
+        'w,
+        's,
+        (
+            &'static VirtualRow,
+            &'static SearchRow,
+            &'static TableRowCells,
+        ),
+    >,
+    /// The cell texts themselves.
+    texts: Query<'w, 's, (&'static mut Text, &'static mut TextColor)>,
+    /// What spawns an adopted row's cells.
+    commands: Commands<'w, 's>,
+}
+
 /// Keep each table's item count current and rebind its pooled rows from the
 /// results; clear the table's selection when its page is replaced.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the row pump reads the UI handles, the results, the child/added/list/table queries \
-              and the row cells + texts it binds — one coherent per-frame rebind"
-)]
 fn rebind_search_rows(
     mut ui: Option<ResMut<SearchUi>>,
     state: Res<SearchState>,
-    child_of: Query<&ChildOf>,
-    added: Query<Entity, Added<VirtualRow>>,
-    mut lists: Query<&mut VirtualList>,
-    mut tables: Query<&mut TableState>,
-    rows: Query<(&VirtualRow, &SearchRow, &TableRowCells)>,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
-    mut commands: Commands,
+    widgets: SearchRowWidgets,
 ) {
+    let SearchRowWidgets {
+        child_of,
+        added,
+        mut lists,
+        mut tables,
+        rows,
+        mut texts,
+        mut commands,
+    } = widgets;
     let Some(ui) = ui.as_deref_mut() else {
         return;
     };
@@ -3019,23 +3034,42 @@ fn location_label(
     label
 }
 
+/// Where a details-pane action lands, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam). The pane's buttons are
+/// shared across every subject, so between them they reach every target: the
+/// session, the friendship offer, both profile floaters, the conversation and
+/// the world map.
+#[derive(bevy::ecs::system::SystemParam)]
+struct DetailActionOut<'w> {
+    /// The session, for teleport / join group / event reminders.
+    sl_commands: MessageWriter<'w, SlCommand>,
+    /// The friendship offer Add Friend sends.
+    friendships: MessageWriter<'w, RequestFriendship>,
+    /// The avatar profile floater.
+    avatar_profiles: MessageWriter<'w, OpenAvatarProfile>,
+    /// The group profile floater.
+    group_profiles: MessageWriter<'w, OpenGroupProfile>,
+    /// The conversation Message / Join Chat opens.
+    conversations: MessageWriter<'w, OpenConversation>,
+    /// The world map Show on Map opens.
+    world_map: MessageWriter<'w, OpenWorldMap>,
+}
+
 /// A details-pane action button press.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the shared details-pane actions fan out to every target: profiles, conversations, \
-              the world map, and the session for teleport / friendship / join"
-)]
 fn on_detail_action(
     press: On<Pointer<Press>>,
     actions: Query<&DetailAction>,
     mut detail: ResMut<SearchDetail>,
-    mut sl_commands: MessageWriter<SlCommand>,
-    mut friendships: MessageWriter<RequestFriendship>,
-    mut avatar_profiles: MessageWriter<OpenAvatarProfile>,
-    mut group_profiles: MessageWriter<OpenGroupProfile>,
-    mut conversations: MessageWriter<OpenConversation>,
-    mut world_map: MessageWriter<OpenWorldMap>,
+    out: DetailActionOut,
 ) {
+    let DetailActionOut {
+        mut sl_commands,
+        mut friendships,
+        mut avatar_profiles,
+        mut group_profiles,
+        mut conversations,
+        mut world_map,
+    } = out;
     if press.button != PointerButton::Primary {
         return;
     }

@@ -181,26 +181,42 @@ struct UiOcclusion<'w, 's> {
     sizes: Query<'w, 's, &'static ComputedNode>,
 }
 
+/// What gates a double-click teleport, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the mouse and modifier keys,
+/// the focus context that says the click is the world's, the setting that
+/// switches the gesture on, and the window the cursor is read from.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct TeleportGate<'w, 's> {
+    /// The mouse buttons.
+    buttons: Res<'w, ButtonInput<MouseButton>>,
+    /// The modifier keys.
+    keyboard: Res<'w, ButtonInput<KeyCode>>,
+    /// Where input is going; only a world click teleports.
+    context: Res<'w, InputContext>,
+    /// The setting that switches the gesture on.
+    settings: Res<'w, ViewerSettings>,
+    /// The window the cursor position is read from.
+    windows: Query<'w, 's, &'static Window>,
+}
+
 /// Detect a double-click and request the GPU ID-buffer pick under it (when
 /// the double-click action is `Teleport`); [`resolve_double_click_teleport`]
 /// issues the teleport if the readback names bare ground.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the input state, cursor window, the grouped occlusion params, the \
-              click-timing local, and the GPU pick queue"
-)]
 fn world_double_click_teleport(
     time: Res<Time>,
-    buttons: Res<ButtonInput<MouseButton>>,
-    keyboard: Res<ButtonInput<KeyCode>>,
-    context: Res<InputContext>,
-    settings: Res<ViewerSettings>,
-    windows: Query<&Window>,
+    gate: TeleportGate,
     occlusion: UiOcclusion,
     hud: HudRayCast,
     mut picker: ResMut<GpuPicker>,
     mut last_click: Local<Option<(f64, Vec2)>>,
 ) {
+    let TeleportGate {
+        buttons,
+        keyboard,
+        context,
+        settings,
+        windows,
+    } = gate;
     // A mouse gesture is independent of keyboard focus (a click on the world
     // still teleports while a floater holds the keyboard) — occlusion is handled
     // by the UI / HUD guards below, not by the keyboard-focus context. Only skip

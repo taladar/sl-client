@@ -912,6 +912,23 @@ fn perform_login(url: &str, user_agent: &str, body: String) -> Result<String, St
         .and_then(reqwest::blocking::Response::text)
         .map_err(|error| error.to_string())
 }
+/// The message writers the network thread's reports fan out into, bundled as
+/// one [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(bevy::ecs::system::SystemParam)]
+struct SlSinks<'w> {
+    /// Session events — everything the grid said.
+    events: MessageWriter<'w, SlEvent>,
+    /// Diagnostics about the link itself.
+    diagnostics: MessageWriter<'w, SlDiagnostic>,
+    /// A command the thread could not carry out.
+    command_failed: MessageWriter<'w, SlCommandFailed>,
+    /// The capability grants, as they arrive.
+    capabilities: MessageWriter<'w, SlCapabilities>,
+    /// An MFA challenge the login stopped on.
+    mfa: MessageWriter<'w, SlMfaChallenge>,
+    /// A login the grid refused.
+    rejected: MessageWriter<'w, SlLoginRejected>,
+}
 
 /// Update system: the thin pump between the ECS and the session's network
 /// thread — forwards this frame's [`SlCommand`]s (cloned, so other in-process
@@ -919,24 +936,22 @@ fn perform_login(url: &str, user_agent: &str, body: String) -> Result<String, St
 /// reported since last frame into the Bevy messages / resources. All protocol
 /// work (LLUDP parse, CAPS ingestion, timers, disk caches) happens on the
 /// thread; see [`run_network_thread`].
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected ECS resources and the message \
-              writers the network thread's reports fan out into"
-)]
 fn drive(
     state: Res<SlState>,
-    mut events: MessageWriter<SlEvent>,
-    mut diagnostics: MessageWriter<SlDiagnostic>,
-    mut command_failed: MessageWriter<SlCommandFailed>,
-    mut capabilities: MessageWriter<SlCapabilities>,
+    sinks: SlSinks,
     mut identity: ResMut<SlIdentity>,
     mut agent_parcel: ResMut<SlAgentParcel>,
-    mut mfa: MessageWriter<SlMfaChallenge>,
-    mut rejected: MessageWriter<SlLoginRejected>,
     mut commands: MessageReader<SlCommand>,
     mut session_ended: Local<bool>,
 ) {
+    let SlSinks {
+        mut events,
+        mut diagnostics,
+        mut command_failed,
+        mut capabilities,
+        mut mfa,
+        mut rejected,
+    } = sinks;
     let Some(link) = &state.link else {
         return;
     };

@@ -898,29 +898,39 @@ fn build_view(
         .collect()
 }
 
+/// What the debug view's list chrome is read and resized through, bundled as
+/// one [`SystemParam`](bevy::ecs::system::SystemParam): the search field the
+/// filter term comes from, and the virtual list and table the filtered row
+/// count is written to.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct DebugViewWidgets<'w, 's> {
+    /// Every editable field, which the search term is read from.
+    fields: Query<'w, 's, &'static EditableText>,
+    /// The virtual list, whose item count follows the filtered rows.
+    lists: Query<'w, 's, &'static mut VirtualList>,
+    /// The table, whose selection is cleared when the filter changes it.
+    tables: Query<'w, 's, &'static mut TableState>,
+}
+
 /// Rebuild [`DebugSettingsModel`] when its inputs move: enumerate the store
 /// once (the declarations are fixed at startup), then re-derive the view
 /// whenever the search term changes or the store moves (an override appearing
 /// or vanishing feeds both the changed-only filter and the `*` markers).
 /// Keeps the viewport's [`VirtualList::item_count`] current and drops a
 /// selection the filter removed.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its inputs, and this view has that many: the UI \
-              handles, the settings store it enumerates, the RLV session that can take a setting \
-              away, the model and editor state it writes, the search field it reads the term \
-              from, and the list and table it resizes"
-)]
 fn refresh_debug_view(
     ui: Option<Res<DebugSettingsUi>>,
     settings: Option<Res<ViewerSettings>>,
     rlv: Option<Res<RlvSession>>,
     mut model: ResMut<DebugSettingsModel>,
     mut state: ResMut<DebugEditorState>,
-    fields: Query<&EditableText>,
-    mut lists: Query<&mut VirtualList>,
-    mut tables: Query<&mut TableState>,
+    widgets: DebugViewWidgets,
 ) {
+    let DebugViewWidgets {
+        fields,
+        mut lists,
+        mut tables,
+    } = widgets;
     let (Some(ui), Some(settings)) = (ui, settings) else {
         return;
     };
@@ -1232,28 +1242,45 @@ fn seed_swatch(swatches: &mut Query<&mut ColorSwatchValue>, entity: Entity, rgb:
     }
 }
 
+/// The detail pane's widget families, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam) — one query per kind of
+/// editor the pane seeds from the selected setting, plus the commands that
+/// toggle a checkbox.
+#[derive(bevy::ecs::system::SystemParam)]
+struct DebugDetailWidgets<'w, 's> {
+    /// The checkboxes, read to leave an already-correct one alone.
+    checkboxes: Query<'w, 's, Has<Checked>>,
+    /// The pane's labels.
+    texts: Query<'w, 's, &'static mut Text>,
+    /// The editor rows, shown or hidden by the setting's type.
+    nodes: Query<'w, 's, &'static mut Node>,
+    /// The text editors, seeded from the setting's value.
+    editables: Query<'w, 's, &'static mut EditableText>,
+    /// The colour swatches, likewise.
+    swatches: Query<'w, 's, &'static mut ColorSwatchValue>,
+    /// What flips a checkbox's `Checked` marker.
+    commands: Commands<'w, 's>,
+}
+
 /// Keep the detail pane following the selection and the store: the name /
 /// comment / type read-outs, the four per-layer value read-outs, which editor
 /// stack is visible, and the visible editors' seeded values. Change-gated on
 /// the editor state and the store, so a quiet frame writes nothing.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the retained \
-              entities, the editor state, the store, the focus guard, and one query per \
-              widget family the pane seeds"
-)]
 fn sync_debug_detail(
     ui: Option<Res<DebugSettingsUi>>,
     state: Res<DebugEditorState>,
     settings: Option<Res<ViewerSettings>>,
     focus: Option<Res<InputFocus>>,
-    checkboxes: Query<Has<Checked>>,
-    mut texts: Query<&mut Text>,
-    mut nodes: Query<&mut Node>,
-    mut editables: Query<&mut EditableText>,
-    mut swatches: Query<&mut ColorSwatchValue>,
-    mut commands: Commands,
+    widgets: DebugDetailWidgets,
 ) {
+    let DebugDetailWidgets {
+        checkboxes,
+        mut texts,
+        mut nodes,
+        mut editables,
+        mut swatches,
+        mut commands,
+    } = widgets;
     let (Some(ui), Some(settings)) = (ui, settings) else {
         return;
     };
@@ -1543,25 +1570,41 @@ fn assemble_field_value(
     }
 }
 
+/// What says a debug editor's edit is finished and what its new value is read
+/// from, bundled as one [`SystemParam`](bevy::ecs::system::SystemParam): the
+/// focus and `Enter` triggers plus the focus the last run saw, and the field
+/// and swatch the value comes off.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct DebugFieldCommit<'w, 's> {
+    /// What is focused now; losing focus commits.
+    focus: Option<Res<'w, InputFocus>>,
+    /// The keyboard, for the `Enter` that commits without leaving the field.
+    keyboard: Res<'w, ButtonInput<KeyCode>>,
+    /// What was focused on the previous run, which is what "lost focus" is
+    /// measured against.
+    focus_track: ResMut<'w, DebugFieldFocus>,
+    /// The edit fields, which a committed text value is read from.
+    fields: Query<'w, 's, &'static EditableText, With<DebugEditField>>,
+    /// The colour swatches, likewise for a committed colour.
+    swatches: Query<'w, 's, &'static ColorSwatchValue>,
+}
+
 /// Commit the visible editor fields on `Enter` or focus loss: parse every
 /// field of the selected kind's stack, assemble the [`SettingValue`], and
 /// write it to the selected scope. Any incomplete field abandons the commit.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the retained \
-              entities, the editor state, the focus / keyboard commit triggers, the field and \
-              swatch reads, and the store"
-)]
 fn commit_debug_text_fields(
     ui: Option<Res<DebugSettingsUi>>,
     state: Res<DebugEditorState>,
-    focus: Option<Res<InputFocus>>,
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut focus_track: ResMut<DebugFieldFocus>,
-    fields: Query<&EditableText, With<DebugEditField>>,
-    swatches: Query<&ColorSwatchValue>,
+    commit: DebugFieldCommit,
     settings: Option<ResMut<ViewerSettings>>,
 ) {
+    let DebugFieldCommit {
+        focus,
+        keyboard,
+        mut focus_track,
+        fields,
+        swatches,
+    } = commit;
     let Some(ui) = ui else {
         return;
     };

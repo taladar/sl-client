@@ -795,25 +795,42 @@ fn track_session_events(mut events: MessageReader<SlEvent>, mut state: ResMut<Ab
     }
 }
 
+/// What the About floater's support block is filled from, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the session's own facts, the
+/// current region, the host's system and GPU details, its window, and the locale
+/// the block is rendered in.
+#[derive(bevy::ecs::system::SystemParam)]
+struct SupportFacts<'w, 's> {
+    /// The session's own facts (grid, name, version), absent before login.
+    session: Option<Res<'w, AboutSessionInfo>>,
+    /// The current region, named in the block.
+    regions: Query<'w, 's, &'static SlRegionIdentity, With<SlCurrentRegion>>,
+    /// The host's CPU / OS / memory details.
+    system_info: Option<Res<'w, SystemInfo>>,
+    /// Its GPU adapter details.
+    adapter: Option<Res<'w, RenderAdapterInfo>>,
+    /// Its window, for the reported resolution.
+    windows: Query<'w, 's, &'static Window, With<bevy::window::PrimaryWindow>>,
+    /// The locale the block is rendered in.
+    locale: Res<'w, UiLocale>,
+}
+
 /// Re-render the support block while the floater is open, writing the `Text`
 /// only when the assembled string changed (build-once / update-in-place).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the model \
-              state, the built UI handles, the login facts, the region query, the host / \
-              GPU / window / locale sources, and the text sink"
-)]
 fn refresh_support_block(
     mut state: ResMut<AboutState>,
     ui: Option<Res<AboutUi>>,
-    session: Option<Res<AboutSessionInfo>>,
-    regions: Query<&SlRegionIdentity, With<SlCurrentRegion>>,
-    system_info: Option<Res<SystemInfo>>,
-    adapter: Option<Res<RenderAdapterInfo>>,
-    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
-    locale: Res<UiLocale>,
+    facts: SupportFacts,
     mut texts: Query<&mut Text>,
 ) {
+    let SupportFacts {
+        session,
+        regions,
+        system_info,
+        adapter,
+        windows,
+        locale,
+    } = facts;
     let Some(ui) = ui else {
         return;
     };

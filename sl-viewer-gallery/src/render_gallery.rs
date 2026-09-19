@@ -602,23 +602,39 @@ fn report_declarations(
     }
 }
 
+/// What a rebuild replaces, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the scene root it despawns,
+/// the camera it re-aims, the header it rewrites, the stage rig it stands down
+/// for a self-lit scene, and the orbit the declared pose becomes.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct GalleryStage<'w, 's> {
+    /// The scene root currently shown, despawned before the new one is spawned.
+    existing: Query<'w, 's, Entity, With<GalleryScene>>,
+    /// The gallery camera, re-aimed at the new scene's declared pose.
+    camera: Query<'w, 's, &'static mut Transform, With<GalleryCamera>>,
+    /// The header line, rewritten to the new scene.
+    header: Query<'w, 's, &'static mut Text, With<GalleryHeader>>,
+    /// The stage rig, hidden for a scene that lights itself.
+    stage: Query<'w, 's, &'static mut Visibility, With<StageLight>>,
+    /// The orbit the scene's declared pose becomes.
+    orbit: ResMut<'w, Orbit>,
+}
+
 /// Rebuild the shown scene: despawn the old root, spawn the new one, and re-aim
 /// the camera at the pose the scene declares.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the cell, the four things it rebuilds, and the assets it builds from are each \
-              genuinely independent; bundling them would only move the list"
-)]
 fn rebuild(
     cell: GalleryCell,
     commands: &mut Commands,
-    existing: &Query<Entity, With<GalleryScene>>,
-    camera: &mut Query<&mut Transform, With<GalleryCamera>>,
-    header: &mut Query<&mut Text, With<GalleryHeader>>,
-    stage: &mut Query<&mut Visibility, With<StageLight>>,
-    orbit: &mut Orbit,
+    shown: &mut GalleryStage<'_, '_>,
     assets: &mut SceneAssets<'_>,
 ) {
+    let GalleryStage {
+        existing,
+        camera,
+        header,
+        stage,
+        orbit,
+    } = shown;
     for root in existing.iter() {
         commands.entity(root).despawn();
     }
@@ -645,7 +661,7 @@ fn rebuild(
     // converted here exactly as the viewer converts an object's. It becomes the
     // *opening* orbit rather than a fixed transform — see `Orbit`.
     let basis = scene_root_transform().rotation;
-    *orbit = Orbit::looking_from(
+    **orbit = Orbit::looking_from(
         basis.mul_vec3(scene.camera.position),
         basis.mul_vec3(scene.camera.look_at),
     );
@@ -670,19 +686,11 @@ fn rebuild(
 }
 
 /// The keys: step scenes, cycle the LOD, restart, pause.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's arguments are its resource/query dependencies"
-)]
 fn drive_keys(
     keys: Res<ButtonInput<KeyCode>>,
     mut cell: ResMut<GalleryCell>,
     mut commands: Commands,
-    existing: Query<Entity, With<GalleryScene>>,
-    mut camera: Query<&mut Transform, With<GalleryCamera>>,
-    mut header: Query<&mut Text, With<GalleryHeader>>,
-    mut stage: Query<&mut Visibility, With<StageLight>>,
-    mut orbit: ResMut<Orbit>,
+    mut shown: GalleryStage,
     mut time: ResMut<Time<Virtual>>,
     mut assets: SceneAssets,
     mut started: Local<bool>,
@@ -719,16 +727,7 @@ fn drive_keys(
     if !changed {
         return;
     }
-    rebuild(
-        *cell,
-        &mut commands,
-        &existing,
-        &mut camera,
-        &mut header,
-        &mut stage,
-        &mut orbit,
-        &mut assets,
-    );
+    rebuild(*cell, &mut commands, &mut shown, &mut assets);
 }
 
 /// Set the stage ambient for the selected scene — the resource, not the per-camera

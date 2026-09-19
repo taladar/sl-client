@@ -118,6 +118,91 @@ pub fn ui_stack_dirty(
     !changed.is_empty() || removed_ui_node || removed_on_live_node
 }
 
+/// What can dirty the layout, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the node-property union,
+/// the measures that are not carved out, and the editable fields' type
+/// changes.
+#[expect(
+    clippy::type_complexity,
+    reason = "the Or<> filters ARE the documented trigger union; splitting them into named \
+              type aliases would only scatter it"
+)]
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub struct LayoutTriggers<'w, 's> {
+    /// Every UI node whose own layout-relevant properties moved.
+    changed: Query<
+        'w,
+        's,
+        (Entity, Option<&'static ChildOf>),
+        (
+            With<Node>,
+            Or<(
+                Added<Node>,
+                Changed<Node>,
+                Changed<ComputedUiRenderTargetInfo>,
+                Changed<UiTransform>,
+                Changed<ScrollPosition>,
+                Changed<Outline>,
+                Changed<LayoutConfig>,
+                Changed<IgnoreScroll>,
+                Changed<Children>,
+                Changed<ChildOf>,
+            )>,
+        ),
+    >,
+    /// Re-measured content, minus the two carved-out categories (editable
+    /// fields and fixed slots, whose measure cannot move the layout).
+    changed_measure: Query<
+        'w,
+        's,
+        (Entity, Option<&'static ChildOf>),
+        (
+            With<Node>,
+            Without<EditableText>,
+            Without<FixedSlotContentSize>,
+            Changed<ContentSize>,
+        ),
+    >,
+    /// An editable field's *type* changing, which does move the layout even
+    /// though its per-frame `ContentSize` churn is ignored.
+    changed_editable: Query<
+        'w,
+        's,
+        (Entity, Option<&'static ChildOf>),
+        (
+            With<Node>,
+            With<EditableText>,
+            Or<(Changed<TextFont>, Changed<LineHeight>, Changed<TextLayout>)>,
+        ),
+    >,
+}
+
+/// What a trigger is checked against before it counts, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the ancestor walk that
+/// finds a stably-hidden parent, the changed-node probe that tells a hidden
+/// ancestor's own flip from a change buried under it, the UI-node membership
+/// check, and the two removal cursors.
+#[expect(
+    missing_debug_implementations,
+    reason = "`RemovedComponents` has no Debug; a hand-written impl could only print the \
+              field names"
+)]
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct LayoutGateWalk<'w, 's> {
+    /// The strict ancestors a candidate is walked up through.
+    ancestors: Query<'w, 's, (&'static Node, Option<&'static ChildOf>)>,
+    /// Whether a hidden ancestor itself changed — a real trigger, as against a
+    /// change buried under an unchanged `Display::None`.
+    changed_nodes: Query<'w, 's, (), (With<Node>, Changed<Node>)>,
+    /// Which entities are UI nodes at all, for the `Children` removal cursor.
+    nodes: Query<'w, 's, (), With<Node>>,
+    /// Despawned UI nodes, which must reach `ui_surface.remove_entities` while
+    /// their removal message still exists.
+    removed_nodes: RemovedComponents<'w, 's, Node>,
+    /// Likewise for a removed `Children`, which also fires for world entities.
+    removed_children: RemovedComponents<'w, 's, Children>,
+}
+
 /// Run condition for [`bevy::ui::UiSystems::Layout`] (`ui_layout_system`):
 /// skip the full-tree layout walk (node iteration, children sync, taffy
 /// round pass, geometry recursion) on frames where none of the system's
@@ -164,59 +249,19 @@ pub fn ui_stack_dirty(
 /// trigger: the caller has vouched that it lives in a fixed-width, clipping
 /// slot where its measure cannot change the layout (the status-bar read-outs —
 /// the FPS integer re-measures at up to 10 Hz otherwise).
-#[expect(
-    clippy::type_complexity,
-    reason = "the Or<> filters ARE the documented trigger union; splitting them into named \
-              type aliases would only scatter it"
-)]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a run condition's parameters are the gated system's full input surface: the \
-              three trigger queries, the ancestor walk, the changed-node probe, the UI-node \
-              membership check, and the two removal cursors"
-)]
-pub fn ui_layout_dirty(
-    changed: Query<
-        (Entity, Option<&ChildOf>),
-        (
-            With<Node>,
-            Or<(
-                Added<Node>,
-                Changed<Node>,
-                Changed<ComputedUiRenderTargetInfo>,
-                Changed<UiTransform>,
-                Changed<ScrollPosition>,
-                Changed<Outline>,
-                Changed<LayoutConfig>,
-                Changed<IgnoreScroll>,
-                Changed<Children>,
-                Changed<ChildOf>,
-            )>,
-        ),
-    >,
-    changed_measure: Query<
-        (Entity, Option<&ChildOf>),
-        (
-            With<Node>,
-            Without<EditableText>,
-            Without<FixedSlotContentSize>,
-            Changed<ContentSize>,
-        ),
-    >,
-    changed_editable: Query<
-        (Entity, Option<&ChildOf>),
-        (
-            With<Node>,
-            With<EditableText>,
-            Or<(Changed<TextFont>, Changed<LineHeight>, Changed<TextLayout>)>,
-        ),
-    >,
-    ancestors: Query<(&Node, Option<&ChildOf>)>,
-    changed_nodes: Query<(), (With<Node>, Changed<Node>)>,
-    nodes: Query<(), With<Node>>,
-    mut removed_nodes: RemovedComponents<Node>,
-    mut removed_children: RemovedComponents<Children>,
-) -> bool {
+pub fn ui_layout_dirty(triggers: LayoutTriggers, walk: LayoutGateWalk) -> bool {
+    let LayoutTriggers {
+        changed,
+        changed_measure,
+        changed_editable,
+    } = triggers;
+    let LayoutGateWalk {
+        ancestors,
+        changed_nodes,
+        nodes,
+        mut removed_nodes,
+        mut removed_children,
+    } = walk;
     // Removals first (and drain both cursors — see `ui_stack_dirty` on why):
     // a despawned UI node must reach `ui_surface.remove_entities` while its
     // removal message still exists. `RemovedComponents<Children>` also fires
@@ -265,23 +310,28 @@ fn log_ui_dirty_enabled() -> bool {
     std::env::var_os("SL_VIEWER_LOG_UI_DIRTY").is_some()
 }
 
-/// Log the entities matching each layout-gate trigger this frame (first three
-/// per category, with their `Name`s). Runs in `Update` — a hair earlier than
-/// the PostUpdate condition, so late PostUpdate writers can still differ — but
-/// every steady per-frame dirtier shows up identically.
+/// One query per layout-gate trigger category, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam) — including the two
+/// carved-out (editable / fixed-slot) content-size categories, which the gate
+/// ignores but which are logged so their volume stays observable.
 #[expect(
     clippy::type_complexity,
     reason = "one query per trigger category IS the diagnostic"
 )]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "one query per trigger category IS the diagnostic — including the two carved-out \
-              (editable / fixed-slot) content-size categories logged for observability"
-)]
-fn log_ui_layout_dirty_causes(
-    changed_node: Query<(Entity, Option<&Name>), (With<Node>, Or<(Added<Node>, Changed<Node>)>)>,
-    changed_content: Query<
-        (Entity, Option<&Name>),
+#[derive(bevy::ecs::system::SystemParam)]
+struct DirtyCategories<'w, 's> {
+    /// Nodes added or whose `Node` changed.
+    node: Query<
+        'w,
+        's,
+        (Entity, Option<&'static Name>),
+        (With<Node>, Or<(Added<Node>, Changed<Node>)>),
+    >,
+    /// Re-measured content the gate counts.
+    content: Query<
+        'w,
+        's,
+        (Entity, Option<&'static Name>),
         (
             With<Node>,
             Without<EditableText>,
@@ -289,25 +339,45 @@ fn log_ui_layout_dirty_causes(
             Changed<ContentSize>,
         ),
     >,
-    changed_editable_content: Query<
-        (Entity, Option<&Name>),
+    /// Editable fields' per-frame `ContentSize` churn, which the gate ignores.
+    editable_content: Query<
+        'w,
+        's,
+        (Entity, Option<&'static Name>),
         (With<Node>, With<EditableText>, Changed<ContentSize>),
     >,
-    changed_fixed_content: Query<
-        (Entity, Option<&Name>),
+    /// Fixed-slot read-outs' measures, which it ignores too.
+    fixed_content: Query<
+        'w,
+        's,
+        (Entity, Option<&'static Name>),
         (With<Node>, With<FixedSlotContentSize>, Changed<ContentSize>),
     >,
-    changed_target: Query<
-        (Entity, Option<&Name>),
+    /// Nodes whose render target moved.
+    target: Query<
+        'w,
+        's,
+        (Entity, Option<&'static Name>),
         (With<Node>, Changed<bevy::ui::ComputedUiRenderTargetInfo>),
     >,
-    changed_transform: Query<(Entity, Option<&Name>), (With<Node>, Changed<UiTransform>)>,
-    changed_scroll: Query<(Entity, Option<&Name>), (With<Node>, Changed<ScrollPosition>)>,
-    changed_children: Query<
-        (Entity, Option<&Name>),
+    /// Nodes whose UI transform moved.
+    transform: Query<'w, 's, (Entity, Option<&'static Name>), (With<Node>, Changed<UiTransform>)>,
+    /// Nodes whose scroll position moved.
+    scroll: Query<'w, 's, (Entity, Option<&'static Name>), (With<Node>, Changed<ScrollPosition>)>,
+    /// Nodes whose place in the tree moved.
+    children: Query<
+        'w,
+        's,
+        (Entity, Option<&'static Name>),
         (With<Node>, Or<(Changed<Children>, Changed<ChildOf>)>),
     >,
-) {
+}
+
+/// Log the entities matching each layout-gate trigger this frame (first three
+/// per category, with their `Name`s). Runs in `Update` — a hair earlier than
+/// the PostUpdate condition, so late PostUpdate writers can still differ — but
+/// every steady per-frame dirtier shows up identically.
+fn log_ui_layout_dirty_causes(categories: DirtyCategories) {
     /// One category's log line: `label: n (name, name, name, …)`.
     fn report(
         label: &str,
@@ -326,19 +396,29 @@ fn log_ui_layout_dirty_causes(
             .collect();
         info!("ui-dirty {label}: {count} ({})", sample.join(", "));
     }
-    report("node", &changed_node);
-    report("content-size", &changed_content);
+    let DirtyCategories {
+        node,
+        content,
+        editable_content,
+        fixed_content,
+        target,
+        transform,
+        scroll,
+        children,
+    } = categories;
+    report("node", &node);
+    report("content-size", &content);
     // Editable fields' per-frame `ContentSize` churn (upstream, see
     // `viewer-perf-editable-text-per-frame-churn`) is carved out of the gate;
     // logged separately so its volume stays observable.
-    report("content-size(editable, ignored)", &changed_editable_content);
+    report("content-size(editable, ignored)", &editable_content);
     // Fixed-slot read-outs (the status bar) whose measure cannot affect layout
     // are carved out too (see `FixedSlotContentSize`); logged separately.
-    report("content-size(fixed-slot, ignored)", &changed_fixed_content);
-    report("render-target", &changed_target);
-    report("ui-transform", &changed_transform);
-    report("scroll", &changed_scroll);
-    report("hierarchy", &changed_children);
+    report("content-size(fixed-slot, ignored)", &fixed_content);
+    report("render-target", &target);
+    report("ui-transform", &transform);
+    report("scroll", &scroll);
+    report("hierarchy", &children);
 }
 
 /// How many times the gated layout set actually ran ([`count_layout_runs`]).

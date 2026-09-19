@@ -609,24 +609,44 @@ fn request_parcel_audio_diagnosis(
 }
 
 /// Sync the cluster's chrome. The bar is always shown; while the parcel has no
+/// The panel's chrome, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the disable marker the
+/// greying is measured against, the labels, their colours, the fills and
+/// borders it repaints, and the commands that add or drop the marker.
+#[derive(bevy::ecs::system::SystemParam)]
+struct ParcelAudioChrome<'w, 's> {
+    /// Which widgets already carry the disable marker, so an unchanged one is
+    /// left alone.
+    disabled: Query<'w, 's, (), With<InteractionDisabled>>,
+    /// The panel's labels.
+    texts: Query<'w, 's, &'static mut Text>,
+    /// Their colours, dimmed while there is no stream.
+    text_colors: Query<'w, 's, &'static mut TextColor>,
+    /// The button fills.
+    fills: Query<'w, 's, &'static mut BackgroundColor>,
+    /// Their borders.
+    borders: Query<'w, 's, &'static mut BorderColor>,
+    /// What adds or drops the disable marker.
+    commands: Commands<'w, 's>,
+}
+
 /// stream URL it is greyed and its play / mute buttons are disabled (the volume
 /// slider stays live, so a user can set it before entering a loud parcel).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the greyed-state sync touches text, colours, borders and the disable marker"
-)]
 fn sync_parcel_audio_ui(
     ui: Option<Res<ParcelAudioUi>>,
     audio: Res<ParcelAudio>,
     diagnostics: Res<MediaDiagnostics>,
     settings: Option<Res<ViewerSettings>>,
-    disabled: Query<(), With<InteractionDisabled>>,
-    mut texts: Query<&mut Text>,
-    mut text_colors: Query<&mut TextColor>,
-    mut fills: Query<&mut BackgroundColor>,
-    mut borders: Query<&mut BorderColor>,
-    mut commands: Commands,
+    chrome: ParcelAudioChrome,
 ) {
+    let ParcelAudioChrome {
+        disabled,
+        mut texts,
+        mut text_colors,
+        mut fills,
+        mut borders,
+        mut commands,
+    } = chrome;
     let Some(ui) = ui else { return };
     let active = audio.state.parcel_url.is_some();
     // The mute glyph reflects the music bus (the stream's mute lives there now).

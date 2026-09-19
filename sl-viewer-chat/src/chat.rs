@@ -325,27 +325,38 @@ pub fn position_chat_overlay(
         overlay.bottom = wanted;
     }
 }
+/// What decides whether a chat line is shown and how, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the font and colour
+/// settings, our own agent, the object mirror the RLV owner-say gate resolves
+/// an issuer against, and the mute list the block filter reads.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+pub struct ChatOverlayGates<'w> {
+    /// The settings the overlay's type size and colours come from.
+    pub settings: Option<Res<'w, ViewerSettings>>,
+    /// Our own agent, which our own lines are recognised by.
+    pub identity: Option<Res<'w, SlIdentity>>,
+    /// The object mirror the RLV owner-say gate resolves an issuer against.
+    pub objects: Option<Res<'w, ObjectState>>,
+    /// The mute list the block filter reads.
+    pub mutes: Option<Res<'w, MuteModel>>,
+}
 
 /// Spawn a fresh, fully-opaque [`ChatOverlayLine`] under the container for each
 /// displayable local-chat message that arrives this frame.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the chat and \
-              notice streams, the overlay state and its container, the font / colour settings, \
-              the own-agent identity, the object mirror the RLV owner-say gate reads, and the \
-              mute list the block filter reads"
-)]
 pub fn update_chat_overlay(
     mut commands: Commands,
     mut events: MessageReader<SlEvent>,
     mut notices: MessageReader<LocalChatNotice>,
     mut overlay: ResMut<ChatOverlay>,
     container: Query<Entity, With<ChatOverlayContainer>>,
-    settings: Option<Res<ViewerSettings>>,
-    identity: Option<Res<SlIdentity>>,
-    objects: Option<Res<ObjectState>>,
-    mutes: Option<Res<MuteModel>>,
+    gates: ChatOverlayGates,
 ) {
+    let ChatOverlayGates {
+        settings,
+        identity,
+        objects,
+        mutes,
+    } = gates;
     let Ok(container) = container.single() else {
         return;
     };

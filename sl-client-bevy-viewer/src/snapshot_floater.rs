@@ -1025,27 +1025,41 @@ fn drive_capture(
     }
 }
 
+/// What a captured shot is written into, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the image store the preview
+/// is uploaded into, the preview box and its image node, and the commands that
+/// spawn the rest.
+#[derive(bevy::ecs::system::SystemParam)]
+struct ShotWidgets<'w, 's> {
+    /// The image store the preview is uploaded into.
+    images: ResMut<'w, Assets<Image>>,
+    /// The preview box, sized to the shot's aspect.
+    nodes: Query<'w, 's, &'static mut Node>,
+    /// Its image node, repointed at the fresh preview.
+    image_nodes: Query<'w, 's, &'static mut ImageNode>,
+    /// What spawns the rest.
+    commands: Commands<'w, 's>,
+}
+
 /// Finish a capture once its frame lands: update the preview, and (for a save)
 /// hand the frame to an off-thread [`spawn_save_task`] that encodes and writes it.
 /// The visual restore of the hidden layers is handled on a timer by
 /// [`drive_capture`], not here, so it never waits on this callback; the saved path
 /// is echoed to chat later by [`poll_snapshot_saves`], once the write completes.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "finishing one capture reads the shot + state, updates the preview image asset + its \
-              node + hint, and spawns the off-thread write while setting the localised status line"
-)]
 fn process_shot(
     mut shot: ResMut<CapturedShot>,
     mut state: ResMut<SnapshotState>,
     ui: Option<Res<SnapshotUi>>,
-    mut images: ResMut<Assets<Image>>,
-    mut nodes: Query<&mut Node>,
-    mut image_nodes: Query<&mut ImageNode>,
-    mut commands: Commands,
+    widgets: ShotWidgets,
     local_tz: Option<Res<LocalTimeZone>>,
     translator: Translator,
 ) {
+    let ShotWidgets {
+        mut images,
+        mut nodes,
+        mut image_nodes,
+        mut commands,
+    } = widgets;
     let Some(image) = shot.0.take() else {
         return;
     };

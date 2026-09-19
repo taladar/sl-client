@@ -2,7 +2,7 @@
 id: idiomatic-audit-bevy-system-param-bundles
 title: 128+ too_many_arguments suppressions are Bevy systems that want a SystemParam bundle
 topic: idiomatic
-status: in-progress
+status: done
 origin: static code audit (2026-08-26)
 points: 8
 ---
@@ -20,10 +20,11 @@ Scope: sweep the largest clusters into `SystemParam` bundles, in a codebase
 whose stated convention is no `#[expect]`. Start with `menu.rs`, then
 `sl-viewer-edit`.
 
-## Swept so far (2026-09-18): 338 → 67
+## Swept so far (2026-09-19): 338 → 13, all thirteen deliberate
 
-Twelve crates are now at **zero** suppressions (`sl-viewer-world-objects` keeps
-two, both deliberate — see below):
+Every crate is now at **zero** suppressions except the two that keep theirs on
+purpose: `sl-proto` (11) and `sl-viewer-world-objects` (2), both explained at
+the end. The largest clusters:
 
 - **`sl-viewer-ui-widgets` (16)** — `menu.rs`'s thirteen collapse into one
   `MenuNav` (the ancestry / children / conditions / slots / direction / filter /
@@ -145,12 +146,61 @@ two, both deliberate — see below):
   `ProfileWhere` / `ProfileWidgets`, `ExperienceNames` /
   `ExperienceListWidgets` / `ExperiencesPick` / `ExperiencesButtonState` /
   `ExperiencesOut`, and `InspectorHost`.
+- **`sl-viewer-ui-context-menus` (8)** — `MenuConditionFacts` (identity,
+  parcel, ground-sit, friends: the four facts every one of the four menus greys
+  its entries from) in a new `menu_params.rs`, plus `AttachmentActionOut`,
+  `ObjectMenuModel` / `ObjectMenuOut` / `SeatPoses`, `PickOcclusion` /
+  `RightClickOut` / `AvatarMenuOut`. Three of the four menus reach the Build
+  tools the same way, so `edit_tool.rs` grew the sweep's second shared bundle,
+  `BuildToolsSurfaces`.
+- **`sl-client-bevy-viewer` (7)** — `SupportFacts`, `TeleportGate`,
+  `ShotWidgets`, `StatusFacts`, and the menu bar's `TopMenuFacts` /
+  `TopMenuState` / `TopMenuOut`. The odd one out is `run_session`, which is not
+  a Bevy system at all: the last loose startup knobs become `SessionContent`
+  beside the `CameraStartup` / `CaptureStartup` / `SkinRuntime` / `MediaRuntime`
+  the file had already grown for the same reason.
+- **`sl-viewer-search` (5)** — the Search button and the `Enter` shortcut are
+  one action behind two triggers, so `run_new_search`'s nine arguments become
+  `SearchRun` with `run()` / `search_field()` on it and both systems shrink to
+  two or three parameters. Plus `SearchRowWidgets` and `DetailActionOut`.
+- **`sl-viewer-preferences` (5)** — `DebugViewWidgets`, `DebugDetailWidgets`,
+  `DebugFieldCommit`, `BindingWalk` / `PreferencesOkOut`, `PrefFilterRows` /
+  `PrefTabTree`.
+- **`sl-viewer-asset-editors` (5)** — Revert and a close-without-saving put the
+  *same* four calls' worth of original asset back on the avatar, so both now go
+  through `WearPreview::restore`; beside it `WearSaveOut`, `WearOpenWidgets`,
+  and two positional-argument records: `EditorShape` (whose call sites read
+  `true, source, true, font, false`) and `ParamSliderSpec`, which replaces a
+  `(i32, bool, f32, f32, f32, String)` tuple carried through three functions.
+- **`sl-viewer-audio` (3)** — the grid's sound events and the viewer's own
+  collision layer start a sound identically, so both take one `SoundStage`
+  (clock, clip cache, sound state, object mirror, mute list, parcel
+  audibility); plus `ParcelAudioChrome`.
+- **`sl-conformance` (3)** — `LoginSpec` for the two login entry points, whose
+  call sites ended `&state_dir, args.force, None`; `RunResult` for what a
+  finished case leaves behind, as against the four arguments saying where the
+  record goes.
+- **the singles and pairs** — `RlvRun` shared by the RLV console and the
+  owner-say intake; `GroupPickOut` / `AvatarPickOut` (and both pickers now use
+  the shared `FloaterHost`); `LayoutTriggers` / `LayoutGateWalk` /
+  `DirtyCategories` for the UI layout gate; `ParcelRegionSpec` (a call that
+  read `0.25, -128.0, -128.0, 256.0, colour, true, false, 64`) and
+  `ParticlePipelines`; `GalleryStage`; `WaitChannels` and `WorldStores` /
+  `WorldPolicies` in the fake grid — the last two named by the suppression's own
+  reason, which already split the list that way in prose; `WebChrome`;
+  `ChatOverlayGates`; `SlSinks`; `ReplStreams` / `ReplOut`; `SymbolEntry`; and
+  `sl-tree`'s `gen_branch`, where the reference's recursive parameter list
+  splits cleanly into what never changes (`BranchTemplates`) and the per-level
+  state (`BranchLevel`).
 
-This crate also produced the sweep's one **shared** bundle: `FloaterHost` in
+The sweep produced two **shared** bundles. The first is `FloaterHost` in
 `sl-viewer-ui-widgets::floater`, the injected form of `host_floater`'s
 `parents` + `floaters` pair. That pair has 51 call sites across the workspace
 and three crates had each grown a private copy of it during this sweep, so it
-now lives beside the function it wraps.
+now lives beside the function it wraps. The second is `BuildToolsSurfaces` in
+`sl-viewer-edit::edit_tool`, the injected form of `open_build_tools_with`'s
+floaters + panels + tool state, which the land, attachment and object menus had
+each been spelling out.
 
 Patterns worth reusing:
 
@@ -189,15 +239,10 @@ add a second name for the same record. The two that did go were not wire
 mirrors: `decompress_patch` / `encode_patch` share three precomputed codec
 tables, now one `PatchTables`.
 
-## Still to sweep (67, of which 13 are deliberate)
+## What stays (13, all deliberate)
 
-By crate, largest first: `sl-viewer-ui-context-menus` 8,
-`sl-client-bevy-viewer` 7, `sl-viewer-search` 5, `sl-viewer-preferences` 5,
-`sl-viewer-asset-editors` 5, `sl-viewer-audio` 3, `sl-conformance` 3, then
-singles and pairs across the rest.
-
-The 13 deliberate ones are the eleven `sl-proto` wire-block mirrors above and
-the two stock-Bevy text-system ports in `name_tag_billboard.rs`.
+The eleven `sl-proto` wire-block mirrors above and the two stock-Bevy
+text-system ports in `name_tag_billboard.rs`. Nothing else is left to sweep.
 
 Not in scope, and worth recording so it is not re-litigated: the remaining cast
 suppressions (152 `as_conversions`, 105 `cast_possible_truncation`, 63

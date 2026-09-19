@@ -14,9 +14,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ideas | 100 |
 | ready | 309 |
 | blocked | 41 |
-| in-progress | 23 |
+| in-progress | 22 |
 | bugs | 5 |
-| done | 1185 |
+| done | 1186 |
 | deferred | 28 |
 | wont-do | 16 |
 | **total** | **1707** |
@@ -1092,7 +1092,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (23)
+## in-progress (22)
 
 ### viewer
 
@@ -1148,12 +1148,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-### idiomatic
-
-- [`idiomatic-audit-bevy-system-param-bundles`](in-progress/idiomatic-audit-bevy-system-param-bundles.md)
-  — 128+ too_many_arguments suppressions are Bevy systems that want a
-  SystemParam bundle
-
 ### chat
 
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
@@ -1177,7 +1171,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 
-## done (1185)
+## done (1186)
 
 ### protocol
 
@@ -3059,6 +3053,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### idiomatic
 
+- [`idiomatic-audit-bevy-system-param-bundles`](done/idiomatic-audit-bevy-system-param-bundles.md)
+  — 128+ too_many_arguments suppressions are Bevy systems that want a
+  SystemParam bundle
 - [`idiomatic-batched-sl-types`](done/idiomatic-batched-sl-types-batched-sl-types-migration-post-roadmap-follow-up.md)
   — Batched sl-types migration (post-roadmap follow-up)
 - [`idiomatic-p1-01`](done/idiomatic-p1-01-new-permissions-bitflags-type-the-sl-perm-set.md)

@@ -59,12 +59,11 @@ use bevy::prelude::*;
 use sl_client_bevy::{Command, SlAgentParcel, SlCommand};
 
 use crate::about_land::{AboutLandSubject, OpenAboutLand};
-use crate::floater::Floater;
+use crate::edit_tool::BuildToolsSurfaces;
 use crate::menu::UNIMPLEMENTED;
 use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, PieMenuDef};
-use crate::ui::UiPanelShown;
 use crate::ui_element::UiAction;
-use crate::world_api::{EditTool, EditToolState, SelfGroundSit};
+use crate::world_api::{EditTool, SelfGroundSit};
 
 /// The `element` the land pie attributes its [`UiAction`]s to.
 pub const LAND_MENU_ELEMENT: &str = "land-menu";
@@ -219,21 +218,12 @@ fn open_land_menu(
 /// Only Create, Sit Here and About Land are wired; every other slice is a
 /// disabled placeholder that never emits, so the fall-through is intentionally
 /// silent.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the action \
-              stream, the agent's parcel and the pick's ground point, the seated state, the \
-              edit-tool state and the floater / panel queries the Create slice opens the build \
-              window through, and the two effect channels"
-)]
 fn handle_land_menu_actions(
     mut actions: MessageReader<UiAction>,
     parcel: Res<SlAgentParcel>,
     target: Res<LandMenuTarget>,
     mut ground_sit: ResMut<SelfGroundSit>,
-    mut tool: ResMut<EditToolState>,
-    floaters: Query<(Entity, &Floater)>,
-    mut panels: Query<&mut UiPanelShown>,
+    mut build_tools: BuildToolsSurfaces,
     mut commands: MessageWriter<SlCommand>,
     mut about_land: MessageWriter<OpenAboutLand>,
 ) {
@@ -247,12 +237,7 @@ fn handle_land_menu_actions(
             // ground rezzes. The reference also deselects the *parcel* first;
             // this viewer holds no parcel selection to drop.
             "build" => {
-                crate::edit_tool::open_build_tools_with(
-                    EditTool::Create,
-                    &floaters,
-                    &mut panels,
-                    &mut tool,
-                );
+                build_tools.open_with(EditTool::Create);
             }
             "sit-here" => {
                 // The reference's `LLLandSit` stands an already-seated avatar up

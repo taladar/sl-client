@@ -98,23 +98,23 @@
 //! (the dispatch), `llviewermenu.cpp` (the handlers).
 
 use bevy::prelude::*;
-use sl_client_bevy::{AgentKey, Command, SlAgentParcel, SlCommand, SlIdentity, SurfaceInfo};
+use sl_client_bevy::{AgentKey, Command, SlCommand, SurfaceInfo};
 
 use crate::avatar_menu::{
     AvatarMenuTarget, OTHER_MUTE_PIE, SELF_RESET_PIE, SELF_SITTING, SELF_STANDING,
     TARGET_NOT_FRIEND,
 };
 use crate::derender::RequestDerender;
+use crate::edit_tool::BuildToolsSurfaces;
 use crate::menu::UNIMPLEMENTED;
+use crate::menu_params::MenuConditionFacts;
 use crate::object_menu::TARGET_TOUCHABLE;
 use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, PieMenuDef};
-use crate::social::FriendsModel;
 use crate::ui_element::UiAction;
 use crate::world_api::AvatarState;
 use crate::world_api::DerenderKind;
 use crate::world_api::ObjectPickSummary;
 use crate::world_api::ObjectState;
-use crate::world_api::SelfGroundSit;
 
 /// The `element` both attachment pies attribute their [`UiAction`]s to.
 ///
@@ -742,27 +742,40 @@ impl Plugin for AttachmentMenuPlugin {
     }
 }
 
+/// What an attachment-menu action acts on, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the object model the
+/// attachment lives in, the build selection an Edit sets, and the wire / derender
+/// channels the actions write.
+#[derive(bevy::ecs::system::SystemParam)]
+struct AttachmentActionOut<'w> {
+    /// The build selection an Edit sets.
+    selection: ResMut<'w, crate::world_api::SelectionSet>,
+    /// The object model the attachment lives in.
+    state: Res<'w, ObjectState>,
+    /// The wire.
+    commands: MessageWriter<'w, SlCommand>,
+    /// The derender a Blocked action raises.
+    derenders: MessageWriter<'w, RequestDerender>,
+}
+
 /// Turn a resolved attachment pick into an open pie: resolve the wearer, choose
 /// self vs other, snapshot the conditions, and stash the targets — the worn
 /// object here, the wearer in [`AvatarMenuTarget`] for the shared avatar
 /// dispatch.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the open requests, the \
-              identity / seated state / friends / avatar registry the conditions and the wearer \
-              resolution read, the two target stashes, and the pie channel"
-)]
 fn open_attachment_menu(
     mut requests: MessageReader<OpenAttachmentMenu>,
-    identity: Res<SlIdentity>,
-    parcel: Res<SlAgentParcel>,
-    ground_sit: Res<SelfGroundSit>,
-    friends: Res<FriendsModel>,
+    facts: MenuConditionFacts,
     avatars: Res<AvatarState>,
     mut target: ResMut<AttachmentMenuTarget>,
     mut avatar_target: ResMut<AvatarMenuTarget>,
     mut pies: MessageWriter<OpenPieMenu>,
 ) {
+    let MenuConditionFacts {
+        identity,
+        parcel,
+        ground_sit,
+        friends,
+    } = facts;
     for request in requests.read() {
         // The wearer: resolved by the avatar pick, or looked up from the
         // summary's wearer avatar. Without one, self vs other cannot be
@@ -827,23 +840,18 @@ const FLAGS_HANDLE_TOUCH: u32 = 1 << 7;
 /// chain) carry the avatar pies' own action names and are dispatched by the
 /// shared handler in [`crate::avatar_menu`], which accepts this menu's element;
 /// every remaining slice is a disabled placeholder that never emits.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the action \
-              stream, the pie target, the edit-tool / floater / panel / selection / object \
-              state the Edit slice drives, and the command / derender writers"
-)]
 fn handle_attachment_menu_actions(
     mut actions: MessageReader<UiAction>,
     target: Res<AttachmentMenuTarget>,
-    mut tool: ResMut<crate::world_api::EditToolState>,
-    floaters: Query<(Entity, &crate::floater::Floater)>,
-    mut panels: Query<&mut crate::ui::UiPanelShown>,
-    mut selection: ResMut<crate::world_api::SelectionSet>,
-    state: Res<ObjectState>,
-    mut commands: MessageWriter<SlCommand>,
-    mut derenders: MessageWriter<RequestDerender>,
+    mut build_tools: BuildToolsSurfaces,
+    out: AttachmentActionOut,
 ) {
+    let AttachmentActionOut {
+        mut selection,
+        state,
+        mut commands,
+        mut derenders,
+    } = out;
     for action in actions.read() {
         if action.element != ATTACHMENT_MENU_ELEMENT {
             continue;
@@ -857,9 +865,7 @@ fn handle_attachment_menu_actions(
         if action.action == "edit" {
             crate::object_menu::edit_picked_object(
                 &summary,
-                &mut tool,
-                &floaters,
-                &mut panels,
+                &mut build_tools,
                 &mut selection,
                 &state,
             );

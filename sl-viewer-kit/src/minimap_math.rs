@@ -560,6 +560,36 @@ pub struct ParcelCell {
     /// The cell's south edge is a property line.
     pub south_line: bool,
 }
+/// Where one region's parcel overlay lands on the raster and how it is drawn:
+/// the scale and the region's placement, the line colour, whether for-sale
+/// parcels are tinted, whether the region draws its own full outline, and how
+/// many overlay cells it has per edge.
+///
+/// Named rather than passed positionally: the call is otherwise
+/// `0.25, -128.0, -128.0, 256.0, colour, true, false, 64` — four `f32`s and
+/// two `bool`s whose order is the only thing telling them apart.
+#[derive(Debug, Clone, Copy)]
+pub struct ParcelRegionSpec {
+    /// Raster texels per world metre.
+    pub texels_per_metre: f32,
+    /// The region's south-west corner, east of the raster's centre, in metres.
+    pub origin_east: f32,
+    /// The same corner, north of it.
+    pub origin_north: f32,
+    /// The region's width in metres.
+    pub region_width: f32,
+    /// The colour the property lines are drawn in.
+    pub line_color: Rgba,
+    /// Whether parcels for sale are tinted.
+    pub show_for_sale: bool,
+    /// Whether the region draws its own full outline — what a region whose
+    /// overlay is unknown (a neighbour) needs, since its edge cells cannot
+    /// supply its south / west property lines.
+    pub full_border: bool,
+    /// How many overlay cells the region has per edge (`0` when its overlay is
+    /// unknown).
+    pub grids_per_edge: usize,
+}
 
 /// Draw one region's parcel overlay into the parcel layer raster: the region's
 /// north / east border lines, the per-cell for-sale / auction fills (when
@@ -574,23 +604,21 @@ pub struct ParcelCell {
 /// whose overlay is unknown (a neighbour), whose edge cells cannot supply its
 /// south / west property lines the way the reference's per-region overlays
 /// do.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a direct port of the reference rasteriser, which takes exactly this data; bundling \
-              into a one-use struct would only rename the arguments"
-)]
 pub fn render_parcel_region(
     raster: &mut LayerRaster,
-    texels_per_metre: f32,
-    origin_east: f32,
-    origin_north: f32,
-    region_width: f32,
-    line_color: Rgba,
-    show_for_sale: bool,
-    full_border: bool,
-    grids_per_edge: usize,
+    spec: &ParcelRegionSpec,
     cell: &dyn Fn(usize, usize) -> Option<ParcelCell>,
 ) {
+    let &ParcelRegionSpec {
+        texels_per_metre,
+        origin_east,
+        origin_north,
+        region_width,
+        line_color,
+        show_for_sale,
+        full_border,
+        grids_per_edge,
+    } = spec;
     let half = f32::from(u16::try_from(raster.size).unwrap_or(u16::MAX)) / 2.0;
     let origin_x = round_i32(origin_east * texels_per_metre + half);
     let origin_y = round_i32(origin_north * texels_per_metre + half);
@@ -1298,12 +1326,12 @@ mod tests {
         COLOR_OTHER_ABOVE, COLOR_OTHER_BELOW, COLOR_PARCEL_LINE, COLOR_SCRIPTED, COLOR_TEMP_ON_REZ,
         COLOR_TRACK, COLOR_YOU_ABOVE, COLOR_YOU_BELOW, DoubleClickAction, FLAG_GROUP_OWNED,
         FLAG_SCRIPTED, FLAG_TEMP_ON_REZ, FLAG_YOU_OWNER, HeightGlyph, LayerRaster, MAP_SCALE_MAX,
-        MAP_SCALE_MEDIUM, MAP_SCALE_MIN, MapView, ObjectAccents, ParcelCell, ParcelFill, Surface,
-        auto_center_step, clamp_scale, coarse_altitude_unknown, compass_label_offset, dot_radius,
-        draw_avatar_glyph, draw_tracking, height_glyph, layer_raster_size, layer_texels_per_metre,
-        minor_directions_visible, object_map_color, object_map_radius, object_on_map,
-        render_object_point, render_parcel_region, render_point, rescale_pan, rotation_for_camera,
-        wheel_scale, zoom_to_cursor_pan,
+        MAP_SCALE_MEDIUM, MAP_SCALE_MIN, MapView, ObjectAccents, ParcelCell, ParcelFill,
+        ParcelRegionSpec, Surface, auto_center_step, clamp_scale, coarse_altitude_unknown,
+        compass_label_offset, dot_radius, draw_avatar_glyph, draw_tracking, height_glyph,
+        layer_raster_size, layer_texels_per_metre, minor_directions_visible, object_map_color,
+        object_map_radius, object_on_map, render_object_point, render_parcel_region, render_point,
+        rescale_pan, rotation_for_camera, wheel_scale, zoom_to_cursor_pan,
     };
     use bevy::math::Vec2;
     use pretty_assertions::{assert_eq, assert_ne};
@@ -1563,14 +1591,16 @@ mod tests {
         };
         render_parcel_region(
             &mut raster,
-            0.25,
-            -128.0,
-            -128.0,
-            256.0,
-            COLOR_PARCEL_LINE,
-            true,
-            false,
-            64,
+            &ParcelRegionSpec {
+                texels_per_metre: 0.25,
+                origin_east: -128.0,
+                origin_north: -128.0,
+                region_width: 256.0,
+                line_color: COLOR_PARCEL_LINE,
+                show_for_sale: true,
+                full_border: false,
+                grids_per_edge: 64,
+            },
             &cell,
         );
         // Each 4 m cell is one texel; cell (4, 4) starts at texel (36, 36). Its
@@ -1600,14 +1630,16 @@ mod tests {
         };
         render_parcel_region(
             &mut raster,
-            0.25,
-            -128.0,
-            -128.0,
-            256.0,
-            COLOR_PARCEL_LINE,
-            false,
-            false,
-            64,
+            &ParcelRegionSpec {
+                texels_per_metre: 0.25,
+                origin_east: -128.0,
+                origin_north: -128.0,
+                region_width: 256.0,
+                line_color: COLOR_PARCEL_LINE,
+                show_for_sale: false,
+                full_border: false,
+                grids_per_edge: 64,
+            },
             &cell,
         );
         // No fill texels anywhere strictly inside the region.
@@ -1620,14 +1652,16 @@ mod tests {
         let cell = |_row: usize, _col: usize| -> Option<ParcelCell> { None };
         render_parcel_region(
             &mut raster,
-            0.25,
-            -128.0,
-            -128.0,
-            256.0,
-            COLOR_PARCEL_LINE,
-            true,
-            true,
-            0,
+            &ParcelRegionSpec {
+                texels_per_metre: 0.25,
+                origin_east: -128.0,
+                origin_north: -128.0,
+                region_width: 256.0,
+                line_color: COLOR_PARCEL_LINE,
+                show_for_sale: true,
+                full_border: true,
+                grids_per_edge: 0,
+            },
             &cell,
         );
         // The region spans texels 32..=96: north and east borders as always…

@@ -369,17 +369,17 @@ impl FakeGridHarness {
         for (label, _first_name, _agent_id) in ACCOUNTS.iter().take(wanted) {
             let avatar = self.avatar(label)?;
             sessions.push(
-                crate::context::login(
-                    self.flavour,
+                crate::context::login(crate::context::LoginSpec {
+                    grid: self.flavour,
                     avatar,
-                    CHANNEL,
-                    clap::crate_version!(),
-                    test.start_location(self.flavour),
-                    &state_dir,
+                    channel: CHANNEL,
+                    version: clap::crate_version!(),
+                    start_location: test.start_location(self.flavour),
+                    state_dir: &state_dir,
                     // Nothing to force: the fake grid rate-limits nothing.
-                    false,
-                    None,
-                )
+                    force: false,
+                    cache_dir: None,
+                })
                 .await?,
             );
             let resolved = self.control_for(avatar).await?;

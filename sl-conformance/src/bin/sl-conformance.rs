@@ -305,30 +305,30 @@ async fn run(args: RunArgs) -> Result<(), Error> {
     // avatar so a multi-avatar case that overrides lands them together.
     let start_location = test.start_location(args.grid);
 
-    let primary_session = context::login(
-        args.grid,
-        primary,
-        CHANNEL,
+    let primary_session = context::login(context::LoginSpec {
+        grid: args.grid,
+        avatar: primary,
+        channel: CHANNEL,
         version,
         start_location,
-        &state_dir,
-        args.force,
-        primary_cache_dir,
-    )
+        state_dir: &state_dir,
+        force: args.force,
+        cache_dir: primary_cache_dir,
+    })
     .await
     .map_err(|error| Error::Test(error.to_string()))?;
     let secondary_session = match secondary {
         Some(secondary) => Some(
-            context::login(
-                args.grid,
-                secondary,
-                CHANNEL,
+            context::login(context::LoginSpec {
+                grid: args.grid,
+                avatar: secondary,
+                channel: CHANNEL,
                 version,
                 start_location,
-                &state_dir,
-                args.force,
-                None,
-            )
+                state_dir: &state_dir,
+                force: args.force,
+                cache_dir: None,
+            })
             .await
             .map_err(|error| Error::Test(error.to_string()))?,
         ),
@@ -336,16 +336,16 @@ async fn run(args: RunArgs) -> Result<(), Error> {
     };
     let tertiary_session = match tertiary {
         Some(tertiary) => Some(
-            context::login(
-                args.grid,
-                tertiary,
-                CHANNEL,
+            context::login(context::LoginSpec {
+                grid: args.grid,
+                avatar: tertiary,
+                channel: CHANNEL,
                 version,
                 start_location,
-                &state_dir,
-                args.force,
-                None,
-            )
+                state_dir: &state_dir,
+                force: args.force,
+                cache_dir: None,
+            })
             .await
             .map_err(|error| Error::Test(error.to_string()))?,
         ),
@@ -399,28 +399,45 @@ async fn run(args: RunArgs) -> Result<(), Error> {
         &records_dir,
         args.grid,
         test.as_ref(),
-        outcome,
-        metrics,
-        completeness,
-        completeness_note,
+        RunResult {
+            outcome,
+            metrics,
+            completeness,
+            completeness_note,
+        },
     )
 }
 
+/// What one finished case leaves behind: whether it passed, what it measured,
+/// and how much of the behaviour it actually covered. Everything the record's
+/// `run` entry is built from, as against the four arguments that say *where*
+/// the record goes.
+#[derive(Debug)]
+struct RunResult {
+    /// Whether the case passed, and why it did not.
+    outcome: Result<(), TestFailure>,
+    /// What the case measured while it ran.
+    metrics: sl_conformance::metrics::Metrics,
+    /// How much of the behaviour the case actually covers.
+    completeness: record::Completeness,
+    /// The note explaining a less-than-full completeness.
+    completeness_note: Option<String>,
+}
+
 /// Build and append the record for a finished run.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "assembling one record from the run's parts; grouping them adds no clarity"
-)]
 fn write_record(
     repo_root: &Path,
     records_dir: &Path,
     grid: Grid,
     test: &dyn GridTest,
-    outcome: Result<(), TestFailure>,
-    metrics: sl_conformance::metrics::Metrics,
-    completeness: record::Completeness,
-    completeness_note: Option<String>,
+    result: RunResult,
 ) -> Result<(), Error> {
+    let RunResult {
+        outcome,
+        metrics,
+        completeness,
+        completeness_note,
+    } = result;
     let describe = gitinfo::behavior_describe(repo_root).map_err(Error::Git)?;
     let passed = outcome.is_ok();
     if let Err(error) = &outcome {

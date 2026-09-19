@@ -237,20 +237,24 @@ pub fn workspace_symbols(
                 &mut symbols,
                 doc,
                 query,
-                &var.name.name,
-                SymbolKind::VARIABLE,
-                var.name.span.clone(),
-                None,
+                SymbolEntry {
+                    name: &var.name.name,
+                    kind: SymbolKind::VARIABLE,
+                    span: var.name.span.clone(),
+                    container_name: None,
+                },
                 encoding,
             ),
             GlobalItem::Function(func) => push_workspace_symbol(
                 &mut symbols,
                 doc,
                 query,
-                &func.name.name,
-                SymbolKind::FUNCTION,
-                func.name.span.clone(),
-                None,
+                SymbolEntry {
+                    name: &func.name.name,
+                    kind: SymbolKind::FUNCTION,
+                    span: func.name.span.clone(),
+                    container_name: None,
+                },
                 encoding,
             ),
         }
@@ -261,10 +265,12 @@ pub fn workspace_symbols(
             &mut symbols,
             doc,
             query,
-            state_ident,
-            SymbolKind::CLASS,
-            name_span,
-            None,
+            SymbolEntry {
+                name: state_ident,
+                kind: SymbolKind::CLASS,
+                span: name_span,
+                container_name: None,
+            },
             encoding,
         );
         for handler in &state.events {
@@ -272,35 +278,48 @@ pub fn workspace_symbols(
                 &mut symbols,
                 doc,
                 query,
-                &handler.name.name,
-                SymbolKind::EVENT,
-                handler.name.span.clone(),
-                Some(state_ident.to_owned()),
+                SymbolEntry {
+                    name: &handler.name.name,
+                    kind: SymbolKind::EVENT,
+                    span: handler.name.span.clone(),
+                    container_name: Some(state_ident.to_owned()),
+                },
                 encoding,
             );
         }
     }
     symbols
 }
+/// One candidate workspace symbol: what it is called, what kind of thing it is,
+/// where in the source it sits, and what it is declared inside (a state, for an
+/// event handler).
+#[derive(Debug, Clone)]
+struct SymbolEntry<'a> {
+    /// The symbol's name, which the query is matched against.
+    name: &'a str,
+    /// What kind of symbol it is.
+    kind: SymbolKind,
+    /// Its byte span in the document, resolved to a [`Location`].
+    span: core::ops::Range<usize>,
+    /// What it is declared inside — a state, for an event handler.
+    container_name: Option<String>,
+}
 
 /// Push one workspace symbol if its name matches `query`, resolving its byte
 /// span to a [`Location`] in `doc`.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a workspace symbol genuinely needs its name, kind, span, container and the \
-              document/encoding to resolve a location; grouping them into a struct would only \
-              move the argument list to the call sites"
-)]
 fn push_workspace_symbol(
     out: &mut Vec<SymbolInformation>,
     doc: &Document,
     query: &str,
-    name: &str,
-    kind: SymbolKind,
-    span: core::ops::Range<usize>,
-    container_name: Option<String>,
+    entry: SymbolEntry<'_>,
     encoding: PositionEncoding,
 ) {
+    let SymbolEntry {
+        name,
+        kind,
+        span,
+        container_name,
+    } = entry;
     if !name_matches(name, query) {
         return;
     }

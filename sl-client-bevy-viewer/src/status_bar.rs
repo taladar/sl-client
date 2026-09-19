@@ -635,25 +635,40 @@ fn track_agent_position(
     }
 }
 
+/// What the status bar reads out, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the balance, where we are
+/// standing, the parcel we are in, the settings that pick the shown readouts,
+/// and the current region.
+#[derive(Debug, bevy::ecs::system::SystemParam)]
+struct StatusFacts<'w, 's> {
+    /// The L$ balance.
+    balance: Res<'w, AgentBalance>,
+    /// Where we are standing, region-local.
+    position: Res<'w, AgentRegionPosition>,
+    /// The parcel we are in, for its name and flags.
+    agent_parcel: Res<'w, SlAgentParcel>,
+    /// The settings that pick which readouts are shown.
+    settings: Option<Res<'w, ViewerSettings>>,
+    /// The current region, named in the bar.
+    regions: Query<'w, 's, &'static SlRegionIdentity, With<SlCurrentRegion>>,
+}
+
 /// Rewrite the region / coordinates / parcel / balance / time / FPS read-outs
 /// each frame from the live read-models and the frame diagnostics, formatted for
 /// the active locale.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the translator, the \
-              frame diagnostics, the balance / position read-models, the agent parcel, the \
-              settings, the current region and the read-out text nodes"
-)]
 fn update_status_readouts(
     translator: Translator,
     diagnostics: Res<DiagnosticsStore>,
-    balance: Res<AgentBalance>,
-    position: Res<AgentRegionPosition>,
-    agent_parcel: Res<SlAgentParcel>,
-    settings: Option<Res<ViewerSettings>>,
-    regions: Query<&SlRegionIdentity, With<SlCurrentRegion>>,
+    facts: StatusFacts,
     mut readouts: Query<(&StatusReadout, &mut Text)>,
 ) {
+    let StatusFacts {
+        balance,
+        position,
+        agent_parcel,
+        settings,
+        regions,
+    } = facts;
     let region_name = regions
         .single()
         .ok()

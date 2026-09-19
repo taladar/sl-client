@@ -561,26 +561,52 @@ fn cylinder_template(
         indices,
     }
 }
+/// What every level of the recursion builds from, unchanged all the way down:
+/// the two templates a segment is stamped from and the species whose numbers
+/// shape it.
+#[derive(Debug, Clone, Copy)]
+struct BranchTemplates<'a> {
+    /// The cylinder a trunk or branch segment is stamped from.
+    cylinder: &'a Template,
+    /// The card a leaf is stamped from.
+    leaf: &'a Template,
+    /// The species whose lengths, angles and steps shape the whole tree.
+    species: &'a TreeSpecies,
+}
+
+/// Where one level of the recursion is and how big it is — the state the
+/// reference's `genBranchPipeline` carries down from level to level.
+#[derive(Debug, Clone, Copy)]
+struct BranchLevel {
+    /// This segment's frame, in Second Life Z-up space.
+    matrix: Affine,
+    /// How many branch levels are left below this one.
+    depth: u16,
+    /// How many trunk segments are left above this one.
+    trunk_depth: u8,
+    /// This level's size relative to the trunk's.
+    scale: f32,
+    /// How far a side branch at this level droops.
+    droop: f32,
+}
 
 /// Recursively stamp the branch pipeline into `out` (the reference viewer's
 /// `genBranchPipeline`), emitting a trunk/branch cylinder and recursing to child
 /// branches and the continuing trunk until the leaf level, where a leaf card is
 /// stamped instead.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a verbatim port of LLVOTree::genBranchPipeline's parameter list"
-)]
-fn gen_branch(
-    out: &mut TreeMesh,
-    cylinder: &Template,
-    leaf: &Template,
-    species: &TreeSpecies,
-    matrix: Affine,
-    depth: u16,
-    trunk_depth: u8,
-    scale: f32,
-    droop: f32,
-) {
+fn gen_branch(out: &mut TreeMesh, templates: BranchTemplates<'_>, level: BranchLevel) {
+    let BranchTemplates {
+        cylinder,
+        leaf,
+        species,
+    } = templates;
+    let BranchLevel {
+        matrix,
+        depth,
+        trunk_depth,
+        scale,
+        droop,
+    } = level;
     // A trunk segment (rather than a side branch): the reference's
     // `trunk_depth || (scale == 1.f)`. `scale` stays exactly `1.0` only on the
     // trunk chain (side branches multiply by `scale_step < 1`, except kelp whose
@@ -629,14 +655,14 @@ fn gen_branch(
         let rot_mat = Affine::rotation(rot).then(trans_mat);
         gen_branch(
             out,
-            cylinder,
-            leaf,
-            species,
-            rot_mat,
-            depth.saturating_sub(1),
-            0,
-            scale * species.scale_step,
-            droop,
+            templates,
+            BranchLevel {
+                matrix: rot_mat,
+                depth: depth.saturating_sub(1),
+                trunk_depth: 0,
+                scale: scale * species.scale_step,
+                droop,
+            },
         );
     }
 
@@ -647,14 +673,14 @@ fn gen_branch(
         let rot_mat = Affine::rotation(rot).then(trans_mat);
         gen_branch(
             out,
-            cylinder,
-            leaf,
-            species,
-            rot_mat,
-            depth,
-            trunk_depth.saturating_sub(1),
-            scale * species.scale_step,
-            droop,
+            templates,
+            BranchLevel {
+                matrix: rot_mat,
+                depth,
+                trunk_depth: trunk_depth.saturating_sub(1),
+                scale: scale * species.scale_step,
+                droop,
+            },
         );
     }
 }
@@ -685,14 +711,18 @@ pub fn tree_geometry(species: &TreeSpecies, lod: TreeLod) -> TreeMesh {
     let droop = species.droop + REST_DROOP_BONUS;
     gen_branch(
         &mut out,
-        &cylinder,
-        &leaf,
-        species,
-        Affine::IDENTITY,
-        u16::from(species.depth),
-        species.trunk_depth,
-        1.0,
-        droop,
+        BranchTemplates {
+            cylinder: &cylinder,
+            leaf: &leaf,
+            species,
+        },
+        BranchLevel {
+            matrix: Affine::IDENTITY,
+            depth: u16::from(species.depth),
+            trunk_depth: species.trunk_depth,
+            scale: 1.0,
+            droop,
+        },
     );
     out
 }

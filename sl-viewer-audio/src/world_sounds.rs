@@ -105,6 +105,32 @@ pub(crate) struct ParcelAudibility<'w> {
     identity: Res<'w, SlIdentity>,
 }
 
+/// What starting a world sound goes through, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the clock a start time is
+/// stamped from, the clip cache a decode is requested in, the sound state the
+/// intent is recorded on, the object mirror a position is looked up in, and the
+/// two gates every sound passes (the mute list and parcel audibility).
+///
+/// Both sound sources — the grid's `SoundTrigger` / attached sounds and the
+/// viewer's own collision layer — start a sound the same way, so both take
+/// this rather than repeating the list.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct SoundStage<'w> {
+    /// The clock a sound's start time is stamped from.
+    time: Res<'w, Time>,
+    /// The clip cache, which a not-yet-decoded asset is requested in.
+    cache: ResMut<'w, SoundCache>,
+    /// Where the intent to play is recorded, for `drive_world_sounds` to turn
+    /// into a voice.
+    sounds: ResMut<'w, WorldSounds>,
+    /// The object mirror a sound's world position is read from.
+    state: Res<'w, ObjectState>,
+    /// The mute list, the first gate a sound passes.
+    mutes: Res<'w, MuteModel>,
+    /// Parcel audibility, the last one.
+    parcel: ParcelAudibility<'w>,
+}
+
 impl ParcelAudibility<'_> {
     /// The agent's current region handle, if known.
     fn agent_region(&self) -> Option<RegionHandle> {
@@ -234,22 +260,19 @@ pub(crate) struct WorldSounds {
 /// This has no access to the [`Mixer`] (an ingest system, not the audio pump);
 /// it only records intent and requests decodes. [`drive_world_sounds`] turns that
 /// into actual voices once the clips are ready and the mixer is in hand.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the event stream, the \
-              clock, the clip cache, the sound state, the object mirror a position needs, and \
-              the three gates a sound passes (mute list, asset blacklist, parcel audibility)"
-)]
 pub(crate) fn ingest_world_sound_events(
     mut events: MessageReader<SlEvent>,
-    time: Res<Time>,
-    mut cache: ResMut<SoundCache>,
-    mut sounds: ResMut<WorldSounds>,
-    state: Res<ObjectState>,
-    mutes: Res<MuteModel>,
+    stage: SoundStage,
     derender: Res<crate::world_api::DerenderList>,
-    parcel: ParcelAudibility,
 ) {
+    let SoundStage {
+        time,
+        mut cache,
+        mut sounds,
+        state,
+        mutes,
+        parcel,
+    } = stage;
     let now = time.elapsed_secs();
     for event in events.read() {
         match &event.0 {
@@ -724,23 +747,20 @@ const fn pair_key(a: Entity, b: Entity) -> (u64, u64) {
 /// per-pair cooldown. Only prim–prim collisions fire (avatars and terrain carry no
 /// collider), and scripted `llCollisionSound`s already arrive separately as
 /// `SoundTrigger`s, so this is purely the viewer-synthesised default layer.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's params are its dependencies; the collision-sound driver needs the \
-              moving colliders, the scene-object map, time, the sound cache + state, the mute \
-              list, the parcel-audibility check and the enable setting"
-)]
 pub(crate) fn ingest_collisions(
     dynamic: Res<DynamicColliders>,
     scene_objects: Query<&SceneObject>,
-    time: Res<Time>,
-    mut cache: ResMut<SoundCache>,
-    mut sounds: ResMut<WorldSounds>,
-    state: Res<ObjectState>,
-    mutes: Res<MuteModel>,
-    parcel: ParcelAudibility,
+    stage: SoundStage,
     settings: Option<Res<ViewerSettings>>,
 ) {
+    let SoundStage {
+        time,
+        mut cache,
+        mut sounds,
+        state,
+        mutes,
+        parcel,
+    } = stage;
     if !collision_sounds_enabled(settings.as_deref()) {
         // Forget any tracked contacts while disabled, so re-enabling does not fire
         // a burst of stale impacts (every still-touching pair reads as a new edge).

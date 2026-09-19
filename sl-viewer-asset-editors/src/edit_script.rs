@@ -341,12 +341,14 @@ fn ingest_script_asset(
             let built = populate_editor(
                 &mut commands,
                 content,
-                &text,
-                editable,
-                source,
-                running,
-                FONT_SIZE,
-                true,
+                EditorShape {
+                    text: &text,
+                    editable,
+                    source,
+                    running,
+                    font_size: FONT_SIZE,
+                    live: true,
+                },
             );
             state.body_field = built.body_field;
             state.status = built.status;
@@ -377,29 +379,49 @@ struct BuiltEditor {
     running_glyph: Option<Entity>,
 }
 
+/// What an editor's content is built from: the script itself, whether it may be
+/// edited at all, what a save writes back to, whether the task script is
+/// running, the type size, and whether this is the real floater or a specimen.
+///
+/// Named rather than passed positionally because four of the six are bare
+/// `bool`s — at a call site `true, source, true, font, false` says nothing
+/// about which switch is which.
+#[derive(Debug, Clone, Copy)]
+struct EditorShape<'a> {
+    /// The script text the body starts at.
+    text: &'a str,
+    /// Whether our permissions allow editing; a `false` gets the read-only
+    /// block and the note above it.
+    editable: bool,
+    /// What a save writes back to — an inventory item or a task script.
+    source: ScriptSource,
+    /// Whether the task script is running, which seeds the Running toggle.
+    running: bool,
+    /// The type size the body and chrome are laid out at.
+    font_size: f32,
+    /// `true` for the real floater (the Running toggle is wired to the session)
+    /// and `false` for a specimen (it is shown for layout but does nothing).
+    /// The Save button needs no such flag: it names the floater it sits in, and
+    /// a specimen sits in none.
+    live: bool,
+}
+
 /// Build the editor's content under `content`: the body (editable field or
 /// read-only block), the Running toggle (task scripts), a Save & Compile button
 /// with a status line, and an empty diagnostics container.
-///
-/// `live` is `true` for the real floater (the Running toggle is wired to the
-/// session) and `false` for a specimen (it is shown for layout but does
-/// nothing). The Save button needs no such flag: it names the floater it sits
-/// in, and a specimen sits in none.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the editor's shape is its content, permission gate, save target, run \
-              state, font size and live/specimen flag — all genuinely independent"
-)]
 fn populate_editor(
     commands: &mut Commands,
     content: Entity,
-    text: &str,
-    editable: bool,
-    source: ScriptSource,
-    running: bool,
-    font_size: f32,
-    live: bool,
+    shape: EditorShape<'_>,
 ) -> BuiltEditor {
+    let EditorShape {
+        text,
+        editable,
+        source,
+        running,
+        font_size,
+        live,
+    } = shape;
     if !editable {
         spawn_note(commands, content, "script-readonly-note", font_size);
     }
@@ -836,12 +858,14 @@ pub fn spawn_script_editor_specimen(
     let built = populate_editor(
         commands,
         col,
-        &cx.text(SPECIMEN_TEXT),
-        true,
-        source,
-        true,
-        cx.font_size,
-        false,
+        EditorShape {
+            text: &cx.text(SPECIMEN_TEXT),
+            editable: true,
+            source,
+            running: true,
+            font_size: cx.font_size,
+            live: false,
+        },
     );
     // A representative diagnostic so the error-list layout is swept too.
     if let Some(errors) = built.errors {
