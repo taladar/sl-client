@@ -1,7 +1,7 @@
 //! The **render scene registry** (`viewer-render-test-harness`): the one list of
 //! things this viewer renders, built with **no login, no region, no OAR and no
 //! UUID lookup** — shared by the gallery a human looks at
-//! (`sl_client_bevy_viewer::render_gallery`) and the checks a machine runs
+//! (`sl_viewer_gallery::render_gallery`) and the checks a machine runs
 //! (`sl_client_bevy_viewer::render_test`).
 //!
 //! This is `sl_viewer_ui_core::ui_element`'s 3D counterpart, and deliberately the same
@@ -10,6 +10,26 @@
 //! applies here and applies harder — a rendering bug is currently found by a
 //! human logging into OpenSim, rezzing an object, flying a camera at it and
 //! squinting, and the `R*` list in `roadmap/bugs/` is what that process misses.
+//!
+//! # Why a crate, and not a module of the scene layer
+//!
+//! This registry is test fixtures, and it lived inside `sl-viewer-world-scene`
+//! until 2026-09-20 — four thousand lines of procedural prims, sculpts, meshes
+//! and skeletons compiled into a library a dozen crates depend on, of which only
+//! the two harness surfaces draw a fixture. Here it is a leaf instead: it
+//! depends on the scene layer (and on the object layer below it) rather than
+//! being part of it, so the nine crates that stand on the scene layer without
+//! ever building a scene (the edit tools, the map, places, search, the context
+//! menus and the world view among them) stop compiling it, and editing a
+//! fixture no longer rebuilds all of them. In `sl-client-bevy-viewer` it is a
+//! **dev**-dependency: the harness tiers (`render_matrix`, `render_readback`,
+//! `render_test`) are the only thing in that crate's own source which builds a
+//! scene.
+//!
+//! The direction of the dependency is the point: a fixture reaches *down* into
+//! the real scene systems (`sl_viewer_world_scene::sky`'s `resolve_sky`,
+//! `water`'s `water_params`, `terrain`'s `build_patch_mesh`), so what it renders
+//! is what the viewer renders. Nothing in the scene layer reaches back up.
 //!
 //! # Why a scene, and not an object
 //!
@@ -116,14 +136,6 @@ use sl_terrain::TerrainComposition;
 
 use std::path::{Path, PathBuf};
 
-use crate::particles::{drive_particles, float_to_u8, retire_orphaned_clouds};
-use crate::sky::{
-    MOON_DISK_RADIUS, SCENE_LIGHT_ILLUMINANCE, SKY_DOME_RADIUS, STAR_DOME_RADIUS, SUN_DISK_RADIUS,
-    build_cloud_dome_mesh, build_star_mesh, cloud_params, disc_transform,
-    placeholder_image as sky_placeholder_image, resolve_sky, shadow_cascades,
-};
-use crate::terrain::{build_patch_mesh, placeholder_image as terrain_placeholder_image};
-use crate::water::{DEFAULT_WATER_HEIGHT, WAVE_NORMAL_UPLOAD, water_params, white_mask_image};
 use sl_viewer_kit::avatar_assets::AvatarAssetLibrary;
 use sl_viewer_kit::coords::sl_to_bevy_rotation;
 use sl_viewer_kit::face_material::{
@@ -143,6 +155,18 @@ use sl_viewer_world_objects::legacy_materials::{
 use sl_viewer_world_objects::objects::{FaceTextureDebug, PrimFaceEntity};
 use sl_viewer_world_objects::texture_anim::{ObjectTextureAnimation, drive_texture_animations};
 use sl_viewer_world_objects::textures::TextureManager;
+use sl_viewer_world_scene::particles::{drive_particles, float_to_u8, retire_orphaned_clouds};
+use sl_viewer_world_scene::sky::{
+    MOON_DISK_RADIUS, SCENE_LIGHT_ILLUMINANCE, SKY_DOME_RADIUS, STAR_DOME_RADIUS, SUN_DISK_RADIUS,
+    build_cloud_dome_mesh, build_star_mesh, cloud_params, disc_transform,
+    placeholder_image as sky_placeholder_image, resolve_sky, shadow_cascades,
+};
+use sl_viewer_world_scene::terrain::{
+    build_patch_mesh, placeholder_image as terrain_placeholder_image,
+};
+use sl_viewer_world_scene::water::{
+    DEFAULT_WATER_HEIGHT, WAVE_NORMAL_UPLOAD, water_params, white_mask_image,
+};
 
 /// The environment variable naming a Linden `character/` directory — **the same
 /// one the viewer itself reads** (`--viewer-assets` / `SL_VIEWER_ASSETS`), so a
@@ -405,7 +429,7 @@ pub struct SceneAssets<'w> {
 
 /// Everything a registered scene needs to be **driven** — the viewer's own
 /// time-varying systems and the resources they read — added by the harness
-/// (`sl_client_bevy_viewer::render_test`) and the gallery (`sl_client_bevy_viewer::render_gallery`) alike.
+/// (`sl_client_bevy_viewer::render_test`) and the gallery (`sl_viewer_gallery::render_gallery`) alike.
 ///
 /// One plugin rather than two lists, and the reason is a failure both apps have
 /// already had. A dynamic scene's renderable does not exist until its driver has
@@ -439,16 +463,16 @@ impl Plugin for SceneRuntimePlugin {
         // (`sl-client-viewer-fetch-defer-until-cap`).
         app.init_resource::<TextureManager>()
             .init_resource::<DecodedTextures>()
-            .init_resource::<crate::render_overrides::RenderOverrides>()
+            .init_resource::<sl_viewer_world_scene::render_overrides::RenderOverrides>()
             .add_systems(Update, (simulate_flexi, drive_texture_animations));
         // The particle drivers, unless the viewer's own `ParticlesPlugin` (and the
         // GPU renderer beside it) is already in the app — a rig that runs the
         // full render stack must not step every cloud twice a frame.
-        if !app.is_plugin_added::<crate::particles::ParticlesPlugin>() {
+        if !app.is_plugin_added::<sl_viewer_world_scene::particles::ParticlesPlugin>() {
             app.add_systems(
                 Startup,
                 (
-                    crate::particles::setup_particles,
+                    sl_viewer_world_scene::particles::setup_particles,
                     sl_viewer_kit::particle_render::setup_particle_quad,
                 ),
             )
@@ -897,7 +921,7 @@ pub fn scene_root_transform() -> Transform {
 /// its visibility from **every** ancestor, so a root without one breaks the
 /// propagation chain for the whole scene and Bevy warns once per renderable
 /// (B0004). Bundled here rather than left to each caller because there are two —
-/// `sl_client_bevy_viewer::render_test` and `sl_client_bevy_viewer::render_gallery` — and the first version of
+/// `sl_client_bevy_viewer::render_test` and `sl_viewer_gallery::render_gallery` — and the first version of
 /// this had the bug in both.
 #[must_use]
 pub fn scene_root() -> impl Bundle {
@@ -2455,7 +2479,7 @@ fn land_patch(patch_x: u32, patch_y: u32) -> TerrainPatch {
 /// [`build_patch_mesh`] and its real [`TerrainMaterial`].
 ///
 /// The patches are placed in plain Second Life metres under the scene root, which
-/// is *not* what the viewer does: `crate::terrain`'s `patch_transform` carries the
+/// is *not* what the viewer does: `sl_viewer_world_scene::terrain`'s `patch_transform` carries the
 /// Second Life → Bevy basis change on each patch entity, because the viewer spawns
 /// its patches at the world root with no basis-changed ancestor. Here the scene
 /// root already carries it (once, for every scene), so applying it again would
@@ -3026,7 +3050,7 @@ fn tree_billboard(
 ///
 /// Every other fixture here writes plain Second Life metres and lets the scene root
 /// convert them once, because that is what the viewer does with everything a region
-/// sends it. `crate::sky` and `crate::water` are the exception, and in neither place
+/// sends it. `sl_viewer_world_scene::sky` and `sl_viewer_world_scene::water` are the exception, and in neither place
 /// is it an oversight: the atmosphere is not *in* the region. Both spawn at the
 /// **world root** with an identity transform and build directly in Bevy's frame —
 /// `build_star_mesh` picks "a random direction on the upper hemisphere (Bevy Y up)",
@@ -3349,7 +3373,7 @@ fn sky_midnight(cx: SceneCx, root: Entity, commands: &mut Commands, assets: &mut
 ///
 /// The scene needs this because the alternative is a scene of nothing. The viewer
 /// fetches its wave normal map from the grid (`DEFAULT_WATER_NORMAL`) and, until it
-/// arrives, wears [`flat_normal_image`](crate::water::flat_normal_image) — a **1×1**
+/// arrives, wears [`flat_normal_image`](sl_viewer_world_scene::water::flat_normal_image) — a **1×1**
 /// perfectly flat normal, whose own doc admits it renders "a fresnel-tinted flat
 /// sea". With no grid that placeholder is forever, and a flat normal gives the
 /// shader no slope anywhere: no fresnel variation, no specular, no wave. Which is
@@ -3515,7 +3539,7 @@ pub const STRADDLING_EMERGENT: f32 = STRADDLING_HALF_HEIGHT - STRADDLING_SINK;
 /// [`SCENES`] `water-straddling-translucent-prim`: a **translucent** prim centred
 /// on the waterline, half of it submerged and half standing above the surface.
 ///
-/// The case the per-object water bucket cannot express. `crate::transparency`
+/// The case the per-object water bucket cannot express. `sl_viewer_world_scene::transparency`
 /// sorts each translucent item into the pre-water bucket or the post-water one by
 /// **its centre height**, and the sea is drawn between them, opaque and writing
 /// depth. A prim that straddles the surface has fragments on both sides but only
@@ -3762,7 +3786,7 @@ fn water_translucent_cap_pair(
 }
 
 /// The viewer's per-face tag for the fixture face at `index`, so a fixture prim is
-/// selected by the same systems a real one is (`crate::water_clip`).
+/// selected by the same systems a real one is (`sl_viewer_world_scene::water_clip`).
 fn prim_face_tag(index: usize) -> PrimFaceEntity {
     PrimFaceEntity {
         face_id: PrimFaceId::new(u16::try_from(index).unwrap_or(u16::MAX)),
@@ -3820,7 +3844,7 @@ fn translucency_matrix(
         ));
     }
     // Each face carries the viewer's own `PrimFaceEntity` tag, which is not
-    // decoration: it is what `crate::water_clip` selects the faces it may split by,
+    // decoration: it is what `sl_viewer_world_scene::water_clip` selects the faces it may split by,
     // so a fixture without it would render a prim the viewer never renders.
     for (label, x, offset) in MATRIX_BOXES {
         let object = commands
@@ -3994,9 +4018,9 @@ fn spawn_sea(
     let material = assets.water_materials.add(WaterMaterial {
         params: water_params(
             &WaterSettings::legacy_default("Default"),
-            crate::water::WaterLighting {
+            sl_viewer_world_scene::water::WaterLighting {
                 light_dir: resolved.light_dir,
-                specular_color: crate::water::water_specular_color(
+                specular_color: sl_viewer_world_scene::water::water_specular_color(
                     Vec3::new(
                         midday.sunlight_color.red(),
                         midday.sunlight_color.green(),
@@ -4025,7 +4049,7 @@ fn spawn_sea(
             // against: submerged, it darkens toward the horizon until a translucent
             // box composited over it stops carrying its own colour, and the walk
             // starts measuring the fog rather than the ordering it is there to pin.
-            crate::water_fog::WaterFogSettings::default(),
+            sl_viewer_world_scene::water_fog::WaterFogSettings::default(),
         ),
         // Both slots share the map, as `apply_water_textures` does until a day
         // cycle drives a separate next frame and a blend between them.
@@ -4040,9 +4064,9 @@ fn spawn_sea(
         // keeps every displaced sample here.
         scene_depth: assets
             .images
-            .add(crate::water_scene_depth::placeholder_scene_depth_image()),
+            .add(sl_viewer_world_scene::water_scene_depth::placeholder_scene_depth_image()),
     });
-    // See `bevy_space`: `crate::water` builds in Bevy's frame at the world root.
+    // See `bevy_space`: `sl_viewer_world_scene::water` builds in Bevy's frame at the world root.
     let space = commands
         .spawn((
             bevy_space(),
@@ -4053,7 +4077,7 @@ fn spawn_sea(
         .id();
     for (name, extent, height) in [
         ("ocean", 20_000.0_f32, DEFAULT_WATER_HEIGHT),
-        // The region plane, a hair above the ocean — `crate::water`'s
+        // The region plane, a hair above the ocean — `sl_viewer_world_scene::water`'s
         // `OCEAN_DEPTH_BIAS`, the thing that stops the two z-fighting.
         ("region-plane", 128.0, DEFAULT_WATER_HEIGHT + 0.02),
     ] {

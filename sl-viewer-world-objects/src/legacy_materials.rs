@@ -418,7 +418,7 @@ pub fn apply_legacy_materials(
 /// The pure half of `apply_legacy_to_face`, split out so it is reachable without
 /// a fetch behind it: everything here is a function of the decoded material, while
 /// the normal / specular maps are grid assets the caller has to go and get. That is
-/// what lets `sl_viewer_world_scene::render_scene`'s legacy-material scene exercise the real
+/// what lets `sl_viewer_render_fixtures`'s legacy-material scene exercise the real
 /// mapping with no capability, no `TextureManager` and no grid — the registry's
 /// rule that construction is separable from transport, applied to this module.
 pub fn apply_legacy_scalars(material_asset: &mut FaceMaterial, material: &LegacyMaterial) -> bool {

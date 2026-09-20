@@ -46,7 +46,7 @@ trademarks of Linden Research, Inc.
   routing, avatar geometry checks) load this directory instead of
   depending on an out-of-tree Firestorm checkout.
 - The render tier's avatar scenes (`avatar-base-part`,
-  `avatar-morphed-body` in `sl-viewer-world-scene/src/render_scene.rs`)
+  `avatar-morphed-body` in `sl-viewer-render-fixtures`)
   default to it too, so the sweep renders the real skeleton, LAD morphs
   and base meshes with no environment set. `SL_VIEWER_ASSETS=mini` is
   the escape hatch back to `sl-avatar`'s 4-vertex fixture, for bisecting

@@ -35,7 +35,6 @@ pub mod particles;
 mod plugin;
 pub mod probes;
 pub mod render_overrides;
-pub mod render_scene;
 pub mod sky;
 pub mod terrain;
 pub mod tonemap;

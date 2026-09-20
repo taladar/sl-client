@@ -699,10 +699,11 @@ fn patch_transform(
 /// A 1×1 olive placeholder [`Image`], used for every detail slot until the real
 /// textures decode.
 ///
-/// `pub(crate)` for [`crate::render_scene`]: a terrain scene has no grid to fetch
+/// `pub` for `sl_viewer_render_fixtures`: a terrain scene has no grid to fetch
 /// a region's detail textures from, so it stands at exactly the state a real
 /// region's terrain is in before they arrive.
-pub(crate) fn placeholder_image() -> Image {
+#[must_use]
+pub fn placeholder_image() -> Image {
     upload_pixels(
         1,
         1,
@@ -719,17 +720,18 @@ pub(crate) fn placeholder_image() -> Image {
 /// height samples but spans `size` metres, so its far (north / east /
 /// north-east) edge is the *shared* boundary with the neighbouring patches. That
 /// extra edge is sampled from the neighbour patches in `raw` (see
-/// [`sample_height`]) — including the **adjacent region's** patches at a region
+/// `sample_height`) — including the **adjacent region's** patches at a region
 /// border — so adjacent patch meshes meet exactly and leave no seam, even where
 /// the ground is sloped across a region boundary.
 /// Each vertex carries computed normals, tiled detail UVs, and a four-component
 /// blend weight (from `composition`, or a flat default while it is unknown); the
 /// grid is two triangles per cell quad.
 ///
-/// `pub(crate)` for [`crate::render_scene`]: this is already a pure
+/// `pub` for `sl_viewer_render_fixtures`: this is already a pure
 /// `(patches, composition) -> Option<Mesh>`, so the terrain scenes call the real
 /// builder rather than a copy of it.
-pub(crate) fn build_patch_mesh(
+#[must_use]
+pub fn build_patch_mesh(
     raw: &HashMap<PatchKey, TerrainPatch>,
     composition: Option<&TerrainComposition>,
     key: PatchKey,

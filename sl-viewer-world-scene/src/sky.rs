@@ -137,13 +137,13 @@ impl Plugin for SkyPlugin {
 /// clip plane by `sky.wgsl` (a skybox backdrop, occluded by real geometry at any
 /// altitude), so this radius only needs to enclose the camera and stay comfortably
 /// within the camera's far plane (4096 m) so the sphere is never frustum-culled.
-pub(crate) const SKY_DOME_RADIUS: f32 = 3000.0;
+pub const SKY_DOME_RADIUS: f32 = 3000.0;
 
 /// The scene directional light's illuminance (lux). Held constant; the sky's
 /// computed sun / moon diffuse colour carries the day↔night brightness change
 /// (a night moon diffuse is a fraction of the daytime sun diffuse), so the light
 /// dims naturally as the colour darkens without re-scaling the illuminance.
-pub(crate) const SCENE_LIGHT_ILLUMINANCE: f32 = 10_000.0;
+pub const SCENE_LIGHT_ILLUMINANCE: f32 = 10_000.0;
 
 /// Maps the sky's ambient colour luminance to the Bevy ambient-light brightness
 /// (lux). The reference default ambient (`0.25` grey) lands at a soft fill.
@@ -196,7 +196,8 @@ pub fn shadow_cascade_count() -> Option<usize> {
 /// receive the sun, while the first (near) cascade is kept tight so avatar-close
 /// detail gets most of the shadow-map resolution. The reference
 /// `LLPipeline::renderShadow` uses four split sun cascades likewise.
-pub(crate) fn shadow_cascades() -> CascadeShadowConfig {
+#[must_use]
+pub fn shadow_cascades() -> CascadeShadowConfig {
     shadow_cascades_for(shadow_cascade_count().unwrap_or(4))
 }
 
@@ -275,10 +276,10 @@ pub(crate) const DISC_DISTANCE: f32 = 2000.0;
 const HEAVENLY_BODY_FACTOR: f32 = 0.1;
 
 /// The reference sun-disc radius (`SUN_DISK_RADIUS`, `llvosky.cpp`).
-pub(crate) const SUN_DISK_RADIUS: f32 = 0.5;
+pub const SUN_DISK_RADIUS: f32 = 0.5;
 
 /// The reference moon-disc radius (`MOON_DISK_RADIUS = SUN_DISK_RADIUS * 0.9`).
-pub(crate) const MOON_DISK_RADIUS: f32 = 0.45;
+pub const MOON_DISK_RADIUS: f32 = 0.45;
 
 /// The radius of the cloud dome, in metres — the reference `LLSettingsSky::
 /// DOME_RADIUS`. The cloud layer's *depth* is forced to the far clip plane by
@@ -331,10 +332,10 @@ const STAR_COUNT: usize = 1000;
 /// The radius of the star sphere, in metres, at which the star quads sit for
 /// screen projection. Their *depth* is forced to the far clip plane by `stars.wgsl`
 /// (a skybox backdrop, occluded by real geometry at any altitude), so this radius
-/// only sets the directional layout and — with [`REFERENCE_DOME_RADIUS`] — the
+/// only sets the directional layout and — with `REFERENCE_DOME_RADIUS` — the
 /// per-star screen size; it is kept well inside the camera's 4096 m far plane so
 /// the sphere is not frustum-culled.
-pub(crate) const STAR_DOME_RADIUS: f32 = 2900.0;
+pub const STAR_DOME_RADIUS: f32 = 2900.0;
 
 /// The reference sky-dome radius (`LLSettingsSky::DOME_RADIUS`), at which the
 /// reference sizes the star quads (`sc = 16 + frand * 20`). Our field sits at the
@@ -484,7 +485,7 @@ pub(crate) struct StarState {
 /// atmosphere yields.
 ///
 /// Extracted because **three systems were deriving it, identically**:
-/// [`drive_sky`], [`drive_clouds`] and [`drive_sun_moon_discs`] each recomputed the
+/// `drive_sky`, `drive_clouds` and `drive_sun_moon_discs` each recomputed the
 /// sun and moon directions, the up tests, the active light direction, the glow
 /// ladder and the clamped light-norm from the same `SkySettings` — the comments in
 /// two of them said "as in `drive_sky`", which is a copy admitting it is one. Three
@@ -493,44 +494,45 @@ pub(crate) struct StarState {
 /// It is also what makes a sky **reachable without a session**: the derivation used
 /// to be welded to `Res<EnvironmentState>` and a camera query, so the only way to
 /// get a sky's uniforms was to be inside a running viewer. Now it is a function of
-/// a `SkySettings`, which is a plain value — so `crate::render_scene`'s four
+/// a `SkySettings`, which is a plain value — so `sl_viewer_render_fixtures`'s four
 /// time-of-day scenes render the real atmosphere rather than four hand-copied
 /// uniform blocks.
-pub(crate) struct ResolvedSky {
+#[derive(Debug)]
+pub struct ResolvedSky {
     /// The atmosphere shader's uniform block.
-    pub(crate) params: SkyParams,
+    pub params: SkyParams,
     /// The clamped light-norm the shaders dot against (`getClampedLightNorm`).
-    pub(crate) lightnorm: Vec3,
+    pub lightnorm: Vec3,
     /// The sun's direction, in Bevy space.
-    pub(crate) sun_dir: Vec3,
+    pub sun_dir: Vec3,
     /// The moon's direction, in Bevy space.
-    pub(crate) moon_dir: Vec3,
+    pub moon_dir: Vec3,
     /// Whether the sun is above the horizon (`getIsSunUp`).
-    pub(crate) sun_up: bool,
+    pub sun_up: bool,
     /// Whether the moon is above the horizon (`getIsMoonUp`).
-    pub(crate) moon_up: bool,
+    pub moon_up: bool,
     /// `1.0` by day, `0.0` by night — the shaders' `sun_up_factor`.
-    pub(crate) sun_up_factor: f32,
+    pub sun_up_factor: f32,
     /// The sun/moon glow factor (`getSunMoonGlowFactor`).
-    pub(crate) glow_factor: f32,
+    pub glow_factor: f32,
     /// The active light's direction: the sun if it is up, else the moon if it is,
     /// else straight down (`getLightDirection`).
-    pub(crate) light_dir: Vec3,
+    pub light_dir: Vec3,
     /// The active body's atmospheric diffuse colour — the scene's directional
     /// light.
-    pub(crate) diffuse: [f32; 3],
+    pub diffuse: [f32; 3],
     /// The sky's total ambient colour.
-    pub(crate) ambient: [f32; 3],
+    pub ambient: [f32; 3],
     /// The atmospheric sun colour a *surface* shader is lit by
-    /// (`calcAtmosphericVarsLinear`'s `sunlit`) — see [`atmospheric_sunlit`], and
+    /// (`calcAtmosphericVarsLinear`'s `sunlit`) — see `atmospheric_sunlit`, and
     /// note that it is **not** [`diffuse`](Self::diffuse).
-    pub(crate) sunlit: Vec3,
+    pub sunlit: Vec3,
     /// The per-metre haze attenuation coefficient a surface shader reproduces
-    /// `atten` from — see [`haze_attenuation_coefficient`].
-    pub(crate) haze_atten_coef: Vec3,
+    /// `atten` from — see `haze_attenuation_coefficient`.
+    pub haze_atten_coef: Vec3,
     /// What every lit legacy surface — prim faces, avatars, trees, terrain — is lit
-    /// by, as the shared sky-lighting texture carries it. See [`surface_sky_lighting`].
-    pub(crate) surface_lighting: SkyLighting,
+    /// by, as the shared sky-lighting texture carries it. See `surface_sky_lighting`.
+    pub surface_lighting: SkyLighting,
 }
 
 /// The sun's and the moon's directions in Bevy space, the reference's own
@@ -777,7 +779,8 @@ fn haze_attenuation_coefficient(params: &SkyParams) -> Vec3 {
 
 /// Resolve one sky frame into everything the scene needs from it. See
 /// [`ResolvedSky`].
-pub(crate) fn resolve_sky(sky: &SkySettings) -> ResolvedSky {
+#[must_use]
+pub fn resolve_sky(sky: &SkySettings) -> ResolvedSky {
     // Sun / moon directions in Bevy space, and which body is up (the reference
     // tests the Second Life up component, which maps to Bevy `y`).
     let (sun_dir, moon_dir) = body_directions(sky);
@@ -1969,8 +1972,8 @@ fn calc_cloud_phi(t: f32) -> f32 {
 
 /// Build the cloud-dome mesh: a faithful port of the reference `LLVOWLSky` sky-dome
 /// tessellation used for clouds (`buildStripsBuffer`). A grid of
-/// [`CLOUD_DOME_STACKS`]×[`CLOUD_DOME_SLICES`] vertices over the zenith cap
-/// ([`calc_cloud_phi`]), each carrying the reference **baked** planar cloud
+/// `CLOUD_DOME_STACKS`×`CLOUD_DOME_SLICES` vertices over the zenith cap
+/// (`calc_cloud_phi`), each carrying the reference **baked** planar cloud
 /// texcoord `((-z0 + 1) / 2, (-x0 + 1) / 2)` of its unit dome direction.
 /// `clouds.wgsl` samples the cloud texture through this interpolated UV, so the
 /// projection matches the reference instead of being derived per fragment across
@@ -1983,7 +1986,8 @@ fn calc_cloud_phi(t: f32) -> f32 {
 /// instead turns the whole layer a quarter-turn about the zenith: the noise is laid
 /// out on other ground, and a west wind carries the clouds north
 /// (`viewer-cloud-noise-scale-divergence`).
-pub(crate) fn build_cloud_dome_mesh() -> Mesh {
+#[must_use]
+pub fn build_cloud_dome_mesh() -> Mesh {
     let stride = CLOUD_DOME_SLICES.saturating_add(1);
     let vert_count = CLOUD_DOME_STACKS.saturating_add(1).saturating_mul(stride);
     let mut positions: Vec<[f32; 3]> = Vec::with_capacity(vert_count);
@@ -2066,12 +2070,13 @@ pub(crate) fn build_cloud_dome_mesh() -> Mesh {
     .with_inserted_indices(Indices::U32(indices))
 }
 
-/// Build the star-field mesh: [`STAR_COUNT`] small camera-facing quads scattered
+/// Build the star-field mesh: `STAR_COUNT` small camera-facing quads scattered
 /// over the upper hemisphere of a sphere of radius [`STAR_DOME_RADIUS`], each with
 /// a per-star near-white colour (the reference `LLVOWLSky::initStars` /
 /// `updateStarGeometry`). Deterministic (fixed-seed PRNG) so the field is stable
 /// across runs.
-pub(crate) fn build_star_mesh() -> Mesh {
+#[must_use]
+pub fn build_star_mesh() -> Mesh {
     let mut rng = StarRng::new(STAR_RNG_SEED);
     let mut positions: Vec<[f32; 3]> = Vec::with_capacity(STAR_COUNT.saturating_mul(4));
     let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(STAR_COUNT.saturating_mul(4));
@@ -2194,14 +2199,10 @@ impl StarRng {
 }
 
 /// Build the billboard transform for a heavenly-body disc: a camera-facing quad
-/// at [`DISC_DISTANCE`] along `dir`, oriented and sized like the reference
+/// at `DISC_DISTANCE` along `dir`, oriented and sized like the reference
 /// `LLVOSky::updateHeavenlyBodyGeometry` (with its near-horizon enlargement).
-pub(crate) fn disc_transform(
-    camera_pos: Vec3,
-    dir: Vec3,
-    scale: f32,
-    disk_radius: f32,
-) -> Transform {
+#[must_use]
+pub fn disc_transform(camera_pos: Vec3, dir: Vec3, scale: f32, disk_radius: f32) -> Transform {
     // Component-wise so the workspace `arithmetic_side_effects` lint (which fires on
     // the glam vector operators) stays happy: `camera_pos + dir * DISC_DISTANCE`.
     let translation = Vec3::new(
@@ -2337,7 +2338,8 @@ pub(crate) fn default_sky_params() -> SkyParams {
 /// direction, day/night factor, glow factor, and accumulated scroll offset. The
 /// scroll is folded into `cloud_pos_density1` the way the reference
 /// `LLSettingsVOSky::applySpecial` does (the x offset negated).
-pub(crate) fn cloud_params(
+#[must_use]
+pub fn cloud_params(
     sky: &SkySettings,
     lightnorm: Vec3,
     sun_up_factor: f32,
@@ -2547,7 +2549,8 @@ const fn glow_vec(glow: Glow) -> Vec3 {
 
 /// A 1×1 transparent-black placeholder [`Image`] for an overlay texture still in
 /// flight.
-pub(crate) fn placeholder_image() -> Image {
+#[must_use]
+pub fn placeholder_image() -> Image {
     Image::new(
         Extent3d {
             width: 1,

@@ -2,7 +2,7 @@
 id: test-assets-unify-rigged-fixtures
 title: Two generators make a rigged fixture; there should be one
 topic: test
-status: blocked
+status: ready
 origin: noticed while doing test-assets-rigged-mesh-encoder (2026-09-01)
 points: 3
 refs: [test-assets-rigged-mesh-encoder, viewer-r1, viewer-p17-2]
@@ -12,7 +12,8 @@ blocked_by: [viewer-audit-render-fixtures-crate]
 Context: [context/testing.md](../context/testing.md).
 
 [[test-assets-rigged-mesh-encoder]] added `sl-test-assets::rigged`, and
-`sl-viewer-world-scene/src/render_scene.rs` already had `rigged_strip`.
+`sl-viewer-render-fixtures` (then
+`sl-viewer-world-scene/src/render_scene.rs`) already had `rigged_strip`.
 Both build a `(Submesh, MeshSkin)` for the same purpose — exercise the
 skinning path — and `sl-test-assets`' own crate docs open by arguing that
 for a fixture oracle to mean the same thing in two tiers "the generator

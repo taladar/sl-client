@@ -652,11 +652,11 @@ impl Emitter {
 /// state with it, and the driver needs no snapshot of the query to release its
 /// borrow before mutating a resource. What the ECS does *not* do for us is retire a
 /// cloud whose source stops emitting but whose object lives on, nor despawn the
-/// separate *render* entity ([`Cloud::entity`], deliberately not a child — its
+/// separate *render* entity (`Cloud::entity`, deliberately not a child — its
 /// particles are in absolute world coordinates); [`retire_orphaned_clouds`] reaps
 /// both.
 #[derive(Debug, Component)]
-pub(crate) struct Cloud {
+pub struct Cloud {
     /// The source emitter state.
     emitter: Emitter,
     /// The source's live particles.
@@ -695,7 +695,7 @@ pub(crate) struct Cloud {
 /// is what lets [`retire_orphaned_clouds`] recognise a render entity whose source is
 /// gone (or has stopped being a particle source) and despawn it.
 #[derive(Debug, Component)]
-pub(crate) struct CloudOf(Entity);
+pub struct CloudOf(Entity);
 
 /// The world-space centroid of the cloud holding the most live particles, with
 /// that count — the debug focus target for [`focus_camera_on_particles`]. `None`
@@ -756,7 +756,7 @@ pub(crate) fn focus_camera_on_particles(
 pub(crate) struct DefaultParticleImage(Handle<Image>);
 
 /// Startup: build and upload the procedural default particle sprite.
-pub(crate) fn setup_particles(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
+pub fn setup_particles(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     let handle = images.add(default_particle_image());
     commands.insert_resource(DefaultParticleImage(handle));
 }
@@ -877,7 +877,7 @@ fn lerp_color(start: [u8; 4], end: [u8; 4], t: f32) -> [f32; 4] {
 /// Truncate a non-negative `f32` into a `u8`, saturating at the range ends — for
 /// packing an alpha value into the procedural sprite.
 ///
-/// `pub(crate)` because `crate::render_scene` packs its procedurally computed
+/// `pub` because `sl_viewer_render_fixtures` packs its procedurally computed
 /// sculpt map with it: the conversion is the same one, and a second copy would
 /// be a second place to get the clamp wrong.
 #[expect(
@@ -886,7 +886,8 @@ fn lerp_color(start: [u8; 4], end: [u8; 4], t: f32) -> [f32; 4] {
     clippy::cast_sign_loss,
     reason = "value pre-clamped to 0..=255; truncate-toward-zero for a colour byte"
 )]
-pub(crate) const fn float_to_u8(value: f32) -> u8 {
+#[must_use]
+pub const fn float_to_u8(value: f32) -> u8 {
     value.clamp(0.0, 255.0) as u8
 }
 
@@ -934,8 +935,13 @@ fn cloud_centroid(particles: &[Particle], default: Vec3) -> Vec3 {
 /// decoded textures a source's diffuse comes from, the image store it lands in,
 /// the texture manager the fetch goes through, and the default image a source
 /// with no texture falls back to.
+#[expect(
+    missing_debug_implementations,
+    reason = "a `SystemParam` cannot derive Debug -- its fields are Bevy store \
+              handles, none of which implements it"
+)]
 #[derive(bevy::ecs::system::SystemParam)]
-pub(crate) struct ParticleStores<'w> {
+pub struct ParticleStores<'w> {
     /// The shared instanced quad every cloud draws.
     quad: Res<'w, ParticleQuad>,
     /// The decoded textures a source's diffuse is resolved in.
@@ -952,7 +958,7 @@ pub(crate) struct ParticleStores<'w> {
 /// [`SystemParam`](bevy::ecs::system::SystemParam): the live particle cap, the
 /// HUD-particle override, and the throttle behind the live-count diagnostic.
 #[derive(Debug, bevy::ecs::system::SystemParam)]
-pub(crate) struct ParticleTuning<'w, 's> {
+pub struct ParticleTuning<'w, 's> {
     /// The live particle cap (`RenderMaxPartCount`); absent in the gallery app,
     /// which falls back to the built-in default.
     settings: Option<Res<'w, ViewerSettings>>,
@@ -978,7 +984,7 @@ pub(crate) struct ParticleTuning<'w, 's> {
     clippy::type_complexity,
     reason = "a Bevy query's fetched components are inherently a tuple"
 )]
-pub(crate) fn drive_particles(
+pub fn drive_particles(
     time: Res<Time>,
     mut commands: Commands,
     mut sources: Query<(
@@ -1229,7 +1235,7 @@ fn spawn_cloud_entity(
 /// Two things go, because the ECS keeps neither for us:
 ///
 /// - the **render entity**, which is not a child of its source (see
-///   [`spawn_cloud_entity`]), so nothing despawns it when the source goes;
+///   `spawn_cloud_entity`), so nothing despawns it when the source goes;
 /// - the source's own [`Cloud`], when the object outlives its particle system —
 ///   `llParticleSystem([])` drops the [`ObjectParticleSystem`] while the prim stays,
 ///   and [`drive_particles`] only sees sources that still have one, so the cloud's
@@ -1238,7 +1244,7 @@ fn spawn_cloud_entity(
 ///   simply seeded afresh.
 ///
 /// A source whose object despawned needs neither: the `Cloud` went with the entity.
-pub(crate) fn retire_orphaned_clouds(
+pub fn retire_orphaned_clouds(
     mut commands: Commands,
     renders: Query<(Entity, &CloudOf)>,
     simulating: Query<(), (With<Cloud>, With<ObjectParticleSystem>)>,

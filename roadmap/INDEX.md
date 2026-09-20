@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 100 |
 | ready | 298 |
-| blocked | 40 |
+| blocked | 39 |
 | in-progress | 22 |
 | bugs | 5 |
-| done | 1197 |
+| done | 1198 |
 | deferred | 29 |
 | wont-do | 16 |
 | **total** | **1707** |
@@ -315,8 +315,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   under-applied
 - [`viewer-audit-preferences-restart-note`](ready/viewer-audit-preferences-restart-note.md)
   — There is no restart-note idiom, so 'restart required' is baked into labels
-- [`viewer-audit-render-fixtures-crate`](ready/viewer-audit-render-fixtures-crate.md)
-  — 3297 lines of test fixtures ship in the production scene crate
 - [`viewer-audit-scene-live-daycycle-fixture`](ready/viewer-audit-scene-live-daycycle-fixture.md)
   — A test fixture that advances the day cycle between samples
 - [`viewer-audit-search-map-edge`](ready/viewer-audit-search-map-edge.md) —
@@ -926,6 +924,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   write a gesture asset (LLMultiGesture)
 - [`test-assets-remaining-class-audit`](ready/test-assets-remaining-class-audit.md)
   — Decide what the remaining asset classes are worth
+- [`test-assets-unify-rigged-fixtures`](ready/test-assets-unify-rigged-fixtures.md)
+  — Two generators make a rigged fixture; there should be one (blocked by
+  `viewer-audit-render-fixtures-crate` (done))
 - [`test-audit-conformance-boilerplate`](ready/test-audit-conformance-boilerplate.md)
   — Factor the repeated session/id acquisition out of the conformance cases
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
@@ -939,7 +940,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
   The two REPL binaries share ~400 near-verbatim lines and have already drifted
 
-## blocked (40)
+## blocked (39)
 
 ### viewer
 
@@ -1056,9 +1057,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
-- [`test-assets-unify-rigged-fixtures`](blocked/test-assets-unify-rigged-fixtures.md)
-  — Two generators make a rigged fixture; there should be one (blocked by
-  `viewer-audit-render-fixtures-crate`)
 - [`test-voice-account`](blocked/test-voice-account-provision-a-voice-account.md)
   — provision a voice account (blocked by `viewer-voice-audio`)
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
@@ -1143,7 +1141,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 
-## done (1197)
+## done (1198)
 
 ### protocol
 
@@ -1500,6 +1498,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   geometrically
 - [`viewer-audit-probe-nonuniform-scale-shear`](done/viewer-audit-probe-nonuniform-scale-shear.md)
   — A reflection probe's non-uniform volume scale shears its sampling frame
+- [`viewer-audit-render-fixtures-crate`](done/viewer-audit-render-fixtures-crate.md)
+  — 3297 lines of test fixtures ship in the production scene crate
 - [`viewer-audit-render-path-env-reads`](done/viewer-audit-render-path-env-reads.md)
   — About a dozen getenv calls and allocations per frame in the sky and post
   chain

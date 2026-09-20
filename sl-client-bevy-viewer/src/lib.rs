@@ -292,7 +292,7 @@ pub(crate) use sl_viewer_world_scene::render_overrides;
 // Only the render-harness tiers (`render_matrix`, `render_readback`,
 // `render_test`) build scenes; the viewer proper builds the world.
 #[cfg(test)]
-pub(crate) use sl_viewer_world_scene::render_scene;
+pub(crate) use sl_viewer_render_fixtures as render_scene;
 #[cfg(test)]
 mod render_test;
 pub(crate) use sl_viewer_notices::script_dialog;

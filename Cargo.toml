@@ -62,6 +62,7 @@ members = [
   "sl-viewer-places",
   "sl-viewer-platform",
   "sl-viewer-preferences",
+  "sl-viewer-render-fixtures",
   "sl-viewer-rlv",
   "sl-viewer-search",
   "sl-viewer-settings",
@@ -154,6 +155,7 @@ sl-viewer-pickers = { path = "sl-viewer-pickers", version = "0.1.0" }
 sl-viewer-places = { path = "sl-viewer-places", version = "0.1.0" }
 sl-viewer-platform = { path = "sl-viewer-platform", version = "0.1.0" }
 sl-viewer-preferences = { path = "sl-viewer-preferences", version = "0.1.0" }
+sl-viewer-render-fixtures = { path = "sl-viewer-render-fixtures", version = "0.1.0" }
 sl-viewer-rlv = { path = "sl-viewer-rlv", version = "0.1.0" }
 sl-viewer-search = { path = "sl-viewer-search", version = "0.1.0" }
 sl-viewer-settings = { path = "sl-viewer-settings", version = "0.1.0" }
