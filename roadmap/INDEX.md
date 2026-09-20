@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 116 |
-| ready | 304 |
-| blocked | 62 |
+| ready | 313 |
+| blocked | 66 |
 | in-progress | 22 |
 | bugs | 5 |
 | done | 1199 |
 | deferred | 30 |
 | wont-do | 16 |
-| **total** | **1754** |
+| **total** | **1767** |
 
 ## ideas (116)
 
@@ -289,7 +289,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (304)
+## ready (313)
 
 ### protocol
 
@@ -883,6 +883,20 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — export / import (blocked by `viewer-preferences-floater` (done))
 - [`viewer-sit-stand-actions`](ready/viewer-sit-stand-actions.md) — Sit / stand
   actions (blocked by `viewer-object-selection-core` (done))
+- [`viewer-skin-bevel-border-policy`](ready/viewer-skin-bevel-border-policy.md)
+  — A bevel's light source has a handedness the logical-property ban denies
+- [`viewer-skin-checkbox-radio-shape`](ready/viewer-skin-checkbox-radio-shape.md)
+  — Checkboxes are hand-rolled per panel, so no skin can shape one
+- [`viewer-skin-icon-set`](ready/viewer-skin-icon-set.md) — A skin should be
+  able to carry an icon set, not just colours
+- [`viewer-skin-list-row-striping`](ready/viewer-skin-list-row-striping.md) —
+  Scroll-list rows — striping, hover and a selection the skin owns
+- [`viewer-skin-scrollbar-shape`](ready/viewer-skin-scrollbar-shape.md) — The
+  scrollbar is a bar — the reference's has ends, a track and a shape
+- [`viewer-skin-text-shadow-role`](ready/viewer-skin-text-shadow-role.md) — A
+  text-shadow role — the trait that makes classic UI text look classic
+- [`viewer-skin-tooltip-roles`](ready/viewer-skin-tooltip-roles.md) — The
+  tooltip is a skinned surface everywhere but here
 - [`viewer-snapshot-composition-guides`](ready/viewer-snapshot-composition-guides.md)
   — Snapshot composition guides, capture frame & filename patterns
 - [`viewer-snapshot-highres-quiet`](ready/viewer-snapshot-highres-quiet.md) —
@@ -949,6 +963,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-world-map-floater` (done))
 - [`viewer-viewer-effect-render`](ready/viewer-viewer-effect-render.md) — Render
   inbound ViewerEffects (beams, spheres)
+- [`viewer-vintage-ui-chrome-crosscheck`](ready/viewer-vintage-ui-chrome-crosscheck.md)
+  — Measure skin fidelity instead of arguing about it
 - [`viewer-voice-audio`](ready/viewer-voice-audio.md) — Voice audio transport
   (WebRTC — no Vivox) (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-audio-backend` (done))
@@ -984,6 +1000,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Factor the repeated session/id acquisition out of the conformance cases
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
+- [`test-firestorm-harness-skin-selection`](ready/test-firestorm-harness-skin-selection.md)
+  — Firestorm harness — start a run in a named skin and theme
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
@@ -1006,7 +1024,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-world-heartbeat`](ready/server-world-heartbeat.md) — A region
   heartbeat — the fake grid has no simulation loop at all
 
-## blocked (62)
+## blocked (66)
 
 ### protocol
 
@@ -1095,6 +1113,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-script-mirror-download`)
 - [`viewer-script-recovery`](blocked/viewer-script-recovery.md) — Unsaved-script
   recovery (blocked by `viewer-lsl-editor-widget`)
+- [`viewer-skin-image-backed-widgets`](blocked/viewer-skin-image-backed-widgets.md)
+  — Nine-sliced image surfaces, so a skin can change a widget's shape (blocked
+  by `viewer-skin-widget-state-classes`)
+- [`viewer-skin-light-surface-roles`](blocked/viewer-skin-light-surface-roles.md)
+  — Role tokens for a light data surface on dark chrome (blocked by
+  `viewer-audit-skin-token-coverage`)
+- [`viewer-skin-widget-state-classes`](blocked/viewer-skin-widget-state-classes.md)
+  — Widget state belongs in the cascade, not in a per-frame Rust paint (blocked
+  by `viewer-audit-skin-token-coverage`)
 - [`viewer-snapshot-profile-feed`](blocked/viewer-snapshot-profile-feed.md) —
   Snapshot destination — profile feed (blocked by `viewer-snapshot-floater`
   (done), `viewer-image-upload`)
@@ -1117,6 +1144,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-vintage-bottom-bar`](blocked/viewer-vintage-bottom-bar.md) — Classic
   (Vintage) bottom-bar arrangement (blocked by `viewer-animation-overrider`,
   `viewer-toolbar-customization`)
+- [`viewer-vintage-skin`](blocked/viewer-vintage-skin.md) — Ship a Vintage-alike
+  skin (blocked by `viewer-skin-light-surface-roles`,
+  `viewer-skin-image-backed-widgets`)
 - [`viewer-voice-call-dialogs`](blocked/viewer-voice-call-dialogs.md) — Voice
   call dialogs — incoming / outgoing, channel switching (blocked by
   `viewer-voice-audio`)
