@@ -104,23 +104,89 @@ Defined by every skin's `skin.css`, consumed by `common.css`:
 
 | Token | Role |
 | --- | --- |
-| `--surface-bg` | a framed panel's background |
-| `--surface-border` | a framed panel's border |
-| `--surface-radius` | a framed panel's corner radius |
-| `--card-bg` | a background-only surface (card, bar) |
-| `--text-primary` | primary body text |
-| `--text-muted` | secondary / instruction text |
-| `--control-bg` | a button's resting background |
-| `--control-bg-hover` | a button's hovered background |
-| `--control-border` | a button's resting border |
+| `--surface-bg` | a framed surface: a panel, a floater body, a menu, a combo popover |
+| `--surface-border` | that surface's frame, and a menu's separator rule |
+| `--surface-radius` | a framed surface's corner radius |
+| `--card-bg` | a background-only surface inside a framed one: a card, a bar, a tab page, the active tab |
+| `--overlay-bg` | the scrim a floating layer sits on (the dock host behind docked floaters) |
+| `--text-primary` | primary body text: a label, a table cell, a menu entry, a tab caption |
+| `--text-muted` | secondary text: a caption, a hint, a column header, a resize grip |
+| `--text-disabled` | text of a control whose action does not apply right now |
+| `--text-heading` | a heading inside a page |
+| `--control-bg` | a button's / combo's resting background |
+| `--control-bg-hover` | the background under the pointer (hovered button, highlighted menu entry) |
+| `--control-bg-disabled` | a disabled control's background |
+| `--control-border` | a control's resting border |
+| `--control-border-disabled` | a disabled control's border |
 | `--control-radius` | a button's corner radius |
+| `--field-bg` | an editable field's recessed well |
+| `--field-text` | the text being edited |
+| `--caret` / `--selection` / `--selection-unfocused` | the text caret and its two selection washes |
 | `--focus-ring` | the keyboard-focus ring |
-| `--accent` | accent bars, highlights |
+| `--accent` | accent bars, an active tab's frame, a lit radio, a drag grip |
+| `--selection-bg` | a selected row's (translucent) background |
+| `--match-highlight` | the glyphs of a filter match inside an ordinary label |
+| `--divider` | a splitter, a rule, a column resize handle |
+| `--track-bg` | the trough a scrollbar thumb or slider handle runs in |
+| `--scrollbar-thumb` | a scrollbar thumb |
+| `--slider-thumb` | a slider handle or trackball marker |
+| `--title-bar-active` | the focused floater's title band (a translucent wash over its body) |
+| `--title-text-inactive` | an unfocused floater's title text |
+| `--glyph-button-bg` | a title-bar glyph button's fill |
+| `--pie-bg` / `--pie-line` / `--pie-selected` | the pie menu's disc, spokes and hovered wedge |
+| `--pie-label-sub-pie` | a wedge caption that opens a sub-pie |
+| `--pie-label-disabled` | a wedge caption that is present but unavailable |
+| `--chat-recall` / `--chat-server-history` / `--chat-live` | the Conversations transcript bands |
 | `--gain` | **meaning-bearing**: a positive / up / gain value |
 | `--loss` | **meaning-bearing**: a negative / down / loss value |
 
+On top of these each skin defines the **user-tunable palette** — the chat,
+name-tag and minimap colours the preferences' *Colors & Skins* tab exposes.
+Those are not consumed by `common.css`: the viewer reads them off the styled
+root and feeds them into the settings store as the skin's declared defaults,
+under any per-account override.
+
 A skin **must** define every token it does not inherit; a `var()` that resolves
-to nothing leaves the property unset (usually invisible).
+to nothing leaves the property unset (usually invisible). Both halves are
+checked against the real stylesheets at build time
+(`tests/shipped_skins.rs`), so a token a skin forgets fails the test rather
+than showing up as one widget in the wrong colour.
+
+### The role palette — skinning what a selector cannot reach
+
+Most of the tokens above are consumed the ordinary way: a rule in `common.css`
+gives a `.sk-*` class a `var(--role)`, and `bevy_flair` paints every node
+carrying that class.
+
+That only works where a **selector** can reach the paint, and a good part of the
+widget set is painted from Rust against state the CSS engine cannot see — a
+floater title bar that changes as focus moves, a tab strip repainted when the
+selection moves, a recycled table row that lights while selected, a pie-menu
+wedge that is a shader rather than a node. Those read the resolved role colours
+instead, through a second mechanism:
+
+```css
+:root {
+  -sk-color-surface-bg: var(--surface-bg);
+  -sk-color-text-muted: var(--text-muted);
+  /* … one line per role … */
+}
+```
+
+Each `-sk-color-<role>` property writes one field of a `SkinPalette` component
+that lands on the styled root, and the Rust paint systems read it from there. It
+is **not a second vocabulary**: every value is one of the same `--<role>` tokens
+the classes use, so a skin still defines each role exactly once and never has to
+know which of the two routes a given widget takes.
+
+As a skin author you never touch that `:root` block — it is part of
+`common.css`, like the class rules. What it means for you is simply that
+retuning a role token restyles *both* halves: `--accent` moves the active tab's
+frame (Rust) and the divider grip (CSS) together.
+
+A skin that omits a role leaves that field at the colour the widget module
+declares as its unskinned fallback, so a partial third-party skin degrades to
+the stock look rather than to black.
 
 ### The widget classes
 
@@ -132,13 +198,39 @@ to nothing leaves the property unset (usually invisible).
 | `.sk-card` | a background-only surface (bg + radius, no border/padding) |
 | `.sk-title` | an instruction / secondary line |
 | `.sk-text` | primary body text |
+| `.sk-heading` | a heading inside a page |
 | `.sk-button` | a button, plus `:hover` and `:focus-visible` states |
+| `.sk-disabled-surface` / `.sk-disabled-text` | the greyed state of either |
+| `.sk-focusable` | the keyboard focus ring (stamped automatically onto every `TabIndex`) |
 | `.sk-accent` | a leading accent bar + hanging indent (logical box demo) |
 | `.sk-tab` | a tab shape with asymmetric top corners (logical corner demo) |
 | `.sk-gain` / `.sk-loss` | meaning-bearing colour swatches |
 | `.sk-menu-bar` / `.sk-menu` | the top bar / a drop-down menu surface |
+| `.sk-menu-bar-item` / `.sk-menu-item` / `.sk-menu-item-disabled` | a bar button, an entry, a greyed entry |
+| `.sk-menu-separator` | the rule between two groups of entries |
+| `.sk-floater` | a floater's body |
+| `.sk-floater-button` / `.sk-floater-glyph` / `.sk-floater-grip` | its title-bar buttons, their glyphs, the resize grip |
+| `.sk-dock-host` | the strip docked floaters flow into |
+| `.sk-tab-panel` | a tab page |
+| `.sk-scrollbar-track` / `.sk-scrollbar-thumb` | a scrollbar, in both the tab strip and the windowed list |
+| `.sk-divider` / `.sk-divider-grip` / `.sk-column-resizer` | a pane splitter, its nub, a table column's drag handle |
+| `.sk-field` | an editable text field's box |
+| `.sk-text-field` | the caret / selection colours of **every** editor (stamped automatically) |
+| `.sk-search-field` / `.sk-search-clear` | the shared search box and its `×` button |
+| `.sk-toolbar-bar` / `.sk-toolbar-button` | the bottom toolbar strip and its buttons |
+| `.sk-toast` / `.sk-toast-text` | a notification toast card and its text |
+| `.sk-build-label` / `.sk-build-value` / `.sk-build-placeholder` / `.sk-build-disabled` | the Build Tools floater's text roles |
+| `.sk-conversations` | the Conversations transcript bands |
 | `.sk-status-readout` | a status-row read-out (region / coordinates / balance / time / FPS) |
 | `.sk-parcel-icon` | a parcel-permission icon on the status row (see below) |
+
+Some widgets are deliberately **absent** from that list even though they are
+skinnable: a floater's title text, a tab button, a radio indicator, a table row
+selection, a menu entry's greying and the pie menu's disc all take their colours
+from the role palette instead, because their paint depends on state a selector
+cannot see. Retuning the role token restyles them; there is no class to write a
+rule against, and adding one would *break* them — a class `color` beats the
+Rust-painted value and flattens the state distinction it was carrying.
 
 ### The status-bar parcel-permission icons
 

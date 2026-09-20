@@ -19,6 +19,7 @@ mod test {
     use pretty_assertions::assert_ne;
     use sl_viewer_ui_core::skin::{SKINS, THEMES, scan_banned_properties};
     use sl_viewer_ui_core::skin_colors::COLOR_TOKENS;
+    use sl_viewer_ui_core::skin_palette::PALETTE_CSS_PROPERTIES;
 
     /// A boxed error so tests can use `?` instead of `unwrap` / `expect`.
     type TestError = Box<dyn core::error::Error>;
@@ -102,6 +103,55 @@ mod test {
                     "{} does not define --{}",
                     path.display(),
                     def.css_var()
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// Every chrome role the widget set paints from is wired in `common.css`
+    /// and defined by every shipped skin.
+    ///
+    /// The role palette (`viewer-audit-skin-token-coverage`) is the half of the
+    /// skin that reaches the Rust-painted widget states, and its failure mode
+    /// is **silent**: a `-sk-color-*` declaration `common.css` never makes, or
+    /// a `var(--role)` no skin defines, simply leaves that field at its
+    /// built-in fallback, so the widget keeps the previous skin's colour and
+    /// nothing is logged. Three links have to hold — the registered property,
+    /// the `common.css` rule, and the token — and this checks the two the
+    /// compiler cannot.
+    #[test]
+    fn every_palette_role_is_wired_and_defined() -> Result<(), TestError> {
+        let common = fs_err::read_to_string(skins_dir().join("common.css"))?;
+        let skins: Vec<(PathBuf, String)> = SKINS
+            .iter()
+            .map(|skin| {
+                let path = skins_dir().join(skin).join("skin.css");
+                let css = fs_err::read_to_string(&path)?;
+                Ok::<_, TestError>((path, css))
+            })
+            .collect::<Result<_, _>>()?;
+        for (property, _field) in PALETTE_CSS_PROPERTIES {
+            let declaration = format!("{property}:");
+            let line = common
+                .lines()
+                .map(str::trim)
+                .find(|line| line.starts_with(&declaration))
+                .ok_or_else(|| {
+                    format!("common.css does not wire {property}, so no skin can reach that role")
+                })?;
+            let token = line
+                .split_once("var(--")
+                .and_then(|(_before, rest)| rest.split_once(')'))
+                .map(|(token, _after)| token)
+                .ok_or_else(|| {
+                    format!("{property} must read a --role token, not the literal `{line}`")
+                })?;
+            for (path, css) in &skins {
+                assert!(
+                    css.contains(&format!("--{token}:")),
+                    "{} does not define --{token}, which common.css reads for {property}",
+                    path.display()
                 );
             }
         }

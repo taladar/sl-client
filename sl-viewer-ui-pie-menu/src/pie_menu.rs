@@ -239,6 +239,7 @@ use bevy::shader::ShaderRef;
 use bevy::window::{PrimaryWindow, WindowFocused};
 
 use sl_viewer_ui_core::i18n::Translator;
+use sl_viewer_ui_core::skin_palette::{SkinColors, SkinPalette};
 use sl_viewer_ui_core::ui::{UiRoot, column};
 use sl_viewer_ui_core::ui_element::{ElementCx, RadialCentre, RadialPlacement, UiAction};
 use sl_viewer_ui_core::ui_font::UiFont;
@@ -1025,33 +1026,53 @@ impl UiMaterial for PieMenuMaterial {
     }
 }
 
-/// The ring's resting fill — the reference's `PieMenuBgColor`
-/// (`0.24 0.24 0.24 0.8`): a neutral, fairly transparent grey rather than the
-/// darker, more opaque tint this used to carry.
-const PIE_BACKGROUND: Color = Color::srgba(0.24, 0.24, 0.24, 0.8);
+/// Which of the three colour roles a slice's caption takes.
+///
+/// Recorded on the caption's text node at build time and painted by
+/// [`paint_pie_labels`] from the skin's role palette, rather than resolved to a
+/// colour here: the labels are spawned from a plain `Commands` (which cannot
+/// reach the world), and a caption has to follow a skin or theme switch like
+/// everything else. The three roles are the reference's own distinctions —
+/// `PieMenuBgColor`'s companion text, the sub-pie tint that says "this opens
+/// another pie" without writing a `>` into the string, and the fade the
+/// reference applies to an unavailable item.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+enum PieLabelRole {
+    /// A live slice that runs an action.
+    Action,
+    /// A live slice that opens a sub-pie.
+    SubPie,
+    /// A slice that is present but unavailable.
+    Disabled,
+}
 
-/// The dividers and the edge rings — the reference's `PieMenuLineColor`
-/// (`0 0 0 0.5`), a soft black.
-const PIE_LINE: Color = Color::srgba(0.0, 0.0, 0.0, 0.5);
+impl PieLabelRole {
+    /// This role's colour in `palette`.
+    const fn color(self, palette: &SkinPalette) -> Color {
+        match self {
+            Self::Action => palette.text_primary,
+            Self::SubPie => palette.pie_label_sub_pie,
+            Self::Disabled => palette.pie_label_disabled,
+        }
+    }
+}
 
-/// The highlighted slot's colour — the reference's `PieMenuSelectedColor`,
-/// `EmphasisColor_35` (`0.950 0.412 0.173 0.35`): a semi-transparent orange. The
-/// shader draws it as a **radial gradient**, full at the inner edge and fading to
-/// nothing at the rim, matching `gl_washer_segment_2d(…, selectedColor,
-/// borderColor)`.
-const PIE_SELECTED: Color = Color::srgba(0.95, 0.412, 0.173, 0.35);
-
-/// A slice label's text colour.
-const PIE_LABEL: Color = Color::srgb(0.93, 0.95, 0.98);
-
-/// A disabled slice label's text colour — faded well down so "here but
-/// unavailable" reads at a glance (the reference fades a disabled item to 0.3
-/// alpha; this goes a little further).
-const PIE_LABEL_DISABLED: Color = Color::srgba(0.93, 0.95, 0.98, 0.22);
-
-/// A sub-pie slice's label colour, so "this opens another pie" reads without the
-/// label having to say `>`.
-const PIE_LABEL_SUB_PIE: Color = Color::srgb(0.65, 0.86, 1.0);
+/// Paint every pie caption from the live role palette — the one writer of a
+/// caption's colour.
+///
+/// Runs every frame with a guarded write, which is what makes it cover both
+/// cases at once: a caption just spawned by [`rebuild_pie_labels`] (which has
+/// no world access and so leaves the colour to this) and a skin, theme or
+/// hot-reload change under an open pie.
+fn paint_pie_labels(palette: SkinColors, mut labels: Query<(&PieLabelRole, &mut TextColor)>) {
+    let palette = palette.get();
+    for (role, mut color) in &mut labels {
+        let wanted = role.color(&palette);
+        if color.0 != wanted {
+            color.0 = wanted;
+        }
+    }
+}
 
 /// The plugin: the shader, the material, and the systems that drive a live pie.
 ///
@@ -1084,6 +1105,9 @@ impl Plugin for PieMenuPlugin {
                     commit_pie_selection,
                     abort_pie_on_focus_loss,
                     update_pie_labels,
+                    // After the rebuild, so a caption spawned this frame is
+                    // painted before it is ever drawn.
+                    paint_pie_labels,
                 )
                     .chain(),
             )
@@ -1262,11 +1286,14 @@ fn attach_pie_material(world: &mut World) {
         // wrong with that.
         return;
     };
+    let fallback = SkinPalette::default();
     let handle = materials.add(PieMenuMaterial {
         params: PieParams {
-            background: LinearRgba::from(PIE_BACKGROUND).to_vec4(),
-            line: LinearRgba::from(PIE_LINE).to_vec4(),
-            selected: LinearRgba::from(PIE_SELECTED).to_vec4(),
+            // The skinless fallback: `drive_pie_material` pushes the live
+            // skin's disc colours in on its first pass, the same frame.
+            background: LinearRgba::from(fallback.pie_bg).to_vec4(),
+            line: LinearRgba::from(fallback.pie_line).to_vec4(),
+            selected: LinearRgba::from(fallback.pie_selected).to_vec4(),
             inner_radius: PIE_INNER_RADIUS,
             outer_radius: PIE_OUTER_RADIUS,
             slot_states: 0,
@@ -1310,10 +1337,10 @@ fn rebuild_pie_labels(
             // position is a property of the entry rather than of a list.
             continue;
         };
-        let color = match (slot.enabled, slot.outcome) {
-            (false, _) => PIE_LABEL_DISABLED,
-            (true, SlotOutcome::SubPie(_)) => PIE_LABEL_SUB_PIE,
-            (true, SlotOutcome::Action(_)) => PIE_LABEL,
+        let role = match (slot.enabled, slot.outcome) {
+            (false, _) => PieLabelRole::Disabled,
+            (true, SlotOutcome::SubPie(_)) => PieLabelRole::SubPie,
+            (true, SlotOutcome::Action(_)) => PieLabelRole::Action,
         };
         commands
             .spawn((
@@ -1369,8 +1396,10 @@ fn rebuild_pie_labels(
                 cx.font(UiFont::Sans),
                 // A sub-pie's label is tinted (and the shader draws a rim chevron);
                 // neither writes a `>` into the string, so there is no bidi arrow to
-                // mirror and no width added to the text.
-                TextColor(color),
+                // mirror and no width added to the text. The tint itself is
+                // `paint_pie_labels`' to write, from the skin.
+                TextColor(role.color(&SkinPalette::default())),
+                role,
                 Name::new(format!("pie-label-text:{}", point.name())),
             ));
     }
@@ -1962,10 +1991,16 @@ fn update_pie_labels(
 /// slot states rarely change, so the params are built first and only written
 /// through if they differ from what the material already holds.
 fn drive_pie_material(
+    palette: SkinColors,
     pies: Query<(&PieMenu, &PieConditions, &PieGeometry, &Children)>,
     rings: Query<(&MaterialNode<PieMenuMaterial>, &ComputedNode), With<PieRing>>,
     mut materials: ResMut<Assets<PieMenuMaterial>>,
 ) {
+    // The disc is a shader, not a node, so the skin cannot reach it through a
+    // class: its three colours ride in with the rest of the params, and the
+    // guarded compare below means a skin change costs one write and a settled
+    // pie still costs none.
+    let palette = palette.get();
     for (pie, conditions, geometry, children) in &pies {
         let Some(current) = pie.current() else {
             continue;
@@ -1996,6 +2031,9 @@ fn drive_pie_material(
                 wanted.outer_radius = geometry.outer * scale;
                 wanted.slot_states = states;
                 wanted.highlighted = highlighted;
+                wanted.background = LinearRgba::from(palette.pie_bg).to_vec4();
+                wanted.line = LinearRgba::from(palette.pie_line).to_vec4();
+                wanted.selected = LinearRgba::from(palette.pie_selected).to_vec4();
                 if wanted == material.params {
                     continue;
                 }
@@ -2135,11 +2173,9 @@ const PIE_TARGET_LABEL: &str = "Right-click anywhere on screen to open the pie m
      the inner circle (or right-click) to close; a slice that opens a sub-pie has a chevron on \
      its rim.";
 
-/// The target's backdrop.
-const PIE_TARGET_BACKGROUND: Color = Color::srgba(0.36, 0.72, 0.98, 0.10);
-
-/// The target's border.
-const PIE_TARGET_BORDER: Color = Color::srgb(0.36, 0.72, 0.98);
+/// How far the target's backdrop is faded from the accent it is drawn in — a
+/// wash rather than a fill, so the prose on it stays legible.
+const PIE_TARGET_BACKDROP_ALPHA: f32 = 0.10;
 
 /// Spawn a surface that opens a **live** pie where you right-click it — the pie's
 /// entry in `ui_element::ELEMENTS`.
@@ -2171,8 +2207,12 @@ pub fn spawn_radial_menu_target(commands: &mut Commands, parent: Entity, cx: Ele
                 max_width: Val::Px(560.0),
                 ..column(Val::Px(8.0))
             },
-            BackgroundColor(PIE_TARGET_BACKGROUND),
-            BorderColor::all(PIE_TARGET_BORDER),
+            BackgroundColor(
+                SkinPalette::default()
+                    .accent
+                    .with_alpha(PIE_TARGET_BACKDROP_ALPHA),
+            ),
+            BorderColor::all(SkinPalette::default().accent),
             Name::new("radial-menu-target"),
             ChildOf(parent),
         ))
@@ -2180,7 +2220,7 @@ pub fn spawn_radial_menu_target(commands: &mut Commands, parent: Entity, cx: Ele
             target.spawn((
                 Text::new(cx.text(PIE_TARGET_LABEL)),
                 cx.font(UiFont::Sans),
-                TextColor(PIE_LABEL),
+                TextColor(SkinPalette::default().text_primary),
                 Name::new("radial-menu-target-text"),
             ));
             // The menu's **address table**, on screen: every function, and the
@@ -2199,7 +2239,7 @@ pub fn spawn_radial_menu_target(commands: &mut Commands, parent: Entity, cx: Ele
             target.spawn((
                 Text::new(address_table(&FIXTURE_PIE)),
                 cx.font(UiFont::Mono),
-                TextColor(PIE_LABEL_SUB_PIE),
+                TextColor(SkinPalette::default().pie_label_sub_pie),
                 Name::new("radial-menu-target-addresses"),
             ));
         })

@@ -14,11 +14,15 @@
   --surface-border: #333a47;
   --surface-radius: 6px;
   --card-bg: #262b34;
+  /* The scrim a floating layer sits on (the dock host behind docked floaters). */
+  --overlay-bg: #0f121ad9;
 
   /* Text */
   --text-primary: #e6ebf2;
   --text-muted: #cbd5e2;
   --text-disabled: #737d8f;
+  /* The one line that names a section inside a page. */
+  --text-heading: #b3d1ff;
 
   /* Text editing (R28). The caret matches the primary text, the reference
    * default ("use same color as text for the cursor"); the selections are
@@ -39,13 +43,45 @@
   --control-bg-hover: #353c4a;
   --control-bg-disabled: #232730;
   --control-border: #66809e;
+  --control-border-disabled: #474752;
   --control-radius: 4px;
+
+  /* Editable fields. Darker than a control so a field reads as a well rather
+   * than a button, and its text is the brightest thing on screen. */
+  --field-bg: #1a1f29;
+  --field-text: #ffffff;
 
   /* Focus ring — loud, so Tab movement is unmistakable. */
   --focus-ring: #ffc740;
 
   /* Accent */
   --accent: #5cb8fa;
+
+  /* Emphasis. The row selection is translucent so a banded list still reads
+   * through it; the match highlight is the filter's own glyph colour. */
+  --selection-bg: #3d57858c;
+  --match-highlight: #fad166;
+
+  /* Structure: splitters, scroll troughs and the two handles that run in one. */
+  --divider: #576887;
+  --track-bg: #1f242e;
+  --scrollbar-thumb: #667a99;
+  --slider-thumb: #bfc7d9;
+
+  /* Floater chrome. The title bar and its glyph buttons are painted OVER the
+   * floater body, so they are a translucent lightening rather than a colour of
+   * their own — which is what keeps them right on any body colour. */
+  --title-bar-active: #ffffff1a;
+  --title-text-inactive: #8c94a3;
+  --glyph-button-bg: #ffffff0f;
+
+  /* The pie menu. More translucent than a floater on purpose: it is drawn over
+   * whatever it acts on, which has to stay visible under it. */
+  --pie-bg: #3d3d3dcc;
+  --pie-line: #00000080;
+  --pie-selected: #f2692c59;
+  --pie-label-sub-pie: #a6dbff;
+  --pie-label-disabled: #edf2fa38;
 
   /* Meaning-bearing (culture / colour-blind overlays remap these). */
   --gain: #3fa34d;

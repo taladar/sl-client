@@ -58,7 +58,10 @@
 use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
+use bevy_flair::style::components::ClassList;
 
+use crate::skin::{SCROLLBAR_THUMB_CLASS, SCROLLBAR_TRACK_CLASS};
+use crate::skin_palette::SkinPalette;
 use crate::ui::{LogicalInset, LogicalRect, UiDirection};
 
 /// How many extra rows to keep live just past each edge of the viewport, so a
@@ -110,12 +113,6 @@ pub const SCROLLBAR_THICKNESS: f32 = 10.0;
 /// very long list.
 const SCROLLBAR_MIN_THUMB: f32 = 24.0;
 
-/// The scrollbar track's colour (the tab-strip scrollbar palette).
-const SCROLLBAR_TRACK_COLOR: Color = Color::srgb(0.12, 0.14, 0.18);
-
-/// The scrollbar thumb's colour.
-const SCROLLBAR_THUMB_COLOR: Color = Color::srgb(0.40, 0.48, 0.60);
-
 /// A [`VirtualList`] viewport's scrollbar track, naming its viewport.
 /// Bevy's `Scrollbar` widget drives the native `ScrollPosition`, which a
 /// virtual list does not use (it owns its own clamped offset), so the bar is
@@ -156,7 +153,8 @@ pub fn spawn_virtual_scrollbar(commands: &mut Commands, viewport: Entity) -> Ent
                 block_end: Val::Px(0.0),
                 ..LogicalRect::AUTO
             }),
-            BackgroundColor(SCROLLBAR_TRACK_COLOR),
+            BackgroundColor(SkinPalette::default().track_bg),
+            ClassList::new_with_classes([SCROLLBAR_TRACK_CLASS]),
             // Above the pooled rows, which are appended later in paint order.
             ZIndex(1),
             Visibility::Hidden,
@@ -174,7 +172,8 @@ pub fn spawn_virtual_scrollbar(commands: &mut Commands, viewport: Entity) -> Ent
                 top: Val::Px(0.0),
                 ..default()
             },
-            BackgroundColor(SCROLLBAR_THUMB_COLOR),
+            BackgroundColor(SkinPalette::default().scrollbar_thumb),
+            ClassList::new_with_classes([SCROLLBAR_THUMB_CLASS]),
             Pickable::default(),
             VirtualScrollbarThumb,
             Name::new("virtual-list:scrollbar-thumb"),

@@ -118,26 +118,23 @@ use bevy::text::{
 };
 use bevy::ui::UiSystems;
 
+use bevy_flair::style::components::ClassList;
+
 use sl_viewer_ui_core::skin::SkinTextCaret;
+use sl_viewer_ui_core::skin_palette::{SkinColors, SkinPalette};
 use sl_viewer_ui_core::ui::{LogicalMargin, LogicalRect, UiPanelShown, UiRoot, column, row};
 use sl_viewer_ui_core::ui_element::{ElementCx, TextMayClip};
 use sl_viewer_ui_core::ui_font::UiFont;
 
-/// A field's text colour.
-const FIELD_TEXT_COLOR: Color = Color::WHITE;
-
-/// An **uneditable** field's text colour — a muted grey so a field the user
-/// cannot change (one [disabled](bevy::ui::InteractionDisabled) for lack of
-/// modify permission, or one marked [`ReadOnlyField`]) reads plainly as such
-/// while its value stays legible, the reference's disabled-field look.
-const FIELD_UNEDITABLE_TEXT_COLOR: Color = Color::srgb(0.45, 0.47, 0.52);
-
-/// A field's recessed background — darker than the surrounding panel, so the
-/// editable area reads as a well the text sits in.
-const FIELD_BACKGROUND: Color = Color::srgb(0.10, 0.12, 0.16);
-
-/// A field's border.
-const FIELD_BORDER: Color = Color::srgb(0.40, 0.50, 0.62);
+/// The skin class on a decorated field's box: `--field-bg` (recessed, darker
+/// than the surrounding panel, so the editable area reads as a well the text
+/// sits in) and `--control-border`.
+///
+/// The field's *text* is absent, and deliberately: it is state-painted by
+/// `reflect_uneditable_text_color` from the `--field-text` /
+/// `--text-disabled` roles, and a class `color` rule would beat that write and
+/// make a read-only field look editable.
+const FIELD_CLASS: &str = "sk-field";
 
 /// A field's border width, in logical pixels.
 const FIELD_BORDER_WIDTH: f32 = 2.0;
@@ -575,7 +572,7 @@ pub fn spawn_text_input(commands: &mut Commands, parent: Entity, spec: &TextInpu
     let mut field = commands.spawn((
         editor,
         font.at(spec.font_size),
-        TextColor(FIELD_TEXT_COLOR),
+        TextColor(SkinPalette::default().field_text),
         // No `TextCursorStyle` here: `install_caret_style` installs the shared
         // skin-driven caret + blink machinery on every editor (R28).
         TabIndex(spec.tab_index),
@@ -590,9 +587,11 @@ pub fn spawn_text_input(commands: &mut Commands, parent: Entity, spec: &TextInpu
     // A decorated field draws its own border and background; a bare one leaves
     // both to the container it is embedded in.
     if spec.decorated {
+        let fallback = SkinPalette::default();
         field.insert((
-            BorderColor::all(FIELD_BORDER),
-            BackgroundColor(FIELD_BACKGROUND),
+            BorderColor::all(fallback.control_border),
+            BackgroundColor(fallback.field_bg),
+            ClassList::new_with_classes([FIELD_CLASS]),
         ));
     }
     if spec.read_only {
@@ -913,6 +912,7 @@ fn drive_caret_blink(
               tuple would hide which two stances share the grey"
 )]
 fn reflect_uneditable_text_color(
+    palette: SkinColors,
     mut fields: Query<
         (
             &mut TextColor,
@@ -922,11 +922,12 @@ fn reflect_uneditable_text_color(
         With<EditableText>,
     >,
 ) {
+    let palette = palette.get();
     for (mut color, disabled, read_only) in &mut fields {
         let want = if disabled || read_only {
-            FIELD_UNEDITABLE_TEXT_COLOR
+            palette.text_disabled
         } else {
-            FIELD_TEXT_COLOR
+            palette.field_text
         };
         if color.0 != want {
             color.0 = want;

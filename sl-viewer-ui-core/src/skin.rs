@@ -245,6 +245,9 @@ impl Plugin for ViewerSkinPlugin {
         register_logical_properties(app);
         register_caret_properties(app);
         register_chat_band_properties(app);
+        // The chrome role palette every Rust-painted widget state reads
+        // (`viewer-audit-skin-token-coverage`).
+        crate::skin_palette::register_palette_properties(app);
         // The `-sk-uisnd-<key>` UI-sound overrides are registered by
         // `sl-viewer-ui-sounds`' own plugin, which is why that one is added
         // after this one: `bevy_flair` has to be up before its registries can be
@@ -321,6 +324,17 @@ fn stamp_focus_ring_class(
         }
     }
 }
+
+/// The CSS class on a scrollbar's track (`--track-bg`). Named here rather than
+/// beside either bar because two crates draw one — the windowed list in
+/// [`crate::virtual_list`] and the tab strip's own bar in
+/// `sl-viewer-ui-widgets` — and a skin must be able to restyle both with one
+/// rule.
+pub const SCROLLBAR_TRACK_CLASS: &str = "sk-scrollbar-track";
+
+/// The CSS class on a scrollbar's thumb (`--scrollbar-thumb`). See
+/// [`SCROLLBAR_TRACK_CLASS`] for why it lives here.
+pub const SCROLLBAR_THUMB_CLASS: &str = "sk-scrollbar-thumb";
 
 /// The CSS class the scaffold tags every editable text field with (R28), so the
 /// skin's caret / selection colour rule (`.sk-text-field`) and its any-focus

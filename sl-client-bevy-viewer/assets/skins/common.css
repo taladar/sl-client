@@ -16,6 +16,65 @@
  * a later :root {} that redefines any of these tokens.
  */
 
+/* The chrome ROLE PALETTE (viewer-audit-skin-token-coverage).
+ *
+ * Half the widget set is painted from Rust against state no CSS selector can
+ * see — a floater title bar that changes with focus, a tab strip repainted as
+ * the selection moves, a recycled table row that lights up while selected, a
+ * pie-menu wedge mesh that is not a UI node at all. Those cannot be dressed by
+ * a `.sk-*` class, so instead the resolved role colours are handed to the Rust
+ * side: each `-sk-color-<role>` property writes one field of the SkinPalette
+ * component (sl-viewer-ui-core/src/skin_palette.rs), and this rule targets
+ * :root, so the whole palette lands once on the styled root.
+ *
+ * This is NOT a second vocabulary: every value here is one of the same
+ * `--<role>` tokens the classes below use, so a skin still defines each role
+ * exactly once. A skin that omits a role leaves that field at its built-in
+ * fallback (the colour the widget module used to hardcode).
+ *
+ * The rule is inert for a class-styled widget — prefer a class whenever a
+ * selector can reach the paint, because then bevy_flair repaints it with no
+ * code involved. */
+:root {
+  -sk-color-surface-bg: var(--surface-bg);
+  -sk-color-surface-border: var(--surface-border);
+  -sk-color-card-bg: var(--card-bg);
+  -sk-color-overlay-bg: var(--overlay-bg);
+
+  -sk-color-text-primary: var(--text-primary);
+  -sk-color-text-muted: var(--text-muted);
+  -sk-color-text-disabled: var(--text-disabled);
+  -sk-color-text-heading: var(--text-heading);
+
+  -sk-color-control-bg: var(--control-bg);
+  -sk-color-control-bg-hover: var(--control-bg-hover);
+  -sk-color-control-bg-disabled: var(--control-bg-disabled);
+  -sk-color-control-border: var(--control-border);
+  -sk-color-control-border-disabled: var(--control-border-disabled);
+
+  -sk-color-field-bg: var(--field-bg);
+  -sk-color-field-text: var(--field-text);
+
+  -sk-color-accent: var(--accent);
+  -sk-color-selection-bg: var(--selection-bg);
+  -sk-color-match-highlight: var(--match-highlight);
+
+  -sk-color-divider: var(--divider);
+  -sk-color-track-bg: var(--track-bg);
+  -sk-color-scrollbar-thumb: var(--scrollbar-thumb);
+  -sk-color-slider-thumb: var(--slider-thumb);
+
+  -sk-color-title-bar-active: var(--title-bar-active);
+  -sk-color-title-text-inactive: var(--title-text-inactive);
+  -sk-color-glyph-button-bg: var(--glyph-button-bg);
+
+  -sk-color-pie-bg: var(--pie-bg);
+  -sk-color-pie-line: var(--pie-line);
+  -sk-color-pie-selected: var(--pie-selected);
+  -sk-color-pie-label-sub-pie: var(--pie-label-sub-pie);
+  -sk-color-pie-label-disabled: var(--pie-label-disabled);
+}
+
 /* A framed content surface. */
 .sk-panel {
   background-color: var(--surface-bg);
@@ -132,6 +191,79 @@
   padding: 4px 12px;
 }
 
+/* A floater's body — the window frame every panel opens in. The title band and
+ * its text are deliberately absent: those are repainted in Rust as focus moves
+ * between floaters (src/floater.rs `highlight_active_floater`, from the
+ * `--title-bar-active` / `--title-text-inactive` roles), and a `color` rule
+ * here would beat that write and flatten the distinction. */
+.sk-floater {
+  background-color: var(--surface-bg);
+  border-color: var(--surface-border);
+}
+
+/* A title-bar glyph button (close, minimise, dock) and its glyph. The button's
+ * fill is a translucent lightening laid over the floater body rather than a
+ * colour of its own, so it reads right on any body colour. */
+.sk-floater-button {
+  background-color: var(--glyph-button-bg);
+}
+
+.sk-floater-glyph {
+  color: var(--text-primary);
+}
+
+/* The corner resize grip — brighter than the glyphs, so the affordance is
+ * findable. */
+.sk-floater-grip {
+  color: var(--text-muted);
+}
+
+/* The dock host: the strip docked floaters flow into. A scrim, so a docked
+ * window reads as hosted (the reference instead hides a hosted floater's own
+ * background to avoid double opacity). */
+.sk-dock-host {
+  background-color: var(--overlay-bg);
+}
+
+/* A tab page — the "content" shade the active tab shares, so the selected tab
+ * reads as merging into its panel. The tab BUTTONS are absent for the same
+ * reason the floater title bar is: their active / inactive / disabled paints
+ * are Rust-driven from the `--card-bg`, `--surface-bg`, `--accent`,
+ * `--surface-border` and `--text-disabled` roles. */
+.sk-tab-panel {
+  background-color: var(--card-bg);
+}
+
+/* A heading inside a page — the one line that names the section. */
+.sk-heading {
+  color: var(--text-heading);
+}
+
+/* A scrollbar, in both the tab strip and the windowed list. */
+.sk-scrollbar-track {
+  background-color: var(--track-bg);
+}
+
+.sk-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+}
+
+/* The draggable splitter between a resizable tab strip and its page, and the
+ * short raised nub that marks it as a handle. */
+.sk-divider {
+  background-color: var(--divider);
+}
+
+.sk-divider-grip {
+  background-color: var(--accent);
+}
+
+/* A table column's resize handle, straddling the column's trailing border.
+ * The same divider role as the tab splitter: both are "drag me to resize". */
+.sk-column-resizer {
+  background-color: var(--divider);
+}
+
 /* A menu bar — the horizontal strip of pull-down buttons. A background-only
  * surface (like a card) so it recolours with the skin. */
 .sk-menu-bar {
@@ -220,10 +352,19 @@
  * so it takes the skin's control surface, like the other editable fields. Used by
  * the menu-bar filter and the inventory filter. */
 .sk-search-field {
-  background-color: var(--control-bg);
+  background-color: var(--field-bg);
   border-color: var(--control-border);
   border-radius: var(--control-radius);
   color: var(--text-primary);
+}
+
+/* A decorated text field's box — the same well as the search box, which is one
+ * of these with a glyph and a clear button in it. The field's TEXT is painted
+ * in Rust (`reflect_uneditable_text_color`, from `--field-text` /
+ * `--text-disabled`), so there is deliberately no `color` here to beat it. */
+.sk-field {
+  background-color: var(--field-bg);
+  border-color: var(--control-border);
 }
 
 /* The circular clear (×) button inside a search box. */

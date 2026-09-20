@@ -53,10 +53,12 @@ use core::cmp::Ordering;
 
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
+use bevy_flair::style::components::ClassList;
 use sl_settings::SettingValue;
 
 use sl_viewer_settings::ViewerSettings;
 use sl_viewer_ui_core::i18n::Translated;
+use sl_viewer_ui_core::skin_palette::{SkinColors, SkinPalette};
 use sl_viewer_ui_core::ui::UiDirection;
 use sl_viewer_ui_core::ui_ellipsis::{RevealEllipsis, spawn_ellipsis_marker};
 use sl_viewer_ui_core::ui_font::UiFont;
@@ -74,9 +76,9 @@ const MAX_COLUMN_WIDTH: f32 = 800.0;
 /// straddling the column's trailing border, wide enough to grab comfortably.
 const RESIZER_WIDTH: f32 = 7.0;
 
-/// The faint colour of a resize handle, so the draggable column borders are
-/// discoverable without shouting.
-const RESIZER_COLOR: Color = Color::srgba(0.62, 0.66, 0.74, 0.35);
+/// The skin class on a column's resize handle (`--divider`), so the draggable
+/// column borders are discoverable without shouting.
+const RESIZER_CLASS: &str = "sk-column-resizer";
 
 /// The gap between a header label and its sort-direction arrow, in logical pixels.
 const ARROW_GAP: f32 = 2.0;
@@ -95,8 +97,10 @@ const FALLBACK_ELLIPSIS: &str = "\u{2026}";
 
 /// A [disabled](bevy::ui::InteractionDisabled) header's label / sort-arrow
 /// colour — dimmed so a header that will not answer a click reads as inert. The
-/// same grey the combo and text-field widgets use for their disabled text.
-const DISABLED_TEXT_COLOR: Color = Color::srgb(0.45, 0.47, 0.52);
+/// same role the combo and text-field widgets grey their text with.
+const fn disabled_text_color(palette: &SkinPalette) -> Color {
+    palette.text_disabled
+}
 
 // ---------------------------------------------------------------------------
 // Column / table specification (static, const-constructible).
@@ -716,10 +720,6 @@ struct TableRow {
     table: Entity,
 }
 
-/// The background of a selected row — a translucent accent, matching the bespoke
-/// selection highlights the migrated tables used.
-const SELECTED_ROW_BACKGROUND: Color = Color::srgba(0.24, 0.34, 0.52, 0.55);
-
 /// Links a header or body cell (the width-bearing node) to its table and column,
 /// so `sync_table_column_widths` keeps every cell of a column the same width as
 /// its header.
@@ -1124,7 +1124,8 @@ fn spawn_border_resizer(
                 bottom: Val::Px(0.0),
                 ..default()
             },
-            BackgroundColor(RESIZER_COLOR),
+            BackgroundColor(SkinPalette::default().divider),
+            ClassList::new_with_classes([RESIZER_CLASS]),
             Pickable::IGNORE,
         ))
         .observe(resize_border_on_drag(root, left))
@@ -1567,16 +1568,18 @@ fn drive_table_sort_arrows(
 /// colour to put back — and the consumer's next bind would undo the greying
 /// anyway. Every write is guarded, so a settled table costs a compare.
 fn reflect_table_disabled(
+    palette: SkinColors,
     tables: Query<(&TableState, Has<bevy::ui::InteractionDisabled>)>,
     disabled: DisabledQuery,
     mut texts: Query<(&TableHeaderText, &mut TextColor)>,
 ) {
+    let palette = palette.get();
     for (header, mut color) in &mut texts {
         let Ok((state, table_disabled)) = tables.get(header.table) else {
             continue;
         };
         let wanted = if table_disabled || disabled.contains(header.cell) {
-            DISABLED_TEXT_COLOR
+            disabled_text_color(&palette)
         } else {
             state.spec.header_color
         };
@@ -1800,9 +1803,11 @@ fn select_table_row_on_press(
 /// index is selected, transparent otherwise. Skips [`TableSelectionMode::None`]
 /// tables entirely, so a consumer that owns its own row backgrounds keeps them.
 fn apply_table_selection_highlight(
+    palette: SkinColors,
     tables: Query<&TableState>,
     mut rows: Query<(&VirtualRow, &TableRow, &mut BackgroundColor)>,
 ) {
+    let palette = palette.get();
     for (row, row_ref, mut background) in &mut rows {
         let Ok(state) = tables.get(row_ref.table) else {
             continue;
@@ -1812,7 +1817,7 @@ fn apply_table_selection_highlight(
         }
         let selected = row.index.is_some_and(|index| state.is_selected(index));
         let wanted = if selected {
-            SELECTED_ROW_BACKGROUND
+            palette.selection_bg
         } else {
             Color::NONE
         };
@@ -1825,11 +1830,11 @@ fn apply_table_selection_highlight(
 #[cfg(test)]
 mod tests {
     use super::{
-        DISABLED_TEXT_COLOR, MAX_COLUMN_WIDTH, MAX_SORT_KEYS, MIN_COLUMN_WIDTH, Ordering,
-        TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableHandle, TableHeaderText,
+        MAX_COLUMN_WIDTH, MAX_SORT_KEYS, MIN_COLUMN_WIDTH, Ordering, SkinPalette, TableAlign,
+        TableColumn, TableColumnKind, TableColumnWidth, TableHandle, TableHeaderText,
         TableSelectionMode, TableSort, TableSortDefault, TableSpec, TableState, TableWidgetPlugin,
-        apply_persisted_widths, encode_widths, keep_order, order_by_sort_keys, resize_column_width,
-        spawn_table, spawn_table_row,
+        apply_persisted_widths, disabled_text_color, encode_widths, keep_order, order_by_sort_keys,
+        resize_column_width, spawn_table, spawn_table_row,
     };
     use bevy::camera::NormalizedRenderTarget;
     use bevy::picking::backend::HitData;
@@ -2424,7 +2429,7 @@ mod tests {
         );
         assert_eq!(
             header_color(&mut app, cell),
-            Some(DISABLED_TEXT_COLOR),
+            Some(disabled_text_color(&SkinPalette::default())),
             "the header greyed"
         );
         Ok(())
@@ -2457,7 +2462,7 @@ mod tests {
         );
         assert_eq!(
             header_color(&mut app, frozen),
-            Some(DISABLED_TEXT_COLOR),
+            Some(disabled_text_color(&SkinPalette::default())),
             "the disabled header greyed"
         );
         assert_eq!(
@@ -2499,7 +2504,10 @@ mod tests {
             .entity_mut(handle.root)
             .insert(bevy::ui::InteractionDisabled);
         app.update();
-        assert_eq!(header_color(&mut app, cell), Some(DISABLED_TEXT_COLOR));
+        assert_eq!(
+            header_color(&mut app, cell),
+            Some(disabled_text_color(&SkinPalette::default()))
+        );
         app.world_mut()
             .entity_mut(handle.root)
             .remove::<bevy::ui::InteractionDisabled>();

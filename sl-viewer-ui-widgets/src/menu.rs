@@ -102,6 +102,7 @@ use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
 
 use sl_viewer_ui_core::i18n::{Translated, Translator};
+use sl_viewer_ui_core::skin_palette::{SkinColors, SkinPalette};
 use sl_viewer_ui_core::ui::{
     LogicalMargin, LogicalRect, UiDirection, UiRoot, UiScaffoldSystems, column,
 };
@@ -522,37 +523,10 @@ fn subtree_matches_filter(def: &MenuDef, query: &str, translator: &Translator) -
 // painted by `highlight_menu_hover` so it works with or without a skin.
 // ---------------------------------------------------------------------------
 
-/// A menu bar / drop-down surface background. Shared with the status area
-/// (`status_bar`) so the two halves of the top row paint the same
-/// fallback colour when no skin is loaded.
-pub const MENU_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
-
-/// A menu-bar button / menu entry's resting background (transparent).
+/// A menu-bar button / menu entry's resting background (transparent). Not a
+/// skin role: a transparent resting state is what lets the hover highlight and
+/// the bar's own surface show through, so a skin recolours those instead.
 const ENTRY_BACKGROUND: Color = Color::NONE;
-
-/// A hovered menu button / entry's background — the highlight.
-const ENTRY_HIGHLIGHT: Color = Color::srgb(0.24, 0.34, 0.52);
-
-/// The label colour of an entry that **matched** the active menu-search filter —
-/// a warm accent, the reference viewer's `hightlightAndHide` highlight. A
-/// build-time text colour, not a per-frame background, so it does not fight the
-/// hover highlight (`highlight_menu_hover`, which paints backgrounds).
-const FILTER_MATCH_COLOR: Color = Color::srgb(0.98, 0.82, 0.40);
-
-/// A drop-down's border.
-const MENU_BORDER: Color = Color::srgb(0.30, 0.36, 0.46);
-
-/// An enabled entry's label colour.
-const ENTRY_TEXT: Color = Color::srgb(0.92, 0.94, 0.98);
-
-/// A disabled entry's label colour — clearly greyed.
-const ENTRY_TEXT_DISABLED: Color = Color::srgb(0.45, 0.49, 0.56);
-
-/// An accelerator / submenu-arrow colour — muted against the label.
-const ENTRY_ACCESSORY: Color = Color::srgb(0.62, 0.66, 0.74);
-
-/// A separator rule colour.
-const SEPARATOR_COLOR: Color = Color::srgb(0.30, 0.34, 0.42);
 
 /// The inline / block padding around a menu-bar button's label, in logical px.
 const BAR_BUTTON_PADDING: Vec2 = Vec2::new(12.0, 6.0);
@@ -791,7 +765,7 @@ pub fn spawn_menu_bar(
                 row_gap: Val::Px(2.0),
                 ..default()
             },
-            BackgroundColor(MENU_BACKGROUND),
+            BackgroundColor(SkinPalette::default().surface_bg),
             ClassList::new_with_classes(["sk-menu-bar"]),
             Name::new("menu-bar"),
             ChildOf(parent),
@@ -878,7 +852,7 @@ pub fn spawn_menu_button(
             Text::default(),
             Translated::new(def.label_key),
             cx.font(UiFont::Sans),
-            TextColor(ENTRY_TEXT),
+            TextColor(SkinPalette::default().text_primary),
             // A child node blocks picking by default, so an un-ignored label
             // would swallow the press and the button would never see it.
             Pickable::IGNORE,
@@ -1392,8 +1366,8 @@ fn build_menu_popup(
                 positions: drop.placements(ctx.direction),
                 window_margin: 4.0,
             },
-            BackgroundColor(MENU_BACKGROUND),
-            BorderColor::all(MENU_BORDER),
+            BackgroundColor(SkinPalette::default().surface_bg),
+            BorderColor::all(SkinPalette::default().surface_border),
             GlobalZIndex(MENU_Z_INDEX),
             // A drop-down is a floating layer: it must render in full even when it
             // overhangs its anchor's edge. A button-anchored menu (`spawn_menu_button`
@@ -1594,7 +1568,7 @@ struct LineDraw<'a> {
     /// for a line that got none.
     jump: Option<(char, usize)>,
     /// Whether this line itself matched the active menu-search term, which
-    /// draws its label in the accent ([`FILTER_MATCH_COLOR`]). A disabled entry
+    /// draws its label in the accent (`--match-highlight`). A disabled entry
     /// stays greyed regardless.
     highlight: bool,
 }
@@ -1610,17 +1584,18 @@ fn spawn_command_line(
     let element = ctx.element;
     let enabled = ctx.conditions.holds(command.enabled_when);
     let checked = command.checked_when.is_some() && ctx.conditions.holds(command.checked_when);
+    let palette = SkinPalette::default();
     let text_color = if !enabled {
-        ENTRY_TEXT_DISABLED
+        palette.text_disabled
     } else if draw.highlight {
-        FILTER_MATCH_COLOR
+        palette.match_highlight
     } else {
-        ENTRY_TEXT
+        palette.text_primary
     };
     let action = command.action;
     // A disabled row carries a second class whose skin rule repaints the label
     // in the skin's disabled grey — without it, the skin's `.sk-menu-item`
-    // text colour would override the Rust-painted `ENTRY_TEXT_DISABLED` and an
+    // text colour would override the Rust-painted disabled grey and an
     // unavailable entry would read enabled.
     let classes: &[&str] = if enabled {
         &["sk-menu-item"]
@@ -1668,7 +1643,7 @@ fn spawn_command_line(
         commands.spawn((
             Text::new(accelerator),
             UiFont::Sans.at(ENTRY_FONT),
-            TextColor(ENTRY_ACCESSORY),
+            TextColor(palette.text_muted),
             Pickable::IGNORE,
             Name::new("menu-item-accel"),
             ChildOf(row),
@@ -1735,8 +1710,9 @@ fn spawn_dynamic_line(
         .observe(emit_dynamic_pick)
         .id();
     attach_row_press(commands, row);
-    spawn_gutter(commands, row, "", ENTRY_TEXT);
-    let label_entity = spawn_entry_label(commands, row, label, ENTRY_TEXT, None);
+    let text = SkinPalette::default().text_primary;
+    spawn_gutter(commands, row, "", text);
+    let label_entity = spawn_entry_label(commands, row, label, text, None);
     commands.entity(label_entity).insert(MenuDynamicLabel);
 }
 
@@ -1751,10 +1727,11 @@ fn spawn_submenu_line(
     element: &'static str,
     filter_parent_matched: bool,
 ) {
+    let palette = SkinPalette::default();
     let label_color = if draw.highlight {
-        FILTER_MATCH_COLOR
+        palette.match_highlight
     } else {
-        ENTRY_TEXT
+        palette.text_primary
     };
     let row = commands
         .spawn((
@@ -1786,7 +1763,7 @@ fn spawn_submenu_line(
     commands.spawn((
         Text::new(SUBMENU_ARROW),
         UiFont::Sans.at(ENTRY_FONT),
-        TextColor(ENTRY_ACCESSORY),
+        TextColor(palette.text_muted),
         Pickable::IGNORE,
         Name::new("menu-submenu-arrow"),
         ChildOf(row),
@@ -1911,7 +1888,7 @@ fn spawn_separator_line(commands: &mut Commands, popup: Entity) {
             margin: UiRect::axes(Val::Px(0.0), Val::Px(4.0)),
             ..default()
         },
-        BackgroundColor(SEPARATOR_COLOR),
+        BackgroundColor(SkinPalette::default().surface_border),
         ClassList::new_with_classes(["sk-menu-separator"]),
         Pickable::IGNORE,
         Name::new("menu-separator"),
@@ -2211,12 +2188,14 @@ fn dismiss_all(
 fn highlight_menu_hover(
     hover: Res<HoverMap>,
     keyboard: Res<MenuKeyboard>,
+    palette: SkinColors,
     child_of: Query<&ChildOf>,
     mut rows: Query<
         (Entity, &mut BackgroundColor, Has<InteractionDisabled>),
         Or<(With<MenuEntryAction>, With<MenuBranch>, With<MenuBarButton>)>,
     >,
 ) {
+    let palette = palette.get();
     let row_entities: HashSet<Entity> = rows.iter().map(|(entity, _, _)| entity).collect();
     let lit: HashSet<Entity> = if keyboard.active {
         let mut set = HashSet::new();
@@ -2249,7 +2228,7 @@ fn highlight_menu_hover(
     };
     for (entity, mut background, disabled) in &mut rows {
         let wanted = if lit.contains(&entity) && !disabled {
-            ENTRY_HIGHLIGHT
+            palette.control_bg_hover
         } else {
             ENTRY_BACKGROUND
         };

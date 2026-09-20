@@ -45,8 +45,10 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui::Checked;
 use bevy::ui_widgets::{RadioButton, RadioGroup, ValueChange};
+use bevy_flair::style::components::ClassList;
 
 use sl_viewer_ui_core::i18n::Translated;
+use sl_viewer_ui_core::skin_palette::{SkinColors, SkinPalette};
 use sl_viewer_ui_core::ui::{column, row};
 use sl_viewer_ui_core::ui_element::UiAction;
 use sl_viewer_ui_core::ui_font::UiFont;
@@ -61,23 +63,29 @@ const ITEM_GAP: f32 = 6.0;
 /// reference's filled radio.
 const SELECTED_GLYPH: &str = "\u{25c9}";
 
+/// The skin class on an option's label — the shared primary-text class.
+const LABEL_CLASS: &str = "sk-text";
+
 /// The indicator glyph of an unselected option — an empty ring (`○`, U+25CB).
 const UNSELECTED_GLYPH: &str = "\u{25cb}";
 
-/// The selected indicator's colour — a bright accent, the loudest "this one"
-/// signal independent of keyboard focus.
-const INDICATOR_ON: Color = Color::srgb(0.52, 0.68, 0.95);
-
-/// An unselected indicator's colour — muted, so the filled option reads at a
-/// glance.
-const INDICATOR_OFF: Color = Color::srgb(0.50, 0.55, 0.63);
-
-/// A [disabled](bevy::ui::InteractionDisabled) group's indicator colour — dimmed
-/// so a radio the consumer cannot change reads as disabled.
-const INDICATOR_DISABLED: Color = Color::srgb(0.34, 0.36, 0.40);
-
-/// An option label's colour.
-const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+/// An option indicator's colour for its state: the accent for the selected
+/// one (the loudest "this one" signal, independent of keyboard focus), a muted
+/// tone for the rest so the filled option reads at a glance, and the disabled
+/// grey for a group the consumer cannot change.
+///
+/// Read from the palette rather than a CSS class because all three are
+/// Rust-painted per frame (`reflect_radio_disabled`), which a class `color`
+/// would beat.
+const fn indicator_color(palette: &SkinPalette, active: bool, disabled: bool) -> Color {
+    if disabled {
+        palette.text_disabled
+    } else if active {
+        palette.accent
+    } else {
+        palette.text_muted
+    }
+}
 
 /// The action a group emits when the user picks a different option. A single
 /// verb — "a choice was made" — because the *which* is readable directly from
@@ -286,7 +294,7 @@ fn spawn_radio_item(
             UNSELECTED_GLYPH
         }),
         UiFont::Sans.at(spec.font_size),
-        TextColor(if active { INDICATOR_ON } else { INDICATOR_OFF }),
+        TextColor(indicator_color(&SkinPalette::default(), active, false)),
         RadioIndicator { group, index },
         // The indicator is part of the option's hit target, not its own; let the
         // click fall through to the `RadioButton`.
@@ -299,7 +307,8 @@ fn spawn_radio_item(
         .spawn((
             Text::new(spec.initial_label(label)),
             UiFont::Sans.at(spec.font_size),
-            TextColor(LABEL_COLOR),
+            TextColor(SkinPalette::default().text_primary),
+            ClassList::new_with_classes([LABEL_CLASS]),
             Pickable::IGNORE,
             Name::new(format!("{}:radio-label:{index}", spec.element)),
             ChildOf(item),
@@ -363,11 +372,15 @@ fn on_radio_value_change(
 /// groups whose selection actually changed, and guards each write so a settled
 /// option does not re-trigger.
 fn apply_radio_selection(
+    palette: SkinColors,
     changed: Query<(Entity, &RadioSelection), Changed<RadioSelection>>,
     items: Query<(Entity, &RadioItem)>,
     mut indicators: Query<(&RadioIndicator, &mut Text, &mut TextColor)>,
     mut commands: Commands,
 ) {
+    // `reflect_radio_disabled` runs every frame and repaints every indicator,
+    // so this one does not have to widen its guard for a skin change.
+    let palette = palette.get();
     for (group_id, selection) in &changed {
         for (item_entity, item) in &items {
             if item.group != group_id {
@@ -393,11 +406,7 @@ fn apply_radio_selection(
             if text.0 != wanted_glyph {
                 wanted_glyph.clone_into(&mut text.0);
             }
-            let wanted_color = if is_active {
-                INDICATOR_ON
-            } else {
-                INDICATOR_OFF
-            };
+            let wanted_color = indicator_color(&palette, is_active, false);
             if color.0 != wanted_color {
                 color.0 = wanted_color;
             }
@@ -410,20 +419,16 @@ fn apply_radio_selection(
 /// group's disabled flag and its selection. Supersedes
 /// `apply_radio_selection`'s indicator colouring.
 fn reflect_radio_disabled(
+    palette: SkinColors,
     groups: Query<(&RadioSelection, Has<bevy::ui::InteractionDisabled>)>,
     mut indicators: Query<(&RadioIndicator, &mut TextColor)>,
 ) {
+    let palette = palette.get();
     for (indicator, mut color) in &mut indicators {
         let Ok((selection, disabled)) = groups.get(indicator.group) else {
             continue;
         };
-        let wanted = if disabled {
-            INDICATOR_DISABLED
-        } else if indicator.index == selection.active {
-            INDICATOR_ON
-        } else {
-            INDICATOR_OFF
-        };
+        let wanted = indicator_color(&palette, indicator.index == selection.active, disabled);
         if color.0 != wanted {
             color.0 = wanted;
         }
