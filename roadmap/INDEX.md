@@ -12,9 +12,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 300 |
+| ready | 299 |
 | blocked | 40 |
-| in-progress | 22 |
+| in-progress | 23 |
 | bugs | 5 |
 | done | 1195 |
 | deferred | 29 |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (300)
+## ready (299)
 
 ### protocol
 
@@ -312,9 +312,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The LSP position-to-byte direction has zero tests
 - [`viewer-audit-menu-label-i18n`](ready/viewer-audit-menu-label-i18n.md) — Menu
   and pie-menu labels cannot be translated, by type
-- [`viewer-audit-object-children-index`](ready/viewer-audit-object-children-index.md)
-  — ObjectState has no children index, so every linkset query full-scans the
-  region
 - [`viewer-audit-preferences-hub-decoupling`](ready/viewer-audit-preferences-hub-decoupling.md)
   — sl-viewer-preferences is a 12-crate hub whose own decoupling mechanism is
   under-applied
@@ -1069,13 +1066,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (22)
+## in-progress (23)
 
 ### viewer
 
 - [`viewer-agentupdate-cadence-effects`](in-progress/viewer-agentupdate-cadence-effects.md)
   — Explore what the raised AgentUpdate/camera-interest cadence buys (and how
   the sim reacts)
+- [`viewer-audit-object-children-index`](in-progress/viewer-audit-object-children-index.md)
+  — ObjectState has no children index, so every linkset query full-scans the
+  region
 - [`viewer-avatar-falls-through-ground`](in-progress/viewer-avatar-falls-through-ground.md)
   — Avatar falls through the ground (simulator reports a bouncing avatar
   position)

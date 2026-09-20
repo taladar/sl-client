@@ -2,7 +2,7 @@
 id: viewer-audit-object-children-index
 title: ObjectState has no children index, so every linkset query full-scans the region
 topic: viewer
-status: ready
+status: in-progress
 origin: static code audit (2026-08-26)
 points: 5
 refs: [viewer-audit-world-api-query-tests]

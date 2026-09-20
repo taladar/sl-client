@@ -1116,3 +1116,286 @@ pub fn despawn_prim_faces(face_entities: &[Entity], commands: &mut Commands) {
         commands.entity(face).try_despawn();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{INITIAL_TREE_TIER, ObjectState, ShapeFingerprint, TrackedObject};
+    use bevy::ecs::world::CommandQueue;
+    use bevy::prelude::{Commands, Vec3, World};
+    use pretty_assertions::assert_eq;
+    use sl_client_bevy::{
+        AgentKey, CircuitId, ObjectExtraParams, ObjectKey, PrimLod, PrimShapeParams,
+        RegionLocalObjectId, ScopedObjectId, Uuid, pcode,
+    };
+
+    /// The circuit every fixture object is streamed on. The queries under test
+    /// are all within one region, so a single circuit is enough to scope them.
+    const CIRCUIT: CircuitId = CircuitId::new(1);
+
+    /// A HUD attachment point (the reference's `31..=38` screen-space range),
+    /// which the wearer-side queries deliberately leave out.
+    const HUD_POINT: u8 = 31;
+
+    /// The scoped id of the fixture object with region-local id `local`.
+    fn scoped(local: u32) -> ScopedObjectId {
+        ScopedObjectId::new(CIRCUIT, RegionLocalObjectId::new(local))
+    }
+
+    /// A synthetic object table: one spawned entity per tracked object, so the
+    /// entity-returning queries have distinct handles to report.
+    struct Fixture {
+        /// The world the fixture entities are spawned in.
+        world: World,
+        /// The object table under test.
+        state: ObjectState,
+    }
+
+    impl Fixture {
+        /// An empty table.
+        fn new() -> Self {
+            Self {
+                world: World::new(),
+                state: ObjectState::default(),
+            }
+        }
+
+        /// Track the object with region-local id `local` hanging off `parent`
+        /// (its own id when it is a linkset root), worn on `attachment_point`
+        /// when it is an attachment. Returns its scoped id.
+        fn track(
+            &mut self,
+            local: u32,
+            parent: u32,
+            attachment_point: Option<u8>,
+        ) -> ScopedObjectId {
+            let entity = self.world.spawn_empty().id();
+            let id = scoped(local);
+            let tracked = TrackedObject {
+                entity,
+                full_key: ObjectKey::from(Uuid::from_u128(u128::from(local))),
+                geometry: entity,
+                shape: ShapeFingerprint {
+                    pcode: pcode::PRIMITIVE,
+                    shape: PrimShapeParams::default(),
+                    sculpt: None,
+                    grass_spread: None,
+                    flexi_softness: None,
+                },
+                // The wire marks a root by a zero parent id, which the ingest
+                // turns into the object naming itself; every fixture follows it.
+                parent: scoped(parent),
+                is_root: parent == local,
+                parented: false,
+                attachment_point,
+                attachment_item: None,
+                owner_id: AgentKey::from(Uuid::nil()),
+                update_flags: 0,
+                material: 0,
+                extra: ObjectExtraParams::default(),
+                texture_animation: None,
+                text: String::new(),
+                text_color: [0; 4],
+                face_entities: Vec::new(),
+                prim_lod: PrimLod::Low,
+                tree_tier: INITIAL_TREE_TIER,
+                animated: false,
+                texture_entry: Vec::new(),
+                media_url: None,
+                scale: Vec3::ONE,
+            };
+            let _replaced = self.state.objects.insert(id, tracked);
+            id
+        }
+
+        /// Run `act` with a [`Commands`] over the fixture world, applying its
+        /// queue afterwards — how the despawning queries are exercised without
+        /// a schedule.
+        fn with_commands<R>(
+            &mut self,
+            act: impl FnOnce(&mut ObjectState, &mut Commands) -> R,
+        ) -> R {
+            let mut queue = CommandQueue::default();
+            let outcome = {
+                let mut commands = Commands::new(&mut queue, &self.world);
+                act(&mut self.state, &mut commands)
+            };
+            queue.apply(&mut self.world);
+            outcome
+        }
+    }
+
+    /// The root comes first and its children follow in region-local id order —
+    /// the stable ordering the prim-navigation buttons and the link-number
+    /// read-out rely on, since the wire carries no true link order.
+    #[test]
+    fn a_linkset_lists_its_root_first_then_its_children_by_local_id() {
+        let mut fixture = Fixture::new();
+        let root = fixture.track(10, 10, None);
+        let later = fixture.track(30, 10, None);
+        let earlier = fixture.track(20, 10, None);
+
+        assert_eq!(
+            fixture.state.linkset_members(&root),
+            vec![root, earlier, later]
+        );
+        assert_eq!(fixture.state.linkset_prim_count(&root), 3);
+    }
+
+    /// A linkset holds only its own child prims: another linkset's children and
+    /// anything worn on this object are not part of it.
+    #[test]
+    fn a_linkset_excludes_another_linksets_children_and_its_own_attachments() {
+        let mut fixture = Fixture::new();
+        let root = fixture.track(10, 10, None);
+        let child = fixture.track(11, 10, None);
+        let _worn = fixture.track(12, 10, Some(6));
+        let _elsewhere_root = fixture.track(20, 20, None);
+        let _elsewhere_child = fixture.track(21, 20, None);
+
+        assert_eq!(fixture.state.linkset_members(&root), vec![root, child]);
+    }
+
+    /// An untracked root yields nothing at all, and a childless one yields only
+    /// itself — the two edges the link-limit guard counts against.
+    #[test]
+    fn an_untracked_linkset_is_empty_and_a_lone_prim_is_one() {
+        let mut fixture = Fixture::new();
+        let lone = fixture.track(10, 10, None);
+
+        assert_eq!(fixture.state.linkset_members(&scoped(99)), Vec::new());
+        assert_eq!(fixture.state.linkset_prim_count(&scoped(99)), 0);
+        assert_eq!(fixture.state.linkset_members(&lone), vec![lone]);
+    }
+
+    /// A picked linked part resolves to its root, a root to itself, and a worn
+    /// prim to nothing — an attachment hangs off an avatar, not a linkset.
+    #[test]
+    fn the_linkset_root_of_a_part_is_its_parent_and_an_attachment_has_none() {
+        let mut fixture = Fixture::new();
+        let root = fixture.track(10, 10, None);
+        let child = fixture.track(11, 10, None);
+        let worn = fixture.track(12, 10, Some(6));
+
+        assert_eq!(fixture.state.linkset_root_of(&root), Some(root));
+        assert_eq!(fixture.state.linkset_root_of(&child), Some(root));
+        assert_eq!(fixture.state.linkset_root_of(&worn), None);
+        assert_eq!(fixture.state.linkset_root_of(&scoped(99)), None);
+    }
+
+    /// Killing a linkset root takes its children with it, and reports every
+    /// id it dropped — the handle the derender path keeps on objects the
+    /// simulator will not stream again.
+    #[test]
+    fn removing_a_root_drops_its_children_and_names_them_all() {
+        let mut fixture = Fixture::new();
+        let root = fixture.track(10, 10, None);
+        let first = fixture.track(11, 10, None);
+        let second = fixture.track(12, 10, None);
+        let bystander = fixture.track(20, 20, None);
+
+        let mut dropped =
+            fixture.with_commands(|state, commands| state.remove_object(root, commands));
+        let head = dropped.first().copied();
+        dropped.sort_by_key(|id| id.id);
+
+        assert_eq!(head, Some(root), "the removed root is reported first");
+        assert_eq!(dropped, vec![root, first, second]);
+        assert!(fixture.state.objects.contains_key(&bystander));
+        assert_eq!(fixture.state.objects.len(), 1);
+    }
+
+    /// An avatar object's removal takes the whole worn chain — the attachment
+    /// root hanging off it and that root's own linked prims.
+    #[test]
+    fn removing_an_avatar_drops_the_attachments_worn_on_it() {
+        let mut fixture = Fixture::new();
+        let avatar = fixture.track(1, 1, None);
+        let worn_root = fixture.track(10, 1, Some(6));
+        let worn_child = fixture.track(11, 10, None);
+
+        let mut dropped =
+            fixture.with_commands(|state, commands| state.remove_object(avatar, commands));
+        dropped.sort_by_key(|id| id.id);
+
+        assert_eq!(dropped, vec![avatar, worn_root, worn_child]);
+        assert!(fixture.state.objects.is_empty());
+    }
+
+    /// A `KillObject` for something this viewer never tracked drops nothing and
+    /// reports nothing.
+    #[test]
+    fn removing_an_untracked_object_drops_nothing() {
+        let mut fixture = Fixture::new();
+        let kept = fixture.track(10, 10, None);
+
+        let dropped =
+            fixture.with_commands(|state, commands| state.remove_object(scoped(99), commands));
+
+        assert_eq!(dropped, Vec::new());
+        assert!(fixture.state.objects.contains_key(&kept));
+    }
+
+    /// The worn index groups attachment roots under the avatar wearing them,
+    /// and leaves HUDs out: they hang off your own screen, are drawn for nobody
+    /// else, and the reference likewise keeps them out of a wearer's
+    /// complexity.
+    #[test]
+    fn worn_roots_are_grouped_by_wearer_and_huds_are_left_out() {
+        let mut fixture = Fixture::new();
+        let wearer = fixture.track(1, 1, None);
+        let other = fixture.track(2, 2, None);
+        let worn = fixture.track(10, 1, Some(6));
+        let _worn_child = fixture.track(11, 10, None);
+        let _hud = fixture.track(12, 1, Some(HUD_POINT));
+        let worn_elsewhere = fixture.track(20, 2, Some(6));
+
+        let by_wearer = fixture.state.attachment_roots_by_wearer();
+
+        assert_eq!(by_wearer.get(&wearer), Some(&vec![worn]));
+        assert_eq!(by_wearer.get(&other), Some(&vec![worn_elsewhere]));
+        assert_eq!(by_wearer.len(), 2);
+    }
+
+    /// A linked prim of a worn linkset is chased up to its attachment root to
+    /// find the avatar it is worn on; a HUD's chain reports no wearer, and an
+    /// in-world prim none either.
+    #[test]
+    fn a_linked_child_of_an_attachment_finds_its_wearer() {
+        let mut fixture = Fixture::new();
+        let wearer = fixture.track(1, 1, None);
+        let worn_root = fixture.track(10, 1, Some(6));
+        let worn_child = fixture.track(11, 10, None);
+        let hud_child = {
+            let _hud_root = fixture.track(12, 1, Some(HUD_POINT));
+            fixture.track(13, 12, None)
+        };
+        let loose = fixture.track(20, 20, None);
+
+        assert_eq!(fixture.state.wearer_of(worn_root), Some(wearer));
+        assert_eq!(fixture.state.wearer_of(worn_child), Some(wearer));
+        assert_eq!(fixture.state.wearer_of(hud_child), None);
+        assert_eq!(fixture.state.wearer_of(loose), None);
+
+        // The raw point, unlike the wearer, is reported for a HUD too.
+        assert_eq!(fixture.state.attachment_point_of(worn_child), Some(6));
+        assert_eq!(
+            fixture.state.attachment_point_of(hud_child),
+            Some(HUD_POINT)
+        );
+        assert_eq!(fixture.state.attachment_point_of(loose), None);
+    }
+
+    /// A fresh-circuit teleport purges the whole table; nothing survives it.
+    #[test]
+    fn a_purge_forgets_every_tracked_object() {
+        let mut fixture = Fixture::new();
+        let root = fixture.track(10, 10, None);
+        let _child = fixture.track(11, 10, None);
+
+        fixture.with_commands(|state, commands| state.purge(commands));
+
+        assert!(fixture.state.objects.is_empty());
+        assert_eq!(fixture.state.linkset_members(&root), Vec::new());
+        assert!(fixture.state.origin().is_none());
+    }
+}
