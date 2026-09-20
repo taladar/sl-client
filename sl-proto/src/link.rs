@@ -283,7 +283,7 @@ impl ReliableLink {
         now: Instant,
     ) -> Result<(), WireError> {
         let mut writer = Writer::new();
-        message.id().encode(&mut writer);
+        message.id().encode(&mut writer)?;
         message.encode_body(&mut writer)?;
         let body = writer.into_bytes();
 

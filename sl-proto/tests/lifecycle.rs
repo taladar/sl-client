@@ -328,16 +328,25 @@ mod test {
     }
 
     /// Builds an inbound datagram for a server-sent message.
-    fn server_datagram(id: MessageId, body: &[u8], sequence: u32, reliable: bool) -> Vec<u8> {
+    fn server_datagram(
+        id: MessageId,
+        body: &[u8],
+        sequence: u32,
+        reliable: bool,
+    ) -> Result<Vec<u8>, TestError> {
         let mut writer = Writer::new();
-        id.encode(&mut writer);
+        id.encode(&mut writer)?;
         writer.bytes(body);
         let flags = if reliable {
             PacketFlags::RELIABLE
         } else {
             PacketFlags::EMPTY
         };
-        encode_datagram(flags, SequenceNumber(sequence), &writer.into_bytes())
+        Ok(encode_datagram(
+            flags,
+            SequenceNumber(sequence),
+            &writer.into_bytes(),
+        ))
     }
 
     /// Builds an inbound datagram carrying a fully encoded server message.
@@ -347,7 +356,7 @@ mod test {
         reliable: bool,
     ) -> Result<Vec<u8>, TestError> {
         let mut writer = Writer::new();
-        message.id().encode(&mut writer);
+        message.id().encode(&mut writer)?;
         message.encode_body(&mut writer)?;
         let flags = if reliable {
             PacketFlags::RELIABLE
@@ -421,7 +430,7 @@ mod test {
         );
 
         // RegionHandshake (all-zero body decodes to zeroed fields/empty blocks).
-        let handshake = server_datagram(MessageId::Low(148), &[0u8; 600], 1, true);
+        let handshake = server_datagram(MessageId::Low(148), &[0u8; 600], 1, true)?;
         session.handle_datagram(sim_addr(), &handshake, now)?;
         let replies = drain(&mut session)?;
         assert!(matches!(
@@ -560,7 +569,7 @@ mod test {
         let now = Instant::now();
         let mut session = established(now)?;
         // StartPingCheck High 1: PingID (u8) + OldestUnacked (u32).
-        let ping = server_datagram(MessageId::High(1), &[0x2A, 0, 0, 0, 0], 2, false);
+        let ping = server_datagram(MessageId::High(1), &[0x2A, 0, 0, 0, 0], 2, false)?;
         session.handle_datagram(sim_addr(), &ping, now)?;
         let replies = drain(&mut session)?;
         let Some(AnyMessage::CompletePingCheck(reply)) = replies.first() else {
@@ -795,7 +804,7 @@ mod test {
             })
             .ok_or("expected a keep-alive StartPingCheck")?;
         let answered_at = after(now, 7_000)?;
-        let complete = server_datagram(MessageId::High(2), &[ping_id], 3, false);
+        let complete = server_datagram(MessageId::High(2), &[ping_id], 3, false)?;
         session.handle_datagram(sim_addr(), &complete, answered_at)?;
 
         say_and_transmit(&mut session, "measure me", answered_at)?;
@@ -822,7 +831,7 @@ mod test {
         drain(&mut session)?;
 
         // A reliable inbound message must be acknowledged.
-        let ping = server_datagram(MessageId::High(1), &[1, 0, 0, 0, 0], 50, true);
+        let ping = server_datagram(MessageId::High(1), &[1, 0, 0, 0, 0], 50, true)?;
         session.handle_datagram(sim_addr(), &ping, now)?;
         drain(&mut session)?; // the ping reply
 
@@ -866,7 +875,7 @@ mod test {
         );
 
         // LogoutReply Low 253: AgentData (2 uuids) + InventoryData variable (count).
-        let reply = server_datagram(MessageId::Low(253), &[0u8; 33], 2, true);
+        let reply = server_datagram(MessageId::Low(253), &[0u8; 33], 2, true)?;
         session.handle_datagram(sim_addr(), &reply, now)?;
         assert!(session.is_closed());
         assert!(matches!(
@@ -12845,7 +12854,7 @@ mod test {
         body.put_u64(0x0003_E800_0003_E900);
         body.bytes(&[127, 0, 0, 1]);
         body.bytes(&[0x32, 0xC8]);
-        let datagram = server_datagram(MessageId::Low(151), &body.into_bytes(), 9, true);
+        let datagram = server_datagram(MessageId::Low(151), &body.into_bytes(), 9, true)?;
         session.handle_datagram(sim_addr(), &datagram, now)?;
 
         let events = drain_events(&mut session);
@@ -12876,7 +12885,7 @@ mod test {
         body.put_u64(0x0003_E900_0003_E800);
         body.bytes(&[127, 0, 0, 1]);
         body.bytes(&[0x23, 0x29]);
-        let datagram = server_datagram(MessageId::Low(151), &body.into_bytes(), sequence, true);
+        let datagram = server_datagram(MessageId::Low(151), &body.into_bytes(), sequence, true)?;
         session.handle_datagram(sim_addr(), &datagram, now)?;
         Ok(())
     }
@@ -12927,7 +12936,7 @@ mod test {
         while session.poll_transmit().is_some() {}
 
         // A ping from the child simulator is answered on the child's circuit.
-        let ping = server_datagram(MessageId::High(1), &[0x2A, 0, 0, 0, 0], 2, false);
+        let ping = server_datagram(MessageId::High(1), &[0x2A, 0, 0, 0, 0], 2, false)?;
         session.handle_datagram(sim_b(), &ping, now)?;
         let reply =
             take_transmit_to(&mut session, sim_b()).ok_or("expected a ping reply to sim_b")?;
@@ -12973,7 +12982,7 @@ mod test {
         // The neighbour answers 200ms later; the child times the round trip and
         // surfaces it as a child-circuit `Event::Ping`.
         let replied_at = after(now, 5_200)?;
-        let complete = server_datagram(MessageId::High(2), &[0], 3, false);
+        let complete = server_datagram(MessageId::High(2), &[0], 3, false)?;
         session.handle_datagram(sim_b(), &complete, replied_at)?;
         let ping_event = drain_events(&mut session)
             .into_iter()
@@ -13075,11 +13084,11 @@ mod test {
         while session.poll_transmit().is_some() {}
 
         // The simulator retires the child circuit.
-        let disable = server_datagram(MessageId::Low(152), &[], 3, true);
+        let disable = server_datagram(MessageId::Low(152), &[], 3, true)?;
         session.handle_datagram(sim_b(), &disable, now)?;
 
         // A ping from that (now-closed) child is ignored — no reply.
-        let ping = server_datagram(MessageId::High(1), &[0x2A, 0, 0, 0, 0], 4, false);
+        let ping = server_datagram(MessageId::High(1), &[0x2A, 0, 0, 0, 0], 4, false)?;
         session.handle_datagram(sim_b(), &ping, now)?;
         assert!(
             take_transmit_to(&mut session, sim_b()).is_none(),
@@ -14663,12 +14672,7 @@ mod test {
         body.put_variable2(b"http://127.0.0.1:9001/seed")?; // seed_capability
         body.put_u8(13); // sim_access (PG)
         body.put_u32(0); // teleport_flags
-        Ok(server_datagram(
-            MessageId::Low(69),
-            &body.into_bytes(),
-            sequence,
-            true,
-        ))
+        server_datagram(MessageId::Low(69), &body.into_bytes(), sequence, true)
     }
 
     /// A simulator address as `(sim_ip, sim_port)` in the on-wire form the region
@@ -14799,7 +14803,7 @@ mod test {
             body.put_u8(13); // sim_access (PG)
             body.put_u32(0); // teleport_flags
             let sequence = self.seq();
-            let datagram = server_datagram(MessageId::Low(69), &body.into_bytes(), sequence, true);
+            let datagram = server_datagram(MessageId::Low(69), &body.into_bytes(), sequence, true)?;
             session.handle_datagram(source, &datagram, now)?;
             Ok(())
         }
@@ -14819,7 +14823,8 @@ mod test {
             body.bytes(&ip);
             body.bytes(&port);
             let sequence = self.seq();
-            let datagram = server_datagram(MessageId::Low(151), &body.into_bytes(), sequence, true);
+            let datagram =
+                server_datagram(MessageId::Low(151), &body.into_bytes(), sequence, true)?;
             session.handle_datagram(root, &datagram, now)?;
             Ok(())
         }
@@ -15721,7 +15726,7 @@ mod test {
         // RegionInfo does. The lenient decoder must still succeed.
         let message = region_info_msg("TrimRegion", 13, 25, 0, 80, 12000);
         let mut writer = Writer::new();
-        message.id().encode(&mut writer);
+        message.id().encode(&mut writer)?;
         message.encode_body(&mut writer)?;
         let mut body = writer.into_bytes();
         body.truncate(body.len().saturating_sub(2));
@@ -16617,7 +16622,7 @@ mod test {
     fn short_zero_run_object_update(sequence: u32) -> Result<Vec<u8>, TestError> {
         let update = object_update(100, 0xABCD, zero_vec());
         let mut writer = Writer::new();
-        update.id().encode(&mut writer);
+        update.id().encode(&mut writer)?;
         update.encode_body(&mut writer)?;
         let mut encoded = zero_encode(&writer.into_bytes());
         // The body ends in the zero joint vectors, so its encoding ends in a
@@ -16677,7 +16682,7 @@ mod test {
 
         let mut writer = Writer::new();
         let update = object_update(100, 0xABCD, zero_vec());
-        update.id().encode(&mut writer);
+        update.id().encode(&mut writer)?;
         update.encode_body(&mut writer)?;
         let mut body = writer.into_bytes();
         // Replace the trailing zero joint vectors with non-zero bytes, then cut
@@ -17652,7 +17657,7 @@ mod test {
         );
 
         // Retiring the child circuit drops only its grants.
-        let disable = server_datagram(MessageId::Low(152), &[], 3, true);
+        let disable = server_datagram(MessageId::Low(152), &[], 3, true)?;
         session.handle_datagram(sim_b(), &disable, now)?;
         assert_eq!(
             session.granted_permissions(child_task, item),
@@ -21567,7 +21572,7 @@ mod test {
 
         // High id 0 maps to no template message, so `AnyMessage::decode` rejects
         // it after consuming only the single id byte.
-        let datagram = server_datagram(MessageId::High(0), &[0xAA, 0xBB], 2, false);
+        let datagram = server_datagram(MessageId::High(0), &[0xAA, 0xBB], 2, false)?;
         session.handle_datagram(sim_addr(), &datagram, now)?;
 
         let diagnostics = drain_diagnostics(&mut session);
@@ -21606,7 +21611,7 @@ mod test {
 
         // RegionHandshake (Low 148) with a one-byte body: the id decodes, but the
         // body runs out before its fields, so decoding fails partway through.
-        let datagram = server_datagram(MessageId::Low(148), &[0x00], 2, false);
+        let datagram = server_datagram(MessageId::Low(148), &[0x00], 2, false)?;
         session.handle_datagram(sim_addr(), &datagram, now)?;
 
         let diagnostics = drain_diagnostics(&mut session);
@@ -21642,7 +21647,7 @@ mod test {
 
         // The same undecodable datagram that produces a DecodeFailed when
         // diagnostics are on must produce nothing while they are off.
-        let datagram = server_datagram(MessageId::High(0), &[0xAA, 0xBB], 2, false);
+        let datagram = server_datagram(MessageId::High(0), &[0xAA, 0xBB], 2, false)?;
         session.handle_datagram(sim_addr(), &datagram, now)?;
         assert!(drain_diagnostics(&mut session).is_empty());
         Ok(())
@@ -22965,7 +22970,7 @@ mod test {
         session.handle_login_response(LoginResponse::Success(login), now)?;
         drain(&mut session)?;
         drain_events(&mut session);
-        let handshake = server_datagram(MessageId::Low(148), &[0u8; 600], 1, true);
+        let handshake = server_datagram(MessageId::Low(148), &[0u8; 600], 1, true)?;
         session.handle_datagram(sim_addr(), &handshake, now)?;
         drain(&mut session)?;
         drain_events(&mut session);
@@ -23524,7 +23529,7 @@ mod test {
         )?;
         drain(&mut session)?;
         drain_events(&mut session);
-        let local = server_datagram(MessageId::Low(64), &[0u8; 48], 20, true);
+        let local = server_datagram(MessageId::Low(64), &[0u8; 48], 20, true)?;
         session.handle_datagram(sim_addr(), &local, now)?;
         drain_events(&mut session);
 
@@ -23659,7 +23664,7 @@ mod test {
         )?;
         drain(&mut session)?;
         drain_events(&mut session);
-        let local = server_datagram(MessageId::Low(64), &[0u8; 48], 20, true);
+        let local = server_datagram(MessageId::Low(64), &[0u8; 48], 20, true)?;
         session.handle_datagram(sim_addr(), &local, now)?;
         drain_events(&mut session);
 
@@ -23675,7 +23680,7 @@ mod test {
 
         enable_neighbour_b(&mut session, 20, now)?;
         while session.poll_transmit().is_some() {}
-        let disable = server_datagram(MessageId::Low(152), &[], 1, true);
+        let disable = server_datagram(MessageId::Low(152), &[], 1, true)?;
         session.handle_datagram(sim_b(), &disable, now)?;
 
         assert_chat_and_presence_intact(&session)
@@ -23693,7 +23698,7 @@ mod test {
         session.initiate_logout(now);
         drain(&mut session)?;
         // LogoutReply Low 253: AgentData (2 uuids) + InventoryData variable (count).
-        let reply = server_datagram(MessageId::Low(253), &[0u8; 33], 30, true);
+        let reply = server_datagram(MessageId::Low(253), &[0u8; 33], 30, true)?;
         session.handle_datagram(sim_addr(), &reply, now)?;
         assert!(session.is_closed(), "the session is closed after logout");
 

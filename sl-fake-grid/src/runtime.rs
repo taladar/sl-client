@@ -2220,7 +2220,7 @@ mod test {
     /// Encodes one client-direction message as an unreliable datagram.
     fn client_datagram(message: &AnyMessage, sequence: u32) -> Result<Vec<u8>, TestError> {
         let mut writer = Writer::new();
-        message.id().encode(&mut writer);
+        message.id().encode(&mut writer)?;
         message.encode_body(&mut writer)?;
         Ok(encode_datagram(
             PacketFlags::EMPTY,

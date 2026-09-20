@@ -28,8 +28,22 @@ pub enum MessageId {
 }
 
 impl MessageId {
+    /// The first `Low` id whose big-endian high byte would be the `0xFF` that
+    /// [`MessageId::decode`] reads as the start of a `Fixed` id. A `Low` id at
+    /// or above it is unrepresentable: no such message exists (the template's
+    /// largest is `0x01AF`), and one invented by hand is refused rather than
+    /// encoded into bytes that decode back as something else.
+    const FIRST_UNREPRESENTABLE_LOW: u16 = 0xFF00;
+
     /// Writes this id's frequency-coded prefix to `writer`.
-    pub fn encode(self, writer: &mut Writer) {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WireError::ValueOutOfRange`] for a `Low` id at or above
+    /// `0xFF00`, whose four bytes `0xFF 0xFF 0xFF xx` decode back as a `Fixed`
+    /// id. Encoding is otherwise total, and encode/decode are inverses over
+    /// every id this returns `Ok` for.
+    pub fn encode(self, writer: &mut Writer) -> Result<(), WireError> {
         match self {
             Self::High(number) => writer.put_u8(number),
             Self::Medium(number) => {
@@ -37,12 +51,19 @@ impl MessageId {
                 writer.put_u8(number);
             }
             Self::Low(number) => {
+                if number >= Self::FIRST_UNREPRESENTABLE_LOW {
+                    return Err(WireError::ValueOutOfRange {
+                        field: "MessageId::Low",
+                        value: i64::from(number),
+                    });
+                }
                 writer.put_u8(EXTEND);
                 writer.put_u8(EXTEND);
                 writer.bytes(&endian::u16_to_be(number));
             }
             Self::Fixed(number) => writer.bytes(&endian::u32_to_be(number)),
         }
+        Ok(())
     }
 
     /// Reads a frequency-coded message id from `reader`.

@@ -52,6 +52,23 @@ pub enum WireError {
         /// The maximum length representable by the prefix.
         max: usize,
     },
+    /// A `Multiple N` block was handed a vector of some other length.
+    ///
+    /// The template fixes such a block's repeat count, so the count is never
+    /// written to the wire and the decoder always reads exactly `N` — encoding
+    /// a shorter or longer vector would emit a packet that decodes as
+    /// something else entirely, silently borrowing bytes from (or stranding
+    /// bytes before) whatever follows. The encoder refuses instead, the way
+    /// the `Variable` arm already refuses a vector too long for its count byte.
+    #[error("block {block} holds {found} item(s) where the template fixes {expected}")]
+    BlockCountMismatch {
+        /// The template's name for the offending block.
+        block: &'static str,
+        /// The repeat count the template fixes.
+        expected: usize,
+        /// The number of items the encoder was handed.
+        found: usize,
+    },
     /// A decoded field held a value outside the range its typed representation
     /// permits — for example a negative L$ amount in a field a conforming peer
     /// only ever sends non-negative, or an amount too large for its signed

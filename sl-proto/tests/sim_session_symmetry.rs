@@ -212,7 +212,7 @@ mod test {
     /// followed by the body.
     fn encode(message: &AnyMessage) -> Result<Vec<u8>, TestError> {
         let mut writer = Writer::new();
-        message.id().encode(&mut writer);
+        message.id().encode(&mut writer)?;
         message.encode_body(&mut writer)?;
         Ok(writer.into_bytes())
     }
