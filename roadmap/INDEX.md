@@ -11,7 +11,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 116 |
+| ideas | 118 |
 | ready | 312 |
 | blocked | 66 |
 | in-progress | 22 |
@@ -19,9 +19,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | done | 1200 |
 | deferred | 30 |
 | wont-do | 16 |
-| **total** | **1767** |
+| **total** | **1769** |
 
-## ideas (116)
+## ideas (118)
 
 ### protocol
 
@@ -172,6 +172,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   shadow tuning (bias / blur / softness)
 - [`viewer-sit-across-region-border-auto-approach`](ideas/viewer-sit-across-region-border-auto-approach.md)
   — Sit on an object across a region border by moving into its region first
+- [`viewer-snapshot-scene-sidecar`](ideas/viewer-snapshot-scene-sidecar.md) —
+  Say what a snapshot is a picture of
 - [`viewer-stars-srgb-linearize`](ideas/viewer-stars-srgb-linearize.md) —
   Linearize the star field like the sky / clouds
 - [`viewer-status-bar-toggle-options`](ideas/viewer-status-bar-toggle-options.md)
@@ -191,6 +193,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
+- [`test-crosscheck-ui-scenes`](ideas/test-crosscheck-ui-scenes.md) — UI scenes
+  — putting two viewers into the same interaction state
 - [`test-reference-cpp-oracles`](ideas/test-reference-cpp-oracles.md) —
   Reference-viewer C++ math and GLSL as test oracles (FFI / naga)
 
