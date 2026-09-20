@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 40 |
 | in-progress | 22 |
 | bugs | 5 |
-| done | 1196 |
+| done | 1197 |
 | deferred | 29 |
 | wont-do | 16 |
-| **total** | **1707** |
+| **total** | **1708** |
 
 ## ideas (100)
 
@@ -258,8 +258,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The one crate with unsafe FFI has the workspace's weakest lint configuration
 - [`protocol-audit-runtime-parity-gaps`](ready/protocol-audit-runtime-parity-gaps.md)
   — Re-exports and derived login state reach only the bevy runtime
-- [`protocol-audit-session-god-object`](ready/protocol-audit-session-god-object.md)
-  — Session and SimSession are god objects with 12k-line impl blocks
+- [`protocol-audit-sim-session-stores`](ready/protocol-audit-sim-session-stores.md)
+  — SimSession's 54 fields mix the driver's serving stores with the circuit
 - [`protocol-audit-wire-error-contract`](ready/protocol-audit-wire-error-contract.md)
   — sl-wire's public parse surface has five different failure disciplines
 - [`protocol-fetch-inventory-items-request`](ready/protocol-fetch-inventory-items-request.md)
@@ -1146,7 +1146,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 
-## done (1196)
+## done (1197)
 
 ### protocol
 
@@ -1314,6 +1314,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — sl-wire's own XML parsing has no nesting guard
 - [`protocol-audit-runtime-shared-crate`](done/protocol-audit-runtime-shared-crate.md)
   — 1677 byte-identical lines are duplicated between the two runtime crates
+- [`protocol-audit-session-god-object`](done/protocol-audit-session-god-object.md)
+  — Session and SimSession are god objects with 12k-line impl blocks
 - [`protocol-audit-sim-session-lifecycle`](done/protocol-audit-sim-session-lifecycle.md)
   — SimSession accepts identity rebinding, never validates a session id, and
   frees nothing on close

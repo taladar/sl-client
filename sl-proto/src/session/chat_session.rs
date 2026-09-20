@@ -403,6 +403,120 @@ impl ChatSession {
         }
     }
 
+    /// Creates a session that exists only as a **pending invitation**: the one
+    /// state [`Self::new`] cannot produce, since a fresh session is `Joined`.
+    pub(crate) fn invited(invite: PendingInvite, now: Instant) -> Self {
+        Self {
+            lifecycle: ChatSessionLifecycle::Invited(invite),
+            ..Self::new(now)
+        }
+    }
+
+    /// Stamps activity and treats what happened as the "joined" signal: an
+    /// outbound send, an inbound message, a participant change or an accept's
+    /// roster all mean we are in this session, so a still-pending invitation is
+    /// promoted (a no-op for one already joined).
+    ///
+    /// Typing is deliberately **not** such a signal: it must neither open nor
+    /// join a session, so it stamps nothing and goes through
+    /// [`Self::note_typing`].
+    pub(crate) fn note_joined(&mut self, now: Instant) {
+        self.last_activity = now;
+        self.lifecycle = ChatSessionLifecycle::Joined;
+    }
+
+    /// Stamps activity and takes a fresh invitation payload — but only while the
+    /// session is still an invitation. An invite never demotes a session we
+    /// have since joined or accepted.
+    pub(crate) fn note_reinvited(&mut self, invite: PendingInvite, now: Instant) {
+        self.last_activity = now;
+        if matches!(self.lifecycle, ChatSessionLifecycle::Invited(_)) {
+            self.lifecycle = ChatSessionLifecycle::Invited(invite);
+        }
+    }
+
+    /// Records whether `agent` is currently typing into this session. A
+    /// typing-start is stamped with `now` so the timed loop can expire it when
+    /// the matching `TypingStop` is lost; a stop clears it immediately.
+    pub(crate) fn note_typing(&mut self, agent: AgentKey, typing: bool, now: Instant) {
+        if typing {
+            self.typing.insert(agent, now);
+        } else {
+            self.typing.remove(&agent);
+        }
+    }
+
+    /// Folds one roster change (`SessionAdd` / `SessionLeave`) into the
+    /// participant set.
+    pub(crate) fn note_participant(&mut self, agent: AgentKey, joined: bool) {
+        if joined {
+            self.participants.insert(agent);
+        } else {
+            self.participants.remove(&agent);
+        }
+    }
+
+    /// Adds everyone in `agents` to the roster (an accept reply's roster, or the
+    /// invitees of a conference we are opening).
+    pub(crate) fn extend_participants(&mut self, agents: impl IntoIterator<Item = AgentKey>) {
+        self.participants.extend(agents);
+    }
+
+    /// Drops `agent` from every per-agent set: an avatar who went offline is no
+    /// longer typing, no longer in the roster, and no longer voice-connected.
+    /// Idempotent — it layers with the sim's own `SessionLeave` and the typing
+    /// expiry rather than replacing either.
+    pub(crate) fn forget_agent(&mut self, agent: AgentKey) {
+        self.typing.remove(&agent);
+        self.participants.remove(&agent);
+        self.voice.members.remove(&agent);
+    }
+
+    /// Clears the unread counter: the conversation has been read.
+    pub(crate) const fn mark_read(&mut self) {
+        self.unread = 0;
+    }
+
+    /// Records that this session offers voice, with whatever channel
+    /// coordinates came with the offer (an invitation's `voice` body, or an
+    /// accept reply's `voice_channel_info`).
+    pub(crate) fn note_voice_offered(&mut self, channel: VoiceChannelInfo) {
+        self.voice.has_voice = true;
+        self.voice.channel = Some(channel);
+    }
+
+    /// Folds one agent-list voice flag into the voice roster. Someone being in
+    /// voice also proves the session has a voice channel, whatever the text
+    /// side has seen.
+    pub(crate) fn note_voice_membership(&mut self, agent: AgentKey, in_voice: bool) {
+        if in_voice {
+            self.voice.has_voice = true;
+            self.voice.members.insert(agent);
+        } else {
+            self.voice.members.remove(&agent);
+        }
+    }
+
+    /// Records that **we** have joined this session's voice channel —
+    /// optimistically, at the signalling level: there is no audio ack.
+    pub(crate) const fn note_voice_joined(&mut self) {
+        self.voice.joined = true;
+        self.voice.has_voice = true;
+    }
+
+    /// Records that we have left the voice channel, leaving the text side of
+    /// the conversation — history, roster, lifecycle — untouched.
+    pub(crate) const fn note_voice_left(&mut self) {
+        self.voice.joined = false;
+    }
+
+    /// Moves the server-history fetch cycle to `state`. The [`Fetched`](ServerHistoryState::Fetched)
+    /// transition belongs to [`Self::store_server_history`], which has the
+    /// backlog to store with it.
+    pub(crate) const fn note_server_history(&mut self, state: ServerHistoryState) {
+        self.server_history_state = state;
+    }
+
     /// Appends `message` to the log, dropping the oldest entry if that pushes the
     /// log past [`HISTORY_CAP`]. Shared by the inbound and outbound log paths;
     /// the unread bookkeeping is the caller's (it differs between the two).

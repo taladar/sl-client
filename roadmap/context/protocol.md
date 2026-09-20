@@ -267,3 +267,21 @@ usable later by a real simulator). Conventions:
   login host serves — `get_grid_info`, map tiles, the economy helper
   XML-RPC — are in scope as sans-I/O codecs (`sl-wire`'s `grid_info`,
   `map_tile`, `economy_helper`, over the generic `xmlrpc` module).
+
+## Decomposing a god object here (one inherent impl per type)
+
+`Session` and `SimSession` carry their whole method surface in a single
+`impl` block each, and that is not an accident to be tidied away by moving
+methods into per-area modules: the workspace lints set
+`clippy::multiple_inherent_impl = "warn"`, the `ggh` pre-commit hook runs
+`cargo clippy --all-targets --workspace -- -D warnings`, and
+`clippy::allow_attributes = "deny"` rules out a local exemption. A split
+`impl Session` fails the commit.
+
+So the only way to shrink either type is to extract a **type** that owns a
+group of fields and the behaviour over them, the way
+[[protocol-audit-extract-lludp-transport]] did with `ReliableLink`,
+[[protocol-audit-session-god-object]] with `WorldCache` and `Transfers`.
+Each extraction is its own task-sized piece of work: name the group, give
+it the operations that have to touch all of it at once, and leave the I/O
+(events, diagnostics, sends) on the session.

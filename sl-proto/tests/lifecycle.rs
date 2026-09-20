@@ -14983,6 +14983,114 @@ mod test {
         Ok(())
     }
 
+    /// **The regression**: a timed-out teleport used to return from the middle
+    /// of the timer tick, so the tick it failed on never retransmitted, never
+    /// flushed its owed acks, never sent the agent update and never ran the
+    /// child-circuit loop. The failure is in-place — the session keeps running —
+    /// so the rest of the tick is still owed.
+    #[test]
+    fn handover_timeout_still_services_the_rest_of_the_tick() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut session, mut grid) = grid_session(now)?;
+
+        // The destination will never answer CompleteAgentMovement.
+        grid.drop_amc(sim_b());
+        session.teleport_to(
+            RegionHandle(B_HANDLE),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        grid.teleport_finish(&mut session, sim_addr(), sim_b(), now)?;
+        grid.pump(&mut session, now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // Past the 30 s teleport timeout: the teleport fails, and the root's
+        // 1 s agent update — due since long before — still goes out on the very
+        // same tick.
+        let later = now + Duration::from_secs(31);
+        session.handle_timeout(later);
+        assert!(
+            drain_events(&mut session)
+                .iter()
+                .any(|event| matches!(event, Event::TeleportFailed { .. })),
+            "the teleport times out"
+        );
+        let mut root_agent_update = false;
+        while let Some(transmit) = session.poll_transmit() {
+            if transmit.destination == sim_addr()
+                && matches!(decode(&transmit)?, AnyMessage::AgentUpdate(_))
+            {
+                root_agent_update = true;
+            }
+        }
+        assert!(
+            root_agent_update,
+            "the failing teleport does not cost the tick its agent update"
+        );
+        Ok(())
+    }
+
+    /// **The regression**: a child circuit's agent update and keep-alive ping are
+    /// sent by the timer tick exactly like the root's, but only its inactivity,
+    /// ack-flush and resend deadlines used to be merged into
+    /// [`Session::poll_timeout`] — so on a quiet child they fired whenever the
+    /// root's next timer happened to wake the session, not when they were due.
+    #[test]
+    fn poll_timeout_merges_a_child_circuits_agent_update() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut session, mut grid) = grid_session(now)?;
+        // Take the root's bootstrap packets off the resend list, so its resend
+        // deadline stops standing in for every other timer it owns.
+        ack_sequences_through(&mut session, now, 9000, 32)?;
+
+        // One tick on the root's own 1 s cadence, so its next agent update is at
+        // +2 s — and the child opens *between* the two, at +1.5 s, putting its
+        // first agent update at +2.5 s, after the root's and before the one
+        // following it.
+        session.handle_timeout(now + Duration::from_secs(1));
+        drain(&mut session)?;
+
+        let open = now + Duration::from_millis(1500);
+        grid.enable_neighbour(&mut session, sim_addr(), sim_b(), open)?;
+        grid.pump(&mut session, open)?;
+        // The neighbour takes delivery of the circuit bootstrap, for the same
+        // reason: an unacked packet's resend deadline would mask the one under
+        // test.
+        let packets = (0..=32).map(|id| PacketAckPacketsBlock { id }).collect();
+        let ack = AnyMessage::PacketAck(PacketAck { packets });
+        session.handle_datagram(sim_b(), &server_message(&ack, 9100, false)?, open)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // The root's tick at +2 s: both circuits' owed acks go out, and the root
+        // rearms its agent update for +3 s.
+        session.handle_timeout(now + Duration::from_secs(2));
+        drain(&mut session)?;
+
+        let wake = session.poll_timeout().ok_or("a timeout is scheduled")?;
+        assert!(
+            wake <= now + Duration::from_millis(2500),
+            "the session wakes for the child's agent update, not for the root's next one"
+        );
+
+        session.handle_timeout(now + Duration::from_millis(2500));
+        let mut child_agent_update = false;
+        while let Some(transmit) = session.poll_transmit() {
+            if transmit.destination == sim_b()
+                && matches!(decode(&transmit)?, AnyMessage::AgentUpdate(_))
+            {
+                child_agent_update = true;
+            }
+        }
+        assert!(
+            child_agent_update,
+            "the child's agent update is sent on the wake it asked for"
+        );
+        Ok(())
+    }
+
     /// Cancelling a teleport mid-handover returns to the source region and drops
     /// the freshly-opened destination circuit (so a later teleport there is fresh
     /// again, not a promote).
