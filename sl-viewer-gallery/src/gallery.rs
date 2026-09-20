@@ -337,6 +337,11 @@ pub fn run(assets: AssetPlugin, registry: GalleryRegistry) -> AppExit {
         // Seeded from `SL_VIEWER_UI_DIRECTION`, as the viewer does, so the gallery
         // can be started straight into RTL rather than only reached by pressing `D`.
         .insert_resource(UiDirection::from_env())
+        // What to render, from the caller. `setup_gallery` and the respawn
+        // systems all take it as a `Res`, so without this the very first
+        // Startup system fails parameter validation and the gallery is a
+        // window that never draws.
+        .insert_resource(registry)
         .init_resource::<GalleryCell>()
         // Declared so an element's button has somewhere to emit to. Nothing reads
         // it but `log_actions`, which is exactly the point: in this binary every
