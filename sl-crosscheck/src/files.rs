@@ -95,7 +95,7 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::{AVATAR_KEY, credentials_toml, grid_toml};
-    use crate::plan::{CaptureSpec, RunPlan};
+    use crate::plan::{CaptureSpec, FirestormSkin, RunPlan, SlClientSkin};
 
     /// The boxed error every test in this module reports through.
     type TestError = Box<dyn core::error::Error>;
@@ -109,6 +109,8 @@ mod tests {
             last_name: "User".to_owned(),
             password: "password".to_owned(),
             capture: CaptureSpec::default(),
+            sl_client_skin: SlClientSkin::default(),
+            firestorm_skin: FirestormSkin::default(),
             camera: None,
         })
     }

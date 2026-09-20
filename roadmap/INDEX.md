@@ -12,9 +12,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 116 |
-| ready | 313 |
+| ready | 312 |
 | blocked | 66 |
-| in-progress | 22 |
+| in-progress | 23 |
 | bugs | 5 |
 | done | 1199 |
 | deferred | 30 |
@@ -289,7 +289,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (313)
+## ready (312)
 
 ### protocol
 
@@ -1000,8 +1000,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Factor the repeated session/id acquisition out of the conformance cases
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
-- [`test-firestorm-harness-skin-selection`](ready/test-firestorm-harness-skin-selection.md)
-  — Firestorm harness — start a run in a named skin and theme
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
@@ -1235,7 +1233,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Batch world changes into per-tick update bursts (blocked by
   `server-world-heartbeat`, `server-world-ecs-store`)
 
-## in-progress (22)
+## in-progress (23)
 
 ### viewer
 
@@ -1295,6 +1293,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
+
+### test
+
+- [`test-firestorm-harness-skin-selection`](in-progress/test-firestorm-harness-skin-selection.md)
+  — Firestorm harness — start a run in a named skin and theme
 
 ## bugs (5)
 

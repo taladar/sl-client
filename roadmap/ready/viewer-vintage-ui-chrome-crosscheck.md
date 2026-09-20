@@ -41,6 +41,26 @@ status row — and not of floater rendering. A notification popping between two
 frames would otherwise make a sequence incomparable, which is why the block
 exists and why it should stay.
 
+## Observed, 2026-09-20
+
+A real run — `--only firestorm --firestorm-skin vintage --capture-ui`, two
+frames — put this beyond theory. The skin applied correctly and Vintage's
+chrome is plainly in the frame, and the frame is still **unusable**: the scene
+appears *twice*, side by side, with black letterboxing above and to the right,
+in an image whose nominal size is the requested 1920×1080.
+
+The run reported none of it. `harness-status.json` said
+`{"ok":true,"reason":"complete","frames_written":2}`, the exit status was 0,
+and the only trace was an INFO line saying `window resized to 1920x1080` —
+which is what the harness *asked* for, not what it got. So a UI capture can
+come back broken and indistinguishable from a good one, which is the failure
+this harness's whole status-file design exists to prevent.
+
+Root cause not yet established — a compositor that answered the reshape with
+its own size, a resize landing mid-capture, or the snapshot reading past the
+window are all consistent with what the image shows. Whatever it is, the
+reporting half above is what turns it from a mystery into a failed run.
+
 ## What to do
 
 - `--skin` / `--theme` on `sl-crosscheck`, into the shared capture block, so
