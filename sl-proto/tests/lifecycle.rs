@@ -1216,6 +1216,123 @@ mod test {
         Ok(())
     }
 
+    /// The arms a root circuit and a child-agent circuit share are **one**
+    /// implementation, not two copies of one: the same message delivered on
+    /// either circuit raises the same event.
+    ///
+    /// The two dispatchers used to mirror each other by hand, and the copies had
+    /// already drifted — a root `RegionHandshake` outside `AwaitingHandshake`
+    /// was silently dropped while the child arm answered it unconditionally.
+    /// The per-arm tests around this one each pin one message on one circuit;
+    /// this one pins the *mirror*, so an arm that grows a root-only quirk fails
+    /// here even if nobody thinks to write the child half of its test.
+    ///
+    /// Only the arms whose output is genuinely circuit-independent belong here:
+    /// the parcel overlay and the coarse locations are deliberately tagged with
+    /// the region that sent them, so their two events differ by design.
+    #[test]
+    fn a_shared_message_raises_the_same_event_on_either_circuit() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        enable_neighbour_b(&mut session, 9, now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let sound = uuid::Uuid::from_u128(0xA01);
+        let object = uuid::Uuid::from_u128(0xA02);
+        let owner = uuid::Uuid::from_u128(0xA03);
+        let shared = [
+            AnyMessage::SoundTrigger(SoundTrigger {
+                sound_data: SoundTriggerSoundDataBlock {
+                    sound_id: sound,
+                    owner_id: owner,
+                    object_id: object,
+                    parent_id: uuid::Uuid::nil(),
+                    handle: 0x0000_03E8_0000_03E8,
+                    position: vec3(96.0, 32.0, 21.0),
+                    gain: 0.75,
+                },
+            }),
+            AnyMessage::AttachedSound(AttachedSound {
+                data_block: AttachedSoundDataBlockBlock {
+                    sound_id: sound,
+                    object_id: object,
+                    owner_id: owner,
+                    gain: 1.0,
+                    flags: SoundFlags::LOOP,
+                },
+            }),
+            AnyMessage::PreloadSound(PreloadSound {
+                data_block: vec![PreloadSoundDataBlockBlock {
+                    object_id: object,
+                    owner_id: owner,
+                    sound_id: sound,
+                }],
+            }),
+            AnyMessage::ObjectAnimation(ObjectAnimation {
+                sender: ObjectAnimationSenderBlock { id: object },
+                animation_list: vec![ObjectAnimationAnimationListBlock {
+                    anim_id: uuid::Uuid::from_u128(0xA04),
+                    anim_sequence_id: 7,
+                }],
+            }),
+            AnyMessage::GenericMessage(GenericMessage {
+                agent_data: GenericMessageAgentDataBlock {
+                    agent_id: uuid::Uuid::from_u128(1),
+                    session_id: uuid::Uuid::from_u128(2),
+                    transaction_id: uuid::Uuid::nil(),
+                },
+                method_data: GenericMessageMethodDataBlock {
+                    method: b"SomeFeature\0".to_vec(),
+                    invoice: uuid::Uuid::nil(),
+                },
+                param_list: vec![GenericMessageParamListBlock {
+                    parameter: b"payload".to_vec(),
+                }],
+            }),
+            AnyMessage::LargeGenericMessage(LargeGenericMessage {
+                agent_data: LargeGenericMessageAgentDataBlock {
+                    agent_id: uuid::Uuid::from_u128(1),
+                    session_id: uuid::Uuid::from_u128(2),
+                    transaction_id: uuid::Uuid::nil(),
+                },
+                method_data: LargeGenericMessageMethodDataBlock {
+                    method: b"SomeBigFeature\0".to_vec(),
+                    invoice: uuid::Uuid::nil(),
+                },
+                param_list: vec![LargeGenericMessageParamListBlock {
+                    parameter: b"payload".to_vec(),
+                }],
+            }),
+        ];
+
+        // Each circuit de-duplicates its own sequence numbers, so one counter
+        // serves both.
+        for (sequence, message) in (100_u32..).zip(shared) {
+            session.handle_datagram(sim_addr(), &server_message(&message, sequence, true)?, now)?;
+            let on_root = drain_events(&mut session);
+            drain(&mut session)?;
+
+            session.handle_datagram(sim_b(), &server_message(&message, sequence, true)?, now)?;
+            let on_child = drain_events(&mut session);
+            drain(&mut session)?;
+
+            assert!(
+                !on_root.is_empty(),
+                "{} raised no event on the root circuit",
+                message.name()
+            );
+            assert_eq!(
+                on_root,
+                on_child,
+                "{} is dispatched differently on a child circuit",
+                message.name()
+            );
+        }
+        Ok(())
+    }
+
     #[test]
     fn large_generic_message_surfaces_method_and_params() -> Result<(), TestError> {
         let now = Instant::now();

@@ -33,8 +33,8 @@ use super::transfers::Transfers;
 use super::world_cache::WorldCache;
 use super::{
     AGENT_UPDATE_INTERVAL, ASSET_TRANSFER_TIMEOUT, ArrivalPose, ChatLifecycleView, ChatSession,
-    ChatSessionInfo, ChatSessionKind, ChatSessionLifecycle, Circuit, DEFAULT_DRAW_DISTANCE,
-    FolderState, FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION,
+    ChatSessionInfo, ChatSessionKind, ChatSessionLifecycle, Circuit, CircuitRole,
+    DEFAULT_DRAW_DISTANCE, FolderState, FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION,
     INVENTORY_FETCH_MAX_ATTEMPTS, INVENTORY_SAVE_TIMEOUT, Inventory, InventoryOwner,
     LOGOUT_TIMEOUT, MAX_XFER_DOWNLOAD_BYTES, MessageCursor, OfferedUpload,
     PARENT_REQUEST_WARN_ATTEMPTS, PendingHandover, PendingInventorySave, PendingInvite,
@@ -2038,20 +2038,14 @@ impl Session {
         }
         // Accept traffic from the root circuit or any open child circuit; ignore
         // anything else.
-        let is_root = self.circuit.as_ref().map(|c| c.sim_addr) == Some(from);
-        if !is_root && !self.children.contains_key(&from) {
+        let Some(role) = self.circuit_role(from) else {
             return Ok(());
-        }
+        };
 
         let parsed = parse_datagram(datagram)?;
 
         let process = {
-            let circuit = if is_root {
-                self.circuit.as_mut()
-            } else {
-                self.children.get_mut(&from)
-            };
-            let Some(circuit) = circuit else {
+            let Some(circuit) = self.circuit_in_role(role, from) else {
                 return Ok(());
             };
             circuit.note_received(now);
@@ -2120,55 +2114,115 @@ impl Session {
             );
         }
         tracing::trace!(?id, name = message.name(), %from, "inbound message");
-        if is_root {
-            self.dispatch(from, &message, now)
-        } else {
-            self.dispatch_child(from, &message, now)
+        match role {
+            CircuitRole::Root => self.dispatch(from, &message, now),
+            CircuitRole::Child => self.dispatch_child(from, &message, now),
         }
     }
 
-    /// Handles a message that arrived on a child-agent circuit. Children carry
-    /// limited traffic; we keep the circuit healthy (ping replies, region
-    /// handshake acknowledgement) and otherwise ignore it — the crossing into a
-    /// child region is driven by `CrossedRegion` on the root circuit.
-    fn dispatch_child(
+    /// Which circuit the simulator address `from` speaks on, or `None` when it
+    /// is neither the root simulator nor an open child — traffic from anywhere
+    /// else is not ours and is ignored.
+    fn circuit_role(&self, from: SocketAddr) -> Option<CircuitRole> {
+        if self.circuit.as_ref().map(|circuit| circuit.sim_addr) == Some(from) {
+            Some(CircuitRole::Root)
+        } else if self.children.contains_key(&from) {
+            Some(CircuitRole::Child)
+        } else {
+            None
+        }
+    }
+
+    /// The circuit `from` speaks on, looked up in whichever place the resolved
+    /// [`CircuitRole`] keeps it.
+    fn circuit_in_role(&mut self, role: CircuitRole, from: SocketAddr) -> Option<&mut Circuit> {
+        match role {
+            CircuitRole::Root => self.circuit.as_mut(),
+            CircuitRole::Child => self.children.get_mut(&from),
+        }
+    }
+
+    /// Handles a message whose treatment is the same on the root circuit and on
+    /// a child-agent circuit, returning whether it was one of them.
+    ///
+    /// A child agent is not a bookkeeping stub: the neighbour streams it a real
+    /// slice of its region — the object updates, the animations that move them,
+    /// the appearances that texture them, the spatial sounds, the parcel
+    /// overlay, the coarse (minimap) dots — and the link underneath it has to
+    /// answer the same pings and acks the root circuit does. Every one of those
+    /// arms therefore has to exist twice. They used to exist twice *literally*,
+    /// hand-copied from [`Session::dispatch`] into
+    /// [`Session::dispatch_child`], and the copies had already drifted: a root
+    /// `RegionHandshake` outside `AwaitingHandshake` was silently dropped while
+    /// the child arm answered it unconditionally, so a region restart left the
+    /// root region's flags stale and the simulator retrying.
+    ///
+    /// They live here once instead, parameterised by the [`CircuitRole`] the
+    /// message arrived on. The role decides exactly three things — which
+    /// circuit answers, how [`Event::Ping`] is tagged, and whether the arrival
+    /// transition runs after a handshake — and everything else is identical for
+    /// both, which is the point: a fix to a shared arm is one edit again.
+    ///
+    /// [`Session::dispatch_child`] calls this up front. [`Session::dispatch`]
+    /// calls it from its fallback arm instead, **after** its own arms have had
+    /// their chance, so a root-only refinement of a message that is otherwise
+    /// shared still wins: the `emptymutelist` and experience `GenericMessage`
+    /// features are the agent's, not a region's, and only the region hosting
+    /// the agent has them to report.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Wire`] if a reply fails to encode or a region handshake
+    /// carries an undecodable body.
+    fn dispatch_shared(
         &mut self,
+        role: CircuitRole,
         from: SocketAddr,
         message: &AnyMessage,
         now: Instant,
-    ) -> Result<(), Error> {
-        // A child agent still receives the neighbour region's object stream;
-        // cache it so a roaming/proximity bot sees adjacent regions too.
-        if self.try_dispatch_object(from, message, now)? {
-            return Ok(());
-        }
+    ) -> Result<bool, Error> {
         match message {
             AnyMessage::StartPingCheck(ping) => {
-                if let Some(circuit) = self.children.get_mut(&from) {
+                if let Some(circuit) = self.circuit_in_role(role, from) {
                     circuit.send_complete_ping_check(PingId(ping.ping_id.ping_id), now)?;
                 }
             }
             AnyMessage::CompletePingCheck(reply) => {
-                // The neighbour's answer to our keep-alive `StartPingCheck` on
-                // this child circuit: surface the round-trip time as a
-                // child-circuit `Event::Ping`.
-                if let Some(rtt) = self.children.get_mut(&from).and_then(|circuit| {
-                    circuit.record_ping_reply(PingId(reply.ping_id.ping_id), now)
+                // The simulator's answer to our keep-alive `StartPingCheck` on
+                // this circuit: surface the round-trip time when it matches the
+                // ping in flight, tagged with the circuit it was measured on.
+                if let Some((sim, rtt)) = self.circuit_in_role(role, from).and_then(|circuit| {
+                    circuit
+                        .record_ping_reply(PingId(reply.ping_id.ping_id), now)
+                        .map(|rtt| (circuit.sim_addr, rtt))
                 }) {
                     self.events.push_back(Event::Ping {
-                        sim: from,
-                        child: true,
+                        sim,
+                        child: role.is_child(),
                         rtt,
                     });
                 }
             }
+            AnyMessage::PacketAck(ack) => {
+                if let Some(circuit) = self.circuit_in_role(role, from) {
+                    for packet in &ack.packets {
+                        circuit.record_acks(&[SequenceNumber(packet.id)]);
+                    }
+                }
+            }
             AnyMessage::RegionHandshake(handshake) => {
-                if let Some(circuit) = self.children.get_mut(&from) {
+                // A simulator re-sends `RegionHandshake` outside login too — on a
+                // region restart, an estate change or a terrain-texture change —
+                // and keeps retrying until it is answered, so reply and refresh
+                // the region's identity/flags whatever the session state (the
+                // reference viewer's `process_region_handshake` is likewise
+                // ungated).
+                if let Some(circuit) = self.circuit_in_role(role, from) {
                     circuit.send_region_handshake_reply(now)?;
                 }
-                // Surface the neighbour region's identity (terrain textures +
-                // elevation bands, flags, maturity, …) just like the root
-                // handshake, keyed by this child circuit's region handle, so a
+                // Surface the region's identity (terrain textures + elevation
+                // bands, flags, maturity, …) keyed by this circuit's region
+                // handle. On a child that is the neighbour's identity, so a
                 // viewer can shade neighbour terrain with its own textures.
                 let region_handle = self
                     .circuit_id_for(from)
@@ -2180,7 +2234,203 @@ impl Session {
                 }
                 self.events
                     .push_back(Event::RegionInfoHandshake(Box::new(identity)));
+                if role == CircuitRole::Root {
+                    // Only the *arrival* transition is once-only, and
+                    // `complete_arrival` guards itself. A neighbour's handshake
+                    // is never an arrival — the crossing into a child region is
+                    // driven by `CrossedRegion` on the root circuit.
+                    self.complete_arrival(now);
+                }
             }
+            // The region's parcel overlay (Second Life pushes it to a child on
+            // establishment; OpenSim on parcel changes), tagged with this
+            // circuit's region so the minimap can draw neighbour property lines
+            // as well as our own.
+            AnyMessage::ParcelOverlay(overlay) => {
+                let region_handle = self
+                    .circuit_id_for(from)
+                    .and_then(|circuit_id| self.world.region_handle(circuit_id))
+                    .unwrap_or(RegionHandle(0));
+                self.events
+                    .push_back(Event::ParcelOverlay(ParcelOverlayInfo {
+                        sequence_id: overlay.parcel_data.sequence_id,
+                        data: overlay.parcel_data.data.clone(),
+                        region_handle,
+                    }));
+            }
+            // An avatar's currently-playing animations, pushed whenever its
+            // animation set changes. The list is the complete current set, not a
+            // delta — a stopped animation simply drops out of a later update.
+            // Without this on a child circuit a neighbour-region avatar stays
+            // frozen at its rest pose even though its geometry renders.
+            AnyMessage::AvatarAnimation(animation) => {
+                self.events.push_back(Event::AvatarAnimation {
+                    avatar_id: AgentKey::from(animation.sender.id),
+                    animations: avatar_animations(animation),
+                    physical_events: animation
+                        .physical_avatar_event_list
+                        .iter()
+                        .map(|block| block.type_data.clone())
+                        .collect(),
+                });
+            }
+            // The full authoritative set of animations now signalled on an
+            // animated-mesh (animesh) object; the object analogue of
+            // `AvatarAnimation`, and frozen on a neighbour for the same reason.
+            AnyMessage::ObjectAnimation(animation) => {
+                self.events.push_back(Event::ObjectAnimation {
+                    object_id: ObjectKey::from(animation.sender.id),
+                    animations: animation
+                        .animation_list
+                        .iter()
+                        .map(|block| ObjectPlayingAnimation {
+                            anim_id: AnimationKey::from(block.anim_id),
+                            sequence_id: block.anim_sequence_id,
+                        })
+                        .collect(),
+                });
+            }
+            // An avatar's appearance (baked textures + visual params), pushed
+            // when it comes into range or restyles. Decoded for both the modern
+            // server-side bake (the texture entry names the server's bakes) and
+            // the legacy client-side bake. Without this on a child circuit a
+            // neighbour-region avatar renders **grey**: its body spawns from the
+            // object stream but no baked texture is ever ingested, since the
+            // bake ingest only fires on this event.
+            AnyMessage::AvatarAppearance(appearance) => {
+                self.events
+                    .push_back(Event::AvatarAppearance(Box::new(avatar_appearance(
+                        appearance,
+                    ))));
+            }
+            // A one-shot spatial sound played at a fixed region-local position
+            // (a scripted `llTriggerSound`, a collision sound, …). May originate
+            // in a neighbouring region, so it carries its own region handle. The
+            // wire `ParentID` is nil when the triggering object is itself the
+            // root, which we surface as `None`.
+            AnyMessage::SoundTrigger(trigger) => {
+                let block = &trigger.sound_data;
+                self.events.push_back(Event::SoundTrigger {
+                    sound_id: block.sound_id,
+                    owner_id: block.owner_id,
+                    object_id: ObjectKey::from(block.object_id),
+                    parent_id: (!block.parent_id.is_nil())
+                        .then_some(ObjectKey::from(block.parent_id)),
+                    region_handle: RegionHandle(block.handle),
+                    position: block.position.clone(),
+                    gain: block.gain,
+                });
+            }
+            // A looping or one-shot sound bound to an in-world object (a scripted
+            // `llPlaySound`/`llLoopSound`); the `STOP` flag stops it instead.
+            AnyMessage::AttachedSound(sound) => {
+                let block = &sound.data_block;
+                self.events.push_back(Event::AttachedSound {
+                    sound_id: block.sound_id,
+                    object_id: ObjectKey::from(block.object_id),
+                    owner_id: block.owner_id,
+                    gain: block.gain,
+                    flags: SoundFlags(block.flags),
+                });
+            }
+            // A volume change for a sound already attached to an object.
+            AnyMessage::AttachedSoundGainChange(change) => {
+                let block = &change.data_block;
+                self.events.push_back(Event::AttachedSoundGainChange {
+                    object_id: ObjectKey::from(block.object_id),
+                    gain: block.gain,
+                });
+            }
+            // A hint to pre-fetch sound assets the simulator is about to play.
+            AnyMessage::PreloadSound(preload) => {
+                self.events.push_back(Event::PreloadSound {
+                    sounds: preload
+                        .data_block
+                        .iter()
+                        .map(|block| SoundPreload {
+                            sound_id: block.sound_id,
+                            object_id: ObjectKey::from(block.object_id),
+                            owner_id: block.owner_id,
+                        })
+                        .collect(),
+                });
+            }
+            // Coarse (minimap) positions of nearby avatars. The location and
+            // agent-data blocks are parallel arrays; `you`/`prey` index into them
+            // (a negative index means "none"). A neighbour region's dots arrive
+            // on its child circuit, and are tagged with its region so a consumer
+            // can place them into world space (R24).
+            AnyMessage::CoarseLocationUpdate(update) => {
+                let event = self.coarse_location_event(from, update);
+                self.events.push_back(event);
+            }
+            // An alert from the region — among them its refusal of a sit on one
+            // of its objects ("Try moving closer"), which a neighbour is as
+            // entitled to send as the root region is.
+            AnyMessage::AlertMessage(alert) => self.handle_alert_message(from, alert),
+            // A generic method-name + parameter envelope used for a grab-bag of
+            // loosely-coupled features keyed by `Method`; the parameter blobs are
+            // surfaced verbatim for the consumer to parse. A neighbour region is
+            // entitled to speak a `GenericMessage` feature at a child agent, and
+            // dropping one would be the same kind of gap the coarse locations,
+            // the parcel overlay and the neighbour sounds each close: the
+            // consumer never learns the region next door said anything.
+            AnyMessage::GenericMessage(generic) => {
+                self.events.push_back(Event::GenericMessage(GenericMessage {
+                    method: trimmed_string(&generic.method_data.method),
+                    invoice: InvoiceId::from(generic.method_data.invoice),
+                    params: generic
+                        .param_list
+                        .iter()
+                        .map(|block| block.parameter.clone())
+                        .collect(),
+                }));
+            }
+            // The same envelope as `GenericMessage`, but with a larger per-param
+            // size limit (real grids carry it over HTTP rather than UDP).
+            AnyMessage::LargeGenericMessage(generic) => {
+                self.events
+                    .push_back(Event::LargeGenericMessage(GenericMessage {
+                        method: trimmed_string(&generic.method_data.method),
+                        invoice: InvoiceId::from(generic.method_data.invoice),
+                        params: generic
+                            .param_list
+                            .iter()
+                            .map(|block| block.parameter.clone())
+                            .collect(),
+                    }));
+            }
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
+
+    /// Handles a message that arrived on a child-agent circuit. Children carry
+    /// limited traffic: the neighbour region's scene stream and the link's own
+    /// keep-alives, all of which the root circuit carries too and
+    /// [`Session::dispatch_shared`] therefore handles for both, plus the two
+    /// signals that mean something only to a child — the confirmation of a
+    /// deferred teleport handover, and the circuit's retirement. The crossing
+    /// into a child region is driven by `CrossedRegion` on the root circuit.
+    fn dispatch_child(
+        &mut self,
+        from: SocketAddr,
+        message: &AnyMessage,
+        now: Instant,
+    ) -> Result<(), Error> {
+        // A child agent still receives the neighbour region's object stream;
+        // cache it so a roaming/proximity bot sees adjacent regions too.
+        if self.try_dispatch_object(from, message, now)? {
+            return Ok(());
+        }
+        // Everything a child shares with the root circuit, handled once for
+        // both. Unlike the root dispatcher this runs *before* the arms below
+        // rather than after them: a child has no refinement of a shared message
+        // to match ahead of it.
+        if self.dispatch_shared(CircuitRole::Child, from, message, now)? {
+            return Ok(());
+        }
+        match message {
             AnyMessage::AgentMovementComplete(complete) => {
                 // The only child circuit we ever send `CompleteAgentMovement` to
                 // is a **pending teleport destination**, so its
@@ -2195,13 +2445,6 @@ impl Session {
                 let pose = ArrivalPose::from_movement_complete(&complete.data);
                 self.commit_handover(from, pose, now);
             }
-            AnyMessage::PacketAck(ack) => {
-                if let Some(circuit) = self.children.get_mut(&from) {
-                    for packet in &ack.packets {
-                        circuit.record_acks(&[SequenceNumber(packet.id)]);
-                    }
-                }
-            }
             AnyMessage::DisableSimulator(_) => {
                 // The simulator is retiring this child circuit. Resolve its
                 // circuit id before removing it so the per-circuit caches can be
@@ -2214,157 +2457,6 @@ impl Session {
                     // (minimap) dots via an empty `CoarseLocationUpdate` (R24).
                     self.forget_sim_objects(circuit_id);
                 }
-            }
-            // A neighbour region's alert — among them its refusal of a sit on
-            // one of its objects ("Try moving closer").
-            AnyMessage::AlertMessage(alert) => self.handle_alert_message(from, alert),
-            // A neighbour region's coarse (minimap) avatar positions, tagged with
-            // this child circuit's region so a consumer can place the dots into
-            // world space — otherwise a neighbour-region avatar is never even shown
-            // as a coarse dot (R24).
-            AnyMessage::CoarseLocationUpdate(update) => {
-                let event = self.coarse_location_event(from, update);
-                self.events.push_back(event);
-            }
-            // A neighbour region's parcel overlay, pushed to the child agent
-            // (Second Life pushes it on child establishment; OpenSim on parcel
-            // changes). Tagged with this circuit's region, like the root arm,
-            // so the minimap can draw neighbour property lines.
-            AnyMessage::ParcelOverlay(overlay) => {
-                let region_handle = self
-                    .circuit_id_for(from)
-                    .and_then(|circuit_id| self.world.region_handle(circuit_id))
-                    .unwrap_or(RegionHandle(0));
-                self.events
-                    .push_back(Event::ParcelOverlay(ParcelOverlayInfo {
-                        sequence_id: overlay.parcel_data.sequence_id,
-                        data: overlay.parcel_data.data.clone(),
-                        region_handle,
-                    }));
-            }
-            // A neighbour region streams its avatars' and animated objects'
-            // animation state on this child circuit, just like the object stream —
-            // without handling them here a neighbour-region avatar or animesh stays
-            // frozen at its rest / T-pose even though its geometry renders (its
-            // `ObjectUpdate` is dispatched by `try_dispatch_object` above). Mirror
-            // the root-circuit handlers so it animates.
-            AnyMessage::AvatarAnimation(animation) => {
-                self.events.push_back(Event::AvatarAnimation {
-                    avatar_id: AgentKey::from(animation.sender.id),
-                    animations: avatar_animations(animation),
-                    physical_events: animation
-                        .physical_avatar_event_list
-                        .iter()
-                        .map(|block| block.type_data.clone())
-                        .collect(),
-                });
-            }
-            AnyMessage::ObjectAnimation(animation) => {
-                self.events.push_back(Event::ObjectAnimation {
-                    object_id: ObjectKey::from(animation.sender.id),
-                    animations: animation
-                        .animation_list
-                        .iter()
-                        .map(|block| ObjectPlayingAnimation {
-                            anim_id: AnimationKey::from(block.anim_id),
-                            sequence_id: block.anim_sequence_id,
-                        })
-                        .collect(),
-                });
-            }
-            // A neighbour region also streams its avatars' `AvatarAppearance` (the
-            // baked-texture ids + visual params) on this child circuit. Without
-            // handling it here a neighbour-region avatar renders **grey** — its
-            // body spawns from the object stream (`try_dispatch_object` above) but
-            // no baked texture is ever ingested, since the bake ingest only fires
-            // on this event. Mirror the root-circuit handler so it textures.
-            AnyMessage::AvatarAppearance(appearance) => {
-                self.events
-                    .push_back(Event::AvatarAppearance(Box::new(avatar_appearance(
-                        appearance,
-                    ))));
-            }
-            // A neighbour region's spatial audio also streams on this child
-            // circuit: a scripted `llTriggerSound` / attached `llLoopSound` in the
-            // adjacent region is audible from ours, so dropping these silenced a
-            // whole neighbouring parcel for no reason (the sounds attach to objects
-            // the child object stream already tracks). Mirror the root handlers.
-            AnyMessage::SoundTrigger(trigger) => {
-                let block = &trigger.sound_data;
-                self.events.push_back(Event::SoundTrigger {
-                    sound_id: block.sound_id,
-                    owner_id: block.owner_id,
-                    object_id: ObjectKey::from(block.object_id),
-                    parent_id: (!block.parent_id.is_nil())
-                        .then_some(ObjectKey::from(block.parent_id)),
-                    region_handle: RegionHandle(block.handle),
-                    position: block.position.clone(),
-                    gain: block.gain,
-                });
-            }
-            AnyMessage::AttachedSound(sound) => {
-                let block = &sound.data_block;
-                self.events.push_back(Event::AttachedSound {
-                    sound_id: block.sound_id,
-                    object_id: ObjectKey::from(block.object_id),
-                    owner_id: block.owner_id,
-                    gain: block.gain,
-                    flags: SoundFlags(block.flags),
-                });
-            }
-            AnyMessage::AttachedSoundGainChange(change) => {
-                let block = &change.data_block;
-                self.events.push_back(Event::AttachedSoundGainChange {
-                    object_id: ObjectKey::from(block.object_id),
-                    gain: block.gain,
-                });
-            }
-            AnyMessage::PreloadSound(preload) => {
-                self.events.push_back(Event::PreloadSound {
-                    sounds: preload
-                        .data_block
-                        .iter()
-                        .map(|block| SoundPreload {
-                            sound_id: block.sound_id,
-                            object_id: ObjectKey::from(block.object_id),
-                            owner_id: block.owner_id,
-                        })
-                        .collect(),
-                });
-            }
-            // The generic method-name + parameter envelope, surfaced verbatim
-            // from a neighbour as it is from the root region. A neighbour
-            // region is entitled to speak a `GenericMessage` feature at a child
-            // agent, and dropping one here is the same kind of gap the coarse
-            // locations, the parcel overlay and the neighbour sounds above were
-            // each added to close: the consumer never learns the region next
-            // door said anything.
-            //
-            // The `emptymutelist` special case of the root arm is deliberately
-            // **not** mirrored: the mute list is the agent's, not a region's,
-            // and only the region hosting the agent has one to report.
-            AnyMessage::GenericMessage(generic) => {
-                self.events.push_back(Event::GenericMessage(GenericMessage {
-                    method: trimmed_string(&generic.method_data.method),
-                    invoice: InvoiceId::from(generic.method_data.invoice),
-                    params: generic
-                        .param_list
-                        .iter()
-                        .map(|block| block.parameter.clone())
-                        .collect(),
-                }));
-            }
-            AnyMessage::LargeGenericMessage(generic) => {
-                self.events
-                    .push_back(Event::LargeGenericMessage(GenericMessage {
-                        method: trimmed_string(&generic.method_data.method),
-                        invoice: InvoiceId::from(generic.method_data.invoice),
-                        params: generic
-                            .param_list
-                            .iter()
-                            .map(|block| block.parameter.clone())
-                            .collect(),
-                    }));
             }
             _ => {
                 self.push_diagnostic(Diagnostic::UnhandledMessage {
@@ -3284,29 +3376,6 @@ impl Session {
             return Ok(());
         }
         match message {
-            AnyMessage::RegionHandshake(handshake) => {
-                // A simulator re-sends `RegionHandshake` outside login too — on a
-                // region restart, an estate change or a terrain-texture change —
-                // and keeps retrying until it is answered, so reply and refresh
-                // the region's identity/flags whatever the session state (the
-                // reference viewer's `process_region_handshake` is likewise
-                // ungated). Only the *arrival* transition is once-only, and
-                // `complete_arrival` guards itself.
-                if let Some(circuit) = self.circuit.as_mut() {
-                    circuit.send_region_handshake_reply(now)?;
-                }
-                let region_handle = self
-                    .circuit_id_for(from)
-                    .and_then(|circuit_id| self.world.region_handle(circuit_id))
-                    .unwrap_or(RegionHandle(0));
-                let identity = region_identity(handshake, region_handle)?;
-                if let Some(circuit_id) = self.circuit_id_for(from) {
-                    self.note_region_flags(circuit_id, identity.region_flags);
-                }
-                self.events
-                    .push_back(Event::RegionInfoHandshake(Box::new(identity)));
-                self.complete_arrival(now);
-            }
             AnyMessage::AgentMovementComplete(complete) => {
                 // After a teleport handover the destination promotes us to root
                 // and confirms with AgentMovementComplete; it may not re-send a
@@ -3365,18 +3434,6 @@ impl Session {
                 }
                 self.events
                     .push_back(Event::ParcelProperties(Box::new(parcel)));
-            }
-            AnyMessage::ParcelOverlay(overlay) => {
-                let region_handle = self
-                    .circuit_id_for(from)
-                    .and_then(|circuit_id| self.world.region_handle(circuit_id))
-                    .unwrap_or(RegionHandle(0));
-                self.events
-                    .push_back(Event::ParcelOverlay(ParcelOverlayInfo {
-                        sequence_id: overlay.parcel_data.sequence_id,
-                        data: overlay.parcel_data.data.clone(),
-                        region_handle,
-                    }));
             }
             // A scripted parcel-media control (`llParcelMediaCommandList`): the
             // simulator tells viewers to play/pause/stop/loop the parcel's
@@ -4067,34 +4124,6 @@ impl Session {
                 )?;
                 self.begin_crossing(dest, RegionHandle(region.region_handle), seed, now)?;
             }
-            AnyMessage::StartPingCheck(ping) => {
-                if let Some(circuit) = self.circuit.as_mut() {
-                    circuit.send_complete_ping_check(PingId(ping.ping_id.ping_id), now)?;
-                }
-            }
-            AnyMessage::CompletePingCheck(reply) => {
-                // The simulator's answer to our keep-alive `StartPingCheck` on the
-                // root circuit: surface the round-trip time when it matches the
-                // ping in flight.
-                if let Some((sim, rtt)) = self.circuit.as_mut().and_then(|circuit| {
-                    circuit
-                        .record_ping_reply(PingId(reply.ping_id.ping_id), now)
-                        .map(|rtt| (circuit.sim_addr, rtt))
-                }) {
-                    self.events.push_back(Event::Ping {
-                        sim,
-                        child: false,
-                        rtt,
-                    });
-                }
-            }
-            AnyMessage::PacketAck(ack) => {
-                if let Some(circuit) = self.circuit.as_mut() {
-                    for packet in &ack.packets {
-                        circuit.record_acks(&[SequenceNumber(packet.id)]);
-                    }
-                }
-            }
             AnyMessage::MuteListUpdate(update) => {
                 // The mute list changed; download the named file over Xfer.
                 let filename = trimmed_string(&update.mute_data.filename);
@@ -4435,16 +4464,6 @@ impl Session {
                 self.events
                     .push_back(Event::TextureNotFound(TextureKey::from(id)));
             }
-            // Another avatar's appearance (baked textures + visual params),
-            // pushed when it comes into range or restyles. Decoded for both the
-            // modern server-side bake (the texture entry names the server's bakes)
-            // and the legacy client-side bake.
-            AnyMessage::AvatarAppearance(appearance) => {
-                self.events
-                    .push_back(Event::AvatarAppearance(Box::new(avatar_appearance(
-                        appearance,
-                    ))));
-            }
             // The agent's own current wearables, pushed at login and after every
             // wearable change (or in reply to `AgentWearablesRequest`).
             AnyMessage::AgentWearablesUpdate(update) => {
@@ -4477,36 +4496,6 @@ impl Session {
                 self.events.push_back(Event::AgentWearables {
                     serial: update.agent_data.serial_num,
                     wearables,
-                });
-            }
-            // Another avatar's currently-playing animations, pushed whenever its
-            // animation set changes. The list is the complete current set, not a
-            // delta — a stopped animation simply drops out of a later update.
-            AnyMessage::AvatarAnimation(animation) => {
-                self.events.push_back(Event::AvatarAnimation {
-                    avatar_id: AgentKey::from(animation.sender.id),
-                    animations: avatar_animations(animation),
-                    physical_events: animation
-                        .physical_avatar_event_list
-                        .iter()
-                        .map(|block| block.type_data.clone())
-                        .collect(),
-                });
-            }
-            // The full authoritative set of animations now signalled on an
-            // animated-mesh (animesh) object; the object analogue of
-            // `AvatarAnimation`.
-            AnyMessage::ObjectAnimation(animation) => {
-                self.events.push_back(Event::ObjectAnimation {
-                    object_id: ObjectKey::from(animation.sender.id),
-                    animations: animation
-                        .animation_list
-                        .iter()
-                        .map(|block| ObjectPlayingAnimation {
-                            anim_id: AnimationKey::from(block.anim_id),
-                            sequence_id: block.anim_sequence_id,
-                        })
-                        .collect(),
                 });
             }
             // The simulator could not find one of the agent's temporary baked
@@ -4689,58 +4678,6 @@ impl Session {
                     god_level: grant.grant_data.god_level,
                 });
             }
-            // A one-shot spatial sound played at a fixed region-local position
-            // (a scripted `llTriggerSound`, a collision sound, …). May originate
-            // in a neighbouring region, so it carries its own region handle. The
-            // wire `ParentID` is nil when the triggering object is itself the
-            // root, which we surface as `None`.
-            AnyMessage::SoundTrigger(trigger) => {
-                let block = &trigger.sound_data;
-                self.events.push_back(Event::SoundTrigger {
-                    sound_id: block.sound_id,
-                    owner_id: block.owner_id,
-                    object_id: ObjectKey::from(block.object_id),
-                    parent_id: (!block.parent_id.is_nil())
-                        .then_some(ObjectKey::from(block.parent_id)),
-                    region_handle: RegionHandle(block.handle),
-                    position: block.position.clone(),
-                    gain: block.gain,
-                });
-            }
-            // A looping or one-shot sound bound to an in-world object (a scripted
-            // `llPlaySound`/`llLoopSound`); the `STOP` flag stops it instead.
-            AnyMessage::AttachedSound(sound) => {
-                let block = &sound.data_block;
-                self.events.push_back(Event::AttachedSound {
-                    sound_id: block.sound_id,
-                    object_id: ObjectKey::from(block.object_id),
-                    owner_id: block.owner_id,
-                    gain: block.gain,
-                    flags: SoundFlags(block.flags),
-                });
-            }
-            // A volume change for a sound already attached to an object.
-            AnyMessage::AttachedSoundGainChange(change) => {
-                let block = &change.data_block;
-                self.events.push_back(Event::AttachedSoundGainChange {
-                    object_id: ObjectKey::from(block.object_id),
-                    gain: block.gain,
-                });
-            }
-            // A hint to pre-fetch sound assets the simulator is about to play.
-            AnyMessage::PreloadSound(preload) => {
-                self.events.push_back(Event::PreloadSound {
-                    sounds: preload
-                        .data_block
-                        .iter()
-                        .map(|block| SoundPreload {
-                            sound_id: block.sound_id,
-                            object_id: ObjectKey::from(block.object_id),
-                            owner_id: block.owner_id,
-                        })
-                        .collect(),
-                });
-            }
             // The reply to a baked-texture cache query (`AgentCachedTexture`).
             AnyMessage::AgentCachedTextureResponse(response) => {
                 self.events.push_back(Event::CachedTextureResponse {
@@ -4751,13 +4688,6 @@ impl Session {
                         .map(|block| (block.texture_index, block.texture_id))
                         .collect(),
                 });
-            }
-            // Coarse (minimap) positions of nearby avatars. The location and
-            // agent-data blocks are parallel arrays; `you`/`prey` index into them
-            // (a negative index means "none").
-            AnyMessage::CoarseLocationUpdate(update) => {
-                let event = self.coarse_location_event(from, update);
-                self.events.push_back(event);
             }
             // Periodic region performance telemetry (~1 Hz). `RegionX`/`RegionY`
             // carry the region's map-tile indices (grid coordinates); the
@@ -5109,35 +5039,6 @@ impl Session {
                     .collect();
                 self.push_experience_event(generic.method_data.invoice, params, true);
             }
-            // A generic method-name + parameter envelope used for a grab-bag of
-            // loosely-coupled features keyed by `Method` (the feature-specific
-            // ones, like `emptymutelist` above, are matched first); the parameter
-            // blobs are surfaced verbatim for the consumer to parse.
-            AnyMessage::GenericMessage(generic) => {
-                self.events.push_back(Event::GenericMessage(GenericMessage {
-                    method: trimmed_string(&generic.method_data.method),
-                    invoice: InvoiceId::from(generic.method_data.invoice),
-                    params: generic
-                        .param_list
-                        .iter()
-                        .map(|block| block.parameter.clone())
-                        .collect(),
-                }));
-            }
-            // The same envelope as `GenericMessage`, but with a larger per-param
-            // size limit (real grids carry it over HTTP rather than UDP).
-            AnyMessage::LargeGenericMessage(generic) => {
-                self.events
-                    .push_back(Event::LargeGenericMessage(GenericMessage {
-                        method: trimmed_string(&generic.method_data.method),
-                        invoice: InvoiceId::from(generic.method_data.invoice),
-                        params: generic
-                            .param_list
-                            .iter()
-                            .map(|block| block.parameter.clone())
-                            .collect(),
-                    }));
-            }
             // An optimised streaming envelope: a numeric method id plus a single
             // opaque data blob (e.g. a GLTF material override), surfaced verbatim.
             AnyMessage::GenericStreamingMessage(streaming) => {
@@ -5224,7 +5125,6 @@ impl Session {
                     object_id: ObjectKey::from(clear.object_data.object_id),
                 });
             }
-            AnyMessage::AlertMessage(alert) => self.handle_alert_message(from, alert),
             AnyMessage::AgentAlertMessage(alert) => {
                 self.events.push_back(Event::AgentAlertMessage {
                     agent_id: AgentKey::from(alert.agent_data.agent_id),
@@ -5515,12 +5415,20 @@ impl Session {
                 self.events.push_back(Event::LoggedOut);
             }
             _ => {
-                self.push_diagnostic(Diagnostic::UnhandledMessage {
-                    id: message.id(),
-                    name: message.name(),
-                    status: message.status(),
-                    child: false,
-                });
+                // Everything the root circuit shares with a child-agent circuit
+                // is handled once, for both, in `dispatch_shared`. It runs
+                // *after* the arms above rather than before them, so a root-only
+                // refinement of a shared message — the `emptymutelist` and
+                // experience `GenericMessage` features, which are the agent's
+                // and not a region's — still matches first.
+                if !self.dispatch_shared(CircuitRole::Root, from, message, now)? {
+                    self.push_diagnostic(Diagnostic::UnhandledMessage {
+                        id: message.id(),
+                        name: message.name(),
+                        status: message.status(),
+                        child: false,
+                    });
+                }
             }
         }
         Ok(())

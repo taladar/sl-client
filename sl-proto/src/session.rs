@@ -1315,6 +1315,28 @@ struct XferUpload {
     last_progress: Instant,
 }
 
+/// Which circuit an inbound message arrived on: the region hosting the agent,
+/// or one of the neighbours it holds a child agent in.
+///
+/// The two carry overlapping traffic — see
+/// [`Session::dispatch_shared`] — and this is the whole of what the shared
+/// handlers need to tell them apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CircuitRole {
+    /// The root circuit: the region that hosts the agent itself.
+    Root,
+    /// A child-agent circuit to a neighbouring region.
+    Child,
+}
+
+impl CircuitRole {
+    /// Whether this is a child-agent circuit, the way the client-facing events
+    /// tag the circuit a measurement or a message came from.
+    const fn is_child(self) -> bool {
+        matches!(self, Self::Child)
+    }
+}
+
 /// The UDP circuit to a single simulator.
 #[derive(Debug)]
 struct Circuit {
