@@ -3610,6 +3610,30 @@ snapshot-postcard-todo = Sending a snapshot as a postcard / e-mail is coming in 
 snapshot-profile-todo = Posting a snapshot to your profile feed is coming in its own task.
 snapshot-inventory-todo = Saving a snapshot to inventory as a texture is coming in its own task.
 
+## The 360-degree snapshot floater (viewer-360-snapshot) — a separate capture
+## renderer: six cube-map faces from the camera's eye point, reprojected into an
+## equirectangular panorama and written with the GPano metadata that makes a
+## viewer or a platform treat it as a sphere.
+panorama-title = 360° Snapshot
+panorama-preview-empty = Press Capture to shoot a panorama.
+panorama-quality-label = Cube faces:
+panorama-width-label = Panorama:
+panorama-format-label = Format:
+panorama-capture = Capture
+panorama-save-disk = Save to Disk
+panorama-hint = The interface and your HUD are never in a panorama. Capture waits for the scene to finish loading, then freezes it while the six views are shot.
+panorama-status-ready = Ready
+panorama-status-settling = Waiting for the scene to finish loading…
+panorama-status-shooting = Shooting view { $face } of { $total }…
+panorama-status-stitching = Working…
+panorama-captured = Panorama captured.
+panorama-saved = Saved panorama to { $path }
+panorama-save-failed = Could not save the panorama: { $error }
+panorama-no-dir = No snapshot folder is available on this system.
+panorama-no-camera = There is no world view to capture a panorama from.
+panorama-capture-lost = The panorama capture did not come back; the camera has been restored.
+panorama-nothing-captured = Capture a panorama before saving one.
+
 ## The Preferences floater shell (viewer-preferences-floater).
 
 preferences-title = Preferences

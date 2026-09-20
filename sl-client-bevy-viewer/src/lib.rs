@@ -64,6 +64,7 @@ pub(crate) const REGISTRARS: &[fn(&mut crate::settings::ViewerSettings)] = &[
     crate::glow::register_settings,
     crate::exposure::register_settings,
     crate::snapshot_floater::register_settings,
+    crate::panorama::register_settings,
     crate::i18n::register_settings,
     crate::avatars::register_settings,
     crate::hover_text::register_settings,
@@ -277,6 +278,7 @@ pub(crate) use sl_viewer_world_scene::parcel_borders;
 pub(crate) use sl_viewer_world_scene::parcel_owners;
 pub(crate) use sl_viewer_world_scene::particles;
 pub(crate) use sl_viewer_world_scene::probes;
+pub(crate) use sl_viewer_world_view::panorama;
 pub(crate) use sl_viewer_world_view::physics;
 #[cfg(test)]
 mod full_stack_test;
@@ -1627,6 +1629,12 @@ fn run_session(
     // selection and a save-to-disk destination that echoes the path to chat.
     // Opened from the bottom toolbar's Snapshot button.
     .add_plugins(crate::snapshot_floater::SnapshotFloaterPlugin)
+    // The 360-degree snapshot floater (viewer-360-snapshot): a capture renderer
+    // of its own -- six cube-map faces shot from the camera's eye point with the
+    // viewer camera itself, reprojected into an equirectangular panorama and
+    // written with the GPano metadata that makes it open as a sphere. Opened
+    // from World > Photo and Video.
+    .add_plugins(crate::panorama::PanoramaPlugin)
     // The Preferences floater shell (viewer-preferences-floater): the tabbed
     // settings window over the typed store — snapshot on open, revert on
     // Cancel / close, persist on OK, with the cross-tab search filter. The

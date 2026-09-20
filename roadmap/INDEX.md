@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 297 |
+| ready | 296 |
 | blocked | 39 |
 | in-progress | 22 |
 | bugs | 6 |
-| done | 1200 |
+| done | 1201 |
 | deferred | 29 |
 | wont-do | 16 |
 | **total** | **1709** |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (297)
+## ready (296)
 
 ### protocol
 
@@ -273,8 +273,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
-- [`viewer-360-snapshot`](ready/viewer-360-snapshot.md) — 360-degree
-  (equirectangular) snapshot
 - [`viewer-about-land-objects-return`](ready/viewer-about-land-objects-return.md)
   — About Land — object return, editable autoreturn & small option gaps
 - [`viewer-agent-hover-height-ingest`](ready/viewer-agent-hover-height-ingest.md)
@@ -1141,7 +1139,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-sliders-show-no-value`](bugs/viewer-sliders-show-no-value.md) — A
   slider shows no value, and no bounds or step either
 
-## done (1200)
+## done (1201)
 
 ### protocol
 
@@ -1378,6 +1376,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`build-structural-encapsulation-audit`](done/build-structural-encapsulation-audit.md)
   — Audit the workspace for structural and encapsulation improvements the crate
   split exposed (blocked by `build-split-viewer-crate` (done))
+- [`viewer-360-snapshot`](done/viewer-360-snapshot.md) — 360-degree
+  (equirectangular) snapshot
 - [`viewer-about-floater`](done/viewer-about-floater.md) — About floater —
   version, system info, credits, licenses (blocked by
   `viewer-ui-widget-scaffold` (done))

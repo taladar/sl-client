@@ -4,7 +4,7 @@ title: Name tags and hover text belong in the overlay pass, not the world pass
 topic: viewer
 status: ready
 origin: live check of viewer-render-resolution-divisor (2026-09-20)
-refs: [viewer-render-resolution-divisor, viewer-name-tags-billboard-render, viewer-hover-text]
+refs: [viewer-render-resolution-divisor, viewer-name-tags-billboard-render, viewer-hover-text, viewer-360-snapshot]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -31,6 +31,12 @@ scene's depth in that framebuffer is commented out).
 So the reference's world-anchored text is **always** full-resolution overlay
 text, at every setting; ours is world geometry that happens to look right while
 the world happens to be full-resolution.
+
+A second consumer has since arrived: the 360° panorama ([[viewer-360-snapshot]])
+photographs the world camera's six faces, so name tags and hover text land in
+every one of them — floating captions inside an immersive photo. That capture
+needs no toggle of its own; moving this text to the overlay pass takes it out of
+a panorama for free.
 
 ## Scope
 

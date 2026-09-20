@@ -9841,6 +9841,7 @@ dependencies = [
  "sl-client-bevy",
  "sl-proto",
  "sl-settings",
+ "sl-types",
  "sl-viewer-intents",
  "sl-viewer-kit",
  "sl-viewer-media",
