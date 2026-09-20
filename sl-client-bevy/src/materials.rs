@@ -12,7 +12,8 @@ use sl_proto::{
 /// POSTs a `RenderMaterials` request for `material_ids` (the zipped binary-LLSD
 /// form) and forwards the decoded legacy materials to `asset_tx` as a
 /// [`SlSessionEvent::RenderMaterials`]. Best-effort: a transport or decode
-/// failure yields an empty list.
+/// failure yields an empty list — and an undecodable reply is logged, since it
+/// is otherwise indistinguishable from a region that knows no such materials.
 pub(crate) fn run_render_materials_fetch(
     cap_url: &str,
     material_ids: Vec<Uuid>,
@@ -31,7 +32,12 @@ pub(crate) fn run_render_materials_fetch(
                 .ok()
         })
         .and_then(|response| response.text().ok())
-        .map(|text| parse_render_materials_response(&text))
+        .map(|text| {
+            parse_render_materials_response(&text).unwrap_or_else(|error| {
+                tracing::warn!("undecodable RenderMaterials reply: {error}");
+                Vec::new()
+            })
+        })
         .unwrap_or_default();
     deliver(asset_tx, SessionEvent::RenderMaterials(materials));
 }

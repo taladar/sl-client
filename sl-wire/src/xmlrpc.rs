@@ -14,6 +14,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::WireError;
 use sl_llsd::{Llsd, parse_guarded_xml, push_escaped};
 
 /// A decoded `<methodCall>`: the method name and its positional parameters.
@@ -50,30 +51,6 @@ impl XmlRpcResponse {
             Self::Fault { .. } => None,
         }
     }
-}
-
-/// A fault decoding an XML-RPC document.
-#[derive(Debug, thiserror::Error)]
-pub enum XmlRpcError {
-    /// The document was not well-formed XML.
-    #[error("malformed XML-RPC document: {0}")]
-    Xml(#[from] roxmltree::Error),
-    /// A `<methodCall>` carried no `<methodName>`.
-    #[error("XML-RPC call has no methodName")]
-    NoMethodName,
-    /// The document was neither a `<methodCall>` nor a `<methodResponse>`.
-    #[error("document is not an XML-RPC call or response")]
-    NotXmlRpc,
-    /// A typed decoder found a field absent or of the wrong kind.
-    #[error(transparent)]
-    Llsd(#[from] sl_llsd::LlsdError),
-    /// A typed decoder was handed a response for a different method, or a
-    /// call naming a method it does not implement.
-    #[error("unexpected XML-RPC method {method:?}")]
-    UnexpectedMethod {
-        /// The method name found.
-        method: String,
-    },
 }
 
 /// Builds a `<methodCall>` document for `method` with the given positional
@@ -146,22 +123,22 @@ pub fn method_name(xml: &str) -> Option<String> {
 ///
 /// # Errors
 ///
-/// Returns [`XmlRpcError::Xml`] for malformed XML or a body nested past
-/// [`sl_llsd::MAX_NESTING_DEPTH`], [`XmlRpcError::NotXmlRpc`] if the root is
-/// not a `<methodCall>`, and [`XmlRpcError::NoMethodName`] if the method name
-/// is absent.
-pub fn parse_method_call(xml: &str) -> Result<XmlRpcCall, XmlRpcError> {
+/// Returns [`WireError::Xml`] for malformed XML, [`WireError::XmlNestingTooDeep`]
+/// for a body nested past [`sl_llsd::MAX_NESTING_DEPTH`],
+/// [`WireError::NotXmlRpc`] if the root is not a `<methodCall>`, and
+/// [`WireError::NoMethodName`] if the method name is absent.
+pub fn parse_method_call(xml: &str) -> Result<XmlRpcCall, WireError> {
     let document = parse_guarded_xml(xml)?;
     let root = document.root_element();
     if !root.has_tag_name("methodCall") {
-        return Err(XmlRpcError::NotXmlRpc);
+        return Err(WireError::NotXmlRpc);
     }
     let method = root
         .children()
         .find(|n| n.has_tag_name("methodName"))
         .and_then(|n| n.text())
         .map(|text| text.trim().to_owned())
-        .ok_or(XmlRpcError::NoMethodName)?;
+        .ok_or(WireError::NoMethodName)?;
     Ok(XmlRpcCall {
         method,
         params: collect_params(root),
@@ -172,14 +149,14 @@ pub fn parse_method_call(xml: &str) -> Result<XmlRpcCall, XmlRpcError> {
 ///
 /// # Errors
 ///
-/// Returns [`XmlRpcError::Xml`] for malformed XML or a body nested past
-/// [`sl_llsd::MAX_NESTING_DEPTH`], and [`XmlRpcError::NotXmlRpc`] if the root
-/// is not a `<methodResponse>`.
-pub fn parse_method_response(xml: &str) -> Result<XmlRpcResponse, XmlRpcError> {
+/// Returns [`WireError::Xml`] for malformed XML, [`WireError::XmlNestingTooDeep`]
+/// for a body nested past [`sl_llsd::MAX_NESTING_DEPTH`], and
+/// [`WireError::NotXmlRpc`] if the root is not a `<methodResponse>`.
+pub fn parse_method_response(xml: &str) -> Result<XmlRpcResponse, WireError> {
     let document = parse_guarded_xml(xml)?;
     let root = document.root_element();
     if !root.has_tag_name("methodResponse") {
-        return Err(XmlRpcError::NotXmlRpc);
+        return Err(WireError::NotXmlRpc);
     }
     if let Some(fault) = root.children().find(|n| n.has_tag_name("fault")) {
         let value = fault
@@ -370,7 +347,7 @@ mod test {
     use sl_llsd::Llsd;
 
     use super::{
-        XmlRpcCall, XmlRpcError, XmlRpcResponse, build_fault, build_method_call,
+        WireError, XmlRpcCall, XmlRpcResponse, build_fault, build_method_call,
         build_method_response, method_name, parse_method_call, parse_method_response,
         value_to_llsd,
     };
@@ -394,7 +371,7 @@ mod test {
     }
 
     #[test]
-    fn call_round_trips_every_value_kind() -> Result<(), XmlRpcError> {
+    fn call_round_trips_every_value_kind() -> Result<(), WireError> {
         let xml = build_method_call("do_thing", &[sample(), Llsd::Integer(3)]);
         assert_eq!(method_name(&xml).as_deref(), Some("do_thing"));
         let call = parse_method_call(&xml)?;
@@ -409,7 +386,7 @@ mod test {
     }
 
     #[test]
-    fn response_round_trips_and_first_param_is_the_struct() -> Result<(), XmlRpcError> {
+    fn response_round_trips_and_first_param_is_the_struct() -> Result<(), WireError> {
         let xml = build_method_response(&[sample()]);
         let response = parse_method_response(&xml)?;
         assert_eq!(response.first_param(), Some(&sample()));
@@ -418,7 +395,7 @@ mod test {
     }
 
     #[test]
-    fn fault_round_trips() -> Result<(), XmlRpcError> {
+    fn fault_round_trips() -> Result<(), WireError> {
         let xml = build_fault(42, "nope & <no>");
         let response = parse_method_response(&xml)?;
         assert_eq!(
@@ -444,17 +421,20 @@ mod test {
     fn wrong_document_kinds_are_rejected() {
         assert!(matches!(
             parse_method_call(&build_method_response(&[])),
-            Err(XmlRpcError::NotXmlRpc)
+            Err(WireError::NotXmlRpc)
         ));
         assert!(matches!(
             parse_method_response(&build_method_call("m", &[])),
-            Err(XmlRpcError::NotXmlRpc)
+            Err(WireError::NotXmlRpc)
         ));
         assert!(matches!(
             parse_method_call("<methodCall><params/></methodCall>"),
-            Err(XmlRpcError::NoMethodName)
+            Err(WireError::NoMethodName)
         ));
-        assert!(matches!(parse_method_call("<<"), Err(XmlRpcError::Xml(_))));
+        assert!(matches!(
+            parse_method_call("<<"),
+            Err(WireError::Xml { .. })
+        ));
         assert!(method_name("not xml").is_none());
         assert!(method_name("<llsd><map/></llsd>").is_none());
     }

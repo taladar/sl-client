@@ -3,6 +3,7 @@
 use super::{GltfMaterialOverride, MaterialOverrideUpdate};
 use crate::WireError;
 use crate::llsd::{Llsd, Scan, parse_llsd_xml, push_escaped};
+use sl_llsd::LlsdError;
 
 // ---------------------------------------------------------------------------
 // GLTF material override (GenericStreamingMessage method 0x4175)
@@ -14,9 +15,23 @@ use crate::llsd::{Llsd, Scan, parse_llsd_xml, push_escaped};
 ///
 /// The per-face override documents (`od`) are returned as their raw notation
 /// bytes rather than parsed — only the envelope (object id and affected faces)
-/// is interpreted. Returns `None` if the payload is not the expected map.
-#[must_use]
-pub fn parse_gltf_material_override(data: &[u8]) -> Option<GltfMaterialOverride> {
+/// is interpreted.
+///
+/// # Errors
+///
+/// Returns [`WireError::Llsd`] carrying [`LlsdError::MalformedNotation`] if the
+/// payload is not the expected notation map. The scan is a single pass with no
+/// point at which one field is known good and another bad, so the envelope is
+/// either read entire or refused — but it is *refused*, not read as an override
+/// that touches no faces.
+pub fn parse_gltf_material_override(data: &[u8]) -> Result<GltfMaterialOverride, WireError> {
+    scan_gltf_material_override(data).ok_or(WireError::Llsd(LlsdError::MalformedNotation))
+}
+
+/// The single-pass notation scan behind [`parse_gltf_material_override`], kept
+/// `Option`-shaped because every step of a notation scan is a peek that either
+/// matches or ends the parse.
+fn scan_gltf_material_override(data: &[u8]) -> Option<GltfMaterialOverride> {
     let mut scan = Scan::new(data);
     scan.expect(b'{')?;
     let mut local_id: Option<i64> = None;
@@ -135,10 +150,10 @@ pub fn build_gltf_material_override(material_override: &GltfMaterialOverride) ->
 ///
 /// # Errors
 ///
-/// Returns the [`roxmltree`] error if `xml` is not well-formed.
+/// Returns [`WireError::Xml`] if `xml` is not well-formed.
 pub fn parse_modify_material_params_request(
     xml: &str,
-) -> Result<Vec<MaterialOverrideUpdate>, roxmltree::Error> {
+) -> Result<Vec<MaterialOverrideUpdate>, WireError> {
     let root = parse_llsd_xml(xml)?;
     let Some(array) = root.as_array() else {
         return Ok(Vec::new());

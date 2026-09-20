@@ -13,7 +13,9 @@ use super::{
     parse_modify_material_params_request, parse_render_materials_put_request,
     parse_render_materials_request, parse_render_materials_response,
 };
+use crate::WireError;
 use crate::llsd::parse_llsd_binary;
+use sl_llsd::LlsdError;
 use sl_types::key::TextureKey;
 use uuid::Uuid;
 
@@ -65,7 +67,7 @@ fn a_date_in_the_payload_does_not_desynchronise_the_fields_after_it() -> Result<
     entry.insert("Material".to_owned(), Llsd::Map(material));
     let body = zipped_envelope(&Llsd::Array(vec![Llsd::Map(entry)]).to_llsd_binary());
 
-    let entries = parse_render_materials_response(&body);
+    let entries = parse_render_materials_response(&body).map_err(|error| error.to_string())?;
     assert_eq!(entries.len(), 1);
     let decoded = entries.first().ok_or("no entry")?;
     assert_eq!(decoded.material_id, id);
@@ -83,7 +85,10 @@ fn a_payload_with_no_terminator_is_refused() {
     let mut binary = Llsd::Array(vec![Llsd::Binary(id.as_bytes().to_vec())]).to_llsd_binary();
     assert_eq!(binary.pop(), Some(b']'));
 
-    assert!(parse_render_materials_request(&zipped_envelope(&binary)).is_empty());
+    assert_eq!(
+        parse_render_materials_request(&zipped_envelope(&binary)),
+        Err(WireError::Llsd(LlsdError::TruncatedBinary))
+    );
 }
 
 /// A payload that nests past the LLSD depth cap is refused rather than
@@ -100,7 +105,12 @@ fn a_payload_nested_past_the_depth_cap_is_refused() {
     }
     binary.push(b'!');
 
-    assert!(parse_render_materials_request(&zipped_envelope(&binary)).is_empty());
+    assert_eq!(
+        parse_render_materials_request(&zipped_envelope(&binary)),
+        Err(WireError::Llsd(LlsdError::NestingTooDeep {
+            limit: sl_llsd::MAX_NESTING_DEPTH
+        }))
+    );
 }
 
 /// A `RenderMaterials` request round-trips through the response parser
@@ -136,7 +146,7 @@ fn render_materials_zip_round_trip() -> Result<(), String> {
     let encoded = base64::engine::general_purpose::STANDARD.encode(&zipped);
     let response = format!("<llsd><map><key>Zipped</key><binary>{encoded}</binary></map></llsd>");
 
-    let entries = parse_render_materials_response(&response);
+    let entries = parse_render_materials_response(&response).map_err(|error| error.to_string())?;
     assert_eq!(entries.len(), 1);
     let decoded = entries.first().ok_or("no entry")?;
     assert_eq!(decoded.material_id, id);
@@ -151,7 +161,7 @@ fn render_materials_zip_round_trip() -> Result<(), String> {
 #[test]
 fn gltf_override_envelope() -> Result<(), String> {
     let payload = b"{'id':i42,'te':[i0,i3],'od':[{'bc':[r1,r1,r1,r1]},{'mf':r0.5}]}";
-    let decoded = parse_gltf_material_override(payload).ok_or("decode failed")?;
+    let decoded = parse_gltf_material_override(payload).map_err(|error| error.to_string())?;
     assert_eq!(
         decoded,
         GltfMaterialOverride {
@@ -192,7 +202,7 @@ fn gltf_override_round_trip() -> Result<(), String> {
         overrides: vec![b"{'bc':[r1,r1,r1,r1]}".to_vec(), b"{'mf':r0.5}".to_vec()],
     };
     let payload = build_gltf_material_override(&original);
-    let decoded = parse_gltf_material_override(&payload).ok_or("decode failed")?;
+    let decoded = parse_gltf_material_override(&payload).map_err(|error| error.to_string())?;
     assert_eq!(decoded, original);
     Ok(())
 }
@@ -249,7 +259,7 @@ fn render_materials_response_round_trip() -> Result<(), String> {
         },
     };
     let response = build_render_materials_response(std::slice::from_ref(&entry));
-    let entries = parse_render_materials_response(&response);
+    let entries = parse_render_materials_response(&response).map_err(|error| error.to_string())?;
     assert_eq!(entries.len(), 1);
     let decoded = entries.first().ok_or("no entry")?;
     assert_eq!(decoded, &entry);
@@ -265,9 +275,13 @@ fn render_materials_request_round_trip() {
         Uuid::from_u128(0x1122_3344_5566_7788_99aa_bbcc_ddee_ff00),
     ];
     let body = build_render_materials_request(&ids);
-    assert_eq!(parse_render_materials_request(&body), ids);
-    // An empty "fetch all" body (no `Zipped`) parses to no ids.
-    assert!(parse_render_materials_request("<llsd><map /></llsd>").is_empty());
+    assert_eq!(parse_render_materials_request(&body), Ok(ids));
+    // An empty "fetch all" body (no `Zipped`) parses to no ids — the one
+    // envelope-less body that is a request rather than a fault.
+    assert_eq!(
+        parse_render_materials_request("<llsd><map /></llsd>"),
+        Ok(Vec::new())
+    );
 }
 
 /// A `RenderMaterials` PUT built by the client parses back to the same face
@@ -301,7 +315,7 @@ fn render_materials_put_request_round_trip() {
         },
     ];
     let body = build_render_materials_put_request(&updates);
-    assert_eq!(parse_render_materials_put_request(&body), updates);
+    assert_eq!(parse_render_materials_put_request(&body), Ok(updates));
 }
 
 /// The `ModifyMaterialParams` `{ success, message }` response builder emits a
@@ -412,11 +426,20 @@ fn a_zipped_body_that_inflates_past_the_ceiling_is_refused() {
     let encoded = base64::engine::general_purpose::STANDARD.encode(&bomb);
     let body = format!("<llsd><map><key>Zipped</key><binary>{encoded}</binary></map></llsd>");
 
-    assert!(parse_render_materials_request(&body).is_empty());
-    assert!(parse_render_materials_put_request(&body).is_empty());
-    assert!(parse_render_materials_response(&body).is_empty());
+    // Each names the ceiling as the reason, rather than answering with the
+    // empty list a caller would read as "this region has no materials".
+    for refusal in [
+        parse_render_materials_request(&body).err(),
+        parse_render_materials_put_request(&body).err(),
+        parse_render_materials_response(&body).err(),
+    ] {
+        assert!(matches!(
+            refusal,
+            Some(WireError::MalformedCompressedBody { .. })
+        ));
+    }
 
     // The same payload without the padding still decodes through the same path.
     let ordinary = build_render_materials_request(&[id]);
-    assert_eq!(parse_render_materials_request(&ordinary), vec![id]);
+    assert_eq!(parse_render_materials_request(&ordinary), Ok(vec![id]));
 }

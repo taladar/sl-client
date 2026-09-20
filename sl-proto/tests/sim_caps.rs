@@ -1552,7 +1552,7 @@ mod test {
             &post(&path, &build_render_materials_request(&[material_id])),
         )?;
         assert_eq!(status, 200);
-        let entries = parse_render_materials_response(&reply);
+        let entries = parse_render_materials_response(&reply)?;
         assert_eq!(entries.len(), 1);
         let entry = entries.first().ok_or("no material entry")?;
         assert_eq!(entry.material_id, material_id);

@@ -275,7 +275,7 @@ fn experience_info_query_round_trip() -> Result<(), String> {
         experience_key("22222222-2222-2222-2222-222222222222")?,
     ];
     let suffix = experience_info_query(&ids);
-    assert_eq!(parse_experience_info_query(&suffix), ids);
+    assert_eq!(parse_experience_info_query(&suffix), Ok(ids.to_vec()));
     Ok(())
 }
 
@@ -318,7 +318,7 @@ fn permission_request_and_reply_round_trip() -> Result<(), String> {
     let body = build_set_experience_permission_request(id, ExperiencePermission::Block);
     let parsed =
         parse_set_experience_permission_request(&body).map_err(|error| format!("{error:?}"))?;
-    assert_eq!(parsed, Some((id, ExperiencePermission::Block)));
+    assert_eq!(parsed, (id, ExperiencePermission::Block));
 
     let allowed = [id];
     let blocked = [experience_key("22222222-2222-2222-2222-222222222222")?];

@@ -247,18 +247,30 @@ pub fn parse_display_names(body: &Llsd) -> Result<Vec<DisplayName>, WireError> {
 // ---------------------------------------------------------------------------
 
 /// Parses the [`display_names_query`] URL suffix back into the requested ids
-/// (every `ids` query parameter). Unparsable ids are skipped; an absent query
-/// yields an empty list.
-#[must_use]
-pub fn parse_display_names_query(suffix: &str) -> Vec<Uuid> {
+/// (every `ids` query parameter).
+///
+/// A suffix with no query string asks for nobody and yields an empty list; an
+/// `ids` parameter that is not a UUID is refused rather than skipped, so a
+/// viewer sending ids this endpoint cannot read is told so instead of being
+/// answered with "none of those residents exist".
+///
+/// # Errors
+///
+/// Returns [`WireError::InvalidUuid`] for an `ids` value that does not parse.
+pub fn parse_display_names_query(suffix: &str) -> Result<Vec<Uuid>, WireError> {
     let Some((_path, query)) = suffix.split_once('?') else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     query
         .split('&')
         .filter_map(|pair| pair.split_once('='))
         .filter(|(key, _value)| *key == "ids")
-        .filter_map(|(_key, value)| Uuid::parse_str(value).ok())
+        .map(|(_key, value)| {
+            Uuid::parse_str(value).map_err(|_error| WireError::InvalidUuid {
+                field: "ids",
+                value: value.to_owned(),
+            })
+        })
         .collect()
 }
 
@@ -452,7 +464,15 @@ mod tests {
         let id = uuid("44444444-4444-4444-4444-444444444444")?;
         let bad = uuid("55555555-5555-5555-5555-555555555555")?;
         let suffix = display_names_query(&[id, bad]);
-        assert_eq!(parse_display_names_query(&suffix), vec![id, bad]);
+        assert_eq!(parse_display_names_query(&suffix), Ok(vec![id, bad]));
+        // An `ids` value that is not a UUID is refused, not quietly dropped.
+        assert_eq!(
+            parse_display_names_query("?ids=not-a-uuid"),
+            Err(WireError::InvalidUuid {
+                field: "ids",
+                value: "not-a-uuid".to_owned(),
+            })
+        );
 
         let name = DisplayName {
             id: AgentKey::from(id),

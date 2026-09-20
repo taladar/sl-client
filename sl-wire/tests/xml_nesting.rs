@@ -12,8 +12,8 @@
 mod test {
     use pretty_assertions::assert_eq;
     use sl_wire::{
-        LoginParseError, XmlRpcError, parse_grid_info_xml, parse_login_request,
-        parse_login_response, parse_method_call, parse_method_response,
+        WireError, parse_grid_info_xml, parse_login_request, parse_login_response,
+        parse_method_call, parse_method_response,
     };
 
     /// How deep to nest: past roxmltree's own recursion ceiling, so an unguarded
@@ -36,7 +36,7 @@ mod test {
         let xml = deeply_nested("methodCall", "<methodName>login_to_simulator</methodName>");
         assert!(matches!(
             parse_method_call(&xml),
-            Err(XmlRpcError::Xml(roxmltree::Error::NodesLimitReached))
+            Err(WireError::XmlNestingTooDeep { .. })
         ));
     }
 
@@ -46,7 +46,7 @@ mod test {
         let xml = deeply_nested("methodResponse", "<value><string>hi</string></value>");
         assert!(matches!(
             parse_method_response(&xml),
-            Err(XmlRpcError::Xml(roxmltree::Error::NodesLimitReached))
+            Err(WireError::XmlNestingTooDeep { .. })
         ));
     }
 
@@ -56,7 +56,7 @@ mod test {
         let xml = deeply_nested("gridinfo", "<gridname>Deep</gridname>");
         assert!(matches!(
             parse_grid_info_xml(&xml),
-            Err(XmlRpcError::Xml(roxmltree::Error::NodesLimitReached))
+            Err(WireError::XmlNestingTooDeep { .. })
         ));
     }
 
@@ -67,7 +67,7 @@ mod test {
         let xml = deeply_nested("methodResponse", "<value><string>hi</string></value>");
         assert!(matches!(
             parse_login_response(&xml),
-            Err(LoginParseError::Xml(roxmltree::Error::NodesLimitReached))
+            Err(WireError::XmlNestingTooDeep { .. })
         ));
     }
 
@@ -78,14 +78,14 @@ mod test {
         let xml = deeply_nested("methodCall", "<methodName>login_to_simulator</methodName>");
         assert!(matches!(
             parse_login_request(&xml),
-            Err(LoginParseError::Xml(roxmltree::Error::NodesLimitReached))
+            Err(WireError::XmlNestingTooDeep { .. })
         ));
     }
 
     /// The guard is a ceiling, not a change of behaviour: a body nested the way
     /// the protocol actually nests still parses.
     #[test]
-    fn ordinary_nesting_still_parses() -> Result<(), XmlRpcError> {
+    fn ordinary_nesting_still_parses() -> Result<(), WireError> {
         let xml = concat!(
             "<methodResponse><params><param><value><struct>",
             "<member><name>login</name><value><string>true</string></value></member>",

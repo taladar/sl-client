@@ -288,9 +288,10 @@ pub enum Error {
     /// An HTTP error while performing the XML-RPC login.
     #[error("login HTTP error: {0}")]
     Http(#[from] ReqwestError),
-    /// The login response could not be parsed.
-    #[error("login parse error: {0}")]
-    Login(#[from] sl_wire::LoginParseError),
+    /// A wire body — the XML-RPC or LLSD login response, in practice, since
+    /// that is the only one this crate parses itself — could not be decoded.
+    #[error("wire parse error: {0}")]
+    Wire(#[from] sl_wire::WireError),
     /// A protocol state-machine error.
     #[error("protocol error: {0}")]
     Proto(#[from] sl_proto::Error),

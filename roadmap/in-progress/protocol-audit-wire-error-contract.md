@@ -2,7 +2,7 @@
 id: protocol-audit-wire-error-contract
 title: sl-wire's public parse surface has five different failure disciplines
 topic: protocol
-status: ready
+status: in-progress
 origin: static code audit (2026-08-26)
 points: 5
 ---

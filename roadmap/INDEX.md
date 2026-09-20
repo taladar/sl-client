@@ -12,9 +12,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 297 |
+| ready | 296 |
 | blocked | 40 |
-| in-progress | 22 |
+| in-progress | 23 |
 | bugs | 5 |
 | done | 1199 |
 | deferred | 29 |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (297)
+## ready (296)
 
 ### protocol
 
@@ -256,8 +256,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Re-exports and derived login state reach only the bevy runtime
 - [`protocol-audit-sim-session-stores`](ready/protocol-audit-sim-session-stores.md)
   — SimSession's 54 fields mix the driver's serving stores with the circuit
-- [`protocol-audit-wire-error-contract`](ready/protocol-audit-wire-error-contract.md)
-  — sl-wire's public parse surface has five different failure disciplines
 - [`protocol-fetch-inventory-items-request`](ready/protocol-fetch-inventory-items-request.md)
   — Fetching inventory items by id (FetchInventory2's request half)
 - [`protocol-sl-llsd-serde`](ready/protocol-sl-llsd-serde.md) — serde
@@ -1063,7 +1061,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (22)
+## in-progress (23)
+
+### protocol
+
+- [`protocol-audit-wire-error-contract`](in-progress/protocol-audit-wire-error-contract.md)
+  — sl-wire's public parse surface has five different failure disciplines
 
 ### viewer
 

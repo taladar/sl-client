@@ -154,12 +154,11 @@ pub use llsd::{
 };
 pub use login::{
     BuddyListEntry, Credential, GestureEntry, GlobalTextures, HomeLocation, InitialOutfit,
-    LoginCategory, LoginFailure, LoginFlags, LoginGates, LoginParseError, LoginRedirect,
-    LoginRejectKind, LoginRequest, LoginResponse, LoginServer, LoginSuccess, MfaChallenge,
-    MfaPolicy, NewUserConfig, ParsedLoginRequest, SkeletonFolder, StartLocation,
-    StartLocationParseError, TutorialSetting, UiConfig, VoiceConfig, build_login_request,
-    build_login_request_with_method, build_login_response, parse_login_request,
-    parse_login_response, password_hash,
+    LoginCategory, LoginFailure, LoginFlags, LoginGates, LoginRedirect, LoginRejectKind,
+    LoginRequest, LoginResponse, LoginServer, LoginSuccess, MfaChallenge, MfaPolicy, NewUserConfig,
+    ParsedLoginRequest, SkeletonFolder, StartLocation, StartLocationParseError, TutorialSetting,
+    UiConfig, VoiceConfig, build_login_request, build_login_request_with_method,
+    build_login_response, parse_login_request, parse_login_response, password_hash,
 };
 pub use login_llsd::{
     build_login_request_llsd, build_login_response_llsd, parse_login_request_llsd,
@@ -216,7 +215,7 @@ pub use sim_features::{
     build_simulator_features_response, parse_simulator_features,
 };
 pub use xmlrpc::{
-    XmlRpcCall, XmlRpcError, XmlRpcResponse, build_fault, build_method_call, build_method_response,
+    XmlRpcCall, XmlRpcResponse, build_fault, build_method_call, build_method_response,
     parse_method_call, parse_method_response,
 };
 // Re-export the `sl-lsl` symbol-table types the `LSLSyntax` decoder produces, so
@@ -608,7 +607,7 @@ mod test {
     }
 
     #[test]
-    fn upload_response_parses_both_steps_and_failure() -> Result<(), roxmltree::Error> {
+    fn upload_response_parses_both_steps_and_failure() -> Result<(), WireError> {
         // Step 1: the uploader URL.
         let step1 = parse_asset_upload_response(
             "<llsd><map><key>state</key><string>upload</string>\
@@ -651,7 +650,7 @@ mod test {
     }
 
     #[test]
-    fn upload_completion_reports_the_permissions_it_granted() -> Result<(), roxmltree::Error> {
+    fn upload_completion_reports_the_permissions_it_granted() -> Result<(), WireError> {
         let asset = uuid::Uuid::from_u128(0x000a_55e7);
         let item = uuid::Uuid::from_u128(0x17e3);
         let granted = parse_asset_upload_response(&format!(
@@ -696,7 +695,7 @@ mod test {
     }
 
     #[test]
-    fn upload_completion_round_trips_through_the_builder() -> Result<(), roxmltree::Error> {
+    fn upload_completion_round_trips_through_the_builder() -> Result<(), WireError> {
         let response = AssetUploadResponse {
             state: "complete".to_owned(),
             uploader: None,
@@ -741,7 +740,7 @@ mod test {
     }
 
     #[test]
-    fn upload_response_parses_script_compile_result() -> Result<(), roxmltree::Error> {
+    fn upload_response_parses_script_compile_result() -> Result<(), WireError> {
         let asset = uuid::Uuid::from_u128(0x5c_1b7);
         // A clean compile: compiled = true, no errors.
         let ok = parse_asset_upload_response(&format!(
@@ -856,7 +855,7 @@ mod test {
     }
 
     #[test]
-    fn upload_metadata_requests_round_trip() -> Result<(), roxmltree::Error> {
+    fn upload_metadata_requests_round_trip() -> Result<(), WireError> {
         let folder = sl_types::key::InventoryFolderKey::from(uuid::Uuid::from_u128(0xf0));
         let item = sl_types::key::InventoryKey::from(uuid::Uuid::from_u128(0x1e));
         let task = sl_types::key::ObjectKey::from(uuid::Uuid::from_u128(0x7a));
@@ -923,7 +922,7 @@ mod test {
         let get = parse_llsd_xml(&build_object_media_get_request(object))?;
         assert_eq!(
             parse_object_media_request(&get),
-            Some(ObjectMediaRequest::Get { object_id: object })
+            Ok(ObjectMediaRequest::Get { object_id: object })
         );
 
         // UPDATE verb, two faces.
@@ -932,17 +931,18 @@ mod test {
             &[Some(entry.clone()), None],
         ))?;
         match parse_object_media_request(&update) {
-            Some(ObjectMediaRequest::Update { object_id, faces }) => {
+            Ok(ObjectMediaRequest::Update { object_id, faces }) => {
                 assert_eq!(object_id, object);
                 assert_eq!(faces, vec![Some(entry), None]);
             }
             other => return Err(format!("expected an Update request, got {other:?}").into()),
         }
 
-        // A verb-less body is unroutable.
+        // A verb-less body is unroutable, and says which member is missing
+        // rather than only that something was.
         assert_eq!(
             parse_object_media_request(&parse_llsd_xml("<llsd><map /></llsd>")?),
-            None
+            Err(sl_llsd::LlsdError::MissingField { field: "verb" }.into())
         );
 
         // Navigate.
@@ -951,7 +951,7 @@ mod test {
             5,
             "https://example.net/",
         ))?;
-        let parsed = parse_object_media_navigate_request(&navigate).ok_or("expected a navigate")?;
+        let parsed = parse_object_media_navigate_request(&navigate)?;
         assert_eq!(parsed.object_id, object);
         assert_eq!(parsed.face, 5);
         assert_eq!(parsed.url, "https://example.net/");

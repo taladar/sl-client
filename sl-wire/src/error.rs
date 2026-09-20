@@ -1,10 +1,23 @@
-//! Error type shared by the wire codec primitives.
+//! The single error type of this crate's public parse surface.
 
 use thiserror::Error;
 
 use crate::message::MessageId;
 
-/// An error encountered while decoding or encoding LLUDP wire data.
+/// An error encountered while decoding or encoding Second Life wire data.
+///
+/// This is the **one** failure type every `pub fn parse_*` in this crate
+/// returns, whatever the encoding underneath: LLUDP datagrams, LLSD bodies,
+/// XML-RPC calls and responses, the login handshake, and the capability bodies
+/// that wrap zipped binary LLSD all fail into it. Nothing on the public surface
+/// reports a fault as a bare `Option`/empty `Vec`, and no third-party error type
+/// (notably the XML reader's — see [`Xml`](Self::Xml)) crosses the boundary, so
+/// a caller writes one `match` and is not recompiled when a dependency of this
+/// crate changes its error shape.
+///
+/// A `parse_*` that returns `Option`/`Ok(None)` is doing route matching, not
+/// error reporting: "this URL suffix is not the one this endpoint serves", or
+/// "this optional field is absent". Those are answers, not failures.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum WireError {
@@ -127,6 +140,71 @@ pub enum WireError {
         /// The version the body declared.
         version: u32,
     },
+    /// An XML body was not well-formed.
+    ///
+    /// The XML reader's own diagnostic is **rendered into `message` rather than
+    /// carried as its own type**: a caller that matches on this crate's failures
+    /// then names nothing from the XML crate, and is neither recompiled nor
+    /// broken when that dependency changes its error shape. The one distinction
+    /// worth acting on — a body refused for depth rather than for syntax — has
+    /// its own variant, [`XmlNestingTooDeep`](WireError::XmlNestingTooDeep).
+    #[error("malformed XML: {message}")]
+    Xml {
+        /// The XML reader's diagnostic, rendered for humans.
+        message: String,
+    },
+    /// An XML body nested arrays / elements deeper than
+    /// [`MAX_NESTING_DEPTH`](sl_llsd::MAX_NESTING_DEPTH), and was refused by
+    /// [`parse_guarded_xml`](sl_llsd::parse_guarded_xml) *before* the reader
+    /// recursed into it — nesting depth is stack depth, and a stack overflow
+    /// aborts the process rather than raising an error this type could carry.
+    ///
+    /// Distinct from [`Xml`](WireError::Xml) because it is not a claim that the
+    /// document is malformed: a body this deep is well-formed and refused
+    /// anyway, which is what a caller reporting "the grid sent something we
+    /// will not read" needs to say.
+    #[error("XML nested deeper than the {limit}-level limit")]
+    XmlNestingTooDeep {
+        /// The limit that was exceeded.
+        limit: usize,
+    },
+    /// A document handed to an XML-RPC decoder was neither a `<methodCall>` nor
+    /// a `<methodResponse>` — an HTML error page from a misrouted request, say.
+    #[error("document is not an XML-RPC call or response")]
+    NotXmlRpc,
+    /// An XML-RPC `<methodCall>` carried no `<methodName>`.
+    #[error("XML-RPC call has no methodName")]
+    NoMethodName,
+    /// A typed XML-RPC decoder was handed a response for a different method, or
+    /// a call naming a method it does not implement. The document is refused
+    /// rather than decoded against the wrong field layout.
+    #[error("unexpected XML-RPC method {method:?}")]
+    UnexpectedMethod {
+        /// The method name found.
+        method: String,
+    },
+    /// The peer answered an XML-RPC call with a `<fault>` instead of a result —
+    /// how a login host reports a refused login.
+    #[error("XML-RPC fault: {message}")]
+    XmlRpcFault {
+        /// The `faultString` member, or `"unknown fault"` when the fault struct
+        /// carried none.
+        message: String,
+    },
+    /// An XML-RPC `<methodResponse>` carried no `<struct>` where the decoder
+    /// requires one — a well-formed document that is not the reply shape.
+    #[error("XML-RPC document carries no response struct")]
+    NoStruct,
+    /// A compressed capability body — the `{ "Zipped": … }` envelope the legacy
+    /// `RenderMaterials` capability carries — did not inflate, or inflated past
+    /// the decoder's size limit. Refused rather than read as an absent body, so
+    /// a corrupt reply is distinguishable from the empty "fetch everything"
+    /// request that legitimately carries no envelope.
+    #[error("compressed {what} body could not be inflated")]
+    MalformedCompressedBody {
+        /// A short static label naming the body that failed to inflate.
+        what: &'static str,
+    },
     /// A fault decoding a [`Llsd`](sl_llsd::Llsd) body: a map field read by the
     /// typed `field_*` / `require_*` accessors was absent or of the wrong LLSD
     /// kind, or an LLSD-XML document failed to parse. This wraps the LLSD core's
@@ -137,4 +215,23 @@ pub enum WireError {
     /// directly.
     #[error(transparent)]
     Llsd(#[from] sl_llsd::LlsdError),
+}
+
+impl From<roxmltree::Error> for WireError {
+    /// Wraps the XML reader's error, keeping the one distinction a caller acts
+    /// on — a body refused by the nesting guard rather than for bad syntax —
+    /// and rendering the rest, so no `roxmltree` type reaches the public
+    /// surface. `parse_guarded_xml` reports its own depth refusal as
+    /// `NodesLimitReached`, which is why that variant maps to
+    /// [`XmlNestingTooDeep`](WireError::XmlNestingTooDeep).
+    fn from(error: roxmltree::Error) -> Self {
+        match error {
+            roxmltree::Error::NodesLimitReached => Self::XmlNestingTooDeep {
+                limit: sl_llsd::MAX_NESTING_DEPTH,
+            },
+            other => Self::Xml {
+                message: other.to_string(),
+            },
+        }
+    }
 }

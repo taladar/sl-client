@@ -1044,13 +1044,16 @@ impl SimCaps {
     /// in the session's display-name store. Known agents answer as full
     /// `agents` records, unknown ids as `bad_ids` (the grid's "could not
     /// resolve" form). No ids — or no query at all — answers an empty
-    /// `agents` array (tolerant).
+    /// `agents` array; an `ids` value that is not a UUID is a `400`, since
+    /// "unreadable" and "nobody by that id" are different answers.
     fn dispatch_display_names(sim: &SimSession, request: &CapsRequest<'_>) -> CapsResponse {
         if request.method != "GET" {
             return CapsResponse::method_not_allowed();
         }
         let query = request.query.unwrap_or_default();
-        let ids = parse_display_names_query(&format!("?{query}"));
+        let Ok(ids) = parse_display_names_query(&format!("?{query}")) else {
+            return CapsResponse::bad_request();
+        };
         let records = ids
             .into_iter()
             .map(|id| {
@@ -1392,7 +1395,9 @@ impl SimCaps {
                 let Ok(text) = std::str::from_utf8(request.body) else {
                     return CapsResponse::bad_request();
                 };
-                let ids = parse_render_materials_request(text);
+                let Ok(ids) = parse_render_materials_request(text) else {
+                    return CapsResponse::bad_request();
+                };
                 CapsResponse::llsd_xml(build_render_materials_response(&sim.region_materials(&ids)))
             }
             "GET" => {
@@ -1402,7 +1407,9 @@ impl SimCaps {
                 let Ok(text) = std::str::from_utf8(request.body) else {
                     return CapsResponse::bad_request();
                 };
-                let updates = parse_render_materials_put_request(text);
+                let Ok(updates) = parse_render_materials_put_request(text) else {
+                    return CapsResponse::bad_request();
+                };
                 sim.push_content_event(ServerEvent::RenderMaterialsSet { updates });
                 CapsResponse::llsd_xml(UNDEF_LLSD_BODY.to_owned())
             }
@@ -1446,7 +1453,7 @@ impl SimCaps {
         let Some(body) = parse_llsd_body(request.body) else {
             return CapsResponse::bad_request();
         };
-        let Some(media_request) = parse_object_media_request(&body) else {
+        let Ok(media_request) = parse_object_media_request(&body) else {
             return CapsResponse::bad_request();
         };
         match media_request {
@@ -1487,7 +1494,7 @@ impl SimCaps {
         let Some(body) = parse_llsd_body(request.body) else {
             return CapsResponse::bad_request();
         };
-        let Some(navigate) = parse_object_media_navigate_request(&body) else {
+        let Ok(navigate) = parse_object_media_navigate_request(&body) else {
             return CapsResponse::bad_request();
         };
         sim.navigate_object_media(navigate.object_id, navigate.face, navigate.url);
@@ -2076,14 +2083,16 @@ impl SimCaps {
     /// sub-path-plus-query form the client builder emits): the stored
     /// record per requested id ([`SimSession::experiences`]); unknown ids
     /// answer as `error_ids` entries. An empty or absent query answers
-    /// `200` with no records — the parser is lenient by design (a
-    /// documented exception to the `400`-on-malformed rule). Wrong
-    /// method → `405`.
+    /// `200` with no records — asking about nothing is not malformed — but a
+    /// `public_id` that is not a UUID is a `400`, like every other
+    /// unreadable request. Wrong method → `405`.
     fn dispatch_experience_info(sim: &SimSession, request: &CapsRequest<'_>) -> CapsResponse {
         if request.method != "GET" {
             return CapsResponse::method_not_allowed();
         }
-        let ids = parse_experience_info_query(&ais_suffix(request));
+        let Ok(ids) = parse_experience_info_query(&ais_suffix(request)) else {
+            return CapsResponse::bad_request();
+        };
         CapsResponse::llsd_xml(build_experience_infos_response(
             &sim.experiences().infos(&ids),
         ))
@@ -2152,7 +2161,7 @@ impl SimCaps {
                 let Ok(body) = std::str::from_utf8(request.body) else {
                     return CapsResponse::bad_request();
                 };
-                let Ok(Some(parsed)) = parse_set_experience_permission_request(body) else {
+                let Ok(parsed) = parse_set_experience_permission_request(body) else {
                     return CapsResponse::bad_request();
                 };
                 parsed

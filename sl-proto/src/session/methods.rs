@@ -2634,7 +2634,7 @@ impl Session {
             AnyMessage::GenericStreamingMessage(message)
                 if message.method_data.method == GLTF_MATERIAL_OVERRIDE_METHOD =>
             {
-                if let Some(decoded) = parse_gltf_material_override(&message.data_block.data) {
+                if let Ok(decoded) = parse_gltf_material_override(&message.data_block.data) {
                     let circuit_id = self.circuit_id_for(from).unwrap_or_default();
                     let region_handle = self
                         .world

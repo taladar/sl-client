@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use sl_wire::{
     BUY_CURRENCY_METHOD, BUY_LAND_PREP_METHOD, CURRENCY_HELPER_PATH, GET_CURRENCY_QUOTE_METHOD,
-    HelperOutcome, LAND_TOOL_HELPER_PATH, PREFLIGHT_BUY_LAND_PREP_METHOD, XmlRpcError,
+    HelperOutcome, LAND_TOOL_HELPER_PATH, PREFLIGHT_BUY_LAND_PREP_METHOD, WireError,
     build_buy_currency_response, build_buy_land_prep_response, build_currency_quote_response,
     build_fault, build_preflight_land_prep_response, parse_buy_currency_request,
     parse_buy_land_prep_request, parse_currency_quote_request, parse_preflight_land_prep_request,
@@ -69,7 +69,7 @@ pub(crate) fn handle_helper(core: &Arc<GridCore>, path: &str, body: &[u8]) -> Ht
     };
     match result {
         Ok(xml) => HttpAnswer::ok(XML_RPC_CONTENT_TYPE, xml),
-        Err(XmlRpcError::UnexpectedMethod { method }) => {
+        Err(WireError::UnexpectedMethod { method }) => {
             fault(FAULT_UNKNOWN_METHOD, &format!("unexpected method {method}"))
         }
         Err(error) => {
