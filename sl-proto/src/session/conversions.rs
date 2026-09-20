@@ -1363,6 +1363,376 @@ fn water_settings_from_llsd(name: &str, water: &Llsd) -> WaterSettings {
     }
 }
 
+#[cfg(test)]
+mod settings_asset_tests {
+    use pretty_assertions::assert_eq;
+    use sl_wire::Llsd;
+
+    use super::{
+        DayNames, EnvironmentAsset, SkySettings, WaterSettings, day_cycle_from_asset,
+        day_cycle_from_llsd, day_names_from_llsd, environment_asset_from_bytes,
+        environment_asset_to_bytes, llsd_map, sky_settings_from_asset, sky_settings_from_llsd,
+        water_settings_from_asset, water_settings_from_llsd,
+    };
+
+    /// A boxed error so tests can use `?` instead of disallowed `unwrap`/`expect`.
+    type TestError = Box<dyn core::error::Error>;
+
+    /// Whether two settings values are the same number. The crate forbids a
+    /// strict `==` on floats, and the values here travel as LLSD reals
+    /// (`f64`) before landing in an `f32` field, so an exact bit comparison is
+    /// not the claim being made anyway.
+    fn close(left: f32, right: f32) -> bool {
+        (left - right).abs() < 1e-6
+    }
+
+    /// An LLSD real array, the shape every colour / vector settings value takes.
+    fn reals(values: &[f32]) -> Llsd {
+        Llsd::Array(values.iter().map(|v| Llsd::Real(f64::from(*v))).collect())
+    }
+
+    /// One keyframe of a day-cycle track: the `{key_keyframe, key_name}` map
+    /// `track_from_llsd` reads.
+    fn keyframe(at: f32, name: &str) -> Llsd {
+        llsd_map(vec![
+            ("key_keyframe", Llsd::Real(f64::from(at))),
+            ("key_name", Llsd::String(name.to_owned())),
+        ])
+    }
+
+    /// A settings map of the given `type` kind carrying `extra` members.
+    fn settings_map(kind: &str, extra: Vec<(&str, Llsd)>) -> Llsd {
+        let mut entries = vec![("type", Llsd::String(kind.to_owned()))];
+        entries.extend(extra);
+        llsd_map(entries)
+    }
+
+    /// The `type` tag is what tells the three settings kinds apart: the same
+    /// LLSD map is a sky, a water frame or a day cycle by that member alone, and
+    /// each decoder refuses the other two kinds rather than returning a frame
+    /// built from absent members. An untagged (or unknown-kind) map is none of
+    /// them.
+    #[test]
+    fn the_type_tag_selects_the_settings_kind() {
+        let sky = settings_map("sky", vec![("max_y", Llsd::Real(1605.0))]);
+        let water = settings_map("water", vec![("water_fog_density", Llsd::Real(4.0))]);
+        let cycle = settings_map("daycycle", vec![]);
+        let untagged = llsd_map(vec![("max_y", Llsd::Real(1605.0))]);
+
+        assert!(sky_settings_from_asset("S", &sky).is_some());
+        assert_eq!(sky_settings_from_asset("S", &water), None);
+        assert_eq!(sky_settings_from_asset("S", &cycle), None);
+        assert_eq!(sky_settings_from_asset("S", &untagged), None);
+
+        assert!(water_settings_from_asset("W", &water).is_some());
+        assert_eq!(water_settings_from_asset("W", &sky), None);
+        assert_eq!(water_settings_from_asset("W", &untagged), None);
+
+        assert!(day_cycle_from_asset("D", &cycle).is_some());
+        assert_eq!(day_cycle_from_asset("D", &sky), None);
+        assert_eq!(day_cycle_from_asset("D", &untagged), None);
+    }
+
+    /// The name a decoded asset carries is the **caller's** — the inventory
+    /// item's name, or the asset id — not the one written inside the payload,
+    /// for all three kinds. A day cycle's own `name` member is overwritten for
+    /// exactly that reason, which is what a viewer shows in its environment
+    /// list.
+    #[test]
+    fn the_callers_name_tags_every_kind() -> Result<(), TestError> {
+        let sky = sky_settings_from_asset(
+            "Inventory Sky",
+            &settings_map("sky", vec![("name", Llsd::String("Asset Sky".to_owned()))]),
+        )
+        .ok_or("a sky asset")?;
+        assert_eq!(sky.name, "Inventory Sky");
+
+        let water = water_settings_from_asset(
+            "Inventory Water",
+            &settings_map("water", vec![("name", Llsd::String("Asset".to_owned()))]),
+        )
+        .ok_or("a water asset")?;
+        assert_eq!(water.name, "Inventory Water");
+
+        let cycle = day_cycle_from_asset(
+            "Inventory Cycle",
+            &settings_map(
+                "daycycle",
+                vec![("name", Llsd::String("Asset Cycle".to_owned()))],
+            ),
+        )
+        .ok_or("a day-cycle asset")?;
+        assert_eq!(cycle.name, "Inventory Cycle");
+        Ok(())
+    }
+
+    /// A day cycle's tracks are positional: **track 0 is water** and the rest
+    /// are sky tracks, ground up. Its frames share one name namespace and are
+    /// sorted into the sky or water map by each frame's own `type` tag, with an
+    /// untagged frame read as a sky (the shape a legacy WindLight cycle has).
+    /// The keyframes keep the order and the positions the track sent.
+    #[test]
+    fn a_day_cycle_splits_the_water_track_from_the_sky_tracks() -> Result<(), TestError> {
+        let cycle = day_cycle_from_llsd(Some(&llsd_map(vec![
+            ("name", Llsd::String("Test Cycle".to_owned())),
+            (
+                "frames",
+                llsd_map(vec![
+                    (
+                        "Noon",
+                        settings_map("sky", vec![("max_y", Llsd::Real(1605.0))]),
+                    ),
+                    (
+                        "Calm",
+                        settings_map("water", vec![("water_fog_density", Llsd::Real(4.0))]),
+                    ),
+                    // No `type` member at all: read as a sky frame.
+                    ("Legacy", llsd_map(vec![("gamma", Llsd::Real(1.0))])),
+                ]),
+            ),
+            (
+                "tracks",
+                Llsd::Array(vec![
+                    // Track 0: water.
+                    Llsd::Array(vec![keyframe(0.0, "Calm")]),
+                    // Track 1: the surface sky track.
+                    Llsd::Array(vec![keyframe(0.25, "Noon"), keyframe(0.75, "Legacy")]),
+                    // Track 2: an altitude track, empty.
+                    Llsd::Array(Vec::new()),
+                ]),
+            ),
+        ])));
+
+        assert_eq!(cycle.name, "Test Cycle");
+        assert_eq!(
+            cycle
+                .water_track
+                .iter()
+                .map(|frame| (frame.keyframe, frame.name.clone()))
+                .collect::<Vec<_>>(),
+            vec![(0.0, "Calm".to_owned())]
+        );
+        assert_eq!(cycle.sky_tracks.len(), 2);
+        assert_eq!(
+            cycle
+                .sky_tracks
+                .first()
+                .ok_or("the surface sky track")?
+                .iter()
+                .map(|frame| (frame.keyframe, frame.name.clone()))
+                .collect::<Vec<_>>(),
+            vec![(0.25, "Noon".to_owned()), (0.75, "Legacy".to_owned())]
+        );
+        assert!(cycle.sky_tracks.get(1).is_some_and(Vec::is_empty));
+        assert_eq!(
+            cycle.sky_frames.keys().collect::<Vec<_>>(),
+            vec!["Legacy", "Noon"]
+        );
+        assert_eq!(cycle.water_frames.keys().collect::<Vec<_>>(), vec!["Calm"]);
+        // Each frame decoded as its own kind, keyed by its name.
+        assert_eq!(
+            cycle.sky_frames.get("Noon").map(|sky| sky.max_y),
+            Some(1605.0)
+        );
+        assert_eq!(
+            cycle
+                .water_frames
+                .get("Calm")
+                .map(|water| water.water_fog_density),
+            Some(4.0)
+        );
+        Ok(())
+    }
+
+    /// An absent or malformed cycle decodes to an empty one rather than to
+    /// nothing: no name, no tracks, no frames. A track that is not an array
+    /// contributes no keyframes, and a keyframe map missing its members falls
+    /// back to position `0.0` and the empty name (which no frame answers to).
+    #[test]
+    fn a_missing_or_malformed_day_cycle_decodes_to_an_empty_one() -> Result<(), TestError> {
+        let empty = day_cycle_from_llsd(None);
+        assert_eq!(empty.name, "");
+        assert!(empty.water_track.is_empty());
+        assert!(empty.sky_tracks.is_empty());
+        assert!(empty.sky_frames.is_empty());
+
+        let malformed = day_cycle_from_llsd(Some(&llsd_map(vec![
+            ("frames", Llsd::Integer(7)),
+            (
+                "tracks",
+                Llsd::Array(vec![
+                    // Not an array: no keyframes.
+                    Llsd::String("nonsense".to_owned()),
+                    Llsd::Array(vec![llsd_map(vec![])]),
+                ]),
+            ),
+        ])));
+        assert!(malformed.water_track.is_empty());
+        assert!(malformed.sky_frames.is_empty());
+        let sky_track = malformed.sky_tracks.first().ok_or("one sky track")?;
+        assert_eq!(
+            sky_track
+                .iter()
+                .map(|frame| (frame.keyframe, frame.name.clone()))
+                .collect::<Vec<_>>(),
+            vec![(0.0, String::new())]
+        );
+        Ok(())
+    }
+
+    /// The seven legacy-haze values are looked up in three places in the
+    /// reference's own order: the frame's `legacy_haze` sub-map, then the frame
+    /// itself, then the viewer's built-in default. All three occur in the wild —
+    /// a sky the reference saved writes each value back wherever it read it — and
+    /// a frame carrying none of them must decode to the *default* haze rather
+    /// than to zero, which is the black, hazeless sky this used to produce.
+    #[test]
+    fn legacy_haze_is_read_from_the_sub_map_then_the_frame_then_the_default() {
+        let default = SkySettings::legacy_windlight_default("Default");
+
+        // The sub-map wins over a top-level value of the same name.
+        let both = sky_settings_from_llsd(
+            "Both",
+            &llsd_map(vec![
+                (
+                    "legacy_haze",
+                    llsd_map(vec![
+                        ("haze_density", Llsd::Real(0.75)),
+                        ("ambient", reals(&[0.1, 0.2, 0.3])),
+                    ]),
+                ),
+                ("haze_density", Llsd::Real(0.25)),
+                ("ambient", reals(&[0.9, 0.9, 0.9])),
+            ]),
+        );
+        assert!(close(both.haze_density, 0.75));
+        assert!(close(both.ambient.red(), 0.1));
+
+        // With no sub-map, the frame's own top-level values are read.
+        let top_level = sky_settings_from_llsd(
+            "Top",
+            &llsd_map(vec![
+                ("haze_density", Llsd::Real(0.25)),
+                ("ambient", reals(&[0.9, 0.8, 0.7])),
+            ]),
+        );
+        assert!(close(top_level.haze_density, 0.25));
+        assert!(close(top_level.ambient.green(), 0.8));
+
+        // With neither, the built-in default — not zero.
+        let bare = sky_settings_from_llsd("Bare", &llsd_map(vec![]));
+        assert!(close(bare.haze_density, default.haze_density));
+        assert_eq!(bare.ambient, default.ambient);
+        assert_eq!(bare.blue_horizon, default.blue_horizon);
+        assert!(close(bare.density_multiplier, default.density_multiplier));
+    }
+
+    /// A sky frame that carries no density profiles decodes to the reference's
+    /// built-in ones rather than to empty lists. What is decoded here is what
+    /// gets *sent* again, and the reference throws away a sky whose profiles are
+    /// empty — so the fallback is what keeps a hand-written or legacy frame
+    /// round-trippable.
+    #[test]
+    fn absent_density_profiles_fall_back_to_the_reference_defaults() {
+        let bare = sky_settings_from_llsd("Bare", &llsd_map(vec![]));
+        assert!(!bare.rayleigh_config.is_empty());
+        assert!(!bare.mie_config.is_empty());
+        assert!(!bare.absorption_config.is_empty());
+        // An explicitly empty profile array is treated the same as an absent one.
+        let empty = sky_settings_from_llsd(
+            "Empty",
+            &llsd_map(vec![("rayleigh_config", Llsd::Array(Vec::new()))]),
+        );
+        assert_eq!(empty.rayleigh_config, bare.rayleigh_config);
+    }
+
+    /// A water frame reads its own members and defaults the rest to zero — it
+    /// has no legacy fallback layer, so what the asset does not say is `0.0` and
+    /// a nil texture id is the "use the viewer default" sentinel.
+    #[test]
+    fn a_water_frame_reads_its_members_and_zeroes_the_rest() {
+        let water = water_settings_from_llsd(
+            "Calm",
+            &llsd_map(vec![
+                ("water_fog_density", Llsd::Real(4.0)),
+                ("water_fog_color", reals(&[0.0, 0.25, 0.5])),
+                ("wave1_direction", reals(&[1.05, -0.42])),
+                ("normal_map", Llsd::Uuid(uuid::Uuid::nil())),
+            ]),
+        );
+        assert_eq!(water.name, "Calm");
+        assert!(close(water.water_fog_density, 4.0));
+        assert!(close(water.water_fog_color.blue(), 0.5));
+        let [wave1_x, wave1_y] = water.wave1_direction;
+        assert!(close(wave1_x, 1.05));
+        assert!(close(wave1_y, -0.42));
+        assert_eq!(water.normal_map, None);
+        // What the asset did not say is zero, not a default.
+        assert!(close(water.blur_multiplier, 0.0));
+        let [wave2_x, wave2_y] = water.wave2_direction;
+        assert!(close(wave2_x, 0.0));
+        assert!(close(wave2_y, 0.0));
+    }
+
+    /// The `day_names` member arrives in two shapes — a string naming the whole
+    /// cycle, or an array naming each track — and anything else means the grid
+    /// published an inline cycle with no names at all.
+    #[test]
+    fn day_names_decode_in_both_wire_shapes() -> Result<(), TestError> {
+        assert_eq!(
+            day_names_from_llsd(Some(&Llsd::String("Sunny Day".to_owned()))),
+            DayNames::Cycle("Sunny Day".to_owned())
+        );
+        let tracks = day_names_from_llsd(Some(&Llsd::Array(vec![
+            Llsd::String("Water".to_owned()),
+            Llsd::String("Ground".to_owned()),
+        ])));
+        let DayNames::Tracks(names) = tracks else {
+            return Err(format!("an array of names decoded as {tracks:?}").into());
+        };
+        assert_eq!(names.first().map(String::as_str), Some("Water"));
+        assert_eq!(names.get(1).map(String::as_str), Some("Ground"));
+        // The tracks the grid did not name stay empty.
+        assert_eq!(names.get(2).map(String::as_str), Some(""));
+        assert_eq!(day_names_from_llsd(None), DayNames::Unnamed);
+        assert_eq!(
+            day_names_from_llsd(Some(&Llsd::Integer(3))),
+            DayNames::Unnamed
+        );
+        Ok(())
+    }
+
+    /// The bytes an EEP settings asset is served as decode back to the frame
+    /// they were written from, for each of the three kinds, and a payload that
+    /// is not LLSD at all — or is LLSD of no settings kind — is not an asset.
+    #[test]
+    fn settings_asset_bytes_round_trip_and_reject_non_assets() -> Result<(), TestError> {
+        let sky = SkySettings::legacy_windlight_default("Noon");
+        let bytes = environment_asset_to_bytes(&EnvironmentAsset::Sky(Box::new(sky.clone())));
+        match environment_asset_from_bytes("Noon", &bytes).ok_or("a sky asset")? {
+            EnvironmentAsset::Sky(decoded) => assert_eq!(*decoded, sky),
+            other => return Err(format!("sky bytes decoded as {other:?}").into()),
+        }
+
+        let water = WaterSettings::legacy_default("Calm");
+        let bytes = environment_asset_to_bytes(&EnvironmentAsset::Water(water.clone()));
+        match environment_asset_from_bytes("Calm", &bytes).ok_or("a water asset")? {
+            EnvironmentAsset::Water(decoded) => assert_eq!(decoded, water),
+            other => return Err(format!("water bytes decoded as {other:?}").into()),
+        }
+
+        // Neither LLSD nor a settings kind: not an asset either way.
+        assert!(environment_asset_from_bytes("X", b"not llsd at all").is_none());
+        assert!(environment_asset_from_bytes("X", &[]).is_none());
+        let not_settings = sl_wire::to_llsd_serialized(
+            &llsd_map(vec![("type", Llsd::String("material".to_owned()))]),
+            sl_wire::LlsdEncoding::Notation,
+        );
+        assert!(environment_asset_from_bytes("X", &not_settings).is_none());
+        Ok(())
+    }
+}
+
 /// Builds [`RegionLimits`] from a `RegionInfo` message's region-info blocks. The
 /// 64-bit flags come from the optional `RegionInfo3` block, and the chat / combat
 /// settings from the optional `RegionInfo5` / `CombatSettings` blocks (all absent
@@ -7025,14 +7395,15 @@ pub(crate) fn full_update_block(object: &Object) -> ObjectUpdateObjectDataBlock 
 mod caps_serializer_tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
-    use crate::types::InventoryListing;
-    use pretty_assertions::assert_eq;
+    use crate::types::{AssetType, InventoryListing, Maturity, MuteType};
+    use pretty_assertions::{assert_eq, assert_ne};
     use sl_types::key::AgentKey;
     use sl_types::key::GroupKey;
     use sl_types::key::InventoryFolderKey;
     use sl_types::key::InventoryKey;
     use sl_types::key::ObjectKey;
     use sl_types::key::TextureKey;
+    use sl_types::map::GridCoordinates;
     use sl_types::map::RegionCoordinates;
     use sl_types::money::LindenAmount;
     use uuid::Uuid;
@@ -7070,6 +7441,9 @@ mod caps_serializer_tests {
     use sl_types::lsl::Vector;
     use sl_wire::RegionHandle;
     use sl_wire::{Llsd, Permissions, Permissions5};
+
+    /// A boxed error so tests can use `?` instead of disallowed `unwrap`/`expect`.
+    type TestError = Box<dyn core::error::Error>;
 
     /// A V4 socket address for the given octets and port.
     fn addr(a: u8, b: u8, c: u8, d: u8, port: u16) -> SocketAddr {
@@ -7195,6 +7569,209 @@ mod caps_serializer_tests {
                 timestamp: Some(1_665_010_000),
             }]
         );
+    }
+
+    /// A downloaded mute-list file parses line by line: every well-formed entry
+    /// is kept in file order, blank lines (including the trailing newline every
+    /// such file ends with) are skipped rather than becoming nil mutes, and a
+    /// line with no `|flags` suffix — the shape the viewer writes for a
+    /// flagless mute — carries no flags. One malformed line fails the **whole**
+    /// file: a partially-applied mute list silently un-mutes somebody.
+    #[test]
+    fn a_mute_list_file_parses_line_by_line() -> Result<(), TestError> {
+        let file = concat!(
+            "1 11111111-1111-1111-1111-111111111111 Bob Resident|5\n",
+            "\n",
+            "2 22222222-2222-2222-2222-222222222222 Noisy Object|0\n",
+            "0 00000000-0000-0000-0000-000000000000 Someone Else\n",
+        );
+        let entries = super::parse_mute_list(file.as_bytes())?;
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| (entry.name.as_str(), entry.mute_type, entry.flags.0))
+                .collect::<Vec<_>>(),
+            vec![
+                ("Bob Resident", MuteType::Agent, 5),
+                ("Noisy Object", MuteType::Object, 0),
+                ("Someone Else", MuteType::ByName, 0),
+            ]
+        );
+        assert_eq!(
+            entries.first().map(|entry| entry.id),
+            Some(Uuid::from_u128(0x1111_1111_1111_1111_1111_1111_1111_1111))
+        );
+        // An empty file is an empty list, not an error.
+        assert_eq!(super::parse_mute_list(b"")?, Vec::new());
+        // One bad line rejects the file rather than dropping that one mute.
+        assert!(matches!(
+            super::parse_mute_list(
+                b"1 not-a-uuid Bob|5\n2 22222222-2222-2222-2222-222222222222 Obj|0\n"
+            ),
+            Err(sl_wire::WireError::InvalidUuid { .. })
+        ));
+        Ok(())
+    }
+
+    /// The conference-invitee bucket is the invitees' raw 16-byte ids back to
+    /// back, and unpacking it is the exact inverse — including the empty bucket
+    /// (a conference with nobody in it). A bucket whose length is not a multiple
+    /// of sixteen is a truncated one: the trailing partial id is dropped rather
+    /// than padded out into an invitation for the nil agent.
+    #[test]
+    fn the_invitee_bucket_packs_and_unpacks_raw_ids() {
+        let ids = vec![
+            Uuid::from_u128(0xA1),
+            Uuid::from_u128(0xB2),
+            Uuid::from_u128(0xC3),
+        ];
+        let bucket = super::pack_uuids(&ids);
+        assert_eq!(bucket.len(), 48);
+        assert_eq!(super::unpack_uuids(&bucket), ids);
+        assert_eq!(super::pack_uuids(&[]), Vec::<u8>::new());
+        assert_eq!(super::unpack_uuids(&[]), Vec::<Uuid>::new());
+        // A trailing partial chunk is ignored, not zero-extended.
+        let mut truncated = bucket.clone();
+        truncated.truncate(bucket.len().saturating_sub(5));
+        assert_eq!(
+            super::unpack_uuids(&truncated),
+            ids.get(..2).unwrap_or_default()
+        );
+    }
+
+    /// The give-inventory bucket is the offered asset's type byte followed by
+    /// its raw 16 id bytes. A type whose code does not fit that byte — the
+    /// "no asset" sentinel `-1`, and any code above 255 — is a hard error rather
+    /// than a silently-written `0`, which would tag the offer as a *texture* and
+    /// hand the recipient the wrong kind of thing.
+    #[test]
+    fn an_inventory_offer_bucket_is_a_type_byte_and_an_id() -> Result<(), TestError> {
+        let id = Uuid::from_u128(0x1234_5678_9ABC_DEF0_1234_5678_9ABC_DEF0);
+        let bucket = super::inventory_offer_bucket(AssetType::Landmark, id)?;
+        assert_eq!(bucket.len(), 17);
+        assert_eq!(bucket.first().copied(), Some(3));
+        assert_eq!(bucket.get(1..), Some(id.as_bytes().as_slice()));
+        for code in [-1_i32, 300] {
+            assert!(matches!(
+                super::inventory_offer_bucket(AssetType::Other(code), id),
+                Err(sl_wire::WireError::ValueOutOfRange {
+                    field: "inventory_offer_asset_type",
+                    value,
+                }) if value == i64::from(code)
+            ));
+        }
+        Ok(())
+    }
+
+    /// The 1:1 IM session id is the byte-wise XOR of the two agent ids, so both
+    /// sides of a conversation compute the **same** id without either being
+    /// told it — which is what makes an incoming IM land in the window the
+    /// outgoing one opened. An IM to oneself is the exception: the XOR would be
+    /// nil (the "no session" sentinel), so the agent's own id stands in.
+    #[test]
+    fn the_im_session_id_is_the_xor_of_the_two_agents() {
+        let alice = AgentKey::from(Uuid::from_u128(0x0F0F_0F0F_0000_0000_0000_0000_0000_00A1));
+        let bob = AgentKey::from(Uuid::from_u128(0x00FF_00FF_0000_0000_0000_0000_0000_00B2));
+        let session = super::compute_im_session_id(alice, bob);
+        // Symmetric: neither side is privileged.
+        assert_eq!(session, super::compute_im_session_id(bob, alice));
+        assert_eq!(
+            session,
+            Uuid::from_u128(0x0FF0_0FF0_0000_0000_0000_0000_0000_0013)
+        );
+        // XOR-ing the session id back with one id yields the other.
+        assert_eq!(
+            super::compute_im_session_id(alice, AgentKey::from(session)),
+            bob.uuid()
+        );
+        // An IM to oneself keeps the agent's own id rather than going nil.
+        assert_eq!(super::compute_im_session_id(alice, alice), alice.uuid());
+        assert_ne!(super::compute_im_session_id(alice, alice), Uuid::nil());
+    }
+
+    /// The `RegionHandshake` encoder and decoder are inverses: everything the
+    /// message carries survives a client-side decode and a server-side re-encode
+    /// unchanged — the region name and its 64-bit extended flags, the maturity
+    /// and product classification, and the terrain compositing parameters the
+    /// ground shader needs. The handle and grid coordinates are *not* wire
+    /// fields (the client knows them from the circuit), so they come from the
+    /// caller on both passes.
+    #[test]
+    fn a_region_handshake_round_trips_through_its_identity() -> Result<(), TestError> {
+        use sl_wire::messages::{
+            RegionHandshake, RegionHandshakeRegionInfo2Block, RegionHandshakeRegionInfo3Block,
+            RegionHandshakeRegionInfo4Block, RegionHandshakeRegionInfoBlock,
+        };
+
+        let handle = RegionHandle::from_grid(1000, 1001);
+        let texture = Uuid::from_u128;
+        let handshake = RegionHandshake {
+            region_info: RegionHandshakeRegionInfoBlock {
+                region_flags: 0x0000_8001,
+                sim_access: sl_wire::sim_access::MATURE,
+                sim_name: super::with_nul("Test Region"),
+                sim_owner: Uuid::from_u128(0x0E11),
+                is_estate_manager: true,
+                water_height: 20.0,
+                billable_factor: 1.0,
+                cache_id: Uuid::from_u128(0xCAC4E),
+                terrain_base0: Uuid::nil(),
+                terrain_base1: Uuid::nil(),
+                terrain_base2: Uuid::nil(),
+                terrain_base3: Uuid::nil(),
+                terrain_detail0: texture(0xD0),
+                terrain_detail1: texture(0xD1),
+                terrain_detail2: texture(0xD2),
+                terrain_detail3: texture(0xD3),
+                terrain_start_height00: 10.0,
+                terrain_start_height01: 11.0,
+                terrain_start_height10: 12.0,
+                terrain_start_height11: 13.0,
+                terrain_height_range00: 60.0,
+                terrain_height_range01: 61.0,
+                terrain_height_range10: 62.0,
+                terrain_height_range11: 63.0,
+            },
+            region_info2: RegionHandshakeRegionInfo2Block {
+                region_id: Uuid::from_u128(0x8E61_0000),
+            },
+            region_info3: RegionHandshakeRegionInfo3Block {
+                cpu_class_id: 1200,
+                cpu_ratio: 4,
+                colo_name: Vec::new(),
+                product_sku: super::with_nul("023"),
+                product_name: super::with_nul("Estate / Full Region"),
+            },
+            region_info4: vec![RegionHandshakeRegionInfo4Block {
+                region_flags_extended: 0x0000_0001_0000_8001,
+                region_protocols: 0x0000_0000_0000_0003,
+            }],
+        };
+
+        let identity = super::region_identity(&handshake, handle)?;
+        assert_eq!(
+            identity.sim_name.as_ref().map(AsRef::as_ref),
+            Some("Test Region")
+        );
+        assert_eq!(identity.region_handle, handle);
+        assert_eq!(identity.grid_coordinates, GridCoordinates::from(handle));
+        assert_eq!(identity.maturity, Maturity::Mature);
+        assert_eq!(identity.region_flags_extended, 0x0000_0001_0000_8001);
+        assert_eq!(
+            identity.terrain.detail_textures,
+            [texture(0xD0), texture(0xD1), texture(0xD2), texture(0xD3)]
+        );
+
+        // Re-encoding and decoding again reproduces the same identity, so the
+        // simulator side can answer with exactly what it was told.
+        let reencoded = super::region_handshake_message(&identity);
+        assert_eq!(super::region_identity(&reencoded, handle)?, identity);
+        // The name survives the NUL-padded wire field verbatim.
+        assert_eq!(
+            super::trimmed_string(&reencoded.region_info.sim_name),
+            "Test Region"
+        );
+        Ok(())
     }
 
     /// A mute-list line with an unparsable UUID or flags is a hard error rather

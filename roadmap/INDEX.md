@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 299 |
+| ready | 298 |
 | blocked | 40 |
 | in-progress | 22 |
 | bugs | 5 |
-| done | 1197 |
+| done | 1198 |
 | deferred | 29 |
 | wont-do | 16 |
 | **total** | **1708** |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (299)
+## ready (298)
 
 ### protocol
 
@@ -248,8 +248,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   AIS3 depth fetch reads only its first level
 - [`protocol-audit-asset-store-duplication`](ready/protocol-audit-asset-store-duplication.md)
   — Three hand-rolled copies of the same asset store
-- [`protocol-audit-conversions-test-coverage`](ready/protocol-audit-conversions-test-coverage.md)
-  — conversions.rs has 233 pure functions and 32 tests
 - [`protocol-audit-decoder-fuzz-harness`](ready/protocol-audit-decoder-fuzz-harness.md)
   — Fuzz the wire and asset decoders
 - [`protocol-audit-dispatch-child-drift`](ready/protocol-audit-dispatch-child-drift.md)
@@ -1146,7 +1144,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 
-## done (1197)
+## done (1198)
 
 ### protocol
 
@@ -1278,6 +1276,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — No asset transfer has a timeout — six registries only ever grow
 - [`protocol-audit-client-xfer-download-bounds`](done/protocol-audit-client-xfer-download-bounds.md)
   — The client's Xfer download has no size cap and no ordering check
+- [`protocol-audit-conversions-test-coverage`](done/protocol-audit-conversions-test-coverage.md)
+  — conversions.rs has 233 pure functions and 32 tests
 - [`protocol-audit-decoder-reference-fidelity`](done/protocol-audit-decoder-reference-fidelity.md)
   — Four decoder divergences from the reference viewer
 - [`protocol-audit-extract-lludp-transport`](done/protocol-audit-extract-lludp-transport.md)

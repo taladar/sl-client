@@ -692,6 +692,110 @@ mod encode_tests {
         assert_eq!(super::encode_sculpt(&mesh), block(0x45));
         Ok(())
     }
+
+    /// The `ObjectExtraParams` *message* form (the reference's
+    /// `sendExtraParameters`) sends every known subtype on every update, with
+    /// `in_use` saying which of them the object actually carries, and each
+    /// in-use block's payload is byte-identical to that subtype's entry in the
+    /// packed container. Decoding the blocks back reproduces the object's
+    /// parameters exactly, so the message and the blob are two spellings of one
+    /// state.
+    #[test]
+    fn message_blocks_carry_every_subtype_and_round_trip() -> Result<(), String> {
+        use super::{decode_extra_param_blocks, extra_param_message_blocks};
+
+        let original = sample();
+        let blocks = extra_param_message_blocks(&original);
+        // One block per known subtype, in ascending type-code order, all in use
+        // for a fully-populated object.
+        assert_eq!(
+            blocks
+                .iter()
+                .map(|block| (block.param_type, block.in_use))
+                .collect::<Vec<_>>(),
+            vec![
+                (0x10, true),
+                (0x20, true),
+                (0x30, true),
+                (0x40, true),
+                (0x70, true),
+                (0x80, true),
+                (0x90, true),
+            ]
+        );
+        // Each payload is the same bytes the packed container carries for that
+        // subtype: the blob's entries are (type, size, payload) after the count.
+        let blob = encode_extra_params(&original);
+        let mut reader = Reader::new(&blob);
+        let count = reader.u8().map_err(|err| err.to_string())?;
+        assert_eq!(usize::from(count), blocks.len());
+        for block in &blocks {
+            let param_type = reader.u16().map_err(|err| err.to_string())?;
+            let size = reader.u32().map_err(|err| err.to_string())?;
+            let payload = reader
+                .take(usize::try_from(size).map_err(|err| err.to_string())?)
+                .map_err(|err| err.to_string())?;
+            assert_eq!(param_type, block.param_type);
+            assert_eq!(payload, block.data.as_slice());
+        }
+
+        let decoded = decode_extra_param_blocks(
+            blocks
+                .into_iter()
+                .map(|block| (block.param_type, block.in_use, block.data)),
+        );
+        assert_eq!(decoded, original);
+        Ok(())
+    }
+
+    /// A not-in-use block clears its subtype: its payload is ignored (the
+    /// simulator drops the entry), so sending the blocks of a default
+    /// `ObjectExtraParams` strips every extra parameter from the object. An
+    /// unknown subtype code is skipped rather than aborting the walk, so a block
+    /// set from a newer grid still delivers the parameters this client knows.
+    #[test]
+    fn not_in_use_and_unknown_blocks_clear_rather_than_carry() {
+        use super::{decode_extra_param_blocks, extra_param_message_blocks};
+
+        let cleared = extra_param_message_blocks(&ObjectExtraParams::default());
+        assert!(cleared.iter().all(|block| !block.in_use));
+        assert!(cleared.iter().all(|block| block.data.is_empty()));
+        assert_eq!(
+            decode_extra_param_blocks(cleared.into_iter().map(|block| (
+                block.param_type,
+                block.in_use,
+                block.data
+            )),),
+            ObjectExtraParams::default()
+        );
+
+        // A light block that *would* decode, marked not-in-use, alongside an
+        // unknown subtype carrying nonsense: neither reaches the result, and the
+        // in-use sculpt block beside them still does.
+        let light_payload = super::encode_light(&LightData {
+            color: [10, 20, 30, 255],
+            radius: 10.0,
+            cutoff: 0.0,
+            falloff: 1.0,
+        });
+        let sculpt_payload = super::encode_sculpt(&SculptData {
+            texture: SculptOrMeshKey::Mesh(MeshKey::from(Uuid::from_u128(0x5C01_7E84))),
+            sculpt_type: 5,
+        });
+        let decoded = decode_extra_param_blocks([
+            (0x20_u16, false, light_payload),
+            (0x30, true, sculpt_payload),
+            (0xA0, true, vec![0xDE, 0xAD, 0xBE, 0xEF]),
+        ]);
+        assert_eq!(decoded.light, None);
+        assert_eq!(
+            decoded.sculpt,
+            Some(SculptData {
+                texture: SculptOrMeshKey::Mesh(MeshKey::from(Uuid::from_u128(0x5C01_7E84))),
+                sculpt_type: 5,
+            })
+        );
+    }
 }
 
 #[cfg(test)]
