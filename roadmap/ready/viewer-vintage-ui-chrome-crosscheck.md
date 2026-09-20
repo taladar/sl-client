@@ -20,10 +20,10 @@ their chrome. Two things stand between that and a usable skin measurement.
 
 **The reference run wears the wrong skin** — it comes up in Firestorm's
 default skin every time, so a comparison against "the reference's Vintage"
-measures nothing. That is its own task on the fork's harness,
-[[test-firestorm-harness-skin-selection]], because the settings involved are
-subtler than they look; this task only needs the `--skin` / `--theme` pair it
-adds to `sl-crosscheck` to reach both viewers.
+measures nothing. Done, in [[test-firestorm-harness-skin-selection]]: the
+fork's harness takes a skin, and `sl-crosscheck` grows **per-viewer** options
+(`--sl-client-skin` / `--firestorm-skin` and their themes) rather than one
+shared flag, because the two viewers' skin namespaces are unrelated.
 
 **A UI capture resizes the window, and only on that side.** The reference's
 snapshot path cannot draw the UI at any size but the window's, so
@@ -41,38 +41,52 @@ status row — and not of floater rendering. A notification popping between two
 frames would otherwise make a sequence incomparable, which is why the block
 exists and why it should stay.
 
-## Observed, 2026-09-20
+## Found and fixed, 2026-09-20
 
-A real run — `--only firestorm --firestorm-skin vintage --capture-ui`, two
-frames — put this beyond theory. The skin applied correctly and Vintage's
-chrome is plainly in the frame, and the frame is still **unusable**: the scene
-appears *twice*, side by side, with black letterboxing above and to the right,
-in an image whose nominal size is the requested 1920×1080.
+A real run — `--only firestorm --firestorm-skin vintage --capture-ui` — put
+this beyond theory, and it was worse than the description above. The frames
+held 1024×738 of content in the bottom-left of a 1920×1080 image, and by the
+second frame the same grab stitched across it twice. `harness-status.json`
+said `{"ok":true,"reason":"complete"}` and the log said `window resized to
+1920x1080`. **Every UI capture ever taken on this machine was like that.**
 
-The run reported none of it. `harness-status.json` said
-`{"ok":true,"reason":"complete","frames_written":2}`, the exit status was 0,
-and the only trace was an INFO line saying `window resized to 1920x1080` —
-which is what the harness *asked* for, not what it got. So a UI capture can
-come back broken and indistinguishable from a good one, which is the failure
-this harness's whole status-file design exists to prevent.
+The window had never been resized at all. `LLViewerWindow::reshape()` is the
+*inbound* notification — what the window system calls when a window has
+already changed — and it only updates `mWindowRectRaw` and re-lays the UI. It
+never touches `mWindow`, so the harness had been telling the viewer's
+internals a size the real window did not have: the UI laid itself out for a
+window that did not exist while the snapshot grabbed the one that did.
+`LLWindow::setSize` is the request.
 
-Root cause not yet established — a compositor that answered the reshape with
-its own size, a resize landing mid-capture, or the snapshot reading past the
-window are all consistent with what the image shows. Whatever it is, the
-reporting half above is what turns it from a mystery into a failed run.
+The guard written to catch a refusing window manager could not fire either. It
+compared the request against `LLViewerWindow`'s own rect — which the request
+had just set — so it always took the success branch and the `LL_WARNS` below
+it was unreachable.
+
+Both fixed on the fork's `test-harness` branch: the harness asks
+`LLWindow::setSize`, and `verifyWindowSize()` reads `LLWindow::getSize` at the
+settle-to-capture transition (a resize is a round trip, so asking and checking
+in one breath can only confirm what was asked). A mismatch now fails the run
+through a `window_size` block of requested / honoured / detail, on the same
+pattern as the day-position pin. The same run now produces two full
+1920×1080 frames with the whole interface in them.
+
+The compositor honours the resize once it is actually asked, so no
+window-rule workaround is needed here — the `detail` field is for the
+machine where it is not.
 
 ## What to do
 
-- `--skin` / `--theme` on `sl-crosscheck`, into the shared capture block, so
-  one flag dresses both viewers ([[test-firestorm-harness-skin-selection]] is
-  the Firestorm half).
+Both of the original items are done (see above). What is left:
+
 - A recorded chrome-capture pair per skin under the cross-check's run
   directory, the way the scene dumps are recorded.
-- Report the window-vs-capture size mismatch as a run failure, not a warning
-  buried in a log — the existing `harness-status.json` is the place.
+- The pair itself, which waits on there being a skin of ours worth comparing —
+  [[viewer-vintage-skin]].
 
 ## Done when
 
-`sl-crosscheck --skin vintage --capture-ui` produces a chrome pair from both
-viewers at the same size, or fails saying why, and the pair is what the
-Vintage-alike skin's fidelity is judged against.
+`sl-crosscheck --sl-client-skin <ours> --firestorm-skin vintage --capture-ui`
+produces a chrome pair from both viewers at the same size, or fails saying
+why, and the pair is what the Vintage-alike skin's fidelity is judged
+against.

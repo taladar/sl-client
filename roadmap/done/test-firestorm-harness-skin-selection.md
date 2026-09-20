@@ -2,7 +2,7 @@
 id: test-firestorm-harness-skin-selection
 title: Firestorm harness — start a run in a named skin and theme
 topic: test
-status: in-progress
+status: done
 origin: Vintage skin fidelity audit (2026-09-20)
 points: 3
 refs: [test-firestorm-crosscheck-runner, test-firestorm-fake-grid-crosscheck,
@@ -170,7 +170,27 @@ behaviour switch rests on `llstartup.cpp:790` copying it unconditionally at
 skin's own `settings.xml` mentions them, and every other writer is in the
 preferences floater, which an unattended run never opens.
 
-Still open: the `sl-crosscheck` half below.
+### The `sl-crosscheck` half — also landed
+
+Per-viewer options and two distinct types, as described above. Verified by a
+real run: `--only firestorm --firestorm-skin vintage --capture-ui` puts
+`SL_VIEWER_SKIN` in Firestorm's environment and not ours, the harness forces
+all four of its skin settings, `skins/vintage/settings.xml` is the one loaded,
+`run.json` records `firestorm_skin: vintage` beside an unset sl-client half,
+and Vintage's chrome fills the frame.
+
+**Not verified live: our own viewer's half.** Its env block and the
+ships-the-skin check are unit-tested, but no run has dressed *this* viewer,
+because that needs a release build of `sl-client-bevy-viewer` (the exclusive
+~16 GiB one) and there is no skin of ours worth comparing until
+[[viewer-vintage-skin]] anyway. The code is the same `skin_env` helper the
+verified half uses.
+
+That first run also found a much older bug in the harness, now fixed and
+recorded in [[viewer-vintage-ui-chrome-crosscheck]]: every UI capture ever
+taken had been of an unresized window, because the harness called
+`LLViewerWindow::reshape()` — the inbound notification — instead of
+`LLWindow::setSize()`.
 
 ## Done when
 

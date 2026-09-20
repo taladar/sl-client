@@ -14,9 +14,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ideas | 116 |
 | ready | 312 |
 | blocked | 66 |
-| in-progress | 23 |
+| in-progress | 22 |
 | bugs | 5 |
-| done | 1199 |
+| done | 1200 |
 | deferred | 30 |
 | wont-do | 16 |
 | **total** | **1767** |
@@ -1233,7 +1233,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Batch world changes into per-tick update bursts (blocked by
   `server-world-heartbeat`, `server-world-ecs-store`)
 
-## in-progress (23)
+## in-progress (22)
 
 ### viewer
 
@@ -1294,11 +1294,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-### test
-
-- [`test-firestorm-harness-skin-selection`](in-progress/test-firestorm-harness-skin-selection.md)
-  — Firestorm harness — start a run in a named skin and theme
-
 ## bugs (5)
 
 ### protocol
@@ -1317,7 +1312,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 
-## done (1199)
+## done (1200)
 
 ### protocol
 
@@ -3683,6 +3678,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `test-fake-grid-fixed-port-scenario` (done))
 - [`test-firestorm-fake-grid-crosscheck`](done/test-firestorm-fake-grid-crosscheck.md)
   — Point Firestorm at the fake grid to calibrate oracles
+- [`test-firestorm-harness-skin-selection`](done/test-firestorm-harness-skin-selection.md)
+  — Firestorm harness — start a run in a named skin and theme
 - [`test-friendship-offer-accept`](done/test-friendship-offer-accept-offer-accept-confirm-both-friend-lists.md)
   — offer, accept, confirm both friend lists
 - [`test-friendship-offer-accept-aditi`](done/test-friendship-offer-accept-aditi-add-the-aditi-variant.md)
