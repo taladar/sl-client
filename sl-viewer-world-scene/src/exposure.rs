@@ -101,8 +101,10 @@ const DEFAULT_EXPOSURE_ENABLED: bool = true;
 /// (`[render.exposure]`), matching the reference's `RenderDynamicExposure*` naming.
 const EXPOSURE_SECTION: &[&str] = &["render", "exposure"];
 
-/// The reference `RenderDynamicExposureEnabled` setting name.
-pub const SETTING_ENABLED: &str = "RenderDynamicExposureEnabled";
+// The two the photographer's window binds live in `sl-viewer-settings`; the
+// four nothing above this crate names stay here, as does every default.
+pub use sl_viewer_settings::keys::exposure::{SETTING_AUTO_ADJUST_LEGACY, SETTING_ENABLED};
+
 /// The reference `RenderDynamicExposureCoefficient` setting name.
 const SETTING_COEFFICIENT: &str = "RenderDynamicExposureCoefficient";
 /// The reference `RenderDynamicExposureSpeedError` setting name (the fraction of the
@@ -115,9 +117,6 @@ const SETTING_SPEED_TARGET: &str = "RenderDynamicExposureSpeedTarget";
 /// range from the sky's fixed HDR offset / min / max rather than the probe-ambiance
 /// `hdr_scale`).
 const SETTING_USE_SKY: &str = "RenderUseExposureSkySettings";
-/// The reference `RenderSkyAutoAdjustLegacy` setting name (treat a legacy sky as if
-/// it carried the auto-adjust probe ambiance, so it adapts too).
-pub const SETTING_AUTO_ADJUST_LEGACY: &str = "RenderSkyAutoAdjustLegacy";
 
 /// The reference `RenderDynamicExposureCoefficient` default (`exposureF.glsl`'s
 /// `max_L`): the average luminance at which the dynamic scale reaches its floor.

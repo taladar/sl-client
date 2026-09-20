@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 40 |
 | in-progress | 22 |
 | bugs | 5 |
-| done | 1195 |
+| done | 1196 |
 | deferred | 29 |
 | wont-do | 16 |
-| **total** | **1707** |
+| **total** | **1708** |
 
 ## ideas (100)
 
@@ -301,6 +301,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-attachment-align`](ready/viewer-attachment-align.md) — Attachment
   alignment tool (avatar align) (blocked by `viewer-object-edit-floater-shell`
   (done))
+- [`viewer-audit-checkbox-box-widget`](ready/viewer-audit-checkbox-box-widget.md)
+  — The settings checkbox box is spawned and repainted by hand in seven places
 - [`viewer-audit-decoded-texture-uploaders`](ready/viewer-audit-decoded-texture-uploaders.md)
   — Eight independent DecodedTexture uploaders each re-decide colour space
 - [`viewer-audit-demo-panels-in-release`](ready/viewer-audit-demo-panels-in-release.md)
@@ -315,9 +317,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-object-children-index`](ready/viewer-audit-object-children-index.md)
   — ObjectState has no children index, so every linkset query full-scans the
   region
-- [`viewer-audit-preferences-hub-decoupling`](ready/viewer-audit-preferences-hub-decoupling.md)
-  — sl-viewer-preferences is a 12-crate hub whose own decoupling mechanism is
-  under-applied
 - [`viewer-audit-preferences-restart-note`](ready/viewer-audit-preferences-restart-note.md)
   — There is no restart-note idiom, so 'restart required' is baked into labels
 - [`viewer-audit-render-fixtures-crate`](ready/viewer-audit-render-fixtures-crate.md)
@@ -1148,7 +1147,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 
-## done (1195)
+## done (1196)
 
 ### protocol
 
@@ -1495,6 +1494,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Two plugins read resources they never register
 - [`viewer-audit-plugins-own-their-schedule`](done/viewer-audit-plugins-own-their-schedule.md)
   — Most viewer crates export loose systems instead of owning a plugin
+- [`viewer-audit-preferences-hub-decoupling`](done/viewer-audit-preferences-hub-decoupling.md)
+  — sl-viewer-preferences is a 12-crate hub whose own decoupling mechanism is
+  under-applied
 - [`viewer-audit-probe-ambient-multiply`](done/viewer-audit-probe-ambient-multiply.md)
   — suppress_global_ambient multiplies an absolute producer and decays it
   geometrically

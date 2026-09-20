@@ -955,9 +955,9 @@ mod tests {
         let mut settings = ViewerSettings::from_store_for_test(store);
         super::register_settings(&mut settings);
         crate::session::register_settings(&mut settings);
-        crate::particles::register_settings(&mut settings);
-        crate::glow::register_settings(&mut settings);
-        crate::render_priority::register_settings(&mut settings);
+        sl_viewer_world_scene::particles::register_settings(&mut settings);
+        sl_viewer_world_scene::glow::register_settings(&mut settings);
+        sl_viewer_world_objects::render_priority::register_settings(&mut settings);
         let mut app = App::new();
         app.add_plugins(MinimalPlugins).insert_resource(settings);
         app

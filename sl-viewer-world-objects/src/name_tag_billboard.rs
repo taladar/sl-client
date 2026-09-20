@@ -103,27 +103,15 @@ pub const DEFAULT_FADE_START_METRES: f32 = 20.0;
 /// start (reference: 5 m, so tags vanish at 25 m).
 pub const DEFAULT_FADE_RANGE_METRES: f32 = 5.0;
 
-/// The distance at which tags start fading, metres (a float setting;
-/// default `DEFAULT_FADE_START_METRES`).
-pub const SETTING_FADE_START: &str = "FadeStartDistance";
-
-/// The fade range, metres past the fade start at which tags are gone (a
-/// float setting; default `DEFAULT_FADE_RANGE_METRES`).
-pub const SETTING_FADE_RANGE: &str = "FadeRange";
-
-/// The bubble backdrop opacity (the reference `ChatBubbleOpacity`,
-/// default 0.5).
-pub const SETTING_BUBBLE_OPACITY: &str = "BubbleOpacity";
-
-/// The master name-tag toggle (the preferences General tab's headline switch;
-/// the reference `AvatarNameTagMode` off/on axis). Honoured by
-/// `follow_tag_anchors`; the full reference toggle set is the separate
-/// `viewer-name-tags-preferences` task.
-pub const SETTING_SHOW_NAME_TAGS: &str = "ShowNameTags";
-
-/// Whether the logged-in avatar's own tag is shown (the reference
-/// `RenderNameShowSelf`). Honoured by `follow_tag_anchors`.
-pub const SETTING_SHOW_OWN_NAME_TAG: &str = "ShowOwnNameTag";
+// Every tag-surface knob is bound by the preferences general tab, so the keys
+// live in `sl-viewer-settings`; the defaults above and the drawing below stay
+// here. `SETTING_SHOW_NAME_TAGS` and `SETTING_SHOW_OWN_NAME_TAG` are honoured
+// by `follow_tag_anchors`; the full reference toggle set is the separate
+// `viewer-name-tags-preferences` task.
+pub use sl_viewer_settings::keys::name_tag_billboard::{
+    SETTING_BUBBLE_OPACITY, SETTING_FADE_RANGE, SETTING_FADE_START, SETTING_SHOW_NAME_TAGS,
+    SETTING_SHOW_OWN_NAME_TAG,
+};
 
 /// The neutral (no anti-overlap offset) [`MeshTag`] value: both packed
 /// components at the `+32768` bias.

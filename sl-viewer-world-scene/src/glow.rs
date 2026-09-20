@@ -84,14 +84,12 @@ const DEFAULT_ITERATIONS: u32 = 2;
 /// The persisted-file section the glow settings are grouped under (`[render.glow]`),
 /// matching the reference's `RenderGlow*` naming.
 const GLOW_SECTION: &[&str] = &["render", "glow"];
-/// The reference `RenderGlow` setting name (the master enable).
-pub const SETTING_ENABLED: &str = "RenderGlow";
-/// The reference `RenderGlowStrength` setting name.
-pub const SETTING_STRENGTH: &str = "RenderGlowStrength";
-/// The reference `RenderGlowIterations` setting name.
-pub const SETTING_ITERATIONS: &str = "RenderGlowIterations";
-/// The reference `RenderGlowWidth` setting name.
-pub const SETTING_WIDTH: &str = "RenderGlowWidth";
+// The glow knobs are bound by the preferences graphics tab and the
+// photographer's window, so the keys live in `sl-viewer-settings`; the defaults
+// above and the pass itself stay here.
+pub use sl_viewer_settings::keys::glow::{
+    SETTING_ENABLED, SETTING_ITERATIONS, SETTING_STRENGTH, SETTING_WIDTH,
+};
 
 /// Register the glow settings on the store with the reference defaults, so a user's
 /// Firestorm `RenderGlow*` port across and the (future) preferences UI has something

@@ -68,21 +68,14 @@ const REPRIORITIZE_INTERVAL_SECS: f32 = 0.25;
 /// The persisted-settings section the LOD-factor setting lives under.
 const RENDER_SECTION: &[&str] = &["render"];
 
-/// The object LOD-factor setting key (the reference `RenderVolumeLODFactor`,
-/// its "Mesh Detail: Objects" slider): a detail multiplier — a larger value
-/// keeps finer mesh / prim / tree geometry to a greater distance. Read by
-/// [`drive_render_priority`] each pass, so a change re-ranks on-screen
-/// geometry within `REPRIORITIZE_INTERVAL_SECS`; surfaced in the
-/// preferences graphics tab and the quick-preferences panel.
-pub const SETTING_LOD_FACTOR: &str = "RenderVolumeLODFactor";
-
-/// The smallest accepted LOD factor (the stock default — the reference slider
-/// also starts at 1).
-pub const LOD_FACTOR_MIN: f32 = 1.0;
-
-/// The largest accepted LOD factor (the reference slider's maximum; its
-/// graphics presets push to ~4× on Ultra).
-pub const LOD_FACTOR_MAX: f32 = 4.0;
+// The LOD factor is surfaced by three sliders above this crate (the
+// preferences graphics tab, the quick-preferences panel, the photographer's
+// window), so its key and their shared bounds live in `sl-viewer-settings`.
+// [`SETTING_LOD_FACTOR`] is read by [`drive_render_priority`] each pass, so a
+// change re-ranks on-screen geometry within `REPRIORITIZE_INTERVAL_SECS`.
+pub use sl_viewer_settings::keys::render_priority::{
+    LOD_FACTOR_MAX, LOD_FACTOR_MIN, SETTING_LOD_FACTOR,
+};
 
 /// Declare the persisted LOD-factor setting (default: the stock
 /// [`DEFAULT_LOD_FACTOR`], i.e. the behaviour before the setting existed).

@@ -72,9 +72,9 @@ pub(crate) const DEFAULT_PRIM_TEXT_MAX_DISTANCE_METRES: f32 = 64.0;
 /// extremely long", unlike the name tag's 298 px chat-bubble wrap.
 const HOVER_MAX_WIDTH_PX: f32 = 1000.0;
 
-/// Master toggle: show floating object text at all (the reference's
-/// `RenderHUDText` / hover-text preference; default on).
-pub const SETTING_SHOW_HOVER_TEXT: &str = "ShowHoverText";
+// The master toggle is bound by the preferences general tab, so the key lives
+// in `sl-viewer-settings`; the default and the drawing stay here.
+pub use sl_viewer_settings::keys::hover_text::SETTING_SHOW_HOVER_TEXT;
 
 /// The floating-text fade-start distance, metres (a float setting).
 pub(crate) const SETTING_HOVER_FADE_START: &str = "HoverTextFadeDistance";
