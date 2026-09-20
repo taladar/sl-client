@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 298 |
+| ready | 297 |
 | blocked | 39 |
 | in-progress | 22 |
 | bugs | 5 |
-| done | 1198 |
+| done | 1199 |
 | deferred | 29 |
 | wont-do | 16 |
 | **total** | **1707** |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (298)
+## ready (297)
 
 ### protocol
 
@@ -315,8 +315,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   under-applied
 - [`viewer-audit-preferences-restart-note`](ready/viewer-audit-preferences-restart-note.md)
   — There is no restart-note idiom, so 'restart required' is baked into labels
-- [`viewer-audit-scene-live-daycycle-fixture`](ready/viewer-audit-scene-live-daycycle-fixture.md)
-  — A test fixture that advances the day cycle between samples
 - [`viewer-audit-search-map-edge`](ready/viewer-audit-search-map-edge.md) —
   sl-viewer-search depends on sl-viewer-map for one two-field struct
 - [`viewer-audit-skin-token-coverage`](ready/viewer-audit-skin-token-coverage.md)
@@ -1141,7 +1139,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 
-## done (1198)
+## done (1199)
 
 ### protocol
 
@@ -1510,6 +1508,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-scene-change-guards-day-cycle`](done/viewer-audit-scene-change-guards-day-cycle.md)
   — The scene crate's write-on-change guards were reasoned about under a pinned
   sky
+- [`viewer-audit-scene-live-daycycle-fixture`](done/viewer-audit-scene-live-daycycle-fixture.md)
+  — A test fixture that advances the day cycle between samples
 - [`viewer-audit-search-sentinel-row`](done/viewer-audit-search-sentinel-row.md)
   — The directory 'there is more' sentinel row is rendered as a result
 - [`viewer-audit-settings-write-race`](done/viewer-audit-settings-write-race.md)

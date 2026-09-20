@@ -161,7 +161,7 @@ const AMBIENT_BRIGHTNESS_SCALE: f32 = 400.0;
 /// caller's write-on-change guard compare the sky's value against a scaled one, so
 /// the guard misses and the resource is dirty every frame. Neither showed while the
 /// scale sat at its idempotent `0.0` default.
-fn sky_ambient_light(ambient: [f32; 3], probe_scale: f32) -> (Color, f32) {
+pub(crate) fn sky_ambient_light(ambient: [f32; 3], probe_scale: f32) -> (Color, f32) {
     let luminance = 0.2126 * ambient[0] + 0.7152 * ambient[1] + 0.0722 * ambient[2];
     let peak = ambient[0].max(ambient[1]).max(ambient[2]).max(1.0e-4);
     let color = Color::linear_rgb(ambient[0] / peak, ambient[1] / peak, ambient[2] / peak);
@@ -2481,14 +2481,19 @@ fn calculate_light_settings(sky: &SkySettings, light_up: f32, moon_up: bool) -> 
 /// already snapped to (`1 / SHADOW_MAP_SIZE` radians), so the day cycle steps no
 /// more coarsely than the light direction the renderer already quantises — while
 /// a four-hour day resamples every 0.44 s instead of every frame.
-const DAY_POSITION_STEPS: f64 = 32768.0;
+///
+/// Crate-visible rather than module-private so `crate::day_cycle_fixture` can
+/// size its per-frame step as a fraction of one cell, which is the unit its
+/// assertions are stated in.
+pub(crate) const DAY_POSITION_STEPS: f64 = 32768.0;
 
 /// The normalised day-cycle position (`0.0..=1.0`) for the current region time,
 /// the reference `LLEnvironment::convert_time_to_position`: `fmod(now +
 /// day_offset, day_length) / day_length` over the Unix clock, quantised to
 /// `DAY_POSITION_STEPS` (32768) steps per day so the sampled environment settles
-/// between steps. The constant stays private — this function is public because
-/// the scene dump reports the position it returns, not to publish the tuning.
+/// between steps. The constant stays crate-private — this function is public
+/// because the scene dump reports the position it returns, not to publish the
+/// tuning.
 ///
 /// A pinned position ([`EnvironmentState::pinned_day_position`], from the
 /// `SL_VIEWER_SKY_DAY_POSITION` override in `RenderOverrides`) wins instead, so
@@ -2585,19 +2590,11 @@ mod tests {
     use sl_client_bevy::{EnvironmentSettings, SkyLighting, SkyLightingMode};
     use sl_viewer_kit::sky_presets::{MIDDAY, MIDNIGHT, SUNRISE, SUNSET, sky_settings_from};
 
-    /// A region on a live four-hour day cycle: the legacy WindLight default with
-    /// the four ported presets keyframed across the day, so the blended sky
-    /// actually moves as the day position advances (the shipped single-frame
-    /// default would return the same noon frame at every position and prove
-    /// nothing). It is also the cycle `sl-crosscheck` dresses a region with when a
-    /// run pins the day position.
-    fn moving_day_cycle() -> EnvironmentSettings {
-        let mut settings = EnvironmentSettings::legacy_windlight_default();
-        settings.day_length = 14400;
-        settings.day_offset = 0;
-        sl_viewer_kit::sky_presets::install_preset_day_cycle(&mut settings);
-        settings
-    }
+    // The region on a live four-hour day cycle these tests sample. It lives in
+    // `crate::day_cycle_fixture`, where the app that steps it does: the pure
+    // assertions here and the app-level ones there have to be sampling the same
+    // cycle or neither says anything about the other.
+    use crate::day_cycle_fixture::moving_day_cycle;
 
     /// The surface lighting `drive_sky` would write at `now` (seconds since the
     /// Unix epoch) for a ground-level camera. `None` only if the cycle defines no

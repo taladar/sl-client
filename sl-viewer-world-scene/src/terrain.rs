@@ -359,7 +359,7 @@ pub fn update_terrain(
 ///
 /// The material binds the shared sky-lighting texture rather than carrying the
 /// sky itself, so a material created at any moment is lit by the current sky.
-fn ensure_region(
+pub(crate) fn ensure_region(
     state: &mut TerrainState,
     textures: &mut TerrainTextures,
     region: RegionHandle,
