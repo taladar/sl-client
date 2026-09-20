@@ -254,7 +254,7 @@ const fn worn_base_priority(object: &Object) -> Priority {
 fn in_hud_attachment(state: &ObjectState, scoped: ScopedObjectId) -> bool {
     let mut current = scoped;
     for _ in 0..MAX_PARENT_WALK {
-        let Some(tracked) = state.objects.get(&current) else {
+        let Some(tracked) = state.objects().get(&current) else {
             return false;
         };
         if tracked.attachment_point.is_some_and(is_hud_point) {
@@ -1691,7 +1691,7 @@ pub(crate) fn pick_object(
             // in to confirm it refines.
             if let Ok(obj) = hit_object.scene.get(current)
                 && obj.category == ObjectCategory::Prim
-                && let Some(tracked) = state.objects.get(&obj.scoped_id)
+                && let Some(tracked) = state.objects().get(&obj.scoped_id)
             {
                 warn!("pick prim {}: lod={:?}", info.full_id(), tracked.prim_lod);
             }
@@ -1725,7 +1725,7 @@ pub(crate) fn pick_object(
             // the ground truth for the P28.2 UV / flipbook driver — plus whether
             // it targets the face under the crosshair (`face == -1` = all faces).
             if let Ok(obj) = hit_object.scene.get(current)
-                && let Some(tracked) = state.objects.get(&obj.scoped_id)
+                && let Some(tracked) = state.objects().get(&obj.scoped_id)
                 && let Ok(tex_anim) = hit_object.tex_anims.get(tracked.geometry)
             {
                 let anim = tex_anim.anim;
@@ -3271,7 +3271,7 @@ fn apply_object(
     let parent_entity = if is_root || attachment_point.is_some() {
         None
     } else {
-        state.objects.get(&parent).map(|root| root.entity)
+        state.objects().get(&parent).map(|root| root.entity)
     };
     // Whether this object is worn on a HUD (itself or via its linkset root). Two
     // things need it: a rigged mesh on a HUD is built as static HUD geometry
@@ -3336,7 +3336,7 @@ fn apply_object(
         );
     }
 
-    if let Some(existing) = state.objects.get_mut(&scoped) {
+    if let Some(mut existing) = state.tracked_mut(&scoped) {
         // A known object: re-place it and refresh its classification (a
         // motion-only update stops here — the geometry is untouched). The scale
         // rides the geometry holder, refreshed here so a live resize is applied
@@ -3496,7 +3496,7 @@ fn apply_object(
         if attachment_point.is_none() {
             let parent_changed = existing.parent != parent;
             reconcile_parent(
-                existing,
+                &mut existing,
                 is_root,
                 parent_entity,
                 parent_changed,
@@ -3631,7 +3631,7 @@ fn apply_object(
     // (`sculpt_rebuild`). An object that owes none — an avatar, a grass clump —
     // gets no entry at all.
     set_object_builds(entity, geometry_build.builds, build.commands);
-    state.objects.insert(
+    state.insert_tracked(
         scoped,
         TrackedObject {
             entity,
@@ -3661,7 +3661,7 @@ fn apply_object(
     );
     debug!(
         "spawned object {scoped} ({category:?}); {} tracked",
-        state.objects.len()
+        state.objects().len()
     );
     // The object layer's leg of the `SL_VIEWER_LOG_ATTACHMENT_BIND=1` trace: a
     // worn object that never appears is otherwise silent everywhere, and this
@@ -3734,18 +3734,27 @@ fn adopt_pending_children(
     root_entity: Entity,
     commands: &mut Commands,
 ) {
-    for child in state.objects.values_mut() {
-        // An attachment parents to its avatar's skeleton joint, not the linkset
-        // root entity — `rigged_attachments::adopt_pending_attachments` handles
-        // it (P16.1).
-        if !child.parented
-            && !child.is_root
-            && child.attachment_point.is_none()
-            && child.parent == scoped
-        {
-            commands.entity(child.entity).insert(ChildOf(root_entity));
-            child.parented = true;
-        }
+    // An attachment parents to its avatar's skeleton joint, not the linkset root
+    // entity — `rigged_attachments::adopt_pending_attachments` handles it
+    // (P16.1). Read off the root's own child list rather than scanned out of the
+    // whole table, and copied out before any child is taken mutably.
+    let waiting: Vec<ScopedObjectId> = state
+        .children_of(&scoped)
+        .iter()
+        .filter(|child| {
+            state
+                .objects()
+                .get(child)
+                .is_some_and(|tracked| !tracked.parented && tracked.attachment_point.is_none())
+        })
+        .copied()
+        .collect();
+    for child in waiting {
+        let Some(mut tracked) = state.tracked_mut(&child) else {
+            continue;
+        };
+        commands.entity(tracked.entity).insert(ChildOf(root_entity));
+        tracked.parented = true;
     }
 }
 
@@ -3851,7 +3860,7 @@ pub fn apply_object_meshes(
                 );
                 continue;
             }
-            let Some(tracked) = state.objects.get(&scoped) else {
+            let Some(tracked) = state.objects().get(&scoped) else {
                 continue;
             };
             let geometry = tracked.geometry;
@@ -3873,7 +3882,7 @@ pub fn apply_object_meshes(
             core::mem::take(&mut build.reuse).despawn_unused(build.commands);
             budget.remaining = budget.remaining.saturating_sub(1);
             debug!("built mesh {key}: {} submesh entities", face_entities.len());
-            if let Some(tracked) = state.objects.get_mut(&scoped) {
+            if let Some(mut tracked) = state.tracked_mut(&scoped) {
                 tracked.face_entities = face_entities;
             }
             // Remember how to rebuild on a later LOD swap (P21.2); a rigged
@@ -3898,7 +3907,7 @@ pub fn apply_object_meshes(
             let scale = rebuild.scale;
             let priority = rebuild.priority;
             let intern = rebuild.intern.clone();
-            let Some(tracked) = state.objects.get_mut(&scoped) else {
+            let Some(mut tracked) = state.tracked_mut(&scoped) else {
                 continue;
             };
             let geometry = tracked.geometry;
@@ -3955,7 +3964,7 @@ pub fn apply_prim_lod(
         &mut targets.0,
         budget.remaining,
         |scoped, desired, remaining| {
-            let Some(tracked) = state.objects.get_mut(&scoped) else {
+            let Some(mut tracked) = state.tracked_mut(&scoped) else {
                 return LodOutcome::Resolved;
             };
             let entity = tracked.entity;
@@ -4054,7 +4063,7 @@ pub fn apply_tree_lod(
         &mut targets.0,
         budget.remaining,
         |scoped, desired, remaining| {
-            let Some(tracked) = state.objects.get_mut(&scoped) else {
+            let Some(mut tracked) = state.tracked_mut(&scoped) else {
                 return LodOutcome::Resolved;
             };
             let entity = tracked.entity;
@@ -4153,7 +4162,7 @@ pub fn apply_object_sculpts(
             let Some(PendingGeometry::Sculpt(pending)) = builds.take_pending(entity) else {
                 continue;
             };
-            let Some(tracked) = state.objects.get(&scoped) else {
+            let Some(tracked) = state.objects().get(&scoped) else {
                 continue;
             };
             let geometry = tracked.geometry;
@@ -4184,7 +4193,7 @@ pub fn apply_object_sculpts(
             // the cold-cache counterpart of what `build_object_geometry` sets when
             // the map was already decoded.
             builds.set_sculpt_rebuild(entity, pending);
-            if let Some(tracked) = state.objects.get_mut(&scoped) {
+            if let Some(mut tracked) = state.tracked_mut(&scoped) {
                 tracked.face_entities = face_entities;
             }
         }
@@ -4973,7 +4982,10 @@ mod tests {
         let scoped = object.scoped_id();
         apply_one(&mut world, &mut state, &object)?;
         assert_eq!(
-            state.objects.get(&scoped).and_then(|it| it.attachment_item),
+            state
+                .objects()
+                .get(&scoped)
+                .and_then(|it| it.attachment_item),
             Some(own),
             "the ingest must keep the item id the wire named"
         );
@@ -4985,7 +4997,10 @@ mod tests {
         nameless.name_value = String::new();
         apply_one(&mut world, &mut state, &nameless)?;
         assert_eq!(
-            state.objects.get(&scoped).and_then(|it| it.attachment_item),
+            state
+                .objects()
+                .get(&scoped)
+                .and_then(|it| it.attachment_item),
             Some(own),
             "an update carrying no name-values must not blank the item id"
         );
@@ -4996,7 +5011,10 @@ mod tests {
         detached.parent_id = RegionLocalObjectId(0);
         apply_one(&mut world, &mut state, &detached)?;
         assert_eq!(
-            state.objects.get(&scoped).and_then(|it| it.attachment_item),
+            state
+                .objects()
+                .get(&scoped)
+                .and_then(|it| it.attachment_item),
             None,
             "an object that is no longer an attachment has no attachment item"
         );
@@ -5033,7 +5051,7 @@ mod tests {
                 tracked.parent = root.scoped_id();
                 tracked.is_root = false;
             }
-            objects.objects.insert(scoped, tracked);
+            objects.insert_tracked(scoped, tracked);
             scoped
         };
         // A worn root (on the Skull, parented to an avatar that is not
@@ -5095,7 +5113,7 @@ mod tests {
             let mut tracked = tracked_stub(&object, entity, geometry);
             tracked.attachment_point = Some(6);
             tracked.attachment_item = attachment_item;
-            objects.objects.insert(object.scoped_id(), tracked);
+            objects.insert_tracked(object.scoped_id(), tracked);
         }
 
         assert!(is_temp_attachment(&objects, ObjectKey::from(temp)));
@@ -5233,8 +5251,8 @@ mod tests {
         child.parent = root_scoped;
         child.is_root = false;
 
-        state.objects.insert(root_scoped, root);
-        state.objects.insert(child_scoped, child);
+        state.insert_tracked(root_scoped, root);
+        state.insert_tracked(child_scoped, child);
 
         assert_eq!(
             state.agent_flags(&child_scoped),
@@ -5253,7 +5271,7 @@ mod tests {
         let locked_scoped = locked_object.scoped_id();
         let mut locked = tracked_stub(&locked_object, Entity::PLACEHOLDER, Entity::PLACEHOLDER);
         locked.parent = locked_scoped;
-        state.objects.insert(locked_scoped, locked);
+        state.insert_tracked(locked_scoped, locked);
         assert!(
             !state.agent_can_modify(&locked_scoped),
             "a tracked object with no modify bit anywhere in its linkset is not modifiable"
@@ -5280,9 +5298,7 @@ mod tests {
         let object = bare_object(pcode::PRIMITIVE);
         let scoped = object.scoped_id();
         let mut state = super::ObjectState::default();
-        let _absent = state
-            .objects
-            .insert(scoped, tracked_stub(&object, child, geometry));
+        let _absent = state.insert_tracked(scoped, tracked_stub(&object, child, geometry));
 
         world.entity_mut(root).despawn();
         assert!(
@@ -5293,7 +5309,7 @@ mod tests {
         let dropped = state.drop_stale_tracked_entity(scoped, |e| world.get_entity(e).is_ok());
         assert_eq!(dropped, Some(child), "the stale entry is reported dropped");
         assert!(
-            state.objects.is_empty(),
+            state.objects().is_empty(),
             "the stale entry is gone so a later update respawns the object"
         );
     }
@@ -5312,14 +5328,12 @@ mod tests {
         let object = bare_object(pcode::PRIMITIVE);
         let scoped = object.scoped_id();
         let mut state = super::ObjectState::default();
-        let _absent = state
-            .objects
-            .insert(scoped, tracked_stub(&object, entity, geometry));
+        let _absent = state.insert_tracked(scoped, tracked_stub(&object, entity, geometry));
 
         let dropped = state.drop_stale_tracked_entity(scoped, |e| world.get_entity(e).is_ok());
         assert_eq!(dropped, None, "a live entity is not dropped");
         assert!(
-            state.objects.contains_key(&scoped),
+            state.objects().contains_key(&scoped),
             "the live object is retained"
         );
     }
@@ -5351,12 +5365,12 @@ mod tests {
         apply_one(&mut world, &mut state, &root_obj)?;
         apply_one(&mut world, &mut state, &child_obj)?;
         let root_entity = state
-            .objects
+            .objects()
             .get(&root_scoped)
             .ok_or("root tracked")?
             .entity;
         let child_entity = state
-            .objects
+            .objects()
             .get(&child_scoped)
             .ok_or("child tracked")?
             .entity;
@@ -5371,7 +5385,7 @@ mod tests {
             "the child entity is now dead"
         );
         assert!(
-            state.objects.contains_key(&child_scoped),
+            state.objects().contains_key(&child_scoped),
             "but the map still tracks it (no remove_object ran) — the stale entry"
         );
 
@@ -5379,7 +5393,7 @@ mod tests {
         // spawn path re-creates the object, re-parented to the still-live root.
         apply_one(&mut world, &mut state, &child_obj)?;
         let new_child = state
-            .objects
+            .objects()
             .get(&child_scoped)
             .ok_or("child re-tracked")?
             .entity;
@@ -5488,7 +5502,7 @@ mod tests {
         let mut state = super::ObjectState::default();
         apply(&mut world, &mut state, &root_obj)?;
         let entity = state
-            .objects
+            .objects()
             .get(&root_scoped)
             .ok_or("root tracked")?
             .entity;
@@ -5587,7 +5601,7 @@ mod tests {
         // The object's face entities, sorted so two builds compare as sets.
         let faces_of = |state: &super::ObjectState, scoped: super::ScopedObjectId| -> Vec<Entity> {
             let mut faces = state
-                .objects
+                .objects()
                 .get(&scoped)
                 .map(|tracked| tracked.face_entities.clone())
                 .unwrap_or_default();
@@ -5760,7 +5774,7 @@ mod tests {
         let scoped = invisible.scoped_id();
         apply(&mut world, &mut state, &invisible)?;
         let faces = state
-            .objects
+            .objects()
             .get(&scoped)
             .map(|tracked| tracked.face_entities.clone())
             .unwrap_or_default();

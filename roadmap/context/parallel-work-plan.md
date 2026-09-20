@@ -99,7 +99,7 @@ and portability cover comes with release preparation.
 
 | Agent | Themes (approx. task counts) | Owns |
 | --- | --- | --- |
-| **A — world & render** | render 33, perf 44, avatar/appearance 28, region/parcel/land 28, input 26, camera 9, snapshot 4 (~170) | `sl-viewer-world-scene`, `-world-objects`, `-world-avatar`, `-world-view`, `sl-texture`, `sl-material`, `sl-bake`, `sl-anim`, `sl-terrain`, `sl-viewer-environment`, `sl-viewer-places` |
+| **A — world & render** | render 33, perf 44, avatar/appearance 28, region/parcel/land 28, input 26, camera 9, snapshot 4 (~170) | `sl-viewer-world-scene`, `-world-objects`, `-world-avatar`, `-world-view`, `sl-texture`, `sl-material`, `sl-bake`, `sl-anim`, `sl-terrain`, `sl-viewer-environment`, `sl-viewer-places`, `sl-viewer-render-fixtures` |
 | **B — UI shell & social** | UI shell 34, chat/IM/notices 27, inventory 22, people/groups 12, map/search 7, i18n 7, misc shell 19 (~128) | the viewer binary's UI (`menu_bar.rs`, `floaters.rs`, `status_bar.rs`, `bottom_toolbar.rs`), `sl-viewer-ui-*`, `-preferences`, `-settings`, `-chat`, `-notices`, `-notifications`, `-people`, `-social`, `-intents`, `-inventory`, `-map`, `-search` |
 | **C — tools, protocol & server** | build/edit tools 42, server 21, test/conformance 18, audio/media/voice 12, scripts/LSL 11, protocol 8 (~152) | `sl-viewer-edit`, `sl-wire`, `sl-proto`, `sl-client-tokio`, `sl-client-common`, `sl-fake-grid`, `sl-conformance`, `sl-crosscheck`, `sl-repl*`, `sl-lsl*`, `sl-audio`, `sl-gst`, `sl-cef` |
 

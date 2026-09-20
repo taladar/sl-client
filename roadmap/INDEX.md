@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 299 |
-| blocked | 40 |
+| ready | 295 |
+| blocked | 39 |
 | in-progress | 22 |
-| bugs | 5 |
-| done | 1198 |
+| bugs | 6 |
+| done | 1204 |
 | deferred | 29 |
 | wont-do | 16 |
-| **total** | **1709** |
+| **total** | **1711** |
 
 ## ideas (100)
 
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (299)
+## ready (295)
 
 ### protocol
 
@@ -273,8 +273,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
-- [`viewer-360-snapshot`](ready/viewer-360-snapshot.md) — 360-degree
-  (equirectangular) snapshot
 - [`viewer-about-land-objects-return`](ready/viewer-about-land-objects-return.md)
   — About Land — object return, editable autoreturn & small option gaps
 - [`viewer-agent-hover-height-ingest`](ready/viewer-agent-hover-height-ingest.md)
@@ -303,8 +301,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-audit-checkbox-box-widget`](ready/viewer-audit-checkbox-box-widget.md)
   — The settings checkbox box is spawned and repainted by hand in seven places
-- [`viewer-audit-decoded-texture-uploaders`](ready/viewer-audit-decoded-texture-uploaders.md)
-  — Eight independent DecodedTexture uploaders each re-decide colour space
 - [`viewer-audit-demo-panels-in-release`](ready/viewer-audit-demo-panels-in-release.md)
   — Five developer demo panels ship in the release binary from inside library
   crates
@@ -312,15 +308,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Extract the pure logic trapped inside viewer systems and test it
 - [`viewer-audit-lsp-position-roundtrip`](ready/viewer-audit-lsp-position-roundtrip.md)
   — The LSP position-to-byte direction has zero tests
-- [`viewer-audit-object-children-index`](ready/viewer-audit-object-children-index.md)
-  — ObjectState has no children index, so every linkset query full-scans the
-  region
 - [`viewer-audit-preferences-restart-note`](ready/viewer-audit-preferences-restart-note.md)
   — There is no restart-note idiom, so 'restart required' is baked into labels
-- [`viewer-audit-render-fixtures-crate`](ready/viewer-audit-render-fixtures-crate.md)
-  — 3297 lines of test fixtures ship in the production scene crate
-- [`viewer-audit-scene-live-daycycle-fixture`](ready/viewer-audit-scene-live-daycycle-fixture.md)
-  — A test fixture that advances the day cycle between samples
 - [`viewer-audit-search-map-edge`](ready/viewer-audit-search-map-edge.md) —
   sl-viewer-search depends on sl-viewer-map for one two-field struct
 - [`viewer-audit-web-auth-preference`](ready/viewer-audit-web-auth-preference.md)
@@ -792,8 +781,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-render-readback-tier`](ready/viewer-render-readback-tier.md) — Render
   readback tier — assert on the pixels, headlessly (blocked by
   `viewer-render-test-harness` (done))
-- [`viewer-render-resolution-divisor`](ready/viewer-render-resolution-divisor.md)
-  — Render at a reduced resolution (RenderResolutionDivisor)
 - [`viewer-render-type-toggles`](ready/viewer-render-type-toggles.md) —
   Render-type & render-feature toggles (hide object classes, wireframe)
 - [`viewer-report-abuse`](ready/viewer-report-abuse.md) — Report Abuse floater
@@ -912,6 +899,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — World-map floater — tracking & teleport hand-off (blocked by
   `viewer-world-map-floater` (done), `viewer-beacons-beam-render` (done),
   `viewer-teleport-flow-progress` (done))
+- [`viewer-world-text-in-the-overlay-pass`](ready/viewer-world-text-in-the-overlay-pass.md)
+  — Name tags and hover text belong in the overlay pass, not the world pass
 
 ### idiomatic
 
@@ -928,6 +917,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   write a gesture asset (LLMultiGesture)
 - [`test-assets-remaining-class-audit`](ready/test-assets-remaining-class-audit.md)
   — Decide what the remaining asset classes are worth
+- [`test-assets-unify-rigged-fixtures`](ready/test-assets-unify-rigged-fixtures.md)
+  — Two generators make a rigged fixture; there should be one (blocked by
+  `viewer-audit-render-fixtures-crate` (done))
 - [`test-audit-conformance-boilerplate`](ready/test-audit-conformance-boilerplate.md)
   — Factor the repeated session/id acquisition out of the conformance cases
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
@@ -941,7 +933,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
   The two REPL binaries share ~400 near-verbatim lines and have already drifted
 
-## blocked (40)
+## blocked (39)
 
 ### viewer
 
@@ -1058,9 +1050,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
-- [`test-assets-unify-rigged-fixtures`](blocked/test-assets-unify-rigged-fixtures.md)
-  — Two generators make a rigged fixture; there should be one (blocked by
-  `viewer-audit-render-fixtures-crate`)
 - [`test-voice-account`](blocked/test-voice-account-provision-a-voice-account.md)
   — provision a voice account (blocked by `viewer-voice-audio`)
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
@@ -1127,7 +1116,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (5)
+## bugs (6)
 
 ### protocol
 
@@ -1144,8 +1133,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Own avatar looks broken after a teleport
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
+- [`viewer-sliders-show-no-value`](bugs/viewer-sliders-show-no-value.md) — A
+  slider shows no value, and no bounds or step either
 
-## done (1198)
+## done (1204)
 
 ### protocol
 
@@ -1382,6 +1373,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`build-structural-encapsulation-audit`](done/build-structural-encapsulation-audit.md)
   — Audit the workspace for structural and encapsulation improvements the crate
   split exposed (blocked by `build-split-viewer-crate` (done))
+- [`viewer-360-snapshot`](done/viewer-360-snapshot.md) — 360-degree
+  (equirectangular) snapshot
 - [`viewer-about-floater`](done/viewer-about-floater.md) — About floater —
   version, system info, credits, licenses (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -1447,6 +1440,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   forever
 - [`viewer-audit-command-result-diagnostics`](done/viewer-audit-command-result-diagnostics.md)
   — The bevy command dispatcher discards 300 protocol send results with no log
+- [`viewer-audit-decoded-texture-uploaders`](done/viewer-audit-decoded-texture-uploaders.md)
+  — Eight independent DecodedTexture uploaders each re-decide colour space
 - [`viewer-audit-diagnostic-stream-unread`](done/viewer-audit-diagnostic-stream-unread.md)
   — The viewer collects protocol diagnostics and drains none of them
 - [`viewer-audit-display-name-accessor-sweep`](done/viewer-audit-display-name-accessor-sweep.md)
@@ -1478,6 +1473,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A malformed notification store is overwritten, destroying unanswered notices
 - [`viewer-audit-notifications-crate-split`](done/viewer-audit-notifications-crate-split.md)
   — Split the 21637-line notification catalogue and make its lookup a map
+- [`viewer-audit-object-children-index`](done/viewer-audit-object-children-index.md)
+  — ObjectState has no children index, so every linkset query full-scans the
+  region
 - [`viewer-audit-parcel-access-list-accumulate`](done/viewer-audit-parcel-access-list-accumulate.md)
   — Editing a multi-packet parcel ban list unbans everyone not in the last
   packet
@@ -1502,6 +1500,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   geometrically
 - [`viewer-audit-probe-nonuniform-scale-shear`](done/viewer-audit-probe-nonuniform-scale-shear.md)
   — A reflection probe's non-uniform volume scale shears its sampling frame
+- [`viewer-audit-render-fixtures-crate`](done/viewer-audit-render-fixtures-crate.md)
+  — 3297 lines of test fixtures ship in the production scene crate
 - [`viewer-audit-render-path-env-reads`](done/viewer-audit-render-path-env-reads.md)
   — About a dozen getenv calls and allocations per frame in the sky and post
   chain
@@ -1512,6 +1512,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-scene-change-guards-day-cycle`](done/viewer-audit-scene-change-guards-day-cycle.md)
   — The scene crate's write-on-change guards were reasoned about under a pinned
   sky
+- [`viewer-audit-scene-live-daycycle-fixture`](done/viewer-audit-scene-live-daycycle-fixture.md)
+  — A test fixture that advances the day cycle between samples
 - [`viewer-audit-search-sentinel-row`](done/viewer-audit-search-sentinel-row.md)
   — The directory 'there is more' sentinel row is rendered as a result
 - [`viewer-audit-settings-write-race`](done/viewer-audit-settings-write-race.md)
@@ -2677,6 +2679,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   pixel-oracle library — decidable verdicts over a captured frame
 - [`viewer-render-readback-texture-anim-test-flaky`](done/viewer-render-readback-texture-anim-test-flaky.md)
   — render_readback texture-animation test is flaky under load
+- [`viewer-render-resolution-divisor`](done/viewer-render-resolution-divisor.md)
+  — Render at a reduced resolution (RenderResolutionDivisor)
 - [`viewer-render-scene-coverage`](done/viewer-render-scene-coverage.md) —
   Render-scene coverage — a scene per render path the viewer already has
   (blocked by `viewer-render-test-harness` (done))

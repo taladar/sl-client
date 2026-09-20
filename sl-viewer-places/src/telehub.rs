@@ -690,7 +690,7 @@ fn selected_roots(selection: &SelectionSet, objects: &ObjectState) -> Vec<Scoped
         .iter()
         .filter(|node| {
             objects
-                .objects
+                .objects()
                 .get(&node.scoped)
                 .is_some_and(|tracked| tracked.is_root && tracked.shape.pcode() == pcode::PRIMITIVE)
         })

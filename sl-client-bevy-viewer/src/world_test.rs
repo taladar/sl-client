@@ -3130,7 +3130,7 @@ mod tests {
         assert!(
             app.world()
                 .resource::<crate::world_api::ObjectState>()
-                .objects
+                .objects()
                 .get(&worn)
                 .is_some_and(|tracked| tracked.parented),
             "a seated attachment must be marked parented so it is not retried every frame"
@@ -3149,7 +3149,7 @@ mod tests {
     fn tracked_entity(app: &App, scoped: ScopedObjectId) -> Option<Entity> {
         app.world()
             .resource::<crate::world_api::ObjectState>()
-            .objects
+            .objects()
             .get(&scoped)
             .map(|tracked| tracked.entity)
     }

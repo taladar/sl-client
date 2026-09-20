@@ -55,6 +55,17 @@ multi-region offsets, in-flight asset leaks, NPC appearance delivery.
   in that order: a frame taken while a texture is still decoding shows an
   untextured face, and one taken while a pipeline is still compiling
   shows nothing at all.
+- `sl-viewer-world-scene/src/day_cycle_fixture.rs` — `DayCycle`, a tier-G scene
+  app whose **day cycle advances between frames**. It exists because a whole
+  class of scene defect is invisible to every harness above: the screenshot,
+  readback and cross-check tiers all pin `SL_VIEWER_SKY_DAY_POSITION`, and under
+  a pinned sun a system that rewrites its target every single frame is
+  indistinguishable from one that never writes. So this fixture records the
+  *writes* — resource change ticks and `AssetEvent::Modified` — rather than the
+  values, and owns its own clock (it pins the position its own simulated region
+  time quantises to) so the assertions do not depend on where the wall clock
+  started. Three fixed defects were found without it; it is where the next one
+  of that shape should fail.
 - `sl-fake-grid/src/marker.rs` — `marker(name)` / `marker_name` /
   `MARKER_METHOD`: a `GenericMessage` on the method
   `sl-fake-grid-marker`, sent by the grid purely so a test can wait for

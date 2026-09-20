@@ -1,7 +1,7 @@
 //! The **render scene registry** (`viewer-render-test-harness`): the one list of
 //! things this viewer renders, built with **no login, no region, no OAR and no
 //! UUID lookup** — shared by the gallery a human looks at
-//! (`sl_client_bevy_viewer::render_gallery`) and the checks a machine runs
+//! (`sl_viewer_gallery::render_gallery`) and the checks a machine runs
 //! (`sl_client_bevy_viewer::render_test`).
 //!
 //! This is `sl_viewer_ui_core::ui_element`'s 3D counterpart, and deliberately the same
@@ -10,6 +10,26 @@
 //! applies here and applies harder — a rendering bug is currently found by a
 //! human logging into OpenSim, rezzing an object, flying a camera at it and
 //! squinting, and the `R*` list in `roadmap/bugs/` is what that process misses.
+//!
+//! # Why a crate, and not a module of the scene layer
+//!
+//! This registry is test fixtures, and it lived inside `sl-viewer-world-scene`
+//! until 2026-09-20 — four thousand lines of procedural prims, sculpts, meshes
+//! and skeletons compiled into a library a dozen crates depend on, of which only
+//! the two harness surfaces draw a fixture. Here it is a leaf instead: it
+//! depends on the scene layer (and on the object layer below it) rather than
+//! being part of it, so the nine crates that stand on the scene layer without
+//! ever building a scene (the edit tools, the map, places, search, the context
+//! menus and the world view among them) stop compiling it, and editing a
+//! fixture no longer rebuilds all of them. In `sl-client-bevy-viewer` it is a
+//! **dev**-dependency: the harness tiers (`render_matrix`, `render_readback`,
+//! `render_test`) are the only thing in that crate's own source which builds a
+//! scene.
+//!
+//! The direction of the dependency is the point: a fixture reaches *down* into
+//! the real scene systems (`sl_viewer_world_scene::sky`'s `resolve_sky`,
+//! `water`'s `water_params`, `terrain`'s `build_patch_mesh`), so what it renders
+//! is what the viewer renders. Nothing in the scene layer reaches back up.
 //!
 //! # Why a scene, and not an object
 //!
@@ -105,25 +125,17 @@ use sl_client_bevy::{
     PrimLod, PrimShapeFloat, ProfileCurve, RegionHandle, ResolvedParams, SKY_LIGHTING_IMAGE,
     SkeletalDeformations, SkyMaterial, StarMaterial, StarParams, Submesh, SunDiscMaterial,
     SunDiscParams, TerrainLayerType, TerrainMaterial, TerrainOwnership, TerrainPatch,
-    TextureAnimation, TextureFace, TextureKey, TreeLod, Uuid, VolumeDeformations, WaterMaterial,
-    WaterSettings, grass_geometry, grass_species, rigged_inverse_bindposes, tessellate,
-    tessellate_sculpt, tessellate_with_path, texture_anim_mode, to_bevy_base_mesh,
-    to_bevy_grass_mesh, to_bevy_image, to_bevy_mesh, to_bevy_morphed_mesh, to_bevy_prim_meshes,
+    TextureAnimation, TextureFace, TextureKey, TextureUpload, TreeLod, Uuid, VolumeDeformations,
+    WaterMaterial, WaterSettings, grass_geometry, grass_species, rigged_inverse_bindposes,
+    tessellate, tessellate_sculpt, tessellate_with_path, texture_anim_mode, to_bevy_base_mesh,
+    to_bevy_grass_mesh, to_bevy_mesh, to_bevy_morphed_mesh, to_bevy_prim_meshes,
     to_bevy_rigged_mesh, to_bevy_tree_mesh, tree_billboard_geometry, tree_geometry, tree_species,
-    write_sky_lighting,
+    upload_decoded, write_sky_lighting,
 };
 use sl_terrain::TerrainComposition;
 
 use std::path::{Path, PathBuf};
 
-use crate::particles::{drive_particles, float_to_u8, retire_orphaned_clouds};
-use crate::sky::{
-    MOON_DISK_RADIUS, SCENE_LIGHT_ILLUMINANCE, SKY_DOME_RADIUS, STAR_DOME_RADIUS, SUN_DISK_RADIUS,
-    build_cloud_dome_mesh, build_star_mesh, cloud_params, disc_transform,
-    placeholder_image as sky_placeholder_image, resolve_sky, shadow_cascades,
-};
-use crate::terrain::{build_patch_mesh, placeholder_image as terrain_placeholder_image};
-use crate::water::{DEFAULT_WATER_HEIGHT, water_normal_image, water_params, white_mask_image};
 use sl_viewer_kit::avatar_assets::AvatarAssetLibrary;
 use sl_viewer_kit::coords::sl_to_bevy_rotation;
 use sl_viewer_kit::face_material::{
@@ -138,11 +150,23 @@ use sl_viewer_world_api::PatchKey;
 use sl_viewer_world_api::{DecodedTextures, ObjectParticleSystem, TerrainSurface};
 use sl_viewer_world_objects::bump::{apply_surface_flags, generate_normal_map};
 use sl_viewer_world_objects::legacy_materials::{
-    apply_legacy_scalars, build_linear_image, build_srgb_image,
+    NORMAL_MAP_UPLOAD, SPECULAR_MAP_UPLOAD, apply_legacy_scalars,
 };
 use sl_viewer_world_objects::objects::{FaceTextureDebug, PrimFaceEntity};
 use sl_viewer_world_objects::texture_anim::{ObjectTextureAnimation, drive_texture_animations};
 use sl_viewer_world_objects::textures::TextureManager;
+use sl_viewer_world_scene::particles::{drive_particles, float_to_u8, retire_orphaned_clouds};
+use sl_viewer_world_scene::sky::{
+    MOON_DISK_RADIUS, SCENE_LIGHT_ILLUMINANCE, SKY_DOME_RADIUS, STAR_DOME_RADIUS, SUN_DISK_RADIUS,
+    build_cloud_dome_mesh, build_star_mesh, cloud_params, disc_transform,
+    placeholder_image as sky_placeholder_image, resolve_sky, shadow_cascades,
+};
+use sl_viewer_world_scene::terrain::{
+    build_patch_mesh, placeholder_image as terrain_placeholder_image,
+};
+use sl_viewer_world_scene::water::{
+    DEFAULT_WATER_HEIGHT, WAVE_NORMAL_UPLOAD, water_params, white_mask_image,
+};
 
 /// The environment variable naming a Linden `character/` directory — **the same
 /// one the viewer itself reads** (`--viewer-assets` / `SL_VIEWER_ASSETS`), so a
@@ -405,7 +429,7 @@ pub struct SceneAssets<'w> {
 
 /// Everything a registered scene needs to be **driven** — the viewer's own
 /// time-varying systems and the resources they read — added by the harness
-/// (`sl_client_bevy_viewer::render_test`) and the gallery (`sl_client_bevy_viewer::render_gallery`) alike.
+/// (`sl_client_bevy_viewer::render_test`) and the gallery (`sl_viewer_gallery::render_gallery`) alike.
 ///
 /// One plugin rather than two lists, and the reason is a failure both apps have
 /// already had. A dynamic scene's renderable does not exist until its driver has
@@ -439,16 +463,16 @@ impl Plugin for SceneRuntimePlugin {
         // (`sl-client-viewer-fetch-defer-until-cap`).
         app.init_resource::<TextureManager>()
             .init_resource::<DecodedTextures>()
-            .init_resource::<crate::render_overrides::RenderOverrides>()
+            .init_resource::<sl_viewer_world_scene::render_overrides::RenderOverrides>()
             .add_systems(Update, (simulate_flexi, drive_texture_animations));
         // The particle drivers, unless the viewer's own `ParticlesPlugin` (and the
         // GPU renderer beside it) is already in the app — a rig that runs the
         // full render stack must not step every cloud twice a frame.
-        if !app.is_plugin_added::<crate::particles::ParticlesPlugin>() {
+        if !app.is_plugin_added::<sl_viewer_world_scene::particles::ParticlesPlugin>() {
             app.add_systems(
                 Startup,
                 (
-                    crate::particles::setup_particles,
+                    sl_viewer_world_scene::particles::setup_particles,
                     sl_viewer_kit::particle_render::setup_particle_quad,
                 ),
             )
@@ -897,7 +921,7 @@ pub fn scene_root_transform() -> Transform {
 /// its visibility from **every** ancestor, so a root without one breaks the
 /// propagation chain for the whole scene and Bevy warns once per renderable
 /// (B0004). Bundled here rather than left to each caller because there are two —
-/// `sl_client_bevy_viewer::render_test` and `sl_client_bevy_viewer::render_gallery` — and the first version of
+/// `sl_client_bevy_viewer::render_test` and `sl_viewer_gallery::render_gallery` — and the first version of
 /// this had the bug in both.
 #[must_use]
 pub fn scene_root() -> impl Bundle {
@@ -1042,10 +1066,11 @@ pub struct WorldScaleGeometry {
 /// `sl-client-prim-texture-debugging` records; both cost real time to localise
 /// precisely because the geometry, the UVs and the decode are all *correct*.
 ///
-/// Four separate places in this viewer set the mode today ([`to_bevy_image`],
-/// `sl_viewer_world_objects::textures`, `sl_viewer_world_objects::legacy_materials`, `sl_viewer_world_objects::bump`) and a fifth
-/// texture path that forgets would reproduce the same bug. Hence the rule is
-/// universal and the exception is opt-in, carries a reason, and is greppable.
+/// One place in this viewer sets the mode ([`upload_decoded`], through
+/// [`sl_client_bevy::upload_pixels`]), and it always repeats — but a texture path
+/// that builds a Bevy `Image` by hand instead would reproduce the same bug. Hence
+/// the rule is universal and the exception is opt-in, carries a reason, and is
+/// greppable.
 #[derive(Component, Debug, Clone, Copy)]
 pub struct SamplerMayClamp {
     /// Why this face's texture is allowed to clamp — in practice, only the
@@ -1296,7 +1321,10 @@ fn prim_textured_tiling(
 ) {
     // Through the real converter, which is where the address mode is set — a
     // fixture that built the `Image` by hand would be testing the fixture.
-    let image = assets.images.add(to_bevy_image(&uv_reference_texture()));
+    let image = assets.images.add(upload_decoded(
+        &uv_reference_texture(),
+        TextureUpload::COLOR,
+    ));
     let material = assets.materials.add(inert_face_material(StandardMaterial {
         base_color: Color::WHITE,
         base_color_texture: Some(image),
@@ -1552,7 +1580,10 @@ fn mesh_cube(_cx: SceneCx, root: Entity, commands: &mut Commands, assets: &mut S
         lod: MeshLod::High,
         submeshes: vec![cube_submesh()],
     };
-    let image = assets.images.add(to_bevy_image(&uv_reference_texture()));
+    let image = assets.images.add(upload_decoded(
+        &uv_reference_texture(),
+        TextureUpload::COLOR,
+    ));
     for (index, submesh) in decoded.submeshes.iter().enumerate() {
         let mesh = assets.meshes.add(to_bevy_mesh(submesh));
         let material = assets.materials.add(inert_face_material(StandardMaterial {
@@ -2448,7 +2479,7 @@ fn land_patch(patch_x: u32, patch_y: u32) -> TerrainPatch {
 /// [`build_patch_mesh`] and its real [`TerrainMaterial`].
 ///
 /// The patches are placed in plain Second Life metres under the scene root, which
-/// is *not* what the viewer does: `crate::terrain`'s `patch_transform` carries the
+/// is *not* what the viewer does: `sl_viewer_world_scene::terrain`'s `patch_transform` carries the
 /// Second Life → Bevy basis change on each patch entity, because the viewer spawns
 /// its patches at the world root with no basis-changed ancestor. Here the scene
 /// root already carries it (once, for every scene), so applying it again would
@@ -2685,7 +2716,10 @@ fn texture_anim_flipbook(
         length: 0.0,
         rate: 8.0,
     };
-    let image = assets.images.add(to_bevy_image(&uv_reference_texture()));
+    let image = assets.images.add(upload_decoded(
+        &uv_reference_texture(),
+        TextureUpload::COLOR,
+    ));
     let object = commands
         .spawn((
             Transform::IDENTITY,
@@ -2792,7 +2826,9 @@ fn flagged_face(bump: u8, shiny: u8, fullbright: bool, glow: f32) -> TextureFace
 /// existed the check had never seen it.
 fn bump_face(cx: SceneCx, root: Entity, commands: &mut Commands, assets: &mut SceneAssets<'_>) {
     let decoded = Arc::new(uv_reference_texture());
-    let diffuse = assets.images.add(to_bevy_image(&decoded));
+    let diffuse = assets
+        .images
+        .add(upload_decoded(&decoded, TextureUpload::COLOR));
     // Through the real generator, which is where the sampler is set — building the
     // normal map by hand here would be testing the fixture.
     let normal = assets
@@ -2861,7 +2897,7 @@ fn bump_face(cx: SceneCx, root: Entity, commands: &mut Commands, assets: &mut Sc
 /// The normal map is generated rather than fetched: the material's `normal_map` is
 /// a grid asset UUID and there is nothing here to fetch it from, so the scene
 /// supplies the decoded pixels and runs the real upload
-/// ([`build_linear_image`] — linear, not sRGB, as a normal map must be) that
+/// ([`NORMAL_MAP_UPLOAD`] — linear, not sRGB, as a normal map must be) that
 /// `apply_legacy_normal_maps` would have run. The scalars go through the real
 /// [`apply_legacy_scalars`].
 fn legacy_material_face(
@@ -2871,17 +2907,22 @@ fn legacy_material_face(
     assets: &mut SceneAssets<'_>,
 ) {
     let decoded = Arc::new(uv_reference_texture());
-    let diffuse = assets.images.add(to_bevy_image(&decoded));
-    let normal = assets.images.add(build_linear_image(&Arc::new(
-        // A normal map is not a colour image; the fixture's is the generated one,
-        // so the scene shows a plausible surface rather than a colour ramp read as
-        // normals.
-        normal_map_texture(&decoded),
-    )));
+    let diffuse = assets
+        .images
+        .add(upload_decoded(&decoded, TextureUpload::COLOR));
+    // A normal map is not a colour image; the fixture's is the generated one, so
+    // the scene shows a plausible surface rather than a colour ramp read as
+    // normals.
+    let normal = assets.images.add(upload_decoded(
+        &Arc::new(normal_map_texture(&decoded)),
+        NORMAL_MAP_UPLOAD,
+    ));
     // A specular map (sRGB, its RGB tinting the highlight), so the scene exercises
     // the legacy specular-map re-sample path (MAP_FLAG_SPEC) on the GPU — the colour
     // reference texture stands in for a real one.
-    let specular = assets.images.add(build_srgb_image(&decoded));
+    let specular = assets
+        .images
+        .add(upload_decoded(&decoded, SPECULAR_MAP_UPLOAD));
 
     for (offset, name, glossiness, environment) in
         [(-1.2_f32, "matte", 20_u8, 10_u8), (1.2, "glossy", 240, 200)]
@@ -3009,7 +3050,7 @@ fn tree_billboard(
 ///
 /// Every other fixture here writes plain Second Life metres and lets the scene root
 /// convert them once, because that is what the viewer does with everything a region
-/// sends it. `crate::sky` and `crate::water` are the exception, and in neither place
+/// sends it. `sl_viewer_world_scene::sky` and `sl_viewer_world_scene::water` are the exception, and in neither place
 /// is it an oversight: the atmosphere is not *in* the region. Both spawn at the
 /// **world root** with an identity transform and build directly in Bevy's frame —
 /// `build_star_mesh` picks "a random direction on the upper hemisphere (Bevy Y up)",
@@ -3332,7 +3373,7 @@ fn sky_midnight(cx: SceneCx, root: Entity, commands: &mut Commands, assets: &mut
 ///
 /// The scene needs this because the alternative is a scene of nothing. The viewer
 /// fetches its wave normal map from the grid (`DEFAULT_WATER_NORMAL`) and, until it
-/// arrives, wears [`flat_normal_image`](crate::water::flat_normal_image) — a **1×1**
+/// arrives, wears [`flat_normal_image`](sl_viewer_world_scene::water::flat_normal_image) — a **1×1**
 /// perfectly flat normal, whose own doc admits it renders "a fresnel-tinted flat
 /// sea". With no grid that placeholder is forever, and a flat normal gives the
 /// shader no slope anywhere: no fresnel variation, no specular, no wave. Which is
@@ -3498,7 +3539,7 @@ pub const STRADDLING_EMERGENT: f32 = STRADDLING_HALF_HEIGHT - STRADDLING_SINK;
 /// [`SCENES`] `water-straddling-translucent-prim`: a **translucent** prim centred
 /// on the waterline, half of it submerged and half standing above the surface.
 ///
-/// The case the per-object water bucket cannot express. `crate::transparency`
+/// The case the per-object water bucket cannot express. `sl_viewer_world_scene::transparency`
 /// sorts each translucent item into the pre-water bucket or the post-water one by
 /// **its centre height**, and the sea is drawn between them, opaque and writing
 /// depth. A prim that straddles the surface has fragments on both sides but only
@@ -3745,7 +3786,7 @@ fn water_translucent_cap_pair(
 }
 
 /// The viewer's per-face tag for the fixture face at `index`, so a fixture prim is
-/// selected by the same systems a real one is (`crate::water_clip`).
+/// selected by the same systems a real one is (`sl_viewer_world_scene::water_clip`).
 fn prim_face_tag(index: usize) -> PrimFaceEntity {
     PrimFaceEntity {
         face_id: PrimFaceId::new(u16::try_from(index).unwrap_or(u16::MAX)),
@@ -3803,7 +3844,7 @@ fn translucency_matrix(
         ));
     }
     // Each face carries the viewer's own `PrimFaceEntity` tag, which is not
-    // decoration: it is what `crate::water_clip` selects the faces it may split by,
+    // decoration: it is what `sl_viewer_world_scene::water_clip` selects the faces it may split by,
     // so a fixture without it would render a prim the viewer never renders.
     for (label, x, offset) in MATRIX_BOXES {
         let object = commands
@@ -3970,16 +4011,16 @@ fn spawn_sea(
     // wearing the viewer's flat placeholder.
     let normal = assets
         .images
-        .add(water_normal_image(&water_wavelet_texture()));
+        .add(upload_decoded(&water_wavelet_texture(), WAVE_NORMAL_UPLOAD));
     // Midday's sun, so the sea is lit from where the sky scenes put it.
     let midday = sky_settings_from(&MIDDAY);
     let resolved = resolve_sky(&midday);
     let material = assets.water_materials.add(WaterMaterial {
         params: water_params(
             &WaterSettings::legacy_default("Default"),
-            crate::water::WaterLighting {
+            sl_viewer_world_scene::water::WaterLighting {
                 light_dir: resolved.light_dir,
-                specular_color: crate::water::water_specular_color(
+                specular_color: sl_viewer_world_scene::water::water_specular_color(
                     Vec3::new(
                         midday.sunlight_color.red(),
                         midday.sunlight_color.green(),
@@ -4008,7 +4049,7 @@ fn spawn_sea(
             // against: submerged, it darkens toward the horizon until a translucent
             // box composited over it stops carrying its own colour, and the walk
             // starts measuring the fog rather than the ordering it is there to pin.
-            crate::water_fog::WaterFogSettings::default(),
+            sl_viewer_world_scene::water_fog::WaterFogSettings::default(),
         ),
         // Both slots share the map, as `apply_water_textures` does until a day
         // cycle drives a separate next frame and a blend between them.
@@ -4023,9 +4064,9 @@ fn spawn_sea(
         // keeps every displaced sample here.
         scene_depth: assets
             .images
-            .add(crate::water_scene_depth::placeholder_scene_depth_image()),
+            .add(sl_viewer_world_scene::water_scene_depth::placeholder_scene_depth_image()),
     });
-    // See `bevy_space`: `crate::water` builds in Bevy's frame at the world root.
+    // See `bevy_space`: `sl_viewer_world_scene::water` builds in Bevy's frame at the world root.
     let space = commands
         .spawn((
             bevy_space(),
@@ -4036,7 +4077,7 @@ fn spawn_sea(
         .id();
     for (name, extent, height) in [
         ("ocean", 20_000.0_f32, DEFAULT_WATER_HEIGHT),
-        // The region plane, a hair above the ocean — `crate::water`'s
+        // The region plane, a hair above the ocean — `sl_viewer_world_scene::water`'s
         // `OCEAN_DEPTH_BIAS`, the thing that stops the two z-fighting.
         ("region-plane", 128.0, DEFAULT_WATER_HEIGHT + 0.02),
     ] {

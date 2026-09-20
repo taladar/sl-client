@@ -11,10 +11,11 @@ refs:
 
 Context: [context/viewer.md](../context/viewer.md).
 
-Every image built from a decoded texture — `build_prim_image` /
-`to_bevy_image`, the PBR, legacy normal / specular and bump maps, terrain
-detail, avatar bakes — goes through `Image::new`, which makes a single mip
-level, and no code in the workspace sets `mip_level_count` or generates a chain.
+Every image built from a decoded texture — prim diffuse, the PBR, legacy normal
+/ specular and bump maps, terrain detail, avatar bakes, all of them now through
+the one `sl_client_bevy::upload_decoded` — goes through `Image::new`, which
+makes a single mip level, and no code in the workspace sets `mip_level_count`
+or generates a chain.
 A face whose texels are smaller than a pixel is therefore sampled from level 0
 alone, whatever its sampler says: a distant or oblique texture aliases and
 shimmers as the camera moves instead of settling to its average.
@@ -32,8 +33,9 @@ one-level texture it has nothing to choose from.
 
 - Generate the chain for world textures, CPU-side at build time or on the GPU
   after upload (wgpu has no `glGenerateMipmap`; Bevy leaves it to the asset).
-  Cost matters: `build_prim_image` is already budgeted per frame
-  (`TextureApplyBudget`), and a full chain is a third more memory.
+  Cost matters: the prim-diffuse upload is already budgeted per frame
+  (`TextureApplyBudget`), and a full chain is a third more memory. One uploader
+  means one place to generate it.
 - Switch the face samplers to a linear `mipmap_filter`.
 - Keep the in-place refresh (`refresh_derived_images`, `refresh_lod_image`)
   rebuilding the chain with the image.

@@ -506,11 +506,21 @@ static ENVIRONMENT_MENU: MenuDef = MenuDef {
 /// it here once they exist.
 static PHOTO_MENU: MenuDef = MenuDef {
     label_key: "menu-bar-photo-and-video",
-    items: &[MenuItemDef::Command(
-        MenuCommand::new("menu-bar-phototools", "toggle-phototools")
-            .accel("Alt+P")
-            .checked_when(PHOTOTOOLS_OPEN),
-    )],
+    items: &[
+        MenuItemDef::Command(
+            MenuCommand::new("menu-bar-phototools", "toggle-phototools")
+                .accel("Alt+P")
+                .checked_when(PHOTOTOOLS_OPEN),
+        ),
+        // The 360-degree panorama capture (viewer-360-snapshot), which is a
+        // capture renderer of its own rather than a snapshot option — the
+        // reference keeps its entry beside Snapshot in the World menu for the
+        // same reason.
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-bar-360-snapshot",
+            "toggle-360-snapshot",
+        )),
+    ],
 };
 
 /// The World menu — the minimap, world map, and environment today; teleport is
@@ -1458,6 +1468,9 @@ fn handle_top_menu_actions(
                     crate::phototools::PHOTOTOOLS_FLOATER_ID,
                 );
             }
+            "toggle-360-snapshot" => {
+                toggle_floater(&floaters, &mut panels, crate::panorama::PANORAMA_FLOATER_ID);
+            }
             // Enter or leave the flycam. Asked for as a request rather than
             // written on `CameraMode` here, because the switch is more than the
             // mode: `switch_camera_mode` seeds the rig's aim entering and
@@ -1847,6 +1860,10 @@ mod tests {
             (
                 "menu-bar-world > menu-bar-photo-and-video".to_owned(),
                 "toggle-phototools",
+            ),
+            (
+                "menu-bar-world > menu-bar-photo-and-video".to_owned(),
+                "toggle-360-snapshot",
             ),
             ("menu-bar-build".to_owned(), "toggle-build-tools"),
             ("menu-bar-build".to_owned(), "undo-objects"),

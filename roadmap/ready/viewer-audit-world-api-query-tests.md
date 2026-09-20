@@ -32,3 +32,19 @@ semantics), `MuteModel` (`:632`) and `CameraRig` (`:2263`).
 This is the prerequisite for [[viewer-audit-object-children-index]] — the
 children index changes exactly these query methods, and there is nothing pinning
 their current behaviour.
+
+## Partly done (2026-09-20)
+
+The hierarchy queries the children index rewrote are covered now, in
+`object_graph.rs`'s own `mod tests` (15 tests): `linkset_members`,
+`linkset_prim_count`, `linkset_root_of`, `remove_object` and its
+`tracked_descendants` walk, `attachment_roots_by_wearer`, `wearer_of`,
+`attachment_point_of`, `purge`, and `children_of` itself. Ten of them were
+written against the pre-index implementation and passed unchanged after it,
+which is what they were for.
+
+Still open, and the reason this task is not done: `minimap_objects`,
+`pick_summary`, `non_motion_blocks_changed` (the highest-consequence one — it
+decides whether a re-tessellation happens), the four extra-param parsers, and
+the four state machines `DerenderList` / `SelectionSet` / `MuteModel` /
+`CameraRig`.

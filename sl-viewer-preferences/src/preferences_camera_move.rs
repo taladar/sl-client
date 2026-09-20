@@ -447,11 +447,20 @@ fn refresh_movement_tuning(
 /// frame). Every FOV consumer (`render_priority`, the minimap compass, the
 /// session look-at) reads the live projection, so the change propagates by
 /// itself.
+///
+/// It yields entirely while a 360 capture holds the camera
+/// ([`CameraBorrowed`](sl_viewer_world_view::panorama::CameraBorrowed)): a cube
+/// face is 90° on a square target, and rewriting the lens from the preference
+/// every frame would undo that between the framing and the shutter.
 fn apply_camera_fov(
     settings: Option<Res<ViewerSettings>>,
     pinned: Option<Res<CameraFovOverride>>,
+    borrowed: Option<Res<sl_viewer_world_view::panorama::CameraBorrowed>>,
     mut cameras: Query<&mut Projection, With<ViewerCamera>>,
 ) {
+    if borrowed.is_some() {
+        return;
+    }
     let stored = match pinned {
         // A run that pinned a lens keeps it whatever the preference says.
         Some(pinned) => pinned.radians,

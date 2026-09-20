@@ -52,6 +52,7 @@ use bevy::ui_widgets::{SliderRange, SliderStep};
 use bevy::window::{PresentMode, PrimaryWindow};
 use sl_settings::{Scope, SettingValue};
 use sl_viewer_settings::env_pins::{EnvPinnedSettings, PinKind};
+use sl_viewer_world_api::SETTING_RENDER_RESOLUTION_DIVISOR;
 
 use crate::preferences::{
     spawn_pref_checkbox, spawn_pref_combo, spawn_pref_combo_with_anchor, spawn_pref_section,
@@ -323,6 +324,32 @@ pub(crate) fn shadow_map_size_options() -> Vec<(&'static str, SettingValue)> {
         ("preferences-shadow-map-2048", SettingValue::U32(2048)),
         ("preferences-shadow-map-4096", SettingValue::U32(4096)),
         ("preferences-shadow-map-8192", SettingValue::U32(8192)),
+    ]
+}
+
+/// The world-render-resolution combo's options: the divisor the 3D scene is
+/// rendered at before being stretched back over the view.
+///
+/// **A ladder rather than a slider, and powers of two rather than every
+/// integer.** What the divisor costs is not linear in it — the pixels the world
+/// costs go as `1/n²`, so `1 → 2` throws away three quarters of them while
+/// `8 → 9` throws away a fiftieth. A linear 1–16 control would spend most of
+/// its travel on steps nobody can see and cram the whole useful range into its
+/// first inch. Each rung here halves both axes, so one step is one consistent
+/// change in what the frame costs and in how soft it looks — and the reference
+/// viewer, which exposes this only as a `RenderResolutionDivisor` text field,
+/// offers no control shape worth copying instead.
+///
+/// The setting itself stays a free `u32` (`effective_divisor` accepts any
+/// value and an RLV `@setdebug_renderresolutiondivisor` may write one): this is
+/// the ladder the *tab* offers, not a restriction on the setting.
+pub(crate) fn resolution_divisor_options() -> Vec<(&'static str, SettingValue)> {
+    vec![
+        ("preferences-resolution-full", SettingValue::U32(1)),
+        ("preferences-resolution-half", SettingValue::U32(2)),
+        ("preferences-resolution-quarter", SettingValue::U32(4)),
+        ("preferences-resolution-eighth", SettingValue::U32(8)),
+        ("preferences-resolution-sixteenth", SettingValue::U32(16)),
     ]
 }
 
@@ -620,6 +647,17 @@ pub(crate) fn build_graphics_tab(commands: &mut Commands, panel: Entity) {
     );
 
     spawn_pref_section(commands, panel, "preferences-section-display");
+    // The bluntest quality lever there is: render the 3D world at 1/n and
+    // stretch it over the view, leaving this interface at full resolution.
+    // Owned by `sl_viewer_world_scene::resolution_divisor`, which registers it
+    // and points the world camera at the reduced target.
+    spawn_pref_combo(
+        commands,
+        panel,
+        "preferences-row-resolution-divisor",
+        SettingBinding::global(SETTING_RENDER_RESOLUTION_DIVISOR),
+        &resolution_divisor_options(),
+    );
     spawn_pref_checkbox(
         commands,
         panel,
@@ -941,11 +979,15 @@ mod tests {
         QualityTierControl, SETTING_FPS_LIMIT, SETTING_LIMIT_FRAMERATE, SETTING_RENDER_QUALITY,
         SETTING_SHADOW_CASCADES, SETTING_SHADOW_DETAIL, SETTING_SHADOW_MAP_SIZE, SETTING_VSYNC,
         apply_quality_tier, apply_shadow_detail, apply_shadow_map_size, apply_vsync, frame_sleep,
-        shadow_map_size_for,
+        resolution_divisor_options, shadow_map_size_for,
     };
     use crate::settings::ViewerSettings;
     use crate::sky::SceneSun;
     use crate::ui_combo::ComboChanged;
+
+    /// A boxed error so a test can use `?` rather than the disallowed
+    /// `unwrap` / `expect`.
+    type TestError = Box<dyn core::error::Error>;
 
     /// A headless app with the graphics (and tier-member) settings
     /// registered; each test adds the applier under test.
@@ -1178,5 +1220,57 @@ mod tests {
                 .ok(),
             Some(700.0)
         );
+    }
+
+    /// The world-render-resolution ladder is a *halving* ladder that starts at
+    /// full resolution and ends exactly at the divisor the scene layer will
+    /// honour.
+    ///
+    /// Each half of that matters. The rungs are powers of two because the cost
+    /// of a divisor goes as `1/n²` — an evenly-spaced ladder of integers would
+    /// put most of its rungs where nothing changes. And the last rung is
+    /// `MAX_RESOLUTION_DIVISOR` because a tab offering a value the clamp then
+    /// silently reduces is a control that lies: pick the last entry, and the
+    /// world must actually render at it.
+    #[test]
+    fn the_resolution_ladder_halves_and_ends_at_the_clamp() -> Result<(), TestError> {
+        let divisors: Vec<u32> = resolution_divisor_options()
+            .into_iter()
+            .map(|(_, value)| match value {
+                SettingValue::U32(divisor) => Ok(divisor),
+                other => Err(format!("a divisor option is not a U32: {other:?}")),
+            })
+            .collect::<Result<_, _>>()?;
+
+        assert_eq!(divisors.first().copied(), Some(1), "the ladder starts full");
+        assert_eq!(
+            divisors.last().copied(),
+            Some(sl_viewer_world_scene::resolution_divisor::MAX_RESOLUTION_DIVISOR),
+            "the last rung must be a divisor the scene layer will actually honour"
+        );
+        for pair in divisors.windows(2) {
+            let [lower, upper] = pair else {
+                return Err("windows(2) yielded a short slice".into());
+            };
+            assert_eq!(
+                upper,
+                &(lower * 2),
+                "each rung halves both axes: {divisors:?}"
+            );
+        }
+
+        // And every rung survives the scene layer's clamp untouched at an
+        // ordinary window size — the ladder and the clamp agreeing is the whole
+        // claim above.
+        for divisor in divisors {
+            assert_eq!(
+                sl_viewer_world_scene::resolution_divisor::effective_divisor(
+                    divisor,
+                    bevy::math::UVec2::new(1920, 1080)
+                ),
+                divisor
+            );
+        }
+        Ok(())
     }
 }

@@ -501,7 +501,7 @@ The pure blend/ease maths live in the new `sl-anim` `blend` module +
 ## P26.2 tree rendering — cross-cutting notes
 
 - **Atlas textures bleed through alpha masks at UV seams under our REPEAT
-  pipeline.** The viewer's object-texture path (`build_prim_image`) uploads
+  pipeline.** The viewer's object-texture path (`upload_decoded`) uploads
   every face texture with **repeat** addressing + bilinear filtering. The Linden
   tree texture is an **atlas** (trunk bark left half `u∈[0,0.5]`, leaf cards
   right `u∈[0.52,0.98]`) with transparent outer edges, so a face sampling
@@ -592,9 +592,9 @@ The pure blend/ease maths live in the new `sl-anim` `blend` module +
   id. One component + one query; no builder signature churn.
 
 - **Colour-space split matters:** base-colour/emissive maps upload sRGB
-  (`Rgba8UnormSrgb`), normal/metallic-roughness upload **linear** (`Rgba8Unorm`)
-  — a separate `build_pbr_image(srgb)` (the shared `to_bevy_image` is
-  sRGB-only). The decode (raw RGBA8) is shared with the diffuse pipeline via
+  (`TextureUpload::COLOR`), normal/metallic-roughness upload **linear**
+  (`TextureUpload::DATA`) — `pbr_map_upload(srgb)` picks between them. The
+  decode (raw RGBA8) is shared with the diffuse pipeline via
   `TextureManager`; only the GPU image format differs, so `materials.rs` keeps
   its own `(TextureKey, srgb)` image cache. SL packs ORM in the
   metallic-roughness map (red=occlusion), so that one image is set on **both**

@@ -166,14 +166,15 @@ pub(crate) fn scene_depth_image(width: u32, height: u32) -> Image {
 }
 
 /// The `1×1` placeholder the water material is created with, before
-/// [`size_water_scene_depth`] has a camera to size the real one from — and the
+/// `size_water_scene_depth` has a camera to size the real one from — and the
 /// depth an offline fixture scene keeps for good, having no copy pass to fill one.
 ///
 /// It is `1×1` so that it can never be mistaken for a view's depth: the shader
 /// reads the bound depth only when it measures the same as the view being shaded,
 /// so the placeholder rejects no refraction sample and the sea looks exactly as it
 /// did before this pass existed.
-pub(crate) fn placeholder_scene_depth_image() -> Image {
+#[must_use]
+pub fn placeholder_scene_depth_image() -> Image {
     scene_depth_image(1, 1)
 }
 

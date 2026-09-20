@@ -43,7 +43,7 @@ use sl_client_bevy::{
     AssetKey, AssetType, Command, FaceMaterialPut, GltfAlphaMode, GltfMaterial, GltfTexture,
     GltfTextureTransform, InventoryType, LegacyMaterial, MaterialOverride, MaterialOverrideUpdate,
     ObjectKey, SlCommand, TextureFace, TextureKey, TextureOverride, TextureTransformOverride, Uuid,
-    encode_override_gltf_json,
+    encode_override_gltf_json, upload_decoded,
 };
 
 use crate::edit_texture::{
@@ -56,7 +56,7 @@ use crate::gizmos::{EditPerm, perm_notice};
 use crate::intents::LocalChatNotice;
 use crate::intents::TexturePicked;
 use crate::legacy_materials::{
-    LegacyMaterialManager, apply_legacy_scalars, build_linear_image, build_srgb_image,
+    LegacyMaterialManager, NORMAL_MAP_UPLOAD, SPECULAR_MAP_UPLOAD, apply_legacy_scalars,
     preview_legacy_material,
 };
 use crate::material_preview::MaterialPreview;
@@ -1952,11 +1952,12 @@ fn resolve_preview_map(
         }
         return false;
     };
-    let image = if srgb {
-        build_srgb_image(&decoded)
+    let upload = if srgb {
+        SPECULAR_MAP_UPLOAD
     } else {
-        build_linear_image(&decoded)
+        NORMAL_MAP_UPLOAD
     };
+    let image = upload_decoded(&decoded, upload);
     *cache = Some(images.add(image));
     true
 }

@@ -322,8 +322,8 @@ pub use crate::terrain::{
     TerrainMaterialPlugin, TerrainOwnership,
 };
 pub use crate::textures::{
-    BevyTextureFetcher, planar_texgen_uv, texture_face_uv_transform, texture_uv_transform,
-    to_bevy_image,
+    BevyTextureFetcher, ColorSpace, TextureUpload, planar_texgen_uv, texture_face_uv_transform,
+    texture_uv_transform, upload_decoded, upload_pixels,
 };
 pub use crate::tree::to_bevy_tree_mesh;
 #[cfg(feature = "bevy_pbr")]

@@ -35,21 +35,19 @@
 use std::collections::{HashMap, HashSet};
 
 use bevy::app::Propagate;
-use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::math::Affine2;
 use bevy::mesh::morph::MeshMorphWeights;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
 use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
-use bytes::Bytes;
 use sl_client_bevy::{
     AgentKey, AnimationPose, BakeRegion, BaseMesh, BaseMeshSkin, BevySkeleton, BodyPhysics,
-    BodySizeMetrics, CoarseLocation, Command, DecodedTexture, DiscardLevel, JointOverrides, Layer,
-    MaskTexture, MeshSkin, MorphWeights, Object, PartMorphMask, RUNTIME_MORPH_PARAMS, RegionHandle,
+    BodySizeMetrics, CoarseLocation, Command, DecodedTexture, JointOverrides, Layer, MaskTexture,
+    MeshSkin, MorphWeights, Object, PartMorphMask, RUNTIME_MORPH_PARAMS, RegionHandle,
     ResolvedParams, SkeletalDeformations, SlCommand, SlEvent, SlIdentity, SlSessionEvent,
-    TextureEntry, TextureKey, VolumeDeformations, avatar_texture, composite_region,
-    joint_position_overrides, pcode, to_bevy_base_mesh, to_bevy_image, to_bevy_morphed_mesh,
-    to_bevy_runtime_morph_targets,
+    TextureEntry, TextureKey, TextureUpload, VolumeDeformations, avatar_texture, composite_region,
+    joint_position_overrides, pcode, to_bevy_base_mesh, to_bevy_morphed_mesh,
+    to_bevy_runtime_morph_targets, upload_decoded, upload_pixels,
 };
 
 use crate::bake_inputs::OwnBakeInputs;
@@ -384,23 +382,9 @@ fn uv_grid_image() -> Image {
         }
     }
     let width = u32::try_from(size).unwrap_or(0);
-    let decoded = DecodedTexture::new(
-        width,
-        width,
-        4,
-        DiscardLevel::FULL,
-        Bytes::from(pixels),
-        None,
-    );
-    let mut image = to_bevy_image(&decoded);
-    // Nearest + repeat: crisp grid lines, and tiling if a UV strays outside [0, 1].
-    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-        address_mode_u: ImageAddressMode::Repeat,
-        address_mode_v: ImageAddressMode::Repeat,
-        address_mode_w: ImageAddressMode::Repeat,
-        ..ImageSamplerDescriptor::nearest()
-    });
-    image
+    // `crisp`: nearest-filtered, so the grid lines stay hard-edged under
+    // magnification rather than blurring into the gradient.
+    upload_pixels(width, width, pixels, TextureUpload::COLOR.crisp())
 }
 
 /// A marker on one avatar attachment-point node (P16.2) — the node parented to a
@@ -2663,7 +2647,7 @@ impl AvatarBakeMaterials {
                 decoded.width, decoded.height, decoded.components, decoded.discard_level
             );
         }
-        let handle = images.add(to_bevy_image(decoded));
+        let handle = images.add(upload_decoded(decoded, TextureUpload::COLOR));
         let _inserted = self.images.insert(id, handle.clone());
         let _classified = self.alpha.insert(id, alpha);
         Some((handle, alpha))
@@ -3174,7 +3158,11 @@ fn run_local_bake_job(job: &LocalBakeJob) -> CompositedRegions {
             continue;
         };
         let alpha = classify_bake_alpha(&decoded);
-        regions.push((region.slot(), to_bevy_image(&decoded), alpha));
+        regions.push((
+            region.slot(),
+            upload_decoded(&decoded, TextureUpload::COLOR),
+            alpha,
+        ));
         summary.push(format!(
             "{}={} layer(s)/{alpha:?}",
             region.name(),

@@ -459,8 +459,21 @@ impl Plugin for CameraPlugin {
                         .in_set(sl_viewer_world_api::WorldPhase::CameraOrbited),
                     aim_look.run_if(resource_equals(CameraMode::Mouselook)),
                     focus_on_object,
-                    drive_flycam.run_if(resource_equals(CameraMode::Flycam)),
-                    position_camera.in_set(sl_viewer_world_api::WorldPhase::CameraPositioned),
+                    // The flycam writes the camera `Transform` itself rather
+                    // than through `position_camera`, so it needs the same
+                    // stand-aside while a 360 capture owns the pose.
+                    drive_flycam
+                        .run_if(resource_equals(CameraMode::Flycam))
+                        .run_if(not(resource_exists::<crate::panorama::CameraBorrowed>)),
+                    // Not while a 360 capture owns the camera: a panorama's six
+                    // faces are rotations about a fixed eye point, and a driver
+                    // that kept writing the follow pose would overwrite each
+                    // face the frame after it was framed. The capture writes the
+                    // pose inside this same set, so everything that follows the
+                    // viewpoint still reads a settled one.
+                    position_camera
+                        .in_set(sl_viewer_world_api::WorldPhase::CameraPositioned)
+                        .run_if(not(resource_exists::<crate::panorama::CameraBorrowed>)),
                 )
                     .chain()
                     // Run after the avatar dead-reckoner so `position_camera` reads

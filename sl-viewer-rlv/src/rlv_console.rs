@@ -565,7 +565,7 @@ fn submit_console_line(
 ) {
     let crate::intake::RlvRun {
         identity,
-        settings,
+        mut settings,
         facts,
         mut controls,
         mut environment,
@@ -615,7 +615,7 @@ fn submit_console_line(
                     .and_then(|identity| identity.agent_id)
                     .map_or_else(Uuid::nil, |agent| agent.uuid());
                 let mut ext = ViewerRlvExt {
-                    settings: settings.as_deref(),
+                    settings: settings.as_deref_mut(),
                     facts: facts.as_deref().copied().unwrap_or_default(),
                 };
                 let mut lines = Vec::new();
@@ -1017,17 +1017,22 @@ mod tests {
         Ok(())
     }
 
-    /// This viewer has no `RenderResolutionDivisor`, so the write it is asked
-    /// for is refused rather than silently swallowed.
+    /// With no settings store behind it — which is every test here, and any
+    /// harness app that never built one — the writable row reads as "not
+    /// reduced" and the write is refused rather than silently swallowed.
+    ///
+    /// The store-backed half of this row (the write lands, and the value a
+    /// script wrote is kept out of the user's settings file) is pinned where
+    /// the source lives, in `sl_viewer_world_api::rlv`.
     #[test]
-    fn a_write_this_viewer_cannot_do_is_refused() -> Result<(), TestError> {
+    fn a_write_with_no_settings_store_is_refused() -> Result<(), TestError> {
         let agent = Uuid::from_u128(1);
         let mut state = RlvState::new();
         let mut lines = Vec::new();
         let mut source = ext(RlvExtFacts::default());
         assert_eq!(
             source.debug_value(RlvDebugSetting::RenderResolutionDivisor),
-            None
+            Some(RlvDebugValue::U32(1))
         );
         assert_eq!(
             source.debug_value(RlvDebugSetting::WindLightUseAtmosShaders),

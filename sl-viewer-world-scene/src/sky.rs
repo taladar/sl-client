@@ -60,15 +60,14 @@ use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bevy::asset::RenderAssetUsages;
-use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::light::{CascadeShadowConfig, CascadeShadowConfigBuilder, NotShadowCaster};
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{
-    CloudMaterial, CloudParams, Color as SlColor, ColorAlpha, DecodedTexture, Glow, SkyLighting,
-    SkyLightingMode, SkyMaterial, SkyParams, SkySettings, StarMaterial, StarParams,
-    SunDiscMaterial, SunDiscParams, TextureKey, to_bevy_image, write_sky_lighting,
+    CloudMaterial, CloudParams, Color as SlColor, ColorAlpha, Glow, SkyLighting, SkyLightingMode,
+    SkyMaterial, SkyParams, SkySettings, StarMaterial, StarParams, SunDiscMaterial, SunDiscParams,
+    TextureKey, TextureUpload, upload_decoded, write_sky_lighting,
 };
 
 use crate::environment::EnvironmentState;
@@ -138,13 +137,13 @@ impl Plugin for SkyPlugin {
 /// clip plane by `sky.wgsl` (a skybox backdrop, occluded by real geometry at any
 /// altitude), so this radius only needs to enclose the camera and stay comfortably
 /// within the camera's far plane (4096 m) so the sphere is never frustum-culled.
-pub(crate) const SKY_DOME_RADIUS: f32 = 3000.0;
+pub const SKY_DOME_RADIUS: f32 = 3000.0;
 
 /// The scene directional light's illuminance (lux). Held constant; the sky's
 /// computed sun / moon diffuse colour carries the day↔night brightness change
 /// (a night moon diffuse is a fraction of the daytime sun diffuse), so the light
 /// dims naturally as the colour darkens without re-scaling the illuminance.
-pub(crate) const SCENE_LIGHT_ILLUMINANCE: f32 = 10_000.0;
+pub const SCENE_LIGHT_ILLUMINANCE: f32 = 10_000.0;
 
 /// Maps the sky's ambient colour luminance to the Bevy ambient-light brightness
 /// (lux). The reference default ambient (`0.25` grey) lands at a soft fill.
@@ -162,7 +161,7 @@ const AMBIENT_BRIGHTNESS_SCALE: f32 = 400.0;
 /// caller's write-on-change guard compare the sky's value against a scaled one, so
 /// the guard misses and the resource is dirty every frame. Neither showed while the
 /// scale sat at its idempotent `0.0` default.
-fn sky_ambient_light(ambient: [f32; 3], probe_scale: f32) -> (Color, f32) {
+pub(crate) fn sky_ambient_light(ambient: [f32; 3], probe_scale: f32) -> (Color, f32) {
     let luminance = 0.2126 * ambient[0] + 0.7152 * ambient[1] + 0.0722 * ambient[2];
     let peak = ambient[0].max(ambient[1]).max(ambient[2]).max(1.0e-4);
     let color = Color::linear_rgb(ambient[0] / peak, ambient[1] / peak, ambient[2] / peak);
@@ -197,7 +196,8 @@ pub fn shadow_cascade_count() -> Option<usize> {
 /// receive the sun, while the first (near) cascade is kept tight so avatar-close
 /// detail gets most of the shadow-map resolution. The reference
 /// `LLPipeline::renderShadow` uses four split sun cascades likewise.
-pub(crate) fn shadow_cascades() -> CascadeShadowConfig {
+#[must_use]
+pub fn shadow_cascades() -> CascadeShadowConfig {
     shadow_cascades_for(shadow_cascade_count().unwrap_or(4))
 }
 
@@ -276,10 +276,10 @@ pub(crate) const DISC_DISTANCE: f32 = 2000.0;
 const HEAVENLY_BODY_FACTOR: f32 = 0.1;
 
 /// The reference sun-disc radius (`SUN_DISK_RADIUS`, `llvosky.cpp`).
-pub(crate) const SUN_DISK_RADIUS: f32 = 0.5;
+pub const SUN_DISK_RADIUS: f32 = 0.5;
 
 /// The reference moon-disc radius (`MOON_DISK_RADIUS = SUN_DISK_RADIUS * 0.9`).
-pub(crate) const MOON_DISK_RADIUS: f32 = 0.45;
+pub const MOON_DISK_RADIUS: f32 = 0.45;
 
 /// The radius of the cloud dome, in metres — the reference `LLSettingsSky::
 /// DOME_RADIUS`. The cloud layer's *depth* is forced to the far clip plane by
@@ -332,10 +332,10 @@ const STAR_COUNT: usize = 1000;
 /// The radius of the star sphere, in metres, at which the star quads sit for
 /// screen projection. Their *depth* is forced to the far clip plane by `stars.wgsl`
 /// (a skybox backdrop, occluded by real geometry at any altitude), so this radius
-/// only sets the directional layout and — with [`REFERENCE_DOME_RADIUS`] — the
+/// only sets the directional layout and — with `REFERENCE_DOME_RADIUS` — the
 /// per-star screen size; it is kept well inside the camera's 4096 m far plane so
 /// the sphere is not frustum-culled.
-pub(crate) const STAR_DOME_RADIUS: f32 = 2900.0;
+pub const STAR_DOME_RADIUS: f32 = 2900.0;
 
 /// The reference sky-dome radius (`LLSettingsSky::DOME_RADIUS`), at which the
 /// reference sizes the star quads (`sc = 16 + frand * 20`). Our field sits at the
@@ -485,7 +485,7 @@ pub(crate) struct StarState {
 /// atmosphere yields.
 ///
 /// Extracted because **three systems were deriving it, identically**:
-/// [`drive_sky`], [`drive_clouds`] and [`drive_sun_moon_discs`] each recomputed the
+/// `drive_sky`, `drive_clouds` and `drive_sun_moon_discs` each recomputed the
 /// sun and moon directions, the up tests, the active light direction, the glow
 /// ladder and the clamped light-norm from the same `SkySettings` — the comments in
 /// two of them said "as in `drive_sky`", which is a copy admitting it is one. Three
@@ -494,44 +494,45 @@ pub(crate) struct StarState {
 /// It is also what makes a sky **reachable without a session**: the derivation used
 /// to be welded to `Res<EnvironmentState>` and a camera query, so the only way to
 /// get a sky's uniforms was to be inside a running viewer. Now it is a function of
-/// a `SkySettings`, which is a plain value — so `crate::render_scene`'s four
+/// a `SkySettings`, which is a plain value — so `sl_viewer_render_fixtures`'s four
 /// time-of-day scenes render the real atmosphere rather than four hand-copied
 /// uniform blocks.
-pub(crate) struct ResolvedSky {
+#[derive(Debug)]
+pub struct ResolvedSky {
     /// The atmosphere shader's uniform block.
-    pub(crate) params: SkyParams,
+    pub params: SkyParams,
     /// The clamped light-norm the shaders dot against (`getClampedLightNorm`).
-    pub(crate) lightnorm: Vec3,
+    pub lightnorm: Vec3,
     /// The sun's direction, in Bevy space.
-    pub(crate) sun_dir: Vec3,
+    pub sun_dir: Vec3,
     /// The moon's direction, in Bevy space.
-    pub(crate) moon_dir: Vec3,
+    pub moon_dir: Vec3,
     /// Whether the sun is above the horizon (`getIsSunUp`).
-    pub(crate) sun_up: bool,
+    pub sun_up: bool,
     /// Whether the moon is above the horizon (`getIsMoonUp`).
-    pub(crate) moon_up: bool,
+    pub moon_up: bool,
     /// `1.0` by day, `0.0` by night — the shaders' `sun_up_factor`.
-    pub(crate) sun_up_factor: f32,
+    pub sun_up_factor: f32,
     /// The sun/moon glow factor (`getSunMoonGlowFactor`).
-    pub(crate) glow_factor: f32,
+    pub glow_factor: f32,
     /// The active light's direction: the sun if it is up, else the moon if it is,
     /// else straight down (`getLightDirection`).
-    pub(crate) light_dir: Vec3,
+    pub light_dir: Vec3,
     /// The active body's atmospheric diffuse colour — the scene's directional
     /// light.
-    pub(crate) diffuse: [f32; 3],
+    pub diffuse: [f32; 3],
     /// The sky's total ambient colour.
-    pub(crate) ambient: [f32; 3],
+    pub ambient: [f32; 3],
     /// The atmospheric sun colour a *surface* shader is lit by
-    /// (`calcAtmosphericVarsLinear`'s `sunlit`) — see [`atmospheric_sunlit`], and
+    /// (`calcAtmosphericVarsLinear`'s `sunlit`) — see `atmospheric_sunlit`, and
     /// note that it is **not** [`diffuse`](Self::diffuse).
-    pub(crate) sunlit: Vec3,
+    pub sunlit: Vec3,
     /// The per-metre haze attenuation coefficient a surface shader reproduces
-    /// `atten` from — see [`haze_attenuation_coefficient`].
-    pub(crate) haze_atten_coef: Vec3,
+    /// `atten` from — see `haze_attenuation_coefficient`.
+    pub haze_atten_coef: Vec3,
     /// What every lit legacy surface — prim faces, avatars, trees, terrain — is lit
-    /// by, as the shared sky-lighting texture carries it. See [`surface_sky_lighting`].
-    pub(crate) surface_lighting: SkyLighting,
+    /// by, as the shared sky-lighting texture carries it. See `surface_sky_lighting`.
+    pub surface_lighting: SkyLighting,
 }
 
 /// The sun's and the moon's directions in Bevy space, the reference's own
@@ -778,7 +779,8 @@ fn haze_attenuation_coefficient(params: &SkyParams) -> Vec3 {
 
 /// Resolve one sky frame into everything the scene needs from it. See
 /// [`ResolvedSky`].
-pub(crate) fn resolve_sky(sky: &SkySettings) -> ResolvedSky {
+#[must_use]
+pub fn resolve_sky(sky: &SkySettings) -> ResolvedSky {
     // Sun / moon directions in Bevy space, and which body is up (the reference
     // tests the Second Life up component, which maps to Bevy `y`).
     let (sun_dir, moon_dir) = body_directions(sky);
@@ -1290,7 +1292,7 @@ pub(crate) fn apply_sky_textures(
             // default moisture / ice of 0 makes it a no-op anyway).
             continue;
         };
-        let handle = images.add(to_bevy_image(decoded));
+        let handle = images.add(upload_decoded(decoded, TextureUpload::COLOR));
         let Some(mut material) = materials.get_mut(&state.material) else {
             return;
         };
@@ -1594,7 +1596,7 @@ pub(crate) fn apply_disc_textures(
                 texel(edge_w, edge_h),
             );
         }
-        let handle = images.add(to_bevy_image(decoded));
+        let handle = images.add(upload_decoded(decoded, TextureUpload::COLOR));
         let target = if is_sun {
             &state.sun_material
         } else {
@@ -1799,7 +1801,7 @@ pub(crate) fn apply_cloud_textures(
                 decoded.width, decoded.height, decoded.components
             );
         }
-        let handle = images.add(cloud_noise_image(decoded));
+        let handle = images.add(upload_decoded(decoded, CLOUD_NOISE_UPLOAD));
         if let Some(mut material) = materials.get_mut(&state.material) {
             // Both noise slots share the id until the day cycle (P22.6) drives a
             // separate next-frame texture and the blend factor between them.
@@ -1809,43 +1811,19 @@ pub(crate) fn apply_cloud_textures(
     }
 }
 
-/// Upload a decoded cloud-noise texture: **linear**, and tiling (R18).
+/// How the cloud-noise texture is uploaded: **linear**
+/// ([`TextureUpload::DATA`]), because the noise is *data*, not colour (R18).
 ///
-/// Both halves are load-bearing. The noise is *data*, not colour: `clouds.wgsl`
-/// ports `cloudsF.glsl`, whose density term is `cloudNoise(uv).x - 0.5` on the
-/// raw byte values — the reference binds the noise as a plain `GL_RGBA8`
-/// texture (`llvosky.cpp` even calls `setExplicitFormat(GL_RGBA8, GL_RGBA)`)
-/// and its shader has no `srgb_to_linear`. Uploading through `to_bevy_image`
-/// (which is `Rgba8UnormSrgb`-only, the same trap the normal-map uploaders
-/// document) had the GPU sRGB-decode every sample, pushing a mid-gray byte 128
-/// down to 0.216: with the default cloud texture only ~9% of texels cleared the
-/// `alpha1 > 0` density threshold instead of ~46%, and the survivors clustered
-/// in a few isolated blobs — the "clouds in one quadrant, rest empty" defect.
-///
-/// The sampler must repeat because `cloud_scale` magnifies the UVs and the
-/// scroll offsets push them well outside `[0, 1]` (the reference samples with
-/// `GL_REPEAT`); Bevy's default clamp-to-edge would smear the edge texel across
-/// the whole layer.
-fn cloud_noise_image(decoded: &DecodedTexture) -> Image {
-    let mut image = Image::new(
-        Extent3d {
-            width: decoded.width,
-            height: decoded.height,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        decoded.pixels.to_vec(),
-        TextureFormat::Rgba8Unorm,
-        RenderAssetUsages::default(),
-    );
-    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-        address_mode_u: ImageAddressMode::Repeat,
-        address_mode_v: ImageAddressMode::Repeat,
-        address_mode_w: ImageAddressMode::Repeat,
-        ..ImageSamplerDescriptor::linear()
-    });
-    image
-}
+/// `clouds.wgsl` ports `cloudsF.glsl`, whose density term is
+/// `cloudNoise(uv).x - 0.5` on the raw byte values — the reference binds the
+/// noise as a plain `GL_RGBA8` texture (`llvosky.cpp` even calls
+/// `setExplicitFormat(GL_RGBA8, GL_RGBA)`) and its shader has no
+/// `srgb_to_linear`. Uploading it as a picture had the GPU sRGB-decode every
+/// sample, pushing a mid-gray byte 128 down to 0.216: with the default cloud
+/// texture only ~9% of texels cleared the `alpha1 > 0` density threshold instead
+/// of ~46%, and the survivors clustered in a few isolated blobs — the "clouds in
+/// one quadrant, rest empty" defect.
+const CLOUD_NOISE_UPLOAD: TextureUpload = TextureUpload::DATA;
 
 /// Startup: build the star-quad mesh, spawn the star field (with its material,
 /// initially hidden until an environment selects a sky frame), and register
@@ -1969,7 +1947,7 @@ pub(crate) fn apply_star_textures(
             // The fetch/decode failed; the field keeps its (transparent) placeholder.
             continue;
         };
-        let handle = images.add(to_bevy_image(decoded));
+        let handle = images.add(upload_decoded(decoded, TextureUpload::COLOR));
         if let Some(mut material) = materials.get_mut(&state.material) {
             material.diffuse = handle;
         }
@@ -1994,8 +1972,8 @@ fn calc_cloud_phi(t: f32) -> f32 {
 
 /// Build the cloud-dome mesh: a faithful port of the reference `LLVOWLSky` sky-dome
 /// tessellation used for clouds (`buildStripsBuffer`). A grid of
-/// [`CLOUD_DOME_STACKS`]×[`CLOUD_DOME_SLICES`] vertices over the zenith cap
-/// ([`calc_cloud_phi`]), each carrying the reference **baked** planar cloud
+/// `CLOUD_DOME_STACKS`×`CLOUD_DOME_SLICES` vertices over the zenith cap
+/// (`calc_cloud_phi`), each carrying the reference **baked** planar cloud
 /// texcoord `((-z0 + 1) / 2, (-x0 + 1) / 2)` of its unit dome direction.
 /// `clouds.wgsl` samples the cloud texture through this interpolated UV, so the
 /// projection matches the reference instead of being derived per fragment across
@@ -2008,7 +1986,8 @@ fn calc_cloud_phi(t: f32) -> f32 {
 /// instead turns the whole layer a quarter-turn about the zenith: the noise is laid
 /// out on other ground, and a west wind carries the clouds north
 /// (`viewer-cloud-noise-scale-divergence`).
-pub(crate) fn build_cloud_dome_mesh() -> Mesh {
+#[must_use]
+pub fn build_cloud_dome_mesh() -> Mesh {
     let stride = CLOUD_DOME_SLICES.saturating_add(1);
     let vert_count = CLOUD_DOME_STACKS.saturating_add(1).saturating_mul(stride);
     let mut positions: Vec<[f32; 3]> = Vec::with_capacity(vert_count);
@@ -2091,12 +2070,13 @@ pub(crate) fn build_cloud_dome_mesh() -> Mesh {
     .with_inserted_indices(Indices::U32(indices))
 }
 
-/// Build the star-field mesh: [`STAR_COUNT`] small camera-facing quads scattered
+/// Build the star-field mesh: `STAR_COUNT` small camera-facing quads scattered
 /// over the upper hemisphere of a sphere of radius [`STAR_DOME_RADIUS`], each with
 /// a per-star near-white colour (the reference `LLVOWLSky::initStars` /
 /// `updateStarGeometry`). Deterministic (fixed-seed PRNG) so the field is stable
 /// across runs.
-pub(crate) fn build_star_mesh() -> Mesh {
+#[must_use]
+pub fn build_star_mesh() -> Mesh {
     let mut rng = StarRng::new(STAR_RNG_SEED);
     let mut positions: Vec<[f32; 3]> = Vec::with_capacity(STAR_COUNT.saturating_mul(4));
     let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(STAR_COUNT.saturating_mul(4));
@@ -2219,14 +2199,10 @@ impl StarRng {
 }
 
 /// Build the billboard transform for a heavenly-body disc: a camera-facing quad
-/// at [`DISC_DISTANCE`] along `dir`, oriented and sized like the reference
+/// at `DISC_DISTANCE` along `dir`, oriented and sized like the reference
 /// `LLVOSky::updateHeavenlyBodyGeometry` (with its near-horizon enlargement).
-pub(crate) fn disc_transform(
-    camera_pos: Vec3,
-    dir: Vec3,
-    scale: f32,
-    disk_radius: f32,
-) -> Transform {
+#[must_use]
+pub fn disc_transform(camera_pos: Vec3, dir: Vec3, scale: f32, disk_radius: f32) -> Transform {
     // Component-wise so the workspace `arithmetic_side_effects` lint (which fires on
     // the glam vector operators) stays happy: `camera_pos + dir * DISC_DISTANCE`.
     let translation = Vec3::new(
@@ -2362,7 +2338,8 @@ pub(crate) fn default_sky_params() -> SkyParams {
 /// direction, day/night factor, glow factor, and accumulated scroll offset. The
 /// scroll is folded into `cloud_pos_density1` the way the reference
 /// `LLSettingsVOSky::applySpecial` does (the x offset negated).
-pub(crate) fn cloud_params(
+#[must_use]
+pub fn cloud_params(
     sky: &SkySettings,
     lightnorm: Vec3,
     sun_up_factor: f32,
@@ -2504,14 +2481,19 @@ fn calculate_light_settings(sky: &SkySettings, light_up: f32, moon_up: bool) -> 
 /// already snapped to (`1 / SHADOW_MAP_SIZE` radians), so the day cycle steps no
 /// more coarsely than the light direction the renderer already quantises — while
 /// a four-hour day resamples every 0.44 s instead of every frame.
-const DAY_POSITION_STEPS: f64 = 32768.0;
+///
+/// Crate-visible rather than module-private so `crate::day_cycle_fixture` can
+/// size its per-frame step as a fraction of one cell, which is the unit its
+/// assertions are stated in.
+pub(crate) const DAY_POSITION_STEPS: f64 = 32768.0;
 
 /// The normalised day-cycle position (`0.0..=1.0`) for the current region time,
 /// the reference `LLEnvironment::convert_time_to_position`: `fmod(now +
 /// day_offset, day_length) / day_length` over the Unix clock, quantised to
 /// `DAY_POSITION_STEPS` (32768) steps per day so the sampled environment settles
-/// between steps. The constant stays private — this function is public because
-/// the scene dump reports the position it returns, not to publish the tuning.
+/// between steps. The constant stays crate-private — this function is public
+/// because the scene dump reports the position it returns, not to publish the
+/// tuning.
 ///
 /// A pinned position ([`EnvironmentState::pinned_day_position`], from the
 /// `SL_VIEWER_SKY_DAY_POSITION` override in `RenderOverrides`) wins instead, so
@@ -2572,7 +2554,8 @@ const fn glow_vec(glow: Glow) -> Vec3 {
 
 /// A 1×1 transparent-black placeholder [`Image`] for an overlay texture still in
 /// flight.
-pub(crate) fn placeholder_image() -> Image {
+#[must_use]
+pub fn placeholder_image() -> Image {
     Image::new(
         Extent3d {
             width: 1,
@@ -2607,19 +2590,11 @@ mod tests {
     use sl_client_bevy::{EnvironmentSettings, SkyLighting, SkyLightingMode};
     use sl_viewer_kit::sky_presets::{MIDDAY, MIDNIGHT, SUNRISE, SUNSET, sky_settings_from};
 
-    /// A region on a live four-hour day cycle: the legacy WindLight default with
-    /// the four ported presets keyframed across the day, so the blended sky
-    /// actually moves as the day position advances (the shipped single-frame
-    /// default would return the same noon frame at every position and prove
-    /// nothing). It is also the cycle `sl-crosscheck` dresses a region with when a
-    /// run pins the day position.
-    fn moving_day_cycle() -> EnvironmentSettings {
-        let mut settings = EnvironmentSettings::legacy_windlight_default();
-        settings.day_length = 14400;
-        settings.day_offset = 0;
-        sl_viewer_kit::sky_presets::install_preset_day_cycle(&mut settings);
-        settings
-    }
+    // The region on a live four-hour day cycle these tests sample. It lives in
+    // `crate::day_cycle_fixture`, where the app that steps it does: the pure
+    // assertions here and the app-level ones there have to be sampling the same
+    // cycle or neither says anything about the other.
+    use crate::day_cycle_fixture::moving_day_cycle;
 
     /// The surface lighting `drive_sky` would write at `now` (seconds since the
     /// Unix epoch) for a ground-level camera. `None` only if the cycle defines no

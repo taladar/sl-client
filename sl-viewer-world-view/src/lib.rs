@@ -40,6 +40,7 @@ pub mod input_context;
 pub mod media_controls;
 pub mod media_prim;
 pub mod movement;
+pub mod panorama;
 pub mod physics;
 pub mod quiescence;
 pub mod scene_dump;

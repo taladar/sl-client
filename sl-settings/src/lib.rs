@@ -375,6 +375,50 @@ mod tests {
         Ok(())
     }
 
+    /// Persistence can be switched off after registration, and the setting then
+    /// behaves exactly like a transient one — which is what the RLV
+    /// `@setdebug_<name>=force` write site needs: the value a script wrote is
+    /// live in this session and absent from the user's file.
+    #[test]
+    fn set_persist_keeps_a_script_written_value_out_of_the_file() -> Result<(), TestError> {
+        let dir = tempdir()?;
+        let path = dir.join("global.toml");
+
+        let mut store = SettingsStore::new();
+        store.register("Divisor", SettingValue::U32(1), "a persisted knob")?;
+        store.set(Scope::Global, "Divisor", SettingValue::U32(4))?;
+        store.set_persist("Divisor", false)?;
+        // The effective value is unchanged — only the file is spared.
+        assert_eq!(store.get_u32("Divisor")?, 4);
+        store.save_scope(Scope::Global, &path)?;
+
+        let mut reloaded = SettingsStore::new();
+        reloaded.register("Divisor", SettingValue::U32(1), "a persisted knob")?;
+        assert!(reloaded.load_scope(Scope::Global, &path)?);
+        assert_eq!(reloaded.get_u32("Divisor")?, 1);
+
+        // And it can be switched back on, which is how the write site restores
+        // persistence once the stored value is the default again.
+        store.set_persist("Divisor", true)?;
+        store.save_scope(Scope::Global, &path)?;
+        let mut again = SettingsStore::new();
+        again.register("Divisor", SettingValue::U32(1), "a persisted knob")?;
+        assert!(again.load_scope(Scope::Global, &path)?);
+        assert_eq!(again.get_u32("Divisor")?, 4);
+        Ok(())
+    }
+
+    /// Switching persistence on a name the store never heard of is an error,
+    /// not a silent no-op.
+    #[test]
+    fn set_persist_rejects_an_unregistered_name() {
+        let mut store = SettingsStore::new();
+        assert!(matches!(
+            store.set_persist("NoSuchSetting", false),
+            Err(SettingError::UnknownSetting(name)) if name == "NoSuchSetting"
+        ));
+    }
+
     /// Loading a scope from an absent file is a no-op, not an error.
     #[test]
     fn loading_missing_file_is_a_no_op() -> Result<(), TestError> {

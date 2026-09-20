@@ -41,14 +41,12 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use bevy::asset::RenderAssetUsages;
-use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{
     ATTRIBUTE_TERRAIN_WEIGHTS, DETAIL_TILE_METRES, RegionHandle, RegionIdentity,
     SKY_LIGHTING_IMAGE, SlEvent, SlIdentity, SlSessionEvent, TerrainMaterial, TerrainOwnership,
-    TerrainPatch, TextureKey, Vector, to_bevy_image,
+    TerrainPatch, TextureKey, TextureUpload, Vector, upload_decoded, upload_pixels,
 };
 
 use sl_terrain::TerrainComposition;
@@ -361,7 +359,7 @@ pub fn update_terrain(
 ///
 /// The material binds the shared sky-lighting texture rather than carrying the
 /// sky itself, so a material created at any moment is lit by the current sky.
-fn ensure_region(
+pub(crate) fn ensure_region(
     state: &mut TerrainState,
     textures: &mut TerrainTextures,
     region: RegionHandle,
@@ -625,13 +623,7 @@ fn apply_detail_texture(
             // The fetch/decode failed; the region keeps the flat placeholder.
             return;
         };
-        let mut image = to_bevy_image(decoded);
-        image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-            address_mode_u: ImageAddressMode::Repeat,
-            address_mode_v: ImageAddressMode::Repeat,
-            ..ImageSamplerDescriptor::linear()
-        });
-        slot.insert(images.add(image));
+        slot.insert(images.add(upload_decoded(decoded, TextureUpload::COLOR)));
         debug!("built tiling image for terrain detail texture {id}");
     }
     let regions: Vec<RegionHandle> = state.regions.keys().copied().collect();
@@ -707,20 +699,16 @@ fn patch_transform(
 /// A 1×1 olive placeholder [`Image`], used for every detail slot until the real
 /// textures decode.
 ///
-/// `pub(crate)` for [`crate::render_scene`]: a terrain scene has no grid to fetch
+/// `pub` for `sl_viewer_render_fixtures`: a terrain scene has no grid to fetch
 /// a region's detail textures from, so it stands at exactly the state a real
 /// region's terrain is in before they arrive.
-pub(crate) fn placeholder_image() -> Image {
-    Image::new(
-        Extent3d {
-            width: 1,
-            height: 1,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
+#[must_use]
+pub fn placeholder_image() -> Image {
+    upload_pixels(
+        1,
+        1,
         TERRAIN_PLACEHOLDER_COLOR.to_vec(),
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::default(),
+        TextureUpload::COLOR,
     )
 }
 
@@ -732,17 +720,18 @@ pub(crate) fn placeholder_image() -> Image {
 /// height samples but spans `size` metres, so its far (north / east /
 /// north-east) edge is the *shared* boundary with the neighbouring patches. That
 /// extra edge is sampled from the neighbour patches in `raw` (see
-/// [`sample_height`]) — including the **adjacent region's** patches at a region
+/// `sample_height`) — including the **adjacent region's** patches at a region
 /// border — so adjacent patch meshes meet exactly and leave no seam, even where
 /// the ground is sloped across a region boundary.
 /// Each vertex carries computed normals, tiled detail UVs, and a four-component
 /// blend weight (from `composition`, or a flat default while it is unknown); the
 /// grid is two triangles per cell quad.
 ///
-/// `pub(crate)` for [`crate::render_scene`]: this is already a pure
+/// `pub` for `sl_viewer_render_fixtures`: this is already a pure
 /// `(patches, composition) -> Option<Mesh>`, so the terrain scenes call the real
 /// builder rather than a copy of it.
-pub(crate) fn build_patch_mesh(
+#[must_use]
+pub fn build_patch_mesh(
     raw: &HashMap<PatchKey, TerrainPatch>,
     composition: Option<&TerrainComposition>,
     key: PatchKey,

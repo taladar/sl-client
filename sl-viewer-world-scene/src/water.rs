@@ -43,14 +43,13 @@
 use std::collections::HashMap;
 
 use bevy::asset::RenderAssetUsages;
-use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy::render::extract_resource::ExtractResource;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{
-    Color as SlColor, DecodedTexture, RegionHandle, SlEvent, SlIdentity, SlSessionEvent,
-    TextureKey, WaterMaterial, WaterParams, WaterSettings,
+    Color as SlColor, RegionHandle, SlEvent, SlIdentity, SlSessionEvent, TextureKey, TextureUpload,
+    WaterMaterial, WaterParams, WaterSettings, upload_decoded,
 };
 
 use crate::environment::EnvironmentState;
@@ -689,7 +688,7 @@ pub(crate) fn apply_water_textures(
             // (still a fresnel-tinted flat sea).
             continue;
         };
-        let handle = images.add(water_normal_image(decoded));
+        let handle = images.add(upload_decoded(decoded, WAVE_NORMAL_UPLOAD));
         if let Some(mut material) = materials.get_mut(&state.material) {
             // Both normal-map slots share the id until the day cycle drives a
             // separate next-frame normal map and the blend factor between them.
@@ -710,22 +709,22 @@ pub(crate) fn apply_water_textures(
 /// colour, which is exactly the class of bug this module has already paid for
 /// once.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct WaterLighting {
+pub struct WaterLighting {
     /// The direction toward the sun, or toward the moon at night, Bevy Y-up
     /// (`getLightDirection`).
-    pub(crate) light_dir: Vec3,
+    pub light_dir: Vec3,
     /// The specular base colour — the pool's `light_diffuse`, see
     /// [`water_specular_color`].
-    pub(crate) specular_color: Vec3,
+    pub specular_color: Vec3,
     /// The atmospheric sun colour the specular highlight is scaled by
     /// (`calcAtmosphericVarsLinear`'s `sunlit`).
-    pub(crate) sunlit_color: Vec3,
+    pub sunlit_color: Vec3,
     /// The per-metre haze attenuation coefficient the highlight fades with over
     /// distance.
-    pub(crate) haze_atten_coef: Vec3,
+    pub haze_atten_coef: Vec3,
     /// The sky-reflection tint (`blue_horizon`) the surface mirrors where no
     /// reflection probe is bound.
-    pub(crate) reflection_color: Vec3,
+    pub reflection_color: Vec3,
 }
 
 /// The water lighting for a scene with no sky frame selected yet: a light
@@ -768,7 +767,8 @@ const fn default_water_lighting() -> WaterLighting {
 ///
 /// Per-component `f32` arithmetic (the glam vector operators trip the workspace
 /// `arithmetic_side_effects` lint).
-pub(crate) fn water_specular_color(sunlight: Vec3, light_dir: Vec3, lit: bool) -> Vec3 {
+#[must_use]
+pub fn water_specular_color(sunlight: Vec3, light_dir: Vec3, lit: bool) -> Vec3 {
     if !lit {
         return Vec3::ZERO;
     }
@@ -796,7 +796,8 @@ pub(crate) fn water_specular_color(sunlight: Vec3, light_dir: Vec3, lit: bool) -
 /// here that follows the camera rather than the environment, and it is a step
 /// function of it — it changes only when the eye crosses the waterline, so it does
 /// not turn the material's compare-then-`get_mut` into a per-frame re-prepare.
-pub(crate) fn water_params(
+#[must_use]
+pub fn water_params(
     water: &WaterSettings,
     lighting: WaterLighting,
     submerged: bool,
@@ -867,56 +868,30 @@ const fn color_rgb(color: SlColor) -> Vec3 {
     Vec3::new(color.red(), color.green(), color.blue())
 }
 
-/// Upload a decoded water normal map: **linear**, and tiling.
+/// How the water's wave normal map is uploaded: **linear**
+/// ([`TextureUpload::DATA`]), because a normal map is not a colour.
 ///
-/// Both halves are load-bearing and one of them was wrong. This used to be
-/// `to_bevy_image`, which builds `Rgba8UnormSrgb` — and a normal map is not a
-/// colour. Read back through the sRGB transfer a flat `(0.5, 0.5, 1.0)` texel
-/// decodes to about `(0.21, 0.21, 1.0)`, which unpacks to a normal tilted well off
-/// the surface rather than along it; every wavelet in the sea was skewed the same
-/// way, and the flatter the water the more wrong it was.
+/// This was once the odd one out. The water uploaded its waves through the
+/// viewer's plain colour path while every other normal map — legacy materials',
+/// PBR materials', the bump generator's — was already careful about exactly this,
+/// and so was this module's own [`flat_normal_image`]: the sea changed colour
+/// space the moment its texture arrived. Read back through the sRGB transfer a
+/// flat `(0.5, 0.5, 1.0)` texel decodes to about `(0.21, 0.21, 1.0)`, which
+/// unpacks to a normal tilted well off the surface rather than along it; every
+/// wavelet was skewed the same way, and the flatter the water the more wrong it
+/// was.
 ///
-/// Every other normal map in this viewer is already careful about exactly this —
-/// [`sl_viewer_world_objects::legacy_materials`]'s `build_linear_image` ("the linear colour space a
-/// normal map needs"), [`sl_viewer_world_objects::materials`]'s `build_pbr_image`, [`sl_viewer_world_objects::bump`]'s
-/// generator — and so is this module's own [`flat_normal_image`], which is
-/// `Rgba8Unorm`. So the water was the one path out of step with its neighbours *and*
-/// with its own placeholder: the sea changed colour space the moment its texture
-/// arrived.
-///
-/// The sampler must repeat because the wave shader scrolls its texcoords well
-/// outside `[0, 1]` (the reference samples with `GL_REPEAT`) and Bevy's default is
-/// clamp-to-edge — the R22h class.
-///
-/// Found by [`crate::render_scene`]'s `water-surface` scene, which had to build one
-/// of these without a grid to have any waves at all.
-pub(crate) fn water_normal_image(decoded: &DecodedTexture) -> Image {
-    let mut image = Image::new(
-        Extent3d {
-            width: decoded.width,
-            height: decoded.height,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        decoded.pixels.to_vec(),
-        TextureFormat::Rgba8Unorm,
-        RenderAssetUsages::default(),
-    );
-    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-        address_mode_u: ImageAddressMode::Repeat,
-        address_mode_v: ImageAddressMode::Repeat,
-        address_mode_w: ImageAddressMode::Repeat,
-        ..ImageSamplerDescriptor::linear()
-    });
-    image
-}
+/// Found by `sl_viewer_render_fixtures`'s `water-surface` scene, which had to build
+/// one of these without a grid to have any waves at all.
+pub const WAVE_NORMAL_UPLOAD: TextureUpload = TextureUpload::DATA;
 
 /// A 1×1 all-white placeholder [`Image`] for the water-exclusion mask: `1` means
 /// "water present", so a water material wearing this placeholder renders the sea
 /// everywhere (no exclusion) until [`crate::water_exclusion`] wires in the real
 /// screen-space mask. Single-channel [`TextureFormat::R8Unorm`] to match the mask
 /// render target the water shader samples.
-pub(crate) fn white_mask_image() -> Image {
+#[must_use]
+pub fn white_mask_image() -> Image {
     Image::new(
         Extent3d {
             width: 1,
@@ -933,7 +908,8 @@ pub(crate) fn white_mask_image() -> Image {
 /// A 1×1 flat-normal placeholder [`Image`] (RGB `(128, 128, 255)` = the unit +Z
 /// tangent-space normal), used for the wave normal map until the real one decodes,
 /// so the surface starts perfectly flat.
-pub(crate) fn flat_normal_image() -> Image {
+#[must_use]
+pub fn flat_normal_image() -> Image {
     Image::new(
         Extent3d {
             width: 1,

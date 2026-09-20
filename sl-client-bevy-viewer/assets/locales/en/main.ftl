@@ -3610,6 +3610,30 @@ snapshot-postcard-todo = Sending a snapshot as a postcard / e-mail is coming in 
 snapshot-profile-todo = Posting a snapshot to your profile feed is coming in its own task.
 snapshot-inventory-todo = Saving a snapshot to inventory as a texture is coming in its own task.
 
+## The 360-degree snapshot floater (viewer-360-snapshot) — a separate capture
+## renderer: six cube-map faces from the camera's eye point, reprojected into an
+## equirectangular panorama and written with the GPano metadata that makes a
+## viewer or a platform treat it as a sphere.
+panorama-title = 360° Snapshot
+panorama-preview-empty = Press Capture to shoot a panorama.
+panorama-quality-label = Cube faces:
+panorama-width-label = Panorama:
+panorama-format-label = Format:
+panorama-capture = Capture
+panorama-save-disk = Save to Disk
+panorama-hint = The interface and your HUD are never in a panorama. Capture waits for the scene to finish loading, then freezes it while the six views are shot.
+panorama-status-ready = Ready
+panorama-status-settling = Waiting for the scene to finish loading…
+panorama-status-shooting = Shooting view { $face } of { $total }…
+panorama-status-stitching = Working…
+panorama-captured = Panorama captured.
+panorama-saved = Saved panorama to { $path }
+panorama-save-failed = Could not save the panorama: { $error }
+panorama-no-dir = No snapshot folder is available on this system.
+panorama-no-camera = There is no world view to capture a panorama from.
+panorama-capture-lost = The panorama capture did not come back; the camera has been restored.
+panorama-nothing-captured = Capture a panorama before saving one.
+
 ## The Preferences floater shell (viewer-preferences-floater).
 
 preferences-title = Preferences
@@ -3800,6 +3824,12 @@ preferences-row-exposure = Exposure
 preferences-row-dynamic-exposure = Dynamic exposure (eye adaptation)
 preferences-row-auto-adjust-legacy = Auto-adjust legacy skies
 preferences-section-display = Display & frame rate
+preferences-row-resolution-divisor = World render resolution
+preferences-resolution-full = Full (default)
+preferences-resolution-half = Half (1/2)
+preferences-resolution-quarter = Quarter (1/4)
+preferences-resolution-eighth = Eighth (1/8)
+preferences-resolution-sixteenth = Sixteenth (1/16)
 preferences-row-vsync = Vertical sync (VSync)
 preferences-row-limit-framerate = Limit frame rate
 preferences-row-fps-limit = Maximum frames per second
@@ -4360,6 +4390,7 @@ menu-bar-personal-lighting = Personal Lighting…
 menu-bar-my-environments = My Environments…
 menu-bar-photo-and-video = Photo and Video
 menu-bar-phototools = Phototools…
+menu-bar-360-snapshot = 360° Snapshot…
 menu-bar-world = World
 menu-bar-mini-map = Mini-Map
 menu-bar-radar = Radar

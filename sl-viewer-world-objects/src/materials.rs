@@ -32,18 +32,16 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use bevy::asset::RenderAssetUsages;
-use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::math::Affine2;
 use bevy::prelude::*;
-use bevy::render::render_resource::{Extent3d, Face, TextureDimension, TextureFormat};
+use bevy::render::render_resource::Face;
 use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use sl_client_bevy::{
     AssetCacheLimits, AssetKey, AssetStore, AssetType, BevyAssetFetcher, BlobFetcher,
     CAP_VIEWER_ASSET, DecodedTexture, GateStats, GltfAlphaMode, GltfMaterial, GltfTexture,
     GltfTextureTransform, MaterialOverride, Priority, ScopedObjectId, SlCapabilities, SlEvent,
-    SlSessionEvent, StoreStats, TextureFace, TextureKey, Uuid, parse_material_asset,
-    parse_material_override,
+    SlSessionEvent, StoreStats, TextureFace, TextureKey, TextureUpload, Uuid, parse_material_asset,
+    parse_material_override, upload_decoded,
 };
 
 use crate::legacy_materials::{LegacyMaterialManager, preview_legacy_material};
@@ -701,7 +699,7 @@ impl MaterialManager {
         if let Some(derived) = self.images.get(&(id, srgb)) {
             return derived.handle.clone();
         }
-        let handle = images.add(build_pbr_image(decoded, srgb));
+        let handle = images.add(upload_decoded(decoded, pbr_map_upload(srgb)));
         let _inserted = self
             .images
             .insert((id, srgb), DerivedImage::new(handle.clone(), decoded));
@@ -751,34 +749,16 @@ fn material_cache_dir() -> Option<PathBuf> {
     sl_viewer_platform::paths::asset_cache_dir("materialcache")
 }
 
-/// Build a Bevy [`Image`] for a PBR material texture map from decoded RGBA8
-/// pixels, in the colour space its slot needs (`Rgba8UnormSrgb` for base colour /
-/// emissive, `Rgba8Unorm` for the linear normal / metallic-roughness maps) and
-/// with the repeating sampler object faces tile their textures with.
-fn build_pbr_image(decoded: &Arc<DecodedTexture>, srgb: bool) -> Image {
-    let format = if srgb {
-        TextureFormat::Rgba8UnormSrgb
+/// How a PBR material texture map is uploaded, given whether its slot holds
+/// colour: base colour and emissive are pictures the creator authored in sRGB,
+/// while the normal and metallic-roughness maps are packed numbers the shader
+/// must read verbatim.
+const fn pbr_map_upload(srgb: bool) -> TextureUpload {
+    if srgb {
+        TextureUpload::COLOR
     } else {
-        TextureFormat::Rgba8Unorm
-    };
-    let mut image = Image::new(
-        Extent3d {
-            width: decoded.width,
-            height: decoded.height,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        decoded.pixels.to_vec(),
-        format,
-        RenderAssetUsages::default(),
-    );
-    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-        address_mode_u: ImageAddressMode::Repeat,
-        address_mode_v: ImageAddressMode::Repeat,
-        address_mode_w: ImageAddressMode::Repeat,
-        ..ImageSamplerDescriptor::linear()
-    });
-    image
+        TextureUpload::DATA
+    }
 }
 
 /// Refresh the material store fetcher's `ViewerAsset` capability URL each time the
@@ -1717,7 +1697,7 @@ pub fn refresh_pbr_textures(
     refresh_derived_images(
         &mut manager.images,
         |(id, _srgb)| id,
-        |(_id, srgb), decoded| build_pbr_image(decoded, srgb),
+        |(_id, srgb), decoded| upload_decoded(decoded, pbr_map_upload(srgb)),
         &store,
         &mut budget,
         &mut images,

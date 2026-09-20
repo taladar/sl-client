@@ -111,11 +111,11 @@ mod test {
             let scoped = object.scoped_id();
             // Reuse the entities of an object already mirrored, so a stream of
             // updates does not spawn a fresh pair every frame.
-            let (entity, geometry) = objects.objects.get(&scoped).map_or_else(
+            let (entity, geometry) = objects.objects().get(&scoped).map_or_else(
                 || (commands.spawn_empty().id(), commands.spawn_empty().id()),
                 |tracked| (tracked.entity, tracked.geometry),
             );
-            objects.objects.insert(
+            objects.insert_tracked(
                 scoped,
                 TrackedObject {
                     entity,

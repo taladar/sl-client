@@ -948,7 +948,7 @@ fn level(store: &sl_settings::SettingsStore, name: &str) -> Option<i32> {
 fn build_objects(sources: &DumpSources, offset: Vec3) -> Vec<ObjectDump> {
     let mut dumped: Vec<ObjectDump> = sources
         .objects
-        .objects
+        .objects()
         .iter()
         .filter(|(scoped, _tracked)| sources.identity.circuit_id == Some(scoped.circuit))
         .filter(|(_scoped, tracked)| {
@@ -1136,7 +1136,7 @@ fn worn_placement(
     let mut current = *scoped;
     let mut wearer = None;
     for _ in 0..MAX_PARENT_WALK {
-        let tracked = objects.objects.get(&current)?;
+        let tracked = objects.objects().get(&current)?;
         // A linkset root standing in the world is not worn by anybody, and is
         // reported exactly as it was drawn.
         if tracked.is_root {
@@ -1172,14 +1172,14 @@ fn avatar_placement(
     transforms: &Query<'_, '_, &GlobalTransform>,
     offset: Vec3,
 ) -> Option<ReferencePose> {
-    let tracked = objects.objects.get(&scoped)?;
+    let tracked = objects.objects().get(&scoped)?;
     let local = LocalPose::of(motions.get(tracked.entity).ok()?);
     if tracked.is_root {
         return Some(ReferencePose::root(local.position, local.rotation));
     }
     // Sitting: the wire pose is relative to the seat, which is an ordinary
     // in-world object and is reported as it was drawn.
-    let seat = objects.objects.get(&tracked.parent)?;
+    let seat = objects.objects().get(&tracked.parent)?;
     let seat = drawn_pose(transforms.get(seat.entity).ok()?, offset);
     Some(compose_link(seat, local))
 }
