@@ -99,10 +99,10 @@ pub fn adopt_pending_attachments(
     // viewer-prim-attachment-worn-but-not-rendered), and nothing said why.
     let trace = log_attachment_bind_enabled();
     // Snapshot the pending attachments first so the target lookup can read
-    // `state.objects` immutably (for the sphere-mode fallback) before the
+    // `state.objects()` immutably (for the sphere-mode fallback) before the
     // `parented` flag is set.
     let pending: Vec<(ScopedObjectId, Entity, u8, ScopedObjectId)> = state
-        .objects
+        .objects()
         .iter()
         .filter_map(|(&scoped, tracked)| {
             let point_id = tracked.attachment_point?;
@@ -160,11 +160,11 @@ pub fn adopt_pending_attachments(
             Some(_body) => avatars.attachment_point_entity(avatar, point_id),
             // Sphere-only avatars (no assets): fall back to the avatar's object
             // entity so the attachment at least follows its position.
-            None => state.objects.get(&avatar).map(|tracked| tracked.entity),
+            None => state.objects().get(&avatar).map(|tracked| tracked.entity),
         };
         if let Some(target) = target {
             commands.entity(entity).insert(ChildOf(target));
-            if let Some(tracked) = state.objects.get_mut(&scoped) {
+            if let Some(tracked) = state.tracked_mut(&scoped) {
                 tracked.parented = true;
             }
             skips.seated(scoped);
@@ -285,7 +285,7 @@ fn route_hud_attachment(
             );
         }
     }
-    if let Some(tracked) = state.objects.get_mut(&scoped) {
+    if let Some(tracked) = state.tracked_mut(&scoped) {
         tracked.parented = true;
     }
     routed
@@ -444,7 +444,7 @@ pub(crate) fn rig_placement(
 ) -> RigPlacement {
     let mut current = scoped;
     for _ in 0..crate::animesh::MAX_LINKSET_DEPTH {
-        let Some(tracked) = state.objects.get(&current) else {
+        let Some(tracked) = state.objects().get(&current) else {
             return RigPlacement::Unresolved;
         };
         if tracked.animated || tracked.attachment_point.is_some() {
@@ -520,7 +520,7 @@ pub fn route_in_world_rigged_meshes(
             continue;
         }
         debug!("rigged mesh on {scoped} is now worn or animated: skinning it");
-        if let Some(tracked) = state.objects.get_mut(&scoped) {
+        if let Some(tracked) = state.tracked_mut(&scoped) {
             for face in tracked.face_entities.drain(..) {
                 commands.entity(face).try_despawn();
             }
@@ -625,7 +625,7 @@ pub fn apply_rigged_attachments(
         if budget.remaining == 0 {
             break;
         }
-        if !mirrors.state.objects.contains_key(&scoped) {
+        if !mirrors.state.objects().contains_key(&scoped) {
             continue;
         }
         let Some(PendingGeometry::RiggedMesh(build)) = builds.pending(entity) else {
@@ -681,7 +681,7 @@ pub fn apply_rigged_attachments(
                     match mirrors.avatars.avatar_root_walk(scoped) {
                         Ok(_resolved) => {}
                         Err((terminus, hops)) => {
-                            let kind = match mirrors.state.objects.get(&terminus) {
+                            let kind = match mirrors.state.objects().get(&terminus) {
                                 Some(tracked) => format!(
                                     "tracked in-world object (is_root={}, attach_point={:?}, {})",
                                     tracked.is_root,
@@ -697,7 +697,7 @@ pub fn apply_rigged_attachments(
                             // it to a spawned avatar's name (when present) names which
                             // avatar is rendering wrong — e.g. a mesh head whose root
                             // is one of the UNTRACKED termini.
-                            let (attach, owner) = mirrors.state.objects.get(&scoped).map_or_else(
+                            let (attach, owner) = mirrors.state.objects().get(&scoped).map_or_else(
                                 || ("?".to_owned(), "?".to_owned()),
                                 |worn| {
                                     let owner = mirrors.avatars.name_of(worn.owner_id).map_or_else(
@@ -833,7 +833,7 @@ pub fn apply_rigged_attachments(
         // rigged mesh carries no LOD-rebuild inputs.
         let _built = builds.take_pending(entity);
         builds.drop_if_resolved(entity, &mut stores.commands);
-        if let Some(tracked) = mirrors.state.objects.get_mut(&scoped) {
+        if let Some(tracked) = mirrors.state.tracked_mut(&scoped) {
             tracked.face_entities = face_entities;
             // The skinned mesh follows the skeleton joints directly, so the object
             // must not also be pinned to a rigid attachment-point node.
@@ -994,7 +994,7 @@ pub(crate) fn prune_control_avatars(
     mut control: ResMut<ControlAvatarState>,
 ) {
     let live: HashSet<ObjectKey> = state
-        .objects
+        .objects()
         .values()
         .map(|tracked| tracked.full_key)
         .collect();
@@ -1319,9 +1319,7 @@ mod tests {
         let entity = world.spawn_empty().id();
         let geometry = world.spawn_empty().id();
         let mut objects = ObjectState::default();
-        let _replaced = objects
-            .objects
-            .insert(WORN, worn_object(entity, geometry, point_id));
+        let _replaced = objects.insert_tracked(WORN, worn_object(entity, geometry, point_id));
         let mut avatars = AvatarState::default();
         let agent = wearer_agent();
         let _prior = avatars.by_scoped.insert(WEARER, agent);
@@ -1363,7 +1361,7 @@ mod tests {
         assert!(
             world
                 .resource::<ObjectState>()
-                .objects
+                .objects()
                 .get(&WORN)
                 .is_some_and(|tracked| tracked.parented),
             "a seated attachment must be marked parented so it is not retried"
@@ -1388,7 +1386,7 @@ mod tests {
         assert!(
             world
                 .resource::<ObjectState>()
-                .objects
+                .objects()
                 .get(&WORN)
                 .is_some_and(|tracked| !tracked.parented),
             "an unseated attachment must stay pending for a later frame"
@@ -1415,7 +1413,7 @@ mod tests {
         let mut unclassified = Vec::new();
         let mut track =
             |id: u32, parent: u32, attachment_point: Option<u8>, animated: bool, entity: Entity| {
-                let _replaced = state.objects.insert(
+                let _replaced = state.insert_tracked(
                     scoped(id),
                     TrackedObject {
                         parent: scoped(parent),

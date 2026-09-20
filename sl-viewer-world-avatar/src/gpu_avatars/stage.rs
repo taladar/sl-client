@@ -1484,7 +1484,7 @@ pub(crate) fn log_animesh_census(
     // whose root has not arrived resolves to no animesh and so is not listed —
     // the bind trace reports it as a worn attachment with no wearer instead.
     let mut roots: HashMap<sl_client_bevy::ObjectKey, Vec<String>> = HashMap::new();
-    for (&scoped, tracked) in &facts.state.objects {
+    for (&scoped, tracked) in facts.state.objects() {
         let Some(sl_client_bevy::SculptOrMeshKey::Mesh(key)) =
             tracked.extra.sculpt.map(|sculpt| sculpt.texture)
         else {

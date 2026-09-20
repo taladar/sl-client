@@ -2963,7 +2963,7 @@ mod tests {
         let mut circuits: Vec<sl_proto::CircuitId> = harness
             .world()
             .resource::<crate::world_api::ObjectState>()
-            .objects
+            .objects()
             .keys()
             .map(|scoped| scoped.circuit)
             .collect();

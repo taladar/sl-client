@@ -1248,7 +1248,7 @@ pub fn swallows_owner_say(
 /// one is admitted there as it is here.
 #[must_use]
 pub fn is_temp_attachment(objects: &ObjectState, key: ObjectKey) -> bool {
-    objects.objects.values().any(|tracked| {
+    objects.objects().values().any(|tracked| {
         tracked.full_key == key
             && tracked.attachment_point.is_some()
             && tracked.attachment_item == Some(key.uuid())
@@ -1272,12 +1272,12 @@ pub fn is_temp_attachment(objects: &ObjectState, key: ObjectKey) -> bool {
 #[must_use]
 pub fn object_attachment(objects: &ObjectState, key: ObjectKey) -> Option<RlvObjectAttachment> {
     let mut current = objects
-        .objects
+        .objects()
         .iter()
         .find(|(_scoped, tracked)| tracked.full_key == key)
         .map(|(scoped, _tracked)| *scoped)?;
     for _step in 0..MAX_PARENT_WALK {
-        let tracked = objects.objects.get(&current)?;
+        let tracked = objects.objects().get(&current)?;
         if let Some(point) = tracked.attachment_point {
             return RlvAttachmentPoint::from_index(point)
                 .map(|point| RlvObjectAttachment::new(tracked.full_key.uuid(), point));

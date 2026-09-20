@@ -265,10 +265,18 @@ pub const INITIAL_TREE_TIER: TreeTier = TreeTier::Lod(TreeLod::High);
 
 /// Viewer-side object bookkeeping: the entity and metadata for every in-world
 /// object currently in the scene, keyed by scoped id.
+///
+/// The table itself is **private**, read through [`objects`](Self::objects) and
+/// written through [`insert_tracked`](Self::insert_tracked),
+/// [`tracked_mut`](Self::tracked_mut) and the removal methods. That is not
+/// ceremony: an object's place in the hierarchy (its `parent`, whether it is a
+/// root, the point it is worn on) is what the linkset queries walk, and a
+/// caller that reached in and moved an object would leave those queries
+/// answering from a stale picture.
 #[derive(Debug, Resource, Default)]
 pub struct ObjectState {
     /// Every tracked object, keyed by its scoped id.
-    pub objects: HashMap<ScopedObjectId, TrackedObject>,
+    objects: HashMap<ScopedObjectId, TrackedObject>,
     /// The region the Bevy scene is currently anchored at (origin `<0,0,0>`), so
     /// a **root** object in a neighbour region is offset onto the right terrain
     /// (`object_transform`) and every root is re-based when this moves
@@ -279,6 +287,32 @@ pub struct ObjectState {
 }
 
 impl ObjectState {
+    /// Every tracked object, keyed by its scoped id — the read side of the
+    /// table. Borrowed whole rather than wrapped, because the consumers of this
+    /// resource read wildly different parts of a tracked object and a reading
+    /// borrow cannot break anything.
+    #[must_use]
+    pub const fn objects(&self) -> &HashMap<ScopedObjectId, TrackedObject> {
+        &self.objects
+    }
+
+    /// Track `tracked` under `scoped`, returning whatever was tracked there
+    /// before (normally nothing — the object ingest's respawn path is the one
+    /// caller that replaces an entry).
+    pub fn insert_tracked(
+        &mut self,
+        scoped: ScopedObjectId,
+        tracked: TrackedObject,
+    ) -> Option<TrackedObject> {
+        self.objects.insert(scoped, tracked)
+    }
+
+    /// The tracked object under `scoped`, mutably — the one way to change one
+    /// from outside this module.
+    pub fn tracked_mut(&mut self, scoped: &ScopedObjectId) -> Option<&mut TrackedObject> {
+        self.objects.get_mut(scoped)
+    }
+
     /// Despawn **every** tracked object entity (and its faces) and forget them —
     /// the object half of the scene-mirror purge a **fresh-circuit** teleport
     /// needs. The session cleared its object cache with no per-object
@@ -1203,7 +1237,7 @@ mod tests {
                 media_url: None,
                 scale: Vec3::ONE,
             };
-            let _replaced = self.state.objects.insert(id, tracked);
+            let _replaced = self.state.insert_tracked(id, tracked);
             id
         }
 
@@ -1300,8 +1334,8 @@ mod tests {
 
         assert_eq!(head, Some(root), "the removed root is reported first");
         assert_eq!(dropped, vec![root, first, second]);
-        assert!(fixture.state.objects.contains_key(&bystander));
-        assert_eq!(fixture.state.objects.len(), 1);
+        assert!(fixture.state.objects().contains_key(&bystander));
+        assert_eq!(fixture.state.objects().len(), 1);
     }
 
     /// An avatar object's removal takes the whole worn chain — the attachment
@@ -1318,7 +1352,7 @@ mod tests {
         dropped.sort_by_key(|id| id.id);
 
         assert_eq!(dropped, vec![avatar, worn_root, worn_child]);
-        assert!(fixture.state.objects.is_empty());
+        assert!(fixture.state.objects().is_empty());
     }
 
     /// A `KillObject` for something this viewer never tracked drops nothing and
@@ -1332,7 +1366,7 @@ mod tests {
             fixture.with_commands(|state, commands| state.remove_object(scoped(99), commands));
 
         assert_eq!(dropped, Vec::new());
-        assert!(fixture.state.objects.contains_key(&kept));
+        assert!(fixture.state.objects().contains_key(&kept));
     }
 
     /// The worn index groups attachment roots under the avatar wearing them,
@@ -1394,7 +1428,7 @@ mod tests {
 
         fixture.with_commands(|state, commands| state.purge(commands));
 
-        assert!(fixture.state.objects.is_empty());
+        assert!(fixture.state.objects().is_empty());
         assert_eq!(fixture.state.linkset_members(&root), Vec::new());
         assert!(fixture.state.origin().is_none());
     }
