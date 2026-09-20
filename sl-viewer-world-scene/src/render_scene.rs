@@ -105,12 +105,12 @@ use sl_client_bevy::{
     PrimLod, PrimShapeFloat, ProfileCurve, RegionHandle, ResolvedParams, SKY_LIGHTING_IMAGE,
     SkeletalDeformations, SkyMaterial, StarMaterial, StarParams, Submesh, SunDiscMaterial,
     SunDiscParams, TerrainLayerType, TerrainMaterial, TerrainOwnership, TerrainPatch,
-    TextureAnimation, TextureFace, TextureKey, TreeLod, Uuid, VolumeDeformations, WaterMaterial,
-    WaterSettings, grass_geometry, grass_species, rigged_inverse_bindposes, tessellate,
-    tessellate_sculpt, tessellate_with_path, texture_anim_mode, to_bevy_base_mesh,
-    to_bevy_grass_mesh, to_bevy_image, to_bevy_mesh, to_bevy_morphed_mesh, to_bevy_prim_meshes,
+    TextureAnimation, TextureFace, TextureKey, TextureUpload, TreeLod, Uuid, VolumeDeformations,
+    WaterMaterial, WaterSettings, grass_geometry, grass_species, rigged_inverse_bindposes,
+    tessellate, tessellate_sculpt, tessellate_with_path, texture_anim_mode, to_bevy_base_mesh,
+    to_bevy_grass_mesh, to_bevy_mesh, to_bevy_morphed_mesh, to_bevy_prim_meshes,
     to_bevy_rigged_mesh, to_bevy_tree_mesh, tree_billboard_geometry, tree_geometry, tree_species,
-    write_sky_lighting,
+    upload_decoded, write_sky_lighting,
 };
 use sl_terrain::TerrainComposition;
 
@@ -123,7 +123,7 @@ use crate::sky::{
     placeholder_image as sky_placeholder_image, resolve_sky, shadow_cascades,
 };
 use crate::terrain::{build_patch_mesh, placeholder_image as terrain_placeholder_image};
-use crate::water::{DEFAULT_WATER_HEIGHT, water_normal_image, water_params, white_mask_image};
+use crate::water::{DEFAULT_WATER_HEIGHT, WAVE_NORMAL_UPLOAD, water_params, white_mask_image};
 use sl_viewer_kit::avatar_assets::AvatarAssetLibrary;
 use sl_viewer_kit::coords::sl_to_bevy_rotation;
 use sl_viewer_kit::face_material::{
@@ -138,7 +138,7 @@ use sl_viewer_world_api::PatchKey;
 use sl_viewer_world_api::{DecodedTextures, ObjectParticleSystem, TerrainSurface};
 use sl_viewer_world_objects::bump::{apply_surface_flags, generate_normal_map};
 use sl_viewer_world_objects::legacy_materials::{
-    apply_legacy_scalars, build_linear_image, build_srgb_image,
+    NORMAL_MAP_UPLOAD, SPECULAR_MAP_UPLOAD, apply_legacy_scalars,
 };
 use sl_viewer_world_objects::objects::{FaceTextureDebug, PrimFaceEntity};
 use sl_viewer_world_objects::texture_anim::{ObjectTextureAnimation, drive_texture_animations};
@@ -1042,10 +1042,11 @@ pub struct WorldScaleGeometry {
 /// `sl-client-prim-texture-debugging` records; both cost real time to localise
 /// precisely because the geometry, the UVs and the decode are all *correct*.
 ///
-/// Four separate places in this viewer set the mode today ([`to_bevy_image`],
-/// `sl_viewer_world_objects::textures`, `sl_viewer_world_objects::legacy_materials`, `sl_viewer_world_objects::bump`) and a fifth
-/// texture path that forgets would reproduce the same bug. Hence the rule is
-/// universal and the exception is opt-in, carries a reason, and is greppable.
+/// One place in this viewer sets the mode ([`upload_decoded`], through
+/// [`sl_client_bevy::upload_pixels`]), and it always repeats — but a texture path
+/// that builds a Bevy `Image` by hand instead would reproduce the same bug. Hence
+/// the rule is universal and the exception is opt-in, carries a reason, and is
+/// greppable.
 #[derive(Component, Debug, Clone, Copy)]
 pub struct SamplerMayClamp {
     /// Why this face's texture is allowed to clamp — in practice, only the
@@ -1296,7 +1297,10 @@ fn prim_textured_tiling(
 ) {
     // Through the real converter, which is where the address mode is set — a
     // fixture that built the `Image` by hand would be testing the fixture.
-    let image = assets.images.add(to_bevy_image(&uv_reference_texture()));
+    let image = assets.images.add(upload_decoded(
+        &uv_reference_texture(),
+        TextureUpload::COLOR,
+    ));
     let material = assets.materials.add(inert_face_material(StandardMaterial {
         base_color: Color::WHITE,
         base_color_texture: Some(image),
@@ -1552,7 +1556,10 @@ fn mesh_cube(_cx: SceneCx, root: Entity, commands: &mut Commands, assets: &mut S
         lod: MeshLod::High,
         submeshes: vec![cube_submesh()],
     };
-    let image = assets.images.add(to_bevy_image(&uv_reference_texture()));
+    let image = assets.images.add(upload_decoded(
+        &uv_reference_texture(),
+        TextureUpload::COLOR,
+    ));
     for (index, submesh) in decoded.submeshes.iter().enumerate() {
         let mesh = assets.meshes.add(to_bevy_mesh(submesh));
         let material = assets.materials.add(inert_face_material(StandardMaterial {
@@ -2685,7 +2692,10 @@ fn texture_anim_flipbook(
         length: 0.0,
         rate: 8.0,
     };
-    let image = assets.images.add(to_bevy_image(&uv_reference_texture()));
+    let image = assets.images.add(upload_decoded(
+        &uv_reference_texture(),
+        TextureUpload::COLOR,
+    ));
     let object = commands
         .spawn((
             Transform::IDENTITY,
@@ -2792,7 +2802,9 @@ fn flagged_face(bump: u8, shiny: u8, fullbright: bool, glow: f32) -> TextureFace
 /// existed the check had never seen it.
 fn bump_face(cx: SceneCx, root: Entity, commands: &mut Commands, assets: &mut SceneAssets<'_>) {
     let decoded = Arc::new(uv_reference_texture());
-    let diffuse = assets.images.add(to_bevy_image(&decoded));
+    let diffuse = assets
+        .images
+        .add(upload_decoded(&decoded, TextureUpload::COLOR));
     // Through the real generator, which is where the sampler is set — building the
     // normal map by hand here would be testing the fixture.
     let normal = assets
@@ -2861,7 +2873,7 @@ fn bump_face(cx: SceneCx, root: Entity, commands: &mut Commands, assets: &mut Sc
 /// The normal map is generated rather than fetched: the material's `normal_map` is
 /// a grid asset UUID and there is nothing here to fetch it from, so the scene
 /// supplies the decoded pixels and runs the real upload
-/// ([`build_linear_image`] — linear, not sRGB, as a normal map must be) that
+/// ([`NORMAL_MAP_UPLOAD`] — linear, not sRGB, as a normal map must be) that
 /// `apply_legacy_normal_maps` would have run. The scalars go through the real
 /// [`apply_legacy_scalars`].
 fn legacy_material_face(
@@ -2871,17 +2883,22 @@ fn legacy_material_face(
     assets: &mut SceneAssets<'_>,
 ) {
     let decoded = Arc::new(uv_reference_texture());
-    let diffuse = assets.images.add(to_bevy_image(&decoded));
-    let normal = assets.images.add(build_linear_image(&Arc::new(
-        // A normal map is not a colour image; the fixture's is the generated one,
-        // so the scene shows a plausible surface rather than a colour ramp read as
-        // normals.
-        normal_map_texture(&decoded),
-    )));
+    let diffuse = assets
+        .images
+        .add(upload_decoded(&decoded, TextureUpload::COLOR));
+    // A normal map is not a colour image; the fixture's is the generated one, so
+    // the scene shows a plausible surface rather than a colour ramp read as
+    // normals.
+    let normal = assets.images.add(upload_decoded(
+        &Arc::new(normal_map_texture(&decoded)),
+        NORMAL_MAP_UPLOAD,
+    ));
     // A specular map (sRGB, its RGB tinting the highlight), so the scene exercises
     // the legacy specular-map re-sample path (MAP_FLAG_SPEC) on the GPU — the colour
     // reference texture stands in for a real one.
-    let specular = assets.images.add(build_srgb_image(&decoded));
+    let specular = assets
+        .images
+        .add(upload_decoded(&decoded, SPECULAR_MAP_UPLOAD));
 
     for (offset, name, glossiness, environment) in
         [(-1.2_f32, "matte", 20_u8, 10_u8), (1.2, "glossy", 240, 200)]
@@ -3970,7 +3987,7 @@ fn spawn_sea(
     // wearing the viewer's flat placeholder.
     let normal = assets
         .images
-        .add(water_normal_image(&water_wavelet_texture()));
+        .add(upload_decoded(&water_wavelet_texture(), WAVE_NORMAL_UPLOAD));
     // Midday's sun, so the sea is lit from where the sky scenes put it.
     let midday = sky_settings_from(&MIDDAY);
     let resolved = resolve_sky(&midday);

@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 299 |
+| ready | 298 |
 | blocked | 40 |
 | in-progress | 22 |
 | bugs | 5 |
-| done | 1196 |
+| done | 1197 |
 | deferred | 29 |
 | wont-do | 16 |
 | **total** | **1707** |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (299)
+## ready (298)
 
 ### protocol
 
@@ -301,8 +301,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-attachment-align`](ready/viewer-attachment-align.md) — Attachment
   alignment tool (avatar align) (blocked by `viewer-object-edit-floater-shell`
   (done))
-- [`viewer-audit-decoded-texture-uploaders`](ready/viewer-audit-decoded-texture-uploaders.md)
-  — Eight independent DecodedTexture uploaders each re-decide colour space
 - [`viewer-audit-demo-panels-in-release`](ready/viewer-audit-demo-panels-in-release.md)
   — Five developer demo panels ship in the release binary from inside library
   crates
@@ -1145,7 +1143,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 
-## done (1196)
+## done (1197)
 
 ### protocol
 
@@ -1447,6 +1445,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   forever
 - [`viewer-audit-command-result-diagnostics`](done/viewer-audit-command-result-diagnostics.md)
   — The bevy command dispatcher discards 300 protocol send results with no log
+- [`viewer-audit-decoded-texture-uploaders`](done/viewer-audit-decoded-texture-uploaders.md)
+  — Eight independent DecodedTexture uploaders each re-decide colour space
 - [`viewer-audit-diagnostic-stream-unread`](done/viewer-audit-diagnostic-stream-unread.md)
   — The viewer collects protocol diagnostics and drains none of them
 - [`viewer-audit-display-name-accessor-sweep`](done/viewer-audit-display-name-accessor-sweep.md)

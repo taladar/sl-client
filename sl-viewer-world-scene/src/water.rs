@@ -43,14 +43,13 @@
 use std::collections::HashMap;
 
 use bevy::asset::RenderAssetUsages;
-use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy::render::extract_resource::ExtractResource;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{
-    Color as SlColor, DecodedTexture, RegionHandle, SlEvent, SlIdentity, SlSessionEvent,
-    TextureKey, WaterMaterial, WaterParams, WaterSettings,
+    Color as SlColor, RegionHandle, SlEvent, SlIdentity, SlSessionEvent, TextureKey, TextureUpload,
+    WaterMaterial, WaterParams, WaterSettings, upload_decoded,
 };
 
 use crate::environment::EnvironmentState;
@@ -689,7 +688,7 @@ pub(crate) fn apply_water_textures(
             // (still a fresnel-tinted flat sea).
             continue;
         };
-        let handle = images.add(water_normal_image(decoded));
+        let handle = images.add(upload_decoded(decoded, WAVE_NORMAL_UPLOAD));
         if let Some(mut material) = materials.get_mut(&state.material) {
             // Both normal-map slots share the id until the day cycle drives a
             // separate next-frame normal map and the blend factor between them.
@@ -867,49 +866,22 @@ const fn color_rgb(color: SlColor) -> Vec3 {
     Vec3::new(color.red(), color.green(), color.blue())
 }
 
-/// Upload a decoded water normal map: **linear**, and tiling.
+/// How the water's wave normal map is uploaded: **linear**
+/// ([`TextureUpload::DATA`]), because a normal map is not a colour.
 ///
-/// Both halves are load-bearing and one of them was wrong. This used to be
-/// `to_bevy_image`, which builds `Rgba8UnormSrgb` — and a normal map is not a
-/// colour. Read back through the sRGB transfer a flat `(0.5, 0.5, 1.0)` texel
-/// decodes to about `(0.21, 0.21, 1.0)`, which unpacks to a normal tilted well off
-/// the surface rather than along it; every wavelet in the sea was skewed the same
-/// way, and the flatter the water the more wrong it was.
+/// This was once the odd one out. The water uploaded its waves through the
+/// viewer's plain colour path while every other normal map — legacy materials',
+/// PBR materials', the bump generator's — was already careful about exactly this,
+/// and so was this module's own [`flat_normal_image`]: the sea changed colour
+/// space the moment its texture arrived. Read back through the sRGB transfer a
+/// flat `(0.5, 0.5, 1.0)` texel decodes to about `(0.21, 0.21, 1.0)`, which
+/// unpacks to a normal tilted well off the surface rather than along it; every
+/// wavelet was skewed the same way, and the flatter the water the more wrong it
+/// was.
 ///
-/// Every other normal map in this viewer is already careful about exactly this —
-/// [`sl_viewer_world_objects::legacy_materials`]'s `build_linear_image` ("the linear colour space a
-/// normal map needs"), [`sl_viewer_world_objects::materials`]'s `build_pbr_image`, [`sl_viewer_world_objects::bump`]'s
-/// generator — and so is this module's own [`flat_normal_image`], which is
-/// `Rgba8Unorm`. So the water was the one path out of step with its neighbours *and*
-/// with its own placeholder: the sea changed colour space the moment its texture
-/// arrived.
-///
-/// The sampler must repeat because the wave shader scrolls its texcoords well
-/// outside `[0, 1]` (the reference samples with `GL_REPEAT`) and Bevy's default is
-/// clamp-to-edge — the R22h class.
-///
-/// Found by [`crate::render_scene`]'s `water-surface` scene, which had to build one
-/// of these without a grid to have any waves at all.
-pub(crate) fn water_normal_image(decoded: &DecodedTexture) -> Image {
-    let mut image = Image::new(
-        Extent3d {
-            width: decoded.width,
-            height: decoded.height,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        decoded.pixels.to_vec(),
-        TextureFormat::Rgba8Unorm,
-        RenderAssetUsages::default(),
-    );
-    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-        address_mode_u: ImageAddressMode::Repeat,
-        address_mode_v: ImageAddressMode::Repeat,
-        address_mode_w: ImageAddressMode::Repeat,
-        ..ImageSamplerDescriptor::linear()
-    });
-    image
-}
+/// Found by [`crate::render_scene`]'s `water-surface` scene, which had to build
+/// one of these without a grid to have any waves at all.
+pub(crate) const WAVE_NORMAL_UPLOAD: TextureUpload = TextureUpload::DATA;
 
 /// A 1×1 all-white placeholder [`Image`] for the water-exclusion mask: `1` means
 /// "water present", so a water material wearing this placeholder renders the sea

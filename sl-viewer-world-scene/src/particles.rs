@@ -88,16 +88,15 @@
 //! `SL_VIEWER_DISABLE_HUD_PARTICLES` suppresses HUD emitters entirely (defaulted
 //! **on** for us — we have no settings UI and the point is to see it work).
 
-use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
-use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 
 use crate::render_overrides::RenderOverrides;
 use bevy::render::batching::NoAutomaticBatching;
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use sl_client_bevy::{DecodedTexture, ParticleSystem, particle_pattern, to_bevy_image};
+use sl_client_bevy::{
+    ParticleSystem, TextureUpload, particle_pattern, upload_decoded, upload_pixels,
+};
 
 use sl_viewer_kit::coords::sl_to_bevy_rotation;
 use sl_viewer_kit::particle_render::{
@@ -793,26 +792,9 @@ fn default_particle_image() -> Image {
             data.push(float_to_u8(alpha * 255.0));
         }
     }
-    let mut image = Image::new(
-        Extent3d {
-            width: SIZE,
-            height: SIZE,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        data,
-        // sRGB so the white blob reads the same brightness as fetched sprites.
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::default(),
-    );
-    // See the doc comment: repeat, like every other texture path here.
-    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-        address_mode_u: ImageAddressMode::Repeat,
-        address_mode_v: ImageAddressMode::Repeat,
-        address_mode_w: ImageAddressMode::Repeat,
-        ..ImageSamplerDescriptor::linear()
-    });
-    image
+    // `COLOR` so the white blob reads the same brightness as fetched sprites, and —
+    // see the doc comment — repeating, like every other texture path here.
+    upload_pixels(SIZE, SIZE, data, TextureUpload::COLOR)
 }
 
 /// The blend mode a particle system's blend function implies: an additive
@@ -1294,7 +1276,12 @@ fn apply_cloud_texture(
             // promptly rather than queued behind nearer prims.
             manager.request_boosted(texture_id, AVATAR_BOOST_PRIORITY);
             if let Some(decoded) = store.get(texture_id) {
-                cloud.texture = images.add(build_particle_image(decoded));
+                // A sprite is a picture, and it repeats like every other texture
+                // here. The reference samples particle textures clamped
+                // (`TAM_CLAMP`), but a billboard quad's UVs span exactly
+                // `[0, 1]`, so nothing ever samples off the end and the
+                // difference is unobservable — see [`default_particle_image`].
+                cloud.texture = images.add(upload_decoded(decoded, TextureUpload::COLOR));
                 cloud.texture_applied = true;
             }
         }
@@ -1304,13 +1291,6 @@ fn apply_cloud_texture(
             cloud.texture_applied = true;
         }
     }
-}
-
-/// Build the Bevy [`Image`] for a decoded particle sprite. The reference viewer
-/// samples particle textures clamped (`TAM_CLAMP`), which is Bevy's default
-/// address mode, so `to_bevy_image`'s sampler is used as-is.
-fn build_particle_image(decoded: &DecodedTexture) -> Image {
-    to_bevy_image(decoded)
 }
 
 #[cfg(test)]

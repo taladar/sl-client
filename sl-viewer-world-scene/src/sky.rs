@@ -60,15 +60,14 @@ use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bevy::asset::RenderAssetUsages;
-use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::light::{CascadeShadowConfig, CascadeShadowConfigBuilder, NotShadowCaster};
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{
-    CloudMaterial, CloudParams, Color as SlColor, ColorAlpha, DecodedTexture, Glow, SkyLighting,
-    SkyLightingMode, SkyMaterial, SkyParams, SkySettings, StarMaterial, StarParams,
-    SunDiscMaterial, SunDiscParams, TextureKey, to_bevy_image, write_sky_lighting,
+    CloudMaterial, CloudParams, Color as SlColor, ColorAlpha, Glow, SkyLighting, SkyLightingMode,
+    SkyMaterial, SkyParams, SkySettings, StarMaterial, StarParams, SunDiscMaterial, SunDiscParams,
+    TextureKey, TextureUpload, upload_decoded, write_sky_lighting,
 };
 
 use crate::environment::EnvironmentState;
@@ -1290,7 +1289,7 @@ pub(crate) fn apply_sky_textures(
             // default moisture / ice of 0 makes it a no-op anyway).
             continue;
         };
-        let handle = images.add(to_bevy_image(decoded));
+        let handle = images.add(upload_decoded(decoded, TextureUpload::COLOR));
         let Some(mut material) = materials.get_mut(&state.material) else {
             return;
         };
@@ -1594,7 +1593,7 @@ pub(crate) fn apply_disc_textures(
                 texel(edge_w, edge_h),
             );
         }
-        let handle = images.add(to_bevy_image(decoded));
+        let handle = images.add(upload_decoded(decoded, TextureUpload::COLOR));
         let target = if is_sun {
             &state.sun_material
         } else {
@@ -1799,7 +1798,7 @@ pub(crate) fn apply_cloud_textures(
                 decoded.width, decoded.height, decoded.components
             );
         }
-        let handle = images.add(cloud_noise_image(decoded));
+        let handle = images.add(upload_decoded(decoded, CLOUD_NOISE_UPLOAD));
         if let Some(mut material) = materials.get_mut(&state.material) {
             // Both noise slots share the id until the day cycle (P22.6) drives a
             // separate next-frame texture and the blend factor between them.
@@ -1809,43 +1808,19 @@ pub(crate) fn apply_cloud_textures(
     }
 }
 
-/// Upload a decoded cloud-noise texture: **linear**, and tiling (R18).
+/// How the cloud-noise texture is uploaded: **linear**
+/// ([`TextureUpload::DATA`]), because the noise is *data*, not colour (R18).
 ///
-/// Both halves are load-bearing. The noise is *data*, not colour: `clouds.wgsl`
-/// ports `cloudsF.glsl`, whose density term is `cloudNoise(uv).x - 0.5` on the
-/// raw byte values — the reference binds the noise as a plain `GL_RGBA8`
-/// texture (`llvosky.cpp` even calls `setExplicitFormat(GL_RGBA8, GL_RGBA)`)
-/// and its shader has no `srgb_to_linear`. Uploading through `to_bevy_image`
-/// (which is `Rgba8UnormSrgb`-only, the same trap the normal-map uploaders
-/// document) had the GPU sRGB-decode every sample, pushing a mid-gray byte 128
-/// down to 0.216: with the default cloud texture only ~9% of texels cleared the
-/// `alpha1 > 0` density threshold instead of ~46%, and the survivors clustered
-/// in a few isolated blobs — the "clouds in one quadrant, rest empty" defect.
-///
-/// The sampler must repeat because `cloud_scale` magnifies the UVs and the
-/// scroll offsets push them well outside `[0, 1]` (the reference samples with
-/// `GL_REPEAT`); Bevy's default clamp-to-edge would smear the edge texel across
-/// the whole layer.
-fn cloud_noise_image(decoded: &DecodedTexture) -> Image {
-    let mut image = Image::new(
-        Extent3d {
-            width: decoded.width,
-            height: decoded.height,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        decoded.pixels.to_vec(),
-        TextureFormat::Rgba8Unorm,
-        RenderAssetUsages::default(),
-    );
-    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-        address_mode_u: ImageAddressMode::Repeat,
-        address_mode_v: ImageAddressMode::Repeat,
-        address_mode_w: ImageAddressMode::Repeat,
-        ..ImageSamplerDescriptor::linear()
-    });
-    image
-}
+/// `clouds.wgsl` ports `cloudsF.glsl`, whose density term is
+/// `cloudNoise(uv).x - 0.5` on the raw byte values — the reference binds the
+/// noise as a plain `GL_RGBA8` texture (`llvosky.cpp` even calls
+/// `setExplicitFormat(GL_RGBA8, GL_RGBA)`) and its shader has no
+/// `srgb_to_linear`. Uploading it as a picture had the GPU sRGB-decode every
+/// sample, pushing a mid-gray byte 128 down to 0.216: with the default cloud
+/// texture only ~9% of texels cleared the `alpha1 > 0` density threshold instead
+/// of ~46%, and the survivors clustered in a few isolated blobs — the "clouds in
+/// one quadrant, rest empty" defect.
+const CLOUD_NOISE_UPLOAD: TextureUpload = TextureUpload::DATA;
 
 /// Startup: build the star-quad mesh, spawn the star field (with its material,
 /// initially hidden until an environment selects a sky frame), and register
@@ -1969,7 +1944,7 @@ pub(crate) fn apply_star_textures(
             // The fetch/decode failed; the field keeps its (transparent) placeholder.
             continue;
         };
-        let handle = images.add(to_bevy_image(decoded));
+        let handle = images.add(upload_decoded(decoded, TextureUpload::COLOR));
         if let Some(mut material) = materials.get_mut(&state.material) {
             material.diffuse = handle;
         }

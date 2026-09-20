@@ -41,14 +41,12 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use bevy::asset::RenderAssetUsages;
-use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{
     ATTRIBUTE_TERRAIN_WEIGHTS, DETAIL_TILE_METRES, RegionHandle, RegionIdentity,
     SKY_LIGHTING_IMAGE, SlEvent, SlIdentity, SlSessionEvent, TerrainMaterial, TerrainOwnership,
-    TerrainPatch, TextureKey, Vector, to_bevy_image,
+    TerrainPatch, TextureKey, TextureUpload, Vector, upload_decoded, upload_pixels,
 };
 
 use sl_terrain::TerrainComposition;
@@ -625,13 +623,7 @@ fn apply_detail_texture(
             // The fetch/decode failed; the region keeps the flat placeholder.
             return;
         };
-        let mut image = to_bevy_image(decoded);
-        image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-            address_mode_u: ImageAddressMode::Repeat,
-            address_mode_v: ImageAddressMode::Repeat,
-            ..ImageSamplerDescriptor::linear()
-        });
-        slot.insert(images.add(image));
+        slot.insert(images.add(upload_decoded(decoded, TextureUpload::COLOR)));
         debug!("built tiling image for terrain detail texture {id}");
     }
     let regions: Vec<RegionHandle> = state.regions.keys().copied().collect();
@@ -711,16 +703,11 @@ fn patch_transform(
 /// a region's detail textures from, so it stands at exactly the state a real
 /// region's terrain is in before they arrive.
 pub(crate) fn placeholder_image() -> Image {
-    Image::new(
-        Extent3d {
-            width: 1,
-            height: 1,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
+    upload_pixels(
+        1,
+        1,
         TERRAIN_PLACEHOLDER_COLOR.to_vec(),
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::default(),
+        TextureUpload::COLOR,
     )
 }
 

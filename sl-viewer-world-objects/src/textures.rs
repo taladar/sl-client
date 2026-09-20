@@ -34,7 +34,8 @@ use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use sl_client_bevy::{
     BevyTextureFetcher, CAP_GET_TEXTURE, CacheLimits, DecodedTexture, DiscardLevel, GateStats,
     Priority, RemoteTextureSource, SlCapabilities, StoreStats, TextureFace, TextureFetcher,
-    TextureKey, TextureRequest, TextureStore, Uuid, texture_face_uv_transform,
+    TextureKey, TextureRequest, TextureStore, TextureUpload, Uuid, texture_face_uv_transform,
+    upload_decoded,
 };
 
 // The decoded-texture store and its readers moved down to the world API so
@@ -42,7 +43,7 @@ use sl_client_bevy::{
 // pipeline; re-exported here so the call sites addressing them through this
 // module are unchanged.
 use sl_viewer_world_api::{BoostTexture, DecodedTextures};
-pub use sl_viewer_world_api::{DiffuseImage, build_prim_image, env_budget, is_absent_texture};
+pub use sl_viewer_world_api::{DiffuseImage, env_budget, is_absent_texture};
 
 use crate::material_cache::{MaterialCache, MaterialKey};
 use sl_viewer_kit::face_material::{FaceMaterial, inert_face_material};
@@ -914,7 +915,7 @@ const DEFAULT_FACE_REPREP_BUDGET: usize = 48;
 /// Default per-frame cap on how many decoded textures the texture-apply systems may
 /// turn into GPU [`Image`]s in one frame — see [`TextureApplyBudget`]. When textures
 /// are served from local cache a whole region's set can decode in a single frame;
-/// building them all at once (`build_prim_image` → `to_bevy_image`, a full RGBA
+/// building them all at once (`upload_decoded`, a full RGBA
 /// upload each ~1.5 ms) was measured as a ~40–55 ms main-thread spike. Kept low
 /// because each build is expensive. Tune with `SL_VIEWER_TEXTURE_IMAGE_BUDGET`.
 const DEFAULT_TEXTURE_IMAGE_BUDGET: usize = 6;
@@ -932,7 +933,7 @@ const DEFAULT_TEXTURE_IMAGE_BUDGET: usize = 6;
 /// re-preps and deferring the overflow ([`DeferredFaceTextures`]) spreads it.
 ///
 /// **Image builds** (`image_remaining`): turning a decoded
-/// texture into a GPU image (`build_prim_image`) is a full RGBA upload; a
+/// texture into a GPU image (`upload_decoded`) is a full RGBA upload; a
 /// cache-warm frame that decodes a region's whole texture set builds them all at
 /// once (~55 ms). Capping the builds leaves the excess textures' faces parked so
 /// [`patch_parked_decoded_textures`] builds them over the next frames.
@@ -1527,7 +1528,7 @@ fn refresh_lod_image(
     let Some(image) = store.get(id) else {
         return;
     };
-    let refreshed = build_prim_image(image);
+    let refreshed = upload_decoded(image, TextureUpload::COLOR);
     let _replaced = images.insert(&handle, refreshed);
     if let Some(material_ids) = prim_textures.materials.get_mut(&id) {
         // Touch each live material (prune any whose face was despawned). The touch
@@ -1861,7 +1862,7 @@ fn prim_image(
         return Some(handle.clone());
     }
     let decoded = store.get(id)?;
-    let handle = images.add(build_prim_image(decoded));
+    let handle = images.add(upload_decoded(decoded, TextureUpload::COLOR));
     let _inserted = prim_textures.images.insert(id, handle.clone());
     Some(handle)
 }

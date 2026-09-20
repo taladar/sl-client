@@ -39,15 +39,12 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use bevy::asset::RenderAssetUsages;
-use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::math::Affine2;
 use bevy::prelude::*;
 
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{
     Command, DecodedTexture, LegacyMaterial, Priority, SlCommand, SlEvent, SlSessionEvent,
-    TextureKey, Uuid, texture_uv_transform,
+    TextureKey, TextureUpload, Uuid, texture_uv_transform, upload_decoded,
 };
 use sl_viewer_world_api::DecodedTextures;
 
@@ -185,7 +182,7 @@ impl LegacyMaterialManager {
         if let Some(derived) = self.images.get(&id) {
             return derived.handle.clone();
         }
-        let handle = images.add(build_linear_image(decoded));
+        let handle = images.add(upload_decoded(decoded, NORMAL_MAP_UPLOAD));
         let _inserted = self
             .images
             .insert(id, DerivedImage::new(handle.clone(), decoded));
@@ -203,7 +200,7 @@ impl LegacyMaterialManager {
         if let Some(derived) = self.spec_images.get(&id) {
             return derived.handle.clone();
         }
-        let handle = images.add(build_srgb_image(decoded));
+        let handle = images.add(upload_decoded(decoded, SPECULAR_MAP_UPLOAD));
         let _inserted = self
             .spec_images
             .insert(id, DerivedImage::new(handle.clone(), decoded));
@@ -211,55 +208,16 @@ impl LegacyMaterialManager {
     }
 }
 
-/// Build a Bevy [`Image`] for a legacy normal map from decoded RGBA8 pixels, in
-/// the linear colour space a normal map needs (`Rgba8Unorm`) and with the
-/// repeating sampler object faces tile their textures with.
-pub fn build_linear_image(decoded: &Arc<DecodedTexture>) -> Image {
-    let mut image = Image::new(
-        Extent3d {
-            width: decoded.width,
-            height: decoded.height,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        decoded.pixels.to_vec(),
-        TextureFormat::Rgba8Unorm,
-        RenderAssetUsages::default(),
-    );
-    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-        address_mode_u: ImageAddressMode::Repeat,
-        address_mode_v: ImageAddressMode::Repeat,
-        address_mode_w: ImageAddressMode::Repeat,
-        ..ImageSamplerDescriptor::linear()
-    });
-    image
-}
+/// How a legacy material's **normal** map is uploaded: its texels are a packed
+/// direction, not a picture, so they must reach the shader untouched
+/// ([`TextureUpload::DATA`]).
+pub const NORMAL_MAP_UPLOAD: TextureUpload = TextureUpload::DATA;
 
-/// Build a Bevy [`Image`] for a legacy specular map from decoded RGBA8 pixels, in
-/// the **sRGB** colour space its RGB tint is authored in (`Rgba8UnormSrgb`, so the
-/// GPU sample is already linear like the reference's `srgb_to_linear(spec.rgb)`),
-/// with the repeating sampler object faces tile their textures with. The alpha
-/// channel (the per-texel environment weight) is unaffected by the sRGB transfer.
-pub fn build_srgb_image(decoded: &Arc<DecodedTexture>) -> Image {
-    let mut image = Image::new(
-        Extent3d {
-            width: decoded.width,
-            height: decoded.height,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        decoded.pixels.to_vec(),
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::default(),
-    );
-    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-        address_mode_u: ImageAddressMode::Repeat,
-        address_mode_v: ImageAddressMode::Repeat,
-        address_mode_w: ImageAddressMode::Repeat,
-        ..ImageSamplerDescriptor::linear()
-    });
-    image
-}
+/// How a legacy material's **specular** map is uploaded: its RGB is a tint the
+/// creator authored in sRGB, so the GPU decodes it and the shader sample is
+/// already linear, like the reference's `srgb_to_linear(spec.rgb)`. The alpha
+/// channel (the per-texel environment weight) is unaffected by the transfer.
+pub const SPECULAR_MAP_UPLOAD: TextureUpload = TextureUpload::COLOR;
 
 /// The linear specular highlight tint a legacy material's sRGB-encoded specular
 /// colour (`0..=255` RGB) maps to — the reference `srgb_to_linear(specular_color)`,
@@ -690,7 +648,7 @@ pub fn refresh_legacy_map_images(
     refresh_derived_images(
         &mut manager.images,
         |id| id,
-        |_id, decoded| build_linear_image(decoded),
+        |_id, decoded| upload_decoded(decoded, NORMAL_MAP_UPLOAD),
         &store,
         &mut budget,
         &mut images,
@@ -699,7 +657,7 @@ pub fn refresh_legacy_map_images(
     refresh_derived_images(
         &mut manager.spec_images,
         |id| id,
-        |_id, decoded| build_srgb_image(decoded),
+        |_id, decoded| upload_decoded(decoded, SPECULAR_MAP_UPLOAD),
         &store,
         &mut budget,
         &mut images,
