@@ -3336,7 +3336,7 @@ fn apply_object(
         );
     }
 
-    if let Some(existing) = state.tracked_mut(&scoped) {
+    if let Some(mut existing) = state.tracked_mut(&scoped) {
         // A known object: re-place it and refresh its classification (a
         // motion-only update stops here — the geometry is untouched). The scale
         // rides the geometry holder, refreshed here so a live resize is applied
@@ -3496,7 +3496,7 @@ fn apply_object(
         if attachment_point.is_none() {
             let parent_changed = existing.parent != parent;
             reconcile_parent(
-                existing,
+                &mut existing,
                 is_root,
                 parent_entity,
                 parent_changed,
@@ -3736,21 +3736,21 @@ fn adopt_pending_children(
 ) {
     // An attachment parents to its avatar's skeleton joint, not the linkset root
     // entity — `rigged_attachments::adopt_pending_attachments` handles it
-    // (P16.1). Picked out before any is taken mutably, so the scan reads the
-    // table once.
+    // (P16.1). Read off the root's own child list rather than scanned out of the
+    // whole table, and copied out before any child is taken mutably.
     let waiting: Vec<ScopedObjectId> = state
-        .objects()
+        .children_of(&scoped)
         .iter()
-        .filter(|(_scoped, child)| {
-            !child.parented
-                && !child.is_root
-                && child.attachment_point.is_none()
-                && child.parent == scoped
+        .filter(|child| {
+            state
+                .objects()
+                .get(child)
+                .is_some_and(|tracked| !tracked.parented && tracked.attachment_point.is_none())
         })
-        .map(|(child, _tracked)| *child)
+        .copied()
         .collect();
     for child in waiting {
-        let Some(tracked) = state.tracked_mut(&child) else {
+        let Some(mut tracked) = state.tracked_mut(&child) else {
             continue;
         };
         commands.entity(tracked.entity).insert(ChildOf(root_entity));
@@ -3882,7 +3882,7 @@ pub fn apply_object_meshes(
             core::mem::take(&mut build.reuse).despawn_unused(build.commands);
             budget.remaining = budget.remaining.saturating_sub(1);
             debug!("built mesh {key}: {} submesh entities", face_entities.len());
-            if let Some(tracked) = state.tracked_mut(&scoped) {
+            if let Some(mut tracked) = state.tracked_mut(&scoped) {
                 tracked.face_entities = face_entities;
             }
             // Remember how to rebuild on a later LOD swap (P21.2); a rigged
@@ -3907,7 +3907,7 @@ pub fn apply_object_meshes(
             let scale = rebuild.scale;
             let priority = rebuild.priority;
             let intern = rebuild.intern.clone();
-            let Some(tracked) = state.tracked_mut(&scoped) else {
+            let Some(mut tracked) = state.tracked_mut(&scoped) else {
                 continue;
             };
             let geometry = tracked.geometry;
@@ -3964,7 +3964,7 @@ pub fn apply_prim_lod(
         &mut targets.0,
         budget.remaining,
         |scoped, desired, remaining| {
-            let Some(tracked) = state.tracked_mut(&scoped) else {
+            let Some(mut tracked) = state.tracked_mut(&scoped) else {
                 return LodOutcome::Resolved;
             };
             let entity = tracked.entity;
@@ -4063,7 +4063,7 @@ pub fn apply_tree_lod(
         &mut targets.0,
         budget.remaining,
         |scoped, desired, remaining| {
-            let Some(tracked) = state.tracked_mut(&scoped) else {
+            let Some(mut tracked) = state.tracked_mut(&scoped) else {
                 return LodOutcome::Resolved;
             };
             let entity = tracked.entity;
@@ -4193,7 +4193,7 @@ pub fn apply_object_sculpts(
             // the cold-cache counterpart of what `build_object_geometry` sets when
             // the map was already decoded.
             builds.set_sculpt_rebuild(entity, pending);
-            if let Some(tracked) = state.tracked_mut(&scoped) {
+            if let Some(mut tracked) = state.tracked_mut(&scoped) {
                 tracked.face_entities = face_entities;
             }
         }

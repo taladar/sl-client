@@ -277,6 +277,15 @@ pub const INITIAL_TREE_TIER: TreeTier = TreeTier::Lod(TreeLod::High);
 pub struct ObjectState {
     /// Every tracked object, keyed by its scoped id.
     objects: HashMap<ScopedObjectId, TrackedObject>,
+    /// The reverse of every tracked object's `parent` link: each non-root
+    /// object filed under the object it hangs off, which is its linkset root
+    /// for a child prim and the avatar object for a worn attachment root.
+    ///
+    /// Kept in step by the three write doors, and by nothing else — see
+    /// [`child_of`]. A parent that is not (yet) tracked still gets an entry, so
+    /// a linkset child that arrived before its root is waiting here when the
+    /// root turns up.
+    children: HashMap<ScopedObjectId, Vec<ScopedObjectId>>,
     /// The region the Bevy scene is currently anchored at (origin `<0,0,0>`), so
     /// a **root** object in a neighbour region is offset onto the right terrain
     /// (`object_transform`) and every root is re-based when this moves
@@ -296,6 +305,20 @@ impl ObjectState {
         &self.objects
     }
 
+    /// The scoped ids of every tracked object hanging directly off `parent`:
+    /// the child prims of a linkset root, or the worn attachment roots of an
+    /// avatar object. In the order they were tracked, which is why the callers
+    /// that promise a stable order sort what they take.
+    ///
+    /// Empty for a leaf — and for an object this viewer does not track, which
+    /// is **not** the same as having no children: a linkset child can arrive
+    /// before its root, and is listed here against a parent that is still
+    /// missing.
+    #[must_use]
+    pub fn children_of(&self, parent: &ScopedObjectId) -> &[ScopedObjectId] {
+        self.children.get(parent).map_or(&[], Vec::as_slice)
+    }
+
     /// Track `tracked` under `scoped`, returning whatever was tracked there
     /// before (normally nothing — the object ingest's respawn path is the one
     /// caller that replaces an entry).
@@ -304,13 +327,38 @@ impl ObjectState {
         scoped: ScopedObjectId,
         tracked: TrackedObject,
     ) -> Option<TrackedObject> {
-        self.objects.insert(scoped, tracked)
+        let now = child_of(&tracked);
+        let replaced = self.objects.insert(scoped, tracked);
+        let before = replaced.as_ref().and_then(child_of);
+        if before != now {
+            reindex_child(&mut self.children, scoped, before, now);
+        }
+        replaced
     }
 
     /// The tracked object under `scoped`, mutably — the one way to change one
-    /// from outside this module.
-    pub fn tracked_mut(&mut self, scoped: &ScopedObjectId) -> Option<&mut TrackedObject> {
-        self.objects.get_mut(scoped)
+    /// from outside this module. The borrow re-files the object in the children
+    /// index if it is used to move it (see [`TrackedObjectMut`]).
+    pub fn tracked_mut(&mut self, scoped: &ScopedObjectId) -> Option<TrackedObjectMut<'_>> {
+        let Self {
+            objects, children, ..
+        } = self;
+        let tracked = objects.get_mut(scoped)?;
+        Some(TrackedObjectMut {
+            before: child_of(tracked),
+            scoped: *scoped,
+            tracked,
+            children,
+        })
+    }
+
+    /// Stop tracking `scoped`, taking it out of the children index with it.
+    fn take_tracked(&mut self, scoped: ScopedObjectId) -> Option<TrackedObject> {
+        let removed = self.objects.remove(&scoped)?;
+        if let Some(parent) = child_of(&removed) {
+            unindex_child(&mut self.children, parent, scoped);
+        }
+        Some(removed)
     }
 
     /// Despawn **every** tracked object entity (and its faces) and forget them —
@@ -345,6 +393,7 @@ impl ObjectState {
             despawn_prim_faces(&tracked.face_entities, commands);
         }
         self.objects.clear();
+        self.children.clear();
         self.origin = None;
     }
 
@@ -365,7 +414,7 @@ impl ObjectState {
         scoped: ScopedObjectId,
         commands: &mut Commands,
     ) -> Vec<ScopedObjectId> {
-        let Some(removed) = self.objects.remove(&scoped) else {
+        let Some(removed) = self.take_tracked(scoped) else {
             return Vec::new();
         };
         // Bevy despawns the parented sub-hierarchy together with the root entity.
@@ -382,10 +431,12 @@ impl ObjectState {
         despawn_prim_faces(&removed.face_entities, commands);
         // Drop tracked descendants; despawn any that were still waiting to be
         // parented (Bevy did not despawn those with the root), and their faces.
-        // Collected before they are dropped, since the walk follows the parent links.
+        // Collected before they are dropped, since the walk follows the child
+        // index down from `scoped` — whose own entry survives the removal above
+        // (that only unfiled it from *its* parent).
         let mut dropped = vec![scoped];
         for descendant in self.tracked_descendants(scoped) {
-            if let Some(entry) = self.objects.remove(&descendant) {
+            if let Some(entry) = self.take_tracked(descendant) {
                 despawn_prim_faces(&entry.face_entities, commands);
                 if !entry.parented {
                     commands.entity(entry.entity).try_despawn();
@@ -396,16 +447,26 @@ impl ObjectState {
         dropped
     }
 
-    /// The scoped ids of every tracked transitive descendant of `root` (children,
-    /// grandchildren, …), following the stored parent links.
+    /// The scoped ids of every tracked transitive descendant of `root`
+    /// (children, grandchildren, …), read off the children index rather than
+    /// rescanned out of the object table per frontier node — which is what made
+    /// removing a D-prim linkset cost O(D x N) over an N-object region.
+    ///
+    /// Breadth-first, each level in region-local id order, so a removal reports
+    /// the same extent twice running. The visited set is not decoration: a
+    /// malformed parent link that names an ancestor would otherwise walk the
+    /// cycle forever, which the old rescan did too.
     fn tracked_descendants(&self, root: ScopedObjectId) -> Vec<ScopedObjectId> {
         let mut descendants = Vec::new();
+        let mut seen: HashSet<ScopedObjectId> = HashSet::from([root]);
         let mut frontier = vec![root];
         while let Some(parent) = frontier.pop() {
-            for (&scoped, tracked) in &self.objects {
-                if !tracked.is_root && tracked.parent == parent {
-                    descendants.push(scoped);
-                    frontier.push(scoped);
+            let mut children = self.children_of(&parent).to_vec();
+            children.sort_by_key(|scoped| scoped.id);
+            for child in children {
+                if seen.insert(child) {
+                    descendants.push(child);
+                    frontier.push(child);
                 }
             }
         }
@@ -432,7 +493,7 @@ impl ObjectState {
         if is_alive(entity) {
             return None;
         }
-        let _stale = self.objects.remove(&scoped);
+        let _stale = self.take_tracked(scoped);
         Some(entity)
     }
 
@@ -520,8 +581,9 @@ impl ObjectState {
     /// object alone if present, else nothing.
     ///
     /// Second Life linksets are one level deep — a child's parent is always the
-    /// linkset root — so a single pass over the object table finds the whole
-    /// set. The child order is the local-id sort, not the simulator's true link
+    /// linkset root — so the root's entry in the children index is the whole
+    /// set, and this costs the linkset's own size rather than the region's.
+    /// The child order is the local-id sort, not the simulator's true link
     /// order (the wire carries no per-child link position; even the reference
     /// notes its child order "is not always the same as sim's idea of link
     /// order"), but it is stable frame to frame, which the prim-navigation
@@ -540,15 +602,19 @@ impl ObjectState {
         }
         members.push(*root);
         let mut children: Vec<ScopedObjectId> = self
-            .objects
+            .children_of(root)
             .iter()
-            .filter(|(scoped, tracked)| {
+            .filter(|scoped| {
+                // An object that named itself as its parent without claiming to
+                // be a root would otherwise be listed as its own child.
                 *scoped != root
-                    && !tracked.is_root
-                    && tracked.attachment_point.is_none()
-                    && tracked.parent == *root
+                    && self.objects.get(scoped).is_some_and(|tracked| {
+                        // A worn attachment hangs off the avatar, and is filed
+                        // here under it like any other child.
+                        tracked.attachment_point.is_none()
+                    })
             })
-            .map(|(scoped, _tracked)| *scoped)
+            .copied()
             .collect();
         children.sort_by_key(|scoped| scoped.id);
         members.extend(children);
@@ -1039,6 +1105,112 @@ impl ObjectState {
     }
 }
 
+/// The object `tracked` hangs off in the children index: its parent when it is
+/// a linkset child or a worn attachment, and `None` when it is a root — a root
+/// names *itself* as parent (the wire marks one with a zero parent id), so
+/// filing it under that would make it its own child.
+///
+/// This is the single definition of what the index mirrors; every place that
+/// files or unfiles an object goes through it, so the index and the `parent`
+/// links cannot drift apart on a case one of them forgot.
+const fn child_of(tracked: &TrackedObject) -> Option<ScopedObjectId> {
+    if tracked.is_root {
+        None
+    } else {
+        Some(tracked.parent)
+    }
+}
+
+/// File `scoped` under `parent` in `children`, ignoring a repeat (an object is
+/// listed once, however often its update is re-applied).
+fn index_child(
+    children: &mut HashMap<ScopedObjectId, Vec<ScopedObjectId>>,
+    parent: ScopedObjectId,
+    scoped: ScopedObjectId,
+) {
+    let siblings = children.entry(parent).or_default();
+    if !siblings.contains(&scoped) {
+        siblings.push(scoped);
+    }
+}
+
+/// Unfile `scoped` from `parent` in `children`, forgetting the list once it
+/// empties — otherwise a region's worth of dead roots accumulates as empty
+/// vectors keyed by objects nothing tracks any more.
+fn unindex_child(
+    children: &mut HashMap<ScopedObjectId, Vec<ScopedObjectId>>,
+    parent: ScopedObjectId,
+    scoped: ScopedObjectId,
+) {
+    let Some(siblings) = children.get_mut(&parent) else {
+        return;
+    };
+    siblings.retain(|id| *id != scoped);
+    if siblings.is_empty() {
+        let _emptied = children.remove(&parent);
+    }
+}
+
+/// Move `scoped` from `before`'s child list to `now`'s — a relink, an unlink
+/// (`now` is `None`), or a child whose root arrived after it. Either end may be
+/// absent, since a root is nobody's child.
+fn reindex_child(
+    children: &mut HashMap<ScopedObjectId, Vec<ScopedObjectId>>,
+    scoped: ScopedObjectId,
+    before: Option<ScopedObjectId>,
+    now: Option<ScopedObjectId>,
+) {
+    if let Some(parent) = before {
+        unindex_child(children, parent, scoped);
+    }
+    if let Some(parent) = now {
+        index_child(children, parent, scoped);
+    }
+}
+
+/// A mutable borrow of one tracked object that keeps [`ObjectState`]'s children
+/// index in step with it.
+///
+/// Every `&mut TrackedObject` outside this module comes from
+/// [`ObjectState::tracked_mut`], and therefore through here: the borrow notes
+/// where the object hung when it was taken, and on drop re-files it if the
+/// holder moved it — relinked it to another root, unlinked it into a root of
+/// its own, or worn it on an avatar. Nothing has to remember to call anything.
+#[derive(Debug)]
+pub struct TrackedObjectMut<'state> {
+    /// The borrowed object.
+    tracked: &'state mut TrackedObject,
+    /// The index to re-file it in, borrowed from the same [`ObjectState`].
+    children: &'state mut HashMap<ScopedObjectId, Vec<ScopedObjectId>>,
+    /// The borrowed object's own scoped id — what the index lists.
+    scoped: ScopedObjectId,
+    /// What it hung off when the borrow was taken.
+    before: Option<ScopedObjectId>,
+}
+
+impl core::ops::Deref for TrackedObjectMut<'_> {
+    type Target = TrackedObject;
+
+    fn deref(&self) -> &TrackedObject {
+        self.tracked
+    }
+}
+
+impl core::ops::DerefMut for TrackedObjectMut<'_> {
+    fn deref_mut(&mut self) -> &mut TrackedObject {
+        self.tracked
+    }
+}
+
+impl Drop for TrackedObjectMut<'_> {
+    fn drop(&mut self) {
+        let now = child_of(self.tracked);
+        if now != self.before {
+            reindex_child(self.children, self.scoped, self.before, now);
+        }
+    }
+}
+
 impl crate::world_scoped::WorldScoped for ObjectState {
     fn purge_world(&mut self, _purge: crate::world_scoped::WorldPurge, commands: &mut Commands) {
         self.purge(commands);
@@ -1241,6 +1413,16 @@ mod tests {
             id
         }
 
+        /// Move a tracked object in the hierarchy the way an update that
+        /// relinked it would: through the guarded mutable borrow, so the
+        /// children index follows the write.
+        fn relink(&mut self, scoped: ScopedObjectId, parent: ScopedObjectId, is_root: bool) {
+            if let Some(mut tracked) = self.state.tracked_mut(&scoped) {
+                tracked.parent = parent;
+                tracked.is_root = is_root;
+            }
+        }
+
         /// Run `act` with a [`Commands`] over the fixture world, applying its
         /// queue afterwards — how the despawning queries are exercised without
         /// a schedule.
@@ -1430,6 +1612,89 @@ mod tests {
 
         assert!(fixture.state.objects().is_empty());
         assert_eq!(fixture.state.linkset_members(&root), Vec::new());
+        assert!(fixture.state.children_of(&root).is_empty());
         assert!(fixture.state.origin().is_none());
+    }
+
+    /// Relinking a child to another root moves it between the two linksets. The
+    /// index has to follow the `parent` write that did it, which is the whole
+    /// reason a mutable borrow of a tracked object is a guard and not a plain
+    /// `&mut`.
+    #[test]
+    fn a_relinked_child_leaves_one_linkset_and_joins_the_other() {
+        let mut fixture = Fixture::new();
+        let first = fixture.track(10, 10, None);
+        let second = fixture.track(20, 20, None);
+        let child = fixture.track(11, 10, None);
+
+        fixture.relink(child, second, false);
+
+        assert_eq!(fixture.state.linkset_members(&first), vec![first]);
+        assert_eq!(fixture.state.linkset_members(&second), vec![second, child]);
+    }
+
+    /// Unlinking a child makes it a root: it belongs to no linkset but its own,
+    /// and the set it left no longer reports it.
+    #[test]
+    fn an_unlinked_child_becomes_a_linkset_of_its_own() {
+        let mut fixture = Fixture::new();
+        let root = fixture.track(10, 10, None);
+        let child = fixture.track(11, 10, None);
+
+        // What the ingest writes for an update whose parent id is zero.
+        fixture.relink(child, child, true);
+
+        assert_eq!(fixture.state.linkset_members(&root), vec![root]);
+        assert_eq!(fixture.state.linkset_members(&child), vec![child]);
+        assert!(fixture.state.children_of(&root).is_empty());
+    }
+
+    /// A child prim routinely arrives before the root it names. It is filed
+    /// against that absent root all the same, which is how the object ingest
+    /// finds the waiting children the moment the root turns up.
+    #[test]
+    fn a_child_whose_root_has_not_arrived_is_listed_against_it() {
+        let mut fixture = Fixture::new();
+        let orphan = fixture.track(11, 10, None);
+        let root = scoped(10);
+
+        assert_eq!(fixture.state.children_of(&root), [orphan]);
+        assert_eq!(
+            fixture.state.linkset_members(&root),
+            Vec::new(),
+            "an untracked root is still not a linkset"
+        );
+    }
+
+    /// Dropping objects one at a time leaves nothing behind in the index —
+    /// neither a dead child in a live root's list, nor an empty list keyed by a
+    /// root nothing tracks any more.
+    #[test]
+    fn removing_objects_leaves_no_ghosts_in_the_index() {
+        let mut fixture = Fixture::new();
+        let root = fixture.track(10, 10, None);
+        let first = fixture.track(11, 10, None);
+        let second = fixture.track(12, 10, None);
+
+        fixture.with_commands(|state, commands| state.remove_object(first, commands));
+        assert_eq!(fixture.state.children_of(&root), [second]);
+
+        fixture.with_commands(|state, commands| state.remove_object(root, commands));
+        assert!(fixture.state.objects().is_empty());
+        assert!(fixture.state.children_of(&root).is_empty());
+    }
+
+    /// An object that names itself as its parent without claiming to be a root
+    /// is malformed, and used to hang the descendant walk forever. It now
+    /// terminates, and the object is not listed as its own linkset child.
+    #[test]
+    fn an_object_parented_to_itself_does_not_hang_the_walk() {
+        let mut fixture = Fixture::new();
+        let root = fixture.track(10, 10, None);
+        fixture.relink(root, root, false);
+
+        assert_eq!(fixture.state.linkset_members(&root), vec![root]);
+        let dropped = fixture.with_commands(|state, commands| state.remove_object(root, commands));
+        assert_eq!(dropped, vec![root]);
     }
 }

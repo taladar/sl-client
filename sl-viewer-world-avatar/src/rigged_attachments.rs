@@ -164,7 +164,7 @@ pub fn adopt_pending_attachments(
         };
         if let Some(target) = target {
             commands.entity(entity).insert(ChildOf(target));
-            if let Some(tracked) = state.tracked_mut(&scoped) {
+            if let Some(mut tracked) = state.tracked_mut(&scoped) {
                 tracked.parented = true;
             }
             skips.seated(scoped);
@@ -285,7 +285,7 @@ fn route_hud_attachment(
             );
         }
     }
-    if let Some(tracked) = state.tracked_mut(&scoped) {
+    if let Some(mut tracked) = state.tracked_mut(&scoped) {
         tracked.parented = true;
     }
     routed
@@ -520,7 +520,7 @@ pub fn route_in_world_rigged_meshes(
             continue;
         }
         debug!("rigged mesh on {scoped} is now worn or animated: skinning it");
-        if let Some(tracked) = state.tracked_mut(&scoped) {
+        if let Some(mut tracked) = state.tracked_mut(&scoped) {
             for face in tracked.face_entities.drain(..) {
                 commands.entity(face).try_despawn();
             }
@@ -833,7 +833,7 @@ pub fn apply_rigged_attachments(
         // rigged mesh carries no LOD-rebuild inputs.
         let _built = builds.take_pending(entity);
         builds.drop_if_resolved(entity, &mut stores.commands);
-        if let Some(tracked) = mirrors.state.tracked_mut(&scoped) {
+        if let Some(mut tracked) = mirrors.state.tracked_mut(&scoped) {
             tracked.face_entities = face_entities;
             // The skinned mesh follows the skeleton joints directly, so the object
             // must not also be pinned to a rigid attachment-point node.

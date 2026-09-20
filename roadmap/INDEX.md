@@ -14,9 +14,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ideas | 100 |
 | ready | 299 |
 | blocked | 40 |
-| in-progress | 23 |
+| in-progress | 22 |
 | bugs | 5 |
-| done | 1195 |
+| done | 1196 |
 | deferred | 29 |
 | wont-do | 16 |
 | **total** | **1707** |
@@ -1066,16 +1066,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (23)
+## in-progress (22)
 
 ### viewer
 
 - [`viewer-agentupdate-cadence-effects`](in-progress/viewer-agentupdate-cadence-effects.md)
   — Explore what the raised AgentUpdate/camera-interest cadence buys (and how
   the sim reacts)
-- [`viewer-audit-object-children-index`](in-progress/viewer-audit-object-children-index.md)
-  — ObjectState has no children index, so every linkset query full-scans the
-  region
 - [`viewer-avatar-falls-through-ground`](in-progress/viewer-avatar-falls-through-ground.md)
   — Avatar falls through the ground (simulator reports a bouncing avatar
   position)
@@ -1148,7 +1145,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 
-## done (1195)
+## done (1196)
 
 ### protocol
 
@@ -1479,6 +1476,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A malformed notification store is overwritten, destroying unanswered notices
 - [`viewer-audit-notifications-crate-split`](done/viewer-audit-notifications-crate-split.md)
   — Split the 21637-line notification catalogue and make its lookup a map
+- [`viewer-audit-object-children-index`](done/viewer-audit-object-children-index.md)
+  — ObjectState has no children index, so every linkset query full-scans the
+  region
 - [`viewer-audit-parcel-access-list-accumulate`](done/viewer-audit-parcel-access-list-accumulate.md)
   — Editing a multi-packet parcel ban list unbans everyone not in the last
   packet
