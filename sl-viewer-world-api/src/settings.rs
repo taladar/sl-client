@@ -90,6 +90,19 @@ pub const SHOW_COORDINATES_KEY: &str = "statusbar_show_coordinates";
 /// (`preferences_camera_move`).
 pub const SETTING_DOUBLE_CLICK_ACTION: &str = "DoubleClickAction";
 
+/// How many times smaller than the window the **3D world** is rendered before
+/// being stretched back over it (the reference `RenderResolutionDivisor`,
+/// `pipeline.cpp`): `1` — the default — renders the world at the window's own
+/// resolution and costs nothing.
+///
+/// Declared here rather than beside the render path that obeys it because two
+/// layers have to agree on the name and neither may depend on the other: the
+/// scene layer (`sl_viewer_world_scene::resolution_divisor`) registers it and
+/// resizes the world's render target from it, and the RLV surface below that
+/// ([`crate::rlv::ViewerRlvExt`]) reads and writes it as the one writable row of
+/// the `@getdebug_*` / `@setdebug_*` allowlist.
+pub const SETTING_RENDER_RESOLUTION_DIVISOR: &str = "RenderResolutionDivisor";
+
 /// The agent-frame rear-view camera offset (forward, left, up metres), the
 /// reference's `CameraOffsetRearView`: three metres behind and 0.75 m above the
 /// focus. Its length is the default zoom distance and its elevation the default

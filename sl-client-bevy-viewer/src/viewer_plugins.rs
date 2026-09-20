@@ -55,6 +55,7 @@ use crate::particle_render::{ParticleRenderPlugin, setup_particle_quad};
 use crate::physics::PhysicsPlugin;
 use crate::pie_menu::PieMenuPlugin;
 use crate::probes::ReflectionProbePlugin;
+use crate::resolution_divisor::ResolutionDivisorPlugin;
 use crate::sit_camera::SitCameraPlugin;
 use crate::spacenav::{DeviceRead, SpacenavPlugin};
 use crate::tonemap::SlTonemapPlugin;
@@ -256,6 +257,12 @@ impl Plugin for ViewerRenderPlugins {
             // write the glow mask into their alpha (see `glow.rs`); the Bevy `Bloom` above
             // stays active meanwhile.
             app.add_plugins(SlGlowPlugin);
+            // The reference viewer's `RenderResolutionDivisor`: renders the 3D
+            // world into an image 1/n the size of the window and stretches it
+            // back over the view, leaving the interface at full resolution.
+            // Inert at the default divisor of 1, which is why it can sit here
+            // unconditionally.
+            app.add_plugins(ResolutionDivisorPlugin);
         }
         if full {
             // The GPU-avatar keystone spike (context/gpu-avatars.md §2.4 / §9.1 risk 1):

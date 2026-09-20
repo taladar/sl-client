@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 297 |
 | blocked | 39 |
 | in-progress | 22 |
-| bugs | 5 |
-| done | 1199 |
+| bugs | 6 |
+| done | 1200 |
 | deferred | 29 |
 | wont-do | 16 |
-| **total** | **1707** |
+| **total** | **1709** |
 
 ## ideas (100)
 
@@ -788,8 +788,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-render-readback-tier`](ready/viewer-render-readback-tier.md) — Render
   readback tier — assert on the pixels, headlessly (blocked by
   `viewer-render-test-harness` (done))
-- [`viewer-render-resolution-divisor`](ready/viewer-render-resolution-divisor.md)
-  — Render at a reduced resolution (RenderResolutionDivisor)
 - [`viewer-render-type-toggles`](ready/viewer-render-type-toggles.md) —
   Render-type & render-feature toggles (hide object classes, wireframe)
 - [`viewer-report-abuse`](ready/viewer-report-abuse.md) — Report Abuse floater
@@ -906,6 +904,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — World-map floater — tracking & teleport hand-off (blocked by
   `viewer-world-map-floater` (done), `viewer-beacons-beam-render` (done),
   `viewer-teleport-flow-progress` (done))
+- [`viewer-world-text-in-the-overlay-pass`](ready/viewer-world-text-in-the-overlay-pass.md)
+  — Name tags and hover text belong in the overlay pass, not the world pass
 
 ### idiomatic
 
@@ -1121,7 +1121,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (5)
+## bugs (6)
 
 ### protocol
 
@@ -1138,8 +1138,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Own avatar looks broken after a teleport
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
+- [`viewer-sliders-show-no-value`](bugs/viewer-sliders-show-no-value.md) — A
+  slider shows no value, and no bounds or step either
 
-## done (1199)
+## done (1200)
 
 ### protocol
 
@@ -2673,6 +2675,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   pixel-oracle library — decidable verdicts over a captured frame
 - [`viewer-render-readback-texture-anim-test-flaky`](done/viewer-render-readback-texture-anim-test-flaky.md)
   — render_readback texture-animation test is flaky under load
+- [`viewer-render-resolution-divisor`](done/viewer-render-resolution-divisor.md)
+  — Render at a reduced resolution (RenderResolutionDivisor)
 - [`viewer-render-scene-coverage`](done/viewer-render-scene-coverage.md) —
   Render-scene coverage — a scene per render path the viewer already has
   (blocked by `viewer-render-test-harness` (done))

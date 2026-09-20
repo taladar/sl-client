@@ -407,6 +407,30 @@ impl SettingsStore {
         Ok(())
     }
 
+    /// Turn a registered setting's persistence on or off after the fact.
+    ///
+    /// Declaration fixes whether a setting is written to disk, and nothing that
+    /// merely *writes* a value may change that. One caller may: the RLV
+    /// `@setdebug_<name>=force` write site, which has to honour the reference's
+    /// rule that **a value a script wrote never reaches the user's settings
+    /// file** — `RlvExtGetSet::processCommand` ends every successful write with
+    /// `pSetting->setPersist(...)`, switching persistence off for as long as the
+    /// stored value is not the declared default. This is that `setPersist`.
+    ///
+    /// The override layers are untouched: the effective value does not change,
+    /// only whether [`save_scope`](SettingsStore::save_scope) will write it out.
+    ///
+    /// # Errors
+    ///
+    /// [`SettingError::UnknownSetting`] if the setting is not registered.
+    pub fn set_persist(&mut self, name: &str, persist: bool) -> Result<(), SettingError> {
+        let Some(decl) = self.decls.get_mut(name) else {
+            return Err(SettingError::UnknownSetting(name.to_owned()));
+        };
+        decl.persist = persist;
+        Ok(())
+    }
+
     /// Remove a setting's override in one scope, reverting it to the next layer
     /// down. Returns whether an override was actually present.
     pub fn reset(&mut self, scope: Scope, name: &str) -> bool {

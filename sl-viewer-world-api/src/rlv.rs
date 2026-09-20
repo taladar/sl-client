@@ -52,11 +52,17 @@ use sl_rlv::{
     RlvAttachmentPoint, RlvDebugSetting, RlvDebugValue, RlvEnvRequest, RlvEnvSource, RlvExtSource,
     RlvObjectAttachment, RlvReply, RlvSkyBody, RlvSkyField, RlvSkyValue, RlvState, is_rlv_line,
 };
-use sl_settings::SettingValue;
+use sl_settings::{Scope, SettingValue};
 use sl_viewer_kit::coords::sky_body_direction;
 use sl_viewer_settings::ViewerSettings;
 
-use crate::{MAX_PARENT_WALK, ObjectState};
+use crate::{MAX_PARENT_WALK, ObjectState, SETTING_RENDER_RESOLUTION_DIVISOR};
+
+/// What `RenderResolutionDivisor` reads as when nothing has reduced it — the
+/// reference's default, and the answer a viewer whose store never registered
+/// the row gives rather than an empty one, because "the world is drawn at the
+/// window's resolution" is true either way.
+const NO_RESOLUTION_DIVISOR: u32 = 1;
 
 /// The whole-environment change an RLV `@setenv_*` command asks for, re-exported
 /// so the scene that carries one out needs this seam and not the language crate
@@ -724,12 +730,14 @@ pub struct RlvExtFacts {
 /// rows that are real settings, [`RlvExtFacts`] for the two that are not.
 ///
 /// Borrowed for the length of one command rather than kept, because both halves
-/// are Bevy resources. The store is borrowed *immutably* because nothing here
-/// is writable — see [`set_debug_value`](RlvExtSource::set_debug_value).
+/// are Bevy resources. The store is borrowed **mutably**: one row of the
+/// allowlist — `RenderResolutionDivisor` — is a setting a script may write, and
+/// writing it has to reach the same store the user's own preferences edit does
+/// (see [`set_debug_value`](RlvExtSource::set_debug_value)).
 #[derive(Debug)]
 pub struct ViewerRlvExt<'settings> {
     /// The settings store the readable RLV rows live in, where there is one.
-    pub settings: Option<&'settings ViewerSettings>,
+    pub settings: Option<&'settings mut ViewerSettings>,
     /// The two computed facts.
     pub facts: RlvExtFacts,
 }
@@ -737,41 +745,85 @@ pub struct ViewerRlvExt<'settings> {
 impl RlvExtSource for ViewerRlvExt<'_> {
     /// What each allowlisted row reads as here.
     ///
-    /// Two of the six answer nothing, and say why:
+    /// Only **`AvatarSex`** and **`AspectRatio`** can answer nothing, and only
+    /// until the avatar layer and the camera have published them; a `None` is
+    /// an empty answer rather than a guess.
     ///
-    /// - **`RenderResolutionDivisor`** — this viewer does not render at a
-    ///   reduced resolution, so there is no setting to read and none to write.
-    ///   It is the cheap vision impairment a collar reaches for, and it belongs
-    ///   with the rest of the vision-restriction rendering rather than being
-    ///   faked with a setting nothing looks at;
-    /// - **`AvatarSex`** and **`AspectRatio`** answer nothing until the avatar
-    ///   layer and the camera have published them.
-    ///
-    /// `WindLightUseAtmosShaders` is not a setting here either, but its answer
-    /// is not in doubt: this viewer always renders the atmospheric sky, which
-    /// is exactly what a script asking the question wants to know.
+    /// `WindLightUseAtmosShaders` is not a setting here, but its answer is not
+    /// in doubt: this viewer always renders the atmospheric sky, which is
+    /// exactly what a script asking the question wants to know.
+    /// `RenderResolutionDivisor` is an ordinary setting again since the world
+    /// gained a reduced-resolution path (`sl_viewer_world_scene`'s
+    /// `resolution_divisor`); it reads its stored value, falling back to `1` —
+    /// "not reduced" — for a viewer whose store never registered it.
     fn debug_value(&self, setting: RlvDebugSetting) -> Option<RlvDebugValue> {
         match setting {
             RlvDebugSetting::AvatarSex => self.facts.avatar_is_male.map(RlvDebugValue::Bool),
             RlvDebugSetting::AspectRatio => self.facts.aspect_ratio.map(RlvDebugValue::Float),
-            RlvDebugSetting::RenderResolutionDivisor => None,
+            RlvDebugSetting::RenderResolutionDivisor => Some(RlvDebugValue::U32(
+                self.settings
+                    .as_deref()
+                    .map_or(NO_RESOLUTION_DIVISOR, |settings| {
+                        settings
+                            .store()
+                            .get_u32(SETTING_RENDER_RESOLUTION_DIVISOR)
+                            .unwrap_or(NO_RESOLUTION_DIVISOR)
+                    }),
+            )),
             RlvDebugSetting::ForbidGiveToRlv => Some(RlvDebugValue::Bool(rlv_flag(
-                self.settings,
+                self.settings.as_deref(),
                 SETTING_FORBID_GIVE_TO_RLV,
             ))),
             RlvDebugSetting::NoSetEnv => Some(RlvDebugValue::Bool(rlv_flag(
-                self.settings,
+                self.settings.as_deref(),
                 SETTING_NO_SET_ENV,
             ))),
             RlvDebugSetting::WindLightUseAtmosShaders => Some(RlvDebugValue::Bool(true)),
         }
     }
 
-    /// Nothing here is writable: of the two rows the allowlist lets a script
-    /// write, `AvatarSex` is a pseudo setting the state machine keeps and
-    /// `RenderResolutionDivisor` is the one this viewer does not have.
-    fn set_debug_value(&mut self, _setting: RlvDebugSetting, _value: RlvDebugValue) -> bool {
-        false
+    /// Store a script-written value.
+    ///
+    /// One row of the allowlist reaches a setting: `RenderResolutionDivisor`,
+    /// the cheap vision impairment a collar imposes. (The other writable row,
+    /// `AvatarSex`, is a pseudo setting the state machine keeps for itself and
+    /// never arrives here.) The write goes to the **global** scope, the same
+    /// layer the graphics tab's own control writes, so the user sees — and can
+    /// undo — exactly what the script did.
+    ///
+    /// Then the reference's `DBG_PERSIST` rule, which this is the first row to
+    /// have anything to protect: *"Default settings should persist if they were
+    /// marked that way, but non-default settings should never persist"*
+    /// (`RlvExtGetSet::processCommand`). A value a script wrote is therefore
+    /// live for the session and absent from the user's settings file, and
+    /// persistence comes back the moment the stored value is the declared
+    /// default again — so a collar that blurs the view cannot leave the blur
+    /// behind after a relog.
+    fn set_debug_value(&mut self, setting: RlvDebugSetting, value: RlvDebugValue) -> bool {
+        let (RlvDebugSetting::RenderResolutionDivisor, RlvDebugValue::U32(divisor)) =
+            (setting, value)
+        else {
+            return false;
+        };
+        let Some(settings) = self.settings.as_deref_mut() else {
+            return false;
+        };
+        // A store that never registered the row has no such setting, which the
+        // script hears as a bad option rather than as a silent success.
+        if !settings
+            .store()
+            .is_registered(SETTING_RENDER_RESOLUTION_DIVISOR)
+        {
+            return false;
+        }
+        let written = SettingValue::U32(divisor);
+        let is_default = settings
+            .store()
+            .declaration(SETTING_RENDER_RESOLUTION_DIVISOR)
+            .is_some_and(|decl| decl.default() == &written);
+        settings.set(Scope::Global, SETTING_RENDER_RESOLUTION_DIVISOR, written);
+        settings.set_persist(SETTING_RENDER_RESOLUTION_DIVISOR, is_default);
+        true
     }
 }
 
@@ -1294,16 +1346,174 @@ pub fn object_attachment(objects: &ObjectState, key: ObjectKey) -> Option<RlvObj
 mod tests {
     use super::{
         RLV_BOOL_SETTINGS, RLV_CONSOLE_CAPACITY, RLV_PREFIX_SETTINGS, RLV_REPLY_CAPACITY,
-        RLV_STRINGS, RlvConsoleKind, RlvEnvironmentSlot, RlvLibraryEnvironments, RlvSession,
-        rlv_flag, rlv_string, rlv_string_def, swallows_owner_say,
+        RLV_STRINGS, RlvConsoleKind, RlvEnvironmentSlot, RlvExtFacts, RlvLibraryEnvironments,
+        RlvSession, SETTING_RENDER_RESOLUTION_DIVISOR, ViewerRlvExt, rlv_flag, rlv_string,
+        rlv_string_def, swallows_owner_say,
     };
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{ChatSource, ChatType, ObjectKey, SettingsKind, SkySettings, Uuid};
     use sl_rlv::{
-        RlvEnvRequest, RlvEnvSource as _, RlvNoFacts, RlvSkyBody, RlvSkyField, RlvSkyValue,
-        parse_chat_line,
+        RlvDebugSetting, RlvDebugValue, RlvEnvRequest, RlvEnvSource as _, RlvExtSource as _,
+        RlvNoFacts, RlvSkyBody, RlvSkyField, RlvSkyValue, parse_chat_line,
     };
+    use sl_settings::{SettingValue, SettingsStore};
+    use sl_viewer_settings::ViewerSettings;
     use std::collections::HashSet;
+
+    /// A boxed error so a test can use `?` rather than the disallowed
+    /// `unwrap` / `expect`.
+    type TestError = Box<dyn core::error::Error>;
+
+    /// A store with the resolution divisor registered the way the scene layer
+    /// registers it (this crate is below the one that owns it, so the shape is
+    /// restated here rather than imported; `sl-viewer-world-scene` pins that
+    /// the two agree).
+    fn store_with_divisor() -> ViewerSettings {
+        let mut settings = ViewerSettings::from_store_for_test(SettingsStore::new());
+        settings.register_in(
+            &["render"],
+            SETTING_RENDER_RESOLUTION_DIVISOR,
+            SettingValue::U32(1),
+            "Divisor for rendering the 3D scene at reduced resolution (1 = full)",
+        );
+        settings
+    }
+
+    /// With no settings store, the one writable row still *reads* — "the world
+    /// is drawn at the window's resolution" is true whether or not anything
+    /// registered the setting — and the write is refused, which the script
+    /// hears as a bad option.
+    #[test]
+    fn the_divisor_reads_as_one_and_refuses_a_write_with_no_store() {
+        let mut ext = ViewerRlvExt {
+            settings: None,
+            facts: RlvExtFacts::default(),
+        };
+        assert_eq!(
+            ext.debug_value(RlvDebugSetting::RenderResolutionDivisor),
+            Some(RlvDebugValue::U32(1))
+        );
+        assert!(!ext.set_debug_value(
+            RlvDebugSetting::RenderResolutionDivisor,
+            RlvDebugValue::U32(4)
+        ));
+    }
+
+    /// A script's write lands in the same (global) layer the graphics tab
+    /// writes, and reads straight back — the round trip
+    /// `@setdebug_renderresolutiondivisor` needs to be worth anything.
+    #[test]
+    fn a_script_write_lands_in_the_store_and_reads_back() {
+        let mut settings = store_with_divisor();
+        let mut ext = ViewerRlvExt {
+            settings: Some(&mut settings),
+            facts: RlvExtFacts::default(),
+        };
+        assert!(ext.set_debug_value(
+            RlvDebugSetting::RenderResolutionDivisor,
+            RlvDebugValue::U32(4)
+        ));
+        assert_eq!(
+            ext.debug_value(RlvDebugSetting::RenderResolutionDivisor),
+            Some(RlvDebugValue::U32(4))
+        );
+        assert_eq!(
+            settings
+                .store()
+                .get_u32(SETTING_RENDER_RESOLUTION_DIVISOR)
+                .ok(),
+            Some(4)
+        );
+    }
+
+    /// The reference's `DBG_PERSIST` rule, which this row is the first to have
+    /// anything to protect: a *non-default* value a script wrote never reaches
+    /// the user's settings file, and persistence comes back the moment the
+    /// stored value is the default again — so a collar cannot leave its blur
+    /// behind after a relog.
+    #[test]
+    fn a_script_written_value_is_kept_out_of_the_settings_file() -> Result<(), TestError> {
+        let mut settings = store_with_divisor();
+        assert!(
+            settings
+                .store()
+                .declaration(SETTING_RENDER_RESOLUTION_DIVISOR)
+                .ok_or("the divisor is not registered")?
+                .persist(),
+            "the divisor is a persisted setting to begin with"
+        );
+
+        let mut ext = ViewerRlvExt {
+            settings: Some(&mut settings),
+            facts: RlvExtFacts::default(),
+        };
+        assert!(ext.set_debug_value(
+            RlvDebugSetting::RenderResolutionDivisor,
+            RlvDebugValue::U32(4)
+        ));
+        assert!(
+            !settings
+                .store()
+                .declaration(SETTING_RENDER_RESOLUTION_DIVISOR)
+                .ok_or("the divisor is not registered")?
+                .persist(),
+            "a non-default value a script wrote must not be written to disk"
+        );
+        assert!(
+            !settings
+                .store()
+                .serialize_scope(sl_settings::Scope::Global)
+                .contains(SETTING_RENDER_RESOLUTION_DIVISOR),
+            "the saved file must not name a setting a script is holding"
+        );
+
+        let mut ext = ViewerRlvExt {
+            settings: Some(&mut settings),
+            facts: RlvExtFacts::default(),
+        };
+        assert!(ext.set_debug_value(
+            RlvDebugSetting::RenderResolutionDivisor,
+            RlvDebugValue::U32(1)
+        ));
+        assert!(
+            settings
+                .store()
+                .declaration(SETTING_RENDER_RESOLUTION_DIVISOR)
+                .ok_or("the divisor is not registered")?
+                .persist(),
+            "back at the default, the setting persists as it was declared to"
+        );
+        Ok(())
+    }
+
+    /// Only the one row is writable here: `AvatarSex` is a pseudo setting the
+    /// state machine keeps, and the read-only rows refuse outright — including
+    /// a write of the right row in the wrong type, which is a malformed command
+    /// rather than a coercion.
+    #[test]
+    fn no_other_row_is_writable() {
+        let mut settings = store_with_divisor();
+        let mut ext = ViewerRlvExt {
+            settings: Some(&mut settings),
+            facts: RlvExtFacts::default(),
+        };
+        for setting in [
+            RlvDebugSetting::AvatarSex,
+            RlvDebugSetting::AspectRatio,
+            RlvDebugSetting::ForbidGiveToRlv,
+            RlvDebugSetting::NoSetEnv,
+            RlvDebugSetting::WindLightUseAtmosShaders,
+        ] {
+            assert!(
+                !ext.set_debug_value(setting, RlvDebugValue::U32(4)),
+                "{setting:?} must not be writable through the settings store"
+            );
+        }
+        assert!(!ext.set_debug_value(
+            RlvDebugSetting::RenderResolutionDivisor,
+            RlvDebugValue::Bool(true)
+        ));
+    }
 
     /// Every setting name in the three rosters is unique — a duplicate would
     /// register twice and the second registration would be dropped with a

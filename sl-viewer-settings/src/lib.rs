@@ -197,6 +197,20 @@ impl ViewerSettings {
         }
     }
 
+    /// Turn a registered setting's persistence on or off after the fact (see
+    /// [`SettingsStore::set_persist`](sl_settings::SettingsStore::set_persist)),
+    /// logging and swallowing an (unregistered) error so a bad name can never
+    /// abort a frame.
+    ///
+    /// The one caller is the RLV `@setdebug_<name>=force` write site, which owes
+    /// the reference's rule that a value a **script** wrote never reaches the
+    /// user's settings file.
+    pub fn set_persist(&mut self, name: &str, persist: bool) {
+        if let Err(error) = self.store.set_persist(name, persist) {
+            warn!("settings: could not set persistence for {name}: {error}");
+        }
+    }
+
     /// Drop a setting's override in one scope, reverting it to the layer below
     /// (see [`SettingsStore::reset`](sl_settings::SettingsStore::reset)). Returns
     /// whether an override was actually present. A bound "reset to default"

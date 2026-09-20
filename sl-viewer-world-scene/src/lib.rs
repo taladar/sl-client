@@ -39,6 +39,7 @@ pub mod particles;
 mod plugin;
 pub mod probes;
 pub mod render_overrides;
+pub mod resolution_divisor;
 pub mod sky;
 pub mod terrain;
 pub mod tonemap;

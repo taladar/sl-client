@@ -60,6 +60,7 @@ pub(crate) const REGISTRARS: &[fn(&mut crate::settings::ViewerSettings)] = &[
     crate::world_map::register_settings,
     crate::search::register_settings,
     crate::tonemap::register_settings,
+    crate::resolution_divisor::register_settings,
     crate::glow::register_settings,
     crate::exposure::register_settings,
     crate::snapshot_floater::register_settings,
@@ -289,6 +290,7 @@ mod viewer_plugins;
 #[cfg(test)]
 mod world_test;
 pub(crate) use sl_viewer_world_scene::render_overrides;
+pub(crate) use sl_viewer_world_scene::resolution_divisor;
 // Only the render-harness tiers (`render_matrix`, `render_readback`,
 // `render_test`) build scenes; the viewer proper builds the world.
 #[cfg(test)]

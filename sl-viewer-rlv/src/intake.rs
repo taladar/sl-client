@@ -631,8 +631,10 @@ fn apply_blocked_behaviours(
 pub(crate) struct RlvRun<'w> {
     /// Our own agent, whose id a console line is issued under.
     pub(crate) identity: Option<Res<'w, SlIdentity>>,
-    /// The settings, which hold the master switch and the debug flags.
-    pub(crate) settings: Option<Res<'w, ViewerSettings>>,
+    /// The settings, which hold the master switch and the debug flags — and
+    /// the one row of the `@setdebug` allowlist a script may *write*
+    /// (`RenderResolutionDivisor`), which is why this is a mutable borrow.
+    pub(crate) settings: Option<ResMut<'w, ViewerSettings>>,
     /// The two facts the debug-setting allowlist reads.
     pub(crate) facts: Option<Res<'w, RlvExtFacts>>,
     /// The movement controls a `@setrot` writes a forced heading on.
@@ -652,7 +654,7 @@ fn take_rlv_owner_say(
 ) {
     let RlvRun {
         identity,
-        settings,
+        mut settings,
         facts,
         mut controls,
         mut environment,
@@ -702,7 +704,7 @@ fn take_rlv_owner_say(
                 .set_object_attachment(issuer, Some(attachment));
         }
         let mut ext = ViewerRlvExt {
-            settings: settings.as_deref(),
+            settings: settings.as_deref_mut(),
             facts: facts.as_deref().copied().unwrap_or_default(),
         };
         let run = apply_owner_say(
