@@ -77,7 +77,9 @@ what makes seamless movement across a contiguous grid possible.
 > **In this codebase**
 >
 > - A circuit is the `Circuit` type in `sl-proto/src/session/circuit.rs`. It
->   owns `next_sequence` and the resend/ack/seen-window bookkeeping, and exposes
+>   holds a `ReliableLink` (`sl-proto/src/link.rs`) for the sequence counter and
+>   the resend/ack/seen-window bookkeeping — the same type the server's
+>   `SimSession` holds, see [LLUDP transport](lludp-transport.md) — and exposes
 >   the `send_use_circuit_code`, `send_complete_agent_movement`, and
 >   `send_region_handshake_reply` helpers used during the handshake.
 > - The owning `Session` (`sl-proto/src/session.rs`) holds the root circuit and

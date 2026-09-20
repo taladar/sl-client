@@ -46,15 +46,14 @@ use super::{
     FolderState, FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION,
     INVENTORY_FETCH_MAX_ATTEMPTS, INVENTORY_SAVE_TIMEOUT, Inventory, InventoryOwner,
     LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT, MAX_XFER_DOWNLOAD_BYTES,
-    MessageCursor, OfferedUpload, PARENT_REQUEST_WARN_ATTEMPTS, PING_INTERVAL, ParentRequest,
-    PendingHandover, PendingInventorySave, PendingInvite, RELIABLE_REPLY_GRACE, ReliableSeverity,
-    SIT_REFUSAL_ALERTS, SIT_TIMEOUT, ScriptGrant, ScriptHolder, ServerHistoryFetch,
-    ServerHistoryMessage, ServerHistoryState, Session, SessionMessage, SessionState, SitState,
-    TELEPORT_TIMEOUT, TEXTURE_DOWNLOAD_MAX_ATTEMPTS, TEXTURE_DOWNLOAD_STALL_TIMEOUT,
-    TYPING_TIMEOUT, TakenControls, TeleportPhase, TextureDownload, TransferDownload,
-    TransferProgress, TransferPurpose, VoiceChannelInfo, XFER_OFFER_TIMEOUT, XFER_REFUSED_RESULT,
-    XFER_STALL_TIMEOUT, XFER_TIMEOUT_RESULT, XferDownload, XferPurpose, XferUpload, deadline,
-    merge_deadline,
+    MessageCursor, OfferedUpload, PARENT_REQUEST_WARN_ATTEMPTS, ParentRequest, PendingHandover,
+    PendingInventorySave, PendingInvite, RELIABLE_REPLY_GRACE, SIT_REFUSAL_ALERTS, SIT_TIMEOUT,
+    ScriptGrant, ScriptHolder, ServerHistoryFetch, ServerHistoryMessage, ServerHistoryState,
+    Session, SessionMessage, SessionState, SitState, TELEPORT_TIMEOUT,
+    TEXTURE_DOWNLOAD_MAX_ATTEMPTS, TEXTURE_DOWNLOAD_STALL_TIMEOUT, TYPING_TIMEOUT, TakenControls,
+    TeleportPhase, TextureDownload, TransferDownload, TransferProgress, TransferPurpose,
+    VoiceChannelInfo, XFER_OFFER_TIMEOUT, XFER_REFUSED_RESULT, XFER_STALL_TIMEOUT,
+    XFER_TIMEOUT_RESULT, XferDownload, XferPurpose, XferUpload, deadline, merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
@@ -63,6 +62,7 @@ use crate::bookkeeping_ids::{
     TransactionId, TransferId, XferId,
 };
 use crate::error::Error;
+use crate::link::{PING_INTERVAL, ReliableSeverity};
 use crate::mute::MuteList;
 use crate::neighbour_caps::ObjectRegion;
 use crate::scoped_id::{CircuitId, ScopedObjectId, ScopedParcelId};
@@ -5652,7 +5652,7 @@ impl Session {
         if self
             .circuit
             .as_ref()
-            .is_some_and(|c| now >= c.timers.inactivity)
+            .is_some_and(|c| now >= c.inactivity_deadline())
         {
             self.close(DisconnectReason::Timeout);
             return Ok(());
@@ -5752,7 +5752,7 @@ impl Session {
         if self
             .circuit
             .as_ref()
-            .and_then(|c| c.timers.ack_flush)
+            .and_then(|c| c.ack_flush_deadline())
             .is_some_and(|d| now >= d)
             && let Some(circuit) = self.circuit.as_mut()
         {
@@ -5799,7 +5799,7 @@ impl Session {
         let mut dead = Vec::new();
         let mut child_exhausted = Vec::new();
         for (addr, child) in &mut self.children {
-            if now >= child.timers.inactivity {
+            if now >= child.inactivity_deadline() {
                 dead.push(*addr);
                 continue;
             }
@@ -5810,7 +5810,7 @@ impl Session {
             // sends every `PacketAck` it can, so the error is informational and
             // must not abort the tick — that would skip the remaining children
             // and the dead-child sweep below.
-            if child.timers.ack_flush.is_some_and(|d| now >= d)
+            if child.ack_flush_deadline().is_some_and(|d| now >= d)
                 && let Err(error) = child.flush_acks(now)
             {
                 tracing::warn!(%addr, %error, "failed to flush owed acks on a child circuit");
@@ -14187,8 +14187,8 @@ impl Session {
             return None;
         }
         let circuit = self.circuit.as_ref()?;
-        let mut earliest = Some(circuit.timers.inactivity);
-        merge_deadline(&mut earliest, circuit.timers.ack_flush);
+        let mut earliest = Some(circuit.inactivity_deadline());
+        merge_deadline(&mut earliest, circuit.ack_flush_deadline());
         merge_deadline(&mut earliest, circuit.timers.agent_update);
         merge_deadline(&mut earliest, circuit.timers.logout);
         merge_deadline(&mut earliest, circuit.timers.teleport);
@@ -14204,8 +14204,8 @@ impl Session {
         // And the parent re-asks, for a child that is otherwise quiet.
         merge_deadline(&mut earliest, self.next_parent_reask());
         for child in self.children.values() {
-            merge_deadline(&mut earliest, Some(child.timers.inactivity));
-            merge_deadline(&mut earliest, child.timers.ack_flush);
+            merge_deadline(&mut earliest, Some(child.inactivity_deadline()));
+            merge_deadline(&mut earliest, child.ack_flush_deadline());
             merge_deadline(&mut earliest, child.next_resend_deadline());
         }
         earliest

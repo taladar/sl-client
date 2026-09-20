@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 300 |
+| ready | 299 |
 | blocked | 40 |
 | in-progress | 22 |
 | bugs | 5 |
-| done | 1195 |
+| done | 1196 |
 | deferred | 29 |
 | wont-do | 16 |
 | **total** | **1707** |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (300)
+## ready (299)
 
 ### protocol
 
@@ -254,8 +254,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Fuzz the wire and asset decoders
 - [`protocol-audit-dispatch-child-drift`](ready/protocol-audit-dispatch-child-drift.md)
   — dispatch_child is a hand-copied subset of dispatch
-- [`protocol-audit-extract-lludp-transport`](ready/protocol-audit-extract-lludp-transport.md)
-  — The LLUDP reliable-transport layer is implemented twice and has drifted
 - [`protocol-audit-j2c-encode-lint-config`](ready/protocol-audit-j2c-encode-lint-config.md)
   — The one crate with unsafe FFI has the workspace's weakest lint configuration
 - [`protocol-audit-runtime-parity-gaps`](ready/protocol-audit-runtime-parity-gaps.md)
@@ -1148,7 +1146,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 
-## done (1195)
+## done (1196)
 
 ### protocol
 
@@ -1282,6 +1280,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The client's Xfer download has no size cap and no ordering check
 - [`protocol-audit-decoder-reference-fidelity`](done/protocol-audit-decoder-reference-fidelity.md)
   — Four decoder divergences from the reference viewer
+- [`protocol-audit-extract-lludp-transport`](done/protocol-audit-extract-lludp-transport.md)
+  — The LLUDP reliable-transport layer is implemented twice and has drifted
 - [`protocol-audit-flush-acks-loses-acks`](done/protocol-audit-flush-acks-loses-acks.md)
   — flush_acks drops every remaining ack on a wire error, in both directions
 - [`protocol-audit-inventory-fetch-deadlock`](done/protocol-audit-inventory-fetch-deadlock.md)

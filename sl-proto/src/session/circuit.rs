@@ -3,18 +3,13 @@
 use super::conversions::{
     OutgoingIm, compute_im_session_id, inventory_item_crc, pack_quaternion_to_vec3, with_nul,
 };
-use super::{
-    ACK_FLUSH_DELAY, Circuit, ExhaustedPacket, INACTIVITY_TIMEOUT, INITIAL_PING_AVERAGE,
-    MAX_RESEND_ATTEMPTS, MINIMUM_RESEND_TIMEOUT, Outbound, PING_AVERAGE_ALPHA, PING_AVERAGE_DECAY,
-    PING_AVERAGE_MAX, PING_AVERAGE_MIN, RELIABLE_TIMEOUT_FACTOR, ReliableSeverity, SeenWindow,
-    Timers, UnackedPacket, deadline,
-};
+use super::{Circuit, Timers};
 use crate::AssetKey;
 use crate::GroupRoleKey;
-use crate::ack_flush::send_ack_packets;
 use crate::bookkeeping_ids::{InventoryCallbackId, PingId, TransferId, XferId};
 use crate::encode_texture_entry;
 use crate::extra_params::extra_param_message_blocks;
+use crate::link::{ExhaustedPacket, ReliableLink, ReliableSeverity};
 use crate::scoped_id::CircuitId;
 use crate::types::EventId;
 use crate::types::directory::category_to_wire;
@@ -199,20 +194,20 @@ use sl_wire::messages::{
     SendXferPacketXferIDBlock, SetGroupAcceptNotices, SetGroupAcceptNoticesAgentDataBlock,
     SetGroupAcceptNoticesDataBlock, SetGroupAcceptNoticesNewDataBlock, SetGroupContribution,
     SetGroupContributionAgentDataBlock, SetGroupContributionDataBlock, StartLure,
-    StartLureAgentDataBlock, StartLureInfoBlock, StartLureTargetDataBlock, StartPingCheck,
-    StartPingCheckPingIDBlock, TeleportLocationRequest, TeleportLocationRequestAgentDataBlock,
-    TeleportLocationRequestInfoBlock, TeleportLureRequest, TeleportLureRequestInfoBlock,
-    TerminateFriendship, TerminateFriendshipAgentDataBlock, TerminateFriendshipExBlockBlock,
-    TrackAgent, TrackAgentAgentDataBlock, TrackAgentTargetDataBlock, TransferAbort,
-    TransferAbortTransferInfoBlock, TransferRequest, TransferRequestTransferInfoBlock,
-    UUIDGroupNameRequest, UUIDGroupNameRequestUUIDNameBlockBlock, UUIDNameRequest,
-    UUIDNameRequestUUIDNameBlockBlock, UpdateGroupInfo, UpdateGroupInfoAgentDataBlock,
-    UpdateGroupInfoGroupDataBlock, UpdateInventoryFolder, UpdateInventoryFolderAgentDataBlock,
-    UpdateInventoryFolderFolderDataBlock, UpdateInventoryItem, UpdateInventoryItemAgentDataBlock,
-    UpdateInventoryItemInventoryDataBlock, UpdateMuteListEntry, UpdateMuteListEntryAgentDataBlock,
-    UpdateMuteListEntryMuteDataBlock, UseCircuitCode, UseCircuitCodeCircuitCodeBlock, UserReport,
-    UserReportAgentDataBlock, UserReportReportDataBlock, ViewerEffect as ViewerEffectMessage,
-    ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
+    StartLureAgentDataBlock, StartLureInfoBlock, StartLureTargetDataBlock, TeleportLocationRequest,
+    TeleportLocationRequestAgentDataBlock, TeleportLocationRequestInfoBlock, TeleportLureRequest,
+    TeleportLureRequestInfoBlock, TerminateFriendship, TerminateFriendshipAgentDataBlock,
+    TerminateFriendshipExBlockBlock, TrackAgent, TrackAgentAgentDataBlock,
+    TrackAgentTargetDataBlock, TransferAbort, TransferAbortTransferInfoBlock, TransferRequest,
+    TransferRequestTransferInfoBlock, UUIDGroupNameRequest, UUIDGroupNameRequestUUIDNameBlockBlock,
+    UUIDNameRequest, UUIDNameRequestUUIDNameBlockBlock, UpdateGroupInfo,
+    UpdateGroupInfoAgentDataBlock, UpdateGroupInfoGroupDataBlock, UpdateInventoryFolder,
+    UpdateInventoryFolderAgentDataBlock, UpdateInventoryFolderFolderDataBlock, UpdateInventoryItem,
+    UpdateInventoryItemAgentDataBlock, UpdateInventoryItemInventoryDataBlock, UpdateMuteListEntry,
+    UpdateMuteListEntryAgentDataBlock, UpdateMuteListEntryMuteDataBlock, UseCircuitCode,
+    UseCircuitCodeCircuitCodeBlock, UserReport, UserReportAgentDataBlock,
+    UserReportReportDataBlock, ViewerEffect as ViewerEffectMessage, ViewerEffectAgentDataBlock,
+    ViewerEffectEffectBlock,
 };
 use sl_wire::messages::{
     AgentDataUpdateRequest, AgentDataUpdateRequestAgentDataBlock, AgentQuitCopy,
@@ -300,10 +295,9 @@ use sl_wire::messages::{
     UpdateUserInfoUserDataBlock, UserInfoRequest, UserInfoRequestAgentDataBlock,
 };
 use sl_wire::{
-    AnyMessage, CircuitCode, PacketFlags, RegionLocalObjectId, RegionLocalParcelId, SequenceNumber,
-    WireError, Writer, encode_datagram,
+    AnyMessage, CircuitCode, RegionLocalObjectId, RegionLocalParcelId, SequenceNumber, WireError,
+    Writer,
 };
-use std::collections::{BTreeMap, VecDeque};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
@@ -369,19 +363,10 @@ impl Circuit {
             agent_id,
             session_id,
             code: circuit_code,
-            next_sequence: SequenceNumber::FIRST,
             pause_serial_num: 0,
-            next_ping_id: PingId::default(),
-            outstanding_ping: None,
-            ping_average: INITIAL_PING_AVERAGE,
-            pending_acks: Vec::new(),
-            unacked: BTreeMap::new(),
-            seen: SeenWindow::default(),
-            out: VecDeque::new(),
+            link: ReliableLink::new(now),
             draw_distance,
             timers: Timers {
-                inactivity: deadline(now, INACTIVITY_TIMEOUT),
-                ack_flush: None,
                 agent_update: None,
                 ping: None,
                 logout: None,
@@ -391,89 +376,25 @@ impl Circuit {
         }
     }
 
-    /// Allocates the next outgoing sequence number.
-    pub(crate) const fn next_sequence(&mut self) -> SequenceNumber {
-        let sequence = self.next_sequence;
-        self.next_sequence = self.next_sequence.wrapping_next();
-        sequence
-    }
-
     /// Encodes and queues a message, tracking it for resend when reliable.
+    ///
+    /// The circuit's own contribution is [`severity_of`]: which of *its*
+    /// messages the session cannot survive losing. Everything else about the
+    /// reliable layer is [`ReliableLink`]'s.
     pub(crate) fn send(
         &mut self,
         message: &AnyMessage,
         reliability: Reliability,
         now: Instant,
     ) -> Result<(), WireError> {
-        let mut writer = Writer::new();
-        message.id().encode(&mut writer);
-        message.encode_body(&mut writer)?;
-        let body = writer.into_bytes();
-
-        let sequence = self.next_sequence();
-        let flags = match reliability {
-            Reliability::Reliable => PacketFlags::RELIABLE,
-            Reliability::Unreliable => PacketFlags::EMPTY,
-        };
-        let datagram = encode_datagram(flags, sequence, &body);
-
-        let tracked = if matches!(reliability, Reliability::Reliable) {
-            self.unacked.insert(
-                sequence,
-                UnackedPacket {
-                    datagram: datagram.clone(),
-                    sent_at: now,
-                    queued: true,
-                    attempts: 1,
-                    name: sl_wire::message_name(message.id()),
-                    severity: severity_of(message),
-                },
-            );
-            Some(sequence)
-        } else {
-            None
-        };
-        self.out.push_back(Outbound {
-            sequence: tracked,
-            payload: datagram,
-        });
-        Ok(())
+        self.link
+            .send(message, reliability, severity_of(message), now)
     }
 
     /// Pops the next datagram to hand to the driver, starting the
-    /// retransmission clock of the reliable packet it carries: until now that
-    /// packet was only *queued*, and time spent in the queue must not count
-    /// against its timeout (see [`UnackedPacket::sent_at`]).
+    /// retransmission clock of the reliable packet it carries.
     pub(crate) fn pop_outbound(&mut self) -> Option<Vec<u8>> {
-        let outbound = self.out.pop_front()?;
-        if let Some(sequence) = outbound.sequence
-            && let Some(packet) = self.unacked.get_mut(&sequence)
-        {
-            packet.queued = false;
-        }
-        Some(outbound.payload)
-    }
-
-    /// The retransmission timeout for this circuit: the reference viewer's
-    /// `LL_RELIABLE_TIMEOUT_FACTOR` multiple of the averaged round-trip time,
-    /// floored at [`MINIMUM_RESEND_TIMEOUT`].
-    fn resend_timeout(&self) -> Duration {
-        self.ping_average
-            .mul_f32(RELIABLE_TIMEOUT_FACTOR)
-            .max(MINIMUM_RESEND_TIMEOUT)
-    }
-
-    /// Folds a round-trip `sample` into the circuit's ping average with the
-    /// reference viewer's fast-attack / slow-decay relaxation
-    /// (`LLCircuitData::setPingDelay`): the average first jumps to any worse
-    /// sample, then relaxes toward it, and the result is clamped to
-    /// `PING_AVERAGE_MIN ..= PING_AVERAGE_MAX`.
-    fn record_ping_sample(&mut self, sample: Duration) {
-        let attacked = self.ping_average.max(sample);
-        self.ping_average = attacked
-            .mul_f32(PING_AVERAGE_DECAY)
-            .saturating_add(sample.mul_f32(PING_AVERAGE_ALPHA))
-            .clamp(PING_AVERAGE_MIN, PING_AVERAGE_MAX);
+        self.link.pop_outbound()
     }
 
     /// Queues `UseCircuitCode` reliably.
@@ -556,35 +477,9 @@ impl Circuit {
 
     /// Queues a keep-alive `StartPingCheck` unreliably, recording it as the
     /// outstanding ping so the matching `CompletePingCheck` can be timed.
-    ///
-    /// Like the reference viewer, the ping carries the oldest unacked outgoing
-    /// sequence number in `OldestUnacked`, letting the simulator drop its own
-    /// record of anything older. "Oldest" is read off the wrapping counter
-    /// rather than the numeric order of the set — see
-    /// [`unacked::oldest`](crate::unacked::oldest). Returns the ping id sent.
+    /// Returns the ping id sent.
     pub(crate) fn send_start_ping_check(&mut self, now: Instant) -> Result<PingId, WireError> {
-        // A ping still outstanding when the next one is due is itself evidence
-        // about the link: the round trip is at least the time it has been in
-        // flight. Folding that in is this circuit's form of the reference
-        // viewer's `getPingInTransitTime`, which inflates the averaged ping
-        // while pings go unanswered — so a simulator that has stopped replying
-        // stretches the retransmission timeout instead of drawing ever more
-        // retransmissions onto an already struggling link.
-        if let Some((_, sent_at)) = self.outstanding_ping {
-            self.record_ping_sample(now.saturating_duration_since(sent_at));
-        }
-        let ping_id = self.next_ping_id;
-        self.next_ping_id = self.next_ping_id.wrapping_next();
-        let oldest = crate::unacked::oldest(&self.unacked, self.next_sequence);
-        let message = AnyMessage::StartPingCheck(StartPingCheck {
-            ping_id: StartPingCheckPingIDBlock {
-                ping_id: ping_id.get(),
-                oldest_unacked: oldest.get(),
-            },
-        });
-        self.send(&message, Reliability::Unreliable, now)?;
-        self.outstanding_ping = Some((ping_id, now));
-        Ok(ping_id)
+        self.link.send_start_ping_check(now)
     }
 
     /// Records an inbound `CompletePingCheck`, returning the round-trip time when
@@ -594,15 +489,7 @@ impl Circuit {
     /// ping in flight (a stale or duplicate echo), leaving any genuine
     /// outstanding ping untouched.
     pub(crate) fn record_ping_reply(&mut self, ping_id: PingId, now: Instant) -> Option<Duration> {
-        match self.outstanding_ping {
-            Some((outstanding, sent_at)) if outstanding == ping_id => {
-                self.outstanding_ping = None;
-                let round_trip = now.saturating_duration_since(sent_at);
-                self.record_ping_sample(round_trip);
-                Some(round_trip)
-            }
-            _ => None,
-        }
+        self.link.record_ping_reply(ping_id, now)
     }
 
     /// Queues a `ChatFromViewer` reliably, sending local chat. The wire string
@@ -5991,105 +5878,47 @@ impl Circuit {
 
     /// Records that a datagram was received, resetting the inactivity timer.
     pub(crate) fn note_received(&mut self, now: Instant) {
-        self.timers.inactivity = deadline(now, INACTIVITY_TIMEOUT);
+        self.link.note_received(now);
+    }
+
+    /// When the circuit is declared dead for lack of inbound traffic.
+    pub(crate) const fn inactivity_deadline(&self) -> Instant {
+        self.link.inactivity_deadline()
+    }
+
+    /// When owed acknowledgements are due to be flushed, if any are pending.
+    pub(crate) const fn ack_flush_deadline(&self) -> Option<Instant> {
+        self.link.ack_flush_deadline()
     }
 
     /// Records that we owe an acknowledgement for `sequence`, arming the flush.
     pub(crate) fn queue_ack(&mut self, sequence: SequenceNumber, now: Instant) {
-        self.pending_acks.push(sequence);
-        if self.timers.ack_flush.is_none() {
-            self.timers.ack_flush = Some(deadline(now, ACK_FLUSH_DELAY));
-        }
+        self.link.queue_ack(sequence, now);
     }
 
     /// Removes the given outgoing sequence numbers from the unacked set.
     pub(crate) fn record_acks(&mut self, ids: &[SequenceNumber]) {
-        for id in ids {
-            self.unacked.remove(id);
-        }
+        self.link.record_acks(ids);
     }
 
     /// Records an inbound reliable `sequence`; returns `true` if it is new.
     pub(crate) fn mark_seen(&mut self, sequence: SequenceNumber) -> bool {
-        self.seen.insert(sequence)
+        self.link.mark_seen(sequence)
     }
 
     /// Flushes owed acknowledgements as one or more `PacketAck` messages.
-    ///
-    /// A message that fails to encode does not take the acks batched behind it
-    /// with it — see [`send_ack_packets`] for why every message is sent even
-    /// after one fails, and why the first failure is the one returned.
     pub(crate) fn flush_acks(&mut self, now: Instant) -> Result<(), WireError> {
-        self.timers.ack_flush = None;
-        if self.pending_acks.is_empty() {
-            return Ok(());
-        }
-        let acks = std::mem::take(&mut self.pending_acks);
-        send_ack_packets(&acks, |message| {
-            self.send(message, Reliability::Unreliable, now)
-        })
+        self.link.flush_acks(now)
     }
 
-    /// Retransmits unacknowledged reliable packets whose timeout has elapsed.
-    ///
-    /// The timeout tracks the circuit's measured round trip
-    /// ([`Self::resend_timeout`]), and a datagram still waiting in the outbound
-    /// queue has its clock held at `now` rather than counting the wait as
-    /// silence from the simulator — so a driver that falls behind does not turn
-    /// its own backlog into a burst of retransmissions.
-    ///
-    /// Returns every packet that has now exhausted its retransmission budget;
-    /// such packets are dropped from the unacked set (so they are reported only
-    /// once and stop driving the resend deadline). An empty result means nothing
-    /// exhausted this tick.
+    /// Retransmits unacknowledged reliable packets whose timeout has elapsed,
+    /// returning every packet that has now exhausted its budget.
     pub(crate) fn process_resends(&mut self, now: Instant) -> Vec<ExhaustedPacket> {
-        let timeout = self.resend_timeout();
-        let mut exhausted = Vec::new();
-        let mut to_send = Vec::new();
-        for (sequence, packet) in &mut self.unacked {
-            if packet.queued {
-                packet.sent_at = now;
-                continue;
-            }
-            if now < deadline(packet.sent_at, timeout) {
-                continue;
-            }
-            if packet.attempts >= MAX_RESEND_ATTEMPTS {
-                exhausted.push(ExhaustedPacket {
-                    sequence: *sequence,
-                    name: packet.name,
-                    severity: packet.severity,
-                });
-                continue;
-            }
-            let mut datagram = packet.datagram.clone();
-            if let Some(first) = datagram.first_mut() {
-                *first |= PacketFlags::RESENT.bits();
-            }
-            packet.sent_at = now;
-            packet.queued = true;
-            packet.attempts = packet.attempts.saturating_add(1);
-            to_send.push(Outbound {
-                sequence: Some(*sequence),
-                payload: datagram,
-            });
-        }
-        self.out.extend(to_send);
-        for packet in &exhausted {
-            self.unacked.remove(&packet.sequence);
-        }
-        exhausted
+        self.link.process_resends(now)
     }
 
-    /// The earliest retransmission deadline across all unacked packets. A packet
-    /// whose datagram is still queued has not started its clock, so it does not
-    /// contribute a deadline — its wake-up comes from the transmission itself.
+    /// The earliest retransmission deadline across all unacked packets.
     pub(crate) fn next_resend_deadline(&self) -> Option<Instant> {
-        let timeout = self.resend_timeout();
-        self.unacked
-            .values()
-            .filter(|packet| !packet.queued)
-            .map(|packet| deadline(packet.sent_at, timeout))
-            .min()
+        self.link.next_resend_deadline()
     }
 }

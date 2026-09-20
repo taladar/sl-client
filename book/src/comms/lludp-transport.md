@@ -142,9 +142,13 @@ When a value comes out wrong by byte-swap, this is almost always the cause.
 >   how far decoding got, which is what a `DecodeFailed`
 >   [diagnostic](sessions.md#diagnostics) records as the failure offset when a
 >   datagram cannot be parsed.
-> - The reliability bookkeeping (the unacked table, seen-window, ack queue)
->   lives per-circuit in `sl-proto/src/session/circuit.rs` (`Circuit::send`,
->   `process_resends`, `resend_timeout`); the `MINIMUM_RESEND_TIMEOUT`,
->   `RELIABLE_TIMEOUT_FACTOR`, `MAX_RESEND_ATTEMPTS` and ping-average constants
->   are in `sl-proto/src/session.rs`.
+> - The reliability bookkeeping — the unacked table, the seen window, the ack
+>   queue, the resend policy and the keep-alive ping that measures the round
+>   trip it rests on — is the `ReliableLink` type in `sl-proto/src/link.rs`,
+>   along with the `MINIMUM_RESEND_TIMEOUT`, `RELIABLE_TIMEOUT_FACTOR`,
+>   `MAX_RESEND_ATTEMPTS` and ping-average constants. **Both directions hold
+>   one**: the client's `Circuit` (`sl-proto/src/session/circuit.rs`) and the
+>   server's `SimSession` (`sl-proto/src/sim_session.rs`) each own a link and
+>   add only what is theirs — which of their own messages the session cannot
+>   survive losing (`severity_of`).
 > - `PacketAck` is a generated message (see [Messages](messages.md)).
