@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 100 |
-| ready | 297 |
-| blocked | 39 |
+| ideas | 116 |
+| ready | 304 |
+| blocked | 62 |
 | in-progress | 22 |
 | bugs | 5 |
 | done | 1199 |
-| deferred | 29 |
+| deferred | 30 |
 | wont-do | 16 |
-| **total** | **1707** |
+| **total** | **1754** |
 
-## ideas (100)
+## ideas (116)
 
 ### protocol
 
@@ -222,6 +222,57 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   service — per-agent trees and the library
 - [`server-login-service`](ideas/server-login-service.md) — Standalone login
   server
+- [`server-lsl-lib-avatar-control`](ideas/server-lsl-lib-avatar-control.md) —
+  Library tranche — avatars, animation, sitting, controls and camera (blocked by
+  `server-lsl-vm-execution`, `server-world-agent-movement`,
+  `server-world-sit-and-attach`)
+- [`server-lsl-lib-comms`](ideas/server-lsl-lib-comms.md) — Library tranche —
+  chat, listens, dialogs and link messages (blocked by
+  `server-lsl-vm-execution`, `server-world-chat-routing`,
+  `protocol-sim-script-messages`)
+- [`server-lsl-lib-detection-sensors`](ideas/server-lsl-lib-detection-sensors.md)
+  — Library tranche — the detected block, sensors and raycasts (blocked by
+  `server-lsl-state-and-events`, `server-world-ecs-store`,
+  `server-world-touch-and-grab`)
+- [`server-lsl-lib-experience`](ideas/server-lsl-lib-experience.md) — Library
+  tranche — experiences and the experience key-value store (blocked by
+  `server-lsl-vm-execution`, `server-lsl-lib-money-permissions`)
+- [`server-lsl-lib-http-url`](ideas/server-lsl-lib-http-url.md) — Library
+  tranche — outbound HTTP and in-world URLs (blocked by
+  `server-lsl-vm-execution`, `server-world-determinism-contract`)
+- [`server-lsl-lib-json-linkset-data`](ideas/server-lsl-lib-json-linkset-data.md)
+  — Library tranche — llJson* and the linkset data store (blocked by
+  `server-lsl-vm-execution`, `server-lsl-library-surface-table`)
+- [`server-lsl-lib-land-region-env`](ideas/server-lsl-lib-land-region-env.md) —
+  Library tranche — parcel, region, estate and environment queries (blocked by
+  `server-lsl-vm-execution`, `server-world-agent-movement`)
+- [`server-lsl-lib-math-rotations`](ideas/server-lsl-lib-math-rotations.md) —
+  Library tranche — maths, vectors and rotations (blocked by
+  `server-lsl-vm-execution`, `server-lsl-library-surface-table`)
+- [`server-lsl-lib-money-permissions`](ideas/server-lsl-lib-money-permissions.md)
+  — Library tranche — script permissions, money and payment (blocked by
+  `server-lsl-vm-execution`, `protocol-sim-script-messages`)
+- [`server-lsl-lib-ossl`](ideas/server-lsl-lib-ossl.md) — Scope the OSSL (os*)
+  surface — how much, and why (blocked by `server-lsl-library-surface-table`)
+- [`server-lsl-lib-physics-vehicles`](ideas/server-lsl-lib-physics-vehicles.md)
+  — Library tranche — status flags, forces, targets and vehicles (blocked by
+  `server-lsl-vm-execution`, `server-world-collision-and-physics`)
+- [`server-lsl-lib-prim-state`](ideas/server-lsl-lib-prim-state.md) — Library
+  tranche — reading and writing the prim (blocked by `server-lsl-vm-execution`,
+  `server-world-ecs-store`, `server-world-link-sets`,
+  `server-world-update-scheduling`)
+- [`server-lsl-lib-strings-lists`](ideas/server-lsl-lib-strings-lists.md) —
+  Library tranche — strings, lists, encoding and hashing (blocked by
+  `server-lsl-vm-execution`, `server-lsl-library-surface-table`)
+- [`server-lsl-lib-task-inventory`](ideas/server-lsl-lib-task-inventory.md) —
+  Library tranche — task inventory, giving, rezzing and notecards (blocked by
+  `server-lsl-vm-execution`, `server-fake-grid-script-engine-wiring`)
+- [`server-lsl-lib-time-timers`](ideas/server-lsl-lib-time-timers.md) — Library
+  tranche — time, timers and sleeping, on a tick clock (blocked by
+  `server-lsl-vm-execution`, `server-world-determinism-contract`)
+- [`server-lsl-script-persistence`](ideas/server-lsl-script-persistence.md) —
+  Script state that survives a take, a rez and a region restart (blocked by
+  `server-lsl-vm-execution`, `server-lsl-state-and-events`)
 - [`server-map-service`](ideas/server-map-service.md) — Map service — tiles and
   map items
 - [`server-message-routing`](ideas/server-message-routing.md) — Global message
@@ -238,7 +289,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (297)
+## ready (304)
 
 ### protocol
 
@@ -266,6 +317,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — sl-wire's public parse surface has five different failure disciplines
 - [`protocol-fetch-inventory-items-request`](ready/protocol-fetch-inventory-items-request.md)
   — Fetching inventory items by id (FetchInventory2's request half)
+- [`protocol-sim-script-messages`](ready/protocol-sim-script-messages.md) — The
+  simulator-side script messages SimSession neither sends nor decodes
 - [`protocol-sl-llsd-serde`](ready/protocol-sl-llsd-serde.md) — serde
   Serialize/Deserialize derives for sl-llsd (Llsd) types
 - [`protocol-sl-lsl-serde`](ready/protocol-sl-lsl-serde.md) — serde support for
@@ -818,6 +871,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Scripts on disk — mirror grid scripts to a directory tree
 - [`viewer-script-queue`](ready/viewer-script-queue.md) — Script queue — mass
   recompile / reset / run-state (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-script-warning-window`](ready/viewer-script-warning-window.md) —
+  Nothing in the viewer shows a script run-time error
 - [`viewer-scripted-followcam-llsetcameraparams`](ready/viewer-scripted-followcam-llsetcameraparams.md)
   — Apply scripted follow-camera parameters (llSetCameraParams)
 - [`viewer-search-maturity-filter`](ready/viewer-search-maturity-filter.md) —
@@ -938,7 +993,26 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
   The two REPL binaries share ~400 near-verbatim lines and have already drifted
 
-## blocked (39)
+### server
+
+- [`server-lsl-architecture`](ready/server-lsl-architecture.md) — LSL engine
+  architecture — execution model, crate layout, scheduling
+- [`server-lsl-value-model`](ready/server-lsl-value-model.md) — The LSL value
+  model — seven types and their exact coercions
+- [`server-world-chat-routing`](ready/server-world-chat-routing.md) — The fake
+  grid hears local chat and drops it
+- [`server-world-ecs-store`](ready/server-world-ecs-store.md) — An ECS scene
+  store for the region, in place of a Vec of objects
+- [`server-world-heartbeat`](ready/server-world-heartbeat.md) — A region
+  heartbeat — the fake grid has no simulation loop at all
+
+## blocked (62)
+
+### protocol
+
+- [`protocol-sim-lsl-syntax-document`](blocked/protocol-sim-lsl-syntax-document.md)
+  — The fake grid serves an empty LSLSyntax document (blocked by
+  `server-lsl-library-surface-table`)
 
 ### viewer
 
@@ -1055,10 +1129,81 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
+- [`test-fake-grid-lsl-offline-cases`](blocked/test-fake-grid-lsl-offline-cases.md)
+  — Move the script and chat conformance cases offline (blocked by
+  `server-fake-grid-scripted-scenario`)
+- [`test-lsl-content-suite`](blocked/test-lsl-content-suite.md) — A test harness
+  for somebody else's LSL content (blocked by
+  `server-fake-grid-scripted-avatars`)
+- [`test-lsl-differential-opensim`](blocked/test-lsl-differential-opensim.md) —
+  Run one script on both grids and diff what it did (blocked by
+  `server-fake-grid-script-engine-wiring`)
+- [`test-lsl-script-corpus`](blocked/test-lsl-script-corpus.md) — An executable
+  LSL corpus that runs in cargo test with no grid (blocked by
+  `server-lsl-vm-execution`)
 - [`test-voice-account`](blocked/test-voice-account-provision-a-voice-account.md)
   — provision a voice account (blocked by `viewer-voice-audio`)
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
+
+### repl
+
+- [`repl-lsl-script-control`](blocked/repl-lsl-script-control.md) — sl-repl
+  verbs for compiling, running and watching scripts (blocked by
+  `server-fake-grid-script-engine-wiring`)
+
+### server
+
+- [`server-fake-grid-script-compile-on-upload`](blocked/server-fake-grid-script-compile-on-upload.md)
+  — A script upload is accepted and never compiled (blocked by
+  `server-lsl-compiler-ir`)
+- [`server-fake-grid-script-engine-wiring`](blocked/server-fake-grid-script-engine-wiring.md)
+  — Wire the script engine into the fake grid (blocked by
+  `server-lsl-vm-execution`, `server-world-heartbeat`, `server-world-ecs-store`)
+- [`server-fake-grid-scripted-avatars`](blocked/server-fake-grid-scripted-avatars.md)
+  — Scripted avatars — a client that grants, pays, sits and answers (blocked by
+  `server-fake-grid-script-engine-wiring`)
+- [`server-fake-grid-scripted-scenario`](blocked/server-fake-grid-scripted-scenario.md)
+  — A scripts scenario — one prim per scripted behaviour (blocked by
+  `server-fake-grid-script-engine-wiring`)
+- [`server-lsl-compiler-ir`](blocked/server-lsl-compiler-ir.md) — Lower the LSL
+  syntax tree to something executable (blocked by `server-lsl-architecture`,
+  `server-lsl-value-model`)
+- [`server-lsl-library-surface-table`](blocked/server-lsl-library-surface-table.md)
+  — One generated table for the library, and a coverage harness over it (blocked
+  by `server-lsl-architecture`)
+- [`server-lsl-memory-and-limits`](blocked/server-lsl-memory-and-limits.md) —
+  Script memory and limits, because scripts observe them (blocked by
+  `server-lsl-vm-execution`)
+- [`server-lsl-runtime-errors`](blocked/server-lsl-runtime-errors.md) — Run-time
+  errors where a resident can see them (blocked by `server-lsl-vm-execution`)
+- [`server-lsl-state-and-events`](blocked/server-lsl-state-and-events.md) — The
+  event and state machine — 35 events and the rules around them (blocked by
+  `server-lsl-vm-execution`)
+- [`server-lsl-vm-execution`](blocked/server-lsl-vm-execution.md) — The script
+  VM — suspendable execution in per-tick slices (blocked by
+  `server-lsl-compiler-ir`)
+- [`server-world-agent-movement`](blocked/server-world-agent-movement.md) — The
+  agent never moves — AgentUpdate is decoded and ignored (blocked by
+  `server-world-heartbeat`)
+- [`server-world-collision-and-physics`](blocked/server-world-collision-and-physics.md)
+  — Enough physics for the collision, target and volume-detect events (blocked
+  by `server-world-heartbeat`, `server-world-ecs-store`)
+- [`server-world-determinism-contract`](blocked/server-world-determinism-contract.md)
+  — Keep the fake grid reproducible once it runs scripts (blocked by
+  `server-world-heartbeat`)
+- [`server-world-link-sets`](blocked/server-world-link-sets.md) — A real
+  link-set model — link numbers, root and children (blocked by
+  `server-world-ecs-store`)
+- [`server-world-sit-and-attach`](blocked/server-world-sit-and-attach.md) —
+  Sitting and attaching as world state a script can read (blocked by
+  `server-world-ecs-store`)
+- [`server-world-touch-and-grab`](blocked/server-world-touch-and-grab.md) —
+  Touch routing — a click on a prim reaches nothing (blocked by
+  `protocol-sim-script-messages`)
+- [`server-world-update-scheduling`](blocked/server-world-update-scheduling.md)
+  — Batch world changes into per-tick update bursts (blocked by
+  `server-world-heartbeat`, `server-world-ecs-store`)
 
 ## in-progress (22)
 
@@ -3774,7 +3919,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Fake grid — a top-objects report with rows in it, and a return that finds
   them
 
-## deferred (29)
+## deferred (30)
 
 ### protocol
 
@@ -3854,6 +3999,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — script-upload on aditi — SL drops the task-inventory write.** The scri
 - [`test-recommit-conformance-records`](deferred/test-recommit-conformance-records.md)
   — Revisit committing sl-conformance records once implementation churn settles
+
+### server
+
+- [`server-lsl-lib-email-xmlrpc`](deferred/server-lsl-lib-email-xmlrpc.md) —
+  Library tranche — email and XML-RPC, parked (blocked by
+  `server-lsl-vm-execution`)
 
 ## wont-do (16)
 

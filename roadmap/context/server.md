@@ -6,6 +6,19 @@ would involve, at subsystem granularity, so the effort can be sized and
 the protocol-surface work ([context/protocol.md](protocol.md), the
 `protocol-sim-*` tasks) can be steered toward genuine reuse.
 
+## The one committed line: LSL on the fake grid
+
+One part of this topic is **not** exploratory. Running LSL scripts on
+`sl-fake-grid`, and building the simulator-side facilities that needs —
+an entity store, a heartbeat, agent movement, chat routing, touch — is
+committed work with its own context file:
+[context/lsl.md](lsl.md). Its tasks are `server-lsl-*` and
+`server-world-*` (plus a handful under `protocol`, `test`, `repl` and
+`viewer`), and they are concrete rather than sizing notes. Read that
+file before picking one up; [[server-script-engine]] and
+[[server-simulator-core]] remain the *real-grid* sizing notes for the
+same subject matter.
+
 ## Boundary with the protocol topic
 
 The `protocol` topic owns the **wire surface**: bidirectional codecs,
