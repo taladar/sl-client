@@ -19,6 +19,7 @@
 //! `panel_inventory_gallery_item.xml` (130×149 tiles, 128 px thumbnail,
 //! min two per row, back / forward navigation).
 
+use crate::skin_palette::SkinPalette;
 use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
@@ -57,10 +58,10 @@ const GRID_HEIGHT: f32 = 420.0;
 const LINE_SCROLL_PIXELS: f32 = 40.0;
 
 /// The label colour.
-const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A dimmer label.
-const DIM_LABEL_COLOR: Color = Color::srgb(0.62, 0.66, 0.74);
+const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// A button's background / border.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);

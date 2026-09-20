@@ -32,6 +32,7 @@
 //! Reference (Firestorm, read-only): `panel_preferences_alerts.xml`,
 //! `llfloaterpreference.cpp` (`buildPopupList` / `onSelectPopup`).
 
+use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui_widgets::Checkbox;
@@ -68,7 +69,7 @@ const SHOW_COL_WIDTH: f32 = 48.0;
 const HEADER_COLOR: Color = Color::srgb(0.75, 0.80, 0.88);
 
 /// The cell label colour (the preferences row-label palette).
-const CELL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+const CELL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// The popup list's table: the custom "Show" checkbox column and the flexible
 /// ignoretext label column. Display-only as far as the widget is concerned —

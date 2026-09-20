@@ -38,6 +38,7 @@
 
 use std::collections::HashSet;
 
+use crate::skin_palette::SkinPalette;
 use bevy::prelude::*;
 use bevy::ui_widgets::popover::{Popover, PopoverAlign, PopoverPlacement, PopoverSide};
 use sl_client_bevy::{ChatChannel, ChatType};
@@ -56,7 +57,7 @@ const SELECT_FONT_SIZE: f32 = 13.0;
 const SELECT_BORDER: Color = Color::srgb(0.34, 0.40, 0.52);
 
 /// The select box / option text colour.
-const SELECT_TEXT_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+const SELECT_TEXT_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A dropdown option's resting background.
 const OPTION_BACKGROUND: Color = Color::NONE;

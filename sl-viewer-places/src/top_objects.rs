@@ -120,6 +120,7 @@
 //! `floater_top_objects.xml`, `llfloaterregioninfo.cpp`
 //! (`LLPanelRegionDebugInfo::onClickTopScripts`), `llparcel.h` (`RT_NONE`).
 
+use crate::skin_palette::SkinPalette;
 use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use bevy::text::EditableText;
@@ -190,10 +191,10 @@ const CONFIRM_BUTTON: &str = "OK";
 const FONT_SIZE: f32 = 13.0;
 
 /// A value / label text colour.
-const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A dim label / secondary text colour.
-const DIM_LABEL_COLOR: Color = Color::srgb(0.62, 0.66, 0.74);
+const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// A disabled control's text colour.
 const DISABLED_COLOR: Color = Color::srgb(0.45, 0.47, 0.52);

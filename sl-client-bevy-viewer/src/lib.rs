@@ -338,6 +338,7 @@ mod net_diagnostics;
 // Tracy client (and its `tracing-tracy` bridge) is present.
 #[cfg(feature = "profile-tracy")]
 mod tracy_plots;
+pub(crate) use sl_viewer_ui_core::skin_palette;
 pub(crate) use sl_viewer_ui_core::ui;
 pub(crate) use sl_viewer_ui_core::ui_element;
 pub(crate) use sl_viewer_ui_widgets::ui_color_picker;

@@ -30,6 +30,7 @@
 //!
 //! Reference (Firestorm, read-only): `llemojihelper`, `llpanelemojicomplete`.
 
+use crate::skin_palette::SkinPalette;
 use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx};
@@ -64,7 +65,7 @@ const ROW_BACKGROUND: Color = Color::NONE;
 const ROW_SELECTED_BACKGROUND: Color = Color::srgb(0.22, 0.40, 0.60);
 
 /// A row's text colour.
-const ROW_TEXT_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+const ROW_TEXT_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// The system set the completer's key handling runs in, so a consumer's own
 /// `Enter` handling (the chat input's send) can order **after** it and not fire on

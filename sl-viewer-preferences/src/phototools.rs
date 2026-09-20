@@ -45,6 +45,7 @@
 //! (`FloaterQuickPrefs::getIsPhototools`), `menu_viewer.xml`
 //! (World ▸ Photo and Video ▸ Phototools, `alt|P`).
 
+use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui::{Checked, InteractionDisabled};
@@ -110,9 +111,9 @@ const VALUE_WIDTH: f32 = 44.0;
 /// A section heading's colour.
 const SECTION_COLOR: Color = Color::srgb(0.78, 0.83, 0.9);
 /// A row label's colour.
-const LABEL_COLOR: Color = Color::srgb(0.86, 0.88, 0.92);
+const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 /// A label's colour while the control beside it is refused.
-const DIM_LABEL_COLOR: Color = Color::srgb(0.52, 0.56, 0.63);
+const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 /// A value readout's colour.
 const VALUE_COLOR: Color = Color::srgb(0.7, 0.74, 0.82);
 /// A control's border.

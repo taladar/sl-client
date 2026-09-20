@@ -39,6 +39,7 @@
 //! are `viewer-avatar-moderation-actions`, and light up in the pie, here and
 //! the minimap at once when that shared layer lands.
 
+use crate::skin_palette::SkinPalette;
 use bevy::ecs::system::SystemParam;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
@@ -155,10 +156,10 @@ const fn row_height(font_size: f32) -> f32 {
 }
 
 /// The default cell / label colour.
-const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// The dimmed header / secondary colour.
-const DIM_LABEL_COLOR: Color = Color::srgb(0.62, 0.66, 0.74);
+const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// A friend's name colour (the name tag's `NameTagFriend`).
 const FRIEND_COLOR: Color = Color::srgb(0.75, 0.92, 0.49);

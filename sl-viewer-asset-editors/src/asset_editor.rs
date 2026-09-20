@@ -32,6 +32,7 @@
 //! button, and a window whose save is still in flight closes itself only once
 //! the save has actually landed.
 
+use crate::skin_palette::SkinPalette;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 
@@ -47,10 +48,10 @@ use crate::ui_font::UiFont;
 pub(crate) const FONT_SIZE: f32 = 14.0;
 
 /// A general-purpose light label colour.
-pub(crate) const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+pub(crate) const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A dimmer colour for secondary text (a read-only note, a status line).
-pub(crate) const DIM_COLOR: Color = Color::srgb(0.62, 0.66, 0.74);
+pub(crate) const DIM_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// A red-tinted colour for a failure (a refused save, a compile error).
 pub(crate) const ERROR_COLOR: Color = Color::srgb(0.92, 0.55, 0.50);

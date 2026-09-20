@@ -44,6 +44,7 @@
 //! Reference (Firestorm, read-only): `llgrouplist`, `llgroupactions`,
 //! Vintage `panel_fs_contacts_groups`.
 
+use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
@@ -85,7 +86,7 @@ const ACTION_COL_WIDTH: f32 = 96.0;
 const ACTIVE_COLOR: Color = Color::srgb(0.52, 0.68, 0.95);
 
 /// A group / label's text colour.
-const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// The group-list scroll surface background — a touch darker, a sunken well (same
 /// as the friends list).
@@ -102,7 +103,7 @@ const ACTION_BACKGROUND: Color = Color::srgb(0.24, 0.29, 0.38);
 const ACTION_DISABLED_BACKGROUND: Color = Color::srgb(0.18, 0.20, 0.24);
 
 /// A disabled action button's label colour — dim, matching the chrome text.
-const DISABLED_LABEL_COLOR: Color = Color::srgb(0.52, 0.55, 0.60);
+const DISABLED_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_disabled;
 
 /// The table header row's background — a recessed strip above the list.
 const HEADER_BACKGROUND: Color = Color::srgb(0.14, 0.17, 0.22);

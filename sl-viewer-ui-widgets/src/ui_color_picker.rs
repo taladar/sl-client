@@ -90,6 +90,7 @@ use bevy::ui_widgets::{
 };
 use bevy::window::PrimaryWindow;
 use bevy_flair::style::components::ClassList;
+use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 use crate::floater::{
     Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterOp, FloaterOwner, FloaterSpec,
@@ -158,7 +159,7 @@ const PICKER_FONT: f32 = 13.0;
 
 /// The hint under the current-colour swatch, and the drag-to-save target's
 /// highlight: both are small, so they share the dimmed text colour.
-const HINT_COLOR: Color = Color::srgb(0.62, 0.66, 0.74);
+const HINT_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// A bordered control's border colour.
 const CONTROL_BORDER: Color = Color::srgba(0.4, 0.4, 0.45, 1.0);

@@ -36,6 +36,7 @@
 //! Reference (Firestorm, read-only): `LLNameEditor` / `LLAvatarName` and the
 //! common "click a resident / group name → profile" behaviour.
 
+use crate::skin_palette::SkinPalette;
 use bevy::prelude::*;
 use sl_client_bevy::{AgentKey, Command, GroupKey, OwnerKey, SlCommand};
 
@@ -51,7 +52,7 @@ use crate::world_api::AvatarState;
 pub(crate) const NAME_LINK_COLOR: Color = Color::srgb(0.52, 0.68, 0.95);
 
 /// The default plain (non-link) colour, matching the floaters' value labels.
-pub(crate) const NAME_PLAIN_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+pub(crate) const NAME_PLAIN_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// The default label font size, in logical pixels — the floater value size.
 const DEFAULT_FONT_SIZE: f32 = 13.0;

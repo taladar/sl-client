@@ -30,6 +30,7 @@
 //! Reference (Firestorm, read-only): `fsfloatersearch.cpp` (legacy search),
 //! `floater_fs_search.xml` + `panel_fs_search_legacy_*.xml`.
 
+use crate::skin_palette::SkinPalette;
 use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use bevy::text::EditableText;
@@ -112,7 +113,7 @@ const DETAIL_WIDTH: f32 = 300.0;
 const SL_SEARCH_URL: &str = "https://search.secondlife.com/";
 
 /// A label colour.
-const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A dim secondary colour.
 const SECONDARY_COLOR: Color = Color::srgb(0.72, 0.76, 0.84);

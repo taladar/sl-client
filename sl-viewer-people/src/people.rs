@@ -48,6 +48,7 @@
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
+use crate::skin_palette::SkinPalette;
 use bevy::asset::RenderAssetUsages;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
@@ -118,7 +119,7 @@ const TAB_BORDER: Color = Color::srgb(0.28, 0.33, 0.42);
 const TAB_ACTIVE_BORDER: Color = Color::srgb(0.52, 0.68, 0.95);
 
 /// A tab / label's text colour.
-const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// The friends-list scroll surface background — a touch darker, a sunken well.
 const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
@@ -137,7 +138,7 @@ const ACTION_BACKGROUND: Color = Color::srgb(0.24, 0.29, 0.38);
 const ACTION_DISABLED_BACKGROUND: Color = Color::srgb(0.18, 0.20, 0.24);
 
 /// A disabled action button's label colour — dim, matching the chrome text.
-const DISABLED_LABEL_COLOR: Color = Color::srgb(0.52, 0.55, 0.60);
+const DISABLED_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_disabled;
 
 /// The table header row's background — a recessed strip above the list.
 const HEADER_BACKGROUND: Color = Color::srgb(0.14, 0.17, 0.22);

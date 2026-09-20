@@ -27,6 +27,7 @@ use sl_settings::SettingValue;
 use crate::i18n::Translated;
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{SettingBinding, bound_slider};
+use crate::skin_palette::SkinPalette;
 use crate::ui::BottomArea;
 use crate::ui::{UiPanelShown, column, row};
 use crate::ui_font::UiFont;
@@ -66,9 +67,9 @@ const PANEL_BACKGROUND: Color = Color::srgba(0.08, 0.09, 0.12, 0.96);
 /// The bar background.
 const BAR_BACKGROUND: Color = Color::srgba(0.08, 0.09, 0.12, 0.92);
 /// Label text colour.
-const LABEL_COLOR: Color = Color::srgb(0.9, 0.9, 0.92);
+const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 /// Dimmed (muted) label / glyph colour.
-const LABEL_DIM: Color = Color::srgb(0.62, 0.65, 0.72);
+const LABEL_DIM: Color = SkinPalette::FALLBACK.text_muted;
 /// Button border.
 const BUTTON_BORDER: Color = Color::srgb(0.3, 0.3, 0.35);
 /// Button fill.

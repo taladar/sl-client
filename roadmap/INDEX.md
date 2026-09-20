@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 40 |
 | in-progress | 22 |
 | bugs | 5 |
-| done | 1197 |
+| done | 1198 |
 | deferred | 29 |
 | wont-do | 16 |
-| **total** | **1708** |
+| **total** | **1709** |
 
 ## ideas (100)
 
@@ -323,8 +323,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A test fixture that advances the day cycle between samples
 - [`viewer-audit-search-map-edge`](ready/viewer-audit-search-map-edge.md) —
   sl-viewer-search depends on sl-viewer-map for one two-field struct
-- [`viewer-audit-skin-token-coverage`](ready/viewer-audit-skin-token-coverage.md)
-  — The skin system covers two widgets
 - [`viewer-audit-web-auth-preference`](ready/viewer-audit-web-auth-preference.md)
   — Whether the grid session cookie is injected into the browser is a CLI flag,
   not a preference
@@ -834,6 +832,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — export / import (blocked by `viewer-preferences-floater` (done))
 - [`viewer-sit-stand-actions`](ready/viewer-sit-stand-actions.md) — Sit / stand
   actions (blocked by `viewer-object-selection-core` (done))
+- [`viewer-skin-panel-text-roles`](ready/viewer-skin-panel-text-roles.md) —
+  Panel text does not follow the skin, only the widgets it is built from
 - [`viewer-snapshot-composition-guides`](ready/viewer-snapshot-composition-guides.md)
   — Snapshot composition guides, capture frame & filename patterns
 - [`viewer-snapshot-highres-quiet`](ready/viewer-snapshot-highres-quiet.md) —
@@ -1145,7 +1145,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 
-## done (1197)
+## done (1198)
 
 ### protocol
 
@@ -1519,6 +1519,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-sit-camera-gating`](done/viewer-audit-sit-camera-gating.md) —
   The scripted sit camera arms on any SitResult and never clears forced
   mouselook
+- [`viewer-audit-skin-token-coverage`](done/viewer-audit-skin-token-coverage.md)
+  — The skin system covers two widgets
 - [`viewer-audit-stale-globaltransform-readers`](done/viewer-audit-stale-globaltransform-readers.md)
   — Depth-reconstructing passes and the interest camera read a frame-old camera
   pose

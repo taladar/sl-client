@@ -41,6 +41,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
+use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
@@ -166,7 +167,7 @@ fn sort_name(
 const CHROME_COLOR: Color = Color::srgb(0.86, 0.89, 0.95);
 
 /// A row label's colour.
-const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A folder row label's colour — a touch warmer than an item, so the tree's
 /// structure reads at a glance.
@@ -174,7 +175,7 @@ const FOLDER_LABEL_COLOR: Color = Color::srgb(0.98, 0.86, 0.55);
 
 /// A row's trailing suffix colour (the permission / worn decorations) — dimmer
 /// than the label, so the name stays the thing the eye reads first.
-const SUFFIX_COLOR: Color = Color::srgb(0.62, 0.66, 0.74);
+const SUFFIX_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// An inactive toolbar button background.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);

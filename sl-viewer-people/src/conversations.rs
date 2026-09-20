@@ -61,6 +61,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+use crate::skin_palette::SkinPalette;
 use bevy::ecs::system::SystemParam;
 use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
@@ -185,7 +186,7 @@ const TAB_BORDER: Color = Color::srgb(0.28, 0.33, 0.42);
 const TAB_ACTIVE_BORDER: Color = Color::srgb(0.52, 0.68, 0.95);
 
 /// A tab label's colour.
-const TAB_LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+const TAB_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A tab's close-button glyph colour.
 const CLOSE_GLYPH_COLOR: Color = Color::srgb(0.72, 0.74, 0.80);

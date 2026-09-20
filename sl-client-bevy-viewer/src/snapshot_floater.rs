@@ -65,6 +65,7 @@
 
 use std::path::PathBuf;
 
+use crate::skin_palette::SkinPalette;
 use bevy::asset::RenderAssetUsages;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
@@ -96,10 +97,10 @@ pub(crate) const SNAPSHOT_FLOATER_ID: &str = "snapshot";
 const FONT_SIZE: f32 = 13.0;
 
 /// A control label's colour.
-const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A dim / secondary text colour (the hint and status lines).
-const HINT_COLOR: Color = Color::srgb(0.62, 0.66, 0.74);
+const HINT_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// A checked toggle's tick colour.
 const CHECK_COLOR: Color = Color::srgb(0.55, 0.85, 0.60);

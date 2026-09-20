@@ -37,6 +37,7 @@
 //! Reference (Firestorm, read-only): `llfloatersettingsdebug.{h,cpp}`,
 //! `floater_settings_debug.xml`, `llcontrol.h`.
 
+use crate::skin_palette::SkinPalette;
 use bevy::input_focus::InputFocus;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
@@ -103,7 +104,7 @@ const NO_OVERRIDE: &str = "–";
 const HEADER_COLOR: Color = Color::srgb(0.75, 0.80, 0.88);
 
 /// The list cell / detail value colour (the preferences row-label palette).
-const CELL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+const CELL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// The muted tone for the comment text and the detail row labels.
 const MUTED_COLOR: Color = Color::srgb(0.65, 0.70, 0.78);
