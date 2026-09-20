@@ -105,6 +105,18 @@
 //! direction, so pointing at it picks that entry — the label is an affordance
 //! telling you what lies that way, not a click target.
 //!
+//! # Labels are keys
+//!
+//! A [`PieAction`] / [`PieMenuDef`] carries a `label_key` the bundle answers,
+//! not English text, so a pie is translatable like every other surface (see
+//! `sl_viewer_ui_widgets::menu` for the same change on the line menu). Nothing
+//! about the *geometry* depends on the wording — a slice's address is its
+//! compass point — so a translation moves no entry; what it does move is how
+//! wide the ring has to be, which `fit_pie_layout` already grows from the
+//! labels' measured boxes. Resolution happens where a pie's labels are built
+//! (`rebuild_pie_labels`) rather than being bound per node, precisely because
+//! that measurement must be of the real string.
+//!
 //! # Placement, and the pointer problem — the task's one real unknown
 //!
 //! A line menu needs clearance in one quadrant and can flip or slide when it runs
@@ -226,6 +238,7 @@ use bevy::render::render_resource::{AsBindGroup, ShaderType};
 use bevy::shader::ShaderRef;
 use bevy::window::{PrimaryWindow, WindowFocused};
 
+use sl_viewer_ui_core::i18n::Translator;
 use sl_viewer_ui_core::ui::{UiRoot, column};
 use sl_viewer_ui_core::ui_element::{ElementCx, RadialCentre, RadialPlacement, UiAction};
 use sl_viewer_ui_core::ui_font::UiFont;
@@ -452,8 +465,16 @@ fn angular_distance(left: f32, right: f32) -> f32 {
 /// of which is "shuffle up to fill a gap".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PieAction {
-    /// The slice's text. Laid out through the ordinary bidi text stack.
-    pub label: &'static str,
+    /// The Fluent key the slice's text is looked up under, resolved through
+    /// `sl_viewer_ui_core::i18n::Translator` when the labels are built and laid
+    /// out through the ordinary bidi text stack.
+    ///
+    /// A **key**, not the text, for the reason
+    /// `sl_viewer_ui_widgets::menu::MenuCommand::label_key` gives: an English
+    /// `&'static str` is a string no translator can reach. The address a slice
+    /// sits at is a compass point rather than its wording, so translating one
+    /// moves nothing — which is exactly the property a pie sells.
+    pub label_key: &'static str,
     /// What this emits when picked — the `action` of the `UiAction` the widget
     /// writes, and the name the address table pins.
     pub action: &'static str,
@@ -508,16 +529,16 @@ pub struct PieEntry {
 
 /// A pie: a name, and its entries.
 ///
-/// The `label` is **not** optional, and that is load-bearing rather than tidy: a
-/// sub-pie slice shows this text, so there is nowhere to write a nameless
-/// overflow bucket. `More >` cannot be expressed without lying in the `label`
-/// field, which a reviewer can see.
+/// The `label_key` is **not** optional, and that is load-bearing rather than
+/// tidy: a sub-pie slice shows this text, so there is nowhere to write a
+/// nameless overflow bucket. `More >` cannot be expressed without lying in the
+/// `label_key` field, which a reviewer can see.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PieMenuDef {
-    /// What a slice opening this pie reads, and what names it in the address
-    /// table. An honest name for the grouping — if there is not one, the grouping
-    /// is overflow rather than structure.
-    pub label: &'static str,
+    /// The Fluent key of what a slice opening this pie reads, and what names it
+    /// in the address table. An honest name for the grouping — if there is not
+    /// one, the grouping is overflow rather than structure.
+    pub label_key: &'static str,
     /// The entries, in any order: order is presentation, position is
     /// [`PieEntry::at`].
     pub entries: &'static [PieEntry],
@@ -644,8 +665,8 @@ impl PieConditions {
 /// the live conditions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResolvedSlot {
-    /// The text to draw.
-    pub label: &'static str,
+    /// The Fluent key of the text to draw.
+    pub label_key: &'static str,
     /// What picking it does.
     pub outcome: SlotOutcome,
     /// Whether it can be picked at all. A disabled slot keeps its position and
@@ -713,12 +734,12 @@ pub fn resolve_slots(
     for entry in menu.entries {
         let resolved = match entry.content {
             PieContent::Action(action) => Some(ResolvedSlot {
-                label: action.label,
+                label_key: action.label_key,
                 outcome: SlotOutcome::Action(action.action),
                 enabled: conditions.holds(action.when),
             }),
             PieContent::SubPie(sub) => Some(ResolvedSlot {
-                label: sub.label,
+                label_key: sub.label_key,
                 outcome: SlotOutcome::SubPie(sub),
                 enabled: !sub.entries.is_empty(),
             }),
@@ -728,7 +749,7 @@ pub fn resolve_slots(
                 .iter()
                 .find(|member| conditions.holds(member.when))
                 .map(|member| ResolvedSlot {
-                    label: member.label,
+                    label_key: member.label_key,
                     outcome: SlotOutcome::Action(member.action),
                     enabled: true,
                 }),
@@ -1037,6 +1058,13 @@ const PIE_LABEL_SUB_PIE: Color = Color::srgb(0.65, 0.86, 1.0);
 /// The widget itself needs none of this to *lay out* — [`spawn_pie_menu`] builds
 /// a tree out of ordinary nodes — which is what lets the headless harness check
 /// it with no renderer.
+///
+/// **Requires the i18n string half.** Every slice resolves its `label_key` as the
+/// labels are built, so these systems take a `sl_viewer_ui_core::i18n::Translator` — an
+/// app that schedules this plugin without `ViewerI18nPlugin` or
+/// `i18n::install_untranslated` panics on its first frame with a
+/// `Resource does not exist` validation error, rather than merely drawing
+/// nothing.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PieMenuPlugin;
 
@@ -1114,6 +1142,7 @@ pub fn spawn_pie_menu(
     commands: &mut Commands,
     parent: Entity,
     cx: ElementCx,
+    translator: &Translator,
     menu: &'static PieMenuDef,
     element: &'static str,
     conditions: PieConditions,
@@ -1217,7 +1246,7 @@ pub fn spawn_pie_menu(
     // conditional entry as disabled even when it is live — the label would read
     // grey while the shader and the pick logic (which do use the real conditions)
     // treated it as enabled.
-    rebuild_pie_labels(commands, root, cx, menu, &conditions);
+    rebuild_pie_labels(commands, root, cx, translator, menu, &conditions);
     root
 }
 
@@ -1258,10 +1287,17 @@ fn attach_pie_material(world: &mut World) {
 /// gallery's own reasoning: an element's strings are baked in at construction, as
 /// a real panel's are, and patching them in place would exercise a path the
 /// viewer does not have.
+///
+/// Each slot's text is resolved here rather than bound with
+/// `sl_viewer_ui_core::i18n::Translated`, because `fit_pie_layout` grows the
+/// ring from the labels' **measured** boxes: a label that arrived a frame after
+/// it was spawned would be measured empty first, and the ring would resize under
+/// an open menu.
 fn rebuild_pie_labels(
     commands: &mut Commands,
     root: Entity,
     cx: ElementCx,
+    translator: &Translator,
     menu: &PieMenuDef,
     conditions: &PieConditions,
 ) {
@@ -1320,7 +1356,7 @@ fn rebuild_pie_labels(
                 ChildOf(root),
             ))
             .with_child((
-                Text::new(cx.text(slot.label)),
+                Text::new(cx.text(&translator.get(slot.label_key))),
                 // A label is bounded (see `max_width` above), so a word wider than
                 // the bound has nowhere to go and would simply overflow — measured
                 // at 163 px against a 153 px box, in Cyrillic at 22 px.
@@ -1523,6 +1559,7 @@ fn swallow_pie_press(mut press: On<Pointer<Press>>) {
 fn open_pie_menus(
     mut commands: Commands,
     mut requests: MessageReader<OpenPieMenu>,
+    translator: Translator,
     root: Option<Res<UiRoot>>,
     // **Only *live* pies** (those carrying a `PiePlacement`), never a specimen a
     // test spawns in flow, which must survive a live pie opening.
@@ -1542,6 +1579,7 @@ fn open_pie_menus(
             &mut commands,
             root.0,
             ElementCx::new(),
+            &translator,
             request.menu,
             request.element,
             PieConditions::new(request.conditions.iter().copied()),
@@ -1874,6 +1912,7 @@ fn abort_pie_on_focus_loss(
 /// Rebuild the labels when the pie descends a level.
 fn update_pie_labels(
     mut commands: Commands,
+    translator: Translator,
     mut pies: Query<(Entity, &PieMenu, &PieConditions, &mut DisplayedPiePath), Changed<PieMenu>>,
     labels: Query<Entity, With<PieLabel>>,
     children: Query<&Children>,
@@ -1902,7 +1941,14 @@ fn update_pie_labels(
                 }
             }
         }
-        rebuild_pie_labels(&mut commands, entity, ElementCx::new(), current, conditions);
+        rebuild_pie_labels(
+            &mut commands,
+            entity,
+            ElementCx::new(),
+            &translator,
+            current,
+            conditions,
+        );
         displayed.0.clone_from(&pie.path);
     }
 }
@@ -1984,12 +2030,12 @@ pub const FIXTURE_CAN_EDIT: &str = "can-edit";
 static FIXTURE_LAND_PIE: PieMenuDef = PieMenuDef {
     // Named for what it groups, not for the fact that it is extra. There is no
     // `More >` here and there is nowhere to put one.
-    label: "Land",
+    label_key: "pie-fixture-land",
     entries: &[
         PieEntry {
             at: Compass::North,
             content: PieContent::Action(PieAction {
-                label: "About Land",
+                label_key: "pie-fixture-about-land",
                 action: "about-land",
                 when: None,
             }),
@@ -1997,7 +2043,7 @@ static FIXTURE_LAND_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::South,
             content: PieContent::Action(PieAction {
-                label: "Buy Land",
+                label_key: "pie-fixture-buy-land",
                 action: "buy-land",
                 when: None,
             }),
@@ -2007,12 +2053,12 @@ static FIXTURE_LAND_PIE: PieMenuDef = PieMenuDef {
 
 /// The fixture's sub-pie.
 static FIXTURE_MANAGE_PIE: PieMenuDef = PieMenuDef {
-    label: "Manage",
+    label_key: "pie-fixture-manage",
     entries: &[
         PieEntry {
             at: Compass::West,
             content: PieContent::Action(PieAction {
-                label: "Take Copy",
+                label_key: "pie-fixture-take-copy",
                 action: "take-copy",
                 when: None,
             }),
@@ -2027,12 +2073,12 @@ static FIXTURE_MANAGE_PIE: PieMenuDef = PieMenuDef {
 /// The fixture pie the registry and the gallery show. See the section comment
 /// above for why each entry is here.
 pub static FIXTURE_PIE: PieMenuDef = PieMenuDef {
-    label: "Object",
+    label_key: "pie-fixture-object",
     entries: &[
         PieEntry {
             at: Compass::North,
             content: PieContent::Action(PieAction {
-                label: "Touch",
+                label_key: "pie-fixture-touch",
                 action: "touch",
                 when: None,
             }),
@@ -2045,12 +2091,12 @@ pub static FIXTURE_PIE: PieMenuDef = PieMenuDef {
             at: Compass::East,
             content: PieContent::Chain(&[
                 PieAction {
-                    label: "Stand Up",
+                    label_key: "pie-fixture-stand-up",
                     action: "stand",
                     when: Some(FIXTURE_SITTING),
                 },
                 PieAction {
-                    label: "Sit Here",
+                    label_key: "pie-fixture-sit-here",
                     action: "sit",
                     when: None,
                 },
@@ -2065,7 +2111,7 @@ pub static FIXTURE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::West,
             content: PieContent::Action(PieAction {
-                label: "Edit",
+                label_key: "pie-fixture-edit",
                 action: "edit",
                 when: Some(FIXTURE_CAN_EDIT),
             }),
@@ -2073,7 +2119,7 @@ pub static FIXTURE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthWest,
             content: PieContent::Action(PieAction {
-                label: "Open",
+                label_key: "pie-fixture-open",
                 action: "open",
                 when: None,
             }),
@@ -2212,6 +2258,7 @@ mod tests {
     use bevy::prelude::*;
     use bevy::window::PrimaryWindow;
     use pretty_assertions::assert_eq;
+    use sl_viewer_ui_core::i18n::{LocaleChoice, Translator, UiLocale};
     use sl_viewer_ui_core::ui::UiDirection;
     use sl_viewer_ui_core::ui_element::{ElementCx, SCRIPTS, SampleText, UiAction};
 
@@ -2356,7 +2403,7 @@ mod tests {
                 if count > 1 {
                     failures.push(format!(
                         "`{}` declares {count} entries at {}",
-                        menu.label,
+                        menu.label_key,
                         point.name()
                     ));
                 }
@@ -2448,12 +2495,12 @@ mod tests {
     #[test]
     fn a_chain_with_no_winner_leaves_its_slot_empty() {
         static NO_WINNER: PieMenuDef = PieMenuDef {
-            label: "Test",
+            label_key: "pie-fixture-test",
             entries: &[
                 super::PieEntry {
                     at: Compass::East,
                     content: PieContent::Chain(&[super::PieAction {
-                        label: "Only If",
+                        label_key: "pie-fixture-only-if",
                         action: "only-if",
                         when: Some("never"),
                     }]),
@@ -2461,7 +2508,7 @@ mod tests {
                 super::PieEntry {
                     at: Compass::North,
                     content: PieContent::Action(super::PieAction {
-                        label: "Always",
+                        label_key: "pie-fixture-always",
                         action: "always",
                         when: None,
                     }),
@@ -2742,18 +2789,36 @@ mod tests {
     /// this way carries no `PiePlacement`, so `place_pie_menu` leaves it in the
     /// flow where the layout checks can measure it.
     fn pie_app(direction: UiDirection) -> Result<App, TestError> {
+        localised_pie_app(direction, LocaleChoice::English)
+    }
+
+    /// [`pie_app`], in a chosen locale.
+    ///
+    /// Only two of the five are reachable without a bundle folder, and both are
+    /// worth having: `English` is the resting harness, where every key resolves
+    /// to itself, and `Pseudo` is the one configuration in which *resolved* text
+    /// and the key are visibly different strings — which is how a test can tell
+    /// a slice drawn through the bundle from one drawn off the declaration.
+    fn localised_pie_app(direction: UiDirection, locale: LocaleChoice) -> Result<App, TestError> {
         let test = LayoutTest::new()
             .with_widget_layout(&[register_pie_layout])
             .with_direction(direction);
         let mut app = test.build();
+        // The translator's three resources, with no bundles behind them: a pie
+        // resolves every `label_key`, and here each one resolves to itself.
+        sl_viewer_ui_core::i18n::install_untranslated(&mut app);
+        app.insert_resource(UiLocale::new(locale));
         crate::ui_test::enable_action_recording(&mut app);
         app.add_systems(
             Startup,
-            (|mut commands: Commands, root: Res<sl_viewer_ui_core::ui::UiRoot>| {
+            (|mut commands: Commands,
+              translator: Translator,
+              root: Res<sl_viewer_ui_core::ui::UiRoot>| {
                 super::spawn_pie_menu(
                     &mut commands,
                     root.0,
                     ElementCx::new(),
+                    &translator,
                     &FIXTURE_PIE,
                     "radial-menu",
                     PieConditions::default(),
@@ -2777,15 +2842,21 @@ mod tests {
         let mut app = LayoutTest::new()
             .with_widget_layout(&[register_pie_layout])
             .build();
+        // The translator's three resources, with no bundles behind them: a pie
+        // resolves every `label_key`, and here each one resolves to itself.
+        sl_viewer_ui_core::i18n::install_untranslated(&mut app);
         crate::ui_test::enable_action_recording(&mut app);
         app.init_resource::<ButtonInput<MouseButton>>()
             .add_systems(
                 Startup,
-                (|mut commands: Commands, root: Res<sl_viewer_ui_core::ui::UiRoot>| {
+                (|mut commands: Commands,
+                  translator: Translator,
+                  root: Res<sl_viewer_ui_core::ui::UiRoot>| {
                     let pie = super::spawn_pie_menu(
                         &mut commands,
                         root.0,
                         ElementCx::new(),
+                        &translator,
                         &FIXTURE_PIE,
                         "radial-menu",
                         PieConditions::default(),
@@ -2911,6 +2982,38 @@ mod tests {
         Ok(())
     }
 
+    /// **A slice draws the bundle's answer, not its `label_key`.**
+    ///
+    /// Invisible in the resting harness, where every key resolves to itself and
+    /// the two are the same string — so this asks in the one locale that needs
+    /// no bundle and still changes the answer. The pseudolocale accents and
+    /// fences whatever the translator resolved, so a slice built off the
+    /// declaration would still read `pie-fixture-touch` and one built through
+    /// the translator cannot.
+    #[test]
+    fn a_slice_draws_the_bundles_answer_not_its_key() -> Result<(), TestError> {
+        let mut app = localised_pie_app(UiDirection::Ltr, LocaleChoice::Pseudo)?;
+        let drawn: Vec<String> = app
+            .world_mut()
+            .query::<(&Text, &Name)>()
+            .iter(app.world())
+            .filter(|(_text, name)| name.as_str().starts_with("pie-label-text:"))
+            .map(|(text, _name)| text.0.clone())
+            .collect();
+        assert!(!drawn.is_empty(), "the pseudolocalised pie drew no labels");
+        for label in &drawn {
+            assert!(
+                label.starts_with('\u{27e6}') && label.ends_with('\u{27e7}'),
+                "a slice's text did not come through the translator: {label}"
+            );
+        }
+        assert!(
+            !drawn.iter().any(|label| label == "pie-fixture-touch"),
+            "a slice drew its key rather than the bundle's answer: {drawn:?}"
+        );
+        Ok(())
+    }
+
     /// An empty slot spawns no label — and nothing moves into its cell.
     #[test]
     fn an_empty_slot_draws_no_label() -> Result<(), TestError> {
@@ -3017,6 +3120,9 @@ mod tests {
     /// into the flick the reveal starts.
     fn pointer_pie_app() -> Result<App, TestError> {
         let mut app = InteractionTest::new().build();
+        // The translator's three resources, with no bundles behind them: a pie
+        // resolves every `label_key`, and here each one resolves to itself.
+        sl_viewer_ui_core::i18n::install_untranslated(&mut app);
         enable_action_recording(&mut app);
         // The plugin's `build` writes its shader with `load_internal_asset!`,
         // which needs the store a CPU-only app has no renderer to create.
@@ -3338,14 +3444,20 @@ mod tests {
         /// under `SampleText::PROSE_CHARS` on purpose, so a script cell swaps it
         /// for that script's *label*-length sample rather than a paragraph — the
         /// length class a pie label actually belongs to.
+        ///
+        /// It is the fixture's `label_key` as well as its text: the harness
+        /// stands the translator up with no bundles behind it
+        /// (`install_untranslated`), so every key resolves to itself and what
+        /// the pie draws here is this very string — which is the only thing the
+        /// check is about.
         const LONG: &str = "Take a Copy of This Object";
         static LONG_PIE: PieMenuDef = PieMenuDef {
-            label: "Long",
+            label_key: "pie-fixture-long",
             entries: &[
                 super::PieEntry {
                     at: Compass::East,
                     content: PieContent::Action(super::PieAction {
-                        label: LONG,
+                        label_key: LONG,
                         action: "east",
                         when: None,
                     }),
@@ -3353,7 +3465,7 @@ mod tests {
                 super::PieEntry {
                     at: Compass::NorthEast,
                     content: PieContent::Action(super::PieAction {
-                        label: LONG,
+                        label_key: LONG,
                         action: "north-east",
                         when: None,
                     }),
@@ -3361,7 +3473,7 @@ mod tests {
                 super::PieEntry {
                     at: Compass::North,
                     content: PieContent::Action(super::PieAction {
-                        label: LONG,
+                        label_key: LONG,
                         action: "north",
                         when: None,
                     }),
@@ -3369,7 +3481,7 @@ mod tests {
                 super::PieEntry {
                     at: Compass::NorthWest,
                     content: PieContent::Action(super::PieAction {
-                        label: LONG,
+                        label_key: LONG,
                         action: "north-west",
                         when: None,
                     }),
@@ -3377,7 +3489,7 @@ mod tests {
                 super::PieEntry {
                     at: Compass::West,
                     content: PieContent::Action(super::PieAction {
-                        label: LONG,
+                        label_key: LONG,
                         action: "west",
                         when: None,
                     }),
@@ -3385,7 +3497,7 @@ mod tests {
                 super::PieEntry {
                     at: Compass::SouthWest,
                     content: PieContent::Action(super::PieAction {
-                        label: LONG,
+                        label_key: LONG,
                         action: "south-west",
                         when: None,
                     }),
@@ -3393,7 +3505,7 @@ mod tests {
                 super::PieEntry {
                     at: Compass::South,
                     content: PieContent::Action(super::PieAction {
-                        label: LONG,
+                        label_key: LONG,
                         action: "south",
                         when: None,
                     }),
@@ -3401,7 +3513,7 @@ mod tests {
                 super::PieEntry {
                     at: Compass::SouthEast,
                     content: PieContent::Action(super::PieAction {
-                        label: LONG,
+                        label_key: LONG,
                         action: "south-east",
                         when: None,
                     }),
@@ -3431,14 +3543,18 @@ mod tests {
                     font_size,
                 };
                 let mut app = test.build();
+                sl_viewer_ui_core::i18n::install_untranslated(&mut app);
                 app.add_message::<UiAction>();
                 app.add_systems(
                     Startup,
-                    (move |mut commands: Commands, root: Res<sl_viewer_ui_core::ui::UiRoot>| {
+                    (move |mut commands: Commands,
+                           translator: Translator,
+                           root: Res<sl_viewer_ui_core::ui::UiRoot>| {
                         super::spawn_pie_menu(
                             &mut commands,
                             root.0,
                             cx,
+                            &translator,
                             &LONG_PIE,
                             "long-pie",
                             PieConditions::default(),
@@ -3473,6 +3589,14 @@ mod tests {
         // ever gets. Built in the body (a `static` cannot loop) and leaked to the
         // `'static` the widget wants; a test process is short-lived, so the leak is
         // bounded and harmless.
+        //
+        // The glyph is the `label_key` as well as the text: the harness stands the
+        // translator up with no bundles behind it, so every key resolves to itself
+        // and one glyph is what the ring is asked to hold — which is the whole
+        // claim. A key spelt as a key would measure a twenty-character label and
+        // test nothing about a language with short words.
+        /// The single CJK glyph every slice of this fixture is labelled with.
+        const GLYPH: &str = "\u{5b57}";
         let entries: Vec<super::PieEntry> = [
             (Compass::East, "e"),
             (Compass::NorthEast, "ne"),
@@ -3487,7 +3611,7 @@ mod tests {
         .map(|(at, action)| super::PieEntry {
             at,
             content: PieContent::Action(super::PieAction {
-                label: "字",
+                label_key: GLYPH,
                 action,
                 when: None,
             }),
@@ -3495,20 +3619,26 @@ mod tests {
         .collect();
         let entries: &'static [super::PieEntry] = Box::leak(entries.into_boxed_slice());
         let menu: &'static PieMenuDef = Box::leak(Box::new(PieMenuDef {
-            label: "Tiny",
+            label_key: GLYPH,
             entries,
         }));
 
         let test = LayoutTest::new().with_widget_layout(&[register_pie_layout]);
         let mut app = test.build();
+        // The translator's three resources, with no bundles behind them: a pie
+        // resolves every `label_key`, and here each one resolves to itself.
+        sl_viewer_ui_core::i18n::install_untranslated(&mut app);
         app.add_message::<UiAction>();
         app.add_systems(
             Startup,
-            (move |mut commands: Commands, root: Res<sl_viewer_ui_core::ui::UiRoot>| {
+            (move |mut commands: Commands,
+                   translator: Translator,
+                   root: Res<sl_viewer_ui_core::ui::UiRoot>| {
                 super::spawn_pie_menu(
                     &mut commands,
                     root.0,
                     ElementCx::new(),
+                    &translator,
                     menu,
                     "tiny",
                     PieConditions::default(),
@@ -3551,6 +3681,9 @@ mod tests {
         let mut app = LayoutTest::new()
             .with_widget_layout(&[register_pie_layout])
             .build();
+        // The translator's three resources, with no bundles behind them: a pie
+        // resolves every `label_key`, and here each one resolves to itself.
+        sl_viewer_ui_core::i18n::install_untranslated(&mut app);
         app.add_message::<UiAction>()
             .add_message::<OpenPieMenu>()
             .add_systems(Update, super::open_pie_menus)
@@ -3690,6 +3823,11 @@ mod tests {
     /// a hand could feel and far over anything a font can move.
     const DEGREE_TOLERANCE: f64 = 1.0;
 
+    /// Half a slice, in degrees — where the recorded angle's branch cut is put,
+    /// so the wrap from 360° back to 0° falls midway between two compass points
+    /// instead of on one.
+    const HALF_SLICE_DEGREES: f32 = 22.5;
+
     /// How far a recorded radius may move, in logical pixels.
     const PIXEL_TOLERANCE: f64 = 0.5;
 
@@ -3735,7 +3873,16 @@ mod tests {
             // number is the angle the widget's own maths uses rather than a
             // screen-space one a reader has to flip in their head.
             let offset = ui_offset(Vec2::new(at.x - centre.x, at.y - centre.y));
-            let degrees = offset.to_angle().to_degrees().rem_euclid(360.0);
+            // Wrapped with the branch cut at -22.5°, **halfway between two
+            // compass points**, rather than at 0° — which is the east point
+            // itself. A plain `rem_euclid(360)` puts the discontinuity exactly
+            // where a recorded value sits, so the east label reads 0.3° one run
+            // and 359.9° the next for a sub-pixel difference in where the text
+            // measured, and the baseline reports a 359° drift for a pie that did
+            // not move. Every recorded value is unchanged by this; what changes
+            // is that none of them sits on the seam.
+            let degrees = (offset.to_angle().to_degrees() + HALF_SLICE_DEGREES).rem_euclid(360.0)
+                - HALF_SLICE_DEGREES;
             facts.float(
                 &format!("label.{}.angle-deg", point.name()),
                 degrees,

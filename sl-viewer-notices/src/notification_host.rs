@@ -517,15 +517,14 @@ fn register_notification_settings(settings: Option<ResMut<ViewerSettings>>) {
                     &[NOTIFICATIONS_SECTION],
                     entry.name,
                     SettingValue::Bool(true),
-                    "Show this notification (untick to suppress it)",
+                    "setting-desc-notification-show",
                 );
                 if entry.ignore == NotificationIgnore::LastResponse {
                     settings.register_in(
                         &[NOTIFICATIONS_SECTION],
                         &last_response_setting_name(entry.name),
                         SettingValue::String(String::new()),
-                        "The button name replayed when this suppressed \
-                         notification is raised (empty = the form's default)",
+                        "setting-desc-notification-last-response",
                     );
                 }
             }
@@ -533,8 +532,7 @@ fn register_notification_settings(settings: Option<ResMut<ViewerSettings>>) {
                 settings.register_transient(
                     entry.name,
                     SettingValue::Bool(true),
-                    "Show this notification (untick to suppress it for this \
-                     session)",
+                    "setting-desc-notification-show-session",
                 );
             }
         }
@@ -2096,9 +2094,7 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         DIAGNOSTICS_SECTION,
         SETTING_COLLECT_DIAGNOSTICS,
         SettingValue::Bool(true),
-        "Collect protocol diagnostics (decode failures, unhandled messages, \
-         unknown capability events, missing replies) and report them to the log. \
-         Costs a little per inbound message; turn it off to run the session lean",
+        "setting-desc-CollectProtocolDiagnostics",
     );
 }
 

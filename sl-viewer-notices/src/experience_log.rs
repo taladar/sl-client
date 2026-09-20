@@ -102,14 +102,13 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         EXPERIENCES_SECTION,
         SETTING_LOG_DAYS,
         SettingValue::I32(DEFAULT_LOG_DAYS),
-        "How many days of experience events to keep in the per-account log \
-         (0 keeps none, 14 is the reference's maximum)",
+        "setting-desc-ExperienceLogDays",
     );
     settings.register_in(
         EXPERIENCES_SECTION,
         SETTING_NOTIFY_ALL,
         SettingValue::Bool(false),
-        "Raise a toast for every experience event, not just record it in the log",
+        "setting-desc-NotifyAllExperienceEvents",
     );
 }
 

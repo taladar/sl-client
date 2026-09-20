@@ -162,8 +162,16 @@ pub const SCRIPTS: &[ScriptSample] = &[
 ///
 /// An element is authored with English literals, exactly as a real panel is. The
 /// cell decides what those literals become — which is a faithful model of what
-/// `viewer-i18n-fluent-scaffold` will do for real, where the literal becomes a
-/// Fluent key and the bundle decides the rest.
+/// [`i18n`](crate::i18n) does for real, where the literal is a Fluent key and
+/// the bundle decides the rest.
+///
+/// An element whose strings *are* keys already — a menu, a pie — is transformed
+/// by the bundle rather than by a cell: the two compose where the element
+/// resolves eagerly (a pie label passes through `cx.text` after the lookup), and
+/// where it binds the key to a node instead (a menu-bar button, through
+/// [`Translated`](crate::i18n::Translated)) the cell does not reach it at all.
+/// Switching the locale is what varies such an element's strings, and it varies
+/// every one of them.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SampleText {
     /// The element's own English literals, untouched — the baseline.

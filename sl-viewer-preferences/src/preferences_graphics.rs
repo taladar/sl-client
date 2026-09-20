@@ -389,44 +389,43 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         RENDER_SECTION,
         SETTING_SHADOW_DETAIL,
         SettingValue::U32(DEFAULT_SHADOW_DETAIL),
-        "Shadow detail: 0 no shadows, 1 sun / moon shadows",
+        "setting-desc-RenderShadowDetail",
     );
     settings.register_in(
         RENDER_SECTION,
         SETTING_SHADOW_MAP_SIZE,
         SettingValue::U32(DEFAULT_SHADOW_MAP_SIZE),
-        "Directional shadow-map resolution (texels per side, a power of two)",
+        "setting-desc-RenderShadowMapSize",
     );
     settings.register_in(
         RENDER_SECTION,
         SETTING_SHADOW_CASCADES,
         SettingValue::U32(DEFAULT_SHADOW_CASCADES),
-        "Sun shadow cascade count (1-4): fewer is faster, coarser in the distance",
+        "setting-desc-RenderShadowCascades",
     );
     settings.register_in(
         RENDER_SECTION,
         SETTING_VSYNC,
         SettingValue::Bool(DEFAULT_VSYNC),
-        "Sync presentation to the monitor refresh (vsync)",
+        "setting-desc-RenderVSyncEnable",
     );
     settings.register_in(
         RENDER_SECTION,
         SETTING_LIMIT_FRAMERATE,
         SettingValue::Bool(DEFAULT_LIMIT_FRAMERATE),
-        "Cap the frame rate at FramePerSecondLimit (thermals / battery)",
+        "setting-desc-FSLimitFramerate",
     );
     settings.register_in(
         RENDER_SECTION,
         SETTING_FPS_LIMIT,
         SettingValue::U32(DEFAULT_FPS_LIMIT),
-        "The frame-rate cap, frames per second, while FSLimitFramerate is on",
+        "setting-desc-FramePerSecondLimit",
     );
     settings.register_in(
         RENDER_SECTION,
         SETTING_RENDER_QUALITY,
         SettingValue::U32(DEFAULT_RENDER_QUALITY),
-        "The last-applied quality tier (0 low - 6 ultra); picking one writes \
-         the tier's values into the individual render settings",
+        "setting-desc-RenderQualityPerformance",
     );
 }
 

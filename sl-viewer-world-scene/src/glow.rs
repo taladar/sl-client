@@ -100,25 +100,25 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         GLOW_SECTION,
         SETTING_ENABLED,
         SettingValue::Bool(true),
-        "Render the Second Life glow / bloom pass",
+        "setting-desc-RenderGlow",
     );
     settings.register_in(
         GLOW_SECTION,
         SETTING_STRENGTH,
         SettingValue::F32(DEFAULT_STRENGTH),
-        "Additive strength of the glow, applied each blur pass",
+        "setting-desc-RenderGlowStrength",
     );
     settings.register_in(
         GLOW_SECTION,
         SETTING_ITERATIONS,
         SettingValue::U32(DEFAULT_ITERATIONS),
-        "Number of separable-Gaussian blur iterations (each is two passes)",
+        "setting-desc-RenderGlowIterations",
     );
     settings.register_in(
         GLOW_SECTION,
         SETTING_WIDTH,
         SettingValue::F32(DEFAULT_WIDTH),
-        "Blur width (the per-pass step is this over the glow-buffer resolution)",
+        "setting-desc-RenderGlowWidth",
     );
 }
 

@@ -180,12 +180,12 @@ pub fn render_pie_conditions(
 /// The "Mute >" sub-pie of the other-avatar pie (reference slot 1 / north-east),
 /// shared verbatim by the attachment-other pie ([`crate::attachment_menu`]).
 pub static OTHER_MUTE_PIE: PieMenuDef = PieMenuDef {
-    label: "Mute",
+    label_key: "pie-avatar-mute",
     entries: &[
         PieEntry {
             at: Compass::East,
             content: PieContent::Action(PieAction {
-                label: "Mute",
+                label_key: "pie-avatar-mute",
                 action: "mute",
                 when: None,
             }),
@@ -193,7 +193,7 @@ pub static OTHER_MUTE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthEast,
             content: PieContent::Action(PieAction {
-                label: "Mute Particle Owner",
+                label_key: "pie-avatar-mute-particle-owner",
                 action: "mute-particles",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -203,12 +203,12 @@ pub static OTHER_MUTE_PIE: PieMenuDef = PieMenuDef {
 
 /// The "Add >" sub-pie of the other-avatar pie (reference slot 4 / west).
 static OTHER_ADD_PIE: PieMenuDef = PieMenuDef {
-    label: "Add",
+    label_key: "pie-avatar-add",
     entries: &[
         PieEntry {
             at: Compass::East,
             content: PieContent::Action(PieAction {
-                label: "Add as Friend",
+                label_key: "pie-avatar-add-as-friend",
                 action: "add-friend",
                 when: Some(TARGET_NOT_FRIEND),
             }),
@@ -216,7 +216,7 @@ static OTHER_ADD_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthEast,
             content: PieContent::Action(PieAction {
-                label: "Add to Set",
+                label_key: "pie-avatar-add-to-set",
                 action: "add-to-set",
                 when: None,
             }),
@@ -228,7 +228,7 @@ static OTHER_ADD_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::North,
             content: PieContent::Action(PieAction {
-                label: "Set Alias",
+                label_key: "pie-avatar-set-alias",
                 action: "set-alias",
                 when: None,
             }),
@@ -244,12 +244,12 @@ static OTHER_ADD_PIE: PieMenuDef = PieMenuDef {
 /// addresses as disabled placeholders, and the reference's later Reset / Dump XML
 /// / Display tails are deferred (see the module doc's "stop there" rule).
 static OTHER_MORE_MORE_PIE: PieMenuDef = PieMenuDef {
-    label: "More",
+    label_key: "pie-avatar-more",
     entries: &[
         PieEntry {
             at: Compass::East,
             content: PieContent::Action(PieAction {
-                label: "Textures",
+                label_key: "pie-avatar-textures",
                 action: "textures",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -257,7 +257,7 @@ static OTHER_MORE_MORE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthEast,
             content: PieContent::Action(PieAction {
-                label: "Script Info",
+                label_key: "pie-avatar-script-info",
                 action: "script-info",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -265,7 +265,7 @@ static OTHER_MORE_MORE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::North,
             content: PieContent::Action(PieAction {
-                label: "Call",
+                label_key: "pie-avatar-call",
                 action: "call",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -273,7 +273,7 @@ static OTHER_MORE_MORE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthWest,
             content: PieContent::Action(PieAction {
-                label: "Zoom In",
+                label_key: "pie-avatar-zoom-in",
                 action: "zoom-in",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -281,7 +281,7 @@ static OTHER_MORE_MORE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::West,
             content: PieContent::Action(PieAction {
-                label: "Tex Refresh",
+                label_key: "pie-avatar-tex-refresh",
                 action: "tex-refresh",
                 when: None,
             }),
@@ -296,12 +296,12 @@ static OTHER_MORE_MORE_PIE: PieMenuDef = PieMenuDef {
 /// the reference's deeper derender tails are deferred rather than reproduced as
 /// dead slices (see the module doc).
 static OTHER_MORE_PIE: PieMenuDef = PieMenuDef {
-    label: "More",
+    label_key: "pie-avatar-more",
     entries: &[
         PieEntry {
             at: Compass::East,
             content: PieContent::Action(PieAction {
-                label: "Freeze",
+                label_key: "pie-avatar-freeze",
                 action: "freeze",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -309,7 +309,7 @@ static OTHER_MORE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthEast,
             content: PieContent::Action(PieAction {
-                label: "Give Card",
+                label_key: "pie-avatar-give-card",
                 action: "give-card",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -317,7 +317,7 @@ static OTHER_MORE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::North,
             content: PieContent::Action(PieAction {
-                label: "Invite to Group",
+                label_key: "pie-avatar-invite-to-group",
                 action: "invite-to-group",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -325,7 +325,7 @@ static OTHER_MORE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthWest,
             content: PieContent::Action(PieAction {
-                label: "Face Towards",
+                label_key: "pie-avatar-face-towards",
                 action: "face-towards",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -333,7 +333,7 @@ static OTHER_MORE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::West,
             content: PieContent::Action(PieAction {
-                label: "Eject",
+                label_key: "pie-avatar-eject",
                 action: "eject",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -364,12 +364,12 @@ static OTHER_MORE_PIE: PieMenuDef = PieMenuDef {
 /// [`crate::avatar_render_settings`] and managed in its floater
 /// (World ▸ Avatar Render Settings).
 static OTHER_RENDER_PIE: PieMenuDef = PieMenuDef {
-    label: "Render",
+    label_key: "pie-avatar-render",
     entries: &[
         PieEntry {
             at: Compass::East,
             content: PieContent::Action(PieAction {
-                label: "Fully",
+                label_key: "pie-avatar-fully",
                 action: "render-fully",
                 when: Some(TARGET_RENDER_NOT_FULLY),
             }),
@@ -377,7 +377,7 @@ static OTHER_RENDER_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::North,
             content: PieContent::Action(PieAction {
-                label: "Normally",
+                label_key: "pie-avatar-normally",
                 action: "render-normally",
                 when: Some(TARGET_RENDER_EXCEPTED),
             }),
@@ -385,7 +385,7 @@ static OTHER_RENDER_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::West,
             content: PieContent::Action(PieAction {
-                label: "Never",
+                label_key: "pie-avatar-never",
                 action: "render-never",
                 when: Some(TARGET_RENDER_NOT_NEVER),
             }),
@@ -411,12 +411,12 @@ const fn render_override_for(action: &str) -> Option<crate::avatar_complexity::R
 /// the session. The reference addresses both slices at the pie's southern
 /// slots, leaving the first six empty, and so do we.
 static OTHER_DERENDER_PIE: PieMenuDef = PieMenuDef {
-    label: "Derender",
+    label_key: "pie-avatar-derender",
     entries: &[
         PieEntry {
             at: Compass::South,
             content: PieContent::Action(PieAction {
-                label: "Blacklist",
+                label_key: "pie-avatar-blacklist",
                 action: "derender-blacklist",
                 when: None,
             }),
@@ -424,7 +424,7 @@ static OTHER_DERENDER_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::SouthEast,
             content: PieContent::Action(PieAction {
-                label: "Temporary",
+                label_key: "pie-avatar-temporary",
                 action: "derender",
                 when: None,
             }),
@@ -434,12 +434,12 @@ static OTHER_DERENDER_PIE: PieMenuDef = PieMenuDef {
 
 /// The pie for **another** avatar. See `menu_pie_avatar_other.xml`.
 pub static AVATAR_OTHER_PIE: PieMenuDef = PieMenuDef {
-    label: "Avatar",
+    label_key: "pie-avatar-avatar",
     entries: &[
         PieEntry {
             at: Compass::East,
             content: PieContent::Action(PieAction {
-                label: "Profile",
+                label_key: "pie-avatar-profile",
                 action: "profile",
                 when: None,
             }),
@@ -451,7 +451,7 @@ pub static AVATAR_OTHER_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::North,
             content: PieContent::Action(PieAction {
-                label: "Go To",
+                label_key: "pie-avatar-go-to",
                 action: "go-to",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -459,7 +459,7 @@ pub static AVATAR_OTHER_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthWest,
             content: PieContent::Action(PieAction {
-                label: "Report",
+                label_key: "pie-avatar-report",
                 action: "report",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -471,7 +471,7 @@ pub static AVATAR_OTHER_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::SouthWest,
             content: PieContent::Action(PieAction {
-                label: "Pay",
+                label_key: "pie-avatar-pay",
                 action: "pay",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -483,7 +483,7 @@ pub static AVATAR_OTHER_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::SouthEast,
             content: PieContent::Action(PieAction {
-                label: "IM",
+                label_key: "pie-avatar-im",
                 action: "im",
                 when: None,
             }),
@@ -505,12 +505,12 @@ pub static AVATAR_OTHER_PIE: PieMenuDef = PieMenuDef {
 /// tattoo / physics / alpha / all-clothes is deferred). Every layer is disabled —
 /// wearables / take-off is not implemented yet.
 static SELF_CLOTHES_PIE: PieMenuDef = PieMenuDef {
-    label: "Clothes",
+    label_key: "pie-avatar-clothes",
     entries: &[
         PieEntry {
             at: Compass::East,
             content: PieContent::Action(PieAction {
-                label: "Shirt",
+                label_key: "pie-avatar-shirt",
                 action: "takeoff-shirt",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -518,7 +518,7 @@ static SELF_CLOTHES_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthEast,
             content: PieContent::Action(PieAction {
-                label: "Pants",
+                label_key: "pie-avatar-pants",
                 action: "takeoff-pants",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -526,7 +526,7 @@ static SELF_CLOTHES_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::North,
             content: PieContent::Action(PieAction {
-                label: "Shoes",
+                label_key: "pie-avatar-shoes",
                 action: "takeoff-shoes",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -534,7 +534,7 @@ static SELF_CLOTHES_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthWest,
             content: PieContent::Action(PieAction {
-                label: "Socks",
+                label_key: "pie-avatar-socks",
                 action: "takeoff-socks",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -542,7 +542,7 @@ static SELF_CLOTHES_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::West,
             content: PieContent::Action(PieAction {
-                label: "Jacket",
+                label_key: "pie-avatar-jacket",
                 action: "takeoff-jacket",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -550,7 +550,7 @@ static SELF_CLOTHES_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::SouthWest,
             content: PieContent::Action(PieAction {
-                label: "Gloves",
+                label_key: "pie-avatar-gloves",
                 action: "takeoff-gloves",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -558,7 +558,7 @@ static SELF_CLOTHES_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::SouthEast,
             content: PieContent::Action(PieAction {
-                label: "Skirt",
+                label_key: "pie-avatar-skirt",
                 action: "takeoff-skirt",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -572,7 +572,7 @@ static SELF_CLOTHES_PIE: PieMenuDef = PieMenuDef {
 /// lists (which HUDs / attachments you are actually wearing); until that data is
 /// wired they are single disabled leaves rather than empty sub-pies.
 static SELF_TAKEOFF_PIE: PieMenuDef = PieMenuDef {
-    label: "Take Off",
+    label_key: "pie-avatar-take-off",
     entries: &[
         PieEntry {
             at: Compass::East,
@@ -581,7 +581,7 @@ static SELF_TAKEOFF_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthEast,
             content: PieContent::Action(PieAction {
-                label: "Detach HUD",
+                label_key: "pie-avatar-detach-hud",
                 action: "detach-hud",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -589,7 +589,7 @@ static SELF_TAKEOFF_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::North,
             content: PieContent::Action(PieAction {
-                label: "Detach",
+                label_key: "pie-avatar-detach",
                 action: "detach-attachment",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -597,7 +597,7 @@ static SELF_TAKEOFF_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthWest,
             content: PieContent::Action(PieAction {
-                label: "Detach All",
+                label_key: "pie-avatar-detach-all",
                 action: "detach-all",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -608,12 +608,12 @@ static SELF_TAKEOFF_PIE: PieMenuDef = PieMenuDef {
 /// The "Reset >" sub-pie of the self "Appearance >" pie, shared verbatim by
 /// both attachment pies' reset tails ([`crate::attachment_menu`]).
 pub static SELF_RESET_PIE: PieMenuDef = PieMenuDef {
-    label: "Reset",
+    label_key: "pie-avatar-reset",
     entries: &[
         PieEntry {
             at: Compass::East,
             content: PieContent::Action(PieAction {
-                label: "Skeleton & Animations",
+                label_key: "pie-avatar-skeleton-and-animations",
                 action: "reset-skel-anim",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -621,7 +621,7 @@ pub static SELF_RESET_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthEast,
             content: PieContent::Action(PieAction {
-                label: "Skeleton",
+                label_key: "pie-avatar-skeleton",
                 action: "reset-skeleton",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -629,7 +629,7 @@ pub static SELF_RESET_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::North,
             content: PieContent::Action(PieAction {
-                label: "Mesh LOD",
+                label_key: "pie-avatar-mesh-lod",
                 action: "reset-mesh-lod",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -640,12 +640,12 @@ pub static SELF_RESET_PIE: PieMenuDef = PieMenuDef {
 /// The self "Appearance >" sub-pie (reference slot 7 / south-east), with the
 /// reference's ninth top-level slice, `Textures`, folded in at south.
 static SELF_APPEARANCE_PIE: PieMenuDef = PieMenuDef {
-    label: "Appearance",
+    label_key: "pie-avatar-appearance",
     entries: &[
         PieEntry {
             at: Compass::East,
             content: PieContent::Action(PieAction {
-                label: "Edit Shape",
+                label_key: "pie-avatar-edit-shape",
                 action: "edit-shape",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -657,7 +657,7 @@ static SELF_APPEARANCE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::North,
             content: PieContent::Action(PieAction {
-                label: "Texture Refresh",
+                label_key: "pie-avatar-texture-refresh",
                 action: "tex-refresh",
                 when: None,
             }),
@@ -665,7 +665,7 @@ static SELF_APPEARANCE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthWest,
             content: PieContent::Action(PieAction {
-                label: "Edit Outfit",
+                label_key: "pie-avatar-edit-outfit",
                 action: "edit-outfit",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -673,7 +673,7 @@ static SELF_APPEARANCE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::West,
             content: PieContent::Action(PieAction {
-                label: "Dump XML",
+                label_key: "pie-avatar-dump-xml",
                 action: "dump-xml",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -681,7 +681,7 @@ static SELF_APPEARANCE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::SouthWest,
             content: PieContent::Action(PieAction {
-                label: "Hover Height",
+                label_key: "pie-avatar-hover-height",
                 action: "hover-height",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -689,7 +689,7 @@ static SELF_APPEARANCE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::South,
             content: PieContent::Action(PieAction {
-                label: "Textures",
+                label_key: "pie-avatar-textures",
                 action: "textures",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -699,12 +699,12 @@ static SELF_APPEARANCE_PIE: PieMenuDef = PieMenuDef {
 
 /// The pie for your **own** avatar. See `menu_pie_avatar_self.xml`.
 pub static AVATAR_SELF_PIE: PieMenuDef = PieMenuDef {
-    label: "Self",
+    label_key: "pie-avatar-self",
     entries: &[
         PieEntry {
             at: Compass::East,
             content: PieContent::Action(PieAction {
-                label: "Profile",
+                label_key: "pie-avatar-profile",
                 action: "profile",
                 when: None,
             }),
@@ -712,7 +712,7 @@ pub static AVATAR_SELF_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthEast,
             content: PieContent::Action(PieAction {
-                label: "Groups",
+                label_key: "pie-avatar-groups",
                 action: "groups",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -727,7 +727,7 @@ pub static AVATAR_SELF_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthWest,
             content: PieContent::Action(PieAction {
-                label: "Sit Down",
+                label_key: "pie-avatar-sit-down",
                 action: "sit-ground",
                 when: Some(SELF_STANDING),
             }),
@@ -735,7 +735,7 @@ pub static AVATAR_SELF_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::West,
             content: PieContent::Action(PieAction {
-                label: "Stand Up",
+                label_key: "pie-avatar-stand-up",
                 action: "stand",
                 when: Some(SELF_SITTING),
             }),
@@ -743,7 +743,7 @@ pub static AVATAR_SELF_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::SouthWest,
             content: PieContent::Action(PieAction {
-                label: "Script Info",
+                label_key: "pie-avatar-script-info",
                 action: "script-info",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -751,7 +751,7 @@ pub static AVATAR_SELF_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::South,
             content: PieContent::Action(PieAction {
-                label: "Gestures",
+                label_key: "pie-avatar-gestures",
                 action: "gestures",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -1632,7 +1632,7 @@ mod tests {
                 if count > 1 {
                     failures.push(format!(
                         "`{}` declares {count} entries at {}",
-                        menu.label,
+                        menu.label_key,
                         point.name()
                     ));
                 }

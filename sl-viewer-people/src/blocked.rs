@@ -188,32 +188,34 @@ const COND_SOUNDS: &str = "blocked-sounds-muted";
 
 /// The blocked-row context menu — the reference's `menu_people_blocked_gear`.
 static BLOCKED_MENU: MenuDef = MenuDef {
-    label: "Blocked",
+    label_key: "menu-blocked-blocked",
     items: &[
-        MenuItemDef::Command(MenuCommand::new("Unblock", "unblock")),
+        MenuItemDef::Command(MenuCommand::new("menu-blocked-unblock", "unblock")),
         MenuItemDef::Separator,
         MenuItemDef::Command(
-            MenuCommand::new("Block Text", "toggle-text")
+            MenuCommand::new("menu-blocked-block-text", "toggle-text")
                 .visible_when(COND_AGENT)
                 .checked_when(COND_TEXT),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Block Voice", "toggle-voice")
+            MenuCommand::new("menu-blocked-block-voice", "toggle-voice")
                 .visible_when(COND_AGENT)
                 .checked_when(COND_VOICE),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Block Particles", "toggle-particles")
+            MenuCommand::new("menu-blocked-block-particles", "toggle-particles")
                 .visible_when(COND_AGENT)
                 .checked_when(COND_PARTICLES),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Block Object Sounds", "toggle-sounds")
+            MenuCommand::new("menu-blocked-block-object-sounds", "toggle-sounds")
                 .visible_when(COND_AGENT)
                 .checked_when(COND_SOUNDS),
         ),
         MenuItemDef::Separator,
-        MenuItemDef::Command(MenuCommand::new("Profile...", "profile").visible_when(COND_AGENT)),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-blocked-profile", "profile").visible_when(COND_AGENT),
+        ),
     ],
 };
 

@@ -207,6 +207,8 @@ pub(crate) use sl_viewer_notices::linkified_text;
 pub(crate) use sl_viewer_notices::load_url;
 pub(crate) use sl_viewer_ui_context_menus::land_menu;
 pub(crate) use sl_viewer_ui_core::i18n;
+#[cfg(test)]
+mod i18n_keys;
 pub(crate) use sl_viewer_ui_widgets::menu;
 pub(crate) use sl_viewer_world_objects::material_preview;
 pub(crate) use sl_viewer_world_scene::lights;

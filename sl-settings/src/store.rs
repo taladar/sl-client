@@ -288,6 +288,32 @@ impl SettingsStore {
         self.decls.get(name)
     }
 
+    /// Replace a registered setting's comment — the description a raw settings
+    /// editor shows and the writer places above the value in the persisted file.
+    ///
+    /// Separate from registration because the comment can arrive **later** than
+    /// the declaration does: a caller that keeps its descriptions somewhere this
+    /// crate cannot read (the viewer looks them up in a translation bundle that
+    /// finishes loading some frames after startup) registers with none and fills
+    /// it in when it has one. Nothing else about the declaration moves, so a
+    /// value written before the comment arrived is still the same setting.
+    ///
+    /// # Errors
+    ///
+    /// [`SettingError::UnknownSetting`] if `name` is not registered.
+    pub fn set_comment(
+        &mut self,
+        name: &str,
+        comment: impl Into<String>,
+    ) -> Result<(), SettingError> {
+        let decl = self
+            .decls
+            .get_mut(name)
+            .ok_or_else(|| SettingError::UnknownSetting(name.to_owned()))?;
+        decl.comment = comment.into();
+        Ok(())
+    }
+
     /// The names of every registered setting, in sorted order.
     ///
     /// A raw settings editor iterates this to list every setting generically.

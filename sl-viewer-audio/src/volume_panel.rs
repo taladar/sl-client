@@ -210,20 +210,20 @@ fn register_settings(settings: &mut ViewerSettings) {
             BUS_SECTION,
             &volume_key(bus),
             SettingValue::F32(default_gain(bus)),
-            "Linear volume (0-1) for this audio bus",
+            "setting-desc-audio-bus-volume",
         );
         settings.register_in(
             BUS_SECTION,
             &mute_key(bus),
             SettingValue::Bool(false),
-            "Whether this audio bus is muted (mute retains the volume level)",
+            "setting-desc-audio-bus-mute",
         );
     }
     settings.register_in(
         AUDIO_SECTION,
         SETTING_MUTE_WHEN_MINIMIZED,
         SettingValue::Bool(false),
-        "Mute audio while the viewer window is minimised / unfocused",
+        "setting-desc-MuteWhenMinimized",
     );
 }
 

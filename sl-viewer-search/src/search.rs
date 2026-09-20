@@ -1084,13 +1084,13 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         SEARCH_SECTION,
         SETTING_ONLINE_ONLY,
         SettingValue::Bool(false),
-        "Restrict People search to online avatars",
+        "setting-desc-SearchPeopleOnlineOnly",
     );
     settings.register_in(
         SEARCH_SECTION,
         SETTING_LAND_ASCENDING,
         SettingValue::Bool(false),
-        "Sort Land search results ascending",
+        "setting-desc-SearchLandAscending",
     );
     // Per-tab maturity: General / Moderate on by default, Adult off (the
     // reference keeps a separate maturity filter per category).
@@ -1100,19 +1100,19 @@ pub fn register_settings(settings: &mut ViewerSettings) {
                 SEARCH_SECTION,
                 general,
                 SettingValue::Bool(true),
-                "Include General (PG) results in this search category",
+                "setting-desc-search-include-general",
             );
             settings.register_in(
                 SEARCH_SECTION,
                 moderate,
                 SettingValue::Bool(true),
-                "Include Moderate (Mature) results in this search category",
+                "setting-desc-search-include-moderate",
             );
             settings.register_in(
                 SEARCH_SECTION,
                 adult,
                 SettingValue::Bool(false),
-                "Include Adult results in this search category",
+                "setting-desc-search-include-adult",
             );
         }
     }

@@ -342,16 +342,22 @@ const SLOT_PROFILES: &str = "radar-profiles";
 /// Present in both menu shapes, because marking is exactly as useful for one
 /// avatar as for ten.
 static RADAR_MARK_MENU: MenuDef = MenuDef {
-    label: "Mark",
+    label_key: "menu-radar-mark",
     items: &[
-        MenuItemDef::Command(MenuCommand::new("Mark Red", "mark-red")),
-        MenuItemDef::Command(MenuCommand::new("Mark Green", "mark-green")),
-        MenuItemDef::Command(MenuCommand::new("Mark Blue", "mark-blue")),
-        MenuItemDef::Command(MenuCommand::new("Mark Purple", "mark-purple")),
-        MenuItemDef::Command(MenuCommand::new("Mark Light Yellow", "mark-yellow")),
+        MenuItemDef::Command(MenuCommand::new("menu-radar-mark-red", "mark-red")),
+        MenuItemDef::Command(MenuCommand::new("menu-radar-mark-green", "mark-green")),
+        MenuItemDef::Command(MenuCommand::new("menu-radar-mark-blue", "mark-blue")),
+        MenuItemDef::Command(MenuCommand::new("menu-radar-mark-purple", "mark-purple")),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-radar-mark-light-yellow",
+            "mark-yellow",
+        )),
         MenuItemDef::Separator,
-        MenuItemDef::Command(MenuCommand::new("Clear Mark", "mark-clear")),
-        MenuItemDef::Command(MenuCommand::new("Clear All Marks", "mark-clear-all")),
+        MenuItemDef::Command(MenuCommand::new("menu-radar-clear-mark", "mark-clear")),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-radar-clear-all-marks",
+            "mark-clear-all",
+        )),
     ],
 };
 
@@ -359,11 +365,14 @@ static RADAR_MARK_MENU: MenuDef = MenuDef {
 /// ([`crate::avatar_render_settings`]), the reference's own radar entries.
 /// *Render Normally* is the absence of a decision, so it clears the entry.
 static RADAR_RENDER_MENU: MenuDef = MenuDef {
-    label: "Render Settings",
+    label_key: "menu-radar-render-settings",
     items: &[
-        MenuItemDef::Command(MenuCommand::new("Render Normally", "render-normally")),
-        MenuItemDef::Command(MenuCommand::new("Do Not Render", "render-never")),
-        MenuItemDef::Command(MenuCommand::new("Render Fully", "render-fully")),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-radar-render-normally",
+            "render-normally",
+        )),
+        MenuItemDef::Command(MenuCommand::new("menu-radar-do-not-render", "render-never")),
+        MenuItemDef::Command(MenuCommand::new("menu-radar-render-fully", "render-fully")),
     ],
 };
 
@@ -371,39 +380,48 @@ static RADAR_RENDER_MENU: MenuDef = MenuDef {
 /// client supports of the reference's `menu_fs_radar.xml` (see the module docs
 /// for what is deliberately absent).
 static RADAR_MENU: MenuDef = MenuDef {
-    label: "Radar",
+    label_key: "menu-radar-radar",
     items: &[
-        MenuItemDef::Command(MenuCommand::new("View Profile", "profile")),
-        MenuItemDef::Command(MenuCommand::new("IM", "im")),
+        MenuItemDef::Command(MenuCommand::new("menu-radar-view-profile", "profile")),
+        MenuItemDef::Command(MenuCommand::new("menu-radar-im", "im")),
         MenuItemDef::Separator,
         MenuItemDef::Command(
-            MenuCommand::new("Start Tracking", "start-tracking").visible_when(COND_NOT_MUTED),
+            MenuCommand::new("menu-radar-start-tracking", "start-tracking")
+                .visible_when(COND_NOT_MUTED),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Stop Tracking", "stop-tracking").visible_when(COND_TRACKING),
+            MenuCommand::new("menu-radar-stop-tracking", "stop-tracking")
+                .visible_when(COND_TRACKING),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Teleport To", "teleport-to").enabled_when(COND_POSITION),
+            MenuCommand::new("menu-radar-teleport-to", "teleport-to").enabled_when(COND_POSITION),
         ),
-        MenuItemDef::Command(MenuCommand::new("Offer Teleport", "offer-teleport")),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-radar-offer-teleport",
+            "offer-teleport",
+        )),
         MenuItemDef::Separator,
         MenuItemDef::Command(
-            MenuCommand::new("Add Friend", "add-friend").visible_when(COND_NOT_FRIEND),
+            MenuCommand::new("menu-radar-add-friend", "add-friend").visible_when(COND_NOT_FRIEND),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Remove Friend", "remove-friend").visible_when(COND_FRIEND),
+            MenuCommand::new("menu-radar-remove-friend", "remove-friend").visible_when(COND_FRIEND),
         ),
-        MenuItemDef::Command(MenuCommand::new("Add to Set", "add-to-set")),
+        MenuItemDef::Command(MenuCommand::new("menu-radar-add-to-set", "add-to-set")),
         MenuItemDef::Submenu(&RADAR_MARK_MENU),
-        MenuItemDef::Command(MenuCommand::new("Block", "block").visible_when(COND_NOT_MUTED)),
-        MenuItemDef::Command(MenuCommand::new("Unblock", "unblock").visible_when(COND_MUTED)),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-radar-block", "block").visible_when(COND_NOT_MUTED),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-radar-unblock", "unblock").visible_when(COND_MUTED),
+        ),
         MenuItemDef::Separator,
         // Client-side derender (`viewer-derender-blacklist`), the reference
         // radar's own Derender / Derender + blacklist pair: the radar is where
         // a griefer is spotted, so it is where they are unrendered from.
-        MenuItemDef::Command(MenuCommand::new("Derender", "derender")),
+        MenuItemDef::Command(MenuCommand::new("menu-radar-derender", "derender")),
         MenuItemDef::Command(MenuCommand::new(
-            "Derender + Blacklist",
+            "menu-radar-derender-blacklist",
             "derender-blacklist",
         )),
         MenuItemDef::Submenu(&RADAR_RENDER_MENU),
@@ -420,33 +438,41 @@ static RADAR_MENU: MenuDef = MenuDef {
 /// arms take the whole selection, so "act on each of them" is not a second
 /// implementation of anything.
 static RADAR_MULTI_MENU: MenuDef = MenuDef {
-    label: "Radar",
+    label_key: "menu-radar-radar",
     items: &[
         // The one thing a `&'static` menu cannot spell: a line per selected
         // avatar, labelled with the name as it arrives (the machinery
         // `viewer-minimap-menu-multi-avatar` built).
         MenuItemDef::DynamicSubmenu {
-            label: "View Profiles",
+            label_key: "menu-radar-view-profiles",
             slot: SLOT_PROFILES,
         },
-        MenuItemDef::Command(MenuCommand::new("IM", "im")),
+        MenuItemDef::Command(MenuCommand::new("menu-radar-im", "im")),
         MenuItemDef::Separator,
-        MenuItemDef::Command(MenuCommand::new("Offer Teleport", "offer-teleport")),
-        MenuItemDef::Separator,
-        MenuItemDef::Command(
-            MenuCommand::new("Add Friends", "add-friend").visible_when(COND_NOT_FRIEND),
-        ),
-        MenuItemDef::Command(
-            MenuCommand::new("Remove Friends", "remove-friend").visible_when(COND_FRIEND),
-        ),
-        MenuItemDef::Command(MenuCommand::new("Add to Set", "add-to-set")),
-        MenuItemDef::Submenu(&RADAR_MARK_MENU),
-        MenuItemDef::Command(MenuCommand::new("Block", "block").visible_when(COND_NOT_MUTED)),
-        MenuItemDef::Command(MenuCommand::new("Unblock", "unblock").visible_when(COND_MUTED)),
-        MenuItemDef::Separator,
-        MenuItemDef::Command(MenuCommand::new("Derender", "derender")),
         MenuItemDef::Command(MenuCommand::new(
-            "Derender + Blacklist",
+            "menu-radar-offer-teleport",
+            "offer-teleport",
+        )),
+        MenuItemDef::Separator,
+        MenuItemDef::Command(
+            MenuCommand::new("menu-radar-add-friends", "add-friend").visible_when(COND_NOT_FRIEND),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-radar-remove-friends", "remove-friend")
+                .visible_when(COND_FRIEND),
+        ),
+        MenuItemDef::Command(MenuCommand::new("menu-radar-add-to-set", "add-to-set")),
+        MenuItemDef::Submenu(&RADAR_MARK_MENU),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-radar-block", "block").visible_when(COND_NOT_MUTED),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-radar-unblock", "unblock").visible_when(COND_MUTED),
+        ),
+        MenuItemDef::Separator,
+        MenuItemDef::Command(MenuCommand::new("menu-radar-derender", "derender")),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-radar-derender-blacklist",
             "derender-blacklist",
         )),
         MenuItemDef::Submenu(&RADAR_RENDER_MENU),
@@ -886,43 +912,45 @@ fn register_radar_settings(settings: Option<ResMut<ViewerSettings>>) {
     let Some(mut settings) = settings else {
         return;
     };
-    for (name, comment) in [
-        (SETTING_CHAT_ENTER, "Report avatars entering chat range"),
-        (SETTING_CHAT_LEAVE, "Report avatars leaving chat range"),
-        (SETTING_DRAW_ENTER, "Report avatars entering draw distance"),
-        (SETTING_DRAW_LEAVE, "Report avatars leaving draw distance"),
-        (SETTING_SIM_ENTER, "Report avatars entering the region"),
-        (SETTING_SIM_LEAVE, "Report avatars leaving the region"),
-        (
-            SETTING_AGE_ALERT,
-            "Alert on avatars below the age threshold",
-        ),
+    for (name, description_key) in [
+        (SETTING_CHAT_ENTER, "setting-desc-RadarReportChatRangeEnter"),
+        (SETTING_CHAT_LEAVE, "setting-desc-RadarReportChatRangeLeave"),
+        (SETTING_DRAW_ENTER, "setting-desc-RadarReportDrawRangeEnter"),
+        (SETTING_DRAW_LEAVE, "setting-desc-RadarReportDrawRangeLeave"),
+        (SETTING_SIM_ENTER, "setting-desc-RadarReportSimRangeEnter"),
+        (SETTING_SIM_LEAVE, "setting-desc-RadarReportSimRangeLeave"),
+        (SETTING_AGE_ALERT, "setting-desc-RadarAgeAlert"),
     ] {
-        settings.register_in(RADAR_SECTION, name, SettingValue::Bool(false), comment);
+        settings.register_in(
+            RADAR_SECTION,
+            name,
+            SettingValue::Bool(false),
+            description_key,
+        );
     }
     settings.register_in(
         RADAR_SECTION,
         SETTING_ALERT_OUTPUT,
         SettingValue::String("chat".to_owned()),
-        "Where radar alerts go: 'chat' (Nearby Chat line) or 'toast'",
+        "setting-desc-RadarAlertOutput",
     );
     settings.register_in(
         RADAR_SECTION,
         SETTING_AGE_DAYS,
         SettingValue::I32(7),
-        "The radar age alert's threshold, in days",
+        "setting-desc-RadarAgeAlertDays",
     );
     settings.register_in(
         RADAR_SECTION,
         SETTING_LIMIT,
         SettingValue::Bool(false),
-        "Limit the radar list to the near-me range",
+        "setting-desc-RadarLimitByRange",
     );
     settings.register_in(
         RADAR_SECTION,
         SETTING_RANGE,
         SettingValue::F32(162.0),
-        "The radar near-me range limit, in metres",
+        "setting-desc-RadarNearMeRange",
     );
     register_table_settings(&mut settings, RADAR_SECTION, &RADAR_TABLE);
 }

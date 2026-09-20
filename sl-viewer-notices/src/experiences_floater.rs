@@ -700,8 +700,7 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         EXPERIENCES_SECTION,
         SETTING_SEARCH_MATURITY,
         SettingValue::I32(MATURITY_GENERAL),
-        "The highest content rating experience search results may carry \
-         (13 General, 21 Moderate, 42 Adult)",
+        "setting-desc-ExperienceSearchMaturity",
     );
 }
 

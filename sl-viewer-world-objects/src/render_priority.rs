@@ -84,8 +84,7 @@ pub fn register_settings(settings: &mut sl_viewer_settings::ViewerSettings) {
         RENDER_SECTION,
         SETTING_LOD_FACTOR,
         sl_settings::SettingValue::F32(DEFAULT_LOD_FACTOR),
-        "Object mesh / prim detail multiplier (RenderVolumeLODFactor): a \
-         larger value keeps finer geometry to a greater distance",
+        "setting-desc-RenderVolumeLODFactor",
     );
 }
 

@@ -157,7 +157,7 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         &["debug_settings"],
         SETTING_HIDE_DEFAULT,
         SettingValue::Bool(false),
-        "Show only settings with an override in the debug-settings editor",
+        "setting-desc-DebugSettingsHideDefault",
     );
 }
 
@@ -2054,7 +2054,7 @@ mod tests {
                 &["floater"],
                 "inventory_rect",
                 SettingValue::Rect([0, 0, 0, 0]),
-                "Window rectangle",
+                "window rectangle",
             )
             .ok();
         let entries = build_entries(&store);

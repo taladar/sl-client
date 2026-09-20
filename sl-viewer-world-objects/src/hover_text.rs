@@ -94,25 +94,25 @@ pub fn register_settings(settings: &mut sl_viewer_settings::ViewerSettings) {
         HOVER_TEXT_SECTION,
         SETTING_SHOW_HOVER_TEXT,
         sl_settings::SettingValue::Bool(true),
-        "Show floating text (llSetText) over in-world objects",
+        "setting-desc-ShowHoverText",
     );
     settings.register_in(
         HOVER_TEXT_SECTION,
         SETTING_HOVER_FADE_START,
         sl_settings::SettingValue::F32(DEFAULT_HOVER_FADE_START_METRES),
-        "Distance in metres at which floating object text starts to fade",
+        "setting-desc-HoverTextFadeDistance",
     );
     settings.register_in(
         HOVER_TEXT_SECTION,
         SETTING_HOVER_FADE_RANGE,
         sl_settings::SettingValue::F32(DEFAULT_HOVER_FADE_RANGE_METRES),
-        "Metres past the fade start at which floating object text is hidden",
+        "setting-desc-HoverTextFadeRange",
     );
     settings.register_in(
         HOVER_TEXT_SECTION,
         SETTING_PRIM_TEXT_MAX_DISTANCE,
         sl_settings::SettingValue::F32(DEFAULT_PRIM_TEXT_MAX_DISTANCE_METRES),
-        "Hard maximum distance in metres at which floating object text is drawn",
+        "setting-desc-PrimTextMaxDrawDistance",
     );
 }
 

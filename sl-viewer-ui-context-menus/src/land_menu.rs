@@ -74,12 +74,12 @@ pub const LAND_MENU_ELEMENT: &str = "land-menu";
 /// Here, Mute Part. Own., Buy Pass, Edit Terrain, Buy This Land (reference
 /// slots 0..7 → compass East..SouthEast).
 pub static LAND_PIE: PieMenuDef = PieMenuDef {
-    label: "Land",
+    label_key: "pie-land-land",
     entries: &[
         PieEntry {
             at: Compass::East,
             content: PieContent::Action(PieAction {
-                label: "About Land...",
+                label_key: "pie-land-about-land",
                 action: "about-land",
                 when: None,
             }),
@@ -87,7 +87,7 @@ pub static LAND_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthEast,
             content: PieContent::Action(PieAction {
-                label: "Create",
+                label_key: "pie-land-create",
                 action: "build",
                 // Unconditional, as the object pie's twin slice is: the
                 // reference's `EnableEdit` asks whether the current *selection*
@@ -100,7 +100,7 @@ pub static LAND_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::North,
             content: PieContent::Action(PieAction {
-                label: "Go Here",
+                label_key: "pie-land-go-here",
                 action: "go-here",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -110,7 +110,7 @@ pub static LAND_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthWest,
             content: PieContent::Action(PieAction {
-                label: "Sit Here",
+                label_key: "pie-land-sit-here",
                 action: "sit-here",
                 when: None,
             }),
@@ -118,7 +118,7 @@ pub static LAND_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::West,
             content: PieContent::Action(PieAction {
-                label: "Mute Part. Own.",
+                label_key: "pie-land-mute-part-own",
                 action: "mute-particles",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -126,7 +126,7 @@ pub static LAND_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::SouthWest,
             content: PieContent::Action(PieAction {
-                label: "Buy Pass",
+                label_key: "pie-land-buy-pass",
                 action: "buy-pass",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -137,7 +137,7 @@ pub static LAND_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::South,
             content: PieContent::Action(PieAction {
-                label: "Edit Terrain",
+                label_key: "pie-land-edit-terrain",
                 action: "edit-terrain",
                 when: None,
             }),
@@ -145,7 +145,7 @@ pub static LAND_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::SouthEast,
             content: PieContent::Action(PieAction {
-                label: "Buy This Land",
+                label_key: "pie-land-buy-this-land",
                 action: "buy-land",
                 when: Some(UNIMPLEMENTED),
             }),

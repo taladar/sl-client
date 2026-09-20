@@ -492,14 +492,14 @@ fn register_color_picker_settings(settings: Option<ResMut<ViewerSettings>>) {
             PICKER_SECTION,
             &palette_setting_name(index),
             SettingValue::Color4(srgba.to_f32_array()),
-            "A saved colour-picker palette swatch",
+            "setting-desc-color-picker-palette-swatch",
         );
     }
     settings.register_in(
         PICKER_SECTION,
         SETTING_APPLY_IMMEDIATELY,
         SettingValue::Bool(true),
-        "Hand a colour to whatever is being tinted while it is being picked",
+        "setting-desc-ApplyColorImmediately",
     );
 }
 

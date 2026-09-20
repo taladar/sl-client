@@ -262,6 +262,18 @@ pub(crate) fn install_element_hosting(app: &mut App) {
     // more: pure logic, no renderer, no engine. A specimen without its
     // plugin is an inert shell, so a contract row taken from one would be
     // pinning the shell rather than the widget.
+    // The string lookup: a menu line resolves its `label_key` as it is built, so
+    // without it every system in `MenuWidgetPlugin` fails parameter validation
+    // and the sweep would be pinning an inert shell — the one thing this
+    // function exists to prevent.
+    //
+    // With the real English behind it, because a sweep cell measures a laid-out
+    // element: every `Translated` label here used to keep the empty `Text` it
+    // spawned with (nothing resolved them), so the sweep was measuring panels
+    // that ship in no locale, and answering each key with itself instead would
+    // swap that for a trackball whose one-letter compass box holds
+    // `trackball-north`.
+    crate::i18n_keys::install_english_strings(app);
     app.add_plugins((
         crate::menu::MenuWidgetPlugin,
         crate::ui_tab::TabWidgetPlugin,

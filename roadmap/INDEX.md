@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 300 |
+| ready | 299 |
 | blocked | 40 |
 | in-progress | 22 |
 | bugs | 5 |
-| done | 1196 |
+| done | 1197 |
 | deferred | 29 |
 | wont-do | 16 |
 | **total** | **1708** |
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (300)
+## ready (299)
 
 ### protocol
 
@@ -312,8 +312,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Extract the pure logic trapped inside viewer systems and test it
 - [`viewer-audit-lsp-position-roundtrip`](ready/viewer-audit-lsp-position-roundtrip.md)
   — The LSP position-to-byte direction has zero tests
-- [`viewer-audit-menu-label-i18n`](ready/viewer-audit-menu-label-i18n.md) — Menu
-  and pie-menu labels cannot be translated, by type
 - [`viewer-audit-object-children-index`](ready/viewer-audit-object-children-index.md)
   — ObjectState has no children index, so every linkset query full-scans the
   region
@@ -1147,7 +1145,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 
-## done (1196)
+## done (1197)
 
 ### protocol
 
@@ -1472,6 +1470,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A transient map-tile fetch error is cached as permanently missing
 - [`viewer-audit-media-url-scheme-allowlist`](done/viewer-audit-media-url-scheme-allowlist.md)
   — Parcel media URLs reach CEF and GStreamer with no scheme allowlist
+- [`viewer-audit-menu-label-i18n`](done/viewer-audit-menu-label-i18n.md) — Menu
+  and pie-menu labels cannot be translated, by type
 - [`viewer-audit-name-tag-viewport-gate`](done/viewer-audit-name-tag-viewport-gate.md)
   — The name-tag viewport-changed gate is exactly inverted
 - [`viewer-audit-notification-store-overwrite`](done/viewer-audit-notification-store-overwrite.md)

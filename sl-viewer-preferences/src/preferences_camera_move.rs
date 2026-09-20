@@ -164,31 +164,31 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         // cross-check caught it — both cameras at the same pose, five prims of a
         // fixture row in one frame and three in the other.
         SettingValue::F32(DEFAULT_FIELD_OF_VIEW),
-        "World camera vertical field of view in radians",
+        "setting-desc-CameraAngle",
     );
     settings.register_in(
         CAMERA_SECTION,
         SETTING_CAMERA_OFFSET_SCALE,
         SettingValue::F32(camera.offset_scale),
-        "Multiplier on the third-person camera's distance from the avatar",
+        "setting-desc-CameraOffsetScale",
     );
     settings.register_in(
         CAMERA_SECTION,
         SETTING_CAMERA_SMOOTHING,
         SettingValue::F32(camera.smoothing_half_life),
-        "Camera smoothing half-life in seconds; 0 disables the smoothing",
+        "setting-desc-CameraSmoothingHalfLife",
     );
     settings.register_in(
         CAMERA_SECTION,
         SETTING_CAMERA_MAX_DISTANCE,
         SettingValue::F32(camera.max_distance),
-        "Farthest the third-person camera zooms from the avatar, in metres",
+        "setting-desc-CameraMaxDistance",
     );
     settings.register_in(
         CAMERA_SECTION,
         SETTING_DISABLE_WHEEL_ZOOM,
         SettingValue::Bool(camera.wheel_zoom_disabled),
-        "Keep the mouse wheel from zooming the camera (drag zoom still works)",
+        "setting-desc-FSDisableMouseWheelCameraZoom",
     );
     settings.register_in(
         CAMERA_SECTION,
@@ -196,37 +196,37 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         SettingValue::F32(
             camera.mouselook_sensitivity_rad_per_px / SENSITIVITY_RAD_PER_PX_PER_UNIT,
         ),
-        "Mouselook mouse sensitivity (the reference viewer's 0-15 scale)",
+        "setting-desc-MouseSensitivity",
     );
     settings.register_in(
         CAMERA_SECTION,
         SETTING_INVERT_MOUSE,
         SettingValue::Bool(camera.invert_mouse_y),
-        "Invert the vertical mouse look (mouse up looks down)",
+        "setting-desc-InvertMouse",
     );
     settings.register_in(
         CAMERA_SECTION,
         SETTING_FIRST_PERSON_AVATAR,
         SettingValue::Bool(true),
-        "Show my own avatar (and its attachments) while in mouselook",
+        "setting-desc-FirstPersonAvatarVisible",
     );
     settings.register_in(
         MOVEMENT_SECTION,
         SETTING_TAP_TAP_HOLD_RUN,
         SettingValue::Bool(movement.allow_tap_tap_hold_run),
-        "Double-tap and hold a walk key to run",
+        "setting-desc-AllowTapTapHoldRun",
     );
     settings.register_in(
         MOVEMENT_SECTION,
         SETTING_AUTOMATIC_FLY,
         SettingValue::Bool(movement.automatic_fly),
-        "Take off by holding the jump key (landing by holding crouch stays on)",
+        "setting-desc-AutomaticFly",
     );
     settings.register_in(
         MOVEMENT_SECTION,
         SETTING_AVATAR_TURN_RATE,
         SettingValue::F32(movement.turn_rate_rad_per_sec),
-        "How fast the left / right keys turn the avatar, radians per second",
+        "setting-desc-AvatarTurnRate",
     );
 }
 

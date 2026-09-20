@@ -1926,79 +1926,102 @@ const GEAR_GALLERY_OPEN: &str = "gear-gallery-open";
 /// feature does not exist yet keep their reference place greyed on
 /// [`UNIMPLEMENTED`](crate::menu::UNIMPLEMENTED).
 static INVENTORY_GEAR_MENU: MenuDef = MenuDef {
-    label: "\u{2699}",
+    label_key: "menu-inventory-gear",
     items: &[
         MenuItemDef::Command(
-            MenuCommand::new("New Inventory Window", "new-window")
+            MenuCommand::new("menu-inventory-new-inventory-window", "new-window")
                 .enabled_when(crate::menu::UNIMPLEMENTED),
         ),
         MenuItemDef::Separator,
         MenuItemDef::Command(
-            MenuCommand::new("Gallery View", "gallery-view").checked_when(GEAR_GALLERY_OPEN),
+            MenuCommand::new("menu-inventory-gallery-view", "gallery-view")
+                .checked_when(GEAR_GALLERY_OPEN),
         ),
         MenuItemDef::Separator,
         MenuItemDef::Command(
-            MenuCommand::new("Sort by Name", "sort-by-name").checked_when(GEAR_SORT_NAME),
+            MenuCommand::new("menu-inventory-sort-by-name", "sort-by-name")
+                .checked_when(GEAR_SORT_NAME),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Sort by Most Recent", "sort-by-recent").checked_when(GEAR_SORT_DATE),
+            MenuCommand::new("menu-inventory-sort-by-most-recent", "sort-by-recent")
+                .checked_when(GEAR_SORT_DATE),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Sort Folders Always by Name", "sort-folders-by-name")
-                .checked_when(GEAR_FOLDERS_BY_NAME)
-                .enabled_when(crate::menu::UNIMPLEMENTED),
+            MenuCommand::new(
+                "menu-inventory-sort-folders-always-by-name",
+                "sort-folders-by-name",
+            )
+            .checked_when(GEAR_FOLDERS_BY_NAME)
+            .enabled_when(crate::menu::UNIMPLEMENTED),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Sort System Folders to Top", "sort-system-folders-to-top")
-                .checked_when(GEAR_SYSTEM_TOP),
+            MenuCommand::new(
+                "menu-inventory-sort-system-folders-to-top",
+                "sort-system-folders-to-top",
+            )
+            .checked_when(GEAR_SYSTEM_TOP),
         ),
         MenuItemDef::Separator,
         MenuItemDef::Command(
-            MenuCommand::new("Show Filters...", "show-filters").checked_when(GEAR_FILTERS_OPEN),
+            MenuCommand::new("menu-inventory-show-filters", "show-filters")
+                .checked_when(GEAR_FILTERS_OPEN),
         ),
-        MenuItemDef::Command(MenuCommand::new("Reset Filters", "reset-filters")),
-        MenuItemDef::Command(MenuCommand::new("Expand All Folders", "expand-all")),
-        MenuItemDef::Command(MenuCommand::new("Collapse All Folders", "collapse-all")),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-inventory-reset-filters",
+            "reset-filters",
+        )),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-inventory-expand-all-folders",
+            "expand-all",
+        )),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-inventory-collapse-all-folders",
+            "collapse-all",
+        )),
         MenuItemDef::Separator,
         MenuItemDef::Command(MenuCommand::new(
-            "Empty Lost And Found",
+            "menu-inventory-empty-lost-and-found",
             "empty-lost-and-found",
         )),
         MenuItemDef::Separator,
         MenuItemDef::Command(
-            MenuCommand::new("Save Texture As", "save-texture")
+            MenuCommand::new("menu-inventory-save-texture-as", "save-texture")
                 .enabled_when(crate::menu::UNIMPLEMENTED),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Share", "share").enabled_when(crate::menu::UNIMPLEMENTED),
-        ),
-        MenuItemDef::Command(
-            MenuCommand::new("Find Original", "find-original")
+            MenuCommand::new("menu-inventory-share", "share")
                 .enabled_when(crate::menu::UNIMPLEMENTED),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Find All Links", "find-links")
+            MenuCommand::new("menu-inventory-find-original", "find-original")
                 .enabled_when(crate::menu::UNIMPLEMENTED),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Replace Links", "replace-links")
-                .enabled_when(crate::menu::UNIMPLEMENTED),
-        ),
-        MenuItemDef::Separator,
-        MenuItemDef::Command(
-            MenuCommand::new("Show Links", "filter-show-links")
+            MenuCommand::new("menu-inventory-find-all-links", "find-links")
                 .enabled_when(crate::menu::UNIMPLEMENTED),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Show Only Links", "filter-only-links")
-                .enabled_when(crate::menu::UNIMPLEMENTED),
-        ),
-        MenuItemDef::Command(
-            MenuCommand::new("Hide Links", "filter-hide-links")
+            MenuCommand::new("menu-inventory-replace-links", "replace-links")
                 .enabled_when(crate::menu::UNIMPLEMENTED),
         ),
         MenuItemDef::Separator,
-        MenuItemDef::Command(MenuCommand::new("Empty Trash", "empty-trash")),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-inventory-show-links", "filter-show-links")
+                .enabled_when(crate::menu::UNIMPLEMENTED),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-inventory-show-only-links", "filter-only-links")
+                .enabled_when(crate::menu::UNIMPLEMENTED),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-inventory-hide-links", "filter-hide-links")
+                .enabled_when(crate::menu::UNIMPLEMENTED),
+        ),
+        MenuItemDef::Separator,
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-inventory-empty-trash",
+            "empty-trash",
+        )),
     ],
 };
 
@@ -4653,30 +4676,39 @@ mod tests {
         let mut entries = Vec::new();
         for item in super::INVENTORY_GEAR_MENU.items {
             if let crate::menu::MenuItemDef::Command(command) = item {
-                entries.push((command.label, command.action));
+                entries.push((command.label_key, command.action));
             }
         }
         let expected = vec![
-            ("New Inventory Window", "new-window"),
-            ("Gallery View", "gallery-view"),
-            ("Sort by Name", "sort-by-name"),
-            ("Sort by Most Recent", "sort-by-recent"),
-            ("Sort Folders Always by Name", "sort-folders-by-name"),
-            ("Sort System Folders to Top", "sort-system-folders-to-top"),
-            ("Show Filters...", "show-filters"),
-            ("Reset Filters", "reset-filters"),
-            ("Expand All Folders", "expand-all"),
-            ("Collapse All Folders", "collapse-all"),
-            ("Empty Lost And Found", "empty-lost-and-found"),
-            ("Save Texture As", "save-texture"),
-            ("Share", "share"),
-            ("Find Original", "find-original"),
-            ("Find All Links", "find-links"),
-            ("Replace Links", "replace-links"),
-            ("Show Links", "filter-show-links"),
-            ("Show Only Links", "filter-only-links"),
-            ("Hide Links", "filter-hide-links"),
-            ("Empty Trash", "empty-trash"),
+            ("menu-inventory-new-inventory-window", "new-window"),
+            ("menu-inventory-gallery-view", "gallery-view"),
+            ("menu-inventory-sort-by-name", "sort-by-name"),
+            ("menu-inventory-sort-by-most-recent", "sort-by-recent"),
+            (
+                "menu-inventory-sort-folders-always-by-name",
+                "sort-folders-by-name",
+            ),
+            (
+                "menu-inventory-sort-system-folders-to-top",
+                "sort-system-folders-to-top",
+            ),
+            ("menu-inventory-show-filters", "show-filters"),
+            ("menu-inventory-reset-filters", "reset-filters"),
+            ("menu-inventory-expand-all-folders", "expand-all"),
+            ("menu-inventory-collapse-all-folders", "collapse-all"),
+            (
+                "menu-inventory-empty-lost-and-found",
+                "empty-lost-and-found",
+            ),
+            ("menu-inventory-save-texture-as", "save-texture"),
+            ("menu-inventory-share", "share"),
+            ("menu-inventory-find-original", "find-original"),
+            ("menu-inventory-find-all-links", "find-links"),
+            ("menu-inventory-replace-links", "replace-links"),
+            ("menu-inventory-show-links", "filter-show-links"),
+            ("menu-inventory-show-only-links", "filter-only-links"),
+            ("menu-inventory-hide-links", "filter-hide-links"),
+            ("menu-inventory-empty-trash", "empty-trash"),
         ];
         assert_eq!(
             entries, expected,

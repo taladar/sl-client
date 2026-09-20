@@ -1956,7 +1956,7 @@ fn register_people_settings(settings: Option<ResMut<ViewerSettings>>) {
         PEOPLE_SETTINGS_SECTION,
         FRIENDS_SORT_SETTING,
         SettingValue::String(SortState::default().encode()),
-        "Friends-list sort order, most-significant column first (col:dir, …).",
+        "setting-desc-friends_sort",
     );
     // The widget-owned friends column widths (draggable columns).
     register_table_settings(&mut settings, PEOPLE_SETTINGS_SECTION, &FRIENDS_TABLE);
@@ -1965,13 +1965,13 @@ fn register_people_settings(settings: Option<ResMut<ViewerSettings>>) {
         &[crate::notifications::NOTIFICATIONS_SECTION],
         SETTING_FRIEND_NOTIFY,
         SettingValue::Bool(true),
-        "Show a toast when a friend comes online or goes offline",
+        "setting-desc-ChatOnlineNotification",
     );
     settings.register_in(
         &[crate::notifications::NOTIFICATIONS_SECTION],
         SETTING_CONTACT_SET_NOTIFY,
         SettingValue::Bool(false),
-        "Show that toast for contact sets marked to notify, even when the above is off",
+        "setting-desc-ContactSetsNotificationToast",
     );
 }
 

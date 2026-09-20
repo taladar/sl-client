@@ -319,11 +319,11 @@ fn follow_strings_picker(
 /// Fill the description and the editor for the selected string, whenever the
 /// selection moved (or a restore invalidated what is shown).
 fn fill_strings_editor(
+    mut commands: Commands,
     ui: Option<Res<StringsUi>>,
     settings: Option<Res<ViewerSettings>>,
     mut selection: ResMut<StringsSelection>,
     mut fields: Query<&mut EditableText>,
-    mut texts: Query<&mut Text>,
 ) {
     let Some(ui) = ui else {
         return;
@@ -338,11 +338,13 @@ fn fill_strings_editor(
     if let Ok(mut field) = fields.get_mut(ui.value_field) {
         field.editor_mut().set_text(&value);
     }
-    if let Ok(mut text) = texts.get_mut(ui.description)
-        && text.0 != entry.description
-    {
-        entry.description.clone_into(&mut text.0);
-    }
+    // Rebound rather than written: the sentence is a Fluent key now, and
+    // `i18n::apply_translations` re-resolves a `Translated` whose key changed —
+    // so the selection moves the description and a locale switch relocalises it,
+    // with neither path writing English here.
+    commands
+        .entity(ui.description)
+        .insert(Translated::new(entry.description_key));
     selection.shown = value;
     selection.filled = true;
 }
@@ -435,8 +437,8 @@ mod tests {
             assert!(!entry.default.is_empty(), "{} has no default", entry.key);
             assert!(!entry.label.is_empty(), "{} has no label", entry.key);
             assert!(
-                !entry.description.is_empty(),
-                "{} has no description",
+                !entry.description_key.is_empty(),
+                "{} has no description key",
                 entry.key
             );
         }

@@ -215,19 +215,19 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         TONEMAP_SECTION,
         SETTING_TONEMAP_TYPE,
         SettingValue::U32(TONEMAP_ACES),
-        "Tone curve: 0 Khronos PBR Neutral, 1 ACES (default), 2 none",
+        "setting-desc-RenderTonemapType",
     );
     settings.register_in(
         TONEMAP_SECTION,
         SETTING_TONEMAP_MIX,
         SettingValue::F32(DEFAULT_TONEMAP_MIX),
-        "How far the tone curve is blended over the merely-exposed colour (0-1)",
+        "setting-desc-RenderTonemapMix",
     );
     settings.register_in(
         TONEMAP_SECTION,
         SETTING_EXPOSURE,
         SettingValue::F32(DEFAULT_EXPOSURE),
-        "Linear scene-colour scale before the tone curve",
+        "setting-desc-RenderExposure",
     );
 }
 

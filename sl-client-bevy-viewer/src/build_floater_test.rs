@@ -38,13 +38,15 @@
 //!
 //! # What the strings are
 //!
-//! The fold installs the string lookup with **no bundles behind it**
-//! (`sl_viewer_ui_core::i18n::install_untranslated`), so every key resolves to
-//! itself. That is deliberate: a test here asserts *which* strings a line is
-//! built from — that the selection summary grows a link-number segment in
-//! edit-linked-parts mode, say — and never a translation's wording, which is
-//! the shipped bundles' business and is pinned in `tests/locale_bundles.rs`.
-//! The arithmetic behind those segments is unit-tested where it is computed.
+//! The fold resolves the real English (`crate::i18n_keys::install_english_strings`,
+//! which the *world* fold needs because a pie measured in key names is a ring no
+//! viewer would draw). A test here still asserts *which* strings a line is built
+//! from — that the selection summary grows a link-number segment in
+//! edit-linked-parts mode, say — and never a translation's wording: it names the
+//! key and compares against `crate::i18n_keys::english`, so a line built
+//! from the wrong key fails while a reworded one does not. The wording itself is
+//! the shipped bundles' business and is pinned in `tests/locale_bundles.rs`; the
+//! arithmetic behind the segments is unit-tested where it is computed.
 
 #[cfg(test)]
 mod tests {
@@ -545,15 +547,15 @@ mod tests {
     /// and which segments appear is the behaviour: nothing selected is its own
     /// string, a selection carries a count and a prim count, and *only* in
     /// edit-linked-parts mode with exactly one part does it carry that part's
-    /// link number. The bundles are not loaded in this fixture, so each segment
-    /// is its own Fluent key — which is what makes the assertion about the line's
+    /// link number. Each segment is named by its own Fluent key and compared
+    /// through `english`, which is what makes the assertion about the line's
     /// composition rather than about anybody's translation.
     #[test]
     fn the_summary_line_says_what_is_selected() -> Result<(), TestError> {
         let mut app = build_tools_app()?;
         assert_eq!(
             field_summary(&mut app),
-            "build-selection-none",
+            crate::i18n_keys::english("build-selection-none"),
             "an empty selection must say so"
         );
 
@@ -1376,7 +1378,7 @@ mod tests {
         show_tab(&mut app, 3)?;
         assert_eq!(
             texture_faces_line(&mut app),
-            "build-tex-faces-all",
+            crate::i18n_keys::english("build-tex-faces-all"),
             "an ordinary object selection edits every face, and must say so"
         );
 

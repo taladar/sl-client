@@ -1714,7 +1714,7 @@ pub fn register_table_settings(settings: &mut ViewerSettings, section: &[&str], 
             section,
             name,
             SettingValue::String(default),
-            "Table sort order, most-significant column first (token:dir, …).",
+            "setting-desc-table-sort-order",
         );
     }
     if let Some(name) = spec.widths_setting {
@@ -1722,7 +1722,7 @@ pub fn register_table_settings(settings: &mut ViewerSettings, section: &[&str], 
             section,
             name,
             SettingValue::String(String::new()),
-            "Table column widths (token:px, …).",
+            "setting-desc-table-column-widths",
         );
     }
 }

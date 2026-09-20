@@ -152,101 +152,101 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         CHAT_SECTION,
         SETTING_CHAT_FONT_SIZE,
         SettingValue::U32(1),
-        "Chat text size: 0 = small, 1 = medium, 2 = large",
+        "setting-desc-ChatFontSize",
     );
     settings.register_in(
         CHAT_SECTION,
         SETTING_NEARBY_TOAST_LIFETIME,
         SettingValue::U32(23),
-        "Seconds a nearby-chat overlay line stays on screen (including the fade)",
+        "setting-desc-NearbyChatToastLifetime",
     );
     settings.register_in(
         CHAT_SECTION,
         SETTING_CHAT_MAX_LINES,
         SettingValue::U32(12),
-        "The most nearby-chat overlay lines shown at once",
+        "setting-desc-ChatOverlayMaxLines",
     );
     settings.register_in(
         CHAT_SECTION,
         SETTING_LOG_NEARBY_CHAT,
         SettingValue::Bool(true),
-        "Save nearby chat to the per-avatar transcript directory",
+        "setting-desc-LogNearbyChat",
     );
     settings.register_in(
         CHAT_SECTION,
         SETTING_LOG_INSTANT_MESSAGES,
         SettingValue::Bool(true),
-        "Save IMs, group chat and conference chat to per-conversation transcripts",
+        "setting-desc-LogInstantMessages",
     );
     settings.register_in(
         CHAT_SECTION,
         SETTING_LOG_LEGACY_NAMES,
         SettingValue::Bool(false),
-        "Name transcript files with the legacy resident-name scheme",
+        "setting-desc-UseLegacyIMLogNames",
     );
     settings.register_in(
         CHAT_SECTION,
         SETTING_LOG_FILENAME_DATE,
         SettingValue::Bool(false),
-        "Add a date suffix to transcript filenames",
+        "setting-desc-LogFileNameWithDate",
     );
     settings.register_in(
         CHAT_SECTION,
         SETTING_LOG_TIMESTAMP,
         SettingValue::Bool(true),
-        "Prefix each logged line with a timestamp",
+        "setting-desc-LogTimestamp",
     );
     settings.register_in(
         CHAT_SECTION,
         SETTING_LOG_TIMESTAMP_DATE,
         SettingValue::Bool(true),
-        "Include the date in logged timestamps",
+        "setting-desc-LogTimestampDate",
     );
     settings.register_in(
         CHAT_SECTION,
         SETTING_LOG_TIMESTAMP_SECONDS,
         SettingValue::Bool(true),
-        "Include seconds in logged timestamps",
+        "setting-desc-LogTimestampSeconds",
     );
     settings.register_in(
         CHAT_SECTION,
         SETTING_CONVERSATION_LOG,
         SettingValue::Bool(false),
-        "Keep the conversation.log index of past conversations",
+        "setting-desc-KeepConversationLog",
     );
     settings.register_in(
         CHAT_SECTION,
         SETTING_CONVERSATION_LOG_RETENTION,
         SettingValue::U32(30),
-        "Days an inactive conversation stays in conversation.log",
+        "setting-desc-ConversationLogRetentionDays",
     );
     settings.register_transient(
         SETTING_ONLINE_STATUS_HIDDEN,
         SettingValue::Bool(false),
-        "Server state: hide my online status from the people directory",
+        "setting-desc-OnlineStatusHidden",
     );
     settings.register_transient(
         SETTING_IM_VIA_EMAIL,
         SettingValue::Bool(false),
-        "Server state: email me IMs that arrive while I'm offline (OpenSim)",
+        "setting-desc-ImViaEmail",
     );
     settings.register_in(
         CHAT_SECTION,
         SETTING_BUSY_RESPONSE,
         SettingValue::String(BUSY_RESPONSE_DEFAULT.to_owned()),
-        "The automatic reply sent to IMs while in Do Not Disturb mode",
+        "setting-desc-BusyResponse",
     );
     settings.register_in(
         CHAT_SECTION,
         SETTING_AUTORESPOND_RESPONSE,
         SettingValue::String(AUTORESPOND_RESPONSE_DEFAULT.to_owned()),
-        "The automatic reply sent to IMs while in autorespond mode",
+        "setting-desc-AutorespondResponse",
     );
     settings.register_in(
         CHAT_SECTION,
         SETTING_AUTORESPOND_NON_FRIENDS_RESPONSE,
         SettingValue::String(AUTORESPOND_RESPONSE_DEFAULT.to_owned()),
-        "The automatic reply sent to non-friends' IMs while in autorespond-to-non-friends mode",
+        "setting-desc-AutorespondNonFriendsResponse",
     );
 }
 

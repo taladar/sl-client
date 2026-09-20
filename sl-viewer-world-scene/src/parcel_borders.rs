@@ -264,15 +264,13 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         PARCEL_SECTION,
         SETTING_SHOW_PROPERTY_LINES,
         sl_settings::SettingValue::Bool(true),
-        "Show the in-world parcel property lines (colour-coded by ownership)",
+        "setting-desc-ShowPropertyLines",
     );
     settings.register_in(
         PARCEL_SECTION,
         SETTING_SHOW_PARCEL_OWNERS,
         sl_settings::SettingValue::Bool(false),
-        "Tint the ground itself by parcel-ownership class (green = yours, \
-         aqua = your group's, red = someone else's, orange = for sale, \
-         violet = auction, grey = public)",
+        "setting-desc-ShowParcelOwners",
     );
 }
 

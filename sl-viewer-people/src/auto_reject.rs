@@ -96,61 +96,61 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         PRESENCE_SECTION,
         SETTING_REJECT_TELEPORT_OFFERS,
         SettingValue::Bool(false),
-        "Reject every incoming teleport offer and request",
+        "setting-desc-RejectTeleportOffersMode",
     );
     settings.register_in(
         PRESENCE_SECTION,
         SETTING_DONT_REJECT_TELEPORT_FROM_FRIENDS,
         SettingValue::Bool(false),
-        "Exempt friends from the teleport-offer rejection",
+        "setting-desc-DontRejectTeleportOffersFromFriends",
     );
     settings.register_in(
         PRESENCE_SECTION,
         SETTING_REJECT_TELEPORT_RESPONSE,
         SettingValue::String(REJECT_TELEPORT_RESPONSE_DEFAULT.to_owned()),
-        "The automatic reply sent to a rejected teleport offer",
+        "setting-desc-RejectTeleportOffersResponse",
     );
     settings.register_in(
         PRESENCE_SECTION,
         SETTING_REJECT_FRIENDSHIP_REQUESTS,
         SettingValue::Bool(false),
-        "Reject every incoming friendship request",
+        "setting-desc-RejectFriendshipRequestsMode",
     );
     settings.register_in(
         PRESENCE_SECTION,
         SETTING_REJECT_FRIENDSHIP_RESPONSE,
         SettingValue::String(REJECT_FRIENDSHIP_RESPONSE_DEFAULT.to_owned()),
-        "The automatic reply sent to a rejected friendship request",
+        "setting-desc-RejectFriendshipRequestsResponse",
     );
     settings.register_in(
         PRESENCE_SECTION,
         SETTING_REJECT_ALL_GROUP_INVITES,
         SettingValue::Bool(false),
-        "Reject every incoming group invitation",
+        "setting-desc-RejectAllGroupInvitesMode",
     );
     settings.register_in(
         PRESENCE_SECTION,
         SETTING_SHOW_JOINED_GROUP_INVITATIONS,
         SettingValue::Bool(false),
-        "Show invitations to groups I am already a member of",
+        "setting-desc-ShowJoinedGroupInvitations",
     );
     settings.register_in(
         PRESENCE_SECTION,
         SETTING_IGNORE_AD_HOC_SESSIONS,
         SettingValue::Bool(false),
-        "Silently decline every ad-hoc conference invitation",
+        "setting-desc-IgnoreAdHocSessions",
     );
     settings.register_in(
         PRESENCE_SECTION,
         SETTING_DONT_IGNORE_AD_HOC_FROM_FRIENDS,
         SettingValue::Bool(false),
-        "Exempt friends from the ad-hoc conference rejection",
+        "setting-desc-DontIgnoreAdHocFromFriends",
     );
     settings.register_in(
         PRESENCE_SECTION,
         SETTING_AUTORESPONSE_ITEM,
         SettingValue::String(String::new()),
-        "The inventory item sent with every autoresponse (item id; empty = none)",
+        "setting-desc-AutoresponseItemUUID",
     );
 }
 

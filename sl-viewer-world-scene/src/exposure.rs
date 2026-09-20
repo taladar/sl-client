@@ -325,37 +325,37 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         EXPOSURE_SECTION,
         SETTING_ENABLED,
         SettingValue::Bool(DEFAULT_EXPOSURE_ENABLED),
-        "Drive the tone-map exposure from the scene's average luminance",
+        "setting-desc-RenderDynamicExposureEnabled",
     );
     settings.register_in(
         EXPOSURE_SECTION,
         SETTING_COEFFICIENT,
         SettingValue::F32(DEFAULT_EXPOSURE_COEFFICIENT),
-        "Average luminance at which the dynamic exposure reaches its floor",
+        "setting-desc-RenderDynamicExposureCoefficient",
     );
     settings.register_in(
         EXPOSURE_SECTION,
         SETTING_SPEED_ERROR,
         SettingValue::F32(DEFAULT_SPEED_ERROR),
-        "Fraction of the exposure error still remaining after the target time",
+        "setting-desc-RenderDynamicExposureSpeedError",
     );
     settings.register_in(
         EXPOSURE_SECTION,
         SETTING_SPEED_TARGET,
         SettingValue::F32(DEFAULT_SPEED_TARGET),
-        "Seconds over which the exposure eases toward a new target",
+        "setting-desc-RenderDynamicExposureSpeedTarget",
     );
     settings.register_in(
         EXPOSURE_SECTION,
         SETTING_USE_SKY,
         SettingValue::Bool(DEFAULT_USE_SKY),
-        "Source the exposure range from the sky's HDR offset/min/max settings",
+        "setting-desc-RenderUseExposureSkySettings",
     );
     settings.register_in(
         EXPOSURE_SECTION,
         SETTING_AUTO_ADJUST_LEGACY,
         SettingValue::Bool(DEFAULT_AUTO_ADJUST_LEGACY),
-        "Let a legacy sky adapt as if it carried the auto-adjust probe ambiance",
+        "setting-desc-RenderSkyAutoAdjustLegacy",
     );
 }
 

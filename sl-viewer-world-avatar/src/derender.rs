@@ -286,19 +286,19 @@ pub fn declare_derender_settings(settings: &mut ViewerSettings) {
         DERENDER_SECTION,
         SETTING_UNTIL_TELEPORT,
         SettingValue::Bool(true),
-        "Temporary derenders last until the next teleport (otherwise: the whole session)",
+        "setting-desc-TempDerenderUntilTeleport",
     );
     settings.register_in(
         DERENDER_SECTION,
         SETTING_FRIENDS_ONLY,
         SettingValue::Bool(false),
-        "Draw only friends' avatars (a crowded-event performance filter)",
+        "setting-desc-RenderFriendsOnly",
     );
     settings.register_in(
         DERENDER_SECTION,
         SETTING_FRIENDS_ONLY_PERSISTS_TP,
         SettingValue::Bool(false),
-        "Keep the friends-only filter on across a teleport",
+        "setting-desc-RenderFriendsOnlyPersistsTP",
     );
 }
 

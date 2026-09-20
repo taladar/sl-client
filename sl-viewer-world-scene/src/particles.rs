@@ -191,8 +191,7 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         RENDER_SECTION,
         SETTING_MAX_PARTICLES,
         sl_settings::SettingValue::U32(4096),
-        "Maximum number of live particles drawn across all sources; emission \
-         stops at the cap and resumes as particles age out",
+        "setting-desc-RenderMaxPartCount",
     );
 }
 

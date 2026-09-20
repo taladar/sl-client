@@ -131,8 +131,10 @@ pub struct ColorTokenDef {
     /// The sRGB fallback, used when no skin supplies the token (and before the
     /// first styled frame). Matches the pre-tab hardcoded values.
     fallback: [f32; 3],
-    /// The declaration comment, written above the persisted override.
-    comment: &'static str,
+    /// The Fluent key of this token's description — resolved into the store's
+    /// comment by `i18n::apply_setting_descriptions`, and from there into the
+    /// raw settings editor and the persisted file.
+    description_key: &'static str,
 }
 
 impl ColorTokenDef {
@@ -153,97 +155,97 @@ pub const COLOR_TOKENS: &[ColorTokenDef] = &[
         setting: SETTING_CHAT_SELF,
         css_var: "chat-self",
         fallback: [1.0, 1.0, 1.0],
-        comment: "Chat colour of my own lines (RGB override of the skin's --chat-self)",
+        description_key: "setting-desc-ChatColorSelf",
     },
     ColorTokenDef {
         setting: SETTING_CHAT_OTHERS,
         css_var: "chat-others",
         fallback: [1.0, 1.0, 1.0],
-        comment: "Chat colour of other avatars' lines (skin --chat-others)",
+        description_key: "setting-desc-ChatColorOthers",
     },
     ColorTokenDef {
         setting: SETTING_CHAT_OBJECTS,
         css_var: "chat-objects",
         fallback: [0.75, 0.75, 0.75],
-        comment: "Chat colour of object chat (skin --chat-objects)",
+        description_key: "setting-desc-ChatColorObjects",
     },
     ColorTokenDef {
         setting: SETTING_CHAT_IM,
         css_var: "chat-im",
         fallback: [0.66, 0.78, 0.92],
-        comment: "Colour of instant-message and group-chat lines (skin --chat-im)",
+        description_key: "setting-desc-ChatColorIm",
     },
     ColorTokenDef {
         setting: SETTING_CHAT_SYSTEM,
         css_var: "chat-system",
         fallback: [1.0, 1.0, 1.0],
-        comment: "Colour of system and viewer-notice chat lines (skin --chat-system)",
+        description_key: "setting-desc-ChatColorSystem",
     },
     ColorTokenDef {
         setting: SETTING_KEYWORD_ALERT,
         css_var: "keyword-alert",
         fallback: [1.0, 0.78, 0.25],
-        comment: "Chat keyword-alert highlight colour (skin --keyword-alert)",
+        description_key: "setting-desc-KeywordAlertColor",
     },
     ColorTokenDef {
         setting: SETTING_NAME_TAG_DEFAULT,
         css_var: "name-tag-default",
         fallback: [1.0, 1.0, 1.0],
-        comment: "Base name-tag colour (skin --name-tag-default)",
+        description_key: "setting-desc-NameTagColorDefault",
     },
     ColorTokenDef {
         setting: SETTING_NAME_TAG_SELF,
         css_var: "name-tag-self",
         fallback: [1.0, 1.0, 1.0],
-        comment: "My own name-tag colour (skin --name-tag-self)",
+        description_key: "setting-desc-NameTagColorSelf",
     },
     ColorTokenDef {
         setting: SETTING_NAME_TAG_FRIEND,
         css_var: "name-tag-friend",
         fallback: [0.75, 0.92, 0.49],
-        comment: "Friends' name-tag colour, the friend highlight (skin --name-tag-friend)",
+        description_key: "setting-desc-NameTagColorFriend",
     },
     ColorTokenDef {
         setting: SETTING_NAME_TAG_MUTED,
         css_var: "name-tag-muted",
         fallback: [0.4, 0.4, 0.4],
-        comment: "Muted avatars' name-tag colour (skin --name-tag-muted)",
+        description_key: "setting-desc-NameTagColorMuted",
     },
     ColorTokenDef {
         setting: SETTING_NAME_TAG_LINDEN,
         css_var: "name-tag-linden",
         fallback: [0.0, 0.5, 1.0],
-        comment: "Grid staff (Linden) name-tag colour (skin --name-tag-linden)",
+        description_key: "setting-desc-NameTagColorLinden",
     },
     ColorTokenDef {
         setting: SETTING_NAME_TAG_MISMATCH,
         css_var: "name-tag-mismatch",
         fallback: [0.9, 0.9, 0.9],
-        comment: "Custom-display-name name-tag colour (skin --name-tag-mismatch)",
+        description_key: "setting-desc-NameTagColorMismatch",
     },
     ColorTokenDef {
         setting: SETTING_NAME_TAG_DISTANCE_WHISPER,
         css_var: "name-tag-distance-whisper",
         fallback: [0.0, 1.0, 0.0],
-        comment: "Distance-band tag colour inside whisper range (skin --name-tag-distance-whisper)",
+        description_key: "setting-desc-NameTagDistanceColorWhisper",
     },
     ColorTokenDef {
         setting: SETTING_NAME_TAG_DISTANCE_CHAT,
         css_var: "name-tag-distance-chat",
         fallback: [0.0, 1.0, 0.0],
-        comment: "Distance-band tag colour inside chat range (skin --name-tag-distance-chat)",
+        description_key: "setting-desc-NameTagDistanceColorChat",
     },
     ColorTokenDef {
         setting: SETTING_NAME_TAG_DISTANCE_SHOUT,
         css_var: "name-tag-distance-shout",
         fallback: [1.0, 1.0, 0.0],
-        comment: "Distance-band tag colour inside shout range (skin --name-tag-distance-shout)",
+        description_key: "setting-desc-NameTagDistanceColorShout",
     },
     ColorTokenDef {
         setting: SETTING_NAME_TAG_DISTANCE_BEYOND,
         css_var: "name-tag-distance-beyond",
         fallback: [1.0, 0.0, 0.0],
-        comment: "Distance-band tag colour beyond shout range (skin --name-tag-distance-beyond)",
+        description_key: "setting-desc-NameTagDistanceColorBeyond",
     },
     // The minimap dot palette. Every fallback here is the reference Vintage
     // skin's value for the matching `MapAvatar*Color` / `MapTrackColor`, and
@@ -254,37 +256,37 @@ pub const COLOR_TOKENS: &[ColorTokenDef] = &[
         setting: SETTING_MINIMAP_AVATAR,
         css_var: "minimap-avatar",
         fallback: [0.0, 1.0, 0.0],
-        comment: "Minimap dot colour of other avatars (skin --minimap-avatar)",
+        description_key: "setting-desc-MinimapColorAvatar",
     },
     ColorTokenDef {
         setting: SETTING_MINIMAP_AVATAR_FRIEND,
         css_var: "minimap-avatar-friend",
         fallback: [1.0, 1.0, 0.0],
-        comment: "Minimap dot colour of friends (skin --minimap-avatar-friend)",
+        description_key: "setting-desc-MinimapColorAvatarFriend",
     },
     ColorTokenDef {
         setting: SETTING_MINIMAP_AVATAR_MUTED,
         css_var: "minimap-avatar-muted",
         fallback: [0.4, 0.4, 0.4],
-        comment: "Minimap dot colour of blocked residents (skin --minimap-avatar-muted)",
+        description_key: "setting-desc-MinimapColorAvatarMuted",
     },
     ColorTokenDef {
         setting: SETTING_MINIMAP_AVATAR_SELF,
         css_var: "minimap-avatar-self",
         fallback: [1.0, 1.0, 0.0],
-        comment: "Minimap marker colour of my own avatar (skin --minimap-avatar-self)",
+        description_key: "setting-desc-MinimapColorAvatarSelf",
     },
     ColorTokenDef {
         setting: SETTING_MINIMAP_AVATAR_LINDEN,
         css_var: "minimap-avatar-linden",
         fallback: [0.0, 0.0, 1.0],
-        comment: "Minimap dot colour of grid staff (skin --minimap-avatar-linden)",
+        description_key: "setting-desc-MinimapColorAvatarLinden",
     },
     ColorTokenDef {
         setting: SETTING_MINIMAP_TRACK,
         css_var: "minimap-track",
         fallback: [0.729, 0.0, 0.121],
-        comment: "Minimap and world-map tracking-beacon colour (skin --minimap-track)",
+        description_key: "setting-desc-MinimapColorTrack",
     },
 ];
 
@@ -297,7 +299,7 @@ pub fn register_settings(settings: &mut ViewerSettings) {
             SECTION,
             def.setting,
             SettingValue::Color3(def.fallback),
-            def.comment,
+            def.description_key,
         );
     }
 }

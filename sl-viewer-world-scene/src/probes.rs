@@ -691,9 +691,7 @@ pub fn declare_probe_settings(settings: &mut ViewerSettings) {
         &["render"],
         PROBE_DYNAMIC_SETTING,
         SettingValue::Bool(ProbeDynamicContent::default().include),
-        "Capture dynamic content (avatars) in local reflection probes. Costlier, and \
-         it defeats probe change-detection (an animating avatar dirties its probe \
-         every frame); the environment-only default probe is unaffected either way.",
+        "setting-desc-render_reflection_probe_dynamic_content",
     );
 }
 
@@ -1738,27 +1736,19 @@ pub fn declare_mirror_settings(settings: &mut ViewerSettings) {
         &["render"],
         RENDER_MIRRORS_SETTING,
         SettingValue::Bool(MirrorSettings::default().enabled),
-        "Enable realtime mirrors (hero probes): a mirror-flagged reflection-probe prim \
-         reflects the scene — and you — sharp and live, re-rendered every frame. \
-         Costlier than the P33 reflection probes, but only a mirror prim actually in \
-         view pays for it.",
+        "setting-desc-render_mirrors",
     );
     settings.register_in(
         &["render"],
         HERO_RESOLUTION_SETTING,
         SettingValue::U32(HERO_DEFAULT_RESOLUTION),
-        "Per-face resolution of a mirror's hero-probe cubemap, in texels \
-         (RenderHeroProbeResolution). Sharper and costlier when higher; rounded to a \
-         power of two in [128, 2048]. Sizes GPU targets, so a change takes effect on \
-         restart.",
+        "setting-desc-render_hero_probe_resolution",
     );
     settings.register_in(
         &["render"],
         HERO_UPDATE_RATE_SETTING,
         SettingValue::U32(HERO_DEFAULT_UPDATE_RATE),
-        "How often a mirror re-renders, in frames (RenderHeroProbeUpdateRate): 1 = \
-         every frame (most live), N = every Nth frame (cheaper, laggier). The main \
-         performance lever for mirrors.",
+        "setting-desc-render_hero_probe_update_rate",
     );
 }
 

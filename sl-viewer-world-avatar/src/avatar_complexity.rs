@@ -1039,21 +1039,19 @@ pub fn declare_complexity_settings(settings: &mut ViewerSettings) {
         RENDER_SECTION,
         SETTING_MAX_COMPLEXITY,
         SettingValue::U32(DEFAULT_MAX_COMPLEXITY),
-        "Draw an avatar costing more than this as a flat silhouette (0 = no limit)",
+        "setting-desc-RenderAvatarMaxComplexity",
     );
     settings.register_in(
         RENDER_SECTION,
         SETTING_COMPLEXITY_MODE,
         SettingValue::U32(ComplexityMode::ByComplexity.stored()),
-        "How the avatar complexity limit treats friends: 0 by complexity alone, \
-         1 always draw friends fully, 2 draw only friends fully",
+        "setting-desc-RenderAvatarComplexityMode",
     );
     settings.register_in(
         RENDER_SECTION,
         SETTING_SURFACE_AREA_LIMIT,
         SettingValue::F32(DEFAULT_SURFACE_AREA_LIMIT),
-        "Draw an avatar whose attachments cover more than this many square metres \
-         as a flat silhouette (0 = no area limit)",
+        "setting-desc-RenderAutoMuteSurfaceAreaLimit",
     );
 }
 
