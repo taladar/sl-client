@@ -59,7 +59,7 @@ use crate::floater::{
 use crate::i18n::Translated;
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{ComboBindingValues, SettingBinding, bound_checkbox, bound_slider};
-use crate::skin_palette::SkinColors;
+use crate::skin::{MATCH_CLASS, NO_MATCH_CLASS, set_state_class, set_state_class_on};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_color_picker::spawn_color_swatch;
 use crate::ui_combo::{ComboSpec, spawn_combo};
@@ -69,7 +69,7 @@ use crate::ui_search::{SearchFieldSpec, spawn_search_field};
 use crate::ui_slider::{SliderStyle, spawn_slider};
 use crate::ui_tab::{
     DEFAULT_ELLIPSIS, TabButton, TabPanel, TabPlacement, TabSpec, TabStrip, fill_tab_container,
-    spawn_tab_container, tab_label_color,
+    spawn_tab_container,
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 
@@ -84,6 +84,10 @@ const SECTION_FONT: f32 = 14.0;
 
 /// A row label's resting colour (the shared panel label tone).
 pub const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
+
+/// The skin class on a preferences row label, so `.sk-match` has a base to
+/// fall back to when the term stops matching.
+const ROW_LABEL_CLASS: &str = "sk-text";
 
 /// A section heading's colour — same tone as the labels; the size difference
 /// carries the hierarchy.
@@ -104,10 +108,6 @@ const ENV_PIN_LIVE_KEY: &str = "preferences-env-pin-live";
 /// The Fluent key of the notice on a row whose setting an environment knob only
 /// **seeded** at start-up (the control still works).
 const ENV_PIN_SEED_KEY: &str = "preferences-env-pin-seed";
-
-/// A filter-matched row label's highlight — the same warm accent
-/// [`crate::menu`] paints its menu-search hits with.
-const FILTER_MATCH_COLOR: Color = Color::srgb(0.98, 0.82, 0.40);
 
 /// A control's border tone (the settings-binding demo's, kept for continuity).
 pub const CONTROL_BORDER: Color = Color::srgb(0.40, 0.50, 0.62);
@@ -357,7 +357,7 @@ fn spawn_row_label(commands: &mut Commands, parent: Entity, label_key: &'static 
             Text::default(),
             Translated::new(label_key),
             UiFont::Sans.at(FONT),
-            TextColor(LABEL_COLOR),
+            ClassList::new_with_classes([ROW_LABEL_CLASS]),
             PrefRowLabel,
             Pickable::IGNORE,
             ChildOf(parent),
@@ -1159,7 +1159,7 @@ pub(crate) fn mirror_preferences_filter(
 /// The searchable rows and what the filter does to them, bundled as one
 /// [`SystemParam`](bevy::ecs::system::SystemParam): the change guard that keeps
 /// the sweep off an unchanged frame, the rows it shows or hides, and the label
-/// text and colour a hit is matched and highlighted through.
+/// text a hit is matched on and the class it is highlighted through.
 #[derive(Debug, bevy::ecs::system::SystemParam)]
 pub(crate) struct PrefFilterRows<'w, 's> {
     /// Whether any row label changed this frame, which is what makes a re-run
@@ -1169,8 +1169,8 @@ pub(crate) struct PrefFilterRows<'w, 's> {
     rows: Query<'w, 's, (Entity, &'static PrefSearchRow, &'static mut Node)>,
     /// The label texts a row is matched on.
     labels: Query<'w, 's, &'static Text>,
-    /// Their colours, which highlight a hit.
-    colors: Query<'w, 's, &'static mut TextColor>,
+    /// The class lists a hit is highlighted through.
+    classes: Query<'w, 's, &'static mut ClassList>,
 }
 
 /// The tab tree the filter reports into, bundled as one
@@ -1200,7 +1200,6 @@ pub(crate) fn apply_preferences_filter(
     ui: Option<Res<PreferencesUi>>,
     state: Res<PreferencesState>,
     extra_hits: Res<PreferencesExtraHits>,
-    palette: SkinColors,
     filter_rows: PrefFilterRows,
     tabs: PrefTabTree,
 ) {
@@ -1208,7 +1207,7 @@ pub(crate) fn apply_preferences_filter(
         changed_labels,
         mut rows,
         labels,
-        mut colors,
+        mut classes,
     } = filter_rows;
     let PrefTabTree {
         parents,
@@ -1220,17 +1219,9 @@ pub(crate) fn apply_preferences_filter(
     let Some(ui) = ui else {
         return;
     };
-    // The dim / restore below paints tab labels from the role palette, so a
-    // skin change has to re-run it or the strip keeps the previous skin's
-    // colours.
-    if !state.is_changed()
-        && !extra_hits.is_changed()
-        && !palette.is_changed()
-        && changed_labels.is_empty()
-    {
+    if !state.is_changed() && !extra_hits.is_changed() && changed_labels.is_empty() {
         return;
     }
-    let palette = palette.get();
     let filtering = !state.filter.is_empty();
 
     // Pass over the rows: show / hide, highlight, and count hits per tab.
@@ -1249,15 +1240,8 @@ pub(crate) fn apply_preferences_filter(
         if node.display != display {
             node.display = display;
         }
-        if let Ok(mut color) = colors.get_mut(search_row.label) {
-            let target = if filtering && matched {
-                FILTER_MATCH_COLOR
-            } else {
-                LABEL_COLOR
-            };
-            if color.0 != target {
-                color.0 = target;
-            }
+        if let Ok(mut classes) = classes.get_mut(search_row.label) {
+            set_state_class(&mut classes, MATCH_CLASS, filtering && matched);
         }
         // The tab this row lives on (only rows of *our* strip count).
         let panel_index = core::iter::successors(Some(row_entity), |entity| {
@@ -1303,16 +1287,8 @@ pub(crate) fn apply_preferences_filter(
             continue;
         }
         let dim = filtering && !tab_has_match.get(&button.index).copied().unwrap_or(false);
-        let target = if dim {
-            palette.text_muted
-        } else {
-            tab_label_color(&palette)
-        };
-        if let Some(label) = first_text_descendant(button_entity, &children, &labels)
-            && let Ok(mut color) = colors.get_mut(label)
-            && color.0 != target
-        {
-            color.0 = target;
+        if let Some(label) = first_text_descendant(button_entity, &children, &labels) {
+            set_state_class_on(&mut classes, label, NO_MATCH_CLASS, dim);
         }
     }
 }
@@ -1680,16 +1656,17 @@ mod tests {
     use sl_settings::{Scope, SettingValue, SettingsStore};
 
     use super::{
-        EnvPinNoticeShown, EnvPinnedSettings, FILTER_MATCH_COLOR, LABEL_COLOR, PinKind,
+        ClassList, EnvPinNoticeShown, EnvPinnedSettings, MATCH_CLASS, NO_MATCH_CLASS, PinKind,
         PrefRowLabel, PrefSearchRow, PreferencesApplied, PreferencesExtraHits, PreferencesState,
-        PreferencesUi, annotate_env_pinned_rows, apply_preferences_filter, guard_pref_bindings,
-        on_preferences_cancel, on_preferences_ok, track_preferences_open_close,
+        PreferencesUi, ROW_LABEL_CLASS, annotate_env_pinned_rows, apply_preferences_filter,
+        guard_pref_bindings, on_preferences_cancel, on_preferences_ok,
+        track_preferences_open_close,
     };
     use crate::floater::FloaterCommand;
     use crate::settings::ViewerSettings;
     use crate::settings_binding::SettingBinding;
     use crate::ui::UiPanelShown;
-    use crate::ui_tab::{TabPanel, TabStrip};
+    use crate::ui_tab::{TAB_LABEL_CLASS, TabButton, TabPanel, TabPlacement, TabStrip};
 
     /// A boxed error so tests can use `?` instead of the disallowed
     /// `unwrap` / `expect`.
@@ -1706,6 +1683,9 @@ mod tests {
         strip: Entity,
         /// Row / label / bound-control entities, one triple per tab.
         rows: [(Entity, Entity, Entity); 2],
+        /// Each tab's caption node, which the filter dims when its tab is
+        /// left with no hit.
+        tab_labels: [Entity; 2],
     }
 
     /// A headless app with the shell's systems over a store populated by
@@ -1744,7 +1724,29 @@ mod tests {
             })
             .id();
         let mut rows = [(root, root, root); 2];
+        let mut tab_labels = [root; 2];
         for (index, (binding, label_text)) in bindings.into_iter().zip(labels).enumerate() {
+            let button = world
+                .spawn((
+                    Node::default(),
+                    TabButton {
+                        strip,
+                        index,
+                        placement: TabPlacement::BlockStart,
+                    },
+                    ChildOf(root),
+                ))
+                .id();
+            let tab_label = world
+                .spawn((
+                    Text::new("tab"),
+                    ClassList::new_with_classes([TAB_LABEL_CLASS]),
+                    ChildOf(button),
+                ))
+                .id();
+            if let Some(slot) = tab_labels.get_mut(index) {
+                *slot = tab_label;
+            }
             let panel = world
                 .spawn((Node::default(), TabPanel { strip, index }, ChildOf(root)))
                 .id();
@@ -1752,7 +1754,7 @@ mod tests {
             let label = world
                 .spawn((
                     Text::new(label_text),
-                    TextColor(LABEL_COLOR),
+                    ClassList::new_with_classes([ROW_LABEL_CLASS]),
                     PrefRowLabel,
                     ChildOf(row),
                 ))
@@ -1771,7 +1773,12 @@ mod tests {
             tab_strip: strip,
             search_field,
         });
-        Fixture { root, strip, rows }
+        Fixture {
+            root,
+            strip,
+            rows,
+            tab_labels,
+        }
     }
 
     /// Flip the fixture's floater open or closed and run a frame.
@@ -2265,21 +2272,35 @@ mod tests {
             Some(Display::Flex),
             "a matching row stays"
         );
-        assert_eq!(
+        // The highlight itself is the skin's (`.sk-match`); what this world
+        // can see — and what the rule selects on — is the class.
+        assert!(
             app.world()
                 .entity(hit_label)
-                .get::<TextColor>()
-                .map(|c| c.0),
-            Some(FILTER_MATCH_COLOR),
+                .get::<ClassList>()
+                .is_some_and(|classes| classes.contains(MATCH_CLASS)),
             "a matching label is highlighted"
         );
-        assert_eq!(
-            app.world()
+        assert!(
+            !app.world()
                 .entity(miss_label)
-                .get::<TextColor>()
-                .map(|c| c.0),
-            Some(LABEL_COLOR),
+                .get::<ClassList>()
+                .is_some_and(|classes| classes.contains(MATCH_CLASS)),
             "a missing label keeps the resting colour"
+        );
+        assert!(
+            app.world()
+                .entity(fixture.tab_labels[0])
+                .get::<ClassList>()
+                .is_some_and(|classes| classes.contains(NO_MATCH_CLASS)),
+            "the tab the filter emptied is dimmed"
+        );
+        assert!(
+            !app.world()
+                .entity(fixture.tab_labels[1])
+                .get::<ClassList>()
+                .is_some_and(|classes| classes.contains(NO_MATCH_CLASS)),
+            "the tab that still has a hit is not"
         );
         assert_eq!(
             app.world()
@@ -2324,10 +2345,21 @@ mod tests {
                 Some(Display::Flex),
                 "every row is restored"
             );
-            assert_eq!(
-                app.world().entity(label).get::<TextColor>().map(|c| c.0),
-                Some(LABEL_COLOR),
+            assert!(
+                !app.world()
+                    .entity(label)
+                    .get::<ClassList>()
+                    .is_some_and(|classes| classes.contains(MATCH_CLASS)),
                 "every label returns to the resting colour"
+            );
+        }
+        for tab_label in fixture.tab_labels {
+            assert!(
+                !app.world()
+                    .entity(tab_label)
+                    .get::<ClassList>()
+                    .is_some_and(|classes| classes.contains(NO_MATCH_CLASS)),
+                "every tab caption is undimmed"
             );
         }
         assert_eq!(

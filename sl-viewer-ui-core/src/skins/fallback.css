@@ -69,6 +69,14 @@
    * back to, so the values are the stock skin's. */
   --gain: #3fa34d;
   --loss: #c0392b;
+
+  /* The four notification kinds. Meaning-bearing like --gain / --loss, and
+   * tokens for the same reason: the kinds must stay distinguishable, which is
+   * what a colour-blind or culture overlay retunes. */
+  --notice-tip: #5c9ee6;
+  --notice-notify: #8c99ad;
+  --notice-alert: #f2b84d;
+  --notice-modal: #e65c52;
   --focus-ring: #ffc740;
 
   /* The selected keyframe marker on a day-cycle timeline. Gold rather than

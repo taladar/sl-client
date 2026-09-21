@@ -388,6 +388,18 @@ pub const HIGHLIGHTED_CLASS: &str = "sk-highlighted";
 /// no style inheritance — a row and its text are separate nodes.
 pub const HIGHLIGHTED_TEXT_CLASS: &str = "sk-highlighted-text";
 
+/// The CSS class on text that matched an active filter term — a preferences
+/// search, a menu search. The glyphs take the skin's `--match-highlight`, and
+/// the row keeps whatever colour it had.
+pub const MATCH_CLASS: &str = "sk-match";
+
+/// The CSS class on text a live filter term left with nothing — a preferences
+/// tab whose every row the search collapsed. The counterpart to
+/// [`MATCH_CLASS`]: one says "this is the hit", the other "there are none
+/// here". Absent when no filter is running, so the resting colour is the
+/// widget's own.
+pub const NO_MATCH_CLASS: &str = "sk-no-match";
+
 /// The CSS class on a widget that is toggled on or selected — a toolbar button
 /// whose floater is open, the active tab, a selected table row.
 pub const ACTIVE_CLASS: &str = "sk-active";

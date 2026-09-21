@@ -98,6 +98,10 @@
   /* Meaning-bearing (culture / colour-blind overlays remap these). */
   --gain: #3fa34d;
   --loss: #c0392b;
+  --notice-tip: #5c9ee6;
+  --notice-notify: #8c99ad;
+  --notice-alert: #f2b84d;
+  --notice-modal: #e65c52;
 
   /* User-tunable palette (the preferences Colors & Skins tab). These are not
    * consumed by common.css: the viewer reads them off the styled root's

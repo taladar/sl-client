@@ -20,6 +20,8 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui_widgets::{Activate, Button, SliderRange, SliderStep};
 use bevy::window::PrimaryWindow;
+use bevy_flair::style::components::ClassList;
+use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, set_state_class};
 
 use sl_audio::{AudioMixer as _, Bus, BusLevel, Mixer};
 use sl_settings::SettingValue;
@@ -68,8 +70,6 @@ const PANEL_BACKGROUND: Color = Color::srgba(0.08, 0.09, 0.12, 0.96);
 const BAR_BACKGROUND: Color = Color::srgba(0.08, 0.09, 0.12, 0.92);
 /// Label text colour.
 const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
-/// Dimmed (muted) label / glyph colour.
-const LABEL_DIM: Color = SkinPalette::FALLBACK.text_muted;
 /// Button border.
 const BUTTON_BORDER: Color = Color::srgb(0.3, 0.3, 0.35);
 /// Button fill.
@@ -80,6 +80,9 @@ const TRACK_FILL: Color = Color::srgb(0.16, 0.19, 0.25);
 const THUMB_FILL: Color = Color::srgb(0.62, 0.72, 0.86);
 /// Font size for the cluster's glyphs and labels.
 const FONT_SIZE: f32 = 13.0;
+/// The skin class on a bus's mute glyph, so `.sk-disabled-text` has a base
+/// to fall back to when the bus is unmuted.
+const GLYPH_CLASS: &str = "sk-text";
 
 /// The default linear gain a fresh install starts a bus at, matching the
 /// reference viewer's `AudioLevel*` settings-defaults (master full, effects and
@@ -394,7 +397,7 @@ fn spawn_mute_button(commands: &mut Commands, parent: Entity, bus: Bus, tab_inde
         Text::new("🔊"),
         VolumeMuteGlyph(bus),
         UiFont::Sans.at(FONT_SIZE),
-        TextColor(LABEL_COLOR),
+        ClassList::new_with_classes([GLYPH_CLASS]),
         Pickable::IGNORE,
         ChildOf(button),
     ));
@@ -470,12 +473,12 @@ fn apply_panel_toggle(
 /// setting.
 fn sync_mute_glyphs(
     settings: Option<Res<ViewerSettings>>,
-    mut glyphs: Query<(&VolumeMuteGlyph, &mut Text, &mut TextColor)>,
+    mut glyphs: Query<(&VolumeMuteGlyph, &mut Text, &mut ClassList)>,
 ) {
     let Some(settings) = settings else {
         return;
     };
-    for (glyph, mut text, mut color) in &mut glyphs {
+    for (glyph, mut text, mut classes) in &mut glyphs {
         let muted = settings
             .store()
             .get_bool(&mute_key(glyph.0))
@@ -484,10 +487,9 @@ fn sync_mute_glyphs(
         if text.0 != want {
             want.clone_into(&mut text.0);
         }
-        let want_color = if muted { LABEL_DIM } else { LABEL_COLOR };
-        if color.0 != want_color {
-            color.0 = want_color;
-        }
+        // The glyph itself still changes — CSS cannot swap text content — so a
+        // muted bus reads as muted by shape as well as by colour.
+        set_state_class(&mut classes, DISABLED_TEXT_CLASS, muted);
     }
 }
 

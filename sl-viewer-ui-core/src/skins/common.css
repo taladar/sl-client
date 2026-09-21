@@ -288,6 +288,14 @@
   color: var(--text-primary);
 }
 
+/* A tab a live search left with no matching row. Dimmer than a caption that
+ * simply is not selected, because the strip is reporting a result here, not a
+ * selection — and quieter than `:disabled`, which the rule below still wins
+ * over: a refused tab cannot be opened at all, which is the louder fact. */
+.sk-tab-label.sk-no-match {
+  color: var(--text-muted);
+}
+
 .sk-tab:disabled .sk-tab-label {
   color: var(--text-disabled);
 }
@@ -315,6 +323,29 @@
 
 .sk-rights-cell:checked:disabled {
   -bevy-image-color: var(--accent-muted);
+}
+
+/* Text that matched an active filter term. Later in the cascade than the
+ * ordinary text rules, so it wins while both apply. */
+.sk-match {
+  color: var(--match-highlight);
+}
+
+/* The teleport-progress title, and the two outcomes it ends in.
+ *
+ * Roles, not constants, for the reason `--gain` and `--loss` are: "arrived" and
+ * "failed" must stay distinguishable, and a colour-blind overlay remapping
+ * green and red is exactly what needs to retune them. */
+.sk-teleport-title {
+  color: var(--text-primary);
+}
+
+.sk-teleport-title.sk-teleport-arrived {
+  color: var(--gain);
+}
+
+.sk-teleport-title.sk-teleport-failed {
+  color: var(--loss);
 }
 
 /* A keyframe marker on the day-cycle timeline. The selected one is gold rather
@@ -710,15 +741,40 @@
   -bevy-image-color: var(--loss);
 }
 
-/* A toast card in the notification host (viewer-ui-notification-host). The
- * meaning-bearing kind accent (Tip / Notify / Alert / Modal) is painted on the
- * card's border in Rust (src/notification_host.rs `kind_accent`), one place for
- * the four kinds, so this rule carries only the skin's surface and corner — no
- * border-color, so the skin does not fight the accent. The border width is set
- * on the node in Rust. */
+/* A toast card in the notification host (viewer-ui-notification-host), and its
+ * kind accent — Tip / Notify / Alert / Modal — as a second class.
+ *
+ * These used to be painted from Rust because they are *meaning-bearing*, which
+ * turns out to be the argument for the opposite: the four kinds must stay
+ * distinguishable, and that is exactly what a colour-blind or culture overlay
+ * needs to retune. Same reason `--gain` and `--loss` are tokens. The border
+ * width is still set on the node in Rust.
+ *
+ * The card's default button (the one Enter or expiry takes) wears the same
+ * accent, reached from the card because that is what knows its kind. */
 .sk-toast {
   background-color: var(--surface-bg);
   border-radius: var(--surface-radius);
+}
+
+.sk-toast-tip,
+.sk-toast-tip .sk-toast-default {
+  border-color: var(--notice-tip);
+}
+
+.sk-toast-notify,
+.sk-toast-notify .sk-toast-default {
+  border-color: var(--notice-notify);
+}
+
+.sk-toast-alert,
+.sk-toast-alert .sk-toast-default {
+  border-color: var(--notice-alert);
+}
+
+.sk-toast-modal,
+.sk-toast-modal .sk-toast-default {
+  border-color: var(--notice-modal);
 }
 
 /* A toast's body / label text. */

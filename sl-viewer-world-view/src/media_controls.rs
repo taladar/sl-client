@@ -34,8 +34,10 @@ use bevy::text::{EditableText, FontCx, LayoutCx};
 use bevy::ui_widgets::{
     Activate, Button, Slider, SliderDragState, SliderRange, SliderStep, SliderValue, ValueChange,
 };
+use bevy_flair::style::components::ClassList;
 use sl_cef::{PlaybackState, ValidatedMediaUrl};
 use sl_client_bevy::{Command, SlCommand};
+use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, set_state_class};
 
 use crate::camera::FocusTarget;
 use crate::media_prim::{MediaData, MediaPrimState, media_permission_allows};
@@ -64,6 +66,10 @@ const FLAGS_OBJECT_YOU_OWNER: u32 = 1 << 5;
 
 /// `MediaEntry::controls` value for the reduced (mini) control set.
 const CONTROLS_MINI: i32 = 1;
+
+/// The skin class on a gated button's glyph, so `.sk-disabled-text` has a base
+/// to fall back to when the action becomes available again.
+const LABEL_CLASS: &str = "sk-text";
 
 /// Bar text colour.
 const BAR_LABEL: Color = Color::srgb(0.9, 0.9, 0.92);
@@ -438,7 +444,7 @@ fn spawn_bar_button(
         .spawn((
             Text::new(glyph),
             UiFont::Sans.at(12.0),
-            TextColor(BAR_LABEL),
+            ClassList::new_with_classes([LABEL_CLASS]),
             Pickable::IGNORE,
             ChildOf(button),
         ))
@@ -458,8 +464,8 @@ struct BarChrome<'w, 's> {
     shown_panels: Query<'w, 's, &'static mut UiPanelShown>,
     /// Text labels (reload glyph, mute glyph, zoom glyph, progress).
     texts: Query<'w, 's, &'static mut Text>,
-    /// Enable-gated label colours.
-    colors: Query<'w, 's, &'static mut TextColor>,
+    /// The class lists an enable-gated label's state is written through.
+    classes: Query<'w, 's, &'static mut ClassList>,
     /// The URL field.
     editors: Query<'w, 's, &'static mut EditableText>,
     /// The secure-lock glyph's visibility.
@@ -680,8 +686,8 @@ fn update_media_controls(
                 }
             }
         } else {
-            set_color(&mut chrome.colors, ui.back.1, status.can_go_back);
-            set_color(&mut chrome.colors, ui.forward.1, status.can_go_forward);
+            set_label_enabled(&mut chrome.classes, ui.back.1, status.can_go_back);
+            set_label_enabled(&mut chrome.classes, ui.forward.1, status.can_go_forward);
         }
         if let Ok(mut reload) = chrome.texts.get_mut(ui.reload_label) {
             let want = if !video && status.loading {
@@ -778,13 +784,10 @@ fn update_media_controls(
     }
 }
 
-/// Recolour an enable-gated button label.
-fn set_color(colors: &mut Query<&mut TextColor>, label: Entity, enabled: bool) {
-    if let Ok(mut color) = colors.get_mut(label) {
-        let want = if enabled { BAR_LABEL } else { BAR_LABEL_DIM };
-        if color.0 != want {
-            color.0 = want;
-        }
+/// Mark an enable-gated button label, so the skin greys it.
+fn set_label_enabled(classes: &mut Query<&mut ClassList>, label: Entity, enabled: bool) {
+    if let Ok(mut list) = classes.get_mut(label) {
+        set_state_class(&mut list, DISABLED_TEXT_CLASS, !enabled);
     }
 }
 

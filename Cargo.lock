@@ -9186,6 +9186,7 @@ name = "sl-viewer-audio"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_flair",
  "pretty_assertions",
  "sl-audio",
  "sl-client-bevy",
@@ -9482,6 +9483,7 @@ name = "sl-viewer-places"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_flair",
  "pretty_assertions",
  "sl-client-bevy",
  "sl-notecard",
@@ -9835,6 +9837,7 @@ name = "sl-viewer-world-view"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_flair",
  "clap",
  "fs-err",
  "image",

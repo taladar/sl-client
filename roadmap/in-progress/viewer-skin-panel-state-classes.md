@@ -95,6 +95,46 @@ not wake the style engine every frame). Prefer a pseudo-class wherever the
 panel already carries the component — `:hover`, `:checked`, `:disabled` — as
 the widget conversions did; three of them needed no marker at all.
 
+## Progress (2026-09-21)
+
+The per-frame `TextColor` writes are gone: the filter highlight and the
+"this tab has no hit" dim in `preferences.rs`, the mute glyph in
+`volume_panel.rs`, the enable-gated bar glyphs in `media_controls.rs`, the
+teleport outcome title, and the four notification kinds. Two classes were
+added for states that had no role — `MATCH_CLASS` and its counterpart
+`NO_MATCH_CLASS` — and `ui_tab`'s `TAB_LABEL_CLASS` turned `pub` so a panel
+that dims a caption spawns the same pair the widget does.
+
+One case does **not** convert and is not meant to: `chat.rs` fades a line by
+its *age*, and there is no selector for how old a node is. It stays Rust.
+
+What is left is the constants, not the writes — the state-named `Color`
+constants still read at spawn time. By crate:
+
+- `sl-viewer-people` — the largest share: `radar.rs`'s
+  `SELECTED_BACKGROUND`, the hand-rolled tab strips in `people.rs` and
+  `conversations.rs` (`TAB_ACTIVE_*` / `TAB_INACTIVE_*`, part 3's
+  widget-adoption question), `ONLINE_COLOR` / `OFFLINE_COLOR`,
+  `ACTION_DISABLED_BACKGROUND` and `DISABLED_LABEL_COLOR` in both
+  `people.rs` and `groups.rs`, `groups.rs`'s `ACTIVE_COLOR`.
+- `sl-viewer-chat` — `emoji_picker.rs`'s `CELL_HOVER_BACKGROUND` (a
+  `:hover`) and `SWATCH_BORDER_ACTIVE`, `local_chat_input.rs`'s
+  `OPTION_ACTIVE_BACKGROUND`.
+- `sl-viewer-preferences` — `phototools.rs`'s `BUTTON_ACTIVE_FILL` /
+  `BUTTON_DISABLED_FILL`, `preferences.rs`'s `CHECK_DISABLED` (which waits
+  on [[viewer-skin-checkbox-radio-shape]] — it is a hand-rolled checkbox).
+- `sl-viewer-places` / `sl-viewer-environment` — the three copies of
+  `DISABLED_COLOR` (`about_region.rs`, `about_land.rs`,
+  `land_environment.rs`), all the same drifted grey.
+- `sl-viewer-ui-widgets` — `ui_trackball.rs`'s `DISABLED_BORDER` /
+  `DISABLED_MARKER` and `ui_color_picker.rs`'s `DISABLED_BORDER`, which are
+  widgets the earlier pass did not reach.
+- `sl-viewer-media` — `web_floater.rs`'s `BUTTON_LABEL_DIM`.
+
+The `DIM_LABEL_COLOR` copies that a grep for state names also turns up are
+*not* this task: a muted caption is a resting colour and belongs to
+[[viewer-skin-panel-text-roles]].
+
 ## Done when
 
 No panel writes a `BackgroundColor` / `TextColor` / `BorderColor` to express a

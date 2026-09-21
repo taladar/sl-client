@@ -194,7 +194,11 @@ const TAB_CLASS: &str = "sk-tab";
 /// The skin class on a tab's caption and its ellipsis marker. Greyed by
 /// `.sk-tab:disabled .sk-tab-label` — an ancestor rule, because `bevy_ui` has
 /// no style inheritance and the caption is its own node.
-const TAB_LABEL_CLASS: &str = "sk-tab-label";
+///
+/// `pub` because a caption is also what a *filter* dims: the preferences
+/// search hangs [`NO_MATCH_CLASS`](sl_viewer_ui_core::skin::NO_MATCH_CLASS) on
+/// this node, and its fixture spawns the same pair.
+pub const TAB_LABEL_CLASS: &str = "sk-tab-label";
 
 /// The skin class on the panel area — the "content" shade the active tab
 /// shares (`--card-bg`).

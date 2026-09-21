@@ -39,6 +39,8 @@
 
 use bevy::prelude::*;
 use bevy::ui_widgets::Activate;
+use bevy_flair::style::components::ClassList;
+use sl_viewer_ui_core::skin::set_state_class;
 
 use sl_client_bevy::{Command, SlCommand, SlEvent, SlSessionEvent};
 
@@ -69,14 +71,15 @@ const PANEL_BG: Color = Color::srgba(0.09, 0.10, 0.13, 0.94);
 /// The overlay panel border.
 const PANEL_BORDER: Color = Color::srgb(0.30, 0.34, 0.42);
 
-/// The colour of the title while a teleport is in progress.
-const TITLE_ACTIVE: Color = Color::srgb(0.85, 0.89, 0.96);
+/// The skin class on the progress title. Its outcome states add
+/// [`TITLE_SUCCESS_CLASS`] or [`TITLE_FAILED_CLASS`].
+const TITLE_CLASS: &str = "sk-teleport-title";
 
-/// The colour of the title on a successful arrival.
-const TITLE_SUCCESS: Color = Color::srgb(0.55, 0.85, 0.55);
+/// The skin class on an arrived title.
+const TITLE_SUCCESS_CLASS: &str = "sk-teleport-arrived";
 
-/// The colour of the title on a failed teleport.
-const TITLE_FAILED: Color = Color::srgb(0.95, 0.55, 0.50);
+/// The skin class on a failed title.
+const TITLE_FAILED_CLASS: &str = "sk-teleport-failed";
 
 /// The colour of the slow-teleport warning line.
 const WARN: Color = Color::srgb(0.95, 0.78, 0.40);
@@ -292,7 +295,7 @@ fn spawn_overlay(mut commands: Commands, root: Res<UiRoot>) {
         OverlayTitle,
         Text::new(""),
         UiFont::Sans.at(16.0),
-        TextColor(TITLE_ACTIVE),
+        ClassList::new_with_classes([TITLE_CLASS]),
         TextLayout::no_wrap(),
         ChildOf(panel),
     ));
@@ -562,7 +565,7 @@ struct OverlayParts<'w, 's> {
     /// The overlay root, whose visibility is the overlay's own.
     root: Query<'w, 's, &'static mut Visibility, With<OverlayRoot>>,
     /// The title line and its colour.
-    titles: Query<'w, 's, (&'static mut Text, &'static mut TextColor), With<OverlayTitle>>,
+    titles: Query<'w, 's, (&'static mut Text, &'static mut ClassList), With<OverlayTitle>>,
     /// The status line.
     statuses: Query<'w, 's, &'static mut Text, (With<OverlayStatus>, Without<OverlayTitle>)>,
     /// The detail line.
@@ -636,14 +639,27 @@ fn render_overlay(time: Res<Time>, mut flow: ResMut<TeleportFlow>, parts: Overla
     }
 
     let elapsed = (now - entry.started_at).max(0.0);
-    let (title_text, title_colour) = match &entry.outcome {
-        Outcome::Pending => ("Teleporting…", TITLE_ACTIVE),
-        Outcome::Succeeded => ("Arrived", TITLE_SUCCESS),
-        Outcome::Failed { .. } => ("Teleport failed", TITLE_FAILED),
+    let title_text = match &entry.outcome {
+        Outcome::Pending => "Teleporting…",
+        Outcome::Succeeded => "Arrived",
+        Outcome::Failed { .. } => "Teleport failed",
     };
-    if let Ok((mut text, mut colour)) = titles.single_mut() {
+    if let Ok((mut text, mut classes)) = titles.single_mut() {
         set_text(&mut text, title_text);
-        colour.0 = title_colour;
+        // Arrived and failed are the skin's to retune — a colour-blind overlay
+        // remapping green/red is the reason these are roles and not constants,
+        // the same reason `--gain` / `--loss` are. In flight neither class is
+        // on, so the title rests on `.sk-teleport-title`.
+        set_state_class(
+            &mut classes,
+            TITLE_SUCCESS_CLASS,
+            matches!(entry.outcome, Outcome::Succeeded),
+        );
+        set_state_class(
+            &mut classes,
+            TITLE_FAILED_CLASS,
+            matches!(entry.outcome, Outcome::Failed { .. }),
+        );
     }
 
     if let Ok(mut text) = statuses.single_mut() {

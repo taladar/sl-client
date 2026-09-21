@@ -83,6 +83,10 @@
   /* Meaning-bearing */
   --gain: #2fbf71;
   --loss: #e05252;
+  --notice-tip: #5c9ee6;
+  --notice-notify: #8c99ad;
+  --notice-alert: #f2b84d;
+  --notice-modal: #e65c52;
 
   /* User-tunable palette (see graphite/skin.css for the token contract) —
    * cooler variants, so a skin switch visibly moves the swatches. */

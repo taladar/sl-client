@@ -97,7 +97,7 @@ const TOAST_MAX_WIDTH: f32 = 360.0;
 /// A toast card's inner padding, in logical pixels.
 const TOAST_PADDING: f32 = 10.0;
 
-/// A toast card's border width, in logical pixels — the meaning-bearing kind
+/// A toast card's border width, in logical pixels — the kind
 /// accent is painted on it in Rust.
 const TOAST_BORDER: f32 = 2.0;
 
@@ -140,10 +140,9 @@ const BUTTON_BORDER: Color = Color::srgb(0.40, 0.50, 0.62);
 /// dialog.
 const SCRIM_COLOR: Color = Color::srgba(0.0, 0.0, 0.0, 0.55);
 
-/// The CSS class on a toast card, so a skin recolours its surface. The
-/// meaning-bearing kind accent (the border colour) is painted in Rust, one place
-/// for the four kinds, so `.sk-toast` carries only the surface and corner — like
-/// `.sk-toolbar-button` — and the skin does not fight the accent.
+/// The CSS class on a toast card, so a skin recolours its surface. The kind
+/// accent rides beside it as a second class ([`kind_class`]), so the border is
+/// the skin's too.
 const CARD_CLASS: &str = "sk-toast";
 
 /// The CSS class on a toast's body text.
@@ -226,17 +225,29 @@ const DEMO_START_DELAY_SECS: f32 = 2.5;
 /// corner stack is seen before the modal's scrim covers it.
 const DEMO_MODAL_DELAY_SECS: f32 = 4.0;
 
-/// The kind accent colour painted on a card's border, a subtle cue to the
-/// notification's class where the reference viewer uses a per-notification icon
-/// texture (which we do not yet carry as data).
-const fn kind_accent(kind: NotificationKind) -> Color {
+/// The skin class carrying a card's kind accent — a cue to the notification's
+/// class where the reference viewer uses a per-notification icon texture
+/// (which we do not yet carry as data).
+///
+/// A class per kind, not a colour resolved here. "Meaning-bearing" was once
+/// the argument for painting these from Rust, and it is the argument for the
+/// opposite: the four kinds must stay *distinguishable*, which is exactly what
+/// a colour-blind or culture overlay needs to retune — the same reason
+/// `--gain` / `--loss` are tokens rather than constants. Hard-coding them
+/// guarantees an overlay cannot.
+const fn kind_class(kind: NotificationKind) -> &'static str {
     match kind {
-        NotificationKind::Tip => Color::srgb(0.36, 0.62, 0.90),
-        NotificationKind::Notify => Color::srgb(0.55, 0.60, 0.68),
-        NotificationKind::Alert => Color::srgb(0.95, 0.72, 0.30),
-        NotificationKind::AlertModal => Color::srgb(0.90, 0.36, 0.32),
+        NotificationKind::Tip => "sk-toast-tip",
+        NotificationKind::Notify => "sk-toast-notify",
+        NotificationKind::Alert => "sk-toast-alert",
+        NotificationKind::AlertModal => "sk-toast-modal",
     }
 }
+
+/// The skin class on the **default** button of a toast (the one Enter or expiry
+/// takes), which wears its card's kind accent on its border — the reference's
+/// emphasis on the default action.
+const DEFAULT_BUTTON_CLASS: &str = "sk-toast-default";
 
 /// The plugin: the channel, the raise / age / resolve / dismiss / fade systems,
 /// and the ignorable-notification settings. Does **not** wire the live
@@ -682,8 +693,7 @@ fn build_toast_card(commands: &mut Commands, content: &ToastContent) -> ToastCar
             ..column(Val::Px(CARD_ROW_GAP))
         },
         BackgroundColor(CARD_BACKGROUND),
-        BorderColor::all(kind_accent(content.kind)),
-        ClassList::new_with_classes([CARD_CLASS]),
+        ClassList::new_with_classes([CARD_CLASS, kind_class(content.kind)]),
         Pickable {
             should_block_lower: true,
             is_hoverable: true,
@@ -836,13 +846,9 @@ fn build_toast_card(commands: &mut Commands, content: &ToastContent) -> ToastCar
             ))
             .id();
         for spec in &content.buttons {
-            // The default button (Enter / expiry) wears the kind accent on its
-            // border, the reference's emphasis on the default action.
-            let border = if spec.is_default {
-                kind_accent(content.kind)
-            } else {
-                BUTTON_BORDER
-            };
+            // The default button (Enter / expiry) wears its card's kind accent
+            // on its border — an ancestor rule, since the card is what knows
+            // which kind it is.
             let button = commands
                 .spawn((
                     Node {
@@ -851,8 +857,11 @@ fn build_toast_card(commands: &mut Commands, content: &ToastContent) -> ToastCar
                         ..default()
                     },
                     BackgroundColor(BUTTON_BACKGROUND),
-                    BorderColor::all(border),
-                    ClassList::new_with_classes([BUTTON_CLASS]),
+                    BorderColor::all(BUTTON_BORDER),
+                    ClassList::new_with_classes(
+                        core::iter::once(BUTTON_CLASS)
+                            .chain(spec.is_default.then_some(DEFAULT_BUTTON_CLASS)),
+                    ),
                     Name::new(format!("toast-button:{}", spec.name)),
                     ChildOf(button_row),
                 ))
