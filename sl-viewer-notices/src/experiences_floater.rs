@@ -93,6 +93,7 @@ use bevy::text::EditableText;
 use bevy::ui::Checked;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
+use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, set_state_class};
 use std::collections::BTreeSet;
 
 use sl_client_bevy::{
@@ -196,8 +197,9 @@ const BUTTON_BACKGROUND: Color = Color::srgb(0.16, 0.19, 0.25);
 /// A button's fallback border — the skin's `.sk-button` overrides it.
 const BUTTON_BORDER: Color = Color::srgb(0.40, 0.50, 0.62);
 
-/// A disabled action's label colour (nothing selected to act on).
-const DISABLED_TEXT_COLOR: Color = Color::srgb(0.45, 0.47, 0.52);
+/// The skin class on a button's caption, so `.sk-disabled-text` has a base to
+/// fall back to when its action becomes available again.
+const LABEL_CLASS: &str = "sk-text";
 
 /// A list's background tint behind its rows.
 const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
@@ -1210,7 +1212,7 @@ fn spawn_action(
         Text::default(),
         Translated::new(label_key),
         UiFont::Sans.at(FONT_SIZE),
-        TextColor(TEXT_COLOR),
+        ClassList::new_with_classes([LABEL_CLASS]),
         Pickable::IGNORE,
         ChildOf(entity),
     ));
@@ -1662,7 +1664,10 @@ fn paint_experience_actions(
     tables: Query<&TableState>,
     buttons: Query<(&ExperiencesButton, &Children)>,
     translator: Translator,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
+    // Narrowed to the text itself: the search-status line below still writes
+    // content, but the buttons' greying is `.sk-disabled-text` now.
+    mut texts: Query<&mut Text>,
+    mut classes: Query<&mut ClassList>,
 ) {
     let Some(ui) = ui else {
         return;
@@ -1675,16 +1680,13 @@ fn paint_experience_actions(
             ExperiencesButton::Page(false) => state.progress.offers_previous(),
             _always => true,
         };
-        let wanted = if enabled {
-            TEXT_COLOR
-        } else {
-            DISABLED_TEXT_COLOR
-        };
+        // A marker, not `:disabled`: these presses are already harmless (a
+        // Profile with nothing selected acts on nothing), so the button does
+        // not refuse input and must not claim to — the same reading
+        // `experience_profile.rs` takes.
         for child in children {
-            if let Ok((_text, mut color)) = texts.get_mut(*child)
-                && color.0 != wanted
-            {
-                color.0 = wanted;
+            if let Ok(mut list) = classes.get_mut(*child) {
+                set_state_class(&mut list, DISABLED_TEXT_CLASS, !enabled);
             }
         }
     }
@@ -1696,7 +1698,7 @@ fn paint_experience_actions(
             &TransArgs::new().int("page", i64::from(state.page)),
         ),
     };
-    if let Ok((mut text, _color)) = texts.get_mut(ui.search_status)
+    if let Ok(mut text) = texts.get_mut(ui.search_status)
         && text.0 != line
     {
         text.0 = line;

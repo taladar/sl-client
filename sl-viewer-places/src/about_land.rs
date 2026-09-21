@@ -118,6 +118,12 @@ const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 /// A checked toggle's tick colour.
 const CHECK_COLOR: Color = Color::srgb(0.55, 0.85, 0.60);
 
+/// The skin class on an action button, so `.sk-button:disabled` greys it.
+const BUTTON_CLASS: &str = "sk-button";
+
+/// The skin class on its caption — the other end of that selector.
+const LABEL_CLASS: &str = "sk-text";
+
 /// A disabled control's text colour (matching the disabled text field / combo).
 const DISABLED_COLOR: Color = Color::srgb(0.45, 0.47, 0.52);
 
@@ -2504,8 +2510,6 @@ fn update_control_enable(
     mut windows: Query<(Entity, &mut AboutLandDirty, &AboutLandState)>,
     gates: EnableGates,
     host: FloaterHost,
-    children: Query<&Children>,
-    mut texts: Query<&mut TextColor>,
     mut commands: Commands,
 ) {
     let EnableGates {
@@ -2541,20 +2545,10 @@ fn update_control_enable(
         } else if !can_edit && !is_disabled {
             commands.entity(entity).insert(InteractionDisabled);
         }
-        // `InteractionDisabled` is advisory: each widget kind greys itself, and
-        // a plain action button's "self" is the label inside it.
-        let want = if can_edit {
-            LABEL_COLOR
-        } else {
-            DISABLED_COLOR
-        };
-        for label in children.get(entity).into_iter().flatten() {
-            if let Ok(mut color) = texts.get_mut(*label)
-                && color.0 != want
-            {
-                color.0 = want;
-            }
-        }
+        // The marker above is the whole of it now: `.sk-button:disabled
+        // .sk-text` greys the caption. (`InteractionDisabled` is advisory — it
+        // stops this window's own observer and paints nothing — which is why
+        // the colours used to be written beside it.)
     }
     for (entity, gate) in &gated {
         let Some(can_edit) = can_edit(entity) else {
@@ -4095,7 +4089,11 @@ fn spawn_action_button(
         .tab_index(tab_index)
         .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
         .label_color(LABEL_COLOR)
-        .font_size(FONT_SIZE),
+        .font_size(FONT_SIZE)
+        // Both ends of `.sk-button:disabled .sk-text`, which greys a refused
+        // action now that nothing repaints its caption.
+        .class(BUTTON_CLASS)
+        .label_class(LABEL_CLASS),
     )
     .button;
     commands.entity(button).insert(action);

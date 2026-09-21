@@ -65,6 +65,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui_widgets::{SliderRange, SliderValue, ValueChange};
+use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
     AssetKey, AssetUpdateLocation, Command, DayCycle, DayTrack, EnvironmentAsset,
     InventoryFolderKey, InventoryKey, KEYFRAME_SLOP, SKY_TRACK_COUNT, SettingsKind, SkySettings,
@@ -81,6 +82,7 @@ use sl_viewer_notifications::{NotificationResponse, ShowNotification};
 use sl_viewer_pickers::ui_texture_picker::TextureSwatchValue;
 use sl_viewer_platform::environment_assets::EnvironmentAssetManager;
 use sl_viewer_ui_core::i18n::{TransArgs, Translated, Translator};
+use sl_viewer_ui_core::skin::{ACTIVE_CLASS, set_state_class};
 use sl_viewer_ui_core::ui::{
     LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row,
 };
@@ -105,8 +107,8 @@ use sl_viewer_world_scene::environment::EnvironmentState;
 use crate::knobs::{ColorKnob, SkyKnob, TextureKnob, WaterKnob};
 use crate::land_environment::{LandDayCycleEdited, OpenLandDayCycle};
 use crate::rows::{
-    AimTrackball, paint_action_button, spawn_action_button, spawn_color_row, spawn_slider_row,
-    spawn_texture_row, spawn_trackball_row, tag_aim_slider,
+    AimTrackball, set_action_button_enabled, spawn_action_button, spawn_color_row,
+    spawn_slider_row, spawn_texture_row, spawn_trackball_row, tag_aim_slider,
 };
 use crate::settings_editor::EditedItem;
 use crate::style::{
@@ -299,13 +301,14 @@ struct DayTick(usize);
 struct DayCloneSource;
 
 /// The node families [`sync_day_chrome`] walks: the track buttons, the action
-/// buttons, the timeline's tick labels, and the children a button's label is
-/// found through.
+/// buttons, the timeline's tick labels, the children a label is re-translated
+/// through, and the class lists a button's state is written through.
 type ChromeWidgets<'w, 's> = (
     Query<'w, 's, (Entity, &'static DayTrackButton)>,
     Query<'w, 's, (Entity, &'static DayButton)>,
     Query<'w, 's, (Entity, &'static DayTick)>,
     Query<'w, 's, &'static Children>,
+    Query<'w, 's, &'static mut ClassList>,
 );
 
 /// What [`paint_button`] writes through — the shared
@@ -2087,7 +2090,7 @@ fn sync_day_chrome(
     translator: Translator,
     chrome: DayChromeText,
     widgets: ChromeWidgets,
-    mut paint: ChromePaint,
+    paint: ChromePaint,
     out: DayChromeOut,
 ) {
     let DayFacts {
@@ -2102,7 +2105,7 @@ fn sync_day_chrome(
         mut options,
         mut commands,
     } = out;
-    let (tracks, buttons, ticks, labels) = widgets;
+    let (tracks, buttons, ticks, labels, mut classes) = widgets;
     let day_length = environment.map_or(0, |environment| environment.settings.day_length);
     let settings_supported = support.supported();
     // A locale switch re-resolves every `Translated` label through the
@@ -2138,8 +2141,8 @@ fn sync_day_chrome(
             let selected = session.is_some_and(|session| session.track == button.0);
             paint_button(
                 &mut commands,
-                &labels,
-                &mut paint,
+                &mut classes,
+                &paint,
                 entity,
                 session.is_some(),
                 selected,
@@ -2149,7 +2152,7 @@ fn sync_day_chrome(
         // The action buttons.
         for (entity, button) in &buttons {
             let enabled = action_enabled(button.0, session, settings_supported);
-            paint_button(&mut commands, &labels, &mut paint, entity, enabled, false);
+            paint_button(&mut commands, &mut classes, &paint, entity, enabled, false);
         }
 
         // The readout, and the ticks it shares its formatting with.
@@ -2383,36 +2386,24 @@ fn show(nodes: &mut Query<&mut Node>, entity: Option<Entity>, visible: bool) {
 }
 
 /// Mark a button enabled or disabled, and lit or not — this window's colours
-/// over the shared [`paint_action_button`], which owns the
+/// over the shared [`set_action_button_enabled`], which owns the
 /// `InteractionDisabled` half.
 fn paint_button(
     commands: &mut Commands,
-    labels: &Query<&Children>,
-    paint: &mut ChromePaint,
+    classes: &mut Query<&mut ClassList>,
+    paint: &ChromePaint,
     entity: Entity,
     enabled: bool,
     lit: bool,
 ) {
-    let background = if !enabled {
-        TRACK_FILL
-    } else if lit {
-        crate::style::SELECTED_BACKGROUND
-    } else {
-        crate::style::ACTION_BACKGROUND
-    };
-    let label = if enabled {
-        LABEL_COLOR
-    } else {
-        DIM_LABEL_COLOR
-    };
-    paint_action_button(
-        commands,
-        labels,
-        paint,
-        entity,
-        enabled,
-        (background, label),
-    );
+    set_action_button_enabled(commands, paint, entity, enabled);
+    // The selected track button reads as lit. `.sk-active` is the same class
+    // the toolbar's open-floater buttons take, and `.sk-button:disabled` wins
+    // over it in the cascade, so a track button on a window with no session
+    // greys rather than staying lit.
+    if let Ok(mut list) = classes.get_mut(entity) {
+        set_state_class(&mut list, ACTIVE_CLASS, lit);
+    }
 }
 
 /// Point a button's label at a different Fluent key (the Play / Pause swap).

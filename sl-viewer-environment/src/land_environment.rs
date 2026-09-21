@@ -96,10 +96,8 @@ use sl_viewer_ui_core::ui_text::set_node_text;
 use sl_viewer_ui_widgets::ui_slider::{SliderStyle, spawn_slider};
 use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 
-use crate::rows::{ButtonPaint, SliderRow, paint_action_button, spawn_action_button};
-use crate::style::{
-    ACTION_BACKGROUND, DIM_LABEL_COLOR, FONT_SIZE, HEADING_SIZE, LABEL_COLOR, TRACK_FILL,
-};
+use crate::rows::{ButtonPaint, SliderRow, set_action_button_enabled, spawn_action_button};
+use crate::style::{DIM_LABEL_COLOR, FONT_SIZE, HEADING_SIZE, LABEL_COLOR};
 
 /// The element-id prefix every control in a land-environment panel is named by.
 const ELEMENT: &str = "land-environment";
@@ -1569,6 +1567,15 @@ struct LandChrome<'w, 's> {
     children: Query<'w, 's, &'static Children>,
     /// The labels themselves.
     texts: Query<'w, 's, &'static mut Text>,
+    /// The check glyphs' and labels' colours.
+    ///
+    /// Its own query now. It used to be borrowed out of the shared
+    /// [`ButtonPaint`], because two `Query<&mut TextColor>` in one system is
+    /// Bevy's B0001 and panics on the first frame — and that bundle carried one
+    /// for the button labels it painted. It no longer paints them
+    /// (`.sk-button:disabled .sk-text` does), so the conflict is gone and the
+    /// checks can hold the only one.
+    check_colours: Query<'w, 's, &'static mut TextColor>,
 }
 
 /// What a land action raises, bundled as one
@@ -1596,7 +1603,7 @@ fn paint_land_controls(
     )>,
     controls: LandControls,
     translator: Translator,
-    mut paint: ButtonPaint,
+    paint: ButtonPaint,
     chrome: LandChrome,
 ) {
     let LandControls {
@@ -1608,6 +1615,7 @@ fn paint_land_controls(
         mut nodes,
         children,
         mut texts,
+        mut check_colours,
     } = chrome;
     for (entity, kind, subject, state, ui) in &panels {
         let reason = unavailable_reason(*kind, subject);
@@ -1621,48 +1629,29 @@ fn paint_land_controls(
             set_node_text(&mut texts, node, &text);
         }
         let enabled = reason.is_none() && subject.editable && state.current.is_some();
-        let colour_pair = |on: bool| {
-            if on {
-                (ACTION_BACKGROUND, LABEL_COLOR)
-            } else {
-                (TRACK_FILL, DISABLED_COLOR)
-            }
-        };
         for (button, PanelOf(panel)) in &actions {
             if *panel != entity {
                 continue;
             }
-            paint_action_button(
-                &mut commands,
-                &children,
-                &mut paint,
-                button,
-                enabled,
-                colour_pair(enabled),
-            );
+            set_action_button_enabled(&mut commands, &paint, button, enabled);
         }
         for (button, PanelOf(panel)) in &pickers {
             if *panel != entity {
                 continue;
             }
-            paint_action_button(
-                &mut commands,
-                &children,
-                &mut paint,
-                button,
-                enabled,
-                colour_pair(enabled),
-            );
+            set_action_button_enabled(&mut commands, &paint, button, enabled);
         }
         for (PanelOf(panel), check) in &checks {
             if *panel != entity {
                 continue;
             }
-            // The colours come out of the shared button paint rather than a
-            // query of this system's own: two `Query<&mut TextColor>` in one
-            // system is Bevy's B0001, which panics on the first frame.
-            let (_backgrounds, colours, _disabled) = &mut paint;
-            set_check_visual(&mut texts, colours, check, subject.allow_override, enabled);
+            set_check_visual(
+                &mut texts,
+                &mut check_colours,
+                check,
+                subject.allow_override,
+                enabled,
+            );
         }
     }
 }

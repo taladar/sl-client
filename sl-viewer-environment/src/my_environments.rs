@@ -97,7 +97,7 @@ use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_te
 use sl_viewer_world_api::rlv::{RlvSession, can_change_environment};
 use sl_viewer_world_scene::environment::LocalEnvironmentPick;
 
-use crate::rows::{ButtonPaint, paint_action_button};
+use crate::rows::{ButtonPaint, set_action_button_enabled};
 use crate::settings_list::{
     FILTER_KINDS, SettingsListFilters, SettingsListRow, kind_key, kind_slug, location_text,
     project, sort_rows, total,
@@ -134,13 +134,11 @@ const CHECK_ON: Color = Color::srgb(0.45, 0.62, 0.90);
 /// An unticked checkbox's fill.
 const CHECK_OFF: Color = Color::srgba(0.10, 0.11, 0.14, 1.0);
 
-/// A disabled action button's background — dimmed, so an entry that is present
-/// but not usable reads as such. Bevy's `InteractionDisabled` is advisory: it
-/// stops this window's own observer from acting, and nothing paints it.
-const DISABLED_BACKGROUND: Color = Color::srgb(0.17, 0.19, 0.23);
+/// The skin class on an action button, so `.sk-button:disabled` greys it.
+const BUTTON_CLASS: &str = "sk-button";
 
-/// A disabled action button's label.
-const DISABLED_LABEL: Color = Color::srgb(0.48, 0.51, 0.57);
+/// The skin class on its caption — the other end of that selector.
+const LABEL_CLASS: &str = "sk-text";
 
 /// The kinds this viewer can mint from nothing, in the add row's order — all
 /// three, since the day-cycle editor exists to open the third with.
@@ -685,11 +683,6 @@ fn spawn_action_button(
     tab: i32,
     disabled: bool,
 ) -> Entity {
-    let background = if disabled {
-        DISABLED_BACKGROUND
-    } else {
-        ACTION_BACKGROUND
-    };
     let spawned = ui_spawn::spawn_button(
         commands,
         parent,
@@ -698,15 +691,21 @@ fn spawn_action_button(
             format!("my-environments-{}:button", button.slug()),
         )
         .tab_index(tab)
-        .colors(background, background)
-        .label_color(if disabled {
-            DISABLED_LABEL
-        } else {
-            LABEL_COLOR
-        })
+        .colors(ACTION_BACKGROUND, ACTION_BACKGROUND)
+        .label_color(LABEL_COLOR)
         .font_size(FONT_SIZE)
+        // Both ends of `.sk-button:disabled .sk-text`. The marker itself goes
+        // on below when the button is born refused, so it reads right on its
+        // first frame rather than waiting for the first sync.
+        .class(BUTTON_CLASS)
+        .label_class(LABEL_CLASS)
         .no_wrap(),
     );
+    if disabled {
+        commands
+            .entity(spawned.button)
+            .insert(bevy::ui::InteractionDisabled);
+    }
     commands
         .entity(spawned.button)
         .insert(button)
@@ -726,24 +725,11 @@ fn sync_my_environments_buttons(
     mut commands: Commands,
     support: Res<SettingsInventorySupport>,
     buttons: Query<Entity, With<MyEnvironmentsButton>>,
-    children: Query<&Children>,
-    mut paint: ButtonPaint,
+    paint: ButtonPaint,
 ) {
     let enabled = support.supported();
-    let colours = if enabled {
-        (ACTION_BACKGROUND, LABEL_COLOR)
-    } else {
-        (DISABLED_BACKGROUND, DISABLED_LABEL)
-    };
     for entity in &buttons {
-        paint_action_button(
-            &mut commands,
-            &children,
-            &mut paint,
-            entity,
-            enabled,
-            colours,
-        );
+        set_action_button_enabled(&mut commands, &paint, entity, enabled);
     }
 }
 

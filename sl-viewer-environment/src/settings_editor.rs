@@ -112,8 +112,8 @@ use crate::rows::{
     AimTrackball, spawn_action_button, spawn_color_row, spawn_slider_row, spawn_texture_row,
     spawn_trackball_row, tag_aim_slider,
 };
-use crate::rows::{ButtonPaint, paint_action_button};
-use crate::style::{ACTION_BACKGROUND, DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, TRACK_FILL};
+use crate::rows::{ButtonPaint, set_action_button_enabled};
+use crate::style::{DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR};
 use crate::tabs::{SKY_TABS, TabPage, WATER_TABS};
 
 /// The sky editor's floater id.
@@ -1667,27 +1667,14 @@ fn sync_editor_buttons(
     mut commands: Commands,
     support: Res<SettingsInventorySupport>,
     buttons: Query<(Entity, &EditorButton)>,
-    children: Query<&Children>,
-    mut paint: ButtonPaint,
+    paint: ButtonPaint,
 ) {
     let enabled = support.supported();
-    let colours = if enabled {
-        (ACTION_BACKGROUND, LABEL_COLOR)
-    } else {
-        (TRACK_FILL, DIM_LABEL_COLOR)
-    };
     for (entity, button) in &buttons {
         if !matches!(button.action, EditorAction::Save | EditorAction::SaveAs) {
             continue;
         }
-        paint_action_button(
-            &mut commands,
-            &children,
-            &mut paint,
-            entity,
-            enabled,
-            colours,
-        );
+        set_action_button_enabled(&mut commands, &paint, entity, enabled);
     }
 }
 

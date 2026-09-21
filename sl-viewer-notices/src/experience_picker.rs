@@ -81,6 +81,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
+use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, set_state_class};
 
 use sl_client_bevy::{Command, ExperienceKey, SlCommand, SlEvent, SlSessionEvent};
 use sl_settings::{Scope, SettingValue};
@@ -140,8 +141,9 @@ const TEXT_COLOR: Color = Color::srgb(0.90, 0.93, 0.97);
 /// A dimmer secondary-text colour.
 const DIM_TEXT_COLOR: Color = Color::srgb(0.64, 0.68, 0.76);
 
-/// A disabled action's text colour.
-const DISABLED_TEXT_COLOR: Color = Color::srgb(0.45, 0.47, 0.52);
+/// The skin class on a button's caption, so `.sk-disabled-text` has a base to
+/// fall back to when its action becomes available again.
+const LABEL_CLASS: &str = "sk-text";
 
 /// An action button's background.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.16, 0.19, 0.25);
@@ -594,7 +596,7 @@ fn spawn_action(
         Text::default(),
         Translated::new(label_key),
         UiFont::Sans.at(FONT_SIZE),
-        TextColor(TEXT_COLOR),
+        ClassList::new_with_classes([LABEL_CLASS]),
         Pickable::IGNORE,
         ChildOf(entity),
     ));
@@ -873,6 +875,20 @@ fn bind_picker_rows(
 // Actions.
 // ---------------------------------------------------------------------------
 
+/// What [`paint_picker_actions`] writes: the search-status line's text, and
+/// the class lists a button's caption expresses its state through.
+///
+/// One [`SystemParam`](bevy::ecs::system::SystemParam) because the two of them
+/// together put the system over the workspace's argument limit — and because
+/// they are the same concern, now that neither is a colour.
+#[derive(bevy::ecs::system::SystemParam)]
+struct PickerChrome<'w, 's> {
+    /// The search-status line.
+    texts: Query<'w, 's, &'static mut Text>,
+    /// The captions' class lists.
+    classes: Query<'w, 's, &'static mut ClassList>,
+}
+
 /// Grey the actions that would do nothing, and write each window's status line.
 fn paint_picker_actions(
     windows: Query<(Entity, &ExperiencePickerState, &ExperiencePickerUi)>,
@@ -881,8 +897,12 @@ fn paint_picker_actions(
     parents: Query<&ChildOf>,
     floaters: Query<(Entity, &Floater)>,
     translator: Translator,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
+    chrome: PickerChrome,
 ) {
+    let PickerChrome {
+        mut texts,
+        mut classes,
+    } = chrome;
     for (window, state, ui) in &windows {
         let selected = picker_selection(&tables, ui.table).is_some();
         for (entity, button, children) in &buttons {
@@ -895,16 +915,12 @@ fn paint_picker_actions(
                 PickerButton::Page(false) => state.progress.offers_previous(),
                 PickerButton::Find | PickerButton::Cancel => true,
             };
-            let wanted = if enabled {
-                TEXT_COLOR
-            } else {
-                DISABLED_TEXT_COLOR
-            };
+            // A marker, not `:disabled`: a Select with nothing selected acts
+            // on nothing rather than refusing input, the same reading
+            // `experience_profile.rs` takes.
             for child in children {
-                if let Ok((_text, mut color)) = texts.get_mut(*child)
-                    && color.0 != wanted
-                {
-                    color.0 = wanted;
+                if let Ok(mut list) = classes.get_mut(*child) {
+                    set_state_class(&mut list, DISABLED_TEXT_CLASS, !enabled);
                 }
             }
         }
@@ -916,7 +932,7 @@ fn paint_picker_actions(
                 &TransArgs::new().int("page", i64::from(state.page)),
             ),
         };
-        if let Ok((mut text, _color)) = texts.get_mut(ui.status)
+        if let Ok(mut text) = texts.get_mut(ui.status)
             && text.0 != line
         {
             text.0 = line;
