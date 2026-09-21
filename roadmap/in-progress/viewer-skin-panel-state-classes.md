@@ -2,7 +2,7 @@
 id: viewer-skin-panel-state-classes
 title: The panels paint their own states, and nine files hand-copied one role
 topic: viewer
-status: ready
+status: in-progress
 origin: survey during viewer-skin-widget-state-classes (2026-09-21)
 points: 5
 refs: [viewer-skin-widget-state-classes, viewer-skin-panel-text-roles]
@@ -51,10 +51,17 @@ selected-row backgrounds hold **five distinct values**:
 The disabled text is tighter: 9 constants, 2 values, 8 of them exactly
 `FALLBACK.text_disabled` and one a hair off.
 
-Beyond the constants, **44 distinct panel functions** take a `&mut
-BackgroundColor` / `TextColor` / `BorderColor` — `sl-viewer-people` (9),
-`-places` (7), `-chat` / `-notices` / `-preferences` (4 each), across 12
-crates.
+Beyond the constants, **22 `TextColor` assignments across 18 files** actually
+recolour panel text per state (44 functions *take* a mutable paint component,
+but many only carry it — `about_land.rs`'s `set_value_node` destructures
+`_color` and writes only the text). They are spread one or two per file rather
+than clustered, so this is a wide, shallow sweep.
+
+Those 22 are also what [[viewer-skin-panel-text-roles]] waits on: a class on
+the spawn helpers would beat a Rust-painted `TextColor` and flatten a greyed
+action column, a disabled check glyph or a faded toast into one colour —
+silently, and only in the live viewer, since the headless harness excludes
+styling.
 
 ## The work, in three parts
 

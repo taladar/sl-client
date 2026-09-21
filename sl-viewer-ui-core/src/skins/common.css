@@ -116,6 +116,14 @@
   background-color: var(--control-bg-hover);
 }
 
+/* A button whose action cannot be taken right now. The panel marks it with
+ * `InteractionDisabled` — which it was already doing, to refuse the press — and
+ * the caption greys from here rather than from a loop that walked the button's
+ * children repainting them. */
+.sk-button:disabled .sk-text {
+  color: var(--text-disabled);
+}
+
 /* A control whose action does not apply to what its panel is showing right now
  * — greyed rather than removed, so a row of actions keeps its shape as the
  * selection moves (Contact Sets' Configure… with a pseudo-set chosen, its
@@ -335,8 +343,14 @@
  * `apply_table_selection_highlight`: the rows are recycled by the virtual
  * list, so the state belongs to the index the row currently shows and no
  * pseudo-class describes it. Translucent on purpose — a banded list still
- * reads through the highlight. */
-.sk-table-row {
+ * reads through the highlight.
+ *
+ * `.sk-list-row` is the same thing for a list a panel builds itself rather
+ * than through the table widget (the pickers, the inventory tree, the About
+ * box's licence list). One rule, two names, because "table row" would be a lie
+ * on half of them. */
+.sk-table-row,
+.sk-list-row {
   background-color: transparent;
 }
 

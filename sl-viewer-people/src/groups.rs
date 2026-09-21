@@ -44,10 +44,12 @@
 //! Reference (Firestorm, read-only): `llgrouplist`, `llgroupactions`,
 //! Vintage `panel_fs_contacts_groups`.
 
+use crate::skin::{ACTIVE_CLASS, set_state_class};
 use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
+use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{Command, GroupKey, SlCommand, SlEvent, SlSessionEvent};
 
 use crate::i18n::{TransArgs, Translated, Translator};
@@ -91,9 +93,6 @@ const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 /// The group-list scroll surface background — a touch darker, a sunken well (same
 /// as the friends list).
 const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
-
-/// The background of the currently-selected group row.
-const SELECTED_ROW_BACKGROUND: Color = Color::srgba(0.30, 0.42, 0.62, 0.55);
 
 /// An action button's background.
 const ACTION_BACKGROUND: Color = Color::srgb(0.24, 0.29, 0.38);
@@ -1024,7 +1023,7 @@ fn bind_group_rows(
         &GroupRowParts,
         &mut BoundGroup,
     )>,
-    mut backgrounds: Query<&mut BackgroundColor>,
+    mut classes: Query<&mut ClassList>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
 ) {
     let Some(ui) = ui else {
@@ -1068,15 +1067,8 @@ fn bind_group_rows(
             set_text(&mut text, if group_row.active { ACTIVE_GLYPH } else { "" });
         }
         let is_selected = selected.0 == Some(group_row.group);
-        if let Ok(mut background) = backgrounds.get_mut(row_entity) {
-            let wanted = if is_selected {
-                SELECTED_ROW_BACKGROUND
-            } else {
-                Color::NONE
-            };
-            if background.0 != wanted {
-                background.0 = wanted;
-            }
+        if let Ok(mut classes) = classes.get_mut(row_entity) {
+            set_state_class(&mut classes, ACTIVE_CLASS, is_selected);
         }
     }
 }

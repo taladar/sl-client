@@ -61,7 +61,9 @@
 //! `fsfloateraddtocontactset`, `fsfloatercontactsetconfiguration`,
 //! `panel_people_contact_sets.xml`.
 
-use crate::skin::{DISABLED_SURFACE_CLASS, DISABLED_TEXT_CLASS, set_state_class_on};
+use crate::skin::{
+    ACTIVE_CLASS, DISABLED_SURFACE_CLASS, DISABLED_TEXT_CLASS, set_state_class, set_state_class_on,
+};
 use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
@@ -134,9 +136,6 @@ const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// The list viewport backdrop.
 const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
-
-/// A selected row's background highlight.
-const SELECTED_BACKGROUND: Color = Color::srgba(0.24, 0.34, 0.52, 0.55);
 
 /// An action button's background. The pre-skin fallback only: the button also
 /// carries [`BUTTON_CLASS`], and the skin's `.sk-button` rule is what actually
@@ -1564,7 +1563,7 @@ fn bind_member_rows(
         &TableRowCells,
         &mut BoundMember,
     )>,
-    mut backgrounds: Query<&mut BackgroundColor>,
+    mut classes: Query<&mut ClassList>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
 ) {
     let Some(ui) = ui else {
@@ -1590,15 +1589,12 @@ fn bind_member_rows(
             let sets = data.map(|member| member.sets.clone()).unwrap_or_default();
             set_table_cell(&mut texts, cell, &sets, DIM_LABEL_COLOR);
         }
-        if let Ok(mut background) = backgrounds.get_mut(row_entity) {
-            let wanted = if data.is_some() && selected.0 == bound.0 {
-                SELECTED_BACKGROUND
-            } else {
-                Color::NONE
-            };
-            if background.0 != wanted {
-                background.0 = wanted;
-            }
+        if let Ok(mut classes) = classes.get_mut(row_entity) {
+            set_state_class(
+                &mut classes,
+                ACTIVE_CLASS,
+                data.is_some() && selected.0 == bound.0,
+            );
         }
     }
 }

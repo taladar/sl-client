@@ -17,6 +17,11 @@ publish.workspace = true
 # Not a workspace dependency: members disagree about `default-features`, so the
 # spec stays per-crate (see the root manifest).
 bevy = { version = "0.19.0" }
+# Two of its floaters put the shared `.sk-active` class on a selected row, so
+# this crate names the CSS engine directly, as the other panel crates do.
+# Already in the closure through sl-viewer-ui-core; the package set is
+# unchanged.
+bevy_flair = { version = "0.8.0" }
 bytes = { workspace = true }
 fs-err = { workspace = true }
 image = { version = "0.25.10", default-features = false, features = [

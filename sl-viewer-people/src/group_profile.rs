@@ -50,11 +50,13 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::skin::{ACTIVE_CLASS, set_state_class};
 use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::text::EditableText;
+use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
     AgentKey, Command, GroupKey, GroupMember, GroupNotice, GroupNoticeKey, GroupProfile, GroupRole,
     GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember, GroupRoleMemberChange,
@@ -115,9 +117,6 @@ const BUTTON_BORDER: Color = Color::srgb(0.34, 0.40, 0.52);
 
 /// A list scroll surface's sunken background.
 const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
-
-/// The background of the currently-selected list row.
-const SELECTED_ROW_BACKGROUND: Color = Color::srgba(0.30, 0.42, 0.62, 0.55);
 
 /// The checked glyph.
 const CHECKED_GLYPH: &str = "\u{2611}";
@@ -1966,7 +1965,7 @@ fn bind_role_rows(
         &TableRowCells,
         &mut BoundRole,
     )>,
-    mut backgrounds: Query<&mut BackgroundColor>,
+    mut classes: Query<&mut ClassList>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
 ) {
     for (state, view, ui) in &windows {
@@ -1989,15 +1988,8 @@ fn bind_role_rows(
             set_row_cell(&mut texts, cells, 0, &role_row.name, selected);
             set_row_cell(&mut texts, cells, 1, &role_row.title, false);
             set_row_cell(&mut texts, cells, 2, &role_row.members.to_string(), false);
-            if let Ok(mut background) = backgrounds.get_mut(row_entity) {
-                let wanted = if selected {
-                    SELECTED_ROW_BACKGROUND
-                } else {
-                    Color::NONE
-                };
-                if background.0 != wanted {
-                    background.0 = wanted;
-                }
+            if let Ok(mut classes) = classes.get_mut(row_entity) {
+                set_state_class(&mut classes, ACTIVE_CLASS, selected);
             }
         }
     }
@@ -2423,7 +2415,7 @@ fn bind_member_rows(
         &TableRowCells,
         &mut BoundMember,
     )>,
-    mut backgrounds: Query<&mut BackgroundColor>,
+    mut classes: Query<&mut ClassList>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
 ) {
     for (state, view, ui) in &windows {
@@ -2448,15 +2440,8 @@ fn bind_member_rows(
             set_row_cell(&mut texts, cells, 1, &member_row.title, false);
             set_row_cell(&mut texts, cells, 2, &member_row.contribution, false);
             set_row_cell(&mut texts, cells, 3, &member_row.status, false);
-            if let Ok(mut background) = backgrounds.get_mut(row_entity) {
-                let wanted = if selected {
-                    SELECTED_ROW_BACKGROUND
-                } else {
-                    Color::NONE
-                };
-                if background.0 != wanted {
-                    background.0 = wanted;
-                }
+            if let Ok(mut classes) = classes.get_mut(row_entity) {
+                set_state_class(&mut classes, ACTIVE_CLASS, selected);
             }
         }
     }
@@ -2549,7 +2534,7 @@ fn bind_notice_rows(
         &TableRowCells,
         &mut BoundNotice,
     )>,
-    mut backgrounds: Query<&mut BackgroundColor>,
+    mut classes: Query<&mut ClassList>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
 ) {
     for (state, view, ui) in &windows {
@@ -2577,15 +2562,8 @@ fn bind_notice_rows(
             set_row_cell(&mut texts, cells, 1, &notice_row.from_name, false);
             set_row_cell(&mut texts, cells, 2, &notice_row.date, false);
             let selected = state.selected_notice == Some(notice_row.index);
-            if let Ok(mut background) = backgrounds.get_mut(row_entity) {
-                let wanted = if selected {
-                    SELECTED_ROW_BACKGROUND
-                } else {
-                    Color::NONE
-                };
-                if background.0 != wanted {
-                    background.0 = wanted;
-                }
+            if let Ok(mut classes) = classes.get_mut(row_entity) {
+                set_state_class(&mut classes, ACTIVE_CLASS, selected);
             }
         }
     }

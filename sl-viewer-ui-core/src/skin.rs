@@ -366,6 +366,15 @@ pub const DISABLED_SURFACE_CLASS: &str = "sk-disabled-surface";
 /// The label half of [`DISABLED_SURFACE_CLASS`].
 pub const DISABLED_TEXT_CLASS: &str = "sk-disabled-text";
 
+/// The CSS class on one row of a list a panel builds itself, rather than
+/// through the table widget — the pickers, the inventory tree, the About box's
+/// licence list. Its selected look is [`ACTIVE_CLASS`]; this carries the
+/// resting one, so dropping the state class has somewhere to land.
+///
+/// The table widget's own rows use `sk-table-row`, which shares the rule:
+/// "table row" would be a lie on half of these.
+pub const LIST_ROW_CLASS: &str = "sk-list-row";
+
 /// The CSS class on a row the pointer or the keyboard has lit
 /// (`--control-bg-hover`), and [`HIGHLIGHTED_TEXT_CLASS`] for its label.
 ///

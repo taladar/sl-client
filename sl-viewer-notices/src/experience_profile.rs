@@ -70,6 +70,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
+use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, set_state_class};
 
 use sl_client_bevy::{
     Command, ExperienceInfo, ExperienceKey, ExperiencePermission, ExperienceProperties,
@@ -118,12 +119,12 @@ const BUTTON_BACKGROUND: Color = Color::srgb(0.16, 0.19, 0.25);
 /// A button's fallback border — the skin's `.sk-button` overrides it.
 const BUTTON_BORDER: Color = Color::srgb(0.40, 0.50, 0.62);
 
-/// A disabled button's label colour, so a press that would do nothing reads as
-/// inert.
-const DISABLED_TEXT_COLOR: Color = Color::srgb(0.45, 0.47, 0.52);
-
 /// The skin class a button wears (`.sk-button`).
 const BUTTON_CLASS: &str = "sk-button";
+
+/// The skin class on a button's caption, so `.sk-disabled-text` has a base to
+/// fall back to when an action stops being redundant.
+const LABEL_CLASS: &str = "sk-text";
 
 /// The glyph a ticked toggle shows.
 const CHECKED_GLYPH: &str = "\u{2611}";
@@ -972,7 +973,7 @@ fn spawn_action(
             Text::default(),
             Translated::new(label_key),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(TEXT_COLOR),
+            ClassList::new_with_classes([LABEL_CLASS]),
             Pickable::IGNORE,
             ChildOf(entity),
         ))
@@ -1051,8 +1052,8 @@ struct ProfileWhere<'w, 's> {
 struct ProfileWidgets<'w, 's> {
     /// The window's labels.
     texts: Query<'w, 's, &'static mut Text>,
-    /// Their colours.
-    colors: Query<'w, 's, &'static mut TextColor>,
+    /// The class lists their state is expressed through.
+    classes: Query<'w, 's, &'static mut ClassList>,
     /// The boxes a section is shown or hidden through.
     nodes: Query<'w, 's, &'static mut Node>,
     /// The owner / group name links.
@@ -1344,7 +1345,7 @@ fn paint_profile_windows(
 ) {
     let ProfileWidgets {
         mut texts,
-        mut colors,
+        mut classes,
         mut nodes,
         mut links,
         mut fields,
@@ -1411,7 +1412,7 @@ fn paint_profile_windows(
             show(&mut nodes, action.button, !privileged);
             // The button standing for the current preference is the no-op one.
             let redundant = state.permission_known && state.permission == permission;
-            set_label_enabled(&mut colors, action.label, !redundant);
+            set_label_enabled(&mut classes, action.label, !redundant);
         }
         show(&mut nodes, ui.edit_button, state.can_edit && !privileged);
         set_node_text(
@@ -1495,21 +1496,17 @@ fn show(nodes: &mut Query<&mut Node>, entity: Entity, shown: bool) {
 }
 
 /// Grey (or un-grey) one action button's label, so a press that would be a
-/// no-op reads as inert. The press itself is already a no-op — sending the
-/// preference the agent already has changes nothing — so this is presentation,
-/// not a gate, which is why it does not reach for
-/// [`InteractionDisabled`](bevy::ui::InteractionDisabled) (advisory per
-/// observer, so it is no substitute for the action itself being harmless).
-fn set_label_enabled(colors: &mut Query<&mut TextColor>, label: Entity, enabled: bool) {
-    let wanted = TextColor(if enabled {
-        TEXT_COLOR
-    } else {
-        DISABLED_TEXT_COLOR
-    });
-    if let Ok(mut color) = colors.get_mut(label)
-        && *color != wanted
-    {
-        *color = wanted;
+/// no-op reads as inert.
+///
+/// A **marker class**, not `:disabled`: the press is already harmless — sending
+/// the preference the agent already has changes nothing — so this is
+/// presentation, not a gate, and
+/// [`InteractionDisabled`](bevy::ui::InteractionDisabled) would describe the
+/// button as refusing input when it does not. `.sk-disabled-text` says the one
+/// thing that is true, and the skin decides what that looks like.
+fn set_label_enabled(classes: &mut Query<&mut ClassList>, label: Entity, enabled: bool) {
+    if let Ok(mut list) = classes.get_mut(label) {
+        set_state_class(&mut list, DISABLED_TEXT_CLASS, !enabled);
     }
 }
 

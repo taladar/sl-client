@@ -72,10 +72,12 @@ use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::EditableText;
+use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
     Command, DirFindFlags, DirGroupResult, GroupKey, QueryId, SlCommand, SlEvent, SlSessionEvent,
     Uuid,
 };
+use sl_viewer_ui_core::skin::{ACTIVE_CLASS, LIST_ROW_CLASS};
 
 use crate::floater::{
     Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterHost, FloaterOp, FloaterOwner,
@@ -104,9 +106,6 @@ const BUTTON_BORDER: Color = Color::srgb(0.34, 0.40, 0.52);
 
 /// The trailing detail column's colour — dimmer than the name it trails.
 const DETAIL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
-
-/// A selected row's background.
-const SELECTED_ROW_BACKGROUND: Color = Color::srgba(0.24, 0.34, 0.52, 0.55);
 
 /// The Fluent key for the "you are in no groups" row.
 const NO_GROUPS_KEY: &str = "group-picker-no-groups";
@@ -799,11 +798,9 @@ fn rebuild_picker_list(
                         align_items: AlignItems::Center,
                         ..row(Val::Px(8.0))
                     },
-                    BackgroundColor(if selected {
-                        SELECTED_ROW_BACKGROUND
-                    } else {
-                        Color::NONE
-                    }),
+                    ClassList::new_with_classes(
+                        core::iter::once(LIST_ROW_CLASS).chain(selected.then_some(ACTIVE_CLASS)),
+                    ),
                     Pickable::default(),
                     // Numbered, so a test (and a person reading the entity
                     // tree) can tell one row from another.

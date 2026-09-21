@@ -33,7 +33,9 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::text::EditableText;
+use bevy_flair::style::components::ClassList;
 use sl_client_bevy::AgentKey;
+use sl_viewer_ui_core::skin::{ACTIVE_CLASS, set_state_class};
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 use crate::avatar_complexity::RenderOverride;
@@ -85,9 +87,6 @@ const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// The list viewport backdrop.
 const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
-
-/// A selected row's background highlight.
-const SELECTED_BACKGROUND: Color = Color::srgba(0.24, 0.34, 0.52, 0.55);
 
 /// An action button's background.
 const ACTION_BACKGROUND: Color = Color::srgb(0.24, 0.29, 0.38);
@@ -727,7 +726,7 @@ pub struct RowCells<'w, 's> {
         ),
     >,
     /// Each row's background, repainted on selection.
-    backgrounds: Query<'w, 's, &'static mut BackgroundColor>,
+    classes: Query<'w, 's, &'static mut ClassList>,
     /// The cell texts and their colours.
     texts: Query<'w, 's, (&'static mut Text, &'static mut TextColor)>,
 }
@@ -780,15 +779,12 @@ fn bind_render_settings_rows(
                 set_table_cell(&mut table.texts, cell, &value, color);
             }
         }
-        if let Ok(mut background) = table.backgrounds.get_mut(row_entity) {
-            let wanted = if selected.0 == Some(AgentKey::from(data.entry.agent)) {
-                SELECTED_BACKGROUND
-            } else {
-                Color::NONE
-            };
-            if background.0 != wanted {
-                background.0 = wanted;
-            }
+        if let Ok(mut classes) = table.classes.get_mut(row_entity) {
+            set_state_class(
+                &mut classes,
+                ACTIVE_CLASS,
+                selected.0 == Some(AgentKey::from(data.entry.agent)),
+            );
         }
     }
 }

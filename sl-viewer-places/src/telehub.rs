@@ -112,8 +112,12 @@ const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 /// A dim label / secondary text colour.
 const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
-/// A disabled control's text colour.
-const DISABLED_COLOR: Color = Color::srgb(0.45, 0.47, 0.52);
+/// The skin class on an action button, so `.sk-button:disabled` greys it.
+const BUTTON_CLASS: &str = "sk-button";
+
+/// The skin class on that button's caption — the other end of the descendant
+/// selector that greys a refused action.
+const LABEL_CLASS: &str = "sk-text";
 
 /// An action button's background.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
@@ -465,7 +469,12 @@ fn spawn_action_button(
         .tab_index(tab_index)
         .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
         .label_color(LABEL_COLOR)
-        .font_size(FONT_SIZE),
+        .font_size(FONT_SIZE)
+        // The greyed look of a refused action is the skin's now
+        // (`.sk-button:disabled .sk-text`), which needs both ends of that
+        // selector to exist.
+        .class(BUTTON_CLASS)
+        .label_class(LABEL_CLASS),
     )
     .button;
     commands
@@ -739,13 +748,15 @@ struct TelehubFacts<'w, 's> {
     tables: Query<'w, 's, &'static TableState>,
 }
 
-/// Grey out and refuse the buttons whose action cannot be taken.
+/// Refuse the buttons whose action cannot be taken.
+///
+/// Only the marker: the greying that used to accompany it is the skin's, from
+/// `.sk-button:disabled .sk-text`, so this no longer walks each button's
+/// children to repaint them.
 fn update_button_enable(
     facts: TelehubFacts,
     buttons: Query<(Entity, &TelehubAction)>,
     disabled: Query<(), With<InteractionDisabled>>,
-    children: Query<&Children>,
-    mut texts: Query<&mut TextColor>,
     mut commands: Commands,
 ) {
     let TelehubFacts {
@@ -772,16 +783,8 @@ fn update_button_enable(
         } else if !enabled && !is_disabled {
             commands.entity(entity).insert(InteractionDisabled);
         }
-        let want = if enabled { LABEL_COLOR } else { DISABLED_COLOR };
-        if let Ok(label) = children.get(entity) {
-            for child in label.iter() {
-                if let Ok(mut color) = texts.get_mut(child)
-                    && color.0 != want
-                {
-                    color.0 = want;
-                }
-            }
-        }
+        // Nothing to paint: the marker above is what `.sk-button:disabled
+        // .sk-text` selects on, so the caption greys from the cascade.
     }
 }
 

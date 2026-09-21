@@ -61,10 +61,12 @@ use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::EditableText;
+use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
     AgentKey, AvatarPickerResult, Command, QueryId, SlCommand, SlEvent, SlIdentity, SlSessionEvent,
     Uuid,
 };
+use sl_viewer_ui_core::skin::{ACTIVE_CLASS, LIST_ROW_CLASS};
 
 use crate::floater::{
     Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterHost, FloaterOp, FloaterOwner,
@@ -97,9 +99,6 @@ const NOT_FOUND_KEY: &str = "avatar-picker-not-found";
 
 /// The username column's colour — dimmer than the name it trails.
 const USERNAME_COLOR: Color = SkinPalette::FALLBACK.text_muted;
-
-/// A selected result row's background.
-const SELECTED_ROW_BACKGROUND: Color = Color::srgba(0.24, 0.34, 0.52, 0.55);
 
 /// The result list's viewport height, in logical pixels.
 const LIST_HEIGHT: f32 = 220.0;
@@ -842,11 +841,9 @@ fn rebuild_picker_list(
                         align_items: AlignItems::Center,
                         ..row(Val::Px(8.0))
                     },
-                    BackgroundColor(if selected {
-                        SELECTED_ROW_BACKGROUND
-                    } else {
-                        Color::NONE
-                    }),
+                    ClassList::new_with_classes(
+                        core::iter::once(LIST_ROW_CLASS).chain(selected.then_some(ACTIVE_CLASS)),
+                    ),
                     Pickable::default(),
                     Name::new("avatar-picker-row"),
                     ChildOf(ui.list),

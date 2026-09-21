@@ -53,11 +53,13 @@
 //! `llfloatergetblockedobjectname`, `menu_people_blocked_{gear,plus,view}.xml`,
 //! `floater_mute_object.xml`.
 
+use crate::skin::{ACTIVE_CLASS, set_state_class};
 use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::text::EditableText;
+use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{AgentKey, Command, MuteEntry, MuteFlags, MuteType, SlCommand, Uuid};
 
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
@@ -111,9 +113,6 @@ const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// The list viewport backdrop.
 const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
-
-/// A selected row's background highlight.
-const SELECTED_BACKGROUND: Color = Color::srgba(0.24, 0.34, 0.52, 0.55);
 
 /// An action button's background.
 const ACTION_BACKGROUND: Color = Color::srgb(0.24, 0.29, 0.38);
@@ -828,7 +827,7 @@ fn bind_blocked_rows(
         &TableRowCells,
         &mut BoundBlocked,
     )>,
-    mut backgrounds: Query<&mut BackgroundColor>,
+    mut classes: Query<&mut ClassList>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
 ) {
     let Some(ui) = ui else {
@@ -859,15 +858,12 @@ fn bind_blocked_rows(
         if let Some(cell) = cells.cell(COL_TYPE) {
             set_table_cell(&mut texts, cell, &type_label, DIM_LABEL_COLOR);
         }
-        if let Ok(mut background) = backgrounds.get_mut(row_entity) {
-            let wanted = if data.is_some() && selected.0 == bound.0 {
-                SELECTED_BACKGROUND
-            } else {
-                Color::NONE
-            };
-            if background.0 != wanted {
-                background.0 = wanted;
-            }
+        if let Ok(mut classes) = classes.get_mut(row_entity) {
+            set_state_class(
+                &mut classes,
+                ACTIVE_CLASS,
+                data.is_some() && selected.0 == bound.0,
+            );
         }
     }
 }

@@ -196,8 +196,11 @@ const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 /// A dim label / secondary text colour.
 const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
-/// A disabled control's text colour.
-const DISABLED_COLOR: Color = Color::srgb(0.45, 0.47, 0.52);
+/// The skin class on an action button, so `.sk-button:disabled` greys it.
+const BUTTON_CLASS: &str = "sk-button";
+
+/// The skin class on that button's caption — the other end of the selector.
+const LABEL_CLASS: &str = "sk-text";
 
 /// An action button's background.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
@@ -1085,7 +1088,11 @@ fn spawn_action_button(
         .tab_index(tab_index)
         .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
         .label_color(LABEL_COLOR)
-        .font_size(FONT_SIZE),
+        .font_size(FONT_SIZE)
+        // Both ends of `.sk-button:disabled .sk-text`, which greys a refused
+        // action now that nothing here repaints its caption.
+        .class(BUTTON_CLASS)
+        .label_class(LABEL_CLASS),
     )
     .button;
     commands
@@ -1589,18 +1596,15 @@ struct TopObjectsActionOut<'w> {
     tracking: ResMut<'w, MapTracking>,
 }
 
-/// The controls a top-objects enable pass greys, bundled as one
-/// [`SystemParam`](bevy::ecs::system::SystemParam): the action buttons, which
-/// already carry the disabled marker, and the children whose label colour
-/// follows.
+/// The controls a top-objects enable pass refuses, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam). Only the buttons and their
+/// marker: the greying that used to follow is the skin's.
 #[derive(Debug, bevy::ecs::system::SystemParam)]
 struct TopObjectsButtons<'w, 's> {
     /// The action buttons and what each does.
     buttons: Query<'w, 's, (Entity, &'static TopObjectsAction)>,
     /// Which of them already carry the disabled marker.
     disabled: Query<'w, 's, (), With<InteractionDisabled>>,
-    /// Their children, whose label colour follows the gate.
-    children: Query<'w, 's, &'static Children>,
 }
 
 /// What a top-objects action reads besides its window, bundled as one
@@ -1624,14 +1628,9 @@ fn update_button_enable(
     regions: Query<&SlRegionIdentity, With<SlCurrentRegion>>,
     controls: TopObjectsButtons,
     host: FloaterHost,
-    mut texts: Query<&mut TextColor>,
     mut commands: Commands,
 ) {
-    let TopObjectsButtons {
-        buttons,
-        disabled,
-        children,
-    } = controls;
+    let TopObjectsButtons { buttons, disabled } = controls;
     let manage = can_manage(&regions);
     for (entity, action) in &buttons {
         let Some(state) = host.of(entity).and_then(|window| windows.get(window).ok()) else {
@@ -1644,16 +1643,7 @@ fn update_button_enable(
         } else if !enabled && !is_disabled {
             commands.entity(entity).insert(InteractionDisabled);
         }
-        let want = if enabled { LABEL_COLOR } else { DISABLED_COLOR };
-        if let Ok(label) = children.get(entity) {
-            for child in label.iter() {
-                if let Ok(mut color) = texts.get_mut(child)
-                    && color.0 != want
-                {
-                    color.0 = want;
-                }
-            }
-        }
+        // Nothing to paint: the marker above is what the skin selects on.
     }
 }
 
