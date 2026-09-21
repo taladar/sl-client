@@ -299,28 +299,27 @@ fn register_floater_settings(
             FLOATER_SECTION,
             &rect_key(id),
             SettingValue::Rect(encode_rect(geometry)),
-            "Window rectangle (logical px [left, top, right, bottom]); a zero-width rect is a \
-             content-sized window",
+            "setting-desc-floater-rect",
         );
         if !open_exempt {
             settings.register_hidden_in(
                 FLOATER_SECTION,
                 &visible_key(id),
                 SettingValue::Bool(shown.0),
-                "Whether the window is open",
+                "setting-desc-floater-visible",
             );
         }
         settings.register_hidden_in(
             FLOATER_SECTION,
             &minimized_key(id),
             SettingValue::Bool(geometry.minimized),
-            "Whether the window is collapsed to its title bar",
+            "setting-desc-floater-minimized",
         );
         settings.register_hidden_in(
             FLOATER_SECTION,
             &docked_key(id),
             SettingValue::Bool(geometry.docked),
-            "Whether the window is docked into its host",
+            "setting-desc-floater-docked",
         );
     }
 }
@@ -526,7 +525,7 @@ fn register_tab_split_settings(
             FLOATER_SECTION,
             &tab_split_key(&floater_id, strip.element),
             SettingValue::F32(width.0),
-            "Tab widget's strip / content split width (logical px)",
+            "setting-desc-floater-tab-split",
         );
         commands.entity(entity).insert(TabSplitRegistered);
     }

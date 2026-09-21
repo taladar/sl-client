@@ -104,49 +104,49 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         WORLD_MAP_SECTION,
         SETTING_SCALE,
         SettingValue::F32(world_map_math::WORLD_MAP_SCALE_DEFAULT),
-        "World-map zoom, in pixels per 256 m region (1-256)",
+        "setting-desc-WorldMapScale",
     );
     settings.register_in(
         WORLD_MAP_SECTION,
         SETTING_PEOPLE,
         SettingValue::Bool(true),
-        "Show avatar markers on the world map",
+        "setting-desc-WorldMapShowPeople",
     );
     settings.register_in(
         WORLD_MAP_SECTION,
         SETTING_INFOHUBS,
         SettingValue::Bool(true),
-        "Show telehub / infohub markers on the world map",
+        "setting-desc-WorldMapShowInfohubs",
     );
     settings.register_in(
         WORLD_MAP_SECTION,
         SETTING_LAND_SALE,
         SettingValue::Bool(true),
-        "Show land-for-sale markers on the world map",
+        "setting-desc-WorldMapShowLandForSale",
     );
     settings.register_in(
         WORLD_MAP_SECTION,
         SETTING_EVENTS,
         SettingValue::Bool(true),
-        "Show event markers on the world map",
+        "setting-desc-WorldMapShowEvents",
     );
     settings.register_in(
         WORLD_MAP_SECTION,
         SETTING_MATURE_EVENTS,
         SettingValue::Bool(false),
-        "Show Moderate event markers on the world map",
+        "setting-desc-WorldMapShowMatureEvents",
     );
     settings.register_in(
         WORLD_MAP_SECTION,
         SETTING_ADULT_EVENTS,
         SettingValue::Bool(false),
-        "Show Adult event markers on the world map",
+        "setting-desc-WorldMapShowAdultEvents",
     );
     settings.register_in(
         WORLD_MAP_SECTION,
         SETTING_REGION_NAMES,
         SettingValue::Bool(true),
-        "Show region names on the world map (region-detail zoom)",
+        "setting-desc-WorldMapShowRegionNames",
     );
 }
 
@@ -2710,32 +2710,36 @@ const COND_ZOOM_GRID: &str = "worldmap-zoom-grid";
 
 /// The Show submenu (marker layer toggles).
 static WORLD_MAP_SHOW_MENU: MenuDef = MenuDef {
-    label: "Show",
+    label_key: "menu-world-map-show",
     items: &[
         MenuItemDef::Command(
-            MenuCommand::new("People", "toggle-people").checked_when(COND_SHOW_PEOPLE),
+            MenuCommand::new("menu-world-map-people", "toggle-people")
+                .checked_when(COND_SHOW_PEOPLE),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Telehubs", "toggle-infohubs").checked_when(COND_SHOW_INFOHUBS),
+            MenuCommand::new("menu-world-map-telehubs", "toggle-infohubs")
+                .checked_when(COND_SHOW_INFOHUBS),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Land for Sale", "toggle-land-sale").checked_when(COND_SHOW_LAND_SALE),
+            MenuCommand::new("menu-world-map-land-for-sale", "toggle-land-sale")
+                .checked_when(COND_SHOW_LAND_SALE),
         ),
         MenuItemDef::Separator,
         MenuItemDef::Command(
-            MenuCommand::new("Events", "toggle-events").checked_when(COND_SHOW_EVENTS),
+            MenuCommand::new("menu-world-map-events", "toggle-events")
+                .checked_when(COND_SHOW_EVENTS),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Moderate Events", "toggle-mature-events")
+            MenuCommand::new("menu-world-map-moderate-events", "toggle-mature-events")
                 .checked_when(COND_SHOW_MATURE_EVENTS),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Adult Events", "toggle-adult-events")
+            MenuCommand::new("menu-world-map-adult-events", "toggle-adult-events")
                 .checked_when(COND_SHOW_ADULT_EVENTS),
         ),
         MenuItemDef::Separator,
         MenuItemDef::Command(
-            MenuCommand::new("Region Names", "toggle-region-names")
+            MenuCommand::new("menu-world-map-region-names", "toggle-region-names")
                 .checked_when(COND_SHOW_REGION_NAMES),
         ),
     ],
@@ -2743,24 +2747,31 @@ static WORLD_MAP_SHOW_MENU: MenuDef = MenuDef {
 
 /// The Zoom submenu (radio checks on the preset in effect).
 static WORLD_MAP_ZOOM_MENU: MenuDef = MenuDef {
-    label: "Zoom",
+    label_key: "menu-world-map-zoom",
     items: &[
-        MenuItemDef::Command(MenuCommand::new("Close", "zoom-close").checked_when(COND_ZOOM_CLOSE)),
         MenuItemDef::Command(
-            MenuCommand::new("Medium", "zoom-medium").checked_when(COND_ZOOM_MEDIUM),
+            MenuCommand::new("menu-world-map-close", "zoom-close").checked_when(COND_ZOOM_CLOSE),
         ),
-        MenuItemDef::Command(MenuCommand::new("Far", "zoom-far").checked_when(COND_ZOOM_FAR)),
         MenuItemDef::Command(
-            MenuCommand::new("Whole Grid", "zoom-grid").checked_when(COND_ZOOM_GRID),
+            MenuCommand::new("menu-world-map-medium", "zoom-medium").checked_when(COND_ZOOM_MEDIUM),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-world-map-far", "zoom-far").checked_when(COND_ZOOM_FAR),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-world-map-whole-grid", "zoom-grid").checked_when(COND_ZOOM_GRID),
         ),
     ],
 };
 
 /// The world-map context menu.
 static WORLD_MAP_MENU: MenuDef = MenuDef {
-    label: "World Map",
+    label_key: "menu-world-map-world-map",
     items: &[
-        MenuItemDef::Command(MenuCommand::new("Center on Me", "center-self")),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-world-map-center-on-me",
+            "center-self",
+        )),
         MenuItemDef::Separator,
         MenuItemDef::Submenu(&WORLD_MAP_ZOOM_MENU),
         MenuItemDef::Submenu(&WORLD_MAP_SHOW_MENU),

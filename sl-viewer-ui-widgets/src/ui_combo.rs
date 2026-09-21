@@ -31,6 +31,7 @@ use bevy::ui_widgets::popover::{Popover, PopoverAlign, PopoverPlacement, Popover
 use bevy_flair::style::components::ClassList;
 
 use sl_viewer_ui_core::i18n::Translated;
+use sl_viewer_ui_core::skin_palette::{SkinColors, SkinPalette};
 use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems, row};
 use sl_viewer_ui_core::ui_font::UiFont;
 
@@ -38,39 +39,13 @@ use sl_viewer_ui_core::ui_font::UiFont;
 /// ([`crate::menu`]'s `10_000`) so a menu opened over a combo still wins.
 const COMBO_Z_INDEX: i32 = 9_500;
 
-/// The anchor button's border colour (the bordered-button idiom shared with the
-/// build tab's cycle stand-ins).
-const COMBO_BORDER: Color = Color::srgba(0.4, 0.4, 0.45, 1.0);
+/// The skin class on the open popover — the same framed surface a drop-down
+/// menu is, which is why it takes the menu's own class.
+const POPOVER_CLASS: &str = "sk-menu";
 
-/// The anchor button's background.
-const COMBO_BACKGROUND: Color = Color::srgba(0.18, 0.18, 0.2, 1.0);
-
-/// The open popover's background.
-const POPOVER_BACKGROUND: Color = Color::srgba(0.14, 0.14, 0.16, 1.0);
-
-/// The popover's border colour.
-const POPOVER_BORDER: Color = Color::srgba(0.42, 0.42, 0.48, 1.0);
-
-/// A popover row's colour when the pointer is over it.
-const ROW_HOVER: Color = Color::srgba(0.28, 0.34, 0.46, 1.0);
-
-/// The value / option text colour.
-const TEXT_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
-
-/// A [disabled](bevy::ui::InteractionDisabled) combo's value / arrow text colour
-/// — a muted grey matching the disabled text field, so a combo the user cannot
-/// change reads as disabled while its selection stays legible.
-const DISABLED_TEXT_COLOR: Color = Color::srgb(0.45, 0.47, 0.52);
-
-/// A disabled combo's background.
-const DISABLED_BACKGROUND: Color = Color::srgba(0.12, 0.12, 0.14, 1.0);
-
-/// A disabled combo's border.
-const DISABLED_BORDER: Color = Color::srgba(0.28, 0.28, 0.32, 1.0);
-
-/// A [separator](ComboRow::Separator) row's rule — the menu popups' divider
-/// colour, since a combo popover and a menu popup are the same surface.
-const SEPARATOR_COLOR: Color = Color::srgb(0.30, 0.34, 0.42);
+/// The skin class on a [separator](ComboRow::Separator) row's rule — the menu
+/// popups' divider, since a combo popover and a menu popup are one surface.
+const SEPARATOR_CLASS: &str = "sk-menu-separator";
 
 /// The dropdown arrow glyph.
 const ARROW_GLYPH: &str = "\u{25be}";
@@ -281,6 +256,9 @@ impl Plugin for ComboWidgetPlugin {
 /// [`ComboSelection`] (the source of truth a consumer reads / writes) and a
 /// [`ComboChanged`] on each user pick.
 pub fn spawn_combo(commands: &mut Commands, parent: Entity, spec: &ComboSpec) -> Entity {
+    // The skinless fallback; `reflect_combo_disabled` repaints the anchor from
+    // the live palette every frame, and the value text carries a skin class.
+    let fallback = SkinPalette::default();
     let active = spec.resolved_active();
     let anchor = commands
         .spawn((
@@ -295,8 +273,8 @@ pub fn spawn_combo(commands: &mut Commands, parent: Entity, spec: &ComboSpec) ->
                 column_gap: Val::Px(8.0),
                 ..row(Val::ZERO)
             },
-            BorderColor::all(COMBO_BORDER),
-            BackgroundColor(COMBO_BACKGROUND),
+            BorderColor::all(fallback.control_border),
+            BackgroundColor(fallback.control_bg),
             ComboSelection {
                 element: spec.element,
                 active,
@@ -318,7 +296,7 @@ pub fn spawn_combo(commands: &mut Commands, parent: Entity, spec: &ComboSpec) ->
         .spawn((
             Text::default(),
             UiFont::Sans.at(spec.font_size),
-            TextColor(TEXT_COLOR),
+            TextColor(fallback.text_primary),
             ClassList::new_with_classes([VALUE_CLASS]),
             ComboValueText,
             Pickable::IGNORE,
@@ -331,7 +309,7 @@ pub fn spawn_combo(commands: &mut Commands, parent: Entity, spec: &ComboSpec) ->
     commands.spawn((
         Text::new(ARROW_GLYPH),
         UiFont::Sans.at(spec.font_size),
-        TextColor(TEXT_COLOR),
+        TextColor(fallback.text_primary),
         Pickable::IGNORE,
         Name::new(format!("{}:combo-arrow", spec.element)),
         ChildOf(anchor),
@@ -417,6 +395,11 @@ fn build_combo_popover(
     options: &ComboOptions,
     states: Option<&ComboRowStates>,
 ) {
+    // Built from a `&mut Commands` with no world access, so the skinless
+    // fallback; `.sk-menu` and `.sk-menu-separator` repaint the surface, and
+    // a row's text stays Rust-painted because the selectable / unselectable
+    // greying must survive the cascade.
+    let palette = SkinPalette::default();
     let popup = commands
         .spawn((
             Node {
@@ -443,8 +426,9 @@ fn build_combo_popover(
                 ],
                 window_margin: 4.0,
             },
-            BackgroundColor(POPOVER_BACKGROUND),
-            BorderColor::all(POPOVER_BORDER),
+            BackgroundColor(SkinPalette::default().surface_bg),
+            BorderColor::all(SkinPalette::default().surface_border),
+            ClassList::new_with_classes([POPOVER_CLASS]),
             GlobalZIndex(COMBO_Z_INDEX),
             // Escape a clipping ancestor (the build floater's content slot) so the
             // popover draws and clicks in full past the floater edge — the menu
@@ -493,7 +477,8 @@ fn build_combo_popover(
                     height: Val::Px(1.0),
                     ..Default::default()
                 },
-                BackgroundColor(SEPARATOR_COLOR),
+                BackgroundColor(palette.surface_border),
+                ClassList::new_with_classes([SEPARATOR_CLASS]),
                 Pickable::IGNORE,
                 ChildOf(row_entity),
             ));
@@ -503,9 +488,9 @@ fn build_combo_popover(
             Text::default(),
             UiFont::Sans.at(options.font_size),
             TextColor(if state.is_selectable() {
-                TEXT_COLOR
+                palette.text_primary
             } else {
-                DISABLED_TEXT_COLOR
+                palette.text_disabled
             }),
             Pickable::IGNORE,
             ChildOf(row_entity),
@@ -528,10 +513,11 @@ fn build_combo_popover(
 /// Highlight a popover row under the pointer.
 fn hover_combo_option(
     over: On<Pointer<Over>>,
+    palette: SkinColors,
     mut rows: Query<&mut BackgroundColor, With<ComboOption>>,
 ) {
     if let Ok(mut bg) = rows.get_mut(over.entity) {
-        bg.0 = ROW_HOVER;
+        bg.0 = palette.get().control_bg_hover;
     }
 }
 
@@ -696,6 +682,7 @@ fn apply_combo_selection(
 /// a consumer disables a combo the same way it disables a text field (adding the
 /// marker), and the widget reflects it.
 fn reflect_combo_disabled(
+    palette: SkinColors,
     mut anchors: Query<
         (
             &Children,
@@ -707,11 +694,20 @@ fn reflect_combo_disabled(
     >,
     mut texts: Query<&mut TextColor>,
 ) {
+    let palette = palette.get();
     for (children, disabled, mut background, mut border) in &mut anchors {
         let (want_bg, want_border, want_text) = if disabled {
-            (DISABLED_BACKGROUND, DISABLED_BORDER, DISABLED_TEXT_COLOR)
+            (
+                palette.control_bg_disabled,
+                palette.control_border_disabled,
+                palette.text_disabled,
+            )
         } else {
-            (COMBO_BACKGROUND, COMBO_BORDER, TEXT_COLOR)
+            (
+                palette.control_bg,
+                palette.control_border,
+                palette.text_primary,
+            )
         };
         if background.0 != want_bg {
             background.0 = want_bg;

@@ -59,6 +59,7 @@ use bevy::input_focus::{FocusCause, FocusedInput, InputFocus};
 use bevy::prelude::*;
 use bevy::ui::InteractionDisabled;
 use bevy::ui_widgets::ValueChange;
+use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 use sl_viewer_ui_core::i18n::Translated;
 use sl_viewer_ui_core::ui_font::UiFont;
@@ -114,7 +115,7 @@ const DISC_BORDER: Color = Color::srgba(0.40, 0.44, 0.54, 1.0);
 const DISABLED_BORDER: Color = Color::srgba(0.26, 0.28, 0.33, 1.0);
 
 /// The compass letters' colour.
-const LABEL_COLOR: Color = Color::srgb(0.62, 0.66, 0.74);
+const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// The sun marker's colour.
 const SUN_COLOR: Color = Color::srgb(1.0, 0.85, 0.35);

@@ -30,6 +30,7 @@
 //! Reference (Firestorm, read-only): `fsfloatersearch.cpp` (legacy search),
 //! `floater_fs_search.xml` + `panel_fs_search_legacy_*.xml`.
 
+use crate::skin_palette::SkinPalette;
 use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use bevy::text::EditableText;
@@ -112,7 +113,7 @@ const DETAIL_WIDTH: f32 = 300.0;
 const SL_SEARCH_URL: &str = "https://search.secondlife.com/";
 
 /// A label colour.
-const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A dim secondary colour.
 const SECONDARY_COLOR: Color = Color::srgb(0.72, 0.76, 0.84);
@@ -1084,13 +1085,13 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         SEARCH_SECTION,
         SETTING_ONLINE_ONLY,
         SettingValue::Bool(false),
-        "Restrict People search to online avatars",
+        "setting-desc-SearchPeopleOnlineOnly",
     );
     settings.register_in(
         SEARCH_SECTION,
         SETTING_LAND_ASCENDING,
         SettingValue::Bool(false),
-        "Sort Land search results ascending",
+        "setting-desc-SearchLandAscending",
     );
     // Per-tab maturity: General / Moderate on by default, Adult off (the
     // reference keeps a separate maturity filter per category).
@@ -1100,19 +1101,19 @@ pub fn register_settings(settings: &mut ViewerSettings) {
                 SEARCH_SECTION,
                 general,
                 SettingValue::Bool(true),
-                "Include General (PG) results in this search category",
+                "setting-desc-search-include-general",
             );
             settings.register_in(
                 SEARCH_SECTION,
                 moderate,
                 SettingValue::Bool(true),
-                "Include Moderate (Mature) results in this search category",
+                "setting-desc-search-include-moderate",
             );
             settings.register_in(
                 SEARCH_SECTION,
                 adult,
                 SettingValue::Bool(false),
-                "Include Adult results in this search category",
+                "setting-desc-search-include-adult",
             );
         }
     }

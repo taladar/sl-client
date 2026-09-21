@@ -209,6 +209,8 @@ pub(crate) use sl_viewer_notices::linkified_text;
 pub(crate) use sl_viewer_notices::load_url;
 pub(crate) use sl_viewer_ui_context_menus::land_menu;
 pub(crate) use sl_viewer_ui_core::i18n;
+#[cfg(test)]
+mod i18n_keys;
 pub(crate) use sl_viewer_ui_widgets::menu;
 pub(crate) use sl_viewer_world_objects::material_preview;
 pub(crate) use sl_viewer_world_scene::lights;
@@ -340,6 +342,7 @@ mod net_diagnostics;
 // Tracy client (and its `tracing-tracy` bridge) is present.
 #[cfg(feature = "profile-tracy")]
 mod tracy_plots;
+pub(crate) use sl_viewer_ui_core::skin_palette;
 pub(crate) use sl_viewer_ui_core::ui;
 pub(crate) use sl_viewer_ui_core::ui_element;
 pub(crate) use sl_viewer_ui_widgets::ui_color_picker;

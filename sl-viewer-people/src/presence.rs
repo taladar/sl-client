@@ -125,49 +125,49 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         PRESENCE_SECTION,
         SETTING_AUTORESPOND_MODE,
         SettingValue::Bool(false),
-        "Answer incoming IMs with the autorespond reply",
+        "setting-desc-AutorespondMode",
     );
     settings.register_in(
         PRESENCE_SECTION,
         SETTING_AUTORESPOND_NON_FRIENDS_MODE,
         SettingValue::Bool(false),
-        "Answer incoming IMs from non-friends with the autorespond reply",
+        "setting-desc-AutorespondNonFriendsMode",
     );
     settings.register_in(
         PRESENCE_SECTION,
         SETTING_SEND_AWAY_RESPONSE,
         SettingValue::Bool(false),
-        "Answer incoming IMs while away with the away reply",
+        "setting-desc-SendAwayAvatarResponse",
     );
     settings.register_in(
         PRESENCE_SECTION,
         SETTING_AWAY_RESPONSE,
         SettingValue::String(AWAY_RESPONSE_DEFAULT.to_owned()),
-        "The automatic reply sent to IMs while away",
+        "setting-desc-AwayAvatarResponse",
     );
     settings.register_in(
         PRESENCE_SECTION,
         SETTING_SEND_MUTED_RESPONSE,
         SettingValue::Bool(false),
-        "Tell a blocked resident their IM was not delivered",
+        "setting-desc-SendMutedAvatarResponse",
     );
     settings.register_in(
         PRESENCE_SECTION,
         SETTING_MUTED_RESPONSE,
         SettingValue::String(MUTED_RESPONSE_DEFAULT.to_owned()),
-        "The automatic reply sent to a blocked resident's IM",
+        "setting-desc-MutedAvatarResponse",
     );
     settings.register_in(
         PRESENCE_SECTION,
         SETTING_SIT_ON_AWAY,
         SettingValue::Bool(false),
-        "Sit the avatar down while away, standing back up on return",
+        "setting-desc-AvatarSitOnAway",
     );
     settings.register_in(
         PRESENCE_SECTION,
         SETTING_QUIT_AFTER_AFK,
         SettingValue::U32(0),
-        "Seconds of being away before the viewer logs out (0 = never)",
+        "setting-desc-QuitAfterSecondsOfAFK",
     );
 }
 

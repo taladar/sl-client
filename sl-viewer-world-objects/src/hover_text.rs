@@ -72,9 +72,9 @@ pub(crate) const DEFAULT_PRIM_TEXT_MAX_DISTANCE_METRES: f32 = 64.0;
 /// extremely long", unlike the name tag's 298 px chat-bubble wrap.
 const HOVER_MAX_WIDTH_PX: f32 = 1000.0;
 
-/// Master toggle: show floating object text at all (the reference's
-/// `RenderHUDText` / hover-text preference; default on).
-pub const SETTING_SHOW_HOVER_TEXT: &str = "ShowHoverText";
+// The master toggle is bound by the preferences general tab, so the key lives
+// in `sl-viewer-settings`; the default and the drawing stay here.
+pub use sl_viewer_settings::keys::hover_text::SETTING_SHOW_HOVER_TEXT;
 
 /// The floating-text fade-start distance, metres (a float setting).
 pub(crate) const SETTING_HOVER_FADE_START: &str = "HoverTextFadeDistance";
@@ -94,25 +94,25 @@ pub fn register_settings(settings: &mut sl_viewer_settings::ViewerSettings) {
         HOVER_TEXT_SECTION,
         SETTING_SHOW_HOVER_TEXT,
         sl_settings::SettingValue::Bool(true),
-        "Show floating text (llSetText) over in-world objects",
+        "setting-desc-ShowHoverText",
     );
     settings.register_in(
         HOVER_TEXT_SECTION,
         SETTING_HOVER_FADE_START,
         sl_settings::SettingValue::F32(DEFAULT_HOVER_FADE_START_METRES),
-        "Distance in metres at which floating object text starts to fade",
+        "setting-desc-HoverTextFadeDistance",
     );
     settings.register_in(
         HOVER_TEXT_SECTION,
         SETTING_HOVER_FADE_RANGE,
         sl_settings::SettingValue::F32(DEFAULT_HOVER_FADE_RANGE_METRES),
-        "Metres past the fade start at which floating object text is hidden",
+        "setting-desc-HoverTextFadeRange",
     );
     settings.register_in(
         HOVER_TEXT_SECTION,
         SETTING_PRIM_TEXT_MAX_DISTANCE,
         sl_settings::SettingValue::F32(DEFAULT_PRIM_TEXT_MAX_DISTANCE_METRES),
-        "Hard maximum distance in metres at which floating object text is drawn",
+        "setting-desc-PrimTextMaxDrawDistance",
     );
 }
 

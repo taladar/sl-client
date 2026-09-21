@@ -113,6 +113,7 @@
 //! Reference (Firestorm, read-only): `indra/llui/lltabcontainer.{h,cpp}`
 //! (`LLTabContainer`).
 
+use bevy::ecs::system::SystemParam;
 use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::picking::hover::HoverMap;
@@ -122,11 +123,15 @@ use bevy::ui_widgets::{
     Button, ControlOrientation, RadioButton, RadioGroup, Scrollbar, ScrollbarThumb, ValueChange,
 };
 
+use bevy_flair::style::components::ClassList;
 use sl_viewer_ui_core::ui::{
     FocusRevealBounds, HideWith, PanelVisibility, TabStopsFollowVisibility, UiDirection, column,
     row,
 };
 use sl_viewer_ui_core::ui_element::{ElementCx, TextMayClip, UiAction};
+
+use sl_viewer_ui_core::skin::{SCROLLBAR_THUMB_CLASS, SCROLLBAR_TRACK_CLASS};
+use sl_viewer_ui_core::skin_palette::{SkinColors, SkinPalette};
 use sl_viewer_ui_core::ui_ellipsis::{RevealEllipsis, spawn_ellipsis_marker};
 use sl_viewer_ui_core::ui_font::UiFont;
 
@@ -159,22 +164,6 @@ const TAB_STRIP_MAX_WIDTH: f32 = 640.0;
 /// fixed size, from its floater). About seven tabs at the default size.
 const TAB_STRIP_MAX_HEIGHT: f32 = 220.0;
 
-/// An inactive tab's background — recessed and clearly darker than the active
-/// one, so the selected tab reads at a glance even without focus.
-const TAB_INACTIVE_BACKGROUND: Color = Color::srgb(0.11, 0.13, 0.17);
-
-/// The active tab's background — the same shade as the panel it fronts
-/// ([`PANEL_BACKGROUND`]), so the reference-viewer look of the selected tab
-/// merging into its content reads.
-const TAB_ACTIVE_BACKGROUND: Color = Color::srgb(0.19, 0.23, 0.31);
-
-/// An inactive tab's border.
-const TAB_BORDER: Color = Color::srgb(0.28, 0.33, 0.42);
-
-/// The active tab's border — a bright accent, the loudest single "this one is
-/// selected" signal, independent of keyboard focus.
-const TAB_ACTIVE_BORDER: Color = Color::srgb(0.52, 0.68, 0.95);
-
 /// The radius of a tab's rounded corners, in logical pixels. Applied only to the
 /// two corners on the edge **away** from the content ([`tab_corner_radius`]), so
 /// a tab reads as a tab rather than a plain button.
@@ -184,23 +173,26 @@ const TAB_CORNER_RADIUS: f32 = 8.0;
 /// ellipsis. See [`TabSpec::ellipsis`] for why this is configurable.
 pub const DEFAULT_ELLIPSIS: &str = "…";
 
-/// A tab label's colour.
-pub const TAB_LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+/// A tab label's colour — the skin's primary text role.
+///
+/// A tab strip is state-painted (`reflect_tab_disabled` greys a label the
+/// moment its strip is disabled), so its colours come from the palette rather
+/// than a CSS class, whose `color` would beat the Rust write.
+#[must_use]
+pub const fn tab_label_color(palette: &SkinPalette) -> Color {
+    palette.text_primary
+}
 
-/// A [disabled](bevy::ui::InteractionDisabled) tab's label / ellipsis colour —
-/// dimmed so a tab that will not switch reads as inert, matching the combo and
-/// text-field widgets' disabled text.
-const TAB_DISABLED_LABEL_COLOR: Color = Color::srgb(0.45, 0.47, 0.52);
+/// The skin class on the panel area — the "content" shade the active tab
+/// shares (`--card-bg`).
+const PANEL_CLASS: &str = "sk-tab-panel";
 
-/// The panel area's background — the "content" shade the active tab shares.
-const PANEL_BACKGROUND: Color = Color::srgb(0.19, 0.23, 0.31);
+/// The skin class on a gallery demo panel's heading — brighter than the body,
+/// so a tab switch (which swaps the heading) is unmistakable.
+const PANEL_HEADING_CLASS: &str = "sk-heading";
 
-/// A demo panel's text colour, for the gallery elements.
-const PANEL_TEXT_COLOR: Color = Color::WHITE;
-
-/// A gallery panel heading's colour — brighter than the body, so a tab switch
-/// (which swaps the heading) is unmistakable.
-const PANEL_HEADING_COLOR: Color = Color::srgb(0.70, 0.82, 1.0);
+/// The skin class on a gallery demo panel's body text.
+const PANEL_TEXT_CLASS: &str = "sk-text";
 
 /// The narrowest a resizable vertical strip may be dragged, in logical pixels —
 /// enough to keep a tab clickable even when every label is truncated to nothing.
@@ -217,11 +209,12 @@ const DIVIDER_THICKNESS: f32 = 8.0;
 /// centred on the bar so it reads as a handle, not just a seam.
 const DIVIDER_GRIP_LENGTH: f32 = 28.0;
 
-/// The divider handle's colour.
-const DIVIDER_COLOR: Color = Color::srgb(0.34, 0.41, 0.53);
+/// The skin class on the divider handle (`--divider`).
+const DIVIDER_CLASS: &str = "sk-divider";
 
-/// The divider grip's colour — brighter than the bar, so the handle stands out.
-const DIVIDER_GRIP_COLOR: Color = Color::srgb(0.60, 0.72, 0.92);
+/// The skin class on the divider's grip nub (`--accent`) — brighter than the
+/// bar, so the handle stands out.
+const DIVIDER_GRIP_CLASS: &str = "sk-divider-grip";
 
 /// The scrollbar's thickness, in logical pixels — the width of a vertical strip's
 /// bar (and the reserved gutter, so tabs do not jump when it appears).
@@ -230,12 +223,6 @@ const SCROLLBAR_THICKNESS: f32 = 10.0;
 /// The scrollbar thumb's shortest length, in logical pixels, so it stays grabbable
 /// when the content is far taller than the strip.
 const SCROLLBAR_MIN_THUMB: f32 = 24.0;
-
-/// The scrollbar track's colour.
-const SCROLLBAR_TRACK_COLOR: Color = Color::srgb(0.12, 0.14, 0.18);
-
-/// The scrollbar thumb's colour.
-const SCROLLBAR_THUMB_COLOR: Color = Color::srgb(0.40, 0.48, 0.60);
 
 /// How far one click of a horizontal strip's scroll arrow moves the tabs, in
 /// logical pixels.
@@ -753,7 +740,8 @@ fn spawn_tab_scrollbar(commands: &mut Commands, strip: Entity, viewport: Entity,
                 flex_shrink: 0.0,
                 ..default()
             },
-            BackgroundColor(SCROLLBAR_TRACK_COLOR),
+            BackgroundColor(SkinPalette::default().track_bg),
+            ClassList::new_with_classes([SCROLLBAR_TRACK_CLASS]),
             // Reserved space (hidden, not removed) so the tabs never jump when the
             // bar appears, which also keeps the overflow measurement stable.
             Visibility::Hidden,
@@ -766,7 +754,8 @@ fn spawn_tab_scrollbar(commands: &mut Commands, strip: Entity, viewport: Entity,
         ))
         .with_child((
             ScrollbarThumb::default(),
-            BackgroundColor(SCROLLBAR_THUMB_COLOR),
+            BackgroundColor(SkinPalette::default().scrollbar_thumb),
+            ClassList::new_with_classes([SCROLLBAR_THUMB_CLASS]),
         ));
 }
 
@@ -840,7 +829,7 @@ fn spawn_tab_scroll_arrow(
                 ARROW_TOWARD_START
             }),
             UiFont::Sans.at(spec.font_size),
-            TextColor(TAB_LABEL_COLOR),
+            TextColor(tab_label_color(&SkinPalette::default())),
             TabArrowGlyph { toward_end },
         ));
 }
@@ -924,7 +913,8 @@ pub fn spawn_tab_container(
             },
             // The "content" backdrop the active tab shares its shade with, so the
             // selected tab reads as merging into its panel.
-            BackgroundColor(PANEL_BACKGROUND),
+            BackgroundColor(SkinPalette::default().card_bg),
+            ClassList::new_with_classes([PANEL_CLASS]),
             Name::new(format!("{}:tab-panels", spec.element)),
             ChildOf(container),
         ))
@@ -1067,7 +1057,8 @@ pub fn fill_tab_container(
                     width: Val::Px(SCROLLBAR_THICKNESS),
                     ..default()
                 },
-                BackgroundColor(SCROLLBAR_TRACK_COLOR),
+                BackgroundColor(SkinPalette::default().track_bg),
+                ClassList::new_with_classes([SCROLLBAR_TRACK_CLASS]),
                 Visibility::Hidden,
                 TabScrollControl {
                     viewport: *panel,
@@ -1078,7 +1069,8 @@ pub fn fill_tab_container(
             ))
             .with_child((
                 ScrollbarThumb::default(),
-                BackgroundColor(SCROLLBAR_THUMB_COLOR),
+                BackgroundColor(SkinPalette::default().scrollbar_thumb),
+                ClassList::new_with_classes([SCROLLBAR_THUMB_CLASS]),
             ));
     }
 }
@@ -1110,6 +1102,10 @@ fn spawn_tab_button(
     label: &str,
     active: bool,
 ) -> Entity {
+    // A free function has no world access, so the tab spawns in the skinless
+    // fallback colours; `apply_programmatic_tab_selection` and
+    // `reflect_tab_disabled` repaint it from the live palette.
+    let fallback = SkinPalette::default();
     // A resizable strip is the one that clips and truncates its labels.
     let clip = spec.is_resizable();
     let button = commands
@@ -1146,8 +1142,8 @@ fn spawn_tab_button(
                 // square.
                 ..default()
             },
-            BorderColor::all(tab_border(active)),
-            BackgroundColor(tab_background(active)),
+            BorderColor::all(tab_border(&fallback, active)),
+            BackgroundColor(tab_background(&fallback, active)),
             Pickable::default(),
             Name::new(format!("{}:tab:{index}", spec.element)),
             ChildOf(parent),
@@ -1188,7 +1184,7 @@ fn spawn_tab_button(
                 Text::new(spec.initial_label(label)),
                 TextLayout::no_wrap(),
                 UiFont::Sans.at(spec.font_size),
-                TextColor(TAB_LABEL_COLOR),
+                TextColor(tab_label_color(&fallback)),
                 TabLabelText { strip, button },
                 // Natural width, so the container — not the text — is what shrinks
                 // and clips, and the text overflows the container's trailing edge.
@@ -1213,7 +1209,7 @@ fn spawn_tab_button(
                 Text::new(spec.initial_label(label)),
                 TextLayout::no_wrap(),
                 UiFont::Sans.at(spec.font_size),
-                TextColor(TAB_LABEL_COLOR),
+                TextColor(tab_label_color(&fallback)),
                 TabLabelText { strip, button },
                 Name::new(format!("{}:tab-label:{index}", spec.element)),
                 ChildOf(button),
@@ -1241,7 +1237,7 @@ fn spawn_tab_ellipsis(
         commands,
         button,
         spec.font_size,
-        TAB_LABEL_COLOR,
+        tab_label_color(&SkinPalette::default()),
         spec.ellipsis,
     );
     commands
@@ -1341,22 +1337,25 @@ fn scroll_tabs_with_wheel(
     }
 }
 
-/// A tab's background for its active state.
-const fn tab_background(active: bool) -> Color {
+/// A tab's background for its active state: the active tab takes the panel's
+/// own shade (`--card-bg`), so the reference-viewer look of the selected tab
+/// merging into its content reads; an inactive one is recessed onto the
+/// surface behind it.
+const fn tab_background(palette: &SkinPalette, active: bool) -> Color {
     if active {
-        TAB_ACTIVE_BACKGROUND
+        palette.card_bg
     } else {
-        TAB_INACTIVE_BACKGROUND
+        palette.surface_bg
     }
 }
 
 /// A tab's border for its active state — the bright accent is the loudest
 /// "selected" signal, independent of focus.
-const fn tab_border(active: bool) -> Color {
+const fn tab_border(palette: &SkinPalette, active: bool) -> Color {
     if active {
-        TAB_ACTIVE_BORDER
+        palette.accent
     } else {
-        TAB_BORDER
+        palette.surface_border
     }
 }
 
@@ -1381,7 +1380,8 @@ fn spawn_divider(
                 align_items: AlignItems::Center,
                 ..default()
             },
-            BackgroundColor(DIVIDER_COLOR),
+            BackgroundColor(SkinPalette::default().divider),
+            ClassList::new_with_classes([DIVIDER_CLASS]),
             Pickable::default(),
             TabDivider { strip },
             Name::new(format!("{}:tab-divider", spec.element)),
@@ -1397,7 +1397,8 @@ fn spawn_divider(
             border_radius: BorderRadius::all(Val::Px(DIVIDER_THICKNESS * 0.25)),
             ..default()
         },
-        BackgroundColor(DIVIDER_GRIP_COLOR),
+        BackgroundColor(SkinPalette::default().accent),
+        ClassList::new_with_classes([DIVIDER_GRIP_CLASS]),
         Pickable::IGNORE,
         Name::new(format!("{}:tab-divider-grip", spec.element)),
         ChildOf(divider),
@@ -1476,17 +1477,9 @@ fn apply_tab_strip_width(mut strips: Query<(&TabStripWidth, &mut Node), Changed<
 /// means a real change.
 fn on_tab_value_change(
     change: On<ValueChange<Entity>>,
-    mut commands: Commands,
+    palette: SkinColors,
     mut strips: Query<(&mut TabStrip, Has<bevy::ui::InteractionDisabled>)>,
-    mut buttons: Query<(
-        Entity,
-        &TabButton,
-        &mut BackgroundColor,
-        &mut BorderColor,
-        Has<bevy::ui::InteractionDisabled>,
-    )>,
-    panels: Query<(Entity, &TabPanel)>,
-    mut visibility: PanelVisibility,
+    mut paint: TabPaint,
     mut actions: MessageWriter<UiAction>,
 ) {
     let strip_id = change.source;
@@ -1498,7 +1491,8 @@ fn on_tab_value_change(
     // `ValueChange` written straight into the world. A value that is not one of
     // this strip's tabs (impossible in practice, but the query is fallible) is
     // ignored.
-    let Some((picked, tab_disabled)) = buttons
+    let Some((picked, tab_disabled)) = paint
+        .buttons
         .get(change.value)
         .ok()
         .map(|(_, button, _, _, disabled)| (button.index, disabled))
@@ -1520,14 +1514,7 @@ fn on_tab_value_change(
     strip.active = picked;
     let element = strip.element;
 
-    reconcile_tab_selection(
-        strip_id,
-        picked,
-        &mut buttons,
-        &panels,
-        &mut visibility,
-        &mut commands,
-    );
+    paint.reconcile(strip_id, picked, &palette.get());
 
     actions.write(UiAction {
         element,
@@ -1535,67 +1522,86 @@ fn on_tab_value_change(
     });
 }
 
-/// Reconcile everything derived from a strip's [`TabStrip::active`] — the
-/// [`Checked`] flags, each tab's highlight [`BackgroundColor`] / [`BorderColor`],
-/// and its panels' [`Visibility`] — to the given `active` index. The single place
-/// these are written, shared by the click / arrow observer
-/// ([`on_tab_value_change`]) and the programmatic-selection system
-/// ([`apply_programmatic_tab_selection`]). Every write is guarded, so a settled
-/// strip is not re-touched.
-///
-/// A panel's `Visibility` is written through [`PanelVisibility`] rather than
-/// here, because hiding a panel is not only a `Visibility`: `bevy_input_focus`
-/// consults neither `Visibility` nor `Display`, so a panel switched away from
-/// keeps its tab stops and `Tab` walks into it. That is the same leak the
-/// scaffold's `UiPanelShown` parks, and it is parked in the same place.
-fn reconcile_tab_selection(
-    strip_id: Entity,
-    active: usize,
-    buttons: &mut Query<(
-        Entity,
-        &TabButton,
-        &mut BackgroundColor,
-        &mut BorderColor,
-        Has<bevy::ui::InteractionDisabled>,
-    )>,
-    panels: &Query<(Entity, &TabPanel)>,
-    visibility: &mut PanelVisibility,
-    commands: &mut Commands,
-) {
-    for (button, tab, mut background, mut border, _disabled) in buttons.iter_mut() {
-        if tab.strip != strip_id {
-            continue;
-        }
-        let is_active = tab.index == active;
-        let wanted_background = tab_background(is_active);
-        if background.0 != wanted_background {
-            background.0 = wanted_background;
-        }
-        let wanted_border = BorderColor::all(tab_border(is_active));
-        if *border != wanted_border {
-            *border = wanted_border;
-        }
-        if is_active {
-            commands.entity(button).insert(Checked);
-        } else {
-            commands.entity(button).remove::<Checked>();
-        }
-    }
+/// Everything a strip's selection is painted into, as one bundle: the tab
+/// boxes, their panels, and the panel-visibility helper that parks their tab
+/// stops. Both writers — the click / arrow observer ([`on_tab_value_change`])
+/// and the programmatic / skin pass ([`apply_programmatic_tab_selection`]) —
+/// take this rather than five parameters each, and [`TabPaint::reconcile`] is
+/// the one place any of it is written.
+#[derive(SystemParam)]
+struct TabPaint<'w, 's> {
+    /// Every tab box: its strip and index, and the two paints its state moves.
+    buttons: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static TabButton,
+            &'static mut BackgroundColor,
+            &'static mut BorderColor,
+            Has<bevy::ui::InteractionDisabled>,
+        ),
+    >,
+    /// The panels those tabs front.
+    panels: Query<'w, 's, (Entity, &'static TabPanel)>,
+    /// Shows / hides a panel, parking its tab stops with it.
+    visibility: PanelVisibility<'w, 's>,
+    /// The [`Checked`] flag, which is deferred.
+    commands: Commands<'w, 's>,
+}
 
-    // Collected first: the walk `set_shown` does reads `Children` and writes
-    // `Visibility`, which it cannot do while this query is still iterating.
-    let switched: Vec<(Entity, bool)> = panels
-        .iter()
-        .filter(|(_, panel)| panel.strip == strip_id)
-        .map(|(entity, panel)| (entity, panel.index == active))
-        .collect();
-    for (panel, is_active) in switched {
-        visibility.set_shown(panel, is_active, HideWith::Visibility);
+impl TabPaint<'_, '_> {
+    /// Reconcile everything derived from a strip's [`TabStrip::active`] — the
+    /// [`Checked`] flags, each tab's highlight [`BackgroundColor`] /
+    /// [`BorderColor`], and its panels' [`Visibility`] — to the given `active`
+    /// index. Every write is guarded, so a settled strip is not re-touched and
+    /// re-running this after a skin change costs a compare per tab.
+    ///
+    /// A panel's `Visibility` is written through [`PanelVisibility`] rather
+    /// than here, because hiding a panel is not only a `Visibility`:
+    /// `bevy_input_focus` consults neither `Visibility` nor `Display`, so a
+    /// panel switched away from keeps its tab stops and `Tab` walks into it.
+    /// That is the same leak the scaffold's `UiPanelShown` parks, and it is
+    /// parked in the same place.
+    fn reconcile(&mut self, strip_id: Entity, active: usize, palette: &SkinPalette) {
+        for (button, tab, mut background, mut border, _disabled) in self.buttons.iter_mut() {
+            if tab.strip != strip_id {
+                continue;
+            }
+            let is_active = tab.index == active;
+            let wanted_background = tab_background(palette, is_active);
+            if background.0 != wanted_background {
+                background.0 = wanted_background;
+            }
+            let wanted_border = BorderColor::all(tab_border(palette, is_active));
+            if *border != wanted_border {
+                *border = wanted_border;
+            }
+            if is_active {
+                self.commands.entity(button).insert(Checked);
+            } else {
+                self.commands.entity(button).remove::<Checked>();
+            }
+        }
+
+        // Collected first: the walk `set_shown` does reads `Children` and
+        // writes `Visibility`, which it cannot do while this query is still
+        // iterating.
+        let switched: Vec<(Entity, bool)> = self
+            .panels
+            .iter()
+            .filter(|(_, panel)| panel.strip == strip_id)
+            .map(|(entity, panel)| (entity, panel.index == active))
+            .collect();
+        for (panel, is_active) in switched {
+            self.visibility
+                .set_shown(panel, is_active, HideWith::Visibility);
+        }
     }
 }
 
 /// Grey every tab label and ellipsis whose strip — or whose own button — is
-/// [disabled](bevy::ui::InteractionDisabled), and restore [`TAB_LABEL_COLOR`]
+/// [disabled](bevy::ui::InteractionDisabled), and restore [`tab_label_color`]
 /// when it is enabled again: the visible half of the disabled state, so a tab
 /// that refuses a click does not look like one that would answer it.
 ///
@@ -1605,14 +1611,16 @@ fn reconcile_tab_selection(
 ///
 /// Every write is guarded, so a settled strip costs a compare per label.
 fn reflect_tab_disabled(
+    palette: SkinColors,
     disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
     mut labels: Query<(&TabLabelText, &mut TextColor)>,
 ) {
+    let palette = palette.get();
     for (label, mut color) in &mut labels {
         let wanted = if disabled.contains(label.strip) || disabled.contains(label.button) {
-            TAB_DISABLED_LABEL_COLOR
+            palette.text_disabled
         } else {
-            TAB_LABEL_COLOR
+            tab_label_color(&palette)
         };
         if color.0 != wanted {
             color.0 = wanted;
@@ -1627,27 +1635,29 @@ fn reflect_tab_disabled(
 /// changed this frame, and every write is guarded, so re-running it right after a
 /// user selection (which also marks the strip changed) is a no-op.
 fn apply_programmatic_tab_selection(
-    strips: Query<(Entity, &TabStrip), Changed<TabStrip>>,
-    mut buttons: Query<(
-        Entity,
-        &TabButton,
-        &mut BackgroundColor,
-        &mut BorderColor,
-        Has<bevy::ui::InteractionDisabled>,
-    )>,
-    panels: Query<(Entity, &TabPanel)>,
-    mut visibility: PanelVisibility,
-    mut commands: Commands,
+    palette: SkinColors,
+    changed: Query<(Entity, &TabStrip), Changed<TabStrip>>,
+    every: Query<(Entity, &TabStrip)>,
+    mut paint: TabPaint,
 ) {
-    for (strip_id, strip) in &strips {
-        reconcile_tab_selection(
-            strip_id,
-            strip.active,
-            &mut buttons,
-            &panels,
-            &mut visibility,
-            &mut commands,
-        );
+    // A tab's highlight is Rust-painted from the role palette, so a skin or
+    // theme switch (or a `--watch-skins` reload) has to reach every strip, not
+    // only the ones whose selection moved — otherwise a strip nobody touches
+    // keeps the previous skin's colours indefinitely. The writes are guarded,
+    // so the wide pass costs a compare per tab and happens only on the frames
+    // the palette actually changes.
+    let repaint_all = palette.is_changed();
+    let palette = palette.get();
+    let strips: Vec<(Entity, usize)> = if repaint_all {
+        every.iter().map(|(id, strip)| (id, strip.active)).collect()
+    } else {
+        changed
+            .iter()
+            .map(|(id, strip)| (id, strip.active))
+            .collect()
+    };
+    for (strip_id, active) in strips {
+        paint.reconcile(strip_id, active, &palette);
     }
 }
 
@@ -1713,13 +1723,15 @@ fn fill_sample_panels(commands: &mut Commands, panels: &[Entity], cx: ElementCx)
         commands.spawn((
             Text::new(cx.text(heading)),
             cx.font(UiFont::Sans),
-            TextColor(PANEL_HEADING_COLOR),
+            TextColor(SkinPalette::default().text_heading),
+            ClassList::new_with_classes([PANEL_HEADING_CLASS]),
             ChildOf(panel),
         ));
         commands.spawn((
             Text::new(cx.text(body)),
             cx.font(UiFont::Sans),
-            TextColor(PANEL_TEXT_COLOR),
+            TextColor(SkinPalette::default().text_primary),
+            ClassList::new_with_classes([PANEL_TEXT_CLASS]),
             ChildOf(panel),
         ));
     }
@@ -1838,7 +1850,8 @@ pub fn spawn_tabs_scroll_demo(
         commands.spawn((
             Text::new(cx.text(&format!("{element} · panel {}", index.saturating_add(1)))),
             cx.font(UiFont::Sans),
-            TextColor(PANEL_HEADING_COLOR),
+            TextColor(SkinPalette::default().text_heading),
+            ClassList::new_with_classes([PANEL_HEADING_CLASS]),
             ChildOf(panel),
         ));
     }
@@ -1849,12 +1862,17 @@ pub fn spawn_tabs_scroll_demo(
 mod tests {
     use super::{
         ARROW_SCROLL_STEP, MAX_STRIP_WIDTH, MIN_STRIP_WIDTH, RevealEllipsis, SAMPLE_LABELS,
-        TAB_ACTIVE_BACKGROUND, TAB_DISABLED_LABEL_COLOR, TAB_INACTIVE_BACKGROUND, TAB_LABEL_COLOR,
-        TAB_SELECTED_ACTION, TabButton, TabContainerHandle, TabDivider, TabLabelText, TabPanel,
-        TabPlacement, TabScrollControl, TabSpec, TabStrip, TabStripWidth, TabViewport,
+        SkinPalette, TAB_SELECTED_ACTION, TabButton, TabContainerHandle, TabDivider, TabLabelText,
+        TabPanel, TabPlacement, TabScrollControl, TabSpec, TabStrip, TabStripWidth, TabViewport,
         apply_tab_strip_width, arrow_scroll_delta, reflect_tab_disabled, resize_strip_width,
-        spawn_tab_container, spawn_tab_strip,
+        spawn_tab_container, spawn_tab_strip, tab_background, tab_label_color,
     };
+
+    /// The colours the tests assert against: the skinless fallback, which is
+    /// what a test world (no `ViewerSkinPlugin`, no stylesheet) paints with.
+    fn palette() -> SkinPalette {
+        SkinPalette::default()
+    }
     use bevy::ecs::system::SystemState;
     use bevy::ecs::world::CommandQueue;
     use bevy::input_focus::tab_navigation::{NavAction, TabIndex, TabNavigation};
@@ -2128,10 +2146,10 @@ mod tests {
         assert!(!is_checked(&app, *buttons.get(1).ok_or("no tab 1")?));
         assert_eq!(
             background(&app, tab0),
-            TAB_ACTIVE_BACKGROUND,
+            tab_background(&palette(), true),
             "the initial active tab is highlighted at rest"
         );
-        assert_eq!(background(&app, tab2), TAB_INACTIVE_BACKGROUND);
+        assert_eq!(background(&app, tab2), tab_background(&palette(), false));
         assert!(panel_shown(&app, *panels.first().ok_or("no panel 0")?));
         assert!(!panel_shown(&app, *panels.get(2).ok_or("no panel 2")?));
 
@@ -2141,8 +2159,8 @@ mod tests {
         assert_eq!(strip_active(&app, strip), 2);
         assert!(!is_checked(&app, tab0));
         assert!(is_checked(&app, tab2));
-        assert_eq!(background(&app, tab2), TAB_ACTIVE_BACKGROUND);
-        assert_eq!(background(&app, tab0), TAB_INACTIVE_BACKGROUND);
+        assert_eq!(background(&app, tab2), tab_background(&palette(), true));
+        assert_eq!(background(&app, tab0), tab_background(&palette(), false));
         assert!(!panel_shown(&app, *panels.first().ok_or("no panel 0")?));
         assert!(panel_shown(&app, *panels.get(2).ok_or("no panel 2")?));
 
@@ -3014,14 +3032,14 @@ mod tests {
         );
         assert_eq!(
             background(&app, tab0),
-            TAB_ACTIVE_BACKGROUND,
+            tab_background(&palette(), true),
             "the active tab keeps its highlight while disabled"
         );
         for button in &buttons {
             assert!(
                 label_colors(&mut app, *button)
                     .iter()
-                    .all(|color| *color == TAB_DISABLED_LABEL_COLOR),
+                    .all(|color| *color == palette().text_disabled),
                 "every label of a disabled strip is greyed"
             );
         }
@@ -3035,7 +3053,7 @@ mod tests {
             assert!(
                 label_colors(&mut app, *button)
                     .iter()
-                    .all(|color| *color == TAB_LABEL_COLOR),
+                    .all(|color| *color == tab_label_color(&palette())),
                 "re-enabling puts the label colour back"
             );
         }
@@ -3073,13 +3091,13 @@ mod tests {
         assert!(
             label_colors(&mut app, frozen)
                 .iter()
-                .all(|color| *color == TAB_DISABLED_LABEL_COLOR),
+                .all(|color| *color == palette().text_disabled),
             "the disabled tab's label is greyed"
         );
         assert!(
             label_colors(&mut app, live)
                 .iter()
-                .all(|color| *color == TAB_LABEL_COLOR),
+                .all(|color| *color == tab_label_color(&palette())),
             "its neighbour's is not"
         );
         Ok(())

@@ -104,7 +104,7 @@ pub(crate) fn register_settings(settings: &mut ViewerSettings) {
         INPUT_SECTION,
         SETTING_DOUBLE_CLICK_ACTION,
         SettingValue::I32(WorldDoubleClickAction::Nothing.to_setting()),
-        "In-world double-click action: 0 nothing, 1 teleport, 2 walk (autopilot)",
+        "setting-desc-DoubleClickAction",
     );
 }
 

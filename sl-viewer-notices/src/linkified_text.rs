@@ -34,6 +34,7 @@
 //! Reference (Firestorm, read-only): `llui/lltextbase` (segment rendering + hit
 //! testing), `llui/llurlaction` (the click actions).
 
+use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui_widgets::Button;
@@ -81,7 +82,7 @@ const TOOLTIP_BACKGROUND: Color = Color::srgba(0.06, 0.07, 0.10, 0.97);
 const TOOLTIP_BORDER: Color = Color::srgb(0.30, 0.34, 0.42);
 
 /// The tooltip's text colour.
-const TOOLTIP_TEXT: Color = Color::srgb(0.90, 0.92, 0.96);
+const TOOLTIP_TEXT: Color = SkinPalette::FALLBACK.text_primary;
 
 /// The tooltip's text size, in logical pixels.
 const TOOLTIP_FONT_SIZE: f32 = 12.0;

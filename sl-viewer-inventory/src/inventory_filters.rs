@@ -20,6 +20,7 @@
 //! `llinventoryfilter.{h,cpp}`, `llpanelmaininventory.cpp`
 //! (`LLFloaterInventoryFinder`).
 
+use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::EditableText;
@@ -40,7 +41,7 @@ pub(crate) const FILTERS_FLOATER_ID: &str = "inventory-filters";
 const FILTER_FONT_SIZE: f32 = 14.0;
 
 /// The floater chrome / label colour.
-const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A toggle row's check glyph colour.
 const CHECK_COLOR: Color = Color::srgb(0.55, 0.85, 0.60);

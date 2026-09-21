@@ -170,12 +170,12 @@ pub const FLAGS_HANDLE_TOUCH: u32 = 1 << 7;
 
 /// The "Take >" sub-pie (root west slot).
 static TAKE_PIE: PieMenuDef = PieMenuDef {
-    label: "Take",
+    label_key: "pie-object-take",
     entries: &[
         PieEntry {
             at: Compass::East,
             content: PieContent::Action(PieAction {
-                label: "Copies: Separately",
+                label_key: "pie-object-copies-separately",
                 action: "take-copies-separately",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -184,7 +184,7 @@ static TAKE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthWest,
             content: PieContent::Action(PieAction {
-                label: "Take Copy",
+                label_key: "pie-object-take-copy",
                 action: "take-copy",
                 when: Some(TARGET_COPYABLE),
             }),
@@ -192,7 +192,7 @@ static TAKE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::West,
             content: PieContent::Action(PieAction {
-                label: "Take",
+                label_key: "pie-object-take",
                 action: "take",
                 when: Some(TARGET_OWNED),
             }),
@@ -200,7 +200,7 @@ static TAKE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::SouthWest,
             content: PieContent::Action(PieAction {
-                label: "Take: Combined",
+                label_key: "pie-object-take-combined",
                 action: "take-combined",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -208,7 +208,7 @@ static TAKE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::South,
             content: PieContent::Action(PieAction {
-                label: "Copy: Combined",
+                label_key: "pie-object-copy-combined",
                 action: "take-copy-combined",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -216,7 +216,7 @@ static TAKE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::SouthEast,
             content: PieContent::Action(PieAction {
-                label: "Take: Separately",
+                label_key: "pie-object-take-separately",
                 action: "take-separately",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -233,18 +233,18 @@ static TAKE_PIE: PieMenuDef = PieMenuDef {
 /// The "Attach HUD >" sub-pie — runtime-filled in the reference, so declared
 /// empty (which renders disabled) until attaching exists.
 static ATTACH_HUD_PIE: PieMenuDef = PieMenuDef {
-    label: "Attach HUD",
+    label_key: "pie-object-attach-hud",
     entries: &[],
 };
 
 /// The deeper "More >" of the Bento attach tree.
 static ATTACH_SKELETON_MORE_PIE: PieMenuDef = PieMenuDef {
-    label: "More",
+    label_key: "pie-object-more",
     entries: &[
         PieEntry {
             at: Compass::East,
             content: PieContent::Action(PieAction {
-                label: "Alt R Ear",
+                label_key: "pie-object-alt-r-ear",
                 action: "attach-alt-right-ear",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -252,7 +252,7 @@ static ATTACH_SKELETON_MORE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthEast,
             content: PieContent::Action(PieAction {
-                label: "Alt R Eye",
+                label_key: "pie-object-alt-r-eye",
                 action: "attach-alt-right-eye",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -260,7 +260,7 @@ static ATTACH_SKELETON_MORE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::North,
             content: PieContent::Action(PieAction {
-                label: "Tongue",
+                label_key: "pie-object-tongue",
                 action: "attach-tongue",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -268,7 +268,7 @@ static ATTACH_SKELETON_MORE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthWest,
             content: PieContent::Action(PieAction {
-                label: "Alt L Eye",
+                label_key: "pie-object-alt-l-eye",
                 action: "attach-alt-left-eye",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -276,7 +276,7 @@ static ATTACH_SKELETON_MORE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::West,
             content: PieContent::Action(PieAction {
-                label: "Alt L Ear",
+                label_key: "pie-object-alt-l-ear",
                 action: "attach-alt-left-ear",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -284,7 +284,7 @@ static ATTACH_SKELETON_MORE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::SouthWest,
             content: PieContent::Action(PieAction {
-                label: "L Ring Finger",
+                label_key: "pie-object-l-ring-finger",
                 action: "attach-left-ring-finger",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -292,7 +292,7 @@ static ATTACH_SKELETON_MORE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::South,
             content: PieContent::Action(PieAction {
-                label: "Jaw",
+                label_key: "pie-object-jaw",
                 action: "attach-jaw",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -300,7 +300,7 @@ static ATTACH_SKELETON_MORE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::SouthEast,
             content: PieContent::Action(PieAction {
-                label: "R Ring Finger",
+                label_key: "pie-object-r-ring-finger",
                 action: "attach-right-ring-finger",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -310,12 +310,12 @@ static ATTACH_SKELETON_MORE_PIE: PieMenuDef = PieMenuDef {
 
 /// The "Ext. Skeleton >" (Bento attach points) sub-pie of "Attach >".
 static ATTACH_SKELETON_PIE: PieMenuDef = PieMenuDef {
-    label: "Ext. Skeleton",
+    label_key: "pie-object-ext-skeleton",
     entries: &[
         PieEntry {
             at: Compass::East,
             content: PieContent::Action(PieAction {
-                label: "Right Wing",
+                label_key: "pie-object-right-wing",
                 action: "attach-right-wing",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -323,7 +323,7 @@ static ATTACH_SKELETON_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthEast,
             content: PieContent::Action(PieAction {
-                label: "Groin",
+                label_key: "pie-object-groin",
                 action: "attach-groin",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -331,7 +331,7 @@ static ATTACH_SKELETON_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::North,
             content: PieContent::Action(PieAction {
-                label: "Tail Base",
+                label_key: "pie-object-tail-base",
                 action: "attach-tail-base",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -339,7 +339,7 @@ static ATTACH_SKELETON_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthWest,
             content: PieContent::Action(PieAction {
-                label: "Tail Tip",
+                label_key: "pie-object-tail-tip",
                 action: "attach-tail-tip",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -347,7 +347,7 @@ static ATTACH_SKELETON_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::West,
             content: PieContent::Action(PieAction {
-                label: "Left Wing",
+                label_key: "pie-object-left-wing",
                 action: "attach-left-wing",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -355,7 +355,7 @@ static ATTACH_SKELETON_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::SouthWest,
             content: PieContent::Action(PieAction {
-                label: "L Hind Foot",
+                label_key: "pie-object-l-hind-foot",
                 action: "attach-left-hind-foot",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -367,7 +367,7 @@ static ATTACH_SKELETON_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::SouthEast,
             content: PieContent::Action(PieAction {
-                label: "R Hind Foot",
+                label_key: "pie-object-r-hind-foot",
                 action: "attach-right-hind-foot",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -378,7 +378,7 @@ static ATTACH_SKELETON_PIE: PieMenuDef = PieMenuDef {
 /// The "Attach >" sub-pie: the reference fills the plain attach points at
 /// runtime (deferred with wearing); its static Bento tree is declared.
 static ATTACH_PIE: PieMenuDef = PieMenuDef {
-    label: "Attach",
+    label_key: "pie-object-attach",
     entries: &[PieEntry {
         at: Compass::East,
         content: PieContent::SubPie(&ATTACH_SKELETON_PIE),
@@ -392,12 +392,12 @@ static ATTACH_PIE: PieMenuDef = PieMenuDef {
 
 /// The "Reset >" sub-pie of the second More level.
 static RESET_PIE: PieMenuDef = PieMenuDef {
-    label: "Reset",
+    label_key: "pie-object-reset",
     entries: &[
         PieEntry {
             at: Compass::East,
             content: PieContent::Action(PieAction {
-                label: "Tex Refresh",
+                label_key: "pie-object-tex-refresh",
                 action: "tex-refresh",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -405,7 +405,7 @@ static RESET_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthEast,
             content: PieContent::Action(PieAction {
-                label: "Skeleton",
+                label_key: "pie-object-skeleton",
                 action: "reset-skeleton",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -417,12 +417,12 @@ static RESET_PIE: PieMenuDef = PieMenuDef {
 /// (`viewer-derender-blacklist`): drop the picked linkset from *this* viewer's
 /// scene, permanently (the persisted blacklist) or for the session.
 static DERENDER_PIE: PieMenuDef = PieMenuDef {
-    label: "Derender",
+    label_key: "pie-object-derender",
     entries: &[
         PieEntry {
             at: Compass::East,
             content: PieContent::Action(PieAction {
-                label: "Blacklist",
+                label_key: "pie-object-blacklist",
                 action: "derender-blacklist",
                 when: None,
             }),
@@ -430,7 +430,7 @@ static DERENDER_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthEast,
             content: PieContent::Action(PieAction {
-                label: "Temporary",
+                label_key: "pie-object-temporary",
                 action: "derender",
                 when: None,
             }),
@@ -440,12 +440,12 @@ static DERENDER_PIE: PieMenuDef = PieMenuDef {
 
 /// The "Save As >" sub-pie of the second More level.
 static SAVE_AS_PIE: PieMenuDef = PieMenuDef {
-    label: "Save As",
+    label_key: "pie-object-save-as",
     entries: &[
         PieEntry {
             at: Compass::East,
             content: PieContent::Action(PieAction {
-                label: "Backup",
+                label_key: "pie-object-backup",
                 action: "export-backup",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -453,7 +453,7 @@ static SAVE_AS_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthEast,
             content: PieContent::Action(PieAction {
-                label: "Collada",
+                label_key: "pie-object-collada",
                 action: "export-collada",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -461,7 +461,7 @@ static SAVE_AS_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::North,
             content: PieContent::Action(PieAction {
-                label: "Dump XML",
+                label_key: "pie-object-dump-xml",
                 action: "dump-xml",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -471,12 +471,12 @@ static SAVE_AS_PIE: PieMenuDef = PieMenuDef {
 
 /// The "Pathfinding >" sub-pie of the second More level.
 static PATHFINDING_PIE: PieMenuDef = PieMenuDef {
-    label: "Pathfinding",
+    label_key: "pie-object-pathfinding",
     entries: &[
         PieEntry {
             at: Compass::East,
             content: PieContent::Action(PieAction {
-                label: "Show in Linksets",
+                label_key: "pie-object-show-in-linksets",
                 action: "pathfinding-linksets",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -484,7 +484,7 @@ static PATHFINDING_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthEast,
             content: PieContent::Action(PieAction {
-                label: "Show in Characters",
+                label_key: "pie-object-show-in-characters",
                 action: "pathfinding-characters",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -495,12 +495,12 @@ static PATHFINDING_PIE: PieMenuDef = PieMenuDef {
 /// The "Mute >" sub-pie of the second More level. Mute itself is wired; muting
 /// the particle *owner* needs particle picking and stays a placeholder.
 static MUTE_PIE: PieMenuDef = PieMenuDef {
-    label: "Mute",
+    label_key: "pie-object-mute",
     entries: &[
         PieEntry {
             at: Compass::East,
             content: PieContent::Action(PieAction {
-                label: "Mute",
+                label_key: "pie-object-mute",
                 action: "mute",
                 when: None,
             }),
@@ -508,7 +508,7 @@ static MUTE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthEast,
             content: PieContent::Action(PieAction {
-                label: "Part. Owner",
+                label_key: "pie-object-part-owner",
                 action: "mute-particles",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -518,12 +518,12 @@ static MUTE_PIE: PieMenuDef = PieMenuDef {
 
 /// The "Scripts >" sub-pie of the second More level.
 static SCRIPTS_PIE: PieMenuDef = PieMenuDef {
-    label: "Scripts",
+    label_key: "pie-object-scripts",
     entries: &[
         PieEntry {
             at: Compass::East,
             content: PieContent::Action(PieAction {
-                label: "Compile (Mono)",
+                label_key: "pie-object-compile-mono",
                 action: "scripts-compile-mono",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -531,7 +531,7 @@ static SCRIPTS_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthEast,
             content: PieContent::Action(PieAction {
-                label: "Compile (LSL)",
+                label_key: "pie-object-compile-lsl",
                 action: "scripts-compile-lsl",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -539,7 +539,7 @@ static SCRIPTS_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::North,
             content: PieContent::Action(PieAction {
-                label: "Reset Scripts",
+                label_key: "pie-object-reset-scripts",
                 action: "scripts-reset",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -547,7 +547,7 @@ static SCRIPTS_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthWest,
             content: PieContent::Action(PieAction {
-                label: "Run Scripts",
+                label_key: "pie-object-run-scripts",
                 action: "scripts-run",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -555,7 +555,7 @@ static SCRIPTS_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::West,
             content: PieContent::Action(PieAction {
-                label: "Stop Scripts",
+                label_key: "pie-object-stop-scripts",
                 action: "scripts-stop",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -563,7 +563,7 @@ static SCRIPTS_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::SouthWest,
             content: PieContent::Action(PieAction {
-                label: "Remove Scripts",
+                label_key: "pie-object-remove-scripts",
                 action: "scripts-remove",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -571,7 +571,7 @@ static SCRIPTS_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::South,
             content: PieContent::Action(PieAction {
-                label: "Script Info",
+                label_key: "pie-object-script-info",
                 action: "script-info",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -581,7 +581,7 @@ static SCRIPTS_PIE: PieMenuDef = PieMenuDef {
 
 /// The second "More >" level (the reference's "Object Pie More 2").
 static OBJECT_MORE2_PIE: PieMenuDef = PieMenuDef {
-    label: "More",
+    label_key: "pie-object-more",
     entries: &[
         PieEntry {
             at: Compass::East,
@@ -594,7 +594,7 @@ static OBJECT_MORE2_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::North,
             content: PieContent::Action(PieAction {
-                label: "Report",
+                label_key: "pie-object-report",
                 action: "report",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -618,7 +618,7 @@ static OBJECT_MORE2_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::SouthEast,
             content: PieContent::Action(PieAction {
-                label: "Inspect",
+                label_key: "pie-object-inspect",
                 action: "inspect",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -628,12 +628,12 @@ static OBJECT_MORE2_PIE: PieMenuDef = PieMenuDef {
 
 /// The first "More >" level (the reference's "Object Pie More 1").
 static OBJECT_MORE_PIE: PieMenuDef = PieMenuDef {
-    label: "More",
+    label_key: "pie-object-more",
     entries: &[
         PieEntry {
             at: Compass::East,
             content: PieContent::Action(PieAction {
-                label: "Delete",
+                label_key: "pie-object-delete",
                 action: "delete",
                 when: Some(TARGET_OWNED),
             }),
@@ -641,7 +641,7 @@ static OBJECT_MORE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthEast,
             content: PieContent::Action(PieAction {
-                label: "Wear",
+                label_key: "pie-object-wear",
                 action: "wear",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -651,7 +651,7 @@ static OBJECT_MORE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::North,
             content: PieContent::Action(PieAction {
-                label: "Take Copy",
+                label_key: "pie-object-take-copy",
                 action: "take-copy",
                 when: Some(TARGET_COPYABLE),
             }),
@@ -667,7 +667,7 @@ static OBJECT_MORE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::SouthWest,
             content: PieContent::Action(PieAction {
-                label: "Return",
+                label_key: "pie-object-return",
                 action: "return",
                 when: Some(TARGET_OWNED),
             }),
@@ -679,7 +679,7 @@ static OBJECT_MORE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::SouthEast,
             content: PieContent::Action(PieAction {
-                label: "Buy",
+                label_key: "pie-object-buy",
                 action: "buy",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -691,12 +691,12 @@ static OBJECT_MORE_PIE: PieMenuDef = PieMenuDef {
 /// Here/Stand Up, [Buy/]Take, Pay, More, Edit (reference slots 0..7 → compass
 /// East..SouthEast).
 pub static OBJECT_PIE: PieMenuDef = PieMenuDef {
-    label: "Object",
+    label_key: "pie-object-object",
     entries: &[
         PieEntry {
             at: Compass::East,
             content: PieContent::Action(PieAction {
-                label: "Open",
+                label_key: "pie-object-open",
                 action: "open",
                 // Enabled for any object — the Object Contents floater
                 // (viewer-prim-inventory-editing) lists whatever the prim holds.
@@ -706,7 +706,7 @@ pub static OBJECT_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthEast,
             content: PieContent::Action(PieAction {
-                label: "Create",
+                label_key: "pie-object-create",
                 action: "build",
                 // Unconditional: the reference gates this on `EnableEdit`
                 // (`enable_object_edit`), which asks whether the *selection* is
@@ -721,7 +721,7 @@ pub static OBJECT_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::North,
             content: PieContent::Action(PieAction {
-                label: "Touch",
+                label_key: "pie-object-touch",
                 action: "touch",
                 when: Some(TARGET_TOUCHABLE),
             }),
@@ -732,12 +732,12 @@ pub static OBJECT_PIE: PieMenuDef = PieMenuDef {
             at: Compass::NorthWest,
             content: PieContent::Chain(&[
                 PieAction {
-                    label: "Sit Here",
+                    label_key: "pie-object-sit-here",
                     action: "sit-here",
                     when: Some(SELF_STANDING),
                 },
                 PieAction {
-                    label: "Stand Up",
+                    label_key: "pie-object-stand-up",
                     action: "stand",
                     when: Some(SELF_SITTING),
                 },
@@ -750,7 +750,7 @@ pub static OBJECT_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::SouthWest,
             content: PieContent::Action(PieAction {
-                label: "Pay",
+                label_key: "pie-object-pay",
                 action: "pay",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -762,7 +762,7 @@ pub static OBJECT_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::SouthEast,
             content: PieContent::Action(PieAction {
-                label: "Edit",
+                label_key: "pie-object-edit",
                 action: "edit",
                 // Unconditional, like the reference: editing a no-modify
                 // object still opens the tools (the sim rejects what it must).
@@ -1315,7 +1315,7 @@ mod tests {
                 if count > 1 {
                     failures.push(format!(
                         "`{}` declares {count} entries at {}",
-                        menu.label,
+                        menu.label_key,
                         point.name()
                     ));
                 }

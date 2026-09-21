@@ -114,7 +114,9 @@
 use bevy::ecs::system::SystemId;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
+use bevy_flair::style::components::ClassList;
 
+use sl_viewer_ui_core::skin_palette::{SkinColors, SkinPalette};
 use sl_viewer_ui_core::ui::{
     BOTTOM_BAR_Z, LogicalBorder, LogicalInset, LogicalPadding, LogicalRect, UiDirection,
     UiPanelShown, UiRoot, UiScaffoldSystems, column, row,
@@ -141,38 +143,26 @@ const RESIZE_FLOOR: Vec2 = Vec2::new(120.0, 48.0);
 /// the **live** floater. The specimen uses the harness's swept size instead.
 const CHROME_FONT_SIZE: f32 = 14.0;
 
-/// The floater's background — a dark neutral, close to the reference's `DkGray`
-/// window fill, at the viewer's usual panel opacity.
-const FLOATER_BACKGROUND: Color = Color::srgba(0.11, 0.12, 0.15, 0.95);
+/// The skin class on the floater body: the `.sk-floater` rule in `common.css`
+/// paints it from `--surface-bg` / `--surface-border`. The inline colours the
+/// body spawns with ([`SkinPalette::surface_bg`] and
+/// [`SkinPalette::surface_border`]) are the unskinned fallback.
+const FLOATER_CLASS: &str = "sk-floater";
 
-/// A hairline border around the whole window, so a floater reads as one object
-/// over a busy world behind it.
-const FLOATER_BORDER_COLOR: Color = Color::srgb(0.30, 0.34, 0.42);
+/// The skin class on a title-bar glyph button's box (`--glyph-button-bg`).
+const CHROME_BUTTON_CLASS: &str = "sk-floater-button";
 
-/// The title band's fill when the floater is **front-most** — the reference's
-/// `TitleBarFocusColor` = `White_10`, a faint white wash that composites over the
-/// floater background. Inactive floaters show no wash ([`Color::NONE`]).
-const TITLE_BAR_ACTIVE: Color = Color::srgba(1.0, 1.0, 1.0, 0.10);
+/// The skin class on a title-bar glyph itself (`--text-primary`) — the
+/// reference's `FloaterButtonImageColor` = `LtGray`.
+const CHROME_GLYPH_CLASS: &str = "sk-floater-glyph";
 
-/// The title text when the floater is front-most — bright, as the reference
-/// brightens the drag-handle title of the focused floater.
-const TITLE_TEXT_ACTIVE: Color = Color::srgb(0.92, 0.94, 0.98);
+/// The skin class on the corner resize grip (`--text-muted`), a touch brighter
+/// than the buttons so the affordance is findable.
+const RESIZE_GRIP_CLASS: &str = "sk-floater-grip";
 
-/// The title text when the floater is not front-most — dimmed, the reference's
-/// `setForeground(false)` on a background floater.
-const TITLE_TEXT_INACTIVE: Color = Color::srgb(0.55, 0.58, 0.64);
-
-/// A chrome button's background — a barely-there tint, so the glyphs read as
-/// buttons without boxing them loudly.
-const BUTTON_BACKGROUND: Color = Color::srgba(1.0, 1.0, 1.0, 0.06);
-
-/// A chrome button's glyph colour — the reference's `FloaterButtonImageColor` =
-/// `LtGray`.
-const BUTTON_GLYPH: Color = Color::srgb(0.90, 0.90, 0.90);
-
-/// The resize grip's colour, a touch brighter than the buttons so the corner
-/// affordance is findable.
-const RESIZE_GRIP_COLOR: Color = Color::srgb(0.62, 0.66, 0.74);
+/// The skin class on the **dock host** behind docked floaters
+/// (`--overlay-bg`).
+const DOCK_HOST_CLASS: &str = "sk-dock-host";
 
 /// The close-button glyph.
 const GLYPH_CLOSE: &str = "\u{2715}";
@@ -613,11 +603,6 @@ impl ActiveFloater {
 #[derive(Resource, Debug, Clone, Copy, Default)]
 pub struct DefaultDockHost(pub Option<Entity>);
 
-/// The dock host's background — a faint panel so a docked floater reads as hosted
-/// (the reference hides a hosted floater's own background to avoid double
-/// opacity; here the host supplies the surround instead).
-const DOCK_HOST_BACKGROUND: Color = Color::srgba(0.06, 0.07, 0.10, 0.85);
-
 /// Startup: spawn the trailing-edge **dock host** — a vertical stack docked
 /// floaters flow into — and publish it in [`DefaultDockHost`].
 ///
@@ -627,6 +612,7 @@ const DOCK_HOST_BACKGROUND: Color = Color::srgba(0.06, 0.07, 0.10, 0.85);
 fn spawn_default_dock_host(
     mut commands: Commands,
     root: Res<UiRoot>,
+    palette: SkinColors,
     mut host: ResMut<DefaultDockHost>,
 ) {
     let entity = commands
@@ -641,7 +627,8 @@ fn spawn_default_dock_host(
                 ..LogicalRect::AUTO
             }),
             LogicalPadding(LogicalRect::all(Val::Px(4.0))),
-            BackgroundColor(DOCK_HOST_BACKGROUND),
+            BackgroundColor(palette.get().overlay_bg),
+            ClassList::new_with_classes([DOCK_HOST_CLASS]),
             // Above the ordinary panels, so a docked floater is not hidden behind
             // them, but it does not fight the free floaters' own raised z-order.
             GlobalZIndex(0),
@@ -1414,6 +1401,10 @@ pub fn spawn_keyed_floater(
     stack_seq: u32,
 ) -> FloaterHandle {
     let font = UiFont::Sans.at(CHROME_FONT_SIZE);
+    // A free function has no world access, so the chrome spawns in the
+    // skinless fallback colours and the `.sk-*` classes below repaint it from
+    // the live skin on the next style pass.
+    let fallback = SkinPalette::default();
     let position = cascade_position(spec.position, stack_seq);
     // An instance carries its key in its `Name`, so the harness (and a person
     // reading an entity dump) can tell two profiles apart.
@@ -1435,8 +1426,11 @@ pub fn spawn_keyed_floater(
                 ..LogicalRect::AUTO
             }),
             LogicalBorder(LogicalRect::all(Val::Px(1.0))),
-            BorderColor::all(FLOATER_BORDER_COLOR),
-            BackgroundColor(FLOATER_BACKGROUND),
+            // The skinless fallback; `.sk-floater` repaints both from the
+            // live skin's surface tokens.
+            BorderColor::all(fallback.surface_border),
+            BackgroundColor(fallback.surface_bg),
+            ClassList::new_with_classes([FLOATER_CLASS]),
             GlobalZIndex(0),
             // Opaque to picking, so a click on the floater does not fall through to
             // the world, and hoverable so its own buttons receive events.
@@ -1698,6 +1692,9 @@ fn build_floater_chrome(
     font: TextFont,
     caps: FloaterCaps,
 ) -> FloaterParts {
+    // As in `spawn_floater`: the skinless fallback, repainted by the classes
+    // (and, for the title, by `highlight_active_floater`).
+    let fallback = SkinPalette::default();
     let title_bar = commands
         .spawn((
             Node {
@@ -1733,7 +1730,10 @@ fn build_floater_chrome(
         .spawn((
             Text::new(title.to_owned()),
             font.clone(),
-            TextColor(TITLE_TEXT_ACTIVE),
+            // No skin class: `highlight_active_floater` repaints this from the
+            // palette as focus moves, and a class `color` rule would beat the
+            // Rust-painted value and flatten the active / inactive distinction.
+            TextColor(fallback.text_primary),
             Name::new("floater-title"),
             ChildOf(title_bar),
         ))
@@ -1813,7 +1813,8 @@ fn build_floater_chrome(
                 .with_child((
                     Text::new(GLYPH_RESIZE.to_owned()),
                     font,
-                    TextColor(RESIZE_GRIP_COLOR),
+                    TextColor(fallback.text_muted),
+                    ClassList::new_with_classes([RESIZE_GRIP_CLASS]),
                 ))
                 .id(),
         )
@@ -1843,6 +1844,8 @@ fn chrome_button(
     font: TextFont,
     name: &str,
 ) -> (Entity, Entity) {
+    // The skinless fallback; the two classes below repaint box and glyph.
+    let fallback = SkinPalette::default();
     let button = commands
         .spawn((
             Node {
@@ -1851,7 +1854,8 @@ fn chrome_button(
                 justify_content: JustifyContent::Center,
                 ..default()
             },
-            BackgroundColor(BUTTON_BACKGROUND),
+            BackgroundColor(fallback.glyph_button_bg),
+            ClassList::new_with_classes([CHROME_BUTTON_CLASS]),
             Pickable {
                 should_block_lower: true,
                 is_hoverable: true,
@@ -1864,7 +1868,8 @@ fn chrome_button(
         .spawn((
             Text::new(glyph.to_owned()),
             font,
-            TextColor(BUTTON_GLYPH),
+            TextColor(fallback.text_primary),
+            ClassList::new_with_classes([CHROME_GLYPH_CLASS]),
             ChildOf(button),
         ))
         .id();
@@ -2327,19 +2332,29 @@ fn set_glyph(texts: &mut Query<&mut Text>, entity: Entity, glyph: &str) {
 
 /// Keep each floater's title bar highlighted when it is the active one, and its
 /// title text bright / dimmed accordingly.
+///
+/// The title band and its text are the floater's one *state*-painted pair, so
+/// they read the skin's role palette here rather than through a class: a class
+/// `color` rule would beat this write and flatten the active / inactive
+/// distinction. That is also why the guard widens to a palette change — with
+/// only the `ActiveFloater` trigger, a skin switch would leave every title in
+/// the previous skin's colours until the front-most window next moved.
 fn highlight_active_floater(
     active: Res<ActiveFloater>,
+    palette: SkinColors,
     floaters: Query<(Entity, &FloaterParts)>,
+    dressed: Query<(), Added<FloaterParts>>,
     mut backgrounds: Query<&mut BackgroundColor>,
     mut texts: Query<&mut TextColor>,
 ) {
-    if !active.is_changed() {
+    if !active.is_changed() && !palette.is_changed() && dressed.is_empty() {
         return;
     }
+    let palette = palette.get();
     for (entity, parts) in &floaters {
         let is_active = active.0 == Some(entity);
         let bar_color = if is_active {
-            TITLE_BAR_ACTIVE
+            palette.title_bar_active
         } else {
             Color::NONE
         };
@@ -2349,9 +2364,9 @@ fn highlight_active_floater(
             background.0 = bar_color;
         }
         let text_color = if is_active {
-            TITLE_TEXT_ACTIVE
+            palette.text_primary
         } else {
-            TITLE_TEXT_INACTIVE
+            palette.title_text_inactive
         };
         let wanted = TextColor(text_color);
         if let Ok(mut color) = texts.get_mut(parts.title_text)
@@ -2478,8 +2493,9 @@ pub fn spawn_floater_specimen(commands: &mut Commands, parent: Entity, cx: Eleme
                 ..column(Val::ZERO)
             },
             LogicalBorder(LogicalRect::all(Val::Px(1.0))),
-            BorderColor::all(FLOATER_BORDER_COLOR),
-            BackgroundColor(FLOATER_BACKGROUND),
+            BorderColor::all(SkinPalette::default().surface_border),
+            BackgroundColor(SkinPalette::default().surface_bg),
+            ClassList::new_with_classes([FLOATER_CLASS]),
             Name::new("floater"),
             ChildOf(parent),
         ))
@@ -2623,7 +2639,8 @@ impl FloaterElement {
                 commands.spawn((
                     Text::new(cx.text(prose)),
                     cx.font(UiFont::Sans),
-                    TextColor(STUB_TEXT_COLOR),
+                    TextColor(SkinPalette::default().text_muted),
+                    ClassList::new_with_classes([STUB_CLASS]),
                     Node {
                         max_width: Val::Px(STUB_MAX_WIDTH),
                         ..default()
@@ -2637,10 +2654,11 @@ impl FloaterElement {
     }
 }
 
-/// The colour a [`FloaterContent::Stub`]'s prose is drawn in — dimmer than real
-/// content, so a person looking at the gallery can tell at a glance which
-/// windows are still standing in for themselves.
-const STUB_TEXT_COLOR: Color = Color::srgb(0.62, 0.66, 0.74);
+/// The skin class on a [`FloaterContent::Stub`]'s prose — the shared
+/// secondary-text class, so it is drawn dimmer than real content and a person
+/// looking at the gallery can tell at a glance which windows are still
+/// standing in for themselves.
+const STUB_CLASS: &str = "sk-title";
 
 /// The width a stub's prose wraps at, in logical pixels. A bound, not a size:
 /// a window with a `default_size` is wider than this and the stub simply sits

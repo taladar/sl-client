@@ -121,10 +121,12 @@ const DERENDER_SECTION: &[&str] = &["derender"];
 /// `FSTempDerenderUntilTeleport`, default on) or for the whole session.
 pub(crate) const SETTING_UNTIL_TELEPORT: &str = "TempDerenderUntilTeleport";
 
-/// The **friends-only** filter (`viewer-render-friends-only`, the reference's
-/// `FSRenderFriendsOnly`): draw only friends' avatars. Per avatar, because it is
-/// a per-avatar habit — and because the reference keeps it per account too.
-pub const SETTING_FRIENDS_ONLY: &str = "RenderFriendsOnly";
+// The friends-only filter (`viewer-render-friends-only`) is bound by the
+// preferences graphics tab and the quick-preferences panel, so its key lives in
+// `sl-viewer-settings`; the default and the filtering stay here. It is per
+// avatar, because it is a per-avatar habit — and because the reference keeps it
+// per account too.
+pub use sl_viewer_settings::keys::derender::SETTING_FRIENDS_ONLY;
 
 /// Whether the friends-only filter survives a teleport (the reference's
 /// `FSRenderFriendsOnlyPersistsTP`). Default **off**: the filter is a
@@ -284,19 +286,19 @@ pub fn declare_derender_settings(settings: &mut ViewerSettings) {
         DERENDER_SECTION,
         SETTING_UNTIL_TELEPORT,
         SettingValue::Bool(true),
-        "Temporary derenders last until the next teleport (otherwise: the whole session)",
+        "setting-desc-TempDerenderUntilTeleport",
     );
     settings.register_in(
         DERENDER_SECTION,
         SETTING_FRIENDS_ONLY,
         SettingValue::Bool(false),
-        "Draw only friends' avatars (a crowded-event performance filter)",
+        "setting-desc-RenderFriendsOnly",
     );
     settings.register_in(
         DERENDER_SECTION,
         SETTING_FRIENDS_ONLY_PERSISTS_TP,
         SettingValue::Bool(false),
-        "Keep the friends-only filter on across a teleport",
+        "setting-desc-RenderFriendsOnlyPersistsTP",
     );
 }
 

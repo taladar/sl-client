@@ -665,9 +665,10 @@ impl Default for ProbeDynamicContent {
     }
 }
 
-/// The persistent settings key toggling dynamic-content capture in local probes
-/// (`ProbeDynamicContent`). Grouped under `[render]` in the settings file.
-pub const PROBE_DYNAMIC_SETTING: &str = "render_reflection_probe_dynamic_content";
+// The dynamic-content toggle is bound by the preferences graphics tab, so the
+// key lives in `sl-viewer-settings`; it is grouped under `[render]` in the
+// settings file, and the default is declared below.
+pub use sl_viewer_settings::keys::probes::PROBE_DYNAMIC_SETTING;
 
 /// Register the reflection-probe settings' declared defaults (startup). Guarded on
 /// [`ViewerSettings`] existing, so the gallery / headless test apps that run the
@@ -690,9 +691,7 @@ pub fn declare_probe_settings(settings: &mut ViewerSettings) {
         &["render"],
         PROBE_DYNAMIC_SETTING,
         SettingValue::Bool(ProbeDynamicContent::default().include),
-        "Capture dynamic content (avatars) in local reflection probes. Costlier, and \
-         it defeats probe change-detection (an animating avatar dirties its probe \
-         every frame); the environment-only default probe is unaffected either way.",
+        "setting-desc-render_reflection_probe_dynamic_content",
     );
 }
 
@@ -1608,13 +1607,12 @@ const MAX_HERO_PROBES: usize = 1;
 /// glass so the reflection reliably lands on the surface.
 const HERO_MIN_VOLUME_EXTENT: f32 = 1.0;
 
-/// The persistent settings keys for the mirror feature, grouped under `[render]`, named
-/// after the reference viewer's controls.
-pub const RENDER_MIRRORS_SETTING: &str = "render_mirrors";
-/// See [`RENDER_MIRRORS_SETTING`] — the hero-probe cube resolution.
-pub const HERO_RESOLUTION_SETTING: &str = "render_hero_probe_resolution";
-/// See [`RENDER_MIRRORS_SETTING`] — the hero-probe re-render cadence in frames.
-pub const HERO_UPDATE_RATE_SETTING: &str = "render_hero_probe_update_rate";
+// The mirror keys, grouped under `[render]` and named after the reference
+// viewer's controls, are bound by the preferences graphics tab and the
+// photographer's window, so they live in `sl-viewer-settings`.
+pub use sl_viewer_settings::keys::probes::{
+    HERO_RESOLUTION_SETTING, HERO_UPDATE_RATE_SETTING, RENDER_MIRRORS_SETTING,
+};
 
 /// The live mirror configuration, mirrored from the persistent `[render]` settings by
 /// [`sync_mirror_settings`] so an edit in the settings file (or a bound preferences
@@ -1738,27 +1736,19 @@ pub fn declare_mirror_settings(settings: &mut ViewerSettings) {
         &["render"],
         RENDER_MIRRORS_SETTING,
         SettingValue::Bool(MirrorSettings::default().enabled),
-        "Enable realtime mirrors (hero probes): a mirror-flagged reflection-probe prim \
-         reflects the scene — and you — sharp and live, re-rendered every frame. \
-         Costlier than the P33 reflection probes, but only a mirror prim actually in \
-         view pays for it.",
+        "setting-desc-render_mirrors",
     );
     settings.register_in(
         &["render"],
         HERO_RESOLUTION_SETTING,
         SettingValue::U32(HERO_DEFAULT_RESOLUTION),
-        "Per-face resolution of a mirror's hero-probe cubemap, in texels \
-         (RenderHeroProbeResolution). Sharper and costlier when higher; rounded to a \
-         power of two in [128, 2048]. Sizes GPU targets, so a change takes effect on \
-         restart.",
+        "setting-desc-render_hero_probe_resolution",
     );
     settings.register_in(
         &["render"],
         HERO_UPDATE_RATE_SETTING,
         SettingValue::U32(HERO_DEFAULT_UPDATE_RATE),
-        "How often a mirror re-renders, in frames (RenderHeroProbeUpdateRate): 1 = \
-         every frame (most live), N = every Nth frame (cheaper, laggier). The main \
-         performance lever for mirrors.",
+        "setting-desc-render_hero_probe_update_rate",
     );
 }
 

@@ -60,6 +60,7 @@ use crate::intents::RequestBlock;
 use crate::intents::RequestFriendship;
 use crate::intents::{ConversationKey, OpenConversation};
 use crate::linkified_text::LinkActivated;
+use crate::skin_palette::SkinPalette;
 use crate::ui::{UiRoot, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_name_link::{NameLink, NameLinkSpec, NameTarget, set_name_link, spawn_name_link};
@@ -117,7 +118,7 @@ const TITLE_COLOR: Color = Color::srgb(0.94, 0.96, 1.0);
 const BODY_COLOR: Color = Color::srgb(0.82, 0.85, 0.90);
 
 /// A dimmer label colour (the "Owner:" prefix).
-const LABEL_COLOR: Color = Color::srgb(0.60, 0.64, 0.72);
+const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// An action button's background.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.16, 0.19, 0.25);

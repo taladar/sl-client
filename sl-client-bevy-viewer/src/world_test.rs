@@ -78,6 +78,20 @@ pub(crate) fn world_app() -> App {
     app.insert_resource(crate::settings::ViewerSettings::declared_for_test(
         crate::REGISTRARS,
     ));
+    // The string lookup, with the viewer's real English behind it.
+    //
+    // At the base rather than beside the UI, and not optional: `PieMenuPlugin`
+    // is part of the *world* group, and a pie resolves every `label_key` as its
+    // labels are built — so the systems take a `Translator` and an app that ran
+    // a frame without one would panic on a missing resource rather than merely
+    // draw nothing. Which is the right way round: a menu that cannot reach a
+    // bundle is broken, and it says so at once.
+    //
+    // The *real* strings rather than key-answers-itself, because this fold's
+    // checks measure layouts: an object pie whose slices read `pie-object-take`
+    // needs a ring no viewer would ever draw, and a pie that overflowed the
+    // window would be a fact about key length.
+    crate::i18n_keys::install_english_strings(&mut app);
     app.insert_resource(crate::animations::AnimationManager::new());
     app.init_resource::<crate::camera::CameraStart>();
     app.init_resource::<SlIdentity>();
@@ -467,11 +481,6 @@ pub(crate) fn world_app_with_build_tools() -> Result<App, Box<dyn core::error::E
     // The local-chat channel the editors post a refused edit's notice on; its
     // owner is the chat group, which this fold leaves out.
     app.add_message::<crate::intents::LocalChatNotice>();
-    // The string lookup the selection summary and every `Translated` label
-    // read, with no bundles behind it: every key resolves to itself, so a test
-    // asserts which strings a line is built from and never a translation's
-    // wording.
-    sl_viewer_ui_core::i18n::install_untranslated(&mut app);
     compose_ui_over(app)
 }
 

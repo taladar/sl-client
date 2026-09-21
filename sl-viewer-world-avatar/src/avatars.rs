@@ -414,79 +414,79 @@ pub fn register_settings(settings: &mut sl_viewer_settings::ViewerSettings) {
         NAME_TAG_SECTION,
         SETTING_SHOW_NAME_TAGS,
         sl_settings::SettingValue::Bool(true),
-        "Show floating name tags over avatars",
+        "setting-desc-ShowNameTags",
     );
     settings.register_in(
         NAME_TAG_SECTION,
         SETTING_SHOW_OWN_NAME_TAG,
         sl_settings::SettingValue::Bool(true),
-        "Show the name tag over your own avatar too",
+        "setting-desc-ShowOwnNameTag",
     );
     settings.register_in(
         NAME_TAG_SECTION,
         crate::name_tag_content::SETTING_SHOW_DISPLAY_NAMES,
         sl_settings::SettingValue::Bool(true),
-        "Show display names on name tags (off: legacy names only)",
+        "setting-desc-ShowDisplayNames",
     );
     settings.register_in(
         NAME_TAG_SECTION,
         crate::name_tag_content::SETTING_SHOW_USERNAMES,
         sl_settings::SettingValue::Bool(true),
-        "Show the username line under a custom display name",
+        "setting-desc-ShowUsernames",
     );
     settings.register_in(
         NAME_TAG_SECTION,
         crate::name_tag_content::SETTING_SHOW_GROUP_TITLES,
         sl_settings::SettingValue::Bool(true),
-        "Show the active group title line on name tags",
+        "setting-desc-ShowGroupTitles",
     );
     settings.register_in(
         NAME_TAG_SECTION,
         crate::name_tag_content::SETTING_SHOW_FRIEND_COLOR,
         sl_settings::SettingValue::Bool(true),
-        "Colour friends' name tags",
+        "setting-desc-ShowFriendColor",
     );
     settings.register_in(
         NAME_TAG_SECTION,
         crate::name_tag_content::SETTING_SHOW_DISTANCE,
         sl_settings::SettingValue::Bool(true),
-        "Show the camera distance line on name tags",
+        "setting-desc-ShowDistance",
     );
     settings.register_in(
         NAME_TAG_SECTION,
         crate::name_tag_content::SETTING_SHOW_TYPING,
         sl_settings::SettingValue::Bool(true),
-        "Show a Typing status line while an avatar is typing",
+        "setting-desc-ShowTyping",
     );
     settings.register_in(
         NAME_TAG_SECTION,
         crate::name_tag_content::SETTING_SHOW_AUTORESPONSE,
         sl_settings::SettingValue::Bool(false),
-        "Show an Auto-Response status on your own tag while an autorespond mode is on",
+        "setting-desc-ShowAutorespondInNameTag",
     );
     settings.register_in(
         NAME_TAG_SECTION,
         crate::name_tag_content::SETTING_COLOR_BY_DISTANCE,
         sl_settings::SettingValue::Bool(false),
-        "Tint whole name tags by chat range (whisper/say/shout)",
+        "setting-desc-ColorByDistance",
     );
     settings.register_in(
         NAME_TAG_SECTION,
         crate::name_tag_content::SETTING_SHOW_COMPLEXITY,
         sl_settings::SettingValue::Bool(true),
-        "Show the render-cost (complexity) line on name tags",
+        "setting-desc-ShowComplexity",
     );
     settings.register_in(
         NAME_TAG_SECTION,
         crate::name_tag_content::SETTING_SHOW_OWN_COMPLEXITY,
         sl_settings::SettingValue::Bool(false),
-        "Show the render-cost line on your own name tag (your only read-out of it)",
+        "setting-desc-ShowOwnComplexity",
     );
     settings.register_in(
         NAME_TAG_SECTION,
         crate::name_tag_content::SETTING_SHOW_COMPLEXITY_WHEN_LIMITED_ONLY,
         sl_settings::SettingValue::Bool(true),
-        "Show other avatars' render cost only while the complexity limit is limiting them",
+        "setting-desc-ShowComplexityWhenLimitedOnly",
     );
     settings.register_in(
         NAME_TAG_SECTION,
@@ -494,7 +494,7 @@ pub fn register_settings(settings: &mut sl_viewer_settings::ViewerSettings) {
         sl_settings::SettingValue::F32(
             sl_viewer_world_objects::name_tag_billboard::DEFAULT_FADE_START_METRES,
         ),
-        "Distance in metres at which name tags start to fade",
+        "setting-desc-FadeStartDistance",
     );
     settings.register_in(
         NAME_TAG_SECTION,
@@ -502,13 +502,13 @@ pub fn register_settings(settings: &mut sl_viewer_settings::ViewerSettings) {
         sl_settings::SettingValue::F32(
             sl_viewer_world_objects::name_tag_billboard::DEFAULT_FADE_RANGE_METRES,
         ),
-        "Metres past the fade start at which name tags are fully hidden",
+        "setting-desc-FadeRange",
     );
     settings.register_in(
         NAME_TAG_SECTION,
         sl_viewer_world_objects::name_tag_billboard::SETTING_BUBBLE_OPACITY,
         sl_settings::SettingValue::F32(0.5),
-        "Opacity of the name-tag backdrop bubble",
+        "setting-desc-BubbleOpacity",
     );
 }
 

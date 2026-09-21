@@ -34,6 +34,7 @@ use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use sl_client_bevy::AgentKey;
+use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 use crate::avatar_complexity::RenderOverride;
 use crate::avatar_render_settings::{
@@ -77,10 +78,10 @@ const FONT_SIZE: f32 = 13.0;
 const ROW_HEIGHT: f32 = 20.0;
 
 /// The default cell / label colour.
-const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// The dimmed header / secondary colour.
-const DIM_LABEL_COLOR: Color = Color::srgb(0.62, 0.66, 0.74);
+const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// The list viewport backdrop.
 const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);

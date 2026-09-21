@@ -38,57 +38,29 @@ use sl_client_bevy::{AgentKey, SlEvent, SlSessionEvent};
 
 use sl_viewer_world_objects::name_tag_billboard::{NameTag, TagContent, TagLine, TagLineSize};
 
-/// Show display names on tags (the reference `NameTagShowDisplayNames`,
-/// default on). Off = legacy names only.
-pub const SETTING_SHOW_DISPLAY_NAMES: &str = "ShowDisplayNames";
-
-/// Show the small `first.last` username line under a custom display name
-/// (the reference `NameTagShowUsernames`, default on).
-pub const SETTING_SHOW_USERNAMES: &str = "ShowUsernames";
-
-/// Show the group-title line (the reference `NameTagShowGroupTitles`,
-/// default on).
-pub const SETTING_SHOW_GROUP_TITLES: &str = "ShowGroupTitles";
-
-/// Colour friends' tags (the reference `NameTagShowFriends`, default on).
-pub const SETTING_SHOW_FRIEND_COLOR: &str = "ShowFriendColor";
-
-/// Show the avatar-distance line (Firestorm `FSTagShowDistance`; FS defaults
-/// it off, but this viewer ships it on — the user asked for it and no
-/// preferences UI exposes the toggle yet). The distance is measured from the
-/// **own avatar** (like the reference); only the fade/cut-off is camera-based.
-pub const SETTING_SHOW_DISTANCE: &str = "ShowDistance";
-
-/// Show the Typing status (Firestorm `FSShowTypingStateInNameTag`; same
-/// on-by-default deviation as [`SETTING_SHOW_DISTANCE`]).
-pub const SETTING_SHOW_TYPING: &str = "ShowTyping";
+// Every tag-line toggle but the autorespond one is bound by the preferences
+// general tab, so the keys live in `sl-viewer-settings`; the defaults and the
+// lines themselves stay here. Two of those defaults deviate from the reference
+// deliberately: `SETTING_SHOW_DISTANCE` (Firestorm `FSTagShowDistance`) and
+// `SETTING_SHOW_TYPING` (`FSShowTypingStateInNameTag`) ship **on** here, where
+// Firestorm ships them off — the user asked for both. The distance is measured
+// from the **own avatar** (like the reference); only the fade / cut-off is
+// camera-based. `SETTING_SHOW_COMPLEXITY` is the master switch over the other
+// two ARC toggles, and shows nothing on its own:
+// `SETTING_SHOW_COMPLEXITY_WHEN_LIMITED_ONLY` is also on by default, so out of
+// the box the number appears only on an avatar the complexity limit is actually
+// doing something about.
+pub use sl_viewer_settings::keys::name_tag_content::{
+    SETTING_COLOR_BY_DISTANCE, SETTING_SHOW_COMPLEXITY, SETTING_SHOW_COMPLEXITY_WHEN_LIMITED_ONLY,
+    SETTING_SHOW_DISPLAY_NAMES, SETTING_SHOW_DISTANCE, SETTING_SHOW_FRIEND_COLOR,
+    SETTING_SHOW_GROUP_TITLES, SETTING_SHOW_OWN_COMPLEXITY, SETTING_SHOW_TYPING,
+    SETTING_SHOW_USERNAMES,
+};
 
 /// Show the `Auto-Response` status on the **own** tag while an autorespond
 /// mode is on (Firestorm `FSShowAutorespondInNametag`, default off — the state
 /// is yours alone, and the reference leaves it hidden until asked for).
 pub(crate) const SETTING_SHOW_AUTORESPONSE: &str = "ShowAutorespondInNameTag";
-
-/// Tint the whole tag by chat-range band (Firestorm
-/// `FSTagShowDistanceColors`, default off).
-pub const SETTING_COLOR_BY_DISTANCE: &str = "ColorByDistance";
-
-/// Show the render-cost (ARC) line at all (Firestorm `FSTagShowARW`, default
-/// on) — the master switch over the two that follow. On its own it shows
-/// nothing: [`SETTING_SHOW_COMPLEXITY_WHEN_LIMITED_ONLY`] is also on by
-/// default, so out of the box the number appears only on an avatar the
-/// complexity limit is actually doing something about.
-pub const SETTING_SHOW_COMPLEXITY: &str = "ShowComplexity";
-
-/// Show the render-cost line on your **own** tag (Firestorm `FSTagShowOwnARW`,
-/// default off). This is the only read-out of your own ARC — the radar lists
-/// nearby avatars and excludes you, exactly as the reference radar does — so
-/// it is what you turn on to find out whether *you* are the expensive one.
-pub const SETTING_SHOW_OWN_COMPLEXITY: &str = "ShowOwnComplexity";
-
-/// Show other avatars' render cost **only** when the viewer is limiting them
-/// (Firestorm `FSTagShowTooComplexOnlyARW`, default on). Off shows it on every
-/// avatar — informative, and a great deal of text over a crowd.
-pub const SETTING_SHOW_COMPLEXITY_WHEN_LIMITED_ONLY: &str = "ShowComplexityWhenLimitedOnly";
 
 // ---------------------------------------------------------------------------
 // Colours (values from the reference's colors.xml).

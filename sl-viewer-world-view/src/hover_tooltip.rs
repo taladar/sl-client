@@ -78,13 +78,13 @@ pub fn register_settings(settings: &mut sl_viewer_settings::ViewerSettings) {
         HOVER_TIP_SECTION,
         SETTING_SHOW_HOVER_TIPS,
         sl_settings::SettingValue::Bool(true),
-        "Show hover tooltips over objects and avatars",
+        "setting-desc-ShowHoverTips",
     );
     settings.register_in(
         HOVER_TIP_SECTION,
         SETTING_SHOW_LAND_TIPS,
         sl_settings::SettingValue::Bool(false),
-        "Show a hover tooltip over land when nothing else is under the cursor",
+        "setting-desc-ShowLandTips",
     );
 }
 

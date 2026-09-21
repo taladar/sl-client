@@ -87,14 +87,10 @@ const TONEMAP_SHADER_HANDLE: Handle<Shader> = uuid_handle!("6b1f0c94-3a27-4d58-9
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct SlTonemapPass;
 
-/// The reference `RenderTonemapType` value selecting the Khronos PBR Neutral curve.
-pub const TONEMAP_KHRONOS_NEUTRAL: u32 = 0;
-/// The reference `RenderTonemapType` value selecting the ACES (Hill) curve — the
-/// reference's default, and so this viewer's.
-pub const TONEMAP_ACES: u32 = 1;
-/// Not a reference value: no tone curve at all (exposure and clamp only, the
-/// reference's `NO_POST` path), so a capture can A/B what the curve is doing.
-pub const TONEMAP_NONE: u32 = 2;
+// The curve numbering the photographer's combo writes, and the three setting
+// names it writes them to, live in `sl-viewer-settings`; the defaults and the
+// pass stay here.
+pub use sl_viewer_settings::keys::tonemap::{TONEMAP_ACES, TONEMAP_KHRONOS_NEUTRAL, TONEMAP_NONE};
 
 /// The reference `RenderTonemapMix` default: how far the tone curve is blended in
 /// over the merely-exposed linear colour.
@@ -205,12 +201,9 @@ pub(crate) const fn effective_tonemap_mix(stored_mix: f32, classic_sky: bool) ->
 /// (`[render.tonemap]`), matching the reference's `Render*` naming.
 const TONEMAP_SECTION: &[&str] = &["render", "tonemap"];
 
-/// The reference `RenderTonemapType` setting name.
-pub const SETTING_TONEMAP_TYPE: &str = "RenderTonemapType";
-/// The reference `RenderTonemapMix` setting name.
-pub const SETTING_TONEMAP_MIX: &str = "RenderTonemapMix";
-/// The reference `RenderExposure` setting name.
-pub const SETTING_EXPOSURE: &str = "RenderExposure";
+pub use sl_viewer_settings::keys::tonemap::{
+    SETTING_EXPOSURE, SETTING_TONEMAP_MIX, SETTING_TONEMAP_TYPE,
+};
 
 /// Register the tone-mapper settings on the store with the reference defaults, so
 /// the names exist (and persist) — a user's Firestorm `RenderTonemapType` /
@@ -222,19 +215,19 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         TONEMAP_SECTION,
         SETTING_TONEMAP_TYPE,
         SettingValue::U32(TONEMAP_ACES),
-        "Tone curve: 0 Khronos PBR Neutral, 1 ACES (default), 2 none",
+        "setting-desc-RenderTonemapType",
     );
     settings.register_in(
         TONEMAP_SECTION,
         SETTING_TONEMAP_MIX,
         SettingValue::F32(DEFAULT_TONEMAP_MIX),
-        "How far the tone curve is blended over the merely-exposed colour (0-1)",
+        "setting-desc-RenderTonemapMix",
     );
     settings.register_in(
         TONEMAP_SECTION,
         SETTING_EXPOSURE,
         SettingValue::F32(DEFAULT_EXPOSURE),
-        "Linear scene-colour scale before the tone curve",
+        "setting-desc-RenderExposure",
     );
 }
 

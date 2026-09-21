@@ -141,12 +141,12 @@ pub const TARGET_DROPPABLE: &str = "target-droppable";
 /// The "Derender >" sub-pie of the self `More >` level. The reference declares
 /// three leading separators, so its two slices sit at north-west and west.
 static SELF_DERENDER_PIE: PieMenuDef = PieMenuDef {
-    label: "Derender",
+    label_key: "pie-attachment-derender",
     entries: &[
         PieEntry {
             at: Compass::NorthWest,
             content: PieContent::Action(PieAction {
-                label: "Temporary",
+                label_key: "pie-attachment-temporary",
                 action: "derender",
                 when: None,
             }),
@@ -154,7 +154,7 @@ static SELF_DERENDER_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::West,
             content: PieContent::Action(PieAction {
-                label: "Blacklist",
+                label_key: "pie-attachment-blacklist",
                 action: "derender-blacklist",
                 when: None,
             }),
@@ -164,12 +164,12 @@ static SELF_DERENDER_PIE: PieMenuDef = PieMenuDef {
 
 /// The "Save As >" sub-pie of the self `More >` level (Backup / Collada).
 static SELF_SAVE_AS_PIE: PieMenuDef = PieMenuDef {
-    label: "Save As",
+    label_key: "pie-attachment-save-as",
     entries: &[
         PieEntry {
             at: Compass::East,
             content: PieContent::Action(PieAction {
-                label: "Backup",
+                label_key: "pie-attachment-backup",
                 action: "export-backup",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -177,7 +177,7 @@ static SELF_SAVE_AS_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthEast,
             content: PieContent::Action(PieAction {
-                label: "Collada",
+                label_key: "pie-attachment-collada",
                 action: "export-collada",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -188,12 +188,12 @@ static SELF_SAVE_AS_PIE: PieMenuDef = PieMenuDef {
 /// The self "More >" sub-pie (reference slot 2 / north): the touch / tex-refresh
 /// / script-info / derender / export / inventory / inspect / textures tail.
 static SELF_MORE_PIE: PieMenuDef = PieMenuDef {
-    label: "More",
+    label_key: "pie-attachment-more",
     entries: &[
         PieEntry {
             at: Compass::East,
             content: PieContent::Action(PieAction {
-                label: "Tex Refresh",
+                label_key: "pie-attachment-tex-refresh",
                 action: "tex-refresh",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -201,7 +201,7 @@ static SELF_MORE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthEast,
             content: PieContent::Action(PieAction {
-                label: "Script Info",
+                label_key: "pie-attachment-script-info",
                 action: "script-info",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -209,7 +209,7 @@ static SELF_MORE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::North,
             content: PieContent::Action(PieAction {
-                label: "Touch",
+                label_key: "pie-attachment-touch",
                 action: "touch",
                 when: Some(TARGET_TOUCHABLE),
             }),
@@ -225,7 +225,7 @@ static SELF_MORE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::SouthWest,
             content: PieContent::Action(PieAction {
-                label: "Show in Inv.",
+                label_key: "pie-attachment-show-in-inv",
                 action: "show-in-inventory",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -233,7 +233,7 @@ static SELF_MORE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::South,
             content: PieContent::Action(PieAction {
-                label: "Inspect",
+                label_key: "pie-attachment-inspect",
                 action: "inspect",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -241,7 +241,7 @@ static SELF_MORE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::SouthEast,
             content: PieContent::Action(PieAction {
-                label: "Textures",
+                label_key: "pie-attachment-textures",
                 action: "textures",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -256,12 +256,12 @@ static SELF_MORE_PIE: PieMenuDef = PieMenuDef {
 /// / south-west; Dump XML at south, Hover Height at south-east) and omits the
 /// Texture Refresh / Textures slices, so this pins the attachment layout.
 static SELF_APPEARANCE_PIE: PieMenuDef = PieMenuDef {
-    label: "Appearance",
+    label_key: "pie-attachment-appearance",
     entries: &[
         PieEntry {
             at: Compass::East,
             content: PieContent::Action(PieAction {
-                label: "Edit Shape",
+                label_key: "pie-attachment-edit-shape",
                 action: "edit-shape",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -273,7 +273,7 @@ static SELF_APPEARANCE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::West,
             content: PieContent::Action(PieAction {
-                label: "Edit Outfit",
+                label_key: "pie-attachment-edit-outfit",
                 action: "edit-outfit",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -281,7 +281,7 @@ static SELF_APPEARANCE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::South,
             content: PieContent::Action(PieAction {
-                label: "Dump XML",
+                label_key: "pie-attachment-dump-xml",
                 action: "dump-xml",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -289,7 +289,7 @@ static SELF_APPEARANCE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::SouthEast,
             content: PieContent::Action(PieAction {
-                label: "Hover Height",
+                label_key: "pie-attachment-hover-height",
                 action: "hover-height",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -300,12 +300,12 @@ static SELF_APPEARANCE_PIE: PieMenuDef = PieMenuDef {
 /// The pie for an attachment **you** wear — in world or on a HUD point. See
 /// `menu_pie_attachment_self.xml`.
 pub static ATTACHMENT_SELF_PIE: PieMenuDef = PieMenuDef {
-    label: "Attachment",
+    label_key: "pie-attachment-attachment",
     entries: &[
         PieEntry {
             at: Compass::East,
             content: PieContent::Action(PieAction {
-                label: "Profile",
+                label_key: "pie-attachment-profile",
                 action: "profile",
                 when: None,
             }),
@@ -313,7 +313,7 @@ pub static ATTACHMENT_SELF_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthEast,
             content: PieContent::Action(PieAction {
-                label: "Drop",
+                label_key: "pie-attachment-drop",
                 action: "drop",
                 when: Some(TARGET_DROPPABLE),
             }),
@@ -330,12 +330,12 @@ pub static ATTACHMENT_SELF_PIE: PieMenuDef = PieMenuDef {
             at: Compass::NorthWest,
             content: PieContent::Chain(&[
                 PieAction {
-                    label: "Sit Here",
+                    label_key: "pie-attachment-sit-here",
                     action: "sit-ground",
                     when: Some(SELF_STANDING),
                 },
                 PieAction {
-                    label: "Stand Up",
+                    label_key: "pie-attachment-stand-up",
                     action: "stand",
                     when: Some(SELF_SITTING),
                 },
@@ -344,7 +344,7 @@ pub static ATTACHMENT_SELF_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::West,
             content: PieContent::Action(PieAction {
-                label: "Detach",
+                label_key: "pie-attachment-detach",
                 action: "detach",
                 when: None,
             }),
@@ -352,7 +352,7 @@ pub static ATTACHMENT_SELF_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::SouthWest,
             content: PieContent::Action(PieAction {
-                label: "Gestures",
+                label_key: "pie-attachment-gestures",
                 action: "gestures",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -364,7 +364,7 @@ pub static ATTACHMENT_SELF_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::SouthEast,
             content: PieContent::Action(PieAction {
-                label: "Edit",
+                label_key: "pie-attachment-edit",
                 action: "edit",
                 // Unconditional, like the in-world object pie: the reference's
                 // `EnableEdit` is satisfied by any valid selection, and a worn
@@ -387,12 +387,12 @@ pub static ATTACHMENT_SELF_PIE: PieMenuDef = PieMenuDef {
 /// leading separators here (unlike the avatar-other pie's two-slice layout), so
 /// As Friend sits at west and To Set at south-west.
 static OTHER_ADD_PIE: PieMenuDef = PieMenuDef {
-    label: "Add",
+    label_key: "pie-attachment-add",
     entries: &[
         PieEntry {
             at: Compass::West,
             content: PieContent::Action(PieAction {
-                label: "Add as Friend",
+                label_key: "pie-attachment-add-as-friend",
                 action: "add-friend",
                 when: Some(TARGET_NOT_FRIEND),
             }),
@@ -400,7 +400,7 @@ static OTHER_ADD_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::SouthWest,
             content: PieContent::Action(PieAction {
-                label: "Add to Set",
+                label_key: "pie-attachment-add-to-set",
                 action: "add-to-set",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -411,12 +411,12 @@ static OTHER_ADD_PIE: PieMenuDef = PieMenuDef {
 /// The "Save As >" sub-pie of the other pie's second `More >` level (Backup /
 /// Collada, then Dump XML after the reference's four separators).
 static OTHER_SAVE_AS_PIE: PieMenuDef = PieMenuDef {
-    label: "Save As",
+    label_key: "pie-attachment-save-as",
     entries: &[
         PieEntry {
             at: Compass::East,
             content: PieContent::Action(PieAction {
-                label: "Backup",
+                label_key: "pie-attachment-backup",
                 action: "export-backup",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -424,7 +424,7 @@ static OTHER_SAVE_AS_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthEast,
             content: PieContent::Action(PieAction {
-                label: "Collada",
+                label_key: "pie-attachment-collada",
                 action: "export-collada",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -432,7 +432,7 @@ static OTHER_SAVE_AS_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::South,
             content: PieContent::Action(PieAction {
-                label: "Dump XML",
+                label_key: "pie-attachment-dump-xml",
                 action: "dump-xml",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -443,12 +443,12 @@ static OTHER_SAVE_AS_PIE: PieMenuDef = PieMenuDef {
 /// The "Display >" sub-pie of the other pie's second `More >` level: the
 /// wearer's impostor render mode (Normally / Never / Fully).
 static OTHER_DISPLAY_PIE: PieMenuDef = PieMenuDef {
-    label: "Display",
+    label_key: "pie-attachment-display",
     entries: &[
         PieEntry {
             at: Compass::East,
             content: PieContent::Action(PieAction {
-                label: "Normally",
+                label_key: "pie-attachment-normally",
                 action: "render-normally",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -456,7 +456,7 @@ static OTHER_DISPLAY_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthEast,
             content: PieContent::Action(PieAction {
-                label: "Never",
+                label_key: "pie-attachment-never",
                 action: "render-never",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -464,7 +464,7 @@ static OTHER_DISPLAY_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::North,
             content: PieContent::Action(PieAction {
-                label: "Fully",
+                label_key: "pie-attachment-fully",
                 action: "render-fully",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -475,12 +475,12 @@ static OTHER_DISPLAY_PIE: PieMenuDef = PieMenuDef {
 /// The second "More >" level of the other pie (the reference's "Avatar Pie
 /// More 2"): the debug / call / zoom / reset / export / display tails.
 static OTHER_MORE2_PIE: PieMenuDef = PieMenuDef {
-    label: "More",
+    label_key: "pie-attachment-more",
     entries: &[
         PieEntry {
             at: Compass::East,
             content: PieContent::Action(PieAction {
-                label: "Textures",
+                label_key: "pie-attachment-textures",
                 action: "textures",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -488,7 +488,7 @@ static OTHER_MORE2_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthEast,
             content: PieContent::Action(PieAction {
-                label: "Script Info",
+                label_key: "pie-attachment-script-info",
                 action: "script-info",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -496,7 +496,7 @@ static OTHER_MORE2_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::North,
             content: PieContent::Action(PieAction {
-                label: "Call",
+                label_key: "pie-attachment-call",
                 action: "call",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -504,7 +504,7 @@ static OTHER_MORE2_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthWest,
             content: PieContent::Action(PieAction {
-                label: "Zoom In",
+                label_key: "pie-attachment-zoom-in",
                 action: "zoom-in",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -512,7 +512,7 @@ static OTHER_MORE2_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::West,
             content: PieContent::Action(PieAction {
-                label: "Tex Refresh",
+                label_key: "pie-attachment-tex-refresh",
                 action: "tex-refresh",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -536,12 +536,12 @@ static OTHER_MORE2_PIE: PieMenuDef = PieMenuDef {
 /// reference declares **six** leading separators, so Blacklist sits at south
 /// and Temporary at south-east.
 static OTHER_DERENDER_PIE: PieMenuDef = PieMenuDef {
-    label: "Derender",
+    label_key: "pie-attachment-derender",
     entries: &[
         PieEntry {
             at: Compass::South,
             content: PieContent::Action(PieAction {
-                label: "Blacklist",
+                label_key: "pie-attachment-blacklist",
                 action: "derender-blacklist",
                 when: None,
             }),
@@ -549,7 +549,7 @@ static OTHER_DERENDER_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::SouthEast,
             content: PieContent::Action(PieAction {
-                label: "Temporary",
+                label_key: "pie-attachment-temporary",
                 action: "derender",
                 when: None,
             }),
@@ -561,12 +561,12 @@ static OTHER_DERENDER_PIE: PieMenuDef = PieMenuDef {
 /// More 1"): the moderation slices plus the nested second level, Inspect, and
 /// the derender tail.
 static OTHER_MORE_PIE: PieMenuDef = PieMenuDef {
-    label: "More",
+    label_key: "pie-attachment-more",
     entries: &[
         PieEntry {
             at: Compass::East,
             content: PieContent::Action(PieAction {
-                label: "Freeze",
+                label_key: "pie-attachment-freeze",
                 action: "freeze",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -574,7 +574,7 @@ static OTHER_MORE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthEast,
             content: PieContent::Action(PieAction {
-                label: "Give Card",
+                label_key: "pie-attachment-give-card",
                 action: "give-card",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -582,7 +582,7 @@ static OTHER_MORE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::North,
             content: PieContent::Action(PieAction {
-                label: "Invite to Group",
+                label_key: "pie-attachment-invite-to-group",
                 action: "invite-to-group",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -590,7 +590,7 @@ static OTHER_MORE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthWest,
             content: PieContent::Action(PieAction {
-                label: "Face Towards",
+                label_key: "pie-attachment-face-towards",
                 action: "face-towards",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -598,7 +598,7 @@ static OTHER_MORE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::West,
             content: PieContent::Action(PieAction {
-                label: "Eject",
+                label_key: "pie-attachment-eject",
                 action: "eject",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -610,7 +610,7 @@ static OTHER_MORE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::South,
             content: PieContent::Action(PieAction {
-                label: "Inspect",
+                label_key: "pie-attachment-inspect",
                 action: "inspect",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -626,12 +626,12 @@ static OTHER_MORE_PIE: PieMenuDef = PieMenuDef {
 /// `menu_pie_attachment_other.xml` (whose root the reference itself names
 /// "Avatar Pie" — it is the avatar-other shape plus the object-ish tails).
 pub static ATTACHMENT_OTHER_PIE: PieMenuDef = PieMenuDef {
-    label: "Avatar",
+    label_key: "pie-attachment-avatar",
     entries: &[
         PieEntry {
             at: Compass::East,
             content: PieContent::Action(PieAction {
-                label: "Profile",
+                label_key: "pie-attachment-profile",
                 action: "profile",
                 when: None,
             }),
@@ -643,7 +643,7 @@ pub static ATTACHMENT_OTHER_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::North,
             content: PieContent::Action(PieAction {
-                label: "Go To",
+                label_key: "pie-attachment-go-to",
                 action: "go-to",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -651,7 +651,7 @@ pub static ATTACHMENT_OTHER_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::NorthWest,
             content: PieContent::Action(PieAction {
-                label: "Report",
+                label_key: "pie-attachment-report",
                 action: "report",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -663,7 +663,7 @@ pub static ATTACHMENT_OTHER_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::SouthWest,
             content: PieContent::Action(PieAction {
-                label: "Pay",
+                label_key: "pie-attachment-pay",
                 action: "pay",
                 when: Some(UNIMPLEMENTED),
             }),
@@ -675,7 +675,7 @@ pub static ATTACHMENT_OTHER_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::SouthEast,
             content: PieContent::Action(PieAction {
-                label: "IM",
+                label_key: "pie-attachment-im",
                 action: "im",
                 when: None,
             }),
@@ -1054,7 +1054,7 @@ mod tests {
                 if count > 1 {
                     failures.push(format!(
                         "`{}` declares {count} entries at {}",
-                        menu.label,
+                        menu.label_key,
                         point.name()
                     ));
                 }

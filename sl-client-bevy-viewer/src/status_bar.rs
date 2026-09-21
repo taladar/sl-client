@@ -315,8 +315,7 @@ fn register_status_bar_settings(settings: Option<ResMut<ViewerSettings>>) {
         &["statusbar"],
         SHOW_COORDINATES_KEY,
         SettingValue::Bool(true),
-        "Show the agent's region-local coordinates in the status area's location \
-         read-out",
+        "setting-desc-statusbar_show_coordinates",
     );
 }
 

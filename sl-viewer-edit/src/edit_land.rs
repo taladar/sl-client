@@ -520,20 +520,19 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         LAND_SECTION,
         SETTING_LAND_BRUSH_ACTION,
         SettingValue::I32(0),
-        "The land tool's picked action: 0 = select land, 1..=6 = the flatten / \
-         raise / lower / smooth / roughen / revert brushes",
+        "setting-desc-RadioLandBrushAction",
     );
     settings.register_in(
         LAND_SECTION,
         SETTING_LAND_BRUSH_SIZE,
         SettingValue::F32(RADIUS_DEFAULT),
-        "The terraform bulldozer's radius, in metres (1..=11)",
+        "setting-desc-LandBrushSize",
     );
     settings.register_in(
         LAND_SECTION,
         SETTING_LAND_BRUSH_FORCE,
         SettingValue::F32(FORCE_DEFAULT),
-        "The terraform bulldozer's strength multiplier",
+        "setting-desc-LandBrushForce",
     );
 }
 

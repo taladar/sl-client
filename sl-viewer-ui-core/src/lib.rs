@@ -29,8 +29,10 @@
 //!   names three dozen feature modules.
 //! - [`i18n`] — Fluent lookup, including the pseudo-localization (the private
 //!   `ui_pseudoloc`) that makes an untranslated string obvious.
-//! - [`skin`], [`skin_colors`] — the CSS skin system and the palette bridge
-//!   that feeds a skin's colours to the settings store as defaults.
+//! - [`skin`], [`skin_colors`], [`skin_palette`] — the CSS skin system, the
+//!   palette bridge that feeds a skin's user-tunable colours to the settings
+//!   store as defaults, and the chrome role palette the Rust-painted widget
+//!   states read.
 //!
 //! The UI's own **sound effects** used to be a module here. They are
 //! `sl-viewer-ui-sounds` now: three lines of them named the audio engine and
@@ -49,6 +51,7 @@
 pub mod i18n;
 pub mod skin;
 pub mod skin_colors;
+pub mod skin_palette;
 pub mod ui;
 pub mod ui_element;
 pub mod ui_ellipsis;

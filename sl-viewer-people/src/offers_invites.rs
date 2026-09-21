@@ -107,7 +107,7 @@ fn register_offers_settings(settings: Option<ResMut<crate::settings::ViewerSetti
         &[crate::notifications::NOTIFICATIONS_SECTION],
         SETTING_AUTO_ACCEPT_INVENTORY,
         sl_settings::SettingValue::Bool(false),
-        "Silently accept inventory offers into the type-appropriate folder",
+        "setting-desc-AutoAcceptNewInventory",
     );
 }
 

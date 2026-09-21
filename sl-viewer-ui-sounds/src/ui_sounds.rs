@@ -205,7 +205,7 @@ pub fn register_settings(settings: &mut ViewerSettings) {
             UI_SOUND_SECTION,
             &sound.enabled_key(),
             SettingValue::Bool(sound.default_enabled()),
-            "Whether this UI feedback sound plays",
+            "setting-desc-ui-sound-enabled",
         );
         // Empty by default so the resolution order can tell "user has not
         // overridden this" (fall through to a skin override, then the reference
@@ -214,7 +214,7 @@ pub fn register_settings(settings: &mut ViewerSettings) {
             UI_SOUND_SECTION,
             &sound.asset_key(),
             SettingValue::String(String::new()),
-            "Override the sound asset UUID for this UI feedback sound (blank = default)",
+            "setting-desc-ui-sound-asset",
         );
     }
 }

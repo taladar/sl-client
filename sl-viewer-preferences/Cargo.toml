@@ -38,14 +38,18 @@ sl-viewer-settings = { workspace = true }
 sl-viewer-ui-core = { workspace = true }
 sl-viewer-ui-widgets = { workspace = true }
 sl-viewer-world-api = { workspace = true }
-sl-viewer-world-avatar = { workspace = true }
-sl-viewer-world-objects = { workspace = true }
 sl-viewer-world-scene = { workspace = true }
 sl-viewer-world-view = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
+# Test-only: the tests below assert that every row binds a setting the viewer
+# really declares, which means running the owning feature's registrar. The keys
+# themselves come from `sl-viewer-settings`, so neither crate is a dependency of
+# the library — only of the tests that check the two agree.
+sl-viewer-world-avatar = { workspace = true }
+sl-viewer-world-objects = { workspace = true }
 uuid = { workspace = true }
 
 [lints]

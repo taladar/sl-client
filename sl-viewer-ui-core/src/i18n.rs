@@ -111,7 +111,7 @@ pub fn register_settings(settings: &mut sl_viewer_settings::ViewerSettings) {
         &["i18n"],
         SETTING_UI_LANGUAGE,
         sl_settings::SettingValue::String(String::new()),
-        "The interface language (en, ja, ar, pl, pseudo); empty = system/default",
+        "setting-desc-UiLanguage",
     );
 }
 
@@ -169,6 +169,7 @@ impl Plugin for ViewerI18nPlugin {
                     sync_ui_direction,
                     apply_locale_ellipsis,
                     apply_translations,
+                    apply_setting_descriptions,
                     toggle_i18n_demo,
                     apply_i18n_demo_visibility.after(toggle_i18n_demo),
                     // The demo panel is hidden by default (F6 toggles it), so
@@ -180,6 +181,76 @@ impl Plugin for ViewerI18nPlugin {
                 ),
             );
     }
+}
+
+/// A plain `key = value` string table consulted **only while no bundle has
+/// loaded** — a headless harness's stand-in for the Fluent chain.
+///
+/// # Why this exists at all
+///
+/// [`install_untranslated`] answers every key with *itself*, which is exactly
+/// what a test asserting **which strings** a line is built from wants. It is the
+/// wrong answer for a test measuring a **layout**: the trackball's compass label
+/// is `N` in English and `trackball-north` as a key, so a box sized for one
+/// letter overflows by an order of magnitude, and a pie whose slices read
+/// `pie-object-take` needs a ring nothing would ever draw. Those harnesses want
+/// the *real* strings and have no asset server to negotiate a Fluent chain with,
+/// so [`install_english`] hands them the shipped bundle as text instead.
+///
+/// Two things keep it out of the running viewer's way. A real chain always
+/// wins, so it is consulted only when there is none — in a viewer, the handful
+/// of frames before the locale folder finishes loading. And it is **optional**:
+/// only [`install_english`] ever inserts it, so a viewer, and every harness
+/// that wants each key to answer with itself, simply has no such resource and
+/// [`Translator`] reads `None`.
+///
+/// A line-wise `key = value` read, not a Fluent parse, so it carries only the
+/// **argument-free** messages: a value spanning several lines (a plural or
+/// gender selector) or holding a placeable (`link { $number }`) is left out and
+/// falls back to its key. That is the right answer rather than a shortfall —
+/// such a string is resolved through [`Translator::format`] with typed
+/// arguments, and a table that answered it could only hand back the
+/// uninterpolated source, which is worse than the key.
+#[derive(Resource, Debug, Default)]
+pub struct BundlelessStrings(bevy::platform::collections::HashMap<String, String>);
+
+impl BundlelessStrings {
+    /// Parse a Fluent bundle's text into a flat table of its single-line
+    /// messages.
+    #[must_use]
+    pub fn from_ftl(source: &str) -> Self {
+        Self(
+            source
+                .lines()
+                .filter_map(|line| line.split_once(" = "))
+                .filter(|(key, value)| {
+                    !key.is_empty()
+                        && !value.contains('{')
+                        && key
+                            .chars()
+                            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+                })
+                .map(|(key, value)| (key.to_owned(), value.to_owned()))
+                .collect(),
+        )
+    }
+
+    /// The text for `key`, or `None` if the table does not hold one.
+    #[must_use]
+    pub fn get(&self, key: &str) -> Option<&str> {
+        self.0.get(key).map(String::as_str)
+    }
+}
+
+/// [`install_untranslated`], with the **real English strings** behind it: the
+/// harness for a test that measures a layout rather than naming the keys a line
+/// is built from.
+///
+/// `bundle` is the text of `assets/locales/en/main.ftl`. See
+/// [`BundlelessStrings`] for why a harness wants this and what it cannot carry.
+pub fn install_english(app: &mut App, bundle: &str) {
+    install_untranslated(app);
+    app.insert_resource(BundlelessStrings::from_ftl(bundle));
 }
 
 /// Install the three resources a [`Translator`] reads, **with no bundles behind
@@ -208,7 +279,7 @@ pub fn install_untranslated(app: &mut App) {
     app.init_resource::<Localization>()
         .insert_resource(UiLocale::new(LocaleChoice::English))
         .init_resource::<LocaleFormatting>()
-        .add_systems(Update, apply_translations);
+        .add_systems(Update, (apply_translations, apply_setting_descriptions));
 }
 
 /// A locale the viewer ships a bundle for, plus the pseudolocale — the fixed set
@@ -588,6 +659,12 @@ impl TransArgs {
 pub struct Translator<'w> {
     /// The negotiated bundle chain the strings are looked up in.
     localization: Res<'w, Localization>,
+    /// The plain string table consulted when that chain is empty — a headless
+    /// harness's stand-in for it, and **absent** everywhere else, which is why
+    /// it is optional: a running viewer has a real chain, and a harness that
+    /// wants every key to answer with itself inserts nothing. See
+    /// [`BundlelessStrings`].
+    bundleless: Option<Res<'w, BundlelessStrings>>,
     /// The active locale — read for the pseudolocale flag.
     locale: Res<'w, UiLocale>,
     /// The active locale's value formatters (numbers / currency / date-time).
@@ -620,9 +697,33 @@ impl Translator<'_> {
         self.finish(key, content)
     }
 
+    /// Whether the negotiated chain holds a bundle at all. `false` for the
+    /// frames before the locale folder loads, and for the whole life of a
+    /// headless harness.
+    fn has_bundle(&self) -> bool {
+        self.localization.locales().next().is_some()
+    }
+
     /// Fall back to the key for a miss, then pseudolocalise if active.
+    ///
+    /// A miss is also **reported once**, because falling back to the key is
+    /// exactly what makes a typo invisible: `notification-confirm-qut` renders
+    /// as the literal `notification-confirm-qut` on a modal and nothing else
+    /// goes wrong, so the only place the mistake can surface is the journal.
+    /// See `report_missing_key` for why the report is deduplicated and why it
+    /// stays quiet until a bundle exists.
     fn finish(&self, key: &str, content: Option<String>) -> String {
-        let raw = content.unwrap_or_else(|| key.to_owned());
+        let raw = content.unwrap_or_else(|| {
+            if self.has_bundle() {
+                report_missing_key(key);
+                return key.to_owned();
+            }
+            self.bundleless
+                .as_ref()
+                .and_then(|table| table.get(key))
+                .unwrap_or(key)
+                .to_owned()
+        });
         if self.locale.pseudo {
             pseudolocalise(&raw)
         } else {
@@ -698,6 +799,81 @@ impl Translator<'_> {
     pub fn parse_number(&self, input: &str) -> Option<f64> {
         self.formatters()
             .and_then(|formatters| formatters.parse_number(input).ok())
+    }
+}
+
+/// Resolve every registered setting's description into the settings store.
+///
+/// **Why the push, rather than a lookup where the description is read.** A
+/// setting's description has two consumers that want it at different moments:
+/// the raw settings editor draws it, and the TOML writer puts it above the value
+/// in the user's file. The writer lives in `sl-viewer-settings`, which this
+/// crate depends on — so it cannot reach a [`Translator`] without a dependency
+/// cycle, and a resolver passed down to it would have to be threaded through
+/// every write path. Resolving here and handing the answer *down* leaves both
+/// consumers reading one plain string, and leaves the registration carrying only
+/// a key.
+///
+/// Runs on two edges. The bundle changing (it loaded, or a locale switch rebuilt
+/// it) re-resolves **everything**, which is what relocalises an open settings
+/// editor and puts the next written file in the new language. A registration
+/// since the last pass — settings arrive in bursts at startup, and then
+/// occasionally, as a floater registers its own geometry the first time it
+/// opens — resolves it too, so a late setting is described like any other.
+///
+/// Absent settings are not an error: the gallery and the layout harnesses stand
+/// the string half up without a store.
+fn apply_setting_descriptions(
+    translator: Translator,
+    settings: Option<ResMut<sl_viewer_settings::ViewerSettings>>,
+) {
+    let Some(mut settings) = settings else {
+        return;
+    };
+    if !translator.changed() && !settings.descriptions_pending() {
+        return;
+    }
+    let resolved: Vec<(String, String)> = settings
+        .description_keys()
+        .map(|(name, key)| (name.to_owned(), translator.get(key)))
+        .collect();
+    for (name, text) in resolved {
+        settings.set_description(&name, &text);
+    }
+    settings.mark_descriptions_resolved();
+}
+
+/// The keys already reported missing, so each one is named **once** per run.
+///
+/// Process-global rather than a resource because the report is made from
+/// [`Translator::finish`], which holds only `Res` — a `ResMut` there would
+/// serialise every panel that reads a string against every other, to carry a
+/// diagnostic. The set only ever grows, and it is small: it holds the keys that
+/// are *wrong*, not the ~3,000 that resolve.
+static MISSING_KEYS: std::sync::LazyLock<
+    std::sync::Mutex<bevy::platform::collections::HashSet<String>>,
+> = std::sync::LazyLock::new(std::sync::Mutex::default);
+
+/// Report `key` as undefined in every bundle of the active chain — once.
+///
+/// **Why deduplicated.** A missing key is looked up wherever it is drawn: a menu
+/// label resolves on every open, a list row on every rebuild. An undeduplicated
+/// `warn!` would be a per-frame torrent that buries the next finding, so the
+/// first sighting names it and the rest are silent.
+///
+/// **Why it is silent without a bundle.** Before the locale folder finishes
+/// loading — and for the whole life of a headless harness
+/// ([`install_untranslated`]) — *every* key misses by construction, and saying
+/// so would be reporting the loading sequence rather than a mistake. The caller
+/// gates on the chain having at least one bundle in it.
+fn report_missing_key(key: &str) {
+    let Ok(mut seen) = MISSING_KEYS.lock() else {
+        // A poisoned lock means another thread panicked mid-report. The
+        // diagnostic is not worth propagating that.
+        return;
+    };
+    if seen.insert(key.to_owned()) {
+        warn!("no bundle in the active locale chain defines the string key `{key}`");
     }
 }
 

@@ -53,6 +53,7 @@
 //! `llfloatergetblockedobjectname`, `menu_people_blocked_{gear,plus,view}.xml`,
 //! `floater_mute_object.xml`.
 
+use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
@@ -103,10 +104,10 @@ const FONT_SIZE: f32 = 13.0;
 const ROW_HEIGHT: f32 = 20.0;
 
 /// The default cell / label colour.
-const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// The dimmed header / secondary colour.
-const DIM_LABEL_COLOR: Color = Color::srgb(0.62, 0.66, 0.74);
+const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// The list viewport backdrop.
 const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
@@ -188,32 +189,34 @@ const COND_SOUNDS: &str = "blocked-sounds-muted";
 
 /// The blocked-row context menu — the reference's `menu_people_blocked_gear`.
 static BLOCKED_MENU: MenuDef = MenuDef {
-    label: "Blocked",
+    label_key: "menu-blocked-blocked",
     items: &[
-        MenuItemDef::Command(MenuCommand::new("Unblock", "unblock")),
+        MenuItemDef::Command(MenuCommand::new("menu-blocked-unblock", "unblock")),
         MenuItemDef::Separator,
         MenuItemDef::Command(
-            MenuCommand::new("Block Text", "toggle-text")
+            MenuCommand::new("menu-blocked-block-text", "toggle-text")
                 .visible_when(COND_AGENT)
                 .checked_when(COND_TEXT),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Block Voice", "toggle-voice")
+            MenuCommand::new("menu-blocked-block-voice", "toggle-voice")
                 .visible_when(COND_AGENT)
                 .checked_when(COND_VOICE),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Block Particles", "toggle-particles")
+            MenuCommand::new("menu-blocked-block-particles", "toggle-particles")
                 .visible_when(COND_AGENT)
                 .checked_when(COND_PARTICLES),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Block Object Sounds", "toggle-sounds")
+            MenuCommand::new("menu-blocked-block-object-sounds", "toggle-sounds")
                 .visible_when(COND_AGENT)
                 .checked_when(COND_SOUNDS),
         ),
         MenuItemDef::Separator,
-        MenuItemDef::Command(MenuCommand::new("Profile...", "profile").visible_when(COND_AGENT)),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-blocked-profile", "profile").visible_when(COND_AGENT),
+        ),
     ],
 };
 

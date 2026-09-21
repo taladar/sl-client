@@ -178,11 +178,10 @@ const fn sim_dt(delta: f32) -> f32 {
 /// The persisted-settings section the particle-cap setting lives under.
 const RENDER_SECTION: &[&str] = &["render"];
 
-/// The particle-cap setting key: the maximum number of live particles across all
-/// sources. The reference viewer's `RenderMaxPartCount`; surfaced in the
-/// quick-preferences panel (`sl_viewer_preferences::quick_preferences`) and consumed live by
-/// `drive_particles`.
-pub const SETTING_MAX_PARTICLES: &str = "RenderMaxPartCount";
+// The particle cap is surfaced by the preferences graphics tab and the
+// quick-preferences panel, so its key lives in `sl-viewer-settings`; the
+// default is declared here and `drive_particles` consumes it live.
+pub use sl_viewer_settings::keys::particles::SETTING_MAX_PARTICLES;
 
 /// Declare the persisted particle-cap setting (the quick-preferences panel binds
 /// to it; `drive_particles` reads it each frame).
@@ -191,8 +190,7 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         RENDER_SECTION,
         SETTING_MAX_PARTICLES,
         sl_settings::SettingValue::U32(4096),
-        "Maximum number of live particles drawn across all sources; emission \
-         stops at the cap and resumes as particles age out",
+        "setting-desc-RenderMaxPartCount",
     );
 }
 

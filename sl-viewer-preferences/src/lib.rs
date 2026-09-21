@@ -51,16 +51,28 @@ pub(crate) use sl_viewer_notifications as notifications;
 pub(crate) use sl_viewer_platform::clipboard;
 pub(crate) use sl_viewer_platform::paths;
 pub(crate) use sl_viewer_settings as settings;
-// The keys of the settings whose behaviour lives in `sl-viewer-people` and
-// `sl-viewer-map`. Those are the only two things this crate ever named from
-// either, so the keys live below both (`sl_viewer_settings::keys`) and neither
-// crate is a dependency here — see that module's doc.
+// The keys of settings whose behaviour lives elsewhere, re-aliased under their
+// owning module's name so a tab still addresses `crate::radar::SETTING_*`. Each
+// group is everything this crate ever named from that module, so the module's
+// crate need not be a dependency here — see `sl_viewer_settings::keys`.
+//
+// `sl-viewer-people` and `sl-viewer-map` are not dependencies at all for this
+// reason, and neither are `sl-viewer-world-objects` and
+// `sl-viewer-world-avatar` (outside the tests, which call the owners'
+// registrars — see the dev-dependencies). `sl-viewer-world-scene` remains one:
+// `sky`, `environment`, `render_overrides` and `viewer_camera` are behaviour,
+// not names. Its six key-only modules are here all the same, because where a
+// name lives is a question about the name, not about what else the crate
+// happens to owe that dependency.
 pub(crate) use sl_viewer_settings::keys::{
-    auto_reject, group_notice, minimap, offers_invites, people, presence, radar, world_map,
+    auto_reject, avatar_complexity, derender, exposure, glow, group_notice, hover_text, minimap,
+    name_tag_billboard, name_tag_content, offers_invites, parcel_borders, particles, people,
+    presence, probes, radar, render_priority, tonemap, world_map,
 };
 pub(crate) use sl_viewer_ui_core::i18n;
 pub(crate) use sl_viewer_ui_core::skin;
 pub(crate) use sl_viewer_ui_core::skin_colors;
+pub(crate) use sl_viewer_ui_core::skin_palette;
 pub(crate) use sl_viewer_ui_core::ui;
 pub(crate) use sl_viewer_ui_core::ui_element;
 pub(crate) use sl_viewer_ui_core::ui_font;
@@ -76,21 +88,9 @@ pub(crate) use sl_viewer_ui_widgets::ui_tab;
 pub(crate) use sl_viewer_ui_widgets::ui_table;
 pub(crate) use sl_viewer_ui_widgets::ui_text_input;
 pub(crate) use sl_viewer_world_api as world_api;
-pub(crate) use sl_viewer_world_avatar::avatar_complexity;
-pub(crate) use sl_viewer_world_avatar::derender;
-pub(crate) use sl_viewer_world_avatar::name_tag_content;
-pub(crate) use sl_viewer_world_objects::hover_text;
-pub(crate) use sl_viewer_world_objects::name_tag_billboard;
-pub(crate) use sl_viewer_world_objects::render_priority;
 pub(crate) use sl_viewer_world_scene::environment;
-pub(crate) use sl_viewer_world_scene::exposure;
-pub(crate) use sl_viewer_world_scene::glow;
-pub(crate) use sl_viewer_world_scene::parcel_borders;
-pub(crate) use sl_viewer_world_scene::particles;
-pub(crate) use sl_viewer_world_scene::probes;
 pub(crate) use sl_viewer_world_scene::render_overrides;
 pub(crate) use sl_viewer_world_scene::sky;
-pub(crate) use sl_viewer_world_scene::tonemap;
 pub(crate) use sl_viewer_world_view::camera;
 pub(crate) use sl_viewer_world_view::media_prim;
 pub(crate) use sl_viewer_world_view::movement;

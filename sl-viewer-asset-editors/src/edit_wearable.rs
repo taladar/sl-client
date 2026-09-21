@@ -39,6 +39,7 @@
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 
+use crate::skin_palette::SkinPalette;
 use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
@@ -97,7 +98,7 @@ const SLIDER: SliderStyle = SliderStyle {
 };
 
 /// The label colour.
-const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A control's border colour.
 const CONTROL_BORDER: Color = Color::srgba(0.34, 0.40, 0.52, 1.0);

@@ -339,8 +339,7 @@ fn register_parcel_audio_settings(settings: Option<ResMut<ViewerSettings>>) {
         AUDIO_SECTION,
         MUSIC_ENABLED_SETTING,
         sl_settings::SettingValue::Bool(false),
-        "Play the parcel's music stream automatically (off by default; the \
-         play button on the audio bar starts a stream on demand)",
+        "setting-desc-MusicStreamEnabled",
     );
     // The stream's volume / mute are the mixer's music bus, registered by the
     // volume panel; the inline slider and mute button below bind those same

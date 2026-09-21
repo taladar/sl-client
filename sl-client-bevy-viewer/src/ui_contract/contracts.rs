@@ -599,8 +599,8 @@ pub(crate) const CONTRACTS: &[ElementContract] = &[
     ElementContract {
         element: "menu-bar",
         nodes: &[
-            NodeContract::inert("menu-button:Avatar"),
-            NodeContract::inert("menu-button:World"),
+            NodeContract::inert("menu-button:menu-fixture-avatar"),
+            NodeContract::inert("menu-button:menu-fixture-world"),
         ],
     },
     ElementContract {

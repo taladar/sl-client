@@ -403,26 +403,30 @@ mod tests {
 
     /// A submenu, so the walk is exercised past the top level.
     static TEST_SUBMENU: MenuDef = MenuDef {
-        label: "Deeper",
+        label_key: "menu-accel-fixture-deeper",
         items: &[MenuItemDef::Command(
-            MenuCommand::new("Deep", "deep").accel("Ctrl+Alt+Shift+S"),
+            MenuCommand::new("menu-accel-fixture-deep", "deep").accel("Ctrl+Alt+Shift+S"),
         )],
     };
 
     /// One menu holding every accelerator shape the dispatcher must tell apart.
     static TEST_MENU: MenuDef = MenuDef {
-        label: "Test",
+        label_key: "menu-accel-fixture-test",
         items: &[
-            MenuItemDef::Command(MenuCommand::new("Open", "open").accel("Ctrl+I")),
-            MenuItemDef::Command(MenuCommand::new("Mini", "mini").accel("Ctrl+Shift+M")),
-            MenuItemDef::Command(MenuCommand::new("Bare", "bare").accel("Home")),
             MenuItemDef::Command(
-                MenuCommand::new("Gated", "gated")
+                MenuCommand::new("menu-accel-fixture-open", "open").accel("Ctrl+I"),
+            ),
+            MenuItemDef::Command(
+                MenuCommand::new("menu-accel-fixture-mini", "mini").accel("Ctrl+Shift+M"),
+            ),
+            MenuItemDef::Command(MenuCommand::new("menu-accel-fixture-bare", "bare").accel("Home")),
+            MenuItemDef::Command(
+                MenuCommand::new("menu-accel-fixture-gated", "gated")
                     .accel("Ctrl+G")
                     .enabled_when("can-gate"),
             ),
             MenuItemDef::Command(
-                MenuCommand::new("Hidden", "hidden")
+                MenuCommand::new("menu-accel-fixture-hidden", "hidden")
                     .accel("Ctrl+H")
                     .visible_when("advanced"),
             ),
@@ -439,6 +443,9 @@ mod tests {
     /// and `held` as the bar's conditions.
     fn bar_app(held: &[&'static str]) -> Result<App, TestError> {
         let mut app = LayoutTest::new().build();
+        // Every menu line resolves its `label_key`; with no bundles behind the
+        // translator each one resolves to itself.
+        sl_viewer_ui_core::i18n::install_untranslated(&mut app);
         enable_action_recording(&mut app);
         app.init_resource::<HoverMap>()
             .init_resource::<ButtonInput<KeyCode>>()

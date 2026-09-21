@@ -119,43 +119,43 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         NETWORK_SECTION,
         SETTING_MAX_BANDWIDTH,
         SettingValue::F32(DEFAULT_MAX_BANDWIDTH_KBPS),
-        "Maximum UDP bandwidth requested from the simulator, kilobits per second",
+        "setting-desc-ThrottleBandwidthKbps",
     );
     settings.register_in(
         NETWORK_SECTION,
         SETTING_HTTP_PROXY_ENABLED,
         SettingValue::Bool(false),
-        "Route all HTTP traffic through the HTTP proxy (takes effect on restart)",
+        "setting-desc-HttpProxyEnabled",
     );
     settings.register_in(
         NETWORK_SECTION,
         SETTING_HTTP_PROXY,
         SettingValue::String(String::new()),
-        "The HTTP proxy as host:port, e.g. 127.0.0.1:8888 (takes effect on restart)",
+        "setting-desc-HttpProxy",
     );
     settings.register_in(
         CACHE_SECTION,
         SETTING_TEXTURE_CACHE_SIZE_MB,
         SettingValue::U32(DEFAULT_CACHE_SIZE_MB),
-        "Texture disk cache size ceiling in MB (takes effect on restart)",
+        "setting-desc-TextureCacheSizeMb",
     );
     settings.register_in(
         CACHE_SECTION,
         SETTING_ASSET_CACHE_SIZE_MB,
         SettingValue::U32(DEFAULT_CACHE_SIZE_MB),
-        "Size ceiling in MB for each asset disk cache (takes effect on restart)",
+        "setting-desc-AssetCacheSizeMb",
     );
     settings.register_in(
         CACHE_SECTION,
         SETTING_CACHE_LOCATION,
         SettingValue::String(String::new()),
-        "Custom cache directory; empty = the platform default (takes effect on restart)",
+        "setting-desc-CacheLocation",
     );
     settings.register_in(
         CACHE_SECTION,
         SETTING_CHAT_LOG_LOCATION,
         SettingValue::String(String::new()),
-        "Custom chat-log directory; empty = the platform default (takes effect on restart)",
+        "setting-desc-ChatLogLocation",
     );
 }
 

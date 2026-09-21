@@ -331,52 +331,52 @@ pub fn register_settings(settings: &mut ViewerSettings) {
             FLYCAM_SECTION,
             &scale_setting(index),
             SettingValue::F32(scale),
-            "Flycam axis scaler",
+            "setting-desc-spacenav-flycam-axis-scale",
         );
         settings.register_in(
             FLYCAM_SECTION,
             &dead_zone_setting(index),
             SettingValue::F32(DEFAULT_DEAD_ZONE),
-            "Flycam axis dead zone",
+            "setting-desc-spacenav-flycam-axis-dead-zone",
         );
     }
     settings.register_in(
         FLYCAM_SECTION,
         FEATHERING_SETTING,
         SettingValue::F32(DEFAULT_FEATHERING),
-        "Flycam feathering (less is softer)",
+        "setting-desc-FlycamFeathering",
     );
     settings.register_in(
         FLYCAM_SECTION,
         AUTO_LEVELING_SETTING,
         SettingValue::Bool(DEFAULT_AUTO_LEVELING),
-        "Ease the flycam horizon back to level",
+        "setting-desc-AutoLeveling",
     );
     for (index, &scale) in DEFAULT_AVATAR_SCALE.iter().enumerate() {
         settings.register_in(
             AVATAR_SECTION,
             &avatar_scale_setting(index),
             SettingValue::F32(scale),
-            "Avatar-motion axis scaler",
+            "setting-desc-spacenav-avatar-axis-scale",
         );
         settings.register_in(
             AVATAR_SECTION,
             &avatar_dead_zone_setting(index),
             SettingValue::F32(DEFAULT_AVATAR_DEAD_ZONE.get(index).copied().unwrap_or(0.0)),
-            "Avatar-motion axis dead zone",
+            "setting-desc-spacenav-avatar-axis-dead-zone",
         );
     }
     settings.register_in(
         AVATAR_SECTION,
         AVATAR_FEATHERING_SETTING,
         SettingValue::F32(DEFAULT_AVATAR_FEATHERING),
-        "Avatar-motion feathering (less is softer)",
+        "setting-desc-AvatarFeathering",
     );
     settings.register_in(
         AVATAR_SECTION,
         RUN_THRESHOLD_SETTING,
         SettingValue::F32(DEFAULT_RUN_THRESHOLD),
-        "Forward-push magnitude past which walking becomes running",
+        "setting-desc-JoystickRunThreshold",
     );
 }
 

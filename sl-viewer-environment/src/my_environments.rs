@@ -209,14 +209,19 @@ const COND_MODIFIABLE: &str = "my-environments-modifiable";
 
 /// The per-row menu — the reference's `menu_settings_gear`.
 static MY_ENVIRONMENTS_MENU: MenuDef = MenuDef {
-    label: "Environment",
+    label_key: "menu-my-env-environment",
     items: &[
-        MenuItemDef::Command(MenuCommand::new("Edit", "edit")),
+        MenuItemDef::Command(MenuCommand::new("menu-my-env-edit", "edit")),
         MenuItemDef::Separator,
-        MenuItemDef::Command(MenuCommand::new("Apply Only To Myself", "apply-local")),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-my-env-apply-only-to-myself",
+            "apply-local",
+        )),
         MenuItemDef::Separator,
-        MenuItemDef::Command(MenuCommand::new("Copy UUID", "copy-uuid")),
-        MenuItemDef::Command(MenuCommand::new("Delete", "delete").enabled_when(COND_MODIFIABLE)),
+        MenuItemDef::Command(MenuCommand::new("menu-my-env-copy-uuid", "copy-uuid")),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-my-env-delete", "delete").enabled_when(COND_MODIFIABLE),
+        ),
     ],
 };
 

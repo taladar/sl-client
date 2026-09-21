@@ -33,6 +33,7 @@ pub(crate) use sl_viewer_kit::face_material;
 pub(crate) use sl_viewer_pickers::ui_texture_picker;
 pub(crate) use sl_viewer_social as social;
 pub(crate) use sl_viewer_ui_core::i18n;
+pub(crate) use sl_viewer_ui_core::skin_palette;
 pub(crate) use sl_viewer_ui_core::ui;
 pub(crate) use sl_viewer_ui_core::ui_element;
 pub(crate) use sl_viewer_ui_core::ui_font;

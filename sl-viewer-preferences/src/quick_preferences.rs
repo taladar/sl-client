@@ -35,6 +35,7 @@
 //! Reference (Firestorm, read-only): `quickprefs` (`FloaterQuickPrefs`),
 //! `quick_preferences.xml`.
 
+use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui::Checked;
@@ -119,7 +120,7 @@ const SPAWN_POSITION: Vec2 = Vec2::splat(ANCHOR_MARGIN);
 /// Section-heading colour.
 const SECTION_COLOR: Color = Color::srgb(0.78, 0.83, 0.9);
 /// Row-label colour.
-const LABEL_COLOR: Color = Color::srgb(0.86, 0.88, 0.92);
+const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 /// The value-readout colour.
 const VALUE_COLOR: Color = Color::srgb(0.7, 0.74, 0.82);
 /// A control's border colour.

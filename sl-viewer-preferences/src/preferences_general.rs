@@ -101,25 +101,25 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         GENERAL_SECTION,
         SETTING_PREFERRED_MATURITY,
         SettingValue::String("PG".to_owned()),
-        "The maturity rating ceiling to ask the grid for: PG, M or A",
+        "setting-desc-PreferredMaturity",
     );
     settings.register_in(
         LOGIN_SECTION,
         SETTING_LOGIN_START_LOCATION,
         SettingValue::String("last".to_owned()),
-        "The default login start location: last, home, or uri:Region&x&y&z",
+        "setting-desc-LoginStartLocation",
     );
     settings.register_in(
         UI_SECTION,
         SETTING_UI_SCALE,
         SettingValue::F32(1.0),
-        "The UI scale factor (1.0 = native size)",
+        "setting-desc-UiScale",
     );
     settings.register_in(
         GENERAL_SECTION,
         SETTING_AFK_TIMEOUT,
         SettingValue::U32(300),
-        "Seconds of inactivity before going away automatically (0 = never)",
+        "setting-desc-AfkTimeoutSeconds",
     );
 }
 

@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 100 |
-| ready | 296 |
+| ready | 295 |
 | blocked | 39 |
 | in-progress | 22 |
 | bugs | 6 |
-| done | 1201 |
+| done | 1204 |
 | deferred | 29 |
 | wont-do | 16 |
-| **total** | **1709** |
+| **total** | **1711** |
 
 ## ideas (100)
 
@@ -238,7 +238,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (296)
+## ready (295)
 
 ### protocol
 
@@ -299,6 +299,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-attachment-align`](ready/viewer-attachment-align.md) — Attachment
   alignment tool (avatar align) (blocked by `viewer-object-edit-floater-shell`
   (done))
+- [`viewer-audit-checkbox-box-widget`](ready/viewer-audit-checkbox-box-widget.md)
+  — The settings checkbox box is spawned and repainted by hand in seven places
 - [`viewer-audit-demo-panels-in-release`](ready/viewer-audit-demo-panels-in-release.md)
   — Five developer demo panels ship in the release binary from inside library
   crates
@@ -306,17 +308,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Extract the pure logic trapped inside viewer systems and test it
 - [`viewer-audit-lsp-position-roundtrip`](ready/viewer-audit-lsp-position-roundtrip.md)
   — The LSP position-to-byte direction has zero tests
-- [`viewer-audit-menu-label-i18n`](ready/viewer-audit-menu-label-i18n.md) — Menu
-  and pie-menu labels cannot be translated, by type
-- [`viewer-audit-preferences-hub-decoupling`](ready/viewer-audit-preferences-hub-decoupling.md)
-  — sl-viewer-preferences is a 12-crate hub whose own decoupling mechanism is
-  under-applied
 - [`viewer-audit-preferences-restart-note`](ready/viewer-audit-preferences-restart-note.md)
   — There is no restart-note idiom, so 'restart required' is baked into labels
 - [`viewer-audit-search-map-edge`](ready/viewer-audit-search-map-edge.md) —
   sl-viewer-search depends on sl-viewer-map for one two-field struct
-- [`viewer-audit-skin-token-coverage`](ready/viewer-audit-skin-token-coverage.md)
-  — The skin system covers two widgets
 - [`viewer-audit-web-auth-preference`](ready/viewer-audit-web-auth-preference.md)
   — Whether the grid session cookie is injected into the browser is a CLI flag,
   not a preference
@@ -824,6 +819,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — export / import (blocked by `viewer-preferences-floater` (done))
 - [`viewer-sit-stand-actions`](ready/viewer-sit-stand-actions.md) — Sit / stand
   actions (blocked by `viewer-object-selection-core` (done))
+- [`viewer-skin-panel-text-roles`](ready/viewer-skin-panel-text-roles.md) —
+  Panel text does not follow the skin, only the widgets it is built from
 - [`viewer-snapshot-composition-guides`](ready/viewer-snapshot-composition-guides.md)
   — Snapshot composition guides, capture frame & filename patterns
 - [`viewer-snapshot-highres-quiet`](ready/viewer-snapshot-highres-quiet.md) —
@@ -1139,7 +1136,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-sliders-show-no-value`](bugs/viewer-sliders-show-no-value.md) — A
   slider shows no value, and no bounds or step either
 
-## done (1201)
+## done (1204)
 
 ### protocol
 
@@ -1468,6 +1465,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A transient map-tile fetch error is cached as permanently missing
 - [`viewer-audit-media-url-scheme-allowlist`](done/viewer-audit-media-url-scheme-allowlist.md)
   — Parcel media URLs reach CEF and GStreamer with no scheme allowlist
+- [`viewer-audit-menu-label-i18n`](done/viewer-audit-menu-label-i18n.md) — Menu
+  and pie-menu labels cannot be translated, by type
 - [`viewer-audit-name-tag-viewport-gate`](done/viewer-audit-name-tag-viewport-gate.md)
   — The name-tag viewport-changed gate is exactly inverted
 - [`viewer-audit-notification-store-overwrite`](done/viewer-audit-notification-store-overwrite.md)
@@ -1493,6 +1492,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Two plugins read resources they never register
 - [`viewer-audit-plugins-own-their-schedule`](done/viewer-audit-plugins-own-their-schedule.md)
   — Most viewer crates export loose systems instead of owning a plugin
+- [`viewer-audit-preferences-hub-decoupling`](done/viewer-audit-preferences-hub-decoupling.md)
+  — sl-viewer-preferences is a 12-crate hub whose own decoupling mechanism is
+  under-applied
 - [`viewer-audit-probe-ambient-multiply`](done/viewer-audit-probe-ambient-multiply.md)
   — suppress_global_ambient multiplies an absolute producer and decays it
   geometrically
@@ -1519,6 +1521,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-sit-camera-gating`](done/viewer-audit-sit-camera-gating.md) —
   The scripted sit camera arms on any SitResult and never clears forced
   mouselook
+- [`viewer-audit-skin-token-coverage`](done/viewer-audit-skin-token-coverage.md)
+  — The skin system covers two widgets
 - [`viewer-audit-stale-globaltransform-readers`](done/viewer-audit-stale-globaltransform-readers.md)
   — Depth-reconstructing passes and the interest camera read a frame-old camera
   pose
