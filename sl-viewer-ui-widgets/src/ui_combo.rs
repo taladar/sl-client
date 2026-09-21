@@ -31,7 +31,7 @@ use bevy::ui_widgets::popover::{Popover, PopoverAlign, PopoverPlacement, Popover
 use bevy_flair::style::components::ClassList;
 
 use sl_viewer_ui_core::i18n::Translated;
-use sl_viewer_ui_core::skin_palette::{SkinColors, SkinPalette};
+use sl_viewer_ui_core::skin_palette::SkinPalette;
 use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems, row};
 use sl_viewer_ui_core::ui_font::UiFont;
 
@@ -52,6 +52,17 @@ const ARROW_GLYPH: &str = "\u{25be}";
 
 /// The skin class for the value / option text (`--text-primary`).
 const VALUE_CLASS: &str = "sk-build-value";
+
+/// The skin class on the combo's anchor box. Its greyed look is the skin's
+/// `:disabled` rule over the `InteractionDisabled` a consumer already sets
+/// (the debug-settings scope combo is one), so there is no state to mirror.
+const ANCHOR_CLASS: &str = "sk-combo";
+
+/// The skin class on one popover row. Its hover is `:hover` — a pointer hover
+/// is the one state a selector reaches with no code at all — and a row that
+/// cannot be picked carries `InteractionDisabled`, which is both true and what
+/// `:disabled` selects on.
+const OPTION_CLASS: &str = "sk-combo-option";
 
 /// Everything a combo is built from — a struct so the knobs read at the call
 /// site, mirroring [`crate::ui_radio::RadioSpec`].
@@ -237,12 +248,7 @@ impl Plugin for ComboWidgetPlugin {
             .add_message::<SetComboOptions>()
             .add_systems(
                 Update,
-                (
-                    apply_set_combo_options,
-                    apply_combo_selection,
-                    reflect_combo_disabled,
-                )
-                    .chain(),
+                (apply_set_combo_options, apply_combo_selection).chain(),
             )
             .add_systems(
                 Startup,
@@ -256,9 +262,6 @@ impl Plugin for ComboWidgetPlugin {
 /// [`ComboSelection`] (the source of truth a consumer reads / writes) and a
 /// [`ComboChanged`] on each user pick.
 pub fn spawn_combo(commands: &mut Commands, parent: Entity, spec: &ComboSpec) -> Entity {
-    // The skinless fallback; `reflect_combo_disabled` repaints the anchor from
-    // the live palette every frame, and the value text carries a skin class.
-    let fallback = SkinPalette::default();
     let active = spec.resolved_active();
     let anchor = commands
         .spawn((
@@ -273,8 +276,7 @@ pub fn spawn_combo(commands: &mut Commands, parent: Entity, spec: &ComboSpec) ->
                 column_gap: Val::Px(8.0),
                 ..row(Val::ZERO)
             },
-            BorderColor::all(fallback.control_border),
-            BackgroundColor(fallback.control_bg),
+            ClassList::new_with_classes([ANCHOR_CLASS]),
             ComboSelection {
                 element: spec.element,
                 active,
@@ -296,7 +298,6 @@ pub fn spawn_combo(commands: &mut Commands, parent: Entity, spec: &ComboSpec) ->
         .spawn((
             Text::default(),
             UiFont::Sans.at(spec.font_size),
-            TextColor(fallback.text_primary),
             ClassList::new_with_classes([VALUE_CLASS]),
             ComboValueText,
             Pickable::IGNORE,
@@ -309,7 +310,10 @@ pub fn spawn_combo(commands: &mut Commands, parent: Entity, spec: &ComboSpec) ->
     commands.spawn((
         Text::new(ARROW_GLYPH),
         UiFont::Sans.at(spec.font_size),
-        TextColor(fallback.text_primary),
+        // The same class as the value text, so the arrow greys with the anchor
+        // through `.sk-combo:disabled .sk-build-value` — as it did when both
+        // were painted `text_primary` here.
+        ClassList::new_with_classes([VALUE_CLASS]),
         Pickable::IGNORE,
         Name::new(format!("{}:combo-arrow", spec.element)),
         ChildOf(anchor),
@@ -395,11 +399,6 @@ fn build_combo_popover(
     options: &ComboOptions,
     states: Option<&ComboRowStates>,
 ) {
-    // Built from a `&mut Commands` with no world access, so the skinless
-    // fallback; `.sk-menu` and `.sk-menu-separator` repaint the surface, and
-    // a row's text stays Rust-painted because the selectable / unselectable
-    // greying must survive the cascade.
-    let palette = SkinPalette::default();
     let popup = commands
         .spawn((
             Node {
@@ -453,7 +452,7 @@ fn build_combo_popover(
                     padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
                     ..Default::default()
                 },
-                BackgroundColor(Color::NONE),
+                ClassList::new_with_classes([OPTION_CLASS]),
                 ComboOption {
                     combo: anchor,
                     index,
@@ -464,11 +463,14 @@ fn build_combo_popover(
             ))
             .observe(select_combo_option)
             .id();
-        if state.is_selectable() {
+        if !state.is_selectable() {
+            // True of the row, not merely convenient for the skin: a
+            // non-selectable row refuses the press. Saying so with the marker
+            // gives `:disabled` something to select on *and* tells the
+            // accessibility tree, which a colour never did.
             commands
                 .entity(row_entity)
-                .observe(hover_combo_option)
-                .observe(unhover_combo_option);
+                .insert(bevy::ui::InteractionDisabled);
         }
         if state == ComboRow::Separator {
             commands.spawn((
@@ -477,57 +479,29 @@ fn build_combo_popover(
                     height: Val::Px(1.0),
                     ..Default::default()
                 },
-                BackgroundColor(palette.surface_border),
                 ClassList::new_with_classes([SEPARATOR_CLASS]),
                 Pickable::IGNORE,
                 ChildOf(row_entity),
             ));
             continue;
         }
-        let mut row_text = commands.spawn((
-            Text::default(),
-            UiFont::Sans.at(options.font_size),
-            TextColor(if state.is_selectable() {
-                palette.text_primary
-            } else {
-                palette.text_disabled
-            }),
-            Pickable::IGNORE,
-            ChildOf(row_entity),
-        ));
-        // The skin class carries `--text-primary`, which would repaint a
-        // disabled row in the ordinary option colour and undo the greying — so
-        // a disabled row is deliberately outside the skin's reach here.
-        if state.is_selectable() {
-            row_text.insert(ClassList::new_with_classes([VALUE_CLASS]));
-        }
-        let text = row_text.id();
+        // Unconditional now: a row that cannot be picked greys through
+        // `.sk-combo-option:disabled .sk-build-value`, so the class no longer
+        // has to be withheld to keep the skin from undoing it.
+        let text = commands
+            .spawn((
+                Text::default(),
+                UiFont::Sans.at(options.font_size),
+                ClassList::new_with_classes([VALUE_CLASS]),
+                Pickable::IGNORE,
+                ChildOf(row_entity),
+            ))
+            .id();
         if options.translate {
             commands.entity(text).insert(Translated::new(label.clone()));
         } else {
             commands.entity(text).insert(Text::new(label.clone()));
         }
-    }
-}
-
-/// Highlight a popover row under the pointer.
-fn hover_combo_option(
-    over: On<Pointer<Over>>,
-    palette: SkinColors,
-    mut rows: Query<&mut BackgroundColor, With<ComboOption>>,
-) {
-    if let Ok(mut bg) = rows.get_mut(over.entity) {
-        bg.0 = palette.get().control_bg_hover;
-    }
-}
-
-/// Clear a popover row's highlight when the pointer leaves.
-fn unhover_combo_option(
-    out: On<Pointer<Out>>,
-    mut rows: Query<&mut BackgroundColor, With<ComboOption>>,
-) {
-    if let Ok(mut bg) = rows.get_mut(out.entity) {
-        bg.0 = Color::NONE;
     }
 }
 
@@ -671,56 +645,6 @@ fn apply_combo_selection(
                         .entity(child)
                         .remove::<Translated>()
                         .insert(Text::new(label.clone()));
-                }
-            }
-        }
-    }
-}
-
-/// Grey a combo's anchor and value / arrow text while it is
-/// [disabled](bevy::ui::InteractionDisabled), and restore them when enabled — so
-/// a consumer disables a combo the same way it disables a text field (adding the
-/// marker), and the widget reflects it.
-fn reflect_combo_disabled(
-    palette: SkinColors,
-    mut anchors: Query<
-        (
-            &Children,
-            Has<bevy::ui::InteractionDisabled>,
-            &mut BackgroundColor,
-            &mut BorderColor,
-        ),
-        With<ComboSelection>,
-    >,
-    mut texts: Query<&mut TextColor>,
-) {
-    let palette = palette.get();
-    for (children, disabled, mut background, mut border) in &mut anchors {
-        let (want_bg, want_border, want_text) = if disabled {
-            (
-                palette.control_bg_disabled,
-                palette.control_border_disabled,
-                palette.text_disabled,
-            )
-        } else {
-            (
-                palette.control_bg,
-                palette.control_border,
-                palette.text_primary,
-            )
-        };
-        if background.0 != want_bg {
-            background.0 = want_bg;
-        }
-        let wanted_border = BorderColor::all(want_border);
-        if *border != wanted_border {
-            *border = wanted_border;
-        }
-        for child in children.iter() {
-            if let Ok(mut color) = texts.get_mut(child) {
-                let wanted = TextColor(want_text);
-                if *color != wanted {
-                    *color = wanted;
                 }
             }
         }

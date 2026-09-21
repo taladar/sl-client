@@ -9697,6 +9697,7 @@ name = "sl-viewer-ui-pie-menu"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_flair",
  "pretty_assertions",
  "sl-viewer-testkit",
  "sl-viewer-ui-core",

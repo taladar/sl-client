@@ -54,6 +54,8 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use bevy::ui::Checked;
+use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
     AgentKey, Command, FriendKey, FriendRights, MuteType, SlCommand, SlEvent, SlSessionEvent,
 };
@@ -146,28 +148,16 @@ const HEADER_BACKGROUND: Color = Color::srgb(0.14, 0.17, 0.22);
 /// The table header text colour — dim, so the headers read as chrome.
 const HEADER_TEXT_COLOR: Color = Color::srgb(0.66, 0.70, 0.78);
 
-/// A right this agent **grants** (an editable "They can …" checkbox), when ticked
-/// — a clear, interactive accent.
-const RIGHT_SET_COLOR: Color = Color::srgb(0.55, 0.75, 0.95);
-
-/// A right the friend **grants** us (a read-only "You can …" checkbox), when
-/// ticked — the same hue, dimmed, so it reads as informational not interactive.
-const RIGHT_RECEIVED_COLOR: Color = Color::srgb(0.42, 0.55, 0.70);
-
-/// A withheld permission (an empty checkbox), either direction — dim.
-const RIGHT_UNSET_COLOR: Color = Color::srgb(0.40, 0.44, 0.50);
-
-/// The tint for a rights checkbox, by whether it is set and which direction (an
-/// editable granted right ticks brighter than a read-only received one).
-const fn right_tint(set: bool, received: bool) -> Color {
-    if !set {
-        RIGHT_UNSET_COLOR
-    } else if received {
-        RIGHT_RECEIVED_COLOR
-    } else {
-        RIGHT_SET_COLOR
-    }
-}
+/// The skin class on a permission checkbox in the friends list.
+///
+/// Its three looks are the skin's, and none of them needs a marker: a ticked
+/// permission carries `Checked` and a read-only ("You can …") one carries
+/// `InteractionDisabled`, so the rules are `.sk-rights-cell`,
+/// `…:checked` and `…:checked:disabled`. Both components state something true
+/// of the cell — it *is* a checkbox, and a received cell really cannot be
+/// changed (only the granted cells carry the toggle observer) — so this also
+/// puts into the accessibility tree what was previously only a tint.
+const RIGHTS_CELL_CLASS: &str = "sk-rights-cell";
 
 /// The filled presence dot glyph, shown for an online friend.
 const ONLINE_GLYPH: &str = "\u{25CF}";
@@ -2437,10 +2427,8 @@ fn spawn_row_rights_group(
             .id();
         let checkbox = commands
             .spawn((
-                ImageNode {
-                    color: RIGHT_UNSET_COLOR,
-                    ..ImageNode::new(icons.checkbox(false))
-                },
+                ImageNode::new(icons.checkbox(false)),
+                ClassList::new_with_classes([RIGHTS_CELL_CLASS]),
                 Node {
                     width: Val::Px(ICON_DISPLAY),
                     height: Val::Px(ICON_DISPLAY),
@@ -2460,7 +2448,15 @@ fn spawn_row_rights_group(
                 ChildOf(cell),
             ))
             .id();
-        if !received {
+        if received {
+            // Read-only in fact, not merely in styling: a received cell gets no
+            // toggle observer below. Saying so with the marker is what
+            // `:checked:disabled` selects on, and it tells the accessibility
+            // tree what the tint used to say only to the eye.
+            commands
+                .entity(checkbox)
+                .insert(bevy::ui::InteractionDisabled);
+        } else {
             commands.entity(checkbox).observe(on_toggle_right);
         }
         checkbox
@@ -2597,18 +2593,22 @@ fn bind_friend_rows(
         // The six permission checkboxes — the ticked / empty icon and the tint by
         // set-ness and direction, plus the friend the (editable) cell now acts on.
         for (checkbox, column) in parts.rights.iter().zip(RIGHT_COLUMNS) {
-            let (received, _kind) = column;
             let set = column_is_set(friend_row, column);
             if let Ok((mut image, mut cell_friend)) = checkboxes.get_mut(*checkbox) {
+                // The icon asset is still ours to swap — CSS cannot change
+                // which image a node shows, and putting icon paths in the skin
+                // is `viewer-skin-icon-set`'s business. The *tint* is the
+                // skin's, through `Checked`.
                 let wanted = ui.icons.checkbox(set);
                 if image.image != wanted {
                     image.image = wanted;
                 }
-                let tint = right_tint(set, received);
-                if image.color != tint {
-                    image.color = tint;
-                }
                 cell_friend.0 = Some(friend_row.friend);
+            }
+            if set {
+                commands.entity(*checkbox).insert(Checked);
+            } else {
+                commands.entity(*checkbox).remove::<Checked>();
             }
         }
     }

@@ -51,6 +51,8 @@
 
   /* Accent */
   --accent: #38bdf8;
+  /* The accent, dimmed — informational rather than interactive. */
+  --accent-muted: #288bba;
 
   /* Emphasis */
   --selection-bg: #2f6fae8c;

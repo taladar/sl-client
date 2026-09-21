@@ -238,6 +238,7 @@ use bevy::render::render_resource::{AsBindGroup, ShaderType};
 use bevy::shader::ShaderRef;
 use bevy::window::{PrimaryWindow, WindowFocused};
 
+use bevy_flair::style::components::ClassList;
 use sl_viewer_ui_core::i18n::Translator;
 use sl_viewer_ui_core::skin_palette::{SkinColors, SkinPalette};
 use sl_viewer_ui_core::ui::{UiRoot, column};
@@ -1028,11 +1029,11 @@ impl UiMaterial for PieMenuMaterial {
 
 /// Which of the three colour roles a slice's caption takes.
 ///
-/// Recorded on the caption's text node at build time and painted by
-/// [`paint_pie_labels`] from the skin's role palette, rather than resolved to a
-/// colour here: the labels are spawned from a plain `Commands` (which cannot
-/// reach the world), and a caption has to follow a skin or theme switch like
-/// everything else. The three roles are the reference's own distinctions —
+/// Recorded on the caption's text node at build time, and naming the skin class
+/// that paints it ([`PieLabelRole::class`]) — so a caption spawned from a plain
+/// `Commands` with no world access is dressed at spawn, and follows a skin or
+/// theme switch like everything else with no code involved. The three roles are
+/// the reference's own distinctions —
 /// `PieMenuBgColor`'s companion text, the sub-pie tint that says "this opens
 /// another pie" without writing a `>` into the string, and the fade the
 /// reference applies to an unavailable item.
@@ -1047,29 +1048,18 @@ enum PieLabelRole {
 }
 
 impl PieLabelRole {
-    /// This role's colour in `palette`.
-    const fn color(self, palette: &SkinPalette) -> Color {
+    /// The skin class that paints this role.
+    ///
+    /// A class rather than a colour resolved here: a caption is spawned from a
+    /// plain `Commands` with no world access, which is exactly why this used to
+    /// need a paint system running every frame to colour it afterwards. A class
+    /// needs no world, so the caption is dressed at spawn and the cascade keeps
+    /// it right through a skin, theme or hot-reload change.
+    const fn class(self) -> &'static str {
         match self {
-            Self::Action => palette.text_primary,
-            Self::SubPie => palette.pie_label_sub_pie,
-            Self::Disabled => palette.pie_label_disabled,
-        }
-    }
-}
-
-/// Paint every pie caption from the live role palette — the one writer of a
-/// caption's colour.
-///
-/// Runs every frame with a guarded write, which is what makes it cover both
-/// cases at once: a caption just spawned by [`rebuild_pie_labels`] (which has
-/// no world access and so leaves the colour to this) and a skin, theme or
-/// hot-reload change under an open pie.
-fn paint_pie_labels(palette: SkinColors, mut labels: Query<(&PieLabelRole, &mut TextColor)>) {
-    let palette = palette.get();
-    for (role, mut color) in &mut labels {
-        let wanted = role.color(&palette);
-        if color.0 != wanted {
-            color.0 = wanted;
+            Self::Action => "sk-pie-label",
+            Self::SubPie => "sk-pie-label-sub-pie",
+            Self::Disabled => "sk-pie-label-unavailable",
         }
     }
 }
@@ -1107,7 +1097,6 @@ impl Plugin for PieMenuPlugin {
                     update_pie_labels,
                     // After the rebuild, so a caption spawned this frame is
                     // painted before it is ever drawn.
-                    paint_pie_labels,
                 )
                     .chain(),
             )
@@ -1396,9 +1385,9 @@ fn rebuild_pie_labels(
                 cx.font(UiFont::Sans),
                 // A sub-pie's label is tinted (and the shader draws a rim chevron);
                 // neither writes a `>` into the string, so there is no bidi arrow to
-                // mirror and no width added to the text. The tint itself is
-                // `paint_pie_labels`' to write, from the skin.
-                TextColor(role.color(&SkinPalette::default())),
+                // mirror and no width added to the text. The tint is the skin's,
+                // through the class this role names.
+                ClassList::new_with_classes([role.class()]),
                 role,
                 Name::new(format!("pie-label-text:{}", point.name())),
             ));

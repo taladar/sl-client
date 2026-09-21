@@ -36,6 +36,9 @@
   --field-bg: #1a1f29;
   --field-text: #ffffff;
   --accent: #5cb8fa;
+  /* The accent, dimmed: a state shown for information rather than for
+   * interaction (a permission a friend grants you, which you cannot change). */
+  --accent-muted: #6b8db3;
   --selection-bg: #3d57858c;
   --match-highlight: #fad166;
   --divider: #576987;

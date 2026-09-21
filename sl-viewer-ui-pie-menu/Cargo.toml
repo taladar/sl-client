@@ -18,6 +18,10 @@ publish.workspace = true
 # spec stays per-crate (see the root manifest). `system_font_discovery` because
 # the slice labels are real, measured text.
 bevy = { version = "0.19.0", features = ["system_font_discovery"] }
+# The captions carry skin classes (`PieLabelRole::class`), so this crate names
+# the CSS engine directly — as the other widget crates do. Already in the
+# closure through sl-viewer-ui-core, so the package set is unchanged.
+bevy_flair = { version = "0.8.0" }
 sl-viewer-ui-core = { workspace = true }
 
 [dev-dependencies]

@@ -529,6 +529,24 @@ fn subtree_matches_filter(def: &MenuDef, query: &str, translator: &Translator) -
 /// the bar's own surface show through, so a skin recolours those instead.
 const ENTRY_BACKGROUND: Color = Color::NONE;
 
+/// The skin class on one menu row.
+const ENTRY_CLASS: &str = "sk-menu-item";
+
+/// The skin class on a row whose label matched the active menu-search term.
+/// A row that is *unavailable* needs no class of its own — it carries
+/// `InteractionDisabled`, which the skin reaches through `:disabled`.
+const ENTRY_MATCH_CLASS: &str = "sk-menu-item-match";
+
+/// The skin class on a row's muted accessories — the accelerator text and a
+/// submenu's trailing arrow. Unconditionally muted, as they were when painted
+/// here: a disabled row greys its label but has always kept these the same.
+const ENTRY_ACCESSORY_CLASS: &str = "sk-menu-accessory";
+
+/// The skin class on a row's text parts — the check gutter and every span of
+/// the label. Their colour follows the row's state through an ancestor rule,
+/// `bevy_ui` having no style inheritance to carry it down.
+const ENTRY_LABEL_CLASS: &str = "sk-menu-item-label";
+
 /// The inline / block padding around a menu-bar button's label, in logical px.
 const BAR_BUTTON_PADDING: Vec2 = Vec2::new(12.0, 6.0);
 
@@ -1585,23 +1603,14 @@ fn spawn_command_line(
     let element = ctx.element;
     let enabled = ctx.conditions.holds(command.enabled_when);
     let checked = command.checked_when.is_some() && ctx.conditions.holds(command.checked_when);
-    let palette = SkinPalette::default();
-    let text_color = if !enabled {
-        palette.text_disabled
-    } else if draw.highlight {
-        palette.match_highlight
-    } else {
-        palette.text_primary
-    };
     let action = command.action;
-    // A disabled row carries a second class whose skin rule repaints the label
-    // in the skin's disabled grey — without it, the skin's `.sk-menu-item`
-    // text colour would override the Rust-painted disabled grey and an
-    // unavailable entry would read enabled.
-    let classes: &[&str] = if enabled {
-        &["sk-menu-item"]
+    // A row that matched the active menu-search term says so; a row that is
+    // unavailable does not need to, because it already carries
+    // `InteractionDisabled` below and the skin greys it through `:disabled`.
+    let classes: &[&str] = if draw.highlight {
+        &[ENTRY_CLASS, ENTRY_MATCH_CLASS]
     } else {
-        &["sk-menu-item", "sk-menu-item-disabled"]
+        &[ENTRY_CLASS]
     };
     let row = commands
         .spawn((
@@ -1627,24 +1636,18 @@ fn spawn_command_line(
     // closes the stack.
     commands.entity(row).observe(emit_menu_action);
     attach_row_press(commands, row);
-    spawn_gutter(
-        commands,
-        row,
-        if checked { CHECK_GLYPH } else { "" },
-        text_color,
-    );
+    spawn_gutter(commands, row, if checked { CHECK_GLYPH } else { "" });
     spawn_entry_label(
         commands,
         row,
         draw.label,
-        text_color,
         draw.jump.map(|(_, offset)| offset),
     );
     if let Some(accelerator) = command.accelerator {
         commands.spawn((
             Text::new(accelerator),
             UiFont::Sans.at(ENTRY_FONT),
-            TextColor(palette.text_muted),
+            ClassList::new_with_classes([ENTRY_ACCESSORY_CLASS]),
             Pickable::IGNORE,
             Name::new("menu-item-accel"),
             ChildOf(row),
@@ -1711,9 +1714,8 @@ fn spawn_dynamic_line(
         .observe(emit_dynamic_pick)
         .id();
     attach_row_press(commands, row);
-    let text = SkinPalette::default().text_primary;
-    spawn_gutter(commands, row, "", text);
-    let label_entity = spawn_entry_label(commands, row, label, text, None);
+    spawn_gutter(commands, row, "");
+    let label_entity = spawn_entry_label(commands, row, label, None);
     commands.entity(label_entity).insert(MenuDynamicLabel);
 }
 
@@ -1728,17 +1730,19 @@ fn spawn_submenu_line(
     element: &'static str,
     filter_parent_matched: bool,
 ) {
-    let palette = SkinPalette::default();
-    let label_color = if draw.highlight {
-        palette.match_highlight
-    } else {
-        palette.text_primary
-    };
     let row = commands
         .spawn((
             entry_row_node(),
             BackgroundColor(ENTRY_BACKGROUND),
-            ClassList::new_with_classes(["sk-menu-item"]),
+            ClassList::new_with_classes(
+                if draw.highlight {
+                    &[ENTRY_CLASS, ENTRY_MATCH_CLASS][..]
+                } else {
+                    &[ENTRY_CLASS][..]
+                }
+                .iter()
+                .copied(),
+            ),
             MenuBranch {
                 def: sub,
                 element,
@@ -1753,18 +1757,12 @@ fn spawn_submenu_line(
     if let Some((key, _)) = draw.jump {
         commands.entity(row).insert(MenuMnemonic { key });
     }
-    spawn_gutter(commands, row, "", label_color);
-    spawn_entry_label(
-        commands,
-        row,
-        draw.label,
-        label_color,
-        draw.jump.map(|(_, off)| off),
-    );
+    spawn_gutter(commands, row, "");
+    spawn_entry_label(commands, row, draw.label, draw.jump.map(|(_, off)| off));
     commands.spawn((
         Text::new(SUBMENU_ARROW),
         UiFont::Sans.at(ENTRY_FONT),
-        TextColor(palette.text_muted),
+        ClassList::new_with_classes([ENTRY_ACCESSORY_CLASS]),
         Pickable::IGNORE,
         Name::new("menu-submenu-arrow"),
         ChildOf(row),
@@ -1789,7 +1787,7 @@ fn entry_row_node() -> Node {
 ///
 /// `Pickable::IGNORE`, like every entry child, so the pointer's target is the
 /// **row**, not this child.
-fn spawn_gutter(commands: &mut Commands, row: Entity, glyph: &str, color: Color) {
+fn spawn_gutter(commands: &mut Commands, row: Entity, glyph: &str) {
     commands.spawn((
         Node {
             width: Val::Px(CHECK_GUTTER_WIDTH),
@@ -1804,7 +1802,7 @@ fn spawn_gutter(commands: &mut Commands, row: Entity, glyph: &str, color: Color)
         }),
         Text::new(glyph),
         UiFont::Sans.at(CHECK_FONT),
-        TextColor(color),
+        ClassList::new_with_classes([ENTRY_LABEL_CLASS]),
         Pickable::IGNORE,
         Name::new("menu-item-check"),
         ChildOf(row),
@@ -1825,7 +1823,6 @@ fn spawn_entry_label(
     commands: &mut Commands,
     row: Entity,
     label: &str,
-    color: Color,
     mnemonic_offset: Option<usize>,
 ) -> Entity {
     let node = Node {
@@ -1839,7 +1836,7 @@ fn spawn_entry_label(
                 node,
                 Text::new(label.to_owned()),
                 UiFont::Sans.at(ENTRY_FONT),
-                TextColor(color),
+                ClassList::new_with_classes([ENTRY_LABEL_CLASS]),
                 Pickable::IGNORE,
                 Name::new("menu-item-label"),
                 ChildOf(row),
@@ -1851,7 +1848,7 @@ fn spawn_entry_label(
                     node,
                     Text::new(before.to_owned()),
                     UiFont::Sans.at(ENTRY_FONT),
-                    TextColor(color),
+                    ClassList::new_with_classes([ENTRY_LABEL_CLASS]),
                     Pickable::IGNORE,
                     Name::new("menu-item-label"),
                     ChildOf(row),
@@ -1860,14 +1857,14 @@ fn spawn_entry_label(
             commands.spawn((
                 TextSpan::new(mnemonic.to_owned()),
                 UiFont::Sans.at(ENTRY_FONT),
-                TextColor(color),
+                ClassList::new_with_classes([ENTRY_LABEL_CLASS]),
                 MnemonicSpan,
                 ChildOf(label_entity),
             ));
             commands.spawn((
                 TextSpan::new(after.to_owned()),
                 UiFont::Sans.at(ENTRY_FONT),
-                TextColor(color),
+                ClassList::new_with_classes([ENTRY_LABEL_CLASS]),
                 ChildOf(label_entity),
             ));
             label_entity

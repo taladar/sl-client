@@ -284,6 +284,95 @@
   color: var(--text-disabled);
 }
 
+/* A permission checkbox in the friends list — a white glyph mask tinted by
+ * `-bevy-image-color`, like the status-bar parcel icons.
+ *
+ * Three looks, no marker classes: a ticked permission carries `Checked` and a
+ * read-only "You can …" one carries `InteractionDisabled`, both of which are
+ * simply true of the cell. So a right you grant reads as a clear interactive
+ * accent, one the friend grants you as the same hue dimmed — informational,
+ * not interactive — and a withheld one stays dim.
+ *
+ * The ticked / empty *icon* is still swapped in Rust: CSS cannot change which
+ * image a node shows, and a skin carrying its own icon set is
+ * `viewer-skin-icon-set`. So the distinction survives a skin that recolours
+ * badly, the way the radio's ring does. */
+.sk-rights-cell {
+  -bevy-image-color: var(--text-disabled);
+}
+
+.sk-rights-cell:checked {
+  -bevy-image-color: var(--accent);
+}
+
+.sk-rights-cell:checked:disabled {
+  -bevy-image-color: var(--accent-muted);
+}
+
+/* A pie slice's caption, in its three roles. The pie *disc* is a shader rather
+ * than a node and keeps taking its three colours through the material's params
+ * — the one piece of this widget a selector genuinely cannot reach. The
+ * captions are ordinary text nodes, so they are dressed at spawn by the class
+ * their role names. */
+.sk-pie-label {
+  color: var(--text-primary);
+}
+
+/* "This opens another pie" — said with a tint (and a rim chevron the shader
+ * draws), never by writing a `>` into the string, so there is no bidi arrow to
+ * mirror and no width added to the label. */
+.sk-pie-label-sub-pie {
+  color: var(--pie-label-sub-pie);
+}
+
+/* A slice that is shown but cannot be picked — the reference fades these
+ * rather than removing them, so a pie's compass positions never move. */
+.sk-pie-label-unavailable {
+  color: var(--pie-label-disabled);
+}
+
+/* One row of a table. Selection is `.sk-active`, added and removed by
+ * `apply_table_selection_highlight`: the rows are recycled by the virtual
+ * list, so the state belongs to the index the row currently shows and no
+ * pseudo-class describes it. Translucent on purpose — a banded list still
+ * reads through the highlight. */
+.sk-table-row {
+  background-color: transparent;
+}
+
+/* A combo's anchor box, and the greyed look of one a consumer has disabled —
+ * `:disabled` over the `InteractionDisabled` the consumer already sets. */
+.sk-combo {
+  background-color: var(--control-bg);
+  border-color: var(--control-border);
+}
+
+.sk-combo:disabled {
+  background-color: var(--control-bg-disabled);
+  border-color: var(--control-border-disabled);
+}
+
+.sk-combo:disabled .sk-build-value {
+  color: var(--text-disabled);
+}
+
+/* One row of the open popover. The hover is `:hover` and nothing else — the
+ * widget used to carry a Pointer<Over> / Pointer<Out> observer pair writing
+ * this colour by hand, which is the one case a selector reaches with no code
+ * at all. A row that cannot be picked carries `InteractionDisabled`, so its
+ * label greys from an ancestor rule rather than by withholding its class. */
+.sk-combo-option {
+  background-color: transparent;
+}
+
+.sk-combo-option:hover {
+  background-color: var(--control-bg-hover);
+}
+
+.sk-combo-option:disabled .sk-build-value {
+  color: var(--text-disabled);
+}
+
 /* A radio option's indicator glyph, and its two other states.
  *
  * Both come from an ancestor: the option's own `:checked` (the `Checked` the
@@ -433,11 +522,31 @@
   border-radius: var(--control-radius);
 }
 
-/* A disabled (greyed-out) menu entry. Later in the cascade than
- * `.sk-menu-item`, so its colour wins over the enabled rule on a row carrying
- * both classes — without it, the skin's text colour would repaint the
- * Rust-painted disabled grey and an unavailable entry would read enabled. */
-.sk-menu-item-disabled {
+/* A menu row's text parts — the check gutter and every span of the label,
+ * separate nodes because bevy_ui has no style inheritance and a label may be
+ * split into three spans so one character can carry the mnemonic underline.
+ *
+ * The three states are the row's, reached from here by ancestor rules: a row
+ * that matched the active menu-search term, and one that is unavailable. The
+ * second is `:disabled` over the `InteractionDisabled` the row already carried
+ * — it needed a hand-written class only while Rust was painting the colour.
+ * Disabled comes last, so an unavailable row that also matched reads greyed
+ * rather than accented. */
+.sk-menu-item-label {
+  color: var(--text-primary);
+}
+
+/* A row's accelerator text and a submenu's trailing arrow — muted whatever the
+ * row's state, which is what they were when painted from Rust. */
+.sk-menu-accessory {
+  color: var(--text-muted);
+}
+
+.sk-menu-item-match .sk-menu-item-label {
+  color: var(--match-highlight);
+}
+
+.sk-menu-item:disabled .sk-menu-item-label {
   color: var(--text-disabled);
 }
 

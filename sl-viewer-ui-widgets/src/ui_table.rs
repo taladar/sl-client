@@ -58,6 +58,7 @@ use sl_settings::SettingValue;
 
 use sl_viewer_settings::ViewerSettings;
 use sl_viewer_ui_core::i18n::Translated;
+use sl_viewer_ui_core::skin::{ACTIVE_CLASS, set_state_class};
 use sl_viewer_ui_core::skin_palette::{SkinColors, SkinPalette};
 use sl_viewer_ui_core::ui::UiDirection;
 use sl_viewer_ui_core::ui_ellipsis::{RevealEllipsis, spawn_ellipsis_marker};
@@ -79,6 +80,16 @@ const RESIZER_WIDTH: f32 = 7.0;
 /// The skin class on a column's resize handle (`--divider`), so the draggable
 /// column borders are discoverable without shouting.
 const RESIZER_CLASS: &str = "sk-column-resizer";
+
+/// The skin class on a table row. A selected row adds [`ACTIVE_CLASS`].
+///
+/// A marker rather than a pseudo-class, and deliberately: the rows are
+/// **recycled** by the virtual list, so selection is a property of the row's
+/// current *index* rather than of the entity, and no state the engine tracks
+/// describes it. `bevy_ui::Checked` would have fitted the selector but not the
+/// meaning — it carries checkbox semantics into the accessibility tree, and a
+/// list row is not a checkbox.
+const ROW_CLASS: &str = "sk-table-row";
 
 /// The gap between a header label and its sort-direction arrow, in logical pixels.
 const ARROW_GAP: f32 = 2.0;
@@ -1220,7 +1231,7 @@ pub fn spawn_table_row(
     commands
         .entity(row_entity)
         .insert((
-            BackgroundColor(Color::NONE),
+            ClassList::new_with_classes([ROW_CLASS]),
             Pickable::default(),
             TableRow { table: root },
         ))
@@ -1803,12 +1814,10 @@ fn select_table_row_on_press(
 /// index is selected, transparent otherwise. Skips [`TableSelectionMode::None`]
 /// tables entirely, so a consumer that owns its own row backgrounds keeps them.
 fn apply_table_selection_highlight(
-    palette: SkinColors,
     tables: Query<&TableState>,
-    mut rows: Query<(&VirtualRow, &TableRow, &mut BackgroundColor)>,
+    mut rows: Query<(&VirtualRow, &TableRow, &mut ClassList)>,
 ) {
-    let palette = palette.get();
-    for (row, row_ref, mut background) in &mut rows {
+    for (row, row_ref, mut classes) in &mut rows {
         let Ok(state) = tables.get(row_ref.table) else {
             continue;
         };
@@ -1816,14 +1825,7 @@ fn apply_table_selection_highlight(
             continue;
         }
         let selected = row.index.is_some_and(|index| state.is_selected(index));
-        let wanted = if selected {
-            palette.selection_bg
-        } else {
-            Color::NONE
-        };
-        if background.0 != wanted {
-            background.0 = wanted;
-        }
+        set_state_class(&mut classes, ACTIVE_CLASS, selected);
     }
 }
 

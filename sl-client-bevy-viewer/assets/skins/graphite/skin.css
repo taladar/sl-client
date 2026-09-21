@@ -62,6 +62,8 @@
 
   /* Accent */
   --accent: #5cb8fa;
+  /* The accent, dimmed — informational rather than interactive. */
+  --accent-muted: #6b8db3;
 
   /* Emphasis. The row selection is translucent so a banded list still reads
    * through it; the match highlight is the filter's own glyph colour. */
