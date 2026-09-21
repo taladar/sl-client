@@ -21,14 +21,15 @@
 //! GPU-bound viewers photographing the same scene at once are two viewers
 //! photographing a machine under load.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use clap::Parser;
 use sl_crosscheck::launch::{Launch, RunDirs, Viewer};
 use sl_crosscheck::plan::{
-    CameraSpec, CaptureAudio, CaptureSpec, RegionPoint, RunPlan, parse_region_point,
+    CameraSpec, CaptureAudio, CaptureSpec, FirestormSkin, RegionPoint, RunPlan, SlClientSkin,
+    parse_region_point,
 };
 use sl_crosscheck::process::{self, Ending};
 use sl_crosscheck::status::Artefacts;
@@ -180,6 +181,34 @@ struct Options {
     #[arg(long)]
     fov: Option<f32>,
 
+    /// The skin this workspace's viewer wears — a directory under its
+    /// `assets/skins/`. Unset leaves it in its own default.
+    ///
+    /// There is deliberately no option that dresses both viewers at once: the
+    /// two skin namespaces are unrelated and a name valid here is generally not
+    /// one there. The run refuses a skin this viewer does not ship rather than
+    /// falling back to a default and capturing the wrong interface.
+    #[arg(long)]
+    sl_client_skin: Option<String>,
+
+    /// The theme overlay for this workspace's viewer — a file under the chosen
+    /// skin's `themes/`, without the extension.
+    #[arg(long)]
+    sl_client_theme: Option<String>,
+
+    /// The skin Firestorm wears — either the folder in its `skins.xml` or the
+    /// name its preferences panel shows (`vintage` or `Vintage`), matched
+    /// case-insensitively. Its harness refuses a name it cannot resolve and
+    /// lists the ones it has.
+    #[arg(long)]
+    firestorm_skin: Option<String>,
+
+    /// The theme Firestorm wears, likewise by folder or by name. Its default
+    /// theme for every skin has an *empty* folder, so that one can only be
+    /// asked for by name (`Classic`, `Grey`).
+    #[arg(long)]
+    firestorm_theme: Option<String>,
+
     /// The account both viewers log in as, `First:Last:password`.
     #[arg(long, default_value = "Test:User:password")]
     account: String,
@@ -314,6 +343,61 @@ fn resolve_camera(
         }
         (None, None) => None,
     })
+}
+
+/// Check that this viewer's asset tree actually ships the skin (and theme) the
+/// run named, before anything is launched.
+///
+/// Firestorm's harness refuses a skin it cannot resolve and says which it has;
+/// this side does not — an unknown id reaches `bevy_flair` as a stylesheet path
+/// that fails to load, and the run captures an **unstyled** interface while the
+/// other viewer captures the skin that was asked for. That pair looks like a
+/// catastrophic styling bug in this viewer rather than like a typo, which is
+/// worth the half-second of `stat` calls to rule out.
+///
+/// # Errors
+///
+/// Returns a message naming the skins the tree does ship, when the named skin
+/// or theme is not among them.
+fn check_skin_is_shipped(asset_root: &Path, wanted: &SlClientSkin) -> Result<(), String> {
+    // Typed, rather than two `&str`s: the `FirestormSkin` beside it in the plan
+    // holds values this tree knows nothing about, and checking one against the
+    // other's asset directory would reject every correct run.
+    let Some(skin) = wanted.skin.as_deref() else {
+        return Ok(());
+    };
+    let skins = asset_root.join("assets").join("skins");
+    let available = || {
+        let mut names: Vec<String> = fs_err::read_dir(&skins)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|entry| entry.path().join("skin.css").is_file())
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .collect();
+        names.sort();
+        names.join(", ")
+    };
+
+    let dir = skins.join(skin);
+    if !dir.join("skin.css").is_file() {
+        return Err(format!(
+            "--sl-client-skin {skin}: {} ships no such skin; available: {}",
+            asset_root.display(),
+            available()
+        ));
+    }
+    if let Some(theme) = wanted.theme.as_deref() {
+        let overlay = dir.join("themes").join(format!("{theme}.css"));
+        if !overlay.is_file() {
+            return Err(format!(
+                "--sl-client-theme {theme}: the {skin} skin has no such theme ({} is not \
+                 there)",
+                overlay.display()
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// The regions this run's grid is built from: one, or the scene's pair when
@@ -598,6 +682,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             day_position: options.day_position,
             fov_degrees: options.fov,
         },
+        sl_client_skin: SlClientSkin {
+            skin: options.sl_client_skin.clone(),
+            theme: options.sl_client_theme.clone(),
+        },
+        firestorm_skin: FirestormSkin {
+            skin: options.firestorm_skin.clone(),
+            theme: options.firestorm_theme.clone(),
+        },
         camera,
     };
     let config = files::write(&dirs.config(), &plan)?;
@@ -609,6 +701,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let interrupted = process::interrupt_flag()?;
 
     let asset_root = PathBuf::from(WORKSPACE_ROOT).join("sl-client-bevy-viewer");
+    // Only when this viewer is in the run: a `--only firestorm` run is entitled
+    // to name a skin this side does not have, and the harness over there does
+    // its own checking.
+    if want_ours {
+        check_skin_is_shipped(&asset_root, &plan.sl_client_skin)?;
+    }
+    if !(plan.sl_client_skin.is_unset() && plan.firestorm_skin.is_unset()) && !plan.capture.ui {
+        // A warning rather than an error: the skin is still applied, and a run
+        // may well want it for something other than the frames. But a world-only
+        // frame holds no interface, so nothing a skin changes can appear in it,
+        // and a run that dressed a viewer to photograph none of it is almost
+        // always one that meant to pass --capture-ui.
+        tracing::warn!(
+            "a skin was named but the frames hold the world only; pass --capture-ui to see it"
+        );
+    }
+
     let mut runs = Vec::new();
     if want_ours {
         let launch = launch::sl_client(

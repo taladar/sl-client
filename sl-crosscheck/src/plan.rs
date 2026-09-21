@@ -109,9 +109,106 @@ pub enum CaptureAudio {
     Audible,
 }
 
+/// The environment a skin choice reaches its viewer by.
+///
+/// One helper rather than two identical bodies, because the *variable names*
+/// are the one thing the two viewers genuinely share — both harnesses read
+/// `SL_VIEWER_SKIN` and `SL_VIEWER_THEME`. What may go in them does not, which
+/// is why the callers are separate types.
+///
+/// An unnamed skin is **absent** rather than stated as empty, unlike the
+/// capture block's layer switches: no value means "your own default" to either
+/// viewer, and an empty string names no skin in either, so leaving the variable
+/// out is the only way to say it.
+fn skin_env(skin: Option<&str>, theme: Option<&str>) -> Vec<(String, String)> {
+    let mut env = Vec::new();
+    if let Some(skin) = skin {
+        env.push(("SL_VIEWER_SKIN".to_owned(), skin.to_owned()));
+    }
+    if let Some(theme) = theme {
+        env.push(("SL_VIEWER_THEME".to_owned(), theme.to_owned()));
+    }
+    env
+}
+
+/// Which skin **this workspace's viewer** wears.
+///
+/// A distinct type from [`FirestormSkin`], not one shared "skin spec" used
+/// twice, because the two namespaces are unrelated and a value valid in one is
+/// generally invalid in the other: `vintage` names a skin in the reference and
+/// (so far) nothing here, `graphite` the reverse. A single type would let a
+/// run hand one viewer the other's skin, and the mistake would surface as a
+/// capture of the wrong interface rather than as an error.
+///
+/// They are also expected to diverge further. Firestorm's skin list is a
+/// catalogue file with display names beside folders; ours is a directory
+/// listing. Whatever either grows — a version, a search path, a validity rule —
+/// it grows without dragging the other along.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SlClientSkin {
+    /// A directory under the viewer's `assets/skins/`, or `None` for its
+    /// default.
+    pub skin: Option<String>,
+    /// A theme overlay id — a file under that skin's `themes/` — or `None` for
+    /// the skin's own base.
+    pub theme: Option<String>,
+}
+
+impl SlClientSkin {
+    /// The environment this choice reaches the viewer by.
+    #[must_use]
+    pub fn env(&self) -> Vec<(String, String)> {
+        skin_env(self.skin.as_deref(), self.theme.as_deref())
+    }
+
+    /// Whether the viewer was left in whatever skin it comes up in.
+    #[must_use]
+    pub const fn is_unset(&self) -> bool {
+        self.skin.is_none() && self.theme.is_none()
+    }
+}
+
+/// Which skin **Firestorm** wears.
+///
+/// The counterpart of [`SlClientSkin`], and deliberately not the same type —
+/// see there for why. Both fields take either the folder or the display name
+/// from the reference's `skins.xml`, matched case-insensitively by its harness,
+/// which refuses a name it cannot resolve and says which it has.
+///
+/// The theme is where the two viewers are furthest apart, permanently: every
+/// reference skin's first theme has an **empty folder**, so it can only be
+/// asked for by name (`Classic`, `Grey`). That wart is not being reproduced on
+/// our side, so there is no spelling of "the base theme" the two share.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct FirestormSkin {
+    /// A skin folder or display name from its `skins.xml`, or `None` for
+    /// whatever the run directory comes up in.
+    pub skin: Option<String>,
+    /// A theme folder or display name within that skin, or `None` to let the
+    /// harness take the skin's first.
+    pub theme: Option<String>,
+}
+
+impl FirestormSkin {
+    /// The environment this choice reaches the viewer by.
+    #[must_use]
+    pub fn env(&self) -> Vec<(String, String)> {
+        skin_env(self.skin.as_deref(), self.theme.as_deref())
+    }
+
+    /// Whether the viewer was left in whatever skin it comes up in.
+    #[must_use]
+    pub const fn is_unset(&self) -> bool {
+        self.skin.is_none() && self.theme.is_none()
+    }
+}
+
 /// The pixel grid, the layers, the shutter and the sun: everything that decides
 /// what a captured frame holds, and the only thing both viewers are configured
-/// with by environment.
+/// with by **one** environment block.
+///
+/// The skin is deliberately not here — see [`SlClientSkin`] and
+/// [`FirestormSkin`], which are per viewer and not even the same type.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CaptureSpec {
     /// The frame width in pixels.
@@ -278,6 +375,11 @@ pub struct RunPlan {
     pub password: String,
     /// What each frame holds.
     pub capture: CaptureSpec,
+    /// The skin this workspace's viewer wears.
+    pub sl_client_skin: SlClientSkin,
+    /// The skin Firestorm wears. A different type, not a second copy of the
+    /// same one: see [`SlClientSkin`] for why one name cannot dress both.
+    pub firestorm_skin: FirestormSkin,
     /// Where the camera stands. `None` leaves both viewers wherever they put
     /// their camera on arrival, which is not the same place — useful for a
     /// smoke test, useless for a comparison.
@@ -312,7 +414,10 @@ impl RunPlan {
 mod tests {
     use pretty_assertions::assert_eq;
 
-    use super::{CameraSpec, CaptureSpec, RegionPoint, RunPlan, parse_region_point};
+    use super::{
+        CameraSpec, CaptureSpec, FirestormSkin, RegionPoint, RunPlan, SlClientSkin,
+        parse_region_point,
+    };
 
     /// The boxed error every test in this module reports through.
     type TestError = Box<dyn core::error::Error>;
@@ -326,6 +431,8 @@ mod tests {
             last_name: "User".to_owned(),
             password: "password".to_owned(),
             capture: CaptureSpec::default(),
+            sl_client_skin: SlClientSkin::default(),
+            firestorm_skin: FirestormSkin::default(),
             camera: None,
         })
     }
@@ -369,6 +476,61 @@ mod tests {
                 .env()
                 .contains(&("SL_VIEWER_CAPTURE_FOV".to_owned(), "60".to_owned()))
         );
+    }
+
+    /// An unnamed skin is left out of the environment rather than stated as
+    /// empty — the one setting where "unset" has no spelling, because no
+    /// string names a viewer's own default.
+    #[test]
+    fn an_unnamed_skin_says_nothing() {
+        assert!(SlClientSkin::default().env().is_empty());
+        assert!(SlClientSkin::default().is_unset());
+        assert!(FirestormSkin::default().env().is_empty());
+        assert!(FirestormSkin::default().is_unset());
+    }
+
+    /// A skin and its theme travel as the two variables both viewers read, and
+    /// a skin without a theme names only itself: the reference's base theme is
+    /// its empty folder and ours is the absence of an overlay, so there is
+    /// nothing to say.
+    #[test]
+    fn a_named_skin_travels_as_two_variables() {
+        let skin_only = SlClientSkin {
+            skin: Some("graphite".to_owned()),
+            theme: None,
+        };
+        assert_eq!(
+            skin_only.env(),
+            vec![("SL_VIEWER_SKIN".to_owned(), "graphite".to_owned())]
+        );
+        assert!(!skin_only.is_unset());
+
+        let themed = FirestormSkin {
+            skin: Some("firestorm".to_owned()),
+            theme: Some("Dark".to_owned()),
+        };
+        assert_eq!(
+            themed.env(),
+            vec![
+                ("SL_VIEWER_SKIN".to_owned(), "firestorm".to_owned()),
+                ("SL_VIEWER_THEME".to_owned(), "Dark".to_owned()),
+            ]
+        );
+    }
+
+    /// The two viewers' skins are independent: dressing one says nothing about
+    /// the other, which is the whole reason they are separate fields.
+    #[test]
+    fn each_viewer_is_dressed_on_its_own() -> Result<(), TestError> {
+        let mut plan = plan()?;
+        plan.firestorm_skin = FirestormSkin {
+            skin: Some("vintage".to_owned()),
+            theme: Some("Classic".to_owned()),
+        };
+        assert!(plan.sl_client_skin.is_unset());
+        assert_eq!(plan.sl_client_skin.env(), Vec::new());
+        assert_eq!(plan.firestorm_skin.env().len(), 2);
+        Ok(())
     }
 
     /// The size goes out in the `WIDTHxHEIGHT` form both viewers parse, and an

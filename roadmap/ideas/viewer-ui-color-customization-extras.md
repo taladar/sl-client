@@ -45,3 +45,25 @@ is skinned via CSS today. Name-tag opacity/Z-offset knobs stay with
 Reference (Firestorm, read-only):
 `indra/newview/skins/default/xui/en/panel_preferences_colors.xml`,
 `indra/newview/llfloaterpreference.cpp` (Pref.applyUIColor).
+
+## Addendum — four the Vintage audit found (2026-09-20)
+
+Four more colours the reference names, Vintage overrides, and we have no
+token for at all — so they are neither skinnable nor tunable today. Values
+and provenance in
+[context/vintage-skin.md](../context/vintage-skin.md); the rest of that
+audit's findings are the `viewer-skin-*` tasks.
+
+- the per-line chat **timestamp** (`ChatTimestampColor`, Vintage `#808080`)
+  and the transcript band behind it (`ChatHistoryBgColor`, `#3e3e3ea1`);
+- the **money tracker**'s credit / debit pair (`MoneyTrackerIncrease` /
+  `Decrease`, `#006600` / `#660000`) and the balance read-out
+  (`CurrencyColor`, `#00ff00`) — we have `--gain` / `--loss`, but they are
+  not wired to either;
+- the **radar / avatar-list row** distance bands
+  (`AvatarListItemChatRange` / `ShoutRange` / `BeyondShoutRange`), which are
+  the row's own colours, not the name tag's — Vintage carries them at
+  `#000000`, `#00000080` and `#66000066`;
+- the **minimap backdrop** (`NetMapBackgroundColor`, `#00000099`). The dot
+  colours are already token-driven and already Vintage's values; the surface
+  they sit on is not.
