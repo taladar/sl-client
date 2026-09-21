@@ -244,23 +244,97 @@
 
 /* A tab shape — only the two top corners are rounded, and asymmetrically (a
  * wide leading corner, a tight trailing one): the logical corner case, which
- * mirrors under RTL. */
+ * mirrors under RTL.
+ *
+ * The selected tab is `:checked`, not a class: `ui_tab.rs`'s reconcile already
+ * maintains `bevy_ui::Checked` on the active button for accessibility, and
+ * bevy_flair syncs that component to the pseudo-class — so the state a skin
+ * selects on is the same state the widget already had, with nothing to keep in
+ * step. Same for `:disabled`, which follows `InteractionDisabled`.
+ *
+ * The active tab takes the panel's own shade so the selected tab reads as
+ * merging into its content, and the accent border is the loudest "selected"
+ * signal, independent of focus. */
 .sk-tab {
-  background-color: var(--control-bg);
-  color: var(--text-primary);
+  background-color: var(--surface-bg);
+  border-color: var(--surface-border);
   border-start-start-radius: 12px;
   border-start-end-radius: 4px;
   padding: 4px 12px;
 }
 
-/* A floater's body — the window frame every panel opens in. The title band and
- * its text are deliberately absent: those are repainted in Rust as focus moves
- * between floaters (src/floater.rs `highlight_active_floater`, from the
- * `--title-bar-active` / `--title-text-inactive` roles), and a `color` rule
- * here would beat that write and flatten the distinction. */
+.sk-tab:checked {
+  background-color: var(--card-bg);
+  border-color: var(--accent);
+}
+
+/* A tab's caption. Its own node, so it needs its own rule — and its greying
+ * follows its *button's* disabled state, which is what the descendant
+ * combinator is for — a caption is its own node and cannot inherit. Only a
+ * single tab can be refused; a strip is never disabled as a whole (see
+ * `on_tab_value_change`). The tab's selection is deliberately
+ * NOT reflected here; the reference keeps showing which tab is open even on a
+ * disabled strip, because hiding that would cost more than the greyed caption
+ * buys. */
+.sk-tab-label {
+  color: var(--text-primary);
+}
+
+.sk-tab:disabled .sk-tab-label {
+  color: var(--text-disabled);
+}
+
+/* A radio option's indicator glyph, and its two other states.
+ *
+ * Both come from an ancestor: the option's own `:checked` (the `Checked` the
+ * widget already maintains for the ARIA radiogroup pattern) and the group's
+ * `:disabled`. The glyph itself still changes in Rust — CSS cannot swap text
+ * content — so the lit ring is a shape change as well as a colour one, and a
+ * skin that recolours only is still legible. */
+.sk-radio-indicator {
+  color: var(--text-muted);
+}
+
+.sk-radio:checked .sk-radio-indicator {
+  color: var(--accent);
+}
+
+/* Last of the three, so a group the consumer cannot change greys whether or
+ * not the option is the lit one. */
+.sk-radio-group:disabled .sk-radio-indicator {
+  color: var(--text-disabled);
+}
+
+/* A floater's body — the window frame every panel opens in. */
 .sk-floater {
   background-color: var(--surface-bg);
   border-color: var(--surface-border);
+}
+
+/* The title band, at rest: transparent over the floater body, with the title
+ * greyed. The focused floater's bar takes `.sk-active` and its text
+ * `.sk-active-text` (src/floater.rs `highlight_active_floater`), which is the
+ * pair a skin needs to express focus at all — it used to be a Rust repaint no
+ * selector could reach.
+ *
+ * The active title is `--text-primary` rather than the generic accent: a window
+ * title says "this window has focus", not "pick me". That is what the compound
+ * selector is for — the state class stays a plain marker, and the widget says
+ * what the state looks like on it. */
+.sk-floater-title-bar {
+  background-color: transparent;
+}
+
+.sk-floater-title-bar.sk-active {
+  background-color: var(--title-bar-active);
+}
+
+.sk-floater-title-text {
+  color: var(--title-text-inactive);
+}
+
+.sk-floater-title-text.sk-active-text {
+  color: var(--text-primary);
 }
 
 /* A title-bar glyph button (close, minimise, dock) and its glyph. The button's

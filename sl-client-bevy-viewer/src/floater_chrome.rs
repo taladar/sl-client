@@ -81,12 +81,14 @@ mod tests {
     use super::floater_app;
     use crate::floater::{Floater, FloaterCommand, FloaterGeometry, FloaterOp, FloaterSpec};
     use crate::floaters::FLOATERS;
+    use crate::skin::ACTIVE_CLASS;
     use crate::ui::{UiPanelShown, UiRoot};
     use crate::ui_test::interact::{self, InteractionTest, centre_of_entity};
     use crate::ui_test::{
         TestError, border_box, drain, find_by_name, interaction_violations, settle,
     };
     use bevy::prelude::*;
+    use bevy_flair::style::components::ClassList;
 
     /// How many frames a drag is stepped over — four, because a reader that
     /// only looked at the press and the release would pass a one-step drag.
@@ -753,14 +755,18 @@ mod tests {
                     floater.id
                 ));
             }
+            // The *look* of the lit bar is the skin's (`.sk-floater-title-bar`
+            // plus `.sk-active`, `viewer-skin-widget-state-classes`), and this
+            // harness excludes styling entirely — so what is observable here,
+            // and what the skin's rule selects on, is the class itself.
             let lit = app
                 .world()
-                .get::<BackgroundColor>(title_bar)
-                .is_some_and(|colour| colour.0.alpha() > 0.0);
+                .get::<ClassList>(title_bar)
+                .is_some_and(|classes| classes.contains(ACTIVE_CLASS));
             if !lit {
                 failures.push(format!(
-                    "floater `{}`: pressed and raised, but its title bar is not highlighted as \
-                     the active window",
+                    "floater `{}`: pressed and raised, but its title bar does not carry the \
+                     active-window class the skin lights it by",
                     floater.id
                 ));
             }

@@ -116,6 +116,7 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_flair::style::components::ClassList;
 
+use sl_viewer_ui_core::skin::{ACTIVE_CLASS, ACTIVE_TEXT_CLASS, set_state_class_on};
 use sl_viewer_ui_core::skin_palette::{SkinColors, SkinPalette};
 use sl_viewer_ui_core::ui::{
     BOTTOM_BAR_Z, LogicalBorder, LogicalInset, LogicalPadding, LogicalRect, UiDirection,
@@ -148,6 +149,15 @@ const CHROME_FONT_SIZE: f32 = 14.0;
 /// body spawns with ([`SkinPalette::surface_bg`] and
 /// [`SkinPalette::surface_border`]) are the unskinned fallback.
 const FLOATER_CLASS: &str = "sk-floater";
+
+/// The skin class on the title bar. Carries the **inactive** look; the focused
+/// floater's bar adds [`ACTIVE_CLASS`], which is how a skin reaches a state it
+/// previously could not (`viewer-skin-widget-state-classes`).
+const TITLE_BAR_CLASS: &str = "sk-floater-title-bar";
+
+/// The skin class on the title text, the label half of [`TITLE_BAR_CLASS`]
+/// (`bevy_ui` has no style inheritance, so the two are separate nodes).
+const TITLE_TEXT_CLASS: &str = "sk-floater-title-text";
 
 /// The skin class on a title-bar glyph button's box (`--glyph-button-bg`).
 const CHROME_BUTTON_CLASS: &str = "sk-floater-button";
@@ -1717,7 +1727,7 @@ fn build_floater_chrome(
                 block_start: Val::Px(4.0),
                 block_end: Val::Px(4.0),
             }),
-            BackgroundColor(Color::NONE),
+            ClassList::new_with_classes([TITLE_BAR_CLASS]),
             Pickable {
                 should_block_lower: true,
                 is_hoverable: true,
@@ -1730,10 +1740,12 @@ fn build_floater_chrome(
         .spawn((
             Text::new(title.to_owned()),
             font.clone(),
-            // No skin class: `highlight_active_floater` repaints this from the
-            // palette as focus moves, and a class `color` rule would beat the
-            // Rust-painted value and flatten the active / inactive distinction.
-            TextColor(fallback.text_primary),
+            // Focus is a class now (`highlight_active_floater` adds and removes
+            // `ACTIVE_TEXT_CLASS`), so the skin owns both states. The old note
+            // here said a class `color` would beat the Rust-painted value and
+            // flatten the distinction — true while Rust was the writer, which
+            // it no longer is.
+            ClassList::new_with_classes([TITLE_TEXT_CLASS]),
             Name::new("floater-title"),
             ChildOf(title_bar),
         ))
@@ -2341,39 +2353,21 @@ fn set_glyph(texts: &mut Query<&mut Text>, entity: Entity, glyph: &str) {
 /// the previous skin's colours until the front-most window next moved.
 fn highlight_active_floater(
     active: Res<ActiveFloater>,
-    palette: SkinColors,
     floaters: Query<(Entity, &FloaterParts)>,
     dressed: Query<(), Added<FloaterParts>>,
-    mut backgrounds: Query<&mut BackgroundColor>,
-    mut texts: Query<&mut TextColor>,
+    mut classes: Query<&mut ClassList>,
 ) {
-    if !active.is_changed() && !palette.is_changed() && dressed.is_empty() {
+    // No `palette.is_changed()` term any more: that existed only because the
+    // colours were painted here, so a skin switch had to be chased. A
+    // class-styled node is repainted by the cascade, so this runs when focus
+    // moves or a floater is born, and not otherwise.
+    if !active.is_changed() && dressed.is_empty() {
         return;
     }
-    let palette = palette.get();
     for (entity, parts) in &floaters {
         let is_active = active.0 == Some(entity);
-        let bar_color = if is_active {
-            palette.title_bar_active
-        } else {
-            Color::NONE
-        };
-        if let Ok(mut background) = backgrounds.get_mut(parts.title_bar)
-            && background.0 != bar_color
-        {
-            background.0 = bar_color;
-        }
-        let text_color = if is_active {
-            palette.text_primary
-        } else {
-            palette.title_text_inactive
-        };
-        let wanted = TextColor(text_color);
-        if let Ok(mut color) = texts.get_mut(parts.title_text)
-            && *color != wanted
-        {
-            *color = wanted;
-        }
+        set_state_class_on(&mut classes, parts.title_bar, ACTIVE_CLASS, is_active);
+        set_state_class_on(&mut classes, parts.title_text, ACTIVE_TEXT_CLASS, is_active);
     }
 }
 
@@ -4269,6 +4263,8 @@ mod tests {
         use crate::ui_combo::{ComboSelection, ComboSpec, ComboWidgetPlugin, spawn_combo};
         use crate::ui_test::interact::{self, InteractionTest, centre_of};
         use crate::ui_test::{find_by_name, settle};
+        use bevy_flair::style::components::ClassList;
+        use sl_viewer_ui_core::skin::ACTIVE_CLASS;
         use sl_viewer_ui_core::ui::{UiPanelShown, UiRoot, UiScaffoldSystems};
 
         /// Where the fixture floater opens, in logical pixels.
@@ -4622,11 +4618,15 @@ mod tests {
             );
 
             // And the highlight follows the front, on both windows at once:
-            // the active one is washed, the other is not.
+            // the active one carries the class the skin washes it with, the
+            // other does not. The colour itself is the cascade's
+            // (`.sk-floater-title-bar.sk-active`) and this world has no
+            // stylesheet, so the class is both what is observable here and
+            // exactly what the rule selects on.
             let lit = |app: &App, bar: Entity| {
                 app.world()
-                    .get::<BackgroundColor>(bar)
-                    .is_some_and(|colour| colour.0.alpha() > 0.0)
+                    .get::<ClassList>(bar)
+                    .is_some_and(|classes| classes.contains(ACTIVE_CLASS))
             };
             assert!(lit(&app, lower_bar), "the active window is not highlighted");
             assert!(

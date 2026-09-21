@@ -241,4 +241,103 @@ mod test {
         // lives in `common.css`, which only the fallback pulls in.
         Ok(())
     }
+
+    /// The three selector mechanisms widget state now rests on really resolve:
+    /// `:checked`, `:disabled`, and a descendant combinator reaching a child
+    /// node from its ancestor's state.
+    ///
+    /// `viewer-skin-widget-state-classes` moves state out of per-frame Rust
+    /// paint, and prefers a pseudo-class wherever the state *is* one the engine
+    /// already knows — `bevy_flair` syncs `bevy_ui::Checked` to `:checked` and
+    /// `InteractionDisabled` to `:disabled`, so a tab's selection needs no
+    /// marker class and nothing to keep in step. The descendant combinator is
+    /// what lets a caption grey from its button's or its strip's state, since
+    /// `bevy_ui` has no style inheritance.
+    ///
+    /// All three fail the same silent way if unsupported: the rule simply does
+    /// not match, the node keeps whatever it was spawned with, and nothing is
+    /// logged. Asserting them here is what makes it safe for the widgets to
+    /// stop painting.
+    #[test]
+    fn checked_disabled_and_descendant_selectors_resolve() -> Result<(), TestError> {
+        let mut app = app();
+        let handle: Handle<StyleSheet> = app
+            .world()
+            .resource::<AssetServer>()
+            .load("skins/graphite/skin.css");
+        let root = app
+            .world_mut()
+            .spawn((Node::default(), Styled::new(handle.clone())))
+            .id();
+
+        // A selected tab, a resting one, and a disabled one carrying a caption.
+        let selected = app
+            .world_mut()
+            .spawn((
+                Node::default(),
+                ClassList::new("sk-tab"),
+                bevy::ui::Checked,
+                ChildOf(root),
+            ))
+            .id();
+        let resting = app
+            .world_mut()
+            .spawn((Node::default(), ClassList::new("sk-tab"), ChildOf(root)))
+            .id();
+        let refused = app
+            .world_mut()
+            .spawn((
+                Node::default(),
+                ClassList::new("sk-tab"),
+                bevy::ui::InteractionDisabled,
+                ChildOf(root),
+            ))
+            .id();
+        let refused_caption = app
+            .world_mut()
+            .spawn((
+                Text::new("caption"),
+                ClassList::new("sk-tab-label"),
+                ChildOf(refused),
+            ))
+            .id();
+        let live_caption = app
+            .world_mut()
+            .spawn((
+                Text::new("caption"),
+                ClassList::new("sk-tab-label"),
+                ChildOf(resting),
+            ))
+            .id();
+
+        load(&mut app, &handle)?;
+        app.update();
+
+        let background = |entity| {
+            app.world()
+                .get::<BackgroundColor>(entity)
+                .map(|background| background.0)
+        };
+        // `:checked` — Graphite's --card-bg, not the resting --surface-bg.
+        assert_eq!(
+            background(selected),
+            Some(Color::srgb_u8(0x26, 0x2b, 0x34)),
+            ":checked did not match, so a selected tab is indistinguishable"
+        );
+        assert_eq!(
+            background(resting),
+            Some(Color::srgba_u8(0x1c, 0x1f, 0x26, 0xf2))
+        );
+
+        let text = |entity| app.world().get::<TextColor>(entity).map(|color| color.0);
+        // The descendant combinator, driven by the ancestor's `:disabled`.
+        assert_eq!(
+            text(refused_caption),
+            Some(Color::srgb_u8(0x73, 0x7d, 0x8f)),
+            "`.sk-tab:disabled .sk-tab-label` did not match, so a refused tab's \
+             caption reads as one that would answer a click"
+        );
+        assert_eq!(text(live_caption), Some(Color::srgb_u8(0xe6, 0xeb, 0xf2)));
+        Ok(())
+    }
 }
