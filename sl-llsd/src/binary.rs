@@ -202,8 +202,18 @@ fn len_as_u32(len: usize) -> u32 {
 }
 
 /// Converts an ISO-8601 date string to the 8 *host-endian* bytes of its `f64`
-/// epoch-seconds, matching Firestorm's raw `Date` write. An unparsable string
-/// encodes as `0.0` (the epoch) so the infallible writer cannot fail.
+/// epoch-seconds, matching Firestorm's raw `Date` write.
+///
+/// The fallback to `0.0` keeps the writer total, and it is **not** a silent
+/// coercion of anything the codec reads: the two textual readers admit a
+/// [`Date`](Llsd::Date) only when it is a timestamp this encoding can carry
+/// (`representable_date`), so a date that came from a document always parses
+/// here. What remains is a `Date` a *caller* built by hand out of a string that
+/// is not RFC 3339 — a programming error, for which the epoch is the same value
+/// an empty `<date/>` and `LLDate`'s default already spell. Making the writer
+/// fallible for it would put a `Result` on every binary encode in the
+/// workspace, including the `RenderMaterials` bodies and mesh headers whose
+/// types cannot hold a date at all.
 fn date_string_to_epoch_bytes(iso: &str) -> [u8; 8] {
     let seconds = OffsetDateTime::parse(iso, &Rfc3339).map_or(0.0, |when| {
         timestamp_to_f64(when.unix_timestamp(), when.nanosecond())
@@ -673,6 +683,29 @@ mod tests {
         assert!(matches!(decoded, Llsd::Date(_)));
         assert_eq!(decoded.to_llsd_binary(), encoded);
         Ok(())
+    }
+
+    /// The readers will not hand this writer a date it cannot carry, so its
+    /// epoch fallback is unreachable from any document — which is what lets the
+    /// writer stay total. Both textual readers refuse (or drop) a date that is
+    /// not a timestamp rather than passing the string through.
+    #[test]
+    fn a_date_the_binary_form_cannot_carry_never_reaches_the_writer() {
+        // Read as XML: the field reads as absent rather than as 1970.
+        assert_eq!(
+            crate::parse_llsd_xml("<llsd><date>not a date</date></llsd>"),
+            Ok(Llsd::Undef)
+        );
+        // Read as notation: refused outright, like every other malformed value.
+        assert_eq!(
+            crate::parse_llsd_notation(b"d\"not a date\""),
+            Err(LlsdError::MalformedNotation)
+        );
+        // An empty date is the epoch on purpose, and still round-trips.
+        assert_eq!(
+            crate::parse_llsd_xml("<llsd><date/></llsd>"),
+            Ok(Llsd::Date(String::new()))
+        );
     }
 
     /// Truncated, unknown-tag, missing-terminator and count-mismatch inputs all

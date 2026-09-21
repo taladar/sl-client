@@ -575,7 +575,12 @@ fn node_to_llsd(node: roxmltree::Node<'_, '_>, depth: usize) -> Llsd {
                 .and_then(|text| Uuid::parse_str(text.trim()).ok())
                 .unwrap_or_else(Uuid::nil),
         ),
-        "date" => Llsd::Date(node.text().unwrap_or("").to_owned()),
+        // A date the binary encoding could not carry becomes `Undef` rather
+        // than a verbatim string: the binary form is `f64` epoch-seconds, so a
+        // string that is not a timestamp has no instant to write and would be
+        // coerced to the epoch — 1970, indistinguishable from a real one.
+        // `Undef` reads as absent instead. See [`representable_date`].
+        "date" => representable_date(node.text()).map_or(Llsd::Undef, Llsd::Date),
         "uri" => Llsd::Uri(node.text().unwrap_or("").to_owned()),
         // An undecodable body is `Undef`, not empty bytes: the walk has no
         // error channel, and `Undef` is the shape it already uses for input it
@@ -635,6 +640,24 @@ fn decode_binary(text: Option<&str>) -> Option<Vec<u8>> {
     base64::engine::general_purpose::STANDARD
         .decode(packed)
         .ok()
+}
+
+/// Keeps a date's verbatim string when it is one the whole codec can carry, or
+/// `None` when it is not.
+///
+/// The textual encodings carry a date as its string and so accept anything; the
+/// binary one carries `f64` epoch-seconds and cannot. Admitting a string only
+/// two of the three encodings can represent is what made a re-encoded date
+/// silently become the epoch, so the readers do not admit it. An **absent or
+/// empty** body is the epoch on purpose — that is what an empty `<date/>` and
+/// `LLDate`'s default both mean — and is kept.
+pub(crate) fn representable_date(text: Option<&str>) -> Option<String> {
+    let text = text.unwrap_or("");
+    if text.trim().is_empty() {
+        return Some(String::new());
+    }
+    time::OffsetDateTime::parse(text, &time::format_description::well_known::Rfc3339).ok()?;
+    Some(text.to_owned())
 }
 
 /// Appends `value` to `out`, escaping the XML metacharacters.

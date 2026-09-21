@@ -522,7 +522,11 @@ impl NotationParser<'_> {
             b'\'' | b'"' => Ok(Llsd::String(self.parse_quoted()?)),
             b's' => Ok(Llsd::String(self.parse_sized_string()?)),
             b'l' => Ok(Llsd::Uri(self.parse_delimited_after_marker()?)),
-            b'd' => Ok(Llsd::Date(self.parse_delimited_after_marker()?)),
+            // A date only the textual encodings could carry is refused, not
+            // kept: see [`representable_date`](crate::value::representable_date).
+            b'd' => crate::value::representable_date(Some(&self.parse_delimited_after_marker()?))
+                .map(Llsd::Date)
+                .ok_or(LlsdError::MalformedNotation),
             b'b' => self.parse_binary(),
             _ => Err(LlsdError::MalformedNotation),
         }

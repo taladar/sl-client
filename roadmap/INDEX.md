@@ -14,9 +14,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ideas | 100 |
 | ready | 296 |
 | blocked | 40 |
-| in-progress | 23 |
+| in-progress | 22 |
 | bugs | 5 |
-| done | 1199 |
+| done | 1200 |
 | deferred | 29 |
 | wont-do | 16 |
 | **total** | **1708** |
@@ -1061,12 +1061,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (23)
-
-### protocol
-
-- [`protocol-audit-wire-error-contract`](in-progress/protocol-audit-wire-error-contract.md)
-  — sl-wire's public parse surface has five different failure disciplines
+## in-progress (22)
 
 ### viewer
 
@@ -1145,7 +1140,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 
-## done (1199)
+## done (1200)
 
 ### protocol
 
@@ -1327,6 +1322,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-audit-tokio-caps-refetch`](done/protocol-audit-tokio-caps-refetch.md)
   — The tokio region-change caps fetch stalls the UDP pump, then swallows its
   failure
+- [`protocol-audit-wire-error-contract`](done/protocol-audit-wire-error-contract.md)
+  — sl-wire's public parse surface has five different failure disciplines
 - [`protocol-experience-environment-push`](done/protocol-experience-environment-push.md)
   — An experience can set the sky, and nothing in this stack can say so
 - [`protocol-experience-parcel-recheck`](done/protocol-experience-parcel-recheck.md)
