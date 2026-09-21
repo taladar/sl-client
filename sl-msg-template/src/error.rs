@@ -77,4 +77,33 @@ pub enum ParseError {
         /// The offending token.
         value: String,
     },
+    /// A `Variable` field declared a length-prefix width no codec implements.
+    ///
+    /// The reference parser accepts any positive integer here, but its reader
+    /// only knows the widths its `MVT_VARIABLE` switch handles, and the real
+    /// template uses only 1 and 2. A width outside that set parses cleanly and
+    /// then decodes *wrongly*, so it is refused where it is written instead.
+    #[error("line {line}: unsupported Variable length-prefix width {width} (expected 1 or 2)")]
+    UnsupportedVariableWidth {
+        /// The 1-based source line.
+        line: usize,
+        /// The offending width.
+        width: u8,
+    },
+    /// A message header carried a trailing word that is not one of the four
+    /// deprecation keywords the reference accepts (`Deprecated`,
+    /// `UDPDeprecated`, `UDPBlackListed`, `NotDeprecated`), or carried more
+    /// than one of them.
+    ///
+    /// The reference reads at most one, in an if/else chain
+    /// (`llmessagetemplateparser.cpp:519-534`), and treats anything else as the
+    /// start of a block — so a word absorbed silently here is a word it would
+    /// have failed on.
+    #[error("line {line}: unexpected message flag {value:?}")]
+    UnexpectedMessageFlag {
+        /// The 1-based source line.
+        line: usize,
+        /// The offending word.
+        value: String,
+    },
 }

@@ -147,6 +147,48 @@ mod test {
         Ok(())
     }
 
+    /// The four deprecation keywords are the whole vocabulary of a message
+    /// header's trailing words, and the reference reads at most one. A word
+    /// outside that set — or a second one — was absorbed silently here, where
+    /// the reference would have tried to read it as the start of a block and
+    /// failed.
+    #[test]
+    fn rejects_a_trailing_word_that_is_not_a_deprecation_keyword() {
+        for flag in [
+            "Deprecated",
+            "UDPDeprecated",
+            "UDPBlackListed",
+            "NotDeprecated",
+        ] {
+            let src = format!("{{ Msg Low 5 NotTrusted Unencoded {flag} }}");
+            assert!(parse(&src).is_ok(), "{flag} should parse");
+        }
+        assert!(matches!(
+            parse("{ Msg Low 5 NotTrusted Unencoded Speculative }"),
+            Err(ParseError::UnexpectedMessageFlag { .. })
+        ));
+        assert!(matches!(
+            parse("{ Msg Low 5 NotTrusted Unencoded Deprecated UDPDeprecated }"),
+            Err(ParseError::UnexpectedMessageFlag { .. })
+        ));
+    }
+
+    /// A `Variable` field's length-prefix width has to be one a codec built
+    /// from this template implements. The reference parser takes any positive
+    /// integer, so a `Variable 4` parsed cleanly here and was then generated as
+    /// a one-byte prefix — a template that decoded wrongly rather than
+    /// failing.
+    #[test]
+    fn rejects_a_variable_width_no_codec_implements() {
+        let ok = "{ Msg Low 5 NotTrusted Unencoded { B Single { F Variable 2 } } }";
+        assert_eq!(parse(ok).map(|template| template.messages.len()), Ok(1));
+        let bad = "{ Msg Low 5 NotTrusted Unencoded { B Single { F Variable 4 } } }";
+        assert!(matches!(
+            parse(bad),
+            Err(ParseError::UnsupportedVariableWidth { width: 4, .. })
+        ));
+    }
+
     /// Unknown keywords surface as errors rather than panics.
     #[test]
     fn rejects_unknown_frequency() {

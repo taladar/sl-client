@@ -23,6 +23,23 @@ pub fn parse(input: &str) -> Result<Template, ParseError> {
     parser.parse_template()
 }
 
+/// The `Variable` length-prefix widths a codec built from this template can
+/// implement: a one-byte or two-byte count. The reference parser accepts any
+/// positive integer, but its reader only handles the widths its `MVT_VARIABLE`
+/// switch knows, and the real template uses only these two — so a wider one
+/// would parse cleanly here and decode wrongly downstream.
+const SUPPORTED_VARIABLE_WIDTHS: [u8; 2] = [1, 2];
+
+/// The trailing words a message header may carry, and the only ones the
+/// reference reads (`llmessagetemplateparser.cpp:519-534`). It takes at most
+/// one, and treats any other word as the start of a block.
+const DEPRECATION_FLAGS: [&str; 4] = [
+    "Deprecated",
+    "UDPDeprecated",
+    "UDPBlackListed",
+    "NotDeprecated",
+];
+
 /// The parser state: a peekable cursor over the token slice.
 struct Parser<'a> {
     /// The remaining tokens to consume.
@@ -76,10 +93,19 @@ impl Parser<'_> {
         let (encoding_word, encoding_line) = self.expect_word_with_line("an encoding attribute")?;
         let encoding = parse_encoding(&encoding_word, encoding_line)?;
 
-        // Zero or more trailing flag words before the first block or the close.
+        // At most one trailing deprecation keyword before the first block or
+        // the close — the four the reference reads, and nothing else. It takes
+        // them in an if/else chain and treats any other word as the start of a
+        // block, so absorbing arbitrary words here accepted templates the
+        // reference would reject.
         let mut flags = Vec::new();
         while let Some(TokenKind::Word(word)) = self.peek_kind() {
-            flags.push(word.clone());
+            let word = word.clone();
+            let line = self.peek_line();
+            if !DEPRECATION_FLAGS.contains(&word.as_str()) || !flags.is_empty() {
+                return Err(ParseError::UnexpectedMessageFlag { line, value: word });
+            }
+            flags.push(word);
             self.advance();
         }
 
@@ -162,9 +188,14 @@ impl Parser<'_> {
             "IPPORT" => FieldType::IpPort,
             "Variable" => {
                 let (size_word, size_line) = self.expect_word_with_line("a length-prefix size")?;
-                FieldType::Variable {
-                    length_bytes: parse_u8(&size_word, size_line)?,
+                let length_bytes = parse_u8(&size_word, size_line)?;
+                if !SUPPORTED_VARIABLE_WIDTHS.contains(&length_bytes) {
+                    return Err(ParseError::UnsupportedVariableWidth {
+                        line: size_line,
+                        width: length_bytes,
+                    });
                 }
+                FieldType::Variable { length_bytes }
             }
             "Fixed" => {
                 let (size_word, size_line) = self.expect_word_with_line("a fixed byte count")?;
@@ -193,6 +224,12 @@ impl Parser<'_> {
     /// Returns the kind of the next token without consuming it.
     fn peek_kind(&mut self) -> Option<&TokenKind> {
         self.tokens.peek().map(|token| &token.kind)
+    }
+
+    /// Returns the 1-based source line of the next token, or `0` at end of
+    /// input (where there is no line to name).
+    fn peek_line(&mut self) -> usize {
+        self.tokens.peek().map_or(0, |token| token.line)
     }
 
     /// Returns `true` if the next token is an opening brace.

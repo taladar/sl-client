@@ -577,7 +577,11 @@ fn node_to_llsd(node: roxmltree::Node<'_, '_>, depth: usize) -> Llsd {
         ),
         "date" => Llsd::Date(node.text().unwrap_or("").to_owned()),
         "uri" => Llsd::Uri(node.text().unwrap_or("").to_owned()),
-        "binary" => Llsd::Binary(decode_binary(node.text())),
+        // An undecodable body is `Undef`, not empty bytes: the walk has no
+        // error channel, and `Undef` is the shape it already uses for input it
+        // cannot represent, so the fault is reported by whichever typed
+        // accessor reads the field rather than read as a zero-length payload.
+        "binary" => decode_binary(node.text()).map_or(Llsd::Undef, Llsd::Binary),
         "array" => Llsd::Array(
             node.children()
                 .filter(roxmltree::Node::is_element)
@@ -616,14 +620,21 @@ fn parse_bool(text: Option<&str>) -> bool {
     matches!(text.map(str::trim), Some("1" | "true"))
 }
 
-/// Base64-decodes binary element text, yielding empty bytes on failure.
-fn decode_binary(text: Option<&str>) -> Vec<u8> {
+/// Base64-decodes binary element text, or `None` when it does not decode.
+///
+/// An absent body is the empty payload a `<binary/>` element means. ASCII
+/// whitespace is stripped from *throughout* the text rather than trimmed from
+/// its ends, because a long base64 body is routinely line-wrapped and the
+/// decoder refuses an embedded newline — trimming alone turned every wrapped
+/// payload into nothing at all.
+fn decode_binary(text: Option<&str>) -> Option<Vec<u8>> {
     let Some(text) = text else {
-        return Vec::new();
+        return Some(Vec::new());
     };
+    let packed: String = text.chars().filter(|c| !c.is_ascii_whitespace()).collect();
     base64::engine::general_purpose::STANDARD
-        .decode(text.trim())
-        .unwrap_or_default()
+        .decode(packed)
+        .ok()
 }
 
 /// Appends `value` to `out`, escaping the XML metacharacters.
@@ -660,6 +671,49 @@ mod tests {
         assert_eq!(
             parse_llsd_xml(&xml),
             Err(roxmltree::Error::NodesLimitReached)
+        );
+    }
+
+    /// A `<binary>` body is base64, and a long one is routinely wrapped across
+    /// lines. The decoder refuses an embedded newline, and trimming only the
+    /// ends left every wrapped payload decoding to *nothing* — a value a caller
+    /// reads as "the sender sent no bytes".
+    #[test]
+    fn a_line_wrapped_binary_body_decodes() {
+        assert_eq!(
+            parse_llsd_xml("<llsd><binary>aGVs\n   bG8=</binary></llsd>"),
+            Ok(Llsd::Binary(b"hello".to_vec()))
+        );
+        // An empty element is still the empty payload it means.
+        assert_eq!(
+            parse_llsd_xml("<llsd><binary/></llsd>"),
+            Ok(Llsd::Binary(Vec::new()))
+        );
+    }
+
+    /// This walk has no error channel and is lenient by design — every
+    /// malformed scalar takes a default. A `<binary>` body that does not decode
+    /// now takes `Undef`, the shape the walk already uses for input it cannot
+    /// represent, rather than empty bytes: an undecodable payload reads as
+    /// *absent* instead of as one the sender deliberately left empty, which is
+    /// a distinction the caller can act on.
+    #[test]
+    fn a_binary_body_that_does_not_decode_reads_as_absent_not_empty() {
+        assert_eq!(
+            parse_llsd_xml("<llsd><binary>!!!!</binary></llsd>"),
+            Ok(Llsd::Undef)
+        );
+        let undecodable =
+            parse_llsd_xml("<llsd><map><key>k</key><binary>!!!!</binary></map></llsd>");
+        assert_eq!(
+            undecodable.map(|value| value.field_binary("k", "k").map(|bytes| bytes.is_some())),
+            Ok(Ok(false))
+        );
+        // A body that *is* empty stays a present, zero-length payload.
+        let empty = parse_llsd_xml("<llsd><map><key>k</key><binary/></map></llsd>");
+        assert_eq!(
+            empty.map(|value| value.field_binary("k", "k").map(|bytes| bytes.is_some())),
+            Ok(Ok(true))
         );
     }
 
