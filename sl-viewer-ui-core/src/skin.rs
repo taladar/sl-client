@@ -58,6 +58,7 @@
 //! in CSS are a separate follow-up (`viewer-ui-skin-l10n-functions`), for which
 //! the loader here leaves a preprocess seam.
 
+use bevy::asset::embedded_asset;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::EditableText;
@@ -93,6 +94,33 @@ pub const SKINS: &[&str] = &["graphite", "azure"];
 /// names `assets/skins/<skin>/themes/<theme>.css`. `None` in the switcher cycle
 /// means "the skin's own base, no overlay".
 pub const THEMES: &[(&str, &str)] = &[("graphite", "dark")];
+
+/// The asset path of the embedded fallback stylesheet — the sheet that is
+/// always there, whatever the asset tree holds.
+///
+/// Widget state lives in the cascade rather than in a per-frame Rust paint
+/// (`viewer-skin-widget-state-classes`), so a world whose skin assets did not
+/// resolve would otherwise stop showing hovered / pressed / disabled at all.
+/// Embedding one sheet in the binary removes that case, and nothing has to
+/// branch on whether a skin loaded.
+///
+/// The crate segment is the **Rust** crate name (`module_path!()`, so
+/// underscores), which is what [`embedded_asset!`] builds its path from.
+pub const FALLBACK_STYLESHEET: &str = "embedded://sl_viewer_ui_core/skins/fallback.css";
+
+/// Bake the fallback stylesheet and the structural rules it imports into the
+/// binary.
+///
+/// Both files are embedded, not just the fallback: `common.css` is the single
+/// copy of the structural rules, and a shipped skin reaches it by importing
+/// [`FALLBACK_STYLESHEET`]. Embedding only the fallback would leave that
+/// `@import` pointing at a file that exists in one asset source and not the
+/// other — which resolves to nothing, silently, like every other link in this
+/// chain.
+pub fn embed_fallback_stylesheet(app: &mut App) {
+    embedded_asset!(app, "skins/common.css");
+    embedded_asset!(app, "skins/fallback.css");
+}
 
 /// The environment variable that seeds the initial [`SkinSelection`] skin id,
 /// for the offline screenshot harness. The CLI `--skin` flag is the
@@ -242,6 +270,7 @@ impl Plugin for ViewerSkinPlugin {
         // The CSS engine. Brought up before our own property registration so its
         // `PropertyRegistry` / `CssPropertyRegistry` resources exist to extend.
         app.add_plugins(FlairPlugin);
+        embed_fallback_stylesheet(app);
         register_logical_properties(app);
         register_caret_properties(app);
         register_chat_band_properties(app);
@@ -322,6 +351,81 @@ fn stamp_focus_ring_class(
                     .insert(ClassList::new_with_classes([FOCUSABLE_CLASS]));
             }
         }
+    }
+}
+
+/// The CSS class on a control whose action does not apply right now — greyed
+/// rather than removed, so a row of actions keeps its shape as the selection
+/// moves. [`DISABLED_TEXT_CLASS`] greys its label.
+///
+/// Named here rather than in the one panel that first needed it: it is the
+/// oldest member of the state vocabulary below, and the pair proved the shape
+/// the rest follow.
+pub const DISABLED_SURFACE_CLASS: &str = "sk-disabled-surface";
+
+/// The label half of [`DISABLED_SURFACE_CLASS`].
+pub const DISABLED_TEXT_CLASS: &str = "sk-disabled-text";
+
+/// The CSS class on a row the pointer or the keyboard has lit
+/// (`--control-bg-hover`), and [`HIGHLIGHTED_TEXT_CLASS`] for its label.
+///
+/// Not `:hover`: the engine's pseudo-class sees only the pointer, and a menu
+/// row is equally lit by keyboard navigation and by being the ancestor of an
+/// open sub-menu. Where a state genuinely *is* a pointer hover, write the
+/// `:hover` rule instead and skip the system entirely.
+pub const HIGHLIGHTED_CLASS: &str = "sk-highlighted";
+
+/// The label half of [`HIGHLIGHTED_CLASS`]. Two classes because `bevy_ui` has
+/// no style inheritance — a row and its text are separate nodes.
+pub const HIGHLIGHTED_TEXT_CLASS: &str = "sk-highlighted-text";
+
+/// The CSS class on a widget that is toggled on or selected — a toolbar button
+/// whose floater is open, the active tab, a selected table row.
+pub const ACTIVE_CLASS: &str = "sk-active";
+
+/// The label half of [`ACTIVE_CLASS`].
+pub const ACTIVE_TEXT_CLASS: &str = "sk-active-text";
+
+/// The CSS class on a widget asking to be noticed (unread IMs behind a closed
+/// Conversations window). The viewer says only *that* it wants attention; the
+/// skin decides whether that pulses, glows or simply stays lit.
+pub const ATTENTION_CLASS: &str = "sk-attention";
+
+/// Add or remove a state class, touching the [`ClassList`] only when the state
+/// actually changed.
+///
+/// The guard is load-bearing, not tidiness. `Mut<ClassList>` marks the
+/// component changed on **any** mutable deref, and the style engine re-resolves
+/// what it is told has changed — so an unguarded `add` every frame would cost
+/// more than the per-frame colour write this whole change removes, and would
+/// hide the win behind a wash. Reading through the immutable `Deref` first
+/// keeps the change tick clean on the frames nothing moved.
+pub fn set_state_class(list: &mut Mut<'_, ClassList>, class: &'static str, wanted: bool) {
+    if list.contains(class) == wanted {
+        return;
+    }
+    if wanted {
+        list.add(class);
+    } else {
+        list.remove(class);
+    }
+}
+
+/// [`set_state_class`] for a node the caller knows only by [`Entity`] — the
+/// shape a widget needs for its *label*, which is a separate node from the
+/// surface carrying the state.
+///
+/// A node with no [`ClassList`] is skipped rather than given one: a widget that
+/// wants to be styled says so when it spawns, and silently growing a list here
+/// would make a missing class at the spawn site look like it worked.
+pub fn set_state_class_on<F: bevy::ecs::query::QueryFilter>(
+    classes: &mut Query<'_, '_, &mut ClassList, F>,
+    node: Entity,
+    class: &'static str,
+    wanted: bool,
+) {
+    if let Ok(mut list) = classes.get_mut(node) {
+        set_state_class(&mut list, class, wanted);
     }
 }
 

@@ -69,7 +69,7 @@ use bevy::prelude::*;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
 
-use crate::conversations::{BLINK_HZ, CONVERSATIONS_FLOATER_ID, ConversationModel};
+use crate::conversations::{CONVERSATIONS_FLOATER_ID, ConversationModel};
 use crate::edit_tool::BUILD_TOOLS_FLOATER_ID;
 use crate::floater::{Floater, floater_panel};
 use crate::i18n::Translated;
@@ -77,6 +77,10 @@ use crate::inventory::INVENTORY_FLOATER_ID;
 use crate::minimap::MINIMAP_FLOATER_ID;
 use crate::nearby_chat_bar::NearbyChatBar;
 use crate::search::SEARCH_FLOATER_ID;
+use crate::skin::{
+    ACTIVE_CLASS, ACTIVE_TEXT_CLASS, ATTENTION_CLASS, DISABLED_SURFACE_CLASS, DISABLED_TEXT_CLASS,
+    set_state_class, set_state_class_on,
+};
 use crate::snapshot_floater::SNAPSHOT_FLOATER_ID;
 use crate::ui::{
     BOTTOM_BAR_Z, BottomArea, LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems,
@@ -112,16 +116,20 @@ const STATE_SLOT_WIDTH: f32 = 230.0;
 /// neutral so the buttons read against the world behind them.
 const BAR_BACKGROUND: Color = Color::srgba(0.08, 0.09, 0.12, 0.92);
 
-/// A button's border colour (the skin carries the corner radius via
-/// `.sk-toolbar-button`; the background and text are painted in Rust so the
-/// active / disabled states are one place, like the floater highlight).
+/// A button's border colour.
 const BUTTON_BORDER: Color = Color::srgb(0.30, 0.34, 0.42);
 
 /// The CSS class on the bar strip, so a skin recolours its surface.
 const BAR_CLASS: &str = "sk-toolbar-bar";
 
-/// The CSS class on every toolbar button, carrying the skin's corner radius.
+/// The CSS class on every toolbar button. Carries the resting look; the lit and
+/// greyed states are the state classes in [`ToolbarButtonVisual::classes`].
 const BUTTON_CLASS: &str = "sk-toolbar-button";
+
+/// The CSS class on every toolbar button's label, the text half of
+/// [`BUTTON_CLASS`] (`bevy_ui` has no style inheritance, so the label is its
+/// own styled node).
+const BUTTON_LABEL_CLASS: &str = "sk-toolbar-label";
 
 /// How a toolbar button currently reads — the three visual states its background
 /// and label colour are painted from, shared by the live state system
@@ -138,29 +146,29 @@ enum ToolbarButtonVisual {
 }
 
 impl ToolbarButtonVisual {
-    /// This state's `(background, label)` colours. `const` so it is a plain table
-    /// with no per-frame allocation, and the single source of truth both the live
-    /// paint and the specimen read.
-    const fn colors(self) -> (Color, Color) {
+    /// This state's `(surface, label)` skin classes, `None` for the resting
+    /// state — which carries no state class at all, so the base
+    /// `.sk-toolbar-button` / `.sk-toolbar-label` rules show through.
+    ///
+    /// Classes rather than the colours this used to hold: what a lit or greyed
+    /// button looks like is the skin's business, and it could not reach either
+    /// while they were `Color` literals here
+    /// (`viewer-skin-widget-state-classes`). `const`, and the single source of
+    /// truth the spawn, the live update and the specimen all read.
+    const fn classes(self) -> (Option<&'static str>, Option<&'static str>) {
         match self {
-            Self::Enabled => (Color::srgb(0.16, 0.19, 0.25), Color::srgb(0.90, 0.92, 0.96)),
-            Self::Active => (Color::srgb(0.22, 0.40, 0.60), Color::srgb(0.97, 0.98, 1.0)),
-            Self::Disabled => (
-                Color::srgba(0.13, 0.15, 0.19, 0.65),
-                Color::srgb(0.48, 0.51, 0.58),
-            ),
+            Self::Enabled => (None, None),
+            Self::Active => (Some(ACTIVE_CLASS), Some(ACTIVE_TEXT_CLASS)),
+            Self::Disabled => (Some(DISABLED_SURFACE_CLASS), Some(DISABLED_TEXT_CLASS)),
         }
     }
 
-    /// The background colour for this state.
-    const fn background(self) -> Color {
-        self.colors().0
-    }
+    /// Every state class a toolbar button's surface can carry, so a state
+    /// change can clear the others without naming them one by one.
+    const SURFACE_CLASSES: [&'static str; 2] = [ACTIVE_CLASS, DISABLED_SURFACE_CLASS];
 
-    /// The label colour for this state.
-    const fn label(self) -> Color {
-        self.colors().1
-    }
+    /// Every state class a toolbar button's label can carry.
+    const LABEL_CLASSES: [&'static str; 2] = [ACTIVE_TEXT_CLASS, DISABLED_TEXT_CLASS];
 }
 
 /// Which floater / panel a toolbar button toggles.
@@ -629,8 +637,10 @@ fn build_button_box(
                 ..default()
             },
             BorderColor::all(BUTTON_BORDER),
-            BackgroundColor(visual.background()),
-            ClassList::new_with_classes([BUTTON_CLASS]),
+            // The state classes the button is born with, so it reads right on
+            // its first frame rather than on the first run of
+            // `update_toolbar_button_states`.
+            ClassList::new_with_classes(core::iter::once(BUTTON_CLASS).chain(visual.classes().0)),
             Pickable::default(),
             Name::new(format!("bottom-toolbar-button:{name}")),
             ChildOf(parent),
@@ -640,7 +650,9 @@ fn build_button_box(
         .spawn((
             Text::default(),
             UiFont::Sans.at(TOOLBAR_FONT_SIZE),
-            TextColor(visual.label()),
+            ClassList::new_with_classes(
+                core::iter::once(BUTTON_LABEL_CLASS).chain(visual.classes().1),
+            ),
             Name::new("bottom-toolbar-label"),
             ChildOf(button),
         ))
@@ -712,44 +724,39 @@ fn update_toolbar_button_states(
     floaters: Query<(Entity, &Floater)>,
     conversation_model: Option<Res<ConversationModel>>,
     nearby_chat: Option<Res<NearbyChatBar>>,
-    time: Res<Time>,
-    mut buttons: Query<(&ToolbarButton, &mut BackgroundColor)>,
+    mut buttons: Query<(&ToolbarButton, &mut ClassList)>,
     panels: Query<&UiPanelShown>,
-    mut labels: Query<&mut TextColor>,
+    mut labels: Query<&mut ClassList, Without<ToolbarButton>>,
 ) {
     let nearby_chat = nearby_chat.as_deref();
-    // The Conversations button flashes while the window is closed and an IM /
-    // group / conference has unread lines — the reference's toolbar attention cue
-    // (the window is never popped open over what the user is doing).
-    let conversations_flash = conversation_model
+    // The Conversations button asks to be noticed while the window is closed and
+    // an IM / group / conference has unread lines — the reference's toolbar
+    // attention cue (the window is never popped open over what the user is
+    // doing). What that *looks* like is the skin's: `.sk-attention` carries the
+    // animation, so nothing here flips a colour twice a second any more.
+    let conversations_want_attention = conversation_model
         .as_deref()
-        .is_some_and(ConversationModel::has_im_attention)
-        && (time.elapsed_secs() * BLINK_HZ).fract() < 0.5;
-    for (button, mut background) in &mut buttons {
+        .is_some_and(ConversationModel::has_im_attention);
+    for (button, mut classes) in &mut buttons {
         let visual = match resolve_target_open(button.target, &floaters, nearby_chat, &panels) {
             Some(true) => ToolbarButtonVisual::Active,
             Some(false) => ToolbarButtonVisual::Enabled,
             None => ToolbarButtonVisual::Disabled,
         };
-        // A closed Conversations button with pending attention pulses to its lit
-        // colour on the blink's "on" phase.
-        let bg = if button.target == ToolbarTarget::Conversations
-            && visual == ToolbarButtonVisual::Enabled
-            && conversations_flash
-        {
-            ToolbarButtonVisual::Active.background()
-        } else {
-            visual.background()
-        };
-        if background.0 != bg {
-            background.0 = bg;
+        let (surface, label) = visual.classes();
+        for class in ToolbarButtonVisual::SURFACE_CLASSES {
+            set_state_class(&mut classes, class, surface == Some(class));
         }
-        let label = TextColor(visual.label());
-        if let Ok(mut color) = labels.get_mut(button.label)
-            && *color != label
-        {
-            *color = label;
+        for class in ToolbarButtonVisual::LABEL_CLASSES {
+            set_state_class_on(&mut labels, button.label, class, label == Some(class));
         }
+        set_state_class(
+            &mut classes,
+            ATTENTION_CLASS,
+            button.target == ToolbarTarget::Conversations
+                && visual == ToolbarButtonVisual::Enabled
+                && conversations_want_attention,
+        );
     }
 }
 
@@ -1011,16 +1018,52 @@ mod tests {
         Ok(())
     }
 
-    /// The three visual states are visually distinct — the active button must not
-    /// read the same as a resting or a disabled one, or the "floater is open"
+    /// The three visual states are distinct — the active button must not read
+    /// the same as a resting or a disabled one, or the "floater is open"
     /// feedback is invisible.
+    ///
+    /// What each state *looks* like is now the skin's
+    /// (`viewer-skin-widget-state-classes`), so what has to hold here is that
+    /// the three select differently: a state whose classes matched another's
+    /// could not be told apart by any stylesheet, however it was written.
     #[test]
     fn the_visual_states_differ() {
-        let enabled = ToolbarButtonVisual::Enabled.background();
-        let active = ToolbarButtonVisual::Active.background();
-        let disabled = ToolbarButtonVisual::Disabled.background();
+        let enabled = ToolbarButtonVisual::Enabled.classes();
+        let active = ToolbarButtonVisual::Active.classes();
+        let disabled = ToolbarButtonVisual::Disabled.classes();
         assert_ne!(enabled, active);
         assert_ne!(enabled, disabled);
         assert_ne!(active, disabled);
+    }
+
+    /// Every state class a button or label can carry appears in the matching
+    /// `*_CLASSES` sweep.
+    ///
+    /// `update_toolbar_button_states` clears the classes a state does *not*
+    /// want by iterating those arrays, so one missed by the array is a class
+    /// that is added and never removed — a button that stays lit after its
+    /// floater closes, which is exactly the failure the per-frame colour write
+    /// could not have.
+    #[test]
+    fn every_state_class_is_in_the_clearing_sweep() {
+        for visual in [
+            ToolbarButtonVisual::Enabled,
+            ToolbarButtonVisual::Active,
+            ToolbarButtonVisual::Disabled,
+        ] {
+            let (surface, label) = visual.classes();
+            if let Some(class) = surface {
+                assert!(
+                    ToolbarButtonVisual::SURFACE_CLASSES.contains(&class),
+                    "{visual:?}'s surface class {class} is never cleared"
+                );
+            }
+            if let Some(class) = label {
+                assert!(
+                    ToolbarButtonVisual::LABEL_CLASSES.contains(&class),
+                    "{visual:?}'s label class {class} is never cleared"
+                );
+            }
+        }
     }
 }

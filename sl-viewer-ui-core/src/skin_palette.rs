@@ -397,6 +397,158 @@ mod tests {
         assert_eq!(mapped, expected);
     }
 
+    /// A boxed error so a test can use `?` instead of `unwrap` / `panic`,
+    /// both of which the workspace lints forbid — in test code as much as in
+    /// the library, since `--all-targets` is what the commit hook runs.
+    type TestError = Box<dyn core::error::Error>;
+
+    /// The structural rules, as the binary embeds them.
+    ///
+    /// Read through `include_str!` rather than the asset server: these checks
+    /// are about what the *source* says, and embedding them here is what lets
+    /// this crate assert its own skin wiring instead of a test in the viewer
+    /// binary doing it across a directory boundary.
+    const COMMON_CSS: &str = include_str!("skins/common.css");
+
+    /// The always-present fallback sheet (`skin::FALLBACK_STYLESHEET`).
+    const FALLBACK_CSS: &str = include_str!("skins/fallback.css");
+
+    /// The `--role` token a `-sk-color-*` declaration in `common.css` reads,
+    /// or `None` when the property is not wired there at all.
+    fn token_for(property: &str) -> Option<&'static str> {
+        let declaration = format!("{property}:");
+        COMMON_CSS
+            .lines()
+            .map(str::trim)
+            .find(|line| line.starts_with(&declaration))?
+            .split_once("var(--")
+            .and_then(|(_before, rest)| rest.split_once(')'))
+            .map(|(token, _after)| token)
+    }
+
+    /// The hex value `fallback.css` gives a token, as `Color`.
+    fn fallback_token(token: &str) -> Option<Color> {
+        let declaration = format!("--{token}:");
+        let value = FALLBACK_CSS
+            .lines()
+            .map(str::trim)
+            .find(|line| line.starts_with(&declaration))?
+            .split_once('#')?
+            .1
+            .split(';')
+            .next()?;
+        let byte = |index: usize| -> Option<f32> {
+            let pair = value.get(index..index.checked_add(2)?)?;
+            Some(f32::from(u8::from_str_radix(pair, 16).ok()?) / 255.0)
+        };
+        let alpha = if value.len() >= 8 { byte(6)? } else { 1.0 };
+        Some(Color::srgba(byte(0)?, byte(2)?, byte(4)?, alpha))
+    }
+
+    /// Every role the widget set paints from is wired in `common.css` and given
+    /// a value by the fallback sheet.
+    ///
+    /// Both halves fail **silently** in the running viewer: a `-sk-color-*`
+    /// declaration `common.css` never makes leaves that field at its built-in
+    /// constant, and a `var(--role)` nothing defines resolves to nothing at
+    /// all. Since `fallback.css` is now imported by every shipped skin, a token
+    /// it defines is the floor under every skin — so this is also what makes
+    /// "a skin may omit a role" safe.
+    #[test]
+    fn every_palette_role_is_wired_and_has_a_fallback_value() -> Result<(), TestError> {
+        for (property, _field) in PALETTE_CSS_PROPERTIES {
+            let token = token_for(property)
+                .ok_or_else(|| format!("common.css does not wire {property} to a --role token"))?;
+            assert!(
+                fallback_token(token).is_some(),
+                "fallback.css does not define --{token}, which common.css reads \
+                 for {property}, so an unskinned world resolves it to nothing"
+            );
+        }
+        Ok(())
+    }
+
+    /// Nothing `common.css` reads is left undefined by the fallback sheet.
+    ///
+    /// Wider than the palette check above: the class rules consume tokens that
+    /// no `SkinPalette` field backs (radii, the focus ring, the chat bands), and
+    /// those have no Rust constant to fall back to — an undefined one is simply
+    /// an unpainted widget.
+    #[test]
+    fn the_fallback_defines_every_token_common_css_reads() {
+        let mut missing: Vec<&str> = Vec::new();
+        let mut rest = COMMON_CSS;
+        while let Some((_before, after)) = rest.split_once("var(--") {
+            let Some((token, tail)) = after.split_once(')') else {
+                break;
+            };
+            if !FALLBACK_CSS.contains(&format!("--{token}:")) && !missing.contains(&token) {
+                missing.push(token);
+            }
+            rest = tail;
+        }
+        assert!(
+            missing.is_empty(),
+            "fallback.css leaves these tokens undefined: {missing:?}"
+        );
+    }
+
+    /// The fallback sheet's values *are* [`SkinPalette::FALLBACK`].
+    ///
+    /// The sheet has to repeat them as hex — CSS cannot read a Rust constant —
+    /// and a duplicated colour that nothing checks is exactly the drift this
+    /// whole role vocabulary exists to end. The tolerance is one 8-bit step,
+    /// which is all the hex round-trip can lose.
+    #[test]
+    fn fallback_tokens_match_rust() -> Result<(), TestError> {
+        let palette = SkinPalette::FALLBACK;
+        let reflected: &dyn Struct = &palette;
+        for (property, field) in PALETTE_CSS_PROPERTIES {
+            let token =
+                token_for(property).ok_or_else(|| format!("{property} is not wired at all"))?;
+            let css = fallback_token(token)
+                .ok_or_else(|| format!("fallback.css does not define --{token}"))?;
+            let rust = reflected
+                .field(field)
+                .and_then(|value| value.try_downcast_ref::<Color>())
+                .copied()
+                .ok_or_else(|| format!("SkinPalette has no Color field {field}"))?;
+            let css = css.to_srgba();
+            let rust = rust.to_srgba();
+            for (channel, (from_css, from_rust)) in [
+                ("red", (css.red, rust.red)),
+                ("green", (css.green, rust.green)),
+                ("blue", (css.blue, rust.blue)),
+                ("alpha", (css.alpha, rust.alpha)),
+            ] {
+                assert!(
+                    (from_css - from_rust).abs() <= 1.0 / 255.0,
+                    "--{token} {channel} is {from_css} in fallback.css but \
+                     {from_rust} in SkinPalette::FALLBACK.{field}"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// The embedded sheets obey the physical-property ban too.
+    ///
+    /// The viewer binary's `shipped_skins` test scans the skins in its own
+    /// `assets/`; these two are the sheets that moved here, and a physical
+    /// `left` / `right` in the *structural* rules would mirror wrongly in every
+    /// skin at once rather than in one.
+    #[test]
+    fn the_embedded_sheets_use_no_banned_property() {
+        for (name, css) in [("common.css", COMMON_CSS), ("fallback.css", FALLBACK_CSS)] {
+            let findings = crate::skin::scan_banned_properties(css);
+            assert!(
+                findings.is_empty(),
+                "{name} uses banned physical properties {findings:?}; \
+                 write the logical name instead"
+            );
+        }
+    }
+
     /// With no styled root in the world, the palette reads as the unskinned
     /// fallback rather than panicking or handing back black.
     #[test]

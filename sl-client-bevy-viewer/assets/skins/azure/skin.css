@@ -6,7 +6,7 @@
  * differ. This is the whole point of the token model: a second skin is a second
  * set of values, never a second layout.
  */
-@import "skins/common.css";
+@import "embedded://sl_viewer_ui_core/skins/fallback.css" layer(fallback);
 
 :root {
   /* Surfaces */

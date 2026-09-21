@@ -2,7 +2,7 @@
 id: viewer-skin-panel-text-roles
 title: Panel text does not follow the skin, only the widgets it is built from
 topic: viewer
-status: ready
+status: in-progress
 origin: viewer-audit-skin-token-coverage (2026-09-20)
 points: 5
 refs: [viewer-audit-skin-token-coverage]

@@ -102,7 +102,8 @@ use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
 
 use sl_viewer_ui_core::i18n::{Translated, Translator};
-use sl_viewer_ui_core::skin_palette::{SkinColors, SkinPalette};
+use sl_viewer_ui_core::skin::{HIGHLIGHTED_CLASS, set_state_class};
+use sl_viewer_ui_core::skin_palette::SkinPalette;
 use sl_viewer_ui_core::ui::{
     LogicalMargin, LogicalRect, UiDirection, UiRoot, UiScaffoldSystems, column,
 };
@@ -2188,14 +2189,12 @@ fn dismiss_all(
 fn highlight_menu_hover(
     hover: Res<HoverMap>,
     keyboard: Res<MenuKeyboard>,
-    palette: SkinColors,
     child_of: Query<&ChildOf>,
     mut rows: Query<
-        (Entity, &mut BackgroundColor, Has<InteractionDisabled>),
+        (Entity, &mut ClassList, Has<InteractionDisabled>),
         Or<(With<MenuEntryAction>, With<MenuBranch>, With<MenuBarButton>)>,
     >,
 ) {
-    let palette = palette.get();
     let row_entities: HashSet<Entity> = rows.iter().map(|(entity, _, _)| entity).collect();
     let lit: HashSet<Entity> = if keyboard.active {
         let mut set = HashSet::new();
@@ -2226,15 +2225,12 @@ fn highlight_menu_hover(
         }
         set
     };
-    for (entity, mut background, disabled) in &mut rows {
-        let wanted = if lit.contains(&entity) && !disabled {
-            palette.control_bg_hover
-        } else {
-            ENTRY_BACKGROUND
-        };
-        if background.0 != wanted {
-            background.0 = wanted;
-        }
+    for (entity, mut classes, disabled) in &mut rows {
+        set_state_class(
+            &mut classes,
+            HIGHLIGHTED_CLASS,
+            lit.contains(&entity) && !disabled,
+        );
     }
 }
 

@@ -12,9 +12,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 118 |
-| ready | 308 |
+| ready | 306 |
 | blocked | 64 |
-| in-progress | 22 |
+| in-progress | 24 |
 | bugs | 6 |
 | done | 1210 |
 | deferred | 30 |
@@ -293,7 +293,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (308)
+## ready (306)
 
 ### protocol
 
@@ -880,16 +880,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Role tokens for a light data surface on dark chrome
 - [`viewer-skin-list-row-striping`](ready/viewer-skin-list-row-striping.md) —
   Scroll-list rows — striping, hover and a selection the skin owns
-- [`viewer-skin-panel-text-roles`](ready/viewer-skin-panel-text-roles.md) —
-  Panel text does not follow the skin, only the widgets it is built from
 - [`viewer-skin-scrollbar-shape`](ready/viewer-skin-scrollbar-shape.md) — The
   scrollbar is a bar — the reference's has ends, a track and a shape
 - [`viewer-skin-text-shadow-role`](ready/viewer-skin-text-shadow-role.md) — A
   text-shadow role — the trait that makes classic UI text look classic
 - [`viewer-skin-tooltip-roles`](ready/viewer-skin-tooltip-roles.md) — The
   tooltip is a skinned surface everywhere but here
-- [`viewer-skin-widget-state-classes`](ready/viewer-skin-widget-state-classes.md)
-  — Widget state belongs in the cascade, not in a per-frame Rust paint
 - [`viewer-snapshot-composition-guides`](ready/viewer-snapshot-composition-guides.md)
   — Snapshot composition guides, capture frame & filename patterns
 - [`viewer-snapshot-highres-quiet`](ready/viewer-snapshot-highres-quiet.md) —
@@ -1222,7 +1218,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Batch world changes into per-tick update bursts (blocked by
   `server-world-heartbeat`, `server-world-ecs-store`)
 
-## in-progress (22)
+## in-progress (24)
 
 ### viewer
 
@@ -1262,6 +1258,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rlva-floaters-toggles`](in-progress/viewer-rlva-floaters-toggles.md)
   — "RLVa UI: console, restrictions/strings/locks floaters + toggles" (blocked
   by `viewer-rlv-restriction-state` (done))
+- [`viewer-skin-panel-text-roles`](in-progress/viewer-skin-panel-text-roles.md)
+  — Panel text does not follow the skin, only the widgets it is built from
+- [`viewer-skin-widget-state-classes`](in-progress/viewer-skin-widget-state-classes.md)
+  — Widget state belongs in the cascade, not in a per-frame Rust paint
 - [`viewer-streaming-audio`](in-progress/viewer-streaming-audio.md) — Parcel
   streaming-audio / media-audio player
 - [`viewer-ui-text-caret-grapheme-motion`](in-progress/viewer-ui-text-caret-grapheme-motion.md)

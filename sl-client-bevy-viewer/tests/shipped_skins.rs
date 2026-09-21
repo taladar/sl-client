@@ -31,6 +31,24 @@ mod test {
             .join("skins")
     }
 
+    /// The structural rules, which live with the crate that embeds them
+    /// (`sl-viewer-ui-core/src/skins/`) rather than in this crate's assets: a
+    /// shipped skin reaches them through the embedded fallback sheet, so there
+    /// is exactly one copy and it is baked into the binary.
+    ///
+    /// That crate asserts the wiring *within* `common.css` itself
+    /// (`skin_palette.rs`'s `every_palette_role_is_wired_and_has_a_fallback_value`);
+    /// what is left here is the half only a shipped skin can answer.
+    fn common_css() -> Result<String, TestError> {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("sl-viewer-ui-core")
+            .join("src")
+            .join("skins")
+            .join("common.css");
+        Ok(fs_err::read_to_string(path)?)
+    }
+
     /// Every shipped skin `.css` — the base of each skin plus every theme
     /// overlay — must be free of the banned physical box properties. This is the
     /// build-time enforcement of "no physical left/right in a skin".
@@ -122,7 +140,7 @@ mod test {
     /// compiler cannot.
     #[test]
     fn every_palette_role_is_wired_and_defined() -> Result<(), TestError> {
-        let common = fs_err::read_to_string(skins_dir().join("common.css"))?;
+        let common = common_css()?;
         let skins: Vec<(PathBuf, String)> = SKINS
             .iter()
             .map(|skin| {

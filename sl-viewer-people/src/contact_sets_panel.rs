@@ -61,6 +61,7 @@
 //! `fsfloateraddtocontactset`, `fsfloatercontactsetconfiguration`,
 //! `panel_people_contact_sets.xml`.
 
+use crate::skin::{DISABLED_SURFACE_CLASS, DISABLED_TEXT_CLASS, set_state_class_on};
 use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
@@ -147,13 +148,6 @@ const BUTTON_CLASS: &str = "sk-button";
 
 /// The skin class every action button's **label** carries.
 const BUTTON_LABEL_CLASS: &str = "sk-text";
-
-/// The skin class greying the surface of a button whose action does not apply
-/// right now (`--control-bg-disabled`; see `assets/skins/common.css`).
-const DISABLED_SURFACE_CLASS: &str = "sk-disabled-surface";
-
-/// The skin class greying such a button's label (`--text-disabled`).
-const DISABLED_TEXT_CLASS: &str = "sk-disabled-text";
 
 /// The trailing action column's width, logical px.
 const ACTION_COL_WIDTH: f32 = 150.0;
@@ -2037,33 +2031,13 @@ fn sync_panel_button_states(
 ) {
     for (entity, button, label, was_disabled) in &buttons {
         let enabled = button.is_enabled(&sets, &view.choice, selected.0);
-        set_skin_class(&mut classes, entity, DISABLED_SURFACE_CLASS, !enabled);
-        set_skin_class(&mut classes, label.0, DISABLED_TEXT_CLASS, !enabled);
+        set_state_class_on(&mut classes, entity, DISABLED_SURFACE_CLASS, !enabled);
+        set_state_class_on(&mut classes, label.0, DISABLED_TEXT_CLASS, !enabled);
         if enabled && was_disabled {
             commands.entity(entity).remove::<InteractionDisabled>();
         } else if !enabled && !was_disabled {
             commands.entity(entity).insert(InteractionDisabled);
         }
-    }
-}
-
-/// Add or drop one skin class on a node, writing only on a real change so an
-/// idle panel does not re-trigger the style pass.
-fn set_skin_class(
-    classes: &mut Query<&mut ClassList>,
-    node: Entity,
-    class: &'static str,
-    wanted: bool,
-) {
-    let Ok(mut list) = classes.get_mut(node) else {
-        return;
-    };
-    if wanted {
-        if !list.contains(class) {
-            list.add(class);
-        }
-    } else if list.contains(class) {
-        list.remove(class);
     }
 }
 

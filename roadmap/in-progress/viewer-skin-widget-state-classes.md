@@ -2,7 +2,7 @@
 id: viewer-skin-widget-state-classes
 title: Widget state belongs in the cascade, not in a per-frame Rust paint
 topic: viewer
-status: ready
+status: in-progress
 origin: Vintage skin fidelity audit (2026-09-20)
 points: 5
 refs: [viewer-ui-skin-tokens, viewer-skin-image-backed-widgets]

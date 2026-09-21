@@ -1,0 +1,72 @@
+/*
+ * fallback.css — the stylesheet that is always there.
+ *
+ * Widget state (hovered, pressed, toggled, disabled) lives in the cascade, not
+ * in a per-frame Rust paint, so a world whose skin assets did not resolve would
+ * otherwise stop showing state at all. This sheet removes that case: it is
+ * embedded in the binary (sl-viewer-ui-core/src/skin.rs `embedded_asset!`), so
+ * there is always a sheet and no code branches on whether a skin is loaded.
+ *
+ * It carries the structural rules (via common.css, embedded beside it) and one
+ * value per role token. Those values are `SkinPalette::FALLBACK` and the
+ * `SkinTextCaret` / `SkinChatBands` defaults, converted to 8-bit hex —
+ * `fallback_tokens_match_rust` in skin_palette.rs asserts they still agree, so
+ * the two cannot drift apart silently.
+ *
+ * A shipped skin imports this rather than common.css directly, and then
+ * redefines whatever tokens it wants: a skin that omits a role now inherits a
+ * sensible value instead of leaving an unresolved var() behind.
+ */
+@import "embedded://sl_viewer_ui_core/skins/common.css";
+
+:root {
+  --surface-bg: #1c1f26f2;
+  --surface-border: #4d576b;
+  --card-bg: #303b4f;
+  --overlay-bg: #0f121ad9;
+  --text-primary: #e6ebf5;
+  --text-muted: #9ea8bd;
+  --text-disabled: #737885;
+  --text-heading: #b3d1ff;
+  --control-bg: #293040;
+  --control-bg-hover: #475775;
+  --control-bg-disabled: #1f1f24;
+  --control-border: #66809e;
+  --control-border-disabled: #474752;
+  --field-bg: #1a1f29;
+  --field-text: #ffffff;
+  --accent: #5cb8fa;
+  --selection-bg: #3d57858c;
+  --match-highlight: #fad166;
+  --divider: #576987;
+  --track-bg: #1f242e;
+  --scrollbar-thumb: #667a99;
+  --slider-thumb: #bfc7d9;
+  --title-bar-active: #ffffff1a;
+  --title-text-inactive: #8c94a3;
+  --glyph-button-bg: #ffffff0f;
+  --pie-bg: #3d3d3dcc;
+  --pie-line: #00000080;
+  --pie-selected: #f2692c59;
+  --pie-label-sub-pie: #a6dbff;
+  --pie-label-disabled: #edf2fa38;
+
+  /* Text editing — the `SkinTextCaret` defaults. */
+  --caret: #ffffff;
+  --selection: #4d8ce673;
+  --selection-unfocused: #73859e59;
+
+  /* Conversation transcript bands — the `SkinChatBands` defaults (the
+   * reference values, which both shipped skins use unchanged). */
+  --chat-recall: #808080;
+  --chat-server-history: #5e8261;
+  --chat-live: #ffffff;
+
+  /* Meaning-bearing, and structural radii. These have no Rust shim to fall
+   * back to, so the values are the stock skin's. */
+  --gain: #3fa34d;
+  --loss: #c0392b;
+  --focus-ring: #ffc740;
+  --surface-radius: 6px;
+  --control-radius: 4px;
+}

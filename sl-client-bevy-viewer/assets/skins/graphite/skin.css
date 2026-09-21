@@ -1,12 +1,18 @@
 /*
  * Graphite — a neutral dark-grey skin (the default).
  *
- * The structural rules come from common.css; this file only assigns values to
+ * The structural rules come from common.css, reached through the embedded
+ * fallback sheet (which also supplies a value for every role this file does
+ * not redefine). It is imported into a cascade LAYER and the tokens below are
+ * left un-layered, so this skin's values beat the fallback's: bevy_flair places
+ * a plainly-@imported sheet's :root such that it would otherwise WIN over the
+ * importing file, which is the same trap themes/dark.css documents. This file
+ * only assigns values to
  * the abstract role tokens. Every token is a role name with a direct value —
  * there is no literal-colour-named palette tier. A user variant of this skin is
  * just a later :root {} (a theme overlay) that redefines any of these.
  */
-@import "skins/common.css";
+@import "embedded://sl_viewer_ui_core/skins/fallback.css" layer(fallback);
 
 :root {
   /* Surfaces */

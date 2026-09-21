@@ -132,6 +132,68 @@
   color: var(--text-disabled);
 }
 
+/* WIDGET STATE (viewer-skin-widget-state-classes).
+ *
+ * Hovered, highlighted, toggled-on: the states a widget spends its most
+ * visually loaded moments in, and the ones a skin most wants to own. They used
+ * to be painted from Rust every frame, which meant a skin could not reach them
+ * at all — in the reference's Vintage skin a pressed control is not a tint but
+ * a different texture in a different hue family, and a skin that cannot restyle
+ * a pressed button cannot be that skin.
+ *
+ * Each is a class the widget's own system adds and removes, because the state
+ * is ours and not the engine's: `:hover` cannot see a menu row lit by keyboard
+ * navigation, nor the ancestor chain of an open sub-menu, nor "the floater this
+ * button toggles is open". Where the state genuinely *is* a pointer hover the
+ * rule above (`.sk-button:hover`) still does it with no code at all — prefer
+ * that whenever a selector can reach the paint.
+ *
+ * Paired surface/text rules again, for the same reason as the disabled pair:
+ * bevy_ui has no style inheritance, so a row and its label are separate nodes.
+ * Disabled comes last of all so it wins over both — a greyed row must never
+ * also read as lit. */
+.sk-highlighted {
+  background-color: var(--control-bg-hover);
+}
+
+.sk-highlighted-text {
+  color: var(--text-primary);
+}
+
+/* Toggled on / selected: a lit toolbar button whose floater is open, the active
+ * tab in a strip, the selected row of a table. Distinct from highlighted, which
+ * follows the pointer or the keyboard and is gone the moment either moves. */
+.sk-active {
+  background-color: var(--selection-bg);
+}
+
+.sk-active-text {
+  color: var(--accent);
+}
+
+/* Wants attention: the Conversations button with unread IMs behind a closed
+ * window. The viewer says only *that* it wants attention; how that reads is the
+ * skin's, which is why this carries an animation rather than a colour the
+ * viewer flips twice a second. A skin that would rather not blink overrides the
+ * rule with a static paint and nothing else changes. */
+.sk-attention {
+  animation: sk-attention-pulse 1s infinite;
+}
+
+@keyframes sk-attention-pulse {
+  from {
+    background-color: var(--control-bg);
+  }
+
+  50% {
+    background-color: var(--selection-bg);
+  }
+
+  to {
+    background-color: var(--control-bg);
+  }
+}
+
 /* The universal keyboard focus ring. Every focusable widget — one carrying a
  * TabIndex — is tagged `.sk-focusable` by the scaffold (src/skin.rs
  * `stamp_focus_ring_class`), so this one pair of rules rings all of them
@@ -270,12 +332,14 @@
   background-color: var(--surface-bg);
 }
 
-/* A menu-bar button (a top-level menu's label). The hover highlight is painted
- * in Rust (src/menu.rs `highlight_menu_hover`), not here, so it reads the same
- * with or without a skin; this rule only carries the skin's text colour and
- * corner. Deliberately no `background-color`, so the skin does not fight the
- * per-frame highlight. */
+/* A menu-bar button (a top-level menu's label). Its lit state is the
+ * `.sk-highlighted` class (src/menu.rs `highlight_menu_hover` adds and removes
+ * it, because the row is lit by keyboard navigation as well as by the pointer),
+ * so this rule carries the idle look — and it must state the idle background
+ * explicitly: a class that only ever *adds* a colour has nothing to revert to
+ * when it is dropped, and the row would keep the highlight forever. */
 .sk-menu-bar-item {
+  background-color: transparent;
   color: var(--text-primary);
   border-radius: var(--control-radius);
 }
@@ -287,9 +351,10 @@
   border-radius: var(--surface-radius);
 }
 
-/* One entry row in a menu. Its highlight is Rust-painted (see above); this rule
- * carries only the skin's text colour and corner, no background. */
+/* One entry row in a menu. Its lit state is `.sk-highlighted` (see above), and
+ * the idle background is stated for the same reason. */
 .sk-menu-item {
+  background-color: transparent;
   color: var(--text-primary);
   border-radius: var(--control-radius);
 }
@@ -387,14 +452,23 @@
   background-color: var(--surface-bg);
 }
 
-/* A bottom-toolbar button. Its enabled / lit (floater open) / disabled
- * background and label colours are painted in Rust
- * (src/bottom_toolbar.rs `update_toolbar_button_states`), one place for the three
- * states, so this rule carries only the skin's corner and border — no
- * `background-color`, so the skin does not fight the per-frame state paint. */
+/* A bottom-toolbar button at rest. Lit (its floater is open) and greyed (not
+ * wired yet) are `.sk-active` / `.sk-disabled-surface`, added and removed by
+ * src/bottom_toolbar.rs `update_toolbar_button_states`; unread IMs behind a
+ * closed Conversations window add `.sk-attention`, which is why the blink is an
+ * animation up there and not a colour the viewer flips twice a second. The
+ * resting background is stated so dropping a state class has somewhere to land.
+ */
 .sk-toolbar-button {
+  background-color: var(--control-bg);
   border-color: var(--control-border);
   border-radius: var(--control-radius);
+}
+
+/* A toolbar button's label — the text half, since bevy_ui has no style
+ * inheritance. `.sk-active-text` / `.sk-disabled-text` override it per state. */
+.sk-toolbar-label {
+  color: var(--text-primary);
 }
 
 /* A parcel-permission icon on the status row. It is shown only while its
@@ -413,8 +487,8 @@
  * meaning-bearing kind accent (Tip / Notify / Alert / Modal) is painted on the
  * card's border in Rust (src/notification_host.rs `kind_accent`), one place for
  * the four kinds, so this rule carries only the skin's surface and corner — no
- * border-color, so the skin does not fight the accent (the same split as
- * .sk-toolbar-button). The border width is set on the node in Rust. */
+ * border-color, so the skin does not fight the accent. The border width is set
+ * on the node in Rust. */
 .sk-toast {
   background-color: var(--surface-bg);
   border-radius: var(--surface-radius);
