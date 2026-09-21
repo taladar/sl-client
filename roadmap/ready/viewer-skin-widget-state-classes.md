@@ -77,6 +77,39 @@ writer there is nothing left to fight. The pie disc is the one piece that
 cannot become a class at all: it is a shader, not a node, and its three
 colours ride in through `drive_pie_material`'s params.
 
+## The unskinned world: bake a fallback sheet (decided 2026-09-21)
+
+Moving state wholly into CSS costs one thing: a world with no stylesheet stops
+showing the distinction at all. Today an unskinned world (a widget crate's unit
+tests, the gallery before its first dress) still renders active / disabled
+correctly, because Rust paints it from `SkinPalette::FALLBACK`.
+
+**The decision is to accept that and remove the case instead**: bake a fallback
+stylesheet into the binary (`bevy::asset`'s `embedded_asset!`), so there is
+always a sheet and the logic never branches on "is there a skin". Nothing else
+about the design changes. The viewer is already badly degraded with no assets —
+untranslated strings everywhere — so "no assets" is not a state worth designing
+the widget paint around.
+
+Two things to settle while doing it, neither a one-liner:
+
+- **Layering.** The skin CSS lives in `sl-client-bevy-viewer/assets/`, but the
+  widgets that stop painting live in `sl-viewer-ui-core` and
+  `sl-viewer-ui-widgets`. That split is deliberate — `tests/shipped_skins.rs`
+  sits in the viewer crate so `sl-viewer-ui-core` does not reach outside its
+  own directory and widen its commit-hook relevance to the whole repository
+  (see `book/src/tools/build-performance.md`). A fallback those crates' **own**
+  unit tests can see therefore has to live at or below them: either a minimal
+  sheet in `sl-viewer-ui-core` that `common.css` supersedes, or the widget
+  tests take the binary's assets.
+- **`@import` paths are asset-root-relative** (`@import "skins/common.css"`),
+  so an embedded source needs the same internal layout or the imports resolve
+  to nothing — silently, like every other link in this chain.
+
+`SkinPalette::FALLBACK` then stops being load-bearing: still the backstop for a
+third-party skin that omits a role, no longer what anything actually renders
+from.
+
 ## Done when
 
 No widget writes a `BackgroundColor` or `TextColor` per frame to express a
