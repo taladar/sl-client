@@ -19,7 +19,7 @@
 //! `PacketFlags`/`PacketAck`), so a [`SimSession`] and a client [`Session`] can
 //! be driven against each other through the real wire path.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
@@ -65,10 +65,9 @@ use sl_wire::messages::{
     EstateOwnerMessageParamListBlock, EventInfoReply, EventInfoReplyAgentDataBlock,
     EventInfoReplyEventDataBlock, FindAgent, FindAgentAgentBlockBlock, FindAgentLocationBlockBlock,
     LogoutReply, LogoutReplyAgentDataBlock, PlacesReply, PlacesReplyAgentDataBlock,
-    PlacesReplyQueryDataBlock, PlacesReplyTransactionDataBlock, StartPingCheck,
-    StartPingCheckPingIDBlock, UUIDGroupNameReply, UUIDGroupNameReplyUUIDNameBlockBlock,
-    UUIDNameReply, UUIDNameReplyUUIDNameBlockBlock, ViewerEffect as ViewerEffectMessage,
-    ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
+    PlacesReplyQueryDataBlock, PlacesReplyTransactionDataBlock, UUIDGroupNameReply,
+    UUIDGroupNameReplyUUIDNameBlockBlock, UUIDNameReply, UUIDNameReplyUUIDNameBlockBlock,
+    ViewerEffect as ViewerEffectMessage, ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
 };
 use sl_wire::messages::{
     AgentWearablesUpdate, AgentWearablesUpdateAgentDataBlock,
@@ -156,13 +155,12 @@ use sl_wire::{
     AnyMessage, CircuitCode, ControlFlags, EventQueueEvent, ExperienceEnvironmentPush,
     ExperienceEvent, ExperienceInfo, ExperiencePermission, ExperienceUpdate, GlobalCoordinates,
     Llsd, MessageId, PacketFlags, Permissions, Permissions5, Reader, RegionExperienceLists,
-    RegionHandle, RegionLocalObjectId, RegionLocalParcelId, SequenceNumber, WireError, Writer,
-    build_event_queue_response, encode_datagram, parse_datagram, zero_decode,
+    RegionHandle, RegionLocalObjectId, RegionLocalParcelId, SequenceNumber, WireError,
+    build_event_queue_response, parse_datagram, zero_decode,
 };
 use uuid::Uuid;
 
 use crate::AssetKey;
-use crate::ack_flush::send_ack_packets;
 use crate::appearance::{MAX_FACES, decode_texture_entry};
 use crate::bookkeeping_ids::{
     ImSessionId, InventoryCallbackId, InvoiceId, LureId, PingId, QueryId, TransactionId,
@@ -170,6 +168,9 @@ use crate::bookkeeping_ids::{
 };
 use crate::error::Error;
 use crate::extra_params::decode_extra_param_blocks;
+use crate::link::{
+    ExhaustedPacket, PING_INTERVAL, ReliableLink, ReliableSeverity, deadline, merge_deadline,
+};
 use crate::object_update::TerseUpdate;
 use crate::session::{
     CrossedRegionInfo, SERVER_HISTORY_CAP, STANDARD_REGION_SIZE_METRES, ServerHistoryMessage,
@@ -317,51 +318,6 @@ macro_rules! restore_item_from_inventory_block {
     }};
 }
 
-/// How long to batch owed acknowledgements before flushing them as a `PacketAck`
-/// (matches the client [`Session`](crate::Session)).
-const ACK_FLUSH_DELAY: Duration = Duration::from_millis(150);
-
-/// How long the circuit may go without any inbound traffic before it is declared
-/// dead.
-const INACTIVITY_TIMEOUT: Duration = Duration::from_secs(45);
-
-/// The floor on the retransmission timeout, however fast the measured round
-/// trip is (the reference's `LL_MINIMUM_RELIABLE_TIMEOUT_SECONDS`). The
-/// simulator's timeout is this or [`RELIABLE_TIMEOUT_FACTOR`] times the
-/// measured round trip, whichever is larger — the same policy the client
-/// [`Session`](crate::Session) uses.
-const MINIMUM_RESEND_TIMEOUT: Duration = Duration::from_secs(1);
-
-/// The multiple of the measured round trip a reliable packet waits before it is
-/// retransmitted (the reference's `LL_RELIABLE_TIMEOUT_FACTOR`), floored at
-/// [`MINIMUM_RESEND_TIMEOUT`].
-const RELIABLE_TIMEOUT_FACTOR: f32 = 5.0;
-
-/// The weight a fresh round-trip sample carries in the ping average.
-const PING_AVERAGE_ALPHA: f32 = 0.2;
-
-/// `1.0 - PING_AVERAGE_ALPHA`, spelled out so the update is literal-only
-/// arithmetic.
-const PING_AVERAGE_DECAY: f32 = 0.8;
-
-/// The floor the ping average is clamped to.
-const PING_AVERAGE_MIN: Duration = Duration::from_millis(100);
-
-/// The ceiling the ping average is clamped to, capping the retransmission
-/// timeout at `RELIABLE_TIMEOUT_FACTOR` times this.
-const PING_AVERAGE_MAX: Duration = Duration::from_millis(2000);
-
-/// The ping average a circuit starts with, before any round trip is measured.
-const INITIAL_PING_AVERAGE: Duration = Duration::from_millis(1000);
-
-/// The cadence at which the simulator pings an active client with a
-/// `StartPingCheck`.
-const PING_INTERVAL: Duration = Duration::from_secs(5);
-
-/// How many times a reliable packet is sent before it is given up on: the first
-/// transmission plus the reference's `LL_DEFAULT_RELIABLE_RETRIES`.
-const MAX_RESEND_ATTEMPTS: u32 = 4;
-
 /// How long the sit handshake may sit in
 /// [`SimSitState::ResponseSent`] awaiting the client's completing `AgentSit`
 /// before the offer is withdrawn. The mirror of the client's `SIT_TIMEOUT`.
@@ -399,9 +355,6 @@ const MAX_SCRIPT_GRANTS: usize = 4096;
 /// before the simulator answers it itself and drops the parked request.
 const TRANSFER_SERVE_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// The bound on the recently-seen inbound reliable sequence window.
-const SEEN_CAPACITY: usize = 4096;
-
 /// The maximum number of names packed into a single `UUIDNameReply` /
 /// `UUIDGroupNameReply`. Smaller than the request batch because each entry also
 /// carries the (variable-length) name strings.
@@ -437,11 +390,6 @@ const fn estate_access_code(kind: EstateAccessKind) -> u32 {
     }
 }
 
-/// Computes `now + duration`, saturating at `now` on (impossible) overflow.
-fn deadline(now: Instant, duration: Duration) -> Instant {
-    now.checked_add(duration).unwrap_or(now)
-}
-
 /// Narrows a global-metre `f64` to the `f32` the `PlacesReply` `GlobalX/Y/Z`
 /// fields carry. Global positions are in-range metre values, so the narrowing
 /// is exact for the data the wire (an `F32`) round-trips.
@@ -462,83 +410,13 @@ const fn global_to_f32(meters: f64) -> f32 {
 /// circuit open for. Everything else is one lost message on a live session,
 /// which the reference likewise reports through the packet's own failure
 /// callback rather than by tearing the circuit down.
-const fn severity_of(message: &AnyMessage) -> SimReliableSeverity {
+const fn severity_of(message: &AnyMessage) -> ReliableSeverity {
     match *message {
         AnyMessage::RegionHandshake(_) | AnyMessage::AgentMovementComplete(_) => {
-            SimReliableSeverity::SessionCritical
+            ReliableSeverity::SessionCritical
         }
-        _ => SimReliableSeverity::BestEffort,
+        _ => ReliableSeverity::BestEffort,
     }
-}
-
-/// Updates `earliest` to the minimum of itself and `candidate`.
-fn merge_deadline(earliest: &mut Option<Instant>, candidate: Option<Instant>) {
-    if let Some(candidate) = candidate {
-        *earliest = Some(match *earliest {
-            Some(current) => current.min(candidate),
-            None => candidate,
-        });
-    }
-}
-
-/// What losing a reliable packet for good costs the simulator's session.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SimReliableSeverity {
-    /// The packet establishes the agent's presence on the circuit
-    /// (`RegionHandshake`, `AgentMovementComplete`): a client that never
-    /// receives it never finishes arriving, so there is nothing left to keep
-    /// the circuit open for.
-    SessionCritical,
-    /// An ordinary reliable message. Losing it costs that one message; the
-    /// session keeps running and the loss is surfaced as
-    /// [`ServerEvent::ReliableGiveUp`] — the reference behaviour, where an
-    /// exhausted reliable packet invokes its own failure callback and leaves
-    /// the circuit alone.
-    BestEffort,
-}
-
-/// A datagram queued for transmission to the client.
-#[derive(Debug, Clone)]
-struct SimOutbound {
-    /// The outgoing sequence number of the reliable packet this datagram
-    /// carries, so popping it can start that packet's retransmission clock.
-    /// `None` for an unreliable datagram, which nothing is waiting on.
-    sequence: Option<SequenceNumber>,
-    /// The fully encoded datagram.
-    payload: Vec<u8>,
-}
-
-/// A reliable packet awaiting acknowledgement, kept so it can be retransmitted.
-#[derive(Debug, Clone)]
-struct UnackedPacket {
-    /// The fully encoded datagram, ready to resend.
-    datagram: Vec<u8>,
-    /// When the current attempt's retransmission clock started. While the
-    /// datagram is still `queued` this is pushed forward to the latest instant
-    /// the session is told about, so time spent waiting on a backed-up driver
-    /// does not count as silence from the client.
-    sent_at: Instant,
-    /// Whether the current attempt's datagram is still sitting in the outbound
-    /// queue rather than having been handed to the driver.
-    queued: bool,
-    /// How many times the packet has been sent so far.
-    attempts: u32,
-    /// The message name, for the give-up report.
-    name: Option<&'static str>,
-    /// What losing this packet costs the session.
-    severity: SimReliableSeverity,
-}
-
-/// A reliable packet that has run out of retransmissions, reported by
-/// [`SimSession::process_resends`].
-#[derive(Debug, Clone, Copy)]
-struct ExhaustedPacket {
-    /// The outgoing sequence number the packet was sent with.
-    sequence: SequenceNumber,
-    /// The message name (`None` for an unrecognised id).
-    name: Option<&'static str>,
-    /// What the loss costs the session.
-    severity: SimReliableSeverity,
 }
 
 /// A `TransferRequest` parked for the driver to serve, with the deadline past
@@ -549,32 +427,6 @@ struct SimTransferServe {
     params: Vec<u8>,
     /// When the request is answered as unanswerable and dropped.
     expires: Instant,
-}
-
-/// A bounded set of recently seen inbound reliable sequence numbers, used to
-/// suppress duplicate processing of retransmitted reliable packets.
-#[derive(Debug, Default)]
-struct SeenWindow {
-    /// Membership set for O(1) lookup.
-    set: HashSet<SequenceNumber>,
-    /// Insertion order, for evicting the oldest entries.
-    order: VecDeque<SequenceNumber>,
-}
-
-impl SeenWindow {
-    /// Records `sequence`; returns `true` if it was not seen before.
-    fn insert(&mut self, sequence: SequenceNumber) -> bool {
-        if !self.set.insert(sequence) {
-            return false;
-        }
-        self.order.push_back(sequence);
-        if self.order.len() > SEEN_CAPACITY
-            && let Some(evicted) = self.order.pop_front()
-        {
-            self.set.remove(&evicted);
-        }
-        true
-    }
 }
 
 /// The lifecycle state of a [`SimSession`].
@@ -3160,29 +3012,12 @@ pub struct SimSession {
     session_id: Option<Uuid>,
     /// The circuit code, from `UseCircuitCode`.
     circuit_code: Option<CircuitCode>,
-    /// The next outgoing sequence number.
-    next_sequence: SequenceNumber,
-    /// The next `StartPingCheck` ping id.
-    next_ping_id: PingId,
-    /// The ping the simulator is waiting on a `CompletePingCheck` for, and when
-    /// it went out — the round trip the retransmission timeout is derived from.
-    outstanding_ping: Option<(PingId, Instant)>,
-    /// The relaxed average of the measured round trip to the client, clamped to
-    /// `PING_AVERAGE_MIN ..= PING_AVERAGE_MAX`. Drives the retransmission
-    /// timeout ([`SimSession::resend_timeout`]).
-    ping_average: Duration,
-    /// Inbound reliable sequence numbers we still owe acknowledgements for.
-    pending_acks: Vec<SequenceNumber>,
-    /// Outgoing reliable packets awaiting acknowledgement, keyed by sequence.
-    unacked: BTreeMap<SequenceNumber, UnackedPacket>,
-    /// Recently seen inbound reliable sequence numbers.
-    seen: SeenWindow,
-    /// Datagrams ready to be transmitted to the client.
-    out: VecDeque<SimOutbound>,
-    /// When the link is declared dead for lack of inbound traffic.
-    inactivity: Instant,
-    /// When to flush owed acknowledgements, if any are pending.
-    ack_flush: Option<Instant>,
+    /// The reliable-transport half of the circuit to the client: sequence
+    /// numbering, the unacknowledged set and its resend policy, owed
+    /// acknowledgements, duplicate suppression, the outbound queue, and the
+    /// keep-alive ping that measures the round trip. Shared with the client
+    /// direction — see [`ReliableLink`](crate::link::ReliableLink).
+    link: ReliableLink,
     /// When to send the next periodic `StartPingCheck`, once active.
     ping: Option<Instant>,
     /// The CAPS `EventQueueGet` events enqueued for the client, awaiting a
@@ -3532,16 +3367,7 @@ impl SimSession {
             agent_id: None,
             session_id: None,
             circuit_code: None,
-            next_sequence: SequenceNumber::FIRST,
-            next_ping_id: PingId(1),
-            outstanding_ping: None,
-            ping_average: INITIAL_PING_AVERAGE,
-            pending_acks: Vec::new(),
-            unacked: BTreeMap::new(),
-            seen: SeenWindow::default(),
-            out: VecDeque::new(),
-            inactivity: deadline(now, INACTIVITY_TIMEOUT),
-            ack_flush: None,
+            link: ReliableLink::new(now),
             ping: None,
             caps_events: Vec::new(),
             event_queue_id: 1,
@@ -4785,7 +4611,7 @@ impl SimSession {
     /// message before it does something the client should only see afterwards.
     #[must_use]
     pub const fn next_outgoing_sequence(&self) -> SequenceNumber {
-        self.next_sequence
+        self.link.peek_next_sequence()
     }
 
     /// Whether the reliable packet sent as `sequence` is still awaiting the
@@ -4799,14 +4625,7 @@ impl SimSession {
     /// client's own event stream.
     #[must_use]
     pub fn is_awaiting_ack(&self, sequence: SequenceNumber) -> bool {
-        self.unacked.contains_key(&sequence)
-    }
-
-    /// Allocates the next outgoing sequence number.
-    const fn next_sequence(&mut self) -> SequenceNumber {
-        let sequence = self.next_sequence;
-        self.next_sequence = self.next_sequence.wrapping_next();
-        sequence
+        self.link.is_awaiting_ack(sequence)
     }
 
     /// Encodes and queues a message to the client, tracking it for resend when
@@ -4817,6 +4636,10 @@ impl SimSession {
     /// what stops a driver from talking to a client that is already gone.
     /// Datagrams queued *before* the close still drain — that is how the
     /// goodbye packet of a clean logout or a retired circuit reaches the client.
+    ///
+    /// The session's own contribution is [`severity_of`]: which of *its*
+    /// messages the circuit cannot survive losing. Everything else about the
+    /// reliable layer is [`ReliableLink`]'s.
     fn send(
         &mut self,
         message: &AnyMessage,
@@ -4826,39 +4649,8 @@ impl SimSession {
         if self.is_closed() {
             return Ok(());
         }
-        let mut writer = Writer::new();
-        message.id().encode(&mut writer);
-        message.encode_body(&mut writer)?;
-        let body = writer.into_bytes();
-
-        let sequence = self.next_sequence();
-        let flags = match reliability {
-            Reliability::Reliable => PacketFlags::RELIABLE,
-            Reliability::Unreliable => PacketFlags::EMPTY,
-        };
-        let datagram = encode_datagram(flags, sequence, &body);
-
-        let tracked = if matches!(reliability, Reliability::Reliable) {
-            self.unacked.insert(
-                sequence,
-                UnackedPacket {
-                    datagram: datagram.clone(),
-                    sent_at: now,
-                    queued: true,
-                    attempts: 1,
-                    name: sl_wire::message_name(message.id()),
-                    severity: severity_of(message),
-                },
-            );
-            Some(sequence)
-        } else {
-            None
-        };
-        self.out.push_back(SimOutbound {
-            sequence: tracked,
-            payload: datagram,
-        });
-        Ok(())
+        self.link
+            .send(message, reliability, severity_of(message), now)
     }
 
     /// Pushes a server message to the client with the given reliability. This is
@@ -9633,7 +9425,7 @@ impl SimSession {
 
     /// Sends a `StartPingCheck` to the client; the client answers with a
     /// `CompletePingCheck`. Returns the ping id sent (so a caller can match the
-    /// reply), or `None` if the circuit is not open.
+    /// reply), or `None` if the circuit is not open or the session has closed.
     ///
     /// The ping carries this end's oldest unacknowledged outgoing sequence
     /// number in `OldestUnacked`, letting the client retire its own
@@ -9646,21 +9438,10 @@ impl SimSession {
     ///
     /// Returns a wire error if the message fails to encode.
     pub fn start_ping_check(&mut self, now: Instant) -> Result<Option<PingId>, Error> {
-        if self.client_addr.is_none() {
+        if self.client_addr.is_none() || self.is_closed() {
             return Ok(None);
         }
-        let ping_id = self.next_ping_id;
-        self.next_ping_id = self.next_ping_id.wrapping_next();
-        let oldest = crate::unacked::oldest(&self.unacked, self.next_sequence);
-        let message = AnyMessage::StartPingCheck(StartPingCheck {
-            ping_id: StartPingCheckPingIDBlock {
-                ping_id: ping_id.get(),
-                oldest_unacked: oldest.get(),
-            },
-        });
-        self.send(&message, Reliability::Unreliable, now)?;
-        self.outstanding_ping = Some((ping_id, now));
-        Ok(Some(ping_id))
+        Ok(Some(self.link.send_start_ping_check(now)?))
     }
 
     // --- CAPS event-queue pushes (typed enqueue helpers) ---------------------
@@ -9826,121 +9607,33 @@ impl SimSession {
 
     /// Records that a datagram was received, resetting the inactivity timer.
     fn note_received(&mut self, now: Instant) {
-        self.inactivity = deadline(now, INACTIVITY_TIMEOUT);
+        self.link.note_received(now);
     }
 
     /// Records that we owe an acknowledgement for `sequence`, arming the flush.
     fn queue_ack(&mut self, sequence: SequenceNumber, now: Instant) {
-        self.pending_acks.push(sequence);
-        if self.ack_flush.is_none() {
-            self.ack_flush = Some(deadline(now, ACK_FLUSH_DELAY));
-        }
+        self.link.queue_ack(sequence, now);
     }
 
     /// Removes the given outgoing sequence numbers from the unacked set.
     fn record_acks(&mut self, ids: &[SequenceNumber]) {
-        for id in ids {
-            self.unacked.remove(id);
-        }
+        self.link.record_acks(ids);
     }
 
     /// Flushes owed acknowledgements as one or more `PacketAck` messages.
-    ///
-    /// A message that fails to encode does not take the acks batched behind it
-    /// with it — see [`send_ack_packets`] for why every message is sent even
-    /// after one fails, and why the first failure is the one returned.
     fn flush_acks(&mut self, now: Instant) -> Result<(), WireError> {
-        self.ack_flush = None;
-        if self.pending_acks.is_empty() {
-            return Ok(());
-        }
-        let acks = std::mem::take(&mut self.pending_acks);
-        send_ack_packets(&acks, |message| {
-            self.send(message, Reliability::Unreliable, now)
-        })
+        self.link.flush_acks(now)
     }
 
-    /// The retransmission timeout for this circuit: the reference's
-    /// `LL_RELIABLE_TIMEOUT_FACTOR` multiple of the averaged round-trip time to
-    /// the client, floored at [`MINIMUM_RESEND_TIMEOUT`].
-    fn resend_timeout(&self) -> Duration {
-        self.ping_average
-            .mul_f32(RELIABLE_TIMEOUT_FACTOR)
-            .max(MINIMUM_RESEND_TIMEOUT)
-    }
-
-    /// Folds a round-trip `sample` into the ping average with the reference's
-    /// fast-attack / slow-decay relaxation (`LLCircuitData::setPingDelay`): the
-    /// average first jumps to any worse sample, then relaxes toward it, and the
-    /// result is clamped to `PING_AVERAGE_MIN ..= PING_AVERAGE_MAX`.
-    fn record_ping_sample(&mut self, sample: Duration) {
-        let attacked = self.ping_average.max(sample);
-        self.ping_average = attacked
-            .mul_f32(PING_AVERAGE_DECAY)
-            .saturating_add(sample.mul_f32(PING_AVERAGE_ALPHA))
-            .clamp(PING_AVERAGE_MIN, PING_AVERAGE_MAX);
-    }
-
-    /// Retransmits unacknowledged reliable packets whose timeout has elapsed.
-    ///
-    /// The timeout tracks the measured round trip ([`Self::resend_timeout`]),
-    /// and a datagram still waiting in the outbound queue has its clock held at
-    /// `now` rather than counting the wait as silence from the client — so a
-    /// driver that falls behind does not turn its own backlog into a burst of
-    /// retransmissions.
-    ///
-    /// Returns every packet that has now exhausted its retransmission budget;
-    /// such packets are dropped from the unacked set, so they are reported once
-    /// and stop driving the resend deadline.
+    /// Retransmits unacknowledged reliable packets whose timeout has elapsed,
+    /// returning every packet that has now exhausted its budget.
     fn process_resends(&mut self, now: Instant) -> Vec<ExhaustedPacket> {
-        let timeout = self.resend_timeout();
-        let mut exhausted = Vec::new();
-        let mut to_send = Vec::new();
-        for (sequence, packet) in &mut self.unacked {
-            if packet.queued {
-                packet.sent_at = now;
-                continue;
-            }
-            if now < deadline(packet.sent_at, timeout) {
-                continue;
-            }
-            if packet.attempts >= MAX_RESEND_ATTEMPTS {
-                exhausted.push(ExhaustedPacket {
-                    sequence: *sequence,
-                    name: packet.name,
-                    severity: packet.severity,
-                });
-                continue;
-            }
-            let mut datagram = packet.datagram.clone();
-            if let Some(first) = datagram.first_mut() {
-                *first |= PacketFlags::RESENT.bits();
-            }
-            packet.sent_at = now;
-            packet.queued = true;
-            packet.attempts = packet.attempts.saturating_add(1);
-            to_send.push(SimOutbound {
-                sequence: Some(*sequence),
-                payload: datagram,
-            });
-        }
-        self.out.extend(to_send);
-        for packet in &exhausted {
-            self.unacked.remove(&packet.sequence);
-        }
-        exhausted
+        self.link.process_resends(now)
     }
 
-    /// The earliest retransmission deadline across all unacked packets. A packet
-    /// whose datagram is still queued has not started its clock, so it does not
-    /// contribute a deadline — its wake-up comes from the transmission itself.
+    /// The earliest retransmission deadline across all unacked packets.
     fn next_resend_deadline(&self) -> Option<Instant> {
-        let timeout = self.resend_timeout();
-        self.unacked
-            .values()
-            .filter(|packet| !packet.queued)
-            .map(|packet| deadline(packet.sent_at, timeout))
-            .min()
+        self.link.next_resend_deadline()
     }
 
     /// Handles an inbound datagram from the client at address `from`.
@@ -10001,7 +9694,7 @@ impl SimSession {
         self.record_acks(&parsed.acks);
         let process = if parsed.flags.contains(PacketFlags::RELIABLE) {
             self.queue_ack(parsed.sequence, now);
-            self.seen.insert(parsed.sequence)
+            self.link.mark_seen(parsed.sequence)
         } else {
             true
         };
@@ -10119,12 +9812,7 @@ impl SimSession {
             // into the average. A reply to any other ping id is stale.
             AnyMessage::CompletePingCheck(complete) => {
                 let answered = PingId(complete.ping_id.ping_id);
-                if let Some((outstanding, sent_at)) = self.outstanding_ping
-                    && outstanding == answered
-                {
-                    self.outstanding_ping = None;
-                    self.record_ping_sample(now.saturating_duration_since(sent_at));
-                }
+                let _round_trip = self.link.record_ping_reply(answered, now);
             }
             AnyMessage::PacketAck(ack) => {
                 let ids: Vec<SequenceNumber> = ack
@@ -12148,11 +11836,11 @@ impl SimSession {
         if matches!(self.state, SimState::Closed) {
             return;
         }
-        if now >= self.inactivity {
+        if now >= self.link.inactivity_deadline() {
             self.close(ServerEvent::Disconnected);
             return;
         }
-        if let Some(at) = self.ack_flush
+        if let Some(at) = self.link.ack_flush_deadline()
             && now >= at
             && let Err(error) = self.flush_acks(now)
         {
@@ -12165,7 +11853,7 @@ impl SimSession {
         let exhausted = self.process_resends(now);
         if exhausted
             .iter()
-            .any(|packet| matches!(packet.severity, SimReliableSeverity::SessionCritical))
+            .any(|packet| matches!(packet.severity, ReliableSeverity::SessionCritical))
         {
             // Without the handshake or the movement completion the client never
             // finishes arriving; there is nothing left to keep the circuit open
@@ -12188,12 +11876,10 @@ impl SimSession {
             && now >= at
         {
             // A ping still in flight when the next one is due is itself a
-            // round-trip measurement in progress: fold its time so far in, so a
-            // client that stops answering widens the retransmission timeout
-            // instead of drawing more retransmissions onto a struggling link.
-            if let Some((_id, sent_at)) = self.outstanding_ping {
-                self.record_ping_sample(now.saturating_duration_since(sent_at));
-            }
+            // round-trip measurement in progress; `send_start_ping_check` folds
+            // its time so far in, so a client that stops answering widens the
+            // retransmission timeout instead of drawing more retransmissions
+            // onto a struggling link.
             self.ping = Some(deadline(now, PING_INTERVAL));
             let _result = self.start_ping_check(now);
         }
@@ -12308,15 +11994,10 @@ impl SimSession {
     /// the queue must not count against its timeout.
     pub fn poll_transmit(&mut self) -> Option<Transmit> {
         let destination = self.client_addr?;
-        let outbound = self.out.pop_front()?;
-        if let Some(sequence) = outbound.sequence
-            && let Some(packet) = self.unacked.get_mut(&sequence)
-        {
-            packet.queued = false;
-        }
+        let payload = self.link.pop_outbound()?;
         Some(Transmit {
             destination,
-            payload: outbound.payload,
+            payload,
         })
     }
 
@@ -12327,8 +12008,8 @@ impl SimSession {
         if matches!(self.state, SimState::Closed) {
             return None;
         }
-        let mut earliest = Some(self.inactivity);
-        merge_deadline(&mut earliest, self.ack_flush);
+        let mut earliest = Some(self.link.inactivity_deadline());
+        merge_deadline(&mut earliest, self.link.ack_flush_deadline());
         merge_deadline(&mut earliest, self.ping);
         merge_deadline(&mut earliest, self.next_resend_deadline());
         merge_deadline(&mut earliest, self.sit_expires);
@@ -12366,11 +12047,8 @@ impl SimSession {
         }
         self.state = SimState::Closed;
         self.ping = None;
-        self.ack_flush = None;
         self.sit_expires = None;
-        self.outstanding_ping = None;
-        self.pending_acks = Vec::new();
-        self.unacked = BTreeMap::new();
+        self.link.quiesce();
         self.caps_events = Vec::new();
         self.xfer_files = BTreeMap::new();
         self.xfer_sends = BTreeMap::new();

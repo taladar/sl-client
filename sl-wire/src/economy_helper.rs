@@ -22,9 +22,9 @@ use std::collections::HashMap;
 use sl_llsd::{Llsd, LlsdError};
 use uuid::Uuid;
 
+use crate::WireError;
 use crate::xmlrpc::{
-    XmlRpcCall, XmlRpcError, build_method_call, build_method_response, parse_method_call,
-    parse_method_response,
+    XmlRpcCall, build_method_call, build_method_response, parse_method_call, parse_method_response,
 };
 
 /// The currency helper script, relative to the helper URI.
@@ -268,20 +268,20 @@ fn opt_int(params: &Llsd, key: &str) -> Option<i32> {
 }
 
 /// A required string member.
-fn req_str(params: &Llsd, key: &str, field: &'static str) -> Result<String, XmlRpcError> {
-    opt_str(params, key).ok_or(XmlRpcError::Llsd(LlsdError::MissingField { field }))
+fn req_str(params: &Llsd, key: &str, field: &'static str) -> Result<String, WireError> {
+    opt_str(params, key).ok_or(WireError::Llsd(LlsdError::MissingField { field }))
 }
 
 /// A required integer member.
-fn req_int(params: &Llsd, key: &str, field: &'static str) -> Result<i32, XmlRpcError> {
-    opt_int(params, key).ok_or(XmlRpcError::Llsd(LlsdError::MissingField { field }))
+fn req_int(params: &Llsd, key: &str, field: &'static str) -> Result<i32, WireError> {
+    opt_int(params, key).ok_or(WireError::Llsd(LlsdError::MissingField { field }))
 }
 
 /// A required UUID member (string-encoded on the wire).
-fn req_uuid(params: &Llsd, key: &str, field: &'static str) -> Result<Uuid, XmlRpcError> {
+fn req_uuid(params: &Llsd, key: &str, field: &'static str) -> Result<Uuid, WireError> {
     let text = req_str(params, key, field)?;
     Uuid::parse_str(text.trim())
-        .map_err(|_error| XmlRpcError::Llsd(LlsdError::MalformedField { field, value: text }))
+        .map_err(|_error| WireError::Llsd(LlsdError::MalformedField { field, value: text }))
 }
 
 /// A boolean member (`0`/`1` or `true`/`false` text tolerated); absent = false.
@@ -296,9 +296,9 @@ fn opt_bool(params: &Llsd, key: &str) -> bool {
 
 /// Unwraps a parsed call, checking its method name and taking the single
 /// struct parameter.
-fn call_params(call: XmlRpcCall, expected: &str) -> Result<Llsd, XmlRpcError> {
+fn call_params(call: XmlRpcCall, expected: &str) -> Result<Llsd, WireError> {
     if call.method != expected {
-        return Err(XmlRpcError::UnexpectedMethod {
+        return Err(WireError::UnexpectedMethod {
             method: call.method,
         });
     }
@@ -306,7 +306,7 @@ fn call_params(call: XmlRpcCall, expected: &str) -> Result<Llsd, XmlRpcError> {
         .into_iter()
         .next()
         .filter(|param| matches!(param, Llsd::Map(_)))
-        .ok_or(XmlRpcError::Llsd(LlsdError::MissingField {
+        .ok_or(WireError::Llsd(LlsdError::MissingField {
             field: "params[0]",
         }))
 }
@@ -315,11 +315,11 @@ fn call_params(call: XmlRpcCall, expected: &str) -> Result<Llsd, XmlRpcError> {
 /// into [`HelperOutcome`] and handing the struct to `decode` on success.
 fn response_outcome<T>(
     xml: &str,
-    decode: impl FnOnce(&Llsd) -> Result<T, XmlRpcError>,
-) -> Result<HelperOutcome<T>, XmlRpcError> {
+    decode: impl FnOnce(&Llsd) -> Result<T, WireError>,
+) -> Result<HelperOutcome<T>, WireError> {
     let response = parse_method_response(xml)?;
     let Some(payload) = response.first_param().filter(|p| matches!(p, Llsd::Map(_))) else {
-        return Err(XmlRpcError::Llsd(LlsdError::MissingField {
+        return Err(WireError::Llsd(LlsdError::MissingField {
             field: "params[0]",
         }));
     };
@@ -404,9 +404,9 @@ pub fn build_currency_quote_request(request: &CurrencyQuoteRequest) -> String {
 ///
 /// # Errors
 ///
-/// Returns an [`XmlRpcError`] for a malformed document, a different method
+/// Returns an [`WireError`] for a malformed document, a different method
 /// name, or a missing/invalid required member.
-pub fn parse_currency_quote_request(xml: &str) -> Result<CurrencyQuoteRequest, XmlRpcError> {
+pub fn parse_currency_quote_request(xml: &str) -> Result<CurrencyQuoteRequest, WireError> {
     let params = call_params(parse_method_call(xml)?, GET_CURRENCY_QUOTE_METHOD)?;
     Ok(CurrencyQuoteRequest {
         agent_id: req_uuid(&params, "agentId", "agentId")?,
@@ -435,11 +435,9 @@ pub fn build_currency_quote_response(outcome: &HelperOutcome<CurrencyQuote>) -> 
 ///
 /// # Errors
 ///
-/// Returns an [`XmlRpcError`] for a malformed document or a response without
+/// Returns an [`WireError`] for a malformed document or a response without
 /// a struct payload.
-pub fn parse_currency_quote_response(
-    xml: &str,
-) -> Result<HelperOutcome<CurrencyQuote>, XmlRpcError> {
+pub fn parse_currency_quote_response(xml: &str) -> Result<HelperOutcome<CurrencyQuote>, WireError> {
     response_outcome(xml, |payload| {
         let (estimated_cost, estimated_local_cost) = get_estimates(payload);
         Ok(CurrencyQuote {
@@ -486,9 +484,9 @@ pub fn build_buy_currency_request(request: &BuyCurrencyRequest) -> String {
 ///
 /// # Errors
 ///
-/// Returns an [`XmlRpcError`] for a malformed document, a different method
+/// Returns an [`WireError`] for a malformed document, a different method
 /// name, or a missing/invalid required member.
-pub fn parse_buy_currency_request(xml: &str) -> Result<BuyCurrencyRequest, XmlRpcError> {
+pub fn parse_buy_currency_request(xml: &str) -> Result<BuyCurrencyRequest, WireError> {
     let params = call_params(parse_method_call(xml)?, BUY_CURRENCY_METHOD)?;
     Ok(BuyCurrencyRequest {
         agent_id: req_uuid(&params, "agentId", "agentId")?,
@@ -513,9 +511,9 @@ pub fn build_buy_currency_response(outcome: &HelperOutcome<()>) -> String {
 ///
 /// # Errors
 ///
-/// Returns an [`XmlRpcError`] for a malformed document or a response without
+/// Returns an [`WireError`] for a malformed document or a response without
 /// a struct payload.
-pub fn parse_buy_currency_response(xml: &str) -> Result<HelperOutcome<()>, XmlRpcError> {
+pub fn parse_buy_currency_response(xml: &str) -> Result<HelperOutcome<()>, WireError> {
     response_outcome(xml, |_payload| Ok(()))
 }
 
@@ -550,7 +548,7 @@ fn put_land_prep(params: &mut HashMap<String, Llsd>, request: &LandPrepRequest) 
 }
 
 /// Reads the members shared by both land-prep calls.
-fn get_land_prep(params: &Llsd) -> Result<LandPrepRequest, XmlRpcError> {
+fn get_land_prep(params: &Llsd) -> Result<LandPrepRequest, WireError> {
     Ok(LandPrepRequest {
         agent_id: req_uuid(params, "agentId", "agentId")?,
         secure_session_id: req_uuid(params, "secureSessionId", "secureSessionId")?,
@@ -577,9 +575,9 @@ pub fn build_preflight_land_prep_request(request: &LandPrepRequest) -> String {
 ///
 /// # Errors
 ///
-/// Returns an [`XmlRpcError`] for a malformed document, a different method
+/// Returns an [`WireError`] for a malformed document, a different method
 /// name, or a missing/invalid required member.
-pub fn parse_preflight_land_prep_request(xml: &str) -> Result<LandPrepRequest, XmlRpcError> {
+pub fn parse_preflight_land_prep_request(xml: &str) -> Result<LandPrepRequest, WireError> {
     let params = call_params(parse_method_call(xml)?, PREFLIGHT_BUY_LAND_PREP_METHOD)?;
     get_land_prep(&params)
 }
@@ -625,11 +623,9 @@ pub fn build_preflight_land_prep_response(outcome: &HelperOutcome<LandPrep>) -> 
 ///
 /// # Errors
 ///
-/// Returns an [`XmlRpcError`] for a malformed document or a response without
+/// Returns an [`WireError`] for a malformed document or a response without
 /// a struct payload.
-pub fn parse_preflight_land_prep_response(
-    xml: &str,
-) -> Result<HelperOutcome<LandPrep>, XmlRpcError> {
+pub fn parse_preflight_land_prep_response(xml: &str) -> Result<HelperOutcome<LandPrep>, WireError> {
     response_outcome(xml, |payload| {
         let membership = payload.get("membership").unwrap_or(&Llsd::Undef);
         let land_use = payload.get("landUse").unwrap_or(&Llsd::Undef);
@@ -672,9 +668,9 @@ pub fn build_buy_land_prep_request(request: &LandPrepRequest) -> String {
 ///
 /// # Errors
 ///
-/// Returns an [`XmlRpcError`] for a malformed document, a different method
+/// Returns an [`WireError`] for a malformed document, a different method
 /// name, or a missing/invalid required member.
-pub fn parse_buy_land_prep_request(xml: &str) -> Result<LandPrepRequest, XmlRpcError> {
+pub fn parse_buy_land_prep_request(xml: &str) -> Result<LandPrepRequest, WireError> {
     let params = call_params(parse_method_call(xml)?, BUY_LAND_PREP_METHOD)?;
     get_land_prep(&params)
 }
@@ -689,9 +685,9 @@ pub fn build_buy_land_prep_response(outcome: &HelperOutcome<()>) -> String {
 ///
 /// # Errors
 ///
-/// Returns an [`XmlRpcError`] for a malformed document or a response without
+/// Returns an [`WireError`] for a malformed document or a response without
 /// a struct payload.
-pub fn parse_buy_land_prep_response(xml: &str) -> Result<HelperOutcome<()>, XmlRpcError> {
+pub fn parse_buy_land_prep_response(xml: &str) -> Result<HelperOutcome<()>, WireError> {
     response_outcome(xml, |_payload| Ok(()))
 }
 
@@ -711,7 +707,7 @@ mod test {
         parse_currency_quote_request, parse_currency_quote_response,
         parse_preflight_land_prep_request, parse_preflight_land_prep_response,
     };
-    use crate::xmlrpc::XmlRpcError;
+    use crate::WireError;
 
     fn agent() -> Uuid {
         Uuid::from_u128(0xA0A0_0000_0000_0000_0000_0000_0000_0001)
@@ -732,7 +728,7 @@ mod test {
     }
 
     #[test]
-    fn currency_quote_round_trips_both_directions() -> Result<(), XmlRpcError> {
+    fn currency_quote_round_trips_both_directions() -> Result<(), WireError> {
         let request = CurrencyQuoteRequest {
             agent_id: agent(),
             secure_session_id: session(),
@@ -762,7 +758,7 @@ mod test {
     }
 
     #[test]
-    fn buy_currency_round_trips() -> Result<(), XmlRpcError> {
+    fn buy_currency_round_trips() -> Result<(), WireError> {
         let request = BuyCurrencyRequest {
             agent_id: agent(),
             secure_session_id: session(),
@@ -785,7 +781,7 @@ mod test {
     }
 
     #[test]
-    fn land_prep_round_trips() -> Result<(), XmlRpcError> {
+    fn land_prep_round_trips() -> Result<(), WireError> {
         let preflight = LandPrepRequest {
             agent_id: agent(),
             secure_session_id: session(),
@@ -853,7 +849,7 @@ mod test {
 </struct></value></param></params></methodCall>"#;
 
     #[test]
-    fn firestorm_literal_quote_parses() -> Result<(), XmlRpcError> {
+    fn firestorm_literal_quote_parses() -> Result<(), WireError> {
         let request = parse_currency_quote_request(FIRESTORM_QUOTE)?;
         assert_eq!(request.agent_id, agent());
         assert_eq!(request.secure_session_id, session());
@@ -866,12 +862,12 @@ mod test {
     fn wrong_method_and_missing_members_are_rejected() {
         assert!(matches!(
             parse_buy_currency_request(FIRESTORM_QUOTE),
-            Err(XmlRpcError::UnexpectedMethod { method }) if method == "getCurrencyQuote"
+            Err(WireError::UnexpectedMethod { method }) if method == "getCurrencyQuote"
         ));
         let no_agent = FIRESTORM_QUOTE.replace("agentId", "agentX");
         assert!(matches!(
             parse_currency_quote_request(&no_agent),
-            Err(XmlRpcError::Llsd(_))
+            Err(WireError::Llsd(_))
         ));
     }
 }

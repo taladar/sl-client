@@ -313,11 +313,21 @@ mod test {
     fn llsd_non_map_body_is_rejected() {
         assert!(matches!(
             parse_login_response_llsd("<llsd><array/></llsd>"),
-            Err(sl_wire::LoginParseError::NoStruct)
+            Err(sl_wire::WireError::Llsd(
+                sl_llsd::LlsdError::MalformedField {
+                    field: "login body",
+                    ..
+                }
+            ))
         ));
         assert!(matches!(
             parse_login_request_llsd("<llsd><string>nope</string></llsd>"),
-            Err(sl_wire::LoginParseError::NoStruct)
+            Err(sl_wire::WireError::Llsd(
+                sl_llsd::LlsdError::MalformedField {
+                    field: "login body",
+                    ..
+                }
+            ))
         ));
     }
 }

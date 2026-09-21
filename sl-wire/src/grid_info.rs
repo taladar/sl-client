@@ -15,7 +15,8 @@ use std::collections::HashMap;
 
 use sl_llsd::{Llsd, parse_guarded_xml, push_escaped};
 
-use crate::xmlrpc::{XmlRpcError, XmlRpcResponse, build_method_response, parse_method_response};
+use crate::WireError;
+use crate::xmlrpc::{XmlRpcResponse, build_method_response, parse_method_response};
 
 /// The path, relative to the login URI, the viewer appends to fetch the XML
 /// form (`<login-uri>/get_grid_info`).
@@ -259,14 +260,15 @@ pub fn build_grid_info_xml(info: &GridInfo) -> String {
 ///
 /// # Errors
 ///
-/// Returns [`XmlRpcError::Xml`] if the body is not well-formed XML or is
-/// nested past [`sl_llsd::MAX_NESTING_DEPTH`], and [`XmlRpcError::NotXmlRpc`]
+/// Returns [`WireError::Xml`] if the body is not well-formed XML,
+/// [`WireError::XmlNestingTooDeep`] if it is nested past
+/// [`sl_llsd::MAX_NESTING_DEPTH`], and [`WireError::NotXmlRpc`]
 /// if the root element is not `<gridinfo>`.
-pub fn parse_grid_info_xml(xml: &str) -> Result<GridInfo, XmlRpcError> {
+pub fn parse_grid_info_xml(xml: &str) -> Result<GridInfo, WireError> {
     let document = parse_guarded_xml(xml)?;
     let root = document.root_element();
     if !root.has_tag_name("gridinfo") {
-        return Err(XmlRpcError::NotXmlRpc);
+        return Err(WireError::NotXmlRpc);
     }
     Ok(root
         .children()
@@ -297,10 +299,10 @@ pub fn build_grid_info_xmlrpc_response(info: &GridInfo) -> String {
 ///
 /// # Errors
 ///
-/// Returns [`XmlRpcError::Xml`] / [`XmlRpcError::NotXmlRpc`] for a malformed
-/// document and [`XmlRpcError::Llsd`] when the response is a fault or its
+/// Returns [`WireError::Xml`] / [`WireError::NotXmlRpc`] for a malformed
+/// document and [`WireError::Llsd`] when the response is a fault or its
 /// first parameter is not a struct.
-pub fn parse_grid_info_xmlrpc_response(xml: &str) -> Result<GridInfo, XmlRpcError> {
+pub fn parse_grid_info_xmlrpc_response(xml: &str) -> Result<GridInfo, WireError> {
     let response = parse_method_response(xml)?;
     let Some(Llsd::Map(map)) = response.first_param() else {
         let value = match response {
@@ -336,7 +338,7 @@ mod test {
         build_grid_info_xml, build_grid_info_xmlrpc_response, parse_grid_info_xml,
         parse_grid_info_xmlrpc_response,
     };
-    use crate::xmlrpc::XmlRpcError;
+    use crate::WireError;
 
     /// The literal document the local OpenSim standalone answers with.
     const OPENSIM_SAMPLE: &str = "<gridinfo><platform>OpenSim</platform>\
@@ -346,7 +348,7 @@ mod test {
 <welcome>http://127.0.0.1/welcome?a=1&amp;b=2</welcome></gridinfo>";
 
     #[test]
-    fn opensim_sample_parses_in_order_with_typed_accessors() -> Result<(), XmlRpcError> {
+    fn opensim_sample_parses_in_order_with_typed_accessors() -> Result<(), WireError> {
         let info = parse_grid_info_xml(OPENSIM_SAMPLE)?;
         assert_eq!(info.len(), 5);
         assert_eq!(info.platform(), Some("OpenSim"));
@@ -370,14 +372,14 @@ mod test {
     }
 
     #[test]
-    fn xml_round_trips_byte_for_byte() -> Result<(), XmlRpcError> {
+    fn xml_round_trips_byte_for_byte() -> Result<(), WireError> {
         let info = parse_grid_info_xml(OPENSIM_SAMPLE)?;
         assert_eq!(build_grid_info_xml(&info), OPENSIM_SAMPLE);
         Ok(())
     }
 
     #[test]
-    fn xmlrpc_form_round_trips() -> Result<(), XmlRpcError> {
+    fn xmlrpc_form_round_trips() -> Result<(), WireError> {
         let info = GridInfo::new()
             .with(KEY_LOGIN, "http://grid.example/")
             .with(KEY_GRIDNAME, "Example & Co")
@@ -419,15 +421,15 @@ mod test {
         assert!(info.login_uri().is_none());
         assert!(matches!(
             parse_grid_info_xml("<other/>"),
-            Err(XmlRpcError::NotXmlRpc)
+            Err(WireError::NotXmlRpc)
         ));
         assert!(matches!(
             parse_grid_info_xml("<<"),
-            Err(XmlRpcError::Xml(_))
+            Err(WireError::Xml { .. })
         ));
         assert!(matches!(
             parse_grid_info_xmlrpc_response(&crate::xmlrpc::build_fault(1, "x")),
-            Err(XmlRpcError::Llsd(_))
+            Err(WireError::Llsd(_))
         ));
     }
 }

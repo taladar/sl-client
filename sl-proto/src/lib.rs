@@ -11,6 +11,7 @@ mod command;
 mod error;
 mod extra_params;
 pub mod j2c;
+mod link;
 mod marketplace;
 pub mod mesh_lod;
 mod mute;

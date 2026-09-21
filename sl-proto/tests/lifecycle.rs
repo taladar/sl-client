@@ -328,16 +328,25 @@ mod test {
     }
 
     /// Builds an inbound datagram for a server-sent message.
-    fn server_datagram(id: MessageId, body: &[u8], sequence: u32, reliable: bool) -> Vec<u8> {
+    fn server_datagram(
+        id: MessageId,
+        body: &[u8],
+        sequence: u32,
+        reliable: bool,
+    ) -> Result<Vec<u8>, TestError> {
         let mut writer = Writer::new();
-        id.encode(&mut writer);
+        id.encode(&mut writer)?;
         writer.bytes(body);
         let flags = if reliable {
             PacketFlags::RELIABLE
         } else {
             PacketFlags::EMPTY
         };
-        encode_datagram(flags, SequenceNumber(sequence), &writer.into_bytes())
+        Ok(encode_datagram(
+            flags,
+            SequenceNumber(sequence),
+            &writer.into_bytes(),
+        ))
     }
 
     /// Builds an inbound datagram carrying a fully encoded server message.
@@ -347,7 +356,7 @@ mod test {
         reliable: bool,
     ) -> Result<Vec<u8>, TestError> {
         let mut writer = Writer::new();
-        message.id().encode(&mut writer);
+        message.id().encode(&mut writer)?;
         message.encode_body(&mut writer)?;
         let flags = if reliable {
             PacketFlags::RELIABLE
@@ -421,7 +430,7 @@ mod test {
         );
 
         // RegionHandshake (all-zero body decodes to zeroed fields/empty blocks).
-        let handshake = server_datagram(MessageId::Low(148), &[0u8; 600], 1, true);
+        let handshake = server_datagram(MessageId::Low(148), &[0u8; 600], 1, true)?;
         session.handle_datagram(sim_addr(), &handshake, now)?;
         let replies = drain(&mut session)?;
         assert!(matches!(
@@ -560,7 +569,7 @@ mod test {
         let now = Instant::now();
         let mut session = established(now)?;
         // StartPingCheck High 1: PingID (u8) + OldestUnacked (u32).
-        let ping = server_datagram(MessageId::High(1), &[0x2A, 0, 0, 0, 0], 2, false);
+        let ping = server_datagram(MessageId::High(1), &[0x2A, 0, 0, 0, 0], 2, false)?;
         session.handle_datagram(sim_addr(), &ping, now)?;
         let replies = drain(&mut session)?;
         let Some(AnyMessage::CompletePingCheck(reply)) = replies.first() else {
@@ -795,7 +804,7 @@ mod test {
             })
             .ok_or("expected a keep-alive StartPingCheck")?;
         let answered_at = after(now, 7_000)?;
-        let complete = server_datagram(MessageId::High(2), &[ping_id], 3, false);
+        let complete = server_datagram(MessageId::High(2), &[ping_id], 3, false)?;
         session.handle_datagram(sim_addr(), &complete, answered_at)?;
 
         say_and_transmit(&mut session, "measure me", answered_at)?;
@@ -822,7 +831,7 @@ mod test {
         drain(&mut session)?;
 
         // A reliable inbound message must be acknowledged.
-        let ping = server_datagram(MessageId::High(1), &[1, 0, 0, 0, 0], 50, true);
+        let ping = server_datagram(MessageId::High(1), &[1, 0, 0, 0, 0], 50, true)?;
         session.handle_datagram(sim_addr(), &ping, now)?;
         drain(&mut session)?; // the ping reply
 
@@ -866,7 +875,7 @@ mod test {
         );
 
         // LogoutReply Low 253: AgentData (2 uuids) + InventoryData variable (count).
-        let reply = server_datagram(MessageId::Low(253), &[0u8; 33], 2, true);
+        let reply = server_datagram(MessageId::Low(253), &[0u8; 33], 2, true)?;
         session.handle_datagram(sim_addr(), &reply, now)?;
         assert!(session.is_closed());
         assert!(matches!(
@@ -1213,6 +1222,123 @@ mod test {
                 params: vec![b"neighbour:Fake Region East".to_vec()],
             }
         );
+        Ok(())
+    }
+
+    /// The arms a root circuit and a child-agent circuit share are **one**
+    /// implementation, not two copies of one: the same message delivered on
+    /// either circuit raises the same event.
+    ///
+    /// The two dispatchers used to mirror each other by hand, and the copies had
+    /// already drifted — a root `RegionHandshake` outside `AwaitingHandshake`
+    /// was silently dropped while the child arm answered it unconditionally.
+    /// The per-arm tests around this one each pin one message on one circuit;
+    /// this one pins the *mirror*, so an arm that grows a root-only quirk fails
+    /// here even if nobody thinks to write the child half of its test.
+    ///
+    /// Only the arms whose output is genuinely circuit-independent belong here:
+    /// the parcel overlay and the coarse locations are deliberately tagged with
+    /// the region that sent them, so their two events differ by design.
+    #[test]
+    fn a_shared_message_raises_the_same_event_on_either_circuit() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        enable_neighbour_b(&mut session, 9, now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let sound = uuid::Uuid::from_u128(0xA01);
+        let object = uuid::Uuid::from_u128(0xA02);
+        let owner = uuid::Uuid::from_u128(0xA03);
+        let shared = [
+            AnyMessage::SoundTrigger(SoundTrigger {
+                sound_data: SoundTriggerSoundDataBlock {
+                    sound_id: sound,
+                    owner_id: owner,
+                    object_id: object,
+                    parent_id: uuid::Uuid::nil(),
+                    handle: 0x0000_03E8_0000_03E8,
+                    position: vec3(96.0, 32.0, 21.0),
+                    gain: 0.75,
+                },
+            }),
+            AnyMessage::AttachedSound(AttachedSound {
+                data_block: AttachedSoundDataBlockBlock {
+                    sound_id: sound,
+                    object_id: object,
+                    owner_id: owner,
+                    gain: 1.0,
+                    flags: SoundFlags::LOOP,
+                },
+            }),
+            AnyMessage::PreloadSound(PreloadSound {
+                data_block: vec![PreloadSoundDataBlockBlock {
+                    object_id: object,
+                    owner_id: owner,
+                    sound_id: sound,
+                }],
+            }),
+            AnyMessage::ObjectAnimation(ObjectAnimation {
+                sender: ObjectAnimationSenderBlock { id: object },
+                animation_list: vec![ObjectAnimationAnimationListBlock {
+                    anim_id: uuid::Uuid::from_u128(0xA04),
+                    anim_sequence_id: 7,
+                }],
+            }),
+            AnyMessage::GenericMessage(GenericMessage {
+                agent_data: GenericMessageAgentDataBlock {
+                    agent_id: uuid::Uuid::from_u128(1),
+                    session_id: uuid::Uuid::from_u128(2),
+                    transaction_id: uuid::Uuid::nil(),
+                },
+                method_data: GenericMessageMethodDataBlock {
+                    method: b"SomeFeature\0".to_vec(),
+                    invoice: uuid::Uuid::nil(),
+                },
+                param_list: vec![GenericMessageParamListBlock {
+                    parameter: b"payload".to_vec(),
+                }],
+            }),
+            AnyMessage::LargeGenericMessage(LargeGenericMessage {
+                agent_data: LargeGenericMessageAgentDataBlock {
+                    agent_id: uuid::Uuid::from_u128(1),
+                    session_id: uuid::Uuid::from_u128(2),
+                    transaction_id: uuid::Uuid::nil(),
+                },
+                method_data: LargeGenericMessageMethodDataBlock {
+                    method: b"SomeBigFeature\0".to_vec(),
+                    invoice: uuid::Uuid::nil(),
+                },
+                param_list: vec![LargeGenericMessageParamListBlock {
+                    parameter: b"payload".to_vec(),
+                }],
+            }),
+        ];
+
+        // Each circuit de-duplicates its own sequence numbers, so one counter
+        // serves both.
+        for (sequence, message) in (100_u32..).zip(shared) {
+            session.handle_datagram(sim_addr(), &server_message(&message, sequence, true)?, now)?;
+            let on_root = drain_events(&mut session);
+            drain(&mut session)?;
+
+            session.handle_datagram(sim_b(), &server_message(&message, sequence, true)?, now)?;
+            let on_child = drain_events(&mut session);
+            drain(&mut session)?;
+
+            assert!(
+                !on_root.is_empty(),
+                "{} raised no event on the root circuit",
+                message.name()
+            );
+            assert_eq!(
+                on_root,
+                on_child,
+                "{} is dispatched differently on a child circuit",
+                message.name()
+            );
+        }
         Ok(())
     }
 
@@ -12728,7 +12854,7 @@ mod test {
         body.put_u64(0x0003_E800_0003_E900);
         body.bytes(&[127, 0, 0, 1]);
         body.bytes(&[0x32, 0xC8]);
-        let datagram = server_datagram(MessageId::Low(151), &body.into_bytes(), 9, true);
+        let datagram = server_datagram(MessageId::Low(151), &body.into_bytes(), 9, true)?;
         session.handle_datagram(sim_addr(), &datagram, now)?;
 
         let events = drain_events(&mut session);
@@ -12759,7 +12885,7 @@ mod test {
         body.put_u64(0x0003_E900_0003_E800);
         body.bytes(&[127, 0, 0, 1]);
         body.bytes(&[0x23, 0x29]);
-        let datagram = server_datagram(MessageId::Low(151), &body.into_bytes(), sequence, true);
+        let datagram = server_datagram(MessageId::Low(151), &body.into_bytes(), sequence, true)?;
         session.handle_datagram(sim_addr(), &datagram, now)?;
         Ok(())
     }
@@ -12810,7 +12936,7 @@ mod test {
         while session.poll_transmit().is_some() {}
 
         // A ping from the child simulator is answered on the child's circuit.
-        let ping = server_datagram(MessageId::High(1), &[0x2A, 0, 0, 0, 0], 2, false);
+        let ping = server_datagram(MessageId::High(1), &[0x2A, 0, 0, 0, 0], 2, false)?;
         session.handle_datagram(sim_b(), &ping, now)?;
         let reply =
             take_transmit_to(&mut session, sim_b()).ok_or("expected a ping reply to sim_b")?;
@@ -12856,7 +12982,7 @@ mod test {
         // The neighbour answers 200ms later; the child times the round trip and
         // surfaces it as a child-circuit `Event::Ping`.
         let replied_at = after(now, 5_200)?;
-        let complete = server_datagram(MessageId::High(2), &[0], 3, false);
+        let complete = server_datagram(MessageId::High(2), &[0], 3, false)?;
         session.handle_datagram(sim_b(), &complete, replied_at)?;
         let ping_event = drain_events(&mut session)
             .into_iter()
@@ -12958,11 +13084,11 @@ mod test {
         while session.poll_transmit().is_some() {}
 
         // The simulator retires the child circuit.
-        let disable = server_datagram(MessageId::Low(152), &[], 3, true);
+        let disable = server_datagram(MessageId::Low(152), &[], 3, true)?;
         session.handle_datagram(sim_b(), &disable, now)?;
 
         // A ping from that (now-closed) child is ignored — no reply.
-        let ping = server_datagram(MessageId::High(1), &[0x2A, 0, 0, 0, 0], 4, false);
+        let ping = server_datagram(MessageId::High(1), &[0x2A, 0, 0, 0, 0], 4, false)?;
         session.handle_datagram(sim_b(), &ping, now)?;
         assert!(
             take_transmit_to(&mut session, sim_b()).is_none(),
@@ -14546,12 +14672,7 @@ mod test {
         body.put_variable2(b"http://127.0.0.1:9001/seed")?; // seed_capability
         body.put_u8(13); // sim_access (PG)
         body.put_u32(0); // teleport_flags
-        Ok(server_datagram(
-            MessageId::Low(69),
-            &body.into_bytes(),
-            sequence,
-            true,
-        ))
+        server_datagram(MessageId::Low(69), &body.into_bytes(), sequence, true)
     }
 
     /// A simulator address as `(sim_ip, sim_port)` in the on-wire form the region
@@ -14682,7 +14803,7 @@ mod test {
             body.put_u8(13); // sim_access (PG)
             body.put_u32(0); // teleport_flags
             let sequence = self.seq();
-            let datagram = server_datagram(MessageId::Low(69), &body.into_bytes(), sequence, true);
+            let datagram = server_datagram(MessageId::Low(69), &body.into_bytes(), sequence, true)?;
             session.handle_datagram(source, &datagram, now)?;
             Ok(())
         }
@@ -14702,7 +14823,8 @@ mod test {
             body.bytes(&ip);
             body.bytes(&port);
             let sequence = self.seq();
-            let datagram = server_datagram(MessageId::Low(151), &body.into_bytes(), sequence, true);
+            let datagram =
+                server_datagram(MessageId::Low(151), &body.into_bytes(), sequence, true)?;
             session.handle_datagram(root, &datagram, now)?;
             Ok(())
         }
@@ -14979,6 +15101,114 @@ mod test {
         assert!(
             !changed.2,
             "the retry stays a neighbour teleport (adjacent by handle), not a distant one"
+        );
+        Ok(())
+    }
+
+    /// **The regression**: a timed-out teleport used to return from the middle
+    /// of the timer tick, so the tick it failed on never retransmitted, never
+    /// flushed its owed acks, never sent the agent update and never ran the
+    /// child-circuit loop. The failure is in-place — the session keeps running —
+    /// so the rest of the tick is still owed.
+    #[test]
+    fn handover_timeout_still_services_the_rest_of_the_tick() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut session, mut grid) = grid_session(now)?;
+
+        // The destination will never answer CompleteAgentMovement.
+        grid.drop_amc(sim_b());
+        session.teleport_to(
+            RegionHandle(B_HANDLE),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        grid.teleport_finish(&mut session, sim_addr(), sim_b(), now)?;
+        grid.pump(&mut session, now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // Past the 30 s teleport timeout: the teleport fails, and the root's
+        // 1 s agent update — due since long before — still goes out on the very
+        // same tick.
+        let later = now + Duration::from_secs(31);
+        session.handle_timeout(later);
+        assert!(
+            drain_events(&mut session)
+                .iter()
+                .any(|event| matches!(event, Event::TeleportFailed { .. })),
+            "the teleport times out"
+        );
+        let mut root_agent_update = false;
+        while let Some(transmit) = session.poll_transmit() {
+            if transmit.destination == sim_addr()
+                && matches!(decode(&transmit)?, AnyMessage::AgentUpdate(_))
+            {
+                root_agent_update = true;
+            }
+        }
+        assert!(
+            root_agent_update,
+            "the failing teleport does not cost the tick its agent update"
+        );
+        Ok(())
+    }
+
+    /// **The regression**: a child circuit's agent update and keep-alive ping are
+    /// sent by the timer tick exactly like the root's, but only its inactivity,
+    /// ack-flush and resend deadlines used to be merged into
+    /// [`Session::poll_timeout`] — so on a quiet child they fired whenever the
+    /// root's next timer happened to wake the session, not when they were due.
+    #[test]
+    fn poll_timeout_merges_a_child_circuits_agent_update() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut session, mut grid) = grid_session(now)?;
+        // Take the root's bootstrap packets off the resend list, so its resend
+        // deadline stops standing in for every other timer it owns.
+        ack_sequences_through(&mut session, now, 9000, 32)?;
+
+        // One tick on the root's own 1 s cadence, so its next agent update is at
+        // +2 s — and the child opens *between* the two, at +1.5 s, putting its
+        // first agent update at +2.5 s, after the root's and before the one
+        // following it.
+        session.handle_timeout(now + Duration::from_secs(1));
+        drain(&mut session)?;
+
+        let open = now + Duration::from_millis(1500);
+        grid.enable_neighbour(&mut session, sim_addr(), sim_b(), open)?;
+        grid.pump(&mut session, open)?;
+        // The neighbour takes delivery of the circuit bootstrap, for the same
+        // reason: an unacked packet's resend deadline would mask the one under
+        // test.
+        let packets = (0..=32).map(|id| PacketAckPacketsBlock { id }).collect();
+        let ack = AnyMessage::PacketAck(PacketAck { packets });
+        session.handle_datagram(sim_b(), &server_message(&ack, 9100, false)?, open)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // The root's tick at +2 s: both circuits' owed acks go out, and the root
+        // rearms its agent update for +3 s.
+        session.handle_timeout(now + Duration::from_secs(2));
+        drain(&mut session)?;
+
+        let wake = session.poll_timeout().ok_or("a timeout is scheduled")?;
+        assert!(
+            wake <= now + Duration::from_millis(2500),
+            "the session wakes for the child's agent update, not for the root's next one"
+        );
+
+        session.handle_timeout(now + Duration::from_millis(2500));
+        let mut child_agent_update = false;
+        while let Some(transmit) = session.poll_transmit() {
+            if transmit.destination == sim_b()
+                && matches!(decode(&transmit)?, AnyMessage::AgentUpdate(_))
+            {
+                child_agent_update = true;
+            }
+        }
+        assert!(
+            child_agent_update,
+            "the child's agent update is sent on the wake it asked for"
         );
         Ok(())
     }
@@ -15496,7 +15726,7 @@ mod test {
         // RegionInfo does. The lenient decoder must still succeed.
         let message = region_info_msg("TrimRegion", 13, 25, 0, 80, 12000);
         let mut writer = Writer::new();
-        message.id().encode(&mut writer);
+        message.id().encode(&mut writer)?;
         message.encode_body(&mut writer)?;
         let mut body = writer.into_bytes();
         body.truncate(body.len().saturating_sub(2));
@@ -16392,7 +16622,7 @@ mod test {
     fn short_zero_run_object_update(sequence: u32) -> Result<Vec<u8>, TestError> {
         let update = object_update(100, 0xABCD, zero_vec());
         let mut writer = Writer::new();
-        update.id().encode(&mut writer);
+        update.id().encode(&mut writer)?;
         update.encode_body(&mut writer)?;
         let mut encoded = zero_encode(&writer.into_bytes());
         // The body ends in the zero joint vectors, so its encoding ends in a
@@ -16452,7 +16682,7 @@ mod test {
 
         let mut writer = Writer::new();
         let update = object_update(100, 0xABCD, zero_vec());
-        update.id().encode(&mut writer);
+        update.id().encode(&mut writer)?;
         update.encode_body(&mut writer)?;
         let mut body = writer.into_bytes();
         // Replace the trailing zero joint vectors with non-zero bytes, then cut
@@ -17427,7 +17657,7 @@ mod test {
         );
 
         // Retiring the child circuit drops only its grants.
-        let disable = server_datagram(MessageId::Low(152), &[], 3, true);
+        let disable = server_datagram(MessageId::Low(152), &[], 3, true)?;
         session.handle_datagram(sim_b(), &disable, now)?;
         assert_eq!(
             session.granted_permissions(child_task, item),
@@ -21342,7 +21572,7 @@ mod test {
 
         // High id 0 maps to no template message, so `AnyMessage::decode` rejects
         // it after consuming only the single id byte.
-        let datagram = server_datagram(MessageId::High(0), &[0xAA, 0xBB], 2, false);
+        let datagram = server_datagram(MessageId::High(0), &[0xAA, 0xBB], 2, false)?;
         session.handle_datagram(sim_addr(), &datagram, now)?;
 
         let diagnostics = drain_diagnostics(&mut session);
@@ -21381,7 +21611,7 @@ mod test {
 
         // RegionHandshake (Low 148) with a one-byte body: the id decodes, but the
         // body runs out before its fields, so decoding fails partway through.
-        let datagram = server_datagram(MessageId::Low(148), &[0x00], 2, false);
+        let datagram = server_datagram(MessageId::Low(148), &[0x00], 2, false)?;
         session.handle_datagram(sim_addr(), &datagram, now)?;
 
         let diagnostics = drain_diagnostics(&mut session);
@@ -21417,7 +21647,7 @@ mod test {
 
         // The same undecodable datagram that produces a DecodeFailed when
         // diagnostics are on must produce nothing while they are off.
-        let datagram = server_datagram(MessageId::High(0), &[0xAA, 0xBB], 2, false);
+        let datagram = server_datagram(MessageId::High(0), &[0xAA, 0xBB], 2, false)?;
         session.handle_datagram(sim_addr(), &datagram, now)?;
         assert!(drain_diagnostics(&mut session).is_empty());
         Ok(())
@@ -22740,7 +22970,7 @@ mod test {
         session.handle_login_response(LoginResponse::Success(login), now)?;
         drain(&mut session)?;
         drain_events(&mut session);
-        let handshake = server_datagram(MessageId::Low(148), &[0u8; 600], 1, true);
+        let handshake = server_datagram(MessageId::Low(148), &[0u8; 600], 1, true)?;
         session.handle_datagram(sim_addr(), &handshake, now)?;
         drain(&mut session)?;
         drain_events(&mut session);
@@ -23299,7 +23529,7 @@ mod test {
         )?;
         drain(&mut session)?;
         drain_events(&mut session);
-        let local = server_datagram(MessageId::Low(64), &[0u8; 48], 20, true);
+        let local = server_datagram(MessageId::Low(64), &[0u8; 48], 20, true)?;
         session.handle_datagram(sim_addr(), &local, now)?;
         drain_events(&mut session);
 
@@ -23434,7 +23664,7 @@ mod test {
         )?;
         drain(&mut session)?;
         drain_events(&mut session);
-        let local = server_datagram(MessageId::Low(64), &[0u8; 48], 20, true);
+        let local = server_datagram(MessageId::Low(64), &[0u8; 48], 20, true)?;
         session.handle_datagram(sim_addr(), &local, now)?;
         drain_events(&mut session);
 
@@ -23450,7 +23680,7 @@ mod test {
 
         enable_neighbour_b(&mut session, 20, now)?;
         while session.poll_transmit().is_some() {}
-        let disable = server_datagram(MessageId::Low(152), &[], 1, true);
+        let disable = server_datagram(MessageId::Low(152), &[], 1, true)?;
         session.handle_datagram(sim_b(), &disable, now)?;
 
         assert_chat_and_presence_intact(&session)
@@ -23468,7 +23698,7 @@ mod test {
         session.initiate_logout(now);
         drain(&mut session)?;
         // LogoutReply Low 253: AgentData (2 uuids) + InventoryData variable (count).
-        let reply = server_datagram(MessageId::Low(253), &[0u8; 33], 30, true);
+        let reply = server_datagram(MessageId::Low(253), &[0u8; 33], 30, true)?;
         session.handle_datagram(sim_addr(), &reply, now)?;
         assert!(session.is_closed(), "the session is closed after logout");
 

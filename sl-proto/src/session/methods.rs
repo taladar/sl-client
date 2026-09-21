@@ -1,5 +1,6 @@
 //! The driver-facing `Session` API: login, UDP/CAPS dispatch, and command methods.
 
+use super::caps_event::CapsEvent;
 use super::conversions::{
     OutgoingIm, ZERO_VECTOR, active_group, agent_drop_group_from_llsd,
     agent_list_voice_updates_from_llsd, agent_state_update_from_llsd,
@@ -28,26 +29,15 @@ use super::conversions::{
     teleport_finish_from_llsd, trimmed_string, voice_channel_info_from_llsd,
     windlight_refresh_from_llsd,
 };
+use super::transfers::Transfers;
+use super::world_cache::WorldCache;
 use super::{
-    AGENT_UPDATE_INTERVAL, ASSET_TRANSFER_TIMEOUT, AVATAR_PICKER_SEARCH_TAG, ArrivalPose,
-    CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES, CAP_ATTACHMENT_RESOURCES,
-    CAP_CHAT_SESSION_REQUEST, CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES,
-    CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_INVENTORY_ITEM, CAP_FETCH_LIBRARY,
-    CAP_FETCH_LIBRARY_ITEM, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
-    CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
-    CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_MEMBER_DATA,
-    CAP_INCREMENT_COF_VERSION, CAP_INVENTORY_API_V3, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3,
-    CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO,
-    CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
-    CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES,
-    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_USER_INFO,
-    CHAT_SESSION_FETCH_HISTORY_TAG, ChatLifecycleView, ChatSession, ChatSessionInfo,
-    ChatSessionKind, ChatSessionLifecycle, Circuit, DEFAULT_DRAW_DISTANCE, EXPERIENCE_QUERY_TAG,
-    FolderState, FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION,
+    AGENT_UPDATE_INTERVAL, ASSET_TRANSFER_TIMEOUT, ArrivalPose, ChatLifecycleView, ChatSession,
+    ChatSessionInfo, ChatSessionKind, ChatSessionLifecycle, Circuit, CircuitRole,
+    DEFAULT_DRAW_DISTANCE, FolderState, FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION,
     INVENTORY_FETCH_MAX_ATTEMPTS, INVENTORY_SAVE_TIMEOUT, Inventory, InventoryOwner,
-    LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT, MAX_XFER_DOWNLOAD_BYTES,
-    MessageCursor, OfferedUpload, PARENT_REQUEST_WARN_ATTEMPTS, PING_INTERVAL, ParentRequest,
-    PendingHandover, PendingInventorySave, PendingInvite, RELIABLE_REPLY_GRACE, ReliableSeverity,
+    LOGOUT_TIMEOUT, MAX_XFER_DOWNLOAD_BYTES, MessageCursor, OfferedUpload,
+    PARENT_REQUEST_WARN_ATTEMPTS, PendingHandover, PendingInventorySave, PendingInvite,
     SIT_REFUSAL_ALERTS, SIT_TIMEOUT, ScriptGrant, ScriptHolder, ServerHistoryFetch,
     ServerHistoryMessage, ServerHistoryState, Session, SessionMessage, SessionState, SitState,
     TELEPORT_TIMEOUT, TEXTURE_DOWNLOAD_MAX_ATTEMPTS, TEXTURE_DOWNLOAD_STALL_TIMEOUT,
@@ -63,6 +53,7 @@ use crate::bookkeeping_ids::{
     TransactionId, TransferId, XferId,
 };
 use crate::error::Error;
+use crate::link::{PING_INTERVAL, ReliableSeverity};
 use crate::mute::MuteList;
 use crate::neighbour_caps::ObjectRegion;
 use crate::scoped_id::{CircuitId, ScopedObjectId, ScopedParcelId};
@@ -148,6 +139,22 @@ const TASK_IDS_PER_REQUEST: usize = 40;
 /// streams over `Xfer`. Kept at the `Xfer` chunk size so it comfortably fits one
 /// reliable UDP packet alongside the message header.
 const ASSET_UPLOAD_INLINE_LIMIT: usize = XFER_CHUNK_SIZE;
+
+/// Whether the session outlived a phase of one timer tick
+/// ([`Session::run_timeout`]).
+///
+/// Only two phases can end it — the link timeouts (inactivity, logout) and a
+/// session-critical packet that exhausts its retransmissions. Everything else a
+/// tick does runs whatever those found, so it is worth being explicit about
+/// which is which.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Liveness {
+    /// The session is still running; the tick continues.
+    Alive,
+    /// The session reached its terminal state in this phase; the rest of the
+    /// tick has nothing left to act on.
+    Ended,
+}
 
 /// Splits a slice of [`ScopedObjectId`]s into the single [`CircuitId`] they all
 /// belong to and the bare region-local ids, ready for a batch request (which
@@ -238,27 +245,9 @@ impl Session {
             openid_url: None,
             openid_token: None,
             login_account: None,
-            xfer_downloads: BTreeMap::new(),
-            pending_xfer_uploads: BTreeMap::new(),
-            xfer_uploads: BTreeMap::new(),
             secure_session_id: Uuid::nil(),
-            pending_asset_uploads: BTreeMap::new(),
-            pending_inventory_saves: BTreeMap::new(),
-            next_xfer_id: XferId(1),
-            pending_task_inventory: BTreeMap::new(),
-            pending_task_inventory_unresolved: VecDeque::new(),
-            texture_downloads: BTreeMap::new(),
-            transfer_downloads: BTreeMap::new(),
-            next_transfer_id: 1,
-            objects: BTreeMap::new(),
-            requested_parents: BTreeMap::new(),
-            terrain: BTreeMap::new(),
-            regions: BTreeMap::new(),
-            region_flags: BTreeMap::new(),
-            parcels: BTreeMap::new(),
-            time_dilation: BTreeMap::new(),
-            own_avatar: BTreeMap::new(),
-            script_request_circuits: BTreeMap::new(),
+            transfers: Transfers::new(),
+            world: WorldCache::new(),
             inventory: Inventory::new(),
             background_inventory_fetch: false,
             fetch_server_chat_history: ServerHistoryFetch::Enabled,
@@ -453,10 +442,14 @@ impl Session {
     }
 
     /// Feeds a parsed CAPS response into the session, surfacing any recognised
-    /// payload. Handles `ParcelProperties` and `TeleportFinish` (delivered over
-    /// the event queue, not UDP) and [`CAP_FETCH_INVENTORY`] (the LLSD response to
-    /// a `FetchInventoryDescendents2` POST the driver performed on the client's
-    /// behalf), surfaced as [`Event::InventoryDescendents`].
+    /// payload. `message` is either an event-queue message name
+    /// (`ParcelProperties`, `TeleportFinish` — things delivered over the event
+    /// queue rather than UDP) or the name of the capability whose POST the
+    /// driver performed on the client's behalf, standing in for "this is the
+    /// answer to that request": [`CAP_FETCH_INVENTORY`](crate::CAP_FETCH_INVENTORY),
+    /// say, for the LLSD response to a `FetchInventoryDescendents2` POST,
+    /// surfaced as [`Event::InventoryDescendents`]. A tag the session does not
+    /// handle is surfaced as [`Diagnostic::UnknownCapsEvent`].
     ///
     /// # Errors
     ///
@@ -469,8 +462,17 @@ impl Session {
         now: Instant,
     ) -> Result<(), Error> {
         tracing::trace!(event = message, "inbound CAPS event");
-        match message {
-            "ParcelProperties" => {
+        let Some(event) = CapsEvent::from_tag(message) else {
+            tracing::trace!(event = message, "unhandled CAPS event");
+            self.push_diagnostic(Diagnostic::UnknownCapsEvent {
+                message: message.to_owned(),
+            });
+            return Ok(());
+        };
+        // Exhaustive, so a tag added to `CapsEvent` cannot be left unhandled
+        // here: the one fall-through is the unknown tag ruled out above.
+        match event {
+            CapsEvent::ParcelProperties => {
                 if let Some(parcel) = parcel_info_from_llsd(body) {
                     // The event queue rides the root region's circuit, so a CAPS
                     // parcel push describes the root region.
@@ -483,7 +485,7 @@ impl Session {
                     self.caps_decode_failed(message);
                 }
             }
-            CAP_EXT_ENVIRONMENT => {
+            CapsEvent::ExtEnvironment => {
                 if let Some(environment) = environment_from_llsd(body) {
                     self.events
                         .push_back(Event::Environment(Box::new(environment)));
@@ -494,7 +496,7 @@ impl Session {
             // A task script's run state, answered over the event queue when the
             // region has one (OpenSim's default, and modern SL) in place of the
             // UDP `ScriptRunningReply`, in response to a `GetScriptRunning`.
-            "ScriptRunningReply" => {
+            CapsEvent::ScriptRunningReply => {
                 if let Some((object_id, item_id, running)) = script_running_from_caps_llsd(body) {
                     self.events.push_back(Event::ScriptRunning {
                         object_id,
@@ -510,7 +512,7 @@ impl Session {
             // with the (`UDPDeprecated`) packet — and only this form carries the
             // `DataExtended` half, which is where the parcel, rez date, script
             // memory and URL count come from.
-            "LandStatReply" => {
+            CapsEvent::LandStatReply => {
                 if let Some((report_type, request_flags, total_object_count, items)) =
                     land_stat_reply_from_caps_llsd(body)
                 {
@@ -529,7 +531,7 @@ impl Session {
             // over it, as one document — and only this form carries the
             // `DataExtended` half, which is where each owner's most recent rez
             // time comes from.
-            "ParcelObjectOwnersReply" => {
+            CapsEvent::ParcelObjectOwnersReply => {
                 if let Some(owners) = parcel_object_owners_from_caps_llsd(body) {
                     // The event queue rides the root region's circuit.
                     let circuit = self.root_circuit_id().unwrap_or_default();
@@ -542,7 +544,7 @@ impl Session {
                     self.caps_decode_failed(message);
                 }
             }
-            "TeleportFinish" => {
+            CapsEvent::TeleportFinish => {
                 if let Some(finish) = teleport_finish_from_llsd(body) {
                     // A finish without a start: the simulator decided on this
                     // teleport (see the UDP arm) — enter the teleport now.
@@ -582,12 +584,12 @@ impl Session {
             // modern path; OpenSim does not use the UDP `EnableSimulator`). Open a
             // child-agent circuit so it holds the agent's presence before a
             // crossing.
-            "EnableSimulator" => {
+            CapsEvent::EnableSimulator => {
                 if let Some((handle, sim)) = enable_simulator_from_caps_llsd(body) {
                     let handle = RegionHandle(handle);
                     self.open_child_circuit(sim, now)?;
                     if let Some(circuit_id) = self.circuit_id_for(sim) {
-                        self.regions.insert(circuit_id, handle);
+                        self.world.note_region(circuit_id, handle);
                     }
                     self.events
                         .push_back(Event::NeighborDiscovered(NeighborInfo {
@@ -602,7 +604,7 @@ impl Session {
             // A neighbouring region's child-agent seed capability, sent after we
             // open the child circuit; cache it for when the child is promoted to
             // root on a border crossing.
-            "EstablishAgentCommunication" => {
+            CapsEvent::EstablishAgentCommunication => {
                 if let Some((sim, seed)) = establish_agent_communication_from_llsd(body) {
                     self.child_seeds.insert(sim, seed.clone());
                     // Surface the seed so the driver POSTs it: OpenSim only streams
@@ -622,14 +624,14 @@ impl Session {
             // Promote the pre-opened child circuit for the destination to root
             // (`begin_crossing` first finalizes/aborts any transfer still in
             // flight — the corner double-crossing / a racing teleport).
-            "CrossedRegion" => {
+            CapsEvent::CrossedRegion => {
                 if let Some((handle, dest, seed)) = crossed_region_from_caps_llsd(body) {
                     self.begin_crossing(dest, RegionHandle(handle), Some(seed), now)?;
                 } else {
                     self.caps_decode_failed(message);
                 }
             }
-            CAP_FETCH_INVENTORY | CAP_FETCH_LIBRARY => {
+            CapsEvent::FetchInventoryDescendents | CapsEvent::FetchLibraryDescendents => {
                 for event in inventory_descendents_from_llsd(body) {
                     if let Event::InventoryDescendents {
                         folder_id,
@@ -655,8 +657,8 @@ impl Session {
             // descendents caps). Merge into the matching tree and surface the
             // items as a bulk update (nil transaction id — the per-item fetch
             // has no correlating transaction).
-            CAP_FETCH_INVENTORY_ITEM | CAP_FETCH_LIBRARY_ITEM => {
-                let owner = if message == CAP_FETCH_LIBRARY_ITEM {
+            CapsEvent::FetchInventoryItem | CapsEvent::FetchLibraryItem => {
+                let owner = if matches!(event, CapsEvent::FetchLibraryItem) {
                     InventoryOwner::Library
                 } else {
                     InventoryOwner::Agent
@@ -675,7 +677,7 @@ impl Session {
             // A `BulkUpdateInventory` the simulator delivers over the CAPS event
             // queue (the modern path OpenSim prefers for copies/gives over the
             // UDP packet). Merge it into the cache like the UDP form.
-            "BulkUpdateInventory" => {
+            CapsEvent::BulkUpdateInventory => {
                 if let Some((transaction_id, folders, items)) =
                     bulk_update_inventory_from_llsd(body)
                 {
@@ -693,8 +695,8 @@ impl Session {
             // The reply to an AIS3 (`InventoryAPIv3`/`LibraryAPIv3`) REST
             // operation — folders/items it created, updated, or fetched, embedded
             // under `_embedded` (and/or at the top level). Merge into the cache.
-            CAP_INVENTORY_API_V3 | CAP_LIBRARY_API_V3 => {
-                let owner = if message == CAP_LIBRARY_API_V3 {
+            CapsEvent::InventoryApiV3 | CapsEvent::LibraryApiV3 => {
+                let owner = if matches!(event, CapsEvent::LibraryApiV3) {
                     InventoryOwner::Library
                 } else {
                     InventoryOwner::Agent
@@ -720,7 +722,7 @@ impl Session {
             }
             // The synchronous reply to a `CreateInventoryCategory` POST:
             // `{ folder_id, name, parent_id, type }` for the new folder.
-            CAP_CREATE_INVENTORY_CATEGORY => {
+            CapsEvent::CreateInventoryCategory => {
                 if let Some(folder) = created_category_from_llsd(body) {
                     self.cache_inventory_folder(folder.clone());
                     self.events.push_back(Event::InventoryBulkUpdate {
@@ -735,7 +737,7 @@ impl Session {
             }
             // The modern (CAPS event-queue) delivery of group memberships; the
             // UDP `AgentGroupDataUpdate` is deprecated on Second Life.
-            "AgentGroupDataUpdate" => {
+            CapsEvent::AgentGroupDataUpdate => {
                 if let Some(event) = group_memberships_from_caps_llsd(body) {
                     self.events.push_back(event);
                 } else {
@@ -744,7 +746,7 @@ impl Session {
             }
             // The response to a `GroupMemberData` capability POST (the modern
             // group roster fetch).
-            CAP_GROUP_MEMBER_DATA => {
+            CapsEvent::GroupMemberData => {
                 if let Some(event) = group_members_from_caps_llsd(body) {
                     self.events.push_back(event);
                 } else {
@@ -756,20 +758,20 @@ impl Session {
             // `AvatarAppearance`; this only reports whether the bake request was
             // accepted (and, on a version mismatch, the COF version the server
             // expected, so the client can re-request).
-            CAP_UPDATE_AVATAR_APPEARANCE => {
+            CapsEvent::UpdateAvatarAppearance => {
                 self.events
                     .push_back(server_appearance_update_from_llsd(body));
             }
             // The reply to an `IncrementCOFVersion` GET. A runtime whose request
             // failed delivers an undefined body, so the caller hears about the
             // failure as a reply with no version and can retry.
-            CAP_INCREMENT_COF_VERSION => {
+            CapsEvent::IncrementCofVersion => {
                 self.events.push_back(cof_version_increment_from_llsd(body));
             }
             // The reply to an `ObjectMedia` GET: an object's current per-face
             // media (`UPDATE` and the navigate cap have no media-bearing reply —
             // they advance the object's media version instead).
-            CAP_OBJECT_MEDIA => match ObjectMediaResponse::from_llsd(body) {
+            CapsEvent::ObjectMedia => match ObjectMediaResponse::from_llsd(body) {
                 Ok(response) => self.events.push_back(Event::ObjectMedia {
                     object_id: response.object_id,
                     version: response.version,
@@ -779,7 +781,7 @@ impl Session {
             },
             // The reply to a `ModifyMaterialParams` POST (setting a GLTF material
             // on object faces): a `{ success, message }` status map.
-            CAP_MODIFY_MATERIAL_PARAMS => {
+            CapsEvent::ModifyMaterialParams => {
                 match (
                     body.field_bool("success", "success"),
                     body.field_str("message", "message"),
@@ -796,20 +798,20 @@ impl Session {
             // The reply to a `ProvisionVoiceAccountRequest` POST: either Vivox
             // SIP credentials or a WebRTC JSEP answer. Only the signalling is
             // surfaced; opening the audio session is the caller's concern.
-            CAP_PROVISION_VOICE_ACCOUNT => match VoiceAccountInfo::from_llsd(body) {
+            CapsEvent::ProvisionVoiceAccount => match VoiceAccountInfo::from_llsd(body) {
                 Ok(info) => self.events.push_back(Event::VoiceAccountProvisioned(info)),
                 Err(error) => self.caps_decode_error(message, &error),
             },
             // The reply to a `ParcelVoiceInfoRequest` POST: the parcel's voice
             // channel URI (absent when the parcel has no voice).
-            CAP_PARCEL_VOICE_INFO => match ParcelVoiceInfo::from_llsd(body) {
+            CapsEvent::ParcelVoiceInfo => match ParcelVoiceInfo::from_llsd(body) {
                 Ok(Some(info)) => self.events.push_back(Event::ParcelVoiceInfo(info)),
                 Ok(None) => self.caps_decode_failed(message),
                 Err(error) => self.caps_decode_error(message, &error),
             },
             // The reply to a `GetDisplayNames` GET: the requested agents' display
             // names (with unresolved ids folded in as `missing` placeholders).
-            CAP_GET_DISPLAY_NAMES => match parse_display_names(body) {
+            CapsEvent::GetDisplayNames => match parse_display_names(body) {
                 Ok(names) => self.events.push_back(Event::DisplayNames(names)),
                 Err(error) => self.caps_decode_error(message, &error),
             },
@@ -821,7 +823,7 @@ impl Session {
             // display-name cache — one search, both uses, exactly as the
             // reference's picker fills its `LLAvatarName` map from the same
             // rows.
-            AVATAR_PICKER_SEARCH_TAG => match parse_avatar_picker_search(body) {
+            CapsEvent::AvatarPickerSearchReply => match parse_avatar_picker_search(body) {
                 Ok(names) => {
                     let query_id = body
                         .get("query-id")
@@ -845,7 +847,7 @@ impl Session {
             // carries it, so two resolves in flight are told apart by what they
             // asked rather than by arrival order. An unstamped reply is a decode
             // error, not a defaulted origin every waiting caller would match.
-            CAP_REMOTE_PARCEL_REQUEST => match parse_remote_parcel_answer(body) {
+            CapsEvent::RemoteParcelRequest => match parse_remote_parcel_answer(body) {
                 Ok(Some(answer)) => self.events.push_back(Event::RemoteParcelId {
                     parcel_id: answer.parcel_id,
                     location: answer.request.location,
@@ -857,7 +859,7 @@ impl Session {
             },
             // The reply to a `SimulatorFeatures` GET: the region's feature flags
             // and limits (with the OpenSim-only grid extras folded in when present).
-            CAP_SIMULATOR_FEATURES => match parse_simulator_features(body) {
+            CapsEvent::SimulatorFeatures => match parse_simulator_features(body) {
                 Ok(features) => self
                     .events
                     .push_back(Event::SimulatorFeatures(Box::new(features))),
@@ -868,13 +870,13 @@ impl Session {
             // when a region advertises a changed `LSLSyntaxId`; a document of an
             // unsupported schema version is a decode error, so the previous table
             // (or none) stands rather than a wrongly-parsed one replacing it.
-            CAP_LSL_SYNTAX => match parse_lsl_syntax(body) {
+            CapsEvent::LslSyntax => match parse_lsl_syntax(body) {
                 Ok(syntax) => self.events.push_back(Event::LslSyntax(Box::new(syntax))),
                 Err(error) => self.caps_decode_error(message, &error),
             },
             // The reply to an `AgentPreferences` POST: the agent's full stored
             // preferences after the (possibly empty) update.
-            CAP_AGENT_PREFERENCES => match parse_agent_preferences(body) {
+            CapsEvent::AgentPreferences => match parse_agent_preferences(body) {
                 Ok(preferences) => self
                     .events
                     .push_back(Event::AgentPreferences(Box::new(preferences))),
@@ -886,7 +888,7 @@ impl Session {
             // UDP message feeds); a POST acknowledges with only
             // `success`/`message`, so it surfaces nothing — a failure is
             // logged.
-            CAP_USER_INFO => match parse_user_info_reply(body) {
+            CapsEvent::UserInfo => match parse_user_info_reply(body) {
                 Ok(reply) => {
                     if !reply.success {
                         tracing::warn!(
@@ -907,25 +909,25 @@ impl Session {
             },
             // The reply to a `GetObjectCost` POST: the per-object land-impact and
             // physics costs, keyed by object id.
-            CAP_GET_OBJECT_COST => match parse_get_object_cost(body) {
+            CapsEvent::GetObjectCost => match parse_get_object_cost(body) {
                 Ok(costs) => self.events.push_back(Event::ObjectCosts(costs)),
                 Err(error) => self.caps_decode_error(message, &error),
             },
             // The reply to a `ResourceCostSelected` POST: the summed selection
             // costs.
-            CAP_RESOURCE_COST_SELECTED => match parse_resource_cost_selected(body) {
+            CapsEvent::ResourceCostSelected => match parse_resource_cost_selected(body) {
                 Ok(cost) => self.events.push_back(Event::SelectedResourceCost(cost)),
                 Err(error) => self.caps_decode_error(message, &error),
             },
             // The reply to a `GetObjectPhysicsData` POST: the per-object physics
             // material parameters, keyed by object id.
-            CAP_GET_OBJECT_PHYSICS_DATA => match parse_get_object_physics_data(body) {
+            CapsEvent::GetObjectPhysicsData => match parse_get_object_physics_data(body) {
                 Ok(data) => self.events.push_back(Event::ObjectPhysicsData(data)),
                 Err(error) => self.caps_decode_error(message, &error),
             },
             // An `ObjectPhysicsProperties` event-queue push: updated physics
             // material parameters for a batch of objects, keyed by region-local id.
-            "ObjectPhysicsProperties" => match parse_object_physics_properties(body) {
+            CapsEvent::ObjectPhysicsProperties => match parse_object_physics_properties(body) {
                 Ok(raw) => {
                     // An event-queue push for the current region: scope each id to
                     // the root circuit.
@@ -941,7 +943,7 @@ impl Session {
             },
             // The reply to an `AttachmentResources` GET: the agent's scripted
             // attachments grouped by attachment point, with a resource summary.
-            CAP_ATTACHMENT_RESOURCES => match parse_attachment_resources(body) {
+            CapsEvent::AttachmentResources => match parse_attachment_resources(body) {
                 Ok(report) => self
                     .events
                     .push_back(Event::AttachmentResources(Box::new(report))),
@@ -949,38 +951,38 @@ impl Session {
             },
             // The reply to a `LandResources` POST: the follow-up cap URLs the
             // runtimes then GET (surfacing the summary/detail reports below).
-            CAP_LAND_RESOURCES => match parse_land_resources_reply(body) {
+            CapsEvent::LandResources => match parse_land_resources_reply(body) {
                 Ok(urls) => self.events.push_back(Event::LandResourcesUrls(urls)),
                 Err(error) => self.caps_decode_error(message, &error),
             },
             // A `LandResources` `ScriptResourceSummary` follow-up GET: the parcel's
             // resource totals (forwarded by the runtimes under this tag).
-            LAND_RESOURCE_SUMMARY_TAG => match parse_land_resource_summary(body) {
+            CapsEvent::LandResourceSummary => match parse_land_resource_summary(body) {
                 Ok(summary) => self.events.push_back(Event::LandResourceSummary(summary)),
                 Err(error) => self.caps_decode_error(message, &error),
             },
             // A `LandResources` `ScriptResourceDetails` follow-up GET: the parcel's
             // per-object resource breakdown.
-            LAND_RESOURCE_DETAIL_TAG => match parse_land_resource_detail(body) {
+            CapsEvent::LandResourceDetail => match parse_land_resource_detail(body) {
                 Ok(detail) => self.events.push_back(Event::LandResourceDetail(detail)),
                 Err(error) => self.caps_decode_error(message, &error),
             },
             // The reply to a `GetExperienceInfo` GET: the requested experiences'
             // metadata (with unresolved ids folded in as `missing` placeholders).
-            CAP_GET_EXPERIENCE_INFO => match parse_experience_infos(body) {
+            CapsEvent::GetExperienceInfo => match parse_experience_infos(body) {
                 Ok(infos) => self.events.push_back(Event::ExperienceInfo(infos)),
                 Err(error) => self.caps_decode_error(message, &error),
             },
             // The reply to a `FindExperienceByName` GET: one page of search
             // hits, plus the grid's `next_page_url` / `previous_page_url`
             // markers saying whether there is a page on either side of it.
-            CAP_FIND_EXPERIENCE_BY_NAME => match parse_experience_search_page(body) {
+            CapsEvent::FindExperienceByName => match parse_experience_search_page(body) {
                 Ok(page) => self.events.push_back(Event::ExperienceSearchResults(page)),
                 Err(error) => self.caps_decode_error(message, &error),
             },
             // The reply to a `GetExperiences` GET or an `ExperiencePreferences`
             // PUT/DELETE: the agent's allowed/blocked experiences.
-            CAP_GET_EXPERIENCES | CAP_EXPERIENCE_PREFERENCES => {
+            CapsEvent::GetExperiences | CapsEvent::ExperiencePreferences => {
                 match parse_experience_permissions(body) {
                     Ok((allowed, blocked)) => self
                         .events
@@ -989,25 +991,25 @@ impl Session {
                 }
             }
             // The reply to an `AgentExperiences` GET: experiences the agent owns.
-            CAP_AGENT_EXPERIENCES => match parse_experience_ids(body) {
+            CapsEvent::AgentExperiences => match parse_experience_ids(body) {
                 Ok(ids) => self.events.push_back(Event::OwnedExperiences(ids)),
                 Err(error) => self.caps_decode_error(message, &error),
             },
             // The reply to a `GetAdminExperiences` GET: experiences the agent
             // administers.
-            CAP_GET_ADMIN_EXPERIENCES => match parse_experience_ids(body) {
+            CapsEvent::GetAdminExperiences => match parse_experience_ids(body) {
                 Ok(ids) => self.events.push_back(Event::AdminExperiences(ids)),
                 Err(error) => self.caps_decode_error(message, &error),
             },
             // The reply to a `GetCreatorExperiences` GET: experiences the agent
             // created.
-            CAP_GET_CREATOR_EXPERIENCES => match parse_experience_ids(body) {
+            CapsEvent::GetCreatorExperiences => match parse_experience_ids(body) {
                 Ok(ids) => self.events.push_back(Event::CreatorExperiences(ids)),
                 Err(error) => self.caps_decode_error(message, &error),
             },
             // The reply to an `UpdateExperience` POST: the experience's metadata
             // after the edit.
-            CAP_UPDATE_EXPERIENCE => match parse_experience_infos(body) {
+            CapsEvent::UpdateExperience => match parse_experience_infos(body) {
                 Ok(infos) => self.events.push_back(Event::ExperienceUpdated(
                     infos.into_iter().next().unwrap_or_default(),
                 )),
@@ -1015,7 +1017,7 @@ impl Session {
             },
             // The reply to a `RegionExperiences` GET or POST: the region's
             // allow/block/trust lists.
-            CAP_REGION_EXPERIENCES => match parse_region_experiences(body) {
+            CapsEvent::RegionExperiences => match parse_region_experiences(body) {
                 Ok(lists) => {
                     self.events.push_back(Event::RegionExperiences {
                         allowed: lists.allowed,
@@ -1031,7 +1033,7 @@ impl Session {
             // asked about into the reply (the answer names only experiences),
             // so a viewer that has stepped on again can discard an answer about
             // land it has already left.
-            EXPERIENCE_QUERY_TAG => match parse_experience_query_reply(body) {
+            CapsEvent::ExperienceQueryReply => match parse_experience_query_reply(body) {
                 Ok(experiences) => {
                     let parcel_id = body
                         .field_i32("parcelid", "parcelid")
@@ -1050,7 +1052,7 @@ impl Session {
             // surfaced as an offline [`Event::InstantMessageReceived`] (the legacy
             // UDP `RetrieveInstantMessages` path re-delivers them as UDP IMs
             // instead).
-            CAP_READ_OFFLINE_MSGS => {
+            CapsEvent::ReadOfflineMsgs => {
                 for im in offline_messages_from_llsd(body) {
                     // A replayed offline IM drains into the 1:1 session keyed by
                     // its sender, logged with the original wire timestamp (only
@@ -1076,7 +1078,7 @@ impl Session {
             // A conference / group IM-session invitation delivered over the CAPS
             // event queue (the modern path, #28). Join by sending into the session
             // with [`Session::send_conference_message`].
-            "ChatterBoxInvitation" => {
+            CapsEvent::ChatterBoxInvitation => {
                 if let Some(event) = chatterbox_invitation_from_llsd(body) {
                     // Record the invitation as a pending `Invited` chat-session
                     // entry (the registry is the pending-invitation read model)
@@ -1118,8 +1120,7 @@ impl Session {
                         if let Some(voice) = body.get("voice")
                             && let Some(chat_session) = self.chat_session_get_mut(kind)
                         {
-                            chat_session.voice.has_voice = true;
-                            chat_session.voice.channel = Some(voice_channel_info_from_llsd(voice));
+                            chat_session.note_voice_offered(voice_channel_info_from_llsd(voice));
                         }
                     }
                     self.events.push_back(event);
@@ -1135,7 +1136,7 @@ impl Session {
             // `voice_channel_info` block — record the channel coordinates and that
             // the session offers voice (B8). The decline reply and OpenSim's
             // stubbed `<llsd>true</llsd>` carry neither, so this is then a no-op.
-            CAP_CHAT_SESSION_REQUEST => {
+            CapsEvent::ChatSessionRequest => {
                 let roster = chat_session_roster_from_llsd(body);
                 let voice = body.get("voice_channel_info");
                 if !roster.is_empty() || voice.is_some() {
@@ -1157,12 +1158,9 @@ impl Session {
                         }
                     };
                     let session = self.chat_session_mut(kind, now);
-                    for agent in roster {
-                        session.participants.insert(agent);
-                    }
+                    session.extend_participants(roster);
                     if let Some(voice) = voice {
-                        session.voice.has_voice = true;
-                        session.voice.channel = Some(voice_channel_info_from_llsd(voice));
+                        session.note_voice_offered(voice_channel_info_from_llsd(voice));
                     }
                 }
             }
@@ -1177,7 +1175,7 @@ impl Session {
             // message that triggered a lazy-open fetch arrives both ways) and
             // surfaced as `Event::SessionServerHistory` when non-empty; it is
             // never written to the on-disk transcript.
-            CHAT_SESSION_FETCH_HISTORY_TAG => {
+            CapsEvent::ChatSessionFetchHistory => {
                 let session_uuid = body
                     .get("session-id")
                     .and_then(Llsd::as_uuid)
@@ -1212,7 +1210,7 @@ impl Session {
             // entry moves before the event is surfaced (a driver then only has
             // to move what it keyed by the temporary id). A failed start drops
             // the optimistic entry entirely.
-            "ChatterBoxSessionStartReply" => {
+            CapsEvent::ChatterBoxSessionStartReply => {
                 if let Some(event) = chatterbox_session_start_reply_from_llsd(body) {
                     if let Event::ChatSessionStarted {
                         temp_session_id,
@@ -1244,26 +1242,21 @@ impl Session {
             // it). Joining happens on an explicit accept, our own send, or an
             // inbound session message — never on a bare roster update. Activity is
             // still stamped so the update orders the session list.
-            "ChatterBoxSessionAgentListUpdates" => {
+            CapsEvent::ChatterBoxSessionAgentListUpdates => {
                 if let Some((session_uuid, updates)) = agent_list_voice_updates_from_llsd(body)
                     && let Some(kind) = self.chat_session_kind_for_session_id(session_uuid)
                     && let Some(session) = self.chat_session_get_mut(kind)
                 {
                     session.last_activity = now;
                     for (agent, in_voice) in updates {
-                        if in_voice {
-                            session.voice.has_voice = true;
-                            session.voice.members.insert(agent);
-                        } else {
-                            session.voice.members.remove(&agent);
-                        }
+                        session.note_voice_membership(agent, in_voice);
                     }
                 }
             }
             // A pathfinding agent-state push: whether the agent may currently
             // rebake this region's navmesh (`{ "can_modify_navmesh": bool }`).
             // SL-only.
-            "AgentStateUpdate" => {
+            CapsEvent::AgentStateUpdate => {
                 if let Some(can_modify_navmesh) = agent_state_update_from_llsd(body) {
                     self.events
                         .push_back(Event::AgentStateUpdate { can_modify_navmesh });
@@ -1273,7 +1266,7 @@ impl Session {
             }
             // A pathfinding navmesh-status push: the region's navmesh build
             // state and version. SL-only.
-            "NavMeshStatusUpdate" => {
+            CapsEvent::NavMeshStatusUpdate => {
                 if let Some(status) = nav_mesh_status_from_llsd(body) {
                     self.events.push_back(Event::NavMeshStatus(status));
                 } else {
@@ -1282,7 +1275,7 @@ impl Session {
             }
             // The simulator dropped this agent from a group (ejected, group
             // dissolved, …); the client should forget its cached membership.
-            "AgentDropGroup" => {
+            CapsEvent::AgentDropGroup => {
                 if let Some(group) = agent_drop_group_from_llsd(body) {
                     self.events
                         .push_back(Event::AgentDroppedFromGroup { group });
@@ -1291,7 +1284,7 @@ impl Session {
                 }
             }
             // A cached display name changed (for this agent or another). SL-only.
-            "DisplayNameUpdate" => {
+            CapsEvent::DisplayNameUpdate => {
                 if let Some(update) = display_name_update_from_llsd(body) {
                     self.events
                         .push_back(Event::DisplayNameUpdate(Box::new(update)));
@@ -1300,42 +1293,36 @@ impl Session {
                 }
             }
             // The result of this agent's own set-display-name request. SL-only.
-            "SetDisplayNameReply" => {
+            CapsEvent::SetDisplayNameReply => {
                 self.events.push_back(Event::SetDisplayNameReply(Box::new(
                     set_display_name_reply_from_llsd(body),
                 )));
             }
             // The simulator asks the client to re-fetch the region's environment
             // (e.g. after an estate-manager windlight change).
-            "WindLightRefresh" => {
+            CapsEvent::WindLightRefresh => {
                 self.events.push_back(Event::WindLightRefresh {
                     interpolate: windlight_refresh_from_llsd(body),
                 });
             }
             // The text output of a region debug-console command.
-            "SimConsoleResponse" => {
+            CapsEvent::SimConsoleResponse => {
                 self.events.push_back(Event::SimConsoleResponse {
                     output: sim_console_response_from_llsd(body),
                 });
             }
             // The voice protocol version this region requires. SL-only.
-            "RequiredVoiceVersion" => {
+            CapsEvent::RequiredVoiceVersion => {
                 self.events.push_back(Event::RequiredVoiceVersion(
                     required_voice_version_from_llsd(body),
                 ));
             }
             // OpenSim's extended per-region settings/limits. OpenSim-only.
-            "OpenRegionInfo" => {
+            CapsEvent::OpenRegionInfo => {
                 self.events
                     .push_back(Event::OpenRegionInfo(Box::new(open_region_info_from_llsd(
                         body,
                     ))));
-            }
-            _ => {
-                tracing::trace!(event = message, "unhandled CAPS event");
-                self.push_diagnostic(Diagnostic::UnknownCapsEvent {
-                    message: message.to_owned(),
-                });
             }
         }
         Ok(())
@@ -1484,11 +1471,7 @@ impl Session {
             // neighbour circuits being cleared really are out of range.
             self.children.clear();
             self.child_seeds.clear();
-            self.objects.clear();
-            self.script_request_circuits.clear();
-            self.terrain.clear();
-            self.regions.clear();
-            self.time_dilation.clear();
+            self.world.reset();
         } else {
             // Neighbour teleport: demote the old root to a child of the new region
             // and keep the whole world (objects / terrain / regions / neighbours),
@@ -1505,7 +1488,7 @@ impl Session {
         // `EnableSimulator`; a fresh circuit cleared `regions` above and needs it
         // re-added.
         if let Some(circuit_id) = self.circuit.as_ref().map(|circuit| circuit.id) {
-            self.regions.insert(circuit_id, region_handle);
+            self.world.note_region(circuit_id, region_handle);
         }
         // A teleport unseats the agent (a crossing keeps the seat), and leaves its
         // in-world objects behind — drop their permission grants (attachments
@@ -1613,7 +1596,7 @@ impl Session {
                     // Record the destination region for the (now root) circuit so
                     // `region_handle` is correct after a crossing, mirroring
                     // `commit_handover` for a teleport.
-                    self.regions.insert(circuit, region_handle);
+                    self.world.note_region(circuit, region_handle);
                     self.events.push_back(Event::RegionChanged {
                         region_handle,
                         sim,
@@ -1891,18 +1874,14 @@ impl Session {
                 self.pending_complete_movement = true;
                 // A fresh session: discard any objects and terrain from a
                 // previous login.
-                self.objects.clear();
-                self.script_request_circuits.clear();
-                self.terrain.clear();
-                self.regions.clear();
-                self.time_dilation.clear();
+                self.world.reset();
                 // Seed the root region's handle from the login response's global
                 // `region_x` / `region_y` so it is known before any object update
                 // arrives — in particular for the `RegionHandshake`, which does
                 // not itself carry the handle.
                 if let (Some(region_x), Some(region_y)) = (success.region_x, success.region_y) {
-                    self.regions
-                        .insert(circuit_id, RegionHandle::from_global(region_x, region_y));
+                    self.world
+                        .note_region(circuit_id, RegionHandle::from_global(region_x, region_y));
                 }
                 self.seed_capability = Some(success.seed_capability.clone());
                 self.agent_appearance_service
@@ -2059,20 +2038,14 @@ impl Session {
         }
         // Accept traffic from the root circuit or any open child circuit; ignore
         // anything else.
-        let is_root = self.circuit.as_ref().map(|c| c.sim_addr) == Some(from);
-        if !is_root && !self.children.contains_key(&from) {
+        let Some(role) = self.circuit_role(from) else {
             return Ok(());
-        }
+        };
 
         let parsed = parse_datagram(datagram)?;
 
         let process = {
-            let circuit = if is_root {
-                self.circuit.as_mut()
-            } else {
-                self.children.get_mut(&from)
-            };
-            let Some(circuit) = circuit else {
+            let Some(circuit) = self.circuit_in_role(role, from) else {
                 return Ok(());
             };
             circuit.note_received(now);
@@ -2141,17 +2114,304 @@ impl Session {
             );
         }
         tracing::trace!(?id, name = message.name(), %from, "inbound message");
-        if is_root {
-            self.dispatch(from, &message, now)
-        } else {
-            self.dispatch_child(from, &message, now)
+        match role {
+            CircuitRole::Root => self.dispatch(from, &message, now),
+            CircuitRole::Child => self.dispatch_child(from, &message, now),
         }
     }
 
+    /// Which circuit the simulator address `from` speaks on, or `None` when it
+    /// is neither the root simulator nor an open child — traffic from anywhere
+    /// else is not ours and is ignored.
+    fn circuit_role(&self, from: SocketAddr) -> Option<CircuitRole> {
+        if self.circuit.as_ref().map(|circuit| circuit.sim_addr) == Some(from) {
+            Some(CircuitRole::Root)
+        } else if self.children.contains_key(&from) {
+            Some(CircuitRole::Child)
+        } else {
+            None
+        }
+    }
+
+    /// The circuit `from` speaks on, looked up in whichever place the resolved
+    /// [`CircuitRole`] keeps it.
+    fn circuit_in_role(&mut self, role: CircuitRole, from: SocketAddr) -> Option<&mut Circuit> {
+        match role {
+            CircuitRole::Root => self.circuit.as_mut(),
+            CircuitRole::Child => self.children.get_mut(&from),
+        }
+    }
+
+    /// Handles a message whose treatment is the same on the root circuit and on
+    /// a child-agent circuit, returning whether it was one of them.
+    ///
+    /// A child agent is not a bookkeeping stub: the neighbour streams it a real
+    /// slice of its region — the object updates, the animations that move them,
+    /// the appearances that texture them, the spatial sounds, the parcel
+    /// overlay, the coarse (minimap) dots — and the link underneath it has to
+    /// answer the same pings and acks the root circuit does. Every one of those
+    /// arms therefore has to exist twice. They used to exist twice *literally*,
+    /// hand-copied from [`Session::dispatch`] into
+    /// [`Session::dispatch_child`], and the copies had already drifted: a root
+    /// `RegionHandshake` outside `AwaitingHandshake` was silently dropped while
+    /// the child arm answered it unconditionally, so a region restart left the
+    /// root region's flags stale and the simulator retrying.
+    ///
+    /// They live here once instead, parameterised by the [`CircuitRole`] the
+    /// message arrived on. The role decides exactly three things — which
+    /// circuit answers, how [`Event::Ping`] is tagged, and whether the arrival
+    /// transition runs after a handshake — and everything else is identical for
+    /// both, which is the point: a fix to a shared arm is one edit again.
+    ///
+    /// [`Session::dispatch_child`] calls this up front. [`Session::dispatch`]
+    /// calls it from its fallback arm instead, **after** its own arms have had
+    /// their chance, so a root-only refinement of a message that is otherwise
+    /// shared still wins: the `emptymutelist` and experience `GenericMessage`
+    /// features are the agent's, not a region's, and only the region hosting
+    /// the agent has them to report.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Wire`] if a reply fails to encode or a region handshake
+    /// carries an undecodable body.
+    fn dispatch_shared(
+        &mut self,
+        role: CircuitRole,
+        from: SocketAddr,
+        message: &AnyMessage,
+        now: Instant,
+    ) -> Result<bool, Error> {
+        match message {
+            AnyMessage::StartPingCheck(ping) => {
+                if let Some(circuit) = self.circuit_in_role(role, from) {
+                    circuit.send_complete_ping_check(PingId(ping.ping_id.ping_id), now)?;
+                }
+            }
+            AnyMessage::CompletePingCheck(reply) => {
+                // The simulator's answer to our keep-alive `StartPingCheck` on
+                // this circuit: surface the round-trip time when it matches the
+                // ping in flight, tagged with the circuit it was measured on.
+                if let Some((sim, rtt)) = self.circuit_in_role(role, from).and_then(|circuit| {
+                    circuit
+                        .record_ping_reply(PingId(reply.ping_id.ping_id), now)
+                        .map(|rtt| (circuit.sim_addr, rtt))
+                }) {
+                    self.events.push_back(Event::Ping {
+                        sim,
+                        child: role.is_child(),
+                        rtt,
+                    });
+                }
+            }
+            AnyMessage::PacketAck(ack) => {
+                if let Some(circuit) = self.circuit_in_role(role, from) {
+                    for packet in &ack.packets {
+                        circuit.record_acks(&[SequenceNumber(packet.id)]);
+                    }
+                }
+            }
+            AnyMessage::RegionHandshake(handshake) => {
+                // A simulator re-sends `RegionHandshake` outside login too — on a
+                // region restart, an estate change or a terrain-texture change —
+                // and keeps retrying until it is answered, so reply and refresh
+                // the region's identity/flags whatever the session state (the
+                // reference viewer's `process_region_handshake` is likewise
+                // ungated).
+                if let Some(circuit) = self.circuit_in_role(role, from) {
+                    circuit.send_region_handshake_reply(now)?;
+                }
+                // Surface the region's identity (terrain textures + elevation
+                // bands, flags, maturity, …) keyed by this circuit's region
+                // handle. On a child that is the neighbour's identity, so a
+                // viewer can shade neighbour terrain with its own textures.
+                let region_handle = self
+                    .circuit_id_for(from)
+                    .and_then(|circuit_id| self.world.region_handle(circuit_id))
+                    .unwrap_or(RegionHandle(0));
+                let identity = region_identity(handshake, region_handle)?;
+                if let Some(circuit_id) = self.circuit_id_for(from) {
+                    self.note_region_flags(circuit_id, identity.region_flags);
+                }
+                self.events
+                    .push_back(Event::RegionInfoHandshake(Box::new(identity)));
+                if role == CircuitRole::Root {
+                    // Only the *arrival* transition is once-only, and
+                    // `complete_arrival` guards itself. A neighbour's handshake
+                    // is never an arrival — the crossing into a child region is
+                    // driven by `CrossedRegion` on the root circuit.
+                    self.complete_arrival(now);
+                }
+            }
+            // The region's parcel overlay (Second Life pushes it to a child on
+            // establishment; OpenSim on parcel changes), tagged with this
+            // circuit's region so the minimap can draw neighbour property lines
+            // as well as our own.
+            AnyMessage::ParcelOverlay(overlay) => {
+                let region_handle = self
+                    .circuit_id_for(from)
+                    .and_then(|circuit_id| self.world.region_handle(circuit_id))
+                    .unwrap_or(RegionHandle(0));
+                self.events
+                    .push_back(Event::ParcelOverlay(ParcelOverlayInfo {
+                        sequence_id: overlay.parcel_data.sequence_id,
+                        data: overlay.parcel_data.data.clone(),
+                        region_handle,
+                    }));
+            }
+            // An avatar's currently-playing animations, pushed whenever its
+            // animation set changes. The list is the complete current set, not a
+            // delta — a stopped animation simply drops out of a later update.
+            // Without this on a child circuit a neighbour-region avatar stays
+            // frozen at its rest pose even though its geometry renders.
+            AnyMessage::AvatarAnimation(animation) => {
+                self.events.push_back(Event::AvatarAnimation {
+                    avatar_id: AgentKey::from(animation.sender.id),
+                    animations: avatar_animations(animation),
+                    physical_events: animation
+                        .physical_avatar_event_list
+                        .iter()
+                        .map(|block| block.type_data.clone())
+                        .collect(),
+                });
+            }
+            // The full authoritative set of animations now signalled on an
+            // animated-mesh (animesh) object; the object analogue of
+            // `AvatarAnimation`, and frozen on a neighbour for the same reason.
+            AnyMessage::ObjectAnimation(animation) => {
+                self.events.push_back(Event::ObjectAnimation {
+                    object_id: ObjectKey::from(animation.sender.id),
+                    animations: animation
+                        .animation_list
+                        .iter()
+                        .map(|block| ObjectPlayingAnimation {
+                            anim_id: AnimationKey::from(block.anim_id),
+                            sequence_id: block.anim_sequence_id,
+                        })
+                        .collect(),
+                });
+            }
+            // An avatar's appearance (baked textures + visual params), pushed
+            // when it comes into range or restyles. Decoded for both the modern
+            // server-side bake (the texture entry names the server's bakes) and
+            // the legacy client-side bake. Without this on a child circuit a
+            // neighbour-region avatar renders **grey**: its body spawns from the
+            // object stream but no baked texture is ever ingested, since the
+            // bake ingest only fires on this event.
+            AnyMessage::AvatarAppearance(appearance) => {
+                self.events
+                    .push_back(Event::AvatarAppearance(Box::new(avatar_appearance(
+                        appearance,
+                    ))));
+            }
+            // A one-shot spatial sound played at a fixed region-local position
+            // (a scripted `llTriggerSound`, a collision sound, …). May originate
+            // in a neighbouring region, so it carries its own region handle. The
+            // wire `ParentID` is nil when the triggering object is itself the
+            // root, which we surface as `None`.
+            AnyMessage::SoundTrigger(trigger) => {
+                let block = &trigger.sound_data;
+                self.events.push_back(Event::SoundTrigger {
+                    sound_id: block.sound_id,
+                    owner_id: block.owner_id,
+                    object_id: ObjectKey::from(block.object_id),
+                    parent_id: (!block.parent_id.is_nil())
+                        .then_some(ObjectKey::from(block.parent_id)),
+                    region_handle: RegionHandle(block.handle),
+                    position: block.position.clone(),
+                    gain: block.gain,
+                });
+            }
+            // A looping or one-shot sound bound to an in-world object (a scripted
+            // `llPlaySound`/`llLoopSound`); the `STOP` flag stops it instead.
+            AnyMessage::AttachedSound(sound) => {
+                let block = &sound.data_block;
+                self.events.push_back(Event::AttachedSound {
+                    sound_id: block.sound_id,
+                    object_id: ObjectKey::from(block.object_id),
+                    owner_id: block.owner_id,
+                    gain: block.gain,
+                    flags: SoundFlags(block.flags),
+                });
+            }
+            // A volume change for a sound already attached to an object.
+            AnyMessage::AttachedSoundGainChange(change) => {
+                let block = &change.data_block;
+                self.events.push_back(Event::AttachedSoundGainChange {
+                    object_id: ObjectKey::from(block.object_id),
+                    gain: block.gain,
+                });
+            }
+            // A hint to pre-fetch sound assets the simulator is about to play.
+            AnyMessage::PreloadSound(preload) => {
+                self.events.push_back(Event::PreloadSound {
+                    sounds: preload
+                        .data_block
+                        .iter()
+                        .map(|block| SoundPreload {
+                            sound_id: block.sound_id,
+                            object_id: ObjectKey::from(block.object_id),
+                            owner_id: block.owner_id,
+                        })
+                        .collect(),
+                });
+            }
+            // Coarse (minimap) positions of nearby avatars. The location and
+            // agent-data blocks are parallel arrays; `you`/`prey` index into them
+            // (a negative index means "none"). A neighbour region's dots arrive
+            // on its child circuit, and are tagged with its region so a consumer
+            // can place them into world space (R24).
+            AnyMessage::CoarseLocationUpdate(update) => {
+                let event = self.coarse_location_event(from, update);
+                self.events.push_back(event);
+            }
+            // An alert from the region — among them its refusal of a sit on one
+            // of its objects ("Try moving closer"), which a neighbour is as
+            // entitled to send as the root region is.
+            AnyMessage::AlertMessage(alert) => self.handle_alert_message(from, alert),
+            // A generic method-name + parameter envelope used for a grab-bag of
+            // loosely-coupled features keyed by `Method`; the parameter blobs are
+            // surfaced verbatim for the consumer to parse. A neighbour region is
+            // entitled to speak a `GenericMessage` feature at a child agent, and
+            // dropping one would be the same kind of gap the coarse locations,
+            // the parcel overlay and the neighbour sounds each close: the
+            // consumer never learns the region next door said anything.
+            AnyMessage::GenericMessage(generic) => {
+                self.events.push_back(Event::GenericMessage(GenericMessage {
+                    method: trimmed_string(&generic.method_data.method),
+                    invoice: InvoiceId::from(generic.method_data.invoice),
+                    params: generic
+                        .param_list
+                        .iter()
+                        .map(|block| block.parameter.clone())
+                        .collect(),
+                }));
+            }
+            // The same envelope as `GenericMessage`, but with a larger per-param
+            // size limit (real grids carry it over HTTP rather than UDP).
+            AnyMessage::LargeGenericMessage(generic) => {
+                self.events
+                    .push_back(Event::LargeGenericMessage(GenericMessage {
+                        method: trimmed_string(&generic.method_data.method),
+                        invoice: InvoiceId::from(generic.method_data.invoice),
+                        params: generic
+                            .param_list
+                            .iter()
+                            .map(|block| block.parameter.clone())
+                            .collect(),
+                    }));
+            }
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
+
     /// Handles a message that arrived on a child-agent circuit. Children carry
-    /// limited traffic; we keep the circuit healthy (ping replies, region
-    /// handshake acknowledgement) and otherwise ignore it — the crossing into a
-    /// child region is driven by `CrossedRegion` on the root circuit.
+    /// limited traffic: the neighbour region's scene stream and the link's own
+    /// keep-alives, all of which the root circuit carries too and
+    /// [`Session::dispatch_shared`] therefore handles for both, plus the two
+    /// signals that mean something only to a child — the confirmation of a
+    /// deferred teleport handover, and the circuit's retirement. The crossing
+    /// into a child region is driven by `CrossedRegion` on the root circuit.
     fn dispatch_child(
         &mut self,
         from: SocketAddr,
@@ -2163,45 +2423,14 @@ impl Session {
         if self.try_dispatch_object(from, message, now)? {
             return Ok(());
         }
+        // Everything a child shares with the root circuit, handled once for
+        // both. Unlike the root dispatcher this runs *before* the arms below
+        // rather than after them: a child has no refinement of a shared message
+        // to match ahead of it.
+        if self.dispatch_shared(CircuitRole::Child, from, message, now)? {
+            return Ok(());
+        }
         match message {
-            AnyMessage::StartPingCheck(ping) => {
-                if let Some(circuit) = self.children.get_mut(&from) {
-                    circuit.send_complete_ping_check(PingId(ping.ping_id.ping_id), now)?;
-                }
-            }
-            AnyMessage::CompletePingCheck(reply) => {
-                // The neighbour's answer to our keep-alive `StartPingCheck` on
-                // this child circuit: surface the round-trip time as a
-                // child-circuit `Event::Ping`.
-                if let Some(rtt) = self.children.get_mut(&from).and_then(|circuit| {
-                    circuit.record_ping_reply(PingId(reply.ping_id.ping_id), now)
-                }) {
-                    self.events.push_back(Event::Ping {
-                        sim: from,
-                        child: true,
-                        rtt,
-                    });
-                }
-            }
-            AnyMessage::RegionHandshake(handshake) => {
-                if let Some(circuit) = self.children.get_mut(&from) {
-                    circuit.send_region_handshake_reply(now)?;
-                }
-                // Surface the neighbour region's identity (terrain textures +
-                // elevation bands, flags, maturity, …) just like the root
-                // handshake, keyed by this child circuit's region handle, so a
-                // viewer can shade neighbour terrain with its own textures.
-                let region_handle = self
-                    .circuit_id_for(from)
-                    .and_then(|circuit_id| self.regions.get(&circuit_id).copied())
-                    .unwrap_or(RegionHandle(0));
-                let identity = region_identity(handshake, region_handle)?;
-                if let Some(circuit_id) = self.circuit_id_for(from) {
-                    self.note_region_flags(circuit_id, identity.region_flags);
-                }
-                self.events
-                    .push_back(Event::RegionInfoHandshake(Box::new(identity)));
-            }
             AnyMessage::AgentMovementComplete(complete) => {
                 // The only child circuit we ever send `CompleteAgentMovement` to
                 // is a **pending teleport destination**, so its
@@ -2216,13 +2445,6 @@ impl Session {
                 let pose = ArrivalPose::from_movement_complete(&complete.data);
                 self.commit_handover(from, pose, now);
             }
-            AnyMessage::PacketAck(ack) => {
-                if let Some(circuit) = self.children.get_mut(&from) {
-                    for packet in &ack.packets {
-                        circuit.record_acks(&[SequenceNumber(packet.id)]);
-                    }
-                }
-            }
             AnyMessage::DisableSimulator(_) => {
                 // The simulator is retiring this child circuit. Resolve its
                 // circuit id before removing it so the per-circuit caches can be
@@ -2235,157 +2457,6 @@ impl Session {
                     // (minimap) dots via an empty `CoarseLocationUpdate` (R24).
                     self.forget_sim_objects(circuit_id);
                 }
-            }
-            // A neighbour region's alert — among them its refusal of a sit on
-            // one of its objects ("Try moving closer").
-            AnyMessage::AlertMessage(alert) => self.handle_alert_message(from, alert),
-            // A neighbour region's coarse (minimap) avatar positions, tagged with
-            // this child circuit's region so a consumer can place the dots into
-            // world space — otherwise a neighbour-region avatar is never even shown
-            // as a coarse dot (R24).
-            AnyMessage::CoarseLocationUpdate(update) => {
-                let event = self.coarse_location_event(from, update);
-                self.events.push_back(event);
-            }
-            // A neighbour region's parcel overlay, pushed to the child agent
-            // (Second Life pushes it on child establishment; OpenSim on parcel
-            // changes). Tagged with this circuit's region, like the root arm,
-            // so the minimap can draw neighbour property lines.
-            AnyMessage::ParcelOverlay(overlay) => {
-                let region_handle = self
-                    .circuit_id_for(from)
-                    .and_then(|circuit_id| self.regions.get(&circuit_id).copied())
-                    .unwrap_or(RegionHandle(0));
-                self.events
-                    .push_back(Event::ParcelOverlay(ParcelOverlayInfo {
-                        sequence_id: overlay.parcel_data.sequence_id,
-                        data: overlay.parcel_data.data.clone(),
-                        region_handle,
-                    }));
-            }
-            // A neighbour region streams its avatars' and animated objects'
-            // animation state on this child circuit, just like the object stream —
-            // without handling them here a neighbour-region avatar or animesh stays
-            // frozen at its rest / T-pose even though its geometry renders (its
-            // `ObjectUpdate` is dispatched by `try_dispatch_object` above). Mirror
-            // the root-circuit handlers so it animates.
-            AnyMessage::AvatarAnimation(animation) => {
-                self.events.push_back(Event::AvatarAnimation {
-                    avatar_id: AgentKey::from(animation.sender.id),
-                    animations: avatar_animations(animation),
-                    physical_events: animation
-                        .physical_avatar_event_list
-                        .iter()
-                        .map(|block| block.type_data.clone())
-                        .collect(),
-                });
-            }
-            AnyMessage::ObjectAnimation(animation) => {
-                self.events.push_back(Event::ObjectAnimation {
-                    object_id: ObjectKey::from(animation.sender.id),
-                    animations: animation
-                        .animation_list
-                        .iter()
-                        .map(|block| ObjectPlayingAnimation {
-                            anim_id: AnimationKey::from(block.anim_id),
-                            sequence_id: block.anim_sequence_id,
-                        })
-                        .collect(),
-                });
-            }
-            // A neighbour region also streams its avatars' `AvatarAppearance` (the
-            // baked-texture ids + visual params) on this child circuit. Without
-            // handling it here a neighbour-region avatar renders **grey** — its
-            // body spawns from the object stream (`try_dispatch_object` above) but
-            // no baked texture is ever ingested, since the bake ingest only fires
-            // on this event. Mirror the root-circuit handler so it textures.
-            AnyMessage::AvatarAppearance(appearance) => {
-                self.events
-                    .push_back(Event::AvatarAppearance(Box::new(avatar_appearance(
-                        appearance,
-                    ))));
-            }
-            // A neighbour region's spatial audio also streams on this child
-            // circuit: a scripted `llTriggerSound` / attached `llLoopSound` in the
-            // adjacent region is audible from ours, so dropping these silenced a
-            // whole neighbouring parcel for no reason (the sounds attach to objects
-            // the child object stream already tracks). Mirror the root handlers.
-            AnyMessage::SoundTrigger(trigger) => {
-                let block = &trigger.sound_data;
-                self.events.push_back(Event::SoundTrigger {
-                    sound_id: block.sound_id,
-                    owner_id: block.owner_id,
-                    object_id: ObjectKey::from(block.object_id),
-                    parent_id: (!block.parent_id.is_nil())
-                        .then_some(ObjectKey::from(block.parent_id)),
-                    region_handle: RegionHandle(block.handle),
-                    position: block.position.clone(),
-                    gain: block.gain,
-                });
-            }
-            AnyMessage::AttachedSound(sound) => {
-                let block = &sound.data_block;
-                self.events.push_back(Event::AttachedSound {
-                    sound_id: block.sound_id,
-                    object_id: ObjectKey::from(block.object_id),
-                    owner_id: block.owner_id,
-                    gain: block.gain,
-                    flags: SoundFlags(block.flags),
-                });
-            }
-            AnyMessage::AttachedSoundGainChange(change) => {
-                let block = &change.data_block;
-                self.events.push_back(Event::AttachedSoundGainChange {
-                    object_id: ObjectKey::from(block.object_id),
-                    gain: block.gain,
-                });
-            }
-            AnyMessage::PreloadSound(preload) => {
-                self.events.push_back(Event::PreloadSound {
-                    sounds: preload
-                        .data_block
-                        .iter()
-                        .map(|block| SoundPreload {
-                            sound_id: block.sound_id,
-                            object_id: ObjectKey::from(block.object_id),
-                            owner_id: block.owner_id,
-                        })
-                        .collect(),
-                });
-            }
-            // The generic method-name + parameter envelope, surfaced verbatim
-            // from a neighbour as it is from the root region. A neighbour
-            // region is entitled to speak a `GenericMessage` feature at a child
-            // agent, and dropping one here is the same kind of gap the coarse
-            // locations, the parcel overlay and the neighbour sounds above were
-            // each added to close: the consumer never learns the region next
-            // door said anything.
-            //
-            // The `emptymutelist` special case of the root arm is deliberately
-            // **not** mirrored: the mute list is the agent's, not a region's,
-            // and only the region hosting the agent has one to report.
-            AnyMessage::GenericMessage(generic) => {
-                self.events.push_back(Event::GenericMessage(GenericMessage {
-                    method: trimmed_string(&generic.method_data.method),
-                    invoice: InvoiceId::from(generic.method_data.invoice),
-                    params: generic
-                        .param_list
-                        .iter()
-                        .map(|block| block.parameter.clone())
-                        .collect(),
-                }));
-            }
-            AnyMessage::LargeGenericMessage(generic) => {
-                self.events
-                    .push_back(Event::LargeGenericMessage(GenericMessage {
-                        method: trimmed_string(&generic.method_data.method),
-                        invoice: InvoiceId::from(generic.method_data.invoice),
-                        params: generic
-                            .param_list
-                            .iter()
-                            .map(|block| block.parameter.clone())
-                            .collect(),
-                    }));
             }
             _ => {
                 self.push_diagnostic(Diagnostic::UnhandledMessage {
@@ -2424,7 +2495,7 @@ impl Session {
             .collect();
         let region_handle = self
             .circuit_id_for(from)
-            .and_then(|circuit_id| self.regions.get(&circuit_id).copied())
+            .and_then(|circuit_id| self.world.region_handle(circuit_id))
             .unwrap_or(RegionHandle(0));
         Event::CoarseLocationUpdate {
             locations,
@@ -2478,7 +2549,7 @@ impl Session {
                 // update for the misses (a full `ObjectUpdate` follows).
                 let cached = self
                     .circuit_id_for(from)
-                    .and_then(|circuit_id| self.objects.get(&circuit_id));
+                    .and_then(|circuit_id| self.world.objects_in(circuit_id));
                 let misses: Vec<RegionLocalObjectId> = update
                     .object_data
                     .iter()
@@ -2519,8 +2590,8 @@ impl Session {
                 };
                 for block in &kill.object_data {
                     let removed = self
-                        .objects
-                        .get_mut(&circuit_id)
+                        .world
+                        .objects_in_mut(circuit_id)
                         .and_then(|sim| sim.remove(&RegionLocalObjectId(block.id)));
                     let region_handle = removed
                         .as_ref()
@@ -2542,7 +2613,7 @@ impl Session {
                 for block in &props.object_data {
                     let properties = object_properties(block)?;
                     if let Some(object) = circuit_id
-                        .and_then(|circuit_id| self.objects.get_mut(&circuit_id))
+                        .and_then(|circuit_id| self.world.objects_in_mut(circuit_id))
                         .and_then(|sim| {
                             sim.values_mut()
                                 .find(|object| object.full_id == properties.object_id)
@@ -2563,12 +2634,11 @@ impl Session {
             AnyMessage::GenericStreamingMessage(message)
                 if message.method_data.method == GLTF_MATERIAL_OVERRIDE_METHOD =>
             {
-                if let Some(decoded) = parse_gltf_material_override(&message.data_block.data) {
+                if let Ok(decoded) = parse_gltf_material_override(&message.data_block.data) {
                     let circuit_id = self.circuit_id_for(from).unwrap_or_default();
                     let region_handle = self
-                        .regions
-                        .get(&circuit_id)
-                        .copied()
+                        .world
+                        .region_handle(circuit_id)
                         .unwrap_or(RegionHandle(0));
                     self.events.push_back(Event::GltfMaterialOverride {
                         region_handle,
@@ -2667,11 +2737,10 @@ impl Session {
             return;
         };
         let region_handle = self
-            .regions
-            .get(&circuit_id)
-            .copied()
+            .world
+            .region_handle(circuit_id)
             .unwrap_or(RegionHandle(0));
-        let cache = self.terrain.entry(circuit_id).or_default();
+        let cache = self.world.terrain_in_or_default(circuit_id);
         let mut emit = Vec::with_capacity(patches.len());
         for decoded in patches {
             let patch = terrain::into_terrain_patch(decoded, layer, region_handle);
@@ -2692,7 +2761,7 @@ impl Session {
         let Some(circuit_id) = self.circuit_id_for(from) else {
             return;
         };
-        if self.time_dilation.insert(circuit_id, raw) == Some(raw) {
+        if !self.world.note_time_dilation(circuit_id, raw) {
             return;
         }
         self.events.push_back(Event::TimeDilation {
@@ -2716,7 +2785,7 @@ impl Session {
         // Remember this circuit's region handle so terrain patches (whose
         // `LayerData` message carries no handle) can be labelled with it.
         if object.region_handle != RegionHandle(0) {
-            self.regions.insert(circuit_id, object.region_handle);
+            self.world.note_region(circuit_id, object.region_handle);
         }
         // Record our own avatar's region-local id the first time its object is
         // seen on this circuit, so attachments (objects parented to it) can later
@@ -2730,12 +2799,12 @@ impl Session {
         }
         // This object arrived: clear any outstanding parent-request for it (a
         // child waiting on it can now resolve, and a later re-orphan re-requests).
-        let _arrived = self.requested_parents.remove(&object.scoped_id());
+        self.world.forget_parent_request(object.scoped_id());
         // Whether it references a parent we do not (yet) track — an out-of-order
         // or dropped root update, which would otherwise strand every child of that
         // root (worn attachments never resolve their wearer and never render).
         let parent_local = object.parent_id;
-        let sim = self.objects.entry(circuit_id).or_default();
+        let sim = self.world.objects_in_or_default(circuit_id);
         let parent_missing =
             parent_local != RegionLocalObjectId(0) && !sim.contains_key(&parent_local);
         match sim.get(&object.local_id) {
@@ -2763,10 +2832,7 @@ impl Session {
         // the children that never update again.
         if parent_missing {
             let parent = ScopedObjectId::new(circuit_id, parent_local);
-            if let std::collections::btree_map::Entry::Vacant(entry) =
-                self.requested_parents.entry(parent)
-            {
-                let _request = entry.insert(ParentRequest::first(now));
+            if self.world.request_parent(parent, now) {
                 self.request_object_ids(from, &[parent_local], now);
             }
         }
@@ -2782,27 +2848,18 @@ impl Session {
     /// and the count of its orphans is what tells a stray prim from a whole
     /// outfit.
     fn reask_missing_parents(&mut self, now: Instant) {
-        let due: Vec<ScopedObjectId> = self
-            .requested_parents
-            .iter()
-            .filter(|(_parent, request)| now >= request.next_ask())
-            .map(|(parent, _request)| *parent)
-            .collect();
+        let due = self.world.parent_requests_due(now);
         if due.is_empty() {
             return;
         }
         let mut asks: BTreeMap<CircuitId, Vec<RegionLocalObjectId>> = BTreeMap::new();
         for parent in due {
-            let orphans = self.objects.get(&parent.circuit).map_or(0, |sim| {
-                sim.values()
-                    .filter(|object| object.parent_id == parent.id)
-                    .count()
-            });
+            let orphans = self.world.orphans_of(parent);
             if orphans == 0 {
-                let _forgotten = self.requested_parents.remove(&parent);
+                self.world.forget_parent_request(parent);
                 continue;
             }
-            let Some(request) = self.requested_parents.get_mut(&parent) else {
+            let Some(request) = self.world.parent_request_mut(parent) else {
                 continue;
             };
             request.asked = now;
@@ -2827,10 +2884,7 @@ impl Session {
     /// The earliest instant [`Self::reask_missing_parents`] has a parent to ask
     /// for again, merged into [`Self::poll_timeout`].
     fn next_parent_reask(&self) -> Option<Instant> {
-        self.requested_parents
-            .values()
-            .map(ParentRequest::next_ask)
-            .min()
+        self.world.next_parent_reask()
     }
 
     /// The simulator address of the live circuit (root or child) whose instance
@@ -2849,7 +2903,7 @@ impl Session {
     /// the object-update path ([`Session::upsert_object`]) and the
     /// `AgentMovementComplete` backstop.
     fn note_own_avatar(&mut self, circuit_id: CircuitId, local_id: RegionLocalObjectId) {
-        self.own_avatar.entry(circuit_id).or_insert(local_id);
+        self.world.note_own_avatar(circuit_id, local_id);
     }
 
     /// Scans circuit `circuit_id`'s object cache for the agent's own avatar
@@ -2860,10 +2914,14 @@ impl Session {
     /// before the slot could be filled.
     fn cached_own_avatar_local_id(&self, circuit_id: CircuitId) -> Option<RegionLocalObjectId> {
         let agent = self.agent_id()?;
-        self.objects.get(&circuit_id)?.values().find_map(|object| {
-            (object.pcode == crate::types::pcode::AVATAR && object.full_id.uuid() == agent.uuid())
+        self.world
+            .objects_in(circuit_id)?
+            .values()
+            .find_map(|object| {
+                (object.pcode == crate::types::pcode::AVATAR
+                    && object.full_id.uuid() == agent.uuid())
                 .then_some(object.local_id)
-        })
+            })
     }
 
     /// Finds a cached object by its persistent global id ([`ObjectKey`]),
@@ -2871,9 +2929,8 @@ impl Session {
     /// nearby objects are cached, so the scan is small). Used by
     /// [`Session::holder_kind`] to classify a script-permission holder.
     fn object_by_full_id(&self, full_id: ObjectKey) -> Option<&Object> {
-        self.objects
-            .values()
-            .flat_map(BTreeMap::values)
+        self.world
+            .objects()
             .find(|object| object.full_id == full_id)
     }
 
@@ -2895,7 +2952,7 @@ impl Session {
         };
         let circuit = object.circuit;
         let parented_to_us = object.parent_id != RegionLocalObjectId(0)
-            && self.own_avatar.get(&circuit) == Some(&object.parent_id);
+            && self.world.own_avatar(circuit) == Some(object.parent_id);
         let kind = if object.attachment_point().is_some() && parented_to_us {
             HolderKind::Attachment
         } else {
@@ -2966,8 +3023,8 @@ impl Session {
             return false;
         };
         let Some(object) = self
-            .objects
-            .get_mut(&circuit_id)
+            .world
+            .objects_in_mut(circuit_id)
             .and_then(|sim| sim.get_mut(&update.local_id))
         else {
             return false;
@@ -3092,9 +3149,8 @@ impl Session {
     /// no record of falls back to the object's own region, then to the root.
     fn circuit_for_script_reply(&mut self, object: ObjectKey) -> Result<&mut Circuit, Error> {
         let scope = self
-            .script_request_circuits
-            .get(&object)
-            .copied()
+            .world
+            .script_request_circuit(object)
             .or_else(|| self.object_by_full_id(object).map(|object| object.circuit));
         self.circuit_or_root(scope)
     }
@@ -3103,7 +3159,7 @@ impl Session {
     /// for [`Session::circuit_for_script_reply`].
     fn note_script_request_circuit(&mut self, from: SocketAddr, object: ObjectKey) {
         if let Some(circuit) = self.circuit_id_for(from) {
-            self.script_request_circuits.insert(object, circuit);
+            self.world.note_script_request_circuit(object, circuit);
         }
     }
 
@@ -3189,7 +3245,7 @@ impl Session {
     #[must_use]
     pub fn region_handle(&self) -> Option<RegionHandle> {
         self.root_circuit_id()
-            .and_then(|circuit| self.regions.get(&circuit).copied())
+            .and_then(|circuit| self.world.region_handle(circuit))
     }
 
     /// The agent's **own** avatar object on the current root circuit, as a
@@ -3205,25 +3261,22 @@ impl Session {
     #[must_use]
     pub fn own_avatar_id(&self) -> Option<ScopedObjectId> {
         let circuit = self.circuit.as_ref()?;
-        self.own_avatar
-            .get(&circuit.id)
-            .map(|&local_id| ScopedObjectId::new(circuit.id, local_id))
+        self.world
+            .own_avatar(circuit.id)
+            .map(|local_id| ScopedObjectId::new(circuit.id, local_id))
     }
 
     /// Records the raw `RegionFlags` a `RegionHandshake` carried for the region on
     /// `circuit`, so [`Session::region_blocks_fly`] can read the current region's
     /// fly setting.
     fn note_region_flags(&mut self, circuit: CircuitId, flags: u32) {
-        self.region_flags.insert(circuit, flags);
+        self.world.note_region_flags(circuit, flags);
     }
 
     /// Folds a `ParcelProperties` into the per-circuit parcel cache for `circuit`,
     /// keyed by the parcel's region-local id.
     fn note_parcel(&mut self, circuit: CircuitId, parcel: &ParcelInfo) {
-        self.parcels
-            .entry(circuit)
-            .or_default()
-            .insert(parcel.local_id, parcel.clone());
+        self.world.note_parcel(circuit, parcel);
     }
 
     /// Whether the agent's current region blocks flying region-wide (the
@@ -3233,7 +3286,7 @@ impl Session {
     #[must_use]
     pub fn region_blocks_fly(&self) -> bool {
         self.root_circuit_id()
-            .and_then(|circuit| self.region_flags.get(&circuit).copied())
+            .and_then(|circuit| self.world.region_flags(circuit))
             .is_some_and(|flags| RegionFlags::from_bits(flags).contains(RegionFlags::BLOCK_FLY))
     }
 
@@ -3245,9 +3298,11 @@ impl Session {
     #[must_use]
     pub fn current_parcel(&self) -> Option<&ParcelInfo> {
         let circuit = self.circuit.as_ref()?;
-        let local_id = self.own_avatar.get(&circuit.id)?;
-        let object = self.objects.get(&circuit.id)?.get(local_id)?;
-        let parcels = self.parcels.get(&circuit.id)?;
+        let local_id = self.world.own_avatar(circuit.id)?;
+        let object = self
+            .world
+            .object(ScopedObjectId::new(circuit.id, local_id))?;
+        let parcels = self.world.parcels_in(circuit.id)?;
         let position = &object.motion.position;
         parcels
             .values()
@@ -3282,7 +3337,7 @@ impl Session {
     fn forget_sim_objects(&mut self, circuit_id: CircuitId) {
         // Capture the region before the handle cache is cleared below, so the
         // coarse-dot prune can name it.
-        let region_handle = self.regions.get(&circuit_id).copied();
+        let region_handle = self.world.region_handle(circuit_id);
         // Reconcile this region's coarse set to nothing so no stale minimap dot
         // is left behind once the region is gone.
         if let Some(region_handle) = region_handle {
@@ -3293,30 +3348,14 @@ impl Session {
                 region_handle,
             });
         }
-        // The terrain, region-handle, time-dilation, and own-avatar caches for
-        // this circuit go stale too.
-        self.terrain.remove(&circuit_id);
-        self.regions.remove(&circuit_id);
-        self.region_flags.remove(&circuit_id);
-        self.parcels.remove(&circuit_id);
-        self.time_dilation.remove(&circuit_id);
-        self.own_avatar.remove(&circuit_id);
-        self.script_request_circuits
-            .retain(|_object, circuit| *circuit != circuit_id);
-        // Outstanding parent re-send requests are scoped to this circuit's
-        // region-local ids, so they go stale with it; without this they are the
-        // one per-circuit store that survives the circuit.
-        self.requested_parents
-            .retain(|parent, _asked| parent.circuit != circuit_id);
         // Drop any permission grants scoped to this retiring (child/neighbour)
         // circuit; the root is never retired this way, so attachment grants
-        // (root-scoped) are never dropped here.
+        // (root-scoped) are never dropped here. The grants are the session's,
+        // not the world's — everything the cache holds for this circuit goes
+        // with `forget_circuit`.
         self.script_grants
             .retain(|_, grant| grant.circuit != Some(circuit_id));
-        let Some(sim) = self.objects.remove(&circuit_id) else {
-            return;
-        };
-        for object in sim.into_values() {
+        for object in self.world.forget_circuit(circuit_id).into_values() {
             self.events.push_back(Event::ObjectRemoved {
                 region_handle: object.region_handle,
                 local_id: ScopedObjectId::new(circuit_id, object.local_id),
@@ -3337,29 +3376,6 @@ impl Session {
             return Ok(());
         }
         match message {
-            AnyMessage::RegionHandshake(handshake) => {
-                // A simulator re-sends `RegionHandshake` outside login too — on a
-                // region restart, an estate change or a terrain-texture change —
-                // and keeps retrying until it is answered, so reply and refresh
-                // the region's identity/flags whatever the session state (the
-                // reference viewer's `process_region_handshake` is likewise
-                // ungated). Only the *arrival* transition is once-only, and
-                // `complete_arrival` guards itself.
-                if let Some(circuit) = self.circuit.as_mut() {
-                    circuit.send_region_handshake_reply(now)?;
-                }
-                let region_handle = self
-                    .circuit_id_for(from)
-                    .and_then(|circuit_id| self.regions.get(&circuit_id).copied())
-                    .unwrap_or(RegionHandle(0));
-                let identity = region_identity(handshake, region_handle)?;
-                if let Some(circuit_id) = self.circuit_id_for(from) {
-                    self.note_region_flags(circuit_id, identity.region_flags);
-                }
-                self.events
-                    .push_back(Event::RegionInfoHandshake(Box::new(identity)));
-                self.complete_arrival(now);
-            }
             AnyMessage::AgentMovementComplete(complete) => {
                 // After a teleport handover the destination promotes us to root
                 // and confirms with AgentMovementComplete; it may not re-send a
@@ -3418,18 +3434,6 @@ impl Session {
                 }
                 self.events
                     .push_back(Event::ParcelProperties(Box::new(parcel)));
-            }
-            AnyMessage::ParcelOverlay(overlay) => {
-                let region_handle = self
-                    .circuit_id_for(from)
-                    .and_then(|circuit_id| self.regions.get(&circuit_id).copied())
-                    .unwrap_or(RegionHandle(0));
-                self.events
-                    .push_back(Event::ParcelOverlay(ParcelOverlayInfo {
-                        sequence_id: overlay.parcel_data.sequence_id,
-                        data: overlay.parcel_data.data.clone(),
-                        region_handle,
-                    }));
             }
             // A scripted parcel-media control (`llParcelMediaCommandList`): the
             // simulator tells viewers to play/pause/stop/loop the parcel's
@@ -3669,11 +3673,7 @@ impl Session {
                         // if it is not already open, the event still fires but
                         // nothing is stored.
                         if let Some(chat_session) = self.chat_session_get_mut(kind) {
-                            if typing {
-                                chat_session.typing.insert(from_agent_id, now);
-                            } else {
-                                chat_session.typing.remove(&from_agent_id);
-                            }
+                            chat_session.note_typing(from_agent_id, typing, now);
                         }
                         self.events.push_back(Event::ImTyping {
                             from_agent_id,
@@ -3716,11 +3716,7 @@ impl Session {
                         // "joined" traffic — the A4 rule), then folds the roster.
                         let chat_session =
                             self.chat_session_mut(ChatSessionKind::Group { group_id }, now);
-                        if joined {
-                            chat_session.participants.insert(agent_id);
-                        } else {
-                            chat_session.participants.remove(&agent_id);
-                        }
+                        chat_session.note_participant(agent_id, joined);
                         self.events.push_back(Event::GroupSessionParticipant {
                             group_id,
                             agent_id,
@@ -3759,11 +3755,7 @@ impl Session {
                         // open the session, then fold the roster.
                         let chat_session =
                             self.chat_session_mut(ChatSessionKind::Conference { id }, now);
-                        if joined {
-                            chat_session.participants.insert(agent_id);
-                        } else {
-                            chat_session.participants.remove(&agent_id);
-                        }
+                        chat_session.note_participant(agent_id, joined);
                         self.events.push_back(Event::ConferenceSessionParticipant {
                             session_id: block.id,
                             agent_id,
@@ -3992,7 +3984,7 @@ impl Session {
                 // agent's presence before the avatar crosses the border.
                 self.open_child_circuit(info.sim, now)?;
                 if let Some(circuit_id) = self.circuit_id_for(info.sim) {
-                    self.regions.insert(circuit_id, info.region_handle);
+                    self.world.note_region(circuit_id, info.region_handle);
                 }
                 self.events.push_back(Event::NeighborDiscovered(info));
             }
@@ -4132,34 +4124,6 @@ impl Session {
                 )?;
                 self.begin_crossing(dest, RegionHandle(region.region_handle), seed, now)?;
             }
-            AnyMessage::StartPingCheck(ping) => {
-                if let Some(circuit) = self.circuit.as_mut() {
-                    circuit.send_complete_ping_check(PingId(ping.ping_id.ping_id), now)?;
-                }
-            }
-            AnyMessage::CompletePingCheck(reply) => {
-                // The simulator's answer to our keep-alive `StartPingCheck` on the
-                // root circuit: surface the round-trip time when it matches the
-                // ping in flight.
-                if let Some((sim, rtt)) = self.circuit.as_mut().and_then(|circuit| {
-                    circuit
-                        .record_ping_reply(PingId(reply.ping_id.ping_id), now)
-                        .map(|rtt| (circuit.sim_addr, rtt))
-                }) {
-                    self.events.push_back(Event::Ping {
-                        sim,
-                        child: false,
-                        rtt,
-                    });
-                }
-            }
-            AnyMessage::PacketAck(ack) => {
-                if let Some(circuit) = self.circuit.as_mut() {
-                    for packet in &ack.packets {
-                        circuit.record_acks(&[SequenceNumber(packet.id)]);
-                    }
-                }
-            }
             AnyMessage::MuteListUpdate(update) => {
                 // The mute list changed; download the named file over Xfer.
                 let filename = trimmed_string(&update.mute_data.filename);
@@ -4194,7 +4158,7 @@ impl Session {
             AnyMessage::SendXferPacket(packet) => {
                 let xfer_id = XferId(packet.xfer_id.id);
                 let packet_id = XferPacketId::from_raw(packet.xfer_id.packet);
-                let Some(download) = self.xfer_downloads.get(&xfer_id) else {
+                let Some(download) = self.transfers.xfer_downloads.get(&xfer_id) else {
                     return Ok(());
                 };
                 let (expected, buffered, declared_so_far) =
@@ -4259,12 +4223,12 @@ impl Session {
                         limit,
                         "Xfer download ran past the length it may occupy"
                     );
-                    let _download = self.xfer_downloads.remove(&xfer_id);
+                    let _download = self.transfers.xfer_downloads.remove(&xfer_id);
                     self.abandon_xfer(xfer_id, "download", XFER_REFUSED_RESULT, now);
                     return Ok(());
                 }
 
-                if let Some(download) = self.xfer_downloads.get_mut(&xfer_id) {
+                if let Some(download) = self.transfers.xfer_downloads.get_mut(&xfer_id) {
                     download.buffer.extend_from_slice(chunk.payload);
                     download.next_packet = download.next_packet.saturating_add(1);
                     download.last_progress = now;
@@ -4274,7 +4238,7 @@ impl Session {
                     circuit.send_confirm_xfer_packet(xfer_id, packet_id.raw(), now)?;
                 }
                 if packet_id.is_last()
-                    && let Some(download) = self.xfer_downloads.remove(&xfer_id)
+                    && let Some(download) = self.transfers.xfer_downloads.remove(&xfer_id)
                 {
                     self.finish_xfer_download(xfer_id, download)?;
                 }
@@ -4290,12 +4254,12 @@ impl Session {
                 // empty — an asset upload the simulator pulls by its `VFileID`
                 // (the predicted `combine(transaction, secure_session)` id an
                 // oversized [`Session::save_inventory_asset`] registered).
-                let offered = self.pending_xfer_uploads.remove(&filename).or_else(|| {
-                    self.pending_asset_uploads.remove(&request.xfer_id.v_file_id)
+                let offered = self.transfers.pending_xfer_uploads.remove(&filename).or_else(|| {
+                    self.transfers.pending_asset_uploads.remove(&request.xfer_id.v_file_id)
                 });
                 if let Some(offer) = offered {
                     let xfer_id = XferId(request.xfer_id.id);
-                    self.xfer_uploads.insert(
+                    self.transfers.xfer_uploads.insert(
                         xfer_id,
                         XferUpload {
                             viewer_filename: filename,
@@ -4316,7 +4280,7 @@ impl Session {
                 // it started: the completion carries only the stored asset, and
                 // the registry is what turns that back into the caller's token.
                 let asset_id = complete.asset_block.uuid;
-                let transaction_id = self
+                let transaction_id = self.transfers
                     .pending_inventory_saves
                     .remove(&asset_id)
                     .map(|save| save.transaction_id);
@@ -4331,11 +4295,11 @@ impl Session {
                 // upload; release the next one, or finish if that was the final
                 // packet. `Xfer` upload is strictly one-packet-at-a-time.
                 let xfer_id = XferId(confirm.xfer_id.id);
-                if let Some(upload) = self.xfer_uploads.get_mut(&xfer_id) {
+                if let Some(upload) = self.transfers.xfer_uploads.get_mut(&xfer_id) {
                     upload.last_progress = now;
                     let finished = upload.last_sent;
                     if finished {
-                        if let Some(upload) = self.xfer_uploads.remove(&xfer_id) {
+                        if let Some(upload) = self.transfers.xfer_uploads.remove(&xfer_id) {
                             self.events.push_back(Event::XferUploaded {
                                 xfer_id,
                                 viewer_filename: upload.viewer_filename,
@@ -4352,8 +4316,8 @@ impl Session {
                 // upload or download and surface the reason so a caller waiting on
                 // completion is not left hanging.
                 let xfer_id = XferId(abort.xfer_id.id);
-                let aborted = self.xfer_uploads.remove(&xfer_id).is_some()
-                    || self.xfer_downloads.remove(&xfer_id).is_some();
+                let aborted = self.transfers.xfer_uploads.remove(&xfer_id).is_some()
+                    || self.transfers.xfer_downloads.remove(&xfer_id).is_some();
                 if aborted {
                     self.events.push_back(Event::XferAborted {
                         xfer_id,
@@ -4368,15 +4332,15 @@ impl Session {
                 // follow (or already arrived — packet buffering handles either
                 // order).
                 let transfer_id = TransferId::new(info.transfer_info.transfer_id);
-                if self.transfer_downloads.contains_key(&transfer_id) {
+                if self.transfers.transfer_downloads.contains_key(&transfer_id) {
                     let status = TransferStatus::from_code(info.transfer_info.status);
                     if matches!(status, TransferStatus::Ok) {
-                        if let Some(download) = self.transfer_downloads.get_mut(&transfer_id) {
+                        if let Some(download) = self.transfers.transfer_downloads.get_mut(&transfer_id) {
                             download.expected_size = usize::try_from(info.transfer_info.size).ok();
                             download.last_progress = now;
                         }
                     } else {
-                        let _download = self.transfer_downloads.remove(&transfer_id);
+                        let _download = self.transfers.transfer_downloads.remove(&transfer_id);
                         self.events.push_back(Event::TransferFailed {
                             transfer_id,
                             status,
@@ -4396,7 +4360,7 @@ impl Session {
                 let index = u32::try_from(packet.transfer_data.packet).ok();
                 let status = TransferStatus::from_code(packet.transfer_data.status);
                 let progress = if let Some(index) = index
-                    && let Some(download) = self.transfer_downloads.get_mut(&transfer_id)
+                    && let Some(download) = self.transfers.transfer_downloads.get_mut(&transfer_id)
                 {
                     download.insert_chunk(index, packet.transfer_data.data.clone());
                     download.last_progress = now;
@@ -4410,7 +4374,7 @@ impl Session {
                 match progress {
                     TransferProgress::Incomplete => {}
                     TransferProgress::Complete => {
-                        if let Some(download) = self.transfer_downloads.remove(&transfer_id) {
+                        if let Some(download) = self.transfers.transfer_downloads.remove(&transfer_id) {
                             let data = download.assemble();
                             match download.purpose {
                                 TransferPurpose::TaskInventoryItem { task, item } => {
@@ -4436,7 +4400,7 @@ impl Session {
                         // fetch rather than hand a caller a corrupt one — and
                         // tell the simulator to stop serving it, as the
                         // reference does when it gives up on a transfer.
-                        let _download = self.transfer_downloads.remove(&transfer_id);
+                        let _download = self.transfers.transfer_downloads.remove(&transfer_id);
                         tracing::warn!(%transfer_id, "abandoning a UDP asset transfer: {reason}");
                         if let Some(circuit) = self.circuit.as_mut() {
                             let _ignored = circuit.send_transfer_abort(transfer_id, now);
@@ -4452,7 +4416,7 @@ impl Session {
                 // The first packet of a UDP texture download: the codec/size/
                 // packet-count header plus packet 0's data.
                 let id = image.image_id.id;
-                let completed = if let Some(download) = self.texture_downloads.get_mut(&id) {
+                let completed = if let Some(download) = self.transfers.texture_downloads.get_mut(&id) {
                     download.note_header(
                         ImageCodec::from_code(image.image_id.codec),
                         image.image_id.packets,
@@ -4463,7 +4427,7 @@ impl Session {
                 } else {
                     false
                 };
-                if completed && let Some(download) = self.texture_downloads.remove(&id) {
+                if completed && let Some(download) = self.transfers.texture_downloads.remove(&id) {
                     let texture = Texture {
                         id: TextureKey::from(id),
                         codec: download.codec,
@@ -4477,14 +4441,14 @@ impl Session {
                 // A follow-on packet of a UDP texture download (packets 1..).
                 let id = image.image_id.id;
                 let packet_index = image.image_id.packet;
-                let completed = if let Some(download) = self.texture_downloads.get_mut(&id) {
+                let completed = if let Some(download) = self.transfers.texture_downloads.get_mut(&id) {
                     download.insert_chunk(packet_index, image.image_data.data.clone());
                     download.note_progress(now);
                     download.is_complete()
                 } else {
                     false
                 };
-                if completed && let Some(download) = self.texture_downloads.remove(&id) {
+                if completed && let Some(download) = self.transfers.texture_downloads.remove(&id) {
                     let texture = Texture {
                         id: TextureKey::from(id),
                         codec: download.codec,
@@ -4496,19 +4460,9 @@ impl Session {
             }
             AnyMessage::ImageNotInDatabase(missing) => {
                 let id = missing.image_id.id;
-                self.texture_downloads.remove(&id);
+                self.transfers.texture_downloads.remove(&id);
                 self.events
                     .push_back(Event::TextureNotFound(TextureKey::from(id)));
-            }
-            // Another avatar's appearance (baked textures + visual params),
-            // pushed when it comes into range or restyles. Decoded for both the
-            // modern server-side bake (the texture entry names the server's bakes)
-            // and the legacy client-side bake.
-            AnyMessage::AvatarAppearance(appearance) => {
-                self.events
-                    .push_back(Event::AvatarAppearance(Box::new(avatar_appearance(
-                        appearance,
-                    ))));
             }
             // The agent's own current wearables, pushed at login and after every
             // wearable change (or in reply to `AgentWearablesRequest`).
@@ -4542,36 +4496,6 @@ impl Session {
                 self.events.push_back(Event::AgentWearables {
                     serial: update.agent_data.serial_num,
                     wearables,
-                });
-            }
-            // Another avatar's currently-playing animations, pushed whenever its
-            // animation set changes. The list is the complete current set, not a
-            // delta — a stopped animation simply drops out of a later update.
-            AnyMessage::AvatarAnimation(animation) => {
-                self.events.push_back(Event::AvatarAnimation {
-                    avatar_id: AgentKey::from(animation.sender.id),
-                    animations: avatar_animations(animation),
-                    physical_events: animation
-                        .physical_avatar_event_list
-                        .iter()
-                        .map(|block| block.type_data.clone())
-                        .collect(),
-                });
-            }
-            // The full authoritative set of animations now signalled on an
-            // animated-mesh (animesh) object; the object analogue of
-            // `AvatarAnimation`.
-            AnyMessage::ObjectAnimation(animation) => {
-                self.events.push_back(Event::ObjectAnimation {
-                    object_id: ObjectKey::from(animation.sender.id),
-                    animations: animation
-                        .animation_list
-                        .iter()
-                        .map(|block| ObjectPlayingAnimation {
-                            anim_id: AnimationKey::from(block.anim_id),
-                            sequence_id: block.anim_sequence_id,
-                        })
-                        .collect(),
                 });
             }
             // The simulator could not find one of the agent's temporary baked
@@ -4693,8 +4617,8 @@ impl Session {
                 // If `fetch_task_inventory` asked for this object's parsed
                 // contents, follow the reply to its `Xfer` file (or emit an empty
                 // listing directly when the task inventory is empty).
-                let claimed = self.pending_task_inventory.remove(&task).is_some()
-                    || self.pending_task_inventory_unresolved.pop_front().is_some();
+                let claimed = self.transfers.pending_task_inventory.remove(&task).is_some()
+                    || self.transfers.pending_task_inventory_unresolved.pop_front().is_some();
                 if claimed {
                     if filename.is_empty() {
                         self.events.push_back(Event::TaskInventoryContents {
@@ -4754,58 +4678,6 @@ impl Session {
                     god_level: grant.grant_data.god_level,
                 });
             }
-            // A one-shot spatial sound played at a fixed region-local position
-            // (a scripted `llTriggerSound`, a collision sound, …). May originate
-            // in a neighbouring region, so it carries its own region handle. The
-            // wire `ParentID` is nil when the triggering object is itself the
-            // root, which we surface as `None`.
-            AnyMessage::SoundTrigger(trigger) => {
-                let block = &trigger.sound_data;
-                self.events.push_back(Event::SoundTrigger {
-                    sound_id: block.sound_id,
-                    owner_id: block.owner_id,
-                    object_id: ObjectKey::from(block.object_id),
-                    parent_id: (!block.parent_id.is_nil())
-                        .then_some(ObjectKey::from(block.parent_id)),
-                    region_handle: RegionHandle(block.handle),
-                    position: block.position.clone(),
-                    gain: block.gain,
-                });
-            }
-            // A looping or one-shot sound bound to an in-world object (a scripted
-            // `llPlaySound`/`llLoopSound`); the `STOP` flag stops it instead.
-            AnyMessage::AttachedSound(sound) => {
-                let block = &sound.data_block;
-                self.events.push_back(Event::AttachedSound {
-                    sound_id: block.sound_id,
-                    object_id: ObjectKey::from(block.object_id),
-                    owner_id: block.owner_id,
-                    gain: block.gain,
-                    flags: SoundFlags(block.flags),
-                });
-            }
-            // A volume change for a sound already attached to an object.
-            AnyMessage::AttachedSoundGainChange(change) => {
-                let block = &change.data_block;
-                self.events.push_back(Event::AttachedSoundGainChange {
-                    object_id: ObjectKey::from(block.object_id),
-                    gain: block.gain,
-                });
-            }
-            // A hint to pre-fetch sound assets the simulator is about to play.
-            AnyMessage::PreloadSound(preload) => {
-                self.events.push_back(Event::PreloadSound {
-                    sounds: preload
-                        .data_block
-                        .iter()
-                        .map(|block| SoundPreload {
-                            sound_id: block.sound_id,
-                            object_id: ObjectKey::from(block.object_id),
-                            owner_id: block.owner_id,
-                        })
-                        .collect(),
-                });
-            }
             // The reply to a baked-texture cache query (`AgentCachedTexture`).
             AnyMessage::AgentCachedTextureResponse(response) => {
                 self.events.push_back(Event::CachedTextureResponse {
@@ -4816,13 +4688,6 @@ impl Session {
                         .map(|block| (block.texture_index, block.texture_id))
                         .collect(),
                 });
-            }
-            // Coarse (minimap) positions of nearby avatars. The location and
-            // agent-data blocks are parallel arrays; `you`/`prey` index into them
-            // (a negative index means "none").
-            AnyMessage::CoarseLocationUpdate(update) => {
-                let event = self.coarse_location_event(from, update);
-                self.events.push_back(event);
             }
             // Periodic region performance telemetry (~1 Hz). `RegionX`/`RegionY`
             // carry the region's map-tile indices (grid coordinates); the
@@ -5174,35 +5039,6 @@ impl Session {
                     .collect();
                 self.push_experience_event(generic.method_data.invoice, params, true);
             }
-            // A generic method-name + parameter envelope used for a grab-bag of
-            // loosely-coupled features keyed by `Method` (the feature-specific
-            // ones, like `emptymutelist` above, are matched first); the parameter
-            // blobs are surfaced verbatim for the consumer to parse.
-            AnyMessage::GenericMessage(generic) => {
-                self.events.push_back(Event::GenericMessage(GenericMessage {
-                    method: trimmed_string(&generic.method_data.method),
-                    invoice: InvoiceId::from(generic.method_data.invoice),
-                    params: generic
-                        .param_list
-                        .iter()
-                        .map(|block| block.parameter.clone())
-                        .collect(),
-                }));
-            }
-            // The same envelope as `GenericMessage`, but with a larger per-param
-            // size limit (real grids carry it over HTTP rather than UDP).
-            AnyMessage::LargeGenericMessage(generic) => {
-                self.events
-                    .push_back(Event::LargeGenericMessage(GenericMessage {
-                        method: trimmed_string(&generic.method_data.method),
-                        invoice: InvoiceId::from(generic.method_data.invoice),
-                        params: generic
-                            .param_list
-                            .iter()
-                            .map(|block| block.parameter.clone())
-                            .collect(),
-                    }));
-            }
             // An optimised streaming envelope: a numeric method id plus a single
             // opaque data blob (e.g. a GLTF material override), surfaced verbatim.
             AnyMessage::GenericStreamingMessage(streaming) => {
@@ -5289,7 +5125,6 @@ impl Session {
                     object_id: ObjectKey::from(clear.object_data.object_id),
                 });
             }
-            AnyMessage::AlertMessage(alert) => self.handle_alert_message(from, alert),
             AnyMessage::AgentAlertMessage(alert) => {
                 self.events.push_back(Event::AgentAlertMessage {
                     agent_id: AgentKey::from(alert.agent_data.agent_id),
@@ -5526,13 +5361,11 @@ impl Session {
                     // needs no chat action. The `FriendKey` and the roster's
                     // `AgentKey` share the same `Key` identity.
                     let agent = AgentKey(id.0);
+                    // An offlined friend can no longer be voice-connected
+                    // either (B8): the voice roster is dropped on the same
+                    // fan-out, idempotent with the agent-list voice updates.
                     for chat_session in self.chat_sessions.values_mut() {
-                        chat_session.typing.remove(&agent);
-                        chat_session.participants.remove(&agent);
-                        // An offlined friend can no longer be voice-connected
-                        // either (B8): drop them from the voice roster on the same
-                        // fan-out, idempotent with the agent-list voice updates.
-                        chat_session.voice.members.remove(&agent);
+                        chat_session.forget_agent(agent);
                     }
                 }
                 if !ids.is_empty() {
@@ -5582,12 +5415,20 @@ impl Session {
                 self.events.push_back(Event::LoggedOut);
             }
             _ => {
-                self.push_diagnostic(Diagnostic::UnhandledMessage {
-                    id: message.id(),
-                    name: message.name(),
-                    status: message.status(),
-                    child: false,
-                });
+                // Everything the root circuit shares with a child-agent circuit
+                // is handled once, for both, in `dispatch_shared`. It runs
+                // *after* the arms above rather than before them, so a root-only
+                // refinement of a shared message — the `emptymutelist` and
+                // experience `GenericMessage` features, which are the agent's
+                // and not a region's — still matches first.
+                if !self.dispatch_shared(CircuitRole::Root, from, message, now)? {
+                    self.push_diagnostic(Diagnostic::UnhandledMessage {
+                        id: message.id(),
+                        name: message.name(),
+                        status: message.status(),
+                        child: false,
+                    });
+                }
             }
         }
         Ok(())
@@ -5602,26 +5443,64 @@ impl Session {
     }
 
     /// The fallible body of [`Self::handle_timeout`].
+    ///
+    /// One tick is a fixed sequence of phases, each its own method below. Only
+    /// the two that can *end* the session ([`Self::expire_link`] and
+    /// [`Self::expire_root_resends`]) cut the tick short, and they do it by
+    /// saying so with [`Liveness::Ended`] rather than returning from the middle
+    /// of a long body: every other phase runs on every tick, whatever the ones
+    /// before it found. A timed-out teleport used to return here too, which cost
+    /// that tick its retransmissions, its owed acks, its agent update and the
+    /// whole child-circuit loop.
     fn run_timeout(&mut self, now: Instant) -> Result<(), Error> {
         if matches!(self.state, SessionState::Closed) {
             return Ok(());
         }
 
-        // Prune stale "X is typing…" entries: a lost `TypingStop` would otherwise
-        // strand the indicator. The accessor stays `now`-free by pruning here on
-        // the timed loop (an explicit `TypingStop` still clears immediately).
+        self.expire_typing(now);
+        self.expire_inventory_fetches(now);
+        // Re-issue, and eventually abandon, asset streams that stopped making
+        // progress. Every one of these registries is insert-on-request,
+        // remove-on-success, so without this a stalled stream strands its
+        // partial buffer — and its caller — for the session's life.
+        self.expire_asset_transfers(now);
+        // Re-ask for linkset roots a tracked child still names but the simulator
+        // has not sent: without it a child that never updates again (a worn
+        // shoe) waits on one unanswered request for the session's life.
+        self.reask_missing_parents(now);
+
+        if self.expire_link(now) == Liveness::Ended {
+            return Ok(());
+        }
+        self.expire_teleport(now);
+        if self.expire_root_resends(now) == Liveness::Ended {
+            return Ok(());
+        }
+        self.expire_sit(now);
+        self.run_root_circuit_timers(now)?;
+        self.run_child_circuit_timers(now);
+
+        Ok(())
+    }
+
+    /// Prunes stale "X is typing…" entries: a lost `TypingStop` would otherwise
+    /// strand the indicator. The accessor stays `now`-free by pruning here on
+    /// the timed loop (an explicit `TypingStop` still clears immediately).
+    fn expire_typing(&mut self, now: Instant) {
         for chat_session in self.chat_sessions.values_mut() {
             chat_session
                 .typing
                 .retain(|_, last_seen| now.saturating_duration_since(*last_seen) < TYPING_TIMEOUT);
         }
+    }
 
-        // Release inventory folder fetches whose reply never came: a lost UDP
-        // request or a CAPS POST that errored out would otherwise hold its folder
-        // `Fetching` for the session's life, and a full budget of such folders
-        // would pin the background crawl's slots at zero. Each stalled folder
-        // returns to `Unknown` for the next sweep to re-issue, until its retry
-        // budget is spent and the crawl gives up on it.
+    /// Releases inventory folder fetches whose reply never came: a lost UDP
+    /// request or a CAPS POST that errored out would otherwise hold its folder
+    /// `Fetching` for the session's life, and a full budget of such folders
+    /// would pin the background crawl's slots at zero. Each stalled folder
+    /// returns to `Unknown` for the next sweep to re-issue, until its retry
+    /// budget is spent and the crawl gives up on it.
+    fn expire_inventory_fetches(&mut self, now: Instant) {
         for (folder, state) in self.inventory.expire_stalled_fetches(now) {
             if matches!(state, FolderState::Failed) {
                 tracing::warn!(
@@ -5637,25 +5516,19 @@ impl Session {
                 tracing::debug!(%folder, "inventory folder contents fetch stalled; requeued");
             }
         }
+    }
 
-        // Re-issue, and eventually abandon, asset streams that stopped making
-        // progress. Every one of these registries is insert-on-request,
-        // remove-on-success, so without this a stalled stream strands its
-        // partial buffer — and its caller — for the session's life.
-        self.expire_asset_transfers(now);
-
-        // Re-ask for linkset roots a tracked child still names but the simulator
-        // has not sent: without it a child that never updates again (a worn
-        // shoe) waits on one unanswered request for the session's life.
-        self.reask_missing_parents(now);
-
+    /// The two root-circuit deadlines that end the session: a link that has gone
+    /// silent past [`INACTIVITY_TIMEOUT`], and a `LogoutRequest` whose
+    /// `LogoutReply` never came.
+    fn expire_link(&mut self, now: Instant) -> Liveness {
         if self
             .circuit
             .as_ref()
-            .is_some_and(|c| now >= c.timers.inactivity)
+            .is_some_and(|c| now >= c.inactivity_deadline())
         {
             self.close(DisconnectReason::Timeout);
-            return Ok(());
+            return Liveness::Ended;
         }
 
         if self
@@ -5671,37 +5544,48 @@ impl Session {
             });
             self.state = SessionState::Closed;
             self.events.push_back(Event::LoggedOut);
-            return Ok(());
+            return Liveness::Ended;
         }
 
-        if matches!(self.state, SessionState::Teleporting)
-            && self
+        Liveness::Alive
+    }
+
+    /// Fails a teleport whose confirmation never arrived, in place: the session
+    /// keeps running where it already is.
+    fn expire_teleport(&mut self, now: Instant) {
+        if !matches!(self.state, SessionState::Teleporting)
+            || !self
                 .circuit
                 .as_ref()
                 .and_then(|c| c.timers.teleport)
                 .is_some_and(|d| now >= d)
         {
-            // A handover in flight left the source region live (deferred
-            // teardown): drop only the pending destination and stay put, so a
-            // lost confirmation fails the teleport in place rather than stranding
-            // the session with its child circuits torn down.
-            self.abort_pending_handover();
-            self.state = SessionState::Active;
-            self.teleport = TeleportPhase::Idle;
-            if let Some(circuit) = self.circuit.as_mut() {
-                circuit.timers.teleport = None;
-            }
-            self.events.push_back(Event::TeleportFailed {
-                reason: "teleport timed out".to_owned(),
-                alert_info: None,
-            });
-            return Ok(());
+            return;
         }
+        // A handover in flight left the source region live (deferred teardown):
+        // drop only the pending destination and stay put, so a lost confirmation
+        // fails the teleport in place rather than stranding the session with its
+        // child circuits torn down.
+        self.abort_pending_handover();
+        self.state = SessionState::Active;
+        self.teleport = TeleportPhase::Idle;
+        if let Some(circuit) = self.circuit.as_mut() {
+            circuit.timers.teleport = None;
+        }
+        self.events.push_back(Event::TeleportFailed {
+            reason: "teleport timed out".to_owned(),
+            alert_info: None,
+        });
+    }
 
-        // A reliable packet that runs out of retransmissions is surfaced, but
-        // only the ones that establish the session on the circuit are fatal: a
-        // lost `ObjectSelect` or chat line costs that one action, and the dead
-        // link it might hint at is the inactivity timeout's job to declare.
+    /// Retransmits what is due on the root circuit, and surfaces what has run
+    /// out of retransmissions.
+    ///
+    /// A packet that gives up is surfaced, but only the ones that establish the
+    /// session on the circuit are fatal: a lost `ObjectSelect` or chat line
+    /// costs that one action, and the dead link it might hint at is the
+    /// inactivity timeout's job to declare.
+    fn expire_root_resends(&mut self, now: Instant) -> Liveness {
         let exhausted = self
             .circuit
             .as_mut()
@@ -5723,36 +5607,45 @@ impl Session {
         }
         if handshake_lost {
             self.close(DisconnectReason::HandshakeFailed);
-            return Ok(());
+            return Liveness::Ended;
         }
+        Liveness::Alive
+    }
 
-        // A sit request whose `AvatarSitResponse` never arrived: surface the
-        // missing reply (the session keeps running — sit is best-effort).
-        if self
+    /// Surfaces a sit request whose `AvatarSitResponse` never arrived. The
+    /// session keeps running — sit is best-effort.
+    fn expire_sit(&mut self, now: Instant) {
+        if !self
             .circuit
             .as_ref()
             .and_then(|c| c.timers.sit)
             .is_some_and(|d| now >= d)
         {
-            if let Some(circuit) = self.circuit.as_mut() {
-                circuit.timers.sit = None;
-            }
-            // Only a sit still pending went unanswered; one a teleport or a
-            // stand already ended is not a missing reply.
-            if matches!(self.sit, SitState::AwaitingResponse { .. }) {
-                self.sit = SitState::NotSitting;
-                tracing::warn!("sit timed out waiting for AvatarSitResponse");
-                self.push_diagnostic(Diagnostic::ExpectedReplyMissing {
-                    request: Diagnostic::SIT_REQUEST.to_owned(),
-                    sequence: None,
-                });
-            }
+            return;
         }
+        if let Some(circuit) = self.circuit.as_mut() {
+            circuit.timers.sit = None;
+        }
+        // Only a sit still pending went unanswered; one a teleport or a stand
+        // already ended is not a missing reply.
+        if matches!(self.sit, SitState::AwaitingResponse { .. }) {
+            self.sit = SitState::NotSitting;
+            tracing::warn!("sit timed out waiting for AvatarSitResponse");
+            self.push_diagnostic(Diagnostic::ExpectedReplyMissing {
+                request: Diagnostic::SIT_REQUEST.to_owned(),
+                sequence: None,
+            });
+        }
+    }
 
+    /// The periodic sends the root circuit owes the simulator: the owed-ack
+    /// flush, the agent update (which carries the camera the interest list is
+    /// built from) and the keep-alive ping.
+    fn run_root_circuit_timers(&mut self, now: Instant) -> Result<(), Error> {
         if self
             .circuit
             .as_ref()
-            .and_then(|c| c.timers.ack_flush)
+            .and_then(|c| c.ack_flush_deadline())
             .is_some_and(|d| now >= d)
             && let Some(circuit) = self.circuit.as_mut()
         {
@@ -5789,9 +5682,19 @@ impl Session {
             circuit.timers.ping = Some(deadline(now, PING_INTERVAL));
         }
 
-        // Keep child circuits healthy: flush owed acks, retransmit, advertise the
-        // agent (camera/interest) so the neighbour streams its objects, and drop
-        // any that have gone silent (a dead child never fails the session).
+        Ok(())
+    }
+
+    /// Keeps child circuits healthy: flush owed acks, retransmit, advertise the
+    /// agent (camera/interest) so the neighbour streams its objects, and drop
+    /// any that have gone silent.
+    ///
+    /// Nothing here fails the session: a dead neighbour, an unflushable ack
+    /// batch and a failed agent-update encode are all reported and stepped over,
+    /// because returning would skip the remaining children and the dead-child
+    /// sweep below — and, through [`Self::handle_timeout`], would close the
+    /// session over a circuit it can live without.
+    fn run_child_circuit_timers(&mut self, now: Instant) {
         let controls = self.controls.bits();
         let body = self.body_rotation.clone();
         let head = self.head_rotation.clone();
@@ -5799,7 +5702,7 @@ impl Session {
         let mut dead = Vec::new();
         let mut child_exhausted = Vec::new();
         for (addr, child) in &mut self.children {
-            if now >= child.timers.inactivity {
+            if now >= child.inactivity_deadline() {
                 dead.push(*addr);
                 continue;
             }
@@ -5807,16 +5710,18 @@ impl Session {
             // exhausting its budget there is still worth surfacing.
             child_exhausted.extend(child.process_resends(now));
             // A child's owed acks are its own business: `flush_acks` already
-            // sends every `PacketAck` it can, so the error is informational and
-            // must not abort the tick — that would skip the remaining children
-            // and the dead-child sweep below.
-            if child.timers.ack_flush.is_some_and(|d| now >= d)
+            // sends every `PacketAck` it can, so the error is informational.
+            if child.ack_flush_deadline().is_some_and(|d| now >= d)
                 && let Err(error) = child.flush_acks(now)
             {
                 tracing::warn!(%addr, %error, "failed to flush owed acks on a child circuit");
             }
             if child.timers.agent_update.is_some_and(|d| now >= d) {
-                child.send_agent_update(controls, body.clone(), head.clone(), &camera, now)?;
+                if let Err(error) =
+                    child.send_agent_update(controls, body.clone(), head.clone(), &camera, now)
+                {
+                    tracing::warn!(%addr, %error, "failed to send an agent update on a child circuit");
+                }
                 child.timers.agent_update = Some(deadline(now, AGENT_UPDATE_INTERVAL));
             }
             // Ping the neighbour too, the same cadence as the root; its
@@ -5849,8 +5754,6 @@ impl Session {
                 self.forget_sim_objects(circuit_id);
             }
         }
-
-        Ok(())
     }
 
     /// Advances every asset-transfer registry to `now`: re-issues what the
@@ -5877,7 +5780,7 @@ impl Session {
     fn expire_texture_downloads(&mut self, now: Instant) {
         let mut retry = Vec::new();
         let mut abandoned = Vec::new();
-        for (id, download) in &mut self.texture_downloads {
+        for (id, download) in &mut self.transfers.texture_downloads {
             if now.saturating_duration_since(download.last_progress)
                 < TEXTURE_DOWNLOAD_STALL_TIMEOUT
             {
@@ -5912,7 +5815,7 @@ impl Session {
             }
         }
         for id in abandoned {
-            let _download = self.texture_downloads.remove(&id);
+            let _download = self.transfers.texture_downloads.remove(&id);
             tracing::warn!(
                 %id,
                 "giving up on a UDP texture download after \
@@ -5932,6 +5835,7 @@ impl Session {
     /// serving it and failing the fetch so its caller is not left waiting.
     fn expire_transfer_downloads(&mut self, now: Instant) {
         let expired: Vec<TransferId> = self
+            .transfers
             .transfer_downloads
             .iter()
             .filter(|(_, download)| {
@@ -5940,7 +5844,7 @@ impl Session {
             .map(|(transfer_id, _)| *transfer_id)
             .collect();
         for transfer_id in expired {
-            let _download = self.transfer_downloads.remove(&transfer_id);
+            let _download = self.transfers.transfer_downloads.remove(&transfer_id);
             // Best-effort, like every other send on the timer loop.
             if let Some(circuit) = self.circuit.as_mut() {
                 let _ignored = circuit.send_transfer_abort(transfer_id, now);
@@ -5969,23 +5873,25 @@ impl Session {
         // sweep over the union could drop an unrelated live transfer that
         // happens to share an id.
         let downloads: Vec<XferId> = self
+            .transfers
             .xfer_downloads
             .iter()
             .filter(|(_, download)| stalled(download.last_progress))
             .map(|(xfer_id, _)| *xfer_id)
             .collect();
         for xfer_id in downloads {
-            let _download = self.xfer_downloads.remove(&xfer_id);
+            let _download = self.transfers.xfer_downloads.remove(&xfer_id);
             self.abandon_xfer(xfer_id, "download", XFER_TIMEOUT_RESULT, now);
         }
         let uploads: Vec<XferId> = self
+            .transfers
             .xfer_uploads
             .iter()
             .filter(|(_, upload)| stalled(upload.last_progress))
             .map(|(xfer_id, _)| *xfer_id)
             .collect();
         for xfer_id in uploads {
-            let _upload = self.xfer_uploads.remove(&xfer_id);
+            let _upload = self.transfers.xfer_uploads.remove(&xfer_id);
             self.abandon_xfer(xfer_id, "upload", XFER_TIMEOUT_RESULT, now);
         }
     }
@@ -6020,13 +5926,14 @@ impl Session {
     /// never come.
     fn expire_upload_offers(&mut self, now: Instant) {
         let expired_files: Vec<String> = self
+            .transfers
             .pending_xfer_uploads
             .iter()
             .filter(|(_, offer)| now >= offer.expires)
             .map(|(filename, _)| filename.clone())
             .collect();
         for filename in expired_files {
-            let _offer = self.pending_xfer_uploads.remove(&filename);
+            let _offer = self.transfers.pending_xfer_uploads.remove(&filename);
             tracing::warn!(%filename, "offered Xfer upload was never requested; withdrawn");
             self.push_diagnostic(Diagnostic::ExpectedReplyMissing {
                 request: Diagnostic::XFER_REQUEST.to_owned(),
@@ -6034,13 +5941,14 @@ impl Session {
             });
         }
         let expired_assets: Vec<Uuid> = self
+            .transfers
             .pending_asset_uploads
             .iter()
             .filter(|(_, offer)| now >= offer.expires)
             .map(|(asset_id, _)| *asset_id)
             .collect();
         for asset_id in expired_assets {
-            let _offer = self.pending_asset_uploads.remove(&asset_id);
+            let _offer = self.transfers.pending_asset_uploads.remove(&asset_id);
             tracing::warn!(%asset_id, "offered asset upload was never pulled; withdrawn");
             self.push_diagnostic(Diagnostic::ExpectedReplyMissing {
                 request: Diagnostic::ASSET_UPLOAD_REQUEST.to_owned(),
@@ -6050,6 +5958,7 @@ impl Session {
             // goes with it rather than waiting out the longer save timeout and
             // reporting the same failure twice.
             let transaction_id = self
+                .transfers
                 .pending_inventory_saves
                 .remove(&asset_id)
                 .map(|save| save.transaction_id);
@@ -6062,6 +5971,7 @@ impl Session {
         // A save the simulator neither pulled nor answered. An inlined payload
         // has no offer to expire, so without this the caller waits forever.
         let expired_saves: Vec<Uuid> = self
+            .transfers
             .pending_inventory_saves
             .iter()
             .filter(|(_, save)| now >= save.expires)
@@ -6069,6 +5979,7 @@ impl Session {
             .collect();
         for asset_id in expired_saves {
             let transaction_id = self
+                .transfers
                 .pending_inventory_saves
                 .remove(&asset_id)
                 .map(|save| save.transaction_id);
@@ -6092,14 +6003,7 @@ impl Session {
     /// object whose contents nobody asked to read would be downloaded and parsed
     /// on a stale claim's behalf.
     fn expire_task_inventory_claims(&mut self, now: Instant) {
-        let fresh = |asked: &Instant| now.saturating_duration_since(*asked) < RELIABLE_REPLY_GRACE;
-        let unresolved_before = self.pending_task_inventory_unresolved.len();
-        self.pending_task_inventory_unresolved.retain(fresh);
-        let resolved_before = self.pending_task_inventory.len();
-        self.pending_task_inventory.retain(|_, asked| fresh(asked));
-        let lost = unresolved_before
-            .saturating_sub(self.pending_task_inventory_unresolved.len())
-            .saturating_add(resolved_before.saturating_sub(self.pending_task_inventory.len()));
+        let lost = self.transfers.expire_task_claims(now);
         for _ in 0..lost {
             tracing::warn!("task inventory reply never arrived; claim dropped");
             self.push_diagnostic(Diagnostic::ExpectedReplyMissing {
@@ -6113,50 +6017,7 @@ impl Session {
     /// to do, merged into [`Self::poll_timeout`] so an otherwise idle shell
     /// still wakes for a stalled stream.
     fn next_asset_transfer_deadline(&self) -> Option<Instant> {
-        let mut earliest = None;
-        for download in self.texture_downloads.values() {
-            merge_deadline(
-                &mut earliest,
-                Some(deadline(
-                    download.last_progress,
-                    TEXTURE_DOWNLOAD_STALL_TIMEOUT,
-                )),
-            );
-        }
-        for download in self.transfer_downloads.values() {
-            merge_deadline(
-                &mut earliest,
-                Some(deadline(download.last_progress, ASSET_TRANSFER_TIMEOUT)),
-            );
-        }
-        for download in self.xfer_downloads.values() {
-            merge_deadline(
-                &mut earliest,
-                Some(deadline(download.last_progress, XFER_STALL_TIMEOUT)),
-            );
-        }
-        for upload in self.xfer_uploads.values() {
-            merge_deadline(
-                &mut earliest,
-                Some(deadline(upload.last_progress, XFER_STALL_TIMEOUT)),
-            );
-        }
-        for offer in self.pending_xfer_uploads.values() {
-            merge_deadline(&mut earliest, Some(offer.expires));
-        }
-        for offer in self.pending_asset_uploads.values() {
-            merge_deadline(&mut earliest, Some(offer.expires));
-        }
-        for save in self.pending_inventory_saves.values() {
-            merge_deadline(&mut earliest, Some(save.expires));
-        }
-        for asked in &self.pending_task_inventory_unresolved {
-            merge_deadline(&mut earliest, Some(deadline(*asked, RELIABLE_REPLY_GRACE)));
-        }
-        for asked in self.pending_task_inventory.values() {
-            merge_deadline(&mut earliest, Some(deadline(*asked, RELIABLE_REPLY_GRACE)));
-        }
-        earliest
+        self.transfers.next_deadline()
     }
 
     /// Enqueues an application message for delivery.
@@ -7005,14 +6866,13 @@ impl Session {
             .chat_sessions
             .entry(kind)
             .or_insert_with(|| ChatSession::new(now));
-        session.last_activity = now;
         // Every site routing through here observes real session traffic (an
         // outbound send, an inbound message / participant change, an accept's
         // roster), which is the "joined" signal: promote a pending `Invited`
         // entry to `Joined` (a no-op for an already-joined session). Typing,
         // which must not open or join a session, uses the non-creating
         // `chat_session_get_mut` instead and so never reaches this promotion.
-        session.lifecycle = ChatSessionLifecycle::Joined;
+        session.note_joined(now);
         session
     }
 
@@ -7029,14 +6889,13 @@ impl Session {
         invite: PendingInvite,
         now: Instant,
     ) {
-        let fresh = !self.chat_sessions.contains_key(&kind);
-        let session = self
-            .chat_sessions
-            .entry(kind)
-            .or_insert_with(|| ChatSession::new(now));
-        session.last_activity = now;
-        if fresh || matches!(session.lifecycle, ChatSessionLifecycle::Invited(_)) {
-            session.lifecycle = ChatSessionLifecycle::Invited(invite);
+        match self.chat_sessions.entry(kind) {
+            std::collections::btree_map::Entry::Occupied(mut existing) => {
+                existing.get_mut().note_reinvited(invite, now);
+            }
+            std::collections::btree_map::Entry::Vacant(slot) => {
+                slot.insert(ChatSession::invited(invite, now));
+            }
         }
     }
 
@@ -7117,14 +6976,11 @@ impl Session {
                 // The invitation beat the reply: keep the entry the inbound
                 // traffic built and fold our optimistic side into it.
                 let session = existing.get_mut();
-                session.participants.extend(started.participants);
-                session.last_activity = now;
-                session.lifecycle = ChatSessionLifecycle::Joined;
+                session.extend_participants(started.participants);
+                session.note_joined(now);
             }
             std::collections::btree_map::Entry::Vacant(slot) => {
-                let session = slot.insert(started);
-                session.last_activity = now;
-                session.lifecycle = ChatSessionLifecycle::Joined;
+                slot.insert(started).note_joined(now);
             }
         }
     }
@@ -7237,7 +7093,7 @@ impl Session {
     /// [`Command::MarkSessionRead`](crate::Command::MarkSessionRead).
     pub fn mark_session_read(&mut self, session: ChatSessionKind) {
         if let Some(chat_session) = self.chat_session_get_mut(session) {
-            chat_session.unread = 0;
+            chat_session.mark_read();
         }
     }
 
@@ -7388,9 +7244,7 @@ impl Session {
     /// `voice.joined` and `voice.has_voice`. The runtime additionally provisions a
     /// voice account and signals into the channel via `ChatSessionRequest`.
     pub fn join_session_voice(&mut self, session: ChatSessionKind, now: Instant) {
-        let chat_session = self.chat_session_mut(session, now);
-        chat_session.voice.joined = true;
-        chat_session.voice.has_voice = true;
+        self.chat_session_mut(session, now).note_voice_joined();
     }
 
     /// Records that we have left `session`'s voice channel — the pure-state half of
@@ -7401,7 +7255,7 @@ impl Session {
     /// additionally signals the voice decline / logout on the wire.
     pub fn leave_session_voice(&mut self, session: ChatSessionKind) {
         if let Some(chat_session) = self.chat_session_get_mut(session) {
-            chat_session.voice.joined = false;
+            chat_session.note_voice_left();
         }
     }
 
@@ -8693,11 +8547,9 @@ impl Session {
         let fresh = !self.chat_sessions.contains_key(&kind);
         let session = self.chat_session_mut(kind, now);
         if fresh {
-            session.server_history_state = ServerHistoryState::NothingToFetch;
+            session.note_server_history(ServerHistoryState::NothingToFetch);
         }
-        for invitee in invitees {
-            session.participants.insert(*invitee);
-        }
+        session.extend_participants(invitees.iter().copied());
     }
 
     /// Sends a message into an ad-hoc conference / multi-party IM session
@@ -8987,15 +8839,6 @@ impl Session {
         }
     }
 
-    /// Allocates the next monotonic [`XferId`] (never zero), for a new inbound
-    /// `Xfer` download or the caller-initiated [`request_xfer`](Self::request_xfer)
-    /// path.
-    fn alloc_xfer_id(&mut self) -> XferId {
-        let id = self.next_xfer_id;
-        self.next_xfer_id = XferId(self.next_xfer_id.get().checked_add(1).unwrap_or(1));
-        id
-    }
-
     /// Registers a new inbound `Xfer` download for `filename` with the given
     /// routing `purpose` and queues the `RequestXfer` that starts it. Returns the
     /// allocated [`XferId`] correlating the transfer.
@@ -9014,10 +8857,10 @@ impl Session {
         filename: &str,
         now: Instant,
     ) -> Result<XferId, Error> {
-        let xfer_id = self.alloc_xfer_id();
+        let xfer_id = self.transfers.mint_xfer_id();
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_request_xfer(xfer_id, filename, now)?;
-        self.xfer_downloads.insert(
+        self.transfers.xfer_downloads.insert(
             xfer_id,
             XferDownload {
                 purpose,
@@ -9070,7 +8913,7 @@ impl Session {
     /// the upload is already gone or fully sent. Advances the upload's cursor
     /// so the next `ConfirmXferPacket` sends the following chunk.
     fn send_next_xfer_upload_packet(&mut self, xfer_id: XferId, now: Instant) -> Result<(), Error> {
-        let Some(upload) = self.xfer_uploads.get_mut(&xfer_id) else {
+        let Some(upload) = self.transfers.xfer_uploads.get_mut(&xfer_id) else {
             return Ok(());
         };
         let sequence = upload.next_sequence;
@@ -9106,14 +8949,6 @@ impl Session {
         self.start_xfer_download(XferPurpose::Generic, filename, now)
     }
 
-    /// Mints the next [`TransferId`] for a legacy UDP asset Transfer (never
-    /// nil).
-    fn alloc_transfer_id(&mut self) -> TransferId {
-        let id = TransferId::new(Uuid::from_u128(self.next_transfer_id));
-        self.next_transfer_id = self.next_transfer_id.checked_add(1).unwrap_or(1);
-        id
-    }
-
     /// Starts a legacy UDP asset Transfer (`TransferRequest`) with the given
     /// routing `purpose`, `source_type` and packed `params`, registering the
     /// reassembly state under a fresh [`TransferId`].
@@ -9133,10 +8968,10 @@ impl Session {
         params: Vec<u8>,
         now: Instant,
     ) -> Result<TransferId, Error> {
-        let transfer_id = self.alloc_transfer_id();
+        let transfer_id = self.transfers.mint_transfer_id();
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_transfer_request(transfer_id, source_type, params, now)?;
-        self.transfer_downloads.insert(
+        self.transfers.transfer_downloads.insert(
             transfer_id,
             TransferDownload {
                 purpose,
@@ -9244,7 +9079,7 @@ impl Session {
     pub fn abort_transfer(&mut self, transfer_id: TransferId, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_transfer_abort(transfer_id, now)?;
-        let _download = self.transfer_downloads.remove(&transfer_id);
+        let _download = self.transfers.transfer_downloads.remove(&transfer_id);
         Ok(())
     }
 
@@ -9356,7 +9191,7 @@ impl Session {
         // A fresh download buffer; a repeat request just restarts it. Registered
         // only once the request is on the wire, so a failed send leaves no entry
         // behind for a caller to wait on.
-        self.texture_downloads.insert(
+        self.transfers.texture_downloads.insert(
             texture_id.uuid(),
             TextureDownload {
                 codec: ImageCodec::J2c,
@@ -10108,9 +9943,12 @@ impl Session {
     ) -> Result<(), Error> {
         match self.resolve_object_key(target) {
             Some(task) => {
-                let _previous = self.pending_task_inventory.insert(task, now);
+                let _previous = self.transfers.pending_task_inventory.insert(task, now);
             }
-            None => self.pending_task_inventory_unresolved.push_back(now),
+            None => self
+                .transfers
+                .pending_task_inventory_unresolved
+                .push_back(now),
         }
         let circuit = self.circuit_for_scope(target.circuit)?;
         circuit.send_request_task_inventory(target.id, now)?;
@@ -10120,10 +9958,7 @@ impl Session {
     /// Resolves a [`ScopedObjectId`] to the cached object's full [`ObjectKey`],
     /// or `None` when that object is not (yet) in the scene-graph cache.
     fn resolve_object_key(&self, target: ScopedObjectId) -> Option<ObjectKey> {
-        self.objects
-            .get(&target.circuit)?
-            .get(&target.id)
-            .map(|object| object.full_id)
+        self.world.object(target).map(|object| object.full_id)
     }
 
     /// Writes the inventory item `item` into the task inventory of the in-world
@@ -10544,7 +10379,7 @@ impl Session {
                     )
             })
             .map(|(kind, chat_session)| {
-                chat_session.server_history_state = ServerHistoryState::Requested;
+                chat_session.note_server_history(ServerHistoryState::Requested);
                 *kind
             })
             .collect()
@@ -10558,7 +10393,7 @@ impl Session {
     /// session.
     pub fn note_server_history_requested(&mut self, session: ChatSessionKind) {
         if let Some(chat_session) = self.chat_session_get_mut(session) {
-            chat_session.server_history_state = ServerHistoryState::Requested;
+            chat_session.note_server_history(ServerHistoryState::Requested);
         }
     }
 
@@ -11365,7 +11200,7 @@ impl Session {
         // Register the save under the id its completion will name, so the result
         // can be handed back to *this* caller rather than to whoever happens to
         // be waiting when some other save completes.
-        let _prev = self.pending_inventory_saves.insert(
+        let _prev = self.transfers.pending_inventory_saves.insert(
             asset_id,
             PendingInventorySave {
                 transaction_id,
@@ -11373,7 +11208,7 @@ impl Session {
             },
         );
         if !inline {
-            let _prev = self.pending_asset_uploads.insert(
+            let _prev = self.transfers.pending_asset_uploads.insert(
                 asset_id,
                 OfferedUpload {
                     data,
@@ -12281,7 +12116,7 @@ impl Session {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         let params = ["upload filename".to_owned(), viewer_filename.to_owned()];
         circuit.send_estate_owner_message("terrain", &params, now)?;
-        let _previous = self.pending_xfer_uploads.insert(
+        let _previous = self.transfers.pending_xfer_uploads.insert(
             viewer_filename.to_owned(),
             OfferedUpload {
                 data,
@@ -12801,7 +12636,7 @@ impl Session {
     /// [`Object`] carries its [`region_handle`](Object::region_handle); a sim's
     /// objects are dropped when its circuit goes away.
     pub fn objects(&self) -> impl Iterator<Item = &Object> {
-        self.objects.values().flat_map(BTreeMap::values)
+        self.world.objects()
     }
 
     /// All cached scene objects in the region identified by `region_handle`.
@@ -12820,7 +12655,7 @@ impl Session {
     /// [`Session::root_circuit_id`] plus a raw id.
     #[must_use]
     pub fn object(&self, id: ScopedObjectId) -> Option<&Object> {
-        self.objects.get(&id.circuit)?.get(&id.id)
+        self.world.object(id)
     }
 
     /// Whether the cached object with global id `key` is a **temporary**
@@ -12843,7 +12678,7 @@ impl Session {
     /// [`TerrainPatch::layer`] for a specific one. A sim's patches are dropped
     /// when its circuit goes away.
     pub fn terrain_patches(&self) -> impl Iterator<Item = &TerrainPatch> {
-        self.terrain.values().flat_map(BTreeMap::values)
+        self.world.terrain_patches()
     }
 
     /// All cached terrain patches in the region identified by `region_handle`.
@@ -12864,7 +12699,7 @@ impl Session {
     #[must_use]
     pub fn terrain_height(&self, x: u32, y: u32) -> Option<f32> {
         let root = self.circuit.as_ref().map(|circuit| circuit.id)?;
-        let cache = self.terrain.get(&root)?;
+        let cache = self.world.terrain_in(root)?;
         // LAND patches on a standard region are 16×16; locate the patch by its
         // grid position then the cell within it (16 is a non-zero literal).
         let patch = cache.get(&(TerrainLayerType::Land.code(), x / 16, y / 16))?;
@@ -13596,7 +13431,7 @@ impl Session {
     /// (`Undo` / `Redo`) addresses objects by full id rather than region-local
     /// id (mirroring the reference's `packObjectID`, which packs `mID`).
     fn resolve_full_ids(&self, scope: CircuitId, ids: &[RegionLocalObjectId]) -> Vec<ObjectKey> {
-        let Some(cache) = self.objects.get(&scope) else {
+        let Some(cache) = self.world.objects_in(scope) else {
             return Vec::new();
         };
         ids.iter()
@@ -14181,19 +14016,28 @@ impl Session {
     }
 
     /// The earliest instant at which [`Self::handle_timeout`] should next run.
+    ///
+    /// Every deadline [`Self::handle_timeout`] services is merged here, and
+    /// none of them is conditional on the root circuit: a session without one
+    /// still owes its inventory fetches, its asset transfers and its child
+    /// circuits a wakeup, and a driver that sleeps on this would otherwise
+    /// never give them a tick.
     #[must_use]
     pub fn poll_timeout(&self) -> Option<Instant> {
         if matches!(self.state, SessionState::Closed) {
             return None;
         }
-        let circuit = self.circuit.as_ref()?;
-        let mut earliest = Some(circuit.timers.inactivity);
-        merge_deadline(&mut earliest, circuit.timers.ack_flush);
-        merge_deadline(&mut earliest, circuit.timers.agent_update);
-        merge_deadline(&mut earliest, circuit.timers.logout);
-        merge_deadline(&mut earliest, circuit.timers.teleport);
-        merge_deadline(&mut earliest, circuit.timers.sit);
-        merge_deadline(&mut earliest, circuit.next_resend_deadline());
+        let mut earliest = None;
+        if let Some(circuit) = self.circuit.as_ref() {
+            merge_deadline(&mut earliest, Some(circuit.inactivity_deadline()));
+            merge_deadline(&mut earliest, circuit.ack_flush_deadline());
+            merge_deadline(&mut earliest, circuit.timers.agent_update);
+            merge_deadline(&mut earliest, circuit.timers.logout);
+            merge_deadline(&mut earliest, circuit.timers.teleport);
+            merge_deadline(&mut earliest, circuit.timers.sit);
+            merge_deadline(&mut earliest, circuit.timers.ping);
+            merge_deadline(&mut earliest, circuit.next_resend_deadline());
+        }
         // The inventory fetch deadlines are session-scoped rather than
         // per-circuit, but an idle shell still has to wake for them or a stalled
         // folder sits `Fetching` until some other timer happens to fire.
@@ -14203,9 +14047,14 @@ impl Session {
         merge_deadline(&mut earliest, self.next_asset_transfer_deadline());
         // And the parent re-asks, for a child that is otherwise quiet.
         merge_deadline(&mut earliest, self.next_parent_reask());
+        // A child circuit's timers are serviced on the same tick as the root's,
+        // so they are merged the same way: the agent update and the ping are
+        // sent per child, not piggybacked on the root's wake.
         for child in self.children.values() {
-            merge_deadline(&mut earliest, Some(child.timers.inactivity));
-            merge_deadline(&mut earliest, child.timers.ack_flush);
+            merge_deadline(&mut earliest, Some(child.inactivity_deadline()));
+            merge_deadline(&mut earliest, child.ack_flush_deadline());
+            merge_deadline(&mut earliest, child.timers.agent_update);
+            merge_deadline(&mut earliest, child.timers.ping);
             merge_deadline(&mut earliest, child.next_resend_deadline());
         }
         earliest

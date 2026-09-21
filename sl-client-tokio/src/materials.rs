@@ -12,7 +12,8 @@ use tokio::sync::mpsc;
 /// POSTs a `RenderMaterials` request for `material_ids` (the zipped binary-LLSD
 /// form), decoding the zipped reply into the legacy materials and surfacing them
 /// as an [`Event::RenderMaterials`]. Best-effort: a transport or decode failure
-/// yields an empty list.
+/// yields an empty list — and is logged, since an undecodable reply is
+/// otherwise indistinguishable from a region that knows no such materials.
 pub(crate) async fn fetch_render_materials(
     cap_url: String,
     material_ids: Vec<Uuid>,
@@ -28,10 +29,19 @@ pub(crate) async fn fetch_render_materials(
         .await
     {
         Ok(response) => match response.text().await {
-            Ok(text) => parse_render_materials_response(&text),
-            Err(_error) => Vec::new(),
+            Ok(text) => parse_render_materials_response(&text).unwrap_or_else(|error| {
+                tracing::warn!("undecodable RenderMaterials reply: {error}");
+                Vec::new()
+            }),
+            Err(error) => {
+                tracing::warn!("RenderMaterials reply body unreadable: {error}");
+                Vec::new()
+            }
         },
-        Err(_error) => Vec::new(),
+        Err(error) => {
+            tracing::warn!("RenderMaterials transport error: {error}");
+            Vec::new()
+        }
     };
     deliver(&events, Event::RenderMaterials(materials)).await;
 }

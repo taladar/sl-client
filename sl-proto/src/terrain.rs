@@ -1071,4 +1071,169 @@ mod tests {
         assert!(error < 0.05, "re-encode drifted by {error}");
         Ok(())
     }
+
+    /// Builds a single-patch payload with all-zero coefficients for an
+    /// *extended* (variable-region) layer: a 32×32 grid whose patch coordinates
+    /// are packed into 32 bits rather than 10. Synthesised by hand, so it pins
+    /// the decoder against the wire format rather than against our own encoder.
+    fn flat_extended_payload(patch_x: u32, patch_y: u32, dc_offset: f32, range: u32) -> Vec<u8> {
+        let mut writer = BitWriter::default();
+        // Group header: stride, patch size 32, the extended LAND layer code.
+        writer.push(264, 16);
+        writer.push(32, 8);
+        writer.push(u32::from(TerrainLayerType::LandExtended.code()), 8);
+        // Patch header: prequant 10 (high nibble 8), wbits 2 (low nibble 0).
+        writer.push(8 << 4, 8);
+        writer.push(dc_offset.to_bits(), 32);
+        writer.push(range, 16);
+        writer.push((patch_x << 16) | (patch_y & 0xffff), 32);
+        // End-of-block: every coefficient is zero.
+        writer.push(1, 1);
+        writer.push(0, 1);
+        writer.push(97, 8);
+        writer.into_bytes()
+    }
+
+    /// The variable-region decode path, read off a hand-built payload: a 32-byte
+    /// patch edge yields 1024 cells, and the 32-bit coordinate field carries a
+    /// grid position (here 300) that the 10-bit standard field could not — the
+    /// branch `decode_layer` takes on `layer.is_extended()`.
+    #[test]
+    fn decodes_an_extended_patch_with_32bit_coordinates() -> Result<(), TestError> {
+        let payload = flat_extended_payload(300, 5, 20.0, 8);
+        let (layer, patches) = decode_layer(&payload).ok_or("payload should decode")?;
+        assert_eq!(layer, TerrainLayerType::LandExtended);
+        assert_eq!(patches.len(), 1);
+        let patch = patches.first().ok_or("expected one patch")?;
+        assert_eq!(patch.patch_x, 300);
+        assert_eq!(patch.patch_y, 5);
+        assert_eq!(patch.size, 32);
+        assert_eq!(patch.values.len(), 1024);
+        // The same closed-form flat height as the standard-size case:
+        // range/2 + dc_offset = 8/2 + 20.
+        for value in &patch.values {
+            assert!((value - 24.0).abs() < 1e-3, "height {value} != 24.0");
+        }
+        Ok(())
+    }
+
+    /// A `LayerData` payload is one datagram, so a short or garbled one is a
+    /// real thing to receive. Every prefix of a two-patch message either fails
+    /// the group header outright or decodes to a bounded, well-formed result:
+    /// the layer it announced, no more patches than were sent, and — the part
+    /// the renderer depends on — a full `size * size` value grid per patch,
+    /// never a short one indexed later by `row * size + col`.
+    #[test]
+    fn every_prefix_of_a_patch_stream_decodes_to_a_bounded_result() -> Result<(), TestError> {
+        let a = build_patch(TerrainLayerType::Land, 0, 0, 16, |_, _| 24.0);
+        let b = build_patch(TerrainLayerType::Land, 1, 1, 16, |x, _| {
+            30.0 + 0.1 * f32::from(u16::try_from(x).unwrap_or(0))
+        });
+        let bytes = encode_layer(TerrainLayerType::Land, &[a, b]);
+        let (_, whole) = decode_layer(&bytes).ok_or("payload should decode")?;
+        assert_eq!(whole.len(), 2);
+        for cut in 0..bytes.len() {
+            let prefix = bytes.get(..cut).ok_or("prefix of the payload")?;
+            let Some((layer, patches)) = decode_layer(prefix) else {
+                continue;
+            };
+            assert_eq!(layer, TerrainLayerType::Land);
+            assert!(
+                patches.len() <= 2,
+                "a {cut}-byte prefix invented {} patches",
+                patches.len()
+            );
+            for patch in &patches {
+                assert_eq!(patch.size, 16);
+                assert_eq!(
+                    patch.values.len(),
+                    256,
+                    "a {cut}-byte prefix yielded a short value grid"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// The bit reader reports running off the end instead of fabricating data:
+    /// reading past the last byte yields zero bits and latches `overrun`, which
+    /// is what stops the patch loop.
+    #[test]
+    fn the_bit_reader_latches_an_overrun() {
+        let mut reader = BitReader::new(&[0xFF]);
+        assert_eq!(reader.unpack(8), 0xFF);
+        assert!(!reader.overrun);
+        assert_eq!(reader.unpack(8), 0);
+        assert!(reader.overrun);
+        // An empty buffer overruns on the very first bit.
+        let mut empty = BitReader::new(&[]);
+        assert_eq!(empty.unpack(1), 0);
+        assert!(empty.overrun);
+    }
+
+    /// The un-zigzag map is a permutation of the transmission indices at both
+    /// patch sizes: every coefficient position is written exactly once, so no
+    /// cell of a decoded patch is left at its initial value and none is written
+    /// twice. A walk that terminated early — the failure mode of the diagonal
+    /// traversal at the larger size — shows up here as a missing index.
+    #[test]
+    fn the_decopy_matrix_is_a_permutation_at_both_patch_sizes() -> Result<(), TestError> {
+        for size in [16_u32, 32] {
+            let total = usize::try_from(size.wrapping_mul(size))?;
+            let matrix = super::build_decopy_matrix(size, total).ok_or("matrix should build")?;
+            assert_eq!(matrix.len(), total);
+            let mut seen = vec![false; total];
+            for step in &matrix {
+                let index = usize::try_from(*step)?;
+                let slot = seen.get_mut(index).ok_or("step outside the patch")?;
+                assert!(
+                    !*slot,
+                    "transmission index {index} used twice at size {size}"
+                );
+                *slot = true;
+            }
+            assert!(
+                seen.into_iter().all(|used| used),
+                "size {size} skipped a cell"
+            );
+            // The walk starts at the DC coefficient: row-major position 0 is the
+            // first value transmitted.
+            assert_eq!(matrix.first().copied(), Some(0));
+        }
+        Ok(())
+    }
+
+    /// The inverse-DCT cosine table is `cos((2n+1) * u * (pi/2)/size)`, and its
+    /// `pi/2 / patch_size` scaling is what makes a 32-patch table different from
+    /// a 16-patch one rather than merely longer: row `u = 0` is all ones at both
+    /// sizes, but row `u = 1` is stretched over twice as many columns.
+    #[test]
+    fn the_icosine_table_scales_with_the_patch_size() -> Result<(), TestError> {
+        for size in [16_usize, 32] {
+            let patch_size = u32::try_from(size)?;
+            let table = super::build_icosine_table(patch_size, size);
+            assert_eq!(table.len(), size.saturating_mul(size));
+            // Row u = 0: cos(0) = 1 for every n.
+            for n in 0..size {
+                let value = table.get(n).copied().ok_or("row 0 entry")?;
+                assert!((value - 1.0).abs() < 1e-6, "cos row 0 col {n} = {value}");
+            }
+            // Row u = 1, column n: cos((2n+1) * pi / (2*size)).
+            for n in [0_usize, 1, size / 2, size - 1] {
+                let expected = ((2.0 * f64::from(u32::try_from(n)?) + 1.0)
+                    * core::f64::consts::FRAC_PI_2
+                    / f64::from(patch_size))
+                .cos();
+                let value = table
+                    .get(size.saturating_add(n))
+                    .copied()
+                    .ok_or("row 1 entry")?;
+                assert!(
+                    (f64::from(value) - expected).abs() < 1e-6,
+                    "cos row 1 col {n} at size {size}: {value} != {expected}"
+                );
+            }
+        }
+        Ok(())
+    }
 }

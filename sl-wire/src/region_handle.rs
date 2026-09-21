@@ -148,7 +148,7 @@ impl From<RegionHandle> for sl_types::map::GridCoordinates {
 #[cfg(test)]
 mod tests {
     use super::RegionHandle;
-    use pretty_assertions::assert_eq;
+    use pretty_assertions::{assert_eq, assert_ne};
 
     #[test]
     fn grid_round_trips() {
@@ -173,6 +173,30 @@ mod tests {
         let expected = u64::from(256_000_u32).checked_shl(32).unwrap_or(0) | u64::from(256_256_u32);
         assert_eq!(handle.get(), expected);
         assert_eq!(RegionHandle::new(handle.get()), handle);
+    }
+
+    /// A grid index past `u32::MAX / 256` has no representable region corner,
+    /// so the metre conversion saturates instead of wrapping into a *different*
+    /// region's handle. The high-index cover elsewhere goes through
+    /// `from_global`, whose inputs are already metres and so cannot overflow —
+    /// this is the one that exercises the multiply.
+    #[test]
+    fn a_grid_index_too_large_to_convert_saturates_rather_than_wrapping() {
+        // The largest index whose south-west corner is representable, and the
+        // corner itself — spelled without bare arithmetic, which the crate
+        // denies.
+        let last = u32::MAX.wrapping_div(256);
+        let corner = last.saturating_mul(256);
+        assert_eq!(
+            RegionHandle::from_grid(last, last).global_coordinates(),
+            (corner, corner)
+        );
+        // One past it saturates: the handle is pinned at the far corner rather
+        // than wrapping back to a low one, so it never names another region.
+        let past = last.saturating_add(1);
+        let over = RegionHandle::from_grid(past, past);
+        assert_eq!(over.global_coordinates(), (u32::MAX, u32::MAX));
+        assert_ne!(over, RegionHandle::from_grid(0, 0));
     }
 
     #[test]

@@ -44,8 +44,8 @@ pub fn build_seed_request(capability_names: &[&str]) -> String {
 ///
 /// # Errors
 ///
-/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
-pub fn parse_seed_request(xml: &str) -> Result<Vec<String>, roxmltree::Error> {
+/// Returns [`WireError::Xml`] if the body is not well-formed XML.
+pub fn parse_seed_request(xml: &str) -> Result<Vec<String>, WireError> {
     let mut names = Vec::new();
     if let Llsd::Array(entries) = parse_llsd_xml(xml)? {
         for entry in entries {
@@ -88,8 +88,8 @@ pub struct EventQueueRequest {
 ///
 /// # Errors
 ///
-/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
-pub fn parse_event_queue_request(xml: &str) -> Result<EventQueueRequest, roxmltree::Error> {
+/// Returns [`WireError::Xml`] if the body is not well-formed XML.
+pub fn parse_event_queue_request(xml: &str) -> Result<EventQueueRequest, WireError> {
     let root = parse_llsd_xml(xml)?;
     let ack = root.get("ack").and_then(Llsd::as_i32);
     let done = root.get("done").and_then(Llsd::as_bool).unwrap_or(false);
@@ -145,10 +145,10 @@ pub struct FetchInventoryFolderRequest {
 ///
 /// # Errors
 ///
-/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
+/// Returns [`WireError::Xml`] if the body is not well-formed XML.
 pub fn parse_fetch_inventory_request(
     xml: &str,
-) -> Result<Vec<FetchInventoryFolderRequest>, roxmltree::Error> {
+) -> Result<Vec<FetchInventoryFolderRequest>, WireError> {
     let root = parse_llsd_xml(xml)?;
     let mut folders = Vec::new();
     let Some(entries) = root.get("folders").and_then(Llsd::as_array) else {
@@ -231,10 +231,10 @@ pub fn build_fetch_inventory_items_request(agent_id: Uuid, items: &[FetchItemRef
 ///
 /// # Errors
 ///
-/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
+/// Returns [`WireError::Xml`] if the body is not well-formed XML.
 pub fn parse_fetch_inventory_items_request(
     xml: &str,
-) -> Result<FetchInventoryItemsRequest, roxmltree::Error> {
+) -> Result<FetchInventoryItemsRequest, WireError> {
     let root = parse_llsd_xml(xml)?;
     let agent_id = root
         .get("agent_id")
@@ -306,8 +306,8 @@ pub fn build_update_avatar_appearance_request(cof_version: i32) -> String {
 ///
 /// # Errors
 ///
-/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
-pub fn parse_update_avatar_appearance_request(xml: &str) -> Result<i32, roxmltree::Error> {
+/// Returns [`WireError::Xml`] if the body is not well-formed XML.
+pub fn parse_update_avatar_appearance_request(xml: &str) -> Result<i32, WireError> {
     let root = parse_llsd_xml(xml)?;
     Ok(root.get("cof_version").and_then(Llsd::as_i32).unwrap_or(0))
 }
@@ -387,10 +387,10 @@ pub struct NewFileAgentInventoryRequest {
 ///
 /// # Errors
 ///
-/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
+/// Returns [`WireError::Xml`] if the body is not well-formed XML.
 pub fn parse_new_file_agent_inventory_request(
     xml: &str,
-) -> Result<NewFileAgentInventoryRequest, roxmltree::Error> {
+) -> Result<NewFileAgentInventoryRequest, WireError> {
     let root = parse_llsd_xml(xml)?;
     Ok(NewFileAgentInventoryRequest {
         folder_id: InventoryFolderKey::from(caps_upload_uuid(&root, "folder_id")),
@@ -478,8 +478,8 @@ pub fn build_update_item_asset_request(item_id: InventoryKey) -> String {
 ///
 /// # Errors
 ///
-/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
-pub fn parse_update_item_asset_request(xml: &str) -> Result<InventoryKey, roxmltree::Error> {
+/// Returns [`WireError::Xml`] if the body is not well-formed XML.
+pub fn parse_update_item_asset_request(xml: &str) -> Result<InventoryKey, WireError> {
     let root = parse_llsd_xml(xml)?;
     Ok(InventoryKey::from(caps_upload_uuid(&root, "item_id")))
 }
@@ -517,10 +517,10 @@ pub struct UpdateTaskItemAssetRequest {
 ///
 /// # Errors
 ///
-/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
+/// Returns [`WireError::Xml`] if the body is not well-formed XML.
 pub fn parse_update_task_item_asset_request(
     xml: &str,
-) -> Result<UpdateTaskItemAssetRequest, roxmltree::Error> {
+) -> Result<UpdateTaskItemAssetRequest, WireError> {
     let root = parse_llsd_xml(xml)?;
     Ok(UpdateTaskItemAssetRequest {
         task_id: ObjectKey::from(caps_upload_uuid(&root, "task_id")),
@@ -560,10 +560,8 @@ pub struct UpdateScriptAgentRequest {
 ///
 /// # Errors
 ///
-/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
-pub fn parse_update_script_agent_request(
-    xml: &str,
-) -> Result<UpdateScriptAgentRequest, roxmltree::Error> {
+/// Returns [`WireError::Xml`] if the body is not well-formed XML.
+pub fn parse_update_script_agent_request(xml: &str) -> Result<UpdateScriptAgentRequest, WireError> {
     let root = parse_llsd_xml(xml)?;
     Ok(UpdateScriptAgentRequest {
         item_id: InventoryKey::from(caps_upload_uuid(&root, "item_id")),
@@ -627,10 +625,8 @@ pub struct UpdateScriptTaskRequest {
 ///
 /// # Errors
 ///
-/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
-pub fn parse_update_script_task_request(
-    xml: &str,
-) -> Result<UpdateScriptTaskRequest, roxmltree::Error> {
+/// Returns [`WireError::Xml`] if the body is not well-formed XML.
+pub fn parse_update_script_task_request(xml: &str) -> Result<UpdateScriptTaskRequest, WireError> {
     let root = parse_llsd_xml(xml)?;
     Ok(UpdateScriptTaskRequest {
         task_id: ObjectKey::from(caps_upload_uuid(&root, "task_id")),
@@ -722,8 +718,8 @@ pub struct UploadGrantedPermissions {
 ///
 /// # Errors
 ///
-/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
-pub fn parse_asset_upload_response(xml: &str) -> Result<AssetUploadResponse, roxmltree::Error> {
+/// Returns [`WireError::Xml`] if the body is not well-formed XML.
+pub fn parse_asset_upload_response(xml: &str) -> Result<AssetUploadResponse, WireError> {
     let root = parse_llsd_xml(xml)?;
     let state = root
         .get("state")
@@ -1352,22 +1348,26 @@ pub enum ObjectMediaRequest {
 
 /// Parses an `ObjectMedia` capability request from its already-decoded LLSD
 /// body — the inverse of the `build_object_media_{get,update}_request` pair.
-/// Routes on the `verb` member; a missing `object_id` or a `verb` other than
-/// `"GET"` / `"UPDATE"` yields `None` (the handler answers `400`).
-#[must_use]
-pub fn parse_object_media_request(body: &Llsd) -> Option<ObjectMediaRequest> {
-    let verb = body.get("verb").and_then(Llsd::as_str)?;
-    let object_id = body
-        .get("object_id")
-        .and_then(Llsd::as_uuid)
-        .map(ObjectKey::from)?;
-    match verb {
-        "GET" => Some(ObjectMediaRequest::Get { object_id }),
-        "UPDATE" => Some(ObjectMediaRequest::Update {
+/// Routes on the `verb` member.
+///
+/// # Errors
+///
+/// Returns a [`WireError`] for an absent or non-string `verb`, an absent or
+/// unparsable `object_id`, or a `verb` other than `"GET"` / `"UPDATE"` — each
+/// of which the handler answers `400` to, now able to say which one it was.
+pub fn parse_object_media_request(body: &Llsd) -> Result<ObjectMediaRequest, WireError> {
+    let verb = body.require_str("verb", "verb")?.to_owned();
+    let object_id = ObjectKey::from(body.require_uuid("object_id", "object_id")?);
+    match verb.as_str() {
+        "GET" => Ok(ObjectMediaRequest::Get { object_id }),
+        "UPDATE" => Ok(ObjectMediaRequest::Update {
             object_id,
             faces: object_media_faces(body),
         }),
-        _ => None,
+        _other => Err(WireError::InvalidScalar {
+            field: "verb",
+            value: verb,
+        }),
     }
 }
 
@@ -1403,24 +1403,28 @@ pub struct ObjectMediaNavigateRequest {
 }
 
 /// Parses an `ObjectMediaNavigate` request from its already-decoded LLSD body —
-/// the inverse of [`build_object_media_navigate_request`]. A missing
-/// `object_id` or an out-of-range `texture_index` yields `None`.
-#[must_use]
-pub fn parse_object_media_navigate_request(body: &Llsd) -> Option<ObjectMediaNavigateRequest> {
-    let object_id = body
-        .get("object_id")
-        .and_then(Llsd::as_uuid)
-        .map(ObjectKey::from)?;
-    let face = body
-        .get("texture_index")
-        .and_then(Llsd::as_i32)
-        .and_then(|index| u8::try_from(index).ok())?;
+/// the inverse of [`build_object_media_navigate_request`]. An absent
+/// `current_url` is an empty one: navigating a face to nothing is how the
+/// reference clears it.
+///
+/// # Errors
+///
+/// Returns a [`WireError`] for an absent or unparsable `object_id`, or a
+/// `texture_index` that is absent or outside the prim-face range.
+pub fn parse_object_media_navigate_request(
+    body: &Llsd,
+) -> Result<ObjectMediaNavigateRequest, WireError> {
+    let object_id = ObjectKey::from(body.require_uuid("object_id", "object_id")?);
+    let raw_face = body.require_i32("texture_index", "texture_index")?;
+    let face = u8::try_from(raw_face).map_err(|_error| WireError::ValueOutOfRange {
+        field: "texture_index",
+        value: i64::from(raw_face),
+    })?;
     let url = body
-        .get("current_url")
-        .and_then(Llsd::as_str)
+        .field_str("current_url", "current_url")?
         .unwrap_or_default()
         .to_owned();
-    Some(ObjectMediaNavigateRequest {
+    Ok(ObjectMediaNavigateRequest {
         object_id,
         face,
         url,
@@ -1449,8 +1453,8 @@ pub struct EventQueueResponse {
 ///
 /// # Errors
 ///
-/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
-pub fn parse_seed_response(xml: &str) -> Result<HashMap<String, String>, roxmltree::Error> {
+/// Returns [`WireError::Xml`] if the body is not well-formed XML.
+pub fn parse_seed_response(xml: &str) -> Result<HashMap<String, String>, WireError> {
     let mut capabilities = HashMap::new();
     if let Llsd::Map(map) = parse_llsd_xml(xml)? {
         for (name, value) in map {
@@ -1481,8 +1485,8 @@ pub fn build_seed_response(capabilities: &HashMap<String, String>) -> String {
 ///
 /// # Errors
 ///
-/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
-pub fn parse_event_queue_response(xml: &str) -> Result<EventQueueResponse, roxmltree::Error> {
+/// Returns [`WireError::Xml`] if the body is not well-formed XML.
+pub fn parse_event_queue_response(xml: &str) -> Result<EventQueueResponse, WireError> {
     let root = parse_llsd_xml(xml)?;
     let id = root.get("id").and_then(Llsd::as_i32).unwrap_or(0);
     let mut events = Vec::new();

@@ -12,13 +12,13 @@ use crate::geometry::Direction;
 use crate::llsd::Llsd;
 use crate::region_handle::RegionHandle;
 use crate::xmlrpc::{array_value_nodes, push_member, push_value, value_to_llsd};
-use sl_llsd::{parse_guarded_xml, push_escaped};
+use sl_llsd::{LlsdError, parse_guarded_xml, push_escaped};
 use sl_types::key::{AgentKey, InventoryFolderKey, InventoryKey, TextureKey};
 use sl_types::map::RegionCoordinates;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::CircuitCode;
+use crate::{CircuitCode, WireError};
 
 /// Where a login should place the avatar — the `start` member of a
 /// [`LoginRequest`].
@@ -1093,46 +1093,14 @@ impl LoginFailure {
     }
 }
 
-/// An error encountered while parsing a login response.
-#[derive(Debug, Error)]
-#[non_exhaustive]
-pub enum LoginParseError {
-    /// The response was not well-formed XML.
-    #[error("malformed XML in login response: {0}")]
-    Xml(#[from] roxmltree::Error),
-    /// The response was an XML-RPC fault.
-    #[error("login server returned an XML-RPC fault: {message}")]
-    Fault {
-        /// The fault string.
-        message: String,
-    },
-    /// The response did not contain the expected response struct.
-    #[error("login response did not contain a response struct")]
-    NoStruct,
-    /// A required field was missing from a successful response.
-    #[error("login response is missing required field {name:?}")]
-    MissingField {
-        /// The missing field name.
-        name: &'static str,
-    },
-    /// A field could not be parsed into its expected type.
-    #[error("login response field {name:?} has an invalid value {value:?}")]
-    InvalidField {
-        /// The field name.
-        name: &'static str,
-        /// The offending value.
-        value: String,
-    },
-}
-
 /// Parses an XML-RPC `login_to_simulator` response body.
 ///
 /// # Errors
 ///
-/// Returns a [`LoginParseError`] if the body is not well-formed or is nested
+/// Returns a [`WireError`] if the body is not well-formed or is nested
 /// past [`sl_llsd::MAX_NESTING_DEPTH`], is an XML-RPC fault, lacks the response
 /// struct, or is missing/has invalid required fields.
-pub fn parse_login_response(xml: &str) -> Result<LoginResponse, LoginParseError> {
+pub fn parse_login_response(xml: &str) -> Result<LoginResponse, WireError> {
     let document = parse_guarded_xml(xml)?;
 
     if let Some(fault) = document.descendants().find(|n| n.has_tag_name("fault")) {
@@ -1145,14 +1113,14 @@ pub fn parse_login_response(xml: &str) -> Result<LoginResponse, LoginParseError>
             .get("faultString")
             .cloned()
             .unwrap_or_else(|| "unknown fault".to_owned());
-        return Err(LoginParseError::Fault { message });
+        return Err(WireError::XmlRpcFault { message });
     }
 
     let response_struct = document
         .descendants()
         .find(|n| n.has_tag_name("param"))
         .and_then(|param| param.descendants().find(|n| n.has_tag_name("struct")))
-        .ok_or(LoginParseError::NoStruct)?;
+        .ok_or(WireError::NoStruct)?;
     let members = collect_members(response_struct);
 
     let login = members.get("login").map(String::as_str);
@@ -1729,33 +1697,27 @@ fn scalar_text(value_node: roxmltree::Node<'_, '_>) -> String {
     }
 }
 
-/// Returns a required member or a [`LoginParseError::MissingField`].
+/// Returns a required member or a [`LlsdError::MissingField`].
 fn required<'a>(
     members: &'a HashMap<String, String>,
     name: &'static str,
-) -> Result<&'a String, LoginParseError> {
+) -> Result<&'a String, WireError> {
     members
         .get(name)
-        .ok_or(LoginParseError::MissingField { name })
+        .ok_or_else(|| WireError::from(LlsdError::MissingField { field: name }))
 }
 
 /// Parses a required member as a UUID.
-fn parse_uuid(
-    members: &HashMap<String, String>,
-    name: &'static str,
-) -> Result<Uuid, LoginParseError> {
+fn parse_uuid(members: &HashMap<String, String>, name: &'static str) -> Result<Uuid, WireError> {
     let value = required(members, name)?;
-    Uuid::parse_str(value).map_err(|_ignored| LoginParseError::InvalidField {
-        name,
+    Uuid::parse_str(value).map_err(|_ignored| WireError::InvalidScalar {
+        field: name,
         value: value.clone(),
     })
 }
 
 /// Parses a required member via its [`std::str::FromStr`] implementation.
-fn parse_parsed<T>(
-    members: &HashMap<String, String>,
-    name: &'static str,
-) -> Result<T, LoginParseError>
+fn parse_parsed<T>(members: &HashMap<String, String>, name: &'static str) -> Result<T, WireError>
 where
     T: std::str::FromStr,
 {
@@ -1763,8 +1725,8 @@ where
     value
         .trim()
         .parse::<T>()
-        .map_err(|_ignored| LoginParseError::InvalidField {
-            name,
+        .map_err(|_ignored| WireError::InvalidScalar {
+            field: name,
             value: value.clone(),
         })
 }
@@ -1855,15 +1817,15 @@ pub struct ParsedLoginRequest {
 ///
 /// # Errors
 ///
-/// Returns a [`LoginParseError`] if the body is not well-formed XML, is nested
+/// Returns a [`WireError`] if the body is not well-formed XML, is nested
 /// past [`sl_llsd::MAX_NESTING_DEPTH`], or does not contain the request struct.
-pub fn parse_login_request(xml: &str) -> Result<ParsedLoginRequest, LoginParseError> {
+pub fn parse_login_request(xml: &str) -> Result<ParsedLoginRequest, WireError> {
     let document = parse_guarded_xml(xml)?;
     let request_struct = document
         .descendants()
         .find(|n| n.has_tag_name("param"))
         .and_then(|param| param.descendants().find(|n| n.has_tag_name("struct")))
-        .ok_or(LoginParseError::NoStruct)?;
+        .ok_or(WireError::NoStruct)?;
     let members = collect_members(request_struct);
     let options = member_value_node(request_struct, "options")
         .map(array_strings)

@@ -339,7 +339,7 @@ pub fn build_voice_signaling_request(
 ///
 /// # Errors
 ///
-/// Returns a [`roxmltree::Error`] if the body is not well-formed XML, or
+/// Returns [`WireError::Xml`] if the body is not well-formed XML, or
 /// [`LlsdError::MalformedField`] if a present field has the wrong LLSD kind.
 pub fn parse_provision_voice_account_request(
     xml: &str,
@@ -390,7 +390,7 @@ pub fn parse_provision_voice_account_request(
 ///
 /// # Errors
 ///
-/// Returns a [`roxmltree::Error`] if the body is not well-formed XML, or
+/// Returns [`WireError::Xml`] if the body is not well-formed XML, or
 /// [`LlsdError::MalformedField`] if a present field has the wrong LLSD kind.
 pub fn parse_voice_signaling_request(
     xml: &str,

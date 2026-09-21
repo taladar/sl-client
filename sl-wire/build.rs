@@ -212,17 +212,38 @@ fn push_message_impl(out: &mut String, message: &MessageDef) {
     // decode_body
     out.push_str("    fn decode_body(reader: &mut Reader) -> Result<Self, WireError> {\n");
     out.push_str("        Ok(Self {\n");
-    for block in &message.blocks {
+    let trailing = trailing_variable_run(message);
+    for (index, block) in message.blocks.iter().enumerate() {
         let field = escape_ident(to_snake_case(&block.name));
         emit(
             out,
             format_args!(
                 "            {field}: {},\n",
-                block_decode_expr(&message.name, block)
+                block_decode_expr(&message.name, block, index >= trailing)
             ),
         );
     }
     out.push_str("        })\n    }\n}\n\n");
+}
+
+/// The index of the first block in `message`'s **trailing run of `Variable`
+/// blocks** — the blocks a sender may legally omit entirely, and so the only
+/// ones whose missing repeat-count byte is an omission rather than a
+/// truncation. `message.blocks.len()` when the last block is not `Variable`.
+///
+/// This is what justifies the tolerance in [`block_decode_expr`]: OpenSim's
+/// shorter `RegionInfo` stops after `RegionInfo2`, dropping `RegionInfo3`,
+/// `RegionInfo5` and `CombatSettings` — all three at the end. A `Variable`
+/// block with anything but `Variable` blocks after it is a different case: the
+/// bytes for those later blocks are still expected, so a body that ends at its
+/// count byte is short, and reading the count strictly says so where the count
+/// went missing rather than several blocks later.
+fn trailing_variable_run(message: &MessageDef) -> usize {
+    message
+        .blocks
+        .iter()
+        .rposition(|block| !matches!(block.cardinality, Cardinality::Variable))
+        .map_or(0, |last_fixed| last_fixed.saturating_add(1))
 }
 
 /// Emits the encode statements for one block.
@@ -241,7 +262,19 @@ fn push_block_encode(out: &mut String, block: &BlockDef) {
                 );
             }
         }
-        Cardinality::Multiple(_) => {
+        Cardinality::Multiple(count) => {
+            // The count is fixed by the template and never written, so the
+            // decoder reads exactly this many however many were encoded: a
+            // wrong-length vector emits a packet that decodes as something
+            // else. Refuse it here, as the `Variable` arm refuses an overlong
+            // one.
+            emit(
+                out,
+                format_args!(
+                    "        if self.{field}.len() != {count} {{ return Err(WireError::BlockCountMismatch {{ block: \"{}\", expected: {count}, found: self.{field}.len() }}); }}\n",
+                    block.name
+                ),
+            );
             emit(out, format_args!("        for item in &self.{field} {{\n"));
             for f in &block.fields {
                 let fname = escape_ident(to_snake_case(&f.name));
@@ -279,7 +312,10 @@ fn push_block_encode(out: &mut String, block: &BlockDef) {
 }
 
 /// Builds the decode expression yielding the stored value for one block.
-fn block_decode_expr(message_name: &str, block: &BlockDef) -> String {
+///
+/// `omittable` says the block is in the message's trailing run of `Variable`
+/// blocks (see [`trailing_variable_run`]) and so may be absent altogether.
+fn block_decode_expr(message_name: &str, block: &BlockDef, omittable: bool) -> String {
     let struct_name = block_struct_name(message_name, &block.name);
     let construct = block_construct_expr(&struct_name, block);
     match block.cardinality {
@@ -287,11 +323,16 @@ fn block_decode_expr(message_name: &str, block: &BlockDef) -> String {
         Cardinality::Multiple(count) => format!(
             "{{ let mut items = Vec::with_capacity({count}); for _ in 0..{count}u32 {{ items.push({construct}); }} items }}"
         ),
-        // A missing count byte (end of data) yields an empty block rather than
-        // an error, so messages that omit trailing optional `Variable` blocks
-        // (e.g. OpenSim's shorter `RegionInfo`) still decode.
-        Cardinality::Variable => format!(
+        // Only a trailing `Variable` block treats a missing count byte as an
+        // empty block: a sender may omit those entirely (OpenSim's shorter
+        // `RegionInfo`), so their absence is a choice rather than a truncation.
+        // Anywhere else the count is required, and a body that ends there is
+        // reported as the short message it is.
+        Cardinality::Variable if omittable => format!(
             "{{ let count = reader.variable_block_count(); let mut items = Vec::with_capacity(usize::from(count)); for _ in 0..count {{ items.push({construct}); }} items }}"
+        ),
+        Cardinality::Variable => format!(
+            "{{ let count = reader.u8()?; let mut items = Vec::with_capacity(usize::from(count)); for _ in 0..count {{ items.push({construct}); }} items }}"
         ),
     }
 }

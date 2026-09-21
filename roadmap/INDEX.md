@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 118 |
-| ready | 312 |
+| ready | 308 |
 | blocked | 64 |
 | in-progress | 22 |
 | bugs | 6 |
-| done | 1205 |
+| done | 1210 |
 | deferred | 30 |
 | wont-do | 16 |
-| **total** | **1773** |
+| **total** | **1774** |
 
 ## ideas (118)
 
@@ -293,7 +293,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (312)
+## ready (308)
 
 ### protocol
 
@@ -303,22 +303,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   AIS3 depth fetch reads only its first level
 - [`protocol-audit-asset-store-duplication`](ready/protocol-audit-asset-store-duplication.md)
   — Three hand-rolled copies of the same asset store
-- [`protocol-audit-conversions-test-coverage`](ready/protocol-audit-conversions-test-coverage.md)
-  — conversions.rs has 233 pure functions and 32 tests
 - [`protocol-audit-decoder-fuzz-harness`](ready/protocol-audit-decoder-fuzz-harness.md)
   — Fuzz the wire and asset decoders
-- [`protocol-audit-dispatch-child-drift`](ready/protocol-audit-dispatch-child-drift.md)
-  — dispatch_child is a hand-copied subset of dispatch
-- [`protocol-audit-extract-lludp-transport`](ready/protocol-audit-extract-lludp-transport.md)
-  — The LLUDP reliable-transport layer is implemented twice and has drifted
 - [`protocol-audit-j2c-encode-lint-config`](ready/protocol-audit-j2c-encode-lint-config.md)
   — The one crate with unsafe FFI has the workspace's weakest lint configuration
 - [`protocol-audit-runtime-parity-gaps`](ready/protocol-audit-runtime-parity-gaps.md)
   — Re-exports and derived login state reach only the bevy runtime
-- [`protocol-audit-session-god-object`](ready/protocol-audit-session-god-object.md)
-  — Session and SimSession are god objects with 12k-line impl blocks
-- [`protocol-audit-wire-error-contract`](ready/protocol-audit-wire-error-contract.md)
-  — sl-wire's public parse surface has five different failure disciplines
+- [`protocol-audit-sim-session-stores`](ready/protocol-audit-sim-session-stores.md)
+  — SimSession's 54 fields mix the driver's serving stores with the circuit
 - [`protocol-fetch-inventory-items-request`](ready/protocol-fetch-inventory-items-request.md)
   — Fetching inventory items by id (FetchInventory2's request half)
 - [`protocol-sim-script-messages`](ready/protocol-sim-script-messages.md) — The
@@ -1311,7 +1303,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-sliders-show-no-value`](bugs/viewer-sliders-show-no-value.md) — A
   slider shows no value, and no bounds or step either
 
-## done (1205)
+## done (1210)
 
 ### protocol
 
@@ -1443,8 +1435,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — No asset transfer has a timeout — six registries only ever grow
 - [`protocol-audit-client-xfer-download-bounds`](done/protocol-audit-client-xfer-download-bounds.md)
   — The client's Xfer download has no size cap and no ordering check
+- [`protocol-audit-conversions-test-coverage`](done/protocol-audit-conversions-test-coverage.md)
+  — conversions.rs has 233 pure functions and 32 tests
 - [`protocol-audit-decoder-reference-fidelity`](done/protocol-audit-decoder-reference-fidelity.md)
   — Four decoder divergences from the reference viewer
+- [`protocol-audit-dispatch-child-drift`](done/protocol-audit-dispatch-child-drift.md)
+  — dispatch_child is a hand-copied subset of dispatch
+- [`protocol-audit-extract-lludp-transport`](done/protocol-audit-extract-lludp-transport.md)
+  — The LLUDP reliable-transport layer is implemented twice and has drifted
 - [`protocol-audit-flush-acks-loses-acks`](done/protocol-audit-flush-acks-loses-acks.md)
   — flush_acks drops every remaining ack on a wire error, in both directions
 - [`protocol-audit-inventory-fetch-deadlock`](done/protocol-audit-inventory-fetch-deadlock.md)
@@ -1477,6 +1475,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — sl-wire's own XML parsing has no nesting guard
 - [`protocol-audit-runtime-shared-crate`](done/protocol-audit-runtime-shared-crate.md)
   — 1677 byte-identical lines are duplicated between the two runtime crates
+- [`protocol-audit-session-god-object`](done/protocol-audit-session-god-object.md)
+  — Session and SimSession are god objects with 12k-line impl blocks
 - [`protocol-audit-sim-session-lifecycle`](done/protocol-audit-sim-session-lifecycle.md)
   — SimSession accepts identity rebinding, never validates a session id, and
   frees nothing on close
@@ -1485,6 +1485,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-audit-tokio-caps-refetch`](done/protocol-audit-tokio-caps-refetch.md)
   — The tokio region-change caps fetch stalls the UDP pump, then swallows its
   failure
+- [`protocol-audit-wire-error-contract`](done/protocol-audit-wire-error-contract.md)
+  — sl-wire's public parse surface has five different failure disciplines
 - [`protocol-experience-environment-push`](done/protocol-experience-environment-push.md)
   — An experience can set the sky, and nothing in this stack can say so
 - [`protocol-experience-parcel-recheck`](done/protocol-experience-parcel-recheck.md)

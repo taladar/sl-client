@@ -1,12 +1,12 @@
 //! The sans-I/O session state machine: login, circuit establishment,
 //! keep-alive, and clean logout, driven entirely by passed-in time.
 
-use crate::bookkeeping_ids::{PingId, TransactionId, TransferId, XferId};
+use crate::bookkeeping_ids::TransactionId;
+use crate::link::{ReliableLink, deadline, merge_deadline};
 use crate::mute::MuteList;
-use crate::scoped_id::{CircuitId, ScopedObjectId};
+use crate::scoped_id::CircuitId;
 use crate::types::{
-    AssetType, Camera, Diagnostic, Event, Friend, ImageCodec, LoginAccount, LoginParams, Object,
-    ParcelInfo, TerrainPatch, Throttle,
+    AssetType, Camera, Diagnostic, Event, Friend, ImageCodec, LoginAccount, LoginParams, Throttle,
 };
 use sl_types::key::{AgentKey, ExperienceKey, FriendKey, InventoryKey, ObjectKey};
 use sl_types::lsl::Rotation;
@@ -17,63 +17,15 @@ use sl_types::map::RegionCoordinates;
 use sl_wire::CircuitCode;
 use sl_wire::ControlFlags;
 use sl_wire::RegionHandle;
-use sl_wire::RegionLocalObjectId;
-use sl_wire::RegionLocalParcelId;
-use sl_wire::SequenceNumber;
-use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 /// How often an `AgentUpdate` is sent to keep the agent active.
 const AGENT_UPDATE_INTERVAL: Duration = Duration::from_millis(1000);
-/// How often a keep-alive `StartPingCheck` is sent on the root circuit to
-/// measure the round-trip time to the simulator, matching the reference
-/// viewer's circuit ping cadence (`LLCircuit`'s ~5-second periodic ping). The
-/// simulator answers each with a `CompletePingCheck` echoing the ping id, which
-/// the session times to surface an [`Event::Ping`](crate::Event::Ping).
-const PING_INTERVAL: Duration = Duration::from_secs(5);
-/// How long owed acknowledgements may wait before being flushed as a `PacketAck`.
-const ACK_FLUSH_DELAY: Duration = Duration::from_millis(150);
-/// How long without inbound traffic before the link is considered dead. Kept
-/// well under OpenSim's 60-second `AckTimeout`.
-const INACTIVITY_TIMEOUT: Duration = Duration::from_secs(45);
 /// How long to wait for a `LogoutReply` before giving up on a clean logout.
 const LOGOUT_TIMEOUT: Duration = Duration::from_secs(5);
-/// The floor on the retransmission timeout for an unacknowledged reliable
-/// packet, however fast the circuit's round trip is. Mirrors the reference
-/// viewer's `LL_MINIMUM_RELIABLE_TIMEOUT_SECONDS`.
-const MINIMUM_RESEND_TIMEOUT: Duration = Duration::from_secs(1);
-/// The multiple of the circuit's averaged round-trip time used as the
-/// retransmission timeout (the reference viewer's
-/// `LL_RELIABLE_TIMEOUT_FACTOR`), floored at [`MINIMUM_RESEND_TIMEOUT`].
-const RELIABLE_TIMEOUT_FACTOR: f32 = 5.0;
-/// The weight a fresh round-trip sample carries in the circuit's ping average
-/// (the reference viewer's `LL_AVERAGED_PING_ALPHA`).
-const PING_AVERAGE_ALPHA: f32 = 0.2;
-/// The weight the previous ping average keeps when a fresh sample arrives —
-/// `1.0 - PING_AVERAGE_ALPHA`, spelled out so the update is literal-only
-/// arithmetic.
-const PING_AVERAGE_DECAY: f32 = 0.8;
-/// The floor the circuit's averaged round-trip time is clamped to (the
-/// reference viewer's `LL_AVERAGED_PING_MIN`), keeping a very fast link from
-/// driving the retransmission timeout below what a briefly busy simulator
-/// needs.
-const PING_AVERAGE_MIN: Duration = Duration::from_millis(100);
-/// The ceiling the circuit's averaged round-trip time is clamped to (the
-/// reference viewer's `LL_AVERAGED_PING_MAX`), bounding the retransmission
-/// timeout at `RELIABLE_TIMEOUT_FACTOR` times this.
-const PING_AVERAGE_MAX: Duration = Duration::from_millis(2000);
-/// The circuit's assumed round-trip time before any keep-alive ping has been
-/// answered (the reference viewer's `INITIAL_PING_VALUE_MSEC`).
-const INITIAL_PING_AVERAGE: Duration = Duration::from_millis(1000);
-/// The maximum number of times a reliable packet is sent before giving up: the
-/// first transmission plus the reference viewer's
-/// `LL_DEFAULT_RELIABLE_RETRIES` retries.
-const MAX_RESEND_ATTEMPTS: u32 = 4;
-/// The maximum number of inbound reliable sequence numbers remembered for
-/// duplicate suppression.
-const SEEN_CAPACITY: usize = 4096;
 /// How long to wait for a `TeleportFinish` before declaring the teleport failed.
 const TELEPORT_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long to wait for an `AvatarSitResponse` before giving up on a sit
@@ -959,126 +911,12 @@ impl ParentRequest {
     }
 }
 
-/// Computes `now + duration`, saturating at `now` on (impossible) overflow.
-fn deadline(now: Instant, duration: Duration) -> Instant {
-    now.checked_add(duration).unwrap_or(now)
-}
-
-/// Updates `earliest` to the minimum of itself and `candidate`.
-fn merge_deadline(earliest: &mut Option<Instant>, candidate: Option<Instant>) {
-    if let Some(candidate) = candidate {
-        *earliest = Some(match *earliest {
-            Some(current) => current.min(candidate),
-            None => candidate,
-        });
-    }
-}
-
-/// What losing a reliable packet for good costs the session.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ReliableSeverity {
-    /// The packet establishes the session itself (`UseCircuitCode`,
-    /// `CompleteAgentMovement`, `RegionHandshakeReply`): without it the
-    /// simulator never admits the agent, so exhausting its retransmissions
-    /// fails the session with [`DisconnectReason::HandshakeFailed`].
-    ///
-    /// [`DisconnectReason::HandshakeFailed`]: crate::types::DisconnectReason::HandshakeFailed
-    SessionCritical,
-    /// An ordinary reliable message (chat, a selection, an inventory request).
-    /// Losing it costs that one action; the session keeps running and the loss
-    /// is surfaced as a [`Diagnostic::ExpectedReplyMissing`]. This matches the
-    /// reference viewer, where an exhausted reliable packet only invokes its
-    /// per-packet failure callback (`LL_ERR_TCP_TIMEOUT`) and leaves the
-    /// circuit alone — a dead link is detected by the inactivity timeout, not
-    /// by one lost message.
-    ///
-    /// [`Diagnostic::ExpectedReplyMissing`]: crate::Diagnostic::ExpectedReplyMissing
-    BestEffort,
-}
-
-/// A reliable packet that has run out of retransmissions, reported by
-/// [`Circuit::process_resends`].
-#[derive(Debug, Clone, Copy)]
-struct ExhaustedPacket {
-    /// The outgoing sequence number the packet was sent with.
-    sequence: SequenceNumber,
-    /// The message name, for the diagnostic label (`None` for an unrecognised
-    /// id).
-    name: Option<&'static str>,
-    /// What the loss costs the session.
-    severity: ReliableSeverity,
-}
-
-/// A datagram queued for transmission on a circuit.
-#[derive(Debug, Clone)]
-struct Outbound {
-    /// The outgoing sequence number of the reliable packet this datagram
-    /// carries, so popping it can start that packet's retransmission clock.
-    /// `None` for an unreliable datagram, which nothing is waiting on.
-    sequence: Option<SequenceNumber>,
-    /// The fully encoded datagram.
-    payload: Vec<u8>,
-}
-
-/// A reliable packet awaiting acknowledgement.
-#[derive(Debug, Clone)]
-struct UnackedPacket {
-    /// The fully encoded datagram, ready to resend.
-    datagram: Vec<u8>,
-    /// When the current attempt's retransmission clock started. While the
-    /// datagram is still `queued`, this is pushed forward to the latest instant
-    /// the session is told about, so time the datagram spends waiting on a
-    /// backed-up driver does not count against its timeout — the clock only
-    /// really starts once the datagram has left the host.
-    sent_at: Instant,
-    /// Whether the current attempt's datagram is still sitting in the circuit's
-    /// outbound queue rather than having been handed to the driver.
-    queued: bool,
-    /// How many times the packet has been sent so far.
-    attempts: u32,
-    /// The message name, used to label a [`Diagnostic::ExpectedReplyMissing`]
-    /// when the packet exhausts its retransmission budget (`None` for an
-    /// unrecognised id).
-    ///
-    /// [`Diagnostic::ExpectedReplyMissing`]: crate::Diagnostic::ExpectedReplyMissing
-    name: Option<&'static str>,
-    /// What losing this packet for good costs the session.
-    severity: ReliableSeverity,
-}
-
-/// A bounded set of recently seen inbound reliable sequence numbers, used to
-/// suppress duplicate processing of retransmitted reliable packets.
-#[derive(Debug, Default)]
-struct SeenWindow {
-    /// Membership set for O(1) lookup.
-    set: HashSet<SequenceNumber>,
-    /// Insertion order, for evicting the oldest entries.
-    order: VecDeque<SequenceNumber>,
-}
-
-impl SeenWindow {
-    /// Records `sequence`; returns `true` if it was not seen before.
-    fn insert(&mut self, sequence: SequenceNumber) -> bool {
-        if !self.set.insert(sequence) {
-            return false;
-        }
-        self.order.push_back(sequence);
-        if self.order.len() > SEEN_CAPACITY
-            && let Some(evicted) = self.order.pop_front()
-        {
-            self.set.remove(&evicted);
-        }
-        true
-    }
-}
-
-/// The per-connection timers, expressed as absolute deadlines.
+/// The per-connection timers a circuit owns that are not the reliable link's
+/// own — the link keeps the inactivity and ack-flush deadlines itself (see
+/// [`ReliableLink`](crate::link::ReliableLink)), because they are transport;
+/// these are what the *session* is waiting for.
 #[derive(Debug)]
 struct Timers {
-    /// When the link is declared dead for lack of inbound traffic.
-    inactivity: Instant,
-    /// When to flush owed acknowledgements, if any are pending.
-    ack_flush: Option<Instant>,
     /// When to send the next `AgentUpdate`, once the session is active.
     agent_update: Option<Instant>,
     /// When to send the next keep-alive `StartPingCheck`, once the session is
@@ -1477,6 +1315,28 @@ struct XferUpload {
     last_progress: Instant,
 }
 
+/// Which circuit an inbound message arrived on: the region hosting the agent,
+/// or one of the neighbours it holds a child agent in.
+///
+/// The two carry overlapping traffic — see
+/// [`Session::dispatch_shared`] — and this is the whole of what the shared
+/// handlers need to tell them apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CircuitRole {
+    /// The root circuit: the region that hosts the agent itself.
+    Root,
+    /// A child-agent circuit to a neighbouring region.
+    Child,
+}
+
+impl CircuitRole {
+    /// Whether this is a child-agent circuit, the way the client-facing events
+    /// tag the circuit a measurement or a message came from.
+    const fn is_child(self) -> bool {
+        matches!(self, Self::Child)
+    }
+}
+
 /// The UDP circuit to a single simulator.
 #[derive(Debug)]
 struct Circuit {
@@ -1492,33 +1352,15 @@ struct Circuit {
     session_id: Uuid,
     /// The circuit code.
     code: CircuitCode,
-    /// The next outgoing sequence number.
-    next_sequence: SequenceNumber,
     /// The monotonically increasing serial number shared by `AgentPause` and
     /// `AgentResume`; the simulator ignores non-increasing values.
     pause_serial_num: u32,
-    /// The next outgoing keep-alive ping id (mirrors the reference viewer's
-    /// `LLCircuitData::mLastPingID`); a wrapping `u8` the matching
-    /// `CompletePingCheck` echoes back.
-    next_ping_id: PingId,
-    /// The in-flight keep-alive ping awaiting its `CompletePingCheck`, paired
-    /// with the instant it was sent so the round-trip time can be measured.
-    /// `None` when no ping is outstanding.
-    outstanding_ping: Option<(PingId, Instant)>,
-    /// The fast-attack / slow-decay average of the circuit's measured
-    /// round-trip time (the reference viewer's `mPingDelayAveraged`), clamped
-    /// to `PING_AVERAGE_MIN ..= PING_AVERAGE_MAX`. Drives the retransmission
-    /// timeout, so a slow or congested link waits longer before resending
-    /// instead of piling retransmissions onto it.
-    ping_average: Duration,
-    /// Inbound reliable sequence numbers we still owe acknowledgements for.
-    pending_acks: Vec<SequenceNumber>,
-    /// Outgoing reliable packets awaiting acknowledgement, keyed by sequence.
-    unacked: BTreeMap<SequenceNumber, UnackedPacket>,
-    /// Recently seen inbound reliable sequence numbers.
-    seen: SeenWindow,
-    /// Datagrams ready to be transmitted.
-    out: VecDeque<Outbound>,
+    /// The reliable-transport half of this circuit: sequence numbering, the
+    /// unacknowledged set and its resend policy, owed acknowledgements,
+    /// duplicate suppression, the outbound queue, and the keep-alive ping that
+    /// measures the round trip. Shared with the server direction — see
+    /// [`ReliableLink`](crate::link::ReliableLink).
+    link: ReliableLink,
     /// The draw distance (metres) advertised in keep-alive `AgentUpdate`s.
     draw_distance: Distance,
     /// The connection timers.
@@ -1931,161 +1773,32 @@ pub struct Session {
     /// Account-level facts from the login response (home, maturity, group limit,
     /// Library roots), or `None` before login.
     login_account: Option<LoginAccount>,
-    /// In-flight inbound `Xfer` file downloads, keyed by the client-chosen
-    /// [`XferId`], each carrying the accumulated bytes and a routing
-    /// [`XferPurpose`]. Started by a `MuteListUpdate`, an auto-fetched
-    /// `ReplyTaskInventory`, or [`Session::request_xfer`]; the single
-    /// `SendXferPacket` handler drains and routes them.
-    xfer_downloads: BTreeMap<XferId, XferDownload>,
-    /// Files offered for outbound `Xfer` upload but not yet requested, keyed by
-    /// the filename we named to the simulator. When the simulator answers a
-    /// client upload trigger (today `EstateOwnerMessage`/`terrain`
-    /// `["upload filename", …]`) with a `RequestXfer` naming this filename, the
-    /// bytes move into [`xfer_uploads`](Self::xfer_uploads) under the
-    /// simulator-assigned [`XferId`] and start streaming. Mirrors the reference
-    /// viewer's `expectFileForTransfer` registry: we only upload a file the
-    /// caller explicitly offered. An offer the simulator never picks up is
-    /// withdrawn after [`XFER_OFFER_TIMEOUT`].
-    pending_xfer_uploads: BTreeMap<String, OfferedUpload>,
-    /// In-flight outbound `Xfer` file uploads, keyed by the **simulator-assigned**
-    /// [`XferId`] from the `RequestXfer`. Each `ConfirmXferPacket` releases the
-    /// next `SendXferPacket`; the final confirmation surfaces
-    /// [`Event::XferUploaded`](crate::Event::XferUploaded).
-    xfer_uploads: BTreeMap<XferId, XferUpload>,
     /// The account's secure session id from the login response, used to predict
     /// a legacy asset upload's stored id (`combine(transaction_id,
     /// secure_session_id)` — see [`sl_wire::combine_uuids`]). Nil before login.
     secure_session_id: Uuid,
-    /// Asset bytes offered for a legacy `AssetUploadRequest` upload that was too
-    /// large to inline, keyed by the **predicted asset id** (`VFileID`). When the
-    /// simulator answers with a `RequestXfer` whose `VFileID` matches, the bytes
-    /// move into [`xfer_uploads`](Self::xfer_uploads) and stream. Mirrors the
-    /// reference viewer's `LLAssetStorage::storeAssetData` Xfer fallback. An
-    /// offer the simulator never picks up is withdrawn after
-    /// [`XFER_OFFER_TIMEOUT`], surfacing a failed
-    /// [`Event::InventoryAssetSaved`](crate::Event::InventoryAssetSaved) so the
-    /// save's caller is not left waiting.
-    pending_asset_uploads: BTreeMap<Uuid, OfferedUpload>,
-    /// Legacy asset saves ([`Session::save_inventory_asset`]) awaiting their
-    /// `AssetUploadComplete`, keyed by the **predicted asset id** the completion
-    /// names — which is the only thing the wire completion carries, so this is
-    /// what turns it back into the transaction the caller started.
+    /// Every asset stream in flight: the inbound `Xfer` downloads and legacy
+    /// UDP texture / Transfer downloads, the outbound `Xfer` uploads, the
+    /// upload offers and inventory saves waiting to be picked up, the
+    /// task-inventory claims waiting on a reply, and the two id counters that
+    /// address them. Each store is insert-on-request and remove-on-completion,
+    /// and each is swept for what has stalled by
+    /// [`Session::expire_asset_transfers`].
+    transfers: Transfers,
+    /// Everything the session mirrors about the regions it is streaming, keyed
+    /// by the circuit instance it belongs to: the scene-graph object cache, the
+    /// terrain patches, each region's handle and raw `RegionFlags`, its parcels,
+    /// its last time dilation, the agent's own avatar id there, the outstanding
+    /// linkset-root re-asks, and which circuit each object's script request
+    /// arrived on.
     ///
-    /// Every save is registered, inlined or not: the small ones (the common
-    /// case) never reach [`pending_asset_uploads`](Self::pending_asset_uploads)
-    /// at all, and they need correlating just as much. An entry the simulator
-    /// never answers is withdrawn after [`INVENTORY_SAVE_TIMEOUT`], surfacing a
-    /// failed [`Event::InventoryAssetSaved`](crate::Event::InventoryAssetSaved).
-    pending_inventory_saves: BTreeMap<Uuid, PendingInventorySave>,
-    /// A monotonic counter for generating `Xfer` ids (never zero).
-    next_xfer_id: XferId,
-    /// Objects whose task inventory a [`Session::fetch_task_inventory`] asked
-    /// for, keyed by their full [`ObjectKey`] (resolved from the object cache at
-    /// request time). When the matching `ReplyTaskInventory` arrives its `Xfer`
-    /// listing is auto-downloaded and parsed into
-    /// [`Event::TaskInventoryContents`](crate::Event::TaskInventoryContents)
-    /// rather than surfaced only as a serial/filename. The value is when the
-    /// request went out: a claim whose reply never arrives is dropped after
-    /// [`RELIABLE_REPLY_GRACE`] rather than silently upgrading some later,
-    /// unrelated `RequestTaskInventory` for the same object.
-    pending_task_inventory: BTreeMap<ObjectKey, Instant>,
-    /// A FIFO fallback for `fetch_task_inventory` calls whose target object was
-    /// not yet in the cache (so its full id could not be resolved to key
-    /// [`pending_task_inventory`](Self::pending_task_inventory)). Each entry
-    /// auto-fetches the next otherwise-unmatched `ReplyTaskInventory`; it cannot
-    /// disambiguate concurrent uncached fetches. Each entry is the instant its
-    /// request went out, and is dropped after [`RELIABLE_REPLY_GRACE`] — a claim
-    /// left standing would otherwise hijack an unrelated later reply.
-    pending_task_inventory_unresolved: VecDeque<Instant>,
-    /// In-flight legacy UDP texture downloads, keyed by the texture's asset id
-    /// (echoed in every `ImageData`/`ImagePacket`). Started by
-    /// [`Session::request_texture`].
-    texture_downloads: BTreeMap<Uuid, TextureDownload>,
-    /// In-flight legacy UDP asset Transfers (`TransferRequest` →
-    /// `TransferInfo` + `TransferPacket` stream), keyed by the client-minted
-    /// [`TransferId`]. Started by [`Session::fetch_task_item_asset`] /
-    /// [`Session::fetch_estate_covenant_asset`] — the two source types that
-    /// remain UDP-only on both grids (no `ViewerAsset` coverage).
-    transfer_downloads: BTreeMap<TransferId, TransferDownload>,
-    /// A monotonic counter for minting [`TransferId`]s (never nil). The
-    /// reference viewer mints random transfer ids; a sans-I/O session has no
-    /// randomness, and the id only correlates replies on this circuit.
-    next_transfer_id: u128,
-    /// The scene-graph object cache, keyed by the circuit instance the objects
-    /// belong to (the root region *and* every child/neighbour circuit), then by
-    /// region-local id. Region-local ids are only unique within a circuit, so
-    /// the cache is partitioned per [`CircuitId`] — a reconnect to the same
-    /// address mints a fresh circuit, so its objects never alias the old ones. A
-    /// circuit's objects are dropped when it goes away (`DisableSimulator`,
-    /// teleport handover, relogin).
-    objects: BTreeMap<CircuitId, BTreeMap<RegionLocalObjectId, Object>>,
-    /// Parent objects we have asked the simulator to (re)send because a child
-    /// object referenced a `parent_id` we had not tracked — an out-of-order or
-    /// dropped root update. Without this a worn attachment (or any linkset child)
-    /// whose root never arrives can never resolve its wearer / chain and so never
-    /// renders.
-    ///
-    /// Re-asked from the timer loop on a doubling interval
-    /// ([`ParentRequest::next_ask`]) for as long as a tracked child still names
-    /// the parent, so a speculative fetch the simulator ignored does not strand
-    /// the child — and, unlike re-asking when a child next updates, it also
-    /// reaches the children that never update again (a worn shoe stands
-    /// still). An entry is cleared when the object finally arrives (so a later
-    /// re-orphan re-requests at once), when no tracked object names it any more,
-    /// and with the rest of a retiring circuit's state.
-    requested_parents: BTreeMap<ScopedObjectId, ParentRequest>,
-    /// The decoded terrain cache, keyed by the circuit instance the patches
-    /// belong to (the root region *and* every neighbour streamed over a child
-    /// circuit), then by `(layer code, patch x, patch y)` so each layer's
-    /// patches are kept side by side. Dropped with the rest of a circuit's state
-    /// when it goes away. See [`Session::terrain_patches`] and
-    /// [`Session::terrain_height`].
-    terrain: BTreeMap<CircuitId, BTreeMap<(u8, u32, u32), TerrainPatch>>,
-    /// The region handle most recently learned for each circuit instance (from
-    /// object updates, which carry it, and from `EnableSimulator`). Used to
-    /// label terrain patches, which the `LayerData` message does not itself tag
-    /// with a region handle.
-    regions: BTreeMap<CircuitId, RegionHandle>,
-    /// The raw 32-bit `RegionFlags` most recently learned for each circuit
-    /// instance, folded from that region's `RegionHandshake`. Read via
-    /// [`Session::region_blocks_fly`] (the `BLOCK_FLY` bit) — the region half of
-    /// [`Session::can_fly`]. Dropped with the rest of a circuit's state when it
-    /// goes away.
-    region_flags: BTreeMap<CircuitId, u32>,
-    /// The parcels learned for each circuit instance, keyed by region-local id.
-    /// Folded from every `ParcelProperties` (UDP and the CAPS event-queue path):
-    /// the simulator auto-pushes the agent's parcel (`SequenceID == 0`) on region
-    /// entry and every parcel crossing, so passively folding the pushes keeps the
-    /// agent's parcel current. Read via [`Session::current_parcel`] (resolved from
-    /// the own-avatar position and each parcel's membership bitmap) and
-    /// [`Session::can_fly`]. This is an API-convenience read model; the simulator
-    /// stays authoritative. Dropped with the rest of a circuit's state when it
-    /// goes away.
-    parcels: BTreeMap<CircuitId, BTreeMap<RegionLocalParcelId, ParcelInfo>>,
-    /// The most recent raw `RegionData.TimeDilation` (a `u16`) seen for each
-    /// circuit instance, used to de-duplicate [`Event::TimeDilation`] so it is
-    /// emitted only when the region's frame time-dilation actually changes
-    /// (every object-update message carries the field). See
-    /// [`Session::note_time_dilation`].
-    time_dilation: BTreeMap<CircuitId, u16>,
-    /// The region-local id of the agent's **own** avatar object on each circuit
-    /// instance, learned the first time that avatar's `ObjectUpdate` is cached
-    /// (or read back from the cache at `AgentMovementComplete`). Used to
-    /// recognise an object parented to our own avatar — one of our attachments —
-    /// when classifying a script-permission holder (the permission system's
-    /// `HolderKind`). Per circuit because a region-local id is unique only within
-    /// one simulator and the avatar is assigned a fresh one in each region;
-    /// absent until the avatar object is first observed on that circuit, and set
-    /// once (the id is stable for the life of the circuit). Dropped with the rest
-    /// of a circuit's state in [`Session::forget_sim_objects`]. Surfaced via
-    /// [`Session::own_avatar_id`].
-    own_avatar: BTreeMap<CircuitId, RegionLocalObjectId>,
-    /// The circuit each object's latest script request (`ScriptDialog` /
-    /// `ScriptQuestion`) arrived on, so the reply goes back to the simulator
-    /// that asked — a neighbour region's script is reached only through its
-    /// child circuit. Dropped with a retiring circuit's state and on a world
-    /// reset; a stale entry only ever falls back to the root circuit.
-    script_request_circuits: BTreeMap<ObjectKey, CircuitId>,
+    /// Per circuit rather than per region because a region-local id is unique
+    /// only within one simulator instance: a reconnect to the same address mints
+    /// a fresh circuit, whose objects never alias the old ones. A circuit's
+    /// share is dropped when it goes away (`DisableSimulator`, teleport
+    /// handover, relogin) by [`WorldCache::forget_circuit`], and the whole cache
+    /// by [`WorldCache::reset`] on a world-resetting teleport or a fresh login.
+    world: WorldCache,
     /// The held inventory model: the agent's own inventory tree and the read-only
     /// Library tree, each owning its folder/item stores, per-folder fetch state,
     /// and a parent→children index, plus the inventory roots and the async
@@ -2123,6 +1836,7 @@ pub struct Session {
     diagnostics: VecDeque<Diagnostic>,
 }
 
+mod caps_event;
 mod chat_session;
 mod circuit;
 mod conversions;
@@ -2130,9 +1844,13 @@ mod inventory;
 mod inventory_cache;
 mod legacy_preset;
 mod methods;
+mod transfers;
+mod world_cache;
 
 use self::chat_session::{ChatSession, ServerHistoryFetch, ServerHistoryState, TYPING_TIMEOUT};
 use self::inventory::Inventory;
+use self::transfers::Transfers;
+use self::world_cache::WorldCache;
 pub use chat_session::{
     ChatLifecycleView, ChatSessionInfo, ChatSessionKind, ChatSessionLifecycle, FriendPresence,
     InviteChannel, MessageCursor, NearbyHistoryLine, PendingInvite, ServerHistoryMessage,

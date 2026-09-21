@@ -22,19 +22,32 @@ use uuid::Uuid;
 // ---------------------------------------------------------------------------
 
 /// Parses the [`experience_info_query`](crate::experience_info_query) URL suffix back into the requested ids
-/// (every `public_id` query parameter). Unparsable ids are skipped; an absent
-/// query yields an empty list.
-#[must_use]
-pub fn parse_experience_info_query(suffix: &str) -> Vec<ExperienceKey> {
+/// (every `public_id` query parameter).
+///
+/// A suffix with no query string asks about nothing and yields an empty list;
+/// a `public_id` that is not a UUID is refused rather than skipped, so a
+/// request this endpoint cannot read is reported instead of being answered
+/// with "none of those experiences exist".
+///
+/// # Errors
+///
+/// Returns [`WireError::InvalidUuid`] for a `public_id` that does not parse.
+pub fn parse_experience_info_query(suffix: &str) -> Result<Vec<ExperienceKey>, WireError> {
     let Some(query) = url_query(suffix) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     query
         .split('&')
         .filter_map(|pair| pair.split_once('='))
         .filter(|(key, _value)| *key == "public_id")
-        .filter_map(|(_key, value)| Uuid::parse_str(value).ok())
-        .map(ExperienceKey::from)
+        .map(|(_key, value)| {
+            Uuid::parse_str(value)
+                .map(ExperienceKey::from)
+                .map_err(|_error| WireError::InvalidUuid {
+                    field: "public_id",
+                    value: value.to_owned(),
+                })
+        })
         .collect()
 }
 
@@ -103,30 +116,36 @@ pub fn parse_experience_query(suffix: &str) -> Option<(i32, Vec<ExperienceKey>)>
 /// Parses an `ExperiencePreferences` PUT body
 /// (`{ "<id>": { "permission": "Allow"|"Block" } }`) back into its
 /// `(experience id, permission)` pair — the inverse of
-/// [`build_set_experience_permission_request`](crate::build_set_experience_permission_request). Returns `Ok(None)` when the body
-/// is well-formed XML but not a single id→permission entry.
+/// [`build_set_experience_permission_request`](crate::build_set_experience_permission_request).
 ///
 /// # Errors
 ///
-/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
+/// Returns a [`WireError`] if the body is not well-formed XML, is not a map,
+/// holds no entry, keys that entry by something other than an experience id, or
+/// carries no readable `permission` — each named, where the body used to decode
+/// to a bare "not that" the handler could only answer `400` to.
 pub fn parse_set_experience_permission_request(
     xml: &str,
-) -> Result<Option<(ExperienceKey, ExperiencePermission)>, roxmltree::Error> {
+) -> Result<(ExperienceKey, ExperiencePermission), WireError> {
     let root = parse_llsd_xml(xml)?;
-    let Some(map) = root.as_map() else {
-        return Ok(None);
-    };
-    let Some((key, value)) = map.iter().next() else {
-        return Ok(None);
-    };
-    let Ok(id) = Uuid::parse_str(key) else {
-        return Ok(None);
-    };
-    let permission = value
-        .get("permission")
-        .and_then(Llsd::as_str)
-        .and_then(ExperiencePermission::from_wire);
-    Ok(permission.map(|permission| (ExperienceKey::from(id), permission)))
+    let map = root.as_map().ok_or_else(|| LlsdError::MalformedField {
+        field: "experience preferences",
+        value: root.kind().to_owned(),
+    })?;
+    let (key, value) = map.iter().next().ok_or(LlsdError::MissingField {
+        field: "experience preferences",
+    })?;
+    let id = Uuid::parse_str(key).map_err(|_error| WireError::InvalidUuid {
+        field: "experience preferences",
+        value: key.clone(),
+    })?;
+    let raw = value.require_str("permission", "permission")?;
+    let permission =
+        ExperiencePermission::from_wire(raw).ok_or_else(|| WireError::InvalidScalar {
+            field: "permission",
+            value: raw.to_owned(),
+        })?;
+    Ok((ExperienceKey::from(id), permission))
 }
 
 /// Parses an `UpdateExperience` POST body back into an [`ExperienceUpdate`] — the

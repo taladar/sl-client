@@ -24,15 +24,17 @@ use std::collections::HashMap;
 
 use uuid::Uuid;
 
-use crate::CircuitCode;
+use sl_llsd::LlsdError;
+
 use crate::llsd::{Llsd, parse_llsd_xml};
 use crate::login::{
     BuddyListEntry, GestureEntry, GlobalTextures, InitialOutfit, LoginCategory, LoginFailure,
-    LoginFlags, LoginParseError, LoginRedirect, LoginRequest, LoginResponse, LoginSuccess,
-    MfaChallenge, NewUserConfig, ParsedLoginRequest, SkeletonFolder, TutorialSetting, UiConfig,
-    VoiceConfig, home_to_string, parse_direction, parse_home, parse_start_member, password_hash,
+    LoginFlags, LoginRedirect, LoginRequest, LoginResponse, LoginSuccess, MfaChallenge,
+    NewUserConfig, ParsedLoginRequest, SkeletonFolder, TutorialSetting, UiConfig, VoiceConfig,
+    home_to_string, parse_direction, parse_home, parse_start_member, password_hash,
     vector3_to_string, yn_str, yn_wire_flag,
 };
+use crate::{CircuitCode, WireError};
 use sl_types::key::{AgentKey, InventoryFolderKey, InventoryKey, TextureKey};
 
 /// Builds the LLSD-XML request body for a `login_to_simulator` call — the
@@ -98,12 +100,16 @@ pub fn build_login_request_llsd(request: &LoginRequest) -> String {
 ///
 /// # Errors
 ///
-/// Returns a [`LoginParseError`] if the body is not well-formed LLSD-XML or
+/// Returns a [`WireError`] if the body is not well-formed LLSD-XML or
 /// its top-level value is not a map.
-pub fn parse_login_request_llsd(body: &str) -> Result<ParsedLoginRequest, LoginParseError> {
-    let value = parse_llsd_xml(body).map_err(|_error| LoginParseError::NoStruct)?;
+pub fn parse_login_request_llsd(body: &str) -> Result<ParsedLoginRequest, WireError> {
+    let value = parse_llsd_xml(body)?;
     let Llsd::Map(map) = value else {
-        return Err(LoginParseError::NoStruct);
+        return Err(LlsdError::MalformedField {
+            field: "login body",
+            value: value.kind().to_owned(),
+        }
+        .into());
     };
     Ok(ParsedLoginRequest {
         first_name: llsd_string(&map, "first"),
@@ -216,13 +222,17 @@ pub fn build_login_response_llsd(response: &LoginResponse) -> String {
 ///
 /// # Errors
 ///
-/// Returns a [`LoginParseError`] if the body is not well-formed LLSD-XML, its
+/// Returns a [`WireError`] if the body is not well-formed LLSD-XML, its
 /// top-level value is not a map, or a required success field is missing or
 /// invalid.
-pub fn parse_login_response_llsd(body: &str) -> Result<LoginResponse, LoginParseError> {
-    let value = parse_llsd_xml(body).map_err(|_error| LoginParseError::NoStruct)?;
+pub fn parse_login_response_llsd(body: &str) -> Result<LoginResponse, WireError> {
+    let value = parse_llsd_xml(body)?;
     let Llsd::Map(map) = value else {
-        return Err(LoginParseError::NoStruct);
+        return Err(LlsdError::MalformedField {
+            field: "login body",
+            value: value.kind().to_owned(),
+        }
+        .into());
     };
     let login = llsd_string(&map, "login");
     if login == "indeterminate" {
@@ -621,7 +631,7 @@ fn insert_success_members(map: &mut HashMap<String, Llsd>, success: &LoginSucces
 
 /// Parses the members of a successful LLSD login response into a
 /// [`LoginSuccess`], the inverse of [`insert_success_members`].
-fn parse_success_members(map: &HashMap<String, Llsd>) -> Result<LoginSuccess, LoginParseError> {
+fn parse_success_members(map: &HashMap<String, Llsd>) -> Result<LoginSuccess, WireError> {
     let mut success = LoginSuccess::minimal(
         AgentKey::from(require_uuid(map, "agent_id")?),
         require_uuid(map, "session_id")?,
@@ -1042,50 +1052,53 @@ fn llsd_bool(map: &HashMap<String, Llsd>, key: &str) -> bool {
 }
 
 /// Returns the named member as a required UUID or the corresponding
-/// [`LoginParseError`].
-fn require_uuid(map: &HashMap<String, Llsd>, name: &'static str) -> Result<Uuid, LoginParseError> {
+/// [`WireError`].
+fn require_uuid(map: &HashMap<String, Llsd>, name: &'static str) -> Result<Uuid, WireError> {
     let value = map
         .get(name)
-        .ok_or(LoginParseError::MissingField { name })?;
-    llsd_to_uuid(value).ok_or_else(|| LoginParseError::InvalidField {
-        name,
+        .ok_or_else(|| WireError::from(LlsdError::MissingField { field: name }))?;
+    llsd_to_uuid(value).ok_or_else(|| WireError::InvalidScalar {
+        field: name,
         value: llsd_scalar_string(value).unwrap_or_default(),
     })
 }
 
 /// Returns the required circuit code, un-wrapping the OpenSim-style `(int)`
 /// bit reinterpretation.
-fn require_circuit_code(map: &HashMap<String, Llsd>) -> Result<CircuitCode, LoginParseError> {
+fn require_circuit_code(map: &HashMap<String, Llsd>) -> Result<CircuitCode, WireError> {
     let name = "circuit_code";
     let value = map
         .get(name)
-        .ok_or(LoginParseError::MissingField { name })?;
+        .ok_or_else(|| WireError::from(LlsdError::MissingField { field: name }))?;
     match value {
         Llsd::Integer(number) => Ok(CircuitCode(u32::from_ne_bytes(number.to_ne_bytes()))),
         other => llsd_scalar_string(other)
             .and_then(|text| text.trim().parse().ok())
             .map(CircuitCode)
-            .ok_or_else(|| LoginParseError::InvalidField {
-                name,
+            .ok_or_else(|| WireError::InvalidScalar {
+                field: name,
                 value: llsd_scalar_string(other).unwrap_or_default(),
             }),
     }
 }
 
 /// Returns the named member parsed via [`std::str::FromStr`] from its scalar
-/// string form, or the corresponding [`LoginParseError`].
-fn require_parsed<T>(map: &HashMap<String, Llsd>, name: &'static str) -> Result<T, LoginParseError>
+/// string form, or the corresponding [`WireError`].
+fn require_parsed<T>(map: &HashMap<String, Llsd>, name: &'static str) -> Result<T, WireError>
 where
     T: std::str::FromStr,
 {
     let value = map
         .get(name)
-        .ok_or(LoginParseError::MissingField { name })?;
-    let text = llsd_scalar_string(value).ok_or_else(|| LoginParseError::InvalidField {
-        name,
+        .ok_or_else(|| WireError::from(LlsdError::MissingField { field: name }))?;
+    let text = llsd_scalar_string(value).ok_or_else(|| WireError::InvalidScalar {
+        field: name,
         value: String::new(),
     })?;
     text.trim()
         .parse::<T>()
-        .map_err(|_ignored| LoginParseError::InvalidField { name, value: text })
+        .map_err(|_ignored| WireError::InvalidScalar {
+            field: name,
+            value: text,
+        })
 }

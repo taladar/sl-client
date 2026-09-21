@@ -420,8 +420,8 @@ mod tests {
 
     use super::{
         DiscardLevel, FIRST_PACKET_SIZE, MAX_DISCARD_LEVEL, MAX_IMAGE_AREA, MAX_IMAGE_COMPONENTS,
-        MAX_IMAGE_DATA_SIZE, MAX_IMAGE_SIZE, discard_data_size, parse_header,
-        parse_header_unvalidated, truncate_to_discard,
+        MAX_IMAGE_DATA_SIZE, MAX_IMAGE_SIZE, SCAN_WINDOW, discard_data_size, find_marker,
+        parse_header, parse_header_unvalidated, read_u16_be, read_u32_be, truncate_to_discard,
     };
 
     /// Appends `value` to `data` as big-endian bytes of `width` bytes (avoiding
@@ -665,6 +665,118 @@ mod tests {
         assert_eq!(huge.full_data_size_bound(), cap);
         assert_eq!(huge.discard_data_size(0), cap / 8);
         assert_eq!(discard_data_size(u32::MAX, u32::MAX, 8, 3), cap / 8);
+        Ok(())
+    }
+
+    /// The two big-endian field readers assemble their bytes most-significant
+    /// first, and refuse — rather than panicking or wrapping around — to read a
+    /// field that runs past the end of the buffer, whichever of its bytes is the
+    /// one missing. An offset near `usize::MAX` is the same refusal: the
+    /// `checked_add` of the later byte offsets cannot overflow into a low index.
+    #[test]
+    fn the_field_readers_refuse_to_read_past_the_end() {
+        let data = [0x12_u8, 0x34, 0x56, 0x78, 0x9A];
+        assert_eq!(read_u16_be(&data, 0), Some(0x1234));
+        assert_eq!(read_u16_be(&data, 3), Some(0x789A));
+        assert_eq!(read_u32_be(&data, 0), Some(0x1234_5678));
+        assert_eq!(read_u32_be(&data, 1), Some(0x3456_789A));
+        // One byte short in each width, then wholly out of bounds.
+        assert_eq!(read_u16_be(&data, 4), None);
+        assert_eq!(read_u16_be(&data, 5), None);
+        assert_eq!(read_u32_be(&data, 2), None);
+        assert_eq!(read_u32_be(&data, 99), None);
+        assert_eq!(read_u16_be(&[], 0), None);
+        assert_eq!(read_u32_be(&data, usize::MAX), None);
+        assert_eq!(read_u16_be(&data, usize::MAX), None);
+    }
+
+    /// `find_marker` answers with the offset *past* the two marker bytes, takes
+    /// the first match, and looks no further than [`SCAN_WINDOW`] bytes in — the
+    /// bound that keeps a long non-J2C blob from being scanned end to end. A
+    /// lone prefix byte at the very end is not half a marker.
+    #[test]
+    fn find_marker_takes_the_first_match_inside_the_scan_window() {
+        // Immediately at the front, and a second occurrence that loses.
+        let twice = [0xFF_u8, 0x51, 0x00, 0xFF, 0x51];
+        assert_eq!(find_marker(&twice, 0x51), Some(2));
+        // A marker that starts on the window's last two bytes is still found;
+        // one byte later is out of reach.
+        let mut inside = vec![0x00_u8; SCAN_WINDOW - 2];
+        inside.extend_from_slice(&[0xFF, 0x51]);
+        assert_eq!(find_marker(&inside, 0x51), Some(SCAN_WINDOW));
+        let mut outside = vec![0x00_u8; SCAN_WINDOW - 1];
+        outside.extend_from_slice(&[0xFF, 0x51]);
+        assert_eq!(find_marker(&outside, 0x51), None);
+        // Absent, wrong second byte, and a trailing half marker.
+        assert_eq!(find_marker(&[0x00, 0x01, 0x02], 0x51), None);
+        assert_eq!(find_marker(&twice, 0x52), None);
+        assert_eq!(find_marker(&[0x00, 0xFF], 0x51), None);
+        assert_eq!(find_marker(&[], 0x51), None);
+        assert_eq!(find_marker(&[0xFF], 0x51), None);
+    }
+
+    /// Anything that is not a recognisable codestream parses to `None` rather
+    /// than to a fabricated geometry: no `SIZ` marker at all, a `SIZ` whose
+    /// fields are truncated, and a canvas whose origin lies outside it (where
+    /// `Xsiz - XOsiz` would underflow). A `SIZ` far enough in to fall outside
+    /// the scan window is equally invisible, which is why the marker segments
+    /// are expected in the main header.
+    #[test]
+    fn a_truncated_or_markerless_codestream_is_not_a_header() -> Result<(), TestError> {
+        assert_eq!(parse_header_unvalidated(&[]), None);
+        assert_eq!(parse_header_unvalidated(&[0xFF, 0x4F]), None);
+        assert_eq!(parse_header_unvalidated(&[0x89, 0x50, 0x4E, 0x47]), None);
+
+        // A well-formed header cut short anywhere inside `SIZ` yields nothing:
+        // the last field the parser reads is `Csiz`, 38 bytes past the marker.
+        let full = synth_header(512, 256, 3, 5);
+        for cut in 4..42 {
+            let truncated = full.get(..cut).ok_or("prefix within the header")?;
+            assert_eq!(
+                parse_header_unvalidated(truncated),
+                None,
+                "a {cut}-byte prefix was read as a header"
+            );
+        }
+
+        // A canvas origin beyond the canvas itself: `Xsiz - XOsiz` underflows,
+        // so there is no width to believe.
+        let mut inverted = full.clone();
+        // The `SIZ` marker ends 4 bytes in (after `SOC`), and `XOsiz` sits 12
+        // bytes past that.
+        let offset_field = inverted.get_mut(16..20).ok_or("XOsiz field")?;
+        offset_field.copy_from_slice(&[0x00, 0x00, 0xFF, 0xFF]);
+        assert_eq!(parse_header_unvalidated(&inverted), None);
+
+        // The same header pushed past the scan window is no longer found.
+        let mut buried = vec![0x00_u8; SCAN_WINDOW];
+        buried.extend_from_slice(&full);
+        assert_eq!(parse_header_unvalidated(&buried), None);
+        Ok(())
+    }
+
+    /// A codestream with no `COD` segment still parses: its geometry is known,
+    /// but its decomposition-level count is not, so there is no coarser level
+    /// to ask for and [`DiscardLevel::clamp_to_image`] pins every request to
+    /// full resolution.
+    #[test]
+    fn a_codestream_without_a_cod_segment_has_no_coarser_level() -> Result<(), TestError> {
+        let full = synth_header(512, 256, 3, 5);
+        // Drop everything from the `COD` marker on.
+        let without_cod = full
+            .windows(2)
+            .position(|pair| pair == [0xFF, 0x52])
+            .and_then(|at| full.get(..at))
+            .ok_or("the synthesised header carries a COD marker")?;
+        let header = parse_header(without_cod).ok_or("SIZ alone is still a header")?;
+        assert_eq!(header.width, 512);
+        assert_eq!(header.height, 256);
+        assert_eq!(header.decomposition_levels, None);
+        assert_eq!(header.max_discard_level(), 0);
+        assert_eq!(
+            DiscardLevel::MAX.clamp_to_image(&header),
+            DiscardLevel::FULL
+        );
         Ok(())
     }
 }

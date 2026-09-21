@@ -39,6 +39,7 @@ fs-err = { workspace = true }
 sl-msg-template = { path = "../sl-msg-template", version = "0.1.0" }
 
 [dev-dependencies]
+fs-err = { workspace = true }
 pretty_assertions = { workspace = true }
 
 [lints]

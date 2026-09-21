@@ -198,7 +198,7 @@ impl<'a> Scan<'a> {
                         self.bump();
                         break;
                     }
-                    self.read_quoted_string()?;
+                    self.skip_map_key()?;
                     self.expect(b':')?;
                     self.skip_value()?;
                 }
@@ -206,6 +206,23 @@ impl<'a> Scan<'a> {
             _ => return None,
         }
         Some((start, self.pos))
+    }
+
+    /// Consumes one map key: a quoted string, or the size-prefixed `s(len)"…"`
+    /// form.
+    ///
+    /// Both walkers over this format have to accept the same keys. The full
+    /// parser behind [`parse_llsd_notation`](crate::parse_llsd_notation) reads
+    /// the sized form, so a document using it parsed with one walker and was
+    /// refused by the other — the same bytes answering two different
+    /// questions.
+    fn skip_map_key(&mut self) -> Option<()> {
+        if self.peek()? == b's' {
+            self.skip_sized();
+            return Some(());
+        }
+        self.read_quoted_string()?;
+        Some(())
     }
 
     /// Consumes a run of ASCII letters/digits (a bare boolean keyword).
@@ -505,7 +522,11 @@ impl NotationParser<'_> {
             b'\'' | b'"' => Ok(Llsd::String(self.parse_quoted()?)),
             b's' => Ok(Llsd::String(self.parse_sized_string()?)),
             b'l' => Ok(Llsd::Uri(self.parse_delimited_after_marker()?)),
-            b'd' => Ok(Llsd::Date(self.parse_delimited_after_marker()?)),
+            // A date only the textual encodings could carry is refused, not
+            // kept: see [`representable_date`](crate::value::representable_date).
+            b'd' => crate::value::representable_date(Some(&self.parse_delimited_after_marker()?))
+                .map(Llsd::Date)
+                .ok_or(LlsdError::MalformedNotation),
             b'b' => self.parse_binary(),
             _ => Err(LlsdError::MalformedNotation),
         }
@@ -735,31 +756,47 @@ impl NotationParser<'_> {
                 self.expect(delim)?;
                 Ok(Llsd::Binary(bytes))
             }
-            b'1' | b'6' => {
-                // `b16"…"` — hex-encoded body up to the closing delimiter.
-                self.take_radix_marker();
-                let text = self.parse_quoted()?;
-                Ok(Llsd::Binary(decode_hex(&text)))
-            }
-            _ => {
-                // `b64"…"` — standard base64 body up to the closing delimiter.
-                self.take_radix_marker();
-                let text = self.parse_quoted()?;
-                Ok(Llsd::Binary(
-                    base64::engine::general_purpose::STANDARD
-                        .decode(text.trim())
-                        .unwrap_or_default(),
-                ))
-            }
+            // The radix marker is read *whole* and compared, the way the
+            // reference does: matching on its first digit alone sent `b64` to
+            // the hex arm, where every non-hex byte of a base64 body was
+            // dropped — so a `b64` value decoded to garbage or, far more often,
+            // to nothing at all.
+            _ => match self.take_radix_marker().as_slice() {
+                b"16" => {
+                    // `b16"…"` — hex-encoded body up to the closing delimiter.
+                    let text = self.parse_quoted()?;
+                    Ok(Llsd::Binary(decode_hex(&text)))
+                }
+                b"64" => {
+                    // `b64"…"` — standard base64 body up to the closing
+                    // delimiter. Every other fault in this parser is a
+                    // `MalformedNotation`; a body that does not decode was one
+                    // too, and reading it as an empty payload made a corrupt
+                    // value indistinguishable from a deliberately empty one.
+                    // Whitespace is stripped first: a long body is routinely
+                    // wrapped across lines, and the decoder refuses a newline.
+                    let text = self.parse_quoted()?;
+                    let packed: String =
+                        text.chars().filter(|c| !c.is_ascii_whitespace()).collect();
+                    let bytes = base64::engine::general_purpose::STANDARD
+                        .decode(packed)
+                        .map_err(|_error| LlsdError::MalformedNotation)?;
+                    Ok(Llsd::Binary(bytes))
+                }
+                _other => Err(LlsdError::MalformedNotation),
+            },
         }
     }
 
-    /// Consumes the digits of a `b16` / `b64` radix marker (leaving the cursor at
-    /// the opening quote).
-    fn take_radix_marker(&mut self) {
-        while matches!(self.peek(), Some(b'0'..=b'9')) {
+    /// Consumes the digits of a `b16` / `b64` radix marker, returning them
+    /// (leaving the cursor at the opening quote).
+    fn take_radix_marker(&mut self) -> Vec<u8> {
+        let mut digits = Vec::new();
+        while let Some(digit @ b'0'..=b'9') = self.peek() {
+            digits.push(digit);
             self.bump();
         }
+        digits
     }
 }
 
@@ -822,6 +859,44 @@ mod tests {
             Err(LlsdError::NestingTooDeep {
                 limit: crate::MAX_NESTING_DEPTH,
             })
+        );
+    }
+
+    /// A binary body that does not decode is a fault, not an empty payload.
+    /// Every other way this parser can fail answers `MalformedNotation`; the
+    /// base64 arm answered `Binary([])`, which reads as a value the sender
+    /// deliberately left empty.
+    #[test]
+    fn a_base64_body_that_does_not_decode_is_refused() {
+        assert_eq!(
+            parse_llsd_notation(b"b64\"!!!!\""),
+            Err(LlsdError::MalformedNotation)
+        );
+        // A body wrapped across lines is *not* malformed — the decoder refuses
+        // an embedded newline, so stripping whitespace is what lets a wrapped
+        // payload decode instead of coming back empty.
+        assert_eq!(
+            parse_llsd_notation(b"b64\"aGVs\nbG8=\""),
+            Ok(Llsd::Binary(b"hello".to_vec()))
+        );
+    }
+
+    /// The two walkers over this format have to accept the same map keys. The
+    /// full parser reads the size-prefixed `s(len)"…"` form; the scanner did
+    /// not, so the same document parsed with one and was refused by the other.
+    #[test]
+    fn both_walkers_accept_a_size_prefixed_map_key() {
+        let document = b"{s(3)'key':i7}";
+        assert_eq!(
+            parse_llsd_notation(document),
+            Ok(Llsd::Map(std::collections::HashMap::from([(
+                "key".to_owned(),
+                Llsd::Integer(7)
+            )])))
+        );
+        assert_eq!(
+            super::Scan::new(document).skip_value(),
+            Some((0, document.len()))
         );
     }
 

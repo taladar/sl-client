@@ -4,6 +4,7 @@ use super::{FaceMaterialPut, LegacyMaterial, RenderMaterialEntry};
 use crate::WireError;
 use crate::llsd::{Llsd, parse_llsd_binary, parse_llsd_xml};
 use base64::Engine as _;
+use sl_llsd::LlsdError;
 use sl_types::key::TextureKey;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -98,39 +99,68 @@ const fn local_id_as_i32(local_id: u32) -> i32 {
 
 /// Unzips the `{ "Zipped": <binary> }` envelope every `RenderMaterials` body
 /// shares into its inner binary-LLSD value — the inverse of [`zipped_body`].
-/// `None` when the body is not the expected map, the binary does not inflate,
-/// or it is not well-formed binary-LLSD. An empty body (the "fetch all region
-/// materials" GET) has no `Zipped` and yields `None` too.
-fn parse_zipped_body(xml: &str) -> Option<Llsd> {
-    let root = parse_llsd_xml(xml).ok()?;
-    let zipped = root.get("Zipped").and_then(Llsd::as_binary)?;
+///
+/// `Ok(None)` means *there was no envelope*: an empty body, which is how the
+/// "fetch all region materials" GET asks for everything. Every other way the
+/// body can be wrong — malformed LLSD-XML, a `Zipped` member that is not
+/// binary, a blob that does not inflate (or inflates past
+/// [`MAX_INFLATED_MATERIALS_BYTES`]), or an inflated payload that is not
+/// well-formed binary LLSD — is an error, so a corrupt reply stays
+/// distinguishable from that legitimately empty request.
+fn parse_zipped_body(xml: &str, what: &'static str) -> Result<Option<Llsd>, WireError> {
+    let root = parse_llsd_xml(xml)?;
+    let Some(zipped) = root.field_binary("Zipped", "Zipped")? else {
+        return Ok(None);
+    };
     let raw = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(
         zipped,
         MAX_INFLATED_MATERIALS_BYTES,
     )
-    .ok()?;
-    parse_llsd_binary(&raw).ok()
+    .map_err(|_error| WireError::MalformedCompressedBody { what })?;
+    Ok(Some(parse_llsd_binary(&raw)?))
+}
+
+/// Reads one `RenderMaterials` material id: the wire carries it as the 16 raw
+/// bytes of the UUID, and anything else is refused rather than skipped.
+fn material_id(item: &Llsd) -> Result<Uuid, WireError> {
+    let bytes = item.as_binary().ok_or_else(|| LlsdError::MalformedField {
+        field: "material id",
+        value: item.kind().to_owned(),
+    })?;
+    Uuid::from_slice(bytes).map_err(|_error| WireError::InvalidUuid {
+        field: "material id",
+        value: format!("{} byte(s)", bytes.len()),
+    })
 }
 
 /// Parses a `RenderMaterials` capability POST **request** — the inverse of
 /// [`build_render_materials_request`]. Unzips the `{ "Zipped": … }` binary-LLSD
 /// array of 16-byte material ids into the queried [`Uuid`]s.
 ///
-/// Best-effort: a malformed body (or an empty "fetch all" body with no
-/// `Zipped`) yields an empty vector, which the handler treats as "return every
-/// known material".
-#[must_use]
-pub fn parse_render_materials_request(xml: &str) -> Vec<Uuid> {
-    let Some(Llsd::Array(items)) = parse_zipped_body(xml) else {
-        return Vec::new();
+/// An empty body — no `Zipped` envelope at all — is the "fetch all region
+/// materials" GET and yields an empty vector, which the handler treats as
+/// "return every known material". A body that *has* an envelope but is
+/// malformed is an error rather than that same empty vector, so a handler
+/// cannot mistake a corrupt request for a request for everything.
+///
+/// # Errors
+///
+/// Returns a [`WireError`] if the `{ "Zipped": … }` envelope is malformed —
+/// bad LLSD-XML, a `Zipped` member that is not binary, a blob that does not
+/// inflate — if it does not hold an array, or if an entry is not the 16 raw
+/// bytes of a material id.
+pub fn parse_render_materials_request(xml: &str) -> Result<Vec<Uuid>, WireError> {
+    let Some(value) = parse_zipped_body(xml, "RenderMaterials request")? else {
+        return Ok(Vec::new());
     };
-    items
-        .iter()
-        .filter_map(|item| {
-            item.as_binary()
-                .and_then(|bytes| Uuid::from_slice(bytes).ok())
-        })
-        .collect()
+    let Llsd::Array(items) = value else {
+        return Err(LlsdError::MalformedField {
+            field: "RenderMaterials request",
+            value: value.kind().to_owned(),
+        }
+        .into());
+    };
+    items.iter().map(material_id).collect()
 }
 
 /// Parses a `RenderMaterials` capability **PUT** request — the inverse of
@@ -139,38 +169,40 @@ pub fn parse_render_materials_request(xml: &str) -> Vec<Uuid> {
 /// map into the per-face assignments; a face without a `Material` is a clear
 /// (`material: None`).
 ///
-/// Best-effort: a malformed body yields an empty vector.
-#[must_use]
-pub fn parse_render_materials_put_request(xml: &str) -> Vec<FaceMaterialPut> {
-    let Some(root) = parse_zipped_body(xml) else {
-        return Vec::new();
-    };
-    let Some(faces) = root.get("FullMaterialsPerFace").and_then(Llsd::as_array) else {
-        return Vec::new();
-    };
-    faces
-        .iter()
-        .filter_map(face_material_put_from_llsd)
-        .collect()
+/// # Errors
+///
+/// Returns a [`WireError`] if the `{ "Zipped": … }` envelope is malformed (as
+/// for [`parse_render_materials_request`]), if the body carries no
+/// `FullMaterialsPerFace` array,
+/// or if an entry lacks its `Face`/`ID` or carries an undecodable `Material`. A
+/// PUT with nothing to say is not a request anyone makes, so an absent envelope
+/// is refused here where [`parse_render_materials_request`] accepts it.
+pub fn parse_render_materials_put_request(xml: &str) -> Result<Vec<FaceMaterialPut>, WireError> {
+    let root = parse_zipped_body(xml, "RenderMaterials PUT")?
+        .ok_or(LlsdError::MissingField { field: "Zipped" })?;
+    let faces = root.require_array("FullMaterialsPerFace", "FullMaterialsPerFace")?;
+    faces.iter().map(face_material_put_from_llsd).collect()
 }
 
 /// Decodes one `{ "Face", "ID", "Material"? }` PUT entry — the inverse of
-/// [`face_material_put_to_llsd`]. A missing `Face`/`ID` drops the entry; an
-/// absent `Material` is a face clear.
-fn face_material_put_from_llsd(item: &Llsd) -> Option<FaceMaterialPut> {
-    let face = item
-        .get("Face")
-        .and_then(Llsd::as_i32)
-        .and_then(|value| u8::try_from(value).ok())?;
-    let local_id = item
-        .get("ID")
-        .and_then(Llsd::as_i32)
-        .map(local_id_from_i32)?;
-    let material = match item.get("Material") {
-        Some(value @ Llsd::Map(_)) => legacy_material_from_llsd(value).ok(),
-        _ => None,
+/// [`face_material_put_to_llsd`]. An absent `Material` is a face clear; a
+/// missing or undecodable `Face`/`ID` is an error, since the entry then names
+/// no face to assign to.
+fn face_material_put_from_llsd(item: &Llsd) -> Result<FaceMaterialPut, WireError> {
+    let raw_face = item.require_i32("Face", "Face")?;
+    let face = u8::try_from(raw_face).map_err(|_error| WireError::ValueOutOfRange {
+        field: "Face",
+        value: i64::from(raw_face),
+    })?;
+    let local_id = local_id_from_i32(item.require_i32("ID", "ID")?);
+    let material = match item.field_map("Material", "Material")? {
+        Some(_present) => item
+            .get("Material")
+            .map(legacy_material_from_llsd)
+            .transpose()?,
+        None => None,
     };
-    Some(FaceMaterialPut {
+    Ok(FaceMaterialPut {
         local_id,
         face,
         material,
@@ -188,39 +220,42 @@ const fn local_id_from_i32(id: i32) -> u32 {
 /// `{ "Zipped": <binary> }` LLSD-XML map whose binary unzips to a binary-LLSD
 /// array of `{ "ID": <binary>, "Material": <map> }`) into the decoded entries.
 ///
-/// Best-effort: a malformed or empty response yields an empty vector.
-#[must_use]
-pub fn parse_render_materials_response(xml: &str) -> Vec<RenderMaterialEntry> {
-    let Some(Llsd::Array(items)) = parse_zipped_body(xml) else {
-        return Vec::new();
+/// # Errors
+///
+/// Returns a [`WireError`] if the `{ "Zipped": … }` envelope is malformed (as
+/// for [`parse_render_materials_request`]) or absent, if it does not hold an
+/// array, or if an entry lacks its `ID`/`Material`. An answer that carries nothing is the empty
+/// array, not the absent envelope, so "the grid found no materials" stays
+/// distinguishable from "the grid sent something we could not read".
+pub fn parse_render_materials_response(xml: &str) -> Result<Vec<RenderMaterialEntry>, WireError> {
+    let value = parse_zipped_body(xml, "RenderMaterials response")?
+        .ok_or(LlsdError::MissingField { field: "Zipped" })?;
+    let Llsd::Array(items) = value else {
+        return Err(LlsdError::MalformedField {
+            field: "RenderMaterials response",
+            value: value.kind().to_owned(),
+        }
+        .into());
     };
-    items
-        .iter()
-        .filter_map(|item| render_material_entry(item).ok().flatten())
-        .collect()
+    items.iter().map(render_material_entry).collect()
 }
 
-/// Decodes one `{ "ID", "Material" }` entry of a `RenderMaterials` response.
-fn render_material_entry(item: &Llsd) -> Result<Option<RenderMaterialEntry>, WireError> {
-    let Some(id_bytes) = item.field_binary("ID", "ID")? else {
-        return Ok(None);
-    };
-    let Ok(material_id) = Uuid::from_slice(id_bytes) else {
-        return Ok(None);
-    };
-    // Validate that "Material", when present, is a map; absent stays a default
-    // (empty) material. The borrow below reuses the same value.
-    if item.field_map("Material", "Material")?.is_none() {
-        return Ok(None);
-    }
-    let Some(material_value) = item.get("Material") else {
-        return Ok(None);
-    };
-    let material = legacy_material_from_llsd(material_value)?;
-    Ok(Some(RenderMaterialEntry {
+/// Decodes one `{ "ID", "Material" }` entry of a `RenderMaterials` response —
+/// the inverse of [`render_material_entry_to_llsd`], which always emits both.
+fn render_material_entry(item: &Llsd) -> Result<RenderMaterialEntry, WireError> {
+    let material_id = material_id(
+        item.get("ID")
+            .ok_or(LlsdError::MissingField { field: "ID" })?,
+    )?;
+    // `require_map` validates the kind; the borrow below reuses the same value.
+    item.require_map("Material", "Material")?;
+    let material_value = item
+        .get("Material")
+        .ok_or(LlsdError::MissingField { field: "Material" })?;
+    Ok(RenderMaterialEntry {
         material_id,
-        material,
-    }))
+        material: legacy_material_from_llsd(material_value)?,
+    })
 }
 
 /// Decodes a [`LegacyMaterial`] from its `RenderMaterials` LLSD map, undoing the
