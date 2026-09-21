@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 118 |
-| ready | 306 |
-| blocked | 64 |
-| in-progress | 24 |
+| ready | 308 |
+| blocked | 63 |
+| in-progress | 23 |
 | bugs | 6 |
-| done | 1210 |
+| done | 1211 |
 | deferred | 30 |
 | wont-do | 16 |
-| **total** | **1774** |
+| **total** | **1775** |
 
 ## ideas (118)
 
@@ -293,7 +293,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (306)
+## ready (308)
 
 ### protocol
 
@@ -876,10 +876,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Checkboxes are hand-rolled per panel, so no skin can shape one
 - [`viewer-skin-icon-set`](ready/viewer-skin-icon-set.md) — A skin should be
   able to carry an icon set, not just colours
+- [`viewer-skin-image-backed-widgets`](ready/viewer-skin-image-backed-widgets.md)
+  — Nine-sliced image surfaces, so a skin can change a widget's shape (blocked
+  by `viewer-skin-widget-state-classes` (done))
 - [`viewer-skin-light-surface-roles`](ready/viewer-skin-light-surface-roles.md)
   — Role tokens for a light data surface on dark chrome
 - [`viewer-skin-list-row-striping`](ready/viewer-skin-list-row-striping.md) —
   Scroll-list rows — striping, hover and a selection the skin owns
+- [`viewer-skin-panel-state-classes`](ready/viewer-skin-panel-state-classes.md)
+  — The panels paint their own states, and nine files hand-copied one role
 - [`viewer-skin-scrollbar-shape`](ready/viewer-skin-scrollbar-shape.md) — The
   scrollbar is a bar — the reference's has ends, a track and a shape
 - [`viewer-skin-text-shadow-role`](ready/viewer-skin-text-shadow-role.md) — A
@@ -1013,7 +1018,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-world-heartbeat`](ready/server-world-heartbeat.md) — A region
   heartbeat — the fake grid has no simulation loop at all
 
-## blocked (64)
+## blocked (63)
 
 ### protocol
 
@@ -1102,9 +1107,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-script-mirror-download`)
 - [`viewer-script-recovery`](blocked/viewer-script-recovery.md) — Unsaved-script
   recovery (blocked by `viewer-lsl-editor-widget`)
-- [`viewer-skin-image-backed-widgets`](blocked/viewer-skin-image-backed-widgets.md)
-  — Nine-sliced image surfaces, so a skin can change a widget's shape (blocked
-  by `viewer-skin-widget-state-classes`)
 - [`viewer-snapshot-profile-feed`](blocked/viewer-snapshot-profile-feed.md) —
   Snapshot destination — profile feed (blocked by `viewer-snapshot-floater`
   (done), `viewer-image-upload`)
@@ -1218,7 +1220,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Batch world changes into per-tick update bursts (blocked by
   `server-world-heartbeat`, `server-world-ecs-store`)
 
-## in-progress (24)
+## in-progress (23)
 
 ### viewer
 
@@ -1260,8 +1262,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   by `viewer-rlv-restriction-state` (done))
 - [`viewer-skin-panel-text-roles`](in-progress/viewer-skin-panel-text-roles.md)
   — Panel text does not follow the skin, only the widgets it is built from
-- [`viewer-skin-widget-state-classes`](in-progress/viewer-skin-widget-state-classes.md)
-  — Widget state belongs in the cascade, not in a per-frame Rust paint
 - [`viewer-streaming-audio`](in-progress/viewer-streaming-audio.md) — Parcel
   streaming-audio / media-audio player
 - [`viewer-ui-text-caret-grapheme-motion`](in-progress/viewer-ui-text-caret-grapheme-motion.md)
@@ -1303,7 +1303,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-sliders-show-no-value`](bugs/viewer-sliders-show-no-value.md) — A
   slider shows no value, and no bounds or step either
 
-## done (1210)
+## done (1211)
 
 ### protocol
 
@@ -2950,6 +2950,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   closer"
 - [`viewer-sit-target-and-stand-button`](done/viewer-sit-target-and-stand-button.md)
   — Sit target ignored on sit, and no Stand button while seated
+- [`viewer-skin-widget-state-classes`](done/viewer-skin-widget-state-classes.md)
+  — Widget state belongs in the cascade, not in a per-frame Rust paint
 - [`viewer-skinned-bind-group-quits-on-rez`](done/viewer-skinned-bind-group-quits-on-rez.md)
   — A skinned draw takes the non-skinned bind group and the render handler quits
   the viewer

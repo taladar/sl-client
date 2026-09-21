@@ -2,7 +2,7 @@
 id: viewer-skin-image-backed-widgets
 title: Nine-sliced image surfaces, so a skin can change a widget's shape
 topic: viewer
-status: blocked
+status: ready
 origin: Vintage skin fidelity audit (2026-09-20)
 points: 8
 refs: [viewer-ui-skin-tokens, viewer-vintage-skin, viewer-skin-bevel-border-policy]

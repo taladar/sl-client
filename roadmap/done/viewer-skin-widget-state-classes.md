@@ -2,7 +2,7 @@
 id: viewer-skin-widget-state-classes
 title: Widget state belongs in the cascade, not in a per-frame Rust paint
 topic: viewer
-status: in-progress
+status: done
 origin: Vintage skin fidelity audit (2026-09-20)
 points: 5
 refs: [viewer-ui-skin-tokens, viewer-skin-image-backed-widgets]
@@ -109,6 +109,42 @@ Two things to settle while doing it, neither a one-liner:
 `SkinPalette::FALLBACK` then stops being load-bearing: still the backstop for a
 third-party skin that omits a role, no longer what anything actually renders
 from.
+
+## What landed (2026-09-21)
+
+Three commits. The state vocabulary and an embedded fallback sheet so there is
+always a stylesheet to select from, then the widget set family by family.
+
+**Nothing needed a marker class where the engine already knew the state.**
+`bevy_flair` syncs `bevy_ui::Checked` to `:checked` and `InteractionDisabled`
+to `:disabled`, and both were already being maintained for accessibility — so
+tabs, radios, the combo, the menu rows and the friends list's permission
+checkboxes select on the state they already had. Markers were needed only for
+states that are genuinely ours: the menu highlight (keyboard navigation and an
+open sub-menu's ancestor chain, neither of which `:hover` sees), the floater
+title (our `ActiveFloater`, not `InputFocus`), the toolbar's "its floater is
+open", and a table row's selection in a recycled virtual list.
+
+Net: four systems, two observers, a component, six colour helpers, three
+skin-chasing `SkinColors::is_changed` widenings and two hand-written classes
+deleted, against ~90 lines of CSS. The widget set is smaller than it was.
+
+**Three exceptions stand, each for a reason.** The pie disc is a shader rather
+than a node; `notification_host`'s `kind_accent` is meaning-bearing; and the
+icon swaps (the radio's ring, the rights checkbox) stay in Rust because CSS
+cannot change which image a node shows — which is load-bearing, since it means
+those distinctions survive a skin that recolours badly.
+
+**A capability went with it.** Nothing had ever disabled a whole tab *strip* —
+every insert was in the widget's own tests, and the reference has no
+container-wide equivalent of `enableTabButton` — so the refusal, the divider's
+resize gate and its tests were dropped, with `a_marked_strip_still_switches`
+pinning the new rule.
+
+The panels were **not** in scope and are surveyed in
+[[viewer-skin-panel-state-classes]]: 26 of their 54 state constants turned out
+to be an existing class under a local name, nine of them hand-copying
+`selection_bg`'s exact value.
 
 ## Done when
 
