@@ -64,6 +64,10 @@
   --accent: #5cb8fa;
   /* The accent, dimmed — informational rather than interactive. */
   --accent-muted: #6b8db3;
+  --marker-selected: #fad159;
+  --tile-bg: #0000004d;
+  --inline-item-bg: #333d528c;
+  --inline-item-bg-hover: #475c85d9;
 
   /* Emphasis. The row selection is translucent so a banded list still reads
    * through it; the match highlight is the filter's own glyph colour. */

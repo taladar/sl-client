@@ -26,6 +26,24 @@ shadow, and a radio button is a white disc in a dark ring, both 15×15. Ours
 are filled squares that go blue when checked. The shapes are different in
 kind, not in tint: one is a container you look into, the other is a swatch.
 
+## Decided (2026-09-21)
+
+The shared-widget approach below is **agreed with the user**, not a proposal —
+do not re-open it.
+
+Two things the `viewer-skin-panel-state-classes` sweep measured while working
+around this:
+
+- **19 files declare their own `CHECKED_GLYPH`**, 30 glyph constants between
+  them. `settings_binding::bound_checkbox` is a binding helper, not a widget,
+  and the panels that do not go through it each draw their own.
+- Three **three-state check painters** were left un-converted for this task to
+  absorb — `about_land.rs`, `about_region.rs` and `land_environment.rs`, each
+  resolving `!enabled` / `on` / `off` to a glyph colour by hand. They were the
+  only sites in that sweep with nothing to convert *to*: a class vocabulary
+  invented for them now would have to be undone when the widget lands. They
+  are the natural first call sites.
+
 ## What to do
 
 - A shared `ui_checkbox` in `sl-viewer-ui-widgets`, on the same model as

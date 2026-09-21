@@ -317,6 +317,36 @@
   -bevy-image-color: var(--accent-muted);
 }
 
+/* A keyframe marker on the day-cycle timeline. The selected one is gold rather
+ * than the blue every list selection takes: it sits on a sky gradient, where
+ * blue would sink in. The cursor marker never selects, so it keeps the base. */
+.sk-day-marker {
+  background-color: var(--slider-thumb);
+}
+
+.sk-day-marker.sk-active {
+  background-color: var(--marker-selected);
+}
+
+/* An inventory gallery tile. Its resting backing is a scrim rather than
+ * transparent, so a thumbnail reads against whatever is behind the panel; the
+ * selected one takes the same highlight as every list row. */
+.sk-gallery-tile {
+  background-color: var(--tile-bg);
+}
+
+/* An embedded item inside notecard prose — a clickable object in a paragraph,
+ * translucent so the prose reads around it. Its hover is `:hover` and nothing
+ * else: the widget used to carry a Pointer<Over> / Pointer<Out> observer pair
+ * writing these two colours by hand. */
+.sk-inline-item {
+  background-color: var(--inline-item-bg);
+}
+
+.sk-inline-item:hover {
+  background-color: var(--inline-item-bg-hover);
+}
+
 /* A pie slice's caption, in its three roles. The pie *disc* is a shader rather
  * than a node and keeps taking its three colours through the material's params
  * — the one piece of this widget a selector genuinely cannot reach. The

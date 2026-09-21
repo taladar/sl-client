@@ -70,6 +70,22 @@
   --gain: #3fa34d;
   --loss: #c0392b;
   --focus-ring: #ffc740;
+
+  /* The selected keyframe marker on a day-cycle timeline. Gold rather than
+   * the blue every list selection uses: it sits on a sky gradient, not in a
+   * list, and blue would sink into it. */
+  --marker-selected: #fad159;
+
+  /* A gallery tile's resting backing — a scrim, so a thumbnail reads against
+   * whatever is behind the panel. */
+  --tile-bg: #0000004d;
+
+  /* An embedded item inside notecard prose: a clickable object in a
+   * paragraph. Translucent on purpose, so the prose reads around it. */
+  --inline-item-bg: #333d528c;
+
+  /* The same, under the pointer. */
+  --inline-item-bg-hover: #475c85d9;
   --surface-radius: 6px;
   --control-radius: 4px;
 }

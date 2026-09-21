@@ -38,6 +38,7 @@ use std::collections::VecDeque;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui_widgets::Button;
+use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
     AgentKey, AssetType, Command, InventoryFolderKey, InventoryKey, InventoryType, ItemInfo,
     ObjectKey, OwnerKey, Permissions5, SlCommand, Uuid,
@@ -58,12 +59,10 @@ const CONFIRM_ITEM_COPY_TEMPLATE: &str = "ConfirmItemCopy";
 /// The affirmative button's stable functor name on `ConfirmItemCopy`.
 const CONFIRM_ITEM_COPY_BUTTON: &str = "OK";
 
-/// The embedded-item box's resting background — a faint pill so an inline item
-/// reads as a distinct, clickable object in the prose.
-const ITEM_BACKGROUND: Color = Color::srgba(0.20, 0.24, 0.32, 0.55);
-
-/// The embedded-item box's hovered background (brighter, to signal the click).
-const ITEM_BACKGROUND_HOVER: Color = Color::srgba(0.28, 0.36, 0.52, 0.85);
+/// The skin class on an embedded-item box — a clickable object inside notecard
+/// prose. Its hover is `:hover` and nothing else; this used to be a
+/// `Pointer<Over>` / `Pointer<Out>` observer pair writing two colours by hand.
+const ITEM_CLASS: &str = "sk-inline-item";
 
 // ---------------------------------------------------------------------------
 // The embedded-item box.
@@ -174,7 +173,7 @@ pub(crate) fn spawn_embedded_item_box(
                 padding: UiRect::axes(Val::Px(4.0), Val::Px(0.0)),
                 ..default()
             },
-            BackgroundColor(ITEM_BACKGROUND),
+            ClassList::new_with_classes([ITEM_CLASS]),
             Button,
             TabIndex(0),
             Pickable::default(),
@@ -196,11 +195,7 @@ pub(crate) fn spawn_embedded_item_box(
         Pickable::IGNORE,
         ChildOf(item_box),
     ));
-    commands
-        .entity(item_box)
-        .observe(on_embedded_press)
-        .observe(on_embedded_over)
-        .observe(on_embedded_out);
+    commands.entity(item_box).observe(on_embedded_press);
     item_box
 }
 
@@ -293,26 +288,6 @@ impl Plugin for NotecardRenderPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PendingEmbeddedCopies>()
             .add_systems(Update, handle_embedded_copy_confirmations);
-    }
-}
-
-/// Brighten the hovered item box.
-fn on_embedded_over(
-    over: On<Pointer<Over>>,
-    mut colors: Query<&mut BackgroundColor, With<EmbeddedItemBox>>,
-) {
-    if let Ok(mut color) = colors.get_mut(over.entity) {
-        color.0 = ITEM_BACKGROUND_HOVER;
-    }
-}
-
-/// Restore the item box's resting background on pointer-out.
-fn on_embedded_out(
-    out: On<Pointer<Out>>,
-    mut colors: Query<&mut BackgroundColor, With<EmbeddedItemBox>>,
-) {
-    if let Ok(mut color) = colors.get_mut(out.entity) {
-        color.0 = ITEM_BACKGROUND;
     }
 }
 

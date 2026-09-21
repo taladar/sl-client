@@ -53,6 +53,10 @@
   --accent: #38bdf8;
   /* The accent, dimmed — informational rather than interactive. */
   --accent-muted: #288bba;
+  --marker-selected: #fad159;
+  --tile-bg: #0000004d;
+  --inline-item-bg: #333d528c;
+  --inline-item-bg-hover: #475c85d9;
 
   /* Emphasis */
   --selection-bg: #2f6fae8c;

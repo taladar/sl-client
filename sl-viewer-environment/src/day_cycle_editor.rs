@@ -111,9 +111,7 @@ use crate::rows::{
     spawn_slider_row, spawn_texture_row, spawn_trackball_row, tag_aim_slider,
 };
 use crate::settings_editor::EditedItem;
-use crate::style::{
-    CONTROL_BORDER, DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, THUMB_FILL, TRACK_FILL,
-};
+use crate::style::{CONTROL_BORDER, DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, TRACK_FILL};
 use crate::tabs::{SKY_TABS, TabPage, WATER_TABS};
 
 /// The window's floater id, and the prefix of every node's name in it.
@@ -147,11 +145,9 @@ const MARKER_WIDTH: f32 = 9.0;
 /// `p0`..`p4`.
 const TICKS: usize = 5;
 
-/// A keyframe marker's fill.
-const MARKER_FILL: Color = Color::srgb(0.72, 0.76, 0.84);
-
-/// The selected keyframe marker's fill.
-const MARKER_SELECTED: Color = Color::srgb(0.98, 0.82, 0.35);
+/// The skin class on a timeline marker — the cursor and every keyframe. The
+/// selected keyframe adds `ACTIVE_CLASS`; the cursor never does.
+const MARKER_CLASS: &str = "sk-day-marker";
 
 /// How many columns a knob page lays its controls out in.
 const COLUMNS: usize = 3;
@@ -1005,11 +1001,7 @@ fn spawn_strip(commands: &mut Commands, parent: Entity, kind: StripKind, markers
                 inline_start: Val::Px(0.0),
                 ..LogicalRect::ZERO
             }),
-            BackgroundColor(if kind == StripKind::Cursor {
-                THUMB_FILL
-            } else {
-                MARKER_FILL
-            }),
+            ClassList::new_with_classes([MARKER_CLASS]),
             // The strip owns the gesture; a marker under the pointer must not
             // swallow the press that was aimed at the track behind it.
             Pickable::IGNORE,
@@ -1600,16 +1592,11 @@ fn on_day_strip_drag(
 /// changed since the pointer left it.
 fn rebuild_day_markers(
     mut state: ResMut<DayCycleEditorState>,
-    mut markers: Query<(
-        &DayMarker,
-        &mut Node,
-        &mut LogicalInset,
-        &mut BackgroundColor,
-    )>,
+    mut markers: Query<(&DayMarker, &mut Node, &mut LogicalInset, &mut ClassList)>,
 ) {
     let Some(session) = state.session.as_mut() else {
         // Nothing open: every marker is hidden, including the scrubber.
-        for (_marker, mut node, _inset, _color) in &mut markers {
+        for (_marker, mut node, _inset, _classes) in &mut markers {
             if node.display != Display::None {
                 node.display = Display::None;
             }
@@ -1628,7 +1615,7 @@ fn rebuild_day_markers(
         .enumerate()
         .map(|(index, keyframe)| (keyframe.keyframe, Some(index) == session.selected))
         .collect();
-    for (marker, mut node, mut inset, mut color) in &mut markers {
+    for (marker, mut node, mut inset, mut classes) in &mut markers {
         let placed = match marker.strip {
             StripKind::Cursor => Some((cursor, false)),
             StripKind::Keyframes => keyframes.get(marker.index).copied(),
@@ -1646,14 +1633,13 @@ fn rebuild_day_markers(
         if inset.0.inline_start != offset {
             inset.0.inline_start = offset;
         }
-        let wanted = match (marker.strip, selected) {
-            (StripKind::Cursor, _any) => THUMB_FILL,
-            (StripKind::Keyframes, true) => MARKER_SELECTED,
-            (StripKind::Keyframes, false) => MARKER_FILL,
-        };
-        if color.0 != wanted {
-            color.0 = wanted;
-        }
+        // The cursor never selects, so only a keyframe marker lights; the
+        // skin decides what that looks like (`.sk-day-marker.sk-active`).
+        set_state_class(
+            &mut classes,
+            ACTIVE_CLASS,
+            matches!(marker.strip, StripKind::Keyframes) && selected,
+        );
     }
 }
 

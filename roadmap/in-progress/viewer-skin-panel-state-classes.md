@@ -40,7 +40,11 @@ selected-row backgrounds hold **five distinct values**:
 
 - **nine agree** — and are exactly `SkinPalette::FALLBACK.selection_bg`,
   `srgba(0.24, 0.34, 0.52, 0.55)`. Nine files hand-copied the role's value
-  rather than reading it.
+  rather than reading it. **Ten**, in fact: the survey anchored on
+  `^const NAME: Color` and so missed the ten *indented* constants in the
+  workspace, one of which is `sl-viewer-environment`'s
+  `style::SELECTED_BACKGROUND` — a crate-local role module, which is the right
+  instinct one layer short of the shared roles.
 - `group_profile.rs` and `groups.rs` drifted to a different blue
   (`0.30, 0.42, 0.62`);
 - `about_floater.rs` drifted in **alpha** as well (`0.35`, not `0.55`);

@@ -34,8 +34,10 @@ use crate::skin_palette::SkinPalette;
 use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx};
+use bevy_flair::style::components::ClassList;
 use sl_emoji::{ShortcodeMatch, complete};
 
+use sl_viewer_ui_core::skin::{ACTIVE_CLASS, LIST_ROW_CLASS, set_state_class};
 use sl_viewer_ui_core::ui::column;
 use sl_viewer_ui_core::ui_font::UiFont;
 
@@ -57,12 +59,6 @@ const POPUP_BACKGROUND: Color = Color::srgba(0.10, 0.12, 0.16, 0.97);
 
 /// The popup's border.
 const POPUP_BORDER: Color = Color::srgb(0.34, 0.40, 0.52);
-
-/// A row's resting background.
-const ROW_BACKGROUND: Color = Color::NONE;
-
-/// The selected row's background — the one `Enter` would accept.
-const ROW_SELECTED_BACKGROUND: Color = Color::srgb(0.22, 0.40, 0.60);
 
 /// A row's text colour.
 const ROW_TEXT_COLOR: Color = SkinPalette::FALLBACK.text_primary;
@@ -267,7 +263,7 @@ fn spawn_colon_row(commands: &mut Commands, popup: Entity, field: Entity, index:
                 padding: UiRect::horizontal(Val::Px(4.0)),
                 ..default()
             },
-            BackgroundColor(ROW_BACKGROUND),
+            ClassList::new_with_classes([LIST_ROW_CLASS]),
             Pickable::default(),
             ColonRow { index, label },
             ChildOf(popup),
@@ -474,7 +470,7 @@ fn accept_match(
 fn highlight_colon_rows(
     completers: Query<&ColonComplete>,
     rows: Query<&ColonRow>,
-    mut backgrounds: Query<&mut BackgroundColor>,
+    mut classes: Query<&mut ClassList>,
 ) {
     for completer in &completers {
         for &row_entity in &completer.rows {
@@ -482,15 +478,8 @@ fn highlight_colon_rows(
                 continue;
             };
             let selected = completer.open && row.index == completer.selected;
-            let wanted = if selected {
-                ROW_SELECTED_BACKGROUND
-            } else {
-                ROW_BACKGROUND
-            };
-            if let Ok(mut background) = backgrounds.get_mut(row_entity)
-                && background.0 != wanted
-            {
-                background.0 = wanted;
+            if let Ok(mut classes) = classes.get_mut(row_entity) {
+                set_state_class(&mut classes, ACTIVE_CLASS, selected);
             }
         }
     }

@@ -23,7 +23,9 @@ use crate::skin_palette::SkinPalette;
 use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
+use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{FolderType, InventoryFolderKey, InventoryType, SlCommand, TextureKey};
+use sl_viewer_ui_core::skin::ACTIVE_CLASS;
 
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::Translated;
@@ -68,11 +70,10 @@ const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
 /// A button's border colour.
 const BUTTON_BORDER: Color = Color::srgb(0.34, 0.40, 0.52);
 
-/// A tile's background.
-const TILE_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.30);
-
-/// A selected tile's background.
-const SELECTED_TILE_BACKGROUND: Color = Color::srgba(0.24, 0.34, 0.52, 0.55);
+/// The skin class on a gallery tile. Its resting backing is a scrim rather
+/// than transparent (`--tile-bg`), so a thumbnail reads against whatever is
+/// behind the panel; a selected tile adds [`ACTIVE_CLASS`].
+const TILE_CLASS: &str = "sk-gallery-tile";
 
 /// Two clicks on the same tile within this window are a double-click, in
 /// seconds.
@@ -468,11 +469,9 @@ fn spawn_tile(
                 padding: UiRect::all(Val::Px(4.0)),
                 ..column(Val::Px(3.0))
             },
-            BackgroundColor(if selected {
-                SELECTED_TILE_BACKGROUND
-            } else {
-                TILE_BACKGROUND
-            }),
+            ClassList::new_with_classes(
+                core::iter::once(TILE_CLASS).chain(selected.then_some(ACTIVE_CLASS)),
+            ),
             Pickable::default(),
             TileKey(key),
             Name::new("inventory-gallery-tile"),

@@ -9162,6 +9162,7 @@ name = "sl-viewer-asset-editors"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_flair",
  "pretty_assertions",
  "sl-client-bevy",
  "sl-notecard",
@@ -9207,6 +9208,7 @@ name = "sl-viewer-chat"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_flair",
  "pretty_assertions",
  "sl-client-bevy",
  "sl-emoji",
@@ -9303,6 +9305,7 @@ name = "sl-viewer-inventory"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_flair",
  "bytes",
  "pretty_assertions",
  "sl-client-bevy",

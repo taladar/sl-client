@@ -48,5 +48,30 @@ Two candidate approaches, both worth costing before picking:
 - **A `TableSpec` that names roles rather than colours** — store a role enum
   and resolve it when the table is spawned, which is inside a system.
 
+## What the state sweep left you (2026-09-21)
+
+`viewer-skin-panel-state-classes` went first precisely so the trap above is
+gone: a class on the spawn helpers would have beaten a Rust-painted
+`TextColor` and flattened a greyed action column or a disabled check glyph into
+one colour, silently and only in the live viewer. Those paints are classes now.
+
+Two things it hands over:
+
+- **Resting greys.** `about_land.rs` and `about_region.rs` each spawn a value
+  node with `TextColor(DISABLED_COLOR)` — a colour at birth, not a state, so it
+  stayed. Their `DISABLED_COLOR` constant survives for those and for the check
+  painters.
+- **An argument-count side effect.** Splitting a combined
+  `(&mut Text, &mut TextColor)` query into content-plus-state adds a parameter,
+  and several of these systems already sit near the workspace's seven-argument
+  clippy limit — `experience_picker.rs` went over and needed a `PickerChrome`
+  bundle. Expect the same in the larger `sl-viewer-places` and
+  `sl-viewer-people` systems.
+
+`ButtonSpec::class` / `::label_class` are the seam the greying used, and they
+work: several panels now pass both. `ui_spawn::spawn_text` already takes an
+`Option<&'static str>` class, so the "classes on the spawn helpers" route is
+the one with evidence behind it.
+
 Done when a skin switch recolours a panel's text the way it already recolours
 its floater, and the gallery's live switcher shows it.
