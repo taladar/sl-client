@@ -96,6 +96,8 @@ pub(crate) fn settings_destination(inventory: &InventoryModel) -> Option<Invento
 pub(crate) mod style {
     use bevy::prelude::Color;
 
+    use sl_viewer_ui_core::skin_palette::SkinPalette;
+
     /// Label / readout font size, logical px.
     pub(crate) const FONT_SIZE: f32 = 13.0;
 
@@ -103,10 +105,10 @@ pub(crate) mod style {
     pub(crate) const HEADING_SIZE: f32 = 14.0;
 
     /// The default label colour.
-    pub(crate) const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+    pub(crate) const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
     /// The dimmed heading / secondary colour.
-    pub(crate) const DIM_LABEL_COLOR: Color = Color::srgb(0.62, 0.66, 0.74);
+    pub(crate) const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
     /// A control's border colour.
     pub(crate) const CONTROL_BORDER: Color = Color::srgba(0.34, 0.40, 0.52, 1.0);

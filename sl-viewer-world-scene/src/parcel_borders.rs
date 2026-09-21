@@ -54,9 +54,10 @@ use sl_viewer_kit::coords::{metres_to_f32, sl_to_bevy_rotation, sl_to_bevy_vec};
 use sl_viewer_settings::ViewerSettings;
 use sl_viewer_world_api::TerrainState;
 
-/// The setting name gating the in-world property lines (the reference viewer's
-/// `ShowPropertyLines`). Registered in [`register_settings`].
-pub const SETTING_SHOW_PROPERTY_LINES: &str = "ShowPropertyLines";
+// The property-line toggle is bound by the preferences move & view tab, so its
+// key lives in `sl-viewer-settings`; the default is declared in
+// [`register_settings`] below.
+pub use sl_viewer_settings::keys::parcel_borders::SETTING_SHOW_PROPERTY_LINES;
 
 /// The setting name gating the in-world **ownership tint** — the terrain itself
 /// shaded by parcel-ownership class, the reference viewer's `ShowParcelOwners`
@@ -263,15 +264,13 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         PARCEL_SECTION,
         SETTING_SHOW_PROPERTY_LINES,
         sl_settings::SettingValue::Bool(true),
-        "Show the in-world parcel property lines (colour-coded by ownership)",
+        "setting-desc-ShowPropertyLines",
     );
     settings.register_in(
         PARCEL_SECTION,
         SETTING_SHOW_PARCEL_OWNERS,
         sl_settings::SettingValue::Bool(false),
-        "Tint the ground itself by parcel-ownership class (green = yours, \
-         aqua = your group's, red = someone else's, orange = for sale, \
-         violet = auction, grey = public)",
+        "setting-desc-ShowParcelOwners",
     );
 }
 

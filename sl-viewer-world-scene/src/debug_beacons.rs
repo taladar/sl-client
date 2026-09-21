@@ -439,7 +439,7 @@ fn update_debug_beacons(
     let wanted: HashSet<ObjectKey> = beacons.iter().filter_map(|beacon| beacon.anchor).collect();
     let mut anchors: HashMap<ObjectKey, (Vec3, Quat)> = HashMap::default();
     for (key, scoped) in objects.scoped_by_full_keys(&wanted) {
-        if let Some(tracked) = objects.objects.get(&scoped)
+        if let Some(tracked) = objects.objects().get(&scoped)
             && let Ok(global) = globals.get(tracked.entity)
         {
             let (_scale, rotation, translation) = global.to_scale_rotation_translation();

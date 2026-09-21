@@ -69,6 +69,7 @@
 //! `floater_telehub.xml`, `panel_region_general.xml` (`manage_telehub_btn`),
 //! `llselectmgr.cpp` (`sendGodlikeRequest`).
 
+use crate::skin_palette::SkinPalette;
 use bevy::prelude::*;
 use bevy::ui::InteractionDisabled;
 use sl_client_bevy::{
@@ -106,10 +107,10 @@ const MAX_SPAWN_POINTS: usize = 16;
 const FONT_SIZE: f32 = 13.0;
 
 /// A value / label text colour.
-const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A dim label / secondary text colour.
-const DIM_LABEL_COLOR: Color = Color::srgb(0.62, 0.66, 0.74);
+const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// A disabled control's text colour.
 const DISABLED_COLOR: Color = Color::srgb(0.45, 0.47, 0.52);
@@ -689,7 +690,7 @@ fn selected_roots(selection: &SelectionSet, objects: &ObjectState) -> Vec<Scoped
         .iter()
         .filter(|node| {
             objects
-                .objects
+                .objects()
                 .get(&node.scoped)
                 .is_some_and(|tracked| tracked.is_root && tracked.shape.pcode() == pcode::PRIMITIVE)
         })

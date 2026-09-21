@@ -91,7 +91,7 @@ fn register_group_notice_settings(settings: Option<ResMut<crate::settings::Viewe
         &[crate::notifications::NOTIFICATIONS_SECTION],
         SETTING_GROUP_NOTICE_TOASTS,
         sl_settings::SettingValue::Bool(true),
-        "Show a toast when a group notice arrives",
+        "setting-desc-ShowGroupNoticeToasts",
     );
 }
 

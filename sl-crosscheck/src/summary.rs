@@ -18,7 +18,7 @@ use core::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::launch::Viewer;
-use crate::plan::RunPlan;
+use crate::plan::{FirestormSkin, RunPlan, SlClientSkin};
 use crate::process::Ending;
 use crate::status::Artefacts;
 
@@ -162,6 +162,13 @@ pub struct RunSummary {
     /// asked for, and `run.json` has to carry the question as well as the
     /// answers.
     pub day_position: Option<f32>,
+    /// What each viewer was dressed in. Two entries, not one, because the two
+    /// viewers' skin namespaces are unrelated — a run that names a skin names
+    /// it per viewer, and `run.json` has to record which side wore what or a
+    /// `ui` capture cannot be read at all.
+    pub sl_client_skin: SlClientSkin,
+    /// What Firestorm was dressed in.
+    pub firestorm_skin: FirestormSkin,
     /// Each viewer's half.
     pub viewers: Vec<ViewerRun>,
 }
@@ -191,6 +198,8 @@ impl RunSummary {
                 .and_then(|camera| camera.look_at)
                 .map(|point| point.to_string()),
             day_position: plan.capture.day_position,
+            sl_client_skin: plan.sl_client_skin.clone(),
+            firestorm_skin: plan.firestorm_skin.clone(),
             viewers,
         }
     }
@@ -309,7 +318,7 @@ mod tests {
 
     use super::{RunSummary, ViewerRun};
     use crate::launch::Viewer;
-    use crate::plan::{CaptureSpec, RunPlan};
+    use crate::plan::{CaptureSpec, FirestormSkin, RunPlan, SlClientSkin};
     use crate::process::Ending;
     use crate::status::{Artefacts, DayPositionStatus, HarnessStatus, Status};
 
@@ -325,6 +334,8 @@ mod tests {
             last_name: "User".to_owned(),
             password: "password".to_owned(),
             capture: CaptureSpec::default(),
+            sl_client_skin: SlClientSkin::default(),
+            firestorm_skin: FirestormSkin::default(),
             camera: None,
         })
     }

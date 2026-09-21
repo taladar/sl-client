@@ -135,80 +135,26 @@ use sl_viewer_world_objects::textures::{TextureDecoded, TextureManager};
 /// section the graphics tab's own settings use.
 const RENDER_SECTION: &[&str] = &["render"];
 
-/// The complexity budget (the reference's `RenderAvatarMaxComplexity`): an
-/// avatar scoring above it is drawn as a jellydoll. `0` disables the limit —
-/// and, as in the reference, the surface-area trigger with it.
-pub const SETTING_MAX_COMPLEXITY: &str = "RenderAvatarMaxComplexity";
-
-/// How the budget is applied (the reference's `RenderAvatarComplexityMode`); see
-/// [`ComplexityMode`].
-pub const SETTING_COMPLEXITY_MODE: &str = "RenderAvatarComplexityMode";
-
-/// The attachment surface-area trigger (the reference's
-/// `RenderAutoMuteSurfaceAreaLimit`), in square metres; `0` turns it off. It
-/// catches the content a triangle count cannot: one enormous alpha sheet is
-/// cheap to *transform* and ruinous to *fill*.
-pub const SETTING_SURFACE_AREA_LIMIT: &str = "RenderAutoMuteSurfaceAreaLimit";
+// The budget is drawn by the preferences graphics tab and the quick-preferences
+// panel, so its keys, the bounds of the sliders over them, and the
+// [`ComplexityMode`] numbering a combo has to write live in
+// `sl-viewer-settings`; the defaults below and the jellydolling itself stay
+// here. [`SETTING_SURFACE_AREA_LIMIT`] catches the content a triangle count
+// cannot: one enormous alpha sheet is cheap to *transform* and ruinous to
+// *fill*.
+pub use sl_viewer_settings::keys::avatar_complexity::{
+    ComplexityMode, MAX_COMPLEXITY_SLIDER_MAX, MAX_COMPLEXITY_SLIDER_STEP, SETTING_COMPLEXITY_MODE,
+    SETTING_MAX_COMPLEXITY, SETTING_SURFACE_AREA_LIMIT, SURFACE_AREA_SLIDER_MAX,
+    SURFACE_AREA_SLIDER_STEP,
+};
 
 /// The default budget: **off**, as the reference ships it. The limit hides
 /// people, so it is opt-in — the Quick Preferences slider is how you reach for
 /// it when a region turns out to be too much.
 const DEFAULT_MAX_COMPLEXITY: u32 = 0;
 
-/// The largest budget the sliders offer. Above roughly this an avatar is
-/// unrenderable on any hardware, so a higher setting would only mean "off",
-/// which `0` already says.
-pub const MAX_COMPLEXITY_SLIDER_MAX: f32 = 500_000.0;
-
-/// The budget slider's step — fine enough to tune, coarse enough that dragging
-/// it does not re-decide every avatar on every pixel.
-pub const MAX_COMPLEXITY_SLIDER_STEP: f32 = 5_000.0;
-
 /// The default surface-area trigger, in square metres (the reference's value).
 const DEFAULT_SURFACE_AREA_LIMIT: f32 = 1000.0;
-
-/// The largest surface-area limit the slider offers.
-pub const SURFACE_AREA_SLIDER_MAX: f32 = 5000.0;
-
-/// The surface-area slider's step.
-pub const SURFACE_AREA_SLIDER_STEP: f32 = 100.0;
-
-/// How the complexity budget is applied to friends — the reference's
-/// `RenderAvatarComplexityMode`, whose stored numbering this keeps.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ComplexityMode {
-    /// Judge everyone by the budget alone, friends included.
-    #[default]
-    ByComplexity,
-    /// Friends are always drawn in full, whatever they cost.
-    AlwaysShowFriends,
-    /// Only friends are drawn in full; everyone else is a jellydoll. Distinct
-    /// from Show Friends Only ([`crate::derender`]), which does not draw the
-    /// non-friends at all — this keeps their silhouette.
-    OnlyShowFriends,
-}
-
-impl ComplexityMode {
-    /// The mode for a stored setting value, defaulting to
-    /// [`ByComplexity`](Self::ByComplexity) for anything unrecognised.
-    const fn from_stored(value: u32) -> Self {
-        match value {
-            1 => Self::AlwaysShowFriends,
-            2 => Self::OnlyShowFriends,
-            _other => Self::ByComplexity,
-        }
-    }
-
-    /// The stored setting value for this mode.
-    #[must_use]
-    pub const fn stored(self) -> u32 {
-        match self {
-            Self::ByComplexity => 0,
-            Self::AlwaysShowFriends => 1,
-            Self::OnlyShowFriends => 2,
-        }
-    }
-}
 
 /// A per-avatar override of the automatic rules (the reference's
 /// `VisualMuteSettings`).
@@ -1093,21 +1039,19 @@ pub fn declare_complexity_settings(settings: &mut ViewerSettings) {
         RENDER_SECTION,
         SETTING_MAX_COMPLEXITY,
         SettingValue::U32(DEFAULT_MAX_COMPLEXITY),
-        "Draw an avatar costing more than this as a flat silhouette (0 = no limit)",
+        "setting-desc-RenderAvatarMaxComplexity",
     );
     settings.register_in(
         RENDER_SECTION,
         SETTING_COMPLEXITY_MODE,
         SettingValue::U32(ComplexityMode::ByComplexity.stored()),
-        "How the avatar complexity limit treats friends: 0 by complexity alone, \
-         1 always draw friends fully, 2 draw only friends fully",
+        "setting-desc-RenderAvatarComplexityMode",
     );
     settings.register_in(
         RENDER_SECTION,
         SETTING_SURFACE_AREA_LIMIT,
         SettingValue::F32(DEFAULT_SURFACE_AREA_LIMIT),
-        "Draw an avatar whose attachments cover more than this many square metres \
-         as a flat silhouette (0 = no area limit)",
+        "setting-desc-RenderAutoMuteSurfaceAreaLimit",
     );
 }
 

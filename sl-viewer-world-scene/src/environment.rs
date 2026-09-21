@@ -608,27 +608,25 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         ENVIRONMENT_SECTION,
         SETTING_TRANSITION_TIME,
         SettingValue::F32(0.0),
-        "Seconds to blend between sky/water settings when the environment is changed by hand. \
-         0 is immediate.",
+        "setting-desc-EnvironmentManualTransitionTime",
     );
     settings.register_in(
         ENVIRONMENT_SECTION,
         SETTING_PERSIST_ACROSS_LOGIN,
         SettingValue::Bool(true),
-        "Restore the personal (local) environment at the next login.",
+        "setting-desc-EnvironmentPersistAcrossLogin",
     );
     settings.register_in(
         ENVIRONMENT_SECTION,
         SETTING_REPEATED_TOGGLES_SHARED,
         SettingValue::Bool(false),
-        "Picking the environment preset that is already pinned reverts to the shared \
-         (region) environment.",
+        "setting-desc-EnvironmentRepeatedTogglesShared",
     );
     settings.register_hidden_in(
         ENVIRONMENT_SECTION,
         SETTING_SAVED_ENVIRONMENT,
         SettingValue::String(String::new()),
-        "The personal environment saved for this account, as JSON. Written by the viewer.",
+        "setting-desc-SavedPersonalEnvironment",
     );
 }
 

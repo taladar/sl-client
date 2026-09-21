@@ -53,9 +53,7 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         RENDER_SECTION,
         SETTING_DRAW_DISTANCE,
         SettingValue::F32(DEFAULT_DRAW_DISTANCE_METRES),
-        "Draw distance in metres: how far the simulator streams objects and \
-         terrain toward the agent (a larger value opens child circuits to \
-         neighbouring regions)",
+        "setting-desc-RenderFarClip",
     );
 }
 

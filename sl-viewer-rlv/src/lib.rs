@@ -65,6 +65,8 @@ use bevy::prelude::*;
 pub(crate) mod style {
     use bevy::prelude::Color;
 
+    use sl_viewer_ui_core::skin_palette::SkinPalette;
+
     /// Header / cell font size, logical px.
     pub(crate) const FONT_SIZE: f32 = 13.0;
 
@@ -72,10 +74,10 @@ pub(crate) mod style {
     pub(crate) const ROW_HEIGHT: f32 = 20.0;
 
     /// The default cell / label colour.
-    pub(crate) const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+    pub(crate) const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
     /// The dimmed header / secondary colour.
-    pub(crate) const DIM_LABEL_COLOR: Color = Color::srgb(0.62, 0.66, 0.74);
+    pub(crate) const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
     /// A list viewport's backdrop.
     pub(crate) const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);

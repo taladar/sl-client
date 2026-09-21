@@ -14,11 +14,13 @@
   --surface-border: #2f5f8f;
   --surface-radius: 8px;
   --card-bg: #103049;
+  --overlay-bg: #06141fd9;
 
   /* Text */
   --text-primary: #eaf3ff;
   --text-muted: #b9d4ee;
   --text-disabled: #6f89a4;
+  --text-heading: #9fd8ff;
 
   /* Text editing (R28): caret = primary text, translucent selections. */
   --caret: #eaf3ff;
@@ -37,13 +39,40 @@
   --control-bg-hover: #1f4e79;
   --control-bg-disabled: #142d44;
   --control-border: #4a90d0;
+  --control-border-disabled: #2b455e;
   --control-radius: 6px;
+
+  /* Editable fields */
+  --field-bg: #0b1f33;
+  --field-text: #ffffff;
 
   /* Focus ring */
   --focus-ring: #ffd166;
 
   /* Accent */
   --accent: #38bdf8;
+
+  /* Emphasis */
+  --selection-bg: #2f6fae8c;
+  --match-highlight: #ffd166;
+
+  /* Structure */
+  --divider: #2f5f8f;
+  --track-bg: #0b1f33;
+  --scrollbar-thumb: #3f7aa8;
+  --slider-thumb: #cfe4f7;
+
+  /* Floater chrome (translucent, so it works over any body colour) */
+  --title-bar-active: #ffffff1f;
+  --title-text-inactive: #7f9bb5;
+  --glyph-button-bg: #ffffff14;
+
+  /* Pie menu */
+  --pie-bg: #0f2740cc;
+  --pie-line: #00000080;
+  --pie-selected: #38bdf859;
+  --pie-label-sub-pie: #8fd0ff;
+  --pie-label-disabled: #eaf3ff38;
 
   /* Meaning-bearing */
   --gain: #2fbf71;

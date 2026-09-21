@@ -46,6 +46,7 @@ use bevy::text::EditableText;
 use bevy_flair::style::components::ClassList;
 
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
+use sl_viewer_ui_core::skin_palette::{SkinColors, SkinPalette};
 use sl_viewer_ui_core::ui::row;
 use sl_viewer_ui_core::ui_element::TextMayClip;
 use sl_viewer_ui_core::ui_font::UiFont;
@@ -56,12 +57,6 @@ const SEARCH_FIELD_CLASS: &str = "sk-search-field";
 
 /// The skin class on the circular clear (`×`) button.
 const SEARCH_CLEAR_CLASS: &str = "sk-search-clear";
-
-/// The search box's border colour (a skin overrides it via [`SEARCH_FIELD_CLASS`]).
-const BOX_BORDER: Color = Color::srgb(0.30, 0.36, 0.46);
-
-/// The search box's background colour (a skin overrides it).
-const BOX_BACKGROUND: Color = Color::srgb(0.10, 0.12, 0.16);
 
 /// The default least width of the box, in logical pixels, so an empty field is a
 /// real click target rather than collapsing to its (empty) content.
@@ -82,21 +77,11 @@ const BOX_PADDING_Y: f32 = 3.0;
 /// The clear button's diameter, in logical pixels.
 const CLEAR_SIZE: f32 = 16.0;
 
-/// The clear button's circle colour (a skin overrides it via
-/// [`SEARCH_CLEAR_CLASS`]).
-const CLEAR_BACKGROUND: Color = Color::srgb(0.34, 0.40, 0.52);
-
 /// The `×` glyph the clear button draws (U+00D7).
 const CLEAR_GLYPH: &str = "\u{00d7}";
 
 /// The clear button's glyph size, in logical pixels.
 const CLEAR_FONT: f32 = 12.0;
-
-/// The clear glyph's colour while the field (or the button) is
-/// [disabled](bevy::ui::InteractionDisabled) — dimmed so the one affordance that
-/// would still empty a disabled field does not look live. The same grey
-/// [`crate::ui_text_input`] greys the field's own text to.
-const CLEAR_DISABLED_COLOR: Color = Color::srgb(0.45, 0.47, 0.52);
 
 /// The leading search glyph (🔍, U+1F50D), shown when
 /// [`SearchFieldSpec::search_glyph`] is set.
@@ -106,13 +91,6 @@ const SEARCH_GLYPH: &str = "\u{1f50d}";
 /// [`crate::ui_text_input`]'s field padding, so the placeholder overlay lands
 /// exactly where the field's own text starts.
 const FIELD_TEXT_INSET: f32 = 6.0;
-
-/// The typed-text colour.
-const TEXT_COLOR: Color = Color::srgb(0.92, 0.94, 0.98);
-
-/// The placeholder and glyph colour — muted against the typed text, so the
-/// placeholder reads as a prompt rather than as content.
-const MUTED_COLOR: Color = Color::srgb(0.55, 0.60, 0.68);
 
 /// A marker on the widget's inner [`EditableText`], so [`SearchFieldPlugin`]'s
 /// generic systems (the clear-on-`Escape`) can find a *search* field among all
@@ -200,6 +178,9 @@ pub fn spawn_search_field(
     parent: Entity,
     spec: &SearchFieldSpec,
 ) -> SearchFieldHandle {
+    // A free function has no world access, so the box spawns in the skinless
+    // fallback colours; `.sk-search-field` / `.sk-search-clear` repaint them.
+    let fallback = SkinPalette::default();
     let container = commands
         .spawn((
             Node {
@@ -209,8 +190,8 @@ pub fn spawn_search_field(
                 padding: UiRect::axes(Val::Px(BOX_PADDING_X), Val::Px(BOX_PADDING_Y)),
                 ..row(Val::Px(INNER_GAP))
             },
-            BorderColor::all(BOX_BORDER),
-            BackgroundColor(BOX_BACKGROUND),
+            BorderColor::all(fallback.control_border),
+            BackgroundColor(fallback.field_bg),
             ClassList::new_with_classes([SEARCH_FIELD_CLASS]),
             Name::new(format!("{}:search", spec.element)),
             ChildOf(parent),
@@ -221,7 +202,7 @@ pub fn spawn_search_field(
         commands.spawn((
             Text::new(SEARCH_GLYPH),
             UiFont::Sans.at(spec.font_size),
-            TextColor(MUTED_COLOR),
+            TextColor(fallback.text_muted),
             Node {
                 flex_shrink: 0.0,
                 ..default()
@@ -269,7 +250,7 @@ pub fn spawn_search_field(
     );
     commands
         .entity(field)
-        .insert((SearchInputField, TextColor(TEXT_COLOR)));
+        .insert((SearchInputField, TextColor(fallback.text_primary)));
 
     let mut placeholder = None;
     if !spec.placeholder.is_empty() {
@@ -280,7 +261,7 @@ pub fn spawn_search_field(
             // otherwise would.
             TextLayout::no_wrap(),
             UiFont::Sans.at(spec.font_size),
-            TextColor(MUTED_COLOR),
+            TextColor(fallback.text_muted),
             Node {
                 position_type: PositionType::Absolute,
                 // Aligned with the field's text origin: both sit one field-text
@@ -333,7 +314,7 @@ fn spawn_clear_button(
                 border_radius: BorderRadius::all(Val::Percent(50.0)),
                 ..default()
             },
-            BackgroundColor(CLEAR_BACKGROUND),
+            BackgroundColor(SkinPalette::default().control_border),
             ClassList::new_with_classes([SEARCH_CLEAR_CLASS]),
             SearchClearButton { field },
             Name::new(format!("{element}:search-clear")),
@@ -343,7 +324,7 @@ fn spawn_clear_button(
     commands.spawn((
         Text::new(CLEAR_GLYPH),
         UiFont::Sans.at(CLEAR_FONT),
-        TextColor(TEXT_COLOR),
+        TextColor(SkinPalette::default().text_primary),
         Pickable::IGNORE,
         Name::new(format!("{element}:search-clear-glyph")),
         ChildOf(clear),
@@ -428,15 +409,17 @@ fn toggle_search_clear(
 /// class, so its background belongs to the skin's cascade, not to a system that
 /// would overwrite it every frame.
 fn reflect_search_clear_disabled(
+    palette: SkinColors,
     buttons: Query<(Entity, &SearchClearButton, &Children)>,
     disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
     mut glyphs: Query<&mut TextColor>,
 ) {
+    let palette = palette.get();
     for (button, clear, children) in &buttons {
         let wanted = if disabled.contains(button) || disabled.contains(clear.field) {
-            CLEAR_DISABLED_COLOR
+            palette.text_disabled
         } else {
-            TEXT_COLOR
+            palette.text_primary
         };
         for child in children.iter() {
             if let Ok(mut color) = glyphs.get_mut(child)
@@ -528,7 +511,9 @@ pub fn spawn_search_specimen(
 
 #[cfg(test)]
 mod tests {
-    use super::{SearchFieldPlugin, SearchFieldSpec, SearchInputField, spawn_search_field};
+    use super::{
+        SearchFieldPlugin, SearchFieldSpec, SearchInputField, SkinPalette, spawn_search_field,
+    };
     use bevy::prelude::*;
     use bevy::text::EditableText;
     use pretty_assertions::assert_eq;
@@ -748,7 +733,7 @@ mod tests {
         };
         assert_eq!(
             color(&app),
-            Some(super::TEXT_COLOR),
+            Some(SkinPalette::default().text_primary),
             "the glyph starts at the live colour"
         );
 
@@ -759,7 +744,7 @@ mod tests {
 
         assert_eq!(
             color(&app),
-            Some(super::CLEAR_DISABLED_COLOR),
+            Some(SkinPalette::default().text_disabled),
             "the glyph greys with the field"
         );
         interact::click_node(&mut app, "test-search:search-clear")?;
@@ -783,7 +768,7 @@ mod tests {
         settle(&mut app);
         assert_eq!(
             color(&app),
-            Some(super::TEXT_COLOR),
+            Some(SkinPalette::default().text_primary),
             "the glyph is live again"
         );
         interact::click_node(&mut app, "test-search:search-clear")?;

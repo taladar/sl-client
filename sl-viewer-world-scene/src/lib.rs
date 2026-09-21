@@ -22,6 +22,10 @@
 )]
 
 pub mod beacons;
+/// The scene app the day-cycle assertions run in — test support, so it is built
+/// only for `cargo test`. See the module's own docs for what it exists to catch.
+#[cfg(test)]
+mod day_cycle_fixture;
 pub mod debug_beacons;
 pub mod diagnostics;
 pub mod entity_diagnostics;
@@ -35,7 +39,7 @@ pub mod particles;
 mod plugin;
 pub mod probes;
 pub mod render_overrides;
-pub mod render_scene;
+pub mod resolution_divisor;
 pub mod sky;
 pub mod terrain;
 pub mod tonemap;

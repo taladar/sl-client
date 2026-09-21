@@ -19,6 +19,7 @@
 //! Reference (Firestorm, read-only): `llmaterialeditor`,
 //! `floater_material_editor.xml`.
 
+use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui_widgets::{Slider, SliderRange, SliderStep, SliderValue, ValueChange};
@@ -59,7 +60,7 @@ const SLIDER: SliderStyle = SliderStyle {
 const PREVIEW_SIZE: f32 = 128.0;
 
 /// The label colour.
-const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A control's border colour.
 const CONTROL_BORDER: Color = Color::srgba(0.34, 0.40, 0.52, 1.0);

@@ -26,33 +26,131 @@ use sl_client_common::retry::{MAX_TRANSIENT_RETRIES, is_transient_status, transi
 /// The `Accept` header a `GetTexture` codestream fetch sends.
 const TEXTURE_ACCEPT: &str = "image/x-j2c";
 
-/// Converts a decoded RGBA8 texture into a Bevy [`Image`] (`Rgba8UnormSrgb`),
-/// ready to insert into `Assets<Image>` and use as a rendered texture.
+/// Whether a texture's bytes are **colour** — sRGB-encoded, so the GPU decodes
+/// each sample to linear before any lighting maths touches it — or **data**,
+/// whose bytes already *are* the numbers the shader wants and must reach it
+/// untouched.
+///
+/// This is the one decision a texture upload cannot take by convention, and
+/// getting it wrong is silent: the image is the right size, the right pixels and
+/// the right sampler, and only the values the shader reads are off. Uploading
+/// data as colour pushes a mid-grey byte 128 from `0.502` down to `0.216`, which
+/// has cost real debugging time in this viewer more than once — a flat
+/// `(0.5, 0.5, 1.0)` normal texel unpacking to a normal tilted well off the
+/// surface (every wavelet in the sea skewed the same way), and only ~9% of the
+/// cloud-noise texels clearing a density threshold ~46% should have cleared.
+/// Uploading colour as data is the same mistake mirrored: everything the user
+/// sees comes out washed out and too bright.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ColorSpace {
+    /// sRGB-encoded colour: what the user sees *as an image* — a prim's diffuse
+    /// map, an avatar bake, a legacy specular map's RGB tint, a UI thumbnail.
+    Srgb,
+    /// Linear data: pixels that are numbers rather than a picture — a normal
+    /// map, a noise field, a mask.
+    Linear,
+}
+
+/// How a decoded texture becomes a GPU [`Image`]: the colour space its bytes are
+/// in ([`ColorSpace`]), and whether it magnifies smoothly or with hard texel
+/// edges.
+///
+/// The address mode is deliberately **not** a knob here. Every texture this
+/// viewer uploads repeats, the rule is universal, and the exception is declared
+/// on the geometry rather than on the image (`SamplerMayClamp`), so an upload has
+/// nothing to decide — see [`upload_pixels`] for why it matters.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TextureUpload {
+    /// How the GPU must read the bytes.
+    color_space: ColorSpace,
+    /// Magnify with `Nearest` rather than `Linear` filtering — hard texel edges,
+    /// for an image whose texels are meant to be seen individually.
+    crisp: bool,
+}
+
+impl TextureUpload {
+    /// A picture: sRGB bytes, smoothly filtered.
+    pub const COLOR: Self = Self {
+        color_space: ColorSpace::Srgb,
+        crisp: false,
+    };
+
+    /// Numbers: linear bytes, smoothly filtered.
+    pub const DATA: Self = Self {
+        color_space: ColorSpace::Linear,
+        crisp: false,
+    };
+
+    /// The same upload magnified with hard texel edges (`Nearest`) instead of
+    /// smooth interpolation, for a texture whose individual texels carry the
+    /// meaning — a debug grid, not a photograph.
+    #[must_use]
+    pub const fn crisp(self) -> Self {
+        Self {
+            color_space: self.color_space,
+            crisp: true,
+        }
+    }
+}
+
+/// The Bevy [`Image`] for an already-decoded texture, ready to insert into
+/// `Assets<Image>` — see [`upload_pixels`], which this is the [`DecodedImage`]
+/// front for.
 #[must_use]
-pub fn to_bevy_image(decoded: &DecodedImage) -> Image {
+pub fn upload_decoded(decoded: &DecodedImage, upload: TextureUpload) -> Image {
+    upload_pixels(
+        decoded.width,
+        decoded.height,
+        decoded.pixels.to_vec(),
+        upload,
+    )
+}
+
+/// The Bevy [`Image`] for tightly packed RGBA8 `pixels` (`width * height * 4`
+/// bytes, row-major) — the single place a **world** texture is uploaded, so the
+/// two decisions that are easy to get silently wrong are made once. (A UI
+/// overlay or a render target that deliberately wants another sampler builds its
+/// own `Image` and says so there; this is the path everything the world renders
+/// goes down.)
+///
+/// **Colour space** is [`upload`](TextureUpload)'s to state; see [`ColorSpace`].
+///
+/// **The address mode is always `Repeat`.** Second Life samples textures with
+/// `GL_REPEAT` by default (the reference viewer sets clamp only for the rare TE
+/// clamp flag); a UV outside `[0, 1]` must wrap, not clamp. Bevy's default
+/// sampler clamps to the edge, which renders a face whose mesh UVs sit on an
+/// integer UV tile — e.g. a mesh-body upper region with `v ∈ [1, 2]` — as a flat
+/// smear of the texture's edge texel instead of the tiled image (R22h: the
+/// "white torso" on an otherwise-correct bake). A path that leaves Bevy's default
+/// in place is wrong in a way that looks like a *texture* bug rather than a
+/// sampler one, which is why it is not a parameter: the exception belongs to the
+/// face that genuinely clamps, and is declared there.
+#[must_use]
+pub fn upload_pixels(width: u32, height: u32, pixels: Vec<u8>, upload: TextureUpload) -> Image {
     let mut image = Image::new(
         Extent3d {
-            width: decoded.width,
-            height: decoded.height,
+            width,
+            height,
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
-        decoded.pixels.to_vec(),
-        TextureFormat::Rgba8UnormSrgb,
+        pixels,
+        match upload.color_space {
+            ColorSpace::Srgb => TextureFormat::Rgba8UnormSrgb,
+            ColorSpace::Linear => TextureFormat::Rgba8Unorm,
+        },
         RenderAssetUsages::default(),
     );
-    // Second Life samples textures with GL_REPEAT by default (the reference viewer
-    // sets clamp only for the rare TE clamp flag); a UV outside `[0, 1]` must wrap,
-    // not clamp. Bevy's default sampler clamps to the edge, which renders a face
-    // whose mesh UVs sit on an integer UV tile — e.g. a mesh-body upper region with
-    // `v ∈ [1, 2]` — as a flat smear of the texture's edge texel instead of the
-    // tiled image (R22h: the "white torso" on an otherwise-correct bake). Wrap on
-    // all axes to match, keeping linear filtering.
+    let filtering = if upload.crisp {
+        ImageSamplerDescriptor::nearest()
+    } else {
+        ImageSamplerDescriptor::linear()
+    };
     image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
         address_mode_u: ImageAddressMode::Repeat,
         address_mode_v: ImageAddressMode::Repeat,
         address_mode_w: ImageAddressMode::Repeat,
-        ..ImageSamplerDescriptor::linear()
+        ..filtering
     });
     image
 }
@@ -330,8 +428,18 @@ impl TextureFetcher for BevyTextureFetcher {
 
 #[cfg(test)]
 mod tests {
-    use super::{planar_texgen_uv, texture_face_uv_transform, to_bevy_image};
+    #![expect(
+        clippy::panic,
+        reason = "a panic is the intended failure signal in a unit test"
+    )]
+
+    use super::{
+        ImageAddressMode, ImageSampler, TextureFormat, TextureUpload, planar_texgen_uv,
+        texture_face_uv_transform, upload_decoded, upload_pixels,
+    };
+    use bevy::image::ImageFilterMode;
     use bevy::math::{Affine2, Vec2};
+    use bevy::prelude::Image;
     use bytes::Bytes;
     use pretty_assertions::assert_eq;
     use sl_proto::{DiscardLevel, TextureFace, TextureKey};
@@ -496,8 +604,65 @@ mod tests {
             Bytes::from(vec![0x7F_u8; 2 * 2 * 4]),
             None,
         );
-        let image = to_bevy_image(&decoded);
+        let image = upload_decoded(&decoded, TextureUpload::COLOR);
         assert_eq!(image.width(), 2);
         assert_eq!(image.height(), 2);
+    }
+
+    /// The colour space is the argument's to choose, and it is the only thing it
+    /// chooses about the bytes: a picture is `Rgba8UnormSrgb`, numbers are
+    /// `Rgba8Unorm`.
+    #[test]
+    fn color_space_picks_the_texture_format() {
+        let pixels = vec![0x80_u8; 2 * 2 * 4];
+        assert_eq!(
+            upload_pixels(2, 2, pixels.clone(), TextureUpload::COLOR)
+                .texture_descriptor
+                .format,
+            TextureFormat::Rgba8UnormSrgb
+        );
+        assert_eq!(
+            upload_pixels(2, 2, pixels, TextureUpload::DATA)
+                .texture_descriptor
+                .format,
+            TextureFormat::Rgba8Unorm
+        );
+    }
+
+    /// Every upload repeats on every axis, whatever else it asks for — the R22h
+    /// rule, which is why the address mode is not a parameter.
+    #[test]
+    fn every_upload_repeats() {
+        for upload in [
+            TextureUpload::COLOR,
+            TextureUpload::DATA,
+            TextureUpload::COLOR.crisp(),
+        ] {
+            let image = upload_pixels(1, 1, vec![0, 0, 0, 255], upload);
+            let ImageSampler::Descriptor(descriptor) = image.sampler else {
+                panic!("an upload must always set a sampler descriptor, never Bevy's default");
+            };
+            assert_eq!(descriptor.address_mode_u, ImageAddressMode::Repeat);
+            assert_eq!(descriptor.address_mode_v, ImageAddressMode::Repeat);
+            assert_eq!(descriptor.address_mode_w, ImageAddressMode::Repeat);
+        }
+    }
+
+    /// `crisp` is the one filtering choice, and it leaves the colour space alone.
+    #[test]
+    fn crisp_magnifies_with_nearest() {
+        let smooth = upload_pixels(1, 1, vec![0, 0, 0, 255], TextureUpload::DATA);
+        let crisp = upload_pixels(1, 1, vec![0, 0, 0, 255], TextureUpload::DATA.crisp());
+        let mag = |image: &Image| match &image.sampler {
+            ImageSampler::Descriptor(descriptor) => descriptor.mag_filter,
+            _default => panic!("an upload must always set a sampler descriptor"),
+        };
+        assert_eq!(mag(&smooth), ImageFilterMode::Linear);
+        assert_eq!(mag(&crisp), ImageFilterMode::Nearest);
+        assert_eq!(
+            crisp.texture_descriptor.format,
+            TextureFormat::Rgba8Unorm,
+            "asking for hard texel edges must not change the colour space"
+        );
     }
 }

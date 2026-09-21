@@ -45,6 +45,7 @@ pub(crate) use sl_viewer_kit::face_material;
 pub(crate) use sl_viewer_media::browser_widget;
 pub(crate) use sl_viewer_media::media_engine;
 pub(crate) use sl_viewer_notices::linkified_text;
+pub(crate) use sl_viewer_render_fixtures as render_scene;
 pub(crate) use sl_viewer_ui_core::i18n;
 pub(crate) use sl_viewer_ui_core::skin;
 pub(crate) use sl_viewer_ui_core::ui;
@@ -62,7 +63,6 @@ pub(crate) use sl_viewer_ui_widgets::ui_trackball;
 pub(crate) use sl_viewer_world_scene::environment;
 pub(crate) use sl_viewer_world_scene::probes;
 pub(crate) use sl_viewer_world_scene::render_overrides;
-pub(crate) use sl_viewer_world_scene::render_scene;
 pub(crate) use sl_viewer_world_scene::viewer_camera;
 
 pub mod gallery;

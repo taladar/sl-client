@@ -52,11 +52,17 @@ use sl_rlv::{
     RlvAttachmentPoint, RlvDebugSetting, RlvDebugValue, RlvEnvRequest, RlvEnvSource, RlvExtSource,
     RlvObjectAttachment, RlvReply, RlvSkyBody, RlvSkyField, RlvSkyValue, RlvState, is_rlv_line,
 };
-use sl_settings::SettingValue;
+use sl_settings::{Scope, SettingValue};
 use sl_viewer_kit::coords::sky_body_direction;
 use sl_viewer_settings::ViewerSettings;
 
-use crate::{MAX_PARENT_WALK, ObjectState};
+use crate::{MAX_PARENT_WALK, ObjectState, SETTING_RENDER_RESOLUTION_DIVISOR};
+
+/// What `RenderResolutionDivisor` reads as when nothing has reduced it — the
+/// reference's default, and the answer a viewer whose store never registered
+/// the row gives rather than an empty one, because "the world is drawn at the
+/// window's resolution" is true either way.
+const NO_RESOLUTION_DIVISOR: u32 = 1;
 
 /// The whole-environment change an RLV `@setenv_*` command asks for, re-exported
 /// so the scene that carries one out needs this seam and not the language crate
@@ -238,8 +244,8 @@ pub struct RlvFlagDef {
     pub name: &'static str,
     /// The reference's default.
     pub default: bool,
-    /// What the setting does, one line.
-    pub comment: &'static str,
+    /// The Fluent key of what the setting does, one line.
+    pub description_key: &'static str,
     /// The menu condition key that holds while the flag is on.
     pub condition: &'static str,
 }
@@ -253,121 +259,121 @@ pub const RLV_BOOL_SETTINGS: &[RlvFlagDef] = &[
     RlvFlagDef {
         name: SETTING_MAIN,
         default: false,
-        comment: "Obey RLV / RLVa commands from worn objects",
+        description_key: "setting-desc-RestrainedLove",
         condition: RLV_ENABLED,
     },
     RlvFlagDef {
         name: SETTING_DEBUG,
         default: false,
-        comment: "Echo every processed RLV command into the RLVa console",
+        description_key: "setting-desc-RestrainedLoveDebug",
         condition: COND_DEBUG,
     },
     RlvFlagDef {
         name: SETTING_CAN_OOC,
         default: true,
-        comment: "Let ((out of character)) chat through a chat restriction",
+        description_key: "setting-desc-RestrainedLoveCanOOC",
         condition: COND_CAN_OOC,
     },
     RlvFlagDef {
         name: SETTING_FORBID_GIVE_TO_RLV,
         default: false,
-        comment: "Refuse inventory offers into the shared #RLV folder",
+        description_key: "setting-desc-RestrainedLoveForbidGiveToRLV",
         condition: COND_FORBID_GIVE_TO_RLV,
     },
     RlvFlagDef {
         name: SETTING_NO_SET_ENV,
         default: false,
-        comment: "Refuse script control of the environment (@setenv)",
+        description_key: "setting-desc-RestrainedLoveNoSetEnv",
         condition: COND_NO_SET_ENV,
     },
     RlvFlagDef {
         name: SETTING_SHOW_ELLIPSIS,
         default: true,
-        comment: "Say a blanked line as \"...\" rather than saying nothing",
+        description_key: "setting-desc-RestrainedLoveShowEllipsis",
         condition: COND_SHOW_ELLIPSIS,
     },
     RlvFlagDef {
         name: SETTING_DEBUG_HIDE_UNSET_DUPLICATE,
         default: true,
-        comment: "Hide the console echo of a command that changed nothing",
+        description_key: "setting-desc-RLVaDebugHideUnsetDuplicate",
         condition: COND_DEBUG_HIDE_UNSET_DUPLICATE,
     },
     RlvFlagDef {
         name: SETTING_ENABLE_IM_QUERY,
         default: false,
-        comment: "Answer @list and @except asked over instant message",
+        description_key: "setting-desc-RLVaEnableIMQuery",
         condition: COND_ENABLE_IM_QUERY,
     },
     RlvFlagDef {
         name: SETTING_ENABLE_LEGACY_NAMING,
         default: false,
-        comment: "Use the legacy naming rules when anonymising a resident",
+        description_key: "setting-desc-RLVaEnableLegacyNaming",
         condition: COND_ENABLE_LEGACY_NAMING,
     },
     RlvFlagDef {
         name: SETTING_ENABLE_SHARED_WEAR,
         default: false,
-        comment: "Allow wearing items from the shared #RLV folder by hand",
+        description_key: "setting-desc-RLVaEnableSharedWear",
         condition: COND_ENABLE_SHARED_WEAR,
     },
     RlvFlagDef {
         name: SETTING_ENABLE_TEMP_ATTACH,
         default: true,
-        comment: "Allow scripts to attach temporary attachments",
+        description_key: "setting-desc-RLVaEnableTemporaryAttachments",
         condition: COND_ENABLE_TEMP_ATTACH,
     },
     RlvFlagDef {
         name: SETTING_HIDE_LOCKED_LAYERS,
         default: false,
-        comment: "Hide a locked clothing layer instead of greying it out",
+        description_key: "setting-desc-RLVaHideLockedLayers",
         condition: COND_HIDE_LOCKED_LAYERS,
     },
     RlvFlagDef {
         name: SETTING_HIDE_LOCKED_ATTACHMENTS,
         default: false,
-        comment: "Hide a locked attachment instead of greying it out",
+        description_key: "setting-desc-RLVaHideLockedAttachments",
         condition: COND_HIDE_LOCKED_ATTACHMENTS,
     },
     RlvFlagDef {
         name: SETTING_HIDE_LOCKED_INVENTORY,
         default: false,
-        comment: "Hide a locked item from the inventory listing",
+        description_key: "setting-desc-RLVaHideLockedInventory",
         condition: COND_HIDE_LOCKED_INVENTORY,
     },
     RlvFlagDef {
         name: SETTING_LOGIN_LAST_LOCATION,
         default: true,
-        comment: "Allow logging in to the last location while RLV is on",
+        description_key: "setting-desc-RLVaLoginLastLocation",
         condition: COND_LOGIN_LAST_LOCATION,
     },
     RlvFlagDef {
         name: SETTING_SHARED_INV_AUTO_RENAME,
         default: true,
-        comment: "Rename an item dropped into #RLV to carry its attachment point",
+        description_key: "setting-desc-RLVaSharedInvAutoRename",
         condition: COND_SHARED_INV_AUTO_RENAME,
     },
     RlvFlagDef {
         name: SETTING_SHOW_ASSERTION_FAILURES,
         default: false,
-        comment: "Surface an internal RLVa assertion failure, not only log it",
+        description_key: "setting-desc-RLVaShowAssertionFailures",
         condition: COND_SHOW_ASSERTION_FAILURES,
     },
     RlvFlagDef {
         name: SETTING_SHOW_REDIRECT_CHAT_TYPING,
         default: false,
-        comment: "Keep sending the typing indicator while chat is redirected",
+        description_key: "setting-desc-RLVaShowRedirectChatTyping",
         condition: COND_SHOW_REDIRECT_CHAT_TYPING,
     },
     RlvFlagDef {
         name: SETTING_SPLIT_REDIRECT_CHAT,
         default: false,
-        comment: "Split a long redirected line instead of truncating it",
+        description_key: "setting-desc-RLVaSplitRedirectChat",
         condition: COND_SPLIT_REDIRECT_CHAT,
     },
     RlvFlagDef {
         name: SETTING_WEAR_REPLACE_UNLOCKED,
         default: true,
-        comment: "Wearing over a locked layer replaces the unlocked items on it",
+        description_key: "setting-desc-RLVaWearReplaceUnlocked",
         condition: COND_WEAR_REPLACE_UNLOCKED,
     },
 ];
@@ -378,12 +384,12 @@ pub const RLV_PREFIX_SETTINGS: &[(&str, &str, &str)] = &[
     (
         SETTING_WEAR_ADD_PREFIX,
         "+",
-        "Shared-folder name prefix meaning \"wear in addition to\"",
+        "setting-desc-RestrainedLoveStackWhenFolderBeginsWith",
     ),
     (
         SETTING_WEAR_REPLACE_PREFIX,
         "-",
-        "Shared-folder name prefix meaning \"wear instead of\"",
+        "setting-desc-RestrainedLoveReplaceWhenFolderBeginsWith",
     ),
 ];
 
@@ -400,8 +406,8 @@ pub struct RlvStringDef {
     pub default: &'static str,
     /// The label the Strings floater lists this entry under.
     pub label: &'static str,
-    /// When this string is emitted, shown under the label.
-    pub description: &'static str,
+    /// The Fluent key of when this string is emitted, shown under the label.
+    pub description_key: &'static str,
 }
 
 /// The eight strings the reference marks `customizable` — the ones the Strings
@@ -421,55 +427,51 @@ pub const RLV_STRINGS: &[RlvStringDef] = &[
         key: "blocked_recvim",
         default: "*** IM blocked by your viewer",
         label: "Blocked incoming IM message (local)",
-        description: "Shown in place of the original message when an incoming IM is blocked",
+        description_key: "setting-desc-blocked_recvim",
     },
     RlvStringDef {
         key: "blocked_recvim_remote",
         default: "The Resident you messaged is currently prevented from reading your instant \
                   messages at the moment, please try again later.",
         label: "Blocked incoming IM message (remote)",
-        description: "Sent to the remote party when their IM was blocked",
+        description_key: "setting-desc-blocked_recvim_remote",
     },
     RlvStringDef {
         key: "blocked_sendim",
         default: "*** IM blocked by sender's viewer",
         label: "Blocked outgoing IM message (local + remote)",
-        description: "Shown (and sent to the remote party) when an outgoing IM is blocked",
+        description_key: "setting-desc-blocked_sendim",
     },
     RlvStringDef {
         key: "blocked_tplurerequest_remote",
         default: "The Resident is currently prevented from accepting. Please try again later.",
         label: "Blocked teleport offer/request (remote)",
-        description: "Sent to the remote party when their teleport offer or request was blocked",
+        description_key: "setting-desc-blocked_tplurerequest_remote",
     },
     RlvStringDef {
         key: "imquery_list_deny",
         default: "*** The other party respectfully requests you mind your own business (bunnies \
                   made me do it!)",
         label: "@list and @except command (remote)",
-        description: "Sent to the remote party when you deny their request to list your active \
-                      RLV restrictions",
+        description_key: "setting-desc-imquery_list_deny",
     },
     RlvStringDef {
         key: "imquery_list_suffix",
         default: "(Use @except to see the list of active exceptions)",
         label: "@list command suffix (remote)",
-        description: "Sent to the remote party as a suffix to @list to inform them how to request \
-                      your exceptions",
+        description_key: "setting-desc-imquery_list_suffix",
     },
     RlvStringDef {
         key: "stopim_endsession_remote",
         default: "*** Session has been ended for the other party",
         label: "@stopim command with an active session (remote)",
-        description: "Sent to the remote party when they attempt to forcefully close the IM \
-                      conversation (and it exists)",
+        description_key: "setting-desc-stopim_endsession_remote",
     },
     RlvStringDef {
         key: "stopim_nosession",
         default: "*** The other party is not under a @startim restriction",
         label: "@stopim command with no session (remote)",
-        description: "Sent to the remote party when they attempt to forcefully close your IM \
-                      conversation with them (and no such session exists)",
+        description_key: "setting-desc-stopim_nosession",
     },
 ];
 
@@ -724,12 +726,14 @@ pub struct RlvExtFacts {
 /// rows that are real settings, [`RlvExtFacts`] for the two that are not.
 ///
 /// Borrowed for the length of one command rather than kept, because both halves
-/// are Bevy resources. The store is borrowed *immutably* because nothing here
-/// is writable — see [`set_debug_value`](RlvExtSource::set_debug_value).
+/// are Bevy resources. The store is borrowed **mutably**: one row of the
+/// allowlist — `RenderResolutionDivisor` — is a setting a script may write, and
+/// writing it has to reach the same store the user's own preferences edit does
+/// (see [`set_debug_value`](RlvExtSource::set_debug_value)).
 #[derive(Debug)]
 pub struct ViewerRlvExt<'settings> {
     /// The settings store the readable RLV rows live in, where there is one.
-    pub settings: Option<&'settings ViewerSettings>,
+    pub settings: Option<&'settings mut ViewerSettings>,
     /// The two computed facts.
     pub facts: RlvExtFacts,
 }
@@ -737,41 +741,85 @@ pub struct ViewerRlvExt<'settings> {
 impl RlvExtSource for ViewerRlvExt<'_> {
     /// What each allowlisted row reads as here.
     ///
-    /// Two of the six answer nothing, and say why:
+    /// Only **`AvatarSex`** and **`AspectRatio`** can answer nothing, and only
+    /// until the avatar layer and the camera have published them; a `None` is
+    /// an empty answer rather than a guess.
     ///
-    /// - **`RenderResolutionDivisor`** — this viewer does not render at a
-    ///   reduced resolution, so there is no setting to read and none to write.
-    ///   It is the cheap vision impairment a collar reaches for, and it belongs
-    ///   with the rest of the vision-restriction rendering rather than being
-    ///   faked with a setting nothing looks at;
-    /// - **`AvatarSex`** and **`AspectRatio`** answer nothing until the avatar
-    ///   layer and the camera have published them.
-    ///
-    /// `WindLightUseAtmosShaders` is not a setting here either, but its answer
-    /// is not in doubt: this viewer always renders the atmospheric sky, which
-    /// is exactly what a script asking the question wants to know.
+    /// `WindLightUseAtmosShaders` is not a setting here, but its answer is not
+    /// in doubt: this viewer always renders the atmospheric sky, which is
+    /// exactly what a script asking the question wants to know.
+    /// `RenderResolutionDivisor` is an ordinary setting again since the world
+    /// gained a reduced-resolution path (`sl_viewer_world_scene`'s
+    /// `resolution_divisor`); it reads its stored value, falling back to `1` —
+    /// "not reduced" — for a viewer whose store never registered it.
     fn debug_value(&self, setting: RlvDebugSetting) -> Option<RlvDebugValue> {
         match setting {
             RlvDebugSetting::AvatarSex => self.facts.avatar_is_male.map(RlvDebugValue::Bool),
             RlvDebugSetting::AspectRatio => self.facts.aspect_ratio.map(RlvDebugValue::Float),
-            RlvDebugSetting::RenderResolutionDivisor => None,
+            RlvDebugSetting::RenderResolutionDivisor => Some(RlvDebugValue::U32(
+                self.settings
+                    .as_deref()
+                    .map_or(NO_RESOLUTION_DIVISOR, |settings| {
+                        settings
+                            .store()
+                            .get_u32(SETTING_RENDER_RESOLUTION_DIVISOR)
+                            .unwrap_or(NO_RESOLUTION_DIVISOR)
+                    }),
+            )),
             RlvDebugSetting::ForbidGiveToRlv => Some(RlvDebugValue::Bool(rlv_flag(
-                self.settings,
+                self.settings.as_deref(),
                 SETTING_FORBID_GIVE_TO_RLV,
             ))),
             RlvDebugSetting::NoSetEnv => Some(RlvDebugValue::Bool(rlv_flag(
-                self.settings,
+                self.settings.as_deref(),
                 SETTING_NO_SET_ENV,
             ))),
             RlvDebugSetting::WindLightUseAtmosShaders => Some(RlvDebugValue::Bool(true)),
         }
     }
 
-    /// Nothing here is writable: of the two rows the allowlist lets a script
-    /// write, `AvatarSex` is a pseudo setting the state machine keeps and
-    /// `RenderResolutionDivisor` is the one this viewer does not have.
-    fn set_debug_value(&mut self, _setting: RlvDebugSetting, _value: RlvDebugValue) -> bool {
-        false
+    /// Store a script-written value.
+    ///
+    /// One row of the allowlist reaches a setting: `RenderResolutionDivisor`,
+    /// the cheap vision impairment a collar imposes. (The other writable row,
+    /// `AvatarSex`, is a pseudo setting the state machine keeps for itself and
+    /// never arrives here.) The write goes to the **global** scope, the same
+    /// layer the graphics tab's own control writes, so the user sees — and can
+    /// undo — exactly what the script did.
+    ///
+    /// Then the reference's `DBG_PERSIST` rule, which this is the first row to
+    /// have anything to protect: *"Default settings should persist if they were
+    /// marked that way, but non-default settings should never persist"*
+    /// (`RlvExtGetSet::processCommand`). A value a script wrote is therefore
+    /// live for the session and absent from the user's settings file, and
+    /// persistence comes back the moment the stored value is the declared
+    /// default again — so a collar that blurs the view cannot leave the blur
+    /// behind after a relog.
+    fn set_debug_value(&mut self, setting: RlvDebugSetting, value: RlvDebugValue) -> bool {
+        let (RlvDebugSetting::RenderResolutionDivisor, RlvDebugValue::U32(divisor)) =
+            (setting, value)
+        else {
+            return false;
+        };
+        let Some(settings) = self.settings.as_deref_mut() else {
+            return false;
+        };
+        // A store that never registered the row has no such setting, which the
+        // script hears as a bad option rather than as a silent success.
+        if !settings
+            .store()
+            .is_registered(SETTING_RENDER_RESOLUTION_DIVISOR)
+        {
+            return false;
+        }
+        let written = SettingValue::U32(divisor);
+        let is_default = settings
+            .store()
+            .declaration(SETTING_RENDER_RESOLUTION_DIVISOR)
+            .is_some_and(|decl| decl.default() == &written);
+        settings.set(Scope::Global, SETTING_RENDER_RESOLUTION_DIVISOR, written);
+        settings.set_persist(SETTING_RENDER_RESOLUTION_DIVISOR, is_default);
+        true
     }
 }
 
@@ -1124,15 +1172,15 @@ pub fn register_settings(settings: &mut ViewerSettings) {
             RLV_SECTION,
             flag.name,
             SettingValue::Bool(flag.default),
-            flag.comment,
+            flag.description_key,
         );
     }
-    for (name, default, comment) in RLV_PREFIX_SETTINGS {
+    for (name, default, description_key) in RLV_PREFIX_SETTINGS {
         settings.register_in(
             RLV_SECTION,
             name,
             SettingValue::String((*default).to_owned()),
-            comment,
+            description_key,
         );
     }
     for entry in RLV_STRINGS {
@@ -1140,7 +1188,7 @@ pub fn register_settings(settings: &mut ViewerSettings) {
             RLV_STRINGS_SECTION,
             entry.key,
             SettingValue::String(entry.default.to_owned()),
-            entry.description,
+            entry.description_key,
         );
     }
 }
@@ -1248,7 +1296,7 @@ pub fn swallows_owner_say(
 /// one is admitted there as it is here.
 #[must_use]
 pub fn is_temp_attachment(objects: &ObjectState, key: ObjectKey) -> bool {
-    objects.objects.values().any(|tracked| {
+    objects.objects().values().any(|tracked| {
         tracked.full_key == key
             && tracked.attachment_point.is_some()
             && tracked.attachment_item == Some(key.uuid())
@@ -1272,12 +1320,12 @@ pub fn is_temp_attachment(objects: &ObjectState, key: ObjectKey) -> bool {
 #[must_use]
 pub fn object_attachment(objects: &ObjectState, key: ObjectKey) -> Option<RlvObjectAttachment> {
     let mut current = objects
-        .objects
+        .objects()
         .iter()
         .find(|(_scoped, tracked)| tracked.full_key == key)
         .map(|(scoped, _tracked)| *scoped)?;
     for _step in 0..MAX_PARENT_WALK {
-        let tracked = objects.objects.get(&current)?;
+        let tracked = objects.objects().get(&current)?;
         if let Some(point) = tracked.attachment_point {
             return RlvAttachmentPoint::from_index(point)
                 .map(|point| RlvObjectAttachment::new(tracked.full_key.uuid(), point));
@@ -1294,16 +1342,174 @@ pub fn object_attachment(objects: &ObjectState, key: ObjectKey) -> Option<RlvObj
 mod tests {
     use super::{
         RLV_BOOL_SETTINGS, RLV_CONSOLE_CAPACITY, RLV_PREFIX_SETTINGS, RLV_REPLY_CAPACITY,
-        RLV_STRINGS, RlvConsoleKind, RlvEnvironmentSlot, RlvLibraryEnvironments, RlvSession,
-        rlv_flag, rlv_string, rlv_string_def, swallows_owner_say,
+        RLV_STRINGS, RlvConsoleKind, RlvEnvironmentSlot, RlvExtFacts, RlvLibraryEnvironments,
+        RlvSession, SETTING_RENDER_RESOLUTION_DIVISOR, ViewerRlvExt, rlv_flag, rlv_string,
+        rlv_string_def, swallows_owner_say,
     };
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{ChatSource, ChatType, ObjectKey, SettingsKind, SkySettings, Uuid};
     use sl_rlv::{
-        RlvEnvRequest, RlvEnvSource as _, RlvNoFacts, RlvSkyBody, RlvSkyField, RlvSkyValue,
-        parse_chat_line,
+        RlvDebugSetting, RlvDebugValue, RlvEnvRequest, RlvEnvSource as _, RlvExtSource as _,
+        RlvNoFacts, RlvSkyBody, RlvSkyField, RlvSkyValue, parse_chat_line,
     };
+    use sl_settings::{SettingValue, SettingsStore};
+    use sl_viewer_settings::ViewerSettings;
     use std::collections::HashSet;
+
+    /// A boxed error so a test can use `?` rather than the disallowed
+    /// `unwrap` / `expect`.
+    type TestError = Box<dyn core::error::Error>;
+
+    /// A store with the resolution divisor registered the way the scene layer
+    /// registers it (this crate is below the one that owns it, so the shape is
+    /// restated here rather than imported; `sl-viewer-world-scene` pins that
+    /// the two agree).
+    fn store_with_divisor() -> ViewerSettings {
+        let mut settings = ViewerSettings::from_store_for_test(SettingsStore::new());
+        settings.register_in(
+            &["render"],
+            SETTING_RENDER_RESOLUTION_DIVISOR,
+            SettingValue::U32(1),
+            "Divisor for rendering the 3D scene at reduced resolution (1 = full)",
+        );
+        settings
+    }
+
+    /// With no settings store, the one writable row still *reads* — "the world
+    /// is drawn at the window's resolution" is true whether or not anything
+    /// registered the setting — and the write is refused, which the script
+    /// hears as a bad option.
+    #[test]
+    fn the_divisor_reads_as_one_and_refuses_a_write_with_no_store() {
+        let mut ext = ViewerRlvExt {
+            settings: None,
+            facts: RlvExtFacts::default(),
+        };
+        assert_eq!(
+            ext.debug_value(RlvDebugSetting::RenderResolutionDivisor),
+            Some(RlvDebugValue::U32(1))
+        );
+        assert!(!ext.set_debug_value(
+            RlvDebugSetting::RenderResolutionDivisor,
+            RlvDebugValue::U32(4)
+        ));
+    }
+
+    /// A script's write lands in the same (global) layer the graphics tab
+    /// writes, and reads straight back — the round trip
+    /// `@setdebug_renderresolutiondivisor` needs to be worth anything.
+    #[test]
+    fn a_script_write_lands_in_the_store_and_reads_back() {
+        let mut settings = store_with_divisor();
+        let mut ext = ViewerRlvExt {
+            settings: Some(&mut settings),
+            facts: RlvExtFacts::default(),
+        };
+        assert!(ext.set_debug_value(
+            RlvDebugSetting::RenderResolutionDivisor,
+            RlvDebugValue::U32(4)
+        ));
+        assert_eq!(
+            ext.debug_value(RlvDebugSetting::RenderResolutionDivisor),
+            Some(RlvDebugValue::U32(4))
+        );
+        assert_eq!(
+            settings
+                .store()
+                .get_u32(SETTING_RENDER_RESOLUTION_DIVISOR)
+                .ok(),
+            Some(4)
+        );
+    }
+
+    /// The reference's `DBG_PERSIST` rule, which this row is the first to have
+    /// anything to protect: a *non-default* value a script wrote never reaches
+    /// the user's settings file, and persistence comes back the moment the
+    /// stored value is the default again — so a collar cannot leave its blur
+    /// behind after a relog.
+    #[test]
+    fn a_script_written_value_is_kept_out_of_the_settings_file() -> Result<(), TestError> {
+        let mut settings = store_with_divisor();
+        assert!(
+            settings
+                .store()
+                .declaration(SETTING_RENDER_RESOLUTION_DIVISOR)
+                .ok_or("the divisor is not registered")?
+                .persist(),
+            "the divisor is a persisted setting to begin with"
+        );
+
+        let mut ext = ViewerRlvExt {
+            settings: Some(&mut settings),
+            facts: RlvExtFacts::default(),
+        };
+        assert!(ext.set_debug_value(
+            RlvDebugSetting::RenderResolutionDivisor,
+            RlvDebugValue::U32(4)
+        ));
+        assert!(
+            !settings
+                .store()
+                .declaration(SETTING_RENDER_RESOLUTION_DIVISOR)
+                .ok_or("the divisor is not registered")?
+                .persist(),
+            "a non-default value a script wrote must not be written to disk"
+        );
+        assert!(
+            !settings
+                .store()
+                .serialize_scope(sl_settings::Scope::Global)
+                .contains(SETTING_RENDER_RESOLUTION_DIVISOR),
+            "the saved file must not name a setting a script is holding"
+        );
+
+        let mut ext = ViewerRlvExt {
+            settings: Some(&mut settings),
+            facts: RlvExtFacts::default(),
+        };
+        assert!(ext.set_debug_value(
+            RlvDebugSetting::RenderResolutionDivisor,
+            RlvDebugValue::U32(1)
+        ));
+        assert!(
+            settings
+                .store()
+                .declaration(SETTING_RENDER_RESOLUTION_DIVISOR)
+                .ok_or("the divisor is not registered")?
+                .persist(),
+            "back at the default, the setting persists as it was declared to"
+        );
+        Ok(())
+    }
+
+    /// Only the one row is writable here: `AvatarSex` is a pseudo setting the
+    /// state machine keeps, and the read-only rows refuse outright — including
+    /// a write of the right row in the wrong type, which is a malformed command
+    /// rather than a coercion.
+    #[test]
+    fn no_other_row_is_writable() {
+        let mut settings = store_with_divisor();
+        let mut ext = ViewerRlvExt {
+            settings: Some(&mut settings),
+            facts: RlvExtFacts::default(),
+        };
+        for setting in [
+            RlvDebugSetting::AvatarSex,
+            RlvDebugSetting::AspectRatio,
+            RlvDebugSetting::ForbidGiveToRlv,
+            RlvDebugSetting::NoSetEnv,
+            RlvDebugSetting::WindLightUseAtmosShaders,
+        ] {
+            assert!(
+                !ext.set_debug_value(setting, RlvDebugValue::U32(4)),
+                "{setting:?} must not be writable through the settings store"
+            );
+        }
+        assert!(!ext.set_debug_value(
+            RlvDebugSetting::RenderResolutionDivisor,
+            RlvDebugValue::Bool(true)
+        ));
+    }
 
     /// Every setting name in the three rosters is unique — a duplicate would
     /// register twice and the second registration would be dropped with a
@@ -1316,7 +1522,7 @@ mod tests {
             .chain(
                 RLV_PREFIX_SETTINGS
                     .iter()
-                    .map(|(name, _default, _comment)| *name),
+                    .map(|(name, _default, _description_key)| *name),
             )
             .chain(RLV_STRINGS.iter().map(|entry| entry.key))
             .collect();

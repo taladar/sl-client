@@ -75,13 +75,13 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         AUDIO_SECTION,
         SETTING_EAR_LOCATION,
         SettingValue::U32(DEFAULT_EAR_LOCATION),
-        "Where the ears are: 0 the camera position, 1 the avatar position",
+        "setting-desc-MediaSoundsEarLocation",
     );
     settings.register_in(
         AUDIO_SECTION,
         SETTING_OUTPUT_DEVICE,
         SettingValue::String(String::new()),
-        "The audio output device, by name (empty: the system default)",
+        "setting-desc-AudioOutputDevice",
     );
 }
 

@@ -45,6 +45,7 @@
 //! (`FloaterQuickPrefs::getIsPhototools`), `menu_viewer.xml`
 //! (World ▸ Photo and Video ▸ Phototools, `alt|P`).
 
+use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui::{Checked, InteractionDisabled};
@@ -110,9 +111,9 @@ const VALUE_WIDTH: f32 = 44.0;
 /// A section heading's colour.
 const SECTION_COLOR: Color = Color::srgb(0.78, 0.83, 0.9);
 /// A row label's colour.
-const LABEL_COLOR: Color = Color::srgb(0.86, 0.88, 0.92);
+const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 /// A label's colour while the control beside it is refused.
-const DIM_LABEL_COLOR: Color = Color::srgb(0.52, 0.56, 0.63);
+const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 /// A value readout's colour.
 const VALUE_COLOR: Color = Color::srgb(0.7, 0.74, 0.82);
 /// A control's border.
@@ -1797,23 +1798,26 @@ mod tests {
     /// The registrars whose settings this window's rows name. Not the viewer's
     /// whole list — only what the table reaches — so a new row naming a setting
     /// from a crate nobody registered here fails loudly rather than being
-    /// skipped.
+    /// skipped. They are named through their owning crate rather than a
+    /// `crate::` alias because the alias resolves to the *key* module in
+    /// `sl-viewer-settings`: a row's key is shared, its default is not, and
+    /// these tests are the one place that wants both.
     const REGISTRARS: &[fn(&mut ViewerSettings)] = &[
         crate::preferences_graphics::register_settings,
         crate::session::register_settings,
-        crate::render_priority::register_settings,
-        crate::particles::register_settings,
-        crate::glow::register_settings,
-        crate::tonemap::register_settings,
-        crate::exposure::register_settings,
+        sl_viewer_world_objects::render_priority::register_settings,
+        sl_viewer_world_scene::particles::register_settings,
+        sl_viewer_world_scene::glow::register_settings,
+        sl_viewer_world_scene::tonemap::register_settings,
+        sl_viewer_world_scene::exposure::register_settings,
         // The four that the viewer declares from a `Startup` system rather than
         // the registrar list, because their plugins may run without a store at
         // all. Each exposes its declarations as a plain function so a reader
         // like this one can ask the same store the viewer will have.
-        crate::probes::declare_probe_settings,
-        crate::probes::declare_mirror_settings,
-        crate::avatar_complexity::declare_complexity_settings,
-        crate::derender::declare_derender_settings,
+        sl_viewer_world_scene::probes::declare_probe_settings,
+        sl_viewer_world_scene::probes::declare_mirror_settings,
+        sl_viewer_world_avatar::avatar_complexity::declare_complexity_settings,
+        sl_viewer_world_avatar::derender::declare_derender_settings,
     ];
 
     /// Every row binds a setting the viewer actually declares — a row over a

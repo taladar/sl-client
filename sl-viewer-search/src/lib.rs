@@ -23,6 +23,7 @@ pub(crate) use sl_viewer_media::browser_widget;
 pub(crate) use sl_viewer_media::media_engine;
 pub(crate) use sl_viewer_settings as settings;
 pub(crate) use sl_viewer_ui_core::i18n;
+pub(crate) use sl_viewer_ui_core::skin_palette;
 pub(crate) use sl_viewer_ui_core::ui;
 pub(crate) use sl_viewer_ui_core::ui_font;
 pub(crate) use sl_viewer_ui_core::ui_spawn;

@@ -8581,6 +8581,7 @@ dependencies = [
  "sl-viewer-places",
  "sl-viewer-platform",
  "sl-viewer-preferences",
+ "sl-viewer-render-fixtures",
  "sl-viewer-rlv",
  "sl-viewer-search",
  "sl-viewer-settings",
@@ -9279,6 +9280,7 @@ dependencies = [
  "sl-viewer-kit",
  "sl-viewer-media",
  "sl-viewer-notices",
+ "sl-viewer-render-fixtures",
  "sl-viewer-ui-core",
  "sl-viewer-ui-pie-menu",
  "sl-viewer-ui-widgets",
@@ -9549,6 +9551,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-viewer-render-fixtures"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bytes",
+ "sl-avatar",
+ "sl-client-bevy",
+ "sl-terrain",
+ "sl-viewer-kit",
+ "sl-viewer-world-api",
+ "sl-viewer-world-objects",
+ "sl-viewer-world-scene",
+]
+
+[[package]]
 name = "sl-viewer-rlv"
 version = "0.1.0"
 dependencies = [
@@ -9788,12 +9805,10 @@ name = "sl-viewer-world-scene"
 version = "0.1.0"
 dependencies = [
  "bevy",
- "bytes",
  "image",
  "pretty_assertions",
  "serde",
  "serde_json",
- "sl-avatar",
  "sl-client-bevy",
  "sl-proto",
  "sl-settings",
@@ -9826,6 +9841,7 @@ dependencies = [
  "sl-client-bevy",
  "sl-proto",
  "sl-settings",
+ "sl-types",
  "sl-viewer-intents",
  "sl-viewer-kit",
  "sl-viewer-media",

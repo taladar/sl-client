@@ -60,9 +60,11 @@ pub(crate) const REGISTRARS: &[fn(&mut crate::settings::ViewerSettings)] = &[
     crate::world_map::register_settings,
     crate::search::register_settings,
     crate::tonemap::register_settings,
+    crate::resolution_divisor::register_settings,
     crate::glow::register_settings,
     crate::exposure::register_settings,
     crate::snapshot_floater::register_settings,
+    crate::panorama::register_settings,
     crate::i18n::register_settings,
     crate::avatars::register_settings,
     crate::hover_text::register_settings,
@@ -207,6 +209,8 @@ pub(crate) use sl_viewer_notices::linkified_text;
 pub(crate) use sl_viewer_notices::load_url;
 pub(crate) use sl_viewer_ui_context_menus::land_menu;
 pub(crate) use sl_viewer_ui_core::i18n;
+#[cfg(test)]
+mod i18n_keys;
 pub(crate) use sl_viewer_ui_widgets::menu;
 pub(crate) use sl_viewer_world_objects::material_preview;
 pub(crate) use sl_viewer_world_scene::lights;
@@ -276,6 +280,7 @@ pub(crate) use sl_viewer_world_scene::parcel_borders;
 pub(crate) use sl_viewer_world_scene::parcel_owners;
 pub(crate) use sl_viewer_world_scene::particles;
 pub(crate) use sl_viewer_world_scene::probes;
+pub(crate) use sl_viewer_world_view::panorama;
 pub(crate) use sl_viewer_world_view::physics;
 #[cfg(test)]
 mod full_stack_test;
@@ -289,10 +294,11 @@ mod viewer_plugins;
 #[cfg(test)]
 mod world_test;
 pub(crate) use sl_viewer_world_scene::render_overrides;
+pub(crate) use sl_viewer_world_scene::resolution_divisor;
 // Only the render-harness tiers (`render_matrix`, `render_readback`,
 // `render_test`) build scenes; the viewer proper builds the world.
 #[cfg(test)]
-pub(crate) use sl_viewer_world_scene::render_scene;
+pub(crate) use sl_viewer_render_fixtures as render_scene;
 #[cfg(test)]
 mod render_test;
 pub(crate) use sl_viewer_notices::script_dialog;
@@ -336,6 +342,7 @@ mod net_diagnostics;
 // Tracy client (and its `tracing-tracy` bridge) is present.
 #[cfg(feature = "profile-tracy")]
 mod tracy_plots;
+pub(crate) use sl_viewer_ui_core::skin_palette;
 pub(crate) use sl_viewer_ui_core::ui;
 pub(crate) use sl_viewer_ui_core::ui_element;
 pub(crate) use sl_viewer_ui_widgets::ui_color_picker;
@@ -1625,6 +1632,12 @@ fn run_session(
     // selection and a save-to-disk destination that echoes the path to chat.
     // Opened from the bottom toolbar's Snapshot button.
     .add_plugins(crate::snapshot_floater::SnapshotFloaterPlugin)
+    // The 360-degree snapshot floater (viewer-360-snapshot): a capture renderer
+    // of its own -- six cube-map faces shot from the camera's eye point with the
+    // viewer camera itself, reprojected into an equirectangular panorama and
+    // written with the GPano metadata that makes it open as a sphere. Opened
+    // from World > Photo and Video.
+    .add_plugins(crate::panorama::PanoramaPlugin)
     // The Preferences floater shell (viewer-preferences-floater): the tabbed
     // settings window over the typed store — snapshot on open, revert on
     // Cancel / close, persist on OK, with the cross-tab search filter. The

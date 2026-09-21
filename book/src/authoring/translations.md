@@ -150,6 +150,30 @@ ui-ellipsis = ……
 
 If your language has its own convention for such punctuation, override the key.
 
+### Menu and pie-menu labels
+
+The two menu surfaces — the pull-down menus and the radial pie menus — are the
+largest single group of keys in the bundle, and they are grouped by **surface**
+under their own headings (`menu-bar-*`, `menu-inv-*`, `menu-radar-*`,
+`pie-avatar-*`, `pie-object-*`, …). Each key is named after its English wording,
+so `menu-bar-mini-map` is the *Mini-Map* line of the top **World** menu.
+
+Two consequences for a translator:
+
+- **Keys are not shared between surfaces even when the English word is.** The
+  avatar pie's `pie-avatar-mute` and the object pie's `pie-object-mute` are
+  separate keys on purpose: one mutes a person and the other an object, and few
+  languages spell both with one word. Translate each in its own context.
+- **Your translation decides the keyboard.** A pull-down entry's underlined
+  **jump key** is the first free letter of the *translated* label, and the menu
+  search box matches what the reader can see — so both follow the translation
+  with no further work, and neither has an English letter hidden behind it.
+
+A pie slice's position never moves: a slice's address is its compass direction,
+not its wording, so a longer translation grows the ring rather than re-ordering
+anything. A long label still wraps inside the slice, so prefer the short form
+where your language offers one.
+
 ### `language-name` — the endonym
 
 Every locale defines `language-name` as its **own** name in its **own** script

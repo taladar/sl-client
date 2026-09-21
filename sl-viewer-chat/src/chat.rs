@@ -620,13 +620,13 @@ mod tests {
             &["chat"],
             crate::world_api::SETTING_NEARBY_TOAST_LIFETIME,
             sl_settings::SettingValue::U32(23),
-            "Seconds a nearby-chat overlay line stays on screen (including the fade)",
+            "setting-desc-NearbyChatToastLifetime",
         );
         settings.register_in(
             &["chat"],
             crate::world_api::SETTING_CHAT_MAX_LINES,
             sl_settings::SettingValue::U32(12),
-            "The most nearby-chat overlay lines shown at once",
+            "setting-desc-ChatOverlayMaxLines",
         );
         settings.set(
             sl_settings::Scope::Global,

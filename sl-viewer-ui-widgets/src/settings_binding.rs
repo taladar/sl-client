@@ -751,12 +751,12 @@ fn register_demo_settings(settings: Option<ResMut<ViewerSettings>>) {
     settings.register_transient(
         DEMO_FLAG_SETTING,
         SettingValue::Bool(true),
-        "Demo bound flag",
+        "setting-desc-DemoBindingFlag",
     );
     settings.register_transient(
         DEMO_LEVEL_SETTING,
         SettingValue::F32(DEMO_LEVEL_DEFAULT),
-        "Demo bound level",
+        "setting-desc-DemoBindingLevel",
     );
 }
 

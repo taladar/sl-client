@@ -865,7 +865,7 @@ fn register_settings(settings: &mut ViewerSettings) {
         AUDIO_SECTION,
         SETTING_COLLISION_SOUNDS,
         sl_settings::SettingValue::Bool(true),
-        "Play the viewer-synthesized material sound when physical objects collide",
+        "setting-desc-EnableCollisionSounds",
     );
 }
 

@@ -47,12 +47,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use bevy::asset::RenderAssetUsages;
-use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;
 
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use sl_client_bevy::{DecodedTexture, Priority, TextureFace, TextureKey, Uuid};
+use sl_client_bevy::{
+    DecodedTexture, Priority, TextureFace, TextureKey, TextureUpload, Uuid, upload_pixels,
+};
 use sl_viewer_world_api::DecodedTextures;
 
 use crate::materials::ObjectRenderMaterials;
@@ -373,8 +372,9 @@ pub fn refresh_bump_normals(
 /// treating pixel luminance as a height field: the per-texel luminance gradient
 /// (central differences, wrapping at the edges to match the repeating face
 /// sampler) tilts each surface normal. `invert` negates the height (the darkness
-/// bump code — dark pixels read as raised). The map is linear (`Rgba8Unorm`) and
-/// tiles with the same repeating sampler as the diffuse.
+/// bump code — dark pixels read as raised). The generated texels are a packed
+/// direction rather than a picture, so the map is uploaded as
+/// [`TextureUpload::DATA`].
 pub fn generate_normal_map(decoded: &Arc<DecodedTexture>, invert: bool) -> Image {
     let width = decoded.width.max(1);
     let height = decoded.height.max(1);
@@ -422,24 +422,7 @@ pub fn generate_normal_map(decoded: &Arc<DecodedTexture>, invert: bool) -> Image
         }
     }
 
-    let mut image = Image::new(
-        Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        data,
-        TextureFormat::Rgba8Unorm,
-        RenderAssetUsages::default(),
-    );
-    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-        address_mode_u: ImageAddressMode::Repeat,
-        address_mode_v: ImageAddressMode::Repeat,
-        address_mode_w: ImageAddressMode::Repeat,
-        ..ImageSamplerDescriptor::linear()
-    });
-    image
+    upload_pixels(width, height, data, TextureUpload::DATA)
 }
 
 /// The index of the previous element in a wrapping row/column of `n` (the last

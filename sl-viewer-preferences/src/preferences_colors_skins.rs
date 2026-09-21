@@ -56,13 +56,13 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         UI_SECTION,
         SETTING_UI_SKIN,
         SettingValue::String(DEFAULT_SKIN.to_owned()),
-        "The UI skin (a directory under assets/skins)",
+        "setting-desc-UiSkin",
     );
     settings.register_in(
         UI_SECTION,
         SETTING_UI_SKIN_THEME,
         SettingValue::String(String::new()),
-        "The skin's theme overlay; empty for the skin's own base",
+        "setting-desc-UiSkinTheme",
     );
 }
 

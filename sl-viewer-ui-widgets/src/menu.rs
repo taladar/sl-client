@@ -17,6 +17,27 @@
 //! rule, `ui_element`). What a given domain menu *contains* is
 //! per-domain and not here, exactly as it is not in the pie.
 //!
+//! # Labels are keys, and everything derived from one is derived from the text
+//!
+//! A [`MenuCommand`] / [`MenuDef`] carries a `label_key`, not a label: a Fluent
+//! key the bundle answers, exactly as a notification template's `message_key`
+//! is. Three things are derived from a label, and all three are derived from the
+//! **resolved** text rather than the key — the drawn line, the keyboard jump key
+//! (`assign_jump_keys`), and whether menu search matches it — so a translated
+//! menu reads, jumps and searches in the reader's own language. That is why a
+//! popup is built with a [`Translator`] in hand (`MenuBuildCtx`) rather than
+//! binding each row to its key.
+//!
+//! The one label that *is* bound, with `i18n::Translated`, is the bar button's:
+//! it has no mnemonic to split and no search term to match, so nothing needs it
+//! synchronously, and binding keeps [`spawn_menu_bar`] callable from a plain
+//! `Commands` — which the element registry's fixed spawn signature requires. A
+//! bar label therefore relocalises in place on a language switch, where a popup
+//! is rebuilt on its next open. The consequence for the gallery is that a bar
+//! label no longer passes through `ElementCx::text`: what varies its length is
+//! the bundle now, which is the real version of the thing that transform stood
+//! in for.
+//!
 //! # Self-managed, on `bevy_ui_widgets`' `Popover`
 //!
 //! The one upstream piece this leans on is [`Popover`] — edge-flipping
@@ -80,6 +101,8 @@ use bevy::ui_widgets::popover::{Popover, PopoverAlign, PopoverPlacement, Popover
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
 
+use sl_viewer_ui_core::i18n::{Translated, Translator};
+use sl_viewer_ui_core::skin_palette::{SkinColors, SkinPalette};
 use sl_viewer_ui_core::ui::{
     LogicalMargin, LogicalRect, UiDirection, UiRoot, UiScaffoldSystems, column,
 };
@@ -100,8 +123,18 @@ use sl_viewer_ui_core::ui_font::UiFont;
 /// visible conditions (the reference's `on_enable` / `on_check` / `on_visible`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MenuCommand {
-    /// The entry's text. Laid out through the ordinary bidi text stack.
-    pub label: &'static str,
+    /// The Fluent key the entry's text is looked up under, resolved through
+    /// [`Translator`] when the line is built and laid out through the ordinary
+    /// bidi text stack.
+    ///
+    /// A **key**, not the text — the same shape
+    /// `sl_viewer_notifications::NotificationTemplate::message_key` has, and for
+    /// the same reason: a `&'static str` of English is a string a translator
+    /// cannot reach. Everything the widget derives from a label — the jump-key
+    /// mnemonic, the menu-search match, the drawn line — is derived from the
+    /// **resolved** text, so a translated menu navigates and searches in the
+    /// reader's own language.
+    pub label_key: &'static str,
     /// What this emits when picked — the `action` of the `UiAction` the widget
     /// writes, and the name a test asserts against.
     pub action: &'static str,
@@ -128,11 +161,11 @@ pub struct MenuCommand {
 }
 
 impl MenuCommand {
-    /// A plain always-available action: a label and the action it emits.
+    /// A plain always-available action: a label key and the action it emits.
     #[must_use]
-    pub const fn new(label: &'static str, action: &'static str) -> Self {
+    pub const fn new(label_key: &'static str, action: &'static str) -> Self {
         Self {
-            label,
+            label_key,
             action,
             enabled_when: None,
             checked_when: None,
@@ -201,8 +234,9 @@ pub enum MenuItemDef {
     /// under the cursor, labelled with a name that may only arrive after the
     /// menu is already open ([`SetMenuDynamicLabels`]).
     DynamicSubmenu {
-        /// The submenu line's own (authored) label.
-        label: &'static str,
+        /// The Fluent key of the submenu line's own (authored) label. Its
+        /// *entries* are runtime data and carry no key.
+        label_key: &'static str,
         /// The [`MenuDynamicSlots`] slot its entries come from.
         slot: &'static str,
     },
@@ -213,8 +247,8 @@ pub enum MenuItemDef {
 /// A menu: the label it drops from, and its lines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MenuDef {
-    /// The button / submenu label this menu drops from.
-    pub label: &'static str,
+    /// The Fluent key of the button / submenu label this menu drops from.
+    pub label_key: &'static str,
     /// The lines, in presentation order (top to bottom *is* the layout).
     pub items: &'static [MenuItemDef],
 }
@@ -260,8 +294,12 @@ impl MenuConditions {
 }
 
 /// Every command action in a menu tree, depth-first, tagged with the
-/// `>`-joined path of menu labels that reaches it — the line-menu analogue of
-/// the pie's `pie_menu::addresses`.
+/// `>`-joined path of menu **label keys** that reaches it — the line-menu
+/// analogue of the pie's `pie_menu::addresses`.
+///
+/// Keys rather than the drawn text, because what this pins is the *walk* and a
+/// walk must not move when the reader switches language: `World > Mini-Map` and
+/// `Welt > Minikarte` are the same address, and only the keys say so.
 ///
 /// The pie pins *which compass point* an action sits at because a pie is
 /// operated by direction; a pull-down is operated by path and order, so what a
@@ -280,13 +318,13 @@ pub fn action_paths(menu: &MenuDef) -> Vec<(String, &'static str)> {
     found
 }
 
-/// [`action_paths`]' recursion: walk `menu`, tracking the label path taken to
-/// reach it.
+/// [`action_paths`]' recursion: walk `menu`, tracking the label-key path taken
+/// to reach it.
 fn collect_action_paths(menu: &MenuDef, prefix: &str, found: &mut Vec<(String, &'static str)>) {
     let here = if prefix.is_empty() {
-        menu.label.to_owned()
+        menu.label_key.to_owned()
     } else {
-        format!("{prefix} > {}", menu.label)
+        format!("{prefix} > {}", menu.label_key)
     };
     for item in menu.items {
         match item {
@@ -397,13 +435,18 @@ impl MenuFilter {
     /// The filter context for building a **top-level** popup of `def` under
     /// `element`, or `None` when no filter applies to it. A top menu whose own
     /// label matches the query shows its whole subtree (`parent_matched`).
-    fn context_for(&self, element: &'static str, def: &MenuDef) -> Option<MenuFilterCtx<'_>> {
+    fn context_for(
+        &self,
+        element: &'static str,
+        def: &MenuDef,
+        translator: &Translator,
+    ) -> Option<MenuFilterCtx<'_>> {
         if self.query.is_empty() || self.element != element {
             return None;
         }
         Some(MenuFilterCtx {
             query: &self.query,
-            parent_matched: label_matches_filter(def.label, &self.query),
+            parent_matched: key_matches_filter(translator, def.label_key, &self.query),
         })
     }
 
@@ -443,21 +486,33 @@ fn label_matches_filter(label: &str, query: &str) -> bool {
     label.to_lowercase().contains(query)
 }
 
+/// [`label_matches_filter`] against the **resolved** text of `key`.
+///
+/// Search matches what the reader can see. Testing the key would mean a German
+/// user searching for `Minikarte` finds nothing while `mini-map` — a string
+/// drawn nowhere — finds the entry.
+fn key_matches_filter(translator: &Translator, key: &'static str, query: &str) -> bool {
+    label_matches_filter(&translator.get(key), query)
+}
+
 /// Whether `def`'s subtree carries a match for `query`: one of its commands'
 /// labels, or a submenu label or something inside a submenu. A never-enabled
 /// placeholder is not counted, so an unpopulated menu does not read as a hit.
-fn subtree_matches_filter(def: &MenuDef, query: &str) -> bool {
+fn subtree_matches_filter(def: &MenuDef, query: &str, translator: &Translator) -> bool {
     def.items.iter().any(|item| match item {
         MenuItemDef::Command(command) => {
             command.enabled_when != Some(NEVER_CONDITION)
-                && label_matches_filter(command.label, query)
+                && key_matches_filter(translator, command.label_key, query)
         }
         MenuItemDef::Submenu(sub) | MenuItemDef::SubmenuWhen(sub, _) => {
-            label_matches_filter(sub.label, query) || subtree_matches_filter(sub, query)
+            key_matches_filter(translator, sub.label_key, query)
+                || subtree_matches_filter(sub, query, translator)
         }
         // A dynamic submenu's entries do not exist until it is opened, so only
         // its own (authored) label can match a search term.
-        MenuItemDef::DynamicSubmenu { label, .. } => label_matches_filter(label, query),
+        MenuItemDef::DynamicSubmenu { label_key, .. } => {
+            key_matches_filter(translator, label_key, query)
+        }
         MenuItemDef::Separator => false,
     })
 }
@@ -468,37 +523,10 @@ fn subtree_matches_filter(def: &MenuDef, query: &str) -> bool {
 // painted by `highlight_menu_hover` so it works with or without a skin.
 // ---------------------------------------------------------------------------
 
-/// A menu bar / drop-down surface background. Shared with the status area
-/// (`status_bar`) so the two halves of the top row paint the same
-/// fallback colour when no skin is loaded.
-pub const MENU_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
-
-/// A menu-bar button / menu entry's resting background (transparent).
+/// A menu-bar button / menu entry's resting background (transparent). Not a
+/// skin role: a transparent resting state is what lets the hover highlight and
+/// the bar's own surface show through, so a skin recolours those instead.
 const ENTRY_BACKGROUND: Color = Color::NONE;
-
-/// A hovered menu button / entry's background — the highlight.
-const ENTRY_HIGHLIGHT: Color = Color::srgb(0.24, 0.34, 0.52);
-
-/// The label colour of an entry that **matched** the active menu-search filter —
-/// a warm accent, the reference viewer's `hightlightAndHide` highlight. A
-/// build-time text colour, not a per-frame background, so it does not fight the
-/// hover highlight (`highlight_menu_hover`, which paints backgrounds).
-const FILTER_MATCH_COLOR: Color = Color::srgb(0.98, 0.82, 0.40);
-
-/// A drop-down's border.
-const MENU_BORDER: Color = Color::srgb(0.30, 0.36, 0.46);
-
-/// An enabled entry's label colour.
-const ENTRY_TEXT: Color = Color::srgb(0.92, 0.94, 0.98);
-
-/// A disabled entry's label colour — clearly greyed.
-const ENTRY_TEXT_DISABLED: Color = Color::srgb(0.45, 0.49, 0.56);
-
-/// An accelerator / submenu-arrow colour — muted against the label.
-const ENTRY_ACCESSORY: Color = Color::srgb(0.62, 0.66, 0.74);
-
-/// A separator rule colour.
-const SEPARATOR_COLOR: Color = Color::srgb(0.30, 0.34, 0.42);
 
 /// The inline / block padding around a menu-bar button's label, in logical px.
 const BAR_BUTTON_PADDING: Vec2 = Vec2::new(12.0, 6.0);
@@ -592,20 +620,20 @@ enum MenuSource {
     /// A [`MenuItemDef::DynamicSubmenu`]'s child list: one line per label in the
     /// named slot.
     Dynamic {
-        /// The branch line's label, kept for the popup's `Name`.
-        label: &'static str,
+        /// The branch line's label key, kept for the popup's `Name`.
+        label_key: &'static str,
         /// The slot the lines come from.
         slot: &'static str,
     },
 }
 
 impl MenuSource {
-    /// The label this popup drops from — the menu's own, or the dynamic
+    /// The label key this popup drops from — the menu's own, or the dynamic
     /// branch's.
-    const fn label(self) -> &'static str {
+    const fn label_key(self) -> &'static str {
         match self {
-            Self::Static(def) => def.label,
-            Self::Dynamic { label, .. } => label,
+            Self::Static(def) => def.label_key,
+            Self::Dynamic { label_key, .. } => label_key,
         }
     }
 }
@@ -737,7 +765,7 @@ pub fn spawn_menu_bar(
                 row_gap: Val::Px(2.0),
                 ..default()
             },
-            BackgroundColor(MENU_BACKGROUND),
+            BackgroundColor(SkinPalette::default().surface_bg),
             ClassList::new_with_classes(["sk-menu-bar"]),
             Name::new("menu-bar"),
             ChildOf(parent),
@@ -771,7 +799,7 @@ pub fn spawn_menu_button(
                 element,
                 open: None,
             },
-            Name::new(format!("menu-host:{}", def.label)),
+            Name::new(format!("menu-host:{}", def.label_key)),
             ChildOf(parent),
         ))
         .id();
@@ -786,7 +814,7 @@ pub fn spawn_menu_button(
             },
             BackgroundColor(ENTRY_BACKGROUND),
             ClassList::new_with_classes(["sk-menu-bar-item"]),
-            Name::new(format!("menu-button:{}", def.label)),
+            Name::new(format!("menu-button:{}", def.label_key)),
             ChildOf(host),
         ))
         .observe(
@@ -810,9 +838,21 @@ pub fn spawn_menu_button(
             },
         )
         .with_child((
-            Text::new(cx.text(def.label)),
+            // A **bound** label rather than a resolved one, unlike the rows
+            // inside the drop-down. A bar button has no mnemonic to split and no
+            // search term to match, so nothing here needs its text
+            // synchronously — and binding keeps [`spawn_menu_bar`] /
+            // [`spawn_menu_button`] spawnable from a plain `Commands`, which the
+            // element registry's fixed spawn signature (`ui_element`) requires.
+            // The button then relocalises in place on a language switch, where a
+            // popup is simply rebuilt on its next open.
+            //
+            // It starts empty on purpose: the key is not display text, and
+            // `apply_translations` fills it the frame it appears.
+            Text::default(),
+            Translated::new(def.label_key),
             cx.font(UiFont::Sans),
-            TextColor(ENTRY_TEXT),
+            TextColor(SkinPalette::default().text_primary),
             // A child node blocks picking by default, so an un-ignored label
             // would swallow the press and the button would never see it.
             Pickable::IGNORE,
@@ -850,6 +890,8 @@ struct MenuNav<'w, 's> {
     direction: Res<'w, UiDirection>,
     /// The live menu-search term.
     filter: Res<'w, MenuFilter>,
+    /// The bundle each line's `label_key` is resolved through.
+    translator: Translator<'w>,
     /// The bar (and gear) menus whose drop-down this opens and closes.
     hosts: Query<'w, 's, (Entity, &'static mut MenuHost)>,
     /// The submenu rows whose child popup this opens and closes.
@@ -891,7 +933,8 @@ impl MenuNav<'_, '_> {
             conditions: held.unwrap_or(&empty),
             slots: &self.slots,
             direction: *self.direction,
-            filter: self.filter.context_for(element, def),
+            filter: self.filter.context_for(element, def, &self.translator),
+            translator: &self.translator,
         };
         let popup = build_menu_popup(
             &mut self.commands,
@@ -935,6 +978,7 @@ impl MenuNav<'_, '_> {
             slots: &self.slots,
             direction: *self.direction,
             filter: self.filter.context_for_branch(element, parent_matched),
+            translator: &self.translator,
         };
         let popup = build_menu_popup(
             &mut self.commands,
@@ -1097,7 +1141,7 @@ fn open_filtered_menu(mut nav: MenuNav) {
                 kids.iter().find(|&child| {
                     nav.hosts.get(child).is_ok_and(|(_, menu)| {
                         menu.element == nav.filter.element
-                            && subtree_matches_filter(menu.def, &nav.filter.query)
+                            && subtree_matches_filter(menu.def, &nav.filter.query, &nav.translator)
                     })
                 })
             })
@@ -1187,23 +1231,25 @@ impl DropDirection {
 
 /// Assign each command / submenu line a keyboard **jump key** — the reference's
 /// `LLMenuGL::createJumpKeys`, reduced to "the first free alphanumeric letter of
-/// the label". Returned parallel to `items`: `Some((upper_key, byte_offset))`
+/// the label". Returned parallel to `labels`: `Some((upper_key, byte_offset))`
 /// for a line that got one (the uppercased key and the byte offset of its
 /// character in the label, so the mnemonic can be underlined in place), `None`
 /// for a separator or a label with no free letter. A key is consumed as it is
 /// taken, so one menu never binds one letter to two lines.
-fn assign_jump_keys(items: &[MenuItemDef]) -> Vec<Option<(char, usize)>> {
+///
+/// Takes the lines' **resolved** labels (`None` for a separator) rather than the
+/// declarations, because a jump key is a promise about the letter the reader can
+/// see: in a translated menu the mnemonics must be that language's letters, not
+/// the ones English happened to spell. It also leaves this pure — the
+/// interesting property, that a menu never binds one letter twice, is checked
+/// without standing up a bundle.
+fn assign_jump_keys(labels: &[Option<String>]) -> Vec<Option<(char, usize)>> {
     let mut taken: HashSet<char> = HashSet::new();
-    let mut out = Vec::with_capacity(items.len());
-    for item in items {
-        let label = match item {
-            MenuItemDef::Command(command) => command.label,
-            MenuItemDef::Submenu(sub) | MenuItemDef::SubmenuWhen(sub, _) => sub.label,
-            MenuItemDef::DynamicSubmenu { label, .. } => label,
-            MenuItemDef::Separator => {
-                out.push(None);
-                continue;
-            }
+    let mut out = Vec::with_capacity(labels.len());
+    for label in labels {
+        let Some(label) = label else {
+            out.push(None);
+            continue;
         };
         let mut assigned = None;
         for (offset, ch) in label.char_indices() {
@@ -1220,6 +1266,27 @@ fn assign_jump_keys(items: &[MenuItemDef]) -> Vec<Option<(char, usize)>> {
         out.push(assigned);
     }
     out
+}
+
+/// Resolve each line's label for display — `None` for a separator, which has
+/// none.
+///
+/// The one lookup per line the whole build shares: the jump-key pass, the
+/// search-filter test and the drawn row all read the same resolved string, so a
+/// key reaches the bundle once per built line rather than once per thing derived
+/// from it.
+fn resolve_item_labels(items: &[MenuItemDef], translator: &Translator) -> Vec<Option<String>> {
+    items
+        .iter()
+        .map(|item| match item {
+            MenuItemDef::Command(command) => Some(translator.get(command.label_key)),
+            MenuItemDef::Submenu(sub) | MenuItemDef::SubmenuWhen(sub, _) => {
+                Some(translator.get(sub.label_key))
+            }
+            MenuItemDef::DynamicSubmenu { label_key, .. } => Some(translator.get(label_key)),
+            MenuItemDef::Separator => None,
+        })
+        .collect()
 }
 
 /// Split `label` at the mnemonic byte `offset` into `(before, mnemonic, after)`,
@@ -1258,6 +1325,10 @@ struct MenuBuildCtx<'a> {
     direction: UiDirection,
     /// The menu-search context, `None` when this menu is not the searched one.
     filter: Option<MenuFilterCtx<'a>>,
+    /// The bundle every line's `label_key` is resolved through — the whole
+    /// reason a translated menu reads, searches and jumps in the reader's
+    /// language.
+    translator: &'a Translator<'a>,
 }
 
 /// Build a drop-down popup for `source` under `anchor`, and return it.
@@ -1295,8 +1366,8 @@ fn build_menu_popup(
                 positions: drop.placements(ctx.direction),
                 window_margin: 4.0,
             },
-            BackgroundColor(MENU_BACKGROUND),
-            BorderColor::all(MENU_BORDER),
+            BackgroundColor(SkinPalette::default().surface_bg),
+            BorderColor::all(SkinPalette::default().surface_border),
             GlobalZIndex(MENU_Z_INDEX),
             // A drop-down is a floating layer: it must render in full even when it
             // overhangs its anchor's edge. A button-anchored menu (`spawn_menu_button`
@@ -1311,7 +1382,7 @@ fn build_menu_popup(
             // root; this makes every menu popup uniform.
             OverrideClip,
             ClassList::new_with_classes(["sk-menu"]),
-            Name::new(format!("menu-popup:{}", source.label())),
+            Name::new(format!("menu-popup:{}", source.label_key())),
             ChildOf(anchor),
         ))
         // Consume a press that lands on the popup's own padding / border, so it
@@ -1322,8 +1393,10 @@ fn build_menu_popup(
         // Jump keys are assigned per built list, so each row carries its
         // mnemonic.
         MenuSource::Static(def) => {
-            for (item, jump) in def.items.iter().zip(assign_jump_keys(def.items)) {
-                spawn_menu_line(commands, popup, *item, jump, ctx);
+            let labels = resolve_item_labels(def.items, ctx.translator);
+            let jumps = assign_jump_keys(&labels);
+            for ((item, label), jump) in def.items.iter().zip(&labels).zip(jumps) {
+                spawn_menu_line(commands, popup, *item, label.as_deref(), jump, ctx);
             }
         }
         // A dynamic list is as long as the slot the domain filled, and its
@@ -1349,9 +1422,13 @@ fn spawn_menu_line(
     commands: &mut Commands,
     popup: Entity,
     item: MenuItemDef,
+    label: Option<&str>,
     jump: Option<(char, usize)>,
     ctx: MenuBuildCtx,
 ) {
+    // Every line but a separator was resolved by `resolve_item_labels`; a
+    // separator has no label and never reaches a branch that reads one.
+    let label = label.unwrap_or_default();
     match item {
         MenuItemDef::Command(command) => {
             if !ctx.conditions.holds(command.visible_when) {
@@ -1359,12 +1436,22 @@ fn spawn_menu_line(
             }
             match ctx.filter {
                 None => {
-                    spawn_command_line(commands, popup, command, false, jump, ctx);
+                    let draw = LineDraw {
+                        label,
+                        jump,
+                        highlight: false,
+                    };
+                    spawn_command_line(commands, popup, command, draw, ctx);
                 }
                 Some(filter) => {
-                    let own_match = label_matches_filter(command.label, filter.query);
+                    let own_match = label_matches_filter(label, filter.query);
                     if filter.parent_matched || own_match {
-                        spawn_command_line(commands, popup, command, own_match, jump, ctx);
+                        let draw = LineDraw {
+                            label,
+                            jump,
+                            highlight: own_match,
+                        };
+                        spawn_command_line(commands, popup, command, draw, ctx);
                     }
                 }
             }
@@ -1374,23 +1461,30 @@ fn spawn_menu_line(
                 commands,
                 popup,
                 MenuSource::Static(sub),
+                LineDraw {
+                    label,
+                    jump,
+                    highlight: false,
+                },
                 ctx.element,
                 false,
-                false,
-                jump,
             ),
             Some(filter) => {
-                let own_match = label_matches_filter(sub.label, filter.query);
+                let own_match = label_matches_filter(label, filter.query);
                 let child_parent_matched = filter.parent_matched || own_match;
-                if child_parent_matched || subtree_matches_filter(sub, filter.query) {
+                if child_parent_matched || subtree_matches_filter(sub, filter.query, ctx.translator)
+                {
                     spawn_submenu_line(
                         commands,
                         popup,
                         MenuSource::Static(sub),
+                        LineDraw {
+                            label,
+                            jump,
+                            highlight: own_match,
+                        },
                         ctx.element,
                         child_parent_matched,
-                        own_match,
-                        jump,
                     );
                 }
             }
@@ -1399,14 +1493,25 @@ fn spawn_menu_line(
         // "one line per avatar under the cursor" has nothing to open when there
         // is one avatar, and the reference hides its `View Profiles` branch on
         // exactly that count.
-        MenuItemDef::DynamicSubmenu { label, slot } => {
+        MenuItemDef::DynamicSubmenu { label_key, slot } => {
             if ctx.slots.labels(slot).is_empty() {
                 return;
             }
-            let source = MenuSource::Dynamic { label, slot };
+            let source = MenuSource::Dynamic { label_key, slot };
             match ctx.filter {
                 None => {
-                    spawn_submenu_line(commands, popup, source, ctx.element, false, false, jump);
+                    spawn_submenu_line(
+                        commands,
+                        popup,
+                        source,
+                        LineDraw {
+                            label,
+                            jump,
+                            highlight: false,
+                        },
+                        ctx.element,
+                        false,
+                    );
                 }
                 Some(filter) => {
                     let own_match = label_matches_filter(label, filter.query);
@@ -1415,10 +1520,13 @@ fn spawn_menu_line(
                             commands,
                             popup,
                             source,
+                            LineDraw {
+                                label,
+                                jump,
+                                highlight: own_match,
+                            },
                             ctx.element,
                             filter.parent_matched || own_match,
-                            own_match,
-                            jump,
                         );
                     }
                 }
@@ -1426,7 +1534,14 @@ fn spawn_menu_line(
         }
         MenuItemDef::SubmenuWhen(sub, when) => {
             if ctx.conditions.holds(Some(when)) {
-                spawn_menu_line(commands, popup, MenuItemDef::Submenu(sub), jump, ctx);
+                spawn_menu_line(
+                    commands,
+                    popup,
+                    MenuItemDef::Submenu(sub),
+                    Some(label),
+                    jump,
+                    ctx,
+                );
             }
         }
         MenuItemDef::Separator => {
@@ -1437,33 +1552,50 @@ fn spawn_menu_line(
     }
 }
 
-/// Spawn a command line: [check gutter] [label] [accelerator].
+/// What one built line draws beyond its own declaration.
 ///
-/// `highlight` draws the label in the menu-search accent ([`FILTER_MATCH_COLOR`])
-/// — set when the entry itself matched an active filter; a disabled entry stays
-/// greyed regardless.
+/// The three facts that are settled *while the popup is built* rather than
+/// authored with the entry: what the bundle answered for its `label_key`, which
+/// letter the jump-key pass gave it, and whether the menu-search term matched
+/// it. They arrive together — the label is resolved first, and the other two are
+/// derived from it — so they travel together rather than as three parameters
+/// threaded through both line builders.
+#[derive(Clone, Copy)]
+struct LineDraw<'a> {
+    /// The resolved text, as the reader sees it.
+    label: &'a str,
+    /// The jump key and the byte offset of its character in `label`, or `None`
+    /// for a line that got none.
+    jump: Option<(char, usize)>,
+    /// Whether this line itself matched the active menu-search term, which
+    /// draws its label in the accent (`--match-highlight`). A disabled entry
+    /// stays greyed regardless.
+    highlight: bool,
+}
+
+/// Spawn a command line: [check gutter] [label] [accelerator].
 fn spawn_command_line(
     commands: &mut Commands,
     popup: Entity,
     command: MenuCommand,
-    highlight: bool,
-    jump: Option<(char, usize)>,
+    draw: LineDraw,
     ctx: MenuBuildCtx,
 ) {
     let element = ctx.element;
     let enabled = ctx.conditions.holds(command.enabled_when);
     let checked = command.checked_when.is_some() && ctx.conditions.holds(command.checked_when);
+    let palette = SkinPalette::default();
     let text_color = if !enabled {
-        ENTRY_TEXT_DISABLED
-    } else if highlight {
-        FILTER_MATCH_COLOR
+        palette.text_disabled
+    } else if draw.highlight {
+        palette.match_highlight
     } else {
-        ENTRY_TEXT
+        palette.text_primary
     };
     let action = command.action;
     // A disabled row carries a second class whose skin rule repaints the label
     // in the skin's disabled grey — without it, the skin's `.sk-menu-item`
-    // text colour would override the Rust-painted `ENTRY_TEXT_DISABLED` and an
+    // text colour would override the Rust-painted disabled grey and an
     // unavailable entry would read enabled.
     let classes: &[&str] = if enabled {
         &["sk-menu-item"]
@@ -1486,7 +1618,7 @@ fn spawn_command_line(
     if checked {
         commands.entity(row).insert(Checked);
     }
-    if let Some((key, _)) = jump {
+    if let Some((key, _)) = draw.jump {
         commands.entity(row).insert(MenuMnemonic { key });
     }
     // Emission is a single point — an `Activate` observer — so a press (mouse)
@@ -1503,15 +1635,15 @@ fn spawn_command_line(
     spawn_entry_label(
         commands,
         row,
-        command.label,
+        draw.label,
         text_color,
-        jump.map(|(_, offset)| offset),
+        draw.jump.map(|(_, offset)| offset),
     );
     if let Some(accelerator) = command.accelerator {
         commands.spawn((
             Text::new(accelerator),
             UiFont::Sans.at(ENTRY_FONT),
-            TextColor(ENTRY_ACCESSORY),
+            TextColor(palette.text_muted),
             Pickable::IGNORE,
             Name::new("menu-item-accel"),
             ChildOf(row),
@@ -1578,8 +1710,9 @@ fn spawn_dynamic_line(
         .observe(emit_dynamic_pick)
         .id();
     attach_row_press(commands, row);
-    spawn_gutter(commands, row, "", ENTRY_TEXT);
-    let label_entity = spawn_entry_label(commands, row, label, ENTRY_TEXT, None);
+    let text = SkinPalette::default().text_primary;
+    spawn_gutter(commands, row, "", text);
+    let label_entity = spawn_entry_label(commands, row, label, text, None);
     commands.entity(label_entity).insert(MenuDynamicLabel);
 }
 
@@ -1590,15 +1723,15 @@ fn spawn_submenu_line(
     commands: &mut Commands,
     popup: Entity,
     sub: MenuSource,
+    draw: LineDraw,
     element: &'static str,
     filter_parent_matched: bool,
-    highlight: bool,
-    jump: Option<(char, usize)>,
 ) {
-    let label_color = if highlight {
-        FILTER_MATCH_COLOR
+    let palette = SkinPalette::default();
+    let label_color = if draw.highlight {
+        palette.match_highlight
     } else {
-        ENTRY_TEXT
+        palette.text_primary
     };
     let row = commands
         .spawn((
@@ -1611,26 +1744,26 @@ fn spawn_submenu_line(
                 open: None,
                 filter_parent_matched,
             },
-            Name::new(format!("menu-submenu:{}", sub.label())),
+            Name::new(format!("menu-submenu:{}", sub.label_key())),
             ChildOf(popup),
         ))
         .observe(|mut press: On<Pointer<Press>>| press.propagate(false))
         .id();
-    if let Some((key, _)) = jump {
+    if let Some((key, _)) = draw.jump {
         commands.entity(row).insert(MenuMnemonic { key });
     }
     spawn_gutter(commands, row, "", label_color);
     spawn_entry_label(
         commands,
         row,
-        sub.label(),
+        draw.label,
         label_color,
-        jump.map(|(_, off)| off),
+        draw.jump.map(|(_, off)| off),
     );
     commands.spawn((
         Text::new(SUBMENU_ARROW),
         UiFont::Sans.at(ENTRY_FONT),
-        TextColor(ENTRY_ACCESSORY),
+        TextColor(palette.text_muted),
         Pickable::IGNORE,
         Name::new("menu-submenu-arrow"),
         ChildOf(row),
@@ -1755,7 +1888,7 @@ fn spawn_separator_line(commands: &mut Commands, popup: Entity) {
             margin: UiRect::axes(Val::Px(0.0), Val::Px(4.0)),
             ..default()
         },
-        BackgroundColor(SEPARATOR_COLOR),
+        BackgroundColor(SkinPalette::default().surface_border),
         ClassList::new_with_classes(["sk-menu-separator"]),
         Pickable::IGNORE,
         Name::new("menu-separator"),
@@ -1973,6 +2106,7 @@ fn open_context_menus(
                 // A context menu is not the searched element, so it is never
                 // filtered.
                 filter: None,
+                translator: &nav.translator,
             },
         );
     }
@@ -2054,12 +2188,14 @@ fn dismiss_all(
 fn highlight_menu_hover(
     hover: Res<HoverMap>,
     keyboard: Res<MenuKeyboard>,
+    palette: SkinColors,
     child_of: Query<&ChildOf>,
     mut rows: Query<
         (Entity, &mut BackgroundColor, Has<InteractionDisabled>),
         Or<(With<MenuEntryAction>, With<MenuBranch>, With<MenuBarButton>)>,
     >,
 ) {
+    let palette = palette.get();
     let row_entities: HashSet<Entity> = rows.iter().map(|(entity, _, _)| entity).collect();
     let lit: HashSet<Entity> = if keyboard.active {
         let mut set = HashSet::new();
@@ -2092,7 +2228,7 @@ fn highlight_menu_hover(
     };
     for (entity, mut background, disabled) in &mut rows {
         let wanted = if lit.contains(&entity) && !disabled {
-            ENTRY_HIGHLIGHT
+            palette.control_bg_hover
         } else {
             ENTRY_BACKGROUND
         };
@@ -2592,6 +2728,13 @@ fn toggle_menu_mnemonic_underline(
 // ---------------------------------------------------------------------------
 
 /// The line-menu widget's runtime.
+///
+/// **Requires the i18n string half.** Every line resolves its `label_key` as it
+/// is built, so these systems take a `sl_viewer_ui_core::i18n::Translator` — an
+/// app that schedules this plugin without `ViewerI18nPlugin` or
+/// `i18n::install_untranslated` panics on its first frame with a
+/// `Resource does not exist` validation error, rather than merely drawing
+/// nothing.
 #[derive(Debug)]
 pub struct MenuWidgetPlugin;
 
@@ -2657,44 +2800,54 @@ impl Plugin for MenuWidgetPlugin {
 
 /// A submenu under the fixture's "World" menu, so the fixture exercises nesting.
 static FIXTURE_SUBMENU: MenuDef = MenuDef {
-    label: "Environment",
+    label_key: "menu-fixture-environment",
     items: &[
-        MenuItemDef::Command(MenuCommand::new("Sunrise", "env-sunrise")),
-        MenuItemDef::Command(MenuCommand::new("Midday", "env-midday")),
-        MenuItemDef::Command(MenuCommand::new("Sunset", "env-sunset")),
+        MenuItemDef::Command(MenuCommand::new("menu-fixture-sunrise", "env-sunrise")),
+        MenuItemDef::Command(MenuCommand::new("menu-fixture-midday", "env-midday")),
+        MenuItemDef::Command(MenuCommand::new("menu-fixture-sunset", "env-sunset")),
     ],
 };
 
 /// The fixture's "Avatar" menu — a check item, a disabled item, accelerators.
 static FIXTURE_AVATAR: MenuDef = MenuDef {
-    label: "Avatar",
+    label_key: "menu-fixture-avatar",
     items: &[
-        MenuItemDef::Command(MenuCommand::new("Inventory", "inventory").accel("Ctrl+I")),
-        MenuItemDef::Command(MenuCommand::new("Appearance", "appearance")),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-fixture-inventory", "inventory").accel("Ctrl+I"),
+        ),
+        MenuItemDef::Command(MenuCommand::new("menu-fixture-appearance", "appearance")),
         MenuItemDef::Separator,
         MenuItemDef::Command(
-            MenuCommand::new("Fly", "fly")
+            MenuCommand::new("menu-fixture-fly", "fly")
                 .checked_when("flying")
                 .accel("Home"),
         ),
-        MenuItemDef::Command(MenuCommand::new("Sit Down", "sit").enabled_when("can-sit")),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-fixture-sit-down", "sit").enabled_when("can-sit"),
+        ),
         MenuItemDef::Separator,
-        MenuItemDef::Command(MenuCommand::new("Quit", "quit").accel("Ctrl+Q")),
+        MenuItemDef::Command(MenuCommand::new("menu-fixture-quit", "quit").accel("Ctrl+Q")),
     ],
 };
 
 /// The fixture's "World" menu, holding the submenu.
 static FIXTURE_WORLD: MenuDef = MenuDef {
-    label: "World",
+    label_key: "menu-fixture-world",
     items: &[
-        MenuItemDef::Command(MenuCommand::new("Mini-Map", "mini-map").accel("Ctrl+Shift+M")),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-fixture-mini-map", "mini-map").accel("Ctrl+Shift+M"),
+        ),
         MenuItemDef::Submenu(&FIXTURE_SUBMENU),
         MenuItemDef::Separator,
-        MenuItemDef::Command(MenuCommand::new("Teleport Home", "teleport-home")),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-fixture-teleport-home",
+            "teleport-home",
+        )),
         // Shown only under an "advanced" condition — a demo of `on_visible`,
         // absent in the gallery (no conditions), present in the test that sets it.
         MenuItemDef::Command(
-            MenuCommand::new("Region Debug Console", "region-debug").visible_when("advanced"),
+            MenuCommand::new("menu-fixture-region-debug-console", "region-debug")
+                .visible_when("advanced"),
         ),
     ],
 };
@@ -2735,24 +2888,30 @@ mod tests {
     use super::{
         CHECK_GLYPH, DropDirection, FIXTURE_AVATAR, FIXTURE_MENU_BAR, FIXTURE_WORLD, MenuBranch,
         MenuCommand, MenuConditions, MenuDef, MenuDynamicPick, MenuDynamicSlots, MenuEntryAction,
-        MenuHost, MenuItemDef, MenuKeyboard, MenuSource, MnemonicSpan, SUBMENU_ARROW,
-        SetMenuDynamicLabels, action_paths, assign_jump_keys, build_menu_popup,
+        MenuHost, MenuItemDef, MenuKeyboard, MenuMnemonic, MenuSource, MnemonicSpan, SUBMENU_ARROW,
+        SetMenuDynamicLabels, Translator, action_paths, assign_jump_keys, build_menu_popup,
         spawn_menu_bar_specimen,
     };
     use bevy::input_focus::{FocusCause, InputFocus};
     use bevy::picking::hover::HoverMap;
     use bevy::prelude::*;
     use bevy::ui_widgets::Activate;
-    use pretty_assertions::assert_eq;
+    use pretty_assertions::{assert_eq, assert_ne};
 
     use crate::ui_test::{
         LayoutTest, TestError, activate, drain_actions, enable_action_recording, find_by_name,
         settle,
     };
+    use sl_viewer_ui_core::i18n::{LocaleChoice, UiLocale};
     use sl_viewer_ui_core::ui::{UiDirection, UiRoot, UiScaffoldSystems};
     use sl_viewer_ui_core::ui_element::{ElementCx, UiAction};
 
     /// The fixture bar's entire action table, pinned against a hand-written list.
+    ///
+    /// Spelt in **label keys**, which is what [`action_paths`] walks: an
+    /// address must not move when the reader switches language, and
+    /// `World > Mini-Map` and `Welt > Minikarte` are the same address only if
+    /// the keys say so.
     #[test]
     fn the_fixture_action_table_is_pinned() {
         let mut table = Vec::new();
@@ -2760,17 +2919,26 @@ mod tests {
             table.extend(action_paths(menu));
         }
         let expected = vec![
-            ("Avatar".to_owned(), "inventory"),
-            ("Avatar".to_owned(), "appearance"),
-            ("Avatar".to_owned(), "fly"),
-            ("Avatar".to_owned(), "sit"),
-            ("Avatar".to_owned(), "quit"),
-            ("World".to_owned(), "mini-map"),
-            ("World > Environment".to_owned(), "env-sunrise"),
-            ("World > Environment".to_owned(), "env-midday"),
-            ("World > Environment".to_owned(), "env-sunset"),
-            ("World".to_owned(), "teleport-home"),
-            ("World".to_owned(), "region-debug"),
+            ("menu-fixture-avatar".to_owned(), "inventory"),
+            ("menu-fixture-avatar".to_owned(), "appearance"),
+            ("menu-fixture-avatar".to_owned(), "fly"),
+            ("menu-fixture-avatar".to_owned(), "sit"),
+            ("menu-fixture-avatar".to_owned(), "quit"),
+            ("menu-fixture-world".to_owned(), "mini-map"),
+            (
+                "menu-fixture-world > menu-fixture-environment".to_owned(),
+                "env-sunrise",
+            ),
+            (
+                "menu-fixture-world > menu-fixture-environment".to_owned(),
+                "env-midday",
+            ),
+            (
+                "menu-fixture-world > menu-fixture-environment".to_owned(),
+                "env-sunset",
+            ),
+            ("menu-fixture-world".to_owned(), "teleport-home"),
+            ("menu-fixture-world".to_owned(), "region-debug"),
         ];
         assert_eq!(table, expected);
     }
@@ -2788,6 +2956,72 @@ mod tests {
             unique.dedup();
             assert_eq!(actions.len(), unique.len(), "a menu repeats an action");
         }
+    }
+
+    /// **A line's text is the bundle's answer, not its `label_key`.**
+    ///
+    /// Invisible in the resting harness, where every key resolves to itself and
+    /// the two are the same string — so this asks in the one locale that needs
+    /// no bundle and still changes the answer. The pseudolocale accents and
+    /// fences whatever the translator resolved, so a row built off the
+    /// declaration would still read `menu-fixture-quit` and a row built through
+    /// the translator cannot.
+    ///
+    /// That the *mnemonic* is one of the accented letters is the same claim from
+    /// the other side: the jump key is taken from the text the reader sees.
+    #[test]
+    fn a_line_draws_the_bundles_answer_not_its_key() -> Result<(), TestError> {
+        let mut app = localised_popup_app(
+            &FIXTURE_AVATAR,
+            &[],
+            MenuDynamicSlots::default(),
+            LocaleChoice::Pseudo,
+        )?;
+        let quit = action_entity(&mut app, "quit").ok_or("the Quit entry is missing")?;
+        let drawn = row_label_text(&app, quit).ok_or("the Quit row drew no label")?;
+        assert_ne!(
+            drawn, "menu-fixture-quit",
+            "the line drew its key rather than the bundle's answer"
+        );
+        assert!(
+            drawn.starts_with('\u{27e6}') && drawn.ends_with('\u{27e7}'),
+            "the drawn text did not come through the translator: {drawn}"
+        );
+        let mnemonic = app
+            .world()
+            .get::<MenuMnemonic>(quit)
+            .ok_or("Quit got no jump key")?
+            .key;
+        assert!(
+            drawn.contains(mnemonic),
+            "the jump key `{mnemonic}` is not a letter of the drawn label {drawn}"
+        );
+        Ok(())
+    }
+
+    /// The whole text a row's label draws, spans included.
+    ///
+    /// A label with a mnemonic is three spans — before, the mnemonic character,
+    /// after — and only their concatenation is what a reader sees.
+    fn row_label_text(app: &App, row: Entity) -> Option<String> {
+        let children: Vec<Entity> = app.world().get::<Children>(row)?.iter().collect();
+        let label = children.into_iter().find(|child| {
+            app.world()
+                .get::<Name>(*child)
+                .is_some_and(|name| name.as_str() == "menu-item-label")
+        })?;
+        let mut drawn = app.world().get::<Text>(label)?.0.clone();
+        let spans: Vec<Entity> = app
+            .world()
+            .get::<Children>(label)
+            .map(|children| children.iter().collect())
+            .unwrap_or_default();
+        for span in spans {
+            if let Some(text) = app.world().get::<TextSpan>(span) {
+                drawn.push_str(&text.0);
+            }
+        }
+        Some(drawn)
     }
 
     /// `MenuConditions::holds` — `None` always holds, a named key holds iff set.
@@ -2811,12 +3045,32 @@ mod tests {
         conditions: &[&'static str],
         slots: MenuDynamicSlots,
     ) -> Result<App, TestError> {
+        localised_popup_app(menu, conditions, slots, LocaleChoice::English)
+    }
+
+    /// [`slotted_popup_app`], in a chosen locale.
+    ///
+    /// Only two of the five are reachable without a bundle folder, and both are
+    /// worth having: `English` is the resting harness, where every key resolves
+    /// to itself, and `Pseudo` is the one configuration in which *resolved* text
+    /// and the key are visibly different strings — which is how a test can tell
+    /// a line drawn through the bundle from one drawn off the declaration.
+    fn localised_popup_app(
+        menu: &'static MenuDef,
+        conditions: &[&'static str],
+        slots: MenuDynamicSlots,
+        locale: LocaleChoice,
+    ) -> Result<App, TestError> {
         let mut app = LayoutTest::new().build();
+        // Every menu line resolves its `label_key`; with no bundles behind the
+        // translator each one resolves to itself.
+        sl_viewer_ui_core::i18n::install_untranslated(&mut app);
+        app.insert_resource(UiLocale::new(locale));
         enable_action_recording(&mut app);
         let held = MenuConditions(conditions.to_vec());
         app.add_systems(
             Startup,
-            (move |mut commands: Commands, root: Res<UiRoot>| {
+            (move |mut commands: Commands, translator: Translator, root: Res<UiRoot>| {
                 let anchor = commands.spawn((Node::default(), ChildOf(root.0))).id();
                 build_menu_popup(
                     &mut commands,
@@ -2829,6 +3083,7 @@ mod tests {
                         slots: &slots,
                         direction: UiDirection::Ltr,
                         filter: None,
+                        translator: &translator,
                     },
                 );
             })
@@ -2844,15 +3099,18 @@ mod tests {
     /// does for a top menu.
     fn filtered_popup_app(menu: &'static MenuDef, query: &str) -> Result<App, TestError> {
         let mut app = LayoutTest::new().build();
+        // Every menu line resolves its `label_key`; with no bundles behind the
+        // translator each one resolves to itself.
+        sl_viewer_ui_core::i18n::install_untranslated(&mut app);
         enable_action_recording(&mut app);
         let query = query.to_lowercase();
         app.add_systems(
             Startup,
-            (move |mut commands: Commands, root: Res<UiRoot>| {
+            (move |mut commands: Commands, translator: Translator, root: Res<UiRoot>| {
                 let anchor = commands.spawn((Node::default(), ChildOf(root.0))).id();
                 let ctx = super::MenuFilterCtx {
                     query: &query,
-                    parent_matched: super::label_matches_filter(menu.label, &query),
+                    parent_matched: super::label_matches_filter(menu.label_key, &query),
                 };
                 build_menu_popup(
                     &mut commands,
@@ -2865,6 +3123,7 @@ mod tests {
                         slots: &MenuDynamicSlots::default(),
                         direction: UiDirection::Ltr,
                         filter: Some(ctx),
+                        translator: &translator,
                     },
                 );
             })
@@ -2879,6 +3138,9 @@ mod tests {
     #[test]
     fn the_specimen_spawns_closed() -> Result<(), TestError> {
         let mut app = LayoutTest::new().build();
+        // Every menu line resolves its `label_key`; with no bundles behind the
+        // translator each one resolves to itself.
+        sl_viewer_ui_core::i18n::install_untranslated(&mut app);
         app.add_systems(
             Startup,
             (|mut commands: Commands, root: Res<UiRoot>| {
@@ -2894,7 +3156,7 @@ mod tests {
             .count();
         assert_eq!(hosts, 2, "one host per top-level fixture menu");
         assert!(
-            find_by_name(&mut app, "menu-popup:Avatar").is_none(),
+            find_by_name(&mut app, "menu-popup:menu-fixture-avatar").is_none(),
             "no menu is open on a freshly spawned bar"
         );
         Ok(())
@@ -2908,9 +3170,12 @@ mod tests {
     #[test]
     fn a_menu_popup_escapes_a_clipping_ancestor() -> Result<(), TestError> {
         let mut app = LayoutTest::new().with_viewport(400, 300).build();
+        // Every menu line resolves its `label_key`; with no bundles behind the
+        // translator each one resolves to itself.
+        sl_viewer_ui_core::i18n::install_untranslated(&mut app);
         app.add_systems(
             Startup,
-            (|mut commands: Commands, root: Res<UiRoot>| {
+            (|mut commands: Commands, translator: Translator, root: Res<UiRoot>| {
                 // A small window that clips its overflow, like the inventory
                 // floater's content slot, placed at the top-left corner.
                 let window = commands
@@ -2961,6 +3226,7 @@ mod tests {
                         slots: &MenuDynamicSlots::default(),
                         direction: UiDirection::Ltr,
                         filter: None,
+                        translator: &translator,
                     },
                 );
             })
@@ -2976,7 +3242,7 @@ mod tests {
              not clip and the popup assertion below proves nothing"
         );
 
-        let popup = find_by_name(&mut app, "menu-popup:Avatar")
+        let popup = find_by_name(&mut app, "menu-popup:menu-fixture-avatar")
             .ok_or_else(|| TestError::from("the menu popup was not spawned"))?;
         assert!(
             app.world().get::<CalculatedClip>(popup).is_none(),
@@ -3062,9 +3328,13 @@ mod tests {
             .world_mut()
             .query::<&MenuBranch>()
             .iter(app.world())
-            .map(|branch| branch.def.label())
+            .map(|branch| branch.def.label_key())
             .collect();
-        assert_eq!(branches, vec!["Environment"], "one submenu, named");
+        assert_eq!(
+            branches,
+            vec!["menu-fixture-environment"],
+            "one submenu, named"
+        );
         let arrows = app
             .world_mut()
             .query::<&Text>()
@@ -3100,11 +3370,11 @@ mod tests {
     /// A menu with one runtime-filled submenu beside an authored command — the
     /// minimap's shape (View Profile / View Profiles ▸ …).
     static FIXTURE_DYNAMIC: MenuDef = MenuDef {
-        label: "People",
+        label_key: "menu-fixture-people",
         items: &[
-            MenuItemDef::Command(MenuCommand::new("View Profile", "profile")),
+            MenuItemDef::Command(MenuCommand::new("menu-fixture-view-profile", "profile")),
             MenuItemDef::DynamicSubmenu {
-                label: "View Profiles",
+                label_key: "menu-fixture-view-profiles",
                 slot: TEST_SLOT,
             },
         ],
@@ -3126,13 +3396,13 @@ mod tests {
     fn an_empty_dynamic_slot_drops_its_line() -> Result<(), TestError> {
         let mut empty = popup_app(&FIXTURE_DYNAMIC, &[])?;
         assert_eq!(
-            count_named(&mut empty, "menu-submenu:View Profiles"),
+            count_named(&mut empty, "menu-submenu:menu-fixture-view-profiles"),
             0,
             "an unfilled slot shows no submenu line"
         );
         let mut filled = slotted_popup_app(&FIXTURE_DYNAMIC, &[], test_slots(&["Ann", "Bo"]))?;
         assert_eq!(
-            count_named(&mut filled, "menu-submenu:View Profiles"),
+            count_named(&mut filled, "menu-submenu:menu-fixture-view-profiles"),
             1,
             "a filled slot fronts its list"
         );
@@ -3225,6 +3495,9 @@ mod tests {
     /// message is applied.
     fn dynamic_popup_app(labels: &[&str]) -> Result<App, TestError> {
         let mut app = LayoutTest::new().build();
+        // Every menu line resolves its `label_key`; with no bundles behind the
+        // translator each one resolves to itself.
+        sl_viewer_ui_core::i18n::install_untranslated(&mut app);
         enable_action_recording(&mut app);
         // The pieces of `MenuWidgetPlugin` a bare popup needs — the whole plugin
         // would also bring its hover / keyboard systems, whose resources this
@@ -3235,13 +3508,16 @@ mod tests {
         app.insert_resource(test_slots(labels));
         app.add_systems(
             Startup,
-            (move |mut commands: Commands, root: Res<UiRoot>, slots: Res<MenuDynamicSlots>| {
+            (move |mut commands: Commands,
+                   translator: Translator,
+                   root: Res<UiRoot>,
+                   slots: Res<MenuDynamicSlots>| {
                 let anchor = commands.spawn((Node::default(), ChildOf(root.0))).id();
                 build_menu_popup(
                     &mut commands,
                     anchor,
                     MenuSource::Dynamic {
-                        label: "View Profiles",
+                        label_key: "menu-fixture-view-profiles",
                         slot: TEST_SLOT,
                     },
                     DropDirection::Inline,
@@ -3251,6 +3527,7 @@ mod tests {
                         slots: &slots,
                         direction: UiDirection::Ltr,
                         filter: None,
+                        translator: &translator,
                     },
                 );
             })
@@ -3262,14 +3539,36 @@ mod tests {
 
     /// `subtree_matches_filter` sees into submenus and past the never-enabled
     /// placeholder.
+    ///
+    /// Driven through a one-system app because the walk matches against each
+    /// line's **resolved** text: with no bundles behind the translator that is
+    /// the key itself, so the terms below are matched against the keys the
+    /// fixture declares.
     #[test]
     fn subtree_match_sees_into_submenus() {
-        // "sunset" is only inside World's Environment submenu.
-        assert!(super::subtree_matches_filter(&FIXTURE_WORLD, "sunset"));
-        // "teleport" is a top-level World command.
-        assert!(super::subtree_matches_filter(&FIXTURE_WORLD, "teleport"));
-        // Nothing in World mentions "inventory".
-        assert!(!super::subtree_matches_filter(&FIXTURE_WORLD, "inventory"));
+        let mut app = App::new();
+        sl_viewer_ui_core::i18n::install_untranslated(&mut app);
+        app.add_systems(Update, |translator: Translator| {
+            // "sunset" is only inside World's Environment submenu.
+            assert!(super::subtree_matches_filter(
+                &FIXTURE_WORLD,
+                "sunset",
+                &translator
+            ));
+            // "teleport" is a top-level World command.
+            assert!(super::subtree_matches_filter(
+                &FIXTURE_WORLD,
+                "teleport",
+                &translator
+            ));
+            // Nothing in World mentions "inventory".
+            assert!(!super::subtree_matches_filter(
+                &FIXTURE_WORLD,
+                "inventory",
+                &translator
+            ));
+        });
+        app.update();
     }
 
     /// A filter shows only the matching command and hides the rest.
@@ -3346,6 +3645,9 @@ mod tests {
     /// need the picking / keyboard resources the layout harness omits.
     fn filtered_bar_app(query: &str) -> Result<App, TestError> {
         let mut app = LayoutTest::new().build();
+        // Every menu line resolves its `label_key`; with no bundles behind the
+        // translator each one resolves to itself.
+        sl_viewer_ui_core::i18n::install_untranslated(&mut app);
         enable_action_recording(&mut app);
         app.init_resource::<HoverMap>()
             .init_resource::<ButtonInput<KeyCode>>()
@@ -3379,11 +3681,11 @@ mod tests {
         // "quit" is in Avatar (first). Avatar opens, World stays closed.
         let mut app = filtered_bar_app("quit")?;
         assert!(
-            find_by_name(&mut app, "menu-popup:Avatar").is_some(),
+            find_by_name(&mut app, "menu-popup:menu-fixture-avatar").is_some(),
             "the first matching menu opens",
         );
         assert!(
-            find_by_name(&mut app, "menu-popup:World").is_none(),
+            find_by_name(&mut app, "menu-popup:menu-fixture-world").is_none(),
             "a non-matching (or later) menu stays closed",
         );
         Ok(())
@@ -3396,11 +3698,11 @@ mod tests {
         // "teleport" is only in World (second); Avatar has no match.
         let mut app = filtered_bar_app("teleport")?;
         assert!(
-            find_by_name(&mut app, "menu-popup:World").is_some(),
+            find_by_name(&mut app, "menu-popup:menu-fixture-world").is_some(),
             "the first *matching* menu opens, though it is not the first menu",
         );
         assert!(
-            find_by_name(&mut app, "menu-popup:Avatar").is_none(),
+            find_by_name(&mut app, "menu-popup:menu-fixture-avatar").is_none(),
             "the earlier non-matching menu is left closed",
         );
         Ok(())
@@ -3410,14 +3712,14 @@ mod tests {
     #[test]
     fn clearing_the_term_closes_the_menu() -> Result<(), TestError> {
         let mut app = filtered_bar_app("quit")?;
-        assert!(find_by_name(&mut app, "menu-popup:Avatar").is_some());
+        assert!(find_by_name(&mut app, "menu-popup:menu-fixture-avatar").is_some());
         app.insert_resource(super::MenuFilter {
             element: "test-bar",
             query: String::new(),
         });
         settle(&mut app);
         assert!(
-            find_by_name(&mut app, "menu-popup:Avatar").is_none(),
+            find_by_name(&mut app, "menu-popup:menu-fixture-avatar").is_none(),
             "an empty term closes the filter-opened menu",
         );
         Ok(())
@@ -3430,13 +3732,14 @@ mod tests {
     #[test]
     fn a_popup_hugs_its_content_height() -> Result<(), TestError> {
         static PLACEHOLDER: MenuDef = MenuDef {
-            label: "Comm",
+            label_key: "menu-fixture-comm",
             items: &[MenuItemDef::Command(
-                super::MenuCommand::new("(no entries yet)", "noop").enabled_when("never"),
+                super::MenuCommand::new("menu-fixture-no-entries-yet", "noop")
+                    .enabled_when("never"),
             )],
         };
         let mut app = popup_app(&PLACEHOLDER, &[])?;
-        let popup = find_by_name(&mut app, "menu-popup:Comm")
+        let popup = find_by_name(&mut app, "menu-popup:menu-fixture-comm")
             .ok_or("the placeholder popup did not spawn")?;
         let row =
             find_by_name(&mut app, "menu-item:noop").ok_or("the placeholder row is missing")?;
@@ -3473,7 +3776,7 @@ mod tests {
     fn every_entry_row_is_full_width() -> Result<(), TestError> {
         let mut app = popup_app(&FIXTURE_AVATAR, &[])?;
         let widths: Vec<f32> = {
-            let popup = find_by_name(&mut app, "menu-popup:Avatar")
+            let popup = find_by_name(&mut app, "menu-popup:menu-fixture-avatar")
                 .ok_or("the Avatar popup did not spawn")?;
             let kids: Vec<Entity> = app
                 .world()
@@ -3502,15 +3805,69 @@ mod tests {
         Ok(())
     }
 
+    /// The letter keys a jump key can be typed on — the inverse of
+    /// [`keycode_to_letter`](super::keycode_to_letter), for a test that reads an
+    /// assigned mnemonic off a row and has to type it.
+    const LETTER_KEYS: [KeyCode; 26] = [
+        KeyCode::KeyA,
+        KeyCode::KeyB,
+        KeyCode::KeyC,
+        KeyCode::KeyD,
+        KeyCode::KeyE,
+        KeyCode::KeyF,
+        KeyCode::KeyG,
+        KeyCode::KeyH,
+        KeyCode::KeyI,
+        KeyCode::KeyJ,
+        KeyCode::KeyK,
+        KeyCode::KeyL,
+        KeyCode::KeyM,
+        KeyCode::KeyN,
+        KeyCode::KeyO,
+        KeyCode::KeyP,
+        KeyCode::KeyQ,
+        KeyCode::KeyR,
+        KeyCode::KeyS,
+        KeyCode::KeyT,
+        KeyCode::KeyU,
+        KeyCode::KeyV,
+        KeyCode::KeyW,
+        KeyCode::KeyX,
+        KeyCode::KeyY,
+        KeyCode::KeyZ,
+    ];
+
+    /// The resolved-label list `assign_jump_keys` reads: one entry per line in
+    /// order, `None` for a separator.
+    fn lines(labels: &[Option<&str>]) -> Vec<Option<String>> {
+        labels
+            .iter()
+            .map(|label| label.map(ToOwned::to_owned))
+            .collect()
+    }
+
     /// Jump keys are the first free letter of each line's label, separators get
     /// none, and the offset points at that character.
+    ///
+    /// Stated in English labels rather than through a fixture's keys, because
+    /// the rule is about the text the reader sees — which in another language is
+    /// another set of letters entirely.
     #[test]
     fn jump_keys_are_the_first_free_letter() {
-        // Avatar: Inventory, Appearance, ―, Fly, Sit Down, ―, Quit.
-        let avatar: Vec<Option<char>> = assign_jump_keys(FIXTURE_AVATAR.items)
-            .iter()
-            .map(|assigned| assigned.map(|(key, _)| key))
-            .collect();
+        // The fixture Avatar menu's shape: Inventory, Appearance, ―, Fly, Sit
+        // Down, ―, Quit.
+        let avatar: Vec<Option<char>> = assign_jump_keys(&lines(&[
+            Some("Inventory"),
+            Some("Appearance"),
+            None,
+            Some("Fly"),
+            Some("Sit Down"),
+            None,
+            Some("Quit"),
+        ]))
+        .iter()
+        .map(|assigned| assigned.map(|(key, _)| key))
+        .collect();
         assert_eq!(
             avatar,
             vec![
@@ -3529,14 +3886,7 @@ mod tests {
     /// so one menu never binds a key twice.
     #[test]
     fn jump_keys_avoid_collisions() {
-        static COLLIDE: MenuDef = MenuDef {
-            label: "File",
-            items: &[
-                MenuItemDef::Command(MenuCommand::new("Save", "save")),
-                MenuItemDef::Command(MenuCommand::new("Sit", "sit")),
-            ],
-        };
-        let keys = assign_jump_keys(COLLIDE.items);
+        let keys = assign_jump_keys(&lines(&[Some("Save"), Some("Sit")]));
         // "Save" takes S; "Sit" cannot, so it takes the next free letter, 'I'@1.
         assert_eq!(keys.first().copied().flatten(), Some(('S', 0)));
         assert_eq!(keys.get(1).copied().flatten(), Some(('I', 1)));
@@ -3546,6 +3896,9 @@ mod tests {
     /// / mouse-motion resources the harness omits, settled closed.
     fn keyboard_bar_app() -> Result<App, TestError> {
         let mut app = LayoutTest::new().build();
+        // Every menu line resolves its `label_key`; with no bundles behind the
+        // translator each one resolves to itself.
+        sl_viewer_ui_core::i18n::install_untranslated(&mut app);
         enable_action_recording(&mut app);
         app.init_resource::<HoverMap>()
             .init_resource::<ButtonInput<KeyCode>>()
@@ -3608,12 +3961,12 @@ mod tests {
     #[test]
     fn enter_on_a_focused_button_opens_and_highlights_first() -> Result<(), TestError> {
         let mut app = keyboard_bar_app()?;
-        let button =
-            find_by_name(&mut app, "menu-button:Avatar").ok_or("the Avatar button is missing")?;
+        let button = find_by_name(&mut app, "menu-button:menu-fixture-avatar")
+            .ok_or("the Avatar button is missing")?;
         focus(&mut app, button);
         tap(&mut app, KeyCode::Enter);
         assert!(
-            find_by_name(&mut app, "menu-popup:Avatar").is_some(),
+            find_by_name(&mut app, "menu-popup:menu-fixture-avatar").is_some(),
             "the menu opened",
         );
         let inventory =
@@ -3635,8 +3988,8 @@ mod tests {
     #[test]
     fn arrows_step_and_enter_activates() -> Result<(), TestError> {
         let mut app = keyboard_bar_app()?;
-        let button =
-            find_by_name(&mut app, "menu-button:Avatar").ok_or("the Avatar button is missing")?;
+        let button = find_by_name(&mut app, "menu-button:menu-fixture-avatar")
+            .ok_or("the Avatar button is missing")?;
         focus(&mut app, button);
         tap(&mut app, KeyCode::Enter);
         // Inventory → Appearance (Fly's predecessor Sit is disabled, but we stop
@@ -3659,7 +4012,7 @@ mod tests {
             "Enter activated the highlighted entry",
         );
         assert!(
-            find_by_name(&mut app, "menu-popup:Avatar").is_none(),
+            find_by_name(&mut app, "menu-popup:menu-fixture-avatar").is_none(),
             "activating an entry closes the menu",
         );
         Ok(())
@@ -3670,8 +4023,8 @@ mod tests {
     #[test]
     fn navigation_skips_a_disabled_entry() -> Result<(), TestError> {
         let mut app = keyboard_bar_app()?;
-        let button =
-            find_by_name(&mut app, "menu-button:Avatar").ok_or("the Avatar button is missing")?;
+        let button = find_by_name(&mut app, "menu-button:menu-fixture-avatar")
+            .ok_or("the Avatar button is missing")?;
         focus(&mut app, button);
         tap(&mut app, KeyCode::Enter);
         tap(&mut app, KeyCode::ArrowDown); // Appearance
@@ -3685,23 +4038,39 @@ mod tests {
         Ok(())
     }
 
-    /// A jump key jumps straight to its entry and commits it — here `Q` activates
-    /// Quit without stepping to it.
+    /// A jump key jumps straight to its entry and commits it — typing Quit's own
+    /// mnemonic activates it without stepping to it.
+    ///
+    /// The letter is read off the row the widget built rather than written down
+    /// here: the mnemonic comes from the label's *resolved* text
+    /// ([`assign_jump_keys`](super::assign_jump_keys)), so pinning a letter
+    /// would pin one language. What this is about is the dispatch — a typed
+    /// letter reaching the row that carries it.
     #[test]
     fn a_jump_key_activates_its_entry() -> Result<(), TestError> {
         let mut app = keyboard_bar_app()?;
-        let button =
-            find_by_name(&mut app, "menu-button:Avatar").ok_or("the Avatar button is missing")?;
+        let button = find_by_name(&mut app, "menu-button:menu-fixture-avatar")
+            .ok_or("the Avatar button is missing")?;
         focus(&mut app, button);
         tap(&mut app, KeyCode::Enter);
-        tap(&mut app, KeyCode::KeyQ);
+        let quit = action_entity(&mut app, "quit").ok_or("the Quit entry is missing")?;
+        let mnemonic = app
+            .world()
+            .get::<MenuMnemonic>(quit)
+            .ok_or("Quit got no jump key")?
+            .key;
+        let typed = LETTER_KEYS
+            .into_iter()
+            .find(|code| super::keycode_to_letter(*code) == Some(mnemonic))
+            .ok_or("Quit's mnemonic is not a letter key")?;
+        tap(&mut app, typed);
         assert_eq!(
             drain_actions(&mut app),
             vec![UiAction {
                 element: "test-bar",
                 action: "quit",
             }],
-            "the Q jump key activated Quit",
+            "Quit's own jump key activated it",
         );
         Ok(())
     }
@@ -3711,12 +4080,12 @@ mod tests {
     #[test]
     fn inline_arrows_open_and_close_a_submenu() -> Result<(), TestError> {
         let mut app = keyboard_bar_app()?;
-        let button =
-            find_by_name(&mut app, "menu-button:World").ok_or("the World button is missing")?;
+        let button = find_by_name(&mut app, "menu-button:menu-fixture-world")
+            .ok_or("the World button is missing")?;
         focus(&mut app, button);
         tap(&mut app, KeyCode::Enter); // World open, Mini-Map highlighted
         tap(&mut app, KeyCode::ArrowDown); // Environment (the submenu branch)
-        let branch = find_by_name(&mut app, "menu-submenu:Environment")
+        let branch = find_by_name(&mut app, "menu-submenu:menu-fixture-environment")
             .ok_or("the Environment branch is missing")?;
         assert_eq!(highlighted(&app), Some(branch), "the branch is highlighted");
         tap(&mut app, KeyCode::ArrowRight); // open the submenu, land on its first entry
@@ -3734,7 +4103,7 @@ mod tests {
             "closing the submenu returns to the branch row",
         );
         assert!(
-            find_by_name(&mut app, "menu-popup:Environment").is_none(),
+            find_by_name(&mut app, "menu-popup:menu-fixture-environment").is_none(),
             "the submenu popup is gone",
         );
         Ok(())
@@ -3745,8 +4114,8 @@ mod tests {
     #[test]
     fn mnemonics_underline_only_while_navigating() -> Result<(), TestError> {
         let mut app = keyboard_bar_app()?;
-        let button =
-            find_by_name(&mut app, "menu-button:Avatar").ok_or("the Avatar button is missing")?;
+        let button = find_by_name(&mut app, "menu-button:menu-fixture-avatar")
+            .ok_or("the Avatar button is missing")?;
         focus(&mut app, button);
         tap(&mut app, KeyCode::Enter);
         let underlined = app
@@ -3816,6 +4185,9 @@ mod tests {
         /// The fixture menu bar under the real pointer stack.
         fn bar_app() -> App {
             let mut app = InteractionTest::new().build();
+            // Every menu line resolves its `label_key`; with no bundles behind the
+            // translator each one resolves to itself.
+            sl_viewer_ui_core::i18n::install_untranslated(&mut app);
             app.add_plugins(MenuWidgetPlugin);
             enable_action_recording(&mut app);
             app.add_systems(
@@ -3858,28 +4230,28 @@ mod tests {
             let mut app = bar_app();
             assert_eq!(open_menus(&mut app), 0, "the bar rests closed");
 
-            interact::click_node(&mut app, "menu-button:Avatar")?;
+            interact::click_node(&mut app, "menu-button:menu-fixture-avatar")?;
             settle(&mut app);
             assert!(
-                present(&mut app, "menu-popup:Avatar"),
+                present(&mut app, "menu-popup:menu-fixture-avatar"),
                 "the click dropped it"
             );
 
             // No click: the bar reads as one strip you sweep across once
             // something on it is open.
-            interact::hover_node(&mut app, "menu-button:World")?;
+            interact::hover_node(&mut app, "menu-button:menu-fixture-world")?;
             settle(&mut app);
             assert!(
-                present(&mut app, "menu-popup:World"),
+                present(&mut app, "menu-popup:menu-fixture-world"),
                 "hovering the next button opens that menu"
             );
             assert!(
-                !present(&mut app, "menu-popup:Avatar"),
+                !present(&mut app, "menu-popup:menu-fixture-avatar"),
                 "and the previous one closes — at most one bar menu is ever down"
             );
             assert_eq!(open_menus(&mut app), 1);
 
-            interact::click_node(&mut app, "menu-button:World")?;
+            interact::click_node(&mut app, "menu-button:menu-fixture-world")?;
             settle(&mut app);
             assert_eq!(
                 open_menus(&mut app),
@@ -3894,13 +4266,13 @@ mod tests {
         #[test]
         fn hovering_a_branch_opens_its_submenu_and_leaving_closes_it() -> Result<(), TestError> {
             let mut app = bar_app();
-            interact::click_node(&mut app, "menu-button:World")?;
+            interact::click_node(&mut app, "menu-button:menu-fixture-world")?;
             settle(&mut app);
 
-            interact::hover_node(&mut app, "menu-submenu:Environment")?;
+            interact::hover_node(&mut app, "menu-submenu:menu-fixture-environment")?;
             settle(&mut app);
             assert!(
-                present(&mut app, "menu-popup:Environment"),
+                present(&mut app, "menu-popup:menu-fixture-environment"),
                 "the branch's child list opens under the pointer"
             );
             assert!(
@@ -3911,7 +4283,7 @@ mod tests {
             interact::hover_node(&mut app, "menu-item:teleport-home")?;
             settle(&mut app);
             assert!(
-                !present(&mut app, "menu-popup:Environment"),
+                !present(&mut app, "menu-popup:menu-fixture-environment"),
                 "sweeping onto a sibling line closes the submenu again"
             );
             Ok(())
@@ -3921,7 +4293,7 @@ mod tests {
         #[test]
         fn an_entry_click_emits_its_action_and_closes_the_bar() -> Result<(), TestError> {
             let mut app = bar_app();
-            interact::click_node(&mut app, "menu-button:Avatar")?;
+            interact::click_node(&mut app, "menu-button:menu-fixture-avatar")?;
             settle(&mut app);
             let _opening = drain_actions(&mut app);
 
@@ -3942,7 +4314,7 @@ mod tests {
         #[test]
         fn an_outside_press_dismisses_the_bar() -> Result<(), TestError> {
             let mut app = bar_app();
-            interact::click_node(&mut app, "menu-button:Avatar")?;
+            interact::click_node(&mut app, "menu-button:menu-fixture-avatar")?;
             settle(&mut app);
             let _opening = drain_actions(&mut app);
 
@@ -3964,7 +4336,7 @@ mod tests {
         #[test]
         fn a_clicked_menu_is_walked_and_activated_from_the_keyboard() -> Result<(), TestError> {
             let mut app = bar_app();
-            interact::click_node(&mut app, "menu-button:Avatar")?;
+            interact::click_node(&mut app, "menu-button:menu-fixture-avatar")?;
             settle(&mut app);
             let _opening = drain_actions(&mut app);
             assert!(
@@ -4001,7 +4373,7 @@ mod tests {
         #[test]
         fn escape_closes_the_open_menu() -> Result<(), TestError> {
             let mut app = bar_app();
-            interact::click_node(&mut app, "menu-button:Avatar")?;
+            interact::click_node(&mut app, "menu-button:menu-fixture-avatar")?;
             settle(&mut app);
             let _opening = drain_actions(&mut app);
 
@@ -4037,7 +4409,7 @@ mod tests {
             // The label is really drawn — otherwise this would be asserting a
             // chord that works rather than the accelerator's promise kept.
             assert!(
-                present(&mut app, "menu-button:Avatar"),
+                present(&mut app, "menu-button:menu-fixture-avatar"),
                 "the fixture bar is up"
             );
 

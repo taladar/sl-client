@@ -10,13 +10,13 @@ use crate::world_state::{AvatarMotion, ObjectParticleSystem};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 use sl_client_bevy::{
     ControlFlags, DecodedTexture, LightData, Object, ObjectKey, PrimFaceId, PrimShapeParams,
     Priority, ReflectionProbe, ReflectionProbeFlags, RegionHandle, Rotation, ScopedObjectId,
-    SurfaceInfo, TextureFace, TextureKey, Uuid, Vector, texture_face_uv_transform, to_bevy_image,
+    SurfaceInfo, TextureFace, TextureKey, TextureUpload, Uuid, Vector, texture_face_uv_transform,
+    upload_decoded,
 };
 use sl_viewer_kit::coords::{sl_rotation_to_quat, sl_to_bevy_rotation};
 
@@ -985,20 +985,6 @@ pub fn is_absent_texture(id: TextureKey) -> bool {
     uuid.is_nil() || uuid == GLTF_OVERRIDE_NULL_UUID
 }
 
-/// Upload a decoded texture as a Bevy image with Second Life's wrap behaviour:
-/// prim faces repeat their texture, which is not Bevy's default.
-#[must_use]
-pub fn build_prim_image(decoded: &Arc<DecodedTexture>) -> Image {
-    let mut image = to_bevy_image(decoded);
-    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-        address_mode_u: ImageAddressMode::Repeat,
-        address_mode_v: ImageAddressMode::Repeat,
-        address_mode_w: ImageAddressMode::Repeat,
-        ..ImageSamplerDescriptor::linear()
-    });
-    image
-}
-
 /// The state of a face's diffuse image — see [`DecodedTextures::diffuse_image`].
 #[derive(Debug, Clone)]
 pub enum DiffuseImage {
@@ -1088,7 +1074,7 @@ impl DecodedTextures {
         if is_absent_texture(id) {
             DiffuseImage::Absent
         } else if let Some(decoded) = self.decoded.get(&id) {
-            DiffuseImage::Ready(images.add(build_prim_image(decoded)))
+            DiffuseImage::Ready(images.add(upload_decoded(decoded, TextureUpload::COLOR)))
         } else {
             DiffuseImage::Pending
         }

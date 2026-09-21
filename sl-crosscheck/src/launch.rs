@@ -166,6 +166,9 @@ pub fn sl_client(
     ];
     args.extend(camera_args(plan));
     let mut env = plan.capture.env();
+    // The one part of the environment that is *not* shared: the two viewers'
+    // skin namespaces are unrelated, so each launch carries its own.
+    env.extend(plan.sl_client_skin.env());
     if let Some(root) = asset_root {
         env.push(("BEVY_ASSET_ROOT".to_owned(), root.display().to_string()));
     }
@@ -227,6 +230,9 @@ pub fn firestorm(
     ];
     args.extend(camera_args(plan));
     let mut env = plan.capture.env();
+    // Firestorm's own skin, and its own type: the values this viewer accepts
+    // are not the values the other one does — see `FirestormSkin`.
+    env.extend(plan.firestorm_skin.env());
     env.push((
         "FIRESTORM_X64_USER_DIR".to_owned(),
         dirs.state(Viewer::Firestorm).display().to_string(),
@@ -267,7 +273,7 @@ mod tests {
 
     use super::{Launch, RunDirs, Viewer, firestorm, sl_client};
     use crate::files::Paths;
-    use crate::plan::{CameraSpec, CaptureSpec, RegionPoint, RunPlan};
+    use crate::plan::{CameraSpec, CaptureSpec, FirestormSkin, RegionPoint, RunPlan, SlClientSkin};
 
     /// The boxed error every test in this module reports through.
     type TestError = Box<dyn core::error::Error>;
@@ -281,6 +287,8 @@ mod tests {
             last_name: "User".to_owned(),
             password: "password".to_owned(),
             capture: CaptureSpec::default(),
+            sl_client_skin: SlClientSkin::default(),
+            firestorm_skin: FirestormSkin::default(),
             camera: Some(CameraSpec::facing(
                 RegionPoint::new(128.0, 140.0, 25.0),
                 8.0,

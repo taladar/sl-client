@@ -257,23 +257,24 @@ const fn rlv_master_toggle(label: &'static str) -> MenuItemDef {
 
 /// The Avatar (Me) menu — the entries with a live target today.
 static AVATAR_MENU: MenuDef = MenuDef {
-    label: "Avatar",
+    label_key: "menu-bar-avatar",
     items: &[
         MenuItemDef::Command(
-            MenuCommand::new("Preferences\u{2026}", "toggle-preferences")
+            MenuCommand::new("menu-bar-preferences", "toggle-preferences")
                 .accel("Ctrl+P")
                 .checked_when(PREFERENCES_OPEN),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Inventory", "toggle-inventory")
+            MenuCommand::new("menu-bar-inventory", "toggle-inventory")
                 .accel("Ctrl+I")
                 .checked_when(INVENTORY_OPEN),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Experiences", "toggle-experiences").checked_when(EXPERIENCES_OPEN),
+            MenuCommand::new("menu-bar-experiences", "toggle-experiences")
+                .checked_when(EXPERIENCES_OPEN),
         ),
         MenuItemDef::Separator,
-        MenuItemDef::Command(MenuCommand::new("Quit", "quit").accel("Ctrl+Q")),
+        MenuItemDef::Command(MenuCommand::new("menu-bar-quit", "quit").accel("Ctrl+Q")),
     ],
 };
 
@@ -282,38 +283,40 @@ static AVATAR_MENU: MenuDef = MenuDef {
 /// Disturb shows as *Unavailable*, the name other residents see on the tag),
 /// followed by the three standing auto-reject modes ([`crate::auto_reject`]).
 static ONLINE_STATUS_MENU: MenuDef = MenuDef {
-    label: "Online Status",
+    label_key: "menu-bar-online-status",
     items: &[
-        MenuItemDef::Command(MenuCommand::new("Away", "presence-away").checked_when(PRESENCE_AWAY)),
         MenuItemDef::Command(
-            MenuCommand::new("Unavailable", "presence-do-not-disturb")
+            MenuCommand::new("menu-bar-away", "presence-away").checked_when(PRESENCE_AWAY),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-bar-unavailable", "presence-do-not-disturb")
                 .checked_when(PRESENCE_DO_NOT_DISTURB),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Autorespond", "presence-autorespond")
+            MenuCommand::new("menu-bar-autorespond", "presence-autorespond")
                 .checked_when(PRESENCE_AUTORESPOND),
         ),
         MenuItemDef::Command(
             MenuCommand::new(
-                "Autorespond to non-friends",
+                "menu-bar-autorespond-to-non-friends",
                 "presence-autorespond-non-friends",
             )
             .checked_when(PRESENCE_AUTORESPOND_NON_FRIENDS),
         ),
         MenuItemDef::Command(
             MenuCommand::new(
-                "Reject teleport offers and requests",
+                "menu-bar-reject-teleport-offers-and-requests",
                 "reject-teleport-offers",
             )
             .checked_when(REJECT_TELEPORT_OFFERS),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Reject all group invites", "reject-group-invites")
+            MenuCommand::new("menu-bar-reject-all-group-invites", "reject-group-invites")
                 .checked_when(REJECT_GROUP_INVITES),
         ),
         MenuItemDef::Command(
             MenuCommand::new(
-                "Reject all friendship requests",
+                "menu-bar-reject-all-friendship-requests",
                 "reject-friendship-requests",
             )
             .checked_when(REJECT_FRIENDSHIP_REQUESTS),
@@ -325,10 +328,10 @@ static ONLINE_STATUS_MENU: MenuDef = MenuDef {
 /// entry opens the [`crate::conversations`] floater (the reference's
 /// `Comm > Conversations…`); friends / groups and the rest are future entries.
 static COMM_MENU: MenuDef = MenuDef {
-    label: "Comm",
+    label_key: "menu-bar-comm",
     items: &[
         MenuItemDef::Command(
-            MenuCommand::new("Conversations", "toggle-conversations")
+            MenuCommand::new("menu-bar-conversations", "toggle-conversations")
                 .accel("Ctrl+T")
                 .checked_when(CONVERSATIONS_OPEN),
         ),
@@ -339,9 +342,9 @@ static COMM_MENU: MenuDef = MenuDef {
         // lists live in sub-tabs of the People pane inside the conversations
         // window, so each entry opens that window and fronts its sub-tab rather
         // than opening a floater of its own.
-        MenuItemDef::Command(MenuCommand::new("Friends", "open-friends-list")),
-        MenuItemDef::Command(MenuCommand::new("Groups", "open-groups-list")),
-        MenuItemDef::Command(MenuCommand::new("Block List", "open-block-list")),
+        MenuItemDef::Command(MenuCommand::new("menu-bar-friends", "open-friends-list")),
+        MenuItemDef::Command(MenuCommand::new("menu-bar-groups", "open-groups-list")),
+        MenuItemDef::Command(MenuCommand::new("menu-bar-block-list", "open-block-list")),
     ],
 };
 
@@ -349,25 +352,25 @@ static COMM_MENU: MenuDef = MenuDef {
 /// EEP day cycle frozen at each of the four times (fixed sun, the region's
 /// palette).
 static ENV_DAYCYCLE_MENU: MenuDef = MenuDef {
-    label: "Day Cycle",
+    label_key: "menu-bar-day-cycle",
     items: &[
         MenuItemDef::Command(
-            MenuCommand::new("Sunrise", "env-daycycle-sunrise")
+            MenuCommand::new("menu-bar-sunrise", "env-daycycle-sunrise")
                 .checked_when(ENV_DAYCYCLE_SUNRISE_ACTIVE)
                 .enabled_when(CAN_CHANGE_ENVIRONMENT),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Midday", "env-daycycle-midday")
+            MenuCommand::new("menu-bar-midday", "env-daycycle-midday")
                 .checked_when(ENV_DAYCYCLE_MIDDAY_ACTIVE)
                 .enabled_when(CAN_CHANGE_ENVIRONMENT),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Sunset", "env-daycycle-sunset")
+            MenuCommand::new("menu-bar-sunset", "env-daycycle-sunset")
                 .checked_when(ENV_DAYCYCLE_SUNSET_ACTIVE)
                 .enabled_when(CAN_CHANGE_ENVIRONMENT),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Midnight", "env-daycycle-midnight")
+            MenuCommand::new("menu-bar-midnight", "env-daycycle-midnight")
                 .checked_when(ENV_DAYCYCLE_MIDNIGHT_ACTIVE)
                 .enabled_when(CAN_CHANGE_ENVIRONMENT),
         ),
@@ -377,25 +380,25 @@ static ENV_DAYCYCLE_MENU: MenuDef = MenuDef {
 /// The World ▸ Environment ▸ **Legacy** submenu — the ported Linden `A-*`
 /// WindLight presets (`reflection_probe_ambiance = 0`, the classic-mode path).
 static ENV_LEGACY_MENU: MenuDef = MenuDef {
-    label: "Legacy",
+    label_key: "menu-bar-legacy",
     items: &[
         MenuItemDef::Command(
-            MenuCommand::new("Sunrise", "env-legacy-sunrise")
+            MenuCommand::new("menu-bar-sunrise", "env-legacy-sunrise")
                 .checked_when(ENV_LEGACY_SUNRISE_ACTIVE)
                 .enabled_when(CAN_CHANGE_ENVIRONMENT),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Midday", "env-legacy-midday")
+            MenuCommand::new("menu-bar-midday", "env-legacy-midday")
                 .checked_when(ENV_LEGACY_MIDDAY_ACTIVE)
                 .enabled_when(CAN_CHANGE_ENVIRONMENT),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Sunset", "env-legacy-sunset")
+            MenuCommand::new("menu-bar-sunset", "env-legacy-sunset")
                 .checked_when(ENV_LEGACY_SUNSET_ACTIVE)
                 .enabled_when(CAN_CHANGE_ENVIRONMENT),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Midnight", "env-legacy-midnight")
+            MenuCommand::new("menu-bar-midnight", "env-legacy-midnight")
                 .checked_when(ENV_LEGACY_MIDNIGHT_ACTIVE)
                 .enabled_when(CAN_CHANGE_ENVIRONMENT),
         ),
@@ -406,25 +409,25 @@ static ENV_LEGACY_MENU: MenuDef = MenuDef {
 /// `KNOWN_SKY_*` library EEP skies, fetched by UUID so they render byte-identical
 /// input to Firestorm's matching presets.
 static ENV_MODERN_MENU: MenuDef = MenuDef {
-    label: "Modern",
+    label_key: "menu-bar-modern",
     items: &[
         MenuItemDef::Command(
-            MenuCommand::new("Sunrise", "env-modern-sunrise")
+            MenuCommand::new("menu-bar-sunrise", "env-modern-sunrise")
                 .checked_when(ENV_MODERN_SUNRISE_ACTIVE)
                 .enabled_when(CAN_CHANGE_ENVIRONMENT),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Midday", "env-modern-midday")
+            MenuCommand::new("menu-bar-midday", "env-modern-midday")
                 .checked_when(ENV_MODERN_MIDDAY_ACTIVE)
                 .enabled_when(CAN_CHANGE_ENVIRONMENT),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Sunset", "env-modern-sunset")
+            MenuCommand::new("menu-bar-sunset", "env-modern-sunset")
                 .checked_when(ENV_MODERN_SUNSET_ACTIVE)
                 .enabled_when(CAN_CHANGE_ENVIRONMENT),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Midnight", "env-modern-midnight")
+            MenuCommand::new("menu-bar-midnight", "env-modern-midnight")
                 .checked_when(ENV_MODERN_MIDNIGHT_ACTIVE)
                 .enabled_when(CAN_CHANGE_ENVIRONMENT),
         ),
@@ -441,16 +444,16 @@ static ENV_MODERN_MENU: MenuDef = MenuDef {
 /// `File.EnableImportWindlightBulk` greys them: there is one ordered reply queue
 /// behind the item creations, so two runs could not tell their items apart.
 static ENV_BULK_IMPORT_MENU: MenuDef = MenuDef {
-    label: "Bulk Import",
+    label_key: "menu-bar-bulk-import",
     items: &[
         MenuItemDef::Command(
-            MenuCommand::new("Days…", "bulk-import-days").enabled_when(BULK_IMPORT_IDLE),
+            MenuCommand::new("menu-bar-days", "bulk-import-days").enabled_when(BULK_IMPORT_IDLE),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Skies…", "bulk-import-skies").enabled_when(BULK_IMPORT_IDLE),
+            MenuCommand::new("menu-bar-skies", "bulk-import-skies").enabled_when(BULK_IMPORT_IDLE),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Water…", "bulk-import-water").enabled_when(BULK_IMPORT_IDLE),
+            MenuCommand::new("menu-bar-water", "bulk-import-water").enabled_when(BULK_IMPORT_IDLE),
         ),
     ],
 };
@@ -461,14 +464,14 @@ static ENV_BULK_IMPORT_MENU: MenuDef = MenuDef {
 /// return to the region's shared environment. The three groups let a legacy sky,
 /// a modern EEP sky, and the region's own be compared at the same time of day.
 static ENVIRONMENT_MENU: MenuDef = MenuDef {
-    label: "Environment",
+    label_key: "menu-bar-environment",
     items: &[
         MenuItemDef::Submenu(&ENV_DAYCYCLE_MENU),
         MenuItemDef::Submenu(&ENV_LEGACY_MENU),
         MenuItemDef::Submenu(&ENV_MODERN_MENU),
         MenuItemDef::Separator,
         MenuItemDef::Command(
-            MenuCommand::new("Use Shared Environment", "env-shared")
+            MenuCommand::new("menu-bar-use-shared-environment", "env-shared")
                 .checked_when(ENV_SHARED_ACTIVE)
                 .enabled_when(CAN_CHANGE_ENVIRONMENT),
         ),
@@ -476,7 +479,7 @@ static ENVIRONMENT_MENU: MenuDef = MenuDef {
         // The window that edits the same local layer the presets above pin, so
         // it is gated on the same `@setenv` restriction they are.
         MenuItemDef::Command(
-            MenuCommand::new("Personal Lighting…", "toggle-personal-lighting")
+            MenuCommand::new("menu-bar-personal-lighting", "toggle-personal-lighting")
                 .enabled_when(CAN_CHANGE_ENVIRONMENT),
         ),
         // The settings-asset library. Deliberately *not* gated on `@setenv`:
@@ -486,7 +489,7 @@ static ENVIRONMENT_MENU: MenuDef = MenuDef {
         // carries the restriction itself, so the window stays usable while the
         // sky stays taken.
         MenuItemDef::Command(MenuCommand::new(
-            "My Environments…",
+            "menu-bar-my-environments",
             "toggle-my-environments",
         )),
         MenuItemDef::Separator,
@@ -502,33 +505,45 @@ static ENVIRONMENT_MENU: MenuDef = MenuDef {
 /// (`viewer-camera-controls-window`) and the depth-of-field focus toggles join
 /// it here once they exist.
 static PHOTO_MENU: MenuDef = MenuDef {
-    label: "Photo and Video",
-    items: &[MenuItemDef::Command(
-        MenuCommand::new("Phototools…", "toggle-phototools")
-            .accel("Alt+P")
-            .checked_when(PHOTOTOOLS_OPEN),
-    )],
+    label_key: "menu-bar-photo-and-video",
+    items: &[
+        MenuItemDef::Command(
+            MenuCommand::new("menu-bar-phototools", "toggle-phototools")
+                .accel("Alt+P")
+                .checked_when(PHOTOTOOLS_OPEN),
+        ),
+        // The 360-degree panorama capture (viewer-360-snapshot), which is a
+        // capture renderer of its own rather than a snapshot option — the
+        // reference keeps its entry beside Snapshot in the World menu for the
+        // same reason.
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-bar-360-snapshot",
+            "toggle-360-snapshot",
+        )),
+    ],
 };
 
 /// The World menu — the minimap, world map, and environment today; teleport is
 /// a future entry.
 static WORLD_MENU: MenuDef = MenuDef {
-    label: "World",
+    label_key: "menu-bar-world",
     items: &[
         MenuItemDef::Command(
-            MenuCommand::new("Mini-Map", "toggle-minimap").checked_when(MINIMAP_OPEN),
+            MenuCommand::new("menu-bar-mini-map", "toggle-minimap").checked_when(MINIMAP_OPEN),
         ),
         // The nearby-avatar radar (viewer-avatar-radar).
-        MenuItemDef::Command(MenuCommand::new("Radar", "toggle-radar").checked_when(RADAR_OPEN)),
         MenuItemDef::Command(
-            MenuCommand::new("World Map", "toggle-world-map")
+            MenuCommand::new("menu-bar-radar", "toggle-radar").checked_when(RADAR_OPEN),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-bar-world-map", "toggle-world-map")
                 .accel("Ctrl+M")
                 .checked_when(WORLD_MAP_OPEN),
         ),
         // The in-world parcel property lines (viewer-parcel-borders-render),
         // colour-coded by ownership; the reference's World ▸ Property Lines.
         MenuItemDef::Command(
-            MenuCommand::new("Property Lines", "toggle-property-lines")
+            MenuCommand::new("menu-bar-property-lines", "toggle-property-lines")
                 .checked_when(PROPERTY_LINES_ON),
         ),
         // The in-world ownership tint on the ground itself
@@ -536,35 +551,39 @@ static WORLD_MENU: MenuDef = MenuDef {
         // World ▸ Show More ▸ Land Owners, also reachable from the Land tool's
         // "Show owners" checkbox.
         MenuItemDef::Command(
-            MenuCommand::new("Land Owners", "toggle-land-owners").checked_when(LAND_OWNERS_ON),
+            MenuCommand::new("menu-bar-land-owners", "toggle-land-owners")
+                .checked_when(LAND_OWNERS_ON),
         ),
         MenuItemDef::Separator,
         // The About Land floater (viewer-parcel-options-general) on the agent's
         // current parcel, and its read-only "About this location" variant.
-        MenuItemDef::Command(MenuCommand::new("About Land…", "about-land")),
-        MenuItemDef::Command(MenuCommand::new("Place Profile…", "place-profile")),
+        MenuItemDef::Command(MenuCommand::new("menu-bar-about-land", "about-land")),
+        MenuItemDef::Command(MenuCommand::new("menu-bar-place-profile", "place-profile")),
         // The Region / Estate floater (viewer-region-options-*) on the agent's
         // current region.
-        MenuItemDef::Command(MenuCommand::new("Region / Estate…", "about-region")),
+        MenuItemDef::Command(MenuCommand::new("menu-bar-region-estate", "about-region")),
         MenuItemDef::Separator,
         // The derender / asset blacklist (viewer-derender-blacklist), where the
         // reference keeps it: World ▸ Asset Blacklist.
         MenuItemDef::Command(
-            MenuCommand::new("Asset Blacklist…", "toggle-asset-blacklist")
+            MenuCommand::new("menu-bar-asset-blacklist", "toggle-asset-blacklist")
                 .checked_when(BLACKLIST_OPEN),
         ),
         // The standing per-avatar render exceptions
         // (viewer-avatar-render-settings-manager), where the reference keeps
         // them: World ▸ Avatar Render Settings.
         MenuItemDef::Command(
-            MenuCommand::new("Avatar Render Settings…", "toggle-avatar-render-settings")
-                .checked_when(AVATAR_RENDER_SETTINGS_OPEN),
+            MenuCommand::new(
+                "menu-bar-avatar-render-settings",
+                "toggle-avatar-render-settings",
+            )
+            .checked_when(AVATAR_RENDER_SETTINGS_OPEN),
         ),
         // Draw only friends' avatars (viewer-render-friends-only) — the
         // crowded-event performance escape hatch, at the reference's own World
         // ▸ Show Friends only.
         MenuItemDef::Command(
-            MenuCommand::new("Show Friends Only", "toggle-friends-only")
+            MenuCommand::new("menu-bar-show-friends-only", "toggle-friends-only")
                 .checked_when(FRIENDS_ONLY_ON),
         ),
         MenuItemDef::Separator,
@@ -577,32 +596,32 @@ static WORLD_MENU: MenuDef = MenuDef {
 /// (`crate::edit_undo`), and prim linking / unlinking (`crate::edit_link`); the
 /// grid options / selection-filter entries are future tasks.
 static BUILD_MENU: MenuDef = MenuDef {
-    label: "Build",
+    label_key: "menu-bar-build",
     items: &[
         MenuItemDef::Command(
-            MenuCommand::new("Build Tools", "toggle-build-tools")
+            MenuCommand::new("menu-bar-build-tools", "toggle-build-tools")
                 .accel("Ctrl+B")
                 .checked_when(BUILD_TOOLS_OPEN),
         ),
         MenuItemDef::Separator,
         MenuItemDef::Command(
-            MenuCommand::new("Undo", crate::edit_undo::UNDO_ACTION)
+            MenuCommand::new("menu-bar-undo", crate::edit_undo::UNDO_ACTION)
                 .accel("Ctrl+Z")
                 .enabled_when(CAN_UNDO),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Redo", crate::edit_undo::REDO_ACTION)
+            MenuCommand::new("menu-bar-redo", crate::edit_undo::REDO_ACTION)
                 .accel("Ctrl+Y")
                 .enabled_when(CAN_REDO),
         ),
         MenuItemDef::Separator,
         MenuItemDef::Command(
-            MenuCommand::new("Link", crate::edit_link::LINK_ACTION)
+            MenuCommand::new("menu-bar-link", crate::edit_link::LINK_ACTION)
                 .accel("Ctrl+L")
                 .enabled_when(CAN_LINK),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Unlink", crate::edit_link::UNLINK_ACTION)
+            MenuCommand::new("menu-bar-unlink", crate::edit_link::UNLINK_ACTION)
                 .accel("Ctrl+Shift+L")
                 .enabled_when(CAN_UNLINK),
         ),
@@ -612,25 +631,26 @@ static BUILD_MENU: MenuDef = MenuDef {
 /// The Content menu — the directory search and the in-viewer web browser today;
 /// marketplace is a future entry.
 static CONTENT_MENU: MenuDef = MenuDef {
-    label: "Content",
+    label_key: "menu-bar-content",
     items: &[
         MenuItemDef::Command(
-            MenuCommand::new("Search…", "toggle-search")
+            MenuCommand::new("menu-bar-search", "toggle-search")
                 .accel("Ctrl+F")
                 .checked_when(SEARCH_OPEN),
         ),
         MenuItemDef::Separator,
         MenuItemDef::Command(
-            MenuCommand::new("Web Browser", "toggle-web-browser").checked_when(WEB_BROWSER_OPEN),
+            MenuCommand::new("menu-bar-web-browser", "toggle-web-browser")
+                .checked_when(WEB_BROWSER_OPEN),
         ),
     ],
 };
 
 /// The Help menu — the About window today; future help entries join it.
 static HELP_MENU: MenuDef = MenuDef {
-    label: "Help",
+    label_key: "menu-bar-help",
     items: &[MenuItemDef::Command(
-        MenuCommand::new("About\u{2026}", "toggle-about").checked_when(ABOUT_OPEN),
+        MenuCommand::new("menu-bar-about", "toggle-about").checked_when(ABOUT_OPEN),
     )],
 };
 
@@ -656,9 +676,9 @@ static HELP_MENU: MenuDef = MenuDef {
 /// `no_two_entries_in_the_bar_share_an_action`), which is a decision about the
 /// whole bar rather than about the flycam.
 static SHORTCUTS_MENU: MenuDef = MenuDef {
-    label: "Shortcuts",
+    label_key: "menu-bar-shortcuts",
     items: &[MenuItemDef::Command(
-        MenuCommand::new("Joystick Flycam", "toggle-flycam")
+        MenuCommand::new("menu-bar-joystick-flycam", "toggle-flycam")
             .accel("Alt+Shift+F")
             .checked_when(FLYCAM_ON),
     )],
@@ -673,12 +693,12 @@ static SHORTCUTS_MENU: MenuDef = MenuDef {
 /// Settings*, so this viewer's Shortcuts sits above its debug-settings entry for
 /// the same reason.
 static ADVANCED_MENU: MenuDef = MenuDef {
-    label: "Advanced",
+    label_key: "menu-bar-advanced",
     items: &[
         MenuItemDef::Submenu(&SHORTCUTS_MENU),
         MenuItemDef::Separator,
         MenuItemDef::Command(
-            MenuCommand::new("Debug settings\u{2026}", "toggle-debug-settings")
+            MenuCommand::new("menu-bar-debug-settings", "toggle-debug-settings")
                 .accel("Ctrl+Alt+Shift+S")
                 .checked_when(DEBUG_SETTINGS_OPEN),
         ),
@@ -687,8 +707,11 @@ static ADVANCED_MENU: MenuDef = MenuDef {
         // viewer reports them to the log. Reachable from the debug-settings
         // editor too; here because it costs something to leave on.
         MenuItemDef::Command(
-            MenuCommand::new("Collect Protocol Diagnostics", "toggle-collect-diagnostics")
-                .checked_when(COLLECT_DIAGNOSTICS_ON),
+            MenuCommand::new(
+                "menu-bar-collect-protocol-diagnostics",
+                "toggle-collect-diagnostics",
+            )
+            .checked_when(COLLECT_DIAGNOSTICS_ON),
         ),
     ],
 };
@@ -697,54 +720,54 @@ static ADVANCED_MENU: MenuDef = MenuDef {
 /// developer-facing flags, the three "hide what is locked" display flags, the
 /// three shared-`#RLV` flags, and the Locks inspector.
 static RLVA_DEBUG_MENU: MenuDef = MenuDef {
-    label: "Debug",
+    label_key: "menu-bar-debug",
     items: &[
-        rlv_toggle("Show Debug Messages", SETTING_DEBUG, COND_DEBUG),
+        rlv_toggle("menu-bar-show-debug-messages", SETTING_DEBUG, COND_DEBUG),
         rlv_toggle(
-            "Hide Unset or Duplicate Messages",
+            "menu-bar-hide-unset-or-duplicate-messages",
             SETTING_DEBUG_HIDE_UNSET_DUPLICATE,
             COND_DEBUG_HIDE_UNSET_DUPLICATE,
         ),
         rlv_toggle(
-            "Show Assertion Failures",
+            "menu-bar-show-assertion-failures",
             SETTING_SHOW_ASSERTION_FAILURES,
             COND_SHOW_ASSERTION_FAILURES,
         ),
         MenuItemDef::Separator,
         rlv_toggle(
-            "Hide Locked Layers",
+            "menu-bar-hide-locked-layers",
             SETTING_HIDE_LOCKED_LAYERS,
             COND_HIDE_LOCKED_LAYERS,
         ),
         rlv_toggle(
-            "Hide Locked Attachments",
+            "menu-bar-hide-locked-attachments",
             SETTING_HIDE_LOCKED_ATTACHMENTS,
             COND_HIDE_LOCKED_ATTACHMENTS,
         ),
         rlv_toggle(
-            "Hide Locked Inventory",
+            "menu-bar-hide-locked-inventory",
             SETTING_HIDE_LOCKED_INVENTORY,
             COND_HIDE_LOCKED_INVENTORY,
         ),
         MenuItemDef::Separator,
         rlv_toggle(
-            "Enable Legacy Naming",
+            "menu-bar-enable-legacy-naming",
             SETTING_ENABLE_LEGACY_NAMING,
             COND_ENABLE_LEGACY_NAMING,
         ),
         rlv_toggle(
-            "Enable Shared Wear",
+            "menu-bar-enable-shared-wear",
             SETTING_ENABLE_SHARED_WEAR,
             COND_ENABLE_SHARED_WEAR,
         ),
         rlv_toggle(
-            "Rename Shared Items on Wear",
+            "menu-bar-rename-shared-items-on-wear",
             SETTING_SHARED_INV_AUTO_RENAME,
             COND_SHARED_INV_AUTO_RENAME,
         ),
         MenuItemDef::Separator,
         MenuItemDef::Command(
-            MenuCommand::new("Locks\u{2026}", "toggle-rlv-locks")
+            MenuCommand::new("menu-bar-locks", "toggle-rlv-locks")
                 .checked_when(RLV_LOCKS_OPEN)
                 .enabled_when(RLV_ENABLED),
         ),
@@ -765,57 +788,57 @@ static RLVA_DEBUG_MENU: MenuDef = MenuDef {
 /// placement and a copy embedded under Advanced, is deliberately absent: there
 /// is one placement here, so there is nothing for it to choose.
 static RLVA_MENU: MenuDef = MenuDef {
-    label: "RLVa",
+    label_key: "menu-bar-rlva",
     items: &[
-        rlv_master_toggle("Enable RLVa"),
+        rlv_master_toggle("menu-bar-enable-rlva"),
         MenuItemDef::Separator,
         MenuItemDef::Submenu(&RLVA_DEBUG_MENU),
         MenuItemDef::Separator,
-        rlv_toggle("Allow OOC Chat", SETTING_CAN_OOC, COND_CAN_OOC),
+        rlv_toggle("menu-bar-allow-ooc-chat", SETTING_CAN_OOC, COND_CAN_OOC),
         rlv_toggle(
-            "Show Filtered Chat",
+            "menu-bar-show-filtered-chat",
             SETTING_SHOW_ELLIPSIS,
             COND_SHOW_ELLIPSIS,
         ),
         rlv_toggle(
-            "Show Redirected Chat Typing",
+            "menu-bar-show-redirected-chat-typing",
             SETTING_SHOW_REDIRECT_CHAT_TYPING,
             COND_SHOW_REDIRECT_CHAT_TYPING,
         ),
         rlv_toggle(
-            "Split Long Redirected Chat",
+            "menu-bar-split-long-redirected-chat",
             SETTING_SPLIT_REDIRECT_CHAT,
             COND_SPLIT_REDIRECT_CHAT,
         ),
         MenuItemDef::Separator,
         rlv_toggle(
-            "Allow Temporary Attachments",
+            "menu-bar-allow-temporary-attachments",
             SETTING_ENABLE_TEMP_ATTACH,
             COND_ENABLE_TEMP_ATTACH,
         ),
         rlv_toggle(
-            "Forbid Give to #RLV",
+            "menu-bar-forbid-give-to-rlv",
             SETTING_FORBID_GIVE_TO_RLV,
             COND_FORBID_GIVE_TO_RLV,
         ),
         rlv_toggle(
-            "Wear Replaces Unlocked",
+            "menu-bar-wear-replaces-unlocked",
             SETTING_WEAR_REPLACE_UNLOCKED,
             COND_WEAR_REPLACE_UNLOCKED,
         ),
         MenuItemDef::Separator,
         MenuItemDef::Command(
-            MenuCommand::new("Console\u{2026}", "toggle-rlv-console")
+            MenuCommand::new("menu-bar-console", "toggle-rlv-console")
                 .checked_when(RLV_CONSOLE_OPEN)
                 .enabled_when(RLV_ENABLED),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Restrictions\u{2026}", "toggle-rlv-behaviours")
+            MenuCommand::new("menu-bar-restrictions", "toggle-rlv-behaviours")
                 .checked_when(RLV_BEHAVIOURS_OPEN)
                 .enabled_when(RLV_ENABLED),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Strings\u{2026}", "toggle-rlv-strings")
+            MenuCommand::new("menu-bar-strings", "toggle-rlv-strings")
                 .checked_when(RLV_STRINGS_OPEN)
                 .enabled_when(RLV_ENABLED),
         ),
@@ -1445,6 +1468,9 @@ fn handle_top_menu_actions(
                     crate::phototools::PHOTOTOOLS_FLOATER_ID,
                 );
             }
+            "toggle-360-snapshot" => {
+                toggle_floater(&floaters, &mut panels, crate::panorama::PANORAMA_FLOATER_ID);
+            }
             // Enter or leave the flycam. Asked for as a request rather than
             // written on `CameraMode` here, because the switch is more than the
             // mode: `switch_camera_mode` seeds the rig's aim entering and
@@ -1685,7 +1711,7 @@ mod tests {
     }
 
     /// The whole bar's action table: every command, in walk order, under the
-    /// `>`-joined path of menu labels that reaches it.
+    /// `>`-joined path of menu label **keys** that reaches it.
     fn table() -> Vec<(String, &'static str)> {
         let mut walked = Vec::new();
         for menu in TOP_MENU_BAR.menus {
@@ -1712,138 +1738,202 @@ mod tests {
     #[test]
     fn the_menu_bar_action_table_is_pinned() {
         let expected: Vec<(String, &'static str)> = vec![
-            ("Avatar".to_owned(), "toggle-preferences"),
-            ("Avatar".to_owned(), "toggle-inventory"),
-            ("Avatar".to_owned(), "toggle-experiences"),
-            ("Avatar".to_owned(), "quit"),
-            ("Comm".to_owned(), "toggle-conversations"),
-            ("Comm > Online Status".to_owned(), "presence-away"),
-            ("Comm > Online Status".to_owned(), "presence-do-not-disturb"),
-            ("Comm > Online Status".to_owned(), "presence-autorespond"),
+            ("menu-bar-avatar".to_owned(), "toggle-preferences"),
+            ("menu-bar-avatar".to_owned(), "toggle-inventory"),
+            ("menu-bar-avatar".to_owned(), "toggle-experiences"),
+            ("menu-bar-avatar".to_owned(), "quit"),
+            ("menu-bar-comm".to_owned(), "toggle-conversations"),
             (
-                "Comm > Online Status".to_owned(),
+                "menu-bar-comm > menu-bar-online-status".to_owned(),
+                "presence-away",
+            ),
+            (
+                "menu-bar-comm > menu-bar-online-status".to_owned(),
+                "presence-do-not-disturb",
+            ),
+            (
+                "menu-bar-comm > menu-bar-online-status".to_owned(),
+                "presence-autorespond",
+            ),
+            (
+                "menu-bar-comm > menu-bar-online-status".to_owned(),
                 "presence-autorespond-non-friends",
             ),
-            ("Comm > Online Status".to_owned(), "reject-teleport-offers"),
-            ("Comm > Online Status".to_owned(), "reject-group-invites"),
             (
-                "Comm > Online Status".to_owned(),
+                "menu-bar-comm > menu-bar-online-status".to_owned(),
+                "reject-teleport-offers",
+            ),
+            (
+                "menu-bar-comm > menu-bar-online-status".to_owned(),
+                "reject-group-invites",
+            ),
+            (
+                "menu-bar-comm > menu-bar-online-status".to_owned(),
                 "reject-friendship-requests",
             ),
-            ("Comm".to_owned(), "open-friends-list"),
-            ("Comm".to_owned(), "open-groups-list"),
-            ("Comm".to_owned(), "open-block-list"),
-            ("World".to_owned(), "toggle-minimap"),
-            ("World".to_owned(), "toggle-radar"),
-            ("World".to_owned(), "toggle-world-map"),
-            ("World".to_owned(), "toggle-property-lines"),
-            ("World".to_owned(), "toggle-land-owners"),
-            ("World".to_owned(), "about-land"),
-            ("World".to_owned(), "place-profile"),
-            ("World".to_owned(), "about-region"),
-            ("World".to_owned(), "toggle-asset-blacklist"),
-            ("World".to_owned(), "toggle-avatar-render-settings"),
-            ("World".to_owned(), "toggle-friends-only"),
+            ("menu-bar-comm".to_owned(), "open-friends-list"),
+            ("menu-bar-comm".to_owned(), "open-groups-list"),
+            ("menu-bar-comm".to_owned(), "open-block-list"),
+            ("menu-bar-world".to_owned(), "toggle-minimap"),
+            ("menu-bar-world".to_owned(), "toggle-radar"),
+            ("menu-bar-world".to_owned(), "toggle-world-map"),
+            ("menu-bar-world".to_owned(), "toggle-property-lines"),
+            ("menu-bar-world".to_owned(), "toggle-land-owners"),
+            ("menu-bar-world".to_owned(), "about-land"),
+            ("menu-bar-world".to_owned(), "place-profile"),
+            ("menu-bar-world".to_owned(), "about-region"),
+            ("menu-bar-world".to_owned(), "toggle-asset-blacklist"),
+            ("menu-bar-world".to_owned(), "toggle-avatar-render-settings"),
+            ("menu-bar-world".to_owned(), "toggle-friends-only"),
             (
-                "World > Environment > Day Cycle".to_owned(),
+                "menu-bar-world > menu-bar-environment > menu-bar-day-cycle".to_owned(),
                 "env-daycycle-sunrise",
             ),
             (
-                "World > Environment > Day Cycle".to_owned(),
+                "menu-bar-world > menu-bar-environment > menu-bar-day-cycle".to_owned(),
                 "env-daycycle-midday",
             ),
             (
-                "World > Environment > Day Cycle".to_owned(),
+                "menu-bar-world > menu-bar-environment > menu-bar-day-cycle".to_owned(),
                 "env-daycycle-sunset",
             ),
             (
-                "World > Environment > Day Cycle".to_owned(),
+                "menu-bar-world > menu-bar-environment > menu-bar-day-cycle".to_owned(),
                 "env-daycycle-midnight",
             ),
             (
-                "World > Environment > Legacy".to_owned(),
+                "menu-bar-world > menu-bar-environment > menu-bar-legacy".to_owned(),
                 "env-legacy-sunrise",
             ),
             (
-                "World > Environment > Legacy".to_owned(),
+                "menu-bar-world > menu-bar-environment > menu-bar-legacy".to_owned(),
                 "env-legacy-midday",
             ),
             (
-                "World > Environment > Legacy".to_owned(),
+                "menu-bar-world > menu-bar-environment > menu-bar-legacy".to_owned(),
                 "env-legacy-sunset",
             ),
             (
-                "World > Environment > Legacy".to_owned(),
+                "menu-bar-world > menu-bar-environment > menu-bar-legacy".to_owned(),
                 "env-legacy-midnight",
             ),
             (
-                "World > Environment > Modern".to_owned(),
+                "menu-bar-world > menu-bar-environment > menu-bar-modern".to_owned(),
                 "env-modern-sunrise",
             ),
             (
-                "World > Environment > Modern".to_owned(),
+                "menu-bar-world > menu-bar-environment > menu-bar-modern".to_owned(),
                 "env-modern-midday",
             ),
             (
-                "World > Environment > Modern".to_owned(),
+                "menu-bar-world > menu-bar-environment > menu-bar-modern".to_owned(),
                 "env-modern-sunset",
             ),
             (
-                "World > Environment > Modern".to_owned(),
+                "menu-bar-world > menu-bar-environment > menu-bar-modern".to_owned(),
                 "env-modern-midnight",
             ),
-            ("World > Environment".to_owned(), "env-shared"),
-            ("World > Environment".to_owned(), "toggle-personal-lighting"),
-            ("World > Environment".to_owned(), "toggle-my-environments"),
             (
-                "World > Environment > Bulk Import".to_owned(),
+                "menu-bar-world > menu-bar-environment".to_owned(),
+                "env-shared",
+            ),
+            (
+                "menu-bar-world > menu-bar-environment".to_owned(),
+                "toggle-personal-lighting",
+            ),
+            (
+                "menu-bar-world > menu-bar-environment".to_owned(),
+                "toggle-my-environments",
+            ),
+            (
+                "menu-bar-world > menu-bar-environment > menu-bar-bulk-import".to_owned(),
                 "bulk-import-days",
             ),
             (
-                "World > Environment > Bulk Import".to_owned(),
+                "menu-bar-world > menu-bar-environment > menu-bar-bulk-import".to_owned(),
                 "bulk-import-skies",
             ),
             (
-                "World > Environment > Bulk Import".to_owned(),
+                "menu-bar-world > menu-bar-environment > menu-bar-bulk-import".to_owned(),
                 "bulk-import-water",
             ),
-            ("World > Photo and Video".to_owned(), "toggle-phototools"),
-            ("Build".to_owned(), "toggle-build-tools"),
-            ("Build".to_owned(), "undo-objects"),
-            ("Build".to_owned(), "redo-objects"),
-            ("Build".to_owned(), "link-objects"),
-            ("Build".to_owned(), "unlink-objects"),
-            ("Content".to_owned(), "toggle-search"),
-            ("Content".to_owned(), "toggle-web-browser"),
+            (
+                "menu-bar-world > menu-bar-photo-and-video".to_owned(),
+                "toggle-phototools",
+            ),
+            (
+                "menu-bar-world > menu-bar-photo-and-video".to_owned(),
+                "toggle-360-snapshot",
+            ),
+            ("menu-bar-build".to_owned(), "toggle-build-tools"),
+            ("menu-bar-build".to_owned(), "undo-objects"),
+            ("menu-bar-build".to_owned(), "redo-objects"),
+            ("menu-bar-build".to_owned(), "link-objects"),
+            ("menu-bar-build".to_owned(), "unlink-objects"),
+            ("menu-bar-content".to_owned(), "toggle-search"),
+            ("menu-bar-content".to_owned(), "toggle-web-browser"),
             // The RLVa menu. Its toggle entries carry the *setting name* as
             // their action, which is what lets one dispatch arm serve all of
             // them (`is_rlv_setting`) — so the pinned names here are the
             // `RlvSettingNames` roster, not `toggle-*` verbs.
-            ("RLVa".to_owned(), "RestrainedLove"),
-            ("RLVa > Debug".to_owned(), "RestrainedLoveDebug"),
-            ("RLVa > Debug".to_owned(), "RLVaDebugHideUnsetDuplicate"),
-            ("RLVa > Debug".to_owned(), "RLVaShowAssertionFailures"),
-            ("RLVa > Debug".to_owned(), "RLVaHideLockedLayers"),
-            ("RLVa > Debug".to_owned(), "RLVaHideLockedAttachments"),
-            ("RLVa > Debug".to_owned(), "RLVaHideLockedInventory"),
-            ("RLVa > Debug".to_owned(), "RLVaEnableLegacyNaming"),
-            ("RLVa > Debug".to_owned(), "RLVaEnableSharedWear"),
-            ("RLVa > Debug".to_owned(), "RLVaSharedInvAutoRename"),
-            ("RLVa > Debug".to_owned(), "toggle-rlv-locks"),
-            ("RLVa".to_owned(), "RestrainedLoveCanOOC"),
-            ("RLVa".to_owned(), "RestrainedLoveShowEllipsis"),
-            ("RLVa".to_owned(), "RLVaShowRedirectChatTyping"),
-            ("RLVa".to_owned(), "RLVaSplitRedirectChat"),
-            ("RLVa".to_owned(), "RLVaEnableTemporaryAttachments"),
-            ("RLVa".to_owned(), "RestrainedLoveForbidGiveToRLV"),
-            ("RLVa".to_owned(), "RLVaWearReplaceUnlocked"),
-            ("RLVa".to_owned(), "toggle-rlv-console"),
-            ("RLVa".to_owned(), "toggle-rlv-behaviours"),
-            ("RLVa".to_owned(), "toggle-rlv-strings"),
-            ("Help".to_owned(), "toggle-about"),
-            ("Advanced > Shortcuts".to_owned(), "toggle-flycam"),
-            ("Advanced".to_owned(), "toggle-debug-settings"),
-            ("Advanced".to_owned(), "toggle-collect-diagnostics"),
+            ("menu-bar-rlva".to_owned(), "RestrainedLove"),
+            (
+                "menu-bar-rlva > menu-bar-debug".to_owned(),
+                "RestrainedLoveDebug",
+            ),
+            (
+                "menu-bar-rlva > menu-bar-debug".to_owned(),
+                "RLVaDebugHideUnsetDuplicate",
+            ),
+            (
+                "menu-bar-rlva > menu-bar-debug".to_owned(),
+                "RLVaShowAssertionFailures",
+            ),
+            (
+                "menu-bar-rlva > menu-bar-debug".to_owned(),
+                "RLVaHideLockedLayers",
+            ),
+            (
+                "menu-bar-rlva > menu-bar-debug".to_owned(),
+                "RLVaHideLockedAttachments",
+            ),
+            (
+                "menu-bar-rlva > menu-bar-debug".to_owned(),
+                "RLVaHideLockedInventory",
+            ),
+            (
+                "menu-bar-rlva > menu-bar-debug".to_owned(),
+                "RLVaEnableLegacyNaming",
+            ),
+            (
+                "menu-bar-rlva > menu-bar-debug".to_owned(),
+                "RLVaEnableSharedWear",
+            ),
+            (
+                "menu-bar-rlva > menu-bar-debug".to_owned(),
+                "RLVaSharedInvAutoRename",
+            ),
+            (
+                "menu-bar-rlva > menu-bar-debug".to_owned(),
+                "toggle-rlv-locks",
+            ),
+            ("menu-bar-rlva".to_owned(), "RestrainedLoveCanOOC"),
+            ("menu-bar-rlva".to_owned(), "RestrainedLoveShowEllipsis"),
+            ("menu-bar-rlva".to_owned(), "RLVaShowRedirectChatTyping"),
+            ("menu-bar-rlva".to_owned(), "RLVaSplitRedirectChat"),
+            ("menu-bar-rlva".to_owned(), "RLVaEnableTemporaryAttachments"),
+            ("menu-bar-rlva".to_owned(), "RestrainedLoveForbidGiveToRLV"),
+            ("menu-bar-rlva".to_owned(), "RLVaWearReplaceUnlocked"),
+            ("menu-bar-rlva".to_owned(), "toggle-rlv-console"),
+            ("menu-bar-rlva".to_owned(), "toggle-rlv-behaviours"),
+            ("menu-bar-rlva".to_owned(), "toggle-rlv-strings"),
+            ("menu-bar-help".to_owned(), "toggle-about"),
+            (
+                "menu-bar-advanced > menu-bar-shortcuts".to_owned(),
+                "toggle-flycam",
+            ),
+            ("menu-bar-advanced".to_owned(), "toggle-debug-settings"),
+            ("menu-bar-advanced".to_owned(), "toggle-collect-diagnostics"),
         ];
         assert_eq!(
             table(),

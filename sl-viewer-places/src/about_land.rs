@@ -58,6 +58,7 @@
 //! Reference (Firestorm, read-only): `llfloaterland`, `llpanelland*`; the
 //! `ParcelPropertiesUpdate`, `ParcelAccessListUpdate` messages.
 
+use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::EditableText;
@@ -109,10 +110,10 @@ use crate::world_api::AvatarState;
 const FONT_SIZE: f32 = 13.0;
 
 /// A read value's text colour.
-const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A dim label / secondary text colour.
-const DIM_LABEL_COLOR: Color = Color::srgb(0.62, 0.66, 0.74);
+const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// A checked toggle's tick colour.
 const CHECK_COLOR: Color = Color::srgb(0.55, 0.85, 0.60);

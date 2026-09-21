@@ -215,32 +215,38 @@ const NEXT_OWNER_DEFAULT: u32 = 0x0000_E000;
 /// The "New Clothes >" submenu — every layer is a placeholder until wearable
 /// creation lands (creating a wearable needs a default asset to be authored).
 static NEW_CLOTHES_MENU: MenuDef = MenuDef {
-    label: "New Clothes",
+    label_key: "menu-inv-new-clothes",
     items: &[
-        MenuItemDef::Command(MenuCommand::new("New Shirt", "new-shirt")),
-        MenuItemDef::Command(MenuCommand::new("New Pants", "new-pants")),
-        MenuItemDef::Command(MenuCommand::new("New Shoes", "new-shoes")),
-        MenuItemDef::Command(MenuCommand::new("New Socks", "new-socks")),
-        MenuItemDef::Command(MenuCommand::new("New Jacket", "new-jacket")),
-        MenuItemDef::Command(MenuCommand::new("New Skirt", "new-skirt")),
-        MenuItemDef::Command(MenuCommand::new("New Gloves", "new-gloves")),
-        MenuItemDef::Command(MenuCommand::new("New Undershirt", "new-undershirt")),
-        MenuItemDef::Command(MenuCommand::new("New Underpants", "new-underpants")),
-        MenuItemDef::Command(MenuCommand::new("New Alpha Mask", "new-alpha")),
-        MenuItemDef::Command(MenuCommand::new("New Tattoo", "new-tattoo")),
-        MenuItemDef::Command(MenuCommand::new("New Universal", "new-universal")),
-        MenuItemDef::Command(MenuCommand::new("New Physics", "new-physics")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-new-shirt", "new-shirt")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-new-pants", "new-pants")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-new-shoes", "new-shoes")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-new-socks", "new-socks")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-new-jacket", "new-jacket")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-new-skirt", "new-skirt")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-new-gloves", "new-gloves")),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-inv-new-undershirt",
+            "new-undershirt",
+        )),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-inv-new-underpants",
+            "new-underpants",
+        )),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-new-alpha-mask", "new-alpha")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-new-tattoo", "new-tattoo")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-new-universal", "new-universal")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-new-physics", "new-physics")),
     ],
 };
 
 /// The "New Body Parts >" submenu — placeholders, as [`NEW_CLOTHES_MENU`].
 static NEW_BODY_PARTS_MENU: MenuDef = MenuDef {
-    label: "New Body Parts",
+    label_key: "menu-inv-new-body-parts",
     items: &[
-        MenuItemDef::Command(MenuCommand::new("New Shape", "new-shape")),
-        MenuItemDef::Command(MenuCommand::new("New Skin", "new-skin")),
-        MenuItemDef::Command(MenuCommand::new("New Hair", "new-hair")),
-        MenuItemDef::Command(MenuCommand::new("New Eyes", "new-eyes")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-new-shape", "new-shape")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-new-skin", "new-skin")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-new-hair", "new-hair")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-new-eyes", "new-eyes")),
     ],
 };
 
@@ -250,27 +256,27 @@ pub(crate) const INVENTORY_ADD_ELEMENT: &str = "inventory-add";
 /// The + menu's Upload submenu — every uploader is a future task
 /// (`viewer-image-upload`, `viewer-mesh-*`), kept greyed in reference order.
 static UPLOAD_MENU: MenuDef = MenuDef {
-    label: "Upload",
+    label_key: "menu-inv-upload",
     items: &[
         MenuItemDef::Command(
-            MenuCommand::new("Image...", "upload-image")
+            MenuCommand::new("menu-inv-image", "upload-image")
                 .accel("Ctrl+U")
                 .enabled_when(UNIMPLEMENTED),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Sound...", "upload-sound").enabled_when(UNIMPLEMENTED),
+            MenuCommand::new("menu-inv-sound", "upload-sound").enabled_when(UNIMPLEMENTED),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Animation...", "upload-animation").enabled_when(UNIMPLEMENTED),
+            MenuCommand::new("menu-inv-animation", "upload-animation").enabled_when(UNIMPLEMENTED),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Model...", "upload-model").enabled_when(UNIMPLEMENTED),
+            MenuCommand::new("menu-inv-model", "upload-model").enabled_when(UNIMPLEMENTED),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Material...", "upload-material").enabled_when(UNIMPLEMENTED),
+            MenuCommand::new("menu-inv-material", "upload-material").enabled_when(UNIMPLEMENTED),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Bulk...", "upload-bulk").enabled_when(UNIMPLEMENTED),
+            MenuCommand::new("menu-inv-bulk", "upload-bulk").enabled_when(UNIMPLEMENTED),
         ),
     ],
 };
@@ -280,16 +286,17 @@ static UPLOAD_MENU: MenuDef = MenuDef {
 /// reference's `MyEnvironments.EnvironmentEnabled` / `LLPanelMainInventory`'s
 /// `isInventoryEnabled` enable callback).
 static NEW_SETTINGS_MENU: MenuDef = MenuDef {
-    label: "New Settings",
+    label_key: "menu-inv-new-settings",
     items: &[
         MenuItemDef::Command(
-            MenuCommand::new("New Sky", "new-sky").enabled_when(CAN_CREATE_SETTINGS),
+            MenuCommand::new("menu-inv-new-sky", "new-sky").enabled_when(CAN_CREATE_SETTINGS),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("New Water", "new-water").enabled_when(CAN_CREATE_SETTINGS),
+            MenuCommand::new("menu-inv-new-water", "new-water").enabled_when(CAN_CREATE_SETTINGS),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("New Day Cycle", "new-daycycle").enabled_when(CAN_CREATE_SETTINGS),
+            MenuCommand::new("menu-inv-new-day-cycle", "new-daycycle")
+                .enabled_when(CAN_CREATE_SETTINGS),
         ),
     ],
 };
@@ -299,22 +306,22 @@ static NEW_SETTINGS_MENU: MenuDef = MenuDef {
 /// creators, the wearable submenus, then Shop. Creation targets the selected
 /// folder (or the root); [`handle_inventory_add_actions`] routes the picks.
 pub(crate) static INVENTORY_ADD_MENU: MenuDef = MenuDef {
-    label: "+",
+    label_key: "menu-inv-add-button",
     items: &[
         MenuItemDef::Submenu(&UPLOAD_MENU),
         MenuItemDef::Separator,
-        MenuItemDef::Command(MenuCommand::new("New Folder", "new-folder")),
-        MenuItemDef::Command(MenuCommand::new("New Script", "new-script")),
-        MenuItemDef::Command(MenuCommand::new("New Notecard", "new-notecard")),
-        MenuItemDef::Command(MenuCommand::new("New Gesture", "new-gesture")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-new-folder", "new-folder")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-new-script", "new-script")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-new-notecard", "new-notecard")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-new-gesture", "new-gesture")),
         MenuItemDef::Command(
-            MenuCommand::new("New Material", "new-material").enabled_when(UNIMPLEMENTED),
+            MenuCommand::new("menu-inv-new-material", "new-material").enabled_when(UNIMPLEMENTED),
         ),
         MenuItemDef::Submenu(&NEW_CLOTHES_MENU),
         MenuItemDef::Submenu(&NEW_BODY_PARTS_MENU),
         MenuItemDef::Submenu(&NEW_SETTINGS_MENU),
         MenuItemDef::Separator,
-        MenuItemDef::Command(MenuCommand::new("Shop...", "shop").enabled_when(UNIMPLEMENTED)),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-shop", "shop").enabled_when(UNIMPLEMENTED)),
     ],
 };
 
@@ -324,74 +331,131 @@ pub(crate) static INVENTORY_ADD_MENU: MenuDef = MenuDef {
 /// [`ATTACH_TO_HUD_MENU`]). Actions carry the wire id (`attach-point-<id>`),
 /// which the dispatcher parses back into an [`AttachmentPoint`].
 static ATTACH_TO_MENU: MenuDef = MenuDef {
-    label: "Attach To",
+    label_key: "menu-inv-attach-to",
     items: &[
-        MenuItemDef::Command(MenuCommand::new("Chest (1)", "attach-point-1")),
-        MenuItemDef::Command(MenuCommand::new("Skull (2)", "attach-point-2")),
-        MenuItemDef::Command(MenuCommand::new("Left Shoulder (3)", "attach-point-3")),
-        MenuItemDef::Command(MenuCommand::new("Right Shoulder (4)", "attach-point-4")),
-        MenuItemDef::Command(MenuCommand::new("Left Hand (5)", "attach-point-5")),
-        MenuItemDef::Command(MenuCommand::new("Right Hand (6)", "attach-point-6")),
-        MenuItemDef::Command(MenuCommand::new("Left Foot (7)", "attach-point-7")),
-        MenuItemDef::Command(MenuCommand::new("Right Foot (8)", "attach-point-8")),
-        MenuItemDef::Command(MenuCommand::new("Spine (9)", "attach-point-9")),
-        MenuItemDef::Command(MenuCommand::new("Pelvis (10)", "attach-point-10")),
-        MenuItemDef::Command(MenuCommand::new("Mouth (11)", "attach-point-11")),
-        MenuItemDef::Command(MenuCommand::new("Chin (12)", "attach-point-12")),
-        MenuItemDef::Command(MenuCommand::new("Left Ear (13)", "attach-point-13")),
-        MenuItemDef::Command(MenuCommand::new("Right Ear (14)", "attach-point-14")),
-        MenuItemDef::Command(MenuCommand::new("Left Eyeball (15)", "attach-point-15")),
-        MenuItemDef::Command(MenuCommand::new("Right Eyeball (16)", "attach-point-16")),
-        MenuItemDef::Command(MenuCommand::new("Nose (17)", "attach-point-17")),
-        MenuItemDef::Command(MenuCommand::new("R Upper Arm (18)", "attach-point-18")),
-        MenuItemDef::Command(MenuCommand::new("R Forearm (19)", "attach-point-19")),
-        MenuItemDef::Command(MenuCommand::new("L Upper Arm (20)", "attach-point-20")),
-        MenuItemDef::Command(MenuCommand::new("L Forearm (21)", "attach-point-21")),
-        MenuItemDef::Command(MenuCommand::new("Right Hip (22)", "attach-point-22")),
-        MenuItemDef::Command(MenuCommand::new("R Upper Leg (23)", "attach-point-23")),
-        MenuItemDef::Command(MenuCommand::new("R Lower Leg (24)", "attach-point-24")),
-        MenuItemDef::Command(MenuCommand::new("Left Hip (25)", "attach-point-25")),
-        MenuItemDef::Command(MenuCommand::new("L Upper Leg (26)", "attach-point-26")),
-        MenuItemDef::Command(MenuCommand::new("L Lower Leg (27)", "attach-point-27")),
-        MenuItemDef::Command(MenuCommand::new("Stomach (28)", "attach-point-28")),
-        MenuItemDef::Command(MenuCommand::new("Left Pec (29)", "attach-point-29")),
-        MenuItemDef::Command(MenuCommand::new("Right Pec (30)", "attach-point-30")),
-        MenuItemDef::Command(MenuCommand::new("Neck (39)", "attach-point-39")),
-        MenuItemDef::Command(MenuCommand::new("Avatar Center (40)", "attach-point-40")),
-        MenuItemDef::Command(MenuCommand::new("Left Ring Finger (41)", "attach-point-41")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-chest-1", "attach-point-1")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-skull-2", "attach-point-2")),
         MenuItemDef::Command(MenuCommand::new(
-            "Right Ring Finger (42)",
+            "menu-inv-left-shoulder-3",
+            "attach-point-3",
+        )),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-inv-right-shoulder-4",
+            "attach-point-4",
+        )),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-left-hand-5", "attach-point-5")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-right-hand-6", "attach-point-6")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-left-foot-7", "attach-point-7")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-right-foot-8", "attach-point-8")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-spine-9", "attach-point-9")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-pelvis-10", "attach-point-10")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-mouth-11", "attach-point-11")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-chin-12", "attach-point-12")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-left-ear-13", "attach-point-13")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-right-ear-14", "attach-point-14")),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-inv-left-eyeball-15",
+            "attach-point-15",
+        )),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-inv-right-eyeball-16",
+            "attach-point-16",
+        )),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-nose-17", "attach-point-17")),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-inv-r-upper-arm-18",
+            "attach-point-18",
+        )),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-r-forearm-19", "attach-point-19")),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-inv-l-upper-arm-20",
+            "attach-point-20",
+        )),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-l-forearm-21", "attach-point-21")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-right-hip-22", "attach-point-22")),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-inv-r-upper-leg-23",
+            "attach-point-23",
+        )),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-inv-r-lower-leg-24",
+            "attach-point-24",
+        )),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-left-hip-25", "attach-point-25")),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-inv-l-upper-leg-26",
+            "attach-point-26",
+        )),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-inv-l-lower-leg-27",
+            "attach-point-27",
+        )),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-stomach-28", "attach-point-28")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-left-pec-29", "attach-point-29")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-right-pec-30", "attach-point-30")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-neck-39", "attach-point-39")),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-inv-avatar-center-40",
+            "attach-point-40",
+        )),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-inv-left-ring-finger-41",
+            "attach-point-41",
+        )),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-inv-right-ring-finger-42",
             "attach-point-42",
         )),
-        MenuItemDef::Command(MenuCommand::new("Tail Base (43)", "attach-point-43")),
-        MenuItemDef::Command(MenuCommand::new("Tail Tip (44)", "attach-point-44")),
-        MenuItemDef::Command(MenuCommand::new("Left Wing (45)", "attach-point-45")),
-        MenuItemDef::Command(MenuCommand::new("Right Wing (46)", "attach-point-46")),
-        MenuItemDef::Command(MenuCommand::new("Jaw (47)", "attach-point-47")),
-        MenuItemDef::Command(MenuCommand::new("Alt Left Ear (48)", "attach-point-48")),
-        MenuItemDef::Command(MenuCommand::new("Alt Right Ear (49)", "attach-point-49")),
-        MenuItemDef::Command(MenuCommand::new("Alt Left Eye (50)", "attach-point-50")),
-        MenuItemDef::Command(MenuCommand::new("Alt Right Eye (51)", "attach-point-51")),
-        MenuItemDef::Command(MenuCommand::new("Tongue (52)", "attach-point-52")),
-        MenuItemDef::Command(MenuCommand::new("Groin (53)", "attach-point-53")),
-        MenuItemDef::Command(MenuCommand::new("Left Hind Foot (54)", "attach-point-54")),
-        MenuItemDef::Command(MenuCommand::new("Right Hind Foot (55)", "attach-point-55")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-tail-base-43", "attach-point-43")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-tail-tip-44", "attach-point-44")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-left-wing-45", "attach-point-45")),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-inv-right-wing-46",
+            "attach-point-46",
+        )),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-jaw-47", "attach-point-47")),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-inv-alt-left-ear-48",
+            "attach-point-48",
+        )),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-inv-alt-right-ear-49",
+            "attach-point-49",
+        )),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-inv-alt-left-eye-50",
+            "attach-point-50",
+        )),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-inv-alt-right-eye-51",
+            "attach-point-51",
+        )),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-tongue-52", "attach-point-52")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-groin-53", "attach-point-53")),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-inv-left-hind-foot-54",
+            "attach-point-54",
+        )),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-inv-right-hind-foot-55",
+            "attach-point-55",
+        )),
     ],
 };
 
 /// The **"Attach To HUD"** submenu: the eight HUD slots (wire ids 31–38). The
 /// reference labels HUD points without the id suffix.
 static ATTACH_TO_HUD_MENU: MenuDef = MenuDef {
-    label: "Attach To HUD",
+    label_key: "menu-inv-attach-to-hud",
     items: &[
-        MenuItemDef::Command(MenuCommand::new("Center 2", "attach-point-31")),
-        MenuItemDef::Command(MenuCommand::new("Top Right", "attach-point-32")),
-        MenuItemDef::Command(MenuCommand::new("Top", "attach-point-33")),
-        MenuItemDef::Command(MenuCommand::new("Top Left", "attach-point-34")),
-        MenuItemDef::Command(MenuCommand::new("Center", "attach-point-35")),
-        MenuItemDef::Command(MenuCommand::new("Bottom Left", "attach-point-36")),
-        MenuItemDef::Command(MenuCommand::new("Bottom", "attach-point-37")),
-        MenuItemDef::Command(MenuCommand::new("Bottom Right", "attach-point-38")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-center-2", "attach-point-31")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-top-right", "attach-point-32")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-top", "attach-point-33")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-top-left", "attach-point-34")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-center", "attach-point-35")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-bottom-left", "attach-point-36")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-bottom", "attach-point-37")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-bottom-right", "attach-point-38")),
     ],
 };
 
@@ -399,62 +463,72 @@ static ATTACH_TO_HUD_MENU: MenuDef = MenuDef {
 /// lost-and-found emptiers, the New … creators, the outfit block, then the
 /// shared rename / clipboard / delete tail.
 pub(crate) static INVENTORY_FOLDER_MENU: MenuDef = MenuDef {
-    label: "Folder",
+    label_key: "menu-inv-folder",
     items: &[
-        MenuItemDef::Command(MenuCommand::new("Share", "share").enabled_when(CAN_SHARE)),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-share", "share").enabled_when(CAN_SHARE)),
         MenuItemDef::Command(
-            MenuCommand::new("Empty Trash", "empty-trash").visible_when(IS_TRASH_FOLDER),
+            MenuCommand::new("menu-inv-empty-trash", "empty-trash").visible_when(IS_TRASH_FOLDER),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Empty Lost And Found", "empty-lost-and-found")
+            MenuCommand::new("menu-inv-empty-lost-and-found", "empty-lost-and-found")
                 .visible_when(IS_LOST_FOUND_FOLDER),
         ),
-        MenuItemDef::Command(MenuCommand::new("New Folder", "new-folder").enabled_when(CAN_CREATE)),
-        MenuItemDef::Command(MenuCommand::new("New Script", "new-script").enabled_when(CAN_CREATE)),
         MenuItemDef::Command(
-            MenuCommand::new("New Notecard", "new-notecard").enabled_when(CAN_CREATE),
+            MenuCommand::new("menu-inv-new-folder", "new-folder").enabled_when(CAN_CREATE),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("New Gesture", "new-gesture").enabled_when(CAN_CREATE),
+            MenuCommand::new("menu-inv-new-script", "new-script").enabled_when(CAN_CREATE),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-inv-new-notecard", "new-notecard").enabled_when(CAN_CREATE),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-inv-new-gesture", "new-gesture").enabled_when(CAN_CREATE),
         ),
         MenuItemDef::Submenu(&NEW_CLOTHES_MENU),
         MenuItemDef::Submenu(&NEW_BODY_PARTS_MENU),
         MenuItemDef::Separator,
         MenuItemDef::Command(
-            MenuCommand::new("Replace Current Outfit", "replace-outfit")
+            MenuCommand::new("menu-inv-replace-current-outfit", "replace-outfit")
                 .enabled_when(FOLDER_HAS_WEARABLES),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Add To Current Outfit", "add-to-outfit")
+            MenuCommand::new("menu-inv-add-to-current-outfit", "add-to-outfit")
                 .enabled_when(FOLDER_HAS_WEARABLES),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Remove From Current Outfit", "remove-from-outfit")
+            MenuCommand::new("menu-inv-remove-from-current-outfit", "remove-from-outfit")
                 .enabled_when(FOLDER_HAS_WORN),
         ),
         MenuItemDef::Separator,
         // A folder of calling cards is a ready-made guest list — the
         // reference's "Conference Chat Folder" entry (parameter "everyone").
         MenuItemDef::Command(
-            MenuCommand::new("Start Conference Chat", "start-conference")
+            MenuCommand::new("menu-inv-start-conference-chat", "start-conference")
                 .visible_when(FOLDER_HAS_CALLING_CARDS),
         ),
         MenuItemDef::Separator,
-        MenuItemDef::Command(MenuCommand::new("Rename", "rename").enabled_when(CAN_RENAME)),
-        MenuItemDef::Command(MenuCommand::new("Cut", "cut").enabled_when(CAN_CUT)),
-        MenuItemDef::Command(MenuCommand::new("Copy", "copy").enabled_when(CAN_COPY)),
-        MenuItemDef::Command(MenuCommand::new("Paste", "paste").enabled_when(CAN_PASTE)),
         MenuItemDef::Command(
-            MenuCommand::new("Paste As Link", "paste-link").enabled_when(CAN_PASTE_LINK),
+            MenuCommand::new("menu-inv-rename", "rename").enabled_when(CAN_RENAME),
+        ),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-cut", "cut").enabled_when(CAN_CUT)),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-copy", "copy").enabled_when(CAN_COPY)),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-paste", "paste").enabled_when(CAN_PASTE)),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-inv-paste-as-link", "paste-link").enabled_when(CAN_PASTE_LINK),
         ),
         MenuItemDef::Separator,
         MenuItemDef::Command(
-            MenuCommand::new("Delete", "delete")
+            MenuCommand::new("menu-inv-delete", "delete")
                 .visible_when(NOT_IN_TRASH)
                 .enabled_when(CAN_DELETE),
         ),
-        MenuItemDef::Command(MenuCommand::new("Purge Item", "purge").visible_when(IN_TRASH)),
-        MenuItemDef::Command(MenuCommand::new("Restore Item", "restore").visible_when(IN_TRASH)),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-inv-purge-item", "purge").visible_when(IN_TRASH),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-inv-restore-item", "restore").visible_when(IN_TRASH),
+        ),
     ],
 };
 
@@ -462,156 +536,171 @@ pub(crate) static INVENTORY_FOLDER_MENU: MenuDef = MenuDef {
 /// head, the clipboard block, the delete block, then the per-type tail (each
 /// entry visible only for its type, the reference's per-bridge selection).
 pub(crate) static INVENTORY_ITEM_MENU: MenuDef = MenuDef {
-    label: "Item",
+    label_key: "menu-inv-item",
     items: &[
-        MenuItemDef::Command(MenuCommand::new("Share", "share").enabled_when(CAN_SHARE)),
-        MenuItemDef::Command(MenuCommand::new("Open", "open").enabled_when(CAN_OPEN)),
-        MenuItemDef::Command(MenuCommand::new("Properties", "properties")),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-share", "share").enabled_when(CAN_SHARE)),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-open", "open").enabled_when(CAN_OPEN)),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-properties", "properties")),
         MenuItemDef::Command(
-            MenuCommand::new("Show in Main view", "show-in-main").visible_when(CAN_SHOW_IN_MAIN),
-        ),
-        MenuItemDef::Command(MenuCommand::new("Rename", "rename").enabled_when(CAN_RENAME)),
-        MenuItemDef::Command(
-            MenuCommand::new("Copy Asset UUID", "copy-asset-uuid").enabled_when(CAN_COPY_UUID),
+            MenuCommand::new("menu-inv-show-in-main-view", "show-in-main")
+                .visible_when(CAN_SHOW_IN_MAIN),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Send with Autoresponses", "set-autoresponse-item")
+            MenuCommand::new("menu-inv-rename", "rename").enabled_when(CAN_RENAME),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-inv-copy-asset-uuid", "copy-asset-uuid")
+                .enabled_when(CAN_COPY_UUID),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-inv-send-with-autoresponses", "set-autoresponse-item")
                 .enabled_when(CAN_AUTORESPOND_WITH),
         ),
         MenuItemDef::Separator,
-        MenuItemDef::Command(MenuCommand::new("Copy", "copy").enabled_when(CAN_COPY)),
-        MenuItemDef::Command(MenuCommand::new("Cut", "cut").enabled_when(CAN_CUT)),
-        MenuItemDef::Command(MenuCommand::new("Paste", "paste").enabled_when(CAN_PASTE)),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-copy", "copy").enabled_when(CAN_COPY)),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-cut", "cut").enabled_when(CAN_CUT)),
+        MenuItemDef::Command(MenuCommand::new("menu-inv-paste", "paste").enabled_when(CAN_PASTE)),
         MenuItemDef::Command(
-            MenuCommand::new("Paste As Link", "paste-link").enabled_when(CAN_PASTE_LINK),
+            MenuCommand::new("menu-inv-paste-as-link", "paste-link").enabled_when(CAN_PASTE_LINK),
         ),
         MenuItemDef::Separator,
         MenuItemDef::Command(
-            MenuCommand::new("Delete", "delete")
+            MenuCommand::new("menu-inv-delete", "delete")
                 .visible_when(NOT_IN_TRASH)
                 .enabled_when(CAN_DELETE),
         ),
-        MenuItemDef::Command(MenuCommand::new("Purge Item", "purge").visible_when(IN_TRASH)),
-        MenuItemDef::Command(MenuCommand::new("Restore Item", "restore").visible_when(IN_TRASH)),
-        MenuItemDef::Separator,
-        // Landmark.
-        MenuItemDef::Command(MenuCommand::new("Teleport", "teleport").visible_when(IS_LANDMARK)),
         MenuItemDef::Command(
-            MenuCommand::new("About Landmark", "about-landmark").visible_when(IS_LANDMARK),
+            MenuCommand::new("menu-inv-purge-item", "purge").visible_when(IN_TRASH),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Show on Map", "show-on-map")
+            MenuCommand::new("menu-inv-restore-item", "restore").visible_when(IN_TRASH),
+        ),
+        MenuItemDef::Separator,
+        // Landmark.
+        MenuItemDef::Command(
+            MenuCommand::new("menu-inv-teleport", "teleport").visible_when(IS_LANDMARK),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-inv-about-landmark", "about-landmark").visible_when(IS_LANDMARK),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-inv-show-on-map", "show-on-map")
                 .visible_when(IS_LANDMARK)
                 .enabled_when(UNIMPLEMENTED),
         ),
         // Sound.
         MenuItemDef::Command(
-            MenuCommand::new("Play", "play-sound")
+            MenuCommand::new("menu-inv-play", "play-sound")
                 .visible_when(IS_SOUND)
                 .enabled_when(UNIMPLEMENTED),
         ),
         // Animation.
         MenuItemDef::Command(
-            MenuCommand::new("Play Inworld", "play-inworld")
+            MenuCommand::new("menu-inv-play-inworld", "play-inworld")
                 .visible_when(IS_ANIMATION)
                 .enabled_when(UNIMPLEMENTED),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Play Locally", "play-locally")
+            MenuCommand::new("menu-inv-play-locally", "play-locally")
                 .visible_when(IS_ANIMATION)
                 .enabled_when(UNIMPLEMENTED),
         ),
         // Calling card: IM the person it names (the card's creator).
         MenuItemDef::Command(
-            MenuCommand::new("Send Instant Message", "send-im").visible_when(IS_CALLING_CARD),
+            MenuCommand::new("menu-inv-send-instant-message", "send-im")
+                .visible_when(IS_CALLING_CARD),
         ),
         // …or, on several cards, one ad-hoc conference with all of them (the
         // reference's "Start Conference Chat", parameter "selected").
         MenuItemDef::Command(
-            MenuCommand::new("Start Conference Chat", "start-conference")
+            MenuCommand::new("menu-inv-start-conference-chat", "start-conference")
                 .visible_when(IS_CALLING_CARD),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Offer Teleport...", "offer-teleport")
+            MenuCommand::new("menu-inv-offer-teleport", "offer-teleport")
                 .visible_when(IS_CALLING_CARD)
                 .enabled_when(UNIMPLEMENTED),
         ),
         // Gesture.
         MenuItemDef::Command(
-            MenuCommand::new("Play", "play-gesture")
+            MenuCommand::new("menu-inv-play", "play-gesture")
                 .visible_when(IS_GESTURE)
                 .enabled_when(UNIMPLEMENTED),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Activate", "activate-gesture")
+            MenuCommand::new("menu-inv-activate", "activate-gesture")
                 .visible_when(IS_GESTURE)
                 .enabled_when(GESTURE_INACTIVE),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Deactivate", "deactivate-gesture")
+            MenuCommand::new("menu-inv-deactivate", "deactivate-gesture")
                 .visible_when(IS_GESTURE)
                 .enabled_when(GESTURE_ACTIVE),
         ),
         // Texture.
         MenuItemDef::Command(
-            MenuCommand::new("Save As", "save-as")
+            MenuCommand::new("menu-inv-save-as", "save-as")
                 .visible_when(IS_TEXTURE)
                 .enabled_when(UNIMPLEMENTED),
         ),
         // Wearable (clothing and body parts).
         MenuItemDef::Command(
-            MenuCommand::new("Wear", "wear-wearable")
+            MenuCommand::new("menu-inv-wear", "wear-wearable")
                 .visible_when(IS_WEARABLE)
                 .enabled_when(NOT_WORN),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Add", "add-wearable")
+            MenuCommand::new("menu-inv-add", "add-wearable")
                 .visible_when(IS_CLOTHING)
                 .enabled_when(NOT_WORN),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Take Off", "take-off")
+            MenuCommand::new("menu-inv-take-off", "take-off")
                 .visible_when(IS_CLOTHING)
                 .enabled_when(WORN),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Edit", "edit-wearable")
+            MenuCommand::new("menu-inv-edit", "edit-wearable")
                 .visible_when(IS_WEARABLE)
                 .enabled_when(WORN),
         ),
-        MenuItemDef::Command(MenuCommand::new("Edit", "edit-material").visible_when(IS_MATERIAL)),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-inv-edit", "edit-material").visible_when(IS_MATERIAL),
+        ),
         // Object / attachment.
         MenuItemDef::Command(
-            MenuCommand::new("Wear", "attach")
+            MenuCommand::new("menu-inv-wear", "attach")
                 .visible_when(IS_OBJECT)
                 .enabled_when(NOT_WORN),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Add", "attach-add")
+            MenuCommand::new("menu-inv-add", "attach-add")
                 .visible_when(IS_OBJECT)
                 .enabled_when(NOT_WORN),
         ),
         MenuItemDef::SubmenuWhen(&ATTACH_TO_MENU, IS_OBJECT),
         MenuItemDef::SubmenuWhen(&ATTACH_TO_HUD_MENU, IS_OBJECT),
         MenuItemDef::Command(
-            MenuCommand::new("Touch", "touch")
+            MenuCommand::new("menu-inv-touch", "touch")
                 .visible_when(IS_OBJECT)
                 .enabled_when(UNIMPLEMENTED),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Detach From Yourself", "detach")
+            MenuCommand::new("menu-inv-detach-from-yourself", "detach")
                 .visible_when(IS_OBJECT)
                 .enabled_when(WORN),
         ),
         // Settings.
-        MenuItemDef::Command(MenuCommand::new("Edit", "edit-settings").visible_when(IS_SETTINGS)),
         MenuItemDef::Command(
-            MenuCommand::new("Apply Only To Myself", "settings-apply-local")
+            MenuCommand::new("menu-inv-edit", "edit-settings").visible_when(IS_SETTINGS),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-inv-apply-only-to-myself", "settings-apply-local")
                 .visible_when(IS_SETTINGS)
                 .enabled_when(UNIMPLEMENTED),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Apply To Parcel", "settings-apply-parcel")
+            MenuCommand::new("menu-inv-apply-to-parcel", "settings-apply-parcel")
                 .visible_when(IS_SETTINGS)
                 .enabled_when(UNIMPLEMENTED),
         ),
@@ -3557,7 +3646,7 @@ mod tests {
         fn walk(menu: &'static MenuDef, out: &mut Vec<(&'static str, &'static str)>) {
             for entry in menu.items {
                 match entry {
-                    MenuItemDef::Command(command) => out.push((command.label, command.action)),
+                    MenuItemDef::Command(command) => out.push((command.label_key, command.action)),
                     MenuItemDef::Submenu(sub) | MenuItemDef::SubmenuWhen(sub, _) => {
                         walk(sub, out);
                     }
@@ -3577,100 +3666,100 @@ mod tests {
     #[test]
     fn item_menu_keeps_every_entry() {
         let expected: Vec<(&str, &str)> = vec![
-            ("Share", "share"),
-            ("Open", "open"),
-            ("Properties", "properties"),
-            ("Show in Main view", "show-in-main"),
-            ("Rename", "rename"),
-            ("Copy Asset UUID", "copy-asset-uuid"),
-            ("Send with Autoresponses", "set-autoresponse-item"),
-            ("Copy", "copy"),
-            ("Cut", "cut"),
-            ("Paste", "paste"),
-            ("Paste As Link", "paste-link"),
-            ("Delete", "delete"),
-            ("Purge Item", "purge"),
-            ("Restore Item", "restore"),
-            ("Teleport", "teleport"),
-            ("About Landmark", "about-landmark"),
-            ("Show on Map", "show-on-map"),
-            ("Play", "play-sound"),
-            ("Play Inworld", "play-inworld"),
-            ("Play Locally", "play-locally"),
-            ("Send Instant Message", "send-im"),
-            ("Start Conference Chat", "start-conference"),
-            ("Offer Teleport...", "offer-teleport"),
-            ("Play", "play-gesture"),
-            ("Activate", "activate-gesture"),
-            ("Deactivate", "deactivate-gesture"),
-            ("Save As", "save-as"),
-            ("Wear", "wear-wearable"),
-            ("Add", "add-wearable"),
-            ("Take Off", "take-off"),
-            ("Edit", "edit-wearable"),
-            ("Edit", "edit-material"),
-            ("Wear", "attach"),
-            ("Add", "attach-add"),
-            ("Chest (1)", "attach-point-1"),
-            ("Skull (2)", "attach-point-2"),
-            ("Left Shoulder (3)", "attach-point-3"),
-            ("Right Shoulder (4)", "attach-point-4"),
-            ("Left Hand (5)", "attach-point-5"),
-            ("Right Hand (6)", "attach-point-6"),
-            ("Left Foot (7)", "attach-point-7"),
-            ("Right Foot (8)", "attach-point-8"),
-            ("Spine (9)", "attach-point-9"),
-            ("Pelvis (10)", "attach-point-10"),
-            ("Mouth (11)", "attach-point-11"),
-            ("Chin (12)", "attach-point-12"),
-            ("Left Ear (13)", "attach-point-13"),
-            ("Right Ear (14)", "attach-point-14"),
-            ("Left Eyeball (15)", "attach-point-15"),
-            ("Right Eyeball (16)", "attach-point-16"),
-            ("Nose (17)", "attach-point-17"),
-            ("R Upper Arm (18)", "attach-point-18"),
-            ("R Forearm (19)", "attach-point-19"),
-            ("L Upper Arm (20)", "attach-point-20"),
-            ("L Forearm (21)", "attach-point-21"),
-            ("Right Hip (22)", "attach-point-22"),
-            ("R Upper Leg (23)", "attach-point-23"),
-            ("R Lower Leg (24)", "attach-point-24"),
-            ("Left Hip (25)", "attach-point-25"),
-            ("L Upper Leg (26)", "attach-point-26"),
-            ("L Lower Leg (27)", "attach-point-27"),
-            ("Stomach (28)", "attach-point-28"),
-            ("Left Pec (29)", "attach-point-29"),
-            ("Right Pec (30)", "attach-point-30"),
-            ("Neck (39)", "attach-point-39"),
-            ("Avatar Center (40)", "attach-point-40"),
-            ("Left Ring Finger (41)", "attach-point-41"),
-            ("Right Ring Finger (42)", "attach-point-42"),
-            ("Tail Base (43)", "attach-point-43"),
-            ("Tail Tip (44)", "attach-point-44"),
-            ("Left Wing (45)", "attach-point-45"),
-            ("Right Wing (46)", "attach-point-46"),
-            ("Jaw (47)", "attach-point-47"),
-            ("Alt Left Ear (48)", "attach-point-48"),
-            ("Alt Right Ear (49)", "attach-point-49"),
-            ("Alt Left Eye (50)", "attach-point-50"),
-            ("Alt Right Eye (51)", "attach-point-51"),
-            ("Tongue (52)", "attach-point-52"),
-            ("Groin (53)", "attach-point-53"),
-            ("Left Hind Foot (54)", "attach-point-54"),
-            ("Right Hind Foot (55)", "attach-point-55"),
-            ("Center 2", "attach-point-31"),
-            ("Top Right", "attach-point-32"),
-            ("Top", "attach-point-33"),
-            ("Top Left", "attach-point-34"),
-            ("Center", "attach-point-35"),
-            ("Bottom Left", "attach-point-36"),
-            ("Bottom", "attach-point-37"),
-            ("Bottom Right", "attach-point-38"),
-            ("Touch", "touch"),
-            ("Detach From Yourself", "detach"),
-            ("Edit", "edit-settings"),
-            ("Apply Only To Myself", "settings-apply-local"),
-            ("Apply To Parcel", "settings-apply-parcel"),
+            ("menu-inv-share", "share"),
+            ("menu-inv-open", "open"),
+            ("menu-inv-properties", "properties"),
+            ("menu-inv-show-in-main-view", "show-in-main"),
+            ("menu-inv-rename", "rename"),
+            ("menu-inv-copy-asset-uuid", "copy-asset-uuid"),
+            ("menu-inv-send-with-autoresponses", "set-autoresponse-item"),
+            ("menu-inv-copy", "copy"),
+            ("menu-inv-cut", "cut"),
+            ("menu-inv-paste", "paste"),
+            ("menu-inv-paste-as-link", "paste-link"),
+            ("menu-inv-delete", "delete"),
+            ("menu-inv-purge-item", "purge"),
+            ("menu-inv-restore-item", "restore"),
+            ("menu-inv-teleport", "teleport"),
+            ("menu-inv-about-landmark", "about-landmark"),
+            ("menu-inv-show-on-map", "show-on-map"),
+            ("menu-inv-play", "play-sound"),
+            ("menu-inv-play-inworld", "play-inworld"),
+            ("menu-inv-play-locally", "play-locally"),
+            ("menu-inv-send-instant-message", "send-im"),
+            ("menu-inv-start-conference-chat", "start-conference"),
+            ("menu-inv-offer-teleport", "offer-teleport"),
+            ("menu-inv-play", "play-gesture"),
+            ("menu-inv-activate", "activate-gesture"),
+            ("menu-inv-deactivate", "deactivate-gesture"),
+            ("menu-inv-save-as", "save-as"),
+            ("menu-inv-wear", "wear-wearable"),
+            ("menu-inv-add", "add-wearable"),
+            ("menu-inv-take-off", "take-off"),
+            ("menu-inv-edit", "edit-wearable"),
+            ("menu-inv-edit", "edit-material"),
+            ("menu-inv-wear", "attach"),
+            ("menu-inv-add", "attach-add"),
+            ("menu-inv-chest-1", "attach-point-1"),
+            ("menu-inv-skull-2", "attach-point-2"),
+            ("menu-inv-left-shoulder-3", "attach-point-3"),
+            ("menu-inv-right-shoulder-4", "attach-point-4"),
+            ("menu-inv-left-hand-5", "attach-point-5"),
+            ("menu-inv-right-hand-6", "attach-point-6"),
+            ("menu-inv-left-foot-7", "attach-point-7"),
+            ("menu-inv-right-foot-8", "attach-point-8"),
+            ("menu-inv-spine-9", "attach-point-9"),
+            ("menu-inv-pelvis-10", "attach-point-10"),
+            ("menu-inv-mouth-11", "attach-point-11"),
+            ("menu-inv-chin-12", "attach-point-12"),
+            ("menu-inv-left-ear-13", "attach-point-13"),
+            ("menu-inv-right-ear-14", "attach-point-14"),
+            ("menu-inv-left-eyeball-15", "attach-point-15"),
+            ("menu-inv-right-eyeball-16", "attach-point-16"),
+            ("menu-inv-nose-17", "attach-point-17"),
+            ("menu-inv-r-upper-arm-18", "attach-point-18"),
+            ("menu-inv-r-forearm-19", "attach-point-19"),
+            ("menu-inv-l-upper-arm-20", "attach-point-20"),
+            ("menu-inv-l-forearm-21", "attach-point-21"),
+            ("menu-inv-right-hip-22", "attach-point-22"),
+            ("menu-inv-r-upper-leg-23", "attach-point-23"),
+            ("menu-inv-r-lower-leg-24", "attach-point-24"),
+            ("menu-inv-left-hip-25", "attach-point-25"),
+            ("menu-inv-l-upper-leg-26", "attach-point-26"),
+            ("menu-inv-l-lower-leg-27", "attach-point-27"),
+            ("menu-inv-stomach-28", "attach-point-28"),
+            ("menu-inv-left-pec-29", "attach-point-29"),
+            ("menu-inv-right-pec-30", "attach-point-30"),
+            ("menu-inv-neck-39", "attach-point-39"),
+            ("menu-inv-avatar-center-40", "attach-point-40"),
+            ("menu-inv-left-ring-finger-41", "attach-point-41"),
+            ("menu-inv-right-ring-finger-42", "attach-point-42"),
+            ("menu-inv-tail-base-43", "attach-point-43"),
+            ("menu-inv-tail-tip-44", "attach-point-44"),
+            ("menu-inv-left-wing-45", "attach-point-45"),
+            ("menu-inv-right-wing-46", "attach-point-46"),
+            ("menu-inv-jaw-47", "attach-point-47"),
+            ("menu-inv-alt-left-ear-48", "attach-point-48"),
+            ("menu-inv-alt-right-ear-49", "attach-point-49"),
+            ("menu-inv-alt-left-eye-50", "attach-point-50"),
+            ("menu-inv-alt-right-eye-51", "attach-point-51"),
+            ("menu-inv-tongue-52", "attach-point-52"),
+            ("menu-inv-groin-53", "attach-point-53"),
+            ("menu-inv-left-hind-foot-54", "attach-point-54"),
+            ("menu-inv-right-hind-foot-55", "attach-point-55"),
+            ("menu-inv-center-2", "attach-point-31"),
+            ("menu-inv-top-right", "attach-point-32"),
+            ("menu-inv-top", "attach-point-33"),
+            ("menu-inv-top-left", "attach-point-34"),
+            ("menu-inv-center", "attach-point-35"),
+            ("menu-inv-bottom-left", "attach-point-36"),
+            ("menu-inv-bottom", "attach-point-37"),
+            ("menu-inv-bottom-right", "attach-point-38"),
+            ("menu-inv-touch", "touch"),
+            ("menu-inv-detach-from-yourself", "detach"),
+            ("menu-inv-edit", "edit-settings"),
+            ("menu-inv-apply-only-to-myself", "settings-apply-local"),
+            ("menu-inv-apply-to-parcel", "settings-apply-parcel"),
         ];
         assert_eq!(
             entries(&INVENTORY_ITEM_MENU),
@@ -3683,42 +3772,42 @@ mod tests {
     #[test]
     fn folder_menu_keeps_every_entry() {
         let expected: Vec<(&str, &str)> = vec![
-            ("Share", "share"),
-            ("Empty Trash", "empty-trash"),
-            ("Empty Lost And Found", "empty-lost-and-found"),
-            ("New Folder", "new-folder"),
-            ("New Script", "new-script"),
-            ("New Notecard", "new-notecard"),
-            ("New Gesture", "new-gesture"),
-            ("New Shirt", "new-shirt"),
-            ("New Pants", "new-pants"),
-            ("New Shoes", "new-shoes"),
-            ("New Socks", "new-socks"),
-            ("New Jacket", "new-jacket"),
-            ("New Skirt", "new-skirt"),
-            ("New Gloves", "new-gloves"),
-            ("New Undershirt", "new-undershirt"),
-            ("New Underpants", "new-underpants"),
-            ("New Alpha Mask", "new-alpha"),
-            ("New Tattoo", "new-tattoo"),
-            ("New Universal", "new-universal"),
-            ("New Physics", "new-physics"),
-            ("New Shape", "new-shape"),
-            ("New Skin", "new-skin"),
-            ("New Hair", "new-hair"),
-            ("New Eyes", "new-eyes"),
-            ("Replace Current Outfit", "replace-outfit"),
-            ("Add To Current Outfit", "add-to-outfit"),
-            ("Remove From Current Outfit", "remove-from-outfit"),
-            ("Start Conference Chat", "start-conference"),
-            ("Rename", "rename"),
-            ("Cut", "cut"),
-            ("Copy", "copy"),
-            ("Paste", "paste"),
-            ("Paste As Link", "paste-link"),
-            ("Delete", "delete"),
-            ("Purge Item", "purge"),
-            ("Restore Item", "restore"),
+            ("menu-inv-share", "share"),
+            ("menu-inv-empty-trash", "empty-trash"),
+            ("menu-inv-empty-lost-and-found", "empty-lost-and-found"),
+            ("menu-inv-new-folder", "new-folder"),
+            ("menu-inv-new-script", "new-script"),
+            ("menu-inv-new-notecard", "new-notecard"),
+            ("menu-inv-new-gesture", "new-gesture"),
+            ("menu-inv-new-shirt", "new-shirt"),
+            ("menu-inv-new-pants", "new-pants"),
+            ("menu-inv-new-shoes", "new-shoes"),
+            ("menu-inv-new-socks", "new-socks"),
+            ("menu-inv-new-jacket", "new-jacket"),
+            ("menu-inv-new-skirt", "new-skirt"),
+            ("menu-inv-new-gloves", "new-gloves"),
+            ("menu-inv-new-undershirt", "new-undershirt"),
+            ("menu-inv-new-underpants", "new-underpants"),
+            ("menu-inv-new-alpha-mask", "new-alpha"),
+            ("menu-inv-new-tattoo", "new-tattoo"),
+            ("menu-inv-new-universal", "new-universal"),
+            ("menu-inv-new-physics", "new-physics"),
+            ("menu-inv-new-shape", "new-shape"),
+            ("menu-inv-new-skin", "new-skin"),
+            ("menu-inv-new-hair", "new-hair"),
+            ("menu-inv-new-eyes", "new-eyes"),
+            ("menu-inv-replace-current-outfit", "replace-outfit"),
+            ("menu-inv-add-to-current-outfit", "add-to-outfit"),
+            ("menu-inv-remove-from-current-outfit", "remove-from-outfit"),
+            ("menu-inv-start-conference-chat", "start-conference"),
+            ("menu-inv-rename", "rename"),
+            ("menu-inv-cut", "cut"),
+            ("menu-inv-copy", "copy"),
+            ("menu-inv-paste", "paste"),
+            ("menu-inv-paste-as-link", "paste-link"),
+            ("menu-inv-delete", "delete"),
+            ("menu-inv-purge-item", "purge"),
+            ("menu-inv-restore-item", "restore"),
         ];
         assert_eq!(
             entries(&INVENTORY_FOLDER_MENU),
@@ -3731,38 +3820,38 @@ mod tests {
     #[test]
     fn add_menu_keeps_every_entry() {
         let expected: Vec<(&str, &str)> = vec![
-            ("Image...", "upload-image"),
-            ("Sound...", "upload-sound"),
-            ("Animation...", "upload-animation"),
-            ("Model...", "upload-model"),
-            ("Material...", "upload-material"),
-            ("Bulk...", "upload-bulk"),
-            ("New Folder", "new-folder"),
-            ("New Script", "new-script"),
-            ("New Notecard", "new-notecard"),
-            ("New Gesture", "new-gesture"),
-            ("New Material", "new-material"),
-            ("New Shirt", "new-shirt"),
-            ("New Pants", "new-pants"),
-            ("New Shoes", "new-shoes"),
-            ("New Socks", "new-socks"),
-            ("New Jacket", "new-jacket"),
-            ("New Skirt", "new-skirt"),
-            ("New Gloves", "new-gloves"),
-            ("New Undershirt", "new-undershirt"),
-            ("New Underpants", "new-underpants"),
-            ("New Alpha Mask", "new-alpha"),
-            ("New Tattoo", "new-tattoo"),
-            ("New Universal", "new-universal"),
-            ("New Physics", "new-physics"),
-            ("New Shape", "new-shape"),
-            ("New Skin", "new-skin"),
-            ("New Hair", "new-hair"),
-            ("New Eyes", "new-eyes"),
-            ("New Sky", "new-sky"),
-            ("New Water", "new-water"),
-            ("New Day Cycle", "new-daycycle"),
-            ("Shop...", "shop"),
+            ("menu-inv-image", "upload-image"),
+            ("menu-inv-sound", "upload-sound"),
+            ("menu-inv-animation", "upload-animation"),
+            ("menu-inv-model", "upload-model"),
+            ("menu-inv-material", "upload-material"),
+            ("menu-inv-bulk", "upload-bulk"),
+            ("menu-inv-new-folder", "new-folder"),
+            ("menu-inv-new-script", "new-script"),
+            ("menu-inv-new-notecard", "new-notecard"),
+            ("menu-inv-new-gesture", "new-gesture"),
+            ("menu-inv-new-material", "new-material"),
+            ("menu-inv-new-shirt", "new-shirt"),
+            ("menu-inv-new-pants", "new-pants"),
+            ("menu-inv-new-shoes", "new-shoes"),
+            ("menu-inv-new-socks", "new-socks"),
+            ("menu-inv-new-jacket", "new-jacket"),
+            ("menu-inv-new-skirt", "new-skirt"),
+            ("menu-inv-new-gloves", "new-gloves"),
+            ("menu-inv-new-undershirt", "new-undershirt"),
+            ("menu-inv-new-underpants", "new-underpants"),
+            ("menu-inv-new-alpha-mask", "new-alpha"),
+            ("menu-inv-new-tattoo", "new-tattoo"),
+            ("menu-inv-new-universal", "new-universal"),
+            ("menu-inv-new-physics", "new-physics"),
+            ("menu-inv-new-shape", "new-shape"),
+            ("menu-inv-new-skin", "new-skin"),
+            ("menu-inv-new-hair", "new-hair"),
+            ("menu-inv-new-eyes", "new-eyes"),
+            ("menu-inv-new-sky", "new-sky"),
+            ("menu-inv-new-water", "new-water"),
+            ("menu-inv-new-day-cycle", "new-daycycle"),
+            ("menu-inv-shop", "shop"),
         ];
         assert_eq!(
             entries(&super::INVENTORY_ADD_MENU),

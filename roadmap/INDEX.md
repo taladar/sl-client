@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 100 |
-| ready | 296 |
-| blocked | 40 |
+| ideas | 118 |
+| ready | 308 |
+| blocked | 64 |
 | in-progress | 22 |
-| bugs | 5 |
-| done | 1200 |
-| deferred | 29 |
+| bugs | 6 |
+| done | 1210 |
+| deferred | 30 |
 | wont-do | 16 |
-| **total** | **1708** |
+| **total** | **1774** |
 
-## ideas (100)
+## ideas (118)
 
 ### protocol
 
@@ -172,6 +172,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   shadow tuning (bias / blur / softness)
 - [`viewer-sit-across-region-border-auto-approach`](ideas/viewer-sit-across-region-border-auto-approach.md)
   — Sit on an object across a region border by moving into its region first
+- [`viewer-snapshot-scene-sidecar`](ideas/viewer-snapshot-scene-sidecar.md) —
+  Say what a snapshot is a picture of
 - [`viewer-stars-srgb-linearize`](ideas/viewer-stars-srgb-linearize.md) —
   Linearize the star field like the sky / clouds
 - [`viewer-status-bar-toggle-options`](ideas/viewer-status-bar-toggle-options.md)
@@ -191,6 +193,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
+- [`test-crosscheck-ui-scenes`](ideas/test-crosscheck-ui-scenes.md) — UI scenes
+  — putting two viewers into the same interaction state
 - [`test-reference-cpp-oracles`](ideas/test-reference-cpp-oracles.md) —
   Reference-viewer C++ math and GLSL as test oracles (FFI / naga)
 
@@ -222,6 +226,57 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   service — per-agent trees and the library
 - [`server-login-service`](ideas/server-login-service.md) — Standalone login
   server
+- [`server-lsl-lib-avatar-control`](ideas/server-lsl-lib-avatar-control.md) —
+  Library tranche — avatars, animation, sitting, controls and camera (blocked by
+  `server-lsl-vm-execution`, `server-world-agent-movement`,
+  `server-world-sit-and-attach`)
+- [`server-lsl-lib-comms`](ideas/server-lsl-lib-comms.md) — Library tranche —
+  chat, listens, dialogs and link messages (blocked by
+  `server-lsl-vm-execution`, `server-world-chat-routing`,
+  `protocol-sim-script-messages`)
+- [`server-lsl-lib-detection-sensors`](ideas/server-lsl-lib-detection-sensors.md)
+  — Library tranche — the detected block, sensors and raycasts (blocked by
+  `server-lsl-state-and-events`, `server-world-ecs-store`,
+  `server-world-touch-and-grab`)
+- [`server-lsl-lib-experience`](ideas/server-lsl-lib-experience.md) — Library
+  tranche — experiences and the experience key-value store (blocked by
+  `server-lsl-vm-execution`, `server-lsl-lib-money-permissions`)
+- [`server-lsl-lib-http-url`](ideas/server-lsl-lib-http-url.md) — Library
+  tranche — outbound HTTP and in-world URLs (blocked by
+  `server-lsl-vm-execution`, `server-world-determinism-contract`)
+- [`server-lsl-lib-json-linkset-data`](ideas/server-lsl-lib-json-linkset-data.md)
+  — Library tranche — llJson* and the linkset data store (blocked by
+  `server-lsl-vm-execution`, `server-lsl-library-surface-table`)
+- [`server-lsl-lib-land-region-env`](ideas/server-lsl-lib-land-region-env.md) —
+  Library tranche — parcel, region, estate and environment queries (blocked by
+  `server-lsl-vm-execution`, `server-world-agent-movement`)
+- [`server-lsl-lib-math-rotations`](ideas/server-lsl-lib-math-rotations.md) —
+  Library tranche — maths, vectors and rotations (blocked by
+  `server-lsl-vm-execution`, `server-lsl-library-surface-table`)
+- [`server-lsl-lib-money-permissions`](ideas/server-lsl-lib-money-permissions.md)
+  — Library tranche — script permissions, money and payment (blocked by
+  `server-lsl-vm-execution`, `protocol-sim-script-messages`)
+- [`server-lsl-lib-ossl`](ideas/server-lsl-lib-ossl.md) — Scope the OSSL (os*)
+  surface — how much, and why (blocked by `server-lsl-library-surface-table`)
+- [`server-lsl-lib-physics-vehicles`](ideas/server-lsl-lib-physics-vehicles.md)
+  — Library tranche — status flags, forces, targets and vehicles (blocked by
+  `server-lsl-vm-execution`, `server-world-collision-and-physics`)
+- [`server-lsl-lib-prim-state`](ideas/server-lsl-lib-prim-state.md) — Library
+  tranche — reading and writing the prim (blocked by `server-lsl-vm-execution`,
+  `server-world-ecs-store`, `server-world-link-sets`,
+  `server-world-update-scheduling`)
+- [`server-lsl-lib-strings-lists`](ideas/server-lsl-lib-strings-lists.md) —
+  Library tranche — strings, lists, encoding and hashing (blocked by
+  `server-lsl-vm-execution`, `server-lsl-library-surface-table`)
+- [`server-lsl-lib-task-inventory`](ideas/server-lsl-lib-task-inventory.md) —
+  Library tranche — task inventory, giving, rezzing and notecards (blocked by
+  `server-lsl-vm-execution`, `server-fake-grid-script-engine-wiring`)
+- [`server-lsl-lib-time-timers`](ideas/server-lsl-lib-time-timers.md) — Library
+  tranche — time, timers and sleeping, on a tick clock (blocked by
+  `server-lsl-vm-execution`, `server-world-determinism-contract`)
+- [`server-lsl-script-persistence`](ideas/server-lsl-script-persistence.md) —
+  Script state that survives a take, a rez and a region restart (blocked by
+  `server-lsl-vm-execution`, `server-lsl-state-and-events`)
 - [`server-map-service`](ideas/server-map-service.md) — Map service — tiles and
   map items
 - [`server-message-routing`](ideas/server-message-routing.md) — Global message
@@ -238,7 +293,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (296)
+## ready (308)
 
 ### protocol
 
@@ -258,6 +313,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — SimSession's 54 fields mix the driver's serving stores with the circuit
 - [`protocol-fetch-inventory-items-request`](ready/protocol-fetch-inventory-items-request.md)
   — Fetching inventory items by id (FetchInventory2's request half)
+- [`protocol-sim-script-messages`](ready/protocol-sim-script-messages.md) — The
+  simulator-side script messages SimSession neither sends nor decodes
 - [`protocol-sl-llsd-serde`](ready/protocol-sl-llsd-serde.md) — serde
   Serialize/Deserialize derives for sl-llsd (Llsd) types
 - [`protocol-sl-lsl-serde`](ready/protocol-sl-lsl-serde.md) — serde support for
@@ -265,8 +322,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
-- [`viewer-360-snapshot`](ready/viewer-360-snapshot.md) — 360-degree
-  (equirectangular) snapshot
 - [`viewer-about-land-objects-return`](ready/viewer-about-land-objects-return.md)
   — About Land — object return, editable autoreturn & small option gaps
 - [`viewer-agent-hover-height-ingest`](ready/viewer-agent-hover-height-ingest.md)
@@ -293,8 +348,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-attachment-align`](ready/viewer-attachment-align.md) — Attachment
   alignment tool (avatar align) (blocked by `viewer-object-edit-floater-shell`
   (done))
-- [`viewer-audit-decoded-texture-uploaders`](ready/viewer-audit-decoded-texture-uploaders.md)
-  — Eight independent DecodedTexture uploaders each re-decide colour space
+- [`viewer-audit-checkbox-box-widget`](ready/viewer-audit-checkbox-box-widget.md)
+  — The settings checkbox box is spawned and repainted by hand in seven places
 - [`viewer-audit-demo-panels-in-release`](ready/viewer-audit-demo-panels-in-release.md)
   — Five developer demo panels ship in the release binary from inside library
   crates
@@ -302,24 +357,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Extract the pure logic trapped inside viewer systems and test it
 - [`viewer-audit-lsp-position-roundtrip`](ready/viewer-audit-lsp-position-roundtrip.md)
   — The LSP position-to-byte direction has zero tests
-- [`viewer-audit-menu-label-i18n`](ready/viewer-audit-menu-label-i18n.md) — Menu
-  and pie-menu labels cannot be translated, by type
-- [`viewer-audit-object-children-index`](ready/viewer-audit-object-children-index.md)
-  — ObjectState has no children index, so every linkset query full-scans the
-  region
-- [`viewer-audit-preferences-hub-decoupling`](ready/viewer-audit-preferences-hub-decoupling.md)
-  — sl-viewer-preferences is a 12-crate hub whose own decoupling mechanism is
-  under-applied
 - [`viewer-audit-preferences-restart-note`](ready/viewer-audit-preferences-restart-note.md)
   — There is no restart-note idiom, so 'restart required' is baked into labels
-- [`viewer-audit-render-fixtures-crate`](ready/viewer-audit-render-fixtures-crate.md)
-  — 3297 lines of test fixtures ship in the production scene crate
-- [`viewer-audit-scene-live-daycycle-fixture`](ready/viewer-audit-scene-live-daycycle-fixture.md)
-  — A test fixture that advances the day cycle between samples
 - [`viewer-audit-search-map-edge`](ready/viewer-audit-search-map-edge.md) —
   sl-viewer-search depends on sl-viewer-map for one two-field struct
-- [`viewer-audit-skin-token-coverage`](ready/viewer-audit-skin-token-coverage.md)
-  — The skin system covers two widgets
 - [`viewer-audit-web-auth-preference`](ready/viewer-audit-web-auth-preference.md)
   — Whether the grid session cookie is injected into the browser is a CLI flag,
   not a preference
@@ -789,8 +830,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-render-readback-tier`](ready/viewer-render-readback-tier.md) — Render
   readback tier — assert on the pixels, headlessly (blocked by
   `viewer-render-test-harness` (done))
-- [`viewer-render-resolution-divisor`](ready/viewer-render-resolution-divisor.md)
-  — Render at a reduced resolution (RenderResolutionDivisor)
 - [`viewer-render-type-toggles`](ready/viewer-render-type-toggles.md) —
   Render-type & render-feature toggles (hide object classes, wireframe)
 - [`viewer-report-abuse`](ready/viewer-report-abuse.md) — Report Abuse floater
@@ -819,6 +858,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Scripts on disk — mirror grid scripts to a directory tree
 - [`viewer-script-queue`](ready/viewer-script-queue.md) — Script queue — mass
   recompile / reset / run-state (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-script-warning-window`](ready/viewer-script-warning-window.md) —
+  Nothing in the viewer shows a script run-time error
 - [`viewer-scripted-followcam-llsetcameraparams`](ready/viewer-scripted-followcam-llsetcameraparams.md)
   — Apply scripted follow-camera parameters (llSetCameraParams)
 - [`viewer-search-maturity-filter`](ready/viewer-search-maturity-filter.md) —
@@ -829,6 +870,26 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — export / import (blocked by `viewer-preferences-floater` (done))
 - [`viewer-sit-stand-actions`](ready/viewer-sit-stand-actions.md) — Sit / stand
   actions (blocked by `viewer-object-selection-core` (done))
+- [`viewer-skin-bevel-border-policy`](ready/viewer-skin-bevel-border-policy.md)
+  — A bevel's light source has a handedness the logical-property ban denies
+- [`viewer-skin-checkbox-radio-shape`](ready/viewer-skin-checkbox-radio-shape.md)
+  — Checkboxes are hand-rolled per panel, so no skin can shape one
+- [`viewer-skin-icon-set`](ready/viewer-skin-icon-set.md) — A skin should be
+  able to carry an icon set, not just colours
+- [`viewer-skin-light-surface-roles`](ready/viewer-skin-light-surface-roles.md)
+  — Role tokens for a light data surface on dark chrome
+- [`viewer-skin-list-row-striping`](ready/viewer-skin-list-row-striping.md) —
+  Scroll-list rows — striping, hover and a selection the skin owns
+- [`viewer-skin-panel-text-roles`](ready/viewer-skin-panel-text-roles.md) —
+  Panel text does not follow the skin, only the widgets it is built from
+- [`viewer-skin-scrollbar-shape`](ready/viewer-skin-scrollbar-shape.md) — The
+  scrollbar is a bar — the reference's has ends, a track and a shape
+- [`viewer-skin-text-shadow-role`](ready/viewer-skin-text-shadow-role.md) — A
+  text-shadow role — the trait that makes classic UI text look classic
+- [`viewer-skin-tooltip-roles`](ready/viewer-skin-tooltip-roles.md) — The
+  tooltip is a skinned surface everywhere but here
+- [`viewer-skin-widget-state-classes`](ready/viewer-skin-widget-state-classes.md)
+  — Widget state belongs in the cascade, not in a per-frame Rust paint
 - [`viewer-snapshot-composition-guides`](ready/viewer-snapshot-composition-guides.md)
   — Snapshot composition guides, capture frame & filename patterns
 - [`viewer-snapshot-highres-quiet`](ready/viewer-snapshot-highres-quiet.md) —
@@ -895,6 +956,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-world-map-floater` (done))
 - [`viewer-viewer-effect-render`](ready/viewer-viewer-effect-render.md) — Render
   inbound ViewerEffects (beams, spheres)
+- [`viewer-vintage-ui-chrome-crosscheck`](ready/viewer-vintage-ui-chrome-crosscheck.md)
+  — Measure skin fidelity instead of arguing about it
 - [`viewer-voice-audio`](ready/viewer-voice-audio.md) — Voice audio transport
   (WebRTC — no Vivox) (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-audio-backend` (done))
@@ -907,6 +970,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — World-map floater — tracking & teleport hand-off (blocked by
   `viewer-world-map-floater` (done), `viewer-beacons-beam-render` (done),
   `viewer-teleport-flow-progress` (done))
+- [`viewer-world-text-in-the-overlay-pass`](ready/viewer-world-text-in-the-overlay-pass.md)
+  — Name tags and hover text belong in the overlay pass, not the world pass
 
 ### idiomatic
 
@@ -923,6 +988,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   write a gesture asset (LLMultiGesture)
 - [`test-assets-remaining-class-audit`](ready/test-assets-remaining-class-audit.md)
   — Decide what the remaining asset classes are worth
+- [`test-assets-unify-rigged-fixtures`](ready/test-assets-unify-rigged-fixtures.md)
+  — Two generators make a rigged fixture; there should be one (blocked by
+  `viewer-audit-render-fixtures-crate` (done))
 - [`test-audit-conformance-boilerplate`](ready/test-audit-conformance-boilerplate.md)
   — Factor the repeated session/id acquisition out of the conformance cases
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
@@ -936,7 +1004,26 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
   The two REPL binaries share ~400 near-verbatim lines and have already drifted
 
-## blocked (40)
+### server
+
+- [`server-lsl-architecture`](ready/server-lsl-architecture.md) — LSL engine
+  architecture — execution model, crate layout, scheduling
+- [`server-lsl-value-model`](ready/server-lsl-value-model.md) — The LSL value
+  model — seven types and their exact coercions
+- [`server-world-chat-routing`](ready/server-world-chat-routing.md) — The fake
+  grid hears local chat and drops it
+- [`server-world-ecs-store`](ready/server-world-ecs-store.md) — An ECS scene
+  store for the region, in place of a Vec of objects
+- [`server-world-heartbeat`](ready/server-world-heartbeat.md) — A region
+  heartbeat — the fake grid has no simulation loop at all
+
+## blocked (64)
+
+### protocol
+
+- [`protocol-sim-lsl-syntax-document`](blocked/protocol-sim-lsl-syntax-document.md)
+  — The fake grid serves an empty LSLSyntax document (blocked by
+  `server-lsl-library-surface-table`)
 
 ### viewer
 
@@ -1019,6 +1106,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-script-mirror-download`)
 - [`viewer-script-recovery`](blocked/viewer-script-recovery.md) — Unsaved-script
   recovery (blocked by `viewer-lsl-editor-widget`)
+- [`viewer-skin-image-backed-widgets`](blocked/viewer-skin-image-backed-widgets.md)
+  — Nine-sliced image surfaces, so a skin can change a widget's shape (blocked
+  by `viewer-skin-widget-state-classes`)
 - [`viewer-snapshot-profile-feed`](blocked/viewer-snapshot-profile-feed.md) —
   Snapshot destination — profile feed (blocked by `viewer-snapshot-floater`
   (done), `viewer-image-upload`)
@@ -1041,6 +1131,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-vintage-bottom-bar`](blocked/viewer-vintage-bottom-bar.md) — Classic
   (Vintage) bottom-bar arrangement (blocked by `viewer-animation-overrider`,
   `viewer-toolbar-customization`)
+- [`viewer-vintage-skin`](blocked/viewer-vintage-skin.md) — Ship a Vintage-alike
+  skin (blocked by `viewer-skin-light-surface-roles`,
+  `viewer-skin-image-backed-widgets`)
 - [`viewer-voice-call-dialogs`](blocked/viewer-voice-call-dialogs.md) — Voice
   call dialogs — incoming / outgoing, channel switching (blocked by
   `viewer-voice-audio`)
@@ -1053,13 +1146,81 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
-- [`test-assets-unify-rigged-fixtures`](blocked/test-assets-unify-rigged-fixtures.md)
-  — Two generators make a rigged fixture; there should be one (blocked by
-  `viewer-audit-render-fixtures-crate`)
+- [`test-fake-grid-lsl-offline-cases`](blocked/test-fake-grid-lsl-offline-cases.md)
+  — Move the script and chat conformance cases offline (blocked by
+  `server-fake-grid-scripted-scenario`)
+- [`test-lsl-content-suite`](blocked/test-lsl-content-suite.md) — A test harness
+  for somebody else's LSL content (blocked by
+  `server-fake-grid-scripted-avatars`)
+- [`test-lsl-differential-opensim`](blocked/test-lsl-differential-opensim.md) —
+  Run one script on both grids and diff what it did (blocked by
+  `server-fake-grid-script-engine-wiring`)
+- [`test-lsl-script-corpus`](blocked/test-lsl-script-corpus.md) — An executable
+  LSL corpus that runs in cargo test with no grid (blocked by
+  `server-lsl-vm-execution`)
 - [`test-voice-account`](blocked/test-voice-account-provision-a-voice-account.md)
   — provision a voice account (blocked by `viewer-voice-audio`)
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
+
+### repl
+
+- [`repl-lsl-script-control`](blocked/repl-lsl-script-control.md) — sl-repl
+  verbs for compiling, running and watching scripts (blocked by
+  `server-fake-grid-script-engine-wiring`)
+
+### server
+
+- [`server-fake-grid-script-compile-on-upload`](blocked/server-fake-grid-script-compile-on-upload.md)
+  — A script upload is accepted and never compiled (blocked by
+  `server-lsl-compiler-ir`)
+- [`server-fake-grid-script-engine-wiring`](blocked/server-fake-grid-script-engine-wiring.md)
+  — Wire the script engine into the fake grid (blocked by
+  `server-lsl-vm-execution`, `server-world-heartbeat`, `server-world-ecs-store`)
+- [`server-fake-grid-scripted-avatars`](blocked/server-fake-grid-scripted-avatars.md)
+  — Scripted avatars — a client that grants, pays, sits and answers (blocked by
+  `server-fake-grid-script-engine-wiring`)
+- [`server-fake-grid-scripted-scenario`](blocked/server-fake-grid-scripted-scenario.md)
+  — A scripts scenario — one prim per scripted behaviour (blocked by
+  `server-fake-grid-script-engine-wiring`)
+- [`server-lsl-compiler-ir`](blocked/server-lsl-compiler-ir.md) — Lower the LSL
+  syntax tree to something executable (blocked by `server-lsl-architecture`,
+  `server-lsl-value-model`)
+- [`server-lsl-library-surface-table`](blocked/server-lsl-library-surface-table.md)
+  — One generated table for the library, and a coverage harness over it (blocked
+  by `server-lsl-architecture`)
+- [`server-lsl-memory-and-limits`](blocked/server-lsl-memory-and-limits.md) —
+  Script memory and limits, because scripts observe them (blocked by
+  `server-lsl-vm-execution`)
+- [`server-lsl-runtime-errors`](blocked/server-lsl-runtime-errors.md) — Run-time
+  errors where a resident can see them (blocked by `server-lsl-vm-execution`)
+- [`server-lsl-state-and-events`](blocked/server-lsl-state-and-events.md) — The
+  event and state machine — 35 events and the rules around them (blocked by
+  `server-lsl-vm-execution`)
+- [`server-lsl-vm-execution`](blocked/server-lsl-vm-execution.md) — The script
+  VM — suspendable execution in per-tick slices (blocked by
+  `server-lsl-compiler-ir`)
+- [`server-world-agent-movement`](blocked/server-world-agent-movement.md) — The
+  agent never moves — AgentUpdate is decoded and ignored (blocked by
+  `server-world-heartbeat`)
+- [`server-world-collision-and-physics`](blocked/server-world-collision-and-physics.md)
+  — Enough physics for the collision, target and volume-detect events (blocked
+  by `server-world-heartbeat`, `server-world-ecs-store`)
+- [`server-world-determinism-contract`](blocked/server-world-determinism-contract.md)
+  — Keep the fake grid reproducible once it runs scripts (blocked by
+  `server-world-heartbeat`)
+- [`server-world-link-sets`](blocked/server-world-link-sets.md) — A real
+  link-set model — link numbers, root and children (blocked by
+  `server-world-ecs-store`)
+- [`server-world-sit-and-attach`](blocked/server-world-sit-and-attach.md) —
+  Sitting and attaching as world state a script can read (blocked by
+  `server-world-ecs-store`)
+- [`server-world-touch-and-grab`](blocked/server-world-touch-and-grab.md) —
+  Touch routing — a click on a prim reaches nothing (blocked by
+  `protocol-sim-script-messages`)
+- [`server-world-update-scheduling`](blocked/server-world-update-scheduling.md)
+  — Batch world changes into per-tick update bursts (blocked by
+  `server-world-heartbeat`, `server-world-ecs-store`)
 
 ## in-progress (22)
 
@@ -1122,7 +1283,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (5)
+## bugs (6)
 
 ### protocol
 
@@ -1139,8 +1300,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Own avatar looks broken after a teleport
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
+- [`viewer-sliders-show-no-value`](bugs/viewer-sliders-show-no-value.md) — A
+  slider shows no value, and no bounds or step either
 
-## done (1200)
+## done (1210)
 
 ### protocol
 
@@ -1387,6 +1550,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`build-structural-encapsulation-audit`](done/build-structural-encapsulation-audit.md)
   — Audit the workspace for structural and encapsulation improvements the crate
   split exposed (blocked by `build-split-viewer-crate` (done))
+- [`viewer-360-snapshot`](done/viewer-360-snapshot.md) — 360-degree
+  (equirectangular) snapshot
 - [`viewer-about-floater`](done/viewer-about-floater.md) — About floater —
   version, system info, credits, licenses (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -1452,6 +1617,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   forever
 - [`viewer-audit-command-result-diagnostics`](done/viewer-audit-command-result-diagnostics.md)
   — The bevy command dispatcher discards 300 protocol send results with no log
+- [`viewer-audit-decoded-texture-uploaders`](done/viewer-audit-decoded-texture-uploaders.md)
+  — Eight independent DecodedTexture uploaders each re-decide colour space
 - [`viewer-audit-diagnostic-stream-unread`](done/viewer-audit-diagnostic-stream-unread.md)
   — The viewer collects protocol diagnostics and drains none of them
 - [`viewer-audit-display-name-accessor-sweep`](done/viewer-audit-display-name-accessor-sweep.md)
@@ -1475,12 +1642,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A transient map-tile fetch error is cached as permanently missing
 - [`viewer-audit-media-url-scheme-allowlist`](done/viewer-audit-media-url-scheme-allowlist.md)
   — Parcel media URLs reach CEF and GStreamer with no scheme allowlist
+- [`viewer-audit-menu-label-i18n`](done/viewer-audit-menu-label-i18n.md) — Menu
+  and pie-menu labels cannot be translated, by type
 - [`viewer-audit-name-tag-viewport-gate`](done/viewer-audit-name-tag-viewport-gate.md)
   — The name-tag viewport-changed gate is exactly inverted
 - [`viewer-audit-notification-store-overwrite`](done/viewer-audit-notification-store-overwrite.md)
   — A malformed notification store is overwritten, destroying unanswered notices
 - [`viewer-audit-notifications-crate-split`](done/viewer-audit-notifications-crate-split.md)
   — Split the 21637-line notification catalogue and make its lookup a map
+- [`viewer-audit-object-children-index`](done/viewer-audit-object-children-index.md)
+  — ObjectState has no children index, so every linkset query full-scans the
+  region
 - [`viewer-audit-parcel-access-list-accumulate`](done/viewer-audit-parcel-access-list-accumulate.md)
   — Editing a multi-packet parcel ban list unbans everyone not in the last
   packet
@@ -1497,11 +1669,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Two plugins read resources they never register
 - [`viewer-audit-plugins-own-their-schedule`](done/viewer-audit-plugins-own-their-schedule.md)
   — Most viewer crates export loose systems instead of owning a plugin
+- [`viewer-audit-preferences-hub-decoupling`](done/viewer-audit-preferences-hub-decoupling.md)
+  — sl-viewer-preferences is a 12-crate hub whose own decoupling mechanism is
+  under-applied
 - [`viewer-audit-probe-ambient-multiply`](done/viewer-audit-probe-ambient-multiply.md)
   — suppress_global_ambient multiplies an absolute producer and decays it
   geometrically
 - [`viewer-audit-probe-nonuniform-scale-shear`](done/viewer-audit-probe-nonuniform-scale-shear.md)
   — A reflection probe's non-uniform volume scale shears its sampling frame
+- [`viewer-audit-render-fixtures-crate`](done/viewer-audit-render-fixtures-crate.md)
+  — 3297 lines of test fixtures ship in the production scene crate
 - [`viewer-audit-render-path-env-reads`](done/viewer-audit-render-path-env-reads.md)
   — About a dozen getenv calls and allocations per frame in the sky and post
   chain
@@ -1512,6 +1689,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-scene-change-guards-day-cycle`](done/viewer-audit-scene-change-guards-day-cycle.md)
   — The scene crate's write-on-change guards were reasoned about under a pinned
   sky
+- [`viewer-audit-scene-live-daycycle-fixture`](done/viewer-audit-scene-live-daycycle-fixture.md)
+  — A test fixture that advances the day cycle between samples
 - [`viewer-audit-search-sentinel-row`](done/viewer-audit-search-sentinel-row.md)
   — The directory 'there is more' sentinel row is rendered as a result
 - [`viewer-audit-settings-write-race`](done/viewer-audit-settings-write-race.md)
@@ -1519,6 +1698,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-sit-camera-gating`](done/viewer-audit-sit-camera-gating.md) —
   The scripted sit camera arms on any SitResult and never clears forced
   mouselook
+- [`viewer-audit-skin-token-coverage`](done/viewer-audit-skin-token-coverage.md)
+  — The skin system covers two widgets
 - [`viewer-audit-stale-globaltransform-readers`](done/viewer-audit-stale-globaltransform-readers.md)
   — Depth-reconstructing passes and the interest camera read a frame-old camera
   pose
@@ -2675,6 +2856,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   pixel-oracle library — decidable verdicts over a captured frame
 - [`viewer-render-readback-texture-anim-test-flaky`](done/viewer-render-readback-texture-anim-test-flaky.md)
   — render_readback texture-animation test is flaky under load
+- [`viewer-render-resolution-divisor`](done/viewer-render-resolution-divisor.md)
+  — Render at a reduced resolution (RenderResolutionDivisor)
 - [`viewer-render-scene-coverage`](done/viewer-render-scene-coverage.md) —
   Render-scene coverage — a scene per render path the viewer already has
   (blocked by `viewer-render-test-harness` (done))
@@ -3507,6 +3690,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `test-fake-grid-fixed-port-scenario` (done))
 - [`test-firestorm-fake-grid-crosscheck`](done/test-firestorm-fake-grid-crosscheck.md)
   — Point Firestorm at the fake grid to calibrate oracles
+- [`test-firestorm-harness-skin-selection`](done/test-firestorm-harness-skin-selection.md)
+  — Firestorm harness — start a run in a named skin and theme
 - [`test-friendship-offer-accept`](done/test-friendship-offer-accept-offer-accept-confirm-both-friend-lists.md)
   — offer, accept, confirm both friend lists
 - [`test-friendship-offer-accept-aditi`](done/test-friendship-offer-accept-aditi-add-the-aditi-variant.md)
@@ -3776,7 +3961,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Fake grid — a top-objects report with rows in it, and a return that finds
   them
 
-## deferred (29)
+## deferred (30)
 
 ### protocol
 
@@ -3856,6 +4041,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — script-upload on aditi — SL drops the task-inventory write.** The scri
 - [`test-recommit-conformance-records`](deferred/test-recommit-conformance-records.md)
   — Revisit committing sl-conformance records once implementation churn settles
+
+### server
+
+- [`server-lsl-lib-email-xmlrpc`](deferred/server-lsl-lib-email-xmlrpc.md) —
+  Library tranche — email and XML-RPC, parked (blocked by
+  `server-lsl-vm-execution`)
 
 ## wont-do (16)
 

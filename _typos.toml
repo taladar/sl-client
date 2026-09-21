@@ -115,3 +115,11 @@ udpateApparentTimeOfDay = "udpateApparentTimeOfDay"
 # `AddNullItemBlockToDescendentsPacket` *is* spelled correctly, which is why
 # only one of the pair is listed here.)
 AddNullFolderBlockToDecendentsPacket = "AddNullFolderBlockToDecendentsPacket"
+# `TextBgWriteableColor` / `ScrollBgWriteableColor` are the reference viewer's
+# own `colors.xml` entry names (and `bg_writeable_color` the matching XUI widget
+# attribute) — Linden's "writeable" for "writable". The Vintage skin survey
+# (roadmap/context/vintage-skin.md) cites them exactly so they stay greppable in
+# the reference tree; theirs to spell, not ours to correct.
+TextBgWriteableColor = "TextBgWriteableColor"
+ScrollBgWriteableColor = "ScrollBgWriteableColor"
+bg_writeable_color = "bg_writeable_color"

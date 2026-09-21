@@ -92,7 +92,7 @@ pub(crate) const MAX_LINKSET_DEPTH: usize = 32;
 pub fn animesh_root(state: &ObjectState, scoped: ScopedObjectId) -> Option<(ObjectKey, Entity)> {
     let mut current = scoped;
     for _ in 0..MAX_LINKSET_DEPTH {
-        let tracked = state.objects.get(&current)?;
+        let tracked = state.objects().get(&current)?;
         if tracked.animated {
             return Some((tracked.full_key, tracked.entity));
         }

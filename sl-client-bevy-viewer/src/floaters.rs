@@ -325,6 +325,16 @@ pub const FLOATERS: &[FloaterElement] = &[
         ),
     },
     FloaterElement {
+        id: "panorama",
+        summary: "360° Snapshot: the panorama capture — the cube-face and panorama size pickers, \
+                  the output format, and the Capture / Save row over a 2:1 preview.",
+        spec: crate::panorama::panorama_floater_spec,
+        content: FloaterContent::Stub(
+            "The 2:1 preview frame, the cube-face / panorama / format pickers, and the Capture \
+             and Save to Disk buttons over the status line.",
+        ),
+    },
+    FloaterElement {
         id: "personal-lighting",
         summary: "Personal Lighting: the local sky and water override — colour swatches, cloud \
                   and water images, the atmosphere sliders, where the sun and moon sit, the \

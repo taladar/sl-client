@@ -1085,38 +1085,47 @@ fn build_viewer_app(params: LoginParams, options: HarnessOptions) -> (App, Captu
     })
     .add_plugins(ViewerRenderPlugins::default())
     .add_plugins(ViewerWorldPlugins::default())
-    .add_plugins(ViewerInputPlugins::without_devices())
-    // Media-on-a-prim, which like the avatar library and the fonts is added by
-    // `run()` and by none of the six groups. Both engines are **off**: with
-    // `enabled: false` the plugin still registers `MediaEngine` /
-    // `MediaSurfaces` and the `Pump` set that `MediaPrimPlugin` schedules
-    // against, but never starts Chromium or GStreamer — and a test binary has
-    // no `sl-cef-helper` beside it to start anyway.
-    //
-    // That is enough for the half of the media path this tier is for: the
-    // object update's `MediaURL` version triggering a `RequestObjectMedia`,
-    // the capability's reply, and the per-face `MediaEntry` set reaching
-    // `MediaData`. The other half — a live surface's placeholder and its first
-    // paint — needs a browser process, and belongs to a rig that has one.
-    .add_plugins(crate::media_engine::MediaEnginePlugin {
-        enabled: false,
-        video_enabled: false,
-    })
-    .add_plugins(crate::media_prim::MediaPrimPlugin)
-    .init_resource::<Recorded>()
-    .init_resource::<SceneWork>()
-    .init_resource::<Captured>()
-    // The bundled font stack. The world's **text** — an object's floating text
-    // and an avatar's name tag — is laid out through the same glyph atlas the
-    // UI is, and the system that installs the faces belongs to the UI group
-    // this harness deliberately leaves out. Without it the world-space text
-    // billboards lay out against a font nothing registered and draw nothing,
-    // which reads as "the tag renderer is broken" rather than as "the fixture
-    // has no font".
-    .add_systems(Startup, crate::ui_font::register_ui_fonts)
-    // After the plugin's `(drive, maintain_world)` chain, so a frame's world
-    // state and its events are observed together.
-    .add_systems(PostUpdate, (record, drain_capabilities, note_scene_work));
+    .add_plugins(ViewerInputPlugins::without_devices());
+    // The string lookup with no bundles behind it, so every key resolves to
+    // itself. The world group carries `PieMenuPlugin`, whose systems resolve a
+    // slice's `label_key` as the labels are built — so a frame run without a
+    // `Translator` panics on the missing resource. `ViewerI18nPlugin` is the
+    // real thing and is deliberately not here: it would drag the Fluent asset
+    // pipeline and a folder load that finishes some unknown number of frames
+    // later into a tier that counts its frames.
+    sl_viewer_ui_core::i18n::install_untranslated(&mut app);
+    app
+        // Media-on-a-prim, which like the avatar library and the fonts is added by
+        // `run()` and by none of the six groups. Both engines are **off**: with
+        // `enabled: false` the plugin still registers `MediaEngine` /
+        // `MediaSurfaces` and the `Pump` set that `MediaPrimPlugin` schedules
+        // against, but never starts Chromium or GStreamer — and a test binary has
+        // no `sl-cef-helper` beside it to start anyway.
+        //
+        // That is enough for the half of the media path this tier is for: the
+        // object update's `MediaURL` version triggering a `RequestObjectMedia`,
+        // the capability's reply, and the per-face `MediaEntry` set reaching
+        // `MediaData`. The other half — a live surface's placeholder and its first
+        // paint — needs a browser process, and belongs to a rig that has one.
+        .add_plugins(crate::media_engine::MediaEnginePlugin {
+            enabled: false,
+            video_enabled: false,
+        })
+        .add_plugins(crate::media_prim::MediaPrimPlugin)
+        .init_resource::<Recorded>()
+        .init_resource::<SceneWork>()
+        .init_resource::<Captured>()
+        // The bundled font stack. The world's **text** — an object's floating text
+        // and an avatar's name tag — is laid out through the same glyph atlas the
+        // UI is, and the system that installs the faces belongs to the UI group
+        // this harness deliberately leaves out. Without it the world-space text
+        // billboards lay out against a font nothing registered and draw nothing,
+        // which reads as "the tag renderer is broken" rather than as "the fixture
+        // has no font".
+        .add_systems(Startup, crate::ui_font::register_ui_fonts)
+        // After the plugin's `(drive, maintain_world)` chain, so a frame's world
+        // state and its events are observed together.
+        .add_systems(PostUpdate, (record, drain_capabilities, note_scene_work));
 
     // The system-avatar `character/` assets: the skeleton, the body meshes and
     // the morph bindings a rigged avatar is built from. Loaded here for the same
@@ -2963,7 +2972,7 @@ mod tests {
         let mut circuits: Vec<sl_proto::CircuitId> = harness
             .world()
             .resource::<crate::world_api::ObjectState>()
-            .objects
+            .objects()
             .keys()
             .map(|scoped| scoped.circuit)
             .collect();

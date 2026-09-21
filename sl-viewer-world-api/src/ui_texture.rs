@@ -5,7 +5,7 @@
 //! same operation: request a texture at the boost priority a surface someone is
 //! looking at uses, park the node that will show it, and swap the decoded image
 //! in when it lands. It was written eight times, once per floater, and every
-//! copy ended in a bare `images.add(to_bevy_image(decoded))` — a fresh full RGBA
+//! copy ended in a bare `images.add(upload_decoded(..))` — a fresh full RGBA
 //! upload with no dedup and nothing that ever drops it, so the same thumbnail
 //! shown in the gallery, the item's properties window and a profile was three
 //! copies of itself, and re-opening a window was another one each time, all of
@@ -34,7 +34,7 @@
 //! second.
 
 use bevy::prelude::*;
-use sl_client_bevy::{DecodedTexture, DiscardLevel, TextureKey, to_bevy_image};
+use sl_client_bevy::{DecodedTexture, DiscardLevel, TextureKey, TextureUpload, upload_decoded};
 
 use crate::{AVATAR_BOOST_PRIORITY, BoostTexture, DecodedTextures};
 use std::collections::HashMap;
@@ -136,7 +136,7 @@ impl UiTextureImages {
         {
             return handle;
         }
-        let handle = images.add(to_bevy_image(decoded));
+        let handle = images.add(upload_decoded(decoded, TextureUpload::COLOR));
         let _replaced = self.uploaded.insert(
             key,
             UploadedImage {

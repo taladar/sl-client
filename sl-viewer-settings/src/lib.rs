@@ -108,6 +108,30 @@ pub struct ViewerSettings {
     /// land out of order. `None` between writes, and in a test app that drives
     /// the store directly.
     writing: Mutex<Option<Task<()>>>,
+    /// Every registered setting's name against the Fluent key of its
+    /// description, in registration order.
+    ///
+    /// **Why the key lives here rather than in the store.** A description is
+    /// user-facing prose, so it is a translated string like any other — but
+    /// `sl-settings` is a plain typed store with no notion of a bundle, and
+    /// this crate sits *below* `sl-viewer-ui-core`, where the [`Translator`]
+    /// is, so neither of them can resolve one. The layer that can
+    /// (`i18n::apply_setting_descriptions`) reads this list, resolves each key,
+    /// and writes the answer back as the store's comment — which is what the
+    /// raw settings editor shows and what the writer puts above the value in
+    /// the persisted file.
+    ///
+    /// [`Translator`]: https://docs.rs/sl-viewer-ui-core
+    description_keys: Vec<(String, String)>,
+    /// Whether [`description_keys`](Self::description_keys) holds anything not
+    /// yet resolved into the store — set by every registration, cleared by the
+    /// resolving pass. It starts `false` for a store with nothing in it.
+    ///
+    /// A flag rather than a per-setting check because the pass runs every
+    /// frame: settings are registered in bursts at startup and then
+    /// occasionally (a floater registers its own geometry the first time it
+    /// opens), so this is false on almost every frame and costs one load.
+    descriptions_pending: bool,
 }
 
 impl ViewerSettings {
@@ -117,13 +141,61 @@ impl ViewerSettings {
         &self.store
     }
 
-    /// Register a setting's declared default (name → value + comment) under a
-    /// section, logging and swallowing the (only-on-duplicate) error so a double
+    /// Register a setting's declared default (name → value) under a section,
+    /// logging and swallowing the (only-on-duplicate) error so a double
     /// registration can never abort startup.
-    fn declare(&mut self, section: &[&str], name: &str, value: SettingValue, comment: &str) {
-        if let Err(error) = self.store.register_in(section, name, value, comment) {
+    ///
+    /// The description is registered as a **key**, held here for the resolving
+    /// pass (see [`description_keys`](Self::description_keys)); the store's own
+    /// comment starts empty, so a file written before the bundle has loaded
+    /// carries values with no comments rather than values labelled with keys.
+    fn declare(&mut self, section: &[&str], name: &str, value: SettingValue, key: &str) {
+        if let Err(error) = self.store.register_in(section, name, value, "") {
             warn!("settings: could not register {name}: {error}");
+            return;
         }
+        self.remember_description(name, key);
+    }
+
+    /// Record `key` as `name`'s description key, for the resolving pass.
+    fn remember_description(&mut self, name: &str, key: &str) {
+        self.description_keys
+            .push((name.to_owned(), key.to_owned()));
+        self.descriptions_pending = true;
+    }
+
+    /// Every registered setting's name against the Fluent key of its
+    /// description, in registration order.
+    ///
+    /// Read by the layer that owns a translation bundle
+    /// (`sl_viewer_ui_core::i18n::apply_setting_descriptions`), which resolves
+    /// each key and hands the answer back through
+    /// [`set_description`](Self::set_description).
+    pub fn description_keys(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.description_keys
+            .iter()
+            .map(|(name, key)| (name.as_str(), key.as_str()))
+    }
+
+    /// Whether any description registered since the last resolving pass is
+    /// still unresolved.
+    #[must_use]
+    pub const fn descriptions_pending(&self) -> bool {
+        self.descriptions_pending
+    }
+
+    /// Write a resolved description into the store as `name`'s comment — what
+    /// the raw settings editor shows and the writer places above the value.
+    ///
+    /// Silently ignores a name the store does not know: the only way to get one
+    /// is a registration that already failed and warned.
+    pub fn set_description(&mut self, name: &str, text: &str) {
+        drop(self.store.set_comment(name, text));
+    }
+
+    /// Note that every description registered so far has been resolved.
+    pub const fn mark_descriptions_resolved(&mut self) {
+        self.descriptions_pending = false;
     }
 
     /// Register a setting grouped under a `[section]` of the persisted file
@@ -135,9 +207,9 @@ impl ViewerSettings {
         section: &[&str],
         name: &str,
         value: SettingValue,
-        comment: &str,
+        description_key: &str,
     ) {
-        self.declare(section, name, value, comment);
+        self.declare(section, name, value, description_key);
     }
 
     /// Register a persisted setting grouped under a `[section]` that the raw
@@ -150,21 +222,25 @@ impl ViewerSettings {
         section: &[&str],
         name: &str,
         value: SettingValue,
-        comment: &str,
+        description_key: &str,
     ) {
-        if let Err(error) = self.store.register_hidden_in(section, name, value, comment) {
+        if let Err(error) = self.store.register_hidden_in(section, name, value, "") {
             warn!("settings: could not register {name}: {error}");
+            return;
         }
+        self.remember_description(name, description_key);
     }
 
     /// Register a runtime-only setting whose overrides are never persisted (the
     /// reference viewer's transient debug settings). The two-way binding demo
     /// (`settings_binding`) uses this so its scratch values write no junk
     /// to the user's config.
-    pub fn register_transient(&mut self, name: &str, value: SettingValue, comment: &str) {
-        if let Err(error) = self.store.register_transient(name, value, comment) {
+    pub fn register_transient(&mut self, name: &str, value: SettingValue, description_key: &str) {
+        if let Err(error) = self.store.register_transient(name, value, "") {
             warn!("settings: could not register {name}: {error}");
+            return;
         }
+        self.remember_description(name, description_key);
     }
 
     /// Replace a registered setting's declared default (see
@@ -194,6 +270,20 @@ impl ViewerSettings {
     pub fn set(&mut self, scope: Scope, name: &str, value: SettingValue) {
         if let Err(error) = self.store.set(scope, name, value) {
             warn!("settings: could not set {name} in the {scope:?} scope: {error}");
+        }
+    }
+
+    /// Turn a registered setting's persistence on or off after the fact (see
+    /// [`SettingsStore::set_persist`](sl_settings::SettingsStore::set_persist)),
+    /// logging and swallowing an (unregistered) error so a bad name can never
+    /// abort a frame.
+    ///
+    /// The one caller is the RLV `@setdebug_<name>=force` write site, which owes
+    /// the reference's rule that a value a **script** wrote never reaches the
+    /// user's settings file.
+    pub fn set_persist(&mut self, name: &str, persist: bool) {
+        if let Err(error) = self.store.set_persist(name, persist) {
+            warn!("settings: could not set persistence for {name}: {error}");
         }
     }
 
@@ -380,6 +470,8 @@ impl ViewerSettings {
             account_path: None,
             dirty: AtomicBool::new(false),
             writing: Mutex::new(None),
+            description_keys: Vec::new(),
+            descriptions_pending: false,
         }
     }
 
@@ -407,6 +499,8 @@ impl ViewerSettings {
             account_path: account,
             dirty: AtomicBool::new(false),
             writing: Mutex::new(None),
+            description_keys: Vec::new(),
+            descriptions_pending: false,
         }
     }
 
@@ -432,6 +526,8 @@ impl ViewerSettings {
             account_path: None,
             dirty: AtomicBool::new(false),
             writing: Mutex::new(None),
+            description_keys: Vec::new(),
+            descriptions_pending: false,
         }
     }
 

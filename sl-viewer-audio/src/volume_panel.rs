@@ -27,6 +27,7 @@ use sl_settings::SettingValue;
 use crate::i18n::Translated;
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{SettingBinding, bound_slider};
+use crate::skin_palette::SkinPalette;
 use crate::ui::BottomArea;
 use crate::ui::{UiPanelShown, column, row};
 use crate::ui_font::UiFont;
@@ -66,9 +67,9 @@ const PANEL_BACKGROUND: Color = Color::srgba(0.08, 0.09, 0.12, 0.96);
 /// The bar background.
 const BAR_BACKGROUND: Color = Color::srgba(0.08, 0.09, 0.12, 0.92);
 /// Label text colour.
-const LABEL_COLOR: Color = Color::srgb(0.9, 0.9, 0.92);
+const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 /// Dimmed (muted) label / glyph colour.
-const LABEL_DIM: Color = Color::srgb(0.62, 0.65, 0.72);
+const LABEL_DIM: Color = SkinPalette::FALLBACK.text_muted;
 /// Button border.
 const BUTTON_BORDER: Color = Color::srgb(0.3, 0.3, 0.35);
 /// Button fill.
@@ -210,20 +211,20 @@ fn register_settings(settings: &mut ViewerSettings) {
             BUS_SECTION,
             &volume_key(bus),
             SettingValue::F32(default_gain(bus)),
-            "Linear volume (0-1) for this audio bus",
+            "setting-desc-audio-bus-volume",
         );
         settings.register_in(
             BUS_SECTION,
             &mute_key(bus),
             SettingValue::Bool(false),
-            "Whether this audio bus is muted (mute retains the volume level)",
+            "setting-desc-audio-bus-mute",
         );
     }
     settings.register_in(
         AUDIO_SECTION,
         SETTING_MUTE_WHEN_MINIMIZED,
         SettingValue::Bool(false),
-        "Mute audio while the viewer window is minimised / unfocused",
+        "setting-desc-MuteWhenMinimized",
     );
 }
 

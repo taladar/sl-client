@@ -172,7 +172,7 @@ fn register_media_settings(settings: Option<ResMut<sl_viewer_settings::ViewerSet
         MEDIA_SECTION,
         MEDIA_AUTO_PLAY_SETTING,
         sl_settings::SettingValue::Bool(false),
-        "Start media-on-a-prim faces marked auto-play without a click",
+        "setting-desc-MediaAutoPlayEnabled",
     );
 }
 

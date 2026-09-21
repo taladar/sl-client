@@ -133,115 +133,115 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         MINIMAP_SECTION,
         SETTING_SCALE,
         SettingValue::F32(minimap_math::MAP_SCALE_MEDIUM),
-        "Minimap zoom, in pixels per 256 m region (32-4096)",
+        "setting-desc-MiniMapScale",
     );
     settings.register_in(
         MINIMAP_SECTION,
         SETTING_ROTATE,
         SettingValue::Bool(true),
-        "Rotate the minimap so the camera heading points up (off = north up)",
+        "setting-desc-MiniMapRotate",
     );
     settings.register_in(
         MINIMAP_SECTION,
         SETTING_AUTO_CENTER,
         SettingValue::Bool(true),
-        "Ease a panned minimap back to centre",
+        "setting-desc-MiniMapAutoCenter",
     );
     settings.register_in(
         MINIMAP_SECTION,
         SETTING_OPACITY,
         SettingValue::F32(0.66),
-        "Minimap surface opacity",
+        "setting-desc-MiniMapOpacity",
     );
     settings.register_in(
         MINIMAP_SECTION,
         SETTING_OBJECTS,
         SettingValue::Bool(true),
-        "Show objects on the minimap",
+        "setting-desc-MiniMapObjects",
     );
     settings.register_in(
         MINIMAP_SECTION,
         SETTING_PHYSICAL,
         SettingValue::Bool(false),
-        "Highlight physical objects on the minimap",
+        "setting-desc-NetMapPhysical",
     );
     settings.register_in(
         MINIMAP_SECTION,
         SETTING_SCRIPTED,
         SettingValue::Bool(false),
-        "Highlight scripted objects on the minimap",
+        "setting-desc-NetMapScripted",
     );
     settings.register_in(
         MINIMAP_SECTION,
         SETTING_TEMP_ON_REZ,
         SettingValue::Bool(false),
-        "Highlight temp-on-rez objects on the minimap",
+        "setting-desc-NetMapTempOnRez",
     );
     settings.register_in(
         MINIMAP_SECTION,
         SETTING_PHANTOM_OPACITY,
         SettingValue::U32(100),
-        "Phantom-object opacity on the minimap, in percent",
+        "setting-desc-NetMapPhantomOpacity",
     );
     settings.register_in(
         MINIMAP_SECTION,
         SETTING_PROPERTY_LINES,
         SettingValue::Bool(true),
-        "Show parcel property lines on the minimap",
+        "setting-desc-MiniMapShowPropertyLines",
     );
     settings.register_in(
         MINIMAP_SECTION,
         SETTING_FOR_SALE,
         SettingValue::Bool(true),
-        "Fill for-sale and auction parcels on the minimap",
+        "setting-desc-MiniMapForSaleParcels",
     );
     settings.register_in(
         MINIMAP_SECTION,
         SETTING_CHAT_RING,
         SettingValue::Bool(false),
-        "Show chat-distance rings on the minimap",
+        "setting-desc-MiniMapChatRing",
     );
     settings.register_in(
         MINIMAP_SECTION,
         SETTING_WHISPER_RING,
         SettingValue::Bool(true),
-        "Show the whisper-range ring (when chat rings are on)",
+        "setting-desc-MiniMapWhisperRing",
     );
     settings.register_in(
         MINIMAP_SECTION,
         SETTING_SAY_RING,
         SettingValue::Bool(true),
-        "Show the say-range ring (when chat rings are on)",
+        "setting-desc-MiniMapSayRing",
     );
     settings.register_in(
         MINIMAP_SECTION,
         SETTING_SHOUT_RING,
         SettingValue::Bool(true),
-        "Show the shout-range ring (when chat rings are on)",
+        "setting-desc-MiniMapShoutRing",
     );
     settings.register_in(
         MINIMAP_SECTION,
         SETTING_DOUBLE_CLICK,
         SettingValue::I32(2),
-        "Minimap double-click action: 0 nothing, 1 world map, 2 teleport",
+        "setting-desc-NetMapDoubleClickAction",
     );
     settings.register_in(
         MINIMAP_SECTION,
         SETTING_PICK_SCALE,
         SettingValue::F32(3.0),
-        "Minimap hover pick radius, as a multiple of the dot radius",
+        "setting-desc-MinimapPickScale",
     );
     settings.register_in(
         MINIMAP_SECTION,
         SETTING_PRIM_MAX_RADIUS,
         SettingValue::F32(16.0),
-        "Largest radius (metres) an object draws with on the minimap",
+        "setting-desc-MiniMapPrimMaxRadius",
     );
     settings.register_in(
         MINIMAP_SECTION,
         SETTING_PRIM_MAX_VERT,
         SettingValue::F32(256.0),
-        "Hide minimap objects more than this many metres above/below the agent (0 = no limit)",
+        "setting-desc-MiniMapPrimMaxVertDistance",
     );
 }
 
@@ -3231,16 +3231,22 @@ const COND_RING_SHOUT: &str = "minimap-ring-shout";
 
 /// The avatar Mark submenu (dot colours fed to [`MinimapMarks`]).
 static MINIMAP_MARK_MENU: MenuDef = MenuDef {
-    label: "Mark",
+    label_key: "menu-minimap-mark",
     items: &[
-        MenuItemDef::Command(MenuCommand::new("Mark Red", "mark-red")),
-        MenuItemDef::Command(MenuCommand::new("Mark Green", "mark-green")),
-        MenuItemDef::Command(MenuCommand::new("Mark Blue", "mark-blue")),
-        MenuItemDef::Command(MenuCommand::new("Mark Purple", "mark-purple")),
-        MenuItemDef::Command(MenuCommand::new("Mark Light Yellow", "mark-yellow")),
+        MenuItemDef::Command(MenuCommand::new("menu-minimap-mark-red", "mark-red")),
+        MenuItemDef::Command(MenuCommand::new("menu-minimap-mark-green", "mark-green")),
+        MenuItemDef::Command(MenuCommand::new("menu-minimap-mark-blue", "mark-blue")),
+        MenuItemDef::Command(MenuCommand::new("menu-minimap-mark-purple", "mark-purple")),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-minimap-mark-light-yellow",
+            "mark-yellow",
+        )),
         MenuItemDef::Separator,
-        MenuItemDef::Command(MenuCommand::new("Clear Mark", "mark-clear")),
-        MenuItemDef::Command(MenuCommand::new("Clear All Marks", "mark-clear-all")),
+        MenuItemDef::Command(MenuCommand::new("menu-minimap-clear-mark", "mark-clear")),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-minimap-clear-all-marks",
+            "mark-clear-all",
+        )),
     ],
 };
 
@@ -3248,59 +3254,69 @@ static MINIMAP_MARK_MENU: MenuDef = MenuDef {
 /// avatar pie / people panel use ([`OpenConversation`], [`OpenAvatarProfile`],
 /// friendship / teleport-offer / mute commands).
 static MINIMAP_MORE_MENU: MenuDef = MenuDef {
-    label: "More Options",
+    label_key: "menu-minimap-more-options",
     items: &[
-        MenuItemDef::Command(MenuCommand::new("IM", "im")),
-        MenuItemDef::Command(MenuCommand::new("Add Friend", "add-friend")),
-        MenuItemDef::Command(MenuCommand::new("Add to Set", "add-to-set")),
-        MenuItemDef::Command(MenuCommand::new("Offer Teleport", "offer-teleport")),
-        MenuItemDef::Command(MenuCommand::new("Block", "block")),
+        MenuItemDef::Command(MenuCommand::new("menu-minimap-im", "im")),
+        MenuItemDef::Command(MenuCommand::new("menu-minimap-add-friend", "add-friend")),
+        MenuItemDef::Command(MenuCommand::new("menu-minimap-add-to-set", "add-to-set")),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-minimap-offer-teleport",
+            "offer-teleport",
+        )),
+        MenuItemDef::Command(MenuCommand::new("menu-minimap-block", "block")),
     ],
 };
 
 /// The Zoom submenu (radio checks on the preset in effect).
 static MINIMAP_ZOOM_MENU: MenuDef = MenuDef {
-    label: "Zoom",
+    label_key: "menu-minimap-zoom",
     items: &[
         MenuItemDef::Command(
-            MenuCommand::new("Very Close", "zoom-very-close").checked_when(COND_ZOOM_VERY_CLOSE),
+            MenuCommand::new("menu-minimap-very-close", "zoom-very-close")
+                .checked_when(COND_ZOOM_VERY_CLOSE),
         ),
-        MenuItemDef::Command(MenuCommand::new("Close", "zoom-close").checked_when(COND_ZOOM_CLOSE)),
         MenuItemDef::Command(
-            MenuCommand::new("Medium", "zoom-medium").checked_when(COND_ZOOM_MEDIUM),
+            MenuCommand::new("menu-minimap-close", "zoom-close").checked_when(COND_ZOOM_CLOSE),
         ),
-        MenuItemDef::Command(MenuCommand::new("Far", "zoom-far").checked_when(COND_ZOOM_FAR)),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-minimap-medium", "zoom-medium").checked_when(COND_ZOOM_MEDIUM),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-minimap-far", "zoom-far").checked_when(COND_ZOOM_FAR),
+        ),
     ],
 };
 
 /// The Show submenu (layer and accent toggles).
 static MINIMAP_SHOW_MENU: MenuDef = MenuDef {
-    label: "Show",
+    label_key: "menu-minimap-show",
     items: &[
         MenuItemDef::Command(
-            MenuCommand::new("Objects", "toggle-objects").checked_when(COND_SHOW_OBJECTS),
+            MenuCommand::new("menu-minimap-objects", "toggle-objects")
+                .checked_when(COND_SHOW_OBJECTS),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Physical Objects", "toggle-physical")
+            MenuCommand::new("menu-minimap-physical-objects", "toggle-physical")
                 .checked_when(COND_SHOW_PHYSICAL)
                 .enabled_when(COND_SHOW_OBJECTS),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Scripted Objects", "toggle-scripted")
+            MenuCommand::new("menu-minimap-scripted-objects", "toggle-scripted")
                 .checked_when(COND_SHOW_SCRIPTED)
                 .enabled_when(COND_SHOW_OBJECTS),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Temp-on-rez Objects", "toggle-temp")
+            MenuCommand::new("menu-minimap-temp-on-rez-objects", "toggle-temp")
                 .checked_when(COND_SHOW_TEMP)
                 .enabled_when(COND_SHOW_OBJECTS),
         ),
         MenuItemDef::Separator,
         MenuItemDef::Command(
-            MenuCommand::new("Property Lines", "toggle-lines").checked_when(COND_SHOW_LINES),
+            MenuCommand::new("menu-minimap-property-lines", "toggle-lines")
+                .checked_when(COND_SHOW_LINES),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Parcels for Sale", "toggle-sale")
+            MenuCommand::new("menu-minimap-parcels-for-sale", "toggle-sale")
                 .checked_when(COND_SHOW_SALE)
                 .enabled_when(COND_SHOW_LINES),
         ),
@@ -3309,22 +3325,24 @@ static MINIMAP_SHOW_MENU: MenuDef = MenuDef {
 
 /// The Chat Distance Rings submenu.
 static MINIMAP_RINGS_MENU: MenuDef = MenuDef {
-    label: "Chat Distance Rings",
+    label_key: "menu-minimap-chat-distance-rings",
     items: &[
-        MenuItemDef::Command(MenuCommand::new("Show Rings", "toggle-ring").checked_when(COND_RING)),
+        MenuItemDef::Command(
+            MenuCommand::new("menu-minimap-show-rings", "toggle-ring").checked_when(COND_RING),
+        ),
         MenuItemDef::Separator,
         MenuItemDef::Command(
-            MenuCommand::new("Whisper Range", "toggle-ring-whisper")
+            MenuCommand::new("menu-minimap-whisper-range", "toggle-ring-whisper")
                 .checked_when(COND_RING_WHISPER)
                 .enabled_when(COND_RING),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Chat Range", "toggle-ring-say")
+            MenuCommand::new("menu-minimap-chat-range", "toggle-ring-say")
                 .checked_when(COND_RING_SAY)
                 .enabled_when(COND_RING),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Shout Range", "toggle-ring-shout")
+            MenuCommand::new("menu-minimap-shout-range", "toggle-ring-shout")
                 .checked_when(COND_RING_SHOUT)
                 .enabled_when(COND_RING),
         ),
@@ -3339,25 +3357,28 @@ static MINIMAP_RINGS_MENU: MenuDef = MenuDef {
 /// **View Profiles** line per avatar, and an **Add to Set** that files all of
 /// them at once. The marks apply to the whole pick radius either way.
 static MINIMAP_MENU: MenuDef = MenuDef {
-    label: "Minimap",
+    label_key: "menu-minimap-minimap",
     items: &[
         MenuItemDef::Command(
-            MenuCommand::new("View Profile", "profile").visible_when(COND_ONE_AVATAR),
+            MenuCommand::new("menu-minimap-view-profile", "profile").visible_when(COND_ONE_AVATAR),
         ),
         MenuItemDef::DynamicSubmenu {
-            label: "View Profiles",
+            label_key: "menu-minimap-view-profiles",
             slot: SLOT_PROFILES,
         },
         MenuItemDef::Command(
-            MenuCommand::new("Add to Set", "add-to-set-multiple").visible_when(COND_MANY_AVATARS),
+            MenuCommand::new("menu-minimap-add-to-set", "add-to-set-multiple")
+                .visible_when(COND_MANY_AVATARS),
         ),
         MenuItemDef::SubmenuWhen(&MINIMAP_MARK_MENU, COND_AVATAR),
         MenuItemDef::SubmenuWhen(&MINIMAP_MORE_MENU, COND_ONE_AVATAR),
         MenuItemDef::Command(
-            MenuCommand::new("Start Tracking", "start-tracking").visible_when(COND_AVATAR),
+            MenuCommand::new("menu-minimap-start-tracking", "start-tracking")
+                .visible_when(COND_AVATAR),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Stop Tracking", "stop-tracking").visible_when(COND_TRACKING),
+            MenuCommand::new("menu-minimap-stop-tracking", "stop-tracking")
+                .visible_when(COND_TRACKING),
         ),
         MenuItemDef::Separator,
         MenuItemDef::Submenu(&MINIMAP_ZOOM_MENU),
@@ -3365,18 +3386,21 @@ static MINIMAP_MENU: MenuDef = MenuDef {
         MenuItemDef::Submenu(&MINIMAP_RINGS_MENU),
         MenuItemDef::Separator,
         MenuItemDef::Command(
-            MenuCommand::new("North at Top", "north-at-top").checked_when(COND_NORTH_UP),
+            MenuCommand::new("menu-minimap-north-at-top", "north-at-top")
+                .checked_when(COND_NORTH_UP),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Camera at Top", "camera-at-top").checked_when(COND_CAMERA_UP),
+            MenuCommand::new("menu-minimap-camera-at-top", "camera-at-top")
+                .checked_when(COND_CAMERA_UP),
         ),
         MenuItemDef::Separator,
         MenuItemDef::Command(
-            MenuCommand::new("Auto-center Map", "toggle-auto-center")
+            MenuCommand::new("menu-minimap-auto-center-map", "toggle-auto-center")
                 .checked_when(COND_AUTO_CENTER),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Re-center Map", "recenter").enabled_when(COND_CAN_RECENTER),
+            MenuCommand::new("menu-minimap-re-center-map", "recenter")
+                .enabled_when(COND_CAN_RECENTER),
         ),
     ],
 };
@@ -3914,13 +3938,13 @@ mod tests {
                 MenuItemDef::Command(command) if command.visible_when == Some(COND_ONE_AVATAR) => {
                     Some(command.action)
                 }
-                MenuItemDef::SubmenuWhen(submenu, COND_ONE_AVATAR) => Some(submenu.label),
+                MenuItemDef::SubmenuWhen(submenu, COND_ONE_AVATAR) => Some(submenu.label_key),
                 _other => None,
             })
             .collect();
         assert_eq!(
             single,
-            vec!["profile", "More Options"],
+            vec!["profile", "menu-minimap-more-options"],
             "the single-avatar entries stand down when several are in range"
         );
         let many: Vec<&str> = MINIMAP_MENU

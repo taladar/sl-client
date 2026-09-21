@@ -55,6 +55,7 @@
 //! `skins/vintage/xui/en/floater_inventory_item_properties.xml`,
 //! `llpreview{notecard,texture,anim}.cpp`, "About Landmark".
 
+use crate::skin_palette::SkinPalette;
 use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use bevy::text::EditableText;
@@ -79,10 +80,10 @@ use crate::world_api::ui_texture::{PendingUiTexture, UiTexturePlugin};
 const PROPS_FONT_SIZE: f32 = 14.0;
 
 /// The label colour.
-const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A dimmer secondary label.
-const DIM_LABEL_COLOR: Color = Color::srgb(0.62, 0.66, 0.74);
+const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// A toggle's check glyph colour.
 const CHECK_COLOR: Color = Color::srgb(0.55, 0.85, 0.60);

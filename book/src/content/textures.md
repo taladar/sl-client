@@ -108,9 +108,17 @@ then re-upgrade its level of detail.
 ## Bevy
 
 `sl-client-bevy` (on Bevy 0.19) bridges the store to Bevy's renderer:
-`to_bevy_image` turns a decoded RGBA8 texture into a `bevy::image::Image`
-(`Rgba8UnormSrgb`), ready to insert into `Assets<Image>` and use as a rendered
-texture. `BevyTextureFetcher` is a blocking-HTTP `TextureFetcher` for a Bevy app
+`upload_decoded` turns a decoded RGBA8 texture into a `bevy::image::Image`,
+ready to insert into `Assets<Image>` and use as a rendered texture. It is the
+viewer's *only* path from pixels to a world texture, so the two decisions that
+are easy to get silently wrong are made once: a `TextureUpload` argument says
+whether the bytes are a picture (`TextureUpload::COLOR`, sRGB) or numbers a
+shader reads verbatim (`TextureUpload::DATA`, linear — normal maps, noise
+fields, masks), and every upload repeats on every axis, because Bevy's default
+clamp-to-edge smears a face's edge texel wherever a UV leaves the unit square.
+`upload_pixels` is the same upload for pixels the viewer generated itself (the
+bump-map generator, the placeholder swatches).
+`BevyTextureFetcher` is a blocking-HTTP `TextureFetcher` for a Bevy app
 with no async runtime — build a `TextureStore` over it and drive `get`/`request`
 by `block_on`-ing on a task/thread (the decode still runs off-thread on the
 store's `rayon` pool). The store surface is re-exported from `sl-client-bevy`.

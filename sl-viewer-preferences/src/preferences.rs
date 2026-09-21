@@ -42,6 +42,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::EditableText;
@@ -58,6 +59,7 @@ use crate::floater::{
 use crate::i18n::Translated;
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{ComboBindingValues, SettingBinding, bound_checkbox, bound_slider};
+use crate::skin_palette::SkinColors;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_color_picker::spawn_color_swatch;
 use crate::ui_combo::{ComboSpec, spawn_combo};
@@ -66,8 +68,8 @@ use crate::ui_font::UiFont;
 use crate::ui_search::{SearchFieldSpec, spawn_search_field};
 use crate::ui_slider::{SliderStyle, spawn_slider};
 use crate::ui_tab::{
-    DEFAULT_ELLIPSIS, TAB_LABEL_COLOR, TabButton, TabPanel, TabPlacement, TabSpec, TabStrip,
-    fill_tab_container, spawn_tab_container,
+    DEFAULT_ELLIPSIS, TabButton, TabPanel, TabPlacement, TabSpec, TabStrip, fill_tab_container,
+    spawn_tab_container, tab_label_color,
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 
@@ -81,14 +83,11 @@ pub const FONT: f32 = 13.0;
 const SECTION_FONT: f32 = 14.0;
 
 /// A row label's resting colour (the shared panel label tone).
-pub const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+pub const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A section heading's colour — same tone as the labels; the size difference
 /// carries the hierarchy.
 const SECTION_COLOR: Color = Color::srgb(0.75, 0.80, 0.88);
-
-/// The muted tone for a filtered-empty tab's label (and the search glyphs).
-const MUTED_COLOR: Color = Color::srgb(0.55, 0.60, 0.68);
 
 /// A note's colour — the warm accent a filter hit uses, because a note is shown
 /// exactly when something wants the reader's eye.
@@ -1201,6 +1200,7 @@ pub(crate) fn apply_preferences_filter(
     ui: Option<Res<PreferencesUi>>,
     state: Res<PreferencesState>,
     extra_hits: Res<PreferencesExtraHits>,
+    palette: SkinColors,
     filter_rows: PrefFilterRows,
     tabs: PrefTabTree,
 ) {
@@ -1220,9 +1220,17 @@ pub(crate) fn apply_preferences_filter(
     let Some(ui) = ui else {
         return;
     };
-    if !state.is_changed() && !extra_hits.is_changed() && changed_labels.is_empty() {
+    // The dim / restore below paints tab labels from the role palette, so a
+    // skin change has to re-run it or the strip keeps the previous skin's
+    // colours.
+    if !state.is_changed()
+        && !extra_hits.is_changed()
+        && !palette.is_changed()
+        && changed_labels.is_empty()
+    {
         return;
     }
+    let palette = palette.get();
     let filtering = !state.filter.is_empty();
 
     // Pass over the rows: show / hide, highlight, and count hits per tab.
@@ -1295,7 +1303,11 @@ pub(crate) fn apply_preferences_filter(
             continue;
         }
         let dim = filtering && !tab_has_match.get(&button.index).copied().unwrap_or(false);
-        let target = if dim { MUTED_COLOR } else { TAB_LABEL_COLOR };
+        let target = if dim {
+            palette.text_muted
+        } else {
+            tab_label_color(&palette)
+        };
         if let Some(label) = first_text_descendant(button_entity, &children, &labels)
             && let Ok(mut color) = colors.get_mut(label)
             && color.0 != target

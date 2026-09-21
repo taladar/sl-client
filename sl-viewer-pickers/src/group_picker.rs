@@ -68,6 +68,7 @@
 //! Reference (Firestorm, read-only): `llfloatergroups.cpp`
 //! (`LLFloaterGroupPicker`, `init_group_list`), `floater_choose_group.xml`.
 
+use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::EditableText;
@@ -94,7 +95,7 @@ const PICKER_FLOATER_ID: &str = "group-picker";
 const PICKER_FONT_SIZE: f32 = 14.0;
 
 /// The label colour.
-const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A button's background.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
@@ -102,7 +103,7 @@ const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
 const BUTTON_BORDER: Color = Color::srgb(0.34, 0.40, 0.52);
 
 /// The trailing detail column's colour — dimmer than the name it trails.
-const DETAIL_COLOR: Color = Color::srgb(0.62, 0.66, 0.74);
+const DETAIL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// A selected row's background.
 const SELECTED_ROW_BACKGROUND: Color = Color::srgba(0.24, 0.34, 0.52, 0.55);

@@ -61,6 +61,7 @@
 //! `stepComboBox`, `isValidPreset`, `onChangeSkyPreset` and siblings),
 //! `panel_quick_prefs.xml`.
 
+use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui_widgets::{Activate, Button};
@@ -122,7 +123,7 @@ const NEXT_GLYPH: &str = "\u{203a}";
 /// The combos' and buttons' font size, in logical pixels.
 const FONT: f32 = 13.0;
 /// A row's label colour.
-const LABEL_COLOR: Color = Color::srgb(0.86, 0.88, 0.92);
+const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 /// A step button's border.
 const BUTTON_BORDER: Color = Color::srgb(0.3, 0.34, 0.42);
 /// A step button's fill.
