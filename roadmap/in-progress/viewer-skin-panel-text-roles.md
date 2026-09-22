@@ -211,24 +211,39 @@ along with its `PhotoButtonLabel` marker.
 **Ten files have a real writer**, and their ~61 sites need per-site judgement
 — which node the writer targets, and whether *this* spawn is that node:
 
-| file | what writes a colour |
-| --- | --- |
-| `inventory.rs` | the row arrow and the label, per bind, by row kind |
-| `about_land.rs`, `about_region.rs` | `set_check_visual`'s three-state glyph |
-| `land_environment.rs`, `snapshot_floater.rs` | the same hand-rolled check |
-| `group_profile.rs` | `set_toggle_glyph` |
-| `rlv_console.rs` | a held line's colour, by severity |
-| `ui_text_input.rs` | the field text, disabled / read-only vs `field_text` |
-| `name_tag_billboard.rs` | world-space name tags — data, not panel chrome |
+| file | what writes a colour | state |
+| --- | --- | --- |
+| `inventory.rs` | the row arrow and the label, per bind, by row kind | **done** |
+| `rlv_console.rs` | a line's colour, by what the line is | **done** |
+| `about_land.rs`, `about_region.rs` | `set_check_visual`'s three-state glyph | checkbox task |
+| `land_environment.rs`, `snapshot_floater.rs` | the same hand-rolled check | checkbox task |
+| `group_profile.rs` | `set_toggle_glyph` | checkbox task |
+| `ui_text_input.rs` | the field text, disabled / read-only vs `field_text` | widget state |
+| `name_tag_billboard.rs` | world-space name tags — data, not panel chrome | not this task |
 
-Four of those are the hand-rolled check painters that
-[[viewer-skin-checkbox-radio-shape]] owns; `ui_text_input`'s is a widget state
-that wants a class rather than a palette read; `name_tag_billboard`'s is not
-this task's at all.
+**Two converted, and both turned out to be roles rather than repaints.**
+`inventory.rs` wrote its row arrow the *same* colour on every bind — a write
+that could never change anything — and its label gold-or-plain by whether the
+row is a folder, which is the reference's own distinction and the fastest way
+to read a long tree. That is `--folder-label` and a class now.
+`rlv_console.rs` wrote a line's colour from a four-way `line_color(kind)`; a
+refused command staying distinguishable is exactly what a colour-blind overlay
+retunes, so the kinds are `--console-info` / `--console-error` over `.sk-text`,
+with a typed command carrying no class at all. `line_color` and the constants
+behind it are gone.
+
+Five of the remaining six are the hand-rolled check painters
+[[viewer-skin-checkbox-radio-shape]] owns — converting them now would invent a
+class vocabulary that task will replace. `ui_text_input`'s is a widget state
+wanting a class rather than a palette read, and `name_tag_billboard`'s is
+world-space data.
 
 ### What is left
 
-- **The ten files above**, one at a time.
+- **`ui_text_input`'s field state**, which wants a class rather than a
+  palette read. The other five writer files are
+  [[viewer-skin-checkbox-radio-shape]]'s, and `name_tag_billboard`'s is not
+  this task's.
 - **The literal-colour spawns** — `Color::WHITE` (32 sites),
   `Color::srgba(0.85, 0.85, 0.85, 1.0)` (18) and the rest of the 86 distinct
   arguments. Each is a decision about which role, if any, it meant; the

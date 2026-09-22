@@ -99,6 +99,14 @@
   /* The row a drag would drop into — the selection highlight, louder. */
   --drop-target: #3d5785bf;
 
+  /* An inventory folder's label — gold, the reference's own. */
+  --folder-label: #fadb8c;
+
+  /* An RLVa console line: accepted, refused. Meaning-bearing like the
+   * notification kinds. */
+  --console-info: #99d1a8;
+  --console-error: #eb8f85;
+
   /* User-tunable palette (see graphite/skin.css for the token contract) —
    * cooler variants, so a skin switch visibly moves the swatches. */
 

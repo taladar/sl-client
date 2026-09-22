@@ -48,6 +48,7 @@ use bevy::input_focus::InputFocus;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx};
+use bevy_flair::style::components::ClassList;
 use sl_client_bevy::SlIdentity;
 use sl_rlv::{
     RLV_PREFIX, RlvCommand, RlvEnvCommand, RlvEnvSource, RlvExtCommand, RlvExtSource, RlvOutcome,
@@ -73,8 +74,10 @@ use sl_viewer_world_api::rlv::{
 use uuid::Uuid;
 
 use crate::style::{
-    ACTION_BACKGROUND, DIM_LABEL_COLOR, ERROR_COLOR, FONT_SIZE, INFO_COLOR, LABEL_COLOR,
-    LIST_BACKGROUND, ROW_HEIGHT,
+    ACTION_BACKGROUND, DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, LIST_BACKGROUND, ROW_HEIGHT,
+};
+use sl_viewer_ui_core::skin::{
+    CONSOLE_ERROR_CLASS, CONSOLE_INFO_CLASS, CONSOLE_REPLY_CLASS, TEXT_CLASS, set_state_class_on,
 };
 
 /// The floater's stable id.
@@ -679,6 +682,7 @@ fn bind_console_rows(
     new_rows: Query<(Entity, &ChildOf), Added<VirtualRow>>,
     rows: Query<(Ref<VirtualRow>, &ChildOf, &ConsoleRowText)>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
+    mut classes: Query<&mut ClassList>,
 ) {
     let Some(ui) = ui else {
         return;
@@ -695,7 +699,7 @@ fn bind_console_rows(
             .spawn((
                 Text::new(String::new()),
                 UiFont::Mono.at(FONT_SIZE),
-                TextColor(LABEL_COLOR),
+                ClassList::new_with_classes([TEXT_CLASS]),
                 Pickable::IGNORE,
                 Name::new("rlv-console-line"),
                 ChildOf(row_entity),
@@ -713,33 +717,25 @@ fn bind_console_rows(
             continue;
         }
         let line = row.index.and_then(|index| session.console().get(index));
-        let (value, color) = line.map_or_else(
-            || (String::new(), LABEL_COLOR),
-            |line| {
-                (
-                    format!("{}{}", line.kind.prefix(), line.text),
-                    line_color(line.kind),
-                )
-            },
-        );
-        if let Ok((mut text, mut text_color)) = texts.get_mut(holder.0) {
-            if text.0 != value {
-                text.0 = value;
-            }
-            if text_color.0 != color {
-                text_color.0 = color;
-            }
+        let value = line.map_or_else(String::new, |line| {
+            format!("{}{}", line.kind.prefix(), line.text)
+        });
+        if let Ok((mut text, _color)) = texts.get_mut(holder.0)
+            && text.0 != value
+        {
+            text.0 = value;
         }
-    }
-}
-
-/// The colour each console stream is written in.
-const fn line_color(kind: RlvConsoleKind) -> Color {
-    match kind {
-        RlvConsoleKind::Input => LABEL_COLOR,
-        RlvConsoleKind::Info => INFO_COLOR,
-        RlvConsoleKind::Error => ERROR_COLOR,
-        RlvConsoleKind::Reply => DIM_LABEL_COLOR,
+        // What the line *is* — a reply, an accepted command, a refused one —
+        // said as a class. A typed command carries none and reads as plain
+        // text, which is what the parked (empty) row also wants.
+        let kind = line.map(|line| line.kind);
+        for (class, wanted) in [
+            (CONSOLE_REPLY_CLASS, kind == Some(RlvConsoleKind::Reply)),
+            (CONSOLE_INFO_CLASS, kind == Some(RlvConsoleKind::Info)),
+            (CONSOLE_ERROR_CLASS, kind == Some(RlvConsoleKind::Error)),
+        ] {
+            set_state_class_on(&mut classes, holder.0, class, wanted);
+        }
     }
 }
 

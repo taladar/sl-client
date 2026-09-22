@@ -66,7 +66,10 @@ use crate::virtual_list::{
     VirtualList, VirtualRow, VirtualViewport, amend_row_node, index_to_f32, layout_virtual_lists,
 };
 use bevy_flair::style::components::ClassList;
-use sl_viewer_ui_core::skin::{ACTIVE_CLASS, LIST_ROW_CLASS, set_state_class};
+use sl_viewer_ui_core::skin::{
+    ACTIVE_CLASS, FOLDER_LABEL_CLASS, LIST_ROW_CLASS, TEXT_CLASS, set_state_class,
+    set_state_class_on, text_role,
+};
 use sl_viewer_ui_core::ui_ellipsis::{RevealEllipsis, spawn_ellipsis_marker};
 
 /// The uniform height of a tree row, in logical pixels. Drives the virtualized
@@ -170,10 +173,6 @@ const CHROME_COLOR: Color = Color::srgb(0.86, 0.89, 0.95);
 
 /// A row label's colour.
 const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
-
-/// A folder row label's colour — a touch warmer than an item, so the tree's
-/// structure reads at a glance.
-const FOLDER_LABEL_COLOR: Color = Color::srgb(0.98, 0.86, 0.55);
 
 /// A row's trailing suffix colour (the permission / worn decorations) — dimmer
 /// than the label, so the name stays the thing the eye reads first.
@@ -3140,7 +3139,7 @@ fn spawn_row_parts(commands: &mut Commands, row_entity: Entity) -> RowParts {
         .spawn((
             Text::new(""),
             UiFont::Mono.at(ROW_FONT_SIZE),
-            TextColor(CHROME_COLOR),
+            text_role(CHROME_COLOR),
             Node {
                 min_width: Val::Px(ARROW_COL_WIDTH),
                 ..default()
@@ -3152,7 +3151,7 @@ fn spawn_row_parts(commands: &mut Commands, row_entity: Entity) -> RowParts {
         .spawn((
             Text::new(""),
             UiFont::Sans.at(ROW_FONT_SIZE),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Node {
                 min_width: Val::Px(ICON_COL_WIDTH),
                 ..default()
@@ -3172,7 +3171,7 @@ fn spawn_row_parts(commands: &mut Commands, row_entity: Entity) -> RowParts {
             Text::new(""),
             TextLayout::no_wrap(),
             UiFont::Sans.at(ROW_FONT_SIZE),
-            TextColor(LABEL_COLOR),
+            ClassList::new_with_classes([TEXT_CLASS]),
             // The text keeps its full width; the clip container is what
             // shrinks, so an over-long name overflows the clip and reveals
             // the marker below.
@@ -3206,7 +3205,7 @@ fn spawn_row_parts(commands: &mut Commands, row_entity: Entity) -> RowParts {
             Text::new(""),
             TextLayout::no_wrap(),
             UiFont::Sans.at(ROW_FONT_SIZE),
-            TextColor(SUFFIX_COLOR),
+            text_role(SUFFIX_COLOR),
             Node {
                 flex_shrink: 0.0,
                 ..default()
@@ -3279,6 +3278,26 @@ const fn suffix_style_for(width: f32, current: SuffixStyle) -> SuffixStyle {
     }
 }
 
+/// What a row's parts are written through, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam) — the indent's width, the
+/// glyph and name text, the worn / link font weight, and the class that says a
+/// name is a folder's.
+///
+/// A bundle because the four of them put [`bind_rows`] over the argument
+/// limit, and because they are one idea: everything a bound row rewrites.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct RowPaint<'w, 's> {
+    /// The indent spacer, whose width is the row's depth.
+    nodes: Query<'w, 's, &'static mut Node>,
+    /// The glyph and name texts. Still paired with their colours: the suffix
+    /// and icon keep theirs, and this query reaches them too.
+    texts: Query<'w, 's, (&'static mut Text, &'static mut TextColor)>,
+    /// The name's weight — bold when worn, italic for an unworn link.
+    fonts: Query<'w, 's, &'static mut TextFont>,
+    /// The name's classes, which say whether it is a folder's.
+    classes: Query<'w, 's, &'static mut ClassList>,
+}
+
 /// Bind each row's parts to the [`DisplayRow`] it now points at — on the frame
 /// the view is rebuilt (all rows) or a row's index changed (that row).
 fn bind_rows(
@@ -3286,10 +3305,14 @@ fn bind_rows(
     style: Res<SuffixStyle>,
     ui: Option<Res<InventoryUi>>,
     rows: Query<(Ref<VirtualRow>, &ChildOf, &RowParts)>,
-    mut nodes: Query<&mut Node>,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
-    mut fonts: Query<&mut TextFont>,
+    paint: RowPaint,
 ) {
+    let RowPaint {
+        mut nodes,
+        mut texts,
+        mut fonts,
+        mut classes,
+    } = paint;
     let Some(ui) = ui else {
         return;
     };
@@ -3312,20 +3335,23 @@ fn bind_rows(
         if let Ok(mut indent) = nodes.get_mut(parts.indent) {
             indent.width = Val::Px(depth_indent(display.depth));
         }
-        if let Ok((mut text, mut color)) = texts.get_mut(parts.arrow) {
+        if let Ok((mut text, _color)) = texts.get_mut(parts.arrow) {
             set_text(&mut text, display.arrow.glyph());
-            *color = TextColor(CHROME_COLOR);
         }
         if let Ok((mut text, _color)) = texts.get_mut(parts.icon) {
             set_text(&mut text, display.icon);
         }
-        if let Ok((mut text, mut color)) = texts.get_mut(parts.label) {
+        if let Ok((mut text, _color)) = texts.get_mut(parts.label) {
             set_text(&mut text, &display.name);
-            *color = TextColor(match display.key {
-                RowKey::Folder(_) => FOLDER_LABEL_COLOR,
-                RowKey::Item(_) => LABEL_COLOR,
-            });
         }
+        // A folder's name reads gold against an item's plain text — the
+        // reference's own distinction, and the skin's to retune.
+        set_state_class_on(
+            &mut classes,
+            parts.label,
+            FOLDER_LABEL_CLASS,
+            matches!(display.key, RowKey::Folder(_)),
+        );
         // A worn item's label draws bold, an unworn link italic (the
         // reference's `getLabelStyle`); write-guarded so an unchanged style
         // does not re-measure the text.
@@ -3925,7 +3951,7 @@ fn spawn_toolbar_button(
             Text::default(),
             Translated::new(label_key),
             UiFont::Sans.at(CHROME_FONT_SIZE),
-            TextColor(CHROME_COLOR),
+            text_role(CHROME_COLOR),
         ))
         .id()
 }
@@ -4042,26 +4068,26 @@ fn spawn_sample_row(
     commands.spawn((
         Text::new(arrow.glyph().to_owned()),
         cx.font(UiFont::Mono),
-        TextColor(CHROME_COLOR),
+        text_role(CHROME_COLOR),
         ChildOf(row_entity),
     ));
     commands.spawn((
         Text::new(icon.to_owned()),
         cx.font(UiFont::Sans),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         ChildOf(row_entity),
     ));
     commands.spawn((
         Text::new(cx.text(label)),
         cx.font(UiFont::Sans),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         ChildOf(row_entity),
     ));
     if !suffix.is_empty() {
         commands.spawn((
             Text::new(cx.text(suffix)),
             cx.font(UiFont::Sans),
-            TextColor(SUFFIX_COLOR),
+            text_role(SUFFIX_COLOR),
             ChildOf(row_entity),
         ));
     }

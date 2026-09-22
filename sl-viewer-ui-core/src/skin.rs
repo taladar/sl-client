@@ -374,6 +374,31 @@ pub const TEXT_CLASS: &str = "sk-text";
 /// system for the duration of the drag; the cascade settles it instead.
 pub const DROP_TARGET_CLASS: &str = "sk-drop-target";
 
+/// The CSS classes on an RLVa console line, by what the line *is*: a reply the
+/// grid sent back, an accepted command, a refused one. A typed command carries
+/// none of them and reads as plain text.
+///
+/// Meaning-bearing, so tokens rather than constants — for the same reason the
+/// four notification kinds are: "was that refused?" must survive a skin, and a
+/// colour-blind overlay is exactly what retunes it. Compound with
+/// [`TEXT_CLASS`], which the line also carries, so dropping one falls back to
+/// the plain look.
+pub const CONSOLE_REPLY_CLASS: &str = "sk-console-reply";
+
+/// The accepted-command half of [`CONSOLE_REPLY_CLASS`].
+pub const CONSOLE_INFO_CLASS: &str = "sk-console-info";
+
+/// The refused-command half of [`CONSOLE_REPLY_CLASS`].
+pub const CONSOLE_ERROR_CLASS: &str = "sk-console-error";
+
+/// The CSS class on an inventory **folder**'s label, which the reference draws
+/// gold against an item's plain text.
+///
+/// A role rather than drift: the distinction is what tells a container from a
+/// thing at a glance down a long tree, and a high-contrast or colour-blind
+/// skin wants to retune it — the same argument as [`PRESENCE_ONLINE_CLASS`].
+pub const FOLDER_LABEL_CLASS: &str = "sk-folder-label";
+
 /// The CSS class on one tile of a dense grid — an emoji cell, a tone swatch.
 /// Its hover is a `:hover` rule and needs no code; the class exists so the rule
 /// has something to select.

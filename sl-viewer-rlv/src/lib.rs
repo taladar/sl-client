@@ -84,12 +84,6 @@ pub(crate) mod style {
 
     /// An action button's background.
     pub(crate) const ACTION_BACKGROUND: Color = Color::srgb(0.24, 0.29, 0.38);
-
-    /// The colour a refused command is written in.
-    pub(crate) const ERROR_COLOR: Color = Color::srgb(0.92, 0.56, 0.52);
-
-    /// The colour an accepted command is written in.
-    pub(crate) const INFO_COLOR: Color = Color::srgb(0.60, 0.82, 0.66);
 }
 
 /// Every RLVa window at once, for a host that wants the whole family.

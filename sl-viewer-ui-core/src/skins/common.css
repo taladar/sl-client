@@ -169,6 +169,28 @@
   background-color: var(--tile-hover);
 }
 
+/* An RLVa console line, by what the line is. Compound with `.sk-text` so a
+ * typed command — which carries none of these — reads as plain text. */
+.sk-text.sk-console-reply {
+  color: var(--text-muted);
+}
+
+.sk-text.sk-console-info {
+  color: var(--console-info);
+}
+
+.sk-text.sk-console-error {
+  color: var(--console-error);
+}
+
+/* An inventory folder's label, gold where an item's is plain — the reference's
+ * own distinction, and the fastest way to read a long tree. Compound with
+ * `.sk-text`, which the label also carries, so dropping this falls back to the
+ * item look rather than to nothing. */
+.sk-text.sk-folder-label {
+  color: var(--folder-label);
+}
+
 /* A friend's presence dot. One of the pair is always on — there is no third
  * presence — so neither needs a resting rule to fall back to. Meaning-bearing,
  * so a skin that remaps green/red for a colour-blind reader remaps these in the
