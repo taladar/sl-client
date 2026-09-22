@@ -82,7 +82,9 @@ use sl_viewer_notifications::{NotificationResponse, ShowNotification};
 use sl_viewer_pickers::ui_texture_picker::TextureSwatchValue;
 use sl_viewer_platform::environment_assets::EnvironmentAssetManager;
 use sl_viewer_ui_core::i18n::{TransArgs, Translated, Translator};
-use sl_viewer_ui_core::skin::{ACTIVE_CLASS, set_action_button_enabled, set_state_class};
+use sl_viewer_ui_core::skin::{
+    ACTIVE_CLASS, set_action_button_enabled, set_state_class, text_role,
+};
 use sl_viewer_ui_core::ui::{
     LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row,
 };
@@ -754,7 +756,7 @@ fn spawn_name_row(commands: &mut Commands, parent: Entity, tab: &mut i32) {
     commands.spawn((
         Text::new(String::new()),
         UiFont::Sans.at(FONT_SIZE),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         Translated::new("settings-editor-name"),
         ChildOf(holder),
     ));
@@ -855,7 +857,7 @@ fn spawn_timeline(commands: &mut Commands, parent: Entity, tab: &mut i32) -> (En
                 ..TextLayout::default()
             },
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(DIM_LABEL_COLOR),
+            text_role(DIM_LABEL_COLOR),
             DayTick(index),
             Name::new(format!("{element}-tick-{index}")),
             ChildOf(ticks),
@@ -885,7 +887,7 @@ fn spawn_timeline(commands: &mut Commands, parent: Entity, tab: &mut i32) -> (En
                 ..TextLayout::default()
             },
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Node {
                 min_width: Val::Px(120.0),
                 ..Node::default()
@@ -1018,7 +1020,7 @@ fn spawn_hint(commands: &mut Commands, parent: Entity) -> Entity {
         .spawn((
             Text::new(String::new()),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(DIM_LABEL_COLOR),
+            text_role(DIM_LABEL_COLOR),
             Translated::new("day-cycle-select-a-keyframe"),
             Name::new(format!("{DAY_CYCLE_EDITOR_FLOATER_ID}-hint")),
             ChildOf(parent),
@@ -1203,7 +1205,7 @@ fn spawn_save_row(commands: &mut Commands, parent: Entity, tab: &mut i32) -> Ent
         .spawn((
             Text::new(String::new()),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(DIM_LABEL_COLOR),
+            text_role(DIM_LABEL_COLOR),
             Name::new(format!("{element}-status")),
             ChildOf(parent),
         ))

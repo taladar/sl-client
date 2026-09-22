@@ -74,6 +74,7 @@ use crate::ui_color_picker::{ColorPicked, ColorSwatchValue};
 use crate::ui_combo::{ComboChanged, ComboSelection};
 use crate::ui_slider::{SliderStyle, SliderWidgetPlugin, slider_thumb, slider_track};
 use sl_viewer_settings::ViewerSettings;
+use sl_viewer_ui_core::skin::text_role;
 use sl_viewer_ui_core::ui::{
     LogicalMargin, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row,
 };
@@ -793,7 +794,7 @@ fn setup_settings_binding_demo(
             panel.spawn((
                 Text::new(DEMO_TITLE),
                 UiFont::Sans.at(DEMO_TITLE_FONT_SIZE),
-                TextColor(DEMO_TEXT_COLOR),
+                text_role(DEMO_TEXT_COLOR),
             ));
             spawn_demo_checkbox_row(panel);
             spawn_demo_slider_row(panel);
@@ -826,7 +827,7 @@ fn spawn_demo_checkbox_row(panel: &mut RelatedSpawnerCommands<'_, ChildOf>) {
             check_row.spawn((
                 Text::default(),
                 UiFont::Sans.at(DEMO_FONT_SIZE),
-                TextColor(DEMO_TEXT_COLOR),
+                text_role(DEMO_TEXT_COLOR),
                 DemoLabel::Flag,
             ));
         });
@@ -854,7 +855,7 @@ fn spawn_demo_slider_row(panel: &mut RelatedSpawnerCommands<'_, ChildOf>) {
             slider_row.spawn((
                 Text::default(),
                 UiFont::Sans.at(DEMO_FONT_SIZE),
-                TextColor(DEMO_TEXT_COLOR),
+                text_role(DEMO_TEXT_COLOR),
                 DemoLabel::Level,
             ));
         });
@@ -879,7 +880,7 @@ fn spawn_demo_reset_button(panel: &mut RelatedSpawnerCommands<'_, ChildOf>) {
         .with_child((
             Text::new("Reset to defaults"),
             UiFont::Sans.at(DEMO_FONT_SIZE),
-            TextColor(DEMO_TEXT_COLOR),
+            text_role(DEMO_TEXT_COLOR),
         ));
 }
 

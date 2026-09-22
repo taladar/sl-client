@@ -86,6 +86,7 @@ use crate::intents::{OpenScript, ScriptSource};
 use crate::ui::{column, row};
 use crate::ui_element::ElementCx;
 use crate::ui_font::UiFont;
+use sl_viewer_ui_core::skin::text_role;
 
 /// A green-tinted colour for a checked Running box.
 const CHECK_COLOR: Color = Color::srgb(0.55, 0.85, 0.60);
@@ -458,7 +459,7 @@ fn populate_editor(
             .spawn((
                 Text::default(),
                 UiFont::Sans.at(font_size),
-                TextColor(DIM_COLOR),
+                text_role(DIM_COLOR),
                 ChildOf(bar),
             ))
             .id();
@@ -689,7 +690,7 @@ fn spawn_readonly_body(commands: &mut Commands, parent: Entity, text: &str, font
         .with_child((
             Text::new(text.to_owned()),
             UiFont::Mono.at(font_size),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
         ));
 }
 
@@ -734,7 +735,7 @@ fn spawn_running_toggle(
         Text::default(),
         Translated::new("script-running"),
         UiFont::Sans.at(font_size),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(host),
     ));
@@ -806,7 +807,7 @@ fn spawn_error_row(
     commands.spawn((
         Text::new(line),
         UiFont::Mono.at(font_size),
-        TextColor(ERROR_COLOR),
+        text_role(ERROR_COLOR),
         ChildOf(parent),
     ));
 }
@@ -872,7 +873,7 @@ pub fn spawn_script_editor_specimen(
         commands.spawn((
             Text::new(cx.text("Line 5, column 9: syntax error")),
             UiFont::Mono.at(cx.font_size),
-            TextColor(ERROR_COLOR),
+            text_role(ERROR_COLOR),
             ChildOf(errors),
         ));
     }

@@ -72,6 +72,7 @@ use crate::environment::{EnvironmentState, FixedEnvironment, LocalEnvironmentPic
 use crate::i18n::Translator;
 use crate::notifications::ShowNotification;
 use crate::settings_index::{SettingsAsset, SettingsIndex};
+use crate::skin::text_role;
 use crate::sky_presets::FixedSky;
 use crate::ui::row;
 use crate::ui_combo::{
@@ -385,7 +386,7 @@ fn spawn_preset_row(
         Text::default(),
         crate::i18n::Translated::new(label_key_of(kind)),
         UiFont::Sans.at(FONT),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(row_entity),
     ));
@@ -459,7 +460,7 @@ fn spawn_step_button(
         .with_child((
             Text::new(if forward { NEXT_GLYPH } else { PREV_GLYPH }),
             UiFont::Sans.at(FONT),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Pickable::IGNORE,
         ));
 }

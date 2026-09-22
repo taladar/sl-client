@@ -37,6 +37,7 @@
 use bevy::prelude::*;
 
 use crate::i18n::LocaleEllipsisMarker;
+use crate::skin::text_role;
 use crate::ui::{LogicalPadding, LogicalRect};
 use crate::ui_font::UiFont;
 
@@ -99,7 +100,7 @@ pub fn spawn_ellipsis_marker(
             Text::new(text.to_owned()),
             TextLayout::no_wrap(),
             UiFont::Sans.at(font_size),
-            TextColor(color),
+            text_role(color),
             Node {
                 // Hidden until the value overflows; never shrinks, so it keeps
                 // its room once shown.

@@ -532,6 +532,34 @@ const fn color_eq(left: Color, right: Color) -> bool {
     }
 }
 
+/// A [`TextColor`] and the class its role names, as a spawn bundle.
+///
+/// The form [`role_class`] takes at a **spawn site**: `text_role(LABEL_COLOR)`
+/// in place of `TextColor(LABEL_COLOR)` is the whole edit, so a panel that
+/// builds its own text nodes rather than going through
+/// [`crate::ui_spawn`]'s helpers becomes skinnable without restating which
+/// role it meant — the colour already says.
+///
+/// A colour that names no role yields an **empty** `ClassList` rather than
+/// none: the node is then ready for a class to be written into it later (a
+/// table cell's role changes per bind), and a widget that wanted one would
+/// otherwise find nothing there.
+///
+/// Only for text whose colour is **not** rewritten from Rust afterwards. A
+/// class `color` beats a `TextColor`, so putting one on a node that something
+/// still repaints per state or per frame — `chat.rs` fades a line by its age —
+/// would pin it to one colour. Those are the sites that need a state class, or
+/// to stay as they are.
+#[must_use]
+pub fn text_role(color: Color) -> (TextColor, ClassList) {
+    (
+        TextColor(color),
+        role_class(color).map_or_else(ClassList::empty, |class| {
+            ClassList::new_with_classes([class])
+        }),
+    )
+}
+
 /// Put the role class `color` names on `list`, taking off whichever of the
 /// other three was there.
 ///

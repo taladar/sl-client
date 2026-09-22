@@ -65,6 +65,7 @@ use crate::notifications::{
     last_response_setting_name, substitute, template,
 };
 use crate::settings::ViewerSettings;
+use crate::skin_palette::SkinPalette;
 use crate::ui::{LogicalInset, LogicalRect, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
@@ -128,7 +129,7 @@ const CARD_BACKGROUND: Color = Color::srgba(0.10, 0.12, 0.16, 0.96);
 
 /// A toast card's fallback body text colour — the skin's `.sk-toast-text`
 /// overrides it.
-const TEXT_COLOR: Color = Color::srgb(0.90, 0.93, 0.97);
+const TEXT_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A toast button's fallback background — the skin's `.sk-button` overrides it.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.16, 0.19, 0.25);

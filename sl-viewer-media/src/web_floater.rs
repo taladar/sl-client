@@ -24,7 +24,7 @@ use crate::media_engine::{MediaEngineSystems, MediaSurfaces};
 use sl_viewer_intents::OpenWebBrowser;
 use sl_viewer_platform::system_browser::{ExternalUrl, normalize_web_url, open_in_system_browser};
 use sl_viewer_ui_core::i18n::Translated;
-use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class_on};
+use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class_on, text_role};
 use sl_viewer_ui_core::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use sl_viewer_ui_core::ui_element::UiAction;
 use sl_viewer_ui_core::ui_font::UiFont;
@@ -145,7 +145,7 @@ fn spawn_web_floater(mut commands: Commands, root: Res<UiRoot>) {
         .spawn((
             Text::new("🔒"),
             UiFont::Sans.at(WEB_FONT_SIZE),
-            TextColor(STATUS_COLOR),
+            text_role(STATUS_COLOR),
             Visibility::Hidden,
             ChildOf(toolbar),
         ))
@@ -184,7 +184,7 @@ fn spawn_web_floater(mut commands: Commands, root: Res<UiRoot>) {
         .spawn((
             Text::default(),
             UiFont::Sans.at(WEB_FONT_SIZE),
-            TextColor(STATUS_COLOR),
+            text_role(STATUS_COLOR),
             ChildOf(content),
         ))
         .id();

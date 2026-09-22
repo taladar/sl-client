@@ -113,6 +113,7 @@ use sl_viewer_world_api::ViewerCamera;
 
 use crate::quiescence::SceneQuiescence;
 use equirect::{CUBE_FACES, CubeFaces};
+use sl_viewer_ui_core::skin::text_role;
 use xmp::PanoramaMetadata;
 
 pub mod equirect;
@@ -591,7 +592,7 @@ fn build_panorama_content(
         .spawn((
             Text::default(),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(HINT_COLOR),
+            text_role(HINT_COLOR),
             Name::new("panorama-status"),
             ChildOf(content),
         ))
@@ -601,7 +602,7 @@ fn build_panorama_content(
         Text::default(),
         Translated::new("panorama-hint"),
         UiFont::Sans.at(FONT_SIZE),
-        TextColor(HINT_COLOR),
+        text_role(HINT_COLOR),
         Node {
             max_width: Val::Px(PREVIEW_WIDTH),
             ..default()
@@ -656,7 +657,7 @@ fn spawn_preview(commands: &mut Commands, parent: Entity) -> (Entity, Entity) {
             Text::default(),
             Translated::new("panorama-preview-empty"),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(HINT_COLOR),
+            text_role(HINT_COLOR),
             ChildOf(frame),
         ))
         .id();
@@ -687,7 +688,7 @@ fn spawn_picker_row(
         Text::default(),
         Translated::new(label_key),
         UiFont::Sans.at(FONT_SIZE),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         ChildOf(row_entity),
     ));
     spawn_combo(

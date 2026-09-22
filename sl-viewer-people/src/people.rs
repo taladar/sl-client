@@ -50,7 +50,7 @@ use std::collections::BTreeSet;
 
 use crate::skin::{
     ACTION_BUTTON_CLASS, DisabledButtons, PRESENCE_OFFLINE_CLASS, PRESENCE_ONLINE_CLASS,
-    TEXT_CLASS, set_action_button_enabled, set_state_class_on,
+    TEXT_CLASS, set_action_button_enabled, set_state_class_on, text_role,
 };
 use crate::skin_palette::SkinPalette;
 use bevy::asset::RenderAssetUsages;
@@ -137,7 +137,7 @@ const ACTION_BACKGROUND: Color = Color::srgb(0.24, 0.29, 0.38);
 const HEADER_BACKGROUND: Color = Color::srgb(0.14, 0.17, 0.22);
 
 /// The table header text colour — dim, so the headers read as chrome.
-const HEADER_TEXT_COLOR: Color = Color::srgb(0.66, 0.70, 0.78);
+const HEADER_TEXT_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// The skin class on a permission checkbox in the friends list.
 ///
@@ -1238,7 +1238,7 @@ fn spawn_people_tab(
     commands.spawn((
         Text::new(String::new()),
         UiFont::Sans.at(CHROME_FONT_SIZE),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         Translated::new(PEOPLE_TAB_KEY),
         Node {
             flex_grow: 1.0,
@@ -1371,7 +1371,7 @@ fn spawn_grant_confirm_modal(commands: &mut Commands, root: Entity) -> (Entity, 
         .spawn((
             Text::new(String::new()),
             UiFont::Sans.at(CHROME_FONT_SIZE),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Pickable::IGNORE,
             Name::new("people-grant-confirm-text"),
             ChildOf(box_node),
@@ -1431,7 +1431,7 @@ fn spawn_confirm_button(
         .with_child((
             Text::new(String::new()),
             UiFont::Sans.at(CHROME_FONT_SIZE),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Translated::new(label_key),
             Pickable::IGNORE,
         ))
@@ -1568,7 +1568,7 @@ fn augment_sortable_header(
         .spawn((
             Text::new(String::new()),
             UiFont::Sans.at(ROW_FONT_SIZE),
-            TextColor(TAB_ACTIVE_BORDER),
+            text_role(TAB_ACTIVE_BORDER),
             Node {
                 flex_shrink: 0.0,
                 margin: UiRect::left(Val::Px(2.0)),
@@ -1617,7 +1617,7 @@ fn fill_rights_group_header(
     commands.spawn((
         Text::new(String::new()),
         UiFont::Sans.at(ROW_FONT_SIZE),
-        TextColor(HEADER_TEXT_COLOR),
+        text_role(HEADER_TEXT_COLOR),
         Translated::new(group_key),
         Pickable::IGNORE,
         ChildOf(group),

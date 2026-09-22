@@ -63,6 +63,7 @@ use bevy_flair::style::components::ClassList;
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 use sl_viewer_ui_core::i18n::Translated;
+use sl_viewer_ui_core::skin::text_role;
 use sl_viewer_ui_core::ui_font::UiFont;
 
 /// The control's outer square, logical px. The aiming circle is inscribed in it
@@ -400,7 +401,7 @@ fn spawn_compass_label(
             linebreak: LineBreak::NoWrap,
         },
         UiFont::Sans.at(LABEL_FONT),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         Node {
             position_type: PositionType::Absolute,
             left: Val::Px(centre + direction.x * travel - LABEL_BOX / 2.0),

@@ -60,7 +60,7 @@ use bevy::text::EditableText;
 use bevy::ui_widgets::Button;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{AssetKey, InventoryFolderKey, InventoryType, TextureKey, Uuid};
-use sl_viewer_ui_core::skin::{ACTIVE_CLASS, set_state_class};
+use sl_viewer_ui_core::skin::{ACTIVE_CLASS, set_state_class, text_role};
 use std::hash::{Hash, Hasher as _};
 
 use crate::floater::{
@@ -71,6 +71,7 @@ use crate::i18n::Translated;
 use crate::intents::{OpenTexturePicker, PickerKind, TexturePicked};
 use crate::inventory::{InventoryModel, MAX_FOLDER_DEPTH, item_icon, query_folder_page};
 use crate::material_preview::MaterialPreview;
+use crate::skin_palette::SkinPalette;
 use crate::ui::{column, row};
 use crate::ui_font::UiFont;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
@@ -128,7 +129,7 @@ const EMPTY_FILL: Color = Color::srgba(0.1, 0.1, 0.12, 1.0);
 const BUTTON_BACKGROUND: Color = Color::srgba(0.18, 0.18, 0.2, 1.0);
 
 /// The text colour.
-const TEXT_COLOR: Color = Color::srgb(0.9, 0.92, 0.96);
+const TEXT_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A folder row's label colour.
 const FOLDER_COLOR: Color = Color::srgb(0.82, 0.86, 0.95);
@@ -465,7 +466,7 @@ fn build_picker_content(commands: &mut Commands, handle: FloaterHandle, open: &O
         Text::default(),
         Translated::new("texture-picker-search"),
         UiFont::Sans.at(PICKER_FONT),
-        TextColor(TEXT_COLOR),
+        text_role(TEXT_COLOR),
         ChildOf(search_row),
     ));
     let search = spawn_text_input(
@@ -1011,14 +1012,14 @@ fn spawn_tree_row(commands: &mut Commands, tree: Entity, row_data: &TreeRow, kin
     commands.spawn((
         Text::new(glyph),
         UiFont::Sans.at(PICKER_FONT),
-        TextColor(colour),
+        text_role(colour),
         Pickable::IGNORE,
         ChildOf(row_entity),
     ));
     commands.spawn((
         Text::new(label),
         UiFont::Sans.at(PICKER_FONT),
-        TextColor(colour),
+        text_role(colour),
         Pickable::IGNORE,
         ChildOf(row_entity),
     ));

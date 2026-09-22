@@ -75,6 +75,7 @@ use crate::ui::row;
 use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonSpec, LabeledRowSpec, UiLabel};
 use crate::world_api::ui_texture::{PendingUiTexture, UiTexturePlugin};
+use sl_viewer_ui_core::skin::text_role;
 
 /// The chrome font size, in logical pixels.
 const PROPS_FONT_SIZE: f32 = 14.0;
@@ -710,7 +711,7 @@ fn spawn_value_label(commands: &mut Commands, parent: Entity, value: String, col
     commands.spawn((
         Text::new(value),
         UiFont::Sans.at(PROPS_FONT_SIZE),
-        TextColor(color),
+        text_role(color),
         ChildOf(parent),
     ));
 }
@@ -737,7 +738,7 @@ fn spawn_static_check(commands: &mut Commands, parent: Entity, label_key: &'stat
         Text::default(),
         Translated::new(label_key),
         UiFont::Sans.at(PROPS_FONT_SIZE),
-        TextColor(DIM_LABEL_COLOR),
+        text_role(DIM_LABEL_COLOR),
         ChildOf(parent),
     ));
 }
@@ -1122,7 +1123,7 @@ fn open_previews(
                     .with_child((
                         Text::new("(loading)"),
                         UiFont::Sans.at(PROPS_FONT_SIZE),
-                        TextColor(DIM_LABEL_COLOR),
+                        text_role(DIM_LABEL_COLOR),
                     ))
                     .id();
                 commands

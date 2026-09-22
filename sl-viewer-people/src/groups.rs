@@ -46,7 +46,7 @@
 
 use crate::skin::{
     ACTION_BUTTON_CLASS, ACTIVE_CLASS, ACTIVE_TEXT_CLASS, DisabledButtons, TEXT_CLASS,
-    set_action_button_enabled, set_state_class, set_state_class_on,
+    set_action_button_enabled, set_state_class, set_state_class_on, text_role,
 };
 use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
@@ -100,7 +100,7 @@ const ACTION_BACKGROUND: Color = Color::srgb(0.24, 0.29, 0.38);
 const HEADER_BACKGROUND: Color = Color::srgb(0.14, 0.17, 0.22);
 
 /// The table header / count text colour — dim, so it reads as chrome.
-const HEADER_TEXT_COLOR: Color = Color::srgb(0.66, 0.70, 0.78);
+const HEADER_TEXT_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// The filled marker glyph shown in the Active column for the active group.
 const ACTIVE_GLYPH: &str = "\u{25CF}";
@@ -442,7 +442,7 @@ fn spawn_groups_panel(
         .spawn((
             Text::new(String::new()),
             UiFont::Sans.at(CHROME_FONT_SIZE),
-            TextColor(HEADER_TEXT_COLOR),
+            text_role(HEADER_TEXT_COLOR),
             Node {
                 flex_shrink: 0.0,
                 padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),
@@ -506,7 +506,7 @@ fn spawn_groups_header(commands: &mut Commands, list_column: Entity) {
     commands.spawn((
         Text::new(String::new()),
         UiFont::Sans.at(ROW_FONT_SIZE),
-        TextColor(HEADER_TEXT_COLOR),
+        text_role(HEADER_TEXT_COLOR),
         Translated::new(HEADER_NAME_KEY),
         Node {
             flex_grow: 1.0,
@@ -519,7 +519,7 @@ fn spawn_groups_header(commands: &mut Commands, list_column: Entity) {
     commands.spawn((
         Text::new(String::new()),
         UiFont::Sans.at(ROW_FONT_SIZE),
-        TextColor(HEADER_TEXT_COLOR),
+        text_role(HEADER_TEXT_COLOR),
         Translated::new(HEADER_ACTIVE_KEY),
         Node {
             width: Val::Px(ACTIVE_COL_WIDTH),
@@ -657,7 +657,7 @@ fn spawn_leave_confirm_modal(commands: &mut Commands, root: Entity) -> (Entity, 
         .spawn((
             Text::new(String::new()),
             UiFont::Sans.at(CHROME_FONT_SIZE),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Pickable::IGNORE,
             Name::new("groups-leave-confirm-text"),
             ChildOf(box_node),
@@ -720,7 +720,7 @@ fn spawn_confirm_button(
         .with_child((
             Text::new(String::new()),
             UiFont::Sans.at(CHROME_FONT_SIZE),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Translated::new(label_key),
             Pickable::IGNORE,
         ))

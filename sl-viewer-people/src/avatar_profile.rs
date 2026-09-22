@@ -73,6 +73,7 @@ use crate::intents::RequestFriendship;
 use crate::intents::{ConversationKey, OpenAvatarProfile, OpenConversation};
 use crate::inventory_drag::AgentDropTarget;
 use crate::inventory_properties::format_unix_date;
+use crate::skin::text_role;
 use crate::social::FriendsModel;
 use crate::social::GroupsModel;
 use crate::ui::{column, row};
@@ -1591,7 +1592,7 @@ fn build_web_tab(
                     Text::default(),
                     Translated::new("profile-web-loading"),
                     UiFont::Sans.at(PROFILE_FONT_SIZE),
-                    TextColor(DIM_LABEL_COLOR),
+                    text_role(DIM_LABEL_COLOR),
                     ChildOf(panel),
                 ))
                 .id(),
@@ -1973,7 +1974,7 @@ fn build_classified_editor(
         Text::default(),
         Translated::new(content_type_key(draft.mature)),
         UiFont::Sans.at(PROFILE_FONT_SIZE),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(type_button),
     ));
@@ -2130,7 +2131,7 @@ fn spawn_section_label(commands: &mut Commands, parent: Entity, label_key: &'sta
         Text::default(),
         Translated::new(label_key),
         UiFont::Sans.at(PROFILE_FONT_SIZE),
-        TextColor(DIM_LABEL_COLOR),
+        text_role(DIM_LABEL_COLOR),
         ChildOf(parent),
     ));
 }
@@ -2140,7 +2141,7 @@ fn spawn_value_label(commands: &mut Commands, parent: Entity, value: String, col
     commands.spawn((
         Text::new(value),
         UiFont::Sans.at(PROFILE_FONT_SIZE),
-        TextColor(color),
+        text_role(color),
         ChildOf(parent),
     ));
 }
@@ -2152,7 +2153,7 @@ fn spawn_value_node(commands: &mut Commands, parent: Entity, color: Color) -> En
         .spawn((
             Text::new(String::new()),
             UiFont::Sans.at(PROFILE_FONT_SIZE),
-            TextColor(color),
+            text_role(color),
             Pickable::IGNORE,
             ChildOf(parent),
         ))
@@ -2176,7 +2177,7 @@ fn spawn_key_label_node(
             Text::default(),
             Translated::new(key),
             UiFont::Sans.at(PROFILE_FONT_SIZE),
-            TextColor(color),
+            text_role(color),
             ChildOf(parent),
         ))
         .id()
@@ -2196,7 +2197,7 @@ fn spawn_text_block(commands: &mut Commands, parent: Entity, text: String) {
         .with_child((
             Text::new(text),
             UiFont::Sans.at(PROFILE_FONT_SIZE),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
         ));
 }
 
@@ -2261,7 +2262,7 @@ fn spawn_disabled_button(commands: &mut Commands, parent: Entity, label_key: &'s
             Text::default(),
             Translated::new(label_key),
             UiFont::Sans.at(PROFILE_FONT_SIZE),
-            TextColor(DIM_LABEL_COLOR),
+            text_role(DIM_LABEL_COLOR),
         ));
 }
 
@@ -2328,7 +2329,7 @@ fn spawn_check_button(
         Text::default(),
         Translated::new(label_key),
         UiFont::Sans.at(PROFILE_FONT_SIZE),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(host),
     ));
@@ -2429,7 +2430,7 @@ fn spawn_profile_group_row(
         .spawn((
             Text::new(name),
             UiFont::Sans.at(PROFILE_FONT_SIZE),
-            TextColor(GROUP_LINK_COLOR),
+            text_role(GROUP_LINK_COLOR),
             ProfileGroupRow(group_id),
             Pickable::default(),
             Name::new("profile-group-row"),
@@ -2491,7 +2492,7 @@ fn spawn_category_label_on(commands: &mut Commands, button: Entity, category: Cl
         .spawn((
             Text::default(),
             UiFont::Sans.at(PROFILE_FONT_SIZE),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Pickable::IGNORE,
             ChildOf(button),
         ))

@@ -70,6 +70,7 @@ use crate::rows::{
     spawn_trackball_row, tag_aim_slider,
 };
 use crate::style::{DIM_LABEL_COLOR, HEADING_SIZE};
+use sl_viewer_ui_core::skin::text_role;
 
 /// The element-id prefix every control in this window is named by — the window
 /// draws knobs it shares with the settings editors, so the *window* supplies
@@ -345,7 +346,7 @@ fn spawn_column(commands: &mut Commands, parent: Entity, heading_key: &'static s
     commands.spawn((
         Text::new(String::new()),
         UiFont::Sans.at(HEADING_SIZE),
-        TextColor(DIM_LABEL_COLOR),
+        text_role(DIM_LABEL_COLOR),
         Translated::new(heading_key),
         ChildOf(column_entity),
     ));

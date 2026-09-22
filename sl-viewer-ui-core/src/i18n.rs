@@ -66,6 +66,7 @@ use sl_l10n::{CivilDateTime, DateTimeLength, DateTimeStyle, LocaleFormatters};
 use sl_viewer_settings::env_pins::{EnvPinnedSettings, PinKind};
 use unic_langid::{LanguageIdentifier, langid};
 
+use crate::skin::text_role;
 use crate::ui::{
     LogicalMargin, LogicalRect, UiDirection, UiPanelShown, UiRoot, UiScaffoldSystems, column, row,
 };
@@ -1169,7 +1170,7 @@ fn demo_line(commands: &mut Commands, parent: Entity, line: I18nDemoLine) {
     commands.spawn((
         Text::default(),
         UiFont::Sans.at(DEMO_FONT_SIZE),
-        TextColor(DEMO_TEXT_COLOR),
+        text_role(DEMO_TEXT_COLOR),
         line,
         ChildOf(parent),
     ));

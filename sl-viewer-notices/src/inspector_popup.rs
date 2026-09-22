@@ -66,6 +66,7 @@ use crate::ui_font::UiFont;
 use crate::ui_name_link::{NameLink, NameLinkSpec, NameTarget, set_name_link, spawn_name_link};
 use crate::url_linkify::LinkTarget;
 use crate::world_api::AvatarState;
+use sl_viewer_ui_core::skin::text_role;
 
 /// The card's fixed width, in logical pixels.
 const CARD_WIDTH: f32 = 280.0;
@@ -112,7 +113,7 @@ const CARD_BACKGROUND: Color = Color::srgba(0.08, 0.09, 0.13, 0.98);
 const CARD_BORDER: Color = Color::srgb(0.32, 0.36, 0.44);
 
 /// The title (name) text colour.
-const TITLE_COLOR: Color = Color::srgb(0.94, 0.96, 1.0);
+const TITLE_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// The body text colour.
 const BODY_COLOR: Color = Color::srgb(0.82, 0.85, 0.90);
@@ -783,7 +784,7 @@ fn build_card(
             UiFont::Sans
                 .at(TITLE_FONT_SIZE)
                 .with_font_weight(bevy::text::FontWeight::BOLD),
-            TextColor(TITLE_COLOR),
+            text_role(TITLE_COLOR),
             Pickable::IGNORE,
             ChildOf(root_entity),
         ))
@@ -802,7 +803,7 @@ fn build_card(
         .spawn((
             Text::new(String::new()),
             UiFont::Sans.at(BODY_FONT_SIZE),
-            TextColor(BODY_COLOR),
+            text_role(BODY_COLOR),
             Node {
                 max_width: Val::Percent(100.0),
                 ..default()
@@ -873,7 +874,7 @@ fn spawn_owner_row(commands: &mut Commands, body: Entity, translator: &Translato
     commands.spawn((
         Text::new(translator.get("inspector-owner")),
         UiFont::Sans.at(BODY_FONT_SIZE),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(owner_row),
     ));
@@ -924,7 +925,7 @@ fn add_button<'commands>(
     button.with_child((
         Text::new(label.to_owned()),
         UiFont::Sans.at(BODY_FONT_SIZE),
-        TextColor(TITLE_COLOR),
+        text_role(TITLE_COLOR),
     ));
     button
 }

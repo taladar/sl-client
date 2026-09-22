@@ -43,6 +43,7 @@ use crate::floater::{
 use crate::i18n::Translated;
 use crate::notifications::{NotificationResponse, ShowNotification};
 use crate::ui_font::UiFont;
+use sl_viewer_ui_core::skin::text_role;
 
 /// The editors' text font size, in logical pixels.
 pub(crate) const FONT_SIZE: f32 = 14.0;
@@ -91,7 +92,7 @@ pub(crate) fn spawn_status(
             Text::default(),
             Translated::new(key),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(color),
+            text_role(color),
             ChildOf(parent),
         ))
         .id()
@@ -101,7 +102,7 @@ pub(crate) fn spawn_status(
 pub(crate) fn set_status(commands: &mut Commands, status: Entity, key: &'static str, color: Color) {
     commands
         .entity(status)
-        .insert((Translated::new(key), TextColor(color)));
+        .insert((Translated::new(key), text_role(color)));
 }
 
 /// Spawn the note shown above a no-modify asset's body.
@@ -115,7 +116,7 @@ pub(crate) fn spawn_note(
         Text::default(),
         Translated::new(key),
         UiFont::Sans.at(font_size),
-        TextColor(DIM_COLOR),
+        text_role(DIM_COLOR),
         ChildOf(parent),
     ));
 }
@@ -186,7 +187,7 @@ pub(crate) fn spawn_save_button(
             Text::default(),
             Translated::new(label_key),
             UiFont::Sans.at(font_size),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Pickable::IGNORE,
         ))
         .observe(on_save_pressed)

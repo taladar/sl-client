@@ -97,6 +97,7 @@ use crate::ui::{column, row};
 use crate::ui_element::{ElementCx, TextMayClip};
 use crate::ui_font::UiFont;
 use crate::url_linkify::{TextRun, linkify};
+use sl_viewer_ui_core::skin::text_role;
 
 /// The body field's height, in visible text lines — what the window opens at,
 /// being content-driven. It is a *starting* size, not a cap: the body fills, so
@@ -487,7 +488,7 @@ fn populate_editor(
         .spawn((
             Text::default(),
             UiFont::Sans.at(font_size),
-            TextColor(DIM_COLOR),
+            text_role(DIM_COLOR),
             ChildOf(bar),
         ))
         .id();

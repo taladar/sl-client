@@ -108,7 +108,7 @@ const HEADER_COLOR: Color = Color::srgb(0.75, 0.80, 0.88);
 const CELL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// The muted tone for the comment text and the detail row labels.
-const MUTED_COLOR: Color = Color::srgb(0.65, 0.70, 0.78);
+const MUTED_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// The largest per-channel disagreement the swatch seed treats as "already in
 /// sync" (half the picker's 8-bit quantisation step, the

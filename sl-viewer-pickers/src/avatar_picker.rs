@@ -66,7 +66,7 @@ use sl_client_bevy::{
     AgentKey, AvatarPickerResult, Command, QueryId, SlCommand, SlEvent, SlIdentity, SlSessionEvent,
     Uuid,
 };
-use sl_viewer_ui_core::skin::{ACTIVE_CLASS, LIST_ROW_CLASS};
+use sl_viewer_ui_core::skin::{ACTIVE_CLASS, LIST_ROW_CLASS, text_role};
 
 use crate::floater::{
     Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterHost, FloaterOp, FloaterOwner,
@@ -515,7 +515,7 @@ fn spawn_picker_button(
             Text::default(),
             Translated::new(label_key),
             UiFont::Sans.at(PICKER_FONT_SIZE),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Pickable::IGNORE,
         ))
         .id()
@@ -821,7 +821,7 @@ fn rebuild_picker_list(
                 Text::default(),
                 Translated::new(NOT_FOUND_KEY),
                 UiFont::Sans.at(PICKER_FONT_SIZE),
-                TextColor(USERNAME_COLOR),
+                text_role(USERNAME_COLOR),
                 Node {
                     padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
                     ..default()
@@ -876,7 +876,7 @@ fn rebuild_picker_list(
                     row.spawn((
                         Text::new(row_data.label.clone()),
                         UiFont::Sans.at(PICKER_FONT_SIZE),
-                        TextColor(LABEL_COLOR),
+                        text_role(LABEL_COLOR),
                         Pickable::IGNORE,
                     ));
                     // The username column, only where the source knows one.
@@ -884,7 +884,7 @@ fn rebuild_picker_list(
                         row.spawn((
                             Text::new(row_data.username.clone()),
                             UiFont::Sans.at(PICKER_FONT_SIZE),
-                            TextColor(USERNAME_COLOR),
+                            text_role(USERNAME_COLOR),
                             Pickable::IGNORE,
                         ));
                     }

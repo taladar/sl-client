@@ -70,7 +70,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
-use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class};
+use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class, text_role};
 
 use sl_client_bevy::{
     Command, ExperienceInfo, ExperienceKey, ExperiencePermission, ExperienceProperties,
@@ -82,6 +82,7 @@ use crate::floater::{
     KeyedFloaterOpen, KeyedFloaters, host_floater,
 };
 use crate::i18n::{Translated, Translator};
+use crate::skin_palette::SkinPalette;
 use crate::ui::{column, row};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
@@ -105,10 +106,10 @@ const HEADING_FONT_SIZE: f32 = 16.0;
 const CONTENT_WIDTH: f32 = 360.0;
 
 /// The primary body text colour.
-const TEXT_COLOR: Color = Color::srgb(0.90, 0.93, 0.97);
+const TEXT_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A dimmer secondary text colour (field captions, the empty-location note).
-const DIM_TEXT_COLOR: Color = Color::srgb(0.64, 0.68, 0.76);
+const DIM_TEXT_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// The heading accent — the emerald every experience surface wears.
 const HEADING_COLOR: Color = Color::srgb(0.42, 0.82, 0.60);
@@ -630,7 +631,7 @@ fn build_view_panel(commands: &mut Commands, parent: Entity) -> ViewPanel {
         .spawn((
             Text::default(),
             UiFont::Sans.at(HEADING_FONT_SIZE),
-            TextColor(HEADING_COLOR),
+            text_role(HEADING_COLOR),
             Pickable::IGNORE,
             Name::new("experience-profile-name"),
             ChildOf(panel),
@@ -640,7 +641,7 @@ fn build_view_panel(commands: &mut Commands, parent: Entity) -> ViewPanel {
         .spawn((
             Text::default(),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(TEXT_COLOR),
+            text_role(TEXT_COLOR),
             Pickable::IGNORE,
             Name::new("experience-profile-description"),
             ChildOf(panel),
@@ -661,7 +662,7 @@ fn build_view_panel(commands: &mut Commands, parent: Entity) -> ViewPanel {
         .spawn((
             Text::default(),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(DIM_TEXT_COLOR),
+            text_role(DIM_TEXT_COLOR),
             Pickable::IGNORE,
             Name::new("experience-profile-scope"),
             ChildOf(panel),
@@ -672,7 +673,7 @@ fn build_view_panel(commands: &mut Commands, parent: Entity) -> ViewPanel {
             Text::default(),
             Translated::new("experience-profile-privileged"),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(DIM_TEXT_COLOR),
+            text_role(DIM_TEXT_COLOR),
             Pickable::IGNORE,
             Name::new("experience-profile-privileged"),
             ChildOf(panel),
@@ -721,7 +722,7 @@ fn build_view_panel(commands: &mut Commands, parent: Entity) -> ViewPanel {
         .spawn((
             Text::default(),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(DIM_TEXT_COLOR),
+            text_role(DIM_TEXT_COLOR),
             Pickable::IGNORE,
             Name::new("experience-profile-status"),
             ChildOf(panel),
@@ -821,7 +822,7 @@ fn build_edit_panel(commands: &mut Commands, parent: Entity) -> EditPanel {
         .spawn((
             Text::default(),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(TEXT_COLOR),
+            text_role(TEXT_COLOR),
             Pickable::IGNORE,
             Name::new("experience-profile-edit-location"),
             ChildOf(location_row),
@@ -903,7 +904,7 @@ fn spawn_caption(commands: &mut Commands, parent: Entity, caption_key: &'static 
         Text::default(),
         Translated::new(caption_key),
         UiFont::Sans.at(FONT_SIZE),
-        TextColor(DIM_TEXT_COLOR),
+        text_role(DIM_TEXT_COLOR),
         Pickable::IGNORE,
         ChildOf(parent),
     ));
@@ -932,7 +933,7 @@ fn spawn_field_row(commands: &mut Commands, parent: Entity, caption_key: &'stati
         .spawn((
             Text::default(),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(TEXT_COLOR),
+            text_role(TEXT_COLOR),
             Pickable::IGNORE,
             ChildOf(row_entity),
         ))
@@ -1008,7 +1009,7 @@ fn spawn_toggle(
         .spawn((
             Text::new(UNCHECKED_GLYPH),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(TEXT_COLOR),
+            text_role(TEXT_COLOR),
             Pickable::IGNORE,
             ChildOf(row_entity),
         ))
@@ -1017,7 +1018,7 @@ fn spawn_toggle(
         Text::default(),
         Translated::new(label_key),
         UiFont::Sans.at(FONT_SIZE),
-        TextColor(TEXT_COLOR),
+        text_role(TEXT_COLOR),
         Pickable::IGNORE,
         ChildOf(row_entity),
     ));

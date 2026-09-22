@@ -59,7 +59,7 @@ use sl_audio::{Bus, Mixer};
 use sl_client_bevy::SlAgentParcel;
 use sl_gst::{AudioStreamPlayer, AudioStreamState, ValidatedMediaUrl};
 use sl_viewer_ui_core::skin::{
-    ACTION_BUTTON_CLASS, DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class_on,
+    ACTION_BUTTON_CLASS, DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class_on, text_role,
 };
 
 use crate::media_audio::MixerStream;
@@ -417,7 +417,7 @@ pub(crate) fn spawn_parcel_audio_bar(
         .spawn((
             Text::default(),
             UiFont::Sans.at(BAR_FONT_SIZE),
-            TextColor(BAR_LABEL_DIM),
+            text_role(BAR_LABEL_DIM),
             Pickable::IGNORE,
             ChildOf(title_clip),
         ))
@@ -749,7 +749,7 @@ pub fn spawn_parcel_audio_specimen(
     commands.spawn((
         Text::new("♫"),
         cx.font(UiFont::Sans),
-        TextColor(BAR_LABEL),
+        text_role(BAR_LABEL),
         ChildOf(cluster),
     ));
     let title_clip = commands
@@ -769,7 +769,7 @@ pub fn spawn_parcel_audio_specimen(
     commands.spawn((
         Text::new(cx.text("Now playing: Synthwave FM")),
         cx.font(UiFont::Sans),
-        TextColor(BAR_LABEL_DIM),
+        text_role(BAR_LABEL_DIM),
         ChildOf(title_clip),
     ));
     for glyph in ["▶", "🔊"] {
@@ -788,7 +788,7 @@ pub fn spawn_parcel_audio_specimen(
         commands.spawn((
             Text::new(glyph),
             cx.font(UiFont::Sans),
-            TextColor(BAR_LABEL),
+            text_role(BAR_LABEL),
             ChildOf(button),
         ));
     }

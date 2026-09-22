@@ -113,6 +113,7 @@ use bevy::input_focus::{InputFocus, InputFocusVisible};
 use bevy::prelude::*;
 use bevy::ui_widgets::{Activate, Button};
 
+use crate::skin::text_role;
 use crate::ui_font::{UiFont, register_ui_fonts};
 
 /// A node that is **fixed to the screen**: permanent chrome the user cannot drag
@@ -1379,7 +1380,7 @@ fn setup_ui_demo(mut commands: Commands, visible: Res<UiDemoVisible>, root: Res<
             panel.spawn((
                 Text::new(UI_DEMO_TITLE),
                 UiFont::Sans.at(DEMO_TITLE_FONT_SIZE),
-                TextColor(DEMO_TITLE_COLOR),
+                text_role(DEMO_TITLE_COLOR),
             ));
             // A `row`, so the buttons flow in text order: under RTL they swap
             // ends with no code here saying so. It wraps rather than overflowing

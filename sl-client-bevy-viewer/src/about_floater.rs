@@ -30,7 +30,7 @@ use crate::floater::{
 };
 use crate::i18n::{Translated, UiLocale};
 use crate::preferences::{CONTROL_BORDER, FONT, LABEL_COLOR};
-use crate::skin::{ACTIVE_CLASS, set_state_class_on};
+use crate::skin::{ACTIVE_CLASS, set_state_class_on, text_role};
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_tab::{
@@ -572,7 +572,7 @@ fn build_info_tab(commands: &mut Commands, panel: Entity) -> Entity {
         Text::default(),
         Translated::new("about-intro"),
         UiFont::Sans.at(FONT),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         Name::new("about:info:intro"),
         ChildOf(tab),
     ));
@@ -581,7 +581,7 @@ fn build_info_tab(commands: &mut Commands, panel: Entity) -> Entity {
         .spawn((
             Text::default(),
             UiFont::Mono.at(MONO_FONT),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Name::new("about:info:support-block"),
             ChildOf(scroll),
         ))
@@ -626,7 +626,7 @@ fn build_credits_tab(commands: &mut Commands, panel: Entity) {
             Text::default(),
             Translated::new(key),
             UiFont::Sans.at(FONT),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Name::new(format!("about:credits:{key}")),
             ChildOf(scroll),
         ));
@@ -699,7 +699,7 @@ fn build_licenses_tab(
         commands.spawn((
             Text::new(label),
             UiFont::Sans.at(FONT),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Pickable::IGNORE,
             ChildOf(row_entity),
         ));
@@ -723,7 +723,7 @@ fn build_licenses_tab(
         .spawn((
             Text::default(),
             UiFont::Mono.at(MONO_FONT),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Name::new("about:licenses:text"),
             ChildOf(text_scroll),
         ))
@@ -761,7 +761,7 @@ fn spawn_about_button(
         Text::default(),
         Translated::new(label_key),
         UiFont::Sans.at(FONT),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(button),
     ));

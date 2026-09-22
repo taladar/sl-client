@@ -77,7 +77,7 @@ use sl_client_bevy::{
     Command, DirFindFlags, DirGroupResult, GroupKey, QueryId, SlCommand, SlEvent, SlSessionEvent,
     Uuid,
 };
-use sl_viewer_ui_core::skin::{ACTIVE_CLASS, LIST_ROW_CLASS};
+use sl_viewer_ui_core::skin::{ACTIVE_CLASS, LIST_ROW_CLASS, text_role};
 
 use crate::floater::{
     Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterHost, FloaterOp, FloaterOwner,
@@ -543,7 +543,7 @@ fn spawn_picker_button(
             Text::default(),
             Translated::new(label_key),
             UiFont::Sans.at(PICKER_FONT_SIZE),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Pickable::IGNORE,
         ))
         .id()
@@ -766,7 +766,7 @@ fn rebuild_picker_list(
                     Text::default(),
                     Translated::new(key),
                     UiFont::Sans.at(PICKER_FONT_SIZE),
-                    TextColor(DETAIL_COLOR),
+                    text_role(DETAIL_COLOR),
                     Node {
                         padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
                         ..default()
@@ -830,7 +830,7 @@ fn rebuild_picker_list(
                     let mut text = entry.spawn((
                         Text::new(label),
                         font,
-                        TextColor(LABEL_COLOR),
+                        text_role(LABEL_COLOR),
                         Pickable::IGNORE,
                     ));
                     // The "none" row carries no group name, so it is labelled
@@ -842,7 +842,7 @@ fn rebuild_picker_list(
                         entry.spawn((
                             Text::new(detail),
                             UiFont::Sans.at(PICKER_FONT_SIZE),
-                            TextColor(DETAIL_COLOR),
+                            text_role(DETAIL_COLOR),
                             Pickable::IGNORE,
                         ));
                     }

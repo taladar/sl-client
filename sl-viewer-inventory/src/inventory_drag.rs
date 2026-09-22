@@ -61,7 +61,7 @@ use sl_client_bevy::{
     InventoryKey, InventoryType, ItemInfo, ObjectKey, Permissions, RestoreItem, RezObjectParams,
     ScopedObjectId, SlCommand, SlIdentity, TransactionId, Uuid, Vector,
 };
-use sl_viewer_ui_core::skin::{DROP_TARGET_CLASS, set_state_class};
+use sl_viewer_ui_core::skin::{DROP_TARGET_CLASS, set_state_class, text_role};
 
 use crate::coords::bevy_to_sl_vec;
 use crate::intents::LocalChatNotice;
@@ -657,13 +657,13 @@ pub(crate) fn on_row_drag_start(
         .with_child((
             Text::new(ghost_icon),
             UiFont::Sans.at(GHOST_FONT_SIZE),
-            TextColor(GHOST_COLOR),
+            text_role(GHOST_COLOR),
             Pickable::IGNORE,
         ))
         .with_child((
             Text::new(ghost_label),
             UiFont::Sans.at(GHOST_FONT_SIZE),
-            TextColor(GHOST_COLOR),
+            text_role(GHOST_COLOR),
             Pickable::IGNORE,
         ))
         .id();

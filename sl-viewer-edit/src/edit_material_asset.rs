@@ -41,6 +41,7 @@ use crate::ui_slider::{SliderStyle, SliderWidgetPlugin, spawn_slider};
 use crate::ui_spawn::{self, ButtonSpec, LabeledRowSpec, UiLabel};
 use crate::ui_text::set_node_text;
 use crate::ui_texture_picker::{TextureSwatchValue, spawn_texture_swatch};
+use sl_viewer_ui_core::skin::text_role;
 
 /// The chrome font size, in logical pixels.
 const FONT: f32 = 13.0;
@@ -294,7 +295,7 @@ fn open_material_editor(
     commands.spawn((
         Text::new("Loading material…"),
         UiFont::Sans.at(FONT),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         ChildOf(ui.content),
     ));
     materials.request_material(asset);
@@ -366,7 +367,7 @@ fn populate_material_editor(
         .spawn((
             Text::new(String::new()),
             UiFont::Sans.at(FONT),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Node {
                 margin: UiRect::bottom(Val::Px(4.0)),
                 ..Default::default()
@@ -541,7 +542,7 @@ fn spawn_factor_slider(
         .spawn((
             Text::new(format!("{value:.2}")),
             UiFont::Sans.at(FONT),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Node {
                 width: Val::Px(34.0),
                 ..Default::default()
@@ -626,7 +627,7 @@ fn spawn_mat_button(
     commands.spawn((
         Text::new(label.to_owned()),
         UiFont::Sans.at(FONT),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(button),
     ));

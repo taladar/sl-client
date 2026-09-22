@@ -101,6 +101,7 @@ use crate::floater::{
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::intents::{ExperiencePicked, ExperiencePickerFilter, OpenExperiencePicker};
 use crate::settings::ViewerSettings;
+use crate::skin_palette::SkinPalette;
 use crate::social::GroupsModel;
 use crate::ui::{UiScaffoldSystems, column, row};
 use crate::ui_combo::{ComboChanged, ComboSpec, spawn_combo};
@@ -136,10 +137,10 @@ const CONTENT_SIZE: Vec2 = Vec2::new(420.0, 340.0);
 const MIN_CONTENT_SIZE: Vec2 = Vec2::new(320.0, 240.0);
 
 /// A label / cell's text colour.
-const TEXT_COLOR: Color = Color::srgb(0.90, 0.93, 0.97);
+const TEXT_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A dimmer secondary-text colour.
-const DIM_TEXT_COLOR: Color = Color::srgb(0.64, 0.68, 0.76);
+const DIM_TEXT_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// An action button's background.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.16, 0.19, 0.25);

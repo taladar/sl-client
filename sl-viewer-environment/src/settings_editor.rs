@@ -114,7 +114,7 @@ use crate::rows::{
 };
 use crate::style::{DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR};
 use crate::tabs::{SKY_TABS, TabPage, WATER_TABS};
-use sl_viewer_ui_core::skin::{DisabledButtons, set_action_button_enabled};
+use sl_viewer_ui_core::skin::{DisabledButtons, set_action_button_enabled, text_role};
 
 /// The sky editor's floater id.
 pub const SKY_EDITOR_FLOATER_ID: &str = "settings-editor-sky";
@@ -774,7 +774,7 @@ fn spawn_name_row(commands: &mut Commands, parent: Entity, editor: EditorKind, t
     commands.spawn((
         Text::new(String::new()),
         UiFont::Sans.at(FONT_SIZE),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         Translated::new("settings-editor-name"),
         ChildOf(row_entity),
     ));
@@ -843,7 +843,7 @@ fn spawn_button_row(
         .spawn((
             Text::new(String::new()),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(DIM_LABEL_COLOR),
+            text_role(DIM_LABEL_COLOR),
             Name::new(format!("{}-status", editor.element())),
             ChildOf(parent),
         ))

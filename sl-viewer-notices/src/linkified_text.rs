@@ -53,6 +53,7 @@ use crate::ui_font::UiFont;
 use crate::ui_name_link::{NAME_LINK_COLOR, NAME_PLAIN_COLOR};
 use crate::url_linkify::{AgentNameStyle, LinkIcon, LinkLabel, LinkTarget, TextRun, linkify};
 use crate::world_api::{AvatarState, NameRecord};
+use sl_viewer_ui_core::skin::text_role;
 
 /// The leading-icon size, in logical pixels, relative to the label font size.
 const ICON_SCALE: f32 = 1.0;
@@ -620,7 +621,7 @@ fn setup_link_tooltip(mut commands: Commands, root: Res<UiRoot>) {
         .spawn((
             Text::new(String::new()),
             UiFont::Sans.at(TOOLTIP_FONT_SIZE),
-            TextColor(TOOLTIP_TEXT),
+            text_role(TOOLTIP_TEXT),
             Pickable::IGNORE,
             ChildOf(box_entity),
         ))

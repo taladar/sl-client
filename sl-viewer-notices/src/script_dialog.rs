@@ -56,11 +56,13 @@ use crate::notification_host::{
 use crate::notifications::{
     NotificationId, NotificationKind, NotificationManager, NotificationPriority,
 };
+use crate::skin_palette::SkinPalette;
 use crate::ui::{column, row};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
+use sl_viewer_ui_core::skin::text_role;
 
 /// The catalogue-template sentinel a script-dialog toast reports as (it is not a
 /// real [`crate::notifications::NOTIFICATIONS`] entry — the card is bespoke — but
@@ -133,10 +135,10 @@ const GRID_BUTTON_WIDTH: f32 = (FULL_TEXT_MAX_WIDTH - BUTTON_GAP * 2.0) / 3.0;
 const CARD_BACKGROUND: Color = Color::srgba(0.10, 0.12, 0.16, 0.98);
 
 /// A card's fallback body text colour — the skin's `.sk-toast-text` overrides it.
-const TEXT_COLOR: Color = Color::srgb(0.90, 0.93, 0.97);
+const TEXT_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A dimmer secondary text colour (the object / owner title line).
-const DIM_TEXT_COLOR: Color = Color::srgb(0.64, 0.68, 0.76);
+const DIM_TEXT_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// The script-dialog accent painted on a card's border and its default button — a
 /// teal distinct from the group-notice blue, so the two cards read apart.
@@ -598,7 +600,7 @@ fn spawn_grid_button(commands: &mut Commands, parent: Entity, label: &str, tab: 
     commands.spawn((
         Text::new(label.to_owned()),
         UiFont::Sans.at(FONT_SIZE),
-        TextColor(TEXT_COLOR),
+        text_role(TEXT_COLOR),
         Pickable::IGNORE,
         ChildOf(label_box),
     ));
@@ -667,7 +669,7 @@ fn spawn_close_button(commands: &mut Commands, card: Entity) -> Entity {
         .with_child((
             Text::new(CLOSE_GLYPH),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(TEXT_COLOR),
+            text_role(TEXT_COLOR),
         ))
         .id()
 }

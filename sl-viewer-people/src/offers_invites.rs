@@ -82,6 +82,8 @@ use crate::notification_host::{
     NotificationChannelRoot, ResolveNotification, ToastSpec, adopt_toast,
 };
 use crate::notifications::{NotificationKind, NotificationManager, NotificationPriority};
+use crate::skin::text_role;
+use crate::skin_palette::SkinPalette;
 use crate::ui::{column, row};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
@@ -181,10 +183,10 @@ const FULL_TEXT_MAX_WIDTH: f32 = CARD_MAX_WIDTH - 2.0 * CARD_PADDING - 2.0 * CAR
 const CARD_BACKGROUND: Color = Color::srgba(0.10, 0.12, 0.16, 0.98);
 
 /// A card's fallback body text colour — the skin's `.sk-toast-text` overrides it.
-const TEXT_COLOR: Color = Color::srgb(0.90, 0.93, 0.97);
+const TEXT_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A dimmer secondary text colour (the fee line, the item / message detail).
-const DIM_TEXT_COLOR: Color = Color::srgb(0.64, 0.68, 0.76);
+const DIM_TEXT_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// A button's fallback background — the skin's `.sk-button` overrides it.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.16, 0.19, 0.25);
@@ -1121,7 +1123,7 @@ fn spawn_close_button(commands: &mut Commands, card: Entity) -> Entity {
         .with_child((
             Text::new(CLOSE_GLYPH),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(TEXT_COLOR),
+            text_role(TEXT_COLOR),
         ))
         .id()
 }

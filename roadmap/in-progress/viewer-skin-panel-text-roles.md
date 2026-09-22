@@ -147,12 +147,64 @@ touching this again should run that scan rather than trust a green test run:
 whether a given panel's bind system is scheduled by any test is not obvious,
 and the failure only exists at runtime.
 
+## The direct spawns (2026-09-22)
+
+`skin::text_role(color) -> (TextColor, ClassList)` is the spawn-site form of
+the same derivation: `text_role(LABEL_COLOR)` in place of
+`TextColor(LABEL_COLOR)` is the whole edit, and a panel that builds its own
+text nodes becomes skinnable without restating which role it meant.
+
+**Found and rewritten with `ast-grep`**, which matches the syntax tree rather
+than the text — so a spawn tuple is distinguishable from a test assertion, and
+formatting is irrelevant. Two rules did it:
+
+- `TextColor($C)` `inside` a `spawn` / `with_child` / `insert` call, which
+  excludes the assertions, and `constraints: {C: {kind: identifier}}`, which
+  excludes a literal `Color::srgba(…)` — a literal names no role by
+  definition. 200 sites in 54 files.
+- The same pattern is the census tool: `--json` plus a counter gives the
+  distribution of *what* the 449 sites pass, which is what turned up the
+  second tier of drift below.
+
+Only files that never take `&mut TextColor` were rewritten (287 of the 449
+sites are in such files). A class `color` beats a Rust-painted `TextColor`, so
+a node something still repaints has to keep painting; `chat.rs`'s age fade is
+the standing example.
+
+### The second tier of drift
+
+The census showed constants that are *almost* a role, which
+`viewer-audit-skin-token-coverage` missed because it collapsed by **name**:
+`TEXT_COLOR` was `srgb(0.90, 0.93, 0.97)` against `text_primary`'s
+`srgb(0.90, 0.92, 0.96)`, `DIM_TEXT_COLOR` `srgb(0.64, 0.68, 0.76)` against
+`text_muted`'s `srgb(0.62, 0.66, 0.74)`. 28 such constants now read
+`SkinPalette::FALLBACK.*` and skin themselves, since `text_role` reads the
+value.
+
+Deliberately **not** collapsed, and why:
+
+- `NAME_TAG_MISMATCH` has its own user-tunable `--name-tag-mismatch` token and
+  is world-space name-tag data, not panel chrome.
+- `DISABLED_MARKER` is the trackball's, already recorded as the case that
+  resists conversion.
+- `GHOST_COLOR` is the inventory drag ghost — an overlay, not panel text.
+- `BAR_LABEL_DIM` and `CHROME_COLOR` each sit equidistant between two roles,
+  so picking one is a judgement rather than a collapse.
+- `HEADER_COLOR`, `SECTION_COLOR`, `VALUE_COLOR` are further than 0.06 from
+  any role (`HEADER_COLOR` is *gold* in one crate). Their own shades, not
+  drift.
+
 ### What is left
 
-- **The ~449 direct `TextColor(…)` spawns** that go through neither a helper
-  nor a table. These are the panel-specific ones; each needs the same
-  judgement the helper now makes automatically, and a good number will turn
-  out to be a role constant that can simply move to a class.
+- **The literal-colour spawns** — `Color::WHITE` (32 sites),
+  `Color::srgba(0.85, 0.85, 0.85, 1.0)` (18) and the rest of the 86 distinct
+  arguments. Each is a decision about which role, if any, it meant; the
+  ast-grep census above is how to enumerate them.
+- **The 162 sites in files that do take `&mut TextColor`.** Safe only once
+  each one is shown not to be repainted per state — the same audit the state
+  task did, one file at a time.
+- **A live look.** Still nothing has confirmed any of this in a window; the
+  gallery's skin switcher is the check.
 - **A live look.** The change is invisible under the built-in fallback by
   construction and only shows once a skin's own token differs, so the gallery's
   live switcher (or a viewer run) is the check that it actually took.

@@ -53,6 +53,7 @@ use crate::floater::{
 use crate::i18n::Translated;
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{SettingBinding, bound_checkbox, bound_slider};
+use crate::skin::text_role;
 use crate::sky_presets::FixedSky;
 use crate::ui::BottomArea;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
@@ -758,7 +759,7 @@ fn spawn_section(commands: &mut Commands, parent: Entity, key: &'static str) {
         Text::default(),
         Translated::new(key),
         UiFont::Sans.at(SECTION_FONT),
-        TextColor(SECTION_COLOR),
+        text_role(SECTION_COLOR),
         Name::new(format!("quick-prefs:section:{key}")),
         ChildOf(parent),
     ));
@@ -923,7 +924,7 @@ fn spawn_entry_label(commands: &mut Commands, parent: Entity, entry: &QuickPrefE
     let mut label = commands.spawn((
         Text::default(),
         UiFont::Sans.at(FONT),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(parent),
     ));
@@ -1016,7 +1017,7 @@ fn spawn_slider_row(commands: &mut Commands, parent: Entity, entry: &QuickPrefEn
     commands.spawn((
         Text::default(),
         UiFont::Sans.at(FONT),
-        TextColor(VALUE_COLOR),
+        text_role(VALUE_COLOR),
         QuickPrefValueLabel {
             control_name: entry.control_name.clone(),
             integer: entry.integer,
@@ -1079,7 +1080,7 @@ pub(crate) fn spawn_quick_prefs_button(
         .with_child((
             Text::new("⚙"),
             UiFont::Sans.at(BUTTON_FONT),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Pickable::IGNORE,
         ));
 }
@@ -1363,7 +1364,7 @@ pub fn spawn_quick_prefs_specimen(
     commands.spawn((
         Text::new(cx.text("Environment")),
         cx.font(UiFont::Sans),
-        TextColor(SECTION_COLOR),
+        text_role(SECTION_COLOR),
         ChildOf(card),
     ));
     spawn_specimen_combo_row(commands, card, &cx, "Preset", "Legacy WindLight");
@@ -1402,7 +1403,7 @@ fn spawn_specimen_combo_row(
     commands.spawn((
         Text::new(cx.text(label)),
         cx.font(UiFont::Sans),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         ChildOf(row_entity),
     ));
     commands
@@ -1419,7 +1420,7 @@ fn spawn_specimen_combo_row(
         .with_child((
             Text::new(cx.text(value)),
             cx.font(UiFont::Sans),
-            TextColor(VALUE_COLOR),
+            text_role(VALUE_COLOR),
         ));
 }
 
@@ -1437,7 +1438,7 @@ fn spawn_specimen_slider_row(
     commands.spawn((
         Text::new(cx.text(label)),
         cx.font(UiFont::Sans),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         ChildOf(row_entity),
     ));
     let group = commands
@@ -1455,7 +1456,7 @@ fn spawn_specimen_slider_row(
     commands.spawn((
         Text::new(cx.text(value)),
         cx.font(UiFont::Sans),
-        TextColor(VALUE_COLOR),
+        text_role(VALUE_COLOR),
         ChildOf(group),
     ));
 }

@@ -64,6 +64,7 @@ use tracing::info;
 use crate::floater::{Floater, FloaterElement, FloaterPlugin, toggle_floater};
 use crate::pie_menu::{FIXTURE_PIE, OpenPieMenu, PieMenuPlugin};
 use crate::skin::SkinSelection;
+use crate::skin::text_role;
 use crate::ui::{
     UiDirection, UiPanelShown, UiRoot, UiScaffoldSystems, apply_panel_visibility,
     apply_ui_direction, column, invalidate_logical_boxes, park_new_tab_stops_in_hidden_subtrees,
@@ -505,7 +506,7 @@ fn setup_gallery(
         .with_child((
             Text::default(),
             UiFont::Mono.at(CHROME_FONT_SIZE),
-            TextColor(HEADER_COLOR),
+            text_role(HEADER_COLOR),
             GalleryHeader,
         ))
         .id();
@@ -601,7 +602,7 @@ fn spawn_floater_switcher(commands: &mut Commands, parent: Entity, registry: Gal
             registry.floaters.len()
         )),
         UiFont::Mono.at(CHROME_FONT_SIZE),
-        TextColor(CHROME_COLOR),
+        text_role(CHROME_COLOR),
         Node {
             max_width: Val::Px(740.0),
             ..default()
@@ -698,7 +699,7 @@ fn spawn_skin_switcher(commands: &mut Commands, header: Entity) {
     commands.spawn((
         Text::default(),
         UiFont::Mono.at(CHROME_FONT_SIZE),
-        TextColor(HEADER_COLOR),
+        text_role(HEADER_COLOR),
         SkinSwitcherLabel,
         ChildOf(strip),
     ));
@@ -713,7 +714,7 @@ fn spawn_skin_switcher(commands: &mut Commands, header: Entity) {
     commands.spawn((
         Text::default(),
         UiFont::Mono.at(CHROME_FONT_SIZE),
-        TextColor(HEADER_COLOR),
+        text_role(HEADER_COLOR),
         PointerMenuLabel,
         ChildOf(strip),
     ));
@@ -888,7 +889,7 @@ fn spawn_element_cards(
         commands.spawn((
             Text::new(format!("{} — {}", element.id, element.summary)),
             UiFont::Mono.at(CHROME_FONT_SIZE),
-            TextColor(CHROME_COLOR),
+            text_role(CHROME_COLOR),
             ChildOf(card),
         ));
         (element.spawn)(commands, card, cell.cx());
@@ -929,7 +930,7 @@ fn spawn_scroll_tabs_cards(commands: &mut Commands, parent: Entity, cell: Galler
                  the control auto-shows from available space, not a flag."
             )),
             UiFont::Mono.at(CHROME_FONT_SIZE),
-            TextColor(CHROME_COLOR),
+            text_role(CHROME_COLOR),
             ChildOf(card),
         ));
         // The two copies side by side so the presence / absence of the control is
@@ -964,7 +965,7 @@ fn spawn_resizable_tabs_card(commands: &mut Commands, parent: Entity, cell: Gall
                 .to_owned(),
         ),
         UiFont::Mono.at(CHROME_FONT_SIZE),
-        TextColor(CHROME_COLOR),
+        text_role(CHROME_COLOR),
         ChildOf(card),
     ));
     crate::ui_tab::spawn_tabs_resizable_demo(commands, card, cell.cx());

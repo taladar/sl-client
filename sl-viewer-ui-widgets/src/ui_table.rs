@@ -59,7 +59,7 @@ use sl_settings::SettingValue;
 use sl_viewer_settings::ViewerSettings;
 use sl_viewer_ui_core::i18n::Translated;
 use sl_viewer_ui_core::skin::{
-    ACTIVE_CLASS, DISABLED_TEXT_CLASS, role_class, set_role_class, set_state_class,
+    ACTIVE_CLASS, DISABLED_TEXT_CLASS, set_role_class, set_state_class, text_role,
 };
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 use sl_viewer_ui_core::ui::UiDirection;
@@ -1065,7 +1065,7 @@ fn spawn_header_cell(
         TextLayout::no_wrap(),
         UiFont::Sans.at(spec.font_size),
         TextColor(spec.header_color),
-        role_class_list(spec.header_color),
+        text_role(spec.header_color).1,
         TableHeaderText { table: root, cell },
         Pickable::IGNORE,
         ChildOf(clip),
@@ -1076,7 +1076,7 @@ fn spawn_header_cell(
             TextLayout::no_wrap(),
             UiFont::Sans.at(spec.font_size),
             TextColor(spec.header_color),
-            role_class_list(spec.header_color),
+            text_role(spec.header_color).1,
             TableHeaderText { table: root, cell },
             Node {
                 flex_shrink: 0.0,
@@ -1296,7 +1296,7 @@ fn spawn_body_cell(
             TextLayout::no_wrap(),
             UiFont::Sans.at(spec.font_size),
             TextColor(spec.cell_color),
-            role_class_list(spec.cell_color),
+            text_role(spec.cell_color).1,
             Node {
                 flex_shrink: 0.0,
                 ..default()
@@ -1600,19 +1600,6 @@ fn reflect_table_disabled(
             table_disabled || disabled.contains(header.cell),
         );
     }
-}
-
-/// A [`ClassList`] holding the role `color` names, or an empty one when it
-/// names none — the component form of [`role_class`], for a spawn tuple.
-///
-/// Empty rather than absent because a body cell's role is rewritten on every
-/// bind: [`set_role_class`] needs a list to write into, and one that grows a
-/// `ClassList` on first use would make a missing one at the spawn site look
-/// like it worked.
-fn role_class_list(color: Color) -> ClassList {
-    role_class(color).map_or_else(ClassList::empty, |class| {
-        ClassList::new_with_classes([class])
-    })
 }
 
 /// Seed each table's sort order and column widths from the persisted account

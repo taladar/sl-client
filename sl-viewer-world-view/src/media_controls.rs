@@ -37,7 +37,7 @@ use bevy::ui_widgets::{
 use bevy_flair::style::components::ClassList;
 use sl_cef::{PlaybackState, ValidatedMediaUrl};
 use sl_client_bevy::{Command, SlCommand};
-use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class};
+use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class, text_role};
 
 use crate::camera::FocusTarget;
 use crate::media_prim::{MediaData, MediaPrimState, media_permission_allows};
@@ -208,7 +208,7 @@ fn spawn_media_controls(mut commands: Commands, root: Res<UiRoot>) {
         .spawn((
             Text::default(),
             UiFont::Sans.at(11.0),
-            TextColor(BAR_LABEL_DIM),
+            text_role(BAR_LABEL_DIM),
             ChildOf(buttons),
         ))
         .id();
@@ -228,7 +228,7 @@ fn spawn_media_controls(mut commands: Commands, root: Res<UiRoot>) {
         .spawn((
             Text::new("🔒"),
             UiFont::Sans.at(11.0),
-            TextColor(BAR_LABEL_DIM),
+            text_role(BAR_LABEL_DIM),
             Visibility::Hidden,
             ChildOf(url_row),
         ))
@@ -299,7 +299,7 @@ fn spawn_scrub_row(commands: &mut Commands, bar: Entity) -> (Entity, Entity, Ent
         .spawn((
             Text::default(),
             UiFont::Sans.at(11.0),
-            TextColor(BAR_LABEL),
+            text_role(BAR_LABEL),
             ChildOf(scrub_row),
         ))
         .id();

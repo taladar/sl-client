@@ -33,6 +33,7 @@ use crate::i18n::Translated;
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonSpec, UiLabel};
+use sl_viewer_ui_core::skin::text_role;
 
 /// The floater's [`crate::floater::FloaterSpec::id`].
 pub(crate) const FILTERS_FLOATER_ID: &str = "inventory-filters";
@@ -628,7 +629,7 @@ fn spawn_toggle_row(
     commands.spawn((
         Text::new(CHECKED_GLYPH),
         UiFont::Sans.at(FILTER_FONT_SIZE),
-        TextColor(CHECK_COLOR),
+        text_role(CHECK_COLOR),
         ToggleGlyph,
         Pickable::IGNORE,
         ChildOf(toggle),
@@ -637,7 +638,7 @@ fn spawn_toggle_row(
         Text::default(),
         Translated::new(label_key),
         UiFont::Sans.at(FILTER_FONT_SIZE),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(toggle),
     ));

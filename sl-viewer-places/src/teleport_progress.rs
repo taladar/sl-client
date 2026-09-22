@@ -41,6 +41,7 @@ use bevy::prelude::*;
 use bevy::ui_widgets::Activate;
 use bevy_flair::style::components::ClassList;
 use sl_viewer_ui_core::skin::set_state_class;
+use sl_viewer_ui_core::skin::text_role;
 
 use sl_client_bevy::{Command, SlCommand, SlEvent, SlSessionEvent};
 
@@ -303,21 +304,21 @@ fn spawn_overlay(mut commands: Commands, root: Res<UiRoot>) {
         OverlayStatus,
         Text::new(""),
         UiFont::Sans.at(13.0),
-        TextColor(DETAIL),
+        text_role(DETAIL),
         ChildOf(panel),
     ));
     commands.spawn((
         OverlayDetail,
         Text::new(""),
         UiFont::Sans.at(12.0),
-        TextColor(DETAIL),
+        text_role(DETAIL),
         ChildOf(panel),
     ));
     commands.spawn((
         OverlayMessage,
         Text::new(""),
         UiFont::Sans.at(12.0),
-        TextColor(WARN),
+        text_role(WARN),
         ChildOf(panel),
     ));
 

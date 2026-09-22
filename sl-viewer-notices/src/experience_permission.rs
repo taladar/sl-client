@@ -83,10 +83,12 @@ use crate::notifications::{
     NotificationId, NotificationKind, NotificationManager, NotificationPriority,
 };
 use crate::script_permission::{is_caution, other_permission_keys, recognized_mask};
+use crate::skin_palette::SkinPalette;
 use crate::ui::{column, row};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
+use sl_viewer_ui_core::skin::text_role;
 
 /// The catalogue-template sentinel an experience card reports as (it is not a real
 /// [`crate::notifications::NOTIFICATIONS`] entry — the card is bespoke — but the
@@ -146,10 +148,10 @@ const FULL_TEXT_MAX_WIDTH: f32 = CARD_MAX_WIDTH - 2.0 * CARD_PADDING - 2.0 * CAR
 const CARD_BACKGROUND: Color = Color::srgba(0.10, 0.12, 0.16, 0.98);
 
 /// A card's fallback body text colour — the skin's `.sk-toast-text` overrides it.
-const TEXT_COLOR: Color = Color::srgb(0.90, 0.93, 0.97);
+const TEXT_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A dimmer secondary text colour (the note and the requested-permission lines).
-const DIM_TEXT_COLOR: Color = Color::srgb(0.64, 0.68, 0.76);
+const DIM_TEXT_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// The experience accent painted on a card's border, its experience-name line and
 /// its default (Yes) button — an emerald distinct from the script-dialog teal, the
@@ -747,7 +749,7 @@ fn spawn_close_button(commands: &mut Commands, card: Entity) -> Entity {
         .with_child((
             Text::new(CLOSE_GLYPH),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(TEXT_COLOR),
+            text_role(TEXT_COLOR),
         ))
         .id()
 }

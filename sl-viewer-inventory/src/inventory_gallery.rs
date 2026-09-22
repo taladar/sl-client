@@ -26,6 +26,7 @@ use bevy::prelude::*;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{FolderType, InventoryFolderKey, InventoryType, SlCommand, TextureKey};
 use sl_viewer_ui_core::skin::ACTIVE_CLASS;
+use sl_viewer_ui_core::skin::text_role;
 
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::Translated;
@@ -243,7 +244,7 @@ fn spawn_gallery_floater(mut commands: Commands, root: Res<UiRoot>) {
         .spawn((
             Text::new(""),
             UiFont::Sans.at(CHROME_FONT_SIZE),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             ChildOf(nav),
         ))
         .id();
@@ -304,7 +305,7 @@ fn spawn_nav_button(
         .with_child((
             Text::new(glyph),
             UiFont::Sans.at(CHROME_FONT_SIZE),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Pickable::IGNORE,
         ))
         .id()
@@ -496,7 +497,7 @@ fn spawn_tile(
         .with_child((
             Text::new(icon),
             UiFont::Sans.at(44.0),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Pickable::IGNORE,
         ))
         .id();
@@ -508,7 +509,7 @@ fn spawn_tile(
     commands.spawn((
         Text::new(name.to_owned()),
         UiFont::Sans.at(TILE_FONT_SIZE),
-        TextColor(DIM_LABEL_COLOR),
+        text_role(DIM_LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(tile),
     ));

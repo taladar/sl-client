@@ -18,7 +18,7 @@ use bevy::ui_widgets::{Slider, SliderRange, SliderStep, SliderValue};
 use sl_client_bevy::TextureKey;
 use sl_viewer_pickers::ui_texture_picker::spawn_texture_swatch;
 use sl_viewer_ui_core::i18n::Translated;
-use sl_viewer_ui_core::skin::{ACTION_BUTTON_CLASS, TEXT_CLASS};
+use sl_viewer_ui_core::skin::{ACTION_BUTTON_CLASS, TEXT_CLASS, text_role};
 use sl_viewer_ui_core::ui::{column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
 use sl_viewer_ui_core::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
@@ -107,7 +107,7 @@ pub fn spawn_labelled_block(
             ..Default::default()
         },
         UiFont::Sans.at(FONT_SIZE),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         Translated::new(label_key),
         ChildOf(caption),
     ));
@@ -135,7 +135,7 @@ pub fn spawn_slider_row(
                 ..Default::default()
             },
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(DIM_LABEL_COLOR),
+            text_role(DIM_LABEL_COLOR),
             Node {
                 min_width: Val::Px(READOUT_WIDTH),
                 justify_content: JustifyContent::End,

@@ -70,6 +70,7 @@ use crate::ui_slider::{SliderStyle, SliderWidgetPlugin, spawn_slider};
 use crate::ui_spawn::{self, ButtonSpec, LabeledRowSpec, UiLabel};
 use crate::ui_texture_picker::{TextureSwatchValue, spawn_texture_swatch};
 use crate::world_api::DecodedTextures;
+use sl_viewer_ui_core::skin::text_role;
 
 /// The Shape gender radio group's element id.
 const GENDER_ELEMENT: &str = "wearable-gender";
@@ -453,7 +454,7 @@ fn open_wearable_editor(
         .spawn((
             Text::new(String::new()),
             UiFont::Sans.at(FONT),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Node {
                 margin: UiRect::bottom(Val::Px(4.0)),
                 ..Default::default()
@@ -490,7 +491,7 @@ fn open_wearable_editor(
                 .spawn((
                     Text::new("— m"),
                     UiFont::Sans.at(FONT),
-                    TextColor(LABEL_COLOR),
+                    text_role(LABEL_COLOR),
                     ChildOf(height_row),
                 ))
                 .id(),
@@ -695,7 +696,7 @@ fn spawn_param_slider(
         .spawn((
             Text::new(format!("{value:.2}")),
             UiFont::Sans.at(FONT),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Node {
                 width: Val::Px(38.0),
                 ..Default::default()

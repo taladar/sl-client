@@ -50,6 +50,8 @@ use bevy::text::{EditableText, FontCx, LayoutCx};
 
 use crate::emoji_complete::{ColonCompleteSet, attach_colon_complete};
 use crate::emoji_picker::OpenEmojiPicker;
+use crate::skin::text_role;
+use crate::skin_palette::SkinPalette;
 use crate::ui::row;
 use crate::ui_font::UiFont;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
@@ -61,7 +63,7 @@ const BOX_BORDER: Color = Color::srgb(0.30, 0.36, 0.46);
 const BOX_BACKGROUND: Color = Color::srgb(0.10, 0.12, 0.16);
 
 /// The typed-text colour.
-const TEXT_COLOR: Color = Color::srgb(0.92, 0.94, 0.98);
+const TEXT_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// The emoji button's glyph — a smiling face, as the reference chat bar shows.
 const EMOJI_GLYPH: &str = "\u{1f642}";
@@ -283,7 +285,7 @@ pub fn spawn_chat_input(
     commands.entity(field).insert((
         ChatInputField,
         ChatInputHistory::default(),
-        TextColor(TEXT_COLOR),
+        text_role(TEXT_COLOR),
     ));
 
     // The completer popup hangs above the whole box.
@@ -321,7 +323,7 @@ fn spawn_emoji_button(
         .with_child((
             Text::new(EMOJI_GLYPH),
             UiFont::Sans.at(spec.font_size),
-            TextColor(TEXT_COLOR),
+            text_role(TEXT_COLOR),
             Pickable::IGNORE,
         ))
         .id();

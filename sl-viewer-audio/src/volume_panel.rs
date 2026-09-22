@@ -21,7 +21,7 @@ use bevy::prelude::*;
 use bevy::ui_widgets::{Activate, Button, SliderRange, SliderStep};
 use bevy::window::PrimaryWindow;
 use bevy_flair::style::components::ClassList;
-use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class};
+use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class, text_role};
 
 use sl_audio::{AudioMixer as _, Bus, BusLevel, Mixer};
 use sl_settings::SettingValue;
@@ -282,7 +282,7 @@ pub fn spawn_volume_controls(
         Text::default(),
         Translated::new("volume-panel-title"),
         UiFont::Sans.at(FONT_SIZE),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(panel),
     ));
@@ -339,7 +339,7 @@ fn spawn_volume_row(commands: &mut Commands, parent: Entity, bus: Bus, tab_base:
         Text::default(),
         Translated::new(label_key(bus)),
         UiFont::Sans.at(FONT_SIZE),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(row_entity),
     ));
@@ -426,7 +426,7 @@ fn spawn_toggle_button(commands: &mut Commands, parent: Entity, tab_index: i32) 
     commands.spawn((
         Text::new("▲"),
         UiFont::Sans.at(FONT_SIZE),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(button),
     ));

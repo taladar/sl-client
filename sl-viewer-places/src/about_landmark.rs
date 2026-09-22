@@ -59,6 +59,7 @@ use crate::ui_text::set_node_text;
 use crate::world_api::AvatarState;
 use crate::world_api::ui_texture::{PendingUiTexture, UiTexturePlugin};
 use crate::world_map::OpenWorldMap;
+use sl_viewer_ui_core::skin::text_role;
 
 /// The floater's font size, in logical pixels.
 const ABOUT_FONT_SIZE: f32 = 14.0;
@@ -410,7 +411,7 @@ fn fill_landmark_content(
         .spawn((
             Text::new(loading.clone()),
             UiFont::Sans.at(ABOUT_FONT_SIZE),
-            TextColor(DIM_LABEL_COLOR),
+            text_role(DIM_LABEL_COLOR),
             ChildOf(snapshot_box),
         ))
         .id();
@@ -475,7 +476,7 @@ fn fill_landmark_content(
         .with_child((
             Text::new(String::new()),
             UiFont::Sans.at(ABOUT_FONT_SIZE),
-            TextColor(DIM_LABEL_COLOR),
+            text_role(DIM_LABEL_COLOR),
         ))
         .id();
     let maturity_row = spawn_labeled_row(commands, content, "about-landmark-maturity");
@@ -980,7 +981,7 @@ fn spawn_value(commands: &mut Commands, parent: Entity, value: String, color: Co
         .spawn((
             Text::new(value),
             UiFont::Sans.at(ABOUT_FONT_SIZE),
-            TextColor(color),
+            text_role(color),
             ChildOf(parent),
         ))
         .id()

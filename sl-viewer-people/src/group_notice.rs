@@ -64,6 +64,8 @@ use crate::notification_persist::{
 use crate::notifications::{
     NotificationId, NotificationKind, NotificationManager, NotificationPriority,
 };
+use crate::skin::text_role;
+use crate::skin_palette::SkinPalette;
 use crate::slt;
 use crate::social::GroupsModel;
 use crate::ui::{column, row};
@@ -159,10 +161,10 @@ const FULL_TEXT_MAX_WIDTH: f32 = CARD_MAX_WIDTH - 2.0 * CARD_PADDING - 2.0 * CAR
 const CARD_BACKGROUND: Color = Color::srgba(0.10, 0.12, 0.16, 0.98);
 
 /// A card's fallback body text colour — the skin's `.sk-toast-text` overrides it.
-const TEXT_COLOR: Color = Color::srgb(0.90, 0.93, 0.97);
+const TEXT_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A dimmer secondary text colour (the "Sent by" title, the date).
-const DIM_TEXT_COLOR: Color = Color::srgb(0.64, 0.68, 0.76);
+const DIM_TEXT_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// The group-notice accent painted on a card's border and its default button.
 const ACCENT_COLOR: Color = Color::srgb(0.52, 0.68, 0.95);
@@ -643,7 +645,7 @@ fn spawn_insignia(
             commands.spawn((
                 Text::new(GROUP_GLYPH),
                 UiFont::Sans.at(HEADER_FONT_SIZE),
-                TextColor(DIM_TEXT_COLOR),
+                text_role(DIM_TEXT_COLOR),
                 Pickable::IGNORE,
                 ChildOf(box_entity),
             ));
@@ -652,7 +654,7 @@ fn spawn_insignia(
             commands.spawn((
                 Text::new(loading_label.to_owned()),
                 UiFont::Sans.at(FONT_SIZE),
-                TextColor(DIM_TEXT_COLOR),
+                text_role(DIM_TEXT_COLOR),
                 Pickable::IGNORE,
                 ChildOf(box_entity),
             ));
@@ -683,7 +685,7 @@ fn spawn_attachment_row(
     commands.spawn((
         Text::new(attachment_glyph(asset_type)),
         UiFont::Sans.at(FONT_SIZE),
-        TextColor(TEXT_COLOR),
+        text_role(TEXT_COLOR),
         Pickable::IGNORE,
         ChildOf(attach_row),
     ));
@@ -798,7 +800,7 @@ fn spawn_close_button(commands: &mut Commands, card: Entity) -> Entity {
         .with_child((
             Text::new(CLOSE_GLYPH),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(TEXT_COLOR),
+            text_role(TEXT_COLOR),
         ))
         .id()
 }

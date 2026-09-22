@@ -118,6 +118,7 @@ use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{SettingBinding, bound_checkbox};
+use crate::skin_palette::SkinPalette;
 use crate::social::GroupsModel;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
@@ -182,10 +183,10 @@ const STRIP_WIDTH: f32 = 124.0;
 const SPECIMEN_WIDTH: f32 = 560.0;
 
 /// The primary body text colour.
-const TEXT_COLOR: Color = Color::srgb(0.90, 0.93, 0.97);
+const TEXT_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A dimmer secondary text colour (table headers, the short-id fallback).
-const DIM_TEXT_COLOR: Color = Color::srgb(0.64, 0.68, 0.76);
+const DIM_TEXT_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// The heading accent — the same emerald the experience toast wears, so the
 /// experience surfaces read as one family.

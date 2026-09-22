@@ -77,6 +77,7 @@ use crate::render_scene::{
     SceneRuntimePlugin, SymmetricAbout, UvsInUnitSquare, WorldScaleGeometry, scene_root,
     scene_root_transform,
 };
+use crate::skin::text_role;
 
 /// The command-line options for the render gallery.
 ///
@@ -526,13 +527,13 @@ fn setup_chrome(mut commands: Commands) {
             chrome.spawn((
                 Text::new(""),
                 TextFont::from_font_size(CHROME_FONT_SIZE),
-                TextColor(HEADER_COLOR),
+                text_role(HEADER_COLOR),
                 GalleryHeader,
             ));
             chrome.spawn((
                 Text::new(""),
                 TextFont::from_font_size(CHROME_FONT_SIZE),
-                TextColor(CHROME_COLOR),
+                text_role(CHROME_COLOR),
                 GalleryDeclarations,
             ));
             chrome.spawn((
@@ -541,7 +542,7 @@ fn setup_chrome(mut commands: Commands) {
                      Esc quit",
                 ),
                 TextFont::from_font_size(CHROME_FONT_SIZE),
-                TextColor(CHROME_COLOR),
+                text_role(CHROME_COLOR),
             ));
         });
 }

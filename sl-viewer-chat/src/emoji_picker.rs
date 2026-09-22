@@ -68,6 +68,7 @@ use crate::floater::{
 };
 use crate::i18n::Translated;
 use crate::skin::TILE_CLASS;
+use crate::skin::text_role;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::{ElementCx, TextMayClip};
 use crate::ui_font::UiFont;
@@ -946,7 +947,7 @@ fn build_emoji_picker_content(
         .spawn((
             Text::new(""),
             UiFont::Sans.at(CHROME_FONT_SIZE),
-            TextColor(PREVIEW_COLOR),
+            text_role(PREVIEW_COLOR),
             TextMayClip {
                 reason: "the emoji preview line is a status hint, cut to the window width like a \
                          scrolling field's text rather than widening the window",
@@ -1120,7 +1121,7 @@ pub fn spawn_emoji_picker_specimen(
     commands.spawn((
         Text::new(cx.text("Hover an emoji to preview it")),
         cx.font(UiFont::Sans),
-        TextColor(PREVIEW_COLOR),
+        text_role(PREVIEW_COLOR),
         Name::new("emoji-picker-sample-preview"),
         ChildOf(panel),
     ));

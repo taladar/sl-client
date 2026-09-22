@@ -59,7 +59,9 @@ use crate::floater::{
 use crate::i18n::Translated;
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{ComboBindingValues, SettingBinding, bound_checkbox, bound_slider};
-use crate::skin::{MATCH_CLASS, NO_MATCH_CLASS, TEXT_CLASS, set_state_class, set_state_class_on};
+use crate::skin::{
+    MATCH_CLASS, NO_MATCH_CLASS, TEXT_CLASS, set_state_class, set_state_class_on, text_role,
+};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_color_picker::spawn_color_swatch;
 use crate::ui_combo::{ComboSpec, spawn_combo};
@@ -576,7 +578,7 @@ pub(crate) fn spawn_pref_section(commands: &mut Commands, parent: Entity, key: &
         Text::default(),
         Translated::new(key),
         UiFont::Sans.at(SECTION_FONT),
-        TextColor(SECTION_COLOR),
+        text_role(SECTION_COLOR),
         Name::new(format!("preferences:section:{key}")),
         ChildOf(parent),
     ));
@@ -607,7 +609,7 @@ pub(crate) fn spawn_pref_note(
             Text::default(),
             Translated::new(key),
             UiFont::Sans.at(FONT),
-            TextColor(NOTE_COLOR),
+            text_role(NOTE_COLOR),
             Name::new(format!("preferences:note:{key}")),
             ChildOf(parent),
         ))
@@ -826,7 +828,7 @@ pub(crate) fn spawn_footer_button(
         Text::default(),
         Translated::new(label_key),
         UiFont::Sans.at(FONT),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(button),
     ));
@@ -1095,14 +1097,14 @@ fn annotate_env_pinned_rows(
                 PinKind::Seed => ENV_PIN_SEED_KEY,
             }),
             UiFont::Sans.at(FONT),
-            TextColor(NOTE_COLOR),
+            text_role(NOTE_COLOR),
             Pickable::IGNORE,
             ChildOf(row),
         ));
         commands.spawn((
             Text::new(pin.env()),
             UiFont::Mono.at(FONT),
-            TextColor(NOTE_COLOR),
+            text_role(NOTE_COLOR),
             Name::new(format!("preferences:env-pin:{}", pin.setting())),
             Pickable::IGNORE,
             ChildOf(row),
@@ -1532,14 +1534,14 @@ pub fn spawn_preferences_specimen(
         commands.spawn((
             Text::new(cx.text("Show property lines")),
             cx.font(UiFont::Sans),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             ChildOf(check_row),
         ));
         let slider_row = commands.spawn((pref_row_node(), ChildOf(panel))).id();
         commands.spawn((
             Text::new(cx.text("Mini-map opacity")),
             cx.font(UiFont::Sans),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             ChildOf(slider_row),
         ));
         // Static: no `Slider`, so nothing drives it — the thumb is drawn at
@@ -1566,7 +1568,7 @@ pub fn spawn_preferences_specimen(
         commands.spawn((
             Text::new(cx.text("Notify me when my friends log in or out")),
             cx.font(UiFont::Sans),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             ChildOf(headline_row),
         ));
         let list_rows: [(&str, bool); 3] = [
@@ -1578,13 +1580,13 @@ pub fn spawn_preferences_specimen(
         commands.spawn((
             Text::new(cx.text("Show")),
             cx.font(UiFont::Sans),
-            TextColor(SECTION_COLOR),
+            text_role(SECTION_COLOR),
             ChildOf(header_row),
         ));
         commands.spawn((
             Text::new(cx.text("Alert")),
             cx.font(UiFont::Sans),
-            TextColor(SECTION_COLOR),
+            text_role(SECTION_COLOR),
             ChildOf(header_row),
         ));
         for (label, shown) in list_rows {
@@ -1604,7 +1606,7 @@ pub fn spawn_preferences_specimen(
             commands.spawn((
                 Text::new(cx.text(label)),
                 cx.font(UiFont::Sans),
-                TextColor(LABEL_COLOR),
+                text_role(LABEL_COLOR),
                 ChildOf(list_row),
             ));
         }
@@ -1635,7 +1637,7 @@ pub fn spawn_preferences_specimen(
         commands.spawn((
             Text::new(cx.text(label)),
             cx.font(UiFont::Sans),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             ChildOf(button),
         ));
     }

@@ -37,7 +37,7 @@ use bevy::text::{EditableText, FontCx, LayoutCx};
 use bevy_flair::style::components::ClassList;
 use sl_emoji::{ShortcodeMatch, complete};
 
-use sl_viewer_ui_core::skin::{ACTIVE_CLASS, LIST_ROW_CLASS, set_state_class};
+use sl_viewer_ui_core::skin::{ACTIVE_CLASS, LIST_ROW_CLASS, set_state_class, text_role};
 use sl_viewer_ui_core::ui::column;
 use sl_viewer_ui_core::ui_font::UiFont;
 
@@ -250,7 +250,7 @@ fn spawn_colon_row(commands: &mut Commands, popup: Entity, field: Entity, index:
         .spawn((
             Text::new(""),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(ROW_TEXT_COLOR),
+            text_role(ROW_TEXT_COLOR),
             Pickable::IGNORE,
         ))
         .id();

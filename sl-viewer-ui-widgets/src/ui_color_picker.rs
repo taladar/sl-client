@@ -100,6 +100,7 @@ use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use sl_settings::{Scope, SettingValue};
 use sl_viewer_settings::ViewerSettings;
 use sl_viewer_ui_core::i18n::Translated;
+use sl_viewer_ui_core::skin::text_role;
 use sl_viewer_ui_core::ui::{LogicalInset, LogicalRect, UiRoot, UiScaffoldSystems, column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
 
@@ -186,7 +187,7 @@ const BUTTON_BACKGROUND: Color = Color::srgba(0.18, 0.18, 0.2, 1.0);
 const BUTTON_LATCHED: Color = Color::srgba(0.32, 0.38, 0.5, 1.0);
 
 /// The text colour.
-const TEXT_COLOR: Color = Color::srgb(0.9, 0.92, 0.96);
+const TEXT_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A field / strip marker's outline — dark, so a pale marker reads against a
 /// pale corner of the field.
@@ -1271,7 +1272,7 @@ fn spawn_channel_row(
     commands.spawn((
         Text::new(name),
         UiFont::Sans.at(PICKER_FONT),
-        TextColor(TEXT_COLOR),
+        text_role(TEXT_COLOR),
         Node {
             min_width: Val::Px(14.0),
             ..Default::default()
@@ -1344,7 +1345,7 @@ fn spawn_hex_row(commands: &mut Commands, parent: Entity) -> Entity {
     commands.spawn((
         Text::new("#"),
         UiFont::Mono.at(PICKER_FONT),
-        TextColor(TEXT_COLOR),
+        text_role(TEXT_COLOR),
         Node {
             min_width: Val::Px(14.0),
             ..Default::default()
@@ -1422,7 +1423,7 @@ fn spawn_apply_now_toggle(commands: &mut Commands, parent: Entity) -> Entity {
         .spawn((
             Text::new(String::from(CHECKED_GLYPH)),
             UiFont::Sans.at(PICKER_FONT),
-            TextColor(HINT_COLOR),
+            text_role(HINT_COLOR),
             Pickable::IGNORE,
             ChildOf(toggle),
         ))

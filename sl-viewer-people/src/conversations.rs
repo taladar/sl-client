@@ -81,6 +81,7 @@ use crate::intents::{
 use crate::linkified_text::{LinkTextStyle, spawn_linkified_text};
 use crate::local_chat_input::{LocalChatSubmit, spawn_local_chat_input};
 use crate::skin::SkinChatBands;
+use crate::skin::text_role;
 use crate::social::{MuteModel, short_id};
 use crate::ui::BOTTOM_BAR_Z;
 use crate::ui::BottomArea;
@@ -239,14 +240,14 @@ fn transcript_line_color(
 const CONVERSATIONS_CLASS: &str = "sk-conversations";
 
 /// The "X is typing…" line's colour — dim, so it reads as ephemeral status.
-const TYPING_COLOR: Color = Color::srgb(0.62, 0.68, 0.78);
+const TYPING_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// The pending-invite bar's background — a faint highlight so the prompt stands
 /// out above the (empty) transcript.
 const INVITE_BACKGROUND: Color = Color::srgba(0.22, 0.26, 0.34, 0.9);
 
 /// The invite prompt / button text colour.
-const INVITE_TEXT_COLOR: Color = Color::srgb(0.94, 0.96, 1.0);
+const INVITE_TEXT_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// The Accept button's background — a muted green.
 const ACCEPT_BACKGROUND: Color = Color::srgb(0.20, 0.42, 0.26);
@@ -1386,7 +1387,7 @@ fn spawn_conversation_view(
         .spawn((
             Text::new(String::new()),
             UiFont::Sans.at(CHROME_FONT_SIZE),
-            TextColor(TAB_LABEL_COLOR),
+            text_role(TAB_LABEL_COLOR),
             Node {
                 flex_grow: 1.0,
                 min_width: Val::Px(0.0),
@@ -1457,7 +1458,7 @@ fn spawn_conversation_view(
         .spawn((
             Text::new(String::new()),
             UiFont::Sans.at(CHROME_FONT_SIZE),
-            TextColor(TYPING_COLOR),
+            text_role(TYPING_COLOR),
             Node {
                 display: Display::None,
                 ..default()
@@ -1552,7 +1553,7 @@ fn spawn_pane_close_button(commands: &mut Commands, panel: Entity, key: Conversa
         .with_child((
             Text::new(CLOSE_GLYPH.to_owned()),
             UiFont::Sans.at(CHROME_FONT_SIZE),
-            TextColor(CLOSE_GLYPH_COLOR),
+            text_role(CLOSE_GLYPH_COLOR),
             Pickable::IGNORE,
         ))
         .observe(
@@ -1601,7 +1602,7 @@ fn spawn_add_participants_button(commands: &mut Commands, panel: Entity, key: Co
         .with_child((
             Text::new(ADD_PARTICIPANTS_GLYPH.to_owned()),
             UiFont::Sans.at(CHROME_FONT_SIZE),
-            TextColor(CLOSE_GLYPH_COLOR),
+            text_role(CLOSE_GLYPH_COLOR),
             Pickable::IGNORE,
         ))
         .observe(
@@ -1640,7 +1641,7 @@ fn spawn_invite_bar(commands: &mut Commands, panel: Entity, key: ConversationKey
     commands.spawn((
         Text::new(String::new()),
         UiFont::Sans.at(CHROME_FONT_SIZE),
-        TextColor(INVITE_TEXT_COLOR),
+        text_role(INVITE_TEXT_COLOR),
         crate::i18n::Translated::new(INVITE_PROMPT_KEY),
         Node {
             flex_grow: 1.0,
@@ -1698,7 +1699,7 @@ fn spawn_invite_button(
         .with_child((
             Text::new(String::new()),
             UiFont::Sans.at(CHROME_FONT_SIZE),
-            TextColor(INVITE_TEXT_COLOR),
+            text_role(INVITE_TEXT_COLOR),
             crate::i18n::Translated::new(label_key),
             Pickable::IGNORE,
         ))

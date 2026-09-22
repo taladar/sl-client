@@ -41,6 +41,7 @@ use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_te
 use sl_viewer_world_api::rlv::{RLV_STRINGS, RlvStringDef, rlv_string};
 
 use crate::style::{ACTION_BACKGROUND, DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR};
+use sl_viewer_ui_core::skin::text_role;
 
 /// The floater's stable id.
 pub const STRINGS_FLOATER_ID: &str = "rlv-strings";
@@ -201,7 +202,7 @@ fn build_strings_content(In(handle): In<FloaterHandle>, mut commands: Commands) 
         .spawn((
             Text::default(),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(DIM_LABEL_COLOR),
+            text_role(DIM_LABEL_COLOR),
             Node {
                 flex_shrink: 0.0,
                 padding: UiRect::axes(Val::Px(2.0), Val::Px(2.0)),
@@ -270,7 +271,7 @@ fn spawn_restore_button(commands: &mut Commands, parent: Entity) {
         .with_child((
             Text::new(String::new()),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Translated::new("rlv-strings-restore"),
             Pickable::IGNORE,
         ))

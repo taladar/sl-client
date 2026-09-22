@@ -44,7 +44,7 @@ use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{ChatChannel, ChatType};
 
 use crate::chat_input::{ChatInputHandle, ChatInputSpec, ChatInputSubmit, spawn_chat_input};
-use crate::skin::{ACTIVE_CLASS, LIST_ROW_CLASS, set_state_class};
+use crate::skin::{ACTIVE_CLASS, LIST_ROW_CLASS, set_state_class, text_role};
 use crate::skin_palette::SkinPalette;
 use crate::ui::column;
 use crate::ui_font::UiFont;
@@ -368,7 +368,7 @@ fn build_volume_select(commands: &mut Commands, container: Entity, field: Entity
         .spawn((
             Text::new(ChatSayVolume::Say.label()),
             UiFont::Sans.at(SELECT_FONT_SIZE),
-            TextColor(SELECT_TEXT_COLOR),
+            text_role(SELECT_TEXT_COLOR),
             Pickable::IGNORE,
         ))
         .id();
@@ -432,7 +432,7 @@ fn spawn_volume_option(
         .with_child((
             Text::new(volume.label()),
             UiFont::Sans.at(SELECT_FONT_SIZE),
-            TextColor(SELECT_TEXT_COLOR),
+            text_role(SELECT_TEXT_COLOR),
             Pickable::IGNORE,
         ))
         .id();
