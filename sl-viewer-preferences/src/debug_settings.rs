@@ -56,6 +56,7 @@ use crate::i18n::Translated;
 use crate::preferences::{CHECK_OFF, CHECK_SIZE, CONTROL_BORDER, PrefCheckboxBox};
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{SettingBinding, bound_checkbox};
+use crate::skin::text_role;
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
@@ -476,7 +477,7 @@ fn build_debug_settings_content(In(handle): In<FloaterHandle>, mut commands: Com
         Text::default(),
         Translated::new("debug-settings-changed-only"),
         UiFont::Sans.at(FONT),
-        TextColor(CELL_COLOR),
+        text_role(CELL_COLOR),
         Pickable::IGNORE,
         ChildOf(changed_only_row),
     ));
@@ -512,7 +513,7 @@ fn build_debug_settings_content(In(handle): In<FloaterHandle>, mut commands: Com
         .spawn((
             Text::default(),
             UiFont::Mono.at(FONT),
-            TextColor(CELL_COLOR),
+            text_role(CELL_COLOR),
             Name::new("debug-settings:name"),
             ChildOf(name_row),
         ))
@@ -530,7 +531,7 @@ fn build_debug_settings_content(In(handle): In<FloaterHandle>, mut commands: Com
         .spawn((
             Text::default(),
             UiFont::Sans.at(FONT),
-            TextColor(MUTED_COLOR),
+            text_role(MUTED_COLOR),
             Name::new("debug-settings:comment"),
             ChildOf(right),
         ))
@@ -557,7 +558,7 @@ fn build_debug_settings_content(In(handle): In<FloaterHandle>, mut commands: Com
         Text::default(),
         Translated::new("debug-settings-scope"),
         UiFont::Sans.at(FONT),
-        TextColor(MUTED_COLOR),
+        text_role(MUTED_COLOR),
         Pickable::IGNORE,
         ChildOf(scope_label),
     ));
@@ -590,7 +591,7 @@ fn build_debug_settings_content(In(handle): In<FloaterHandle>, mut commands: Com
         Text::default(),
         Translated::new("debug-settings-none-selected"),
         UiFont::Sans.at(FONT),
-        TextColor(MUTED_COLOR),
+        text_role(MUTED_COLOR),
         ChildOf(placeholder_row),
     ));
 
@@ -764,7 +765,7 @@ fn spawn_detail_value_row(
         Text::default(),
         Translated::new(label_key),
         UiFont::Sans.at(FONT),
-        TextColor(MUTED_COLOR),
+        text_role(MUTED_COLOR),
         Pickable::IGNORE,
         ChildOf(label_slot),
     ));
@@ -772,7 +773,7 @@ fn spawn_detail_value_row(
         .spawn((
             Text::default(),
             UiFont::Mono.at(FONT),
-            TextColor(CELL_COLOR),
+            text_role(CELL_COLOR),
             Name::new(format!("debug-settings:value:{label_key}")),
             ChildOf(row_node),
         ))
@@ -840,7 +841,7 @@ fn spawn_component_label(commands: &mut Commands, parent: Entity, letter: &'stat
     commands.spawn((
         Text::new(letter),
         UiFont::Sans.at(FONT),
-        TextColor(MUTED_COLOR),
+        text_role(MUTED_COLOR),
         Pickable::IGNORE,
         ChildOf(parent),
     ));
@@ -1785,7 +1786,7 @@ pub fn spawn_debug_settings_specimen(
         commands.spawn((
             Text::new(if changed { CHANGED_MARK } else { "" }),
             cx.font(UiFont::Mono),
-            TextColor(CELL_COLOR),
+            text_role(CELL_COLOR),
             Node {
                 width: Val::Px(CHANGED_COL_WIDTH),
                 flex_shrink: 0.0,
@@ -1796,7 +1797,7 @@ pub fn spawn_debug_settings_specimen(
         commands.spawn((
             Text::new(cx.text(name)),
             cx.font(UiFont::Mono),
-            TextColor(CELL_COLOR),
+            text_role(CELL_COLOR),
             ChildOf(list_row),
         ));
     }
@@ -1814,13 +1815,13 @@ pub fn spawn_debug_settings_specimen(
     commands.spawn((
         Text::new(cx.text("AudioMasterVolume")),
         cx.font(UiFont::Mono),
-        TextColor(CELL_COLOR),
+        text_role(CELL_COLOR),
         ChildOf(right),
     ));
     commands.spawn((
         Text::new(cx.text("Master audio level")),
         cx.font(UiFont::Sans),
-        TextColor(MUTED_COLOR),
+        text_role(MUTED_COLOR),
         ChildOf(right),
     ));
     let detail_rows: [(&str, &str); 4] = [
@@ -1852,13 +1853,13 @@ pub fn spawn_debug_settings_specimen(
         commands.spawn((
             Text::new(cx.text(label)),
             cx.font(UiFont::Sans),
-            TextColor(MUTED_COLOR),
+            text_role(MUTED_COLOR),
             ChildOf(label_slot),
         ));
         commands.spawn((
             Text::new(cx.text(value)),
             cx.font(UiFont::Mono),
-            TextColor(CELL_COLOR),
+            text_role(CELL_COLOR),
             ChildOf(detail_row),
         ));
     }
@@ -1910,7 +1911,7 @@ pub fn spawn_debug_settings_specimen(
         commands.spawn((
             Text::new(cx.text(label)),
             cx.font(UiFont::Sans),
-            TextColor(CELL_COLOR),
+            text_role(CELL_COLOR),
             ChildOf(button),
         ));
     }

@@ -45,7 +45,7 @@
 //! (`FloaterQuickPrefs::getIsPhototools`), `menu_viewer.xml`
 //! (World ▸ Photo and Video ▸ Phototools, `alt|P`).
 
-use crate::skin::{ACTION_BUTTON_CLASS, ACTIVE_CLASS, TEXT_CLASS, set_state_class};
+use crate::skin::{ACTION_BUTTON_CLASS, ACTIVE_CLASS, TEXT_CLASS, set_state_class, text_role};
 use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
@@ -114,8 +114,6 @@ const VALUE_WIDTH: f32 = 44.0;
 const SECTION_COLOR: Color = Color::srgb(0.78, 0.83, 0.9);
 /// A row label's colour.
 const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
-/// A label's colour while the control beside it is refused.
-const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 /// A value readout's colour.
 const VALUE_COLOR: Color = Color::srgb(0.7, 0.74, 0.82);
 /// A control's border.
@@ -1063,10 +1061,6 @@ struct PhotoValueLabel {
 #[derive(Component, Debug, Clone, Copy)]
 struct PhotoCheckboxBox;
 
-/// Marks a button's label, so the `@setenv` greying reaches the text too.
-#[derive(Component, Debug, Clone, Copy)]
-struct PhotoButtonLabel(Entity);
-
 /// Owns the Phototools window: the floater chrome and deferred content, the
 /// environment controls, and the control visuals.
 #[derive(Debug, Clone, Copy, Default)]
@@ -1091,7 +1085,6 @@ impl Plugin for PhototoolsPlugin {
                     sync_environment_controls,
                     update_photo_values,
                     drive_photo_checkboxes,
-                    drive_photo_button_labels,
                 ),
             )
             // Chained, and push first: the push is what sets the `ours` latch
@@ -1284,7 +1277,7 @@ fn spawn_section(commands: &mut Commands, parent: Entity, key: &'static str) {
         Text::default(),
         Translated::new(key),
         UiFont::Sans.at(SECTION_FONT),
-        TextColor(SECTION_COLOR),
+        text_role(SECTION_COLOR),
         Name::new(format!("phototools:section:{key}")),
         ChildOf(parent),
     ));
@@ -1372,7 +1365,7 @@ fn spawn_slider_row(
     commands.spawn((
         Text::default(),
         UiFont::Sans.at(FONT),
-        TextColor(VALUE_COLOR),
+        text_role(VALUE_COLOR),
         PhotoValueLabel {
             setting: row_def.setting.to_owned(),
             integer,
@@ -1459,7 +1452,6 @@ fn spawn_photo_button(
         Translated::new(label_key),
         UiFont::Sans.at(FONT),
         ClassList::new_with_classes([TEXT_CLASS]),
-        PhotoButtonLabel(button),
         Pickable::IGNORE,
         ChildOf(button),
     ));
@@ -1542,27 +1534,6 @@ fn drive_photo_checkboxes(
     }
 }
 
-/// Grey a refused button's label. The fill is the time buttons' own business
-/// (they also carry the "this is the environment in force" highlight); the text
-/// is every button's, which is why it is a system over the labels rather than
-/// another arm of [`sync_environment_controls`].
-fn drive_photo_button_labels(
-    disabled: Query<Has<InteractionDisabled>>,
-    mut labels: Query<(&mut TextColor, &PhotoButtonLabel)>,
-) {
-    for (mut color, label) in &mut labels {
-        let refused = disabled.get(label.0).unwrap_or(false);
-        let target = if refused {
-            DIM_LABEL_COLOR
-        } else {
-            LABEL_COLOR
-        };
-        if color.0 != target {
-            color.0 = target;
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------
 // The gallery specimen.
 // ---------------------------------------------------------------------------
@@ -1614,13 +1585,13 @@ pub fn spawn_phototools_specimen(commands: &mut Commands, parent: Entity, cx: El
             .with_child((
                 Text::new(cx.text(label)),
                 cx.font(UiFont::Sans),
-                TextColor(LABEL_COLOR),
+                text_role(LABEL_COLOR),
             ));
     }
     commands.spawn((
         Text::new(cx.text("Fixed sky")),
         cx.font(UiFont::Sans),
-        TextColor(SECTION_COLOR),
+        text_role(SECTION_COLOR),
         ChildOf(card),
     ));
     spawn_specimen_combo_row(commands, card, &cx, "Preset library", "Legacy WindLight");
@@ -1654,13 +1625,13 @@ pub fn spawn_phototools_specimen(commands: &mut Commands, parent: Entity, cx: El
             .with_child((
                 Text::new(cx.text(label)),
                 cx.font(UiFont::Sans),
-                TextColor(LABEL_COLOR),
+                text_role(LABEL_COLOR),
             ));
     }
     commands.spawn((
         Text::new(cx.text("Reflections")),
         cx.font(UiFont::Sans),
-        TextColor(SECTION_COLOR),
+        text_role(SECTION_COLOR),
         ChildOf(card),
     ));
     spawn_specimen_check_row(commands, card, &cx, "Avatars in reflections", true);
@@ -1690,7 +1661,7 @@ fn spawn_specimen_combo_row(
     commands.spawn((
         Text::new(cx.text(label)),
         cx.font(UiFont::Sans),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         ChildOf(row_entity),
     ));
     commands
@@ -1707,7 +1678,7 @@ fn spawn_specimen_combo_row(
         .with_child((
             Text::new(cx.text(value)),
             cx.font(UiFont::Sans),
-            TextColor(VALUE_COLOR),
+            text_role(VALUE_COLOR),
         ));
 }
 
@@ -1723,7 +1694,7 @@ fn spawn_specimen_check_row(
     commands.spawn((
         Text::new(cx.text(label)),
         cx.font(UiFont::Sans),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         ChildOf(row_entity),
     ));
     commands.spawn((
@@ -1753,7 +1724,7 @@ fn spawn_specimen_slider_row(
     commands.spawn((
         Text::new(cx.text(label)),
         cx.font(UiFont::Sans),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         ChildOf(row_entity),
     ));
     // Static: no `Slider`, so the thumb is drawn at the specimen's fraction and
@@ -1762,7 +1733,7 @@ fn spawn_specimen_slider_row(
     commands.spawn((
         Text::new(cx.text(value)),
         cx.font(UiFont::Sans),
-        TextColor(VALUE_COLOR),
+        text_role(VALUE_COLOR),
         ChildOf(row_entity),
     ));
 }

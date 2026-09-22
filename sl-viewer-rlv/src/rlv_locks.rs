@@ -50,6 +50,7 @@ use sl_viewer_world_api::rlv::RlvSession;
 
 use crate::rlv_behaviours::issuer_label;
 use crate::style::{DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, LIST_BACKGROUND, ROW_HEIGHT};
+use sl_viewer_ui_core::skin::text_role;
 
 /// The floater's stable id.
 pub const LOCKS_FLOATER_ID: &str = "rlv-locks";
@@ -386,7 +387,7 @@ fn build_locks_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
         .spawn((
             Text::default(),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(DIM_LABEL_COLOR),
+            text_role(DIM_LABEL_COLOR),
             Node {
                 flex_shrink: 0.0,
                 padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),

@@ -63,7 +63,7 @@
 
 use crate::skin::{
     ACTIVE_CLASS, DISABLED_SURFACE_CLASS, DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class,
-    set_state_class_on,
+    set_state_class_on, text_role,
 };
 use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
@@ -778,7 +778,7 @@ fn spawn_contact_sets_panel(
         .spawn((
             Text::default(),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(DIM_LABEL_COLOR),
+            text_role(DIM_LABEL_COLOR),
             Node {
                 flex_shrink: 0.0,
                 padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),
@@ -899,7 +899,7 @@ fn spawn_add_to_set_floater(mut commands: Commands, root: Res<UiRoot>) {
         .spawn((
             Text::default(),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Pickable::IGNORE,
             Name::new("add-to-contact-set-prompt"),
             ChildOf(content),
@@ -1013,7 +1013,7 @@ fn spawn_config_floater(mut commands: Commands, root: Res<UiRoot>) {
         Text::default(),
         Translated::new("contact-set-config-name"),
         UiFont::Sans.at(FONT_SIZE),
-        TextColor(DIM_LABEL_COLOR),
+        text_role(DIM_LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(name_row),
     ));
@@ -1043,7 +1043,7 @@ fn spawn_config_floater(mut commands: Commands, root: Res<UiRoot>) {
         Text::default(),
         Translated::new("contact-set-config-color"),
         UiFont::Sans.at(FONT_SIZE),
-        TextColor(DIM_LABEL_COLOR),
+        text_role(DIM_LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(color_row),
     ));
@@ -1126,7 +1126,7 @@ fn spawn_config_toggle(
         .spawn((
             Text::new(UNCHECKED_GLYPH.to_owned()),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(DIM_LABEL_COLOR),
+            text_role(DIM_LABEL_COLOR),
             Pickable::IGNORE,
             ChildOf(button),
         ))
@@ -1135,7 +1135,7 @@ fn spawn_config_toggle(
         Text::default(),
         Translated::new(label_key),
         UiFont::Sans.at(FONT_SIZE),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(button),
     ));

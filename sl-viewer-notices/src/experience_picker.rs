@@ -81,7 +81,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
-use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class};
+use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class, text_role};
 
 use sl_client_bevy::{Command, ExperienceKey, SlCommand, SlEvent, SlSessionEvent};
 use sl_settings::{Scope, SettingValue};
@@ -450,7 +450,7 @@ fn build_picker_content(
         Text::default(),
         Translated::new("experiences-search-rating"),
         UiFont::Sans.at(FONT_SIZE),
-        TextColor(DIM_TEXT_COLOR),
+        text_role(DIM_TEXT_COLOR),
         Pickable::IGNORE,
         ChildOf(filter_row),
     ));
@@ -545,7 +545,7 @@ fn build_picker_content(
         .spawn((
             Text::default(),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(DIM_TEXT_COLOR),
+            text_role(DIM_TEXT_COLOR),
             Pickable::IGNORE,
             Name::new("experience-picker-status"),
             ChildOf(actions),

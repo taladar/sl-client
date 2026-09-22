@@ -39,6 +39,7 @@ use sl_rlv::{
 };
 use sl_viewer_platform::clipboard::{ViewerClipboard, copy_to_clipboard};
 use sl_viewer_ui_core::i18n::{TransArgs, Translated, Translator};
+use sl_viewer_ui_core::skin::text_role;
 use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems, column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
 use sl_viewer_ui_core::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
@@ -567,7 +568,7 @@ fn build_behaviours_content(In(handle): In<FloaterHandle>, mut commands: Command
         .spawn((
             Text::default(),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(DIM_LABEL_COLOR),
+            text_role(DIM_LABEL_COLOR),
             Node {
                 flex_shrink: 1.0,
                 padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),
@@ -615,7 +616,7 @@ fn spawn_copy_button(commands: &mut Commands, parent: Entity) {
         .with_child((
             Text::new(String::new()),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Translated::new("rlv-behaviours-copy"),
             Pickable::IGNORE,
         ))

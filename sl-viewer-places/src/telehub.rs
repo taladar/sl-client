@@ -70,6 +70,7 @@
 //! `llselectmgr.cpp` (`sendGodlikeRequest`).
 
 use sl_viewer_ui_core::skin::TEXT_CLASS;
+use sl_viewer_ui_core::skin::text_role;
 
 use crate::skin_palette::SkinPalette;
 use bevy::prelude::*;
@@ -413,7 +414,7 @@ fn spawn_line(commands: &mut Commands, parent: Entity, color: Color) -> Entity {
         .spawn((
             Text::new(String::new()),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(color),
+            text_role(color),
             Pickable::IGNORE,
             ChildOf(parent),
         ))
@@ -445,7 +446,7 @@ fn spawn_note(commands: &mut Commands, parent: Entity, key: &'static str) {
             Text::default(),
             Translated::new(key),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(DIM_LABEL_COLOR),
+            text_role(DIM_LABEL_COLOR),
             Pickable::IGNORE,
         ));
 }

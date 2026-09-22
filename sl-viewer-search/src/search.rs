@@ -77,6 +77,7 @@ use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow};
 use crate::world_api::ui_texture::{PendingUiTexture, UiTexturePlugin};
 use crate::world_map::OpenWorldMap;
+use sl_viewer_ui_core::skin::text_role;
 
 // ---------------------------------------------------------------------------
 // Constants.
@@ -1631,7 +1632,7 @@ fn spawn_detail_value(
     commands.spawn((
         Text::new(String::new()),
         UiFont::Sans.at(size),
-        TextColor(color),
+        text_role(color),
         Node {
             max_width: Val::Px(DETAIL_WIDTH - 16.0),
             ..default()
@@ -1668,7 +1669,7 @@ fn spawn_events_filters(commands: &mut Commands, panel: Entity) -> (Entity, Enti
         .spawn((
             Text::new(String::new()),
             UiFont::Sans.at(FONT),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             ChildOf(filters),
         ))
         .id();
@@ -1699,7 +1700,7 @@ fn spawn_events_day_button(commands: &mut Commands, parent: Entity, forward: boo
     commands.spawn((
         Text::new(glyph.to_owned()),
         UiFont::Sans.at(FONT),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(button),
     ));
@@ -1762,7 +1763,7 @@ fn spawn_paging_row(commands: &mut Commands, panel: Entity, category: SearchCate
     commands.spawn((
         Text::new(String::new()),
         UiFont::Sans.at(FONT),
-        TextColor(SECONDARY_COLOR),
+        text_role(SECONDARY_COLOR),
         SearchCount(category),
         ChildOf(paging),
     ));
@@ -1800,7 +1801,7 @@ fn spawn_paging_button(
         Text::default(),
         Translated::new(key),
         UiFont::Sans.at(FONT),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(button),
     ));

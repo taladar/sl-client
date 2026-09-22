@@ -53,7 +53,7 @@
 //! `llfloatergetblockedobjectname`, `menu_people_blocked_{gear,plus,view}.xml`,
 //! `floater_mute_object.xml`.
 
-use crate::skin::{ACTIVE_CLASS, set_state_class};
+use crate::skin::{ACTIVE_CLASS, set_state_class, text_role};
 use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
@@ -534,7 +534,7 @@ fn spawn_blocked_panel(
         .spawn((
             Text::default(),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(DIM_LABEL_COLOR),
+            text_role(DIM_LABEL_COLOR),
             Node {
                 flex_shrink: 0.0,
                 padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),
@@ -602,7 +602,7 @@ fn spawn_blocked_button(commands: &mut Commands, parent: Entity, button: Blocked
                 ..default()
             },
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Pickable::IGNORE,
         ))
         .observe(on_blocked_button_press);
@@ -693,7 +693,7 @@ fn spawn_block_by_name_floater(mut commands: Commands, root: Res<UiRoot>) {
                     "block-by-name-cancel"
                 }),
                 UiFont::Sans.at(FONT_SIZE),
-                TextColor(LABEL_COLOR),
+                text_role(LABEL_COLOR),
                 Pickable::IGNORE,
             ))
             .observe(on_block_by_name_press);

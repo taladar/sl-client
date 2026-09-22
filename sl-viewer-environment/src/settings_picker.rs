@@ -55,7 +55,7 @@ use sl_viewer_intents::{OpenSettingsPicker, PickedSettings, SettingsPicked};
 use sl_viewer_inventory::inventory::InventoryModel;
 use sl_viewer_inventory::settings_index::SettingsIndex;
 use sl_viewer_ui_core::i18n::{TransArgs, Translated, Translator};
-use sl_viewer_ui_core::skin::{ACTIVE_CLASS, set_state_class_on};
+use sl_viewer_ui_core::skin::{ACTIVE_CLASS, set_state_class_on, text_role};
 use sl_viewer_ui_core::ui::{UiScaffoldSystems, column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
 use sl_viewer_ui_core::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
@@ -337,7 +337,7 @@ fn build_settings_picker_content(
         .spawn((
             Text::default(),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(DIM_LABEL_COLOR),
+            text_role(DIM_LABEL_COLOR),
             Pickable::IGNORE,
             Name::new("settings-picker-field"),
             ChildOf(content),
@@ -371,7 +371,7 @@ fn build_settings_picker_content(
         .spawn((
             Text::default(),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(DIM_LABEL_COLOR),
+            text_role(DIM_LABEL_COLOR),
             Node {
                 flex_shrink: 0.0,
                 padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),
@@ -451,7 +451,7 @@ fn spawn_picker_button(
                 ..default()
             },
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Pickable::IGNORE,
         ))
         .observe(on_picker_button)

@@ -39,7 +39,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::Uuid;
-use sl_viewer_ui_core::skin::{ACTIVE_CLASS, set_state_class};
+use sl_viewer_ui_core::skin::{ACTIVE_CLASS, set_state_class, text_role};
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 use crate::derender::UnDerender;
@@ -423,7 +423,7 @@ fn build_blacklist_content(In(handle): In<FloaterHandle>, mut commands: Commands
         .spawn((
             Text::default(),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(DIM_LABEL_COLOR),
+            text_role(DIM_LABEL_COLOR),
             Node {
                 flex_shrink: 0.0,
                 padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),
@@ -482,7 +482,7 @@ fn spawn_blacklist_action(commands: &mut Commands, parent: Entity, button: Black
         .with_child((
             Text::new(String::new()),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Translated::new(button.label_key()),
             Pickable::IGNORE,
         ))

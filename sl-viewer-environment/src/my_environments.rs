@@ -108,6 +108,7 @@ use crate::style::{
 use bevy_flair::style::components::ClassList;
 use sl_viewer_ui_core::skin::{
     ACTIVE_CLASS, DisabledButtons, TEXT_CLASS, set_action_button_enabled, set_state_class_on,
+    text_role,
 };
 
 /// The floater's stable id.
@@ -495,7 +496,7 @@ fn build_my_environments_content(In(handle): In<FloaterHandle>, mut commands: Co
         .spawn((
             Text::default(),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(DIM_LABEL_COLOR),
+            text_role(DIM_LABEL_COLOR),
             Node {
                 flex_shrink: 0.0,
                 padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),
@@ -592,7 +593,7 @@ fn spawn_kind_checkbox(commands: &mut Commands, parent: Entity, index: usize, ki
         Text::default(),
         Translated::new(kind_key(kind)),
         UiFont::Sans.at(FONT_SIZE),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(holder),
     ));
@@ -617,7 +618,7 @@ fn spawn_rename_row(commands: &mut Commands, parent: Entity) -> Entity {
         Text::default(),
         Translated::new("my-environments-name"),
         UiFont::Sans.at(FONT_SIZE),
-        TextColor(LABEL_COLOR),
+        text_role(LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(holder),
     ));

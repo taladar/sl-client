@@ -35,7 +35,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::AgentKey;
-use sl_viewer_ui_core::skin::{ACTIVE_CLASS, set_state_class};
+use sl_viewer_ui_core::skin::{ACTIVE_CLASS, set_state_class, text_role};
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 use crate::avatar_complexity::RenderOverride;
@@ -452,7 +452,7 @@ fn build_render_settings_content(In(handle): In<FloaterHandle>, mut commands: Co
         .spawn((
             Text::default(),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(DIM_LABEL_COLOR),
+            text_role(DIM_LABEL_COLOR),
             Node {
                 flex_shrink: 0.0,
                 padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),
@@ -521,7 +521,7 @@ fn spawn_render_settings_action(
         .with_child((
             Text::new(String::new()),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Translated::new(button.label_key()),
             Pickable::IGNORE,
         ))

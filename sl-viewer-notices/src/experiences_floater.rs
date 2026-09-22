@@ -93,7 +93,7 @@ use bevy::text::EditableText;
 use bevy::ui::Checked;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
-use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class};
+use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class, text_role};
 use std::collections::BTreeSet;
 
 use sl_client_bevy::{
@@ -1008,7 +1008,7 @@ fn build_search_tab(commands: &mut Commands, panel: Entity) -> SearchTab {
         Text::default(),
         Translated::new("experiences-search-rating"),
         UiFont::Sans.at(FONT_SIZE),
-        TextColor(DIM_TEXT_COLOR),
+        text_role(DIM_TEXT_COLOR),
         Pickable::IGNORE,
         ChildOf(filter_row),
     ));
@@ -1068,7 +1068,7 @@ fn build_search_tab(commands: &mut Commands, panel: Entity) -> SearchTab {
         .spawn((
             Text::default(),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(DIM_TEXT_COLOR),
+            text_role(DIM_TEXT_COLOR),
             Pickable::IGNORE,
             Name::new("experiences-search-status"),
             ChildOf(actions),
@@ -1173,7 +1173,7 @@ fn spawn_notify_checkbox(commands: &mut Commands, parent: Entity) {
         Text::default(),
         Translated::new("experiences-events-notify"),
         UiFont::Sans.at(FONT_SIZE),
-        TextColor(TEXT_COLOR),
+        text_role(TEXT_COLOR),
         Pickable::IGNORE,
         ChildOf(row_node),
     ));
@@ -1908,7 +1908,7 @@ pub fn spawn_experiences_specimen(
                 ..default()
             },
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(HEADING_COLOR),
+            text_role(HEADING_COLOR),
             Pickable::IGNORE,
             ChildOf(strip),
         ));
@@ -1983,7 +1983,7 @@ fn spawn_specimen_row(
                 ..default()
             },
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(color),
+            text_role(color),
             Pickable::IGNORE,
             ChildOf(row_entity),
         ));
@@ -2002,7 +2002,7 @@ fn spawn_specimen_button(
     commands.spawn((
         Text::new(label.to_owned()),
         UiFont::Sans.at(FONT_SIZE),
-        TextColor(TEXT_COLOR),
+        text_role(TEXT_COLOR),
         Pickable::IGNORE,
         ChildOf(button),
     ));

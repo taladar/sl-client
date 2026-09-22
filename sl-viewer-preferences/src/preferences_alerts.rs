@@ -46,6 +46,7 @@ use crate::preferences::{
     spawn_pref_combo, spawn_pref_section, spawn_pref_text,
 };
 use crate::settings_binding::SettingBinding;
+use crate::skin::text_role;
 use crate::ui_table::{
     TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableSelectionMode, TableSpec,
     set_table_cell, spawn_table, spawn_table_row,
@@ -252,7 +253,7 @@ pub(crate) fn build_alerts_tab(commands: &mut Commands, panel: Entity) {
             Text::default(),
             Translated::new("preferences-alerts-col-show"),
             crate::ui_font::UiFont::Sans.at(FONT),
-            TextColor(HEADER_COLOR),
+            text_role(HEADER_COLOR),
             ChildOf(header_cell),
         ));
     }

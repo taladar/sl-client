@@ -194,17 +194,50 @@ Deliberately **not** collapsed, and why:
   any role (`HEADER_COLOR` is *gold* in one crate). Their own shades, not
   drift.
 
+### The files that *do* write a colour (2026-09-22)
+
+Of the 27 files holding a `&mut TextColor`, **seventeen never actually write
+one** — their only such query is `set_table_cell`'s widened cell tuple, which
+carries the class itself. Those 75 sites converted with the rest.
+
+One of them was a defect this audit found in the greying commit
+(`791bd913`): `phototools`' button captions had been given `.sk-text` while
+`drive_photo_button_labels` still wrote their colour every frame — two writers
+on one component. The system was redundant by then (the button carries
+`.sk-action-button` and `InteractionDisabled`, so
+`.sk-action-button:disabled .sk-text` greys the caption), so it is deleted
+along with its `PhotoButtonLabel` marker.
+
+**Ten files have a real writer**, and their ~61 sites need per-site judgement
+— which node the writer targets, and whether *this* spawn is that node:
+
+| file | what writes a colour |
+| --- | --- |
+| `inventory.rs` | the row arrow and the label, per bind, by row kind |
+| `about_land.rs`, `about_region.rs` | `set_check_visual`'s three-state glyph |
+| `land_environment.rs`, `snapshot_floater.rs` | the same hand-rolled check |
+| `group_profile.rs` | `set_toggle_glyph` |
+| `rlv_console.rs` | a held line's colour, by severity |
+| `ui_text_input.rs` | the field text, disabled / read-only vs `field_text` |
+| `name_tag_billboard.rs` | world-space name tags — data, not panel chrome |
+
+Four of those are the hand-rolled check painters that
+[[viewer-skin-checkbox-radio-shape]] owns; `ui_text_input`'s is a widget state
+that wants a class rather than a palette read; `name_tag_billboard`'s is not
+this task's at all.
+
 ### What is left
 
+- **The ten files above**, one at a time.
 - **The literal-colour spawns** — `Color::WHITE` (32 sites),
   `Color::srgba(0.85, 0.85, 0.85, 1.0)` (18) and the rest of the 86 distinct
   arguments. Each is a decision about which role, if any, it meant; the
-  ast-grep census above is how to enumerate them.
-- **The 162 sites in files that do take `&mut TextColor`.** Safe only once
-  each one is shown not to be repainted per state — the same audit the state
-  task did, one file at a time.
-- **A live look.** Still nothing has confirmed any of this in a window; the
-  gallery's skin switcher is the check.
+  ast-grep census is how to enumerate them.
+- **The live look is deliberately deferred to the end.** A half-converted UI
+  cannot be judged by eye — nothing distinguishes a colour that is already
+  skin-driven from one that is not — so the check only becomes meaningful when
+  the task is finished, and it is then "does a skin switch recolour
+  *everything*".
 - **A live look.** The change is invisible under the built-in fallback by
   construction and only shows once a skin's own token differs, so the gallery's
   live switcher (or a viewer run) is the check that it actually took.

@@ -39,7 +39,7 @@
 //! are `viewer-avatar-moderation-actions`, and light up in the pie, here and
 //! the minimap at once when that shared layer lands.
 
-use crate::skin::{ACTIVE_CLASS, LIST_ROW_CLASS};
+use crate::skin::{ACTIVE_CLASS, LIST_ROW_CLASS, text_role};
 use crate::skin_palette::SkinPalette;
 use bevy::ecs::system::SystemParam;
 use bevy::input_focus::tab_navigation::TabIndex;
@@ -1061,7 +1061,7 @@ fn build_radar_content(
         Text::default(),
         Translated::new("radar-limit-range"),
         UiFont::Sans.at(FONT_SIZE),
-        TextColor(DIM_LABEL_COLOR),
+        text_role(DIM_LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(controls),
     ));
@@ -1085,7 +1085,7 @@ fn build_radar_content(
         .spawn((
             Text::default(),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(DIM_LABEL_COLOR),
+            text_role(DIM_LABEL_COLOR),
             Node {
                 flex_shrink: 0.0,
                 ..default()
@@ -1195,7 +1195,7 @@ fn spawn_radar_action_button(
         .with_child((
             Text::new(String::new()),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Translated::new(label_key),
             Pickable::IGNORE,
         ))
@@ -1808,7 +1808,7 @@ pub fn spawn_radar_specimen(
             ..default()
         },
         UiFont::Sans.at(cx.font_size),
-        TextColor(DIM_LABEL_COLOR),
+        text_role(DIM_LABEL_COLOR),
         ChildOf(root),
     ));
     let rows: [SpecimenRow; 3] = [
@@ -1868,7 +1868,7 @@ pub fn spawn_radar_specimen(
                     ..default()
                 },
                 UiFont::Sans.at(cx.font_size),
-                TextColor(color),
+                text_role(color),
                 Pickable::IGNORE,
                 ChildOf(row_node),
             ));
@@ -1900,7 +1900,7 @@ pub fn spawn_radar_specimen(
                     ..default()
                 },
                 UiFont::Sans.at(cx.font_size),
-                TextColor(LABEL_COLOR),
+                text_role(LABEL_COLOR),
             ));
     }
     root
