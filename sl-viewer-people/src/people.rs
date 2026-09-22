@@ -48,6 +48,10 @@
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
+use crate::skin::{
+    ACTION_BUTTON_CLASS, DisabledButtons, PRESENCE_OFFLINE_CLASS, PRESENCE_ONLINE_CLASS,
+    TEXT_CLASS, set_action_button_enabled, set_state_class_on,
+};
 use crate::skin_palette::SkinPalette;
 use bevy::asset::RenderAssetUsages;
 use bevy::input_focus::tab_navigation::TabIndex;
@@ -126,21 +130,8 @@ const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 /// The friends-list scroll surface background — a touch darker, a sunken well.
 const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
 
-/// An online friend's presence dot colour — a friendly green.
-const ONLINE_COLOR: Color = Color::srgb(0.40, 0.80, 0.42);
-
-/// An offline (or not-visible) friend's presence dot colour — dim grey.
-const OFFLINE_COLOR: Color = Color::srgb(0.42, 0.46, 0.52);
-
 /// An action button's background.
 const ACTION_BACKGROUND: Color = Color::srgb(0.24, 0.29, 0.38);
-
-/// A disabled action button's background — the same values the Groups column
-/// beside this one uses, so the two read as one surface.
-const ACTION_DISABLED_BACKGROUND: Color = Color::srgb(0.18, 0.20, 0.24);
-
-/// A disabled action button's label colour — dim, matching the chrome text.
-const DISABLED_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_disabled;
 
 /// The table header row's background — a recessed strip above the list.
 const HEADER_BACKGROUND: Color = Color::srgb(0.14, 0.17, 0.22);
@@ -876,10 +867,10 @@ fn friend_command(action: FriendAction, friend: FriendKey) -> Option<Command> {
 pub(crate) struct FriendActionButton {
     /// The action this button fires.
     action: FriendAction,
-    /// The button node (carries the background).
+    /// The button node. It carries `InteractionDisabled` when the selection
+    /// cannot support the action; everything the refusal looks like is the
+    /// skin's (`.sk-action-button:disabled`).
     button: Entity,
-    /// The button's label node (carries the text colour).
-    label: Entity,
 }
 
 /// The People tab / pane entities — the ECS mirror of [`FriendsModel`].
@@ -1686,9 +1677,11 @@ fn spawn_action_button(
         ButtonSpec::flat(UiLabel::key(action.label_key()), "people-friends-action")
             .colors(ACTION_BACKGROUND, ACTION_BACKGROUND)
             .label_color(LABEL_COLOR)
+            .class(ACTION_BUTTON_CLASS)
+            .label_class(TEXT_CLASS)
             .font_size(CHROME_FONT_SIZE),
     );
-    let (button, label) = (spawned.button, spawned.label);
+    let button = spawned.button;
     commands.entity(button).observe(
         move |mut press: On<Pointer<Press>>,
               selected: Res<SelectedFriend>,
@@ -1762,11 +1755,7 @@ fn spawn_action_button(
             }
         },
     );
-    FriendActionButton {
-        action,
-        button,
-        label,
-    }
+    FriendActionButton { action, button }
 }
 
 /// Spawn the Groups sub-tab content container — an empty column, hidden until the
@@ -2168,8 +2157,8 @@ fn refresh_friend_actions(
     selected: Res<SelectedFriend>,
     view: Res<FriendsView>,
     ui: Option<Res<PeopleUi>>,
-    mut backgrounds: Query<&mut BackgroundColor>,
-    mut colors: Query<&mut TextColor>,
+    mut commands: Commands,
+    disabled: DisabledButtons,
 ) {
     let Some(ui) = ui else {
         return;
@@ -2179,26 +2168,7 @@ fn refresh_friend_actions(
     }
     for entry in &ui.friend_actions {
         let enabled = friend_action_enabled(entry.action, selected.all(), &view);
-        let wanted = if enabled {
-            ACTION_BACKGROUND
-        } else {
-            ACTION_DISABLED_BACKGROUND
-        };
-        if let Ok(mut background) = backgrounds.get_mut(entry.button)
-            && background.0 != wanted
-        {
-            background.0 = wanted;
-        }
-        let wanted = TextColor(if enabled {
-            LABEL_COLOR
-        } else {
-            DISABLED_LABEL_COLOR
-        });
-        if let Ok(mut color) = colors.get_mut(entry.label)
-            && *color != wanted
-        {
-            *color = wanted;
-        }
+        set_action_button_enabled(&mut commands, &disabled, entry.button, enabled);
     }
 }
 
@@ -2373,6 +2343,12 @@ fn populate_friend_rows(
             you_map,
             you_edit,
         ];
+        // The dot is always in one of its two presence states, so it spawns in
+        // the resting one rather than classless; `bind_friend_rows` settles it
+        // on the same frame it takes a friend.
+        commands
+            .entity(presence)
+            .insert(ClassList::new_with_classes([PRESENCE_OFFLINE_CLASS]));
         commands
             .entity(row_entity)
             .insert((
@@ -2552,7 +2528,8 @@ fn bind_friend_rows(
         &FriendRowParts,
         &mut BoundFriend,
     )>,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
+    mut texts: Query<&mut Text>,
+    mut classes: Query<&mut ClassList>,
     mut checkboxes: Query<(&mut ImageNode, &mut CellFriend)>,
     mut commands: Commands,
 ) {
@@ -2579,15 +2556,24 @@ fn bind_friend_rows(
         commands
             .entity(row_entity)
             .insert(crate::inventory_drag::AgentDropTarget(friend_row.agent));
-        if let Ok((mut text, mut color)) = texts.get_mut(parts.presence) {
+        if let Ok(mut text) = texts.get_mut(parts.presence) {
             set_text(&mut text, presence_glyph(friend_row.online));
-            *color = TextColor(if friend_row.online {
-                ONLINE_COLOR
-            } else {
-                OFFLINE_COLOR
-            });
         }
-        if let Ok((mut text, _color)) = texts.get_mut(parts.label) {
+        // The dot's colour is the skin's, and the pair is exclusive: there is
+        // no third presence, so neither class has a resting rule to fall to.
+        set_state_class_on(
+            &mut classes,
+            parts.presence,
+            PRESENCE_ONLINE_CLASS,
+            friend_row.online,
+        );
+        set_state_class_on(
+            &mut classes,
+            parts.presence,
+            PRESENCE_OFFLINE_CLASS,
+            !friend_row.online,
+        );
+        if let Ok(mut text) = texts.get_mut(parts.label) {
             set_text(&mut text, &friend_row.name);
         }
         // The six permission checkboxes — the ticked / empty icon and the tint by

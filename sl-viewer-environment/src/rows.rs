@@ -18,6 +18,7 @@ use bevy::ui_widgets::{Slider, SliderRange, SliderStep, SliderValue};
 use sl_client_bevy::TextureKey;
 use sl_viewer_pickers::ui_texture_picker::spawn_texture_swatch;
 use sl_viewer_ui_core::i18n::Translated;
+use sl_viewer_ui_core::skin::{ACTION_BUTTON_CLASS, TEXT_CLASS};
 use sl_viewer_ui_core::ui::{column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
 use sl_viewer_ui_core::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
@@ -340,6 +341,8 @@ pub fn spawn_action_button(
             .padding(10.0, 4.0)
             .colors(ACTION_BACKGROUND, ACTION_BACKGROUND)
             .label_color(LABEL_COLOR)
+            .class(ACTION_BUTTON_CLASS)
+            .label_class(TEXT_CLASS)
             .font_size(FONT_SIZE)
             .layout(|node| {
                 node.align_self = AlignSelf::FlexStart;
@@ -351,47 +354,6 @@ pub fn spawn_action_button(
             }),
     )
     .button
-}
-
-/// What [`set_action_button_enabled`] reads: the filter saying whether a button
-/// is already disabled, so one that already carries the right marker is left
-/// alone rather than re-marked changed every frame (which would give the
-/// translation sweep and the layout gate work sixty times a second over a
-/// window where nothing moved).
-///
-/// It used to carry the button's background and its label's colour too. Those
-/// are the skin's now (`.sk-button:disabled`, `viewer-skin-panel-state-classes`),
-/// so nothing here paints.
-pub type ButtonPaint<'w, 's> = Query<'w, 's, (), With<bevy::ui::InteractionDisabled>>;
-
-/// Mark one action button enabled or disabled.
-///
-/// Bevy's `InteractionDisabled` is **advisory**: it stops a window's own press
-/// observer (each one filters on it) and paints nothing — which is why the dim
-/// colours used to be written here beside it. They are the skin's now, through
-/// `.sk-button:disabled` and `.sk-button:disabled .sk-text`, so this sets the
-/// marker and stops.
-///
-/// Still shared, and for the same reason: four windows in this crate grey the
-/// same kind of button on the same kind of predicate, and a copy per window is
-/// a place for the `InteractionDisabled` half to drift.
-pub fn set_action_button_enabled(
-    commands: &mut Commands,
-    disabled: &ButtonPaint,
-    entity: Entity,
-    enabled: bool,
-) {
-    if disabled.contains(entity) == enabled {
-        if enabled {
-            commands
-                .entity(entity)
-                .remove::<bevy::ui::InteractionDisabled>();
-        } else {
-            commands
-                .entity(entity)
-                .insert(bevy::ui::InteractionDisabled);
-        }
-    }
 }
 
 /// The one system every environment window's sliders share.
@@ -454,8 +416,11 @@ mod tests {
     use bevy::ui_widgets::{SliderRange, SliderValue};
     use pretty_assertions::assert_eq;
 
-    use super::{AimSlider, AimTrackball, RowsPlugin};
+    use bevy_flair::style::components::ClassList;
+
+    use super::{AimSlider, AimTrackball, RowsPlugin, spawn_action_button};
     use crate::knobs::{AimKnobs, SkyKnob};
+    use sl_viewer_ui_core::skin::{ACTION_BUTTON_CLASS, TEXT_CLASS};
     use sl_viewer_ui_widgets::ui_trackball::TrackballAim;
 
     /// A boxed error so tests can use `?` instead of the disallowed
@@ -687,6 +652,60 @@ mod tests {
         app.update();
         let (_min, max) = SkyKnob::SunAzimuth.range();
         assert_eq!(value_of(&app, azimuth), Some(max));
+        Ok(())
+    }
+
+    /// **The greying has two ends, and only one of them is the marker.**
+    ///
+    /// `set_action_button_enabled` sets `InteractionDisabled` and paints
+    /// nothing, which works only because `.sk-action-button:disabled` and
+    /// `.sk-action-button:disabled .sk-text` select on it. This asserts the
+    /// other end: that the button this helper spawns actually carries both
+    /// anchors. Without it, dropping the paint leaves a refused button looking
+    /// exactly like one that would answer a click — invisibly, since the
+    /// headless harness resolves no stylesheet.
+    #[test]
+    fn a_spawned_action_button_carries_both_ends_of_the_disabled_selector() -> Result<(), TestError>
+    {
+        let mut app = rows_app();
+        let parent = app.world_mut().spawn(Node::default()).id();
+        let mut tab = 0;
+        let button = {
+            let world = app.world_mut();
+            let mut commands = world.commands();
+            let button = spawn_action_button(
+                &mut commands,
+                parent,
+                WINDOW,
+                "do-it",
+                "do-it".to_owned(),
+                &mut tab,
+            );
+            world.flush();
+            button
+        };
+        assert!(
+            app.world()
+                .entity(button)
+                .get::<ClassList>()
+                .is_some_and(|classes| classes.contains(ACTION_BUTTON_CLASS)),
+            "the button has no class, so `.sk-action-button:disabled` can never \
+             match and a refused button never greys"
+        );
+        let caption = app
+            .world()
+            .entity(button)
+            .get::<Children>()
+            .and_then(|kids| kids.iter().next())
+            .ok_or("the button spawned no caption")?;
+        assert!(
+            app.world()
+                .entity(caption)
+                .get::<ClassList>()
+                .is_some_and(|classes| classes.contains(TEXT_CLASS)),
+            "the caption has no class, so the descendant half of the rule has \
+             nothing to select"
+        );
         Ok(())
     }
 }

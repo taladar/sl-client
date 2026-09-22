@@ -49,11 +49,13 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::text::EditableText;
+use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{InventoryKey, SettingsKind, Uuid};
 use sl_viewer_intents::{OpenSettingsPicker, PickedSettings, SettingsPicked};
 use sl_viewer_inventory::inventory::InventoryModel;
 use sl_viewer_inventory::settings_index::SettingsIndex;
 use sl_viewer_ui_core::i18n::{TransArgs, Translated, Translator};
+use sl_viewer_ui_core::skin::{ACTIVE_CLASS, set_state_class_on};
 use sl_viewer_ui_core::ui::{UiScaffoldSystems, column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
 use sl_viewer_ui_core::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
@@ -72,7 +74,6 @@ use crate::settings_list::{
 };
 use crate::style::{
     ACTION_BACKGROUND, DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, LIST_BACKGROUND, ROW_HEIGHT,
-    SELECTED_BACKGROUND,
 };
 
 /// The picker's stable floater id — and the element-id prefix of its controls.
@@ -652,7 +653,7 @@ fn bind_picker_rows(
         &TableRowCells,
         &mut BoundPickerRow,
     )>,
-    mut backgrounds: Query<&mut BackgroundColor>,
+    mut classes: Query<&mut ClassList>,
     // One `Text` query for the field line *and* the cells: two of them
     // (`Query<&mut Text>` beside `Query<(&mut Text, &mut TextColor)>`) is a
     // B0001 conflict, and the panic is on the system's first run — the whole
@@ -700,16 +701,14 @@ fn bind_picker_rows(
                     set_table_cell(&mut cells_text, cell, &value, color);
                 }
             }
-            if let Ok(mut background) = backgrounds.get_mut(row_entity) {
-                let wanted = if data.is_some() && state.selected == bound.0 {
-                    SELECTED_BACKGROUND
-                } else {
-                    Color::NONE
-                };
-                if background.0 != wanted {
-                    background.0 = wanted;
-                }
-            }
+            // The one selection highlight, not this picker's copy of its
+            // value: `.sk-active` over the table widget's row class.
+            set_state_class_on(
+                &mut classes,
+                row_entity,
+                ACTIVE_CLASS,
+                data.is_some() && state.selected == bound.0,
+            );
         }
     }
 }

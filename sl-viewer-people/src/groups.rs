@@ -44,7 +44,10 @@
 //! Reference (Firestorm, read-only): `llgrouplist`, `llgroupactions`,
 //! Vintage `panel_fs_contacts_groups`.
 
-use crate::skin::{ACTIVE_CLASS, set_state_class};
+use crate::skin::{
+    ACTION_BUTTON_CLASS, ACTIVE_CLASS, ACTIVE_TEXT_CLASS, DisabledButtons, TEXT_CLASS,
+    set_action_button_enabled, set_state_class, set_state_class_on,
+};
 use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
@@ -83,10 +86,6 @@ const ACTIVE_COL_WIDTH: f32 = 56.0;
 /// the longest label ("Activate") at the chrome font size.
 const ACTION_COL_WIDTH: f32 = 96.0;
 
-/// An accent used for the active group's row text and its marker — the same bright
-/// "this one is selected" hue the sibling panes use.
-const ACTIVE_COLOR: Color = Color::srgb(0.52, 0.68, 0.95);
-
 /// A group / label's text colour.
 const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
@@ -96,13 +95,6 @@ const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
 
 /// An action button's background.
 const ACTION_BACKGROUND: Color = Color::srgb(0.24, 0.29, 0.38);
-
-/// A disabled action button's background — the same hue, sunk towards the panel
-/// so it reads as unavailable rather than as a second kind of button.
-const ACTION_DISABLED_BACKGROUND: Color = Color::srgb(0.18, 0.20, 0.24);
-
-/// A disabled action button's label colour — dim, matching the chrome text.
-const DISABLED_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_disabled;
 
 /// The table header row's background — a recessed strip above the list.
 const HEADER_BACKGROUND: Color = Color::srgb(0.14, 0.17, 0.22);
@@ -274,10 +266,10 @@ pub(crate) struct GroupsUi {
 pub(crate) struct ActionButton {
     /// The action this button fires.
     action: GroupAction,
-    /// The button node (carries the background).
+    /// The button node. It carries `InteractionDisabled` when the selection
+    /// cannot support the action; everything the refusal looks like is the
+    /// skin's (`.sk-action-button:disabled`).
     button: Entity,
-    /// The button's label node (carries the text colour).
-    label: Entity,
 }
 
 /// The ordered, render-ready groups projection the virtualized list binds to.
@@ -554,9 +546,11 @@ fn spawn_action_button(
         ButtonSpec::flat(UiLabel::key(action.label_key()), "groups-action")
             .colors(ACTION_BACKGROUND, ACTION_BACKGROUND)
             .label_color(LABEL_COLOR)
+            .class(ACTION_BUTTON_CLASS)
+            .label_class(TEXT_CLASS)
             .font_size(CHROME_FONT_SIZE),
     );
-    let (button, label) = (spawned.button, spawned.label);
+    let button = spawned.button;
     commands.entity(button).observe(
         move |mut press: On<Pointer<Press>>,
               selected: Res<SelectedGroup>,
@@ -609,11 +603,7 @@ fn spawn_action_button(
             }
         },
     );
-    ActionButton {
-        action,
-        button,
-        label,
-    }
+    ActionButton { action, button }
 }
 
 /// Spawn the leave-confirm modal: a full-window scrim (blocking clicks behind it)
@@ -863,8 +853,8 @@ fn refresh_group_actions(
     selected: Res<SelectedGroup>,
     view: Res<GroupsView>,
     ui: Option<Res<GroupsUi>>,
-    mut backgrounds: Query<&mut BackgroundColor>,
-    mut colors: Query<&mut TextColor>,
+    mut commands: Commands,
+    disabled: DisabledButtons,
 ) {
     let Some(ui) = ui else {
         return;
@@ -874,26 +864,7 @@ fn refresh_group_actions(
     }
     for entry in &ui.action_buttons {
         let enabled = action_enabled(entry.action, selected.0, &view);
-        let wanted = if enabled {
-            ACTION_BACKGROUND
-        } else {
-            ACTION_DISABLED_BACKGROUND
-        };
-        if let Ok(mut background) = backgrounds.get_mut(entry.button)
-            && background.0 != wanted
-        {
-            background.0 = wanted;
-        }
-        let wanted = TextColor(if enabled {
-            LABEL_COLOR
-        } else {
-            DISABLED_LABEL_COLOR
-        });
-        if let Ok(mut color) = colors.get_mut(entry.label)
-            && *color != wanted
-        {
-            *color = wanted;
-        }
+        set_action_button_enabled(&mut commands, &disabled, entry.button, enabled);
     }
 }
 
@@ -970,7 +941,7 @@ fn populate_group_rows(
             .spawn((
                 Text::new(String::new()),
                 UiFont::Sans.at(ROW_FONT_SIZE),
-                TextColor(LABEL_COLOR),
+                ClassList::new_with_classes([TEXT_CLASS]),
                 Node {
                     flex_grow: 1.0,
                     min_width: Val::Px(0.0),
@@ -997,7 +968,9 @@ fn populate_group_rows(
             .spawn((
                 Text::new(String::new()),
                 UiFont::Sans.at(ROW_FONT_SIZE),
-                TextColor(ACTIVE_COLOR),
+                // Always the accent: the marker is either the filled glyph or
+                // nothing at all, so it has no second colour to take.
+                ClassList::new_with_classes([ACTIVE_TEXT_CLASS]),
                 Pickable::IGNORE,
                 ChildOf(active_cell),
             ))
@@ -1024,7 +997,7 @@ fn bind_group_rows(
         &mut BoundGroup,
     )>,
     mut classes: Query<&mut ClassList>,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
+    mut texts: Query<&mut Text>,
 ) {
     let Some(ui) = ui else {
         return;
@@ -1047,8 +1020,7 @@ fn bind_group_rows(
             continue;
         };
         bound.0 = Some(group_row.group);
-        // The name — brighter (accent) for the active group, so it reads as worn.
-        if let Ok((mut text, mut color)) = texts.get_mut(parts.label) {
+        if let Ok(mut text) = texts.get_mut(parts.label) {
             set_text(
                 &mut text,
                 match group_row.group {
@@ -1056,14 +1028,18 @@ fn bind_group_rows(
                     GroupChoice::Group(_) => &group_row.name,
                 },
             );
-            *color = TextColor(if group_row.active {
-                ACTIVE_COLOR
-            } else {
-                LABEL_COLOR
-            });
         }
+        // The name reads as worn in the accent — the same class the sibling
+        // panes' selected text takes, which is what the local copy of that
+        // colour was trying to be.
+        set_state_class_on(
+            &mut classes,
+            parts.label,
+            ACTIVE_TEXT_CLASS,
+            group_row.active,
+        );
         // The active marker — the filled glyph for the active group, else empty.
-        if let Ok((mut text, _color)) = texts.get_mut(parts.marker) {
+        if let Ok(mut text) = texts.get_mut(parts.marker) {
             set_text(&mut text, if group_row.active { ACTIVE_GLYPH } else { "" });
         }
         let is_selected = selected.0 == Some(group_row.group);

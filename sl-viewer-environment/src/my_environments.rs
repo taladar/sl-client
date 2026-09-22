@@ -97,14 +97,17 @@ use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_te
 use sl_viewer_world_api::rlv::{RlvSession, can_change_environment};
 use sl_viewer_world_scene::environment::LocalEnvironmentPick;
 
-use crate::rows::{ButtonPaint, set_action_button_enabled};
 use crate::settings_list::{
     FILTER_KINDS, SettingsListFilters, SettingsListRow, kind_key, kind_slug, location_text,
     project, sort_rows, total,
 };
 use crate::style::{
     ACTION_BACKGROUND, CONTROL_BORDER, DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, LIST_BACKGROUND,
-    ROW_HEIGHT, SELECTED_BACKGROUND,
+    ROW_HEIGHT,
+};
+use bevy_flair::style::components::ClassList;
+use sl_viewer_ui_core::skin::{
+    ACTIVE_CLASS, DisabledButtons, set_action_button_enabled, set_state_class_on,
 };
 
 /// The floater's stable id.
@@ -725,11 +728,11 @@ fn sync_my_environments_buttons(
     mut commands: Commands,
     support: Res<SettingsInventorySupport>,
     buttons: Query<Entity, With<MyEnvironmentsButton>>,
-    paint: ButtonPaint,
+    disabled: DisabledButtons,
 ) {
     let enabled = support.supported();
     for entity in &buttons {
-        set_action_button_enabled(&mut commands, &paint, entity, enabled);
+        set_action_button_enabled(&mut commands, &disabled, entity, enabled);
     }
 }
 
@@ -933,7 +936,7 @@ fn bind_environment_rows(
         &TableRowCells,
         &mut BoundEnvironment,
     )>,
-    mut backgrounds: Query<&mut BackgroundColor>,
+    mut classes: Query<&mut ClassList>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
 ) {
     let Some(ui) = ui else {
@@ -969,16 +972,14 @@ fn bind_environment_rows(
                 set_table_cell(&mut texts, cell, &value, color);
             }
         }
-        if let Ok(mut background) = backgrounds.get_mut(row_entity) {
-            let wanted = if data.is_some() && selected.0 == bound.0 {
-                SELECTED_BACKGROUND
-            } else {
-                Color::NONE
-            };
-            if background.0 != wanted {
-                background.0 = wanted;
-            }
-        }
+        // The one selection highlight, not this window's copy of its value:
+        // `.sk-active` over the row class the table widget already spawned.
+        set_state_class_on(
+            &mut classes,
+            row_entity,
+            ACTIVE_CLASS,
+            data.is_some() && selected.0 == bound.0,
+        );
     }
 }
 

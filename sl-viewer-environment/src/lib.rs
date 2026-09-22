@@ -127,9 +127,6 @@ pub(crate) mod style {
 
     /// A scrolling list's backdrop.
     pub(crate) const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
-
-    /// A selected row's background.
-    pub(crate) const SELECTED_BACKGROUND: Color = Color::srgba(0.24, 0.34, 0.52, 0.55);
 }
 
 /// Every environment editor at once, for a host that wants the whole family.

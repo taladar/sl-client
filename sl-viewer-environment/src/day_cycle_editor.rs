@@ -82,7 +82,7 @@ use sl_viewer_notifications::{NotificationResponse, ShowNotification};
 use sl_viewer_pickers::ui_texture_picker::TextureSwatchValue;
 use sl_viewer_platform::environment_assets::EnvironmentAssetManager;
 use sl_viewer_ui_core::i18n::{TransArgs, Translated, Translator};
-use sl_viewer_ui_core::skin::{ACTIVE_CLASS, set_state_class};
+use sl_viewer_ui_core::skin::{ACTIVE_CLASS, set_action_button_enabled, set_state_class};
 use sl_viewer_ui_core::ui::{
     LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row,
 };
@@ -107,8 +107,8 @@ use sl_viewer_world_scene::environment::EnvironmentState;
 use crate::knobs::{ColorKnob, SkyKnob, TextureKnob, WaterKnob};
 use crate::land_environment::{LandDayCycleEdited, OpenLandDayCycle};
 use crate::rows::{
-    AimTrackball, set_action_button_enabled, spawn_action_button, spawn_color_row,
-    spawn_slider_row, spawn_texture_row, spawn_trackball_row, tag_aim_slider,
+    AimTrackball, spawn_action_button, spawn_color_row, spawn_slider_row, spawn_texture_row,
+    spawn_trackball_row, tag_aim_slider,
 };
 use crate::settings_editor::EditedItem;
 use crate::style::{CONTROL_BORDER, DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, TRACK_FILL};
@@ -308,8 +308,9 @@ type ChromeWidgets<'w, 's> = (
 );
 
 /// What [`paint_button`] writes through — the shared
-/// [`ButtonPaint`](crate::rows::ButtonPaint), named for this window's chrome.
-type ChromePaint<'w, 's> = crate::rows::ButtonPaint<'w, 's>;
+/// [`DisabledButtons`](sl_viewer_ui_core::skin::DisabledButtons), named for
+/// this window's chrome.
+type ChromePaint<'w, 's> = sl_viewer_ui_core::skin::DisabledButtons<'w, 's>;
 
 // ---------------------------------------------------------------------------
 // State.

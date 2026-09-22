@@ -38,12 +38,14 @@
 
 use std::collections::HashSet;
 
-use crate::skin_palette::SkinPalette;
 use bevy::prelude::*;
 use bevy::ui_widgets::popover::{Popover, PopoverAlign, PopoverPlacement, PopoverSide};
+use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{ChatChannel, ChatType};
 
 use crate::chat_input::{ChatInputHandle, ChatInputSpec, ChatInputSubmit, spawn_chat_input};
+use crate::skin::{ACTIVE_CLASS, LIST_ROW_CLASS, set_state_class};
+use crate::skin_palette::SkinPalette;
 use crate::ui::column;
 use crate::ui_font::UiFont;
 
@@ -59,12 +61,9 @@ const SELECT_BORDER: Color = Color::srgb(0.34, 0.40, 0.52);
 /// The select box / option text colour.
 const SELECT_TEXT_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
-/// A dropdown option's resting background.
+/// The volume button's resting background — the one of the two boxes here that
+/// never lights up.
 const OPTION_BACKGROUND: Color = Color::NONE;
-
-/// The current volume's option background (and the button tint) — so the active
-/// choice reads at a glance.
-const OPTION_ACTIVE_BACKGROUND: Color = Color::srgb(0.22, 0.40, 0.60);
 
 /// The dropdown panel background.
 const DROPDOWN_BACKGROUND: Color = Color::srgba(0.10, 0.12, 0.16, 0.98);
@@ -425,7 +424,7 @@ fn spawn_volume_option(
                 padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
                 ..default()
             },
-            BackgroundColor(OPTION_BACKGROUND),
+            ClassList::new_with_classes([LIST_ROW_CLASS]),
             Pickable::default(),
             VolumeOption { field, volume },
             ChildOf(dropdown),
@@ -521,7 +520,7 @@ fn reflect_volume_select(
     inputs: Query<&LocalChatInput>,
     buttons: Query<&VolumeButton>,
     mut texts: Query<&mut Text>,
-    mut options: Query<(&VolumeOption, &mut BackgroundColor)>,
+    mut options: Query<(&VolumeOption, &mut ClassList)>,
 ) {
     for button in &buttons {
         let Ok(input) = inputs.get(button.field) else {
@@ -534,18 +533,14 @@ fn reflect_volume_select(
             }
         }
     }
-    for (option, mut background) in &mut options {
+    for (option, mut classes) in &mut options {
         let Ok(input) = inputs.get(option.field) else {
             continue;
         };
-        let wanted = if input.volume == option.volume {
-            OPTION_ACTIVE_BACKGROUND
-        } else {
-            OPTION_BACKGROUND
-        };
-        if background.0 != wanted {
-            background.0 = wanted;
-        }
+        // The same pair every hand-rolled list in the viewer takes: the row's
+        // resting look and the one translucent highlight, rather than this
+        // dropdown's own opaque blue.
+        set_state_class(&mut classes, ACTIVE_CLASS, input.volume == option.volume);
     }
 }
 

@@ -15,6 +15,7 @@ use bevy::input_focus::{FocusedInput, InputFocus};
 use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx};
 use bevy::ui_widgets::{Activate, Button};
+use bevy_flair::style::components::ClassList;
 
 use crate::browser_widget::{
     BrowserView, BrowserViewSpec, SurfaceTrust, ValidatedMediaUrl, spawn_browser_view,
@@ -23,6 +24,7 @@ use crate::media_engine::{MediaEngineSystems, MediaSurfaces};
 use sl_viewer_intents::OpenWebBrowser;
 use sl_viewer_platform::system_browser::{ExternalUrl, normalize_web_url, open_in_system_browser};
 use sl_viewer_ui_core::i18n::Translated;
+use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, set_state_class_on};
 use sl_viewer_ui_core::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use sl_viewer_ui_core::ui_element::UiAction;
 use sl_viewer_ui_core::ui_font::UiFont;
@@ -43,10 +45,9 @@ const DEFAULT_HOME_URL: &str = "https://secondlife.com/";
 /// The toolbar / status font size.
 const WEB_FONT_SIZE: f32 = 13.0;
 
-/// Toolbar button label colour.
-const BUTTON_LABEL: Color = Color::srgb(0.9, 0.9, 0.92);
-/// Toolbar button label colour when the action is unavailable.
-const BUTTON_LABEL_DIM: Color = Color::srgb(0.45, 0.45, 0.5);
+/// The skin class on a toolbar button's glyph, so `.sk-disabled-text` has a
+/// base to fall back to when the action becomes available again.
+const BUTTON_LABEL_CLASS: &str = "sk-text";
 /// Status-row text colour.
 const STATUS_COLOR: Color = Color::srgb(0.7, 0.72, 0.78);
 
@@ -241,7 +242,7 @@ fn spawn_toolbar_button(
         .spawn((
             Text::new(glyph),
             UiFont::Sans.at(WEB_FONT_SIZE),
-            TextColor(BUTTON_LABEL),
+            ClassList::new_with_classes([BUTTON_LABEL_CLASS]),
             Pickable::IGNORE,
             ChildOf(button),
         ))
@@ -366,8 +367,8 @@ fn handle_web_actions(
 struct WebChrome<'w, 's> {
     /// The status row and the button glyphs.
     texts: Query<'w, 's, &'static mut Text>,
-    /// Their colours, which grey a disabled Back / Forward.
-    colors: Query<'w, 's, &'static mut TextColor>,
+    /// The class lists a greyed Back / Forward is written through.
+    classes: Query<'w, 's, &'static mut ClassList>,
     /// The address bar, rewritten while it is not being edited.
     editors: Query<'w, 's, &'static mut EditableText>,
     /// The secure lock, shown only for a secure page.
@@ -393,7 +394,7 @@ fn sync_web_floater(
 ) {
     let WebChrome {
         mut texts,
-        mut colors,
+        mut classes,
         mut editors,
         mut visibilities,
         panels,
@@ -440,26 +441,18 @@ fn sync_web_floater(
     {
         set_editor_text(&mut editor, &status.url, &mut font_cx, &mut layout_cx);
     }
-    if let Ok(mut color) = colors.get_mut(ui.back_label) {
-        let want = if status.can_go_back {
-            BUTTON_LABEL
-        } else {
-            BUTTON_LABEL_DIM
-        };
-        if color.0 != want {
-            color.0 = want;
-        }
-    }
-    if let Ok(mut color) = colors.get_mut(ui.forward_label) {
-        let want = if status.can_go_forward {
-            BUTTON_LABEL
-        } else {
-            BUTTON_LABEL_DIM
-        };
-        if color.0 != want {
-            color.0 = want;
-        }
-    }
+    set_state_class_on(
+        &mut classes,
+        ui.back_label,
+        DISABLED_TEXT_CLASS,
+        !status.can_go_back,
+    );
+    set_state_class_on(
+        &mut classes,
+        ui.forward_label,
+        DISABLED_TEXT_CLASS,
+        !status.can_go_forward,
+    );
     if let Ok(mut reload) = texts.get_mut(ui.reload_label) {
         let want = if status.loading { "✕" } else { "⟳" };
         if reload.0 != want {

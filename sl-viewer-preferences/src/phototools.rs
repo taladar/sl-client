@@ -45,11 +45,13 @@
 //! (`FloaterQuickPrefs::getIsPhototools`), `menu_viewer.xml`
 //! (World ▸ Photo and Video ▸ Phototools, `alt|P`).
 
+use crate::skin::{ACTION_BUTTON_CLASS, ACTIVE_CLASS, TEXT_CLASS, set_state_class};
 use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui::{Checked, InteractionDisabled};
 use bevy::ui_widgets::{Activate, Button, SliderRange, SliderStep, SliderValue, ValueChange};
+use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{EnvironmentAsset, SkySettings};
 use sl_settings::{Scope, SettingKind, SettingValue};
 use sl_viewer_environment::knobs::{AimKnobs, SkyKnob};
@@ -130,10 +132,9 @@ const CHECK_ON: Color = Color::srgb(0.3, 0.7, 0.45);
 const BUTTON_BORDER: Color = Color::srgb(0.3, 0.34, 0.42);
 /// A button's fill.
 const BUTTON_FILL: Color = Color::srgb(0.16, 0.17, 0.2);
-/// The fill of the time button whose environment is the one in force.
+/// The fill of the time button whose environment is the one in force — the
+/// gallery specimen's, which draws a static strip rather than a live one.
 const BUTTON_ACTIVE_FILL: Color = Color::srgb(0.24, 0.32, 0.45);
-/// A refused button's fill.
-const BUTTON_DISABLED_FILL: Color = Color::srgb(0.13, 0.14, 0.16);
 
 // ---------------------------------------------------------------------------
 // The table.
@@ -851,7 +852,7 @@ fn sync_environment_controls(
     environment: Option<Res<EnvironmentState>>,
     rlv: Option<Res<RlvSession>>,
     mut groups: Query<&mut ComboSelection, With<PhotoEnvGroupCombo>>,
-    mut times: Query<(&PhotoTimeButton, &mut BackgroundColor)>,
+    mut times: Query<(&PhotoTimeButton, &mut ClassList)>,
     gated: Query<(Entity, Has<InteractionDisabled>), With<PhotoEnvGated>>,
     mut commands: Commands,
 ) {
@@ -878,19 +879,14 @@ fn sync_environment_controls(
         }
     }
     let group_shown = groups.single().ok().map(|selection| selection.active);
-    for (button, mut fill) in &mut times {
+    for (button, mut classes) in &mut times {
         let active = fixed.is_some_and(|fixed| time_of(fixed) == button.0)
             && fixed.map(group_index_of) == group_shown;
-        let target = if !allowed {
-            BUTTON_DISABLED_FILL
-        } else if active {
-            BUTTON_ACTIVE_FILL
-        } else {
-            BUTTON_FILL
-        };
-        if fill.0 != target {
-            fill.0 = target;
-        }
+        // Only the lit half is written here. The refused half is the
+        // `InteractionDisabled` the loop above already sets, which
+        // `.sk-action-button:disabled` selects on — and which beats `.sk-active`
+        // in the cascade, so a button that is both lit and refused greys.
+        set_state_class(&mut classes, ACTIVE_CLASS, active);
     }
 }
 
@@ -1453,6 +1449,7 @@ fn spawn_photo_button(
             },
             BorderColor::all(BUTTON_BORDER),
             BackgroundColor(BUTTON_FILL),
+            ClassList::new_with_classes([ACTION_BUTTON_CLASS]),
             Name::new(format!("phototools:button:{slug}:{label_key}")),
             ChildOf(parent),
         ))
@@ -1461,7 +1458,7 @@ fn spawn_photo_button(
         Text::default(),
         Translated::new(label_key),
         UiFont::Sans.at(FONT),
-        TextColor(LABEL_COLOR),
+        ClassList::new_with_classes([TEXT_CLASS]),
         PhotoButtonLabel(button),
         Pickable::IGNORE,
         ChildOf(button),

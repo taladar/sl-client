@@ -9370,6 +9370,7 @@ name = "sl-viewer-media"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_flair",
  "clap",
  "crossbeam-channel",
  "fs-err",

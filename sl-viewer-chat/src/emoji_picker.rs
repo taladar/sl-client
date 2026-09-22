@@ -58,13 +58,16 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus, InputFocusSystems};
 use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx};
+use bevy::ui::Checked;
 use bevy::window::PrimaryWindow;
+use bevy_flair::style::components::ClassList;
 use sl_emoji::{Emoji, Group, SkinTone, search};
 
 use crate::floater::{
     Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterOp, FloaterSpec, spawn_floater,
 };
 use crate::i18n::Translated;
+use crate::skin::TILE_CLASS;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::{ElementCx, TextMayClip};
 use crate::ui_font::UiFont;
@@ -114,16 +117,9 @@ const CHROME_FONT_SIZE: f32 = 14.0;
 /// little high keeps the window fully on screen while it settles.
 const ESTIMATED_PICKER_HEIGHT: f32 = 440.0;
 
-/// A cell's hover highlight — a faint white wash, so the glyph under the pointer
-/// reads as the one a click would take.
-const CELL_HOVER_BACKGROUND: Color = Color::srgba(1.0, 1.0, 1.0, 0.14);
-
-/// A tone swatch's resting border.
-const SWATCH_BORDER: Color = Color::srgb(0.30, 0.36, 0.46);
-
-/// A tone swatch's border when it is the selected tone — bright, so the active
-/// tone is unmistakable.
-const SWATCH_BORDER_ACTIVE: Color = Color::srgb(0.55, 0.78, 1.0);
+/// The skin class on a tone swatch. Its chosen look is `:checked`, since
+/// exactly one tone is selected at a time — the swatch strip is a radio group.
+const SWATCH_CLASS: &str = "sk-tone-swatch";
 
 /// The preview line's text colour.
 const PREVIEW_COLOR: Color = Color::srgb(0.82, 0.86, 0.94);
@@ -523,6 +519,7 @@ fn spawn_live_emoji_cell(commands: &mut Commands, row_entity: Entity) -> Entity 
                 ..default()
             },
             BackgroundColor(Color::NONE),
+            ClassList::new_with_classes([TILE_CLASS]),
             Pickable::default(),
             EmojiCell { emoji: None, glyph },
             ChildOf(row_entity),
@@ -530,9 +527,10 @@ fn spawn_live_emoji_cell(commands: &mut Commands, row_entity: Entity) -> Entity 
         .add_child(glyph)
         .id();
 
-    // The press (insert), hover (preview + highlight) and unhover observers, each
-    // capturing this `cell` so it reads the cell's *current* bound emoji — which
-    // recycling keeps up to date — rather than a snapshot.
+    // The press (insert) and hover (preview) observers, each capturing this
+    // `cell` so it reads the cell's *current* bound emoji — which recycling keeps
+    // up to date — rather than a snapshot. The hover *highlight* is no longer
+    // one of them: `.sk-tile:hover` reaches it with no code at all.
     commands
         .entity(cell)
         .observe(
@@ -569,19 +567,16 @@ fn spawn_live_emoji_cell(commands: &mut Commands, row_entity: Entity) -> Entity 
         )
         .observe(
             move |_over: On<Pointer<Over>>,
-                  mut cells: Query<(&EmojiCell, &mut BackgroundColor)>,
+                  cells: Query<&EmojiCell>,
                   state: Res<EmojiPickerState>,
                   ui: Option<Res<EmojiPickerUi>>,
                   mut texts: Query<&mut Text>| {
-                let Ok((&EmojiCell { emoji, .. }, mut background)) = cells.get_mut(cell) else {
+                let Ok(&EmojiCell { emoji, .. }) = cells.get(cell) else {
                     return;
                 };
                 let Some(emoji) = emoji else {
                     return;
                 };
-                if background.0 != CELL_HOVER_BACKGROUND {
-                    background.0 = CELL_HOVER_BACKGROUND;
-                }
                 if let Some(ui) = ui
                     && let Ok(mut text) = texts.get_mut(ui.preview)
                 {
@@ -589,15 +584,6 @@ fn spawn_live_emoji_cell(commands: &mut Commands, row_entity: Entity) -> Entity 
                     if text.0 != shown {
                         text.0 = shown;
                     }
-                }
-            },
-        )
-        .observe(
-            move |_out: On<Pointer<Out>>, mut backgrounds: Query<&mut BackgroundColor>| {
-                if let Ok(mut background) = backgrounds.get_mut(cell)
-                    && background.0 != Color::NONE
-                {
-                    background.0 = Color::NONE;
                 }
             },
         );
@@ -694,24 +680,25 @@ fn bind_emoji_rows(
 // Systems — skin tone
 // ---------------------------------------------------------------------------
 
-/// Outline the swatch of the currently-selected tone, and only that one, so the
-/// active skin tone is unmistakable. Writes only on a real change.
+/// Mark the swatch of the currently-selected tone, and only that one. What that
+/// looks like is `.sk-tone-swatch:checked`'s; this says only which one it is.
 fn apply_tone_highlight(
     state: Res<EmojiPickerState>,
-    mut swatches: Query<(&EmojiToneSwatch, &mut BorderColor)>,
+    swatches: Query<(Entity, &EmojiToneSwatch, Has<Checked>)>,
+    mut commands: Commands,
 ) {
     if !state.is_changed() {
         return;
     }
-    for (swatch, mut border) in &mut swatches {
-        let wanted = if swatch.tone == state.tone {
-            SWATCH_BORDER_ACTIVE
+    for (entity, swatch, checked) in &swatches {
+        let wanted = swatch.tone == state.tone;
+        if checked == wanted {
+            continue;
+        }
+        if wanted {
+            commands.entity(entity).insert(Checked);
         } else {
-            SWATCH_BORDER
-        };
-        let wanted = BorderColor::all(wanted);
-        if *border != wanted {
-            *border = wanted;
+            commands.entity(entity).remove::<Checked>();
         }
     }
 }
@@ -1016,13 +1003,8 @@ fn spawn_tone_swatch(
     base: Option<Emoji>,
     tone: SkinTone,
 ) -> Entity {
-    let border = if tone == SkinTone::Default {
-        SWATCH_BORDER_ACTIVE
-    } else {
-        SWATCH_BORDER
-    };
     let glyph = base.map_or("", |emoji| toned_glyph(emoji, tone));
-    commands
+    let swatch = commands
         .spawn((
             Node {
                 min_width: Val::Px(CELL_SIZE),
@@ -1032,8 +1014,8 @@ fn spawn_tone_swatch(
                 padding: UiRect::all(Val::Px(2.0)),
                 ..default()
             },
-            BorderColor::all(border),
             BackgroundColor(Color::NONE),
+            ClassList::new_with_classes([SWATCH_CLASS]),
             Pickable::default(),
             EmojiToneSwatch { tone },
             Name::new("emoji-picker-tone"),
@@ -1045,7 +1027,13 @@ fn spawn_tone_swatch(
             TextColor(Color::WHITE),
             Pickable::IGNORE,
         ))
-        .id()
+        .id();
+    // The default tone is the chosen one until the state says otherwise, so the
+    // strip is never briefly showing none as chosen.
+    if tone == SkinTone::Default {
+        commands.entity(swatch).insert(Checked);
+    }
+    swatch
 }
 
 // ---------------------------------------------------------------------------

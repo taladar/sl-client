@@ -124,6 +124,80 @@
   color: var(--text-disabled);
 }
 
+/* A sun / moon trackball's disc. Its *fill* is still the widget's, because
+ * which side of the horizon the aim is on decides it and that is the control's
+ * data rather than a UI state; its rim is chrome, and dims from the
+ * `InteractionDisabled` the consumer sets on the trackball — an ancestor rule,
+ * because the disc is its own node and bevy_ui has no style inheritance. */
+.sk-trackball-disc {
+  border-color: var(--control-border);
+}
+
+.sk-trackball:disabled .sk-trackball-disc {
+  border-color: var(--control-border-disabled);
+}
+
+/* A colour swatch a panel opens the picker from. Its fill is the colour it
+ * carries — the widget's, not the skin's — but its rim is chrome, and a swatch
+ * the consumer has refused dims from `:disabled` over the
+ * `InteractionDisabled` the consumer already sets. */
+.sk-swatch {
+  border-color: var(--control-border);
+}
+
+.sk-swatch:disabled {
+  border-color: var(--control-border-disabled);
+}
+
+/* A skin-tone swatch in the emoji picker: a bordered tile, exactly one of which
+ * is chosen. That is a radio, so the chosen one carries `Checked` and `:checked`
+ * outlines it — no marker class and no per-tone paint loop. */
+.sk-tone-swatch {
+  border-color: var(--control-border);
+}
+
+.sk-tone-swatch:checked {
+  border-color: var(--accent);
+}
+
+/* One tile of a dense grid — an emoji cell. A translucent wash rather than the
+ * control shade `.sk-highlighted` carries: a grid is mostly tiles, and an opaque
+ * block under the pointer reads as a hole punched in it. The whole rule is a
+ * `:hover`, so the pair of Pointer<Over> / Pointer<Out> observers that used to
+ * write these two colours is gone. */
+.sk-tile:hover {
+  background-color: var(--tile-hover);
+}
+
+/* A friend's presence dot. One of the pair is always on — there is no third
+ * presence — so neither needs a resting rule to fall back to. Meaning-bearing,
+ * so a skin that remaps green/red for a colour-blind reader remaps these in the
+ * same place it remaps --gain / --loss. */
+.sk-presence-online {
+  color: var(--presence-online);
+}
+
+.sk-presence-offline {
+  color: var(--presence-offline);
+}
+
+/* A flat action button in a panel's button column — the shape `ButtonSpec::flat`
+ * spawns. Only its refused state is here; its resting look is still the panel's
+ * own (`viewer-skin-panel-text-roles` owns that), which is why this is not
+ * `.sk-button`: that class carries a whole resting look these buttons do not
+ * have.
+ *
+ * Compound rather than a lone class, so it also beats `.sk-active` wherever a
+ * button is both lit and refused — the day-cycle editor's track buttons on a
+ * window with no session. */
+.sk-action-button:disabled {
+  background-color: var(--control-bg-disabled);
+}
+
+.sk-action-button:disabled .sk-text {
+  color: var(--text-disabled);
+}
+
 /* A control whose action does not apply to what its panel is showing right now
  * — greyed rather than removed, so a row of actions keeps its shape as the
  * selection moves (Contact Sets' Configure… with a pseudo-set chosen, its

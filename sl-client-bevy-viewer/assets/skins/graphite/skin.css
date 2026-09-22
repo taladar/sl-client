@@ -103,6 +103,14 @@
   --notice-alert: #f2b84d;
   --notice-modal: #e65c52;
 
+  /* A friend's presence. Meaning-bearing for the same reason as the kinds
+   * above, and the values the Friends list carried before they were roles. */
+  --presence-online: #66cc6b;
+  --presence-offline: #6b7585;
+
+  /* A hovered tile in a dense grid — a wash, not a block: see .sk-tile. */
+  --tile-hover: #ffffff24;
+
   /* User-tunable palette (the preferences Colors & Skins tab). These are not
    * consumed by common.css: the viewer reads them off the styled root's
    * resolved vars and feeds them into the settings store as the skin-supplied

@@ -340,4 +340,89 @@ mod test {
         assert_eq!(text(live_caption), Some(Color::srgb_u8(0xe6, 0xeb, 0xf2)));
         Ok(())
     }
+
+    /// A refused action button greys — **both** halves of it.
+    ///
+    /// This is the pair that broke once already: `set_action_button_enabled`
+    /// stopped painting, on the strength of `.sk-action-button:disabled` and
+    /// its descendant rule, and the spawn helper was never given the classes
+    /// those select on — so a refused button looked exactly like one that
+    /// would answer a click, in the live viewer only. `rows.rs` asserts the
+    /// spawn end; this asserts the rule end, against the real shipped skin.
+    #[test]
+    fn a_refused_action_button_greys_box_and_caption() -> Result<(), TestError> {
+        let mut app = app();
+        let handle: Handle<StyleSheet> = app
+            .world()
+            .resource::<AssetServer>()
+            .load("skins/graphite/skin.css");
+        let root = app
+            .world_mut()
+            .spawn((Node::default(), Styled::new(handle.clone())))
+            .id();
+
+        let refused = app
+            .world_mut()
+            .spawn((
+                Node::default(),
+                ClassList::new("sk-action-button"),
+                bevy::ui::InteractionDisabled,
+                ChildOf(root),
+            ))
+            .id();
+        let refused_caption = app
+            .world_mut()
+            .spawn((
+                Text::new("Do it"),
+                ClassList::new("sk-text"),
+                ChildOf(refused),
+            ))
+            .id();
+        let live = app
+            .world_mut()
+            .spawn((
+                Node::default(),
+                ClassList::new("sk-action-button"),
+                ChildOf(root),
+            ))
+            .id();
+        let live_caption = app
+            .world_mut()
+            .spawn((Text::new("Do it"), ClassList::new("sk-text"), ChildOf(live)))
+            .id();
+
+        load(&mut app, &handle)?;
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<BackgroundColor>(refused)
+                .map(|background| background.0),
+            Some(Color::srgb_u8(0x23, 0x27, 0x30)),
+            "`.sk-action-button:disabled` did not match, so a refused button \
+             keeps its live fill"
+        );
+        let text = |entity| app.world().get::<TextColor>(entity).map(|color| color.0);
+        assert_eq!(
+            text(refused_caption),
+            Some(Color::srgb_u8(0x73, 0x7d, 0x8f)),
+            "the descendant half did not match, so a refused button's caption \
+             reads as live"
+        );
+        assert_eq!(
+            text(live_caption),
+            Some(Color::srgb_u8(0xe6, 0xeb, 0xf2)),
+            "an enabled button's caption must fall back to `.sk-text`"
+        );
+        // The live button's fill is its panel's, not the skin's: no rule
+        // matches it at all, which is the point of not using `.sk-button` here.
+        assert_ne!(
+            app.world()
+                .get::<BackgroundColor>(live)
+                .map(|background| background.0),
+            Some(Color::srgb_u8(0x23, 0x27, 0x30)),
+            "an enabled action button must take no fill from the skin"
+        );
+        Ok(())
+    }
 }

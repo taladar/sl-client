@@ -96,8 +96,9 @@ use sl_viewer_ui_core::ui_text::set_node_text;
 use sl_viewer_ui_widgets::ui_slider::{SliderStyle, spawn_slider};
 use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 
-use crate::rows::{ButtonPaint, SliderRow, set_action_button_enabled, spawn_action_button};
+use crate::rows::{SliderRow, spawn_action_button};
 use crate::style::{DIM_LABEL_COLOR, FONT_SIZE, HEADING_SIZE, LABEL_COLOR};
+use sl_viewer_ui_core::skin::{DisabledButtons, set_action_button_enabled};
 
 /// The element-id prefix every control in a land-environment panel is named by.
 const ELEMENT: &str = "land-environment";
@@ -1570,7 +1571,7 @@ struct LandChrome<'w, 's> {
     /// The check glyphs' and labels' colours.
     ///
     /// Its own query now. It used to be borrowed out of the shared
-    /// [`ButtonPaint`], because two `Query<&mut TextColor>` in one system is
+    /// button-paint bundle, because two `Query<&mut TextColor>` in one system is
     /// Bevy's B0001 and panics on the first frame — and that bundle carried one
     /// for the button labels it painted. It no longer paints them
     /// (`.sk-button:disabled .sk-text` does), so the conflict is gone and the
@@ -1603,7 +1604,7 @@ fn paint_land_controls(
     )>,
     controls: LandControls,
     translator: Translator,
-    paint: ButtonPaint,
+    disabled: DisabledButtons,
     chrome: LandChrome,
 ) {
     let LandControls {
@@ -1633,13 +1634,13 @@ fn paint_land_controls(
             if *panel != entity {
                 continue;
             }
-            set_action_button_enabled(&mut commands, &paint, button, enabled);
+            set_action_button_enabled(&mut commands, &disabled, button, enabled);
         }
         for (button, PanelOf(panel)) in &pickers {
             if *panel != entity {
                 continue;
             }
-            set_action_button_enabled(&mut commands, &paint, button, enabled);
+            set_action_button_enabled(&mut commands, &disabled, button, enabled);
         }
         for (PanelOf(panel), check) in &checks {
             if *panel != entity {

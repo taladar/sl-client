@@ -59,6 +59,7 @@ use bevy::input_focus::{FocusCause, FocusedInput, InputFocus};
 use bevy::prelude::*;
 use bevy::ui::InteractionDisabled;
 use bevy::ui_widgets::ValueChange;
+use bevy_flair::style::components::ClassList;
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 use sl_viewer_ui_core::i18n::Translated;
@@ -108,11 +109,12 @@ const DISC_FILL: Color = Color::srgba(0.10, 0.12, 0.17, 1.0);
 /// when the body it holds is on the far side.
 const DISC_FILL_BELOW: Color = Color::srgba(0.07, 0.08, 0.11, 1.0);
 
-/// The disc's rim.
-const DISC_BORDER: Color = Color::srgba(0.40, 0.44, 0.54, 1.0);
+/// The skin class on the trackball itself, so the disc's rim can dim from an
+/// ancestor `:disabled` rule rather than from a per-frame write.
+const TRACKBALL_CLASS: &str = "sk-trackball";
 
-/// A disabled control's rim.
-const DISABLED_BORDER: Color = Color::srgba(0.26, 0.28, 0.33, 1.0);
+/// The skin class on the disc inside it — the node the rule above selects.
+const DISC_CLASS: &str = "sk-trackball-disc";
 
 /// The compass letters' colour.
 const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
@@ -312,6 +314,7 @@ pub fn spawn_trackball(
             },
             body,
             aim,
+            ClassList::new_with_classes([TRACKBALL_CLASS]),
             TrackballDrag::default(),
             TabIndex(tab_index),
             Pickable::default(),
@@ -337,8 +340,8 @@ pub fn spawn_trackball(
             border_radius: BorderRadius::all(Val::Percent(50.0)),
             ..Default::default()
         },
-        BorderColor::all(DISC_BORDER),
         BackgroundColor(DISC_FILL),
+        ClassList::new_with_classes([DISC_CLASS]),
         TrackballDisc,
         Pickable::IGNORE,
         Name::new(format!("{element}-{}:trackball-disc", body.slug())),
@@ -700,18 +703,13 @@ fn sync_trackballs(
             let Ok((is_disc, is_marker, is_label)) = parts.get(child) else {
                 continue;
             };
-            if is_disc {
-                paint(
-                    child,
-                    if above { DISC_FILL } else { DISC_FILL_BELOW },
-                    if disabled {
-                        DISABLED_BORDER
-                    } else {
-                        DISC_BORDER
-                    },
-                    &mut backgrounds,
-                    &mut borders,
-                );
+            if is_disc && let Ok(mut background) = backgrounds.get_mut(child) {
+                // Only the fill: the rim is `.sk-trackball-disc`'s, and its
+                // dimmed form the ancestor `:disabled` rule's.
+                let wanted = if above { DISC_FILL } else { DISC_FILL_BELOW };
+                if background.0 != wanted {
+                    background.0 = wanted;
+                }
             }
             if is_marker {
                 place_marker(child, at, &mut nodes);

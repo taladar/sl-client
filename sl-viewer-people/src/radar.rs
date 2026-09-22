@@ -39,6 +39,7 @@
 //! are `viewer-avatar-moderation-actions`, and light up in the pie, here and
 //! the minimap at once when that shared layer lands.
 
+use crate::skin::{ACTIVE_CLASS, LIST_ROW_CLASS};
 use crate::skin_palette::SkinPalette;
 use bevy::ecs::system::SystemParam;
 use bevy::input_focus::tab_navigation::TabIndex;
@@ -46,6 +47,7 @@ use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui::Checked;
+use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
     AgentKey, Command, FriendKey, GlobalCoordinates, MuteType, SlCommand, SlEvent, SlIdentity,
     SlSessionEvent, Vector,
@@ -175,9 +177,6 @@ const SHOUT_RANGE_COLOR: Color = Color::srgb(1.0, 1.0, 0.0);
 
 /// The list viewport backdrop.
 const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
-
-/// A selected row's background highlight.
-const SELECTED_BACKGROUND: Color = Color::srgba(0.24, 0.34, 0.52, 0.55);
 
 /// An action button's background.
 const ACTION_BACKGROUND: Color = Color::srgb(0.24, 0.29, 0.38);
@@ -1848,11 +1847,12 @@ pub fn spawn_radar_specimen(
                     padding: UiRect::horizontal(Val::Px(4.0)),
                     ..row(Val::Px(10.0))
                 },
-                BackgroundColor(if index == 0 {
-                    SELECTED_BACKGROUND
-                } else {
-                    Color::NONE
-                }),
+                // The same pair the live list takes from the table widget, so
+                // the specimen shows the skin's highlight rather than a copy of
+                // one skin's value.
+                ClassList::new_with_classes(
+                    core::iter::once(LIST_ROW_CLASS).chain((index == 0).then_some(ACTIVE_CLASS)),
+                ),
                 ChildOf(root),
             ))
             .id();

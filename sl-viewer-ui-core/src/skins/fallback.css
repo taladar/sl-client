@@ -79,6 +79,14 @@
   --notice-modal: #e65c52;
   --focus-ring: #ffc740;
 
+  /* A friend's presence. Meaning-bearing for the same reason as the kinds
+   * above, and the values the Friends list carried before they were roles. */
+  --presence-online: #66cc6b;
+  --presence-offline: #6b7585;
+
+  /* A hovered tile in a dense grid — a wash, not a block: see .sk-tile. */
+  --tile-hover: #ffffff24;
+
   /* The selected keyframe marker on a day-cycle timeline. Gold rather than
    * the blue every list selection uses: it sits on a sky gradient, not in a
    * list, and blue would sink into it. */

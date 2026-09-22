@@ -164,9 +164,10 @@ const HINT_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 /// A bordered control's border colour.
 const CONTROL_BORDER: Color = Color::srgba(0.4, 0.4, 0.45, 1.0);
 
-/// A [disabled](bevy::ui::InteractionDisabled) swatch's border — dimmed so a
-/// swatch the consumer cannot change reads as disabled.
-const DISABLED_BORDER: Color = Color::srgba(0.28, 0.28, 0.32, 1.0);
+/// The skin class on a colour swatch. Its dimmed rim is
+/// `.sk-swatch:disabled`, over the [`InteractionDisabled`](bevy::ui::InteractionDisabled)
+/// the consumer already sets — so there is no system here that paints it.
+const SWATCH_CLASS: &str = "sk-swatch";
 
 /// A palette cell's border while the current colour is dragged over it — the
 /// reference's complementary-colour highlight, as a single bright rim.
@@ -324,7 +325,7 @@ pub fn spawn_color_swatch(
                 border: UiRect::all(Val::Px(1.0)),
                 ..Default::default()
             },
-            BorderColor::all(CONTROL_BORDER),
+            ClassList::new_with_classes([SWATCH_CLASS]),
             BackgroundColor(initial),
             ColorSwatchValue(initial),
             ColorSwatchField(Box::from(element)),
@@ -356,26 +357,6 @@ fn open_picker_from_swatch(
             field: field.0.clone(),
             current: value.0,
         });
-    }
-}
-
-/// Dim a colour swatch's border while it is
-/// [disabled](bevy::ui::InteractionDisabled), restoring it when enabled.
-fn reflect_color_swatch_disabled(
-    mut swatches: Query<
-        (&mut BorderColor, Has<bevy::ui::InteractionDisabled>),
-        With<ColorSwatchValue>,
-    >,
-) {
-    for (mut border, disabled) in &mut swatches {
-        let wanted = BorderColor::all(if disabled {
-            DISABLED_BORDER
-        } else {
-            CONTROL_BORDER
-        });
-        if *border != wanted {
-            *border = wanted;
-        }
     }
 }
 
@@ -866,7 +847,6 @@ impl Plugin for ColorPickerPlugin {
                     emit_live_preview,
                     sync_color_picker_visual,
                     apply_color_swatch_fill,
-                    reflect_color_swatch_disabled,
                 )
                     .chain(),
             );

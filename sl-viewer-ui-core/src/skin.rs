@@ -354,6 +354,45 @@ fn stamp_focus_ring_class(
     }
 }
 
+/// The CSS class on ordinary body text — a caption, a row label, a button's
+/// own glyph.
+///
+/// It carries the resting colour (`--text-primary`), which is the whole point:
+/// every state rule that greys or highlights text is a *descendant* or
+/// *compound* selector over a node like this, and a label with no base class
+/// has nowhere to fall back to when the state lifts. Named here because eight
+/// crates were each declaring their own copy of the same string.
+pub const TEXT_CLASS: &str = "sk-text";
+
+/// The CSS class on one tile of a dense grid — an emoji cell, a tone swatch.
+/// Its hover is a `:hover` rule and needs no code; the class exists so the rule
+/// has something to select.
+pub const TILE_CLASS: &str = "sk-tile";
+
+/// The CSS class on a presence indicator showing its subject is online, and
+/// [`PRESENCE_OFFLINE_CLASS`] for one who is not.
+///
+/// Meaning-bearing, like `--gain` / `--loss`: green-for-present is a
+/// convention, not a fact, and a colour-blind or high-contrast skin wants to
+/// remap it — which is exactly why these are roles rather than two constants in
+/// the Friends list. The *glyph* changes too (a filled dot against a hollow
+/// one), so the state still reads with the colours taken away.
+pub const PRESENCE_ONLINE_CLASS: &str = "sk-presence-online";
+
+/// The offline half of [`PRESENCE_ONLINE_CLASS`]. One of the pair is always on:
+/// there is no third presence and so no resting colour to fall back to.
+pub const PRESENCE_OFFLINE_CLASS: &str = "sk-presence-offline";
+
+/// The CSS class on a flat action button — the shape a panel's button column
+/// spawns ([`ButtonSpec::flat`](crate::ui_spawn::ButtonSpec::flat)).
+///
+/// Deliberately *not* `.sk-button`: that class carries a whole resting look
+/// (the control shade, a 2 px border, its own padding) which these buttons do
+/// not have and should not suddenly grow. This one carries only the refused
+/// state, so the resting look stays the panel's until
+/// `viewer-skin-panel-text-roles` moves it to tokens as well.
+pub const ACTION_BUTTON_CLASS: &str = "sk-action-button";
+
 /// The CSS class on a control whose action does not apply right now — greyed
 /// rather than removed, so a row of actions keeps its shape as the selection
 /// moves. [`DISABLED_TEXT_CLASS`] greys its label.
@@ -447,6 +486,43 @@ pub fn set_state_class_on<F: bevy::ecs::query::QueryFilter>(
 ) {
     if let Ok(mut list) = classes.get_mut(node) {
         set_state_class(&mut list, class, wanted);
+    }
+}
+
+/// What [`set_action_button_enabled`] reads: the filter saying whether a button
+/// already carries [`InteractionDisabled`](bevy::ui::InteractionDisabled), so
+/// the marker is toggled alone rather than re-marked changed every frame (which
+/// would give the translation sweep and the layout gate work sixty times a
+/// second over a window where nothing moved).
+pub type DisabledButtons<'w, 's> = Query<'w, 's, (), With<bevy::ui::InteractionDisabled>>;
+
+/// Mark one action button enabled or disabled.
+///
+/// Bevy's `InteractionDisabled` is **advisory**: it stops a window's own press
+/// observer (each one filters on it) and paints nothing. The greying is the
+/// skin's, through `.sk-button:disabled` and `.sk-button:disabled .sk-text`, so
+/// this sets the marker and stops.
+///
+/// Shared because a disabled action button is not one window's idea: the
+/// environment windows, the Friends pane and the Groups pane all grey the same
+/// kind of button on the same kind of predicate, and a copy per window is a
+/// place for the marker half to drift out of step with the press refusal.
+pub fn set_action_button_enabled(
+    commands: &mut Commands<'_, '_>,
+    disabled: &DisabledButtons<'_, '_>,
+    entity: Entity,
+    enabled: bool,
+) {
+    if disabled.contains(entity) == enabled {
+        if enabled {
+            commands
+                .entity(entity)
+                .remove::<bevy::ui::InteractionDisabled>();
+        } else {
+            commands
+                .entity(entity)
+                .insert(bevy::ui::InteractionDisabled);
+        }
     }
 }
 
