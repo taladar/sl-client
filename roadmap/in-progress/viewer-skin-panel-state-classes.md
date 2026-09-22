@@ -187,9 +187,14 @@ gone.
 
 Still to do:
 
-- `sl-viewer-people` — the hand-rolled tab strips in `people.rs` and
-  `conversations.rs` (`TAB_ACTIVE_*` / `TAB_INACTIVE_*`). Part 3's
-  widget-adoption question, deliberately not converted in place.
+- `sl-viewer-people` — the hand-rolled tab buttons in `conversations.rs` and
+  `people.rs` (`TAB_ACTIVE_*` / `TAB_INACTIVE_*` / `TAB_ATTENTION_*`). Part
+  3's widget-adoption question, now its own task:
+  [[viewer-ui-tab-widget-dynamic-tabs]]. The strip already *is* a `TabStrip`;
+  what the widget cannot do is grow or drop a tab at runtime, which is why the
+  buttons were written twice. Converting their colours in place would dress a
+  hand-rolled strip to look like the widget, which is the wrong half of the
+  fix.
 - `sl-viewer-ui-widgets` — `ui_trackball.rs`'s `DISABLED_MARKER` is the one
   case that resists a split: the marker's enabled colour is the *body's*
   (sun / moon) and the horizon swaps which of fill and rim carries it, so

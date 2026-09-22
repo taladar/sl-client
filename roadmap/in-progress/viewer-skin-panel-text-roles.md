@@ -73,5 +73,43 @@ work: several panels now pass both. `ui_spawn::spawn_text` already takes an
 `Option<&'static str>` class, so the "classes on the spawn helpers" route is
 the one with evidence behind it.
 
+## The seam, chosen and built (2026-09-22)
+
+**"Classes on the spawn helpers", with the role read back out of the colour.**
+
+`ui_spawn::spawn_text` — which `spawn_label`, `spawn_labeled_row` and
+`spawn_button` all end in — now derives the class from the colour it was
+handed: `FALLBACK.text_primary` → `.sk-text`, `text_muted` → `.sk-title`,
+`text_heading` → `.sk-heading`, `text_disabled` → `.sk-disabled-text`. A colour
+that matches no role gets no class and keeps painting itself.
+
+That works only because `viewer-audit-skin-token-coverage` had already
+collapsed all 64 label-colour copies onto those four constants: a panel asking
+for `text_muted` is **naming a role**, not picking a grey, so the equality is
+exact rather than approximate. Reading the role back out is what covers ~230
+call sites without touching one of them — the alternative, a role parameter on
+each helper, is the same information spelled 230 times.
+
+The `TextColor` stays beside the class: it is the unskinned value a headless
+world, and a skin that omits the token, fall back to. `spawn_text`'s explicit
+`class` argument still wins where a caller passed one.
+
+`a_label_takes_the_class_of_the_role_its_colour_names` holds both halves,
+including that an off-role colour is left alone.
+
+### What is left
+
+- **The ~449 direct `TextColor(…)` spawns** that do not go through a helper.
+  These are the panel-specific ones; each needs the same judgement the helper
+  now makes automatically, and a good number will turn out to be a role
+  constant that can simply move to a class.
+- **`const TableSpec`.** The second obstacle is untouched: several panels
+  declare `const SPEC: TableSpec = TableSpec { header_color: …, cell_color: … }`
+  and a `const` cannot read a resource. The candidate remains a role enum in
+  the spec, resolved when the table is spawned (which is inside a system).
+- **A live look.** The change is invisible under the built-in fallback by
+  construction and only shows once a skin's own token differs, so the gallery's
+  live switcher (or a viewer run) is the check that it actually took.
+
 Done when a skin switch recolours a panel's text the way it already recolours
 its floater, and the gallery's live switcher shows it.

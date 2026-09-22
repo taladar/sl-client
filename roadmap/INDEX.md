@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 118 |
-| ready | 307 |
+| ready | 308 |
 | blocked | 63 |
 | in-progress | 24 |
 | bugs | 6 |
 | done | 1211 |
 | deferred | 30 |
 | wont-do | 16 |
-| **total** | **1775** |
+| **total** | **1776** |
 
 ## ideas (118)
 
@@ -293,7 +293,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (307)
+## ready (308)
 
 ### protocol
 
@@ -946,6 +946,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-styling-interaction-tests`](ready/viewer-ui-styling-interaction-tests.md)
   — bevy_flair state styling under synthetic hover and focus (blocked by
   `viewer-ui-interaction-harness` (done))
+- [`viewer-ui-tab-widget-dynamic-tabs`](ready/viewer-ui-tab-widget-dynamic-tabs.md)
+  — The tab widget cannot grow a tab, so the one strip that needs to is
+  hand-rolled
 - [`viewer-underwater-alpha-fog-remaining-materials`](ready/viewer-underwater-alpha-fog-remaining-materials.md)
   — The particle billboards do not carry the water fog
 - [`viewer-url-context-menus`](ready/viewer-url-context-menus.md) — Right-click

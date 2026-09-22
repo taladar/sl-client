@@ -47,6 +47,8 @@ use bevy::prelude::*;
 use bevy_flair::style::components::ClassList;
 
 use crate::i18n::Translated;
+use crate::skin::{DISABLED_TEXT_CLASS, HEADING_CLASS, TEXT_CLASS, TITLE_CLASS};
+use crate::skin_palette::SkinPalette;
 use crate::ui_font::UiFont;
 
 /// What a helper-spawned label says.
@@ -520,11 +522,62 @@ pub fn spawn_label(
     spawn_text(commands, parent, &label, color, font_size, None, false)
 }
 
+/// The skin class a colour *names*, or `None` for one that is not a text role.
+///
+/// The seam `viewer-skin-panel-text-roles` turns on. Panels take their label
+/// colours from [`SkinPalette::FALLBACK`] — `viewer-audit-skin-token-coverage`
+/// collapsed all 64 copies onto those four constants, so a panel asking for
+/// `text_muted` is *naming a role*, not picking a grey, and the equality below
+/// is exact rather than approximate.
+///
+/// Reading the role back out of the value is what lets every call site stay as
+/// it is. The alternative — a role parameter on each helper — is the same
+/// information spelled at ~230 call sites.
+///
+/// A colour that matches no role gets no class and keeps painting itself. That
+/// is deliberate: a panel with a colour of its own has not said which role it
+/// means, and guessing would be worse than leaving it unskinned for
+/// [`crate::skin`]'s later passes.
+const fn role_class(color: Color) -> Option<&'static str> {
+    // `match` cannot pattern-match on non-structural constants, so this is a
+    // chain of comparisons against the four role values.
+    if color_eq(color, SkinPalette::FALLBACK.text_primary) {
+        Some(TEXT_CLASS)
+    } else if color_eq(color, SkinPalette::FALLBACK.text_muted) {
+        Some(TITLE_CLASS)
+    } else if color_eq(color, SkinPalette::FALLBACK.text_heading) {
+        Some(HEADING_CLASS)
+    } else if color_eq(color, SkinPalette::FALLBACK.text_disabled) {
+        Some(DISABLED_TEXT_CLASS)
+    } else {
+        None
+    }
+}
+
+/// `Color` equality usable from a `const fn`: the roles are all `Srgba`, and
+/// both sides are compile-time constants copied from the same place, so exact
+/// component equality is the right test and not a float-tolerance question.
+const fn color_eq(left: Color, right: Color) -> bool {
+    match (left, right) {
+        (Color::Srgba(left), Color::Srgba(right)) => {
+            left.red == right.red
+                && left.green == right.green
+                && left.blue == right.blue
+                && left.alpha == right.alpha
+        }
+        _ => false,
+    }
+}
+
 /// Spawn the text node the three helpers all end in.
 ///
 /// One function because the divergence between their labels was never
 /// deliberate: every one of them wants the same font role, the same colour
 /// handling, and the same `Pickable::IGNORE` (see the module docs).
+///
+/// The `TextColor` stays beside the class rather than being replaced by it: it
+/// is the unskinned value a headless world (and a skin that omits the token)
+/// falls back to, and the class beats it wherever a stylesheet is resolved.
 fn spawn_text(
     commands: &mut Commands,
     parent: Entity,
@@ -550,7 +603,7 @@ fn spawn_text(
             text.insert(Text::new(literal.clone()));
         }
     }
-    if let Some(class) = class {
+    if let Some(class) = class.or_else(|| role_class(color)) {
         text.insert(ClassList::new_with_classes([class]));
     }
     if no_wrap {
@@ -706,5 +759,56 @@ mod tests {
         assert_eq!(first.tab_index, Some(4));
         assert_eq!(second.tab_index, Some(5));
         assert_eq!(tab, 6);
+    }
+
+    /// **A label that names a role is skinnable; one that names a colour is
+    /// not.**
+    ///
+    /// This is the whole of `viewer-skin-panel-text-roles`' first move: a panel
+    /// asking for `FALLBACK.text_muted` is naming a role, so the label carries
+    /// `.sk-title` and a skin recolours it — with no change at the ~230 call
+    /// sites. A panel asking for a colour of its own has named no role, gets no
+    /// class, and keeps painting itself until someone decides what it meant.
+    ///
+    /// The `TextColor` stays either way: it is what a headless world, and a
+    /// skin that omits the token, fall back to.
+    #[test]
+    fn a_label_takes_the_class_of_the_role_its_colour_names() -> Result<(), TestError> {
+        let mut app = app();
+        let parent = app.world_mut().spawn(Node::default()).id();
+        let cases = [
+            (SkinPalette::FALLBACK.text_primary, Some(TEXT_CLASS)),
+            (SkinPalette::FALLBACK.text_muted, Some(TITLE_CLASS)),
+            (SkinPalette::FALLBACK.text_heading, Some(HEADING_CLASS)),
+            (
+                SkinPalette::FALLBACK.text_disabled,
+                Some(DISABLED_TEXT_CLASS),
+            ),
+            // A colour that is nobody's role.
+            (Color::srgb(0.13, 0.79, 0.31), None),
+        ];
+        for (color, wanted) in cases {
+            let label = apply(&mut app, |commands| {
+                spawn_label(commands, parent, UiLabel::literal("a label"), color, 13.0)
+            });
+            let world = app.world();
+            let classes = world.get::<ClassList>(label);
+            match wanted {
+                Some(class) => assert!(
+                    classes.is_some_and(|classes| classes.contains(class)),
+                    "a label coloured with a role must carry that role's class"
+                ),
+                None => assert!(
+                    classes.is_none(),
+                    "a label with a colour of its own must not be given a role's class"
+                ),
+            }
+            assert_eq!(
+                world.get::<TextColor>(label).map(|text| text.0),
+                Some(color),
+                "the unskinned colour stays beside the class"
+            );
+        }
+        Ok(())
     }
 }

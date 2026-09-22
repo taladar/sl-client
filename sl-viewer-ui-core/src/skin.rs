@@ -392,6 +392,13 @@ pub const PRESENCE_ONLINE_CLASS: &str = "sk-presence-online";
 /// there is no third presence and so no resting colour to fall back to.
 pub const PRESENCE_OFFLINE_CLASS: &str = "sk-presence-offline";
 
+/// The CSS class on a secondary line — an instruction under a heading, the
+/// muted half of a label/value pair. [`TEXT_CLASS`]'s quieter sibling.
+pub const TITLE_CLASS: &str = "sk-title";
+
+/// The CSS class on the one line that names a section inside a panel.
+pub const HEADING_CLASS: &str = "sk-heading";
+
 /// The CSS class on a flat action button — the shape a panel's button column
 /// spawns ([`ButtonSpec::flat`](crate::ui_spawn::ButtonSpec::flat)).
 ///
