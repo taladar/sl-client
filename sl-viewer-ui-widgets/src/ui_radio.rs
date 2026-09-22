@@ -43,6 +43,7 @@
 
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
+use bevy::text::LineHeight;
 use bevy::ui::Checked;
 use bevy::ui_widgets::{RadioButton, RadioGroup, ValueChange};
 use bevy_flair::style::components::{ClassList, PseudoElementsSupport};
@@ -59,6 +60,22 @@ const GROUP_GAP: f32 = 8.0;
 
 /// The gap between an option's indicator and its label, in logical pixels.
 const ITEM_GAP: f32 = 6.0;
+
+/// The indicator's edge length, in logical pixels — the same square the
+/// checkbox's box occupies, because the two controls stand beside each other in
+/// the same panels and a ring that measured itself would not line up with a box
+/// that does not.
+///
+/// Reserving it is what makes the captions of a column of options share an edge
+/// whatever ring the skin draws — and what keeps the layout the same whether a
+/// stylesheet is loaded at all, which a specimen measured headlessly otherwise
+/// is not.
+const INDICATOR_SIZE: f32 = 14.0;
+
+/// The ring's font size, as a fraction of [`INDICATOR_SIZE`] — the checkbox
+/// tick's rule, for the same reason: the caption's size says nothing about the
+/// square the mark has to fit in.
+const INDICATOR_FONT_SCALE: f32 = 0.8;
 
 /// The skin class on a radio group, so a disabled group greys every indicator
 /// in it through `.sk-radio-group:disabled .sk-radio-indicator`.
@@ -280,12 +297,29 @@ fn spawn_radio_item(
     }
 
     commands.spawn((
-        // Empty: the ring is `.sk-radio-indicator::before`'s `content`, and its
-        // lit form `.sk-radio:checked`'s, so the skin owns both shapes. See the
-        // rules in `common.css`.
-        Text::default(),
+        // It names no glyph: the ring is `.sk-radio-indicator::before`'s
+        // `content`, and its lit form `.sk-radio:checked`'s, so the skin owns
+        // both shapes. See the rules in `common.css`.
+        //
+        // The zero-width space is the same measurement fix as the checkbox
+        // tick's, and `ui_checkbox::spawn_checkbox` explains it: `bevy_text`
+        // styles each span by *range* and skips empty ones, so a text node with
+        // no characters is laid out at parley's defaults — a 20 px line
+        // whatever font it asked for, which here makes every radio row taller
+        // than its caption and lifts the ring off the caption's baseline.
+        Text::new("\u{200b}"),
         PseudoElementsSupport,
-        UiFont::Sans.at(spec.font_size),
+        UiFont::Sans.at(INDICATOR_SIZE * INDICATOR_FONT_SCALE),
+        // The ring's own square, sized and centred like the checkbox's box: the
+        // line box is the square, and the glyph is centred in it rather than
+        // sitting wherever its advance puts it.
+        LineHeight::Px(INDICATOR_SIZE),
+        TextLayout::justify(Justify::Center),
+        Node {
+            width: Val::Px(INDICATOR_SIZE),
+            flex_shrink: 0.0,
+            ..default()
+        },
         ClassList::new_with_classes([INDICATOR_CLASS]),
         RadioIndicator { group, index },
         // The indicator is part of the option's hit target, not its own; let the

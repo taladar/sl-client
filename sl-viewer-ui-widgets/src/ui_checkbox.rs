@@ -29,9 +29,11 @@
 //! and a skin that wants a cross, a dot or a filled square writes it in
 //! `common.css` rather than asking for a Rust change.
 //!
-//! So the widget spawns an *empty* text node and stops. An unchecked box has
-//! no rule, so its span stays empty; there is no glyph to rewrite and no
-//! system to rewrite it.
+//! So the widget spawns a text node that names no glyph and stops. An
+//! unchecked box has no rule, so its span stays empty; there is no glyph to
+//! rewrite and no system to rewrite it. The node is not quite *empty* — it
+//! holds one zero-width space, for a measurement reason `spawn_checkbox`
+//! explains at the line that puts it there.
 //!
 //! # What it is not
 //!
@@ -43,7 +45,8 @@
 
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
-use bevy::ui_widgets::Checkbox;
+use bevy::text::LineHeight;
+use bevy::ui_widgets::{Checkbox, checkbox_self_update};
 use bevy_flair::style::components::{ClassList, PseudoElementsSupport};
 use sl_viewer_ui_core::i18n::Translated;
 use sl_viewer_ui_core::skin::{
@@ -57,6 +60,14 @@ const BOX_SIZE: f32 = 14.0;
 
 /// The gap between the box and its caption, in logical pixels.
 const LABEL_GAP: f32 = 6.0;
+
+/// The tick's font size, as a fraction of the box it sits in.
+///
+/// Not the caption's size, which is the caller's and says nothing about the
+/// square the mark has to fit: a 20 px caption beside a 14 px box would put a
+/// 20 px glyph inside it. A skin that wants a different mark sets `font-size`
+/// on `.sk-checkbox-tick` along with its `content`.
+const TICK_FONT_SCALE: f32 = 0.8;
 
 /// A checkbox to spawn.
 #[derive(Clone, Debug)]
@@ -114,6 +125,16 @@ pub fn spawn_checkbox(
             Name::new(format!("{}:checkbox", spec.element)),
             ChildOf(parent),
         ))
+        // **It ticks itself.** `bevy_ui_widgets`' headless `Checkbox` only
+        // *announces* a toggle — a click or `Space` raises `ValueChange<bool>`
+        // and nothing adds or removes `Checked` unless something observes it.
+        // Without this a checkbox with no binding behind it is a box that never
+        // ticks, which is what a skin author sees in the gallery and what every
+        // caller wiring its own behaviour would have to remember. A bound
+        // checkbox is unharmed: `settings_binding` answers the same event by
+        // writing the store and reflecting it, so both paths converge on the
+        // state the store ends up holding.
+        .observe(checkbox_self_update)
         .id();
     let box_node = commands
         .spawn((
@@ -136,18 +157,37 @@ pub fn spawn_checkbox(
         ))
         .id();
     commands.spawn((
-        // Empty on purpose: the glyph is `.sk-checkbox:checked
+        // It names no glyph: the mark is `.sk-checkbox:checked
         // .sk-checkbox-tick::before`'s `content`, so the skin chooses it.
+        //
+        // The one character it does carry is a **zero-width space**, and it is
+        // there for the measure rather than for anything anyone can see.
+        // `bevy_text` pushes each span's font as a *range* style and skips
+        // empty ranges, so a text node holding no characters is laid out at
+        // parley's own defaults — a 20 px line, whatever font the node asked
+        // for. Inside this 14 px square that is six pixels of overflow, and
+        // taffy folds a child's content into every ancestor's `content_size`,
+        // so it reappears as the checkbox overflowing, then its row, then the
+        // tab panel, then the floater: four viewer-wide layout sweeps failing
+        // at once. One default-ignorable character gives the line a range to
+        // style; the shaper gives it zero advance, so the tick stays centred.
+        // See [[viewer-bevy-empty-text-measures-at-parley-defaults]] — with
+        // that fixed upstream this goes back to `Text::default()`.
         //
         // `PseudoElementsSupport` is safe to insert anywhere as of the
         // `dbaaa48` bevy_flair pin: its text branch used to spawn the
         // pseudo-element without a `StyleData` that `PseudoElement`'s insert
         // hook `expect`s, so this component took down any app without the full
         // style plugin — every widget unit test included. The block branch of
-        // the same function always spawned one; now both do.
-        Text::default(),
+        // the same function always spawned one; now both do. Since `946f8a2`
+        // the pseudo-element also **inherits** the font below, as CSS says it
+        // does — without that it brought bevy's default 20 px along with it.
+        Text::new("\u{200b}"),
         PseudoElementsSupport,
-        UiFont::Sans.at(spec.font_size),
+        UiFont::Sans.at(BOX_SIZE * TICK_FONT_SCALE),
+        // The line box is the box, so the mark cannot be taller than the square
+        // it marks whatever font size a skin gives it.
+        LineHeight::Px(BOX_SIZE),
         ClassList::new_with_classes([CHECKBOX_TICK_CLASS]),
         Pickable::IGNORE,
         ChildOf(box_node),
@@ -176,7 +216,9 @@ pub fn spawn_checkbox(
 mod tests {
     use super::*;
     use bevy::ui::Checked;
+    use bevy::ui_widgets::ValueChange;
     use pretty_assertions::{assert_eq, assert_ne};
+    use sl_viewer_testkit::{LayoutTest, overflow_violations, settle, spawn_under_root};
 
     /// A boxed error so tests can use `?` instead of the disallowed
     /// `unwrap` / `expect`.
@@ -253,8 +295,9 @@ mod tests {
         );
         assert_eq!(
             world.get::<Text>(tick).map(|text| text.0.clone()),
-            Some(String::new()),
-            "the widget must name no glyph — the skin's `content` does"
+            Some("\u{200b}".to_owned()),
+            "the widget must name no glyph — the skin's `content` does. The one \
+             character here is the zero-width space the measure needs"
         );
         assert!(
             world.get::<PseudoElementsSupport>(tick).is_some(),
@@ -329,6 +372,73 @@ mod tests {
         assert_eq!(
             before, after,
             "a tick must not move a class — `:checked` is the selector"
+        );
+        Ok(())
+    }
+
+    /// **A click ticks it.** The headless widget only announces the toggle, so
+    /// the marker the whole skin selects on moves only because `spawn_checkbox`
+    /// attaches `checkbox_self_update`. Triggered directly rather than through a
+    /// pointer: what is in question is the wiring, not the hit test.
+    #[test]
+    fn announcing_a_change_moves_the_marker() -> Result<(), TestError> {
+        let mut app = app();
+        let spawned = spawn(&mut app, false);
+        app.world_mut().trigger(ValueChange {
+            source: spawned.checkbox,
+            value: true,
+            is_final: true,
+        });
+        app.update();
+        assert!(
+            app.world().get::<Checked>(spawned.checkbox).is_some(),
+            "a checkbox nothing else drives has to tick itself"
+        );
+        app.world_mut().trigger(ValueChange {
+            source: spawned.checkbox,
+            value: false,
+            is_final: true,
+        });
+        app.update();
+        assert!(
+            app.world().get::<Checked>(spawned.checkbox).is_none(),
+            "and untick itself"
+        );
+        Ok(())
+    }
+
+    /// **The tick fits its box.** The box is a fixed square and the tick is a
+    /// text node inside it, so the tick's *line box* — not its ink — is what
+    /// has to fit: a text node one line tall reports that line's height as its
+    /// content, and a line taller than the square makes the box overflow
+    /// itself. That is not cosmetic. Taffy folds a child's content into every
+    /// ancestor's `content_size`, so six pixels of overflow inside a 14 px box
+    /// propagate out through the checkbox, its row, the tab panel and the
+    /// floater — which is exactly how this was found, as four viewer-wide
+    /// layout sweeps failing at once.
+    #[test]
+    fn the_tick_fits_the_box_it_sits_in() -> Result<(), TestError> {
+        let mut app = LayoutTest::new().build();
+        let row = spawn_under_root(&mut app, (Node::default(), Name::new("row")));
+        let mut queue = bevy::ecs::world::CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, app.world());
+        spawn_checkbox(
+            &mut commands,
+            row,
+            &CheckboxSpec {
+                element: "demo",
+                label: "Show property lines".to_owned(),
+                tab_index: 0,
+                font_size: 13.0,
+                translate_label: false,
+            },
+        );
+        queue.apply(app.world_mut());
+        settle(&mut app);
+        assert_eq!(
+            overflow_violations(&mut app),
+            Vec::<String>::new(),
+            "a checkbox spills out of its own boxes"
         );
         Ok(())
     }

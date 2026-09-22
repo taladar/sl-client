@@ -12,12 +12,13 @@
 //!
 //! Mechanics worth naming:
 //!
-//! - **The rows are the settings binding.** Each pooled row's checkbox is a
-//!   plain [`Checkbox`] the bind pass points at a different setting by
-//!   replacing its [`SettingBinding`] — the binding layer's idempotent sync
-//!   then repaints it, its `ValueChange` observer writes the store, and the
-//!   shell's account guard disables it until the account scope loads. No
-//!   bespoke toggle plumbing.
+//! - **The rows are the settings binding.** Each pooled row's checkbox is the
+//!   shared widget ([`crate::ui_checkbox`]) that the bind pass points at a
+//!   different setting by replacing its [`SettingBinding`] — the binding
+//!   layer's idempotent sync then follows it, its `ValueChange` observer
+//!   writes the store, and the shell's account guard disables it until the
+//!   account scope loads. No bespoke toggle plumbing, and no repaint: the
+//!   look is the skin's through `:checked` / `:disabled`.
 //! - **Hidden snapshot markers.** The shell's Cancel/OK snapshot walks every
 //!   [`SettingBinding`] under the floater on the open edge — but the
 //!   virtualized list only materialises the rows on screen. A display-none
@@ -33,20 +34,19 @@
 //! `llfloaterpreference.cpp` (`buildPopupList` / `onSelectPopup`).
 
 use crate::skin_palette::SkinPalette;
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
-use bevy::ui_widgets::Checkbox;
 use bevy_flair::style::components::ClassList;
 
 use crate::i18n::{Translated, Translator};
 use crate::notifications::NOTIFICATIONS;
 use crate::preferences::{
-    CHECK_OFF, CHECK_SIZE, CONTROL_BORDER, PREF_TABS, PrefCheckboxBox, PreferencesExtraHits,
-    PreferencesState, apply_preferences_filter, mirror_preferences_filter, spawn_pref_checkbox,
-    spawn_pref_combo, spawn_pref_section, spawn_pref_text,
+    PREF_TABS, PreferencesExtraHits, PreferencesState, apply_preferences_filter,
+    mirror_preferences_filter, spawn_pref_checkbox, spawn_pref_combo, spawn_pref_section,
+    spawn_pref_text,
 };
 use crate::settings_binding::SettingBinding;
 use crate::skin::text_role;
+use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use crate::ui_table::{
     TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableSelectionMode, TableSpec,
     set_table_cell, spawn_table, spawn_table_row,
@@ -382,26 +382,25 @@ fn populate_alerts_rows(
         let (Some(show_cell), Some(label_cell)) = (cells.cell(0), cells.cell(1)) else {
             continue;
         };
-        // A bare Checkbox: the bind pass points it at its row's setting by
+        // An unbound checkbox: the bind pass points it at its row's setting by
         // inserting the SettingBinding, and the binding layer does the rest
-        // (sync, write, the shell's account guard, the disabled tint).
-        let checkbox = commands
-            .spawn((
-                Checkbox,
-                Node {
-                    width: Val::Px(CHECK_SIZE),
-                    height: Val::Px(CHECK_SIZE),
-                    border: UiRect::all(Val::Px(2.0)),
-                    flex_shrink: 0.0,
-                    ..default()
-                },
-                BorderColor::all(CONTROL_BORDER),
-                BackgroundColor(CHECK_OFF),
-                TabIndex(0),
-                PrefCheckboxBox,
-                ChildOf(show_cell),
-            ))
-            .id();
+        // (sync, write, the shell's account guard). Its *look*, including the
+        // greyed one, is the skin's through `.sk-checkbox`.
+        //
+        // No caption — the alert's text is the row's own next cell, so this one
+        // is the widget's box alone.
+        let checkbox = spawn_checkbox(
+            &mut commands,
+            show_cell,
+            &CheckboxSpec {
+                element: "preferences-alerts",
+                label: String::new(),
+                tab_index: 0,
+                font_size: FONT,
+                translate_label: false,
+            },
+        )
+        .checkbox;
         commands.entity(row_entity).insert(AlertRowParts {
             checkbox,
             label_cell,

@@ -38,7 +38,6 @@
 use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
-use bevy::ui::Checked;
 use bevy::ui::InteractionDisabled;
 use bevy::ui_widgets::{Activate, Button, SliderRange, SliderStep};
 use bevy::window::PrimaryWindow;
@@ -57,6 +56,7 @@ use crate::skin::text_role;
 use crate::sky_presets::FixedSky;
 use crate::ui::BottomArea;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_element::ElementCx;
 use crate::ui_font::UiFont;
@@ -90,8 +90,6 @@ const SLIDER: SliderStyle = SliderStyle {
     thumb_width: 12.0,
     thumb_fill: THUMB_FILL,
 };
-/// A checkbox box's side length, in logical pixels.
-const CHECK_SIZE: f32 = 16.0;
 /// The width of a setting row's trailing value readout, in logical pixels.
 const VALUE_WIDTH: f32 = 44.0;
 
@@ -130,10 +128,6 @@ const CONTROL_BORDER: Color = Color::srgb(0.4, 0.5, 0.62);
 const TRACK_FILL: Color = Color::srgb(0.16, 0.19, 0.25);
 /// A slider thumb's fill.
 const THUMB_FILL: Color = Color::srgb(0.62, 0.72, 0.86);
-/// A checkbox box's fill when unchecked.
-const CHECK_OFF: Color = Color::srgb(0.12, 0.14, 0.18);
-/// A checkbox box's fill when checked.
-const CHECK_ON: Color = Color::srgb(0.3, 0.7, 0.45);
 /// A thin divider between the environment section and the settings rows.
 const DIVIDER_COLOR: Color = Color::srgb(0.28, 0.31, 0.38);
 
@@ -582,11 +576,6 @@ const fn combo_indices(fixed: Option<FixedEnvironment>, local_in_force: bool) ->
 #[derive(Component, Debug, Clone, Copy)]
 struct QuickPrefsFloaterRoot;
 
-/// A marker on a setting checkbox's box, so [`drive_quick_pref_checkboxes`]
-/// colours it.
-#[derive(Component, Debug, Clone, Copy)]
-struct QuickPrefCheckboxBox;
-
 /// A setting row's trailing value readout, tagged with what it displays.
 #[derive(Component, Debug, Clone)]
 struct QuickPrefValueLabel {
@@ -618,7 +607,6 @@ impl Plugin for QuickPreferencesPlugin {
                 apply_env_combos,
                 sync_env_combos.after(apply_env_combos),
                 update_quick_pref_values,
-                drive_quick_pref_checkboxes,
             ),
         );
     }
@@ -947,22 +935,29 @@ fn spawn_checkbox_row(commands: &mut Commands, parent: Entity, entry: &QuickPref
             ChildOf(parent),
         ))
         .id();
-    spawn_entry_label(commands, row, entry);
-    commands.spawn((
-        bound_checkbox(entry_binding(entry)),
-        Node {
-            width: Val::Px(CHECK_SIZE),
-            height: Val::Px(CHECK_SIZE),
-            border: UiRect::all(Val::Px(2.0)),
-            flex_shrink: 0.0,
-            ..default()
+    // The caption belongs to the widget, not to the row: a sibling label is not
+    // part of the checkbox, so clicking it would not toggle anything. The box
+    // leads and the caption follows it, which is also the reference's shape
+    // (`<check_box label="…" left="3">`) and what keeps a column of boxes
+    // aligned regardless of how long each caption is.
+    let (label, translate_label) = match &entry.label {
+        QuickPrefLabel::Key(key) => (key.clone(), true),
+        QuickPrefLabel::Text(text) => (text.clone(), false),
+    };
+    let checkbox = spawn_checkbox(
+        commands,
+        row,
+        &CheckboxSpec {
+            element: "quick-prefs",
+            label,
+            tab_index: 0,
+            font_size: FONT,
+            translate_label,
         },
-        BorderColor::all(CONTROL_BORDER),
-        BackgroundColor(CHECK_OFF),
-        TabIndex(0),
-        QuickPrefCheckboxBox,
-        ChildOf(row),
-    ));
+    );
+    commands
+        .entity(checkbox.checkbox)
+        .insert(bound_checkbox(entry_binding(entry)));
 }
 
 /// Spawn a slider row bound to a numeric setting, with a trailing value readout.
@@ -1323,18 +1318,6 @@ const fn i32_to_f32(value: i32) -> f32 {
 )]
 const fn u32_to_f32(value: u32) -> f32 {
     value as f32
-}
-
-/// Colour each setting checkbox's box from its `Checked` state.
-fn drive_quick_pref_checkboxes(
-    mut boxes: Query<(&mut BackgroundColor, Has<Checked>), With<QuickPrefCheckboxBox>>,
-) {
-    for (mut fill, checked) in &mut boxes {
-        let target = if checked { CHECK_ON } else { CHECK_OFF };
-        if fill.0 != target {
-            fill.0 = target;
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------

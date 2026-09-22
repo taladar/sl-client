@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 118 |
-| ready | 310 |
+| ready | 309 |
 | blocked | 63 |
-| in-progress | 24 |
-| bugs | 7 |
+| in-progress | 25 |
+| bugs | 8 |
 | done | 1211 |
 | deferred | 30 |
 | wont-do | 16 |
-| **total** | **1779** |
+| **total** | **1780** |
 
 ## ideas (118)
 
@@ -293,7 +293,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (310)
+## ready (309)
 
 ### protocol
 
@@ -872,8 +872,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   actions (blocked by `viewer-object-selection-core` (done))
 - [`viewer-skin-bevel-border-policy`](ready/viewer-skin-bevel-border-policy.md)
   — A bevel's light source has a handedness the logical-property ban denies
-- [`viewer-skin-checkbox-radio-shape`](ready/viewer-skin-checkbox-radio-shape.md)
-  — Checkboxes are hand-rolled per panel, so no skin can shape one
 - [`viewer-skin-glyphs-from-content`](ready/viewer-skin-glyphs-from-content.md)
   — A skin can choose the glyph, not just its colour — audit where that applies
 - [`viewer-skin-icon-set`](ready/viewer-skin-icon-set.md) — A skin should be
@@ -1225,7 +1223,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Batch world changes into per-tick update bursts (blocked by
   `server-world-heartbeat`, `server-world-ecs-store`)
 
-## in-progress (24)
+## in-progress (25)
 
 ### viewer
 
@@ -1265,6 +1263,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rlva-floaters-toggles`](in-progress/viewer-rlva-floaters-toggles.md)
   — "RLVa UI: console, restrictions/strings/locks floaters + toggles" (blocked
   by `viewer-rlv-restriction-state` (done))
+- [`viewer-skin-checkbox-radio-shape`](in-progress/viewer-skin-checkbox-radio-shape.md)
+  — Checkboxes are hand-rolled per panel, so no skin can shape one
 - [`viewer-skin-panel-state-classes`](in-progress/viewer-skin-panel-state-classes.md)
   — The panels paint their own states, and nine files hand-copied one role
 - [`viewer-skin-panel-text-roles`](in-progress/viewer-skin-panel-text-roles.md)
@@ -1290,7 +1290,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (7)
+## bugs (8)
 
 ### protocol
 
@@ -1299,6 +1299,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`viewer-bevy-empty-text-measures-at-parley-defaults`](bugs/viewer-bevy-empty-text-measures-at-parley-defaults.md)
+  — An empty text node is measured at parley's defaults, not its own font
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
   Some worn mesh hair does not render (visible in Firestorm)
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)

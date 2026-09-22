@@ -63,6 +63,7 @@ use crate::skin::{
     MATCH_CLASS, NO_MATCH_CLASS, TEXT_CLASS, set_state_class, set_state_class_on, text_role,
 };
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use crate::ui_color_picker::spawn_color_swatch;
 use crate::ui_combo::{ComboSpec, spawn_combo};
 use crate::ui_element::ElementCx;
@@ -110,15 +111,6 @@ const ENV_PIN_SEED_KEY: &str = "preferences-env-pin-seed";
 /// A control's border tone (the settings-binding demo's, kept for continuity).
 pub const CONTROL_BORDER: Color = Color::srgb(0.40, 0.50, 0.62);
 
-/// A checkbox box's fill while unchecked.
-pub(crate) const CHECK_OFF: Color = Color::srgb(0.12, 0.14, 0.18);
-
-/// A checkbox box's fill while checked.
-const CHECK_ON: Color = Color::srgb(0.30, 0.70, 0.45);
-
-/// A checkbox box's fill while its binding is account-guarded (disabled).
-const CHECK_DISABLED: Color = Color::srgb(0.20, 0.22, 0.26);
-
 /// A slider track's fill.
 const TRACK_FILL: Color = Color::srgb(0.16, 0.19, 0.25);
 
@@ -130,9 +122,6 @@ const BUTTON_BACKGROUND: Color = Color::srgb(0.16, 0.19, 0.25);
 
 /// The skin class the footer buttons carry (hover styling).
 const BUTTON_CLASS: &str = "sk-button";
-
-/// A checkbox box's side length, in logical pixels.
-pub(crate) const CHECK_SIZE: f32 = 18.0;
 
 /// How this panel's sliders are drawn.
 const SLIDER: SliderStyle = SliderStyle {
@@ -335,11 +324,6 @@ pub(crate) struct PrefSearchRow {
 #[derive(Component, Debug, Clone, Copy)]
 pub(crate) struct PrefRowLabel;
 
-/// Marks a preference checkbox's box node, so its fill tracks `Checked` (and
-/// the account guard).
-#[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct PrefCheckboxBox;
-
 /// The bare row node every preference row starts from.
 fn pref_row_node() -> Node {
     Node {
@@ -379,23 +363,26 @@ pub(crate) fn spawn_pref_checkbox(
             ChildOf(parent),
         ))
         .id();
-    commands.spawn((
-        bound_checkbox(binding),
-        Node {
-            width: Val::Px(CHECK_SIZE),
-            height: Val::Px(CHECK_SIZE),
-            border: UiRect::all(Val::Px(2.0)),
-            flex_shrink: 0.0,
-            ..default()
+    // The shared widget draws the box, the tick and the caption; this adds the
+    // binding that makes it a *setting*, and the two markers the search needs.
+    let checkbox = spawn_checkbox(
+        commands,
+        row,
+        &CheckboxSpec {
+            element: "preferences",
+            label: label_key.to_owned(),
+            tab_index: 0,
+            font_size: FONT,
+            translate_label: true,
         },
-        BorderColor::all(CONTROL_BORDER),
-        BackgroundColor(CHECK_OFF),
-        TabIndex(0),
-        PrefCheckboxBox,
-        ChildOf(row),
-    ));
-    let label = spawn_row_label(commands, row, label_key);
-    commands.entity(row).insert(PrefSearchRow { label });
+    );
+    commands
+        .entity(checkbox.checkbox)
+        .insert(bound_checkbox(binding));
+    commands.entity(checkbox.label).insert(PrefRowLabel);
+    commands.entity(row).insert(PrefSearchRow {
+        label: checkbox.label,
+    });
     row
 }
 
@@ -650,7 +637,6 @@ impl Plugin for PreferencesPlugin {
                     select_env_preferences_tab,
                     mirror_preferences_filter,
                     apply_preferences_filter.after(mirror_preferences_filter),
-                    drive_pref_checkbox_visual,
                 ),
             );
     }
@@ -1316,41 +1302,6 @@ fn first_text_descendant(
 }
 
 // ---------------------------------------------------------------------------
-// Control visuals (the settings-binding demo's look, on the shell's markers).
-// ---------------------------------------------------------------------------
-
-/// One preference checkbox box's paint inputs: its fill, whether it is
-/// checked, and whether the account guard disables it (a type alias per
-/// `clippy::type_complexity`).
-type PrefCheckboxPaint<'world, 'state> = Query<
-    'world,
-    'state,
-    (
-        &'static mut BackgroundColor,
-        Has<Checked>,
-        Has<InteractionDisabled>,
-    ),
-    With<PrefCheckboxBox>,
->;
-
-/// Colour each preference checkbox's box from its `Checked` state (muted while
-/// the account guard disables it).
-fn drive_pref_checkbox_visual(mut boxes: PrefCheckboxPaint) {
-    for (mut fill, checked, disabled) in &mut boxes {
-        let target = if disabled {
-            CHECK_DISABLED
-        } else if checked {
-            CHECK_ON
-        } else {
-            CHECK_OFF
-        };
-        if fill.0 != target {
-            fill.0 = target;
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
 // The first tab: UI & world display.
 // ---------------------------------------------------------------------------
 
@@ -1519,24 +1470,25 @@ pub fn spawn_preferences_specimen(
     if let Some(panel) = tabs.panels.first().copied() {
         // A checkbox row and a slider row, as static stand-ins.
         let check_row = commands.spawn((pref_row_node(), ChildOf(panel))).id();
-        commands.spawn((
-            Node {
-                width: Val::Px(CHECK_SIZE),
-                height: Val::Px(CHECK_SIZE),
-                border: UiRect::all(Val::Px(2.0)),
-                flex_shrink: 0.0,
-                ..default()
+        // A real checkbox, ticked: the specimen is what a skin author
+        // sees, so it has to be the widget rather than a box painted to
+        // look like one.
+        //
+        // Its own element id, not the card's: a node is addressed by `Name`,
+        // both by the contract table and by the layout harness, and five
+        // specimens sharing one name would leave four of them unaddressable.
+        let specimen = spawn_checkbox(
+            commands,
+            check_row,
+            &CheckboxSpec {
+                element: "preferences-specimen-lines",
+                label: cx.text("Show property lines"),
+                tab_index: 0,
+                font_size: FONT,
+                translate_label: false,
             },
-            BorderColor::all(CONTROL_BORDER),
-            BackgroundColor(CHECK_ON),
-            ChildOf(check_row),
-        ));
-        commands.spawn((
-            Text::new(cx.text("Show property lines")),
-            cx.font(UiFont::Sans),
-            text_role(LABEL_COLOR),
-            ChildOf(check_row),
-        ));
+        );
+        commands.entity(specimen.checkbox).insert(Checked);
         let slider_row = commands.spawn((pref_row_node(), ChildOf(panel))).id();
         commands.spawn((
             Text::new(cx.text("Mini-map opacity")),
@@ -1553,28 +1505,36 @@ pub fn spawn_preferences_specimen(
         // two-column popup list (checkbox column | ignoretext label), the
         // live layout's shape without the virtualized table.
         let headline_row = commands.spawn((pref_row_node(), ChildOf(panel))).id();
-        commands.spawn((
-            Node {
-                width: Val::Px(CHECK_SIZE),
-                height: Val::Px(CHECK_SIZE),
-                border: UiRect::all(Val::Px(2.0)),
-                flex_shrink: 0.0,
-                ..default()
+        let headline = spawn_checkbox(
+            commands,
+            headline_row,
+            &CheckboxSpec {
+                element: "preferences-specimen-friends",
+                label: cx.text("Notify me when my friends log in or out"),
+                tab_index: 0,
+                font_size: FONT,
+                translate_label: false,
             },
-            BorderColor::all(CONTROL_BORDER),
-            BackgroundColor(CHECK_ON),
-            ChildOf(headline_row),
-        ));
-        commands.spawn((
-            Text::new(cx.text("Notify me when my friends log in or out")),
-            cx.font(UiFont::Sans),
-            text_role(LABEL_COLOR),
-            ChildOf(headline_row),
-        ));
-        let list_rows: [(&str, bool); 3] = [
-            ("About Land: unsaved changes", true),
-            ("Confirm before I pay an object", false),
-            ("Warn about script permissions", true),
+        );
+        commands.entity(headline.checkbox).insert(Checked);
+        // Each row carries its own element id for the same reason the two above
+        // do: the name is the address.
+        let list_rows: [(&str, bool, &'static str); 3] = [
+            (
+                "About Land: unsaved changes",
+                true,
+                "preferences-specimen-land",
+            ),
+            (
+                "Confirm before I pay an object",
+                false,
+                "preferences-specimen-pay",
+            ),
+            (
+                "Warn about script permissions",
+                true,
+                "preferences-specimen-scripts",
+            ),
         ];
         let header_row = commands.spawn((pref_row_node(), ChildOf(panel))).id();
         commands.spawn((
@@ -1589,26 +1549,24 @@ pub fn spawn_preferences_specimen(
             text_role(SECTION_COLOR),
             ChildOf(header_row),
         ));
-        for (label, shown) in list_rows {
+        for (label, shown, element) in list_rows {
             let list_row = commands.spawn((pref_row_node(), ChildOf(panel))).id();
-            commands.spawn((
-                Node {
-                    width: Val::Px(CHECK_SIZE),
-                    height: Val::Px(CHECK_SIZE),
-                    border: UiRect::all(Val::Px(2.0)),
-                    flex_shrink: 0.0,
-                    ..default()
+            // Ticked and unticked side by side, which is the pair a skin
+            // author most needs to see at a glance.
+            let entry = spawn_checkbox(
+                commands,
+                list_row,
+                &CheckboxSpec {
+                    element,
+                    label: cx.text(label),
+                    tab_index: 0,
+                    font_size: FONT,
+                    translate_label: false,
                 },
-                BorderColor::all(CONTROL_BORDER),
-                BackgroundColor(if shown { CHECK_ON } else { CHECK_OFF }),
-                ChildOf(list_row),
-            ));
-            commands.spawn((
-                Text::new(cx.text(label)),
-                cx.font(UiFont::Sans),
-                text_role(LABEL_COLOR),
-                ChildOf(list_row),
-            ));
+            );
+            if shown {
+                commands.entity(entry.checkbox).insert(Checked);
+            }
         }
     }
 

@@ -161,8 +161,8 @@
  * could never become it; swapping these backgrounds for a nine-slice
  * (viewer-skin-image-backed-widgets) needs no Rust change.
  *
- * The tick is always the glyph — CSS cannot swap text content — so unchecked
- * paints it `transparent` rather than rewriting it from a system. */
+ * The tick is a `content` glyph on a pseudo-element, so an unchecked box needs
+ * no rule at all — there is nothing to hide, because nothing was written. */
 .sk-checkbox-box {
   background-color: var(--check-bg);
   border-color: var(--check-border);
@@ -180,8 +180,10 @@
  * U+00D7 ×) and a skin that wants a cross, a dot or a filled square says so
  * here. An unchecked box simply has no rule, so its span stays empty.
  *
- * The widget spawns an empty text node carrying `PseudoElementsSupport`; it
- * never names a glyph, which is why there is no Rust system rewriting one. */
+ * The widget spawns a text node carrying `PseudoElementsSupport` and names no
+ * glyph, which is why there is no Rust system rewriting one. A skin that wants
+ * a bigger or smaller mark sets `font-size` here too: the pseudo-element
+ * inherits the host's otherwise, which the widget sizes from the box. */
 .sk-checkbox:checked .sk-checkbox-tick::before {
   content: "\2713";
   color: var(--check-tick);

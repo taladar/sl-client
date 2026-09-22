@@ -39,11 +39,10 @@
 
 use crate::skin_palette::SkinPalette;
 use bevy::input_focus::InputFocus;
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui::{Checked, InteractionDisabled};
-use bevy::ui_widgets::{Activate, Checkbox, ValueChange};
+use bevy::ui_widgets::{Activate, ValueChange};
 use bevy_flair::style::components::ClassList;
 use sl_rlv::is_debug_setting_locked;
 use sl_settings::{Scope, SettingDecl, SettingKind, SettingValue};
@@ -53,11 +52,12 @@ use crate::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, floater_shown, spawn_floater,
 };
 use crate::i18n::Translated;
-use crate::preferences::{CHECK_OFF, CHECK_SIZE, CONTROL_BORDER, PrefCheckboxBox};
+use crate::preferences::CONTROL_BORDER;
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{SettingBinding, bound_checkbox};
 use crate::skin::text_role;
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
+use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_element::ElementCx;
@@ -458,21 +458,20 @@ fn build_debug_settings_content(In(handle): In<FloaterHandle>, mut commands: Com
             ChildOf(left),
         ))
         .id();
-    commands.spawn((
-        bound_checkbox(SettingBinding::global(SETTING_HIDE_DEFAULT)),
-        Node {
-            width: Val::Px(CHECK_SIZE),
-            height: Val::Px(CHECK_SIZE),
-            border: UiRect::all(Val::Px(2.0)),
-            flex_shrink: 0.0,
-            ..default()
+    let changed_only = spawn_checkbox(
+        &mut commands,
+        changed_only_row,
+        &CheckboxSpec {
+            element: "debug-settings:changed-only",
+            label: String::new(),
+            tab_index: 0,
+            font_size: FONT,
+            translate_label: false,
         },
-        BorderColor::all(CONTROL_BORDER),
-        BackgroundColor(CHECK_OFF),
-        TabIndex(0),
-        PrefCheckboxBox,
-        ChildOf(changed_only_row),
-    ));
+    );
+    commands
+        .entity(changed_only.checkbox)
+        .insert(bound_checkbox(SettingBinding::global(SETTING_HIDE_DEFAULT)));
     commands.spawn((
         Text::default(),
         Translated::new("debug-settings-changed-only"),
@@ -599,24 +598,19 @@ fn build_debug_settings_content(In(handle): In<FloaterHandle>, mut commands: Com
 
     // Bool: a checkbox (no `SettingBinding` — see `DebugBoolCheckbox`).
     let bool_row = spawn_editor_row(&mut commands, right, "debug-settings:edit:bool");
-    let bool_checkbox = commands
-        .spawn((
-            Checkbox,
-            Node {
-                width: Val::Px(CHECK_SIZE),
-                height: Val::Px(CHECK_SIZE),
-                border: UiRect::all(Val::Px(2.0)),
-                flex_shrink: 0.0,
-                ..default()
-            },
-            BorderColor::all(CONTROL_BORDER),
-            BackgroundColor(CHECK_OFF),
-            TabIndex(0),
-            PrefCheckboxBox,
-            DebugBoolCheckbox,
-            ChildOf(bool_row),
-        ))
-        .id();
+    let bool_checkbox = spawn_checkbox(
+        &mut commands,
+        bool_row,
+        &CheckboxSpec {
+            element: "debug-settings:edit:bool",
+            label: String::new(),
+            tab_index: 0,
+            font_size: FONT,
+            translate_label: false,
+        },
+    )
+    .checkbox;
+    commands.entity(bool_checkbox).insert(DebugBoolCheckbox);
 
     // String: a line field.
     let string_row = spawn_editor_row(&mut commands, right, "debug-settings:edit:string");

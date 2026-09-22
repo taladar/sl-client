@@ -2,10 +2,11 @@
 id: viewer-skin-checkbox-radio-shape
 title: Checkboxes are hand-rolled per panel, so no skin can shape one
 topic: viewer
-status: ready
+status: in-progress
 origin: Vintage skin fidelity audit (2026-09-20)
 points: 5
-refs: [viewer-ui-radio-widget, viewer-ui-settings-binding, viewer-vintage-skin]
+refs: [viewer-ui-radio-widget, viewer-ui-settings-binding, viewer-vintage-skin,
+  viewer-bevy-empty-text-measures-at-parley-defaults]
 ---
 
 Context: [context/viewer.md](../context/viewer.md),
@@ -69,3 +70,53 @@ have.
 One checkbox widget exists, every panel uses it, its shape and colours come
 from the skin, and a scratch skin can make it a light box with a dark frame
 and a tick without touching Rust.
+
+## Progress (2026-09-22)
+
+The widget exists and the skin owns all four looks: `ui_checkbox` in
+`sl-viewer-ui-widgets` spawns row / box / tick / caption, carries
+`CHECKBOX_CLASS`, `CHECKBOX_BOX_CLASS` and `CHECKBOX_TICK_CLASS`, and **paints
+nothing** — `:checked` and `:disabled` reach it from `common.css`, and the tick
+is that stylesheet's `content` glyph on a `::before` rather than a constant in
+Rust. `ui_radio`'s glyph-swapping half is gone the same way. Two upstream fixes
+were needed to get there, both in the `taladar/bevy_flair` fork: a text
+`::before` spawning without `StyleData` (`dbaaa48`), and one not inheriting its
+host's font (`946f8a2`).
+
+**Call sites converted so far:** the whole of `sl-viewer-preferences` —
+`preferences.rs` (`spawn_pref_checkbox`, so every Preferences tab),
+`preferences_alerts.rs`, `debug_settings.rs`, `quick_preferences.rs` and
+`phototools.rs`, plus the Preferences and Photo Tools gallery specimens. Their
+`CHECK_ON` / `CHECK_OFF` / `CHECK_DISABLED` constants and the three per-panel
+`drive_*_checkbox_visual` systems are deleted.
+
+**The caption belongs to the widget.** Two of those panels first kept their own
+label beside a caption-less box; a label that is not part of the checkbox
+cannot be clicked to toggle it, and the reference puts the box *first*
+(`<check_box label="…" left="3">`), which is also what keeps a column of boxes
+aligned. Both now pass their label into `CheckboxSpec`. The two sites that stay
+caption-less are the ones whose text is genuinely elsewhere: the alerts table
+(the text is a different column) and the debug-settings bool editor.
+
+**Two defects the contract sweep caught on the way**, both now fixed here:
+
+- A checkbox with no `SettingBinding` behind it **never ticked**.
+  `bevy_ui_widgets`' headless `Checkbox` only announces a toggle as a
+  `ValueChange<bool>`; nothing
+  adds or removes `Checked` unless something observes it, and only the binding
+  path did. `spawn_checkbox` now attaches `checkbox_self_update`, so the widget
+  is self-updating and a bound one still converges on what the store holds.
+- Both glyph hosts were measured at parley's defaults because they held no
+  characters — see
+  [[viewer-bevy-empty-text-measures-at-parley-defaults]]. The radio's indicator
+  also had no reserved box at all, so a column of options aligned their captions
+  differently depending on whether a stylesheet was loaded; it now occupies the
+  same 14 px square the checkbox's box does.
+
+**Still to convert:** `avatar_profile.rs` (`spawn_check_button`),
+`about_land.rs` / `about_region.rs` (`spawn_check` + the three-state
+`set_check_visual`), `land_environment.rs`, `snapshot_floater.rs`
+(`set_check_glyph`), `group_profile.rs` (`set_toggle_glyph`), `edit_script.rs`,
+`edit_material_asset.rs`, `edit_tool.rs`, `inventory_filters.rs`,
+`inventory_properties.rs`, `experience_profile.rs`, `contact_sets_panel.rs`,
+`ui_color_picker.rs`. A gallery specimen for the widget itself is still owed.

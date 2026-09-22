@@ -49,7 +49,8 @@
 
 use super::{ElementContract, Gesture, NodeContract, Probe, Row};
 use bevy::input_focus::InputFocus;
-use bevy::prelude::{App, Name};
+use bevy::prelude::{App, Has, Name};
+use bevy::ui::Checked;
 use sl_viewer_ui_widgets::ui_trackball::{SPECIMEN_MOON_AIM, SPECIMEN_SUN_AIM, TrackballAim};
 
 /// The named node this probe asks about, since a [`Probe`] is handed the app
@@ -179,6 +180,72 @@ const MOON_ARROW_STEPS: Probe = Probe {
     what: "an arrow key moved the moon trackball's aim",
     check: |app: &mut App| aim_moved(app, MOON_TRACKBALL, SPECIMEN_MOON_AIM),
 };
+
+/// Whether the node named `node` is ticked.
+///
+/// A checkbox's whole reaction is this marker: `bevy_ui_widgets`' headless
+/// [`Checkbox`](bevy::ui_widgets::Checkbox) announces an activation as a
+/// `ValueChange<bool>` and emits no `UiAction` at all, `spawn_checkbox`'s
+/// self-update observer turns that into [`Checked`](bevy::ui::Checked), and the
+/// skin draws the tick from `:checked`. So without a probe every gesture on
+/// every checkbox in the viewer would sweep as "inert" and a box that had
+/// quietly stopped toggling would pass — which one had, until this row was
+/// written: nothing observed the event at all.
+fn ticked(app: &mut App, node: &str) -> bool {
+    let mut query = app.world_mut().query::<(&Name, Has<Checked>)>();
+    query
+        .iter(app.world())
+        .find(|(name, _ticked)| name.as_str() == node)
+        .is_some_and(|(_name, ticked)| ticked)
+}
+
+/// The Preferences specimen's checkbox, spawned ticked.
+///
+/// Only the one: the other four live in the specimen's *second* tab, and a
+/// hidden panel's `TabIndex` is parked by the scaffold, so neither the sweep nor
+/// the table can address a node in it — which
+/// `the_contract_table_addresses_only_live_nodes` says out loud.
+const PREF_LINES: &str = "preferences-specimen-lines:checkbox";
+
+/// The Photo Tools specimen's, also ticked.
+const PHOTO_CHECK: &str = "phototools-specimen:checkbox";
+
+/// An activation clears the tick on the Preferences specimen's checkbox.
+///
+/// The other direction — an unticked box ticking — is pinned by the widget's own
+/// `announcing_a_change_moves_the_marker`, which drives both ways without
+/// needing a second specimen.
+const LINES_CLEARS: Probe = Probe {
+    what: "the activated `Show property lines` checkbox is no longer ticked",
+    check: |app: &mut App| !ticked(app, PREF_LINES),
+};
+
+/// The same for the Photo Tools specimen.
+const PHOTO_CLEARS: Probe = Probe {
+    what: "the activated reflections checkbox is no longer ticked",
+    check: |app: &mut App| !ticked(app, PHOTO_CHECK),
+};
+
+/// The three gestures that activate a checkbox — the keyboard's two and the
+/// pointer's one — each leaving `probe`.
+///
+/// A checkbox answers all three identically, so the rows are generated rather
+/// than written out twice; the double click is deliberately absent, because
+/// toggling twice lands back where it started and there is nothing to pin.
+const fn toggles(probe: Probe) -> [Row; 3] {
+    [
+        Row::leaves(Gesture::PrimaryClick, probe),
+        Row::leaves(Gesture::Enter, probe),
+        Row::leaves(Gesture::Space, probe),
+    ]
+}
+
+/// The Preferences specimen's rows, named so `CONTRACTS` can borrow them: a
+/// `const fn` call in a `&[…]` there would be a temporary.
+const LINES_ROWS: [Row; 3] = toggles(LINES_CLEARS);
+
+/// The Photo Tools specimen's.
+const PHOTO_ROWS: [Row; 3] = toggles(PHOTO_CLEARS);
 
 /// Every element's contract, keyed by `UiElement::id`.
 pub(crate) const CONTRACTS: &[ElementContract] = &[
@@ -683,6 +750,10 @@ pub(crate) const CONTRACTS: &[ElementContract] = &[
         ],
     },
     ElementContract {
+        element: "phototools",
+        nodes: &[NodeContract::new(PHOTO_CHECK, &PHOTO_ROWS)],
+    },
+    ElementContract {
         element: "preferences",
         nodes: &[
             NodeContract::new(
@@ -695,6 +766,7 @@ pub(crate) const CONTRACTS: &[ElementContract] = &[
                 ],
             ),
             NodeContract::inert("preferences-specimen:field"),
+            NodeContract::new(PREF_LINES, &LINES_ROWS),
         ],
     },
     ElementContract {

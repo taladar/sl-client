@@ -523,11 +523,16 @@ bevy_feathers = { git = "https://github.com/taladar/bevy.git", rev = "4598842b73
 #     `PseudoElement`'s insert hook `expect`s — so `PseudoElementsSupport` on
 #     a `Text` panics in any app without the full plugin stack (every widget
 #     unit test). The block branch of the same function already spawned one.
-bevy_flair = { git = "https://github.com/taladar/bevy_flair.git", rev = "dbaaa48d9dc5d51d75fcc31ca1588e0a5da003b8" }
-bevy_flair_core = { git = "https://github.com/taladar/bevy_flair.git", rev = "dbaaa48d9dc5d51d75fcc31ca1588e0a5da003b8" }
-bevy_flair_core_macros = { git = "https://github.com/taladar/bevy_flair.git", rev = "dbaaa48d9dc5d51d75fcc31ca1588e0a5da003b8" }
-bevy_flair_css_parser = { git = "https://github.com/taladar/bevy_flair.git", rev = "dbaaa48d9dc5d51d75fcc31ca1588e0a5da003b8" }
-bevy_flair_style = { git = "https://github.com/taladar/bevy_flair.git", rev = "dbaaa48d9dc5d51d75fcc31ca1588e0a5da003b8" }
+#  3. a text `::before` took bevy's default 20 px `TextFont` instead of
+#     inheriting its host's, as CSS says a pseudo-element does. The span is
+#     measured as part of the host's text block, so a 14 px checkbox box with
+#     a `content` tick reported 20 px of content and overflowed itself, and
+#     taffy folded that into every ancestor up to the floater.
+bevy_flair = { git = "https://github.com/taladar/bevy_flair.git", rev = "946f8a23ffd83ec9c1a1a3b37e900732c0d044ae" }
+bevy_flair_core = { git = "https://github.com/taladar/bevy_flair.git", rev = "946f8a23ffd83ec9c1a1a3b37e900732c0d044ae" }
+bevy_flair_core_macros = { git = "https://github.com/taladar/bevy_flair.git", rev = "946f8a23ffd83ec9c1a1a3b37e900732c0d044ae" }
+bevy_flair_css_parser = { git = "https://github.com/taladar/bevy_flair.git", rev = "946f8a23ffd83ec9c1a1a3b37e900732c0d044ae" }
+bevy_flair_style = { git = "https://github.com/taladar/bevy_flair.git", rev = "946f8a23ffd83ec9c1a1a3b37e900732c0d044ae" }
 bevy_gilrs = { git = "https://github.com/taladar/bevy.git", rev = "4598842b734c35115c66df1f2dc77e94ed9b9734" }
 bevy_gizmos = { git = "https://github.com/taladar/bevy.git", rev = "4598842b734c35115c66df1f2dc77e94ed9b9734" }
 bevy_gizmos_macros = { git = "https://github.com/taladar/bevy.git", rev = "4598842b734c35115c66df1f2dc77e94ed9b9734" }

@@ -47,6 +47,7 @@
 
 use crate::skin::{ACTION_BUTTON_CLASS, ACTIVE_CLASS, TEXT_CLASS, set_state_class, text_role};
 use crate::skin_palette::SkinPalette;
+use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui::{Checked, InteractionDisabled};
@@ -105,8 +106,6 @@ const SLIDER: SliderStyle = SliderStyle {
     thumb_width: 12.0,
     thumb_fill: THUMB_FILL,
 };
-/// A checkbox box's side, in logical pixels.
-const CHECK_SIZE: f32 = 16.0;
 /// The minimum width of a slider row's trailing value readout.
 const VALUE_WIDTH: f32 = 44.0;
 
@@ -122,10 +121,6 @@ const CONTROL_BORDER: Color = Color::srgb(0.4, 0.5, 0.62);
 const TRACK_FILL: Color = Color::srgb(0.16, 0.19, 0.25);
 /// A slider thumb's fill.
 const THUMB_FILL: Color = Color::srgb(0.62, 0.72, 0.86);
-/// A checkbox box's fill while unchecked.
-const CHECK_OFF: Color = Color::srgb(0.12, 0.14, 0.18);
-/// A checkbox box's fill while checked.
-const CHECK_ON: Color = Color::srgb(0.3, 0.7, 0.45);
 /// A button's border.
 const BUTTON_BORDER: Color = Color::srgb(0.3, 0.34, 0.42);
 /// A button's fill.
@@ -1057,10 +1052,6 @@ struct PhotoValueLabel {
     integer: bool,
 }
 
-/// Marks a setting checkbox's box, so its fill tracks `Checked`.
-#[derive(Component, Debug, Clone, Copy)]
-struct PhotoCheckboxBox;
-
 /// Owns the Phototools window: the floater chrome and deferred content, the
 /// environment controls, and the control visuals.
 #[derive(Debug, Clone, Copy, Default)]
@@ -1079,14 +1070,7 @@ impl Plugin for PhototoolsPlugin {
                 Startup,
                 spawn_phototools_floater.after(UiScaffoldSystems::SpawnRoot),
             )
-            .add_systems(
-                Update,
-                (
-                    sync_environment_controls,
-                    update_photo_values,
-                    drive_photo_checkboxes,
-                ),
-            )
+            .add_systems(Update, (sync_environment_controls, update_photo_values))
             // Chained, and push first: the push is what sets the `ours` latch
             // the capture consumes in the same frame, so a drag never reads its
             // own write back through the lossy rotation round trip.
@@ -1290,23 +1274,26 @@ fn spawn_label(commands: &mut Commands, parent: Entity, key: &'static str) {
 
 /// Spawn a checkbox row.
 fn spawn_check_row(commands: &mut Commands, parent: Entity, row_def: &PhotoRow) {
-    let row_entity = spawn_row_shell(commands, parent, row_def);
-    commands.spawn((
-        bound_checkbox(row_binding(row_def)),
-        Node {
-            width: Val::Px(CHECK_SIZE),
-            height: Val::Px(CHECK_SIZE),
-            border: UiRect::all(Val::Px(2.0)),
-            flex_shrink: 0.0,
-            ..default()
+    // No row-shell label here: the caption is the widget's own, so that clicking
+    // it toggles (a sibling label is not part of the checkbox and would be
+    // inert), and so that the box leads the caption the way the reference's
+    // `<check_box label="…" left="3">` does — which is also what keeps a column
+    // of boxes aligned whatever the captions' lengths.
+    let row_entity = spawn_row_node(commands, parent, row_def);
+    let checkbox = spawn_checkbox(
+        commands,
+        row_entity,
+        &CheckboxSpec {
+            element: row_def.element,
+            label: row_def.label.to_owned(),
+            tab_index: 0,
+            font_size: FONT,
+            translate_label: true,
         },
-        BorderColor::all(CONTROL_BORDER),
-        BackgroundColor(CHECK_OFF),
-        TabIndex(0),
-        PhotoCheckboxBox,
-        Name::new(format!("{}:checkbox", row_def.element)),
-        ChildOf(row_entity),
-    ));
+    );
+    commands
+        .entity(checkbox.checkbox)
+        .insert(bound_checkbox(row_binding(row_def)));
 }
 
 /// Spawn a slider row with its trailing readout.
@@ -1409,15 +1396,21 @@ fn spawn_combo_row(
     }
 }
 
-/// The row node and its label, shared by all three control kinds.
-fn spawn_row_shell(commands: &mut Commands, parent: Entity, row_def: &PhotoRow) -> Entity {
-    let row_entity = commands
+/// The bare row node, without a caption — for the checkbox row, whose caption
+/// belongs to the widget.
+fn spawn_row_node(commands: &mut Commands, parent: Entity, row_def: &PhotoRow) -> Entity {
+    commands
         .spawn((
             row_node(),
             Name::new(format!("phototools:row:{}", row_def.setting)),
             ChildOf(parent),
         ))
-        .id();
+        .id()
+}
+
+/// The row node and its leading label, shared by the slider and combo rows.
+fn spawn_row_shell(commands: &mut Commands, parent: Entity, row_def: &PhotoRow) -> Entity {
+    let row_entity = spawn_row_node(commands, parent, row_def);
     spawn_label(commands, row_entity, row_def.label);
     row_entity
 }
@@ -1520,18 +1513,6 @@ const fn i32_to_f32(value: i32) -> f32 {
 )]
 const fn u32_to_f32(value: u32) -> f32 {
     value as f32
-}
-
-/// Colour each checkbox's box from its `Checked` state.
-fn drive_photo_checkboxes(
-    mut boxes: Query<(&mut BackgroundColor, Has<Checked>), With<PhotoCheckboxBox>>,
-) {
-    for (mut fill, checked) in &mut boxes {
-        let target = if checked { CHECK_ON } else { CHECK_OFF };
-        if fill.0 != target {
-            fill.0 = target;
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1691,24 +1672,24 @@ fn spawn_specimen_check_row(
     checked: bool,
 ) {
     let row_entity = commands.spawn((specimen_row(), ChildOf(parent))).id();
-    commands.spawn((
-        Text::new(cx.text(label)),
-        cx.font(UiFont::Sans),
-        text_role(LABEL_COLOR),
-        ChildOf(row_entity),
-    ));
-    commands.spawn((
-        Node {
-            width: Val::Px(CHECK_SIZE),
-            height: Val::Px(CHECK_SIZE),
-            border: UiRect::all(Val::Px(2.0)),
-            flex_shrink: 0.0,
-            ..default()
+    // The real widget, caption and all, so the specimen shows what a skin's
+    // rules do — and shows the shape the live rows have, box leading its own
+    // clickable caption, rather than a box beside a label that is not part of
+    // it.
+    let specimen = spawn_checkbox(
+        commands,
+        row_entity,
+        &CheckboxSpec {
+            element: "phototools-specimen",
+            label: cx.text(label),
+            tab_index: 0,
+            font_size: FONT,
+            translate_label: false,
         },
-        BorderColor::all(CONTROL_BORDER),
-        BackgroundColor(if checked { CHECK_ON } else { CHECK_OFF }),
-        ChildOf(row_entity),
-    ));
+    );
+    if checked {
+        commands.entity(specimen.checkbox).insert(Checked);
+    }
 }
 
 /// A static slider-looking specimen row.
