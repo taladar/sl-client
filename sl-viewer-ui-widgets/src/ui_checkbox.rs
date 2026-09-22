@@ -11,8 +11,7 @@
 //! # The state model is the selector one, and there is no paint system
 //!
 //! A checkbox has exactly the two states the engine already tracks —
-//! [`Checked`](bevy::ui::Checked) and
-//! [`InteractionDisabled`](bevy::ui::InteractionDisabled), which `bevy_flair` syncs to
+//! [`Checked`] and [`InteractionDisabled`], which `bevy_flair` syncs to
 //! `:checked` and `:disabled` — so every one of its four looks is a rule in
 //! `common.css` and **nothing here paints**. That is not tidiness: the
 //! reference expresses checked / unchecked / pressed / disabled as six separate
@@ -46,6 +45,7 @@
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::LineHeight;
+use bevy::ui::{Checked, InteractionDisabled};
 use bevy::ui_widgets::{Checkbox, checkbox_self_update};
 use bevy_flair::style::components::{ClassList, PseudoElementsSupport};
 use sl_viewer_ui_core::i18n::Translated;
@@ -212,10 +212,74 @@ pub fn spawn_checkbox(
     }
 }
 
+/// Gallery element: the four looks a skin has to dress, side by side.
+///
+/// All four at once because they are a *set*: a skin author changing
+/// `--check-bg-checked` needs to see it against the resting box, and the two
+/// refused states are the pair that is easiest to get wrong — a greyed box with
+/// a mark that stayed bright, or a refused empty box that still looks live.
+///
+/// The refused pair carry `InteractionDisabled`, which is also what makes them
+/// inert here: the gallery's specimens are live widgets, so the two enabled
+/// boxes really do tick when clicked.
+pub fn spawn_checkbox_element(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: sl_viewer_ui_core::ui_element::ElementCx,
+) -> Entity {
+    let column = commands
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(6.0),
+                ..default()
+            },
+            Name::new("checkbox-states"),
+            ChildOf(parent),
+        ))
+        .id();
+    for (element, caption, checked, refused) in [
+        ("checkbox-resting", "Show property lines", false, false),
+        ("checkbox-checked", "Play media automatically", true, false),
+        (
+            "checkbox-refused",
+            "Allow other residents to fly",
+            false,
+            true,
+        ),
+        (
+            "checkbox-refused-checked",
+            "Everyone can see this",
+            true,
+            true,
+        ),
+    ] {
+        let spawned = spawn_checkbox(
+            commands,
+            column,
+            &CheckboxSpec {
+                element,
+                label: cx.text(caption),
+                tab_index: 0,
+                font_size: cx.font_size,
+                translate_label: false,
+            },
+        );
+        if checked {
+            commands.entity(spawned.checkbox).insert(Checked);
+        }
+        if refused {
+            commands
+                .entity(spawned.checkbox)
+                .insert(InteractionDisabled);
+        }
+    }
+    column
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy::ui::Checked;
     use bevy::ui_widgets::ValueChange;
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_viewer_testkit::{LayoutTest, overflow_violations, settle, spawn_under_root};

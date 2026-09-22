@@ -217,6 +217,15 @@ pub const ELEMENTS: &[UiElement] = &[
         spawn: crate::ui_tab::spawn_tabs_inline_end,
     },
     UiElement {
+        id: "checkbox-states",
+        summary: "The checkbox widget (`crate::ui_checkbox`) in all four of the looks a skin has \
+                  to dress: resting, ticked, refused and refused-while-ticked. The widget paints \
+                  none of them — `.sk-checkbox`, `:checked` and `:disabled` in `common.css` do, \
+                  and the tick itself is that stylesheet's `content` glyph — so this is the \
+                  element a skin author checks a new palette against.",
+        spawn: crate::ui_checkbox::spawn_checkbox_element,
+    },
+    UiElement {
         id: "radio-group-row",
         summary: "A radio-button group flowing along the inline axis (`crate::ui_radio`): \
                   mutually-exclusive options with a filled-dot indicator, one selected, the group \

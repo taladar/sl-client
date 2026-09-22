@@ -36,6 +36,10 @@
 use crate::world_api::{MatChannel, MatMedia, MatModeState, PbrChannel};
 use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
+use bevy::ui::Checked;
+use bevy::ui_widgets::ValueChange;
+
+use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use bevy::text::{EditableText, FontCx, LayoutCx};
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
@@ -44,10 +48,7 @@ use sl_client_bevy::{
 };
 
 use crate::edit_params::set_disabled_class;
-use crate::edit_tool::{
-    BuildTabPages, CHECKED_GLYPH, LABEL_CLASS, TOOL_FONT_SIZE, UNCHECKED_GLYPH, VALUE_CLASS,
-    spawn_row_label,
-};
+use crate::edit_tool::{BuildTabPages, LABEL_CLASS, TOOL_FONT_SIZE, VALUE_CLASS, spawn_row_label};
 use crate::face_material::FaceMaterial;
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::intents::TexturePicked;
@@ -409,10 +410,6 @@ enum TexInfo {
     /// Which faces the edits will hit (the selected-face count, or "all faces").
     Faces,
 }
-
-/// A toggle row's check-glyph marker.
-#[derive(Component, Debug, Clone, Copy)]
-struct TexToggleGlyph(TexToggle);
 
 /// Tags a Texture-tab combo with the packed enum it drives, so the combo sync
 /// and the [`ComboChanged`] handler map the combo back to its attribute.
@@ -906,8 +903,8 @@ fn spawn_tex_field(commands: &mut Commands, parent: Entity, field: TexField, tab
     commands.entity(entity).insert((field, TexControl));
 }
 
-/// Spawn one Texture-tab toggle row (check glyph + label); returns the toggle
-/// row so the caller can tag it (e.g. with a `ShowWhen`).
+/// Spawn one Texture-tab toggle — the shared checkbox widget; returns it so the
+/// caller can tag it (e.g. with a `ShowWhen`).
 fn spawn_tex_toggle(
     commands: &mut Commands,
     parent: Entity,
@@ -917,41 +914,22 @@ fn spawn_tex_toggle(
 ) -> Entity {
     let index = *tab_index;
     *tab_index = tab_index.saturating_add(1);
-    let toggle_row = commands
-        .spawn((
-            bevy::ui_widgets::Button,
-            bevy::input_focus::tab_navigation::TabIndex(index),
-            Node {
-                align_items: AlignItems::Center,
-                ..row(Val::Px(6.0))
-            },
-            Pickable::default(),
-            toggle,
-            TexControl,
-            Name::new(format!("build-tex:{label_key}")),
-            ChildOf(parent),
-        ))
-        .id();
-    commands.spawn((
-        Text::new(UNCHECKED_GLYPH),
-        UiFont::Sans.at(TOOL_FONT_SIZE),
-        TextColor(Color::WHITE),
-        ClassList::new_with_classes([VALUE_CLASS]),
-        TexToggleGlyph(toggle),
-        Pickable::IGNORE,
-        ChildOf(toggle_row),
-    ));
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(TOOL_FONT_SIZE),
-        TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
-        ClassList::new_with_classes([LABEL_CLASS]),
-        Pickable::IGNORE,
-        ChildOf(toggle_row),
-    ));
-    commands.entity(toggle_row).observe(handle_tex_toggle_press);
-    toggle_row
+    let checkbox = spawn_checkbox(
+        commands,
+        parent,
+        &CheckboxSpec {
+            element: label_key,
+            label: label_key.to_owned(),
+            tab_index: index,
+            font_size: TOOL_FONT_SIZE,
+            translate_label: true,
+        },
+    );
+    commands
+        .entity(checkbox.checkbox)
+        .insert((toggle, TexControl))
+        .observe(handle_tex_toggle_press);
+    checkbox.checkbox
 }
 
 /// Spawn one Texture-tab combo box for `cycle`, its options the cycle's value
@@ -1072,13 +1050,13 @@ fn face_set_signature(faces: Option<&std::collections::HashSet<PrimFaceId>>) -> 
 struct TexWidgets<'w, 's> {
     /// The numeric fields.
     fields: Query<'w, 's, (Entity, &'static TexField, &'static mut EditableText)>,
-    /// The toggle glyphs.
-    glyphs: Query<'w, 's, (&'static TexToggleGlyph, &'static mut Text), Without<TexInfo>>,
+    /// The toggle checkboxes, with the marker their tick follows.
+    toggles: Query<'w, 's, (Entity, &'static TexToggle, Has<Checked>)>,
     /// The bump / shiny / mapping combos, whose selection index the sync sets from
     /// the representative face (the combo widget reconciles the visible value).
     combos: Query<'w, 's, (&'static TexCombo, &'static mut ComboSelection)>,
     /// The info-line texts.
-    infos: Query<'w, 's, (&'static TexInfo, &'static mut Text), Without<TexToggleGlyph>>,
+    infos: Query<'w, 's, (&'static TexInfo, &'static mut Text)>,
     /// The tint-colour swatch value (set from the representative face).
     color_swatch: Query<'w, 's, &'static mut ColorSwatchValue>,
     /// The diffuse-texture swatch value (set from the representative face).
@@ -1254,10 +1232,14 @@ fn sync_texture_widgets(
                 );
             }
         }
-        for (_glyph, mut text) in &mut widgets.glyphs {
-            if text.0 != UNCHECKED_GLYPH {
-                UNCHECKED_GLYPH.clone_into(&mut text.0);
-            }
+        // Nothing selected: every toggle reads as off.
+        let cleared: Vec<Entity> = widgets
+            .toggles
+            .iter()
+            .filter_map(|(entity, _toggle, ticked)| ticked.then_some(entity))
+            .collect();
+        for entity in cleared {
+            widgets.commands.entity(entity).remove::<Checked>();
         }
         for (_combo, mut combo_selection) in &mut widgets.combos {
             if combo_selection.active != 0 {
@@ -1300,14 +1282,16 @@ fn sync_texture_widgets(
             );
         }
     }
-    for (glyph, mut text) in &mut widgets.glyphs {
-        let want = if glyph.0.get(&face) {
-            CHECKED_GLYPH
-        } else {
-            UNCHECKED_GLYPH
-        };
-        if text.0 != want {
-            want.clone_into(&mut text.0);
+    let ticks: Vec<(Entity, bool, bool)> = widgets
+        .toggles
+        .iter()
+        .map(|(entity, toggle, ticked)| (entity, toggle.get(&face), ticked))
+        .collect();
+    for (entity, on, ticked) in ticks {
+        if on && !ticked {
+            widgets.commands.entity(entity).insert(Checked);
+        } else if !on && ticked {
+            widgets.commands.entity(entity).remove::<Checked>();
         }
     }
     for (combo, mut selection) in &mut widgets.combos {
@@ -1410,14 +1394,13 @@ fn commit_texture_fields(
 
 /// Flip a Texture-tab toggle on the selected faces.
 fn handle_tex_toggle_press(
-    press: On<Pointer<Press>>,
+    change: On<ValueChange<bool>>,
     toggles: Query<&TexToggle>,
     mut tex: TexFaceEdit,
 ) {
-    if press.button != PointerButton::Primary {
-        return;
-    }
-    let Ok(&toggle) = toggles.get(press.entity) else {
+    // The faces decide, not the box: the widget has moved its own tick already
+    // and the sync pass puts it back where the selection says.
+    let Ok(&toggle) = toggles.get(change.source) else {
         return;
     };
     // Read the current value off the primary's representative face, then flip it

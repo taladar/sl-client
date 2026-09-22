@@ -53,7 +53,8 @@ use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::EditableText;
-use bevy::ui_widgets::{ControlOrientation, Scrollbar, ScrollbarThumb};
+use bevy::ui::Checked;
+use bevy::ui_widgets::{ControlOrientation, Scrollbar, ScrollbarThumb, ValueChange};
 use sl_client_bevy::{
     AgentKey, AvatarClassified, AvatarGroupMembership, AvatarPick, AvatarProperties,
     ClassifiedCategory, ClassifiedInfo, ClassifiedKey, ClassifiedUpdate, Command, FriendKey,
@@ -77,6 +78,7 @@ use crate::skin::text_role;
 use crate::social::FriendsModel;
 use crate::social::GroupsModel;
 use crate::ui::{column, row};
+use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonSpec, LabeledRowSpec, UiLabel};
 use crate::ui_tab::{
@@ -96,9 +98,6 @@ const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A dimmer secondary label.
 const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
-
-/// A toggle's check glyph colour.
-const CHECK_COLOR: Color = Color::srgb(0.55, 0.85, 0.60);
 
 /// The accent colour for a clickable group name in the 2nd-Life group list.
 const GROUP_LINK_COLOR: Color = Color::srgb(0.52, 0.68, 0.95);
@@ -123,11 +122,6 @@ const GROUP_DOUBLE_CLICK_SECS: f32 = 0.4;
 const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
 /// A button's border colour.
 const BUTTON_BORDER: Color = Color::srgb(0.34, 0.40, 0.52);
-
-/// The checked glyph.
-const CHECKED_GLYPH: &str = "\u{2611}";
-/// The unchecked glyph.
-const UNCHECKED_GLYPH: &str = "\u{2610}";
 
 /// The profile / first-life picture edge, in logical pixels (the reference's
 /// second-life picture control is 158×158).
@@ -437,8 +431,9 @@ struct SecondLifeHandles {
     about: Option<Entity>,
     /// Whether the About has been filled.
     about_built: bool,
-    /// The own-profile "show in search" check glyph (updated in place).
-    show_in_search_glyph: Option<Entity>,
+    /// The own-profile "show in search" checkbox (its `Checked` is moved in
+    /// place).
+    show_in_search_check: Option<Entity>,
     /// The "no groups" placeholder label, shown while the group list is empty.
     groups_none: Option<Entity>,
     /// A signature of the sorted group set the rows were last built for — the rows
@@ -905,6 +900,9 @@ struct ProfileSources<'w, 's> {
     groups_model: Res<'w, GroupsModel>,
     /// The texts a rebuilt tab writes.
     texts: Query<'w, 's, &'static mut Text>,
+    /// Which checkboxes carry their tick, so one is only moved when it
+    /// disagrees with the profile.
+    ticked: Query<'w, 's, Has<Checked>>,
     /// What spawns the tab contents.
     commands: Commands<'w, 's>,
 }
@@ -986,6 +984,7 @@ fn rebuild_one_profile(
                 state,
                 ui,
                 &mut sources.texts,
+                &sources.ticked,
                 &sources.groups_model,
             );
             continue;
@@ -1213,7 +1212,7 @@ fn build_second_life_structure(
     );
 
     if build.own {
-        ui.sl_handles.show_in_search_glyph = Some(spawn_check_button(
+        ui.sl_handles.show_in_search_check = Some(spawn_check_button(
             commands,
             panel,
             "profile-show-in-search",
@@ -1395,6 +1394,7 @@ fn update_second_life(
     state: &ProfileState,
     ui: &mut ProfileUi,
     texts: &mut Query<&mut Text>,
+    ticked: &Query<Has<Checked>>,
     groups_model: &GroupsModel,
 ) {
     ui_text::set_node_text(
@@ -1410,9 +1410,10 @@ fn update_second_life(
             &build.avatars.label_text(partner),
         );
     }
-    set_check_glyph(
-        texts,
-        ui.sl_handles.show_in_search_glyph,
+    set_check_marker(
+        commands,
+        ticked,
+        ui.sl_handles.show_in_search_check,
         state.show_in_search,
     );
     // The **own** profile lists the full membership set (the reference shows your
@@ -2293,8 +2294,11 @@ fn spawn_cycle_button(
         .id()
 }
 
-/// A clickable check-glyph toggle dispatching `action`, returning its glyph text
-/// node so the checked state can be updated in place ([`set_check_glyph`]).
+/// A checkbox dispatching `action`, returning its checkbox entity so the
+/// checked state can be moved in place ([`set_check_marker`]).
+///
+/// The Fluent key is the widget's element id, so each toggle is addressable by
+/// its own name.
 fn spawn_check_button(
     commands: &mut Commands,
     parent: Entity,
@@ -2302,49 +2306,47 @@ fn spawn_check_button(
     action: ProfileAction,
     on: bool,
 ) -> Entity {
-    let host = commands
-        .spawn((
-            Button,
-            action,
-            Node {
-                align_items: AlignItems::Center,
-                ..row(Val::Px(4.0))
-            },
-            Pickable::default(),
-            Name::new(format!("profile-toggle:{label_key}")),
-            ChildOf(parent),
-        ))
-        .observe(on_profile_action)
-        .id();
-    let glyph = commands
-        .spawn((
-            Text::new(if on { CHECKED_GLYPH } else { UNCHECKED_GLYPH }),
-            UiFont::Sans.at(PROFILE_FONT_SIZE),
-            TextColor(if on { CHECK_COLOR } else { DIM_LABEL_COLOR }),
-            Pickable::IGNORE,
-            ChildOf(host),
-        ))
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(PROFILE_FONT_SIZE),
-        text_role(LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(host),
-    ));
-    glyph
+    let checkbox = spawn_checkbox(
+        commands,
+        parent,
+        &CheckboxSpec {
+            element: label_key,
+            label: label_key.to_owned(),
+            tab_index: 0,
+            font_size: PROFILE_FONT_SIZE,
+            translate_label: true,
+        },
+    );
+    commands
+        .entity(checkbox.checkbox)
+        .insert(action)
+        .observe(on_profile_check);
+    if on {
+        commands.entity(checkbox.checkbox).insert(Checked);
+    }
+    checkbox.checkbox
 }
 
-/// Set a check-button glyph's checked state in place (no respawn).
-fn set_check_glyph(texts: &mut Query<&mut Text>, glyph: Option<Entity>, on: bool) {
-    if let Some(glyph) = glyph
-        && let Ok(mut text) = texts.get_mut(glyph)
-    {
-        let wanted = if on { CHECKED_GLYPH } else { UNCHECKED_GLYPH };
-        if text.0 != wanted {
-            wanted.clone_into(&mut text.0);
-        }
+/// Put a checkbox's tick where the profile says it belongs (no respawn).
+///
+/// `Checked` is the whole of it: `.sk-checkbox:checked` draws the mark, so this
+/// writes no glyph and no colour.
+fn set_check_marker(
+    commands: &mut Commands,
+    ticked: &Query<Has<Checked>>,
+    checkbox: Option<Entity>,
+    on: bool,
+) {
+    let Some(checkbox) = checkbox else {
+        return;
+    };
+    let Ok(is_ticked) = ticked.get(checkbox) else {
+        return;
+    };
+    if on && !is_ticked {
+        commands.entity(checkbox).insert(Checked);
+    } else if !on && is_ticked {
+        commands.entity(checkbox).remove::<Checked>();
     }
 }
 
@@ -2652,10 +2654,10 @@ fn on_profile_action(
                 description: String::new(),
             }));
         }
-        ProfileAction::ToggleShowInSearch => {
-            state.show_in_search = !state.show_in_search;
-            dirty.mark(ProfileTab::SecondLife);
-        }
+        // The two checkbox actions arrive as a `ValueChange` on the checkbox
+        // itself (`on_profile_check`) rather than as a press on a button, so
+        // there is nothing to do for them here.
+        ProfileAction::ToggleShowInSearch | ProfileAction::ToggleAutoRenew => {}
         ProfileAction::SaveProfile => {
             let Some(props) = state.properties.clone() else {
                 return;
@@ -2893,12 +2895,41 @@ fn on_profile_action(
                 dirty.mark(ProfileTab::Classifieds);
             }
         }
+    }
+}
+
+/// A profile checkbox was toggled.
+///
+/// Its own observer, because the widget announces a **value** where a button
+/// announces a press: the draft takes the value the box now shows rather than
+/// flipping a flag of its own and hoping the two agree.
+fn on_profile_check(
+    change: On<ValueChange<bool>>,
+    actions: Query<&ProfileAction>,
+    host: ProfileHost,
+    mut instances: Query<(&mut ProfileState, &mut ProfileDirty)>,
+) {
+    let Ok(action) = actions.get(change.source) else {
+        return;
+    };
+    let Some(window) = host_floater(change.source, &host.parents, &host.floaters) else {
+        return;
+    };
+    let Ok((mut state, mut dirty)) = instances.get_mut(window) else {
+        return;
+    };
+    match action {
+        ProfileAction::ToggleShowInSearch => {
+            state.show_in_search = change.value;
+            dirty.mark(ProfileTab::SecondLife);
+        }
         ProfileAction::ToggleAutoRenew => {
             if let Some(draft) = edited_classified_draft(&mut state) {
-                draft.auto_renew = !draft.auto_renew;
+                draft.auto_renew = change.value;
                 dirty.mark(ProfileTab::Classifieds);
             }
         }
+        _not_a_checkbox => {}
     }
 }
 

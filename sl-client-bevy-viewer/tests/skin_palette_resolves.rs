@@ -457,12 +457,16 @@ mod test {
                     ChildOf(box_node),
                 ))
                 .id();
-            (box_node, tick)
+            let caption = app
+                .world_mut()
+                .spawn((Text::default(), ClassList::new("sk-text"), ChildOf(row)))
+                .id();
+            (box_node, tick, caption)
         };
-        let (off_box, off_tick) = spawn_box(false, false);
-        let (on_box, on_tick) = spawn_box(true, false);
-        let (refused_box, refused_tick) = spawn_box(false, true);
-        let (refused_on_box, refused_on_tick) = spawn_box(true, true);
+        let (off_box, off_tick, off_caption) = spawn_box(false, false);
+        let (on_box, on_tick, _on_caption) = spawn_box(true, false);
+        let (refused_box, refused_tick, refused_caption) = spawn_box(false, true);
+        let (refused_on_box, refused_on_tick, _refused_on_caption) = spawn_box(true, true);
 
         load(&mut app, &handle)?;
         app.update();
@@ -541,6 +545,24 @@ mod test {
             fill(refused_on_box),
             Some(Srgba::hex("232730").map_err(|error| error.to_string())?),
             "disabled must beat checked on the box"
+        );
+        // And the caption greys with the box. A greyed box beside a caption in
+        // full contrast reads as an empty box rather than as a setting this
+        // window will not let you change — the same pairing `.sk-button` makes.
+        let caption_color = |entity| {
+            app.world()
+                .get::<TextColor>(entity)
+                .map(|color| color.0.to_srgba())
+        };
+        assert_eq!(
+            caption_color(off_caption),
+            Some(Srgba::hex("e6ebf2").map_err(|error| error.to_string())?),
+            "an enabled caption is ordinary body text"
+        );
+        assert_eq!(
+            caption_color(refused_caption),
+            Some(Srgba::hex("737d8f").map_err(|error| error.to_string())?),
+            "a refused checkbox must grey its caption, not only its box"
         );
         Ok(())
     }

@@ -63,16 +63,15 @@ use sl_settings::{Scope, SettingValue};
 use sl_viewer_notifications::{NotificationResponse, ShowNotification};
 use sl_viewer_settings::ViewerSettings;
 use sl_viewer_ui_widgets::settings_binding::{SettingBinding, bound_checkbox, bound_slider};
+use sl_viewer_ui_widgets::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use sl_viewer_ui_widgets::ui_slider::{SliderStyle, spawn_slider};
 use sl_viewer_world_scene::parcel_borders::SETTING_SHOW_PARCEL_OWNERS;
 
 use crate::coords::{bevy_to_sl_vec, sl_to_bevy_vec};
 use crate::edit_params::set_disabled_class;
-use crate::edit_tool::{
-    CHECKED_GLYPH, LABEL_CLASS, TOOL_FONT_SIZE, UNCHECKED_GLYPH, VALUE_CLASS, spawn_row_label,
-};
+use crate::edit_tool::{LABEL_CLASS, TOOL_FONT_SIZE, VALUE_CLASS, spawn_row_label};
 use crate::gizmos::{GizmoInteraction, on_gizmo_layer};
-use crate::i18n::{TransArgs, Translated, Translator};
+use crate::i18n::{TransArgs, Translator};
 use crate::intents::{AboutLandSubject, OpenAboutLand};
 use crate::objects::SceneObject;
 use crate::ui::{UiPanelShown, UiPointerClaim, column, row};
@@ -498,8 +497,6 @@ struct LandPanelUi {
     subdivide: Entity,
     /// The **Join** caption, greyed when the selection cannot be joined.
     join: Entity,
-    /// The **Show owners** checkbox's glyph node.
-    owners_glyph: Entity,
 }
 
 /// A land rectangle awaiting the user's answer to a confirmation, so the
@@ -1199,7 +1196,7 @@ pub(crate) fn spawn_land_panel(commands: &mut Commands, parent: Entity) {
 
     // Show owners: the in-world ownership tint, bound to the setting the terrain
     // overlay reads.
-    let owners_glyph = spawn_owners_checkbox(commands, panel, 47);
+    spawn_owners_checkbox(commands, panel, 47);
 
     commands.insert_resource(LandPanelUi {
         panel,
@@ -1208,7 +1205,6 @@ pub(crate) fn spawn_land_panel(commands: &mut Commands, parent: Entity) {
         about_land,
         subdivide,
         join,
-        owners_glyph,
     });
 }
 
@@ -1290,43 +1286,29 @@ fn spawn_land_button(
 }
 
 /// Spawn the **Show owners** checkbox, bound to the setting the in-world
-/// ownership tint reads. Returns its glyph node, which the sync pass rewrites.
-fn spawn_owners_checkbox(commands: &mut Commands, parent: Entity, tab_index: i32) -> Entity {
-    let row_entity = commands
-        .spawn((
-            bound_checkbox(SettingBinding::global(SETTING_SHOW_PARCEL_OWNERS)),
-            bevy::input_focus::tab_navigation::TabIndex(tab_index),
-            Node {
-                align_items: AlignItems::Center,
-                ..row(Val::Px(6.0))
-            },
-            Pickable::default(),
-            Name::new("build-land:show-owners"),
-            ChildOf(parent),
-        ))
-        .id();
-    let glyph = commands
-        .spawn((
-            Text::new(UNCHECKED_GLYPH),
-            UiFont::Sans.at(TOOL_FONT_SIZE),
-            // A skinless fallback; the skin recolours via the class token.
-            TextColor(Color::WHITE),
-            ClassList::new_with_classes([VALUE_CLASS]),
-            Pickable::IGNORE,
-            ChildOf(row_entity),
-        ))
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new("build-land-show-owners"),
-        UiFont::Sans.at(TOOL_FONT_SIZE),
-        // A skinless fallback; the skin recolours via the class token.
-        TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
-        ClassList::new_with_classes([LABEL_CLASS]),
-        Pickable::IGNORE,
-        ChildOf(row_entity),
-    ));
-    glyph
+/// ownership tint reads.
+///
+/// Nothing is returned and nothing is synced: `bound_checkbox` moves the
+/// widget's `Checked` from the store and back, and `.sk-checkbox:checked` draws
+/// the tick — so a setting changed in Preferences reaches this box with no code
+/// in this panel at all.
+fn spawn_owners_checkbox(commands: &mut Commands, parent: Entity, tab_index: i32) {
+    let checkbox = spawn_checkbox(
+        commands,
+        parent,
+        &CheckboxSpec {
+            element: "build-land-show-owners",
+            label: "build-land-show-owners".to_owned(),
+            tab_index,
+            font_size: TOOL_FONT_SIZE,
+            translate_label: true,
+        },
+    );
+    commands
+        .entity(checkbox.checkbox)
+        .insert(bound_checkbox(SettingBinding::global(
+            SETTING_SHOW_PARCEL_OWNERS,
+        )));
 }
 
 /// The panel's write targets, bundled so the sync pass stays inside Bevy's
@@ -1409,24 +1391,6 @@ fn sync_land_panel(
     );
     set_enabled(&mut nodes.classes, ui.subdivide, can_divide(&selection));
     set_enabled(&mut nodes.classes, ui.join, can_join(&selection));
-
-    // The checkbox glyph follows the bound setting, wherever it was changed
-    // (this panel, the World menu, the debug-settings editor).
-    let owners = settings.is_some_and(|settings| {
-        settings
-            .store()
-            .get_bool(SETTING_SHOW_PARCEL_OWNERS)
-            .unwrap_or(false)
-    });
-    set_text(
-        &mut nodes.texts,
-        ui.owners_glyph,
-        if owners {
-            CHECKED_GLYPH
-        } else {
-            UNCHECKED_GLYPH
-        },
-    );
 }
 
 /// A selected area as whole square metres, for the read-out.

@@ -85,6 +85,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
 use bevy::text::EditableText;
+use bevy::ui::Checked;
 use bevy::ui_widgets::{
     Button, Slider, SliderRange, SliderStep, SliderThumb, SliderValue, ValueChange,
 };
@@ -96,6 +97,7 @@ use crate::floater::{
     Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterOp, FloaterOwner, FloaterSpec,
     FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater, picker_identity,
 };
+use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use sl_settings::{Scope, SettingValue};
 use sl_viewer_settings::ViewerSettings;
@@ -638,7 +640,7 @@ struct ColorPickerUi {
     /// The eyedropper button, latched while it is armed.
     pipette: Entity,
     /// The Apply-now checkbox's glyph node.
-    apply_glyph: Entity,
+    apply_check: Entity,
 }
 
 /// Which value a slider drives.
@@ -1049,7 +1051,7 @@ fn build_color_picker_body(commands: &mut Commands, parent: Entity) -> (Entity, 
             ChildOf(content),
         ))
         .id();
-    let apply_glyph = spawn_apply_now_toggle(commands, buttons);
+    let apply_check = spawn_apply_now_toggle(commands, buttons);
     let replies = commands
         .spawn((
             Node {
@@ -1080,7 +1082,7 @@ fn build_color_picker_body(commands: &mut Commands, parent: Entity) -> (Entity, 
             hex,
             palette,
             pipette,
-            apply_glyph,
+            apply_check,
         },
     )
 }
@@ -1403,48 +1405,23 @@ fn spawn_pipette_button(commands: &mut Commands, parent: Entity) -> Entity {
 /// Spawn the Apply-now checkbox, returning its glyph node (which the sync
 /// repaints from the setting).
 fn spawn_apply_now_toggle(commands: &mut Commands, parent: Entity) -> Entity {
-    let toggle = commands
-        .spawn((
-            Button,
-            TabIndex(0),
-            Node {
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(6.0),
-                ..row(Val::Px(0.0))
-            },
-            ApplyNowToggle,
-            Pickable::default(),
-            Name::new("color-picker-apply-now"),
-            ChildOf(parent),
-        ))
-        .observe(on_apply_now_press)
-        .id();
-    let glyph = commands
-        .spawn((
-            Text::new(String::from(CHECKED_GLYPH)),
-            UiFont::Sans.at(PICKER_FONT),
-            text_role(HINT_COLOR),
-            Pickable::IGNORE,
-            ChildOf(toggle),
-        ))
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new("color-picker-apply-now"),
-        UiFont::Sans.at(PICKER_FONT),
-        TextColor(TEXT_COLOR),
-        ClassList::new_with_classes([VALUE_CLASS]),
-        Pickable::IGNORE,
-        ChildOf(toggle),
-    ));
-    glyph
+    let checkbox = spawn_checkbox(
+        commands,
+        parent,
+        &CheckboxSpec {
+            element: "color-picker-apply-now",
+            label: "color-picker-apply-now".to_owned(),
+            tab_index: 0,
+            font_size: PICKER_FONT,
+            translate_label: true,
+        },
+    );
+    commands
+        .entity(checkbox.checkbox)
+        .insert(ApplyNowToggle)
+        .observe(on_apply_now_press);
+    checkbox.checkbox
 }
-
-/// The checked box glyph.
-const CHECKED_GLYPH: &str = "\u{2611}";
-
-/// The unchecked box glyph.
-const UNCHECKED_GLYPH: &str = "\u{2610}";
 
 /// Spawn the 32-cell palette under `parent`, two rows of sixteen as the
 /// reference draws it.
@@ -2276,6 +2253,9 @@ struct PickerVisuals<'w, 's> {
     texts: Query<'w, 's, &'static mut Text>,
     /// The editable hex field.
     editables: Query<'w, 's, &'static mut EditableText>,
+    /// Which checkboxes carry their tick, so the apply-now mark moves only when
+    /// it disagrees with the flag.
+    ticked: Query<'w, 's, Has<Checked>>,
     /// What toggles the eyedropper / latched markers.
     commands: Commands<'w, 's>,
 }
@@ -2375,14 +2355,13 @@ fn sync_color_picker_visual(
             paint(&mut visuals.backgrounds, *cell, palette.entry(index));
         }
 
-        if let Ok(mut glyph) = visuals.texts.get_mut(ui.apply_glyph) {
-            let want = if apply_now.0 {
-                CHECKED_GLYPH
+        // The apply-now tick: a marker the skin draws from, moved only when it
+        // disagrees with the flag.
+        if apply_now.0 != visuals.ticked.get(ui.apply_check).unwrap_or(false) {
+            if apply_now.0 {
+                visuals.commands.entity(ui.apply_check).insert(Checked);
             } else {
-                UNCHECKED_GLYPH
-            };
-            if glyph.0 != want {
-                glyph.0 = String::from(want);
+                visuals.commands.entity(ui.apply_check).remove::<Checked>();
             }
         }
     }
@@ -2461,15 +2440,15 @@ fn apply_color_swatch_fill(
 
 /// The Apply-now checkbox: flip the setting the live stream is gated on.
 fn on_apply_now_press(
-    press: On<Pointer<Press>>,
+    change: On<ValueChange<bool>>,
     toggles: Query<(), With<ApplyNowToggle>>,
     mut apply_now: ResMut<ApplyColorImmediately>,
     settings: Option<ResMut<ViewerSettings>>,
 ) {
-    if press.button != PointerButton::Primary || !toggles.contains(press.entity) {
+    if !toggles.contains(change.source) {
         return;
     }
-    apply_now.0 = !apply_now.0;
+    apply_now.0 = change.value;
     // The store only remembers it. A host without one (the gallery, a test fold)
     // still flips the flag, which is what makes the control a control.
     if let Some(mut settings) = settings {
@@ -3132,10 +3111,19 @@ mod tests {
             .iter(app.world())
             .next()
             .ok_or("the picker has no Apply-now toggle")?;
-        press(&mut app, toggle);
+        // The toggle is the shared checkbox widget now, so it announces a
+        // **value** rather than a press: `bevy_ui_widgets` turns the click into
+        // this, and the picker's observer reads it. Triggered directly because
+        // what is in question is the flag, not the hit test.
+        app.world_mut().trigger(ValueChange {
+            source: toggle,
+            value: false,
+            is_final: true,
+        });
+        app.update();
         assert!(
             !app.world().resource::<ApplyColorImmediately>().0,
-            "a press flips it even with no settings store to persist it to"
+            "a toggle flips it even with no settings store to persist it to"
         );
 
         let before = app.world().resource::<Recorded>().picked.len();

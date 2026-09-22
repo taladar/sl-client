@@ -90,7 +90,6 @@ use bevy::input_focus::InputFocus;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::EditableText;
-use bevy::ui::Checked;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
 use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class, text_role};
@@ -121,6 +120,7 @@ use crate::settings_binding::{SettingBinding, bound_checkbox};
 use crate::skin_palette::SkinPalette;
 use crate::social::GroupsModel;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
@@ -200,15 +200,6 @@ const BUTTON_BORDER: Color = Color::srgb(0.40, 0.50, 0.62);
 
 /// A list's background tint behind its rows.
 const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
-
-/// The Notify checkbox's box, in logical pixels.
-const CHECK_SIZE: f32 = 14.0;
-
-/// The checkbox box's fill when unticked.
-const CHECK_OFF: Color = Color::srgba(0.0, 0.0, 0.0, 0.35);
-
-/// The checkbox box's fill when ticked — the same emerald the headings wear.
-const CHECK_ON: Color = HEADING_COLOR;
 
 // ---------------------------------------------------------------------------
 // Tables.
@@ -727,7 +718,6 @@ impl Plugin for ExperiencesPlugin {
                     track_maturity_filter,
                     rebuild_experience_views,
                     paint_experience_actions,
-                    paint_notify_checkbox,
                 )
                     .chain()
                     .before(layout_virtual_lists),
@@ -1145,55 +1135,20 @@ fn spawn_pane_table(commands: &mut Commands, panel: Entity, pane: Pane) -> PaneH
 /// reference's `notify_all`, which decides whether a recorded event also raises
 /// a toast.
 fn spawn_notify_checkbox(commands: &mut Commands, parent: Entity) {
-    let row_node = commands
-        .spawn((
-            Node {
-                align_items: AlignItems::Center,
-                ..row(Val::Px(5.0))
-            },
-            ChildOf(parent),
-        ))
-        .id();
-    commands.spawn((
-        bound_checkbox(SettingBinding::account(SETTING_NOTIFY_ALL)),
-        Node {
-            width: Val::Px(CHECK_SIZE),
-            height: Val::Px(CHECK_SIZE),
-            border: UiRect::all(Val::Px(2.0)),
-            ..default()
+    let checkbox = spawn_checkbox(
+        commands,
+        parent,
+        &CheckboxSpec {
+            element: "experiences-events-notify",
+            label: "experiences-events-notify".to_owned(),
+            tab_index: 9,
+            font_size: FONT_SIZE,
+            translate_label: true,
         },
-        BorderColor::all(BUTTON_BORDER),
-        BackgroundColor(CHECK_OFF),
-        TabIndex(9),
-        NotifyCheckboxBox,
-        Pickable::default(),
-        ChildOf(row_node),
-    ));
-    commands.spawn((
-        Text::default(),
-        Translated::new("experiences-events-notify"),
-        UiFont::Sans.at(FONT_SIZE),
-        text_role(TEXT_COLOR),
-        Pickable::IGNORE,
-        ChildOf(row_node),
-    ));
-}
-
-/// Marks the Notify checkbox's box so its fill can follow [`Checked`] (the
-/// headless widget carries the state; the visual is ours).
-#[derive(Component, Debug)]
-struct NotifyCheckboxBox;
-
-/// Keep the Notify checkbox's fill agreeing with its [`Checked`] state.
-fn paint_notify_checkbox(
-    mut boxes: Query<(&mut BackgroundColor, Has<Checked>), With<NotifyCheckboxBox>>,
-) {
-    for (mut fill, checked) in &mut boxes {
-        let wanted = if checked { CHECK_ON } else { CHECK_OFF };
-        if fill.0 != wanted {
-            fill.0 = wanted;
-        }
-    }
+    );
+    commands
+        .entity(checkbox.checkbox)
+        .insert(bound_checkbox(SettingBinding::account(SETTING_NOTIFY_ALL)));
 }
 
 /// Spawn one of the window's action buttons, wired to the shared observer.

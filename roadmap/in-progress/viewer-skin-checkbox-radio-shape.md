@@ -113,10 +113,40 @@ caption-less are the ones whose text is genuinely elsewhere: the alerts table
   differently depending on whether a stylesheet was loaded; it now occupies the
   same 14 px square the checkbox's box does.
 
-**Still to convert:** `avatar_profile.rs` (`spawn_check_button`),
-`about_land.rs` / `about_region.rs` (`spawn_check` + the three-state
-`set_check_visual`), `land_environment.rs`, `snapshot_floater.rs`
-(`set_check_glyph`), `group_profile.rs` (`set_toggle_glyph`), `edit_script.rs`,
-`edit_material_asset.rs`, `edit_tool.rs`, `inventory_filters.rs`,
-`inventory_properties.rs`, `experience_profile.rs`, `contact_sets_panel.rs`,
-`ui_color_picker.rs`. A gallery specimen for the widget itself is still owed.
+**Every call site is converted (2026-09-22).** The nineteen `CHECKED_GLYPH`
+declarations are gone, and so are the four colour-box painters
+(`drive_search_checkbox_visual`, `paint_notify_checkbox`,
+`sync_radar_limit_checkbox`, the my-environments fill loop): About Land, About
+Region, the land-environment override, the six Build Tools editors, the avatar
+and group profiles, contact sets, the radar, the inventory filters and item
+properties, the script editor, the material-asset editor, the snapshot floater,
+search, experiences, the notification toast's ignore box and the colour
+picker's apply-now toggle.
+
+Three shapes came out of it, and they are the thing to reuse when the next
+panel grows a checkbox:
+
+- **The panel owns the value.** A settings-bound box needs nothing at all:
+  `bound_checkbox` on the widget's checkbox entity, and the binding moves
+  `Checked` both ways.
+- **The grid owns the value.** About Land / Region, the Build Tools faces, the
+  parcel-override confirmation: the observer writes the draft or sends the
+  command, and a refusal *puts the tick back*, because the widget flips its own
+  marker before anyone asks whether the change is allowed. The sync pass is the
+  only other writer.
+- **Read-only is `InteractionDisabled`**, not a dim colour: the "You can" rows
+  of item properties, a group flag the agent cannot change, a script editor
+  opened on a no-modify item. `.sk-checkbox:disabled` greys box and caption
+  together.
+
+A gallery element (`checkbox-states`) shows all four looks side by side, and
+the contract table pins that the live two toggle on a click, `Enter` and
+`Space` while the refused two answer nothing.
+
+## Still open
+
+- `.sk-checkbox:disabled .sk-text` was added for the greyed caption; the
+  **image-backed** form ([[viewer-skin-image-backed-widgets]]) is still the
+  nine-slice swap this was built to allow.
+- The tick and ring hosts carry a zero-width space until
+  [[viewer-bevy-empty-text-measures-at-parley-defaults]] is fixed upstream.

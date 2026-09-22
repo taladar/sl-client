@@ -67,7 +67,7 @@ use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui::Checked;
-use bevy::ui_widgets::{Checkbox, ValueChange};
+use bevy::ui_widgets::ValueChange;
 use sl_client_bevy::{
     AssetKey, Command, FolderType, InventoryKey, Permissions, SettingsKind, SlCommand,
 };
@@ -87,6 +87,7 @@ use sl_viewer_ui_widgets::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, floater_shown, spawn_floater,
 };
 use sl_viewer_ui_widgets::menu::{MenuCommand, MenuDef, MenuItemDef, OpenContextMenu};
+use sl_viewer_ui_widgets::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use sl_viewer_ui_widgets::ui_search::{SearchFieldSpec, spawn_search_field};
 use sl_viewer_ui_widgets::ui_table::{
     TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells, TableSelectionMode,
@@ -98,12 +99,11 @@ use sl_viewer_world_api::rlv::{RlvSession, can_change_environment};
 use sl_viewer_world_scene::environment::LocalEnvironmentPick;
 
 use crate::settings_list::{
-    FILTER_KINDS, SettingsListFilters, SettingsListRow, kind_key, kind_slug, location_text,
+    FILTER_KINDS, SettingsListFilters, SettingsListRow, kind_element, kind_key, location_text,
     project, sort_rows, total,
 };
 use crate::style::{
-    ACTION_BACKGROUND, CONTROL_BORDER, DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, LIST_BACKGROUND,
-    ROW_HEIGHT,
+    ACTION_BACKGROUND, DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, LIST_BACKGROUND, ROW_HEIGHT,
 };
 use bevy_flair::style::components::ClassList;
 use sl_viewer_ui_core::skin::{
@@ -128,15 +128,6 @@ const COL_NAME: usize = 1;
 
 /// Column index of where the item lives.
 const COL_WHERE: usize = 2;
-
-/// A checkbox's side, logical px.
-const CHECK_SIZE: f32 = 13.0;
-
-/// A ticked checkbox's fill.
-const CHECK_ON: Color = Color::srgb(0.45, 0.62, 0.90);
-
-/// An unticked checkbox's fill.
-const CHECK_OFF: Color = Color::srgba(0.10, 0.11, 0.14, 1.0);
 
 /// The skin class on an action button, so `.sk-button:disabled` greys it.
 const BUTTON_CLASS: &str = "sk-button";
@@ -559,44 +550,23 @@ fn spawn_filter_row(commands: &mut Commands, parent: Entity) -> Entity {
     search.field
 }
 
-/// One kind checkbox with its label, ticked to start (all three kinds show).
+/// One kind checkbox with its caption, ticked to start (all three kinds show).
 fn spawn_kind_checkbox(commands: &mut Commands, parent: Entity, index: usize, kind: SettingsKind) {
-    let holder = commands
-        .spawn((
-            Node {
-                align_items: AlignItems::Center,
-                ..row(Val::Px(4.0))
-            },
-            ChildOf(parent),
-        ))
-        .id();
+    let checkbox = spawn_checkbox(
+        commands,
+        parent,
+        &CheckboxSpec {
+            element: kind_element(kind),
+            label: kind_key(kind).to_owned(),
+            tab_index: i32::try_from(index).unwrap_or(0),
+            font_size: FONT_SIZE,
+            translate_label: true,
+        },
+    );
     commands
-        .spawn((
-            Checkbox,
-            Checked,
-            Node {
-                width: Val::Px(CHECK_SIZE),
-                height: Val::Px(CHECK_SIZE),
-                border: UiRect::all(Val::Px(2.0)),
-                flex_shrink: 0.0,
-                ..default()
-            },
-            BorderColor::all(CONTROL_BORDER),
-            BackgroundColor(CHECK_ON),
-            TabIndex(i32::try_from(index).unwrap_or(0)),
-            KindFilterCheckbox(index),
-            Name::new(format!("my-environments-filter-{}:check", kind_slug(kind))),
-            ChildOf(holder),
-        ))
+        .entity(checkbox.checkbox)
+        .insert((Checked, KindFilterCheckbox(index)))
         .observe(on_kind_filter_toggle);
-    commands.spawn((
-        Text::default(),
-        Translated::new(kind_key(kind)),
-        UiFont::Sans.at(FONT_SIZE),
-        text_role(LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(holder),
-    ));
 }
 
 /// The rename row: a label, the field seeded from the selection, and the button
@@ -992,23 +962,12 @@ fn on_kind_filter_toggle(
     change: On<ValueChange<bool>>,
     boxes: Query<&KindFilterCheckbox>,
     mut filters: ResMut<SettingsListFilters>,
-    mut backgrounds: Query<&mut BackgroundColor>,
-    mut commands: Commands,
 ) {
     let Ok(check) = boxes.get(change.source) else {
         return;
     };
-    if change.value {
-        commands.entity(change.source).insert(Checked);
-    } else {
-        commands.entity(change.source).remove::<Checked>();
-    }
-    if let Ok(mut background) = backgrounds.get_mut(change.source) {
-        let wanted = if change.value { CHECK_ON } else { CHECK_OFF };
-        if background.0 != wanted {
-            background.0 = wanted;
-        }
-    }
+    // The widget moves its own `Checked`, and `.sk-checkbox:checked` draws from
+    // it, so the filter is all this has left to write.
     if let Some(slot) = filters.kinds.get_mut(check.0) {
         *slot = change.value;
     }
@@ -1415,7 +1374,6 @@ fn confirm_environment_delete(
 fn sync_kind_checkboxes(
     filters: Res<SettingsListFilters>,
     boxes: Query<(Entity, &KindFilterCheckbox, Has<Checked>)>,
-    mut backgrounds: Query<&mut BackgroundColor>,
     mut commands: Commands,
 ) {
     if !filters.is_changed() {
@@ -1428,12 +1386,6 @@ fn sync_kind_checkboxes(
                 commands.entity(entity).insert(Checked);
             } else {
                 commands.entity(entity).remove::<Checked>();
-            }
-        }
-        if let Ok(mut background) = backgrounds.get_mut(entity) {
-            let fill = if wanted { CHECK_ON } else { CHECK_OFF };
-            if background.0 != fill {
-                background.0 = fill;
             }
         }
     }

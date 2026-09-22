@@ -70,9 +70,11 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx};
-use bevy::ui::InteractionDisabled;
-use bevy::ui_widgets::{Activate, Button};
+use bevy::ui::{Checked, InteractionDisabled};
+use bevy::ui_widgets::ValueChange;
 use bevy_flair::style::components::ClassList;
+
+use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use sl_client_bevy::{AgentKey, Command, SlCommand};
 
 use crate::contact_sets::{
@@ -148,12 +150,6 @@ const BUTTON_CLASS: &str = "sk-button";
 
 /// The trailing action column's width, logical px.
 const ACTION_COL_WIDTH: f32 = 150.0;
-
-/// The glyph a checked settings-floater toggle shows.
-const CHECKED_GLYPH: &str = "\u{2611}";
-
-/// The glyph an unchecked one shows.
-const UNCHECKED_GLYPH: &str = "\u{2610}";
 
 // --- Table ----------------------------------------------------------------
 
@@ -1094,8 +1090,8 @@ fn spawn_config_floater(mut commands: Commands, root: Res<UiRoot>) {
     });
 }
 
-/// Spawn one of the settings floater's checkboxes — a clickable ☐/☑ glyph and a
-/// label — returning the glyph node the sync pass writes.
+/// Spawn one of the settings floater's checkboxes — the shared widget —
+/// returning the checkbox whose `Checked` the sync pass moves.
 fn spawn_config_toggle(
     commands: &mut Commands,
     parent: Entity,
@@ -1103,43 +1099,22 @@ fn spawn_config_toggle(
     tab: i32,
     toggle: ConfigToggle,
 ) -> Entity {
-    let button = commands
-        .spawn((
-            Button,
-            TabIndex(tab),
-            Node {
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(6.0),
-                ..row(Val::Px(0.0))
-            },
-            Pickable {
-                should_block_lower: true,
-                is_hoverable: true,
-            },
-            toggle,
-            Name::new("contact-set-config-toggle"),
-            ChildOf(parent),
-        ))
-        .observe(on_config_toggle_press)
-        .id();
-    let glyph = commands
-        .spawn((
-            Text::new(UNCHECKED_GLYPH.to_owned()),
-            UiFont::Sans.at(FONT_SIZE),
-            text_role(DIM_LABEL_COLOR),
-            Pickable::IGNORE,
-            ChildOf(button),
-        ))
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(FONT_SIZE),
-        text_role(LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(button),
-    ));
-    glyph
+    let checkbox = spawn_checkbox(
+        commands,
+        parent,
+        &CheckboxSpec {
+            element: label_key,
+            label: label_key.to_owned(),
+            tab_index: tab,
+            font_size: FONT_SIZE,
+            translate_label: true,
+        },
+    );
+    commands
+        .entity(checkbox.checkbox)
+        .insert(toggle)
+        .observe(on_config_toggle_press);
+    checkbox.checkbox
 }
 
 /// Spawn one reply block: the "use a reply of this set's own" toggle over the
@@ -1401,10 +1376,17 @@ struct AddToSetFloater<'w, 's> {
 struct ConfigWidgets<'w, 's> {
     /// The floater's show / hide switch.
     panels: Query<'w, 's, &'static mut UiPanelShown>,
-    /// Its title and checkbox glyphs.
+    /// Its title.
     texts: Query<'w, 's, &'static mut Text>,
-    /// The set's colour swatch.
-    swatches: Query<'w, 's, (&'static mut ColorSwatchValue, &'static mut BackgroundColor)>,
+    /// Which of its checkboxes carry their tick, so one is only moved when it
+    /// disagrees with the set.
+    ticked: Query<'w, 's, Has<Checked>>,
+    /// The queue a tick is moved through.
+    commands: Commands<'w, 's>,
+    /// The set's colour swatch — its **value** only: `apply_color_swatch_fill`
+    /// paints the fill from it, so a second writer here could only ever
+    /// disagree with the widget.
+    swatches: Query<'w, 's, &'static mut ColorSwatchValue>,
     /// The name field and the four reply fields.
     editors: Query<'w, 's, &'static mut EditableText>,
     /// Parley's font context, for a programmatic field rewrite.
@@ -2044,7 +2026,7 @@ fn sync_panel_button_states(
 /// text with them, so turning an override on answers with what is already typed
 /// rather than with nothing.
 fn on_config_toggle_press(
-    activate: On<Activate>,
+    change: On<ValueChange<bool>>,
     toggles: Query<&ConfigToggle>,
     ui: Option<Res<ConfigUi>>,
     sets: Res<ContactSets>,
@@ -2052,7 +2034,9 @@ fn on_config_toggle_press(
     target: Res<ConfigTarget>,
     mut requests: MessageWriter<RequestContactSet>,
 ) {
-    let Ok(toggle) = toggles.get(activate.entity).copied() else {
+    // The widget has moved its own tick; the model is the truth, and the sync
+    // pass puts the tick where the model lands.
+    let Ok(toggle) = toggles.get(change.source).copied() else {
         return;
     };
     let (Some(ui), Some(name)) = (ui, target.0.clone()) else {
@@ -2186,25 +2170,29 @@ fn sync_config_floater(
     // The swatch follows the set on every change (a recolour lands here too);
     // the name field is seeded only when the floater turns to a new set, so a
     // half-typed rename is not overwritten under the user's hands.
-    if let Ok((mut value, mut background)) = widgets.swatches.get_mut(ui.swatch) {
-        if value.0 != set.color() {
-            value.0 = set.color();
-        }
-        if background.0 != set.color() {
-            background.0 = set.color();
-        }
+    if let Ok(mut value) = widgets.swatches.get_mut(ui.swatch)
+        && value.0 != set.color()
+    {
+        value.0 = set.color();
     }
     // The five checkboxes follow the set on every change too — each is flipped
     // through the model, so this is what actually draws the new state.
-    set_config_check(&mut widgets.texts, ui.notify_glyph, set.notify());
     set_config_check(
-        &mut widgets.texts,
+        &mut widgets.commands,
+        &widgets.ticked,
+        ui.notify_glyph,
+        set.notify(),
+    );
+    set_config_check(
+        &mut widgets.commands,
+        &widgets.ticked,
         ui.sort_glyph,
         set.sorts_by_online_status(),
     );
     for mode in AUTORESPONSE_MODES {
         set_config_check(
-            &mut widgets.texts,
+            &mut widgets.commands,
+            &widgets.ticked,
             ui.autoresponse(*mode).glyph,
             set.autoresponse(*mode).enabled(),
         );
@@ -2246,17 +2234,24 @@ fn sync_config_floater(
     }
 }
 
-/// Draw one settings-floater checkbox in its checked / unchecked state.
-fn set_config_check(texts: &mut Query<&mut Text>, node: Entity, checked: bool) {
-    let glyph = if checked {
-        CHECKED_GLYPH
-    } else {
-        UNCHECKED_GLYPH
+/// Put one settings-floater checkbox's tick where the set says it belongs.
+///
+/// `Checked` is the whole of it — `.sk-checkbox:checked` draws the mark — and
+/// the marker is only moved when it disagrees, because this runs on every
+/// change to the model.
+fn set_config_check(
+    commands: &mut Commands,
+    ticked: &Query<Has<Checked>>,
+    node: Entity,
+    checked: bool,
+) {
+    let Ok(is_ticked) = ticked.get(node) else {
+        return;
     };
-    if let Ok(mut text) = texts.get_mut(node)
-        && text.0 != glyph
-    {
-        glyph.clone_into(&mut text.0);
+    if checked && !is_ticked {
+        commands.entity(node).insert(Checked);
+    } else if !checked && is_ticked {
+        commands.entity(node).remove::<Checked>();
     }
 }
 

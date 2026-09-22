@@ -46,6 +46,9 @@ use std::time::Duration;
 
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
+use bevy::ui::Checked;
+
+use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use bevy::text::EditableText;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
@@ -157,12 +160,6 @@ const TITLE_CLASS: &str = "sk-toast-title";
 const BUTTON_CLASS: &str = "sk-button";
 
 /// The checkbox glyph shown when the "don't show me this again" box is ticked
-/// (`☑`).
-const CHECK_ON: &str = "\u{2611}";
-
-/// The checkbox glyph shown when the box is unticked (`☐`).
-const CHECK_OFF: &str = "\u{2610}";
-
 /// The glyph on a toast's close button (`×`).
 const CLOSE_GLYPH: &str = "\u{00d7}";
 
@@ -478,12 +475,13 @@ struct FadeColor {
     base_text: Option<Color>,
 }
 
-/// A toast's "don't show me this again" checkbox state.
+/// Marks a toast's "don't show me this again" checkbox.
+///
+/// A marker alone: whether it is ticked is the widget's own `Checked`, which is
+/// also what `.sk-checkbox:checked` draws the mark from, so the state is in one
+/// place rather than mirrored into a field of this.
 #[derive(Component, Debug)]
-struct IgnoreCheckbox {
-    /// Whether the box is ticked.
-    checked: bool,
-}
+struct IgnoreCheckbox;
 
 /// Internal: the overflow control was clicked — rotate the queued toasts so the
 /// next hidden one comes into view (the reference "cycle through the open ones").
@@ -659,16 +657,18 @@ struct ToastButtonSpec {
     is_default: bool,
 }
 
-/// The entities `build_toast_card` produced that a caller wires: the card root,
-/// the button boxes (paired with their name), and the ignore checkbox.
+/// The entities `build_toast_card` produced that a caller wires: the card root
+/// and the button boxes (paired with their name).
+///
+/// The ignore checkbox is not among them: it keeps its own `Checked`, and the
+/// resolve pass finds it by walking the toast's descendants for
+/// [`IgnoreCheckbox`], so nobody has to hold on to it.
 struct ToastCard {
     /// The card root node (or, for a modal, the panel reparented under the
     /// scrim).
     root: Entity,
     /// Each button box paired with its [`ToastButtonSpec::name`].
     buttons: Vec<(Entity, &'static str)>,
-    /// The ignore checkbox: its clickable box and the glyph text node to flip.
-    ignore: Option<(Entity, Entity)>,
     /// The close (×) button box, when the toast is [`closable`](ToastContent::closable).
     close: Option<Entity>,
     /// The text-input field ([`EditableText`] node), when the content carries
@@ -877,7 +877,7 @@ fn build_toast_card(commands: &mut Commands, content: &ToastContent) -> ToastCar
     }
 
     // The ignore checkbox row, if the notification is ignorable.
-    let ignore = if content.ignorable {
+    if content.ignorable {
         let ignore_row = commands
             .spawn((
                 Node {
@@ -892,57 +892,33 @@ fn build_toast_card(commands: &mut Commands, content: &ToastContent) -> ToastCar
                 ChildOf(root),
             ))
             .id();
-        let glyph = commands
-            .spawn((
-                Text::new(CHECK_OFF),
-                UiFont::Sans.at(content.font_size),
-                TextColor(TEXT_COLOR),
-                Name::new("toast-ignore-glyph"),
-            ))
-            .id();
-        let checkbox = commands
-            .spawn((
-                Node {
-                    align_items: AlignItems::Center,
-                    padding: UiRect::all(Val::Px(2.0)),
-                    ..row(Val::Px(6.0))
-                },
-                IgnoreCheckbox { checked: false },
-                Name::new("toast-ignore-box"),
-                ChildOf(ignore_row),
-            ))
-            .add_child(glyph)
-            .id();
-        // The label is bounded (and the sole occupant of its box) so a long /
-        // large-font translation wraps inside the card instead of overflowing it —
-        // the same measure-safe pattern as the body (see `build_toast_card`).
-        let label_box = commands
-            .spawn((
-                Node {
-                    max_width: Val::Px(TEXT_MAX_WIDTH - IGNORE_CHECKBOX_ALLOWANCE),
-                    ..default()
-                },
-                Name::new("toast-ignore-label-box"),
-                ChildOf(ignore_row),
-            ))
-            .id();
-        commands.spawn((
-            Text::new(content.ignore_label.clone()),
-            UiFont::Sans.at(content.font_size),
-            TextColor(TEXT_COLOR),
-            ClassList::new_with_classes([TEXT_CLASS]),
-            Name::new("toast-ignore-label"),
-            ChildOf(label_box),
-        ));
-        Some((checkbox, glyph))
-    } else {
-        None
-    };
+        // The shared widget, caption and all: a click on the words ticks it too,
+        // which for a "don't show me this again" line is what the user reaches
+        // for. Its caption wraps inside the card the way the body does.
+        let spawned = spawn_checkbox(
+            commands,
+            ignore_row,
+            &CheckboxSpec {
+                element: "toast-ignore",
+                label: content.ignore_label.clone(),
+                tab_index: 0,
+                font_size: content.font_size,
+                translate_label: false,
+            },
+        );
+        commands.entity(spawned.checkbox).insert(IgnoreCheckbox);
+        // The caption is bounded so a long / large-font translation wraps
+        // inside the card instead of overflowing it — the same measure-safe
+        // pattern as the body (see `build_toast_card`).
+        commands.entity(spawned.label).insert(Node {
+            max_width: Val::Px(TEXT_MAX_WIDTH - IGNORE_CHECKBOX_ALLOWANCE),
+            ..default()
+        });
+    }
 
     ToastCard {
         root,
         buttons,
-        ignore,
         close,
         input,
     }
@@ -1164,7 +1140,7 @@ struct ResolveWidgets<'w, 's> {
     /// Their children, walked to find the controls below.
     children: Query<'w, 's, &'static Children>,
     /// The "ignore this kind" checkbox.
-    checkboxes: Query<'w, 's, &'static IgnoreCheckbox>,
+    checkboxes: Query<'w, 's, Has<Checked>, With<IgnoreCheckbox>>,
     /// The reply field, for a notification that takes text.
     editors: Query<'w, 's, &'static EditableText>,
 }
@@ -1369,27 +1345,6 @@ fn raise_notifications(
                 );
         }
 
-        // Wire the ignore checkbox to toggle its state and glyph.
-        if let Some((checkbox, glyph)) = card.ignore {
-            commands
-                .entity(checkbox)
-                .insert((Button, TabIndex(0)))
-                .observe(
-                    move |_activate: On<Activate>,
-                          mut boxes: Query<&mut IgnoreCheckbox>,
-                          mut texts: Query<&mut Text>| {
-                        if let Ok(mut state) = boxes.get_mut(checkbox) {
-                            state.checked = !state.checked;
-                            if let Ok(mut text) = texts.get_mut(glyph) {
-                                let glyph_text = if state.checked { CHECK_ON } else { CHECK_OFF };
-                                text.0.clear();
-                                text.0.push_str(glyph_text);
-                            }
-                        }
-                    },
-                );
-        }
-
         // Wire the close (×) button to dismiss the toast early (no button choice).
         if let Some(close) = card.close {
             let target = toast_entity;
@@ -1544,7 +1499,7 @@ fn resolve_notifications(
         };
         let ignored = children
             .iter_descendants(resolution.toast)
-            .any(|node| checkboxes.get(node).is_ok_and(|checkbox| checkbox.checked));
+            .any(|node| checkboxes.get(node).unwrap_or(false));
         // A ticked checkbox records what its kind means: a suppression for
         // the suppressible kinds (plus, for `LastResponse`, the button to
         // replay — the reference saves the response under `Default<name>`),
@@ -2345,6 +2300,7 @@ const SPECIMEN_BODY: &str = "The region you are in now will restart in 5 minutes
 mod tests {
     use bevy::prelude::{App, Messages, Update};
     use bevy::text::EditableText;
+    use bevy::ui::Checked;
     use pretty_assertions::assert_eq;
     use sl_settings::{Scope, SettingValue, SettingsStore};
 
@@ -2502,7 +2458,7 @@ mod tests {
         app.init_resource::<NotificationManager>();
         app.insert_resource(ViewerSettings::from_store_for_test(store));
         app.add_systems(Update, resolve_notifications);
-        let checkbox = app.world_mut().spawn(IgnoreCheckbox { checked: true }).id();
+        let checkbox = app.world_mut().spawn((IgnoreCheckbox, Checked)).id();
         let id = app
             .world_mut()
             .resource_mut::<NotificationManager>()

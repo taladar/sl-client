@@ -52,6 +52,7 @@
 mod tests {
     use bevy::input::keyboard::Key;
     use bevy::prelude::*;
+    use bevy::ui::Checked;
     use pretty_assertions::assert_eq;
 
     use sl_client_bevy::{Command, ObjectKey, ScopedObjectId, Uuid, Vector};
@@ -777,9 +778,10 @@ mod tests {
     /// **Each toggle row flips its flag, and says so.**
     ///
     /// The four toggles are the ones every other build system reads — snapping,
-    /// the grid frame, edit-linked-parts and stretch-both — and each is a row
-    /// whose *glyph* is the only thing the user sees. A flag that flipped
-    /// without the glyph following would be a control that lies about its state.
+    /// the grid frame, edit-linked-parts and stretch-both — and each is a
+    /// checkbox whose *tick* is the only thing the user sees. A flag that
+    /// flipped without the tick following would be a control that lies about
+    /// its state.
     #[test]
     fn each_toggle_row_flips_its_flag() -> Result<(), TestError> {
         let mut app = build_tools_app()?;
@@ -789,7 +791,7 @@ mod tests {
             ("build-toggle-edit-linked", false),
             ("build-toggle-stretch-both", false),
         ] {
-            let row = format!("build-tools:{key}");
+            let row = format!("{key}:checkbox");
             assert_eq!(
                 toggle_state(&app, key)?,
                 before,
@@ -803,13 +805,9 @@ mod tests {
                 "a click on `{key}` must flip it"
             );
             assert_eq!(
-                toggle_glyph(&mut app, &row),
-                if before {
-                    crate::edit_tool::UNCHECKED_GLYPH
-                } else {
-                    crate::edit_tool::CHECKED_GLYPH
-                },
-                "`{key}`'s glyph must follow its flag"
+                toggle_is_ticked(&mut app, &row),
+                !before,
+                "`{key}`'s tick must follow its flag"
             );
             // Put it back, so each toggle is checked from the shipped defaults
             // rather than from whatever the previous one left behind.
@@ -836,20 +834,13 @@ mod tests {
         })
     }
 
-    /// The check glyph a toggle row currently draws.
-    fn toggle_glyph(app: &mut App, row: &str) -> String {
-        let Some(entity) = find_by_name(app, row) else {
-            return String::new();
-        };
-        let children: Vec<Entity> = app
-            .world()
-            .get::<Children>(entity)
-            .map(|children| children.iter().collect())
-            .unwrap_or_default();
-        children
-            .into_iter()
-            .find_map(|child| app.world().get::<Text>(child).map(|text| text.0.clone()))
-            .unwrap_or_default()
+    /// Whether a toggle's checkbox carries the tick.
+    ///
+    /// `Checked` rather than a glyph: the mark is the skin's `content` on a
+    /// pseudo-element now, so the marker is where the state actually lives —
+    /// and it is what `.sk-checkbox:checked` draws from.
+    fn toggle_is_ticked(app: &mut App, row: &str) -> bool {
+        find_by_name(app, row).is_some_and(|entity| app.world().get::<Checked>(entity).is_some())
     }
 
     /// **`Ctrl+B` opens and closes the build window — and closing it leaves
@@ -1018,7 +1009,7 @@ mod tests {
         let witnesses = [
             (0_usize, "build-name:field"),
             (1, "build-pos-x:field"),
-            (2, "build-params:build-feature-flexi"),
+            (2, "build-feature-flexi:checkbox"),
             (3, "build-tex-glow:field"),
             (4, "contents:count"),
         ];

@@ -67,6 +67,7 @@ pub(crate) use sl_viewer_ui_widgets::floater;
 pub(crate) use sl_viewer_ui_widgets::floater_persist;
 pub(crate) use sl_viewer_ui_widgets::menu;
 pub(crate) use sl_viewer_ui_widgets::settings_binding;
+pub(crate) use sl_viewer_ui_widgets::ui_checkbox;
 pub(crate) use sl_viewer_ui_widgets::ui_color_picker;
 pub(crate) use sl_viewer_ui_widgets::ui_combo;
 pub(crate) use sl_viewer_ui_widgets::ui_search;

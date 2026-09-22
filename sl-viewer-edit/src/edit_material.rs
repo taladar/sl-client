@@ -39,6 +39,8 @@
 use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx};
+use bevy::ui::Checked;
+use bevy::ui_widgets::ValueChange;
 use sl_client_bevy::{
     AssetKey, AssetType, Command, FaceMaterialPut, GltfAlphaMode, GltfMaterial, GltfTexture,
     GltfTextureTransform, InventoryType, LegacyMaterial, MaterialOverride, MaterialOverrideUpdate,
@@ -50,7 +52,7 @@ use crate::edit_texture::{
     PrimFaceLookup, ShowWhen, node_face_indices, parse_tex_value, primary_face_index,
     representative_face, spawn_row,
 };
-use crate::edit_tool::{CHECKED_GLYPH, LABEL_CLASS, TOOL_FONT_SIZE, UNCHECKED_GLYPH, VALUE_CLASS};
+use crate::edit_tool::{TOOL_FONT_SIZE, VALUE_CLASS};
 use crate::face_material::{FaceMaterial, MAP_FLAG_NORMAL, MAP_FLAG_SPEC};
 use crate::gizmos::{EditPerm, perm_notice};
 use crate::intents::LocalChatNotice;
@@ -65,6 +67,7 @@ use crate::objects::{FaceTextureDebug, PrimFaceEntity, SceneObject};
 use crate::textures::{
     FaceStores, PrimTextures, TextureAlpha, TextureManager, compose_face_material,
 };
+use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
@@ -483,10 +486,6 @@ struct PbrAlphaCombo;
 #[derive(Component, Debug, Clone, Copy)]
 struct DoubleSidedButton;
 
-/// The double-sided toggle's check-glyph text.
-#[derive(Component, Debug, Clone, Copy)]
-struct DoubleSidedGlyph;
-
 /// The "New material" (apply a blank GLTF material) button.
 #[derive(Component, Debug, Clone, Copy)]
 struct PbrNewButton;
@@ -531,8 +530,8 @@ struct BuildMaterialUi {
     pbr_normal_swatch: Entity,
     /// The PBR alpha-mode combo.
     pbr_alpha_combo: Entity,
-    /// The double-sided toggle's glyph text (rewritten by the sync).
-    double_sided_glyph: Entity,
+    /// The double-sided toggle's checkbox (the sync moves its `Checked`).
+    double_sided_check: Entity,
 }
 
 /// The last-shown material-channel snapshot, so the widgets rewrite only on a
@@ -755,7 +754,7 @@ pub(crate) fn spawn_material_channels(commands: &mut Commands, page: Entity, tab
         ShowWhen::PbrMaterialId,
         tab_index,
     );
-    let double_sided_glyph =
+    let double_sided_check =
         spawn_double_sided_toggle(commands, page, "build-pbr-double-sided", tab_index);
 
     // --- PBR base-colour channel ---
@@ -849,7 +848,7 @@ pub(crate) fn spawn_material_channels(commands: &mut Commands, page: Entity, tab
         pbr_emissive_tint,
         pbr_normal_swatch,
         pbr_alpha_combo,
-        double_sided_glyph,
+        double_sided_check,
     });
 }
 
@@ -919,7 +918,10 @@ fn spawn_pbr_scalar_row(
     commands.entity(entity).insert((field, MatControl));
 }
 
-/// Spawn the double-sided toggle row, returning the check-glyph entity.
+/// Spawn the double-sided toggle row, returning its checkbox.
+///
+/// The shared widget: the tick is `.sk-checkbox:checked`'s, so the sync moves a
+/// marker rather than rewriting a glyph.
 fn spawn_double_sided_toggle(
     commands: &mut Commands,
     page: Entity,
@@ -928,44 +930,27 @@ fn spawn_double_sided_toggle(
 ) -> Entity {
     let index = *tab_index;
     *tab_index = tab_index.saturating_add(1);
-    let row = commands
-        .spawn((
-            bevy::ui_widgets::Button,
-            bevy::input_focus::tab_navigation::TabIndex(index),
-            Node {
-                align_items: AlignItems::Center,
-                ..crate::ui::row(Val::Px(6.0))
-            },
-            Pickable::default(),
+    let checkbox = spawn_checkbox(
+        commands,
+        page,
+        &CheckboxSpec {
+            element: label_key,
+            label: label_key.to_owned(),
+            tab_index: index,
+            font_size: TOOL_FONT_SIZE,
+            translate_label: true,
+        },
+    );
+    commands
+        .entity(checkbox.checkbox)
+        .insert((
             DoubleSidedButton,
             MatControl,
             ShowWhen::PbrMaterialId,
-            Name::new("build-pbr:double-sided"),
             ChildOf(page),
         ))
-        .id();
-    let glyph = commands
-        .spawn((
-            Text::new(UNCHECKED_GLYPH),
-            crate::ui_font::UiFont::Sans.at(TOOL_FONT_SIZE),
-            TextColor(Color::WHITE),
-            bevy_flair::style::components::ClassList::new_with_classes([VALUE_CLASS]),
-            DoubleSidedGlyph,
-            Pickable::IGNORE,
-            ChildOf(row),
-        ))
-        .id();
-    commands.spawn((
-        Text::default(),
-        crate::i18n::Translated::new(label_key),
-        crate::ui_font::UiFont::Sans.at(TOOL_FONT_SIZE),
-        TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
-        bevy_flair::style::components::ClassList::new_with_classes([LABEL_CLASS]),
-        Pickable::IGNORE,
-        ChildOf(row),
-    ));
-    commands.entity(row).observe(handle_double_sided_press);
-    glyph
+        .observe(handle_double_sided_press);
+    checkbox.checkbox
 }
 
 /// Spawn a small labelled action button (New / Save), returning its entity.
@@ -1396,7 +1381,10 @@ struct MatWidgets<'w, 's> {
     /// The colour swatch values (specular / PBR tints).
     color_swatches: Query<'w, 's, &'static mut ColorSwatchValue>,
     /// The double-sided toggle glyph text.
-    double_sided_glyph: Query<'w, 's, &'static mut Text, With<DoubleSidedGlyph>>,
+    double_sided_check: Query<'w, 's, Has<Checked>, With<DoubleSidedButton>>,
+    /// The queue the tick is moved through — part of the bundle so the system
+    /// that writes every material widget stays inside Bevy's parameter count.
+    commands: Commands<'w, 's>,
     /// The font context a programmatic [`EditableText`] rewrite relays through.
     font_cx: ResMut<'w, FontCx>,
     /// The layout context the same rewrite relays through.
@@ -1579,15 +1567,19 @@ fn sync_material_widgets(
             combo.active = want;
         }
     }
-    // Double-sided toggle glyph.
-    if let Ok(mut text) = widgets.double_sided_glyph.get_mut(ui.double_sided_glyph) {
-        let want = if effective.double_sided {
-            CHECKED_GLYPH
-        } else {
-            UNCHECKED_GLYPH
-        };
-        if text.0 != want {
-            want.clone_into(&mut text.0);
+    // The double-sided toggle's tick: a marker, which `.sk-checkbox:checked`
+    // draws.
+    if let Ok(ticked) = widgets.double_sided_check.get(ui.double_sided_check) {
+        if effective.double_sided && !ticked {
+            widgets
+                .commands
+                .entity(ui.double_sided_check)
+                .insert(Checked);
+        } else if !effective.double_sided && ticked {
+            widgets
+                .commands
+                .entity(ui.double_sided_check)
+                .remove::<Checked>();
         }
     }
     // Legacy swatches.
@@ -2637,16 +2629,18 @@ fn commit_pbr_scalars(
 /// Toggle the double-sided flag on the selected PBR faces (reads the primary
 /// face's current effective value, flips it).
 fn handle_double_sided_press(
-    press: On<Pointer<Press>>,
+    change: On<ValueChange<bool>>,
     buttons: Query<(), With<DoubleSidedButton>>,
     mut pbr: PbrFaceEdit,
 ) {
-    if press.button != PointerButton::Primary || !buttons.contains(press.entity) {
+    if !buttons.contains(change.source) {
         return;
     }
     if !pbr.allowed() {
         return;
     }
+    // The faces are the truth, not the box: the widget has already moved its own
+    // tick, and the sync puts it back where the selection says on the next pass.
     let (_id, base, over) = pbr.representative();
     let current = effective_pbr_material(base, over.as_ref()).double_sided;
     pbr.apply_override(|over| over.double_sided = Some(!current));

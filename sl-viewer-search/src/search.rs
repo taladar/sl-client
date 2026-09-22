@@ -34,7 +34,6 @@ use crate::skin_palette::SkinPalette;
 use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use bevy::text::EditableText;
-use bevy::ui::Checked;
 use bevy::ui_widgets::Button;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
@@ -61,6 +60,7 @@ use crate::media_engine::MediaSurfaces;
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{SettingBinding, bound_checkbox};
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
+use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use crate::ui_combo::{ComboChanged, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
 use crate::ui_radio::{RadioLayout, RadioSelection, RadioSpec, spawn_radio_group};
@@ -122,18 +122,6 @@ const SECONDARY_COLOR: Color = Color::srgb(0.72, 0.76, 0.84);
 
 /// A table header colour.
 const HEADER_COLOR: Color = Color::srgb(0.78, 0.82, 0.90);
-
-/// A checkbox box's border.
-const CHECK_BORDER: Color = Color::srgb(0.40, 0.50, 0.62);
-
-/// A checkbox box's fill when unchecked.
-const CHECK_OFF: Color = Color::srgb(0.12, 0.14, 0.18);
-
-/// A checkbox box's fill when checked.
-const CHECK_ON: Color = Color::srgb(0.30, 0.70, 0.45);
-
-/// A checkbox box's side length, in logical pixels.
-const CHECK_SIZE: f32 = 16.0;
 
 /// A button's background.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.16, 0.19, 0.25);
@@ -961,10 +949,6 @@ struct PagingButton {
     forward: bool,
 }
 
-/// Marks a maturity / online checkbox's box node.
-#[derive(Component, Clone, Copy)]
-struct SearchCheckboxBox;
-
 /// Which value node of the details pane a [`Text`] is.
 #[derive(Component, Clone, Copy)]
 enum DetailField {
@@ -1203,7 +1187,6 @@ impl Plugin for SearchFloaterPlugin {
                     update_detail_pane,
                     request_detail_snapshot,
                     update_search_counts,
-                    drive_search_checkbox_visual,
                 )
                     .chain(),
             );
@@ -1865,38 +1848,27 @@ fn spawn_maturity_checkboxes(commands: &mut Commands, parent: Entity, category: 
     }
 }
 
-/// Spawn a settings-bound checkbox with a box visual and a translated label.
+/// Spawn a settings-bound checkbox — the shared widget, caption and all.
 fn spawn_search_checkbox(
     commands: &mut Commands,
     parent: Entity,
     setting: &'static str,
     label_key: &'static str,
 ) {
-    let row_node = commands
-        .spawn((
-            Node {
-                align_items: AlignItems::Center,
-                ..row(Val::Px(5.0))
-            },
-            ChildOf(parent),
-        ))
-        .id();
-    commands.spawn((
-        bound_checkbox(SettingBinding::global(setting)),
-        Node {
-            width: Val::Px(CHECK_SIZE),
-            height: Val::Px(CHECK_SIZE),
-            border: UiRect::all(Val::Px(2.0)),
-            ..default()
+    let checkbox = spawn_checkbox(
+        commands,
+        parent,
+        &CheckboxSpec {
+            element: label_key,
+            label: label_key.to_owned(),
+            tab_index: 0,
+            font_size: FONT,
+            translate_label: true,
         },
-        BorderColor::all(CHECK_BORDER),
-        BackgroundColor(CHECK_OFF),
-        bevy::input_focus::tab_navigation::TabIndex(0),
-        SearchCheckboxBox,
-        Pickable::default(),
-        ChildOf(row_node),
-    ));
-    spawn_label(commands, row_node, label_key, LABEL_COLOR);
+    );
+    commands
+        .entity(checkbox.checkbox)
+        .insert(bound_checkbox(SettingBinding::global(setting)));
 }
 
 /// Spawn a small non-negative-integer limit field (empty = no limit).
@@ -3187,18 +3159,6 @@ fn events_day_label(mode: EventsMode, day: i32) -> String {
         (EventsMode::ByDate, -1) => "Yesterday".to_owned(),
         (EventsMode::ByDate, other) if other > 0 => format!("+{other} days"),
         (EventsMode::ByDate, other) => format!("{other} days"),
-    }
-}
-
-/// Colour each maturity / online checkbox's box from its `Checked` state.
-fn drive_search_checkbox_visual(
-    mut boxes: Query<(&mut BackgroundColor, Has<Checked>), With<SearchCheckboxBox>>,
-) {
-    for (mut fill, checked) in &mut boxes {
-        let wanted = if checked { CHECK_ON } else { CHECK_OFF };
-        if fill.0 != wanted {
-            fill.0 = wanted;
-        }
     }
 }
 

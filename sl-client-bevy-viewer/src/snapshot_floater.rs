@@ -67,11 +67,14 @@ use std::path::PathBuf;
 
 use crate::skin_palette::SkinPalette;
 use bevy::asset::RenderAssetUsages;
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
+use bevy::ui::Checked;
+use bevy::ui_widgets::ValueChange;
+
+use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
 use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
-use bevy::ui_widgets::{Activate, Button};
+use bevy::ui_widgets::Activate;
 
 use crate::hud::HudScreen;
 use crate::i18n::{TransArgs, Translated, Translator};
@@ -102,9 +105,6 @@ const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 /// A dim / secondary text colour (the hint and status lines).
 const HINT_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
-/// A checked toggle's tick colour.
-const CHECK_COLOR: Color = Color::srgb(0.55, 0.85, 0.60);
-
 /// A button's background.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
 
@@ -128,12 +128,6 @@ const PREVIEW_MAX_WIDTH: f32 = 640.0;
 /// The tallest the preview image is drawn, in logical pixels (see
 /// [`PREVIEW_MAX_WIDTH`]).
 const PREVIEW_MAX_HEIGHT: f32 = 400.0;
-
-/// The glyph for a checked toggle.
-const CHECKED_GLYPH: &str = "\u{2611}";
-
-/// The glyph for an unchecked toggle.
-const UNCHECKED_GLYPH: &str = "\u{2610}";
 
 /// How many frames to wait after hiding the excluded layers before the shutter,
 /// so the hidden UI / disabled HUD camera is actually rendered out first.
@@ -218,7 +212,7 @@ impl Plugin for SnapshotFloaterPlugin {
                 (
                     load_persisted_preferences,
                     apply_format_combo,
-                    update_toggle_glyphs,
+                    update_toggle_ticks,
                     update_status_text,
                     snapshot_hotkey,
                     start_capture,
@@ -381,11 +375,11 @@ pub(crate) struct SnapshotUi {
     /// The "click Refresh" hint shown until the first capture.
     preview_hint: Entity,
     /// The include-UI checkbox glyph node.
-    ui_glyph: Entity,
-    /// The include-HUD checkbox glyph node.
-    hud_glyph: Entity,
-    /// The hide-L$-balance checkbox glyph node.
-    balance_glyph: Entity,
+    ui_check: Entity,
+    /// The include-HUD checkbox.
+    hud_check: Entity,
+    /// The hide-L$-balance checkbox.
+    balance_check: Entity,
     /// The format combo anchor.
     format_combo: Entity,
     /// The transient status text node.
@@ -483,20 +477,19 @@ fn build_snapshot_content(
         },
     );
 
-    let (ui_button, ui_glyph) = spawn_checkbox(&mut commands, content, "snapshot-include-ui", 2);
+    let ui_check = spawn_snapshot_check(&mut commands, content, "snapshot-include-ui", 2);
     commands
-        .entity(ui_button)
+        .entity(ui_check)
         .insert(SnapshotToggle::Ui)
         .observe(toggle_pressed);
-    let (hud_button, hud_glyph) = spawn_checkbox(&mut commands, content, "snapshot-include-hud", 3);
+    let hud_check = spawn_snapshot_check(&mut commands, content, "snapshot-include-hud", 3);
     commands
-        .entity(hud_button)
+        .entity(hud_check)
         .insert(SnapshotToggle::Hud)
         .observe(toggle_pressed);
-    let (balance_button, balance_glyph) =
-        spawn_checkbox(&mut commands, content, "snapshot-hide-balance", 4);
+    let balance_check = spawn_snapshot_check(&mut commands, content, "snapshot-hide-balance", 4);
     commands
-        .entity(balance_button)
+        .entity(balance_check)
         .insert(SnapshotToggle::Balance)
         .observe(toggle_pressed);
 
@@ -545,9 +538,9 @@ fn build_snapshot_content(
     commands.insert_resource(SnapshotUi {
         preview,
         preview_hint,
-        ui_glyph,
-        hud_glyph,
-        balance_glyph,
+        ui_check,
+        hud_check,
+        balance_check,
         format_combo,
         status,
     });
@@ -683,70 +676,54 @@ fn spawn_text_button(
     .button
 }
 
-/// Spawn a glyph checkbox (a clickable box with a ☐/☑ glyph then a label),
-/// returning the clickable box and its glyph node. The caller inserts the
-/// [`SnapshotToggle`] tag and the press observer.
-fn spawn_checkbox(
+/// Spawn one of the floater's checkboxes — the shared widget, caption and all —
+/// returning it. The caller inserts the [`SnapshotToggle`] tag and the
+/// `ValueChange` observer.
+fn spawn_snapshot_check(
     commands: &mut Commands,
     parent: Entity,
     label_key: &'static str,
     tab: i32,
-) -> (Entity, Entity) {
-    let button = commands
-        .spawn((
-            Button,
-            TabIndex(tab),
-            Node {
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(6.0),
-                ..row(Val::Px(0.0))
-            },
-            Name::new("snapshot-checkbox"),
-            ChildOf(parent),
-        ))
-        .id();
-    let glyph = commands
-        .spawn((
-            Text::new(UNCHECKED_GLYPH.to_owned()),
-            UiFont::Sans.at(FONT_SIZE),
-            TextColor(HINT_COLOR),
-            Pickable::IGNORE,
-            ChildOf(button),
-        ))
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(FONT_SIZE),
-        TextColor(LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(button),
-    ));
-    (button, glyph)
+) -> Entity {
+    let checkbox = spawn_checkbox(
+        commands,
+        parent,
+        &CheckboxSpec {
+            element: label_key,
+            label: label_key.to_owned(),
+            tab_index: tab,
+            font_size: FONT_SIZE,
+            translate_label: true,
+        },
+    );
+    checkbox.checkbox
 }
 
 /// A checkbox press: flip its toggle in the state and persist the new value.
 fn toggle_pressed(
-    activate: On<Activate>,
+    change: On<ValueChange<bool>>,
     toggles: Query<&SnapshotToggle>,
     mut state: ResMut<SnapshotState>,
     mut settings: ResMut<ViewerSettings>,
 ) {
-    let Ok(toggle) = toggles.get(activate.entity) else {
+    let Ok(toggle) = toggles.get(change.source) else {
         return;
     };
-    let (value, name) = match toggle {
+    // The value the box now shows, rather than a flip of our own: the two could
+    // only ever disagree, and the box is what the user just acted on.
+    let value = change.value;
+    let name = match toggle {
         SnapshotToggle::Ui => {
-            state.include_ui = !state.include_ui;
-            (state.include_ui, SETTING_INCLUDE_UI)
+            state.include_ui = value;
+            SETTING_INCLUDE_UI
         }
         SnapshotToggle::Hud => {
-            state.include_hud = !state.include_hud;
-            (state.include_hud, SETTING_INCLUDE_HUD)
+            state.include_hud = value;
+            SETTING_INCLUDE_HUD
         }
         SnapshotToggle::Balance => {
-            state.hide_balance = !state.hide_balance;
-            (state.hide_balance, SETTING_HIDE_BALANCE)
+            state.hide_balance = value;
+            SETTING_HIDE_BALANCE
         }
     };
     settings.set_account(name, SettingValue::Bool(value));
@@ -828,11 +805,15 @@ fn apply_format_combo(
     }
 }
 
-/// Keep the three checkbox glyphs in sync with the toggles.
-fn update_toggle_glyphs(
+/// Keep the three checkboxes' ticks in step with the toggles.
+///
+/// A marker apiece — `.sk-checkbox:checked` draws the mark — so a setting
+/// restored at login or changed elsewhere reaches the boxes with no paint here.
+fn update_toggle_ticks(
     state: Res<SnapshotState>,
     ui: Option<Res<SnapshotUi>>,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
+    ticked: Query<Has<Checked>>,
+    mut commands: Commands,
 ) {
     if !state.is_changed() {
         return;
@@ -840,24 +821,18 @@ fn update_toggle_glyphs(
     let Some(ui) = ui else {
         return;
     };
-    set_check_glyph(&mut texts, ui.ui_glyph, state.include_ui);
-    set_check_glyph(&mut texts, ui.hud_glyph, state.include_hud);
-    set_check_glyph(&mut texts, ui.balance_glyph, state.hide_balance);
-}
-
-/// Set one checkbox glyph's text and colour to reflect its checked state.
-fn set_check_glyph(texts: &mut Query<(&mut Text, &mut TextColor)>, node: Entity, checked: bool) {
-    let (glyph, color) = if checked {
-        (CHECKED_GLYPH, CHECK_COLOR)
-    } else {
-        (UNCHECKED_GLYPH, HINT_COLOR)
-    };
-    if let Ok((mut text, mut text_color)) = texts.get_mut(node) {
-        if text.0 != glyph {
-            glyph.clone_into(&mut text.0);
-        }
-        if text_color.0 != color {
-            text_color.0 = color;
+    for (checkbox, on) in [
+        (ui.ui_check, state.include_ui),
+        (ui.hud_check, state.include_hud),
+        (ui.balance_check, state.hide_balance),
+    ] {
+        let Ok(is_ticked) = ticked.get(checkbox) else {
+            continue;
+        };
+        if on && !is_ticked {
+            commands.entity(checkbox).insert(Checked);
+        } else if !on && is_ticked {
+            commands.entity(checkbox).remove::<Checked>();
         }
     }
 }

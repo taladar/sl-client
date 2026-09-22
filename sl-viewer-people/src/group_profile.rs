@@ -56,7 +56,11 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::text::EditableText;
+use bevy::ui::{Checked, InteractionDisabled};
+use bevy::ui_widgets::ValueChange;
 use bevy_flair::style::components::ClassList;
+
+use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use sl_client_bevy::{
     AgentKey, Command, GroupKey, GroupMember, GroupNotice, GroupNoticeKey, GroupProfile, GroupRole,
     GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember, GroupRoleMemberChange,
@@ -103,9 +107,6 @@ const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 /// A dimmer secondary label.
 const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
-/// A toggle's check-glyph colour when on.
-const CHECK_COLOR: Color = Color::srgb(0.55, 0.85, 0.60);
-
 /// An accent for the selected row / active marker.
 const ACCENT_COLOR: Color = Color::srgb(0.52, 0.68, 0.95);
 
@@ -117,12 +118,6 @@ const BUTTON_BORDER: Color = Color::srgb(0.34, 0.40, 0.52);
 
 /// A list scroll surface's sunken background.
 const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
-
-/// The checked glyph.
-const CHECKED_GLYPH: &str = "\u{2611}";
-
-/// The unchecked glyph.
-const UNCHECKED_GLYPH: &str = "\u{2610}";
 
 /// The group insignia's edge, in logical pixels.
 const INSIGNIA_EDGE: f32 = 128.0;
@@ -1575,6 +1570,7 @@ fn build_general_tab(
     avatars: Res<AvatarState>,
     groups: Res<GroupsModel>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
+    mut checks: GeneralChecks,
     mut commands: Commands,
 ) {
     for (state, mut dirty, mut ui) in &mut windows {
@@ -1627,7 +1623,7 @@ fn build_general_tab(
             build_general_structure(&mut commands, panel, target, &profile, sig, state, &mut ui);
             ui.general_sig = Some(sig);
         }
-        update_general_values(&ui, &profile, state, &avatars, &mut texts);
+        update_general_values(&ui, &profile, state, &avatars, &mut texts, &mut checks);
     }
 }
 
@@ -1794,6 +1790,16 @@ fn build_general_structure(
     );
 }
 
+/// The General tab's checkbox state and the queue its ticks are moved through,
+/// bundled so the update function stays inside Bevy's parameter count.
+#[derive(bevy::ecs::system::SystemParam)]
+struct GeneralChecks<'w, 's> {
+    /// Which flag checkboxes carry their tick.
+    ticked: Query<'w, 's, Has<Checked>>,
+    /// The queue a tick is moved through.
+    commands: Commands<'w, 's>,
+}
+
 /// Update the General tab's value nodes in place from the current state — the
 /// founder name (resolves async), the counts / fee (a re-fetch), the flag glyphs
 /// (toggled), and the active title (cycled). No respawn.
@@ -1803,6 +1809,7 @@ fn update_general_values(
     state: &GroupProfileState,
     avatars: &AvatarState,
     texts: &mut Query<(&mut Text, &mut TextColor)>,
+    checks: &mut GeneralChecks<'_, '_>,
 ) {
     let handles = &ui.general_handles;
     set_value_node(
@@ -1820,20 +1827,19 @@ fn update_general_values(
         handles.fee_display,
         &format!("L$ {}", profile.membership_fee.0),
     );
-    if let Some(glyph) = handles.open_enrollment_glyph {
-        set_toggle_glyph(texts, glyph, state.general_draft.open_enrollment);
-    }
-    if let Some(glyph) = handles.mature_glyph {
-        set_toggle_glyph(texts, glyph, state.general_draft.mature);
-    }
-    if let Some(glyph) = handles.show_in_list_glyph {
-        set_toggle_glyph(texts, glyph, state.general_draft.show_in_list);
-    }
-    if let Some(glyph) = handles.accept_notices_glyph {
-        set_toggle_glyph(texts, glyph, state.accept_notices);
-    }
-    if let Some(glyph) = handles.list_in_profile_glyph {
-        set_toggle_glyph(texts, glyph, state.list_in_profile);
+    for (checkbox, on) in [
+        (
+            handles.open_enrollment_glyph,
+            state.general_draft.open_enrollment,
+        ),
+        (handles.mature_glyph, state.general_draft.mature),
+        (handles.show_in_list_glyph, state.general_draft.show_in_list),
+        (handles.accept_notices_glyph, state.accept_notices),
+        (handles.list_in_profile_glyph, state.list_in_profile),
+    ] {
+        if let Some(checkbox) = checkbox {
+            set_toggle_marker(&mut checks.commands, &checks.ticked, checkbox, on);
+        }
     }
     let title = state
         .titles
@@ -2627,6 +2633,97 @@ fn on_notice_row_press(
 // Actions.
 // ---------------------------------------------------------------------------
 
+/// A group-profile checkbox was toggled.
+///
+/// Its own observer, because the widget announces a **value** where a button
+/// announces a press. The seven toggles that used to be arms of
+/// [`on_group_profile_action`] live here; each still writes its own state and
+/// leaves the rebuild to put the tick where the group lands.
+fn on_group_profile_check(
+    change: On<ValueChange<bool>>,
+    actions: Query<&GroupProfileAction>,
+    host: GroupProfileHost,
+    mut windows: Query<(&mut GroupProfileState, &mut GroupProfileDirty)>,
+    mut sl_commands: MessageWriter<SlCommand>,
+) {
+    let Ok(action) = actions.get(change.source) else {
+        return;
+    };
+    let Some(window) = host_floater(change.source, &host.parents, &host.floaters) else {
+        return;
+    };
+    let Ok((mut state, mut dirty)) = windows.get_mut(window) else {
+        return;
+    };
+    let Some(target) = state.target else {
+        return;
+    };
+    let state = &mut *state;
+    let dirty = &mut *dirty;
+    match action {
+        GroupProfileAction::ToggleAcceptNotices => {
+            state.accept_notices = !state.accept_notices;
+            send_accept_notices(state, target, &mut sl_commands);
+            dirty.general_values = true;
+        }
+        GroupProfileAction::ToggleListInProfile => {
+            state.list_in_profile = !state.list_in_profile;
+            send_accept_notices(state, target, &mut sl_commands);
+            dirty.general_values = true;
+        }
+        GroupProfileAction::ToggleOpenEnrollment => {
+            state.general_draft.open_enrollment = !state.general_draft.open_enrollment;
+            dirty.general_values = true;
+        }
+        GroupProfileAction::ToggleMature => {
+            state.general_draft.mature = !state.general_draft.mature;
+            dirty.general_values = true;
+        }
+        GroupProfileAction::ToggleShowInList => {
+            state.general_draft.show_in_list = !state.general_draft.show_in_list;
+            dirty.general_values = true;
+        }
+        GroupProfileAction::ToggleMemberRole(role_id) => {
+            let role_id = *role_id;
+            let DetailsFocus::Member(member) = state.focus else {
+                return;
+            };
+            let currently = state.member_roles(member).contains(&role_id);
+            let change = if currently {
+                GroupRoleChange::Remove
+            } else {
+                GroupRoleChange::Add
+            };
+            sl_commands.write(SlCommand(Command::ChangeGroupRoleMembers {
+                group_id: target,
+                changes: vec![GroupRoleMemberChange {
+                    role_id,
+                    member_id: member,
+                    change,
+                }],
+            }));
+            // Reflect locally, then re-request to confirm.
+            if currently {
+                state
+                    .role_members
+                    .retain(|pair| !(pair.role_id == role_id && pair.member_id == member));
+            } else {
+                state.role_members.push(GroupRoleMember {
+                    role_id,
+                    member_id: member,
+                });
+            }
+            sl_commands.write(SlCommand(Command::RequestGroupRoleMembers(target)));
+            dirty.details = true;
+        }
+        GroupProfileAction::ToggleRolePower(bit) => {
+            state.role_power_draft ^= *bit;
+            dirty.details = true;
+        }
+        _not_a_checkbox => {}
+    }
+}
+
 /// Dispatch a clicked group-profile button to the behaviour behind it.
 #[expect(
     clippy::too_many_lines,
@@ -2697,28 +2794,16 @@ fn on_group_profile_action(
             })));
             sl_commands.write(SlCommand(Command::RequestGroupProfile(target)));
         }
-        GroupProfileAction::ToggleAcceptNotices => {
-            state.accept_notices = !state.accept_notices;
-            send_accept_notices(&state, target, &mut sl_commands);
-            dirty.general_values = true;
-        }
-        GroupProfileAction::ToggleListInProfile => {
-            state.list_in_profile = !state.list_in_profile;
-            send_accept_notices(&state, target, &mut sl_commands);
-            dirty.general_values = true;
-        }
-        GroupProfileAction::ToggleOpenEnrollment => {
-            state.general_draft.open_enrollment = !state.general_draft.open_enrollment;
-            dirty.general_values = true;
-        }
-        GroupProfileAction::ToggleMature => {
-            state.general_draft.mature = !state.general_draft.mature;
-            dirty.general_values = true;
-        }
-        GroupProfileAction::ToggleShowInList => {
-            state.general_draft.show_in_list = !state.general_draft.show_in_list;
-            dirty.general_values = true;
-        }
+        // The seven checkbox actions arrive as a `ValueChange` on the checkbox
+        // itself (`on_group_profile_check`) rather than as a press on a button,
+        // so there is nothing to do for them here.
+        GroupProfileAction::ToggleAcceptNotices
+        | GroupProfileAction::ToggleListInProfile
+        | GroupProfileAction::ToggleOpenEnrollment
+        | GroupProfileAction::ToggleMature
+        | GroupProfileAction::ToggleShowInList
+        | GroupProfileAction::ToggleMemberRole(_)
+        | GroupProfileAction::ToggleRolePower(_) => {}
         GroupProfileAction::CycleTitle => {
             if state.titles.is_empty() {
                 return;
@@ -2748,38 +2833,6 @@ fn on_group_profile_action(
                 }));
                 sl_commands.write(SlCommand(Command::FetchGroupMembers(target)));
             }
-        }
-        GroupProfileAction::ToggleMemberRole(role_id) => {
-            let DetailsFocus::Member(member) = state.focus else {
-                return;
-            };
-            let currently = state.member_roles(member).contains(&role_id);
-            let change = if currently {
-                GroupRoleChange::Remove
-            } else {
-                GroupRoleChange::Add
-            };
-            sl_commands.write(SlCommand(Command::ChangeGroupRoleMembers {
-                group_id: target,
-                changes: vec![GroupRoleMemberChange {
-                    role_id,
-                    member_id: member,
-                    change,
-                }],
-            }));
-            // Reflect locally, then re-request to confirm.
-            if currently {
-                state
-                    .role_members
-                    .retain(|pair| !(pair.role_id == role_id && pair.member_id == member));
-            } else {
-                state.role_members.push(GroupRoleMember {
-                    role_id,
-                    member_id: member,
-                });
-            }
-            sl_commands.write(SlCommand(Command::RequestGroupRoleMembers(target)));
-            dirty.details = true;
         }
         GroupProfileAction::NewRole => {
             sl_commands.write(SlCommand(Command::UpdateGroupRoles {
@@ -2839,10 +2892,6 @@ fn on_group_profile_action(
                 }],
             }));
             sl_commands.write(SlCommand(Command::RequestGroupRoles(target)));
-        }
-        GroupProfileAction::ToggleRolePower(bit) => {
-            state.role_power_draft ^= bit;
-            dirty.details = true;
         }
         GroupProfileAction::SaveRolePowers => {
             let DetailsFocus::Role(Some(role_id)) = state.focus else {
@@ -3061,9 +3110,12 @@ fn spawn_cycle_button(
         .id()
 }
 
-/// A flag row: a translated label leading a clickable check-glyph toggle (or a
-/// read-only glyph when `action` is `None`). Returns the glyph text node so its
-/// checked state can be updated in place.
+/// A flag row: a translated label in the leading column and a checkbox after
+/// it (read-only — greyed and refusing the pointer — when `action` is `None`).
+/// Returns the checkbox so its tick can be moved in place.
+///
+/// Caption-less on purpose: this floater's rows carry their label in a leading
+/// column, so a second caption on the box would say everything twice.
 fn spawn_flag_row(
     commands: &mut Commands,
     parent: Entity,
@@ -3072,11 +3124,11 @@ fn spawn_flag_row(
     action: Option<GroupProfileAction>,
 ) -> Entity {
     let row_entity = spawn_labeled_row(commands, parent, label_key);
-    spawn_toggle_glyph(commands, row_entity, on, action)
+    spawn_toggle_checkbox(commands, row_entity, label_key, None, on, action)
 }
 
-/// A toggle row: a clickable (or read-only) check-glyph leading a plain-text
-/// label. Returns the glyph text node.
+/// A toggle row whose caption is a **runtime** string — a role's name in the
+/// member panel's role list. Returns the checkbox.
 fn spawn_toggle_row(
     commands: &mut Commands,
     parent: Entity,
@@ -3084,13 +3136,18 @@ fn spawn_toggle_row(
     on: bool,
     action: Option<GroupProfileAction>,
 ) -> Entity {
-    let (host, glyph) = spawn_toggle_host(commands, parent, on, action);
-    spawn_value_label(commands, host, label.to_owned(), LABEL_COLOR);
-    glyph
+    spawn_toggle_checkbox(
+        commands,
+        parent,
+        "group-role-toggle",
+        Some(Caption::Literal(label.to_owned())),
+        on,
+        action,
+    )
 }
 
-/// A toggle row whose label is a translated Fluent key (the abilities checklist).
-/// Returns the glyph text node.
+/// A toggle row whose caption is a translated Fluent key (the abilities
+/// checklist). Returns the checkbox.
 fn spawn_toggle_key_row(
     commands: &mut Commands,
     parent: Entity,
@@ -3098,89 +3155,79 @@ fn spawn_toggle_key_row(
     on: bool,
     action: Option<GroupProfileAction>,
 ) -> Entity {
-    let (host, glyph) = spawn_toggle_host(commands, parent, on, action);
-    commands.spawn((
-        Text::default(),
-        Translated::new(key),
-        UiFont::Sans.at(FONT_SIZE),
-        TextColor(LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(host),
-    ));
-    glyph
+    spawn_toggle_checkbox(commands, parent, key, Some(Caption::Key(key)), on, action)
 }
 
-/// The shared toggle-row host: a centred row carrying the check glyph, returning
-/// the host entity for the caller to append its label to, and the glyph text node.
-fn spawn_toggle_host(
-    commands: &mut Commands,
-    parent: Entity,
-    on: bool,
-    action: Option<GroupProfileAction>,
-) -> (Entity, Entity) {
-    let host = commands
-        .spawn((
-            Node {
-                align_items: AlignItems::Center,
-                ..row(Val::Px(4.0))
-            },
-            ChildOf(parent),
-        ))
-        .id();
-    let glyph = spawn_toggle_glyph(commands, host, on, action);
-    (host, glyph)
+/// What a toggle's caption is, where it has one of its own.
+enum Caption {
+    /// A Fluent key, re-resolved on a locale change.
+    Key(&'static str),
+    /// Literal display text (a role's name).
+    Literal(String),
 }
 
-/// The check-glyph itself: a [`Button`] carrying `action` when interactive, or a
-/// plain non-picking glyph when read-only. Returns the glyph text node so a
-/// caller can update its checked/unchecked state in place ([`set_toggle_glyph`]).
-fn spawn_toggle_glyph(
+/// The shared toggle: the checkbox widget, carrying `action` when interactive
+/// and `InteractionDisabled` when read-only — which is what greys it, since a
+/// read-only flag here is a fact about the group rather than a control.
+fn spawn_toggle_checkbox(
     commands: &mut Commands,
     parent: Entity,
+    element: &'static str,
+    caption: Option<Caption>,
     on: bool,
     action: Option<GroupProfileAction>,
 ) -> Entity {
-    let glyph = if on { CHECKED_GLYPH } else { UNCHECKED_GLYPH };
-    let color = if on { CHECK_COLOR } else { DIM_LABEL_COLOR };
-    let host = match action {
-        Some(action) => commands
-            .spawn((
-                Button,
-                action,
-                Node {
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                Pickable::default(),
-                ChildOf(parent),
-            ))
-            .observe(on_group_profile_action)
-            .id(),
-        None => parent,
+    let (label, translate) = match caption {
+        Some(Caption::Key(key)) => (key.to_owned(), true),
+        Some(Caption::Literal(text)) => (text, false),
+        None => (String::new(), false),
     };
-    commands
-        .spawn((
-            Text::new(glyph),
-            UiFont::Sans.at(FONT_SIZE),
-            TextColor(color),
-            Pickable::IGNORE,
-            ChildOf(host),
-        ))
-        .id()
+    let checkbox = spawn_checkbox(
+        commands,
+        parent,
+        &CheckboxSpec {
+            element,
+            label,
+            tab_index: 0,
+            font_size: FONT_SIZE,
+            translate_label: translate,
+        },
+    );
+    let entity = checkbox.checkbox;
+    if on {
+        commands.entity(entity).insert(Checked);
+    }
+    match action {
+        Some(action) => {
+            commands
+                .entity(entity)
+                .insert(action)
+                .observe(on_group_profile_check);
+        }
+        None => {
+            commands.entity(entity).insert(InteractionDisabled);
+        }
+    }
+    entity
 }
 
-/// Set a toggle glyph text node to its checked/unchecked state in place (no
-/// respawn), for the retained value-update path.
-fn set_toggle_glyph(texts: &mut Query<(&mut Text, &mut TextColor)>, glyph: Entity, on: bool) {
-    if let Ok((mut text, mut color)) = texts.get_mut(glyph) {
-        let wanted = if on { CHECKED_GLYPH } else { UNCHECKED_GLYPH };
-        if text.0 != wanted {
-            wanted.clone_into(&mut text.0);
-        }
-        let wanted_color = TextColor(if on { CHECK_COLOR } else { DIM_LABEL_COLOR });
-        if *color != wanted_color {
-            *color = wanted_color;
-        }
+/// Put a toggle's tick where the group says it belongs, in place (no respawn).
+///
+/// `Checked` is the whole of it: `.sk-checkbox:checked` draws the mark, so this
+/// writes no glyph and no colour, and moves the marker only when it disagrees.
+fn set_toggle_marker(
+    commands: &mut Commands,
+    ticked: &Query<Has<Checked>>,
+    checkbox: Entity,
+    on: bool,
+) {
+    let Ok(is_ticked) = ticked.get(checkbox) else {
+        return;
+    };
+    if on && !is_ticked {
+        commands.entity(checkbox).insert(Checked);
+    } else if !on && is_ticked {
+        commands.entity(checkbox).remove::<Checked>();
     }
 }
 

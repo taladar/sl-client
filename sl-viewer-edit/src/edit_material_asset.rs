@@ -22,7 +22,10 @@
 use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
+use bevy::ui::Checked;
 use bevy::ui_widgets::{Slider, SliderRange, SliderStep, SliderValue, ValueChange};
+
+use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use sl_client_bevy::{
     AssetKey, AssetUpdateLocation, Command, GltfAlphaMode, GltfMaterial, GltfTexture, ItemInfo,
     SlCommand, SlEvent, SlSessionEvent, TextureKey, UpdatableAssetType, Uuid,
@@ -74,11 +77,6 @@ const THUMB_FILL: Color = Color::srgb(0.72, 0.76, 0.84);
 
 /// A button's background.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
-
-/// The checked / unchecked toggle glyphs.
-const CHECKED_GLYPH: &str = "\u{2611}";
-/// The unchecked toggle glyph.
-const UNCHECKED_GLYPH: &str = "\u{2610}";
 
 // ---------------------------------------------------------------------------
 // Messages, components and resources.
@@ -192,8 +190,8 @@ struct MatEdit {
     preview: Option<Entity>,
     /// The alpha-mode button's label node.
     alpha_label: Option<Entity>,
-    /// The double-sided button's glyph node.
-    double_label: Option<Entity>,
+    /// The double-sided checkbox (its `Checked` is the state).
+    double_check: Option<Entity>,
     /// The status readout node.
     status: Option<Entity>,
 }
@@ -309,7 +307,7 @@ fn open_material_editor(
         saving: false,
         preview: None,
         alpha_label: None,
-        double_label: None,
+        double_check: None,
         status: None,
     });
     if let Ok(mut shown) = panels.get_mut(ui.panel) {
@@ -494,19 +492,32 @@ fn populate_material_editor(
         &mut tab,
     );
 
-    // Double-sided toggle.
+    // Double-sided toggle: the shared checkbox widget, caption-less because this
+    // editor's rows carry their label in a leading column (as the alerts table
+    // does) rather than beside each control.
     let double_row = spawn_labeled_row(&mut commands, ui.content, "Double Sided");
-    let double_label = spawn_text_button(
+    let double_check = spawn_checkbox(
         &mut commands,
         double_row,
-        toggle_glyph(material.double_sided),
-        MatDoubleSidedButton,
-        &mut tab,
+        &CheckboxSpec {
+            element: "material-double-sided",
+            label: String::new(),
+            tab_index: tab,
+            font_size: FONT,
+            translate_label: false,
+        },
     );
+    commands
+        .entity(double_check.checkbox)
+        .insert(MatDoubleSidedButton)
+        .observe(on_mat_double_sided);
+    if material.double_sided {
+        commands.entity(double_check.checkbox).insert(Checked);
+    }
 
     edit.preview = Some(preview);
     edit.alpha_label = Some(alpha_label);
-    edit.double_label = Some(double_label);
+    edit.double_check = Some(double_check.checkbox);
     edit.status = Some(status);
 }
 
@@ -723,11 +734,10 @@ fn apply_mat_color_picked(
     }
 }
 
-/// A text-button press: cycle the alpha mode, or toggle double-sided.
+/// A text-button press: cycle the alpha mode.
 fn on_mat_toggle(
     press: On<Pointer<Press>>,
     alpha: Query<&MatAlphaButton>,
-    double: Query<&MatDoubleSidedButton>,
     mut state: ResMut<MatEditState>,
     mut texts: Query<&mut Text>,
 ) {
@@ -745,15 +755,30 @@ fn on_mat_toggle(
             alpha_mode_name(edit.edited.alpha_mode),
         );
         edit.dirty = true;
-    } else if double.get(press.entity).is_ok() {
-        edit.edited.double_sided = !edit.edited.double_sided;
-        set_node_text(
-            &mut texts,
-            edit.double_label,
-            toggle_glyph(edit.edited.double_sided),
-        );
-        edit.dirty = true;
     }
+}
+
+/// The double-sided checkbox was toggled: the widget has already moved its own
+/// tick, so this writes the draft and nothing else.
+fn on_mat_double_sided(
+    change: On<ValueChange<bool>>,
+    double: Query<&MatDoubleSidedButton>,
+    mut state: ResMut<MatEditState>,
+    mut commands: Commands,
+) {
+    if double.get(change.source).is_err() {
+        return;
+    }
+    let Some(edit) = state.active.as_mut() else {
+        // No material open: the box has no draft to write to, so put its tick
+        // back rather than leaving it claiming something.
+        if change.value {
+            commands.entity(change.source).remove::<Checked>();
+        }
+        return;
+    };
+    edit.edited.double_sided = change.value;
+    edit.dirty = true;
 }
 
 /// Refresh the preview sphere when the edited material changed.
@@ -919,9 +944,4 @@ const fn next_alpha_mode(mode: GltfAlphaMode) -> GltfAlphaMode {
         GltfAlphaMode::Mask => GltfAlphaMode::Blend,
         GltfAlphaMode::Blend => GltfAlphaMode::Opaque,
     }
-}
-
-/// The checkbox glyph for a boolean.
-const fn toggle_glyph(on: bool) -> &'static str {
-    if on { CHECKED_GLYPH } else { UNCHECKED_GLYPH }
 }

@@ -64,7 +64,8 @@
 //! Every tab's structure is spawned **once**, when the window opens, and never
 //! torn down while it lives.
 //! Replies update values *in place*: value labels via `set_value_node`,
-//! checkbox glyphs via `set_check_visual`, the maturity combo by writing its
+//! checkbox ticks by moving the `Checked` the skin selects on, the maturity
+//! combo by writing its
 //! [`ComboSelection`](crate::ui_combo), edit fields by seeding
 //! `EditableText::editor_mut().set_text` (through the crate's `edit_fields`,
 //! which keeps an unapplied edit out of that write), and the four estate
@@ -110,7 +111,8 @@ use sl_viewer_ui_core::skin::TEXT_CLASS;
 use crate::skin_palette::SkinPalette;
 use bevy::prelude::*;
 use bevy::text::EditableText;
-use bevy::ui::InteractionDisabled;
+use bevy::ui::{Checked, InteractionDisabled};
+use bevy::ui_widgets::ValueChange;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
     AgentKey, Asset, AssetKey, AssetType, Command, EstateAccessDelta, EstateAccessKind,
@@ -141,6 +143,7 @@ use crate::social::GroupsModel;
 use crate::telehub::{OpenTelehub, TelehubPlugin};
 use crate::top_objects::{OpenTopObjects, TopObjectsPlugin};
 use crate::ui::{column, row};
+use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
 use crate::ui_name_link::{NameLink, NameLinkSpec, NameTarget, set_name_link, spawn_name_link};
@@ -168,14 +171,8 @@ const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 /// A dim label / secondary text colour.
 const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
-/// A checked toggle's tick colour.
-const CHECK_COLOR: Color = Color::srgb(0.55, 0.85, 0.60);
-
 /// The skin class on an action button, so `.sk-button:disabled` greys it.
 const BUTTON_CLASS: &str = "sk-button";
-
-/// A disabled control's text colour (matching the disabled text field / combo).
-const DISABLED_COLOR: Color = Color::srgb(0.45, 0.47, 0.52);
 
 /// An action button's background.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
@@ -185,12 +182,6 @@ const BUTTON_BORDER: Color = Color::srgb(0.34, 0.40, 0.52);
 
 /// A list background.
 const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
-
-/// The glyph for a checked toggle.
-const CHECKED_GLYPH: &str = "\u{2611}";
-
-/// The glyph for an unchecked toggle.
-const UNCHECKED_GLYPH: &str = "\u{2610}";
 
 /// The bounded height of each estate access list, in logical pixels — the widget
 /// scrolls beyond it rather than growing the tab.
@@ -962,14 +953,14 @@ struct AboutRegionUi {
 // ---------------------------------------------------------------------------
 
 /// A checkbox on the Region / Debug tabs.
+///
+/// It names the setting the box reflects and nothing else: the box, the tick
+/// and the caption belong to [`spawn_checkbox`], and all of their looks are the
+/// skin's — `:checked` for the tick, `:disabled` for the greying.
 #[derive(Component, Debug, Clone, Copy)]
 struct AboutRegionCheck {
     /// What the checkbox reflects.
     kind: CheckKind,
-    /// The check-glyph text node.
-    glyph: Entity,
-    /// The label text node (greyed with the glyph when disabled).
-    label: Entity,
 }
 
 /// Which region / debug / estate setting a checkbox drives. Every kind is
@@ -2661,8 +2652,8 @@ struct RegionEnableGates<'w, 's> {
     gated: Query<'w, 's, Entity, With<EditGate>>,
     /// Which of them already carry the disabled marker.
     disabled: Query<'w, 's, (), With<InteractionDisabled>>,
-    /// The checkboxes whose glyph follows the gate.
-    checks: Query<'w, 's, (Entity, &'static AboutRegionCheck)>,
+    /// The checkboxes whose tick follows the region's own state.
+    checks: Query<'w, 's, (Entity, &'static AboutRegionCheck, Has<Checked>)>,
 }
 
 /// The name sources an access row is resolved through, bundled as one plain
@@ -2719,7 +2710,6 @@ fn update_control_enable(
     mut windows: Query<(Entity, &mut AboutRegionDirty, &AboutRegionState)>,
     gates: RegionEnableGates,
     host: FloaterHost,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
     mut commands: Commands,
 ) {
     let RegionEnableGates {
@@ -2762,21 +2752,17 @@ fn update_control_enable(
     // them. (`InteractionDisabled` is advisory — it stops this window's own
     // observer and paints nothing — which is why the colours used to be
     // written beside it.)
-    for (entity, check) in &checks {
+    for (entity, check, is_ticked) in &checks {
         let Some(hosting) = host.of(entity) else {
             continue;
         };
-        let Some(can_manage) = repainting
-            .iter()
-            .find_map(|(window, can_manage)| (*window == hosting).then_some(*can_manage))
-        else {
+        if !repainting.iter().any(|(window, _)| *window == hosting) {
             continue;
-        };
+        }
         let Ok((_window, _dirty, state)) = windows.get(hosting) else {
             continue;
         };
-        let on = check.kind.checked(state);
-        set_check_visual(&mut texts, check, on, can_manage);
+        set_check_marker(&mut commands, entity, is_ticked, check.kind.checked(state));
     }
 }
 
@@ -3708,31 +3694,35 @@ fn post_region_experiences(state: &AboutRegionState, commands: &mut MessageWrite
 /// Toggle a checkbox, flipping its backing draft field.
 /// Toggle a checkbox, flipping the draft field of the window it was pressed in.
 fn on_about_region_check(
-    press: On<Pointer<Press>>,
+    change: On<ValueChange<bool>>,
     checks: Query<&AboutRegionCheck>,
     mut windows: Query<&mut AboutRegionState>,
     parents: Query<&ChildOf>,
     floaters: Query<(Entity, &Floater)>,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
+    mut commands: Commands,
 ) {
-    if press.button != PointerButton::Primary {
-        return;
-    }
-    let Ok(check) = checks.get(press.entity) else {
+    let entity = change.source;
+    let Ok(check) = checks.get(entity) else {
         return;
     };
-    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+    let Some(window) = host_floater(entity, &parents, &floaters) else {
         return;
     };
     let Ok(mut state) = windows.get_mut(window) else {
         return;
     };
+    // The widget moved its own tick before anyone asked whether the agent may
+    // manage this estate, so a refusal has to put it back.
     if !state.can_manage {
+        set_check_marker(
+            &mut commands,
+            entity,
+            change.value,
+            check.kind.checked(&state),
+        );
         return;
     }
     check.kind.toggle(&mut state);
-    let on = check.kind.checked(&state);
-    set_check_visual(&mut texts, check, on, true);
 }
 
 /// Dispatch a floater action-button press.
@@ -4414,35 +4404,17 @@ fn set_cell(
     }
 }
 
-/// Set a checkbox's glyph and label in place, greying both when disabled.
-fn set_check_visual(
-    texts: &mut Query<(&mut Text, &mut TextColor)>,
-    check: &AboutRegionCheck,
-    on: bool,
-    enabled: bool,
-) {
-    let glyph = if on { CHECKED_GLYPH } else { UNCHECKED_GLYPH };
-    let glyph_color = if !enabled {
-        DISABLED_COLOR
-    } else if on {
-        CHECK_COLOR
-    } else {
-        DIM_LABEL_COLOR
-    };
-    if let Ok((mut text, mut color)) = texts.get_mut(check.glyph) {
-        if text.0 != glyph {
-            glyph.clone_into(&mut text.0);
-        }
-        let wanted = TextColor(glyph_color);
-        if *color != wanted {
-            *color = wanted;
-        }
-    }
-    let label_color = TextColor(if enabled { LABEL_COLOR } else { DISABLED_COLOR });
-    if let Ok((_text, mut color)) = texts.get_mut(check.label)
-        && *color != label_color
-    {
-        *color = label_color;
+/// Put a checkbox's tick where the region says it belongs.
+///
+/// The whole of the repaint now: `Checked` is what `.sk-checkbox:checked`
+/// selects on and the greying follows the `InteractionDisabled` the gate
+/// maintains, so neither is a colour this window writes. Idempotent — the
+/// marker moves only when it disagrees.
+fn set_check_marker(commands: &mut Commands, entity: Entity, is_ticked: bool, on: bool) {
+    if on && !is_ticked {
+        commands.entity(entity).insert(Checked);
+    } else if !on && is_ticked {
+        commands.entity(entity).remove::<Checked>();
     }
 }
 
@@ -4673,37 +4645,27 @@ fn spawn_detail_swatch(commands: &mut Commands, parent: Entity, slot: usize) -> 
     swatch
 }
 
-/// A checkbox: a clickable glyph leading a translated label, gated on estate
-/// rights ([`EditGate`]).
+/// A checkbox: the shared widget, gated on estate rights ([`EditGate`]).
+///
+/// The Fluent key doubles as the widget's element id, so each box is
+/// addressable by its own name rather than every one of them sharing a single
+/// one.
 fn spawn_check(commands: &mut Commands, parent: Entity, label_key: &'static str, kind: CheckKind) {
     let row_entity = spawn_row(commands, parent);
-    let glyph = commands
-        .spawn((
-            Text::new(UNCHECKED_GLYPH),
-            UiFont::Sans.at(FONT_SIZE),
-            TextColor(DIM_LABEL_COLOR),
-            Pickable::IGNORE,
-        ))
-        .id();
-    let label = commands
-        .spawn((
-            Text::default(),
-            Translated::new(label_key),
-            UiFont::Sans.at(FONT_SIZE),
-            TextColor(LABEL_COLOR),
-            Pickable::IGNORE,
-        ))
-        .id();
+    let checkbox = spawn_checkbox(
+        commands,
+        row_entity,
+        &CheckboxSpec {
+            element: label_key,
+            label: label_key.to_owned(),
+            tab_index: 0,
+            font_size: FONT_SIZE,
+            translate_label: true,
+        },
+    );
     commands
-        .entity(row_entity)
-        .insert((
-            Button,
-            AboutRegionCheck { kind, glyph, label },
-            EditGate,
-            Pickable::default(),
-        ))
-        .add_child(glyph)
-        .add_child(label)
+        .entity(checkbox.checkbox)
+        .insert((AboutRegionCheck { kind }, EditGate))
         .observe(on_about_region_check);
 }
 

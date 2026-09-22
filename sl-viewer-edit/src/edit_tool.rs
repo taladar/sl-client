@@ -31,6 +31,8 @@ use crate::world_api::{BUILD_TOOLS, DEFAULT_GRID_UNIT, EditTool, EditToolState, 
 use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx};
+use bevy::ui::Checked;
+use bevy::ui_widgets::ValueChange;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{Command, ObjectTransform, Permissions, SlCommand, Vector};
 
@@ -45,6 +47,7 @@ use crate::i18n::{TransArgs, Translated, Translator};
 use crate::intents::LocalChatNotice;
 use crate::objects::{ObjectSlMotion, SceneObject};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use crate::ui_font::UiFont;
 use crate::ui_radio::{RadioLayout, RadioSelection, RadioSpec, spawn_radio_group};
 use crate::ui_tab::{
@@ -65,12 +68,6 @@ pub const BUILD_TOOLS_FLOATER_ID: &str = "build-tools";
 
 /// The width of a numeric transform field, in `"0"`-glyph advances.
 const FIELD_WIDTH_GLYPHS: f32 = 8.0;
-
-/// The toggle-row check glyph while on.
-pub const CHECKED_GLYPH: &str = "☑";
-
-/// The toggle-row check glyph while off.
-pub const UNCHECKED_GLYPH: &str = "☐";
 
 /// The skin class for the floater's label / summary text
 /// (`--text-muted`-driven; see `assets/skins/common.css`).
@@ -187,10 +184,6 @@ struct BuildTransformLabel(FieldGroup);
 #[derive(Component, Debug, Clone, Copy)]
 struct BuildToolRadio;
 
-/// Marks a toggle row's check glyph.
-#[derive(Component, Debug, Clone, Copy)]
-struct BuildToggleGlyph(BuildToggle);
-
 /// The build floater's entities.
 #[derive(Resource, Debug)]
 pub(crate) struct BuildToolsUi {
@@ -272,7 +265,7 @@ impl Plugin for EditToolPlugin {
                     sync_build_tool_from_radio,
                     sync_radio_from_build_tool,
                     sync_tab_visibility,
-                    update_toggle_glyphs,
+                    sync_toggle_ticks,
                     promote_selection_when_whole_linkset,
                     sync_link_part_nav,
                     sync_tab_pages,
@@ -712,7 +705,11 @@ fn build_build_tools_content(
     });
 }
 
-/// Spawn one toggle row (check glyph + label) flipping a [`BuildToggle`].
+/// Spawn one toggle row — the shared checkbox widget — flipping a
+/// [`BuildToggle`].
+///
+/// The Fluent key is the widget's element id, so each toggle is addressable by
+/// its own name (`build-toggle-snap:checkbox`).
 fn spawn_toggle_row(
     commands: &mut Commands,
     parent: Entity,
@@ -720,43 +717,22 @@ fn spawn_toggle_row(
     label_key: &'static str,
     tab_index: i32,
 ) {
-    let toggle_row = commands
-        .spawn((
-            bevy::ui_widgets::Button,
-            bevy::input_focus::tab_navigation::TabIndex(tab_index),
-            Node {
-                align_items: AlignItems::Center,
-                ..row(Val::Px(6.0))
-            },
-            Pickable::default(),
-            toggle,
-            Name::new(format!("build-tools:{label_key}")),
-            ChildOf(parent),
-        ))
-        .id();
-    commands.spawn((
-        Text::new(UNCHECKED_GLYPH),
-        UiFont::Sans.at(TOOL_FONT_SIZE),
-        // A skinless fallback; the skin recolours via the class token.
-        TextColor(Color::WHITE),
-        ClassList::new_with_classes([VALUE_CLASS]),
-        BuildToggleGlyph(toggle),
-        Pickable::IGNORE,
-        ChildOf(toggle_row),
-    ));
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(TOOL_FONT_SIZE),
-        // A skinless fallback; the skin recolours via the class token.
-        TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
-        ClassList::new_with_classes([LABEL_CLASS]),
-        Pickable::IGNORE,
-        ChildOf(toggle_row),
-    ));
-    commands.entity(toggle_row).observe(
-        move |press: On<Pointer<Press>>, mut state: ResMut<EditToolState>| {
-            if press.button == PointerButton::Primary {
+    let checkbox = spawn_checkbox(
+        commands,
+        parent,
+        &CheckboxSpec {
+            element: label_key,
+            label: label_key.to_owned(),
+            tab_index,
+            font_size: TOOL_FONT_SIZE,
+            translate_label: true,
+        },
+    );
+    commands.entity(checkbox.checkbox).insert(toggle).observe(
+        move |change: On<ValueChange<bool>>, mut state: ResMut<EditToolState>| {
+            // The widget has already moved its own tick; `sync_toggle_ticks`
+            // agrees with it on the next frame, from the state this writes.
+            if toggle.get(&state) != change.value {
                 toggle.flip(&mut state);
             }
         },
@@ -1067,22 +1043,25 @@ fn sync_radio_from_build_tool(
     }
 }
 
-/// Keep the toggle rows' check glyphs in step with the state.
-fn update_toggle_glyphs(
+/// Keep the toggle rows' ticks in step with the state.
+///
+/// `Checked` is the whole of it: `.sk-checkbox:checked` draws the mark, so a
+/// flag changed from anywhere — a keyboard shortcut, another panel — reaches the
+/// box through the marker rather than through a glyph this system writes.
+fn sync_toggle_ticks(
     state: Res<EditToolState>,
-    mut glyphs: Query<(&BuildToggleGlyph, &mut Text)>,
+    mut commands: Commands,
+    toggles: Query<(Entity, &BuildToggle, Has<Checked>)>,
 ) {
     if !state.is_changed() {
         return;
     }
-    for (glyph, mut text) in &mut glyphs {
-        let want = if glyph.0.get(&state) {
-            CHECKED_GLYPH
-        } else {
-            UNCHECKED_GLYPH
-        };
-        if text.0 != want {
-            want.clone_into(&mut text.0);
+    for (entity, toggle, ticked) in &toggles {
+        let on = toggle.get(&state);
+        if on && !ticked {
+            commands.entity(entity).insert(Checked);
+        } else if !on && ticked {
+            commands.entity(entity).remove::<Checked>();
         }
     }
 }
@@ -1606,26 +1585,20 @@ pub fn spawn_build_tools_specimen(
             ChildOf(root),
         ))
         .id();
-    commands
-        .spawn((Node::default(), ChildOf(toggle)))
-        .with_child((
-            Text::new(CHECKED_GLYPH),
-            cx.font(UiFont::Sans),
-            TextColor(Color::WHITE),
-        ));
-    commands
-        .spawn((
-            Node {
-                max_width: Val::Px(220.0),
-                ..Default::default()
-            },
-            ChildOf(toggle),
-        ))
-        .with_child((
-            Text::new(cx.text("Snap to grid")),
-            cx.font(UiFont::Sans),
-            TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
-        ));
+    // The real widget, ticked: a specimen is what a skin author looks at, so a
+    // box painted to look like one would be showing them the wrong thing.
+    let snap = spawn_checkbox(
+        commands,
+        toggle,
+        &CheckboxSpec {
+            element: "build-specimen-snap",
+            label: cx.text("Snap to grid"),
+            tab_index: 0,
+            font_size: cx.font_size,
+            translate_label: false,
+        },
+    );
+    commands.entity(snap.checkbox).insert(Checked);
     let transform_row = commands
         .spawn((
             Node {

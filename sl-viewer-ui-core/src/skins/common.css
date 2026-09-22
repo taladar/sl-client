@@ -201,6 +201,13 @@
   color: var(--text-disabled);
 }
 
+/* And the caption with it, the same way a refused button's is: the box alone
+ * greying would read as a box that happens to be empty rather than as a
+ * setting this window will not let you change. */
+.sk-checkbox:disabled .sk-text {
+  color: var(--text-disabled);
+}
+
 /* A skin-tone swatch in the emoji picker: a bordered tile, exactly one of which
  * is chosen. That is a radio, so the chosen one carries `Checked` and `:checked`
  * outlines it — no marker class and no per-tone paint loop. */

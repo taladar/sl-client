@@ -67,6 +67,10 @@
 //! `llfloaterscriptdebug`.
 
 use bevy::prelude::*;
+use bevy::ui::{Checked, InteractionDisabled};
+use bevy::ui_widgets::ValueChange;
+
+use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use bevy::text::EditableText;
 use sl_client_bevy::{
     AssetKey, AssetType, Command, InventoryKey, ObjectKey, ScriptCompileError, ScriptTarget,
@@ -81,21 +85,12 @@ use crate::floater::{
     Floater, FloaterCaps, FloaterHandle, FloaterKey, FloaterSpec, FloaterSystems, KeyedFloaterOpen,
     KeyedFloaters, host_floater,
 };
-use crate::i18n::{TransArgs, Translated, Translator};
+use crate::i18n::{TransArgs, Translator};
 use crate::intents::{OpenScript, ScriptSource};
 use crate::ui::{column, row};
 use crate::ui_element::ElementCx;
 use crate::ui_font::UiFont;
 use sl_viewer_ui_core::skin::text_role;
-
-/// A green-tinted colour for a checked Running box.
-const CHECK_COLOR: Color = Color::srgb(0.55, 0.85, 0.60);
-
-/// The check glyph for a ticked toggle (`☑`).
-const CHECKED_GLYPH: &str = "\u{2611}";
-
-/// The empty-box glyph for an unticked toggle (`☐`).
-const UNCHECKED_GLYPH: &str = "\u{2610}";
 
 /// The body field's height, in visible text lines — what the window opens at,
 /// being content-driven. It is a *starting* size, not a cap: the body fills, so
@@ -185,7 +180,7 @@ struct ScriptEditorState {
     running: Option<bool>,
     /// The Running toggle's glyph node, repainted when the query answers or the
     /// user toggles it.
-    running_glyph: Option<Entity>,
+    running_check: Option<Entity>,
     /// The `(object, item)` a `RequestScriptRunning` awaits a reply for.
     pending_running: Option<(ObjectKey, InventoryKey)>,
 }
@@ -296,7 +291,7 @@ fn build_script_window(commands: &mut Commands, handle: FloaterHandle, open: &Op
             status: Some(status),
             errors: None,
             running: None,
-            running_glyph: None,
+            running_check: None,
             pending_running,
         },
     ));
@@ -354,7 +349,7 @@ fn ingest_script_asset(
             state.body_field = built.body_field;
             state.status = built.status;
             state.errors = built.errors;
-            state.running_glyph = built.running_glyph;
+            state.running_check = built.running_check;
             // The source as it arrived is the baseline the unsaved-work guard
             // measures against; a read-only window has no buffer to lose and so
             // never gets one.
@@ -377,7 +372,7 @@ struct BuiltEditor {
     /// The compile-diagnostics container, when the editor offers a Save button.
     errors: Option<Entity>,
     /// The Running toggle's glyph node, when a task script is editable.
-    running_glyph: Option<Entity>,
+    running_check: Option<Entity>,
 }
 
 /// What an editor's content is built from: the script itself, whether it may be
@@ -441,7 +436,7 @@ fn populate_editor(
         None
     };
 
-    let running_glyph = (editable && source.is_task())
+    let running_check = (editable && source.is_task())
         .then(|| spawn_running_toggle(commands, content, running, font_size, live));
 
     let (status, errors) = if editable {
@@ -493,7 +488,7 @@ fn populate_editor(
         body_field,
         status,
         errors,
-        running_glyph,
+        running_check,
     }
 }
 
@@ -571,7 +566,7 @@ fn report_script_running(
                 continue;
             }
             state.running = Some(*running);
-            repaint_running_glyph(&mut commands, state.running_glyph, *running);
+            set_running_tick(&mut commands, state.running_check, *running);
         }
     }
 }
@@ -694,9 +689,12 @@ fn spawn_readonly_body(commands: &mut Commands, parent: Entity, text: &str, font
         ));
 }
 
-/// Spawn the Running toggle for a task script: a check glyph plus a label. When
-/// `live`, clicking it flips the run state carried into the next Save. Returns
-/// the glyph node so the run-state query can repaint it.
+/// Spawn the Running toggle for a task script — the shared checkbox widget.
+/// When `live`, toggling it flips the run state carried into the next Save.
+/// Returns the checkbox, whose `Checked` the run-state query moves.
+///
+/// A read-only editor gets `InteractionDisabled` instead of an observer, so the
+/// box greys and refuses the pointer rather than looking live and doing nothing.
 fn spawn_running_toggle(
     commands: &mut Commands,
     parent: Entity,
@@ -704,81 +702,59 @@ fn spawn_running_toggle(
     font_size: f32,
     live: bool,
 ) -> Entity {
-    let mut row_entity = commands.spawn((
-        Button,
-        Node {
-            align_items: AlignItems::Center,
-            ..row(Val::Px(4.0))
+    let checkbox = spawn_checkbox(
+        commands,
+        parent,
+        &CheckboxSpec {
+            element: "script-running",
+            label: "script-running".to_owned(),
+            tab_index: 0,
+            font_size,
+            translate_label: true,
         },
-        Pickable::default(),
-        Name::new("script-running-toggle"),
-        ChildOf(parent),
-    ));
-    if live {
-        row_entity.observe(on_running_toggle);
+    );
+    let entity = checkbox.checkbox;
+    if running {
+        commands.entity(entity).insert(Checked);
     }
-    let host = row_entity.id();
-    let glyph = commands
-        .spawn((
-            Text::new(if running {
-                CHECKED_GLYPH
-            } else {
-                UNCHECKED_GLYPH
-            }),
-            UiFont::Sans.at(font_size),
-            TextColor(if running { CHECK_COLOR } else { DIM_COLOR }),
-            Pickable::IGNORE,
-            ChildOf(host),
-        ))
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new("script-running"),
-        UiFont::Sans.at(font_size),
-        text_role(LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(host),
-    ));
-    glyph
+    if live {
+        commands.entity(entity).observe(on_running_toggle);
+    } else {
+        commands.entity(entity).insert(InteractionDisabled);
+    }
+    entity
 }
 
-/// The Running toggle was clicked: flip the run state the next Save carries, and
-/// repaint the glyph. The state is applied on Save (a save *is* a recompile), so
-/// this does not send a separate `SetScriptRunning`.
+/// The Running toggle was toggled: flip the run state the next Save carries.
+/// The state is applied on Save (a save *is* a recompile), so this sends no
+/// separate `SetScriptRunning`.
 fn on_running_toggle(
-    press: On<Pointer<Press>>,
+    change: On<ValueChange<bool>>,
     parents: Query<&ChildOf>,
     floaters: Query<(Entity, &Floater)>,
     mut windows: Query<&mut ScriptEditorState>,
-    mut commands: Commands,
 ) {
-    if press.button != PointerButton::Primary {
-        return;
-    }
     // The toggle belongs to the window it sits in — with two scripts open,
     // this must not flip the other one's run state.
-    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+    let Some(window) = host_floater(change.source, &parents, &floaters) else {
         return;
     };
     let Ok(mut state) = windows.get_mut(window) else {
         return;
     };
-    let running = !state.running.unwrap_or(true);
-    state.running = Some(running);
-    repaint_running_glyph(&mut commands, state.running_glyph, running);
+    state.running = Some(change.value);
 }
 
-/// Repaint the Running toggle's glyph to reflect `running`.
-fn repaint_running_glyph(commands: &mut Commands, glyph: Option<Entity>, running: bool) {
-    if let Some(glyph) = glyph {
-        commands.entity(glyph).insert((
-            Text::new(if running {
-                CHECKED_GLYPH
-            } else {
-                UNCHECKED_GLYPH
-            }),
-            TextColor(if running { CHECK_COLOR } else { DIM_COLOR }),
-        ));
+/// Put the Running toggle's tick where the run state says — for the grid's own
+/// answer, which arrives long after the click that asked for it.
+fn set_running_tick(commands: &mut Commands, checkbox: Option<Entity>, running: bool) {
+    let Some(checkbox) = checkbox else {
+        return;
+    };
+    if running {
+        commands.entity(checkbox).insert(Checked);
+    } else {
+        commands.entity(checkbox).remove::<Checked>();
     }
 }
 

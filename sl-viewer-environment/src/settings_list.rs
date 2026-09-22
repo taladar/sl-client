@@ -187,6 +187,17 @@ pub const fn kind_slug(kind: SettingsKind) -> &'static str {
     }
 }
 
+/// A kind filter checkbox's element id — the name its widget's nodes carry, so
+/// each of the three is addressable rather than all sharing one.
+#[must_use]
+pub const fn kind_element(kind: SettingsKind) -> &'static str {
+    match kind {
+        SettingsKind::Sky => "my-environments-filter-sky",
+        SettingsKind::Water => "my-environments-filter-water",
+        SettingsKind::DayCycle => "my-environments-filter-day-cycle",
+    }
+}
+
 /// Order `rows` by a table's sort keys (most significant first), falling back to
 /// a case-insensitive name compare so the order is total and stable.
 ///

@@ -44,6 +44,10 @@
 
 use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
+use bevy::ui::Checked;
+use bevy::ui_widgets::ValueChange;
+
+use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use bevy::text::{EditableText, FontCx, LayoutCx};
 use bevy_flair::style::components::ClassList;
 use bevy_fluent::Localization;
@@ -53,10 +57,7 @@ use sl_client_bevy::{
     PrimShapeFloat, PrimShapeParams, ProfileCurve, ScopedObjectId, SlCommand, Uuid, Vector, pcode,
 };
 
-use crate::edit_tool::{
-    BuildTabPages, CHECKED_GLYPH, LABEL_CLASS, TOOL_FONT_SIZE, UNCHECKED_GLYPH, VALUE_CLASS,
-    spawn_row_label,
-};
+use crate::edit_tool::{BuildTabPages, LABEL_CLASS, TOOL_FONT_SIZE, VALUE_CLASS, spawn_row_label};
 use crate::i18n::{Translated, Translator};
 use crate::intents::{GroupPicked, OpenGroupPicker};
 use crate::social::GroupsModel;
@@ -733,10 +734,6 @@ enum ParamToggle {
     AnyoneCopy,
 }
 
-/// Marks a [`ParamToggle`] row's check glyph.
-#[derive(Component, Debug, Clone, Copy)]
-struct ParamToggleGlyph(ParamToggle);
-
 /// Which cycle button this is (the combo stand-ins).
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 enum ParamCycle {
@@ -802,10 +799,6 @@ enum FeatureRows {
     /// The spotlight projection row.
     Spot,
 }
-
-/// Marks a [`ParamToggle`] row's text label (greyed with its gate).
-#[derive(Component, Debug, Clone, Copy)]
-struct ParamToggleLabel(ParamToggle);
 
 /// What must be true of the selection for an interactive widget to be live.
 /// A gated-off widget stays **visible** but greys out and ignores input —
@@ -978,7 +971,11 @@ fn spawn_param_row(commands: &mut Commands, parent: Entity, label_key: &'static 
     row_entity
 }
 
-/// Spawn one wire-committing toggle row (check glyph + label).
+/// Spawn one wire-committing toggle row — the shared checkbox widget.
+///
+/// The gate rides on the checkbox itself, so the pass that refuses a control
+/// reaches box and caption alike through `.sk-checkbox:disabled`: no class is
+/// added to a text node here, and there is no glyph to grey.
 fn spawn_param_toggle(
     commands: &mut Commands,
     parent: Entity,
@@ -988,43 +985,21 @@ fn spawn_param_toggle(
 ) {
     let index = *tab_index;
     *tab_index = tab_index.saturating_add(1);
-    let toggle_row = commands
-        .spawn((
-            bevy::ui_widgets::Button,
-            bevy::input_focus::tab_navigation::TabIndex(index),
-            Node {
-                align_items: AlignItems::Center,
-                ..row(Val::Px(6.0))
-            },
-            Pickable::default(),
-            toggle,
-            toggle_gate(toggle),
-            Name::new(format!("build-params:{label_key}")),
-            ChildOf(parent),
-        ))
-        .id();
-    commands.spawn((
-        Text::new(UNCHECKED_GLYPH),
-        UiFont::Sans.at(TOOL_FONT_SIZE),
-        // A skinless fallback; the skin recolours via the class token.
-        TextColor(Color::WHITE),
-        ClassList::new_with_classes([VALUE_CLASS]),
-        ParamToggleGlyph(toggle),
-        Pickable::IGNORE,
-        ChildOf(toggle_row),
-    ));
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(TOOL_FONT_SIZE),
-        // A skinless fallback; the skin recolours via the class token.
-        TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
-        ClassList::new_with_classes([LABEL_CLASS]),
-        ParamToggleLabel(toggle),
-        Pickable::IGNORE,
-        ChildOf(toggle_row),
-    ));
-    commands.entity(toggle_row).observe(handle_toggle_press);
+    let checkbox = spawn_checkbox(
+        commands,
+        parent,
+        &CheckboxSpec {
+            element: label_key,
+            label: label_key.to_owned(),
+            tab_index: index,
+            font_size: TOOL_FONT_SIZE,
+            translate_label: true,
+        },
+    );
+    commands
+        .entity(checkbox.checkbox)
+        .insert((toggle, toggle_gate(toggle)))
+        .observe(handle_toggle_press);
 }
 
 /// Spawn one cycle button (the combo stand-in): a bordered button whose value
@@ -2234,29 +2209,9 @@ fn build_snapshot(
     })
 }
 
-/// A toggle glyph's text + class query row. See [`ParamWidgets`].
-type GlyphQuery<'w, 's> = Query<
-    'w,
-    's,
-    (
-        &'static ParamToggleGlyph,
-        &'static mut Text,
-        &'static mut ClassList,
-    ),
-    (
-        Without<ParamCycleValue>,
-        Without<ParamToggleLabel>,
-        Without<InfoText>,
-    ),
->;
-
-/// A toggle label's class query row. See [`ParamWidgets`].
-type ToggleLabelQuery<'w, 's> = Query<
-    'w,
-    's,
-    (&'static ParamToggleLabel, &'static mut ClassList),
-    (Without<ParamCycleValue>, Without<ParamToggleGlyph>),
->;
+/// Every toggle checkbox, with the marker its tick follows. See
+/// [`ParamWidgets`].
+type ToggleQuery<'w, 's> = Query<'w, 's, (Entity, &'static ParamToggle, Has<Checked>)>;
 
 /// A cycle value's text + class query row. See [`ParamWidgets`].
 type CycleValueQuery<'w, 's> = Query<
@@ -2267,20 +2222,12 @@ type CycleValueQuery<'w, 's> = Query<
         &'static mut Text,
         &'static mut ClassList,
     ),
-    (
-        Without<ParamToggleGlyph>,
-        Without<ParamToggleLabel>,
-        Without<InfoText>,
-    ),
+    Without<InfoText>,
 >;
 
 /// A read-only info line's text query row. See [`ParamWidgets`].
-type InfoQuery<'w, 's> = Query<
-    'w,
-    's,
-    (&'static InfoText, &'static mut Text),
-    (Without<ParamToggleGlyph>, Without<ParamCycleValue>),
->;
+type InfoQuery<'w, 's> =
+    Query<'w, 's, (&'static InfoText, &'static mut Text), Without<ParamCycleValue>>;
 
 /// Add or remove the greyed-out skin class on a widget text.
 pub(crate) fn set_disabled_class(class_list: &mut ClassList, disabled: bool) {
@@ -2311,10 +2258,8 @@ fn perm_bit(
 struct ParamWidgets<'w, 's> {
     /// The parameter text fields.
     editors: Query<'w, 's, (Entity, &'static ParamField, &'static mut EditableText)>,
-    /// The toggle rows' check glyphs.
-    glyphs: GlyphQuery<'w, 's>,
-    /// The toggle rows' text labels.
-    toggle_labels: ToggleLabelQuery<'w, 's>,
+    /// The toggle checkboxes, whose tick follows the selection.
+    toggles: ToggleQuery<'w, 's>,
     /// The cycle buttons' value texts.
     cycle_values: CycleValueQuery<'w, 's>,
     /// The read-only info lines.
@@ -2507,9 +2452,12 @@ fn sync_param_widgets(
         }
     }
 
-    // Toggle glyphs (checked state + greyed-out class).
-    for (glyph, mut text, mut class_list) in &mut widgets.glyphs {
-        let on = match glyph.0 {
+    // The toggles' ticks. `Checked` is the whole of it — `.sk-checkbox:checked`
+    // draws the mark — and the greying is the gate loop's `InteractionDisabled`
+    // above, which lands on the checkbox itself and reaches its caption through
+    // `.sk-checkbox:disabled`.
+    for (entity, toggle, ticked) in &widgets.toggles {
+        let on = match toggle {
             ParamToggle::Physical => data.is_some_and(|d| d.update_flags & FLAGS_USE_PHYSICS != 0),
             ParamToggle::Temporary => {
                 data.is_some_and(|d| d.update_flags & FLAGS_TEMPORARY_ON_REZ != 0)
@@ -2526,14 +2474,11 @@ fn sync_param_widgets(
             ParamToggle::AnyoneMove => perm_bit(data, |p| p.everyone, Permissions::MOVE),
             ParamToggle::AnyoneCopy => perm_bit(data, |p| p.everyone, Permissions::COPY),
         };
-        let want = if on { CHECKED_GLYPH } else { UNCHECKED_GLYPH };
-        if text.0 != want {
-            want.clone_into(&mut text.0);
+        if on && !ticked {
+            commands.entity(entity).insert(Checked);
+        } else if !on && ticked {
+            commands.entity(entity).remove::<Checked>();
         }
-        set_disabled_class(&mut class_list, !enabled_for(toggle_gate(glyph.0)));
-    }
-    for (label, mut class_list) in &mut widgets.toggle_labels {
-        set_disabled_class(&mut class_list, !enabled_for(toggle_gate(label.0)));
     }
 
     // Cycle labels: the value when there is one (a sculpt / mesh still shows
@@ -2903,17 +2848,16 @@ fn collect_shape_ui(values: &dyn Fn(ParamField) -> Option<f32>) -> Option<ShapeU
 /// wire state for the primary selection and send the corresponding message
 /// (the toggle is read off the pressed row's component).
 fn handle_toggle_press(
-    press: On<Pointer<Press>>,
+    change: On<ValueChange<bool>>,
     toggles: Query<&ParamToggle>,
     mut selection: ResMut<SelectionSet>,
     mut objects: ResMut<ObjectState>,
     mut snapshot: ResMut<ShownSnapshot>,
     mut commands: MessageWriter<SlCommand>,
 ) {
-    if press.button != PointerButton::Primary {
-        return;
-    }
-    let Ok(&toggle) = toggles.get(press.entity) else {
+    // The widget has already moved its own tick; the object is the truth, and
+    // the sync pass puts the tick back where the reply says on the next frame.
+    let Ok(&toggle) = toggles.get(change.source) else {
         return;
     };
     let Some(primary_scoped) = selection.primary().map(|primary| primary.scoped) else {

@@ -4880,7 +4880,7 @@ mod tests {
         model.set_items(objects, &[item(11, 3, "A box", InventoryType::Object)]);
         // Nothing expanded: the filter still finds the loaded items.
         let mut only_objects = crate::inventory_filters::TypeFilterSet::none();
-        only_objects.toggle(crate::inventory_filters::TypeFilter::Object);
+        only_objects.set(crate::inventory_filters::TypeFilter::Object, true);
         let filter = crate::inventory_filters::ItemFilter {
             types: only_objects,
             ..crate::inventory_filters::ItemFilter::default()

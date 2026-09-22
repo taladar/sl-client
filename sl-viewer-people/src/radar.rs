@@ -46,8 +46,9 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::text::EditableText;
-use bevy::ui::Checked;
 use bevy_flair::style::components::ClassList;
+
+use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use sl_client_bevy::{
     AgentKey, Command, FriendKey, GlobalCoordinates, MuteType, SlCommand, SlEvent, SlIdentity,
     SlSessionEvent, Vector,
@@ -180,18 +181,6 @@ const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
 
 /// An action button's background.
 const ACTION_BACKGROUND: Color = Color::srgb(0.24, 0.29, 0.38);
-
-/// The limit checkbox's box border.
-const CHECK_BORDER: Color = Color::srgb(0.55, 0.60, 0.70);
-
-/// The limit checkbox's unchecked fill.
-const CHECK_OFF: Color = Color::srgba(0.10, 0.12, 0.16, 0.9);
-
-/// The limit checkbox's checked fill.
-const CHECK_ON: Color = Color::srgb(0.45, 0.62, 0.90);
-
-/// The limit checkbox's box side, logical px.
-const CHECK_SIZE: f32 = 14.0;
 
 // --- Table ----------------------------------------------------------------
 
@@ -630,10 +619,6 @@ struct RadarUi {
     range_field: Entity,
 }
 
-/// Marker on the limit checkbox's box, for the checked-state fill sync.
-#[derive(Component, Debug, Clone, Copy)]
-struct RadarLimitCheckbox;
-
 /// The agent a pooled radar row currently presents.
 #[derive(Component, Debug, Clone, Copy)]
 struct BoundRadar(Option<AgentKey>);
@@ -888,7 +873,6 @@ impl Plugin for RadarPlugin {
                     (
                         mirror_radar_filter,
                         apply_radar_range_field,
-                        sync_radar_limit_checkbox,
                         rebuild_radar_view,
                     )
                         .run_if(floater_shown(RADAR_FLOATER_ID)),
@@ -1040,31 +1024,22 @@ fn build_radar_content(
             .entity(placeholder)
             .insert(Translated::new("radar-filter-placeholder"));
     }
-    commands.spawn((
-        bound_checkbox(SettingBinding::account(SETTING_LIMIT)),
-        Node {
-            width: Val::Px(CHECK_SIZE),
-            height: Val::Px(CHECK_SIZE),
-            flex_shrink: 0.0,
-            border: UiRect::all(Val::Px(2.0)),
-            ..default()
+    // The range limit: the shared widget, carrying its own caption so a click on
+    // the words toggles it too, bound to the setting the projection reads.
+    let limit = spawn_checkbox(
+        &mut commands,
+        controls,
+        &CheckboxSpec {
+            element: "radar-limit",
+            label: "radar-limit-range".to_owned(),
+            tab_index: 0,
+            font_size: FONT_SIZE,
+            translate_label: true,
         },
-        BorderColor::all(CHECK_BORDER),
-        BackgroundColor(CHECK_OFF),
-        TabIndex(0),
-        RadarLimitCheckbox,
-        Pickable::default(),
-        Name::new("radar-limit-checkbox"),
-        ChildOf(controls),
-    ));
-    commands.spawn((
-        Text::default(),
-        Translated::new("radar-limit-range"),
-        UiFont::Sans.at(FONT_SIZE),
-        text_role(DIM_LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(controls),
-    ));
+    );
+    commands
+        .entity(limit.checkbox)
+        .insert(bound_checkbox(SettingBinding::account(SETTING_LIMIT)));
     let initial_range = settings
         .as_deref()
         .and_then(|settings| settings.store().get_f32(SETTING_RANGE).ok())
@@ -1488,19 +1463,6 @@ fn apply_radar_range_field(
     if (current - value).abs() > f32::EPSILON {
         settings.set_account(SETTING_RANGE, SettingValue::F32(value));
         settings.save_async();
-    }
-}
-
-/// Fill the limit checkbox's box from its bound `Checked` state (the binding
-/// layer keeps `Checked` in step with the setting; this is only the paint).
-fn sync_radar_limit_checkbox(
-    mut boxes: Query<(&mut BackgroundColor, Has<Checked>), With<RadarLimitCheckbox>>,
-) {
-    for (mut background, checked) in &mut boxes {
-        let wanted = if checked { CHECK_ON } else { CHECK_OFF };
-        if background.0 != wanted {
-            background.0 = wanted;
-        }
     }
 }
 

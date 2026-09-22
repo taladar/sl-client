@@ -34,7 +34,8 @@
 //! Every tab's structure is spawned **once**, when the window opens, and never
 //! torn down while it lives.
 //! Replies update values *in place*: value labels via `set_value_node`,
-//! checkbox glyphs via `set_check_visual`, combos by writing their
+//! checkbox ticks by moving the `Checked` the skin selects on, combos by
+//! writing their
 //! [`ComboSelection`](crate::ui_combo), edit fields by seeding
 //! `EditableText::editor_mut().set_text` on a fresh subject, and the three
 //! variable lists (object owners, allow, ban) through the **table widget**
@@ -64,7 +65,8 @@ use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::EditableText;
-use bevy::ui::InteractionDisabled;
+use bevy::ui::{Checked, InteractionDisabled};
+use bevy::ui_widgets::ValueChange;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
     AgentKey, Asset, AssetKey, AssetType, CircuitId, Command, EstateCovenant, LandArea,
@@ -91,6 +93,7 @@ use crate::land_environment::{
 use crate::name_revisions::{NameRevisions, ViewBuilt};
 use crate::social::GroupsModel;
 use crate::ui::{column, row};
+use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
 use crate::ui_name_link::{NameLink, NameLinkSpec, NameTarget, set_name_link, spawn_name_link};
@@ -118,9 +121,6 @@ const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 /// A dim label / secondary text colour.
 const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
-/// A checked toggle's tick colour.
-const CHECK_COLOR: Color = Color::srgb(0.55, 0.85, 0.60);
-
 /// The skin class on an action button, so `.sk-button:disabled` greys it.
 const BUTTON_CLASS: &str = "sk-button";
 
@@ -135,12 +135,6 @@ const BUTTON_BORDER: Color = Color::srgb(0.34, 0.40, 0.52);
 
 /// A list background.
 const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
-
-/// The glyph for a checked toggle.
-const CHECKED_GLYPH: &str = "\u{2611}";
-
-/// The glyph for an unchecked toggle.
-const UNCHECKED_GLYPH: &str = "\u{2610}";
 
 /// The bounded height of each list (object owners, allow, ban), in logical
 /// pixels — the widget scrolls beyond it rather than growing the tab.
@@ -910,14 +904,15 @@ impl CheckKind {
 }
 
 /// A checkbox on an editable / read-only tab.
+///
+/// It names the parcel fact the box reflects and nothing else: the box, the
+/// tick and the caption are [`spawn_checkbox`]'s, and every one of their looks
+/// is the skin's — `:checked` for the tick, `:disabled` for the greying — so
+/// there are no text nodes here to hold on to.
 #[derive(Component, Debug, Clone, Copy)]
 struct AboutLandCheck {
     /// What the checkbox reflects.
     kind: CheckKind,
-    /// The check-glyph text node.
-    glyph: Entity,
-    /// The label text node (greyed with the glyph when disabled).
-    label: Entity,
 }
 
 /// A control whose interactivity follows the agent's edit rights: `Owner` is
@@ -2646,12 +2641,12 @@ fn update_general_tab(
 /// ([`host_floater`]) — see [`update_control_enable`] for why a sweep is wrong.
 fn update_editable_tab(
     mut windows: Query<(Entity, &mut AboutLandDirty, &AboutLandUi, &AboutLandState)>,
-    checks: Query<(Entity, &AboutLandCheck)>,
-    parents: Query<&ChildOf>,
-    floaters: Query<(Entity, &Floater)>,
+    checks: Query<(Entity, &AboutLandCheck, Has<Checked>)>,
+    host: FloaterHost,
     mut combos: Query<&mut ComboSelection>,
     translator: Translator,
     mut texts: Query<(&mut Text, &mut TextColor)>,
+    mut commands: Commands,
 ) {
     for (window, mut dirty, ui, state) in &mut windows {
         if !dirty.editable_values {
@@ -2659,14 +2654,11 @@ fn update_editable_tab(
         }
         dirty.editable_values = false;
         let texts = &mut texts;
-        let can_edit = state.can_edit;
-        for (entity, check) in &checks {
-            if host_floater(entity, &parents, &floaters) != Some(window) {
+        for (entity, check, is_ticked) in &checks {
+            if host.of(entity) != Some(window) {
                 continue;
             }
-            let on = check.kind.checked(state);
-            let enabled = can_edit && check.kind.editable();
-            set_check_visual(texts, check, on, enabled);
+            set_check_marker(&mut commands, entity, is_ticked, check.kind.checked(state));
         }
         let draft = &state.draft;
         set_combo(
@@ -3232,34 +3224,42 @@ fn bind_access_rows(
 // Edit observers / handlers.
 // ---------------------------------------------------------------------------
 
-/// Toggle an editable checkbox.
-/// Toggle an editable checkbox, in the window it was pressed in.
+/// Write an editable checkbox's new state into the draft, in the window it was
+/// toggled in.
+///
+/// The widget announces the toggle and has already moved its own `Checked`, so
+/// this owns the **draft** and not the look. A refusal — a parcel the agent may
+/// not edit, or a read-only reflection with no write path — puts the marker
+/// back where the parcel says it belongs, because the tick moved before anyone
+/// asked whether it was allowed to.
 fn on_about_land_check(
-    press: On<Pointer<Press>>,
+    change: On<ValueChange<bool>>,
     checks: Query<&AboutLandCheck>,
     mut windows: Query<&mut AboutLandState>,
     parents: Query<&ChildOf>,
     floaters: Query<(Entity, &Floater)>,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
+    mut commands: Commands,
 ) {
-    if press.button != PointerButton::Primary {
-        return;
-    }
-    let Ok(check) = checks.get(press.entity) else {
+    let entity = change.source;
+    let Ok(check) = checks.get(entity) else {
         return;
     };
-    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+    let Some(window) = host_floater(entity, &parents, &floaters) else {
         return;
     };
     let Ok(mut state) = windows.get_mut(window) else {
         return;
     };
     if !state.can_edit || !check.kind.editable() {
+        set_check_marker(
+            &mut commands,
+            entity,
+            change.value,
+            check.kind.checked(&state),
+        );
         return;
     }
     check.kind.toggle(&mut state.draft);
-    let on = check.kind.checked(&state);
-    set_check_visual(&mut texts, check, on, true);
 }
 
 /// Dispatch a floater button press, in the window it was pressed in.
@@ -4117,42 +4117,34 @@ fn spawn_apply_button(commands: &mut Commands, parent: Entity, tab_index: i32) {
     );
 }
 
-/// A checkbox: a clickable glyph leading a translated label. Editable checkboxes
-/// carry [`EditGate::Owner`]; read-only ones carry [`EditGate::Never`].
+/// A checkbox: the shared widget, bound to one parcel fact. Editable checkboxes
+/// carry [`EditGate::Owner`]; read-only ones carry [`EditGate::Never`], which
+/// [`update_control_enable`] turns into the `InteractionDisabled` the skin greys
+/// from.
+///
+/// The Fluent key doubles as the widget's element id, so every checkbox in the
+/// window is addressable by its own name rather than sharing one.
 fn spawn_check(commands: &mut Commands, parent: Entity, label_key: &'static str, kind: CheckKind) {
     let row_entity = spawn_row(commands, parent);
-    let glyph = commands
-        .spawn((
-            Text::new(UNCHECKED_GLYPH),
-            UiFont::Sans.at(FONT_SIZE),
-            TextColor(DIM_LABEL_COLOR),
-            Pickable::IGNORE,
-        ))
-        .id();
-    let label = commands
-        .spawn((
-            Text::default(),
-            Translated::new(label_key),
-            UiFont::Sans.at(FONT_SIZE),
-            TextColor(LABEL_COLOR),
-            Pickable::IGNORE,
-        ))
-        .id();
+    let checkbox = spawn_checkbox(
+        commands,
+        row_entity,
+        &CheckboxSpec {
+            element: label_key,
+            label: label_key.to_owned(),
+            tab_index: 0,
+            font_size: FONT_SIZE,
+            translate_label: true,
+        },
+    );
     let gate = if kind.editable() {
         EditGate::Owner
     } else {
         EditGate::Never
     };
     commands
-        .entity(row_entity)
-        .insert((
-            Button,
-            AboutLandCheck { kind, glyph, label },
-            gate,
-            Pickable::default(),
-        ))
-        .add_child(glyph)
-        .add_child(label)
+        .entity(checkbox.checkbox)
+        .insert((AboutLandCheck { kind }, gate))
         .observe(on_about_land_check);
 }
 
@@ -4267,35 +4259,18 @@ fn set_cell(
     }
 }
 
-/// Set a checkbox's glyph and label in place, greying both when disabled.
-fn set_check_visual(
-    texts: &mut Query<(&mut Text, &mut TextColor)>,
-    check: &AboutLandCheck,
-    on: bool,
-    enabled: bool,
-) {
-    let glyph = if on { CHECKED_GLYPH } else { UNCHECKED_GLYPH };
-    let glyph_color = if !enabled {
-        DISABLED_COLOR
-    } else if on {
-        CHECK_COLOR
-    } else {
-        DIM_LABEL_COLOR
-    };
-    if let Ok((mut text, mut color)) = texts.get_mut(check.glyph) {
-        if text.0 != glyph {
-            glyph.clone_into(&mut text.0);
-        }
-        let wanted = TextColor(glyph_color);
-        if *color != wanted {
-            *color = wanted;
-        }
-    }
-    let label_color = TextColor(if enabled { LABEL_COLOR } else { DISABLED_COLOR });
-    if let Ok((_text, mut color)) = texts.get_mut(check.label)
-        && *color != label_color
-    {
-        *color = label_color;
+/// Put a checkbox's tick where the parcel says it belongs.
+///
+/// The whole of the repaint now: `Checked` is what `.sk-checkbox:checked`
+/// selects on, the greying follows the `InteractionDisabled`
+/// [`update_control_enable`] maintains, and neither is a colour this window
+/// writes. Idempotent — the marker is only moved when it disagrees, so a
+/// per-frame refresh does not re-trigger the style engine.
+fn set_check_marker(commands: &mut Commands, entity: Entity, is_ticked: bool, on: bool) {
+    if on && !is_ticked {
+        commands.entity(entity).insert(Checked);
+    } else if !on && is_ticked {
+        commands.entity(entity).remove::<Checked>();
     }
 }
 

@@ -67,6 +67,10 @@
 
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
+use bevy::ui::Checked;
+use bevy::ui_widgets::ValueChange;
+
+use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use bevy::text::EditableText;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
@@ -122,12 +126,6 @@ const BUTTON_BORDER: Color = Color::srgb(0.40, 0.50, 0.62);
 
 /// The skin class a button wears (`.sk-button`).
 const BUTTON_CLASS: &str = "sk-button";
-
-/// The glyph a ticked toggle shows.
-const CHECKED_GLYPH: &str = "\u{2611}";
-
-/// The glyph an unticked toggle shows.
-const UNCHECKED_GLYPH: &str = "\u{2610}";
 
 /// The description field's visible line count in edit mode.
 const DESCRIPTION_LINES: f32 = 4.0;
@@ -418,9 +416,9 @@ struct ExperienceProfileUi {
     /// The edit column's home-location value.
     edit_location_text: Entity,
     /// The Enable toggle's glyph.
-    enable_glyph: Entity,
+    enable_check: Entity,
     /// The Private toggle's glyph.
-    private_glyph: Entity,
+    private_check: Entity,
 }
 
 /// A spawned action button: the clickable box and the label inside it. Both are
@@ -578,8 +576,8 @@ fn build_profile_content(
             description_field: edit.description_field,
             maturity_combo: edit.maturity_combo,
             edit_location_text: edit.location_text,
-            enable_glyph: edit.enable_glyph,
-            private_glyph: edit.private_glyph,
+            enable_check: edit.enable_check,
+            private_check: edit.private_check,
         },
     ));
 }
@@ -759,9 +757,9 @@ struct EditPanel {
     /// The home-location value.
     location_text: Entity,
     /// The Enable toggle's glyph.
-    enable_glyph: Entity,
+    enable_check: Entity,
     /// The Private toggle's glyph.
-    private_glyph: Entity,
+    private_check: Entity,
 }
 
 /// Build the edit column: the three typed / chosen fields, the two location
@@ -850,14 +848,14 @@ fn build_edit_panel(commands: &mut Commands, parent: Entity) -> EditPanel {
         ProfileButton::ClearLocation,
         9,
     );
-    let enable_glyph = spawn_toggle(
+    let enable_check = spawn_toggle(
         commands,
         panel,
         "experience-profile-enabled",
         ProfileButton::ToggleEnabled,
         10,
     );
-    let private_glyph = spawn_toggle(
+    let private_check = spawn_toggle(
         commands,
         panel,
         "experience-profile-private",
@@ -893,8 +891,8 @@ fn build_edit_panel(commands: &mut Commands, parent: Entity) -> EditPanel {
         description_field,
         maturity_combo,
         location_text,
-        enable_glyph,
-        private_glyph,
+        enable_check,
+        private_check,
     }
 }
 
@@ -982,8 +980,8 @@ fn spawn_action(
     }
 }
 
-/// Spawn a property toggle — a clickable glyph leading a translated label —
-/// returning the glyph node the paint pass writes.
+/// Spawn a property toggle — the shared checkbox widget — returning the
+/// checkbox whose `Checked` the paint pass moves.
 fn spawn_toggle(
     commands: &mut Commands,
     parent: Entity,
@@ -991,39 +989,54 @@ fn spawn_toggle(
     button: ProfileButton,
     tab: i32,
 ) -> Entity {
-    let row_entity = commands
-        .spawn((
-            Button,
-            TabIndex(tab),
-            Node {
-                align_items: AlignItems::Center,
-                ..row(Val::Px(5.0))
-            },
-            button,
-            Pickable::default(),
-            Name::new("experience-profile-toggle"),
-            ChildOf(parent),
-        ))
-        .id();
-    let glyph = commands
-        .spawn((
-            Text::new(UNCHECKED_GLYPH),
-            UiFont::Sans.at(FONT_SIZE),
-            text_role(TEXT_COLOR),
-            Pickable::IGNORE,
-            ChildOf(row_entity),
-        ))
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(FONT_SIZE),
-        text_role(TEXT_COLOR),
-        Pickable::IGNORE,
-        ChildOf(row_entity),
-    ));
-    commands.entity(row_entity).observe(on_profile_button);
-    glyph
+    let checkbox = spawn_checkbox(
+        commands,
+        parent,
+        &CheckboxSpec {
+            element: label_key,
+            label: label_key.to_owned(),
+            tab_index: tab,
+            font_size: FONT_SIZE,
+            translate_label: true,
+        },
+    );
+    commands
+        .entity(checkbox.checkbox)
+        .insert(button)
+        .observe(on_profile_check);
+    checkbox.checkbox
+}
+
+/// A property checkbox was toggled: the draft takes the value the box now
+/// shows.
+fn on_profile_check(
+    change: On<ValueChange<bool>>,
+    buttons: Query<&ProfileButton>,
+    host: FloaterHost,
+    mut states: Query<&mut ExperienceProfileState>,
+) {
+    let Ok(button) = buttons.get(change.source) else {
+        return;
+    };
+    // The box belongs to the window it sits in — with two profiles open, this
+    // must not edit the other one's draft.
+    let Some(window) = host.of(change.source) else {
+        return;
+    };
+    let Ok(mut state) = states.get_mut(window) else {
+        return;
+    };
+    match button {
+        ProfileButton::ToggleEnabled => {
+            state.edit.enabled = change.value;
+            state.touch();
+        }
+        ProfileButton::TogglePrivate => {
+            state.edit.private = change.value;
+            state.touch();
+        }
+        _not_a_checkbox => {}
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1044,8 +1057,10 @@ struct ProfileWhere<'w, 's> {
 /// An experience profile window's widgets, bundled as one
 /// [`SystemParam`](bevy::ecs::system::SystemParam): its labels and their
 /// colours, the boxes a section is shown through, the name links, the edit
-/// fields and the maturity combo.
-#[derive(Debug, bevy::ecs::system::SystemParam)]
+/// fields, the maturity combo and the queue the checkbox ticks move through.
+///
+/// No `Debug`, because `Commands` has none.
+#[derive(bevy::ecs::system::SystemParam)]
 struct ProfileWidgets<'w, 's> {
     /// The window's labels.
     texts: Query<'w, 's, &'static mut Text>,
@@ -1059,6 +1074,8 @@ struct ProfileWidgets<'w, 's> {
     fields: Query<'w, 's, &'static mut EditableText>,
     /// The maturity combo's selection.
     combos: Query<'w, 's, &'static mut ComboSelection>,
+    /// The queue the two checkboxes' ticks are moved through.
+    commands: Commands<'w, 's>,
 }
 
 /// Every button in the window, resolved to **its own** window with
@@ -1142,14 +1159,9 @@ fn on_profile_button(
             state.edit.location = None;
             state.touch();
         }
-        ProfileButton::ToggleEnabled => {
-            state.edit.enabled = !state.edit.enabled;
-            state.touch();
-        }
-        ProfileButton::TogglePrivate => {
-            state.edit.private = !state.edit.private;
-            state.touch();
-        }
+        // The two checkbox buttons arrive as a `ValueChange` on the checkbox
+        // itself (`on_profile_check`), never as a press here.
+        ProfileButton::ToggleEnabled | ProfileButton::TogglePrivate => {}
     }
 }
 
@@ -1347,6 +1359,7 @@ fn paint_profile_windows(
         mut links,
         mut fields,
         mut combos,
+        mut commands,
     } = widgets;
     let relocalised = translator.changed();
     for (mut state, ui) in &mut windows {
@@ -1444,14 +1457,17 @@ fn paint_profile_windows(
             ui.edit_location_text,
             &location_text(state.edit.location.as_ref(), &translator),
         );
-        set_node_text(&mut texts, ui.enable_glyph, glyph_for(state.edit.enabled));
-        set_node_text(&mut texts, ui.private_glyph, glyph_for(state.edit.private));
+        for (checkbox, on) in [
+            (ui.enable_check, state.edit.enabled),
+            (ui.private_check, state.edit.private),
+        ] {
+            if on {
+                commands.entity(checkbox).insert(Checked);
+            } else {
+                commands.entity(checkbox).remove::<Checked>();
+            }
+        }
     }
-}
-
-/// The tick / empty-box glyph for a toggle.
-const fn glyph_for(on: bool) -> &'static str {
-    if on { CHECKED_GLYPH } else { UNCHECKED_GLYPH }
 }
 
 /// An experience's display name, or the reference's "(Untitled)" placeholder

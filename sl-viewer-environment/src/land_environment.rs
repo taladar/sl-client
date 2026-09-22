@@ -81,6 +81,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use bevy::prelude::*;
 use bevy::text::EditableText;
+use bevy::ui::{Checked, InteractionDisabled};
 use bevy::ui_widgets::{SliderRange, SliderValue, ValueChange};
 use sl_client_bevy::{
     Command, DayCycle, EnvironmentSettings, EnvironmentUpdate, LandArea, Permissions, SettingsKind,
@@ -93,6 +94,7 @@ use sl_viewer_ui_core::i18n::{Translated, Translator};
 use sl_viewer_ui_core::ui::{column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
 use sl_viewer_ui_core::ui_text::set_node_text;
+use sl_viewer_ui_widgets::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use sl_viewer_ui_widgets::ui_slider::{SliderStyle, spawn_slider};
 use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 
@@ -139,18 +141,6 @@ const RESET_CONFIRM: &str = "SettingsConfirmReset";
 
 /// The confirmation in front of an estate parcel-override change.
 const OVERRIDE_CONFIRM: &str = "EstateParcelEnvironmentOverride";
-
-/// The glyph for a checked toggle.
-const CHECKED_GLYPH: &str = "\u{2611}";
-
-/// The glyph for an unchecked toggle.
-const UNCHECKED_GLYPH: &str = "\u{2610}";
-
-/// A checked toggle's tick colour.
-const CHECK_COLOR: Color = Color::srgb(0.55, 0.85, 0.60);
-
-/// A disabled control's text colour.
-const DISABLED_COLOR: Color = Color::srgb(0.45, 0.47, 0.52);
 
 // ---------------------------------------------------------------------------
 // The panel's subject.
@@ -454,14 +444,28 @@ enum LandAction {
     Revert,
 }
 
+/// Every override checkbox, with the two markers its looks follow: one alias
+/// because the panel's repaint and the checkbox's own observer ask the same
+/// question of the same entities.
+type OverrideChecks<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static PanelOf,
+        Has<Checked>,
+        Has<InteractionDisabled>,
+    ),
+    With<OverrideCheck>,
+>;
+
 /// The parcel-override checkbox.
+///
+/// A marker and nothing more: the box, the tick and the caption are
+/// [`spawn_checkbox`]'s, and their looks are the skin's — `:checked` for the
+/// tick, `:disabled` for the greying — so there is nothing here to hold.
 #[derive(Component, Debug, Clone, Copy)]
-struct OverrideCheck {
-    /// The glyph node.
-    glyph: Entity,
-    /// The label node.
-    label: Entity,
-}
+struct OverrideCheck;
 
 /// The retained nodes one panel writes through.
 #[derive(Component, Debug)]
@@ -855,36 +859,24 @@ fn spawn_altitude_field(
     field
 }
 
-/// The parcel-override checkbox: a clickable glyph leading a translated label.
+/// The parcel-override checkbox: the shared widget, bound to the parcel's
+/// override flag through a confirmation rather than directly.
 fn spawn_override_check(commands: &mut Commands, parent: Entity, panel: Entity) {
     let row_entity = spawn_row(commands, parent);
-    let glyph = commands
-        .spawn((
-            Text::new(UNCHECKED_GLYPH),
-            UiFont::Sans.at(FONT_SIZE),
-            TextColor(DIM_LABEL_COLOR),
-            Pickable::IGNORE,
-        ))
-        .id();
-    let label = commands
-        .spawn((
-            Text::default(),
-            Translated::new("land-env-allow-override"),
-            UiFont::Sans.at(FONT_SIZE),
-            TextColor(LABEL_COLOR),
-            Pickable::IGNORE,
-        ))
-        .id();
+    let checkbox = spawn_checkbox(
+        commands,
+        row_entity,
+        &CheckboxSpec {
+            element: "land-env-allow-override",
+            label: "land-env-allow-override".to_owned(),
+            tab_index: 0,
+            font_size: FONT_SIZE,
+            translate_label: true,
+        },
+    );
     commands
-        .entity(row_entity)
-        .insert((
-            Button,
-            PanelOf(panel),
-            OverrideCheck { glyph, label },
-            Pickable::default(),
-        ))
-        .add_child(glyph)
-        .add_child(label)
+        .entity(checkbox.checkbox)
+        .insert((PanelOf(panel), OverrideCheck))
         .observe(on_override_pressed);
 }
 
@@ -1553,8 +1545,8 @@ struct LandControls<'w, 's> {
     actions: Query<'w, 's, (Entity, &'static PanelOf), With<LandAction>>,
     /// The picker buttons, likewise.
     pickers: Query<'w, 's, (Entity, &'static PanelOf), With<PickerButton>>,
-    /// The override checkboxes and what each overrides.
-    checks: Query<'w, 's, (&'static PanelOf, &'static OverrideCheck)>,
+    /// The override checkboxes, with the two markers their looks follow.
+    checks: OverrideChecks<'w, 's>,
 }
 
 /// The land panel's chrome, bundled as one
@@ -1568,15 +1560,6 @@ struct LandChrome<'w, 's> {
     children: Query<'w, 's, &'static Children>,
     /// The labels themselves.
     texts: Query<'w, 's, &'static mut Text>,
-    /// The check glyphs' and labels' colours.
-    ///
-    /// Its own query now. It used to be borrowed out of the shared
-    /// button-paint bundle, because two `Query<&mut TextColor>` in one system is
-    /// Bevy's B0001 and panics on the first frame — and that bundle carried one
-    /// for the button labels it painted. It no longer paints them
-    /// (`.sk-button:disabled .sk-text` does), so the conflict is gone and the
-    /// checks can hold the only one.
-    check_colours: Query<'w, 's, &'static mut TextColor>,
 }
 
 /// What a land action raises, bundled as one
@@ -1616,7 +1599,6 @@ fn paint_land_controls(
         mut nodes,
         children,
         mut texts,
-        mut check_colours,
     } = chrome;
     for (entity, kind, subject, state, ui) in &panels {
         let reason = unavailable_reason(*kind, subject);
@@ -1642,14 +1624,14 @@ fn paint_land_controls(
             }
             set_action_button_enabled(&mut commands, &disabled, button, enabled);
         }
-        for (PanelOf(panel), check) in &checks {
+        for (check, PanelOf(panel), ticked, refused) in &checks {
             if *panel != entity {
                 continue;
             }
-            set_check_visual(
-                &mut texts,
-                &mut check_colours,
+            set_check_markers(
+                &mut commands,
                 check,
+                CheckMarkers { ticked, refused },
                 subject.allow_override,
                 enabled,
             );
@@ -1794,26 +1776,36 @@ fn on_land_pick_pressed(
     });
 }
 
-/// The parcel-override checkbox was clicked: ask, as the reference asks.
+/// The parcel-override checkbox was toggled: ask, as the reference asks.
+///
+/// **The tick goes straight back** wherever this lands, and that is the point:
+/// the parcel's override flag is not this click's to set — the confirmation
+/// dialog's answer is — so a box that stayed ticked while the question was
+/// still on screen would be claiming something the grid had not been told. It
+/// ticks when the reply comes back and the panel repaints.
 fn on_override_pressed(
-    mut press: On<Pointer<Press>>,
-    checks: Query<(&PanelOf, &OverrideCheck)>,
-    disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
+    change: On<ValueChange<bool>>,
+    checks: OverrideChecks,
     panels: Query<&LandEnvironmentSubject>,
     mut confirm: ResMut<LandEnvironmentConfirm>,
     mut notify: MessageWriter<ShowNotification>,
+    mut commands: Commands,
 ) {
-    if press.button != PointerButton::Primary || disabled.contains(press.entity) {
-        return;
-    }
-    let Ok((PanelOf(panel), _check)) = checks.get(press.entity) else {
+    let entity = change.source;
+    let Ok((_entity, PanelOf(panel), ticked, refused)) = checks.get(entity) else {
         return;
     };
     let Ok(subject) = panels.get(*panel) else {
         return;
     };
-    press.propagate(false);
-    if !subject.live || !subject.editable || confirm.0.is_some() {
+    set_check_markers(
+        &mut commands,
+        entity,
+        CheckMarkers { ticked, refused },
+        subject.allow_override,
+        !refused,
+    );
+    if refused || !subject.live || !subject.editable || confirm.0.is_some() {
         return;
     }
     confirm.0 = Some(PendingConfirm {
@@ -1878,36 +1870,40 @@ fn show_node(nodes: &mut Query<&mut Node>, node: Entity, shown: bool) {
     }
 }
 
-/// Set a checkbox's glyph and label colours, only on change.
-fn set_check_visual(
-    texts: &mut Query<&mut Text>,
-    colours: &mut Query<&mut TextColor>,
-    check: &OverrideCheck,
+/// Put the override checkbox's tick where the parcel says it belongs, and its
+/// refusal marker where the panel says.
+///
+/// Both are markers the skin selects on — `.sk-checkbox:checked` for the tick,
+/// `.sk-checkbox:disabled` for the greying of box and caption alike — so this
+/// writes no colour and no glyph. Idempotent: a marker moves only when it
+/// disagrees, which matters because this runs every frame.
+fn set_check_markers(
+    commands: &mut Commands,
+    entity: Entity,
+    state: CheckMarkers,
     on: bool,
     enabled: bool,
 ) {
-    let glyph = if on { CHECKED_GLYPH } else { UNCHECKED_GLYPH };
-    set_node_text(texts, check.glyph, glyph);
-    let glyph_colour = if !enabled {
-        DISABLED_COLOR
-    } else if on {
-        CHECK_COLOR
-    } else {
-        DIM_LABEL_COLOR
-    };
-    for (node, wanted) in [
-        (check.glyph, glyph_colour),
-        (
-            check.label,
-            if enabled { LABEL_COLOR } else { DISABLED_COLOR },
-        ),
-    ] {
-        if let Ok(mut colour) = colours.get_mut(node)
-            && colour.0 != wanted
-        {
-            colour.0 = wanted;
-        }
+    if on && !state.ticked {
+        commands.entity(entity).insert(Checked);
+    } else if !on && state.ticked {
+        commands.entity(entity).remove::<Checked>();
     }
+    if enabled && state.refused {
+        commands.entity(entity).remove::<InteractionDisabled>();
+    } else if !enabled && !state.refused {
+        commands.entity(entity).insert(InteractionDisabled);
+    }
+}
+
+/// What a checkbox's two markers currently say, so [`set_check_markers`] can
+/// move only the ones that disagree.
+#[derive(Debug, Clone, Copy)]
+struct CheckMarkers {
+    /// Whether it carries [`Checked`].
+    ticked: bool,
+    /// Whether it carries [`InteractionDisabled`].
+    refused: bool,
 }
 
 #[cfg(test)]

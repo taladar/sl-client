@@ -59,6 +59,8 @@ use crate::skin_palette::SkinPalette;
 use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use bevy::text::EditableText;
+use bevy::ui::{Checked, InteractionDisabled};
+use bevy::ui_widgets::ValueChange;
 use sl_client_bevy::{
     AnimationKey, AssetKey, Command, InventoryItem, InventoryKey, InventoryType, ItemInfo,
     LindenAmount, Permissions, SaleInfo, SaleType, SettingsKind, SlCommand, SlIdentity, TextureKey,
@@ -72,6 +74,7 @@ use crate::floater::{
 use crate::i18n::Translated;
 use crate::inventory::query_folder_page;
 use crate::ui::row;
+use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonSpec, LabeledRowSpec, UiLabel};
 use crate::world_api::ui_texture::{PendingUiTexture, UiTexturePlugin};
@@ -86,23 +89,12 @@ const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 /// A dimmer secondary label.
 const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
-/// A toggle's check glyph colour.
-const CHECK_COLOR: Color = Color::srgb(0.55, 0.85, 0.60);
-
 /// A **read-only** check's glyph colour — the live check's green, muted, so the
 /// "You can" row reads as a statement of fact rather than a control that will
-/// not respond. See `spawn_static_check`.
-const STATIC_CHECK_COLOR: Color = Color::srgb(0.42, 0.60, 0.45);
-
 /// A button's background / border.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
 /// A button's border colour.
 const BUTTON_BORDER: Color = Color::srgb(0.34, 0.40, 0.52);
-
-/// The checked / unchecked glyphs.
-const CHECKED_GLYPH: &str = "\u{2611}";
-/// The unchecked glyph.
-const UNCHECKED_GLYPH: &str = "\u{2610}";
 
 /// The price a **newly offered** item starts at, in L$, when its own price is
 /// unreadable — only reached if the field holds something unparsable, since an
@@ -720,31 +712,31 @@ fn spawn_value_label(commands: &mut Commands, parent: Entity, value: String, col
 fn spawn_static_check(commands: &mut Commands, parent: Entity, label_key: &'static str, on: bool) {
     // Read-only, and it must **look** it: the "You can" row states what the
     // owner mask already says, and nothing here can change it (only the item's
-    // creator or a next-owner setting can). Drawn in the dim label colour and
-    // with a dimmed check, so it does not read as a checkbox the user is
-    // failing to click — the same distinction the reference draws between its
-    // greyed permission display and its live next-owner boxes.
-    commands.spawn((
-        Text::new(if on { CHECKED_GLYPH } else { UNCHECKED_GLYPH }),
-        UiFont::Sans.at(PROPS_FONT_SIZE),
-        TextColor(if on {
-            STATIC_CHECK_COLOR
-        } else {
-            DIM_LABEL_COLOR
-        }),
-        ChildOf(parent),
-    ));
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(PROPS_FONT_SIZE),
-        text_role(DIM_LABEL_COLOR),
-        ChildOf(parent),
-    ));
+    // creator or a next-owner setting can). `InteractionDisabled` is what says
+    // so — it greys box and caption through `.sk-checkbox:disabled` and refuses
+    // the pointer — which is the same distinction the reference draws between
+    // its greyed permission display and its live next-owner boxes.
+    let checkbox = spawn_checkbox(
+        commands,
+        parent,
+        &CheckboxSpec {
+            element: label_key,
+            label: label_key.to_owned(),
+            tab_index: 0,
+            font_size: PROPS_FONT_SIZE,
+            translate_label: true,
+        },
+    );
+    commands
+        .entity(checkbox.checkbox)
+        .insert(InteractionDisabled);
+    if on {
+        commands.entity(checkbox.checkbox).insert(Checked);
+    }
 }
 
-/// A clickable permission / sale toggle. Greyed (non-interactive) when the
-/// viewer's agent does not own the item.
+/// A clickable permission / sale toggle — the shared checkbox widget. Greyed
+/// and non-interactive when the viewer's agent does not own the item.
 fn spawn_props_toggle(
     commands: &mut Commands,
     parent: Entity,
@@ -753,47 +745,36 @@ fn spawn_props_toggle(
     on: bool,
     editable: bool,
 ) {
-    let mut entity = commands.spawn((
-        Button,
-        Node {
-            align_items: AlignItems::Center,
-            ..row(Val::Px(4.0))
+    let checkbox = spawn_checkbox(
+        commands,
+        parent,
+        &CheckboxSpec {
+            element: label_key,
+            label: label_key.to_owned(),
+            tab_index: 0,
+            font_size: PROPS_FONT_SIZE,
+            translate_label: true,
         },
-        Pickable::default(),
-        Name::new(format!("item-properties:{label_key}")),
-        ChildOf(parent),
-    ));
-    if editable {
-        entity.insert(toggle);
-        entity.observe(on_toggle_press);
+    );
+    let entity = checkbox.checkbox;
+    if on {
+        commands.entity(entity).insert(Checked);
     }
-    let host = entity.id();
-    commands.spawn((
-        Text::new(if on { CHECKED_GLYPH } else { UNCHECKED_GLYPH }),
-        UiFont::Sans.at(PROPS_FONT_SIZE),
-        TextColor(if on { CHECK_COLOR } else { DIM_LABEL_COLOR }),
-        Pickable::IGNORE,
-        ChildOf(host),
-    ));
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(PROPS_FONT_SIZE),
-        TextColor(if editable {
-            LABEL_COLOR
-        } else {
-            DIM_LABEL_COLOR
-        }),
-        Pickable::IGNORE,
-        ChildOf(host),
-    ));
+    if editable {
+        commands
+            .entity(entity)
+            .insert(toggle)
+            .observe(on_toggle_press);
+    } else {
+        commands.entity(entity).insert(InteractionDisabled);
+    }
 }
 
 /// A permission / sale toggle was clicked: flip the bit on the shown item,
 /// send the update, and re-open the floater on the updated snapshot (which
 /// repaints every toggle).
 fn on_toggle_press(
-    press: On<Pointer<Press>>,
+    change: On<ValueChange<bool>>,
     toggles: Query<&PropsToggle>,
     host: PropertiesHost,
     mut windows: Query<(&mut ItemPropertiesState, &ItemPropertiesUi)>,
@@ -802,15 +783,14 @@ fn on_toggle_press(
     mut reopen: MessageWriter<OpenItemProperties>,
 ) {
     let PropertiesHost { parents, floaters } = host;
-    if press.button != PointerButton::Primary {
-        return;
-    }
-    let Ok(toggle) = toggles.get(press.entity) else {
+    // The widget has moved its own tick; the item's permissions are the truth,
+    // and the window is rebuilt from the grid's reply.
+    let Ok(toggle) = toggles.get(change.source) else {
         return;
     };
     // The toggle belongs to the window it sits in: with two items' properties
     // open, this must flip *that* item's bit and read *that* window's price.
-    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+    let Some(window) = host_floater(change.source, &parents, &floaters) else {
         return;
     };
     let Ok((mut state, ui)) = windows.get_mut(window) else {

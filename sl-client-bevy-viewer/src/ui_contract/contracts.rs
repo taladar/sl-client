@@ -210,6 +210,19 @@ const PREF_LINES: &str = "preferences-specimen-lines:checkbox";
 /// The Photo Tools specimen's, also ticked.
 const PHOTO_CHECK: &str = "phototools-specimen:checkbox";
 
+/// The Build Tools specimen's snap-to-grid checkbox, also ticked.
+const BUILD_SNAP: &str = "build-specimen-snap:checkbox";
+
+/// The gallery element's resting box — the one of its four spawned unticked and
+/// live.
+const GALLERY_RESTING: &str = "checkbox-resting:checkbox";
+
+/// Its ticked one.
+const GALLERY_CHECKED: &str = "checkbox-checked:checkbox";
+
+/// The notification toast's "don't show me this again" box, spawned unticked.
+const TOAST_IGNORE: &str = "toast-ignore:checkbox";
+
 /// An activation clears the tick on the Preferences specimen's checkbox.
 ///
 /// The other direction — an unticked box ticking — is pinned by the widget's own
@@ -218,6 +231,33 @@ const PHOTO_CHECK: &str = "phototools-specimen:checkbox";
 const LINES_CLEARS: Probe = Probe {
     what: "the activated `Show property lines` checkbox is no longer ticked",
     check: |app: &mut App| !ticked(app, PREF_LINES),
+};
+
+/// The gallery's resting box **ticks** — the direction only an unticked
+/// specimen can pin.
+const GALLERY_SETS: Probe = Probe {
+    what: "the activated resting checkbox is now ticked",
+    check: |app: &mut App| ticked(app, GALLERY_RESTING),
+};
+
+/// Its ticked one clears.
+const GALLERY_CLEARS: Probe = Probe {
+    what: "the activated ticked checkbox is no longer ticked",
+    check: |app: &mut App| !ticked(app, GALLERY_CHECKED),
+};
+
+/// The toast's ignore box ticks — and it is the box's own `Checked` that the
+/// resolve pass reads when the toast is answered, so a box that stopped ticking
+/// would silently stop suppressing anything.
+const TOAST_IGNORE_SETS: Probe = Probe {
+    what: "the activated ignore checkbox is now ticked",
+    check: |app: &mut App| ticked(app, TOAST_IGNORE),
+};
+
+/// The same for the Build Tools specimen.
+const SNAP_CLEARS: Probe = Probe {
+    what: "the activated snap-to-grid checkbox is no longer ticked",
+    check: |app: &mut App| !ticked(app, BUILD_SNAP),
 };
 
 /// The same for the Photo Tools specimen.
@@ -246,6 +286,18 @@ const LINES_ROWS: [Row; 3] = toggles(LINES_CLEARS);
 
 /// The Photo Tools specimen's.
 const PHOTO_ROWS: [Row; 3] = toggles(PHOTO_CLEARS);
+
+/// The Build Tools specimen's.
+const SNAP_ROWS: [Row; 3] = toggles(SNAP_CLEARS);
+
+/// The gallery element's resting box.
+const GALLERY_RESTING_ROWS: [Row; 3] = toggles(GALLERY_SETS);
+
+/// Its ticked one.
+const GALLERY_CHECKED_ROWS: [Row; 3] = toggles(GALLERY_CLEARS);
+
+/// The toast's ignore box.
+const TOAST_IGNORE_ROWS: [Row; 3] = toggles(TOAST_IGNORE_SETS);
 
 /// Every element's contract, keyed by `UiElement::id`.
 pub(crate) const CONTRACTS: &[ElementContract] = &[
@@ -302,6 +354,7 @@ pub(crate) const CONTRACTS: &[ElementContract] = &[
     ElementContract {
         element: "build-tools",
         nodes: &[
+            NodeContract::new(BUILD_SNAP, &SNAP_ROWS),
             NodeContract::inert("build-specimen-x:field"),
             NodeContract::inert("build-specimen-y:field"),
             NodeContract::inert("build-specimen-z:field"),
@@ -360,6 +413,18 @@ pub(crate) const CONTRACTS: &[ElementContract] = &[
                     Row::emits(Gesture::Space, &["save"]),
                 ],
             ),
+        ],
+    },
+    ElementContract {
+        element: "checkbox-states",
+        nodes: &[
+            NodeContract::new(GALLERY_RESTING, &GALLERY_RESTING_ROWS),
+            NodeContract::new(GALLERY_CHECKED, &GALLERY_CHECKED_ROWS),
+            // The two refused boxes carry `InteractionDisabled`, so every
+            // gesture on them is inert — which is the whole of what a refused
+            // control claims, and worth saying rather than omitting.
+            NodeContract::inert("checkbox-refused:checkbox"),
+            NodeContract::inert("checkbox-refused-checked:checkbox"),
         ],
     },
     ElementContract {
@@ -687,6 +752,7 @@ pub(crate) const CONTRACTS: &[ElementContract] = &[
     ElementContract {
         element: "notification-toast",
         nodes: &[
+            NodeContract::new(TOAST_IGNORE, &TOAST_IGNORE_ROWS),
             NodeContract::new(
                 "toast-button:Cancel",
                 &[
@@ -946,6 +1012,10 @@ pub(crate) const CONTRACTS: &[ElementContract] = &[
         nodes: &[
             NodeContract::inert("script-body:field"),
             NodeContract::inert("script-save"),
+            // The specimen's Running box is built with `live: false`, so it
+            // carries `InteractionDisabled` and answers nothing — the shape a
+            // no-modify script's editor has.
+            NodeContract::inert("script-running:checkbox"),
         ],
     },
     ElementContract {

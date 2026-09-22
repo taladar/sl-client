@@ -21,9 +21,10 @@
 //! (`LLFloaterInventoryFinder`).
 
 use crate::skin_palette::SkinPalette;
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::EditableText;
+use bevy::ui::Checked;
+use bevy::ui_widgets::ValueChange;
 use sl_client_bevy::{InventoryType, ItemInfo};
 
 use crate::floater::{
@@ -31,9 +32,8 @@ use crate::floater::{
 };
 use crate::i18n::Translated;
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
-use crate::ui_font::UiFont;
+use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use crate::ui_spawn::{self, ButtonSpec, UiLabel};
-use sl_viewer_ui_core::skin::text_role;
 
 /// The floater's [`crate::floater::FloaterSpec::id`].
 pub(crate) const FILTERS_FLOATER_ID: &str = "inventory-filters";
@@ -44,19 +44,11 @@ const FILTER_FONT_SIZE: f32 = 14.0;
 /// The floater chrome / label colour.
 const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
-/// A toggle row's check glyph colour.
-const CHECK_COLOR: Color = Color::srgb(0.55, 0.85, 0.60);
-
 /// A button's background.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
 
 /// A button's border.
 const BUTTON_BORDER: Color = Color::srgb(0.34, 0.40, 0.52);
-
-/// The checked / unchecked box glyphs of a toggle row.
-const CHECKED_GLYPH: &str = "\u{2611}";
-/// The unchecked box glyph.
-const UNCHECKED_GLYPH: &str = "\u{2610}";
 
 // ---------------------------------------------------------------------------
 // The pure filter model.
@@ -214,9 +206,15 @@ impl TypeFilterSet {
         self.0 & filter.bit() != 0
     }
 
-    /// Tick or untick one box.
-    pub(crate) const fn toggle(&mut self, filter: TypeFilter) {
-        self.0 ^= filter.bit();
+    /// Put one box in the state the checkbox now shows — what a widget that
+    /// announces a **value** hands over, where flipping would disagree with it
+    /// the first time the two ever got out of step.
+    pub(crate) const fn set(&mut self, filter: TypeFilter, on: bool) {
+        if on {
+            self.0 |= filter.bit();
+        } else {
+            self.0 &= !filter.bit();
+        }
     }
 
     /// Whether every box is ticked (the un-narrowed state).
@@ -381,11 +379,6 @@ struct SinceLoginToggle;
 #[derive(Component, Debug, Clone, Copy)]
 struct DirectionToggle(DateDirection);
 
-/// The check-glyph text node of a toggle row (the part the sync system
-/// repaints).
-#[derive(Component)]
-struct ToggleGlyph;
-
 /// The plugin that owns the filters floater and its state.
 #[derive(Debug)]
 pub struct InventoryFiltersPlugin;
@@ -400,7 +393,7 @@ impl Plugin for InventoryFiltersPlugin {
                 Startup,
                 spawn_filters_floater.after(UiScaffoldSystems::SpawnRoot),
             )
-            .add_systems(Update, (read_range_fields, sync_toggle_glyphs).chain());
+            .add_systems(Update, (read_range_fields, sync_toggle_ticks).chain());
     }
 }
 
@@ -460,10 +453,8 @@ fn build_filters_content(In(handle): In<FloaterHandle>, mut commands: Commands) 
             i32::try_from(index).unwrap_or(0).saturating_add(1),
         );
         commands.entity(toggle).insert(TypeToggle(filter)).observe(
-            move |press: On<Pointer<Press>>, mut state: ResMut<InventoryFilterState>| {
-                if press.button == PointerButton::Primary {
-                    state.filter.types.toggle(filter);
-                }
+            move |change: On<ValueChange<bool>>, mut state: ResMut<InventoryFilterState>| {
+                state.filter.types.set(filter, change.value);
             },
         );
     }
@@ -497,18 +488,14 @@ fn build_filters_content(In(handle): In<FloaterHandle>, mut commands: Commands) 
     // Worn / since-login.
     let worn = spawn_toggle_row(&mut commands, content, "inventory-filter-worn", 22);
     commands.entity(worn).insert(WornToggle).observe(
-        |press: On<Pointer<Press>>, mut state: ResMut<InventoryFilterState>| {
-            if press.button == PointerButton::Primary {
-                state.filter.worn_only = !state.filter.worn_only;
-            }
+        |change: On<ValueChange<bool>>, mut state: ResMut<InventoryFilterState>| {
+            state.filter.worn_only = change.value;
         },
     );
     let since = spawn_toggle_row(&mut commands, content, "inventory-filter-since-login", 23);
     commands.entity(since).insert(SinceLoginToggle).observe(
-        |press: On<Pointer<Press>>, mut state: ResMut<InventoryFilterState>| {
-            if press.button == PointerButton::Primary {
-                state.filter.since_login = !state.filter.since_login;
-            }
+        |change: On<ValueChange<bool>>, mut state: ResMut<InventoryFilterState>| {
+            state.filter.since_login = change.value;
         },
     );
 
@@ -518,10 +505,11 @@ fn build_filters_content(In(handle): In<FloaterHandle>, mut commands: Commands) 
         .entity(newer)
         .insert(DirectionToggle(DateDirection::Newer))
         .observe(
-            |press: On<Pointer<Press>>, mut state: ResMut<InventoryFilterState>| {
-                if press.button == PointerButton::Primary {
-                    state.filter.direction = DateDirection::Newer;
-                }
+            |_change: On<ValueChange<bool>>, mut state: ResMut<InventoryFilterState>| {
+                // A two-way radio: picking this one *is* the direction, and
+                // unticking it means nothing — `sync_toggle_ticks` puts the
+                // tick back where the filter says.
+                state.filter.direction = DateDirection::Newer;
             },
         );
     let older = spawn_toggle_row(&mut commands, content, "inventory-filter-older-than", 25);
@@ -529,10 +517,8 @@ fn build_filters_content(In(handle): In<FloaterHandle>, mut commands: Commands) 
         .entity(older)
         .insert(DirectionToggle(DateDirection::Older))
         .observe(
-            |press: On<Pointer<Press>>, mut state: ResMut<InventoryFilterState>| {
-                if press.button == PointerButton::Primary {
-                    state.filter.direction = DateDirection::Older;
-                }
+            |_change: On<ValueChange<bool>>, mut state: ResMut<InventoryFilterState>| {
+                state.filter.direction = DateDirection::Older;
             },
         );
 
@@ -605,44 +591,27 @@ fn build_filters_content(In(handle): In<FloaterHandle>, mut commands: Commands) 
     });
 }
 
-/// Spawn one toggle row: a check glyph and a translated label on a clickable
-/// row. The caller attaches the marker component and the press observer.
+/// Spawn one toggle: the shared checkbox widget, carrying its own translated
+/// caption so a click on the words toggles too. The caller attaches the marker
+/// component and the `ValueChange` observer.
 fn spawn_toggle_row(
     commands: &mut Commands,
     parent: Entity,
     label_key: &'static str,
     tab_index: i32,
 ) -> Entity {
-    let toggle = commands
-        .spawn((
-            Button,
-            TabIndex(tab_index),
-            Node {
-                align_items: AlignItems::Center,
-                ..row(Val::Px(6.0))
-            },
-            Pickable::default(),
-            Name::new(format!("inventory-filter:{label_key}")),
-            ChildOf(parent),
-        ))
-        .id();
-    commands.spawn((
-        Text::new(CHECKED_GLYPH),
-        UiFont::Sans.at(FILTER_FONT_SIZE),
-        text_role(CHECK_COLOR),
-        ToggleGlyph,
-        Pickable::IGNORE,
-        ChildOf(toggle),
-    ));
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(FILTER_FONT_SIZE),
-        text_role(LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(toggle),
-    ));
-    toggle
+    let checkbox = spawn_checkbox(
+        commands,
+        parent,
+        &CheckboxSpec {
+            element: label_key,
+            label: label_key.to_owned(),
+            tab_index,
+            font_size: FILTER_FONT_SIZE,
+            translate_label: true,
+        },
+    );
+    checkbox.checkbox
 }
 
 /// Spawn a bordered text button with a translated label.
@@ -720,40 +689,41 @@ pub(crate) fn apply_reset(
     }
 }
 
-/// Repaint every toggle row's check glyph from the state (write-guarded, so a
+/// Move every toggle's `Checked` to what the filter says (write-guarded, so a
 /// quiet frame costs comparisons only).
-fn sync_toggle_glyphs(
+///
+/// The marker is the whole of it — `.sk-checkbox:checked` draws the mark — which
+/// is what lets a filter changed from anywhere (the All / None buttons, a reset)
+/// reach the boxes without a second paint path.
+fn sync_toggle_ticks(
     state: Res<InventoryFilterState>,
-    types: Query<(&TypeToggle, &Children)>,
-    worn: Query<&Children, With<WornToggle>>,
-    since: Query<&Children, With<SinceLoginToggle>>,
-    directions: Query<(&DirectionToggle, &Children)>,
-    mut glyphs: Query<&mut Text, With<ToggleGlyph>>,
+    types: Query<(Entity, &TypeToggle, Has<Checked>)>,
+    worn: Query<(Entity, Has<Checked>), With<WornToggle>>,
+    since: Query<(Entity, Has<Checked>), With<SinceLoginToggle>>,
+    directions: Query<(Entity, &DirectionToggle, Has<Checked>)>,
+    mut commands: Commands,
 ) {
     if !state.is_changed() {
         return;
     }
-    let mut set = |children: &Children, on: bool| {
-        for child in children {
-            if let Ok(mut text) = glyphs.get_mut(*child) {
-                let wanted = if on { CHECKED_GLYPH } else { UNCHECKED_GLYPH };
-                if text.0 != wanted {
-                    wanted.clone_into(&mut text.0);
-                }
-            }
+    let mut set = |entity: Entity, ticked: bool, on: bool| {
+        if on && !ticked {
+            commands.entity(entity).insert(Checked);
+        } else if !on && ticked {
+            commands.entity(entity).remove::<Checked>();
         }
     };
-    for (toggle, children) in &types {
-        set(children, state.filter.types.contains(toggle.0));
+    for (entity, toggle, ticked) in &types {
+        set(entity, ticked, state.filter.types.contains(toggle.0));
     }
-    for children in &worn {
-        set(children, state.filter.worn_only);
+    for (entity, ticked) in &worn {
+        set(entity, ticked, state.filter.worn_only);
     }
-    for children in &since {
-        set(children, state.filter.since_login);
+    for (entity, ticked) in &since {
+        set(entity, ticked, state.filter.since_login);
     }
-    for (toggle, children) in &directions {
-        set(children, state.filter.direction == toggle.0);
+    for (entity, toggle, ticked) in &directions {
+        set(entity, ticked, state.filter.direction == toggle.0);
     }
 }
 
@@ -801,7 +771,7 @@ mod tests {
     #[test]
     fn type_boxes_narrow_by_group() {
         let mut filter = ItemFilter::default();
-        filter.types.toggle(TypeFilter::Texture);
+        filter.types.set(TypeFilter::Texture, false);
         assert!(filter.is_active());
         assert!(!filter.passes(&item(InventoryType::Texture, 0), false, 0, 0));
         assert!(filter.passes(&item(InventoryType::Sound, 0), false, 0, 0));
