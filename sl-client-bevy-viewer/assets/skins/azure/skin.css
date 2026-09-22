@@ -111,6 +111,17 @@
   --check-border-checked: #5cb8fa;
   --check-tick: #e6ebf2;
 
+  /* The radio option's disc: the well inside the ring, the ring itself, and
+   * the pip that shows against them. Its own tokens rather than the
+   * checkbox's, because the reference draws the two controls differently — a
+   * pale disc in a dark ring beside a light square with a tick — and a skin
+   * that wants them to match need only give these the same values. */
+  --radio-bg: #1a1f29;
+  --radio-border: #66809e;
+  --radio-bg-checked: #3d5785;
+  --radio-border-checked: #5cb8fa;
+  --radio-pip: #e6ebf2;
+
   /* An RLVa console line: accepted, refused. Meaning-bearing like the
    * notification kinds. */
   --console-info: #99d1a8;

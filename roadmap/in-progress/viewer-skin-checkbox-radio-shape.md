@@ -143,6 +143,31 @@ A gallery element (`checkbox-states`) shows all four looks side by side, and
 the contract table pins that the live two toggle on a click, `Enter` and
 `Space` while the refused two answer nothing.
 
+## The radio's disc (2026-09-22)
+
+The other half of the title, and the last mechanism gap. The indicator was a
+**character** — `◯` / `◉` through `content` — and a glyph carries exactly one
+colour, so a skin could recolour the ring but never draw the reference's *pale
+disc inside a dark ring*, which is two. It is a round box now
+(`border-radius: 50%`, asserted, since a `%` the parser rejected would leave it
+square with nothing else to show for it) with the lit mark as a `content` pip
+inside it — the checkbox's structure exactly:
+
+- `.sk-radio-indicator` — the disc: `--radio-bg` / `--radio-border`, and the
+  `:checked` pair. Five new tokens, defined in the fallback sheet and both
+  shipped skins.
+- `.sk-radio-pip::before` — the mark, `--radio-pip`, matched only under
+  `:checked`, so an unlit option has no rule and nothing to hide.
+- `.sk-radio-group:disabled` greys the disc, the pip and now the caption, the
+  way a refused checkbox does.
+
+**A guard came out of it.** Nothing checked that a token a *class* rule reads
+is defined at all — the shipped-skin tests only covered the `-sk-color-*`
+palette roles, so `--check-*` had no coverage either and a missing `--radio-*`
+would have painted bevy_flair's default silently.
+`every_token_common_css_reads_is_defined_by_every_skin` now walks all 67 tokens
+`common.css` names across the fallback and both skins.
+
 ## Still open
 
 - `.sk-checkbox:disabled .sk-text` was added for the greyed caption; the

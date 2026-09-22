@@ -536,36 +536,55 @@
   color: var(--text-disabled);
 }
 
-/* A radio option's indicator, and its two other states.
+/* THE RADIO OPTION (viewer-skin-checkbox-radio-shape).
  *
- * Both come from an ancestor: the option's own `:checked` (the `Checked` the
- * widget already maintains for the ARIA radiogroup pattern) and the group's
- * `:disabled`.
+ * A disc in a ring with a pip in it, on the checkbox's model and for the same
+ * reason: the reference draws a radio as a pale disc inside a dark ring — two
+ * colours — and a glyph can only ever carry one, so the ring is a round box the
+ * skin fills and outlines and the pip inside it is a `content` mark.
  *
- * The **glyph is the skin's**, like the checkbox's tick — `content` on a
- * `::before` — so the lit ring is a shape change as well as a colour one and a
- * skin that recolours only is still legible, without a Rust system rewriting
- * text. A skin wanting a filled dot (U+2022 •), a square (U+25A0 ■) or a
- * different ring pair says so here. */
+ * All three looks come from an ancestor: the option's own `:checked` (the
+ * `Checked` the widget already maintains for the ARIA radiogroup pattern) and
+ * the group's `:disabled`. The widget paints none of them.
+ *
+ * A skin wanting a filled dot (U+25CF ●), a bullet (U+2022 •) or a square
+ * (U+25A0 ■) writes it in the `content` below; one wanting the disc itself to
+ * change shape sets `border-radius` here. */
 .sk-radio-indicator {
-  color: var(--text-muted);
-}
-
-.sk-radio-indicator::before {
-  content: "\25cb";
+  background-color: var(--radio-bg);
+  border-color: var(--radio-border);
+  border-radius: 50%;
 }
 
 .sk-radio:checked .sk-radio-indicator {
-  color: var(--accent);
+  background-color: var(--radio-bg-checked);
+  border-color: var(--radio-border-checked);
 }
 
-.sk-radio:checked .sk-radio-indicator::before {
-  content: "\25c9";
+/* The pip is the SKIN'S MARK, not the widget's — the checkbox tick's trick. An
+ * unlit option matches no rule, so its span stays empty and there is nothing to
+ * hide. A skin that wants a bigger or smaller pip sets `font-size` here too:
+ * the pseudo-element inherits the host's otherwise, which the widget sizes from
+ * the disc. */
+.sk-radio:checked .sk-radio-pip::before {
+  content: "\25cf";
+  color: var(--radio-pip);
 }
 
-/* Last of the three, so a group the consumer cannot change greys whether or
- * not the option is the lit one. */
+/* Refused. Last of the three, so a group the consumer cannot change greys
+ * whether or not the option is the lit one — and the pip greys only where there
+ * *is* one, which is why that rule is compound. */
 .sk-radio-group:disabled .sk-radio-indicator {
+  background-color: var(--control-bg-disabled);
+  border-color: var(--control-border-disabled);
+}
+
+.sk-radio-group:disabled .sk-radio-pip::before {
+  color: var(--text-disabled);
+}
+
+/* And the caption with it, as a refused checkbox's does. */
+.sk-radio-group:disabled .sk-text {
   color: var(--text-disabled);
 }
 

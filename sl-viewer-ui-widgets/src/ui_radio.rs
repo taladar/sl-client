@@ -20,7 +20,7 @@
 //! [`RadioSelection`] on the group carries the selected index and is the only
 //! thing that decides selection. Everything visible is derived from it — the
 //! per-item [`Checked`] markers (which the group's own arrow-key handler reads
-//! to find the current option) and the `◉` / `○` indicator glyphs — so nothing
+//! to find the current option) and the disc's `:checked` look — so nothing
 //! can drift. `on_radio_value_change` (an observer per group, mirroring
 //! [`crate::ui_tab`]'s strip) is the only writer of `active` from a click or
 //! arrow key, and `apply_radio_selection` is the only writer of the derived
@@ -72,10 +72,11 @@ const ITEM_GAP: f32 = 6.0;
 /// is not.
 const INDICATOR_SIZE: f32 = 14.0;
 
-/// The ring's font size, as a fraction of [`INDICATOR_SIZE`] — the checkbox
+/// The pip's font size, as a fraction of [`INDICATOR_SIZE`] — the checkbox
 /// tick's rule, for the same reason: the caption's size says nothing about the
-/// square the mark has to fit in.
-const INDICATOR_FONT_SCALE: f32 = 0.8;
+/// disc the mark has to fit in. Smaller than the tick's share, because a pip
+/// sits *inside* a ring rather than filling the box.
+const INDICATOR_FONT_SCALE: f32 = 0.6;
 
 /// The skin class on a radio group, so a disabled group greys every indicator
 /// in it through `.sk-radio-group:disabled .sk-radio-indicator`.
@@ -86,12 +87,18 @@ const GROUP_CLASS: &str = "sk-radio-group";
 /// radiogroup pattern.
 const ITEM_CLASS: &str = "sk-radio";
 
-/// The skin class on an option's indicator. Its three looks — lit, resting,
-/// and greyed for a group the consumer cannot change — are all the skin's,
-/// selected through the item's `:checked` and the group's `:disabled`, and so
-/// is the **glyph**: `.sk-radio-indicator::before`'s `content` carries the
-/// ring, and the `:checked` rule the filled one.
+/// The skin class on an option's **disc** — the round box the mark sits in.
+/// Its three looks (resting, lit, and greyed for a group the consumer cannot
+/// change) are the skin's, selected through the item's `:checked` and the
+/// group's `:disabled`: a fill and a ring colour apiece, which is what lets a
+/// skin draw the reference's pale-disc-in-a-dark-ring rather than only recolour
+/// a character.
 const INDICATOR_CLASS: &str = "sk-radio-indicator";
+
+/// The skin class on the **pip** inside the disc: an empty text node whose
+/// `::before` carries the lit mark's `content`, the checkbox tick's trick. An
+/// unlit option matches no rule, so it shows nothing.
+const PIP_CLASS: &str = "sk-radio-pip";
 
 /// The action a group emits when the user picks a different option. A single
 /// verb — "a choice was made" — because the *which* is readable directly from
@@ -198,13 +205,13 @@ pub struct RadioItem {
     pub index: usize,
 }
 
-/// An option's indicator node, naming its group and index.
+/// An option's disc node, naming its group and index.
 ///
-/// It no longer carries anything to *write* — the ring, its lit form and its
+/// It no longer carries anything to *write* — the disc, its lit form and its
 /// greyed one are all the skin's, reached by `:checked` / `:disabled` from the
-/// option and the group. Kept because the gallery and the tests find an
-/// indicator by it, and because a marker is the cheapest way to say which of a
-/// row's children is the dot.
+/// option and the group. Kept because the gallery and the tests find a disc by
+/// it, and because a marker is the cheapest way to say which of a row's
+/// children is the indicator.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 struct RadioIndicator {
     /// The group whose selection this indicator reflects.
@@ -263,10 +270,10 @@ pub fn spawn_radio_group(commands: &mut Commands, parent: Entity, spec: &RadioSp
     group
 }
 
-/// Spawn one option — a [`RadioButton`] styled as a radio row: a `◉` / `○`
-/// indicator followed by its label. Not focusable itself; per the ARIA
-/// radiogroup pattern the group is the focus stop and the arrows move the
-/// selection within it.
+/// Spawn one option — a [`RadioButton`] styled as a radio row: a disc (filled
+/// with the skin's pip when lit) followed by its label. Not focusable itself;
+/// per the ARIA radiogroup pattern the group is the focus stop and the arrows
+/// move the selection within it.
 fn spawn_radio_item(
     commands: &mut Commands,
     group: Entity,
@@ -296,37 +303,53 @@ fn spawn_radio_item(
         commands.entity(item).insert(Checked);
     }
 
+    // **The disc is a box, not a character.** The reference draws a radio as a
+    // pale disc inside a dark ring — two colours — and a glyph can only ever
+    // carry one, so the ring is a round `Node` the skin fills and outlines
+    // (`--radio-bg` / `--radio-border`, and the `:checked` pair) exactly as the
+    // checkbox's square is. The mark inside it stays a `content` glyph, so a
+    // skin that wants a filled dot, a square or a smaller pip still says so in
+    // one rule.
+    let disc = commands
+        .spawn((
+            Node {
+                width: Val::Px(INDICATOR_SIZE),
+                height: Val::Px(INDICATOR_SIZE),
+                flex_shrink: 0.0,
+                border: UiRect::all(Val::Px(1.0)),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            ClassList::new_with_classes([INDICATOR_CLASS]),
+            RadioIndicator { group, index },
+            // The disc is part of the option's hit target, not its own; let the
+            // click fall through to the `RadioButton`.
+            Pickable::IGNORE,
+            Name::new(format!("{}:radio-dot:{index}", spec.element)),
+            ChildOf(item),
+        ))
+        .id();
     commands.spawn((
-        // It names no glyph: the ring is `.sk-radio-indicator::before`'s
-        // `content`, and its lit form `.sk-radio:checked`'s, so the skin owns
-        // both shapes. See the rules in `common.css`.
+        // It names no mark: the lit pip is `.sk-radio:checked .sk-radio-pip`'s
+        // `content`, so the skin owns it. An unlit option has no rule, so its
+        // span stays empty.
         //
         // The zero-width space is the same measurement fix as the checkbox
         // tick's, and `ui_checkbox::spawn_checkbox` explains it: `bevy_text`
         // styles each span by *range* and skips empty ones, so a text node with
         // no characters is laid out at parley's defaults — a 20 px line
-        // whatever font it asked for, which here makes every radio row taller
-        // than its caption and lifts the ring off the caption's baseline.
+        // whatever font it asked for, which inside this disc is overflow.
         Text::new("\u{200b}"),
         PseudoElementsSupport,
         UiFont::Sans.at(INDICATOR_SIZE * INDICATOR_FONT_SCALE),
-        // The ring's own square, sized and centred like the checkbox's box: the
-        // line box is the square, and the glyph is centred in it rather than
-        // sitting wherever its advance puts it.
+        // The line box is the disc, so the pip cannot be taller than the ring
+        // it sits in whatever font size a skin gives it.
         LineHeight::Px(INDICATOR_SIZE),
         TextLayout::justify(Justify::Center),
-        Node {
-            width: Val::Px(INDICATOR_SIZE),
-            flex_shrink: 0.0,
-            ..default()
-        },
-        ClassList::new_with_classes([INDICATOR_CLASS]),
-        RadioIndicator { group, index },
-        // The indicator is part of the option's hit target, not its own; let the
-        // click fall through to the `RadioButton`.
+        ClassList::new_with_classes([PIP_CLASS]),
         Pickable::IGNORE,
-        Name::new(format!("{}:radio-dot:{index}", spec.element)),
-        ChildOf(item),
+        ChildOf(disc),
     ));
 
     let label_entity = commands
@@ -487,11 +510,53 @@ mod tests {
     use super::{
         RadioItem, RadioLayout, RadioSelection, RadioSpec, RadioWidgetPlugin, spawn_radio_group,
     };
+    use sl_viewer_testkit::{LayoutTest, overflow_violations, settle, spawn_under_root};
     use sl_viewer_ui_core::ui_element::UiAction;
 
     /// A boxed error so tests can use `?` instead of the disallowed
     /// `unwrap` / `expect`.
     type TestError = Box<dyn core::error::Error>;
+
+    /// **The pip fits the disc it sits in.**
+    ///
+    /// A text node is as tall as its line, mark or no mark, so a pip laid out
+    /// at parley's defaults would be taller than the ring around it — and taffy
+    /// folds a child's content into every ancestor, so those pixels would
+    /// surface as the option's row, the group, and whatever panel holds it
+    /// overflowing. Pinned here as well as in `ui_checkbox`, because the two
+    /// controls reached the same shape by different routes.
+    #[test]
+    fn the_pip_fits_the_disc_it_sits_in() -> Result<(), TestError> {
+        let mut app = LayoutTest::new().build();
+        let row = spawn_under_root(&mut app, (Node::default(), Name::new("row")));
+        let labels: Vec<String> = ["Move", "Rotate", "Stretch"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        let mut queue = bevy::ecs::world::CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, app.world());
+        spawn_radio_group(
+            &mut commands,
+            row,
+            &RadioSpec {
+                element: "demo",
+                labels: &labels,
+                active: 1,
+                tab_index: 0,
+                font_size: 13.0,
+                layout: RadioLayout::Column,
+                translate_labels: false,
+            },
+        );
+        queue.apply(app.world_mut());
+        settle(&mut app);
+        assert_eq!(
+            overflow_violations(&mut app),
+            Vec::<String>::new(),
+            "a radio group spills out of its own boxes"
+        );
+        Ok(())
+    }
 
     /// The group entity built by the setup system, published for the test body.
     #[derive(Resource, Debug, Clone, Copy)]

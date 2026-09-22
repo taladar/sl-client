@@ -567,14 +567,17 @@ mod test {
         Ok(())
     }
 
-    /// **A radio's ring is the skin's too**, both of them.
+    /// **A radio's disc, ring and pip are all the skin's.**
     ///
-    /// The same move as the checkbox: `apply_radio_selection` used to rewrite
-    /// the glyph between `○` and `◉`, and that loop is gone — the option's
-    /// `:checked` picks the filled ring through `content`. A skin wanting a
-    /// filled dot or a square says so in one rule.
+    /// The same move as the checkbox, and finished the same way. First
+    /// `apply_radio_selection`'s glyph-swapping loop went, leaving the mark to
+    /// `content`; then the indicator stopped being a character at all. A glyph
+    /// carries exactly one colour, so a recolour could never be the reference's
+    /// **pale disc inside a dark ring** — that needs a filled, outlined box, and
+    /// this is what says the box is reachable: two fills, a greyed one, and the
+    /// pip that shows against them.
     #[test]
-    fn a_radio_takes_both_of_its_rings_from_the_skin() -> Result<(), TestError> {
+    fn a_radio_takes_its_disc_ring_and_pip_from_the_skin() -> Result<(), TestError> {
         let mut app = app();
         let handle: Handle<StyleSheet> = app
             .world()
@@ -584,46 +587,131 @@ mod test {
             .world_mut()
             .spawn((Node::default(), Styled::new(handle.clone())))
             .id();
-        let mut spawn_option = |checked: bool| {
-            let mut item =
-                app.world_mut()
-                    .spawn((Node::default(), ClassList::new("sk-radio"), ChildOf(root)));
+        // A group around the options, because the refused look is selected from
+        // it — a whole group is what a consumer refuses, not one option.
+        let mut spawn_group = |disabled: bool| {
+            let mut group = app.world_mut().spawn((
+                Node::default(),
+                ClassList::new("sk-radio-group"),
+                ChildOf(root),
+            ));
+            if disabled {
+                group.insert(bevy::ui::InteractionDisabled);
+            }
+            group.id()
+        };
+        let live = spawn_group(false);
+        let refused = spawn_group(true);
+        let mut spawn_option = |group: Entity, checked: bool| {
+            let mut item = app.world_mut().spawn((
+                Node::default(),
+                ClassList::new("sk-radio"),
+                ChildOf(group),
+            ));
             if checked {
                 item.insert(bevy::ui::Checked);
             }
             let item = item.id();
-            app.world_mut()
+            let disc = app
+                .world_mut()
                 .spawn((
-                    Text::default(),
-                    PseudoElementsSupport,
+                    Node::default(),
                     ClassList::new("sk-radio-indicator"),
                     ChildOf(item),
                 ))
-                .id()
+                .id();
+            let pip = app
+                .world_mut()
+                .spawn((
+                    // Empty, exactly as the widget spawns it: the mark is the
+                    // skin's `content`, reached through `::before`.
+                    Text::default(),
+                    PseudoElementsSupport,
+                    ClassList::new("sk-radio-pip"),
+                    ChildOf(disc),
+                ))
+                .id();
+            (disc, pip)
         };
-        let resting = spawn_option(false);
-        let lit = spawn_option(true);
+        let (resting_disc, resting_pip) = spawn_option(live, false);
+        let (lit_disc, lit_pip) = spawn_option(live, true);
+        let (refused_disc, _refused_pip) = spawn_option(refused, false);
+        let (_refused_lit_disc, refused_lit_pip) = spawn_option(refused, true);
 
         load(&mut app, &handle)?;
         app.update();
 
-        let ring = |entity| {
+        let fill = |entity| {
+            app.world()
+                .get::<BackgroundColor>(entity)
+                .map(|background| background.0.to_srgba())
+        };
+        let before = |entity| {
             app.world()
                 .get::<Children>(entity)
                 .and_then(|kids| kids.iter().next())
-                .and_then(|before| app.world().get::<TextSpan>(before))
+        };
+        let mark = |entity| {
+            before(entity)
+                .and_then(|e| app.world().get::<TextSpan>(e))
                 .map(|span| span.0.clone())
         };
+        let pip_color = |entity| {
+            before(entity)
+                .and_then(|e| app.world().get::<TextColor>(e))
+                .map(|color| color.0.to_srgba())
+        };
+
+        // The disc is a *box*, which is the whole point: a glyph carries one
+        // colour, so only a filled, outlined node can be the reference's pale
+        // disc inside a dark ring.
         assert_eq!(
-            ring(resting),
-            Some("\u{25cb}".to_owned()),
-            "an unselected option must carry the empty ring"
+            fill(resting_disc),
+            Some(Srgba::hex("1a1f29").map_err(|error| error.to_string())?),
+            "an unselected disc takes `--radio-bg`"
         );
         assert_eq!(
-            ring(lit),
-            Some("\u{25c9}".to_owned()),
-            "`:checked` must reach the ring, or selection is colour-only and a \
-             recolour-free skin cannot show it"
+            fill(lit_disc),
+            Some(Srgba::hex("3d5785").map_err(|error| error.to_string())?),
+            "`:checked` did not reach the disc"
+        );
+        assert_eq!(
+            fill(refused_disc),
+            Some(Srgba::hex("232730").map_err(|error| error.to_string())?),
+            "a refused group did not grey its options' discs"
+        );
+        // Round, and from the stylesheet: the widget spawns a plain square
+        // node, so a skin that wanted a square indicator would only have to
+        // drop this one declaration. Asserted because a `50%` bevy_flair failed
+        // to parse would leave the disc square with nothing else to show for
+        // it.
+        assert_eq!(
+            app.world()
+                .get::<Node>(resting_disc)
+                .map(|node| node.border_radius.top_left),
+            Some(Val::Percent(50.0)),
+            "the disc did not take its `border-radius` from the skin"
+        );
+        assert_eq!(
+            mark(lit_pip),
+            Some("\u{25cf}".to_owned()),
+            "`content` did not reach the pip's `::before`, so selection is \
+             colour-only and a recolour-free skin cannot show it"
+        );
+        assert_eq!(
+            mark(resting_pip).as_deref(),
+            Some(""),
+            "an unselected option must carry no mark at all"
+        );
+        assert_eq!(
+            pip_color(lit_pip),
+            Some(Srgba::hex("e6ebf2").map_err(|error| error.to_string())?),
+            "a lit pip takes `--radio-pip`"
+        );
+        assert_eq!(
+            pip_color(refused_lit_pip),
+            Some(Srgba::hex("737d8f").map_err(|error| error.to_string())?),
+            "a refused group's lit pip greys"
         );
         Ok(())
     }

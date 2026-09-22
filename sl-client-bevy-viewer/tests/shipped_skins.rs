@@ -127,6 +127,66 @@ mod test {
         Ok(())
     }
 
+    /// **Every token `common.css` reads, every shipped skin defines.**
+    ///
+    /// The other half of the palette guard above, and the one that covers the
+    /// tokens a *class* rule names rather than the `-sk-color-*` roles: the
+    /// checkbox's `--check-*`, the radio's `--radio-*`, every surface and text
+    /// colour. Its failure mode is the same silent one — a rule falling back to
+    /// bevy_flair's default for an undefined `var()`, which is a colour no skin
+    /// chose — and the omission is easiest to make in exactly the case that
+    /// prompted this: a widget growing new tokens, with three sheets to add
+    /// them to.
+    ///
+    /// The **fallback** sheet is checked too, because a skin is allowed to
+    /// define only what it changes and that one is what everything else rests
+    /// on.
+    #[test]
+    fn every_token_common_css_reads_is_defined_by_every_skin() -> Result<(), TestError> {
+        let common = common_css()?;
+        let mut used: Vec<&str> = common
+            .split("var(--")
+            .skip(1)
+            .filter_map(|tail| tail.split_once(')').map(|(name, _rest)| name))
+            .collect();
+        used.sort_unstable();
+        used.dedup();
+        assert!(
+            used.len() > 20,
+            "only {} tokens found — the parse, not the skins, is what broke",
+            used.len()
+        );
+
+        let fallback = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("sl-viewer-ui-core")
+            .join("src")
+            .join("skins")
+            .join("fallback.css");
+        let mut sheets: Vec<PathBuf> = vec![fallback];
+        sheets.extend(
+            SKINS
+                .iter()
+                .map(|skin| skins_dir().join(skin).join("skin.css")),
+        );
+
+        let mut missing = Vec::new();
+        for sheet in sheets {
+            let css = fs_err::read_to_string(&sheet)?;
+            for token in &used {
+                if !css.contains(&format!("--{token}:")) {
+                    missing.push(format!("{}: --{token}", sheet.display()));
+                }
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "a rule reads a token the sheet never defines, so it paints \
+             bevy_flair's default instead of a chosen colour: {missing:#?}"
+        );
+        Ok(())
+    }
+
     /// Every chrome role the widget set paints from is wired in `common.css`
     /// and defined by every shipped skin.
     ///
