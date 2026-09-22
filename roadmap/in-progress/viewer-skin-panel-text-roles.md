@@ -97,6 +97,20 @@ world, and a skin that omits the token, fall back to. `spawn_text`'s explicit
 `a_label_takes_the_class_of_the_role_its_colour_names` holds both halves,
 including that an off-role colour is left alone.
 
+**The invariant it rests on** is that the mapping is *injective*: each of the
+four values must belong to exactly one role, or a label would silently take
+another role's class. That holds today — the nearest neighbours are
+`pie_label_sub_pie` against `text_heading` and `title_text_inactive` against
+`text_muted`, both distinct — and
+`the_text_roles_are_the_only_roles_with_their_values` now enforces it by
+reflection over every palette field, so a role added or retuned later is
+covered without anyone remembering. Only the **fallback** has to satisfy it: a
+skin may give two roles the same value freely, since the class is chosen at
+spawn from the fallback and the skin paints per class. If the fallback ever
+*needs* two equal text roles, the derivation has to be replaced by an explicit
+role at the call sites — which is the option this seam was chosen over, and
+the failure message says so.
+
 ### What is left
 
 - **The ~449 direct `TextColor(…)` spawns** that do not go through a helper.
