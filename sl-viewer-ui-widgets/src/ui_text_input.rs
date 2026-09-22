@@ -120,8 +120,8 @@ use bevy::ui::UiSystems;
 
 use bevy_flair::style::components::ClassList;
 
-use sl_viewer_ui_core::skin::SkinTextCaret;
-use sl_viewer_ui_core::skin_palette::{SkinColors, SkinPalette};
+use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, SkinTextCaret, set_state_class};
+use sl_viewer_ui_core::skin_palette::SkinPalette;
 use sl_viewer_ui_core::ui::{LogicalMargin, LogicalRect, UiPanelShown, UiRoot, column, row};
 use sl_viewer_ui_core::ui_element::{ElementCx, TextMayClip};
 use sl_viewer_ui_core::ui_font::UiFont;
@@ -130,10 +130,14 @@ use sl_viewer_ui_core::ui_font::UiFont;
 /// than the surrounding panel, so the editable area reads as a well the text
 /// sits in) and `--control-border`.
 ///
-/// The field's *text* is absent, and deliberately: it is state-painted by
-/// `reflect_uneditable_text_color` from the `--field-text` /
-/// `--text-disabled` roles, and a class `color` rule would beat that write and
-/// make a read-only field look editable.
+/// The field's *text* is not here but in `.sk-text-field`, which the scaffold
+/// stamps on every editor — one rule for every field rather than one per
+/// decorated box. This used to say the text was deliberately left unstyled,
+/// because a class `color` would have beaten
+/// [`reflect_uneditable_text_color`]'s write and made a read-only field look
+/// editable. That is exactly backwards now: the rule paints the resting
+/// colour and that system adds `.sk-disabled-text`, which the state block wins
+/// with.
 const FIELD_CLASS: &str = "sk-field";
 
 /// A field's border width, in logical pixels.
@@ -908,30 +912,25 @@ fn drive_caret_blink(
 /// it is shows itself the moment they try to select.
 #[expect(
     clippy::type_complexity,
-    reason = "the query is one colour to write and the two markers that decide it; naming the \
-              tuple would hide which two stances share the grey"
+    reason = "the query is the class list to mark and the two markers that decide it; naming \
+              the tuple would hide which two stances share the grey"
 )]
 fn reflect_uneditable_text_color(
-    palette: SkinColors,
     mut fields: Query<
         (
-            &mut TextColor,
+            &mut ClassList,
             Has<bevy::ui::InteractionDisabled>,
             Has<ReadOnlyField>,
         ),
         With<EditableText>,
     >,
 ) {
-    let palette = palette.get();
-    for (mut color, disabled, read_only) in &mut fields {
-        let want = if disabled || read_only {
-            palette.text_disabled
-        } else {
-            palette.field_text
-        };
-        if color.0 != want {
-            color.0 = want;
-        }
+    for (mut classes, disabled, read_only) in &mut fields {
+        // The resting colour is `.sk-text-field`'s, which the scaffold already
+        // stamped; this says only that the field cannot be edited. Read-only is
+        // why it is a class and not `:disabled` alone — no pseudo-class sees a
+        // field that takes focus and a caret but refuses an edit.
+        set_state_class(&mut classes, DISABLED_TEXT_CLASS, disabled || read_only);
     }
 }
 

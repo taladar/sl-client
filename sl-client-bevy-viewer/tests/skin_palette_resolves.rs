@@ -401,6 +401,59 @@ mod test {
         Ok(())
     }
 
+    /// A field that cannot be edited greys, and an ordinary one does not.
+    ///
+    /// `.sk-text-field` is stamped on every editor by the scaffold and now
+    /// carries the typed text's colour; `reflect_uneditable_text_color` adds
+    /// `.sk-disabled-text` for a disabled *or* read-only field. Both rules are
+    /// a single class, so which wins is the file's order — the same thing
+    /// `a_selected_row_beats_its_resting_rule` pins for rows.
+    #[test]
+    fn a_field_that_refuses_edits_greys_its_text() -> Result<(), TestError> {
+        let mut app = app();
+        let handle: Handle<StyleSheet> = app
+            .world()
+            .resource::<AssetServer>()
+            .load("skins/graphite/skin.css");
+        let root = app
+            .world_mut()
+            .spawn((Node::default(), Styled::new(handle.clone())))
+            .id();
+        let editable = app
+            .world_mut()
+            .spawn((
+                Text::new("typed"),
+                ClassList::new("sk-text-field"),
+                ChildOf(root),
+            ))
+            .id();
+        let refused = app
+            .world_mut()
+            .spawn((
+                Text::new("typed"),
+                ClassList::new("sk-text-field sk-disabled-text"),
+                ChildOf(root),
+            ))
+            .id();
+
+        load(&mut app, &handle)?;
+        app.update();
+
+        let text = |entity| app.world().get::<TextColor>(entity).map(|color| color.0);
+        assert_eq!(
+            text(editable),
+            Some(Color::srgb_u8(0xff, 0xff, 0xff)),
+            "an editable field's text must take `--field-text`"
+        );
+        assert_eq!(
+            text(refused),
+            Some(Color::srgb_u8(0x73, 0x7d, 0x8f)),
+            "`.sk-disabled-text` must beat `.sk-text-field`, or a read-only \
+             field reads as editable"
+        );
+        Ok(())
+    }
+
     /// A refused action button greys — **both** halves of it.
     ///
     /// This is the pair that broke once already: `set_action_button_enabled`

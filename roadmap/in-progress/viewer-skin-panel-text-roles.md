@@ -244,10 +244,18 @@ world-space data.
   palette read. The other five writer files are
   [[viewer-skin-checkbox-radio-shape]]'s, and `name_tag_billboard`'s is not
   this task's.
-- **The literal-colour spawns** — `Color::WHITE` (32 sites),
-  `Color::srgba(0.85, 0.85, 0.85, 1.0)` (18) and the rest of the 86 distinct
-  arguments. Each is a decision about which role, if any, it meant; the
-  ast-grep census is how to enumerate them.
+- **The literal-colour spawns.** `ast-grep run -p 'TextColor(Color::$$$C)'`
+  says every one of the 32 is `Color::WHITE`, and reading them shows *three*
+  different intents behind the same expression — which is why this is a
+  decision list and not a sweep:
+  - **Plain panel text** (`ui_element.rs`'s specimen prose and labels) — wants
+    `text_role`, and is the only kind that does.
+  - **An untinted glyph** (`emoji_picker.rs`'s cells and tone swatches) —
+    white *is* "do not tint" for a colour emoji, so a role would tint it.
+  - **A deliberate skinless fallback** (`edit_tool.rs` and its siblings, which
+    say so at the site: "the skin recolours via the class token") — already
+    class-driven, and the white is the value a stylesheet-less world falls
+    back to. Exactly what `text_role` leaves alone.
 - **The live look is deliberately deferred to the end.** A half-converted UI
   cannot be judged by eye — nothing distinguishes a colour that is already
   skin-driven from one that is not — so the check only becomes meaningful when

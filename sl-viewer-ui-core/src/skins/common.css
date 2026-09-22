@@ -671,6 +671,12 @@
   caret-color: var(--caret);
   selection-color: var(--selection);
   unfocused-selection-color: var(--selection-unfocused);
+  /* The typed text itself. Here rather than at each spawn site for the same
+   * reason the caret is: the scaffold stamps this class on every field, so one
+   * rule reaches all of them. A field that cannot be edited — disabled, or
+   * read-only, which no pseudo-class can see — adds `.sk-disabled-text`, and
+   * the state block at the end of this file wins over this. */
+  color: var(--field-text);
 }
 
 /* The Conversations floater's transcript band colours — the reference's
