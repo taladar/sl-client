@@ -107,7 +107,7 @@ use crate::style::{
 };
 use bevy_flair::style::components::ClassList;
 use sl_viewer_ui_core::skin::{
-    ACTIVE_CLASS, DisabledButtons, set_action_button_enabled, set_state_class_on,
+    ACTIVE_CLASS, DisabledButtons, TEXT_CLASS, set_action_button_enabled, set_state_class_on,
 };
 
 /// The floater's stable id.
@@ -139,9 +139,6 @@ const CHECK_OFF: Color = Color::srgba(0.10, 0.11, 0.14, 1.0);
 
 /// The skin class on an action button, so `.sk-button:disabled` greys it.
 const BUTTON_CLASS: &str = "sk-button";
-
-/// The skin class on its caption — the other end of that selector.
-const LABEL_CLASS: &str = "sk-text";
 
 /// The kinds this viewer can mint from nothing, in the add row's order — all
 /// three, since the day-cycle editor exists to open the third with.
@@ -701,7 +698,7 @@ fn spawn_action_button(
         // on below when the button is born refused, so it reads right on its
         // first frame rather than waiting for the first sync.
         .class(BUTTON_CLASS)
-        .label_class(LABEL_CLASS)
+        .label_class(TEXT_CLASS)
         .no_wrap(),
     );
     if disabled {

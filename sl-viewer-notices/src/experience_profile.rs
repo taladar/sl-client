@@ -70,7 +70,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
-use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, set_state_class};
+use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class};
 
 use sl_client_bevy::{
     Command, ExperienceInfo, ExperienceKey, ExperiencePermission, ExperienceProperties,
@@ -121,10 +121,6 @@ const BUTTON_BORDER: Color = Color::srgb(0.40, 0.50, 0.62);
 
 /// The skin class a button wears (`.sk-button`).
 const BUTTON_CLASS: &str = "sk-button";
-
-/// The skin class on a button's caption, so `.sk-disabled-text` has a base to
-/// fall back to when an action stops being redundant.
-const LABEL_CLASS: &str = "sk-text";
 
 /// The glyph a ticked toggle shows.
 const CHECKED_GLYPH: &str = "\u{2611}";
@@ -973,7 +969,7 @@ fn spawn_action(
             Text::default(),
             Translated::new(label_key),
             UiFont::Sans.at(FONT_SIZE),
-            ClassList::new_with_classes([LABEL_CLASS]),
+            ClassList::new_with_classes([TEXT_CLASS]),
             Pickable::IGNORE,
             ChildOf(entity),
         ))

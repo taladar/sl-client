@@ -93,7 +93,7 @@ use bevy::text::EditableText;
 use bevy::ui::Checked;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
-use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, set_state_class};
+use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class};
 use std::collections::BTreeSet;
 
 use sl_client_bevy::{
@@ -196,10 +196,6 @@ const BUTTON_BACKGROUND: Color = Color::srgb(0.16, 0.19, 0.25);
 
 /// A button's fallback border — the skin's `.sk-button` overrides it.
 const BUTTON_BORDER: Color = Color::srgb(0.40, 0.50, 0.62);
-
-/// The skin class on a button's caption, so `.sk-disabled-text` has a base to
-/// fall back to when its action becomes available again.
-const LABEL_CLASS: &str = "sk-text";
 
 /// A list's background tint behind its rows.
 const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
@@ -1212,7 +1208,7 @@ fn spawn_action(
         Text::default(),
         Translated::new(label_key),
         UiFont::Sans.at(FONT_SIZE),
-        ClassList::new_with_classes([LABEL_CLASS]),
+        ClassList::new_with_classes([TEXT_CLASS]),
         Pickable::IGNORE,
         ChildOf(entity),
     ));

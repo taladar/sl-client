@@ -132,7 +132,7 @@ use sl_viewer_ui_core::ui::{
 };
 use sl_viewer_ui_core::ui_element::{ElementCx, TextMayClip, UiAction};
 
-use sl_viewer_ui_core::skin::{SCROLLBAR_THUMB_CLASS, SCROLLBAR_TRACK_CLASS};
+use sl_viewer_ui_core::skin::{SCROLLBAR_THUMB_CLASS, SCROLLBAR_TRACK_CLASS, TEXT_CLASS};
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 use sl_viewer_ui_core::ui_ellipsis::{RevealEllipsis, spawn_ellipsis_marker};
 use sl_viewer_ui_core::ui_font::UiFont;
@@ -207,9 +207,6 @@ const PANEL_CLASS: &str = "sk-tab-panel";
 /// The skin class on a gallery demo panel's heading — brighter than the body,
 /// so a tab switch (which swaps the heading) is unmistakable.
 const PANEL_HEADING_CLASS: &str = "sk-heading";
-
-/// The skin class on a gallery demo panel's body text.
-const PANEL_TEXT_CLASS: &str = "sk-text";
 
 /// The narrowest a resizable vertical strip may be dragged, in logical pixels —
 /// enough to keep a tab clickable even when every label is truncated to nothing.
@@ -1667,7 +1664,7 @@ fn fill_sample_panels(commands: &mut Commands, panels: &[Entity], cx: ElementCx)
             Text::new(cx.text(body)),
             cx.font(UiFont::Sans),
             TextColor(SkinPalette::default().text_primary),
-            ClassList::new_with_classes([PANEL_TEXT_CLASS]),
+            ClassList::new_with_classes([TEXT_CLASS]),
             ChildOf(panel),
         ));
     }

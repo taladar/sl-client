@@ -55,11 +55,13 @@
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
+use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
     ASSET_CODE_LINK, ASSET_CODE_LINK_FOLDER, AgentKey, AssetType, Command, InventoryFolderKey,
     InventoryKey, InventoryType, ItemInfo, ObjectKey, Permissions, RestoreItem, RezObjectParams,
     ScopedObjectId, SlCommand, SlIdentity, TransactionId, Uuid, Vector,
 };
+use sl_viewer_ui_core::skin::{DROP_TARGET_CLASS, set_state_class};
 
 use crate::coords::bevy_to_sl_vec;
 use crate::intents::LocalChatNotice;
@@ -101,9 +103,6 @@ const GHOST_COLOR: Color = Color::srgb(0.92, 0.94, 0.98);
 
 /// The ghost's backdrop, so it reads over any scene.
 const GHOST_BACKGROUND: Color = Color::srgba(0.10, 0.12, 0.16, 0.85);
-
-/// The drop-target folder row's highlight.
-const DROP_HIGHLIGHT: Color = Color::srgba(0.24, 0.34, 0.52, 0.75);
 
 /// How close to the viewport's top / bottom edge the pointer auto-scrolls, in
 /// logical pixels.
@@ -164,14 +163,6 @@ struct ActiveDrag {
 pub(crate) struct InventoryDragState {
     /// The in-progress drag.
     active: Option<ActiveDrag>,
-}
-
-impl InventoryDragState {
-    /// Whether a drag is in progress — while it is, the drop-target highlight
-    /// owns the row backgrounds and the selection painter stands down.
-    pub(crate) const fn is_active(&self) -> bool {
-        self.active.is_some()
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -442,14 +433,14 @@ pub(crate) struct DragHover<'w, 's> {
     viewports: Query<'w, 's, (&'static ComputedNode, &'static UiGlobalTransform)>,
     /// The virtual list the auto-scroll drives.
     lists: Query<'w, 's, &'static mut VirtualList>,
-    /// The pooled rows, whose backgrounds carry the drop highlight.
+    /// The pooled rows, whose class lists carry the drop highlight.
     rows: Query<
         'w,
         's,
         (
             &'static VirtualRow,
             &'static ChildOf,
-            &'static mut BackgroundColor,
+            &'static mut ClassList,
         ),
     >,
     /// The ghost node the drag drags around.
@@ -501,7 +492,7 @@ pub(crate) struct DragGeometry<'w, 's> {
         (
             &'static VirtualRow,
             &'static ChildOf,
-            &'static mut BackgroundColor,
+            &'static mut ClassList,
         ),
     >,
 }
@@ -819,29 +810,23 @@ pub(crate) fn drive_inventory_drag(
             .iter()
             .position(|row| row.key() == RowKey::Folder(folder))
     });
-    for (row, child_of, mut background) in &mut rows {
+    for (row, child_of, mut classes) in &mut rows {
         if child_of.parent() != ui.viewport() {
             continue;
         }
-        let wanted = if row.index.is_some() && row.index == target_index {
-            DROP_HIGHLIGHT
-        } else {
-            Color::NONE
-        };
-        if background.0 != wanted {
-            background.0 = wanted;
-        }
+        let wanted = row.index.is_some() && row.index == target_index;
+        set_state_class(&mut classes, DROP_TARGET_CLASS, wanted);
     }
 }
 
 /// Reset every pooled row's drop highlight.
 fn clear_row_highlights(
     viewport: Entity,
-    rows: &mut Query<(&VirtualRow, &ChildOf, &mut BackgroundColor)>,
+    rows: &mut Query<(&VirtualRow, &ChildOf, &mut ClassList)>,
 ) {
-    for (_row, child_of, mut background) in rows {
-        if child_of.parent() == viewport && background.0 != Color::NONE {
-            background.0 = Color::NONE;
+    for (_row, child_of, mut classes) in rows {
+        if child_of.parent() == viewport {
+            set_state_class(&mut classes, DROP_TARGET_CLASS, false);
         }
     }
 }

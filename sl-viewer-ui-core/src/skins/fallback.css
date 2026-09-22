@@ -87,6 +87,9 @@
   /* A hovered tile in a dense grid — a wash, not a block: see .sk-tile. */
   --tile-hover: #ffffff24;
 
+  /* The row a drag would drop into — the selection highlight, louder. */
+  --drop-target: #3d5785bf;
+
   /* The selected keyframe marker on a day-cycle timeline. Gold rather than
    * the blue every list selection uses: it sits on a sky gradient, not in a
    * list, and blue would sink into it. */

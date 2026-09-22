@@ -192,88 +192,11 @@
  * window with no session. */
 .sk-action-button:disabled {
   background-color: var(--control-bg-disabled);
+  border-color: var(--control-border-disabled);
 }
 
 .sk-action-button:disabled .sk-text {
   color: var(--text-disabled);
-}
-
-/* A control whose action does not apply to what its panel is showing right now
- * — greyed rather than removed, so a row of actions keeps its shape as the
- * selection moves (Contact Sets' Configure… with a pseudo-set chosen, its
- * Rem Alias… with nobody selected, …). Two rules because bevy_ui has no style
- * inheritance: the surface and its label are separate nodes, so each carries
- * the class that greys it. Both come later in the cascade than .sk-button /
- * .sk-text so they win while both apply, and dropping the disabled class falls
- * back to the base rule rather than to nothing. */
-.sk-disabled-surface {
-  background-color: var(--control-bg-disabled);
-}
-
-.sk-disabled-text {
-  color: var(--text-disabled);
-}
-
-/* WIDGET STATE (viewer-skin-widget-state-classes).
- *
- * Hovered, highlighted, toggled-on: the states a widget spends its most
- * visually loaded moments in, and the ones a skin most wants to own. They used
- * to be painted from Rust every frame, which meant a skin could not reach them
- * at all — in the reference's Vintage skin a pressed control is not a tint but
- * a different texture in a different hue family, and a skin that cannot restyle
- * a pressed button cannot be that skin.
- *
- * Each is a class the widget's own system adds and removes, because the state
- * is ours and not the engine's: `:hover` cannot see a menu row lit by keyboard
- * navigation, nor the ancestor chain of an open sub-menu, nor "the floater this
- * button toggles is open". Where the state genuinely *is* a pointer hover the
- * rule above (`.sk-button:hover`) still does it with no code at all — prefer
- * that whenever a selector can reach the paint.
- *
- * Paired surface/text rules again, for the same reason as the disabled pair:
- * bevy_ui has no style inheritance, so a row and its label are separate nodes.
- * Disabled comes last of all so it wins over both — a greyed row must never
- * also read as lit. */
-.sk-highlighted {
-  background-color: var(--control-bg-hover);
-}
-
-.sk-highlighted-text {
-  color: var(--text-primary);
-}
-
-/* Toggled on / selected: a lit toolbar button whose floater is open, the active
- * tab in a strip, the selected row of a table. Distinct from highlighted, which
- * follows the pointer or the keyboard and is gone the moment either moves. */
-.sk-active {
-  background-color: var(--selection-bg);
-}
-
-.sk-active-text {
-  color: var(--accent);
-}
-
-/* Wants attention: the Conversations button with unread IMs behind a closed
- * window. The viewer says only *that* it wants attention; how that reads is the
- * skin's, which is why this carries an animation rather than a colour the
- * viewer flips twice a second. A skin that would rather not blink overrides the
- * rule with a static paint and nothing else changes. */
-.sk-attention {
-  animation: sk-attention-pulse 1s infinite;
-}
-
-@keyframes sk-attention-pulse {
-  from {
-    background-color: var(--control-bg);
-  }
-
-  50% {
-    background-color: var(--selection-bg);
-  }
-
-  to {
-    background-color: var(--control-bg);
-  }
 }
 
 /* The universal keyboard focus ring. Every focusable widget — one carrying a
@@ -487,6 +410,16 @@
 .sk-table-row,
 .sk-list-row {
   background-color: transparent;
+}
+
+/* A row in a picker's tree, which lights under the pointer. Its own class and
+ * not a `:hover` on `.sk-list-row`, because giving every hand-rolled list a
+ * hover it does not have today is a visual change across a dozen panels —
+ * [[viewer-skin-list-row-striping]] owns that question for all of them. The
+ * selection compound in the state block at the end of this file comes later,
+ * so a selected row stays selected-looking under the pointer. */
+.sk-picker-row:hover {
+  background-color: var(--control-bg-hover);
 }
 
 /* A combo's anchor box, and the greyed look of one a consumer has disabled —
@@ -884,5 +817,124 @@
 /* A gated-off (greyed) build-parameter control. Later in the cascade than
  * .sk-build-label / .sk-build-value so it wins while both classes apply. */
 .sk-build-disabled {
+  color: var(--text-disabled);
+}
+
+/* ---------------------------------------------------------------------------
+ * STATE, AND LAST ON PURPOSE.
+ *
+ * Every rule above states a widget's *resting* look, and most of them do it
+ * with a single class. These state rules carry a single class too, so
+ * specificity does not separate them: the only thing deciding whether a
+ * selected row is painted or transparent is which rule appears later in this
+ * file.
+ *
+ * They used to appear near the top, which meant `.sk-list-row`'s transparent,
+ * `.sk-menu-item`'s transparent, `.sk-gallery-tile`'s scrim and
+ * `.sk-toolbar-button`'s control shade each beat them — selection was
+ * invisible everywhere the cascade painted it, and only in the live viewer,
+ * since a headless world resolves no stylesheet.
+ *
+ * So: resting rules above, state rules here, and within these highlighted,
+ * then active, then disabled — a greyed row must never also read as lit. A
+ * pairing that needs a colour of its own is written compound beside its widget
+ * (`.sk-day-marker.sk-active`, `.sk-floater-title-bar.sk-active`) and wins on
+ * specificity from wherever it sits.
+ *
+ * `a_selected_row_beats_its_resting_rule` in the viewer's skin test is what
+ * holds this, because nothing in Rust can see it.
+ * ------------------------------------------------------------------------ */
+
+/* WIDGET STATE (viewer-skin-widget-state-classes).
+ *
+ * Hovered, highlighted, toggled-on: the states a widget spends its most
+ * visually loaded moments in, and the ones a skin most wants to own. They used
+ * to be painted from Rust every frame, which meant a skin could not reach them
+ * at all — in the reference's Vintage skin a pressed control is not a tint but
+ * a different texture in a different hue family, and a skin that cannot restyle
+ * a pressed button cannot be that skin.
+ *
+ * Each is a class the widget's own system adds and removes, because the state
+ * is ours and not the engine's: `:hover` cannot see a menu row lit by keyboard
+ * navigation, nor the ancestor chain of an open sub-menu, nor "the floater this
+ * button toggles is open". Where the state genuinely *is* a pointer hover the
+ * rule above (`.sk-button:hover`) still does it with no code at all — prefer
+ * that whenever a selector can reach the paint.
+ *
+ * Paired surface/text rules again, for the same reason as the disabled pair:
+ * bevy_ui has no style inheritance, so a row and its label are separate nodes.
+ * Disabled comes last of all so it wins over both — a greyed row must never
+ * also read as lit. */
+.sk-highlighted {
+  background-color: var(--control-bg-hover);
+}
+
+.sk-highlighted-text {
+  color: var(--text-primary);
+}
+
+/* Toggled on / selected: a lit toolbar button whose floater is open, the active
+ * tab in a strip, the selected row of a table. Distinct from highlighted, which
+ * follows the pointer or the keyboard and is gone the moment either moves. */
+.sk-active {
+  background-color: var(--selection-bg);
+}
+
+.sk-active-text {
+  color: var(--accent);
+}
+
+/* A selected row, written compound so it beats a row's own `:hover` as well as
+ * its resting rule — both are (0,2,0), and this block is last. */
+.sk-table-row.sk-active,
+.sk-list-row.sk-active {
+  background-color: var(--selection-bg);
+}
+
+/* The row a drag is over. Compound and after the selection, so dragging onto
+ * the folder that happens to be selected still shows where the drop lands —
+ * which the inventory used to arrange by switching its selection system off
+ * for the duration of the drag. */
+.sk-table-row.sk-drop-target,
+.sk-list-row.sk-drop-target {
+  background-color: var(--drop-target);
+}
+
+/* Wants attention: the Conversations button with unread IMs behind a closed
+ * window. The viewer says only *that* it wants attention; how that reads is the
+ * skin's, which is why this carries an animation rather than a colour the
+ * viewer flips twice a second. A skin that would rather not blink overrides the
+ * rule with a static paint and nothing else changes. */
+.sk-attention {
+  animation: sk-attention-pulse 1s infinite;
+}
+
+@keyframes sk-attention-pulse {
+  from {
+    background-color: var(--control-bg);
+  }
+
+  50% {
+    background-color: var(--selection-bg);
+  }
+
+  to {
+    background-color: var(--control-bg);
+  }
+}
+
+/* A control whose action does not apply to what its panel is showing right now
+ * — greyed rather than removed, so a row of actions keeps its shape as the
+ * selection moves (Contact Sets' Configure… with a pseudo-set chosen, its
+ * Rem Alias… with nobody selected, …). Two rules because bevy_ui has no style
+ * inheritance: the surface and its label are separate nodes, so each carries
+ * the class that greys it. Both come later in the cascade than .sk-button /
+ * .sk-text so they win while both apply, and dropping the disabled class falls
+ * back to the base rule rather than to nothing. */
+.sk-disabled-surface {
+  background-color: var(--control-bg-disabled);
+}
+
+.sk-disabled-text {
   color: var(--text-disabled);
 }

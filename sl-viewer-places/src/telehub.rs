@@ -69,6 +69,8 @@
 //! `floater_telehub.xml`, `panel_region_general.xml` (`manage_telehub_btn`),
 //! `llselectmgr.cpp` (`sendGodlikeRequest`).
 
+use sl_viewer_ui_core::skin::TEXT_CLASS;
+
 use crate::skin_palette::SkinPalette;
 use bevy::prelude::*;
 use bevy::ui::InteractionDisabled;
@@ -114,10 +116,6 @@ const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// The skin class on an action button, so `.sk-button:disabled` greys it.
 const BUTTON_CLASS: &str = "sk-button";
-
-/// The skin class on that button's caption — the other end of the descendant
-/// selector that greys a refused action.
-const LABEL_CLASS: &str = "sk-text";
 
 /// An action button's background.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
@@ -474,7 +472,7 @@ fn spawn_action_button(
         // (`.sk-button:disabled .sk-text`), which needs both ends of that
         // selector to exist.
         .class(BUTTON_CLASS)
-        .label_class(LABEL_CLASS),
+        .label_class(TEXT_CLASS),
     )
     .button;
     commands

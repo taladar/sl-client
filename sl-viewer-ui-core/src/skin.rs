@@ -364,6 +364,15 @@ fn stamp_focus_ring_class(
 /// crates were each declaring their own copy of the same string.
 pub const TEXT_CLASS: &str = "sk-text";
 
+/// The CSS class on the row a drag is currently over — the folder an
+/// inventory drop would land in.
+///
+/// Louder than [`ACTIVE_CLASS`] and written to beat it, because during a drag
+/// the question on screen is "where will this land", not "what was selected
+/// before it started". It used to be arranged by *skipping* the selection
+/// system for the duration of the drag; the cascade settles it instead.
+pub const DROP_TARGET_CLASS: &str = "sk-drop-target";
+
 /// The CSS class on one tile of a dense grid — an emoji cell, a tone swatch.
 /// Its hover is a `:hover` rule and needs no code; the class exists so the rule
 /// has something to select.

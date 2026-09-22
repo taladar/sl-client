@@ -148,18 +148,45 @@ for the two environment windows that painted a table row's selection
 themselves, which is what `style::SELECTED_BACKGROUND` — the tenth copy of
 `selection_bg`, and the one the first survey named — existed for.
 
-Still to do, from a survey that (unlike the first) also catches indented and
-`pub(crate)` constants:
+### The cascade was the other half (2026-09-22)
 
-- `sl-viewer-pickers` — `ui_texture_picker.rs` is the densest one left:
-  `SELECTED_FILL`, `ROW_HOVER` (another hover-observer pair) and
-  `DISABLED_BORDER`.
-- `sl-viewer-inventory` — `inventory.rs`'s `SELECTED_ROW_BACKGROUND` (a
-  tenth copy of `selection_bg`) and `inventory_drag.rs`'s `DROP_HIGHLIGHT`,
-  which is a state no pseudo-class reaches and wants a class of its own.
-- `sl-client-bevy-viewer` — `about_floater.rs`'s `LICENSE_ROW_SELECTED`.
-- `sl-viewer-audio` — `parcel_audio.rs`'s `BUTTON_FILL_DISABLED` /
-  `BUTTON_BORDER_DISABLED`.
+The sweep's own conversions were not being painted. `.sk-active` and
+`.sk-highlighted` sat near the **top** of `common.css`, and every widget's
+resting rule below them — `.sk-list-row`'s transparent, `.sk-menu-item`'s
+transparent, `.sk-gallery-tile`'s scrim, `.sk-toolbar-button`'s control shade —
+carries the same one-class specificity, so the later rule won and **selection
+was invisible everywhere the cascade painted it**. Only in the live viewer,
+since a headless world resolves no stylesheet.
+
+The state vocabulary now lives at the end of the file, ordered highlighted →
+active → disabled (the file's own comment always claimed disabled came last;
+it came first). A row's selection is additionally written compound
+(`.sk-list-row.sk-active`) so it also beats a row's `:hover`.
+`a_selected_row_beats_its_resting_rule` in the viewer's skin test is what
+holds it, because nothing in Rust can see it.
+
+### The rest of the constants (2026-09-22)
+
+Converted: the texture picker's tree rows — selection to `.sk-active`, its
+hover to a `.sk-picker-row:hover` rule that retired a **fifth** hand-written
+hover-observer pair, and its swatch to `.sk-swatch:disabled`, deleting a whole
+reflect system; the inventory tree's selected row and its drag drop-target,
+which needed a `DROP_TARGET_CLASS` of its own; About's licence list; and the
+parcel-audio cluster, whose two buttons already carried `InteractionDisabled`
+and now grey from it.
+
+The inventory pair is the one worth remembering: `paint_selection` and the
+drag's highlight were two systems writing one `BackgroundColor`, kept apart by
+`paint_selection` **switching itself off** for the duration of a drag. As
+classes they no longer collide — `.sk-drop-target` beats `.sk-active` in the
+cascade — so the coordination, and the drag-state dependency it needed, are
+gone.
+
+`skin::TEXT_CLASS` now exists and the **fifteen** crate-local copies of
+`const … = "sk-text"` (under five different names) are gone with it.
+
+Still to do:
+
 - `sl-viewer-people` — the hand-rolled tab strips in `people.rs` and
   `conversations.rs` (`TAB_ACTIVE_*` / `TAB_INACTIVE_*`). Part 3's
   widget-adoption question, deliberately not converted in place.
@@ -169,6 +196,10 @@ Still to do, from a survey that (unlike the first) also catches indented and
   Rust and the cascade would be writing the same two properties. Converting
   it means tokenising the sun and moon colours, which is a design decision of
   its own.
+- A general list-row **hover** is still not a thing the shared `.sk-list-row`
+  carries: the picker got its own class rather than give a dozen panels a
+  hover they do not have today. [[viewer-skin-list-row-striping]] owns that
+  for all of them.
 
 Not this task, though a grep for state names turns them up: the three copies
 of `DISABLED_COLOR` (`about_region.rs`, `about_land.rs`,

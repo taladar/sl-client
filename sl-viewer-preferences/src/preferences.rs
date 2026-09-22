@@ -59,7 +59,7 @@ use crate::floater::{
 use crate::i18n::Translated;
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{ComboBindingValues, SettingBinding, bound_checkbox, bound_slider};
-use crate::skin::{MATCH_CLASS, NO_MATCH_CLASS, set_state_class, set_state_class_on};
+use crate::skin::{MATCH_CLASS, NO_MATCH_CLASS, TEXT_CLASS, set_state_class, set_state_class_on};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_color_picker::spawn_color_swatch;
 use crate::ui_combo::{ComboSpec, spawn_combo};
@@ -84,10 +84,6 @@ const SECTION_FONT: f32 = 14.0;
 
 /// A row label's resting colour (the shared panel label tone).
 pub const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
-
-/// The skin class on a preferences row label, so `.sk-match` has a base to
-/// fall back to when the term stops matching.
-const ROW_LABEL_CLASS: &str = "sk-text";
 
 /// A section heading's colour — same tone as the labels; the size difference
 /// carries the hierarchy.
@@ -357,7 +353,7 @@ fn spawn_row_label(commands: &mut Commands, parent: Entity, label_key: &'static 
             Text::default(),
             Translated::new(label_key),
             UiFont::Sans.at(FONT),
-            ClassList::new_with_classes([ROW_LABEL_CLASS]),
+            ClassList::new_with_classes([TEXT_CLASS]),
             PrefRowLabel,
             Pickable::IGNORE,
             ChildOf(parent),
@@ -1658,7 +1654,7 @@ mod tests {
     use super::{
         ClassList, EnvPinNoticeShown, EnvPinnedSettings, MATCH_CLASS, NO_MATCH_CLASS, PinKind,
         PrefRowLabel, PrefSearchRow, PreferencesApplied, PreferencesExtraHits, PreferencesState,
-        PreferencesUi, ROW_LABEL_CLASS, annotate_env_pinned_rows, apply_preferences_filter,
+        PreferencesUi, TEXT_CLASS, annotate_env_pinned_rows, apply_preferences_filter,
         guard_pref_bindings, on_preferences_cancel, on_preferences_ok,
         track_preferences_open_close,
     };
@@ -1754,7 +1750,7 @@ mod tests {
             let label = world
                 .spawn((
                     Text::new(label_text),
-                    ClassList::new_with_classes([ROW_LABEL_CLASS]),
+                    ClassList::new_with_classes([TEXT_CLASS]),
                     PrefRowLabel,
                     ChildOf(row),
                 ))

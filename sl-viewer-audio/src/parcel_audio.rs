@@ -54,9 +54,13 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui::InteractionDisabled;
 use bevy::ui_widgets::{Activate, Button, SliderRange, SliderStep};
+use bevy_flair::style::components::ClassList;
 use sl_audio::{Bus, Mixer};
 use sl_client_bevy::SlAgentParcel;
 use sl_gst::{AudioStreamPlayer, AudioStreamState, ValidatedMediaUrl};
+use sl_viewer_ui_core::skin::{
+    ACTION_BUTTON_CLASS, DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class_on,
+};
 
 use crate::media_audio::MixerStream;
 use crate::media_diagnostics::MediaDiagnostics;
@@ -109,10 +113,6 @@ const BAR_LABEL_DIM: Color = Color::srgb(0.62, 0.65, 0.72);
 const BUTTON_BORDER: Color = Color::srgb(0.3, 0.3, 0.35);
 /// Button fill.
 const BUTTON_FILL: Color = Color::srgb(0.16, 0.17, 0.2);
-/// Button border while the cluster is disabled (no parcel stream).
-const BUTTON_BORDER_DISABLED: Color = Color::srgb(0.2, 0.2, 0.22);
-/// Button fill while the cluster is disabled (no parcel stream).
-const BUTTON_FILL_DISABLED: Color = Color::srgb(0.11, 0.12, 0.14);
 /// The slider track's fill.
 const TRACK_FILL: Color = Color::srgb(0.16, 0.19, 0.25);
 /// The slider thumb's fill.
@@ -398,7 +398,7 @@ pub(crate) fn spawn_parcel_audio_bar(
         .spawn((
             Text::new("♫"),
             UiFont::Sans.at(BAR_FONT_SIZE),
-            TextColor(BAR_LABEL),
+            ClassList::new_with_classes([TEXT_CLASS]),
             Pickable::IGNORE,
             ChildOf(cluster),
         ))
@@ -473,6 +473,7 @@ fn spawn_glyph_button(
             },
             BorderColor::all(BUTTON_BORDER),
             BackgroundColor(BUTTON_FILL),
+            ClassList::new_with_classes([ACTION_BUTTON_CLASS]),
             Pickable::default(),
             Name::new(format!("parcel-audio-button:{action}")),
             ChildOf(parent),
@@ -490,7 +491,7 @@ fn spawn_glyph_button(
         .spawn((
             Text::new(glyph),
             UiFont::Sans.at(BAR_FONT_SIZE),
-            TextColor(BAR_LABEL),
+            ClassList::new_with_classes([TEXT_CLASS]),
             Pickable::IGNORE,
             ChildOf(button),
         ))
@@ -619,12 +620,8 @@ struct ParcelAudioChrome<'w, 's> {
     disabled: Query<'w, 's, (), With<InteractionDisabled>>,
     /// The panel's labels.
     texts: Query<'w, 's, &'static mut Text>,
-    /// Their colours, dimmed while there is no stream.
-    text_colors: Query<'w, 's, &'static mut TextColor>,
-    /// The button fills.
-    fills: Query<'w, 's, &'static mut BackgroundColor>,
-    /// Their borders.
-    borders: Query<'w, 's, &'static mut BorderColor>,
+    /// Their class lists, which carry the greying while there is no stream.
+    classes: Query<'w, 's, &'static mut ClassList>,
     /// What adds or drops the disable marker.
     commands: Commands<'w, 's>,
 }
@@ -641,9 +638,7 @@ fn sync_parcel_audio_ui(
     let ParcelAudioChrome {
         disabled,
         mut texts,
-        mut text_colors,
-        mut fills,
-        mut borders,
+        mut classes,
         mut commands,
     } = chrome;
     let Some(ui) = ui else { return };
@@ -659,36 +654,15 @@ fn sync_parcel_audio_ui(
         })
         .unwrap_or(false);
 
-    // Grey the tintable glyphs (the ♫ marker and the ▶/■ play glyph; the mute
-    // 🔊/🔇 is a colour emoji that ignores tint, so the button chrome carries
-    // its greyed cue instead).
-    let glyph_color = if active { BAR_LABEL } else { BAR_LABEL_DIM };
-    for entity in [ui.marker, ui.play_label] {
-        if let Ok(mut color) = text_colors.get_mut(entity)
-            && color.0 != glyph_color
-        {
-            color.0 = glyph_color;
-        }
-    }
+    // The ♫ marker greys with the cluster rather than with a button, so it
+    // carries the class directly. The ▶/■ play glyph is a child of its button
+    // and greys from `.sk-action-button:disabled .sk-text`; the mute 🔊/🔇 is a
+    // colour emoji that ignores tint, so the button chrome is its greyed cue.
+    set_state_class_on(&mut classes, ui.marker, DISABLED_TEXT_CLASS, !active);
 
-    // Grey and disable the two buttons.
-    let (fill, border) = if active {
-        (BUTTON_FILL, BUTTON_BORDER)
-    } else {
-        (BUTTON_FILL_DISABLED, BUTTON_BORDER_DISABLED)
-    };
+    // Disable the two buttons. What that *looks* like is
+    // `.sk-action-button:disabled`'s, box and caption both.
     for button in [ui.play_button, ui.mute_button] {
-        if let Ok(mut background) = fills.get_mut(button)
-            && background.0 != fill
-        {
-            background.0 = fill;
-        }
-        if let Ok(mut edge) = borders.get_mut(button) {
-            let want = BorderColor::all(border);
-            if *edge != want {
-                *edge = want;
-            }
-        }
         let is_disabled = disabled.contains(button);
         if active && is_disabled {
             commands.entity(button).remove::<InteractionDisabled>();

@@ -37,7 +37,7 @@ use bevy::ui_widgets::{
 use bevy_flair::style::components::ClassList;
 use sl_cef::{PlaybackState, ValidatedMediaUrl};
 use sl_client_bevy::{Command, SlCommand};
-use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, set_state_class};
+use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class};
 
 use crate::camera::FocusTarget;
 use crate::media_prim::{MediaData, MediaPrimState, media_permission_allows};
@@ -66,10 +66,6 @@ const FLAGS_OBJECT_YOU_OWNER: u32 = 1 << 5;
 
 /// `MediaEntry::controls` value for the reduced (mini) control set.
 const CONTROLS_MINI: i32 = 1;
-
-/// The skin class on a gated button's glyph, so `.sk-disabled-text` has a base
-/// to fall back to when the action becomes available again.
-const LABEL_CLASS: &str = "sk-text";
 
 /// Bar text colour.
 const BAR_LABEL: Color = Color::srgb(0.9, 0.9, 0.92);
@@ -444,7 +440,7 @@ fn spawn_bar_button(
         .spawn((
             Text::new(glyph),
             UiFont::Sans.at(12.0),
-            ClassList::new_with_classes([LABEL_CLASS]),
+            ClassList::new_with_classes([TEXT_CLASS]),
             Pickable::IGNORE,
             ChildOf(button),
         ))

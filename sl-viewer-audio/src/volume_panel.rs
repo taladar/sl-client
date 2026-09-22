@@ -21,7 +21,7 @@ use bevy::prelude::*;
 use bevy::ui_widgets::{Activate, Button, SliderRange, SliderStep};
 use bevy::window::PrimaryWindow;
 use bevy_flair::style::components::ClassList;
-use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, set_state_class};
+use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class};
 
 use sl_audio::{AudioMixer as _, Bus, BusLevel, Mixer};
 use sl_settings::SettingValue;
@@ -80,10 +80,6 @@ const TRACK_FILL: Color = Color::srgb(0.16, 0.19, 0.25);
 const THUMB_FILL: Color = Color::srgb(0.62, 0.72, 0.86);
 /// Font size for the cluster's glyphs and labels.
 const FONT_SIZE: f32 = 13.0;
-/// The skin class on a bus's mute glyph, so `.sk-disabled-text` has a base
-/// to fall back to when the bus is unmuted.
-const GLYPH_CLASS: &str = "sk-text";
-
 /// The default linear gain a fresh install starts a bus at, matching the
 /// reference viewer's `AudioLevel*` settings-defaults (master full, effects and
 /// UI half, streams quieter, voice a little louder). Mute defaults off, also
@@ -397,7 +393,7 @@ fn spawn_mute_button(commands: &mut Commands, parent: Entity, bus: Bus, tab_inde
         Text::new("🔊"),
         VolumeMuteGlyph(bus),
         UiFont::Sans.at(FONT_SIZE),
-        ClassList::new_with_classes([GLYPH_CLASS]),
+        ClassList::new_with_classes([TEXT_CLASS]),
         Pickable::IGNORE,
         ChildOf(button),
     ));

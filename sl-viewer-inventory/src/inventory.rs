@@ -65,6 +65,8 @@ use crate::ui_text::set_text;
 use crate::virtual_list::{
     VirtualList, VirtualRow, VirtualViewport, amend_row_node, index_to_f32, layout_virtual_lists,
 };
+use bevy_flair::style::components::ClassList;
+use sl_viewer_ui_core::skin::{ACTIVE_CLASS, LIST_ROW_CLASS, set_state_class};
 use sl_viewer_ui_core::ui_ellipsis::{RevealEllipsis, spawn_ellipsis_marker};
 
 /// The uniform height of a tree row, in logical pixels. Drives the virtualized
@@ -193,9 +195,6 @@ const ROW_FONT_SIZE: f32 = 14.0;
 /// resolved `i18n`'s `ui-ellipsis` — the Latin single ellipsis, matching the
 /// table cells' and tab strips' default.
 const FALLBACK_ELLIPSIS: &str = "\u{2026}";
-
-/// A selected row's background.
-const SELECTED_ROW_BACKGROUND: Color = Color::srgba(0.24, 0.34, 0.52, 0.55);
 
 /// Two clicks on the same row within this window are a double-click (which
 /// toggles a folder), in seconds.
@@ -3061,9 +3060,10 @@ fn populate_new_rows(
         amend_tree_row_node(&mut commands, row_entity);
         commands.entity(row_entity).insert((
             Pickable::default(),
-            // Transparent until the drag-and-drop hover paints it as the drop
-            // target ([`crate::inventory_drag`]).
-            BackgroundColor(Color::NONE),
+            // The resting look, the selection (`.sk-active`) and the
+            // drag-and-drop target (`.sk-drop-target`,
+            // [`crate::inventory_drag`]) are all this one class list's.
+            ClassList::new_with_classes([LIST_ROW_CLASS]),
         ));
         let parts = spawn_row_parts(&mut commands, row_entity);
         commands
@@ -3497,23 +3497,20 @@ fn on_row_press(
     }
 }
 
-/// Paint each pooled row's selection background. Skipped mid-drag, when the
-/// drop-target highlight ([`crate::inventory_drag`]) owns the row backgrounds;
-/// runs write-guarded otherwise, so a still list costs comparisons only.
+/// Mark each pooled row that is selected. No longer skipped mid-drag: the
+/// drop-target highlight is its own class now and `.sk-drop-target` beats
+/// `.sk-active` in the cascade, so the two no longer have to take turns owning
+/// one `BackgroundColor`.
 fn paint_selection(
     ui: Option<Res<InventoryUi>>,
     selection: Res<InventorySelection>,
     view: Res<InventoryView>,
-    drag: Res<crate::inventory_drag::InventoryDragState>,
-    mut rows: Query<(&VirtualRow, &ChildOf, &mut BackgroundColor)>,
+    mut rows: Query<(&VirtualRow, &ChildOf, &mut ClassList)>,
 ) {
     let Some(ui) = ui else {
         return;
     };
-    if drag.is_active() {
-        return;
-    }
-    for (row, child_of, mut background) in &mut rows {
+    for (row, child_of, mut classes) in &mut rows {
         if child_of.parent() != ui.viewport {
             continue;
         }
@@ -3521,14 +3518,7 @@ fn paint_selection(
             .index
             .and_then(|index| view.rows.get(index))
             .is_some_and(|display| selection.contains(display.key()));
-        let wanted = if selected {
-            SELECTED_ROW_BACKGROUND
-        } else {
-            Color::NONE
-        };
-        if background.0 != wanted {
-            background.0 = wanted;
-        }
+        set_state_class(&mut classes, ACTIVE_CLASS, selected);
     }
 }
 

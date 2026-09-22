@@ -62,7 +62,8 @@
 //! `panel_people_contact_sets.xml`.
 
 use crate::skin::{
-    ACTIVE_CLASS, DISABLED_SURFACE_CLASS, DISABLED_TEXT_CLASS, set_state_class, set_state_class_on,
+    ACTIVE_CLASS, DISABLED_SURFACE_CLASS, DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class,
+    set_state_class_on,
 };
 use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
@@ -144,9 +145,6 @@ const ACTION_BACKGROUND: Color = Color::srgb(0.24, 0.29, 0.38);
 
 /// The skin class every action button's surface carries.
 const BUTTON_CLASS: &str = "sk-button";
-
-/// The skin class every action button's **label** carries.
-const BUTTON_LABEL_CLASS: &str = "sk-text";
 
 /// The trailing action column's width, logical px.
 const ACTION_COL_WIDTH: f32 = 150.0;
@@ -839,7 +837,7 @@ fn spawn_panel_button(commands: &mut Commands, parent: Entity, button: ContactSe
             },
             UiFont::Sans.at(FONT_SIZE),
             TextColor(LABEL_COLOR),
-            ClassList::new_with_classes([BUTTON_LABEL_CLASS]),
+            ClassList::new_with_classes([TEXT_CLASS]),
             Pickable::IGNORE,
         ))
         .id();
@@ -960,7 +958,7 @@ fn spawn_add_to_set_floater(mut commands: Commands, root: Res<UiRoot>) {
                 }),
                 UiFont::Sans.at(FONT_SIZE),
                 TextColor(LABEL_COLOR),
-                ClassList::new_with_classes([BUTTON_LABEL_CLASS]),
+                ClassList::new_with_classes([TEXT_CLASS]),
                 Pickable::IGNORE,
             ))
             .observe(on_add_to_set_press);
@@ -1215,7 +1213,7 @@ fn spawn_config_button(commands: &mut Commands, parent: Entity, button: ConfigBu
             }),
             UiFont::Sans.at(FONT_SIZE),
             TextColor(LABEL_COLOR),
-            ClassList::new_with_classes([BUTTON_LABEL_CLASS]),
+            ClassList::new_with_classes([TEXT_CLASS]),
             Pickable::IGNORE,
         ))
         .observe(on_config_button_press);

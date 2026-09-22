@@ -120,6 +120,8 @@
 //! `floater_top_objects.xml`, `llfloaterregioninfo.cpp`
 //! (`LLPanelRegionDebugInfo::onClickTopScripts`), `llparcel.h` (`RT_NONE`).
 
+use sl_viewer_ui_core::skin::TEXT_CLASS;
+
 use crate::skin_palette::SkinPalette;
 use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
@@ -198,9 +200,6 @@ const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// The skin class on an action button, so `.sk-button:disabled` greys it.
 const BUTTON_CLASS: &str = "sk-button";
-
-/// The skin class on that button's caption — the other end of the selector.
-const LABEL_CLASS: &str = "sk-text";
 
 /// An action button's background.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
@@ -1092,7 +1091,7 @@ fn spawn_action_button(
         // Both ends of `.sk-button:disabled .sk-text`, which greys a refused
         // action now that nothing here repaints its caption.
         .class(BUTTON_CLASS)
-        .label_class(LABEL_CLASS),
+        .label_class(TEXT_CLASS),
     )
     .button;
     commands

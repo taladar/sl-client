@@ -341,6 +341,66 @@ mod test {
         Ok(())
     }
 
+    /// A selected row really is painted, and a resting one really is not.
+    ///
+    /// `.sk-table-row` / `.sk-list-row` declare the resting `transparent`, and
+    /// `.sk-active` the selection — two rules of equal specificity, so which
+    /// one wins is decided by the order they appear in `common.css` and by
+    /// nothing else. That is a property of the file, not of the code that adds
+    /// the class, and no Rust test can see it.
+    #[test]
+    fn a_selected_row_beats_its_resting_rule() -> Result<(), TestError> {
+        let mut app = app();
+        let handle: Handle<StyleSheet> = app
+            .world()
+            .resource::<AssetServer>()
+            .load("skins/graphite/skin.css");
+        let root = app
+            .world_mut()
+            .spawn((Node::default(), Styled::new(handle.clone())))
+            .id();
+        let selected = app
+            .world_mut()
+            .spawn((
+                Node::default(),
+                ClassList::new("sk-table-row sk-active"),
+                ChildOf(root),
+            ))
+            .id();
+        let resting = app
+            .world_mut()
+            .spawn((
+                Node::default(),
+                ClassList::new("sk-table-row"),
+                ChildOf(root),
+            ))
+            .id();
+
+        load(&mut app, &handle)?;
+        app.update();
+
+        let background = |entity| {
+            app.world()
+                .get::<BackgroundColor>(entity)
+                .map(|background| background.0)
+        };
+        assert_eq!(
+            background(selected),
+            Some(Color::srgba_u8(0x3d, 0x57, 0x85, 0x8c)),
+            "a selected row resolved to its resting rule, so selection is \
+             invisible in every list the cascade paints"
+        );
+        // Through `to_srgba`, because a resolved colour arrives as `Srgba` and
+        // `Color::NONE` is a `LinearRgba` — the same colour, a different
+        // variant, and `assert_eq` on `Color` would compare the variants.
+        assert_eq!(
+            background(resting).map(|color| color.to_srgba()),
+            Some(Srgba::NONE),
+            "a resting row must be transparent"
+        );
+        Ok(())
+    }
+
     /// A refused action button greys — **both** halves of it.
     ///
     /// This is the pair that broke once already: `set_action_button_enabled`

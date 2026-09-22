@@ -96,6 +96,9 @@
   /* A hovered tile in a dense grid — a wash, not a block: see .sk-tile. */
   --tile-hover: #ffffff24;
 
+  /* The row a drag would drop into — the selection highlight, louder. */
+  --drop-target: #3d5785bf;
+
   /* User-tunable palette (see graphite/skin.css for the token contract) —
    * cooler variants, so a skin switch visibly moves the swatches. */
 

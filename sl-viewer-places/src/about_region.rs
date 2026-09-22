@@ -105,6 +105,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use sl_viewer_ui_core::skin::TEXT_CLASS;
+
 use crate::skin_palette::SkinPalette;
 use bevy::prelude::*;
 use bevy::text::EditableText;
@@ -170,9 +172,6 @@ const CHECK_COLOR: Color = Color::srgb(0.55, 0.85, 0.60);
 
 /// The skin class on an action button, so `.sk-button:disabled` greys it.
 const BUTTON_CLASS: &str = "sk-button";
-
-/// The skin class on its caption — the other end of that selector.
-const LABEL_CLASS: &str = "sk-text";
 
 /// A disabled control's text colour (matching the disabled text field / combo).
 const DISABLED_COLOR: Color = Color::srgb(0.45, 0.47, 0.52);
@@ -4595,7 +4594,7 @@ fn spawn_action_button(
         // Both ends of `.sk-button:disabled .sk-text`, which greys a refused
         // action now that nothing repaints its caption.
         .class(BUTTON_CLASS)
-        .label_class(LABEL_CLASS),
+        .label_class(TEXT_CLASS),
     )
     .button;
     commands.entity(button).insert(action);

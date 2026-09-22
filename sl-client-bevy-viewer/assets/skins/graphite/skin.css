@@ -111,6 +111,9 @@
   /* A hovered tile in a dense grid — a wash, not a block: see .sk-tile. */
   --tile-hover: #ffffff24;
 
+  /* The row a drag would drop into — the selection highlight, louder. */
+  --drop-target: #3d5785bf;
+
   /* User-tunable palette (the preferences Colors & Skins tab). These are not
    * consumed by common.css: the viewer reads them off the styled root's
    * resolved vars and feeds them into the settings store as the skin-supplied

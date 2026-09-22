@@ -21,6 +21,7 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::render::renderer::RenderAdapterInfo;
 use bevy::ui_widgets::{Button, ControlOrientation, Scrollbar, ScrollbarThumb};
+use bevy_flair::style::components::ClassList;
 
 use crate::build_info;
 use crate::clipboard::{ViewerClipboard, copy_to_clipboard};
@@ -29,6 +30,7 @@ use crate::floater::{
 };
 use crate::i18n::{Translated, UiLocale};
 use crate::preferences::{CONTROL_BORDER, FONT, LABEL_COLOR};
+use crate::skin::{ACTIVE_CLASS, set_state_class_on};
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_tab::{
@@ -74,11 +76,10 @@ const BUTTON_BACKGROUND: Color = Color::srgb(0.16, 0.19, 0.25);
 /// The license list's width, in logical pixels.
 const LICENSE_LIST_WIDTH: f32 = 230.0;
 
-/// The selected license row's background.
-const LICENSE_ROW_SELECTED: Color = Color::srgba(0.35, 0.55, 0.90, 0.35);
-
-/// An unselected license row's background.
-const LICENSE_ROW_UNSELECTED: Color = Color::NONE;
+/// The skin class on a license row: the resting look and the selection are
+/// both `.sk-list-row`'s, the same pair every hand-rolled list in the viewer
+/// takes.
+const LICENSE_ROW_CLASS: &str = "sk-list-row";
 
 /// The monospace font size of the support block and license texts.
 const MONO_FONT: f32 = 12.0;
@@ -679,7 +680,7 @@ fn build_licenses_tab(
                     padding: UiRect::axes(Val::Px(6.0), Val::Px(3.0)),
                     ..row(Val::Px(4.0))
                 },
-                BackgroundColor(LICENSE_ROW_UNSELECTED),
+                ClassList::new_with_classes([LICENSE_ROW_CLASS]),
                 Pickable::default(),
                 Name::new(format!("about:licenses:row:{}", section.id)),
                 ChildOf(list),
@@ -891,7 +892,7 @@ fn refresh_license_pane(
     mut state: ResMut<AboutState>,
     ui: Option<Res<AboutUi>>,
     mut texts: Query<&mut Text>,
-    mut backgrounds: Query<&mut BackgroundColor>,
+    mut classes: Query<&mut ClassList>,
 ) {
     let Some(ui) = ui else {
         return;
@@ -912,13 +913,7 @@ fn refresh_license_pane(
         *text = Text::new(content);
     }
     for (index, row_entity) in ui.license_rows.iter().enumerate() {
-        if let Ok(mut background) = backgrounds.get_mut(*row_entity) {
-            background.0 = if index == selected {
-                LICENSE_ROW_SELECTED
-            } else {
-                LICENSE_ROW_UNSELECTED
-            };
-        }
+        set_state_class_on(&mut classes, *row_entity, ACTIVE_CLASS, index == selected);
     }
     state.rendered_license = Some(selected);
 }

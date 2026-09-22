@@ -48,6 +48,7 @@ use bevy::ui_widgets::{RadioButton, RadioGroup, ValueChange};
 use bevy_flair::style::components::ClassList;
 
 use sl_viewer_ui_core::i18n::Translated;
+use sl_viewer_ui_core::skin::TEXT_CLASS;
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 use sl_viewer_ui_core::ui::{column, row};
 use sl_viewer_ui_core::ui_element::UiAction;
@@ -76,9 +77,6 @@ const ITEM_CLASS: &str = "sk-radio";
 /// resting, and greyed for a group the consumer cannot change — are all the
 /// skin's, selected through the item's `:checked` and the group's `:disabled`.
 const INDICATOR_CLASS: &str = "sk-radio-indicator";
-
-/// The skin class on an option's label — the shared primary-text class.
-const LABEL_CLASS: &str = "sk-text";
 
 /// The indicator glyph of an unselected option — an empty ring (`○`, U+25CB).
 const UNSELECTED_GLYPH: &str = "\u{25cb}";
@@ -303,7 +301,7 @@ fn spawn_radio_item(
             Text::new(spec.initial_label(label)),
             UiFont::Sans.at(spec.font_size),
             TextColor(SkinPalette::default().text_primary),
-            ClassList::new_with_classes([LABEL_CLASS]),
+            ClassList::new_with_classes([TEXT_CLASS]),
             Pickable::IGNORE,
             Name::new(format!("{}:radio-label:{index}", spec.element)),
             ChildOf(item),

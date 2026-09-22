@@ -24,7 +24,7 @@ use crate::media_engine::{MediaEngineSystems, MediaSurfaces};
 use sl_viewer_intents::OpenWebBrowser;
 use sl_viewer_platform::system_browser::{ExternalUrl, normalize_web_url, open_in_system_browser};
 use sl_viewer_ui_core::i18n::Translated;
-use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, set_state_class_on};
+use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class_on};
 use sl_viewer_ui_core::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use sl_viewer_ui_core::ui_element::UiAction;
 use sl_viewer_ui_core::ui_font::UiFont;
@@ -45,9 +45,6 @@ const DEFAULT_HOME_URL: &str = "https://secondlife.com/";
 /// The toolbar / status font size.
 const WEB_FONT_SIZE: f32 = 13.0;
 
-/// The skin class on a toolbar button's glyph, so `.sk-disabled-text` has a
-/// base to fall back to when the action becomes available again.
-const BUTTON_LABEL_CLASS: &str = "sk-text";
 /// Status-row text colour.
 const STATUS_COLOR: Color = Color::srgb(0.7, 0.72, 0.78);
 
@@ -242,7 +239,7 @@ fn spawn_toolbar_button(
         .spawn((
             Text::new(glyph),
             UiFont::Sans.at(WEB_FONT_SIZE),
-            ClassList::new_with_classes([BUTTON_LABEL_CLASS]),
+            ClassList::new_with_classes([TEXT_CLASS]),
             Pickable::IGNORE,
             ChildOf(button),
         ))

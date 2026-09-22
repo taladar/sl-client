@@ -60,6 +60,7 @@ use bevy::text::EditableText;
 use bevy::ui_widgets::Button;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{AssetKey, InventoryFolderKey, InventoryType, TextureKey, Uuid};
+use sl_viewer_ui_core::skin::{ACTIVE_CLASS, set_state_class};
 use std::hash::{Hash, Hasher as _};
 
 use crate::floater::{
@@ -110,18 +111,18 @@ const MAX_ROWS: usize = 400;
 /// A bordered control's border colour.
 const CONTROL_BORDER: Color = Color::srgba(0.4, 0.4, 0.45, 1.0);
 
-/// A [disabled](bevy::ui::InteractionDisabled) swatch's border — dimmed so a
-/// swatch the consumer cannot change reads as disabled.
-const DISABLED_BORDER: Color = Color::srgba(0.28, 0.28, 0.32, 1.0);
+/// The skin class on a texture swatch. Its dimmed rim is `.sk-swatch:disabled`
+/// over the [`InteractionDisabled`](bevy::ui::InteractionDisabled) the consumer
+/// already sets, so nothing here paints it.
+const SWATCH_CLASS: &str = "sk-swatch";
+
+/// The skin classes on one row of the picker's tree: the shared resting look
+/// and selection (`.sk-list-row`, `.sk-active`) plus the picker's own pointer
+/// hover, which is a `:hover` rule and needs no observer.
+const ROW_CLASS: &str = "sk-list-row sk-picker-row";
 
 /// A tile / swatch's empty fill.
 const EMPTY_FILL: Color = Color::srgba(0.1, 0.1, 0.12, 1.0);
-
-/// A selected row's background.
-const SELECTED_FILL: Color = Color::srgba(0.2, 0.3, 0.45, 1.0);
-
-/// A row's background when the pointer is over it.
-const ROW_HOVER: Color = Color::srgba(0.22, 0.24, 0.3, 1.0);
 
 /// A button's background.
 const BUTTON_BACKGROUND: Color = Color::srgba(0.18, 0.18, 0.2, 1.0);
@@ -175,7 +176,7 @@ pub fn spawn_texture_swatch(
                 border: UiRect::all(Val::Px(1.0)),
                 ..Default::default()
             },
-            BorderColor::all(CONTROL_BORDER),
+            ClassList::new(SWATCH_CLASS),
             BackgroundColor(EMPTY_FILL),
             TextureSwatchValue(initial),
             TextureSwatchField(Box::from(element)),
@@ -405,28 +406,7 @@ impl Plugin for TexturePickerPlugin {
                     apply_texture_swatch_thumbnail,
                 )
                     .chain(),
-            )
-            .add_systems(Update, reflect_texture_swatch_disabled);
-    }
-}
-
-/// Dim a texture swatch's border while it is
-/// [disabled](bevy::ui::InteractionDisabled), restoring it when enabled.
-fn reflect_texture_swatch_disabled(
-    mut swatches: Query<
-        (&mut BorderColor, Has<bevy::ui::InteractionDisabled>),
-        With<TextureSwatchValue>,
-    >,
-) {
-    for (mut border, disabled) in &mut swatches {
-        let wanted = BorderColor::all(if disabled {
-            DISABLED_BORDER
-        } else {
-            CONTROL_BORDER
-        });
-        if *border != wanted {
-            *border = wanted;
-        }
+            );
     }
 }
 
@@ -945,25 +925,22 @@ fn rebuild_tree(
     }
 }
 
-/// Paint the selected texture item's row highlight on the existing rows (so a
-/// selection change never respawns rows). Only touches a row whose highlight
-/// state actually flips, leaving the hover tint alone.
+/// Mark the selected texture item's row on the existing rows (so a selection
+/// change never respawns rows). What selected *looks* like is
+/// `.sk-list-row.sk-active`'s — which is also why the hover no longer has to be
+/// worked around here: that compound beats `.sk-picker-row:hover`, where this
+/// used to keep the two apart by comparing colours.
 fn paint_tree_selection(
     windows: Query<(&TexturePickerState, &TexturePickerUi)>,
     parents: Query<&ChildOf>,
-    mut rows: Query<(Entity, &TreeItemRow, &mut BackgroundColor)>,
+    mut rows: Query<(Entity, &TreeItemRow, &mut ClassList)>,
 ) {
     for (state, ui) in &windows {
-        for (row_entity, row, mut background) in &mut rows {
+        for (row_entity, row, mut classes) in &mut rows {
             if parents.get(row_entity).map(ChildOf::parent) != Ok(ui.tree) {
                 continue;
             }
-            let selected = row.0 == state.selected;
-            if selected && background.0 != SELECTED_FILL {
-                background.0 = SELECTED_FILL;
-            } else if !selected && background.0 == SELECTED_FILL {
-                background.0 = Color::NONE;
-            }
+            set_state_class(&mut classes, ACTIVE_CLASS, row.0 == state.selected);
         }
     }
 }
@@ -1008,7 +985,7 @@ fn spawn_tree_row(commands: &mut Commands, tree: Entity, row_data: &TreeRow, kin
                 column_gap: Val::Px(4.0),
                 ..row(Val::ZERO)
             },
-            BackgroundColor(Color::NONE),
+            ClassList::new(ROW_CLASS),
             // Hoverable and clickable, but does NOT block lower: the stable tree
             // container beneath is what the world-pick's UI-block test sees, so a
             // row that despawns on a rebuild can never leave a hole in the block
@@ -1031,10 +1008,6 @@ fn spawn_tree_row(commands: &mut Commands, tree: Entity, row_data: &TreeRow, kin
             commands.entity(row_entity).observe(on_item_row_press);
         }
     }
-    commands
-        .entity(row_entity)
-        .observe(on_row_hover)
-        .observe(on_row_unhover);
     commands.spawn((
         Text::new(glyph),
         UiFont::Sans.at(PICKER_FONT),
@@ -1060,24 +1033,6 @@ fn depth_indent(depth: usize) -> f32 {
     )]
     let depth = depth as f32;
     depth * INDENT_PER_DEPTH
-}
-
-/// Highlight a row under the pointer (unless it is the selected item).
-fn on_row_hover(over: On<Pointer<Over>>, mut rows: Query<&mut BackgroundColor, With<Button>>) {
-    if let Ok(mut background) = rows.get_mut(over.entity)
-        && background.0 == Color::NONE
-    {
-        background.0 = ROW_HOVER;
-    }
-}
-
-/// Clear a row's hover highlight (unless it is the selected item).
-fn on_row_unhover(out: On<Pointer<Out>>, mut rows: Query<&mut BackgroundColor, With<Button>>) {
-    if let Ok(mut background) = rows.get_mut(out.entity)
-        && background.0 == ROW_HOVER
-    {
-        background.0 = Color::NONE;
-    }
 }
 
 /// Toggle a folder row's expansion, lazily fetching its contents the first time.

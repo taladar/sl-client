@@ -81,7 +81,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
-use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, set_state_class};
+use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class};
 
 use sl_client_bevy::{Command, ExperienceKey, SlCommand, SlEvent, SlSessionEvent};
 use sl_settings::{Scope, SettingValue};
@@ -140,10 +140,6 @@ const TEXT_COLOR: Color = Color::srgb(0.90, 0.93, 0.97);
 
 /// A dimmer secondary-text colour.
 const DIM_TEXT_COLOR: Color = Color::srgb(0.64, 0.68, 0.76);
-
-/// The skin class on a button's caption, so `.sk-disabled-text` has a base to
-/// fall back to when its action becomes available again.
-const LABEL_CLASS: &str = "sk-text";
 
 /// An action button's background.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.16, 0.19, 0.25);
@@ -596,7 +592,7 @@ fn spawn_action(
         Text::default(),
         Translated::new(label_key),
         UiFont::Sans.at(FONT_SIZE),
-        ClassList::new_with_classes([LABEL_CLASS]),
+        ClassList::new_with_classes([TEXT_CLASS]),
         Pickable::IGNORE,
         ChildOf(entity),
     ));
