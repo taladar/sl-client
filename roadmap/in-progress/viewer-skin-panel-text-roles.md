@@ -111,16 +111,48 @@ spawn from the fallback and the skin paints per class. If the fallback ever
 role at the call sites — which is the option this seam was chosen over, and
 the failure message says so.
 
+## The tables (2026-09-22)
+
+The second obstacle turned out not to need the role enum the plan proposed.
+`role_class` answers the same question for a `const TableSpec`'s
+`header_color` / `cell_color` as it does for a label's, so the ~34 specs are
+covered where they stand — the spec keeps naming a colour and the widget reads
+the role out of it.
+
+A cell's role is **not** fixed by its column, though, which is what makes this
+more than the header case: the radar colours its range column by distance band
+and its name column by whether the avatar is muted, so the role has to follow
+each bind. `set_table_cell` therefore carries the class beside the colour
+(`skin::set_role_class`, which makes exactly one of the four current), and its
+query widened to `(&mut Text, &mut TextColor, Option<&mut ClassList>)` across
+19 consumer files.
+
+The table widget also stopped painting one state of its own: header greying
+was a `SkinColors`-reading system writing `disabled_text_color`, and is now
+`.sk-disabled-text` over whatever role the spec's header colour names.
+
+### B0001 is the hazard here, and the compiler cannot see it
+
+Widening that query gives a system a second `&mut ClassList` access whenever it
+already had one for its **rows** — Bevy's B0001, which is a panic on the
+system's first run rather than a compile error. Six systems had it
+(`settings_picker`, `asset_blacklist`, `avatar_render_floater`,
+`group_profile`, `blocked`, `contact_sets_panel`, `my_environments`). A row
+carries no `Text`, so `Without<Text>` on the row query makes the two provably
+disjoint and Bevy accepts them.
+
+Three of those were found by a **static scan** for "a widened cell query beside
+an unfiltered `&mut ClassList` in one signature", not by the suite. Anything
+touching this again should run that scan rather than trust a green test run:
+whether a given panel's bind system is scheduled by any test is not obvious,
+and the failure only exists at runtime.
+
 ### What is left
 
-- **The ~449 direct `TextColor(…)` spawns** that do not go through a helper.
-  These are the panel-specific ones; each needs the same judgement the helper
-  now makes automatically, and a good number will turn out to be a role
-  constant that can simply move to a class.
-- **`const TableSpec`.** The second obstacle is untouched: several panels
-  declare `const SPEC: TableSpec = TableSpec { header_color: …, cell_color: … }`
-  and a `const` cannot read a resource. The candidate remains a role enum in
-  the spec, resolved when the table is spawned (which is inside a system).
+- **The ~449 direct `TextColor(…)` spawns** that go through neither a helper
+  nor a table. These are the panel-specific ones; each needs the same
+  judgement the helper now makes automatically, and a good number will turn
+  out to be a role constant that can simply move to a class.
 - **A live look.** The change is invisible under the built-in fallback by
   construction and only shows once a skin's own token differs, so the gallery's
   live switcher (or a viewer run) is the check that it actually took.

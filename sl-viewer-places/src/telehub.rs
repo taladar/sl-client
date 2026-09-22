@@ -74,6 +74,7 @@ use sl_viewer_ui_core::skin::TEXT_CLASS;
 use crate::skin_palette::SkinPalette;
 use bevy::prelude::*;
 use bevy::ui::InteractionDisabled;
+use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
     Command, ObjectKey, RegionHandle, ScopedObjectId, SlCommand, SlCurrentRegion, SlEvent,
     SlRegionIdentity, SlSessionEvent, TelehubInfo, Vector, pcode,
@@ -605,7 +606,7 @@ fn bind_spawn_rows(
     ui: Option<Res<TelehubUi>>,
     state: Res<TelehubState>,
     rows: Query<(Ref<VirtualRow>, &ChildOf, &crate::ui_table::TableRowCells)>,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
+    mut texts: Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
 ) {
     let Some(ui) = ui.as_deref() else {
         return;

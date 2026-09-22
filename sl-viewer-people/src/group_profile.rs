@@ -1965,8 +1965,8 @@ fn bind_role_rows(
         &TableRowCells,
         &mut BoundRole,
     )>,
-    mut classes: Query<&mut ClassList>,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
+    mut classes: Query<&mut ClassList, Without<Text>>,
+    mut texts: Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
 ) {
     for (state, view, ui) in &windows {
         let refresh_all = view.is_changed() || state.is_changed();
@@ -2415,8 +2415,8 @@ fn bind_member_rows(
         &TableRowCells,
         &mut BoundMember,
     )>,
-    mut classes: Query<&mut ClassList>,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
+    mut classes: Query<&mut ClassList, Without<Text>>,
+    mut texts: Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
 ) {
     for (state, view, ui) in &windows {
         let refresh_all = view.is_changed() || state.is_changed() || avatars.is_changed();
@@ -2451,7 +2451,7 @@ fn bind_member_rows(
 /// selection — resolves the cell entity from the row's [`TableRowCells`] and
 /// writes it through the widget's [`set_table_cell`].
 fn set_row_cell(
-    texts: &mut Query<(&mut Text, &mut TextColor)>,
+    texts: &mut Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
     cells: &TableRowCells,
     column: usize,
     value: &str,
@@ -2534,8 +2534,8 @@ fn bind_notice_rows(
         &TableRowCells,
         &mut BoundNotice,
     )>,
-    mut classes: Query<&mut ClassList>,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
+    mut classes: Query<&mut ClassList, Without<Text>>,
+    mut texts: Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
 ) {
     for (state, view, ui) in &windows {
         let refresh_all = view.is_changed() || state.is_changed();

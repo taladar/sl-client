@@ -32,6 +32,7 @@
 
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
+use bevy_flair::style::components::ClassList;
 use sl_client_bevy::Uuid;
 use sl_rlv::{
     RlvBehaviour, RlvException, RlvExceptionOption, RlvHeldCommand, RlvParamKind, RlvState,
@@ -709,7 +710,7 @@ fn bind_behaviours_rows(
     view: Res<BehavioursView>,
     lists: Query<&BehavioursList>,
     mut rows: Query<(Ref<VirtualRow>, &ChildOf, &TableRowCells)>,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
+    mut texts: Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
 ) {
     let refresh_all = view.is_changed();
     for (row, child_of, cells) in &mut rows {

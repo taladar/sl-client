@@ -1686,7 +1686,7 @@ fn bind_radar_rows(
     state: Res<RadarState>,
     ui: Option<Res<RadarUi>>,
     mut rows: Query<(Ref<VirtualRow>, &ChildOf, &TableRowCells, &mut BoundRadar)>,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
+    mut texts: Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
 ) {
     let Some(ui) = ui else {
         return;

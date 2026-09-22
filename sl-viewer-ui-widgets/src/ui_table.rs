@@ -58,8 +58,10 @@ use sl_settings::SettingValue;
 
 use sl_viewer_settings::ViewerSettings;
 use sl_viewer_ui_core::i18n::Translated;
-use sl_viewer_ui_core::skin::{ACTIVE_CLASS, set_state_class};
-use sl_viewer_ui_core::skin_palette::{SkinColors, SkinPalette};
+use sl_viewer_ui_core::skin::{
+    ACTIVE_CLASS, DISABLED_TEXT_CLASS, role_class, set_role_class, set_state_class,
+};
+use sl_viewer_ui_core::skin_palette::SkinPalette;
 use sl_viewer_ui_core::ui::UiDirection;
 use sl_viewer_ui_core::ui_ellipsis::{RevealEllipsis, spawn_ellipsis_marker};
 use sl_viewer_ui_core::ui_font::UiFont;
@@ -105,13 +107,6 @@ const SORT_DESCENDING_GLYPH: &str = "\u{25BC}";
 /// The ellipsis shown before any locale bundle has resolved `i18n`'s
 /// `ui-ellipsis` — the Latin single ellipsis, matching the tab widget's default.
 const FALLBACK_ELLIPSIS: &str = "\u{2026}";
-
-/// A [disabled](bevy::ui::InteractionDisabled) header's label / sort-arrow
-/// colour — dimmed so a header that will not answer a click reads as inert. The
-/// same role the combo and text-field widgets grey their text with.
-const fn disabled_text_color(palette: &SkinPalette) -> Color {
-    palette.text_disabled
-}
 
 // ---------------------------------------------------------------------------
 // Column / table specification (static, const-constructible).
@@ -1070,6 +1065,7 @@ fn spawn_header_cell(
         TextLayout::no_wrap(),
         UiFont::Sans.at(spec.font_size),
         TextColor(spec.header_color),
+        role_class_list(spec.header_color),
         TableHeaderText { table: root, cell },
         Pickable::IGNORE,
         ChildOf(clip),
@@ -1080,6 +1076,7 @@ fn spawn_header_cell(
             TextLayout::no_wrap(),
             UiFont::Sans.at(spec.font_size),
             TextColor(spec.header_color),
+            role_class_list(spec.header_color),
             TableHeaderText { table: root, cell },
             Node {
                 flex_shrink: 0.0,
@@ -1299,6 +1296,7 @@ fn spawn_body_cell(
             TextLayout::no_wrap(),
             UiFont::Sans.at(spec.font_size),
             TextColor(spec.cell_color),
+            role_class_list(spec.cell_color),
             Node {
                 flex_shrink: 0.0,
                 ..default()
@@ -1325,17 +1323,24 @@ fn spawn_body_cell(
 /// Set a cell's value text and colour in place (change-guarded), the binding
 /// counterpart to [`spawn_table_row`]. A no-op if `cell` is not a live text node.
 pub fn set_table_cell(
-    texts: &mut Query<(&mut Text, &mut TextColor)>,
+    texts: &mut Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
     cell: Entity,
     value: &str,
     color: Color,
 ) {
-    if let Ok((mut text, mut text_color)) = texts.get_mut(cell) {
+    if let Ok((mut text, mut text_color, classes)) = texts.get_mut(cell) {
         if text.0 != value {
             value.clone_into(&mut text.0);
         }
         if text_color.0 != color {
             text_color.0 = color;
+        }
+        // The colour stays as the unskinned value; the class is what a skin
+        // repaints, and it follows the colour because a cell's role is the
+        // consumer's and can change per row — the radar's range column reads
+        // one way in chat range and another beyond it.
+        if let Some(mut classes) = classes {
+            set_role_class(&mut classes, color);
         }
     }
 }
@@ -1569,35 +1574,45 @@ fn drive_table_sort_arrows(
     }
 }
 
-/// Grey each header label and sort arrow whose table — or whose own header cell
-/// — is [disabled](bevy::ui::InteractionDisabled), and restore the spec's header
-/// colour when it is enabled again: the visible half of the disabled state, so a
-/// header that refuses a click does not look like one that would answer it.
+/// Mark each header label and sort arrow whose table — or whose own header cell
+/// — is [disabled](bevy::ui::InteractionDisabled), so a header that refuses a
+/// click does not look like one that would answer it.
 ///
-/// Header text only. A body cell's colour is the consumer's, written on every
-/// bind by [`set_table_cell`], so a widget system that greyed it would have no
-/// colour to put back — and the consumer's next bind would undo the greying
-/// anyway. Every write is guarded, so a settled table costs a compare.
+/// What that *looks* like is `.sk-disabled-text`'s; dropping the class falls
+/// back to the role the spec's header colour names, which is why there is no
+/// colour to put back here any more.
+///
+/// Header text only. A body cell's role is the consumer's, rewritten on every
+/// bind by [`set_table_cell`], so a widget system that greyed it would be
+/// undone by the consumer's next bind anyway.
 fn reflect_table_disabled(
-    palette: SkinColors,
-    tables: Query<(&TableState, Has<bevy::ui::InteractionDisabled>)>,
+    tables: Query<(Has<bevy::ui::InteractionDisabled>, &TableState)>,
     disabled: DisabledQuery,
-    mut texts: Query<(&TableHeaderText, &mut TextColor)>,
+    mut texts: Query<(&TableHeaderText, &mut ClassList)>,
 ) {
-    let palette = palette.get();
-    for (header, mut color) in &mut texts {
-        let Ok((state, table_disabled)) = tables.get(header.table) else {
+    for (header, mut classes) in &mut texts {
+        let Ok((table_disabled, _state)) = tables.get(header.table) else {
             continue;
         };
-        let wanted = if table_disabled || disabled.contains(header.cell) {
-            disabled_text_color(&palette)
-        } else {
-            state.spec.header_color
-        };
-        if color.0 != wanted {
-            color.0 = wanted;
-        }
+        set_state_class(
+            &mut classes,
+            DISABLED_TEXT_CLASS,
+            table_disabled || disabled.contains(header.cell),
+        );
     }
+}
+
+/// A [`ClassList`] holding the role `color` names, or an empty one when it
+/// names none — the component form of [`role_class`], for a spawn tuple.
+///
+/// Empty rather than absent because a body cell's role is rewritten on every
+/// bind: [`set_role_class`] needs a list to write into, and one that grows a
+/// `ClassList` on first use would make a missing one at the spawn site look
+/// like it worked.
+fn role_class_list(color: Color) -> ClassList {
+    role_class(color).map_or_else(ClassList::empty, |class| {
+        ClassList::new_with_classes([class])
+    })
 }
 
 /// Seed each table's sort order and column widths from the persisted account
@@ -1832,16 +1847,17 @@ fn apply_table_selection_highlight(
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_COLUMN_WIDTH, MAX_SORT_KEYS, MIN_COLUMN_WIDTH, Ordering, SkinPalette, TableAlign,
-        TableColumn, TableColumnKind, TableColumnWidth, TableHandle, TableHeaderText,
+        DISABLED_TEXT_CLASS, MAX_COLUMN_WIDTH, MAX_SORT_KEYS, MIN_COLUMN_WIDTH, Ordering,
+        TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableHandle, TableHeaderText,
         TableSelectionMode, TableSort, TableSortDefault, TableSpec, TableState, TableWidgetPlugin,
-        apply_persisted_widths, disabled_text_color, encode_widths, keep_order, order_by_sort_keys,
-        resize_column_width, spawn_table, spawn_table_row,
+        apply_persisted_widths, encode_widths, keep_order, order_by_sort_keys, resize_column_width,
+        spawn_table, spawn_table_row,
     };
     use bevy::camera::NormalizedRenderTarget;
     use bevy::picking::backend::HitData;
     use bevy::picking::pointer::{Location, PointerId};
     use bevy::prelude::*;
+    use bevy_flair::style::components::ClassList;
     use pretty_assertions::assert_eq;
     use sl_viewer_ui_core::ui::{UiDirection, UiRoot};
     use sl_viewer_ui_core::virtual_list::VirtualRow;
@@ -2340,12 +2356,12 @@ mod tests {
 
     /// The colour of the first header text under `cell`, walking the cell's
     /// subtree (the label sits inside a clip container, the arrow beside it).
-    fn header_color(app: &mut App, cell: Entity) -> Option<Color> {
-        let mut texts = app.world_mut().query::<(&TableHeaderText, &TextColor)>();
+    fn header_greyed(app: &mut App, cell: Entity) -> Option<bool> {
+        let mut texts = app.world_mut().query::<(&TableHeaderText, &ClassList)>();
         texts
             .iter(app.world())
             .find(|(header, _)| header.cell == cell)
-            .map(|(_, color)| color.0)
+            .map(|(_, classes)| classes.contains(DISABLED_TEXT_CLASS))
     }
 
     /// The named descendant of the table (its column-resize handle).
@@ -2430,8 +2446,8 @@ mod tests {
             "nothing was selected"
         );
         assert_eq!(
-            header_color(&mut app, cell),
-            Some(disabled_text_color(&SkinPalette::default())),
+            header_greyed(&mut app, cell),
+            Some(true),
             "the header greyed"
         );
         Ok(())
@@ -2463,14 +2479,14 @@ mod tests {
             "its neighbour still sorts"
         );
         assert_eq!(
-            header_color(&mut app, frozen),
-            Some(disabled_text_color(&SkinPalette::default())),
+            header_greyed(&mut app, frozen),
+            Some(true),
             "the disabled header greyed"
         );
         assert_eq!(
-            header_color(&mut app, live),
-            Some(SORTABLE_SPEC.header_color),
-            "the live header kept the spec's colour"
+            header_greyed(&mut app, live),
+            Some(false),
+            "the live header kept the role its spec colour names"
         );
         Ok(())
     }
@@ -2506,18 +2522,15 @@ mod tests {
             .entity_mut(handle.root)
             .insert(bevy::ui::InteractionDisabled);
         app.update();
-        assert_eq!(
-            header_color(&mut app, cell),
-            Some(disabled_text_color(&SkinPalette::default()))
-        );
+        assert_eq!(header_greyed(&mut app, cell), Some(true));
         app.world_mut()
             .entity_mut(handle.root)
             .remove::<bevy::ui::InteractionDisabled>();
         app.update();
         assert_eq!(
-            header_color(&mut app, cell),
-            Some(SORTABLE_SPEC.header_color),
-            "re-enabling puts the spec's colour back"
+            header_greyed(&mut app, cell),
+            Some(false),
+            "re-enabling drops the greying, falling back to the spec's role"
         );
         Ok(())
     }

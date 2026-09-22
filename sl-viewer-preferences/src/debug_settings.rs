@@ -44,6 +44,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui::{Checked, InteractionDisabled};
 use bevy::ui_widgets::{Activate, Checkbox, ValueChange};
+use bevy_flair::style::components::ClassList;
 use sl_rlv::is_debug_setting_locked;
 use sl_settings::{Scope, SettingDecl, SettingKind, SettingValue};
 
@@ -1031,7 +1032,7 @@ fn bind_debug_rows(
     ui: Option<Res<DebugSettingsUi>>,
     settings: Option<Res<ViewerSettings>>,
     rows: Query<(Ref<VirtualRow>, &ChildOf, &DebugRowParts)>,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
+    mut texts: Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
 ) {
     let (Some(ui), Some(settings)) = (ui, settings) else {
         return;

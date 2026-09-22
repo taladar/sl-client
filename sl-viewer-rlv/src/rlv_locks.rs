@@ -30,6 +30,7 @@
 
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
+use bevy_flair::style::components::ClassList;
 use sl_rlv::{
     RlvFolderLock, RlvFolderLockPermission, RlvFolderLockScope, RlvFolderLockSource, RlvLockKind,
     RlvLocks, RlvState,
@@ -462,7 +463,7 @@ fn bind_lock_rows(
     ui: Option<Res<LocksUi>>,
     translator: Translator,
     mut rows: Query<(Ref<VirtualRow>, &ChildOf, &TableRowCells)>,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
+    mut texts: Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
 ) {
     let Some(ui) = ui else {
         return;

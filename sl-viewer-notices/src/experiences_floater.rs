@@ -1598,7 +1598,7 @@ fn bind_experience_rows(
     view: Res<ExperiencesView>,
     viewports: Query<&PaneViewport>,
     rows: Query<(Ref<VirtualRow>, &ChildOf, &TableRowCells)>,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
+    mut texts: Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
 ) {
     let refresh_all = view.is_changed();
     for (row, child_of, cells) in &rows {

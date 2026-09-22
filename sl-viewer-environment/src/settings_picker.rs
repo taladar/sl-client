@@ -653,18 +653,22 @@ fn bind_picker_rows(
         &TableRowCells,
         &mut BoundPickerRow,
     )>,
-    mut classes: Query<&mut ClassList>,
+    // `Without<Text>` is load-bearing, not decoration. This query writes a
+    // *row*'s class and the one below writes a *cell text*'s, and two
+    // unfiltered `&mut ClassList` queries in one system are Bevy's B0001 — a
+    // panic on the system's first run, the whole viewer and not just this
+    // window. A row carries no `Text`, so the filter makes the two provably
+    // disjoint and Bevy accepts them.
+    mut classes: Query<&mut ClassList, Without<Text>>,
     // One `Text` query for the field line *and* the cells: two of them
-    // (`Query<&mut Text>` beside `Query<(&mut Text, &mut TextColor)>`) is a
-    // B0001 conflict, and the panic is on the system's first run — the whole
-    // viewer, not this window. The field line carries a `TextColor` too, so the
-    // wider query reaches it.
-    mut cells_text: Query<(&mut Text, &mut TextColor)>,
+    // (`Query<&mut Text>` beside the tuple below) would be the same B0001. The
+    // field line carries a `TextColor` too, so the wider query reaches it.
+    mut cells_text: Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
 ) {
     let library_label = translator.get("my-environments-library");
     for (state, ui) in &windows {
         if state.is_changed()
-            && let Ok((mut text, _color)) = cells_text.get_mut(ui.field_text)
+            && let Ok((mut text, _color, _classes)) = cells_text.get_mut(ui.field_text)
         {
             let label = translator.format(
                 "settings-picker-field",

@@ -127,6 +127,7 @@ use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui::InteractionDisabled;
+use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
     Command, GlobalCoordinates, GridCoordinates, LandStatExtended, LandStatItem,
     LandStatReportType, LandStatScore, ObjectKey, ParcelReturnType, RegionIdentity,
@@ -1305,7 +1306,7 @@ fn bind_top_objects_rows(
         &TopObjectsUi,
     )>,
     rows: Query<(Ref<VirtualRow>, &ChildOf, &TableRowCells)>,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
+    mut texts: Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
 ) {
     for (kind, state, view, ui) in &windows {
         let refresh = state.is_changed() || view.is_changed();

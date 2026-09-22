@@ -36,6 +36,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui::Checked;
 use bevy::ui_widgets::Button;
+use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
     AgentKey, AvatarProperties, ClassifiedCategory, ClassifiedInfo, ClassifiedKey, Command,
     DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
@@ -2469,8 +2470,16 @@ struct SearchRowWidgets<'w, 's> {
             &'static TableRowCells,
         ),
     >,
-    /// The cell texts themselves.
-    texts: Query<'w, 's, (&'static mut Text, &'static mut TextColor)>,
+    /// The cell texts, their colours, and the role class the colour names.
+    texts: Query<
+        'w,
+        's,
+        (
+            &'static mut Text,
+            &'static mut TextColor,
+            Option<&'static mut ClassList>,
+        ),
+    >,
     /// What spawns an adopted row's cells.
     commands: Commands<'w, 's>,
 }
@@ -2545,7 +2554,7 @@ fn bind_row(
     index: usize,
     cells: &TableRowCells,
     state: &SearchState,
-    texts: &mut Query<(&mut Text, &mut TextColor)>,
+    texts: &mut Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
 ) {
     let mut set = |column: usize, value: String, color: Color| {
         if let Some(cell) = cells.cell(column) {

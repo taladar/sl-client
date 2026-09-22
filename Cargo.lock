@@ -9577,6 +9577,7 @@ name = "sl-viewer-rlv"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_flair",
  "pretty_assertions",
  "sl-client-bevy",
  "sl-fake-grid",
@@ -9598,6 +9599,7 @@ name = "sl-viewer-search"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_flair",
  "pretty_assertions",
  "sl-client-bevy",
  "sl-settings",

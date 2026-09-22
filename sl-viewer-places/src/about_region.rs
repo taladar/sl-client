@@ -111,6 +111,7 @@ use crate::skin_palette::SkinPalette;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui::InteractionDisabled;
+use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
     AgentKey, Asset, AssetKey, AssetType, Command, EstateAccessDelta, EstateAccessKind,
     EstateCovenant, EstateFlags, EstateInfo, EstateInfoUpdate, ExperienceInfo, ExperienceKey,
@@ -3304,7 +3305,7 @@ fn bind_access_rows(
     parents: Query<&ChildOf>,
     floaters: Query<(Entity, &Floater)>,
     mut visibility: Query<&mut Visibility>,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
+    mut texts: Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
 ) {
     for (window, managers, allowed, allowed_groups, banned, state, ui) in &windows {
         let refresh = managers.is_changed()
@@ -3517,7 +3518,7 @@ fn bind_experience_rows(
     parents: Query<&ChildOf>,
     floaters: Query<(Entity, &Floater)>,
     mut visibility: Query<&mut Visibility>,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
+    mut texts: Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
 ) {
     for (window, view, state, ui) in &windows {
         let refresh = view.is_changed() || state.is_changed();
@@ -4403,7 +4404,7 @@ fn set_value_node(
 
 /// Set a table cell's text in place.
 fn set_cell(
-    texts: &mut Query<(&mut Text, &mut TextColor)>,
+    texts: &mut Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
     cells: &crate::ui_table::TableRowCells,
     column: usize,
     value: &str,

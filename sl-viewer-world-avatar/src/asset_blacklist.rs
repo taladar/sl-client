@@ -643,10 +643,21 @@ pub struct RowCells<'w, 's> {
             &'static mut BoundBlacklist,
         ),
     >,
-    /// Each row's background, repainted on selection.
-    classes: Query<'w, 's, &'static mut ClassList>,
-    /// The cell texts and their colours.
-    texts: Query<'w, 's, (&'static mut Text, &'static mut TextColor)>,
+    /// Each row's selection class. `Without<Text>` because the cell query
+    /// below also reaches a `ClassList` — the cell text's — and two unfiltered
+    /// `&mut ClassList` in one bundle are Bevy's B0001, a panic on the first
+    /// run. A row carries no `Text`, so the two are provably disjoint.
+    classes: Query<'w, 's, &'static mut ClassList, Without<Text>>,
+    /// The cell texts, their colours, and the role class the colour names.
+    texts: Query<
+        'w,
+        's,
+        (
+            &'static mut Text,
+            &'static mut TextColor,
+            Option<&'static mut ClassList>,
+        ),
+    >,
 }
 
 /// Bind each pooled row to the entry it now presents.

@@ -47,8 +47,7 @@ use bevy::prelude::*;
 use bevy_flair::style::components::ClassList;
 
 use crate::i18n::Translated;
-use crate::skin::{DISABLED_TEXT_CLASS, HEADING_CLASS, TEXT_CLASS, TITLE_CLASS};
-use crate::skin_palette::SkinPalette;
+use crate::skin::role_class;
 use crate::ui_font::UiFont;
 
 /// What a helper-spawned label says.
@@ -522,69 +521,6 @@ pub fn spawn_label(
     spawn_text(commands, parent, &label, color, font_size, None, false)
 }
 
-/// The skin class a colour *names*, or `None` for one that is not a text role.
-///
-/// The seam `viewer-skin-panel-text-roles` turns on. Panels take their label
-/// colours from [`SkinPalette::FALLBACK`] — `viewer-audit-skin-token-coverage`
-/// collapsed all 64 copies onto those four constants, so a panel asking for
-/// `text_muted` is *naming a role*, not picking a grey, and the equality below
-/// is exact rather than approximate.
-///
-/// Reading the role back out of the value is what lets every call site stay as
-/// it is. The alternative — a role parameter on each helper — is the same
-/// information spelled at ~230 call sites.
-///
-/// A colour that matches no role gets no class and keeps painting itself. That
-/// is deliberate: a panel with a colour of its own has not said which role it
-/// means, and guessing would be worse than leaving it unskinned for
-/// [`crate::skin`]'s later passes.
-///
-/// # The invariant this rests on
-///
-/// Reading a role out of a value only works while the mapping is **injective**:
-/// each of the four values must belong to exactly one role in the whole
-/// palette, or a label would silently take another role's class.
-/// `the_text_roles_are_the_only_roles_with_their_values` asserts it over every
-/// field of [`SkinPalette::FALLBACK`] by reflection, so a future palette edit
-/// that collides two roles fails there rather than quietly giving labels the
-/// wrong class.
-///
-/// Only the **fallback** has to satisfy it. A *skin* may give two roles the
-/// same value freely: the class is chosen here, from the fallback, and the skin
-/// then paints whatever it likes per class. And a caller who needs a role this
-/// cannot express passes the class explicitly — `spawn_text`'s own argument, or
-/// [`ButtonSpec::label_class`] — which always wins over the derivation.
-const fn role_class(color: Color) -> Option<&'static str> {
-    // `match` cannot pattern-match on non-structural constants, so this is a
-    // chain of comparisons against the four role values.
-    if color_eq(color, SkinPalette::FALLBACK.text_primary) {
-        Some(TEXT_CLASS)
-    } else if color_eq(color, SkinPalette::FALLBACK.text_muted) {
-        Some(TITLE_CLASS)
-    } else if color_eq(color, SkinPalette::FALLBACK.text_heading) {
-        Some(HEADING_CLASS)
-    } else if color_eq(color, SkinPalette::FALLBACK.text_disabled) {
-        Some(DISABLED_TEXT_CLASS)
-    } else {
-        None
-    }
-}
-
-/// `Color` equality usable from a `const fn`: the roles are all `Srgba`, and
-/// both sides are compile-time constants copied from the same place, so exact
-/// component equality is the right test and not a float-tolerance question.
-const fn color_eq(left: Color, right: Color) -> bool {
-    match (left, right) {
-        (Color::Srgba(left), Color::Srgba(right)) => {
-            left.red == right.red
-                && left.green == right.green
-                && left.blue == right.blue
-                && left.alpha == right.alpha
-        }
-        _ => false,
-    }
-}
-
 /// Spawn the text node the three helpers all end in.
 ///
 /// One function because the divergence between their labels was never
@@ -631,6 +567,8 @@ fn spawn_text(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::skin::{DISABLED_TEXT_CLASS, HEADING_CLASS, TEXT_CLASS, TITLE_CLASS};
+    use crate::skin_palette::SkinPalette;
     use pretty_assertions::assert_eq;
 
     /// A boxed error so tests can use `?` instead of disallowed `unwrap`/`expect`.
@@ -775,54 +713,6 @@ mod tests {
         assert_eq!(first.tab_index, Some(4));
         assert_eq!(second.tab_index, Some(5));
         assert_eq!(tab, 6);
-    }
-
-    /// **A role's value must name that role and no other.**
-    ///
-    /// [`role_class`] reads a role back out of a colour, which is sound only
-    /// while each of the four values is unique across the whole palette — two
-    /// roles sharing a value would make a label take the wrong class, silently
-    /// and only under a skin that paints those two classes differently.
-    ///
-    /// Checked by reflection over every field rather than against a list, so a
-    /// role added later is covered without anyone remembering to add it here.
-    #[test]
-    fn the_text_roles_are_the_only_roles_with_their_values() -> Result<(), TestError> {
-        use bevy::reflect::structs::Struct as _;
-
-        let fallback = SkinPalette::FALLBACK;
-        let keyed = [
-            ("text_primary", fallback.text_primary),
-            ("text_muted", fallback.text_muted),
-            ("text_heading", fallback.text_heading),
-            ("text_disabled", fallback.text_disabled),
-        ];
-        for (role, value) in keyed {
-            let named: Vec<&str> = (0..fallback.field_len())
-                .filter_map(|index| {
-                    let name = fallback.name_at(index)?;
-                    let color = fallback.field_at(index)?.try_downcast_ref::<Color>()?;
-                    (*color == value).then_some(name)
-                })
-                .collect();
-            // Without this the test passes vacuously if the walk downcasts
-            // nothing — the shape of a check that checks nothing.
-            assert!(
-                named.contains(&role),
-                "the reflection walk did not find `{role}` itself, so it is \
-                 looking at no colours and would report no clash whatever the \
-                 palette said"
-            );
-            let clashes: Vec<&str> = named.into_iter().filter(|name| *name != role).collect();
-            assert!(
-                clashes.is_empty(),
-                "`{role}` shares its value with {clashes:?}, so a label coloured \
-                 with it can no longer be mapped back to one role — give the \
-                 roles distinct fallback values, or replace the derivation in \
-                 `role_class` with an explicit role at the call sites"
-            );
-        }
-        Ok(())
     }
 
     /// **A label that names a role is skinnable; one that names a colour is

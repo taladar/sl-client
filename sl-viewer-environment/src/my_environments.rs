@@ -933,8 +933,12 @@ fn bind_environment_rows(
         &TableRowCells,
         &mut BoundEnvironment,
     )>,
-    mut classes: Query<&mut ClassList>,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
+    // `Without<Text>` is load-bearing: this writes a *row*'s class and the
+    // query below writes a *cell text*'s, and two unfiltered `&mut ClassList`
+    // in one system are Bevy's B0001 — a panic on the first run. A row carries
+    // no `Text`, so the filter makes them provably disjoint.
+    mut classes: Query<&mut ClassList, Without<Text>>,
+    mut texts: Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
 ) {
     let Some(ui) = ui else {
         return;

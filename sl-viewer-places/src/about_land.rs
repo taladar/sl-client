@@ -65,6 +65,7 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui::InteractionDisabled;
+use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
     AgentKey, Asset, AssetKey, AssetType, CircuitId, Command, EstateCovenant, LandArea,
     LindenAmount, Maturity, OwnerKey, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
@@ -3102,7 +3103,7 @@ fn populate_owner_rows(
 fn bind_owner_rows(
     windows: Query<(Ref<OwnersView>, &AboutLandUi)>,
     rows: Query<(Ref<VirtualRow>, &ChildOf, &crate::ui_table::TableRowCells)>,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
+    mut texts: Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
 ) {
     for (view, ui) in &windows {
         let Some(viewport) = ui.object_handles.owners_viewport else {
@@ -3184,7 +3185,7 @@ fn bind_access_rows(
     parents: Query<&ChildOf>,
     floaters: Query<(Entity, &Floater)>,
     mut visibility: Query<&mut Visibility>,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
+    mut texts: Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
 ) {
     for (window, allow, ban, state, ui) in &windows {
         let refresh = allow.is_changed() || ban.is_changed() || state.is_changed();
@@ -4256,7 +4257,7 @@ fn set_value_node(
 
 /// Set a table cell's text in place.
 fn set_cell(
-    texts: &mut Query<(&mut Text, &mut TextColor)>,
+    texts: &mut Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
     cells: &crate::ui_table::TableRowCells,
     column: usize,
     value: &str,

@@ -36,6 +36,7 @@ use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui_widgets::Checkbox;
+use bevy_flair::style::components::ClassList;
 
 use crate::i18n::{Translated, Translator};
 use crate::notifications::NOTIFICATIONS;
@@ -414,7 +415,7 @@ fn bind_alerts_rows(
     model: Option<Res<AlertsModel>>,
     ui: Option<Res<AlertsTabUi>>,
     rows: Query<(Ref<VirtualRow>, &ChildOf, &AlertRowParts)>,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
+    mut texts: Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
     mut commands: Commands,
 ) {
     let (Some(model), Some(ui)) = (model, ui) else {

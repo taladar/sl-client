@@ -842,7 +842,7 @@ fn populate_picker_rows(
 fn bind_picker_rows(
     windows: Query<(Ref<ExperiencePickerView>, &ExperiencePickerUi)>,
     rows: Query<(Ref<VirtualRow>, &ChildOf, &TableRowCells)>,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
+    mut texts: Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
 ) {
     for (view, ui) in &windows {
         let refresh_all = view.is_changed();
