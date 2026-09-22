@@ -1062,7 +1062,7 @@ dependencies = [
 [[package]]
 name = "bevy_flair"
 version = "0.8.0"
-source = "git+https://github.com/taladar/bevy_flair.git?rev=aef41d88cc21228b378f81779c85b656ba7a53a5#aef41d88cc21228b378f81779c85b656ba7a53a5"
+source = "git+https://github.com/taladar/bevy_flair.git?rev=dbaaa48d9dc5d51d75fcc31ca1588e0a5da003b8#dbaaa48d9dc5d51d75fcc31ca1588e0a5da003b8"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
@@ -1074,7 +1074,7 @@ dependencies = [
 [[package]]
 name = "bevy_flair_core"
 version = "0.8.0"
-source = "git+https://github.com/taladar/bevy_flair.git?rev=aef41d88cc21228b378f81779c85b656ba7a53a5#aef41d88cc21228b378f81779c85b656ba7a53a5"
+source = "git+https://github.com/taladar/bevy_flair.git?rev=dbaaa48d9dc5d51d75fcc31ca1588e0a5da003b8#dbaaa48d9dc5d51d75fcc31ca1588e0a5da003b8"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -1097,7 +1097,7 @@ dependencies = [
 [[package]]
 name = "bevy_flair_core_macros"
 version = "0.8.0"
-source = "git+https://github.com/taladar/bevy_flair.git?rev=aef41d88cc21228b378f81779c85b656ba7a53a5#aef41d88cc21228b378f81779c85b656ba7a53a5"
+source = "git+https://github.com/taladar/bevy_flair.git?rev=dbaaa48d9dc5d51d75fcc31ca1588e0a5da003b8#dbaaa48d9dc5d51d75fcc31ca1588e0a5da003b8"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -1108,7 +1108,7 @@ dependencies = [
 [[package]]
 name = "bevy_flair_css_parser"
 version = "0.8.0"
-source = "git+https://github.com/taladar/bevy_flair.git?rev=aef41d88cc21228b378f81779c85b656ba7a53a5#aef41d88cc21228b378f81779c85b656ba7a53a5"
+source = "git+https://github.com/taladar/bevy_flair.git?rev=dbaaa48d9dc5d51d75fcc31ca1588e0a5da003b8#dbaaa48d9dc5d51d75fcc31ca1588e0a5da003b8"
 dependencies = [
  "ariadne",
  "bevy_app",
@@ -1140,7 +1140,7 @@ dependencies = [
 [[package]]
 name = "bevy_flair_style"
 version = "0.8.0"
-source = "git+https://github.com/taladar/bevy_flair.git?rev=aef41d88cc21228b378f81779c85b656ba7a53a5#aef41d88cc21228b378f81779c85b656ba7a53a5"
+source = "git+https://github.com/taladar/bevy_flair.git?rev=dbaaa48d9dc5d51d75fcc31ca1588e0a5da003b8#dbaaa48d9dc5d51d75fcc31ca1588e0a5da003b8"
 dependencies = [
  "bevy_app",
  "bevy_asset",

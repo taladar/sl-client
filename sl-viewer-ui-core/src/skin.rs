@@ -722,6 +722,21 @@ fn stamp_text_field_class(
     }
 }
 
+/// The CSS class on a checkbox — the row carrying `Checkbox`, and so the
+/// `:checked` / `:disabled` its box and tick rules reach down from.
+///
+/// The checkbox's three classes live here with the rest of the state
+/// vocabulary rather than in `sl-viewer-ui-widgets`'s `ui_checkbox`, so a rule
+/// in `common.css` and the class that selects it are named in one crate.
+pub const CHECKBOX_CLASS: &str = "sk-checkbox";
+
+/// The CSS class on a checkbox's box: the frame and fill a tick sits in.
+pub const CHECKBOX_BOX_CLASS: &str = "sk-checkbox-box";
+
+/// The CSS class on a checkbox's tick. Its glyph is the skin's `content` on a
+/// `::before`, so the widget's tick node carries `PseudoElementsSupport`.
+pub const CHECKBOX_TICK_CLASS: &str = "sk-checkbox-tick";
+
 /// The skin-driven text-caret and selection colours of one editable text field
 /// (R28), written by the `caret-color` / `selection-color` /
 /// `unfocused-selection-color` CSS properties (the `.sk-text-field` rule in

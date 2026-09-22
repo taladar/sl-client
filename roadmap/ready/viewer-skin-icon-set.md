@@ -5,7 +5,8 @@ topic: viewer
 status: ready
 origin: Vintage skin fidelity audit (2026-09-20)
 points: 5
-refs: [viewer-ui-skin-tokens, viewer-vintage-skin, viewer-ui-status-bar-parcel-icons]
+refs: [viewer-ui-skin-tokens, viewer-vintage-skin, viewer-ui-status-bar-parcel-icons,
+  viewer-skin-glyphs-from-content]
 ---
 
 Context: [context/viewer.md](../context/viewer.md),
@@ -29,13 +30,30 @@ Where we stand:
   `.sk-parcel-icon`, and `common.css` already documents the per-glyph override
   (`.sk-parcel-icon--voice { -bevy-image: url("my-voice.png"); }`). That is
   the pattern; it just has one user.
+- **Two more image families pick their art in Rust** (found 2026-09-22 while
+  building the checkbox widget). Both are `ImageNode`s whose *tint* is already
+  the skin's and whose *art* is not, so both are the parcel-icon pattern with
+  the second half missing:
+  - the **Friends list's rights columns** — `people.rs`'s `PeopleIcons`
+    (eye / pin / pencil headers, and the `check_on` / `check_off` a cell
+    swaps through `icons.checkbox(set)`). Drawn in code rather than shipped
+    as art, which is also why they are the easiest to re-point.
+  - the **link icons** in `linkified_text.rs` — `icons/link/agent.png`,
+    `group.png`, `location.png`, chosen by `LinkIcon` and tinted per link.
 
 ## What to do
 
 - Name each icon slot as a class the way the parcel icons are named, so a skin
   can re-point one glyph or all of them with `-bevy-image`. The slot list is
   the reference's: inventory item types, folder types (open and closed),
-  wearable sub-types, parcel status, and the floater caption glyphs.
+  wearable sub-types, parcel status, the floater caption glyphs, the Friends
+  list's rights columns, and the link icons.
+- Where the art is *text* rather than an image, the mechanism is `content` on
+  a `::before` instead of `-bevy-image` —
+  [[viewer-skin-glyphs-from-content]] audits those, and the two tasks should
+  agree on the class names where a slot could be drawn either way (a
+  checkbox's tick is the obvious one: a glyph today, a nine-slice under
+  [[viewer-skin-image-backed-widgets]]).
 - Give the shipped skins a real icon set for those slots so the emoji fall
   back out of the UI. Emoji were a good stand-in — they read at a glance and
   cost nothing — but they carry a colour the skin cannot change and a metric

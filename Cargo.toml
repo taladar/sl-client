@@ -512,16 +512,22 @@ bevy_ecs_macro_logic = { git = "https://github.com/taladar/bevy.git", rev = "459
 bevy_ecs_macros = { git = "https://github.com/taladar/bevy.git", rev = "4598842b734c35115c66df1f2dc77e94ed9b9734" }
 bevy_encase_derive = { git = "https://github.com/taladar/bevy.git", rev = "4598842b734c35115c66df1f2dc77e94ed9b9734" }
 bevy_feathers = { git = "https://github.com/taladar/bevy.git", rev = "4598842b734c35115c66df1f2dc77e94ed9b9734" }
-# bevy_flair 0.8.0 + the recalculate_style-on-Reset fix (debug-build panic /
-# release-build silent reset downgrade when a freshly spawned widget is swept
-# into a sibling/descendant recalculation in the same frame) — submitted
-# upstream; drop the patch once a release carries it. All flair crates come
-# from the same rev so the graph never mixes registry and git copies.
-bevy_flair = { git = "https://github.com/taladar/bevy_flair.git", rev = "aef41d88cc21228b378f81779c85b656ba7a53a5" }
-bevy_flair_core = { git = "https://github.com/taladar/bevy_flair.git", rev = "aef41d88cc21228b378f81779c85b656ba7a53a5" }
-bevy_flair_core_macros = { git = "https://github.com/taladar/bevy_flair.git", rev = "aef41d88cc21228b378f81779c85b656ba7a53a5" }
-bevy_flair_css_parser = { git = "https://github.com/taladar/bevy_flair.git", rev = "aef41d88cc21228b378f81779c85b656ba7a53a5" }
-bevy_flair_style = { git = "https://github.com/taladar/bevy_flair.git", rev = "aef41d88cc21228b378f81779c85b656ba7a53a5" }
+# bevy_flair 0.8.0 + two fixes, both submitted upstream; drop the patch once a
+# release carries them. All flair crates come from the same rev so the graph
+# never mixes registry and git copies.
+#
+#  1. recalculate_style-on-Reset — a debug-build panic / release-build silent
+#     reset downgrade when a freshly spawned widget is swept into a
+#     sibling/descendant recalculation in the same frame.
+#  2. a text `::before` spawns without a `StyleData`, which
+#     `PseudoElement`'s insert hook `expect`s — so `PseudoElementsSupport` on
+#     a `Text` panics in any app without the full plugin stack (every widget
+#     unit test). The block branch of the same function already spawned one.
+bevy_flair = { git = "https://github.com/taladar/bevy_flair.git", rev = "dbaaa48d9dc5d51d75fcc31ca1588e0a5da003b8" }
+bevy_flair_core = { git = "https://github.com/taladar/bevy_flair.git", rev = "dbaaa48d9dc5d51d75fcc31ca1588e0a5da003b8" }
+bevy_flair_core_macros = { git = "https://github.com/taladar/bevy_flair.git", rev = "dbaaa48d9dc5d51d75fcc31ca1588e0a5da003b8" }
+bevy_flair_css_parser = { git = "https://github.com/taladar/bevy_flair.git", rev = "dbaaa48d9dc5d51d75fcc31ca1588e0a5da003b8" }
+bevy_flair_style = { git = "https://github.com/taladar/bevy_flair.git", rev = "dbaaa48d9dc5d51d75fcc31ca1588e0a5da003b8" }
 bevy_gilrs = { git = "https://github.com/taladar/bevy.git", rev = "4598842b734c35115c66df1f2dc77e94ed9b9734" }
 bevy_gizmos = { git = "https://github.com/taladar/bevy.git", rev = "4598842b734c35115c66df1f2dc77e94ed9b9734" }
 bevy_gizmos_macros = { git = "https://github.com/taladar/bevy.git", rev = "4598842b734c35115c66df1f2dc77e94ed9b9734" }

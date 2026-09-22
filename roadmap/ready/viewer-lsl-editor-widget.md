@@ -5,7 +5,7 @@ topic: viewer
 status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-lsl-script-editor
 blocked_by: [viewer-ui-text-foundation, viewer-ui-text-input-widget]
-refs: [viewer-notecard-editor, viewer-notecard-inline-items]
+refs: [viewer-ui-skin-tokens, viewer-notecard-editor, viewer-notecard-inline-items]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -43,10 +43,28 @@ both; but "per-range colour" and "inline objects plus per-range colour" are
 different designs, and it is much cheaper to know that before writing the first
 one than after.
 
+**"Per-range colour" is the wrong target; per-range *style* is the right one.**
+[[viewer-lsl-editor-highlight]] settled that a range should carry a **token
+class** and let the cascade resolve it, because `bevy_flair` maps far more
+than colour onto a text node — `font-weight`, `font-style`, `font-width`,
+`letter-spacing`, `line-height`, `text-decoration-line` /
+`-color`, `text-shadow`, the font features and variations. Bold keywords,
+italic comments and an underlined error range are all stylesheet decisions,
+and a design that can only carry a `Color` per range forecloses every one of
+them. Parley's brush list is the mechanism; what a brush *holds* is this
+task's choice.
+
+**Decide here: does a range ever get a box?** Per-token **background** cannot
+come from the cascade — `background-color` maps to `BackgroundColor`, a UI
+**node** component, and an inline range is a `TextSpan`. So a
+selection-behind-a-token or highlighted-region effect has to be drawn by this
+widget. The current-line highlight below is the same question in its easiest
+form; answer it once, for both.
+
 Reuse what Bevy/parley already give: cursor and word/line motion, selection
 geometry, IME, clipboard, bidi and grapheme-correct backspace. Build here:
-undo/redo, per-range colour, a gutter and line numbers, current-line highlight,
-find/replace and go-to-line (for the error list). The colour *source* (lexer
+undo/redo, per-range style, a gutter and line numbers, current-line highlight,
+find/replace and go-to-line (for the error list). The style *source* (lexer
 tokens) and the structural affordances (folding, brace match, outline) layer on
 top in [[viewer-lsl-editor-highlight]].
 

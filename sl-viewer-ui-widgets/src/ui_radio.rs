@@ -45,7 +45,7 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui::Checked;
 use bevy::ui_widgets::{RadioButton, RadioGroup, ValueChange};
-use bevy_flair::style::components::ClassList;
+use bevy_flair::style::components::{ClassList, PseudoElementsSupport};
 
 use sl_viewer_ui_core::i18n::Translated;
 use sl_viewer_ui_core::skin::TEXT_CLASS;
@@ -60,10 +60,6 @@ const GROUP_GAP: f32 = 8.0;
 /// The gap between an option's indicator and its label, in logical pixels.
 const ITEM_GAP: f32 = 6.0;
 
-/// The indicator glyph of the selected option — a ringed dot (`◉`, U+25C9), the
-/// reference's filled radio.
-const SELECTED_GLYPH: &str = "\u{25c9}";
-
 /// The skin class on a radio group, so a disabled group greys every indicator
 /// in it through `.sk-radio-group:disabled .sk-radio-indicator`.
 const GROUP_CLASS: &str = "sk-radio-group";
@@ -73,13 +69,12 @@ const GROUP_CLASS: &str = "sk-radio-group";
 /// radiogroup pattern.
 const ITEM_CLASS: &str = "sk-radio";
 
-/// The skin class on an option's indicator glyph. Its three looks — lit,
-/// resting, and greyed for a group the consumer cannot change — are all the
-/// skin's, selected through the item's `:checked` and the group's `:disabled`.
+/// The skin class on an option's indicator. Its three looks — lit, resting,
+/// and greyed for a group the consumer cannot change — are all the skin's,
+/// selected through the item's `:checked` and the group's `:disabled`, and so
+/// is the **glyph**: `.sk-radio-indicator::before`'s `content` carries the
+/// ring, and the `:checked` rule the filled one.
 const INDICATOR_CLASS: &str = "sk-radio-indicator";
-
-/// The indicator glyph of an unselected option — an empty ring (`○`, U+25CB).
-const UNSELECTED_GLYPH: &str = "\u{25cb}";
 
 /// The action a group emits when the user picks a different option. A single
 /// verb — "a choice was made" — because the *which* is readable directly from
@@ -186,9 +181,13 @@ pub struct RadioItem {
     pub index: usize,
 }
 
-/// An option's indicator glyph node, naming its group and index so
-/// `apply_radio_selection` can swap the glyph and colour when the selection
-/// changes.
+/// An option's indicator node, naming its group and index.
+///
+/// It no longer carries anything to *write* — the ring, its lit form and its
+/// greyed one are all the skin's, reached by `:checked` / `:disabled` from the
+/// option and the group. Kept because the gallery and the tests find an
+/// indicator by it, and because a marker is the cheapest way to say which of a
+/// row's children is the dot.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 struct RadioIndicator {
     /// The group whose selection this indicator reflects.
@@ -281,11 +280,11 @@ fn spawn_radio_item(
     }
 
     commands.spawn((
-        Text::new(if active {
-            SELECTED_GLYPH
-        } else {
-            UNSELECTED_GLYPH
-        }),
+        // Empty: the ring is `.sk-radio-indicator::before`'s `content`, and its
+        // lit form `.sk-radio:checked`'s, so the skin owns both shapes. See the
+        // rules in `common.css`.
+        Text::default(),
+        PseudoElementsSupport,
         UiFont::Sans.at(spec.font_size),
         ClassList::new_with_classes([INDICATOR_CLASS]),
         RadioIndicator { group, index },
@@ -367,7 +366,6 @@ fn on_radio_value_change(
 fn apply_radio_selection(
     changed: Query<(Entity, &RadioSelection), Changed<RadioSelection>>,
     items: Query<(Entity, &RadioItem)>,
-    mut indicators: Query<(&RadioIndicator, &mut Text)>,
     mut commands: Commands,
 ) {
     for (group_id, selection) in &changed {
@@ -380,20 +378,6 @@ fn apply_radio_selection(
                 commands.entity(item_entity).insert(Checked);
             } else {
                 commands.entity(item_entity).remove::<Checked>();
-            }
-        }
-        for (indicator, mut text) in &mut indicators {
-            if indicator.group != group_id {
-                continue;
-            }
-            let is_active = indicator.index == selection.active;
-            let wanted_glyph = if is_active {
-                SELECTED_GLYPH
-            } else {
-                UNSELECTED_GLYPH
-            };
-            if text.0 != wanted_glyph {
-                wanted_glyph.clone_into(&mut text.0);
             }
         }
     }

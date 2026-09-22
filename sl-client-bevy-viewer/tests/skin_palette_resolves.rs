@@ -401,6 +401,211 @@ mod test {
         Ok(())
     }
 
+    /// **All four checkbox looks come out of the stylesheet.**
+    ///
+    /// The widget paints nothing at all: `:checked` and `:disabled` reach the
+    /// box and the tick from the row, and unchecked is `transparent` rather
+    /// than a rewritten glyph. So *every* state of it is this file's, and a
+    /// Rust test can only see that the classes are present — which
+    /// `ui_checkbox`'s own tests do. This is the half that says they resolve.
+    ///
+    /// The checked-and-disabled case is the one worth pinning: the tick greys
+    /// only where it is shown, so that rule has to be compound. A lone
+    /// `:disabled` on the tick would paint a grey tick on an *unchecked* box.
+    #[test]
+    fn a_checkbox_takes_all_four_of_its_looks_from_the_skin() -> Result<(), TestError> {
+        let mut app = app();
+        let handle: Handle<StyleSheet> = app
+            .world()
+            .resource::<AssetServer>()
+            .load("skins/graphite/skin.css");
+        let root = app
+            .world_mut()
+            .spawn((Node::default(), Styled::new(handle.clone())))
+            .id();
+
+        // (checked, disabled) -> its box and tick.
+        let mut spawn_box = |checked: bool, disabled: bool| {
+            let mut row = app.world_mut().spawn((
+                Node::default(),
+                ClassList::new("sk-checkbox"),
+                ChildOf(root),
+            ));
+            if checked {
+                row.insert(bevy::ui::Checked);
+            }
+            if disabled {
+                row.insert(bevy::ui::InteractionDisabled);
+            }
+            let row = row.id();
+            let box_node = app
+                .world_mut()
+                .spawn((
+                    Node::default(),
+                    ClassList::new("sk-checkbox-box"),
+                    ChildOf(row),
+                ))
+                .id();
+            let tick = app
+                .world_mut()
+                .spawn((
+                    // Empty, exactly as the widget spawns it: the glyph is the
+                    // skin's `content`, reached through `::before`.
+                    Text::default(),
+                    PseudoElementsSupport,
+                    ClassList::new("sk-checkbox-tick"),
+                    ChildOf(box_node),
+                ))
+                .id();
+            (box_node, tick)
+        };
+        let (off_box, off_tick) = spawn_box(false, false);
+        let (on_box, on_tick) = spawn_box(true, false);
+        let (refused_box, refused_tick) = spawn_box(false, true);
+        let (refused_on_box, refused_on_tick) = spawn_box(true, true);
+
+        load(&mut app, &handle)?;
+        app.update();
+
+        let fill = |entity| {
+            app.world()
+                .get::<BackgroundColor>(entity)
+                .map(|background| background.0.to_srgba())
+        };
+        // The `::before` pseudo-element bevy_flair spawned under the tick —
+        // where `content` and its colour actually land. Found by position
+        // because `PseudoElement` is private to bevy_flair: its
+        // `PseudoElementsSupport` hook spawns `::before` and then `::after`,
+        // so the first child is the one. A future version spawning them the
+        // other way round fails this loudly rather than silently, which is
+        // what to want from a positional assumption.
+        let before = |entity| {
+            app.world()
+                .get::<Children>(entity)
+                .and_then(|kids| kids.iter().next())
+        };
+        let mark = |entity| {
+            before(entity)
+                .and_then(|e| app.world().get::<TextSpan>(e))
+                .map(|span| span.0.clone())
+        };
+        let tick = |entity| {
+            before(entity)
+                .and_then(|e| app.world().get::<TextColor>(e))
+                .map(|color| color.0.to_srgba())
+        };
+        assert_eq!(
+            fill(off_box),
+            Some(Srgba::hex("1a1f29").map_err(|error| error.to_string())?),
+            "an unchecked box takes `--check-bg`"
+        );
+        assert_eq!(
+            fill(on_box),
+            Some(Srgba::hex("3d5785").map_err(|error| error.to_string())?),
+            "`:checked` did not reach the box"
+        );
+        assert_eq!(
+            fill(refused_box),
+            Some(Srgba::hex("232730").map_err(|error| error.to_string())?),
+            "`:disabled` did not reach the box"
+        );
+        // The glyph is the skin's, which is the point: a skin that wants ✔, ✗
+        // or × writes it in `content` and the widget never learns.
+        assert_eq!(
+            mark(on_tick),
+            Some("\u{2713}".to_owned()),
+            "`content` did not reach the tick's `::before`, so no skin can \
+             choose the mark"
+        );
+        assert_eq!(
+            mark(off_tick).as_deref(),
+            Some(""),
+            "an unchecked box must carry no mark at all"
+        );
+        assert_eq!(
+            tick(on_tick),
+            Some(Srgba::hex("e6ebf2").map_err(|error| error.to_string())?),
+            "a checked tick takes `--check-tick`"
+        );
+        assert_eq!(
+            mark(refused_tick).as_deref(),
+            Some(""),
+            "a refused *unchecked* box must still show no mark"
+        );
+        assert_eq!(
+            tick(refused_on_tick),
+            Some(Srgba::hex("737d8f").map_err(|error| error.to_string())?),
+            "a refused checked tick greys"
+        );
+        assert_eq!(
+            fill(refused_on_box),
+            Some(Srgba::hex("232730").map_err(|error| error.to_string())?),
+            "disabled must beat checked on the box"
+        );
+        Ok(())
+    }
+
+    /// **A radio's ring is the skin's too**, both of them.
+    ///
+    /// The same move as the checkbox: `apply_radio_selection` used to rewrite
+    /// the glyph between `○` and `◉`, and that loop is gone — the option's
+    /// `:checked` picks the filled ring through `content`. A skin wanting a
+    /// filled dot or a square says so in one rule.
+    #[test]
+    fn a_radio_takes_both_of_its_rings_from_the_skin() -> Result<(), TestError> {
+        let mut app = app();
+        let handle: Handle<StyleSheet> = app
+            .world()
+            .resource::<AssetServer>()
+            .load("skins/graphite/skin.css");
+        let root = app
+            .world_mut()
+            .spawn((Node::default(), Styled::new(handle.clone())))
+            .id();
+        let mut spawn_option = |checked: bool| {
+            let mut item =
+                app.world_mut()
+                    .spawn((Node::default(), ClassList::new("sk-radio"), ChildOf(root)));
+            if checked {
+                item.insert(bevy::ui::Checked);
+            }
+            let item = item.id();
+            app.world_mut()
+                .spawn((
+                    Text::default(),
+                    PseudoElementsSupport,
+                    ClassList::new("sk-radio-indicator"),
+                    ChildOf(item),
+                ))
+                .id()
+        };
+        let resting = spawn_option(false);
+        let lit = spawn_option(true);
+
+        load(&mut app, &handle)?;
+        app.update();
+
+        let ring = |entity| {
+            app.world()
+                .get::<Children>(entity)
+                .and_then(|kids| kids.iter().next())
+                .and_then(|before| app.world().get::<TextSpan>(before))
+                .map(|span| span.0.clone())
+        };
+        assert_eq!(
+            ring(resting),
+            Some("\u{25cb}".to_owned()),
+            "an unselected option must carry the empty ring"
+        );
+        assert_eq!(
+            ring(lit),
+            Some("\u{25c9}".to_owned()),
+            "`:checked` must reach the ring, or selection is colour-only and a \
+             recolour-free skin cannot show it"
+        );
+        Ok(())
+    }
+
     /// A field that cannot be edited greys, and an ordinary one does not.
     ///
     /// `.sk-text-field` is stamped on every editor by the scaffold and now

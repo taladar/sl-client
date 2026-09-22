@@ -238,32 +238,28 @@ class vocabulary that task will replace. `ui_text_input`'s is a widget state
 wanting a class rather than a palette read, and `name_tag_billboard`'s is
 world-space data.
 
-### What is left
+### What is left, and it is not this task's
 
-- **`ui_text_input`'s field state**, which wants a class rather than a
-  palette read. The other five writer files are
-  [[viewer-skin-checkbox-radio-shape]]'s, and `name_tag_billboard`'s is not
-  this task's.
-- **The literal-colour spawns.** `ast-grep run -p 'TextColor(Color::$$$C)'`
-  says every one of the 32 is `Color::WHITE`, and reading them shows *three*
-  different intents behind the same expression — which is why this is a
-  decision list and not a sweep:
-  - **Plain panel text** (`ui_element.rs`'s specimen prose and labels) — wants
-    `text_role`, and is the only kind that does.
-  - **An untinted glyph** (`emoji_picker.rs`'s cells and tone swatches) —
-    white *is* "do not tint" for a colour emoji, so a role would tint it.
-  - **A deliberate skinless fallback** (`edit_tool.rs` and its siblings, which
-    say so at the site: "the skin recolours via the class token") — already
-    class-driven, and the white is the value a stylesheet-less world falls
-    back to. Exactly what `text_role` leaves alone.
-- **The live look is deliberately deferred to the end.** A half-converted UI
-  cannot be judged by eye — nothing distinguishes a colour that is already
-  skin-driven from one that is not — so the check only becomes meaningful when
-  the task is finished, and it is then "does a skin switch recolour
-  *everything*".
-- **A live look.** The change is invisible under the built-in fallback by
-  construction and only shows once a skin's own token differs, so the gallery's
-  live switcher (or a viewer run) is the check that it actually took.
+Nothing here is still panel-text work:
 
-Done when a skin switch recolours a panel's text the way it already recolours
-its floater, and the gallery's live switcher shows it.
+- **64 sites over 22 constants that resolve to no role**, plus the 32
+  `Color::WHITE` literals — each a judgement rather than a sweep, and every
+  one already calling `text_role`, so each fix is one line in a *constant*.
+  Their own task now: [[viewer-skin-text-colours-without-a-role]].
+- **Five hand-rolled three-state check painters** (`about_land`,
+  `about_region`, `land_environment`, `snapshot_floater`, `group_profile`) —
+  [[viewer-skin-checkbox-radio-shape]]'s, and converting them here would
+  invent a vocabulary that task will replace.
+- **`name_tag_billboard`** is not residue at all: `NAME_TAG_MISMATCH` is
+  `--name-tag-mismatch`'s fallback, and name tags are already skinnable
+  through the user-tunable palette.
+
+### The live look, deferred on purpose
+
+A half-converted UI cannot be judged by eye — nothing distinguishes a colour
+that is already skin-driven from one that is not. Now that panel text, tables,
+widget state and row selection all go through the cascade, the check is
+meaningful and simple: **does a skin switch in the gallery recolour
+everything?** Two defects this work turned up (the cascade ordering, the
+phototools double-writer) were invisible headlessly, so it is worth doing
+before this is called finished.

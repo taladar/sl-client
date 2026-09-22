@@ -49,6 +49,7 @@ pub mod floater_persist;
 pub mod menu;
 pub mod menu_accel;
 pub mod settings_binding;
+pub mod ui_checkbox;
 pub mod ui_color_picker;
 pub mod ui_combo;
 pub mod ui_radio;

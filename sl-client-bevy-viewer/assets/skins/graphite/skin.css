@@ -117,6 +117,15 @@
   /* An inventory folder's label — gold, the reference's own. */
   --folder-label: #fadb8c;
 
+  /* The checkbox: its resting well, its frame, and the two the tick shows
+   * against. A light box with a dark frame is the classic look, which a skin
+   * gets by redefining these four and nothing else. */
+  --check-bg: #1a1f29;
+  --check-border: #66809e;
+  --check-bg-checked: #3d5785;
+  --check-border-checked: #5cb8fa;
+  --check-tick: #e6ebf2;
+
   /* An RLVa console line: accepted, refused. Meaning-bearing like the
    * notification kinds. */
   --console-info: #99d1a8;

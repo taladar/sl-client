@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 118 |
-| ready | 308 |
+| ready | 310 |
 | blocked | 63 |
 | in-progress | 24 |
-| bugs | 6 |
+| bugs | 7 |
 | done | 1211 |
 | deferred | 30 |
 | wont-do | 16 |
-| **total** | **1776** |
+| **total** | **1779** |
 
 ## ideas (118)
 
@@ -293,7 +293,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (308)
+## ready (310)
 
 ### protocol
 
@@ -874,6 +874,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A bevel's light source has a handedness the logical-property ban denies
 - [`viewer-skin-checkbox-radio-shape`](ready/viewer-skin-checkbox-radio-shape.md)
   — Checkboxes are hand-rolled per panel, so no skin can shape one
+- [`viewer-skin-glyphs-from-content`](ready/viewer-skin-glyphs-from-content.md)
+  — A skin can choose the glyph, not just its colour — audit where that applies
 - [`viewer-skin-icon-set`](ready/viewer-skin-icon-set.md) — A skin should be
   able to carry an icon set, not just colours
 - [`viewer-skin-image-backed-widgets`](ready/viewer-skin-image-backed-widgets.md)
@@ -885,6 +887,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Scroll-list rows — striping, hover and a selection the skin owns
 - [`viewer-skin-scrollbar-shape`](ready/viewer-skin-scrollbar-shape.md) — The
   scrollbar is a bar — the reference's has ends, a track and a shape
+- [`viewer-skin-text-colours-without-a-role`](ready/viewer-skin-text-colours-without-a-role.md)
+  — The text colours that name no role, and the four kinds of reason why
 - [`viewer-skin-text-shadow-role`](ready/viewer-skin-text-shadow-role.md) — A
   text-shadow role — the trait that makes classic UI text look classic
 - [`viewer-skin-tooltip-roles`](ready/viewer-skin-tooltip-roles.md) — The
@@ -1286,7 +1290,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (6)
+## bugs (7)
 
 ### protocol
 
@@ -1305,6 +1309,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 - [`viewer-sliders-show-no-value`](bugs/viewer-sliders-show-no-value.md) — A
   slider shows no value, and no bounds or step either
+
+### test
+
+- [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
+  — object_asset_format fails only in a full-workspace run, and fails early
 
 ## done (1211)
 

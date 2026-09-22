@@ -149,6 +149,56 @@
   border-color: var(--control-border-disabled);
 }
 
+/* THE CHECKBOX (viewer-skin-checkbox-radio-shape).
+ *
+ * All four looks live here and the widget paints none of them: a checkbox
+ * carries `Checked` and `InteractionDisabled`, which bevy_flair syncs to
+ * `:checked` and `:disabled`, so every state is a selector reaching down from
+ * the row to the box and the tick.
+ *
+ * That is why the reference's look is reachable at all. It draws checked /
+ * unchecked / pressed / disabled as six separate textures, so a per-frame fill
+ * could never become it; swapping these backgrounds for a nine-slice
+ * (viewer-skin-image-backed-widgets) needs no Rust change.
+ *
+ * The tick is always the glyph — CSS cannot swap text content — so unchecked
+ * paints it `transparent` rather than rewriting it from a system. */
+.sk-checkbox-box {
+  background-color: var(--check-bg);
+  border-color: var(--check-border);
+  border-radius: 2px;
+}
+
+.sk-checkbox:checked .sk-checkbox-box {
+  background-color: var(--check-bg-checked);
+  border-color: var(--check-border-checked);
+}
+
+/* The tick is the SKIN'S GLYPH, not the widget's. `content` on a `::before`
+ * writes the pseudo-element's `TextSpan`, so which mark a checkbox wears is a
+ * stylesheet decision — Unicode has several (U+2713 ✓, U+2714 ✔, U+2717 ✗,
+ * U+00D7 ×) and a skin that wants a cross, a dot or a filled square says so
+ * here. An unchecked box simply has no rule, so its span stays empty.
+ *
+ * The widget spawns an empty text node carrying `PseudoElementsSupport`; it
+ * never names a glyph, which is why there is no Rust system rewriting one. */
+.sk-checkbox:checked .sk-checkbox-tick::before {
+  content: "\2713";
+  color: var(--check-tick);
+}
+
+/* Refused. The box greys whatever its state; the tick greys only where there
+ * *is* one, which is why that rule is compound — an unchecked box has no
+ * `::before` content to grey. */
+.sk-checkbox:disabled .sk-checkbox-box {
+  background-color: var(--control-bg-disabled);
+  border-color: var(--control-border-disabled);
+}
+
+.sk-checkbox:checked:disabled .sk-checkbox-tick::before {
+  color: var(--text-disabled);
+}
+
 /* A skin-tone swatch in the emoji picker: a bordered tile, exactly one of which
  * is chosen. That is a radio, so the chosen one carries `Checked` and `:checked`
  * outlines it — no marker class and no per-tone paint loop. */
@@ -477,19 +527,31 @@
   color: var(--text-disabled);
 }
 
-/* A radio option's indicator glyph, and its two other states.
+/* A radio option's indicator, and its two other states.
  *
  * Both come from an ancestor: the option's own `:checked` (the `Checked` the
  * widget already maintains for the ARIA radiogroup pattern) and the group's
- * `:disabled`. The glyph itself still changes in Rust — CSS cannot swap text
- * content — so the lit ring is a shape change as well as a colour one, and a
- * skin that recolours only is still legible. */
+ * `:disabled`.
+ *
+ * The **glyph is the skin's**, like the checkbox's tick — `content` on a
+ * `::before` — so the lit ring is a shape change as well as a colour one and a
+ * skin that recolours only is still legible, without a Rust system rewriting
+ * text. A skin wanting a filled dot (U+2022 •), a square (U+25A0 ■) or a
+ * different ring pair says so here. */
 .sk-radio-indicator {
   color: var(--text-muted);
 }
 
+.sk-radio-indicator::before {
+  content: "\25cb";
+}
+
 .sk-radio:checked .sk-radio-indicator {
   color: var(--accent);
+}
+
+.sk-radio:checked .sk-radio-indicator::before {
+  content: "\25c9";
 }
 
 /* Last of the three, so a group the consumer cannot change greys whether or
