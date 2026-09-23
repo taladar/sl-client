@@ -118,10 +118,15 @@ const CONTROL_BORDER: Color = Color::srgba(0.4, 0.4, 0.45, 1.0);
 /// already sets, so nothing here paints it.
 const SWATCH_CLASS: &str = "sk-swatch";
 
-/// The skin classes on one row of the picker's tree: the shared resting look
-/// and selection (`.sk-list-row`, `.sk-active`) plus the picker's own pointer
-/// hover, which is a `:hover` rule and needs no observer.
-const ROW_CLASS: &str = "sk-list-row sk-picker-row";
+/// The skin class on one row of the picker's tree: the shared resting look,
+/// selection and pointer hover (`.sk-list-row`, `.sk-active`,
+/// `.sk-list-row:hover`).
+///
+/// It used to carry a second `sk-picker-row` for the hover alone, because this
+/// was the only list in the viewer that lit a row under the pointer.
+/// `viewer-skin-list-row-striping` gave every list that hover, so the class had
+/// nothing left to say.
+const ROW_CLASS: &str = "sk-list-row";
 
 /// A tile / swatch's empty fill.
 const EMPTY_FILL: Color = Color::srgba(0.1, 0.1, 0.12, 1.0);
@@ -922,7 +927,7 @@ fn rebuild_tree(
 /// Mark the selected texture item's row on the existing rows (so a selection
 /// change never respawns rows). What selected *looks* like is
 /// `.sk-list-row.sk-active`'s — which is also why the hover no longer has to be
-/// worked around here: that compound beats `.sk-picker-row:hover`, where this
+/// worked around here: that compound beats `.sk-list-row:hover`, where this
 /// used to keep the two apart by comparing colours.
 fn paint_tree_selection(
     windows: Query<(&TexturePickerState, &TexturePickerUi)>,

@@ -423,6 +423,146 @@ mod test {
         Ok(())
     }
 
+    /// **A row's four states resolve in the order the file puts them in.**
+    ///
+    /// Striped, hovered and selected are one class or pseudo-class each,
+    /// compounded with the row's own — (0,2,0) every time — so specificity
+    /// separates none of them and a row that is all three is painted by
+    /// whichever rule `common.css` states last. That is the whole mechanism
+    /// (`viewer-skin-list-row-striping`), and it is invisible to Rust: the
+    /// classes go on, and what comes out the other end is a colour.
+    ///
+    /// Graphite bands nothing, so the stripe here resolves to the transparent
+    /// its token holds — `a_light_list_bands_hovers_and_selects` is where the
+    /// stripe has a colour to show. What this pins is the precedence, and the
+    /// selected row's text, which Graphite *does* move off the field family.
+    #[test]
+    fn a_rows_states_resolve_stripe_then_hover_then_selection() -> Result<(), TestError> {
+        use bevy::picking::hover::Hovered;
+
+        let mut app = app();
+        let handle: Handle<StyleSheet> = app
+            .world()
+            .resource::<AssetServer>()
+            .load("skins/graphite/skin.css");
+        let root = app
+            .world_mut()
+            .spawn((Node::default(), Styled::new(handle.clone())))
+            .id();
+        let mut row = |classes: &str, hovered: bool| {
+            let entity = app
+                .world_mut()
+                .spawn((Node::default(), ClassList::new(classes), ChildOf(root)))
+                .id();
+            if hovered {
+                app.world_mut().entity_mut(entity).insert(Hovered(true));
+            }
+            entity
+        };
+        let striped = row("sk-table-row sk-stripe", false);
+        let hovered = row("sk-table-row", true);
+        let striped_hovered = row("sk-table-row sk-stripe", true);
+        let selected_hovered = row("sk-table-row sk-active", true);
+        let hovered_hand_rolled = row("sk-list-row", true);
+
+        // The text half: a cell in a selected row against one in an ordinary
+        // row, both inside a list's face, so the re-rooting applies to both and
+        // only the selection separates them.
+        let list = app
+            .world_mut()
+            .spawn((
+                Node::default(),
+                ClassList::new("sk-list-surface"),
+                ChildOf(root),
+            ))
+            .id();
+        let selected_row = app
+            .world_mut()
+            .spawn((
+                Node::default(),
+                ClassList::new("sk-table-row sk-active"),
+                ChildOf(list),
+            ))
+            .id();
+        let selected_cell = app
+            .world_mut()
+            .spawn((
+                Text::new("Kelly"),
+                ClassList::new("sk-text"),
+                ChildOf(selected_row),
+            ))
+            .id();
+        let resting_row = app
+            .world_mut()
+            .spawn((
+                Node::default(),
+                ClassList::new("sk-table-row"),
+                ChildOf(list),
+            ))
+            .id();
+        let resting_cell = app
+            .world_mut()
+            .spawn((
+                Text::new("Robin"),
+                ClassList::new("sk-text"),
+                ChildOf(resting_row),
+            ))
+            .id();
+
+        load(&mut app, &handle)?;
+        app.update();
+
+        let fill = |entity| {
+            app.world()
+                .get::<BackgroundColor>(entity)
+                .map(|background| background.0)
+        };
+        let text = |entity| app.world().get::<TextColor>(entity).map(|color| color.0);
+        let hover = Some(Color::srgb_u8(0x35, 0x3c, 0x4a));
+
+        assert_eq!(
+            fill(striped).map(|color| color.to_srgba()),
+            Some(Srgba::NONE),
+            "Graphite bands nothing, so a striped row is its list's face"
+        );
+        assert_eq!(
+            fill(hovered),
+            hover,
+            "a row under the pointer did not take `--list-row-hover`, so no \
+             list in the viewer answers the pointer"
+        );
+        assert_eq!(
+            fill(hovered_hand_rolled),
+            hover,
+            "a hand-rolled list's row must hover like a table's — that shared \
+             rule is what retired the texture picker's `.sk-picker-row:hover`"
+        );
+        assert_eq!(
+            fill(striped_hovered),
+            hover,
+            "the hover must come after the stripe, or the pointer does \
+             nothing on every other row"
+        );
+        assert_eq!(
+            fill(selected_hovered),
+            Some(Color::srgba_u8(0x3d, 0x57, 0x85, 0x8c)),
+            "the selection must come after the hover, or moving the pointer \
+             over the selected row un-selects it to the eye"
+        );
+        assert_eq!(
+            text(selected_cell),
+            Some(Color::srgb_u8(0xe6, 0xeb, 0xf2)),
+            "a selected row's text did not take `--list-row-selected-text`"
+        );
+        assert_eq!(
+            text(resting_cell),
+            Some(Color::srgb_u8(0xff, 0xff, 0xff)),
+            "an unselected cell must stay on the field family, or the \
+             selected-row rule is reaching the whole list"
+        );
+        Ok(())
+    }
+
     /// **Toggling `Checked` at runtime moves the mark, both ways.**
     ///
     /// Every other checkbox test here spawns one entity per state, so all of
@@ -1113,6 +1253,192 @@ mod test {
             chrome_text,
             "a label outside any list must keep the chrome text role — the \
              re-rooting has to be scoped to the data surface"
+        );
+        Ok(())
+    }
+
+    /// **A combo's drop-down has a surface of its own, and an opaque one.**
+    ///
+    /// It is a *list*, so it takes the field family's text — and it **floats**,
+    /// which is the half that was got wrong: it was given `--list-bg`, a 25%
+    /// black scrim meant for a list sitting in a panel, and a drop-down has no
+    /// panel behind it. The chrome and the world read straight through the
+    /// options. The reference makes `ComboListBgColor` opaque in every skin it
+    /// ships, and gives it a name of its own for exactly this reason.
+    ///
+    /// Asserted as "not the scrim, and not see-through" rather than against one
+    /// hex value, because what matters is the property, not the colour a skin
+    /// happens to choose.
+    #[test]
+    fn a_floating_drop_down_is_not_a_scrim() -> Result<(), TestError> {
+        let mut app = app();
+        let handle: Handle<StyleSheet> = app
+            .world()
+            .resource::<AssetServer>()
+            .load("skins/graphite/skin.css");
+        let root = app
+            .world_mut()
+            .spawn((Node::default(), Styled::new(handle.clone())))
+            .id();
+        let popover = app
+            .world_mut()
+            .spawn((
+                Node::default(),
+                ClassList::new("sk-combo-list"),
+                ChildOf(root),
+            ))
+            .id();
+        let embedded = app
+            .world_mut()
+            .spawn((
+                Node::default(),
+                ClassList::new("sk-list-surface"),
+                ChildOf(root),
+            ))
+            .id();
+
+        load(&mut app, &handle)?;
+        app.update();
+
+        let fill = |entity| {
+            app.world()
+                .get::<BackgroundColor>(entity)
+                .map(|background| background.0.to_srgba())
+        };
+        let drop_down = fill(popover).ok_or("the drop-down resolved no background at all")?;
+        assert!(
+            drop_down.alpha >= 1.0,
+            "a drop-down floats, so ANY transparency puts whatever is behind it \
+             among the option labels — 5% was enough to read as a missing \
+             background over text: {drop_down:?}"
+        );
+        assert_ne!(
+            Some(drop_down),
+            fill(embedded),
+            "a floating drop-down and a list embedded in a panel must not share \
+             one token — that is how the scrim got onto the drop-down"
+        );
+        Ok(())
+    }
+
+    /// **A skin that bands its lists gets banded lists, with no Rust change.**
+    ///
+    /// The other half of `a_rows_states_resolve_stripe_then_hover_then_selection`:
+    /// that one pins the precedence in a skin where the stripe is transparent,
+    /// this one gives the four row roles the reference's measured Vintage
+    /// values and reads them back. Both flat skins leave a list's rows to the
+    /// list's own face, so without a fixture nothing here would be visible in
+    /// any sheet the binary ships — which is exactly the case that hides a
+    /// token that never reached its rule.
+    ///
+    /// The caption of a **button** inside a selected row is the assertion that
+    /// pays for itself: `--list-row-selected-text` is black in this fixture
+    /// and the chrome text is near-white, so a selected-row rule that reached
+    /// past the row's own cells would put black text on a dark button.
+    #[test]
+    fn a_light_list_bands_hovers_and_selects() -> Result<(), TestError> {
+        use bevy::picking::hover::Hovered;
+
+        let mut app = app_with_assets(&test_assets_dir());
+        let handle: Handle<StyleSheet> = app
+            .world()
+            .resource::<AssetServer>()
+            .load("light-field.css");
+        let root = app
+            .world_mut()
+            .spawn((Node::default(), Styled::new(handle.clone())))
+            .id();
+        let list = app
+            .world_mut()
+            .spawn((
+                Node::default(),
+                ClassList::new("sk-list-surface"),
+                ChildOf(root),
+            ))
+            .id();
+        let mut row = |classes: &str, hovered: bool| {
+            let entity = app
+                .world_mut()
+                .spawn((Node::default(), ClassList::new(classes), ChildOf(list)))
+                .id();
+            if hovered {
+                app.world_mut().entity_mut(entity).insert(Hovered(true));
+            }
+            entity
+        };
+        let resting = row("sk-list-row", false);
+        let striped = row("sk-list-row sk-stripe", false);
+        let hovered = row("sk-list-row", true);
+        let selected = row("sk-list-row sk-active", false);
+
+        let selected_cell = app
+            .world_mut()
+            .spawn((
+                Text::new("Kelly"),
+                ClassList::new("sk-text"),
+                ChildOf(selected),
+            ))
+            .id();
+        let button = app
+            .world_mut()
+            .spawn((
+                Node::default(),
+                ClassList::new("sk-button"),
+                ChildOf(selected),
+            ))
+            .id();
+        let caption = app
+            .world_mut()
+            .spawn((
+                Text::new("Remove"),
+                ClassList::new("sk-text"),
+                ChildOf(button),
+            ))
+            .id();
+
+        load(&mut app, &handle)?;
+        app.update();
+
+        let fill = |entity| {
+            app.world()
+                .get::<BackgroundColor>(entity)
+                .map(|background| background.0)
+        };
+        let text = |entity| app.world().get::<TextColor>(entity).map(|color| color.0);
+
+        assert_eq!(
+            fill(resting).map(|color| color.to_srgba()),
+            Some(Srgba::NONE),
+            "an ordinary row is the list's own face showing through — the \
+             fixture leaves `--list-row-bg` at the fallback's transparent"
+        );
+        assert_eq!(
+            fill(striped),
+            Some(Color::srgb_u8(0xb8, 0xbf, 0xbb)),
+            "`ScrollBGStripeColor` never reached the row, so a banded skin \
+             gets no bands"
+        );
+        assert_eq!(
+            fill(hovered),
+            Some(Color::srgb_u8(0xbe, 0xc3, 0xc3)),
+            "`ScrollHoveredColor` never reached the row"
+        );
+        assert_eq!(
+            fill(selected),
+            Some(Color::srgb_u8(0x8d, 0x90, 0xc2)),
+            "`ScrollSelectedBGColor` never reached the row — a light list \
+             cannot take the chrome's blue selection"
+        );
+        assert_eq!(
+            text(selected_cell),
+            Some(Color::srgb_u8(0x00, 0x00, 0x00)),
+            "a selected row's cell must take the skin's selected text"
+        );
+        assert_eq!(
+            text(caption),
+            Some(Color::srgb_u8(0xe6, 0xeb, 0xf5)),
+            "a button inside a SELECTED row must keep the chrome text, the \
+             same exception a button in an ordinary row already has"
         );
         Ok(())
     }

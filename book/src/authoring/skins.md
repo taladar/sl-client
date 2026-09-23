@@ -124,7 +124,12 @@ Defined by every skin's `skin.css`, consumed by `common.css`:
 | `--caret` / `--selection` / `--selection-unfocused` | the text caret and its two selection washes |
 | `--focus-ring` | the keyboard-focus ring |
 | `--accent` | accent bars, an active tab's frame, a lit radio, a drag grip |
-| `--selection-bg` | a selected row's (translucent) background |
+| `--selection-bg` | a lit control's (translucent) background: a toggled toolbar button, an active tab |
+| `--list-row-bg` | a scroll list's ordinary row — transparent in both shipped skins, so the list's own face shows through |
+| `--list-row-stripe` | every other row of a scroll list, by the row's data index |
+| `--list-row-hover` | the row under the pointer |
+| `--list-row-selected-bg` | a selected row's (translucent) background |
+| `--list-row-selected-text` | a selected row's text, which a light list moves off the field family |
 | `--match-highlight` | the glyphs of a filter match inside an ordinary label |
 | `--divider` | a splitter, a rule, a column resize handle |
 | `--track-bg` | the trough a scrollbar thumb or slider handle runs in |
@@ -216,6 +221,7 @@ the stock look rather than to black.
 | `.sk-tab-panel` | a tab page |
 | `.sk-scrollbar-track` / `.sk-scrollbar-thumb` | a scrollbar, in both the tab strip and the windowed list |
 | `.sk-divider` / `.sk-divider-grip` / `.sk-column-resizer` | a pane splitter, its nub, a table column's drag handle |
+| `.sk-list-row` / `.sk-table-row` | one row of a scroll list, plus its `:hover`; worn with `.sk-stripe` on every other row and `.sk-active` when selected |
 | `.sk-field` | an editable text field's box |
 | `.sk-text-field` | the caret / selection colours of **every** editor (stamped automatically) |
 | `.sk-search-field` / `.sk-search-clear` | the shared search box and its `×` button |
@@ -226,13 +232,16 @@ the stock look rather than to black.
 | `.sk-status-readout` | a status-row read-out (region / coordinates / balance / time / FPS) |
 | `.sk-parcel-icon` | a parcel-permission icon on the status row (see below) |
 
-Some widgets are deliberately **absent** from that list even though they are
-skinnable: a floater's title text, a tab button, a radio indicator, a table row
-selection, a menu entry's greying and the pie menu's disc all take their colours
-from the role palette instead, because their paint depends on state a selector
-cannot see. Retuning the role token restyles them; there is no class to write a
-rule against, and adding one would *break* them — a class `color` beats the
-Rust-painted value and flattens the state distinction it was carrying.
+A few things are deliberately **absent** from that list even though they are
+skinnable — the pie menu's disc and wedges above all, which are a **shader**
+rather than nodes the cascade can reach. They take their colours from the role
+palette instead: retuning the role token restyles them, and there is no class
+to write a rule against.
+
+Widget **state** is not in that group: hovered, selected, toggled and refused
+are classes and pseudo-classes in `common.css` (`.sk-active`,
+`.sk-highlighted`, `:hover`, `:checked`, `:disabled`), so a skin restyles a
+selected row or a lit toolbar button by writing a rule like any other.
 
 ### The status-bar parcel-permission icons
 

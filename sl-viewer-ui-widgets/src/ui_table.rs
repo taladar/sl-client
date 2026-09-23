@@ -59,8 +59,8 @@ use sl_settings::SettingValue;
 use sl_viewer_settings::ViewerSettings;
 use sl_viewer_ui_core::i18n::Translated;
 use sl_viewer_ui_core::skin::{
-    ACTIVE_CLASS, DISABLED_TEXT_CLASS, LIST_SURFACE_CLASS, set_role_class, set_state_class,
-    text_role,
+    ACTIVE_CLASS, DISABLED_TEXT_CLASS, LIST_ROW_CLASS, LIST_SURFACE_CLASS, STRIPE_CLASS,
+    TABLE_ROW_CLASS, TEXT_CLASS, set_role_class, set_state_class, text_role,
 };
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 use sl_viewer_ui_core::ui::UiDirection;
@@ -84,15 +84,14 @@ const RESIZER_WIDTH: f32 = 7.0;
 /// column borders are discoverable without shouting.
 const RESIZER_CLASS: &str = "sk-column-resizer";
 
-/// The skin class on a table row. A selected row adds [`ACTIVE_CLASS`].
+/// The skin class on a table row — [`TABLE_ROW_CLASS`], named in
+/// `sl_viewer_ui_core::skin` beside the hand-rolled lists' [`LIST_ROW_CLASS`]
+/// because the scaffold that gives a row its hover has to know both.
 ///
-/// A marker rather than a pseudo-class, and deliberately: the rows are
-/// **recycled** by the virtual list, so selection is a property of the row's
-/// current *index* rather than of the entity, and no state the engine tracks
-/// describes it. `bevy_ui::Checked` would have fitted the selector but not the
-/// meaning — it carries checkbox semantics into the accessibility tree, and a
-/// list row is not a checkbox.
-const ROW_CLASS: &str = "sk-table-row";
+/// A selected row adds [`ACTIVE_CLASS`]; `bevy_ui::Checked` would have fitted
+/// the selector but not the meaning — it carries checkbox semantics into the
+/// accessibility tree, and a list row is not a checkbox.
+const ROW_CLASS: &str = TABLE_ROW_CLASS;
 
 /// The gap between a header label and its sort-direction arrow, in logical pixels.
 const ARROW_GAP: f32 = 2.0;
@@ -1750,6 +1749,77 @@ pub fn register_table_settings(settings: &mut ViewerSettings, section: &[&str], 
             "setting-desc-table-column-widths",
         );
     }
+}
+
+/// Gallery element: the four looks a scroll list's rows have, on a list's own
+/// face (`viewer-skin-list-row-striping`).
+///
+/// All four together because they are a *set*, the same argument the checkbox's
+/// specimen makes: a skin author choosing `--list-row-stripe` needs to see it
+/// against the ordinary row it alternates with, and against the selection that
+/// has to stay louder than both. Nothing here is painted from Rust — the rows
+/// carry `.sk-list-row`, `.sk-stripe` and `.sk-active` and the stylesheet
+/// decides — so this is also where a skin's row family is checked.
+///
+/// The **hover** is the one state not laid out here, because it cannot be: it
+/// is a real `:hover`, so it shows by putting the pointer on a row, which is
+/// the point of a live gallery.
+///
+/// Plain rows rather than a [`spawn_table`] fixture: a table would bring a
+/// header, a column model and a virtual pool along, and none of that is what a
+/// skin author is looking at.
+pub fn spawn_list_row_states_element(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: sl_viewer_ui_core::ui_element::ElementCx,
+) -> Entity {
+    let list = commands
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::all(Val::Px(2.0)),
+                ..default()
+            },
+            ClassList::new_with_classes([LIST_SURFACE_CLASS]),
+            Name::new("list-row-states"),
+            ChildOf(parent),
+        ))
+        .id();
+    for (element, caption, striped, selected) in [
+        ("list-row-resting", "Aviary Sandbox", false, false),
+        ("list-row-stripe", "Bay City — Harbour", true, false),
+        ("list-row-selected", "Calleta (selected)", false, true),
+        ("list-row-stripe-selected", "Da Boom (selected)", true, true),
+    ] {
+        let row = commands
+            .spawn((
+                Node {
+                    padding: UiRect::axes(Val::Px(6.0), Val::Px(3.0)),
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                ClassList::new_with_classes(
+                    core::iter::once(LIST_ROW_CLASS)
+                        .chain(striped.then_some(STRIPE_CLASS))
+                        .chain(selected.then_some(ACTIVE_CLASS)),
+                ),
+                // Blocking, so the row answers the pointer and its `:hover`
+                // rule is reachable — which is the whole demonstration of the
+                // one state this element cannot lay out.
+                Pickable::default(),
+                Name::new(element),
+                ChildOf(list),
+            ))
+            .id();
+        commands.spawn((
+            Text::new(cx.text(caption)),
+            cx.font(UiFont::Sans),
+            ClassList::new_with_classes([TEXT_CLASS]),
+            Name::new(format!("{element}:label")),
+            ChildOf(row),
+        ));
+    }
+    list
 }
 
 // ---------------------------------------------------------------------------

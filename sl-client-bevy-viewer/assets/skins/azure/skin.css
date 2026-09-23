@@ -57,6 +57,18 @@
   --field-placeholder: #b9d4ee;
   --list-bg: #00000040;
   --menu-bg: #0f2740f2;
+  /* A combo's drop-down: opaque, because it floats — the list scrim would let
+   * the world through it. */
+  --combo-list-bg: #0f2740;
+  /* A scroll list's four row states (viewer-skin-list-row-striping): no
+   * banding, the chrome hover, and the selection a lit control already takes.
+   * The reference's dark default skin leaves `ScrollBGStripeColor` transparent
+   * too — banded lists are a light skin's idea. */
+  --list-row-bg: #00000000;
+  --list-row-stripe: #00000000;
+  --list-row-hover: #1f4e79;
+  --list-row-selected-bg: #2f6fae8c;
+  --list-row-selected-text: #eaf3ff;
 
   /* Focus ring */
   --focus-ring: #ffd166;

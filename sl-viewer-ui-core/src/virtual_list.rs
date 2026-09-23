@@ -60,7 +60,7 @@ use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 use bevy_flair::style::components::ClassList;
 
-use crate::skin::{SCROLLBAR_THUMB_CLASS, SCROLLBAR_TRACK_CLASS};
+use crate::skin::{SCROLLBAR_THUMB_CLASS, SCROLLBAR_TRACK_CLASS, STRIPE_CLASS, set_state_class};
 use crate::skin_palette::SkinPalette;
 use crate::ui::{LogicalInset, LogicalRect, UiDirection};
 
@@ -89,6 +89,7 @@ impl Plugin for VirtualListPlugin {
             (
                 scroll_virtual_lists,
                 layout_virtual_lists,
+                stripe_virtual_rows,
                 drive_virtual_scrollbars,
             )
                 .chain(),
@@ -724,6 +725,37 @@ pub fn layout_virtual_lists(
     }
 }
 
+/// Stripe every other row of every virtualised list, by the **data** index the
+/// row currently shows (`viewer-skin-list-row-striping`).
+///
+/// The parity has to follow the item, not the pooled row: `slot_index`'s
+/// mapping is modular, so one row of scroll changes which slot shows which
+/// item, and a stripe taken from the slot would crawl up the list as it
+/// scrolled. [`VirtualRow::index`] is the mapping's answer, so this reads that
+/// and nothing else — a parked row (`index: None`) is unstriped, which is what
+/// it would be anyway with `Display::None`.
+///
+/// Even indices carry the stripe, matching the reference's own scroll list
+/// (`LLScrollListCtrl::draw`: `mDrawStripes && (line % 2 == 0)`), so the first
+/// row of a list is the striped one.
+///
+/// Runs over every pooled row every frame rather than on `Changed<VirtualRow>`:
+/// a consumer inserts its [`ClassList`] from a `Commands` in its own `Added`
+/// pass, which lands a frame or more after the bind that would have been the
+/// only notification, and a row that missed it would stay unstriped for its
+/// whole life. [`set_state_class`] guards the
+/// write, so a settled list costs a compare per row and wakes nothing.
+///
+/// A row with no [`ClassList`] is skipped rather than given one, on the same
+/// rule as [`set_state_class_on`](crate::skin::set_state_class_on): a widget
+/// that wants to be styled says so when it spawns.
+pub fn stripe_virtual_rows(mut rows: Query<(&VirtualRow, &mut ClassList)>) {
+    for (row, mut classes) in &mut rows {
+        let striped = row.index.is_some_and(|index| index % 2 == 0);
+        set_state_class(&mut classes, STRIPE_CLASS, striped);
+    }
+}
+
 /// Widen a row index or count to `f32` without an `as` cast (the workspace
 /// forbids them), by splitting the low 32 bits into two `u16` halves — the same
 /// trick `coords::metres_to_f32` uses. Counts far beyond `u32` are not
@@ -762,11 +794,12 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::{
-        OVERSCAN_ROWS, RowWindow, SCROLLBAR_THICKNESS, UiDirection, VirtualList, VirtualRow,
-        content_height, floor_to_usize, index_to_f32, layout_virtual_lists, max_scroll, row_top,
-        row_window, scrollbar_geometry, slot_index,
+        ClassList, OVERSCAN_ROWS, RowWindow, SCROLLBAR_THICKNESS, STRIPE_CLASS, UiDirection,
+        VirtualList, VirtualRow, content_height, floor_to_usize, index_to_f32,
+        layout_virtual_lists, max_scroll, row_top, row_window, scrollbar_geometry, slot_index,
+        stripe_virtual_rows,
     };
-    use pretty_assertions::assert_eq;
+    use pretty_assertions::{assert_eq, assert_ne};
 
     /// A window with no overscan, for reasoning about the visible span alone.
     fn window_no_overscan(scroll: f32, viewport: f32, row_height: f32, count: usize) -> RowWindow {
@@ -1019,7 +1052,10 @@ mod tests {
             // reads the direction like every other laying-out system here;
             // without the resource it fails parameter validation on frame one.
             .insert_resource(direction)
-            .add_systems(Update, (layout_virtual_lists, count_rebinds).chain());
+            .add_systems(
+                Update,
+                (layout_virtual_lists, stripe_virtual_rows, count_rebinds).chain(),
+            );
         let mut list = VirtualList::new(row_height);
         list.item_count = item_count;
         let viewport = app
@@ -1046,6 +1082,89 @@ mod tests {
             .collect::<Vec<(usize, Option<usize>)>>();
         rows.sort_unstable_by_key(|&(slot, _)| slot);
         rows.into_iter().map(|(_, index)| index).collect()
+    }
+
+    /// **A stripe belongs to the item, not to the pooled row.**
+    ///
+    /// The slot↔item mapping is modular, so one row of scroll re-binds exactly
+    /// one slot and leaves every other slot showing the item it showed before.
+    /// A stripe taken from the slot (a `:nth-child(even)`, or a parity computed
+    /// once at spawn) would therefore stay put while the items moved under it,
+    /// and the bands would crawl up the list as it scrolled — worse than no
+    /// stripe at all. This asserts the parity against
+    /// [`VirtualRow::index`](super::VirtualRow::index) before and after a
+    /// one-row scroll, which is the scroll that moves exactly one slot.
+    #[test]
+    fn stripe_parity_follows_the_item_across_a_scroll() -> Result<(), TestError> {
+        /// Every pooled row's item and whether it is striped, in slot order.
+        fn stripes(app: &mut App) -> Vec<(Option<usize>, bool)> {
+            let mut query = app.world_mut().query::<(&VirtualRow, &ClassList)>();
+            let mut rows = query
+                .iter(app.world())
+                .map(|(row, classes)| (row.slot, row.index, classes.contains(STRIPE_CLASS)))
+                .collect::<Vec<(usize, Option<usize>, bool)>>();
+            rows.sort_unstable_by_key(|&(slot, _, _)| slot);
+            rows.into_iter()
+                .map(|(_, index, striped)| (index, striped))
+                .collect()
+        }
+
+        let (mut app, viewport) = pool_app(100, 20.0, 100.0);
+        // One frame to grow and bind the pool, then give every pooled row a
+        // class list the way a consumer's `Added<VirtualRow>` pass does — a
+        // frame later than the bind, which is why the striping system scans
+        // rather than watching `Changed<VirtualRow>`.
+        app.update();
+        let pooled: Vec<Entity> = {
+            let mut query = app.world_mut().query_filtered::<Entity, With<VirtualRow>>();
+            query.iter(app.world()).collect()
+        };
+        assert!(
+            !pooled.is_empty(),
+            "the pool never grew, so nothing striped"
+        );
+        for row in pooled {
+            app.world_mut()
+                .entity_mut(row)
+                .insert(ClassList::new("sk-list-row"));
+        }
+        // Away from the top, where the window really does move: the backward
+        // overscan clamps at item 0, so the first few rows of scroll change
+        // nothing about which slot shows which item.
+        if let Some(mut list) = app.world_mut().get_mut::<VirtualList>(viewport) {
+            list.scroll = row_top(OVERSCAN_ROWS + 1, 20.0);
+        }
+        app.update();
+
+        let before = stripes(&mut app);
+        for &(index, striped) in &before {
+            assert_eq!(
+                striped,
+                index.is_some_and(|index| index % 2 == 0),
+                "item {index:?} is striped {striped}, which is not its own parity"
+            );
+        }
+
+        // One row further: the window advances by one, so exactly one slot
+        // re-binds and its parity must flip with the item it took.
+        if let Some(mut list) = app.world_mut().get_mut::<VirtualList>(viewport) {
+            list.scroll = row_top(OVERSCAN_ROWS + 2, 20.0);
+        }
+        app.update();
+        let after = stripes(&mut app);
+        for &(index, striped) in &after {
+            assert_eq!(
+                striped,
+                index.is_some_and(|index| index % 2 == 0),
+                "after one row of scroll, item {index:?} carries stripe {striped}"
+            );
+        }
+        assert_ne!(
+            before, after,
+            "no slot changed item across a one-row scroll, so the assertion \
+             above would hold for a stripe computed from the slot too"
+        );
+        Ok(())
     }
 
     /// A visible scrollbar **reserves** the rows' inline-end edge rather than

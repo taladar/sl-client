@@ -300,6 +300,10 @@ impl Plugin for ViewerSkinPlugin {
                     // Tag each editable text field so the skin's caret /
                     // selection / focused-field rules reach it (R28).
                     stamp_text_field_class,
+                    // Give everything a `:hover` rule selects the component
+                    // that pseudo-class is read from — nothing else does
+                    // (`viewer-skin-list-row-striping`).
+                    stamp_hover_state,
                 ),
             )
             .add_systems(
@@ -434,6 +438,17 @@ pub const FOLDER_LABEL_CLASS: &str = "sk-folder-label";
 /// has something to select.
 pub const TILE_CLASS: &str = "sk-tile";
 
+/// The CSS class on a clickable item embedded in notecard prose — an object in
+/// a paragraph. Its hover is a `:hover` rule, so the class is what the
+/// scaffold's hover stamp needs to see.
+pub const INLINE_ITEM_CLASS: &str = "sk-inline-item";
+
+/// The CSS class on one row of a combo box's open drop-down. Its hover is a
+/// `:hover` rule, which replaced a hand-written `Pointer<Over>` /
+/// `Pointer<Out>` observer pair — and then painted nothing until the
+/// scaffold's hover stamp gave the row the state to be hovered in.
+pub const COMBO_OPTION_CLASS: &str = "sk-combo-option";
+
 /// The CSS class on a presence indicator showing its subject is online, and
 /// [`PRESENCE_OFFLINE_CLASS`] for one who is not.
 ///
@@ -512,9 +527,111 @@ pub const DISABLED_TEXT_CLASS: &str = "sk-disabled-text";
 /// licence list. Its selected look is [`ACTIVE_CLASS`]; this carries the
 /// resting one, so dropping the state class has somewhere to land.
 ///
-/// The table widget's own rows use `sk-table-row`, which shares the rule:
-/// "table row" would be a lie on half of these.
+/// The table widget's own rows use [`TABLE_ROW_CLASS`], which shares every
+/// rule with this one.
 pub const LIST_ROW_CLASS: &str = "sk-list-row";
+
+/// The CSS class on one row of the **table widget**, which shares every rule
+/// with [`LIST_ROW_CLASS`] — "table row" would be a lie on half the lists that
+/// carry the other one, and a row's look must not depend on which of the two
+/// spelled it.
+///
+/// A marker rather than a pseudo-class, and deliberately: the rows are
+/// **recycled** by the virtual list, so selection is a property of the row's
+/// current *index* rather than of the entity, and no state the engine tracks
+/// describes it.
+pub const TABLE_ROW_CLASS: &str = "sk-table-row";
+
+/// Every class `common.css` writes a `:hover` rule for.
+///
+/// It is the input to [`stamp_hover_state`] and
+/// `every_hover_rule_has_something_to_hover` asserts it is **exactly** the set
+/// the stylesheet names — add a `:hover` rule without adding its class here and
+/// the test says so, rather than the rule quietly painting nothing.
+const HOVER_CLASSES: &[&str] = &[
+    BUTTON_CLASS,
+    TILE_CLASS,
+    INLINE_ITEM_CLASS,
+    COMBO_OPTION_CLASS,
+    TABLE_ROW_CLASS,
+    LIST_ROW_CLASS,
+];
+
+/// What [`stamp_hover_state`] walks: the classed nodes that could still need
+/// the hover component — everything whose `ClassList` has just changed (an
+/// insert counts) and that carries neither the modern `Hovered` nor the legacy
+/// `Interaction`.
+///
+/// A named type because the two `Without`s and the `Changed` are what keep the
+/// scan bounded, and a filter this load-bearing should be readable at a glance
+/// rather than spelled inline.
+type HoverCandidates<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static ClassList),
+    (
+        Changed<ClassList>,
+        Without<bevy::picking::hover::Hovered>,
+        Without<Interaction>,
+    ),
+>;
+
+/// Give everything a `:hover` rule selects the component that pseudo-class is
+/// read from, so the rule fires at all.
+///
+/// `bevy_picking`'s `Hovered` is **opt-in** — its own docs say "typically, a
+/// simple hoverable entity or widget will have this component added to it", and
+/// nothing adds it for you — and `bevy_flair` reads exactly two things:
+/// `Hovered`, and the legacy `Interaction` that **`bevy_ui`'s** `Button`
+/// requires. Neither is implied by being pickable, or by carrying a class, or
+/// by `bevy_ui_widgets`' headless `Button`, which is a different type that
+/// requires neither.
+///
+/// So a `:hover` rule on anything that is not a `bevy_ui::Button` parsed,
+/// matched nothing, and painted nothing — silently, and only in the live
+/// viewer. Three rules were in that state when this was written: the scroll
+/// list rows this was added for, the emoji grid's `.sk-tile`, and
+/// `.sk-combo-option`, the last two having had working `Pointer<Over>` /
+/// `Pointer<Out>` observer pairs *replaced* by the rule.
+///
+/// A cascade test cannot catch it, which is worth stating because this codebase
+/// leans on those: a test inserts `Hovered(true)` itself and so proves the
+/// *rule* while staying blind to whether anything ever supplies the state.
+/// `every_hover_rule_has_something_to_hover` is the check that does see it.
+///
+/// Keyed off the classes rather than wired per call site, on
+/// [`stamp_focus_ring_class`]'s model: one place, and a widget built next year
+/// gets its hover by carrying the class, which is the whole claim the class
+/// makes. `Without<Hovered>` keeps the scan to nodes that still need it — the
+/// striping and selection systems touch a row's `ClassList` often — and
+/// `Without<Interaction>` leaves anything that already has the legacy component
+/// to the path it had, rather than have two systems write one pseudo-state.
+fn stamp_hover_state(mut commands: Commands, hoverable: HoverCandidates) {
+    for (entity, classes) in &hoverable {
+        if HOVER_CLASSES.iter().any(|class| classes.contains(*class)) {
+            commands
+                .entity(entity)
+                .insert(bevy::picking::hover::Hovered::default());
+        }
+    }
+}
+
+/// The CSS class on every other row of a scroll list
+/// (`viewer-skin-list-row-striping`), stamped by
+/// [`stripe_virtual_rows`](crate::virtual_list::stripe_virtual_rows) from the
+/// row's **data** index rather than from its pool slot.
+///
+/// Striping is not decoration on a list a hundred rows long — it is how the eye
+/// keeps a row's cells together across a wide table, which is most of what an
+/// inventory list, a radar and a region's top-objects list are.
+///
+/// A class rather than the `:nth-child(even)` the engine does parse: the rows
+/// are **recycled**, so a row's position among its siblings is its pool slot
+/// and the slot↔item mapping is modular — a `:nth-child` stripe would walk up
+/// the list as it scrolled, which is worse than no stripe. Only ever written
+/// compound with a row class in `common.css`, so a pooled row belonging to
+/// something that is not a list is unaffected.
+pub const STRIPE_CLASS: &str = "sk-stripe";
 
 /// The CSS class on the **face** a scroll list's rows sit on — the viewport of
 /// a virtualised list (`viewer-skin-light-surface-roles`).
@@ -1562,9 +1679,10 @@ pub fn scan_banned_properties(css: &str) -> Vec<BannedProperty> {
 #[cfg(test)]
 mod tests {
     use super::{
-        BANNED_PHYSICAL_PROPERTIES, DEFAULT_SKIN, FOCUSABLE_CLASS, SkinMargin, SkinRadius,
-        SkinSelection, UiDirection, invalidate_skin_boxes, logical_replacement, resolve_skin_boxes,
-        scan_banned_properties, stamp_focus_ring_class,
+        BANNED_PHYSICAL_PROPERTIES, DEFAULT_SKIN, FOCUSABLE_CLASS, HOVER_CLASSES, LIST_ROW_CLASS,
+        SkinMargin, SkinRadius, SkinSelection, TABLE_ROW_CLASS, UiDirection, invalidate_skin_boxes,
+        logical_replacement, resolve_skin_boxes, scan_banned_properties, stamp_focus_ring_class,
+        stamp_hover_state,
     };
     use crate::skin_palette::SkinPalette;
     use bevy::input_focus::tab_navigation::TabIndex;
@@ -1727,6 +1845,164 @@ mod tests {
             "a non-focusable entity (no TabIndex) must not be tagged"
         );
         Ok(())
+    }
+
+    /// **Everything a `:hover` rule selects is given the component that
+    /// pseudo-class is read from.**
+    ///
+    /// `bevy_picking`'s `Hovered` is opt-in and nothing adds it for you, so
+    /// `common.css`'s `.sk-list-row:hover` matched nothing at all until the
+    /// scaffold stamped it — a rule that parsed, resolved and painted never.
+    /// The cascade test for that rule cannot catch this: it inserts `Hovered`
+    /// itself, which is precisely the state nothing was supplying.
+    ///
+    /// Anything that already carries `Interaction` is left alone: `bevy_ui`'s
+    /// `Button` requires it, `bevy_flair` reads it for the same pseudo-state,
+    /// and two systems writing one state is a race to nowhere.
+    #[test]
+    fn a_hoverable_node_is_given_the_hover_component() {
+        use bevy::picking::hover::Hovered;
+
+        let mut app = App::new();
+        app.add_systems(Update, stamp_hover_state);
+
+        let list_row = app
+            .world_mut()
+            .spawn(ClassList::new_with_classes([LIST_ROW_CLASS]))
+            .id();
+        let table_row = app
+            .world_mut()
+            .spawn(ClassList::new_with_classes([TABLE_ROW_CLASS]))
+            .id();
+        let button_row = app
+            .world_mut()
+            .spawn((
+                ClassList::new_with_classes([LIST_ROW_CLASS]),
+                Interaction::default(),
+            ))
+            .id();
+        let nothing_hoverable = app
+            .world_mut()
+            .spawn(ClassList::new_with_classes(["sk-panel"]))
+            .id();
+
+        app.update();
+
+        assert!(
+            app.world().get::<Hovered>(list_row).is_some(),
+            "a hand-rolled list's row never hovers without this"
+        );
+        assert!(
+            app.world().get::<Hovered>(table_row).is_some(),
+            "a table row never hovers without this"
+        );
+        assert!(
+            app.world().get::<Hovered>(button_row).is_none(),
+            "a node that already carries `Interaction` has the pseudo-state \
+             driven for it"
+        );
+        assert!(
+            app.world().get::<Hovered>(nothing_hoverable).is_none(),
+            "a class with no `:hover` rule gains nothing — the component is \
+             only free while the set stays the set the stylesheet names"
+        );
+    }
+
+    /// `css` with every `/* … */` comment removed, so a scan over selectors
+    /// does not read the prose around them.
+    fn strip_css_comments(css: &str) -> String {
+        let mut out = String::new();
+        let mut rest = css;
+        while let Some((before, after)) = rest.split_once("/*") {
+            out.push_str(before);
+            let Some((_comment, tail)) = after.split_once("*/") else {
+                return out;
+            };
+            rest = tail;
+        }
+        out.push_str(rest);
+        out
+    }
+
+    /// **Every `:hover` rule in `common.css` selects something that can
+    /// actually be hovered.**
+    ///
+    /// This is the check that would have caught three dead rules, and the one
+    /// the cascade tests structurally cannot be: they supply `Hovered`
+    /// themselves. It reads the stylesheet, collects the class of every
+    /// `:hover` selector in it, and asserts that set is **exactly**
+    /// [`HOVER_CLASSES`] — the list `stamp_hover_state` walks.
+    ///
+    /// Both directions matter. A rule whose class is missing from the list
+    /// paints nothing, silently and only in the live viewer. A class in the
+    /// list with no rule left means the stamp is handing out a component for a
+    /// hover nobody draws, which is how the list would rot into a
+    /// catch-everything.
+    #[test]
+    fn every_hover_rule_has_something_to_hover() {
+        // Comments first, or the prose explaining a rule counts as one — and
+        // this file explains every rule it has, including two it no longer
+        // carries.
+        let css = strip_css_comments(include_str!("skins/common.css"));
+        let mut named: Vec<&str> = Vec::new();
+        for (at, _) in css.match_indices(":hover") {
+            let Some(before) = css.get(..at) else {
+                continue;
+            };
+            // The class is the identifier the pseudo-class hangs off: walk back
+            // over the name to the `.` that starts it.
+            let head =
+                before.trim_end_matches(|c: char| c.is_alphanumeric() || c == '-' || c == '_');
+            let Some(class) = before.get(head.len()..) else {
+                continue;
+            };
+            if head.ends_with('.') && !class.is_empty() {
+                named.push(class);
+            }
+        }
+        named.sort_unstable();
+        named.dedup();
+        let mut declared: Vec<&str> = HOVER_CLASSES.to_vec();
+        declared.sort_unstable();
+        assert_eq!(
+            named, declared,
+            "`common.css` writes a `:hover` rule for a class `stamp_hover_state` \
+             does not stamp (so the rule paints nothing at all, in the live \
+             viewer only), or stamps one no rule uses any more"
+        );
+    }
+
+    /// **Every `:hover` rule has a resting rule to fall back to.**
+    ///
+    /// `bevy_flair` does not *revert* a property when a rule stops matching — it
+    /// applies the winning rule's value and nothing more. A class whose only
+    /// rule is a `:hover` therefore paints on the way in and has nothing to
+    /// paint on the way out, so the state sticks for the life of the node. That
+    /// is what `.sk-tile` did: the wash stayed on every emoji cell the pointer
+    /// had ever crossed, which a dense grid makes obvious within seconds and no
+    /// test here could see.
+    ///
+    /// The check is deliberately coarse — a bare `.<class>` rule exists — rather
+    /// than per-property. It catches the shape of the mistake (a state with no
+    /// resting counterpart at all), which is the one that has actually been
+    /// made, twice.
+    #[test]
+    fn every_hover_rule_has_a_resting_rule() {
+        let css = strip_css_comments(include_str!("skins/common.css"));
+        let missing: Vec<&str> = HOVER_CLASSES
+            .iter()
+            .copied()
+            .filter(|class| {
+                // A selector list writes `.a,\n.b {`, so either spelling counts.
+                !css.contains(&format!(".{class} {{")) && !css.contains(&format!(".{class},"))
+            })
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "these classes have a `:hover` rule and no resting rule, so once \
+             the pointer has touched one the state never comes off it: \
+             {missing:?}"
+        );
     }
 
     /// `resolve` prefers the CLI pair atomically, falls back to a validated

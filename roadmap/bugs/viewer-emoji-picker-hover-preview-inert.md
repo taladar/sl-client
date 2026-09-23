@@ -45,6 +45,27 @@ cell gets two observers; the hover one is at ~line 572:
 
 Every failure path in it is a silent `return`, which is why nothing is logged.
 
+## A cheap discriminator (2026-09-23)
+
+`viewer-skin-list-row-striping` found that `bevy_picking`'s `Hovered` is
+**opt-in** and nothing was adding it, so every `:hover` rule on a non-`Button`
+node painted nothing — `.sk-tile:hover`, the emoji cell's **highlight**,
+among them. `skin::stamp_hover_state` now supplies it.
+
+That is a *different mechanism* from this bug (the preview line is written by a
+`Pointer<Over>` observer, which needs no component), but the two share an
+input: both the highlight and the `Over` event come from the **`HoverMap`**. So
+the fix turns the picker into a one-look experiment:
+
+- the cell now **highlights** under the pointer but the preview is still
+  empty → the cell is in the `HoverMap`, the event reaches it, and the fault is
+  in the observer body or its resource lookups (leads 2 and 3);
+- the cell **still does not highlight** → the cell is not in the `HoverMap` at
+  all and lead 1 is confirmed, which also predicts `Pointer<Out>` never fires.
+
+Worth running before touching any of the leads below, because it splits them in
+half for the cost of opening the floater.
+
 ## Leads, in order
 
 1. **The `Pointer<Over>` never reaches the cell.** The cell carries

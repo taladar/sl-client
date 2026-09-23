@@ -31,6 +31,7 @@ use bevy::ui_widgets::popover::{Popover, PopoverAlign, PopoverPlacement, Popover
 use bevy_flair::style::components::ClassList;
 
 use sl_viewer_ui_core::i18n::Translated;
+use sl_viewer_ui_core::skin::COMBO_OPTION_CLASS;
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems, row};
 use sl_viewer_ui_core::ui_font::UiFont;
@@ -72,10 +73,15 @@ const VALUE_CLASS: &str = "sk-build-value";
 const ANCHOR_CLASS: &str = "sk-combo";
 
 /// The skin class on one popover row. Its hover is `:hover` — a pointer hover
-/// is the one state a selector reaches with no code at all — and a row that
-/// cannot be picked carries `InteractionDisabled`, which is both true and what
-/// `:disabled` selects on.
-const OPTION_CLASS: &str = "sk-combo-option";
+/// is the one state a selector reaches with no code at all, once
+/// `skin::stamp_hover_state` has given the row the component that pseudo-class
+/// is read from — and a row that cannot be picked carries
+/// `InteractionDisabled`, which is both true and what `:disabled` selects on.
+///
+/// Named in `sl_viewer_ui_core::skin` rather than here because that stamp is
+/// driven by the list of classes with a `:hover` rule, and a copy of the string
+/// here would be a class the stamp does not know.
+const OPTION_CLASS: &str = COMBO_OPTION_CLASS;
 
 /// Everything a combo is built from — a struct so the knobs read at the call
 /// site, mirroring [`crate::ui_radio::RadioSpec`].

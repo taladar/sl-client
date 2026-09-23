@@ -50,6 +50,24 @@
   --field-placeholder: #9ea8bd;
   --list-bg: #00000040;
   --menu-bg: #1c1f26f2;
+  /* A combo's drop-down. Its own role because the reference gives it one
+   * (`ComboListBgColor`), and OPAQUE because the thing floats: `--list-bg` is
+   * a scrim for a list sitting in a panel, and there is no panel under this
+   * one. */
+  --combo-list-bg: #1c1f26;
+  /* A scroll list's four row states (viewer-skin-list-row-striping). The
+   * ordinary row and the stripe are both transparent here, so a flat skin's
+   * rows are the list's own face and only a skin that bands its lists — the
+   * reference's light classic skins do; its dark default skin does not — pays
+   * for the distinction. The hover is the chrome hover a menu row and a combo
+   * option already take, so a row lighting under the pointer matches them; the
+   * selection and its text are `--selection-bg` and `--text-primary`, the
+   * values a selected row and its cells had before either had a role. */
+  --list-row-bg: #00000000;
+  --list-row-stripe: #00000000;
+  --list-row-hover: #475775;
+  --list-row-selected-bg: #3d57858c;
+  --list-row-selected-text: #e6ebf5;
   /* The accent, dimmed: a state shown for information rather than for
    * interaction (a permission a friend grants you, which you cannot change). */
   --accent-muted: #6b8db3;

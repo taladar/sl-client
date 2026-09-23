@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 118 |
-| ready | 307 |
+| ready | 308 |
 | blocked | 63 |
-| in-progress | 28 |
+| in-progress | 29 |
 | bugs | 9 |
-| done | 1213 |
+| done | 1214 |
 | deferred | 30 |
 | wont-do | 16 |
-| **total** | **1784** |
+| **total** | **1787** |
 
 ## ideas (118)
 
@@ -293,7 +293,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (307)
+## ready (308)
 
 ### protocol
 
@@ -361,6 +361,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — There is no restart-note idiom, so 'restart required' is baked into labels
 - [`viewer-audit-search-map-edge`](ready/viewer-audit-search-map-edge.md) —
   sl-viewer-search depends on sl-viewer-map for one two-field struct
+- [`viewer-audit-specimens-carry-widget-classes`](ready/viewer-audit-specimens-carry-widget-classes.md)
+  — A gallery specimen that hand-rolls its nodes shows none of the skin
 - [`viewer-audit-web-auth-preference`](ready/viewer-audit-web-auth-preference.md)
   — Whether the grid session cookie is injected into the browser is a CLI flag,
   not a preference
@@ -872,12 +874,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   actions (blocked by `viewer-object-selection-core` (done))
 - [`viewer-skin-bevel-border-policy`](ready/viewer-skin-bevel-border-policy.md)
   — A bevel's light source has a handedness the logical-property ban denies
+- [`viewer-skin-book-token-table-behind`](ready/viewer-skin-book-token-table-behind.md)
+  — The skin chapter's token table is four tasks behind the vocabulary
 - [`viewer-skin-glyphs-from-content`](ready/viewer-skin-glyphs-from-content.md)
   — A skin can choose the glyph, not just its colour — audit where that applies
 - [`viewer-skin-icon-set`](ready/viewer-skin-icon-set.md) — A skin should be
   able to carry an icon set, not just colours
-- [`viewer-skin-list-row-striping`](ready/viewer-skin-list-row-striping.md) —
-  Scroll-list rows — striping, hover and a selection the skin owns
 - [`viewer-skin-scrollbar-shape`](ready/viewer-skin-scrollbar-shape.md) — The
   scrollbar is a bar — the reference's has ends, a track and a shape
 - [`viewer-skin-search-box-focused-fill`](ready/viewer-skin-search-box-focused-fill.md)
@@ -1219,7 +1221,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Batch world changes into per-tick update bursts (blocked by
   `server-world-heartbeat`, `server-world-ecs-store`)
 
-## in-progress (28)
+## in-progress (29)
 
 ### viewer
 
@@ -1236,6 +1238,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-environment-personal-lighting`](in-progress/viewer-environment-personal-lighting.md)
   — Personal lighting — local environment override (blocked by
   `viewer-ui-widget-scaffold` (done))
+- [`viewer-gallery-scrollbar-and-page-keys`](in-progress/viewer-gallery-scrollbar-and-page-keys.md)
+  — The gallery can only be crossed by mouse wheel
 - [`viewer-keyed-floater-audit`](in-progress/viewer-keyed-floater-audit.md) —
   Audit the other per-subject singletons onto the keyed-floater scaffold
 - [`viewer-media-prim-browser`](in-progress/viewer-media-prim-browser.md) —
@@ -1321,7 +1325,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1213)
+## done (1214)
 
 ### protocol
 
@@ -2973,6 +2977,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-skin-image-backed-widgets`](done/viewer-skin-image-backed-widgets.md)
   — Nine-sliced image surfaces, so a skin can change a widget's shape (blocked
   by `viewer-skin-widget-state-classes` (done))
+- [`viewer-skin-list-row-striping`](done/viewer-skin-list-row-striping.md) —
+  Scroll-list rows — striping, hover and a selection the skin owns
 - [`viewer-skin-widget-state-classes`](done/viewer-skin-widget-state-classes.md)
   — Widget state belongs in the cascade, not in a per-frame Rust paint
 - [`viewer-skinned-bind-group-quits-on-rez`](done/viewer-skinned-bind-group-quits-on-rez.md)

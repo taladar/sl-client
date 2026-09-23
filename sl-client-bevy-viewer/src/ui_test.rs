@@ -380,6 +380,76 @@ mod tests {
         Ok(())
     }
 
+    /// **Every emoji tone swatch has a glyph in it, and a box to draw it in.**
+    ///
+    /// The strip is six frames with one glyph each, and it was reported showing
+    /// six *empty* frames. Three things have to hold and only one of them is
+    /// visible in a screenshot: the sample short-code resolves (its own test, in
+    /// `emoji_picker`), the glyph reaches the text node, and the node measures.
+    /// This covers the last two — a swatch whose text laid out at zero is a
+    /// layout bug, and an empty `Text` is a data one, and they look identical on
+    /// screen.
+    #[test]
+    fn every_emoji_tone_swatch_has_a_glyph_and_a_box() -> Result<(), TestError> {
+        let element = ELEMENTS
+            .iter()
+            .find(|element| element.id == "emoji-picker")
+            .ok_or("the `emoji-picker` element is not registered")?;
+        let mut app = spawn_element(LayoutTest::new(), element, ElementCx::new());
+
+        let swatches: Vec<Entity> = {
+            let mut query = app.world_mut().query::<(Entity, &Name)>();
+            query
+                .iter(app.world())
+                .filter(|(_, name)| name.as_str() == "emoji-picker-tone")
+                .map(|(entity, _)| entity)
+                .collect()
+        };
+        assert!(
+            swatches.len() > 1,
+            "the tone strip spawned {} swatches, so there is no strip to check",
+            swatches.len()
+        );
+
+        let mut findings = Vec::new();
+        for swatch in swatches {
+            let children: Vec<Entity> = app
+                .world()
+                .get::<Children>(swatch)
+                .map(|children| children.iter().collect())
+                .unwrap_or_default();
+            let mut glyphs = 0_usize;
+            for child in children {
+                let Some(text) = app.world().get::<Text>(child) else {
+                    continue;
+                };
+                glyphs = glyphs.saturating_add(1);
+                if text.0.is_empty() {
+                    findings.push(format!("{swatch}: the glyph text is empty"));
+                    continue;
+                }
+                let Some(computed) = app.world().get::<ComputedNode>(child) else {
+                    findings.push(format!("{swatch}: the glyph node never laid out"));
+                    continue;
+                };
+                if computed.size.x <= 0.0 || computed.size.y <= 0.0 {
+                    findings.push(format!(
+                        "{swatch}: the glyph {:?} measured {:?}",
+                        text.0, computed.size
+                    ));
+                }
+            }
+            if glyphs == 0 {
+                findings.push(format!("{swatch}: the swatch holds no text node at all"));
+            }
+        }
+        assert!(
+            findings.is_empty(),
+            "a tone swatch cannot show its emoji: {findings:#?}"
+        );
+        Ok(())
+    }
+
     // -----------------------------------------------------------------------
     // Behaviour. Not the resting state — what the element *does*.
     // -----------------------------------------------------------------------

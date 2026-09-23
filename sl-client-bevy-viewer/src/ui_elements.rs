@@ -153,6 +153,15 @@ pub const ELEMENTS: &[UiElement] = &[
         spawn: crate::inventory::spawn_inventory_row_sample,
     },
     UiElement {
+        id: "list-row-states",
+        summary: "A scroll list's row states on the list's own face: an ordinary row, a striped \
+                  one, and the selection over each. The widget paints none of them — \
+                  `.sk-list-row`, `.sk-stripe` and `.sk-active` in `common.css` do — so this is \
+                  where a skin's row family is checked. The fourth state, the pointer hover, is a \
+                  real `:hover`: put the pointer on a row to see it.",
+        spawn: crate::ui_table::spawn_list_row_states_element,
+    },
+    UiElement {
         id: "floater",
         summary: "A floating window's chrome: a title bar with dock / minimize / close buttons, a \
                   content slot, and a resize grip. The live manager (`crate::floater`) makes it \

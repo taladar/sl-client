@@ -122,6 +122,11 @@ const ESTIMATED_PICKER_HEIGHT: f32 = 440.0;
 
 /// The skin class on a tone swatch. Its chosen look is `:checked`, since
 /// exactly one tone is selected at a time — the swatch strip is a radio group.
+///
+/// It is worn **beside** [`TILE_CLASS`], which is where the pointer hover comes
+/// from: a swatch is one tile of a small grid and answers a click exactly as a
+/// cell does, so it should light under the pointer exactly as a cell does. This
+/// class carries only what is different about it — the frame.
 const SWATCH_CLASS: &str = "sk-tone-swatch";
 
 /// The preview line's shortcode text — the primary role.
@@ -1023,7 +1028,7 @@ fn spawn_tone_swatch(
                 ..default()
             },
             BackgroundColor(Color::NONE),
-            ClassList::new_with_classes([SWATCH_CLASS]),
+            ClassList::new_with_classes([SWATCH_CLASS, TILE_CLASS]),
             Pickable::default(),
             EmojiToneSwatch { tone },
             Name::new("emoji-picker-tone"),
@@ -1099,6 +1104,13 @@ pub fn spawn_emoji_picker_specimen(
                         ..default()
                     },
                     BackgroundColor(Color::NONE),
+                    // The real cell's class and pickability, so the card shows
+                    // the real look: a specimen cell used to carry neither, so
+                    // `.sk-tile:hover` could not reach it and the element a
+                    // skin author checks a grid against was the one thing in
+                    // the gallery that could not be skinned.
+                    ClassList::new_with_classes([TILE_CLASS]),
+                    Pickable::default(),
                     Name::new("emoji-picker-sample-cell"),
                     ChildOf(grid_row),
                 ))
@@ -1141,8 +1153,8 @@ pub fn spawn_emoji_picker_specimen(
 #[cfg(test)]
 mod tests {
     use super::{
-        CELL_SIZE, EmojiPickerState, GRID_COLUMNS, VIEWPORT_WIDTH, anchor_top, build_view,
-        insert_glyph_into_editable, preview_text, row_count, toned_glyph,
+        CELL_SIZE, EmojiPickerState, GRID_COLUMNS, SWATCH_SAMPLE_SHORTCODE, VIEWPORT_WIDTH,
+        anchor_top, build_view, insert_glyph_into_editable, preview_text, row_count, toned_glyph,
     };
     use bevy::text::{EditableText, FontCx, LayoutCx};
     use pretty_assertions::{assert_eq, assert_ne};
@@ -1188,6 +1200,36 @@ mod tests {
         assert_eq!(build_view(0, "   "), expected);
         // A group index past the end is an empty list, not a panic.
         assert!(build_view(usize::MAX, "").is_empty());
+        Ok(())
+    }
+
+    /// **The tone strip's sample emoji resolves, and takes every tone.**
+    ///
+    /// The swatches are a row of *frames* with one glyph each, so a sample that
+    /// resolved to `None` would draw six empty boxes — a picker that looks
+    /// broken in a way nothing logs, because `spawn_tone_swatch` turns a missing
+    /// emoji into an empty string and carries on. The short-code is a literal
+    /// (`SWATCH_SAMPLE_SHORTCODE`) and the dataset is a dependency, so the two
+    /// can part company at a version bump with nothing to say so.
+    #[test]
+    fn the_tone_strip_sample_resolves_at_every_tone() -> Result<(), TestError> {
+        let base = by_shortcode(SWATCH_SAMPLE_SHORTCODE)
+            .ok_or("the tone strip's sample short-code names no emoji")?;
+        for tone in SkinTone::ALL {
+            let glyph = toned_glyph(base, tone);
+            assert!(
+                !glyph.is_empty(),
+                "{tone:?} left the swatch with no glyph to draw"
+            );
+        }
+        // Every swatch showing the SAME glyph would be a strip that cannot be
+        // read as a tone choice at all.
+        assert_ne!(
+            toned_glyph(base, SkinTone::Default),
+            toned_glyph(base, SkinTone::Dark),
+            "the sample takes no skin tones, so the strip shows one glyph six \
+             times"
+        );
         Ok(())
     }
 

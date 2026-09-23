@@ -16,8 +16,9 @@
  * so with no dependency on any file under `assets/` — which leaves the CHROME
  * at the fallback's dark values. That is what makes the test's "a label outside
  * the list is still near-white" assertion mean something. It then redefines the
- * seven field / list tokens (plus the caret, which belongs to that family) to
- * the reference's measured Vintage values, and nothing else. See
+ * field / list tokens — the seven of the field family, the list's face, its
+ * four row states, and the caret, which belongs to that family — to the
+ * reference's measured Vintage values, and nothing else. See
  * roadmap/context/vintage-skin.md for where the numbers come from.
  *
  * The base goes into a cascade LAYER for the reason themes/dark.css documents:
@@ -43,6 +44,21 @@
 
   /* ScrollBgWriteableColor — a scroll list's face. */
   --list-bg: #c8cfcc;
+
+  /* ComboListBgColor — a drop-down's, which Vintage makes a flat 0.9 grey.
+   * Opaque in every skin the reference ships, because the thing floats. */
+  --combo-list-bg: #e6e6e6;
+
+  /* A scroll list's rows: ScrollBGStripeColor / ScrollHoveredColor /
+   * ScrollSelectedBGColor / ScrollSelectedFGColor, which Vintage resolves to
+   * `UIControlBGLightStripe` / `UIControlBGLightHover` / `UIControlBGSelected`
+   * / `TextFgColor`. `--list-row-bg` is deliberately NOT redefined: an
+   * ordinary row is the list's own face showing through, so leaving it at the
+   * fallback's transparent is also the assertion that the import worked. */
+  --list-row-stripe: #b8bfbb;
+  --list-row-hover: #bec3c3;
+  --list-row-selected-bg: #8d90c2;
+  --list-row-selected-text: #000000;
 
   /* TextCursorColor, which follows the field text rather than the chrome text.
    * A caret is drawn ON the field: Graphite's near-white one would be gone. */

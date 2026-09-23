@@ -62,7 +62,11 @@ const CONFIRM_ITEM_COPY_BUTTON: &str = "OK";
 /// The skin class on an embedded-item box — a clickable object inside notecard
 /// prose. Its hover is `:hover` and nothing else; this used to be a
 /// `Pointer<Over>` / `Pointer<Out>` observer pair writing two colours by hand.
-const ITEM_CLASS: &str = "sk-inline-item";
+///
+/// Named in `sl_viewer_ui_core::skin`, because `stamp_hover_state` is driven by
+/// the list of classes with a `:hover` rule and a copy of the string here would
+/// be a class that stamp does not know.
+const ITEM_CLASS: &str = sl_viewer_ui_core::skin::INLINE_ITEM_CLASS;
 
 // ---------------------------------------------------------------------------
 // The embedded-item box.

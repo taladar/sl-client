@@ -78,6 +78,20 @@
   /* A dropped-down menu. The floater body's colour here; a skin that floats
    * its menus in a colour of their own changes this one token. */
   --menu-bg: #1c1f26f2;
+  /* A combo's drop-down, which floats like a menu and so is opaque like one —
+   * `--list-bg`'s scrim would leave the world showing through it. */
+  --combo-list-bg: #1c1f26;
+  /* A scroll list's four row states (viewer-skin-list-row-striping). Graphite
+   * bands nothing — an ordinary row and a striped one are both the list's own
+   * face showing through, which is what the reference's dark default skin does
+   * as well (`ScrollBGStripeColor` is `Transparent` there; it is the light
+   * classic skins that band). The hover is the chrome hover, so a row lights
+   * under the pointer the way a menu row and a combo option do. */
+  --list-row-bg: #00000000;
+  --list-row-stripe: #00000000;
+  --list-row-hover: #353c4a;
+  --list-row-selected-bg: #3d57858c;
+  --list-row-selected-text: #e6ebf2;
 
   /* Focus ring — loud, so Tab movement is unmistakable. */
   --focus-ring: #ffc740;

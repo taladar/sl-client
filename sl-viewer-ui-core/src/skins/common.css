@@ -250,9 +250,21 @@
 
 /* One tile of a dense grid — an emoji cell. A translucent wash rather than the
  * control shade `.sk-highlighted` carries: a grid is mostly tiles, and an opaque
- * block under the pointer reads as a hole punched in it. The whole rule is a
- * `:hover`, so the pair of Pointer<Over> / Pointer<Out> observers that used to
- * write these two colours is gone. */
+ * block under the pointer reads as a hole punched in it. The pair of
+ * Pointer<Over> / Pointer<Out> observers that used to write these two colours
+ * is gone.
+ *
+ * The RESTING rule is not decoration and must not be deleted as one: bevy_flair
+ * does not revert a property when a rule stops matching, it only ever applies
+ * the winning rule's value. A class whose only rule is a `:hover` therefore
+ * paints on the way in and has nothing to paint on the way out — the wash stayed
+ * on every cell the pointer had ever crossed, which is exactly what a grid makes
+ * obvious. Every state rule in this file needs a resting counterpart for the
+ * properties it writes; `every_hover_rule_has_a_resting_rule` checks the hovers. */
+.sk-tile {
+  background-color: transparent;
+}
+
 .sk-tile:hover {
   background-color: var(--tile-hover);
 }
@@ -529,11 +541,14 @@
   color: var(--pie-label-disabled);
 }
 
-/* One row of a table. Selection is `.sk-active`, added and removed by
- * `apply_table_selection_highlight`: the rows are recycled by the virtual
- * list, so the state belongs to the index the row currently shows and no
- * pseudo-class describes it. Translucent on purpose — a banded list still
- * reads through the highlight.
+/* One row of a table, at rest — the ordinary, unstriped one. `--list-row-bg`
+ * is transparent in every flat skin, so what shows through is the list's own
+ * face (`.sk-list-surface`); a skin that wants rows painted rather than the
+ * viewport behind them has the token to say so.
+ *
+ * The other three row states are in the state block at the end of this file,
+ * where the order that decides them is: the stripe, the pointer hover, and the
+ * selection.
  *
  * `.sk-list-row` is the same thing for a list a panel builds itself rather
  * than through the table widget (the pickers, the inventory tree, the About
@@ -541,17 +556,7 @@
  * on half of them. */
 .sk-table-row,
 .sk-list-row {
-  background-color: transparent;
-}
-
-/* A row in a picker's tree, which lights under the pointer. Its own class and
- * not a `:hover` on `.sk-list-row`, because giving every hand-rolled list a
- * hover it does not have today is a visual change across a dozen panels —
- * [[viewer-skin-list-row-striping]] owns that question for all of them. The
- * selection compound in the state block at the end of this file comes later,
- * so a selected row stays selected-looking under the pointer. */
-.sk-picker-row:hover {
-  background-color: var(--control-bg-hover);
+  background-color: var(--list-row-bg);
 }
 
 /* A combo's anchor box, and the greyed look of one a consumer has disabled —
@@ -795,14 +800,23 @@
 }
 
 /* A combo's open popover. It looks like a menu and it is NOT one: a drop-down
- * list is a data surface, so it takes `--list-bg` and its rows take the field
- * family's text — which is the whole reason it stopped sharing `.sk-menu` (the
- * reference names it separately too, `ComboListBgColor`).
+ * list is a data surface, so its rows take the field family's text — which is
+ * the whole reason it stopped sharing `.sk-menu` (the reference names it
+ * separately too, `ComboListBgColor`).
+ *
+ * Its face is `--combo-list-bg` and NOT `--list-bg`, which is the difference
+ * between a list inside a panel and one that FLOATS. `--list-bg` is a scrim —
+ * 25% black over whatever the panel behind it is — and a drop-down has no
+ * panel behind it, so the scrim left it see-through, with the chrome and the
+ * world reading through the options. (It looked like a missing background the
+ * moment the row hover below started painting, which is how it was found.) The
+ * reference makes `ComboListBgColor` opaque in every skin it ships: `DkGray` in
+ * the default, a flat 0.9 grey in Vintage.
  *
  * Its rows keep `.sk-combo-option` / `.sk-menu-separator`: the shape and the
  * hover are a menu's, only the colours are a list's. */
 .sk-combo-list {
-  background-color: var(--list-bg);
+  background-color: var(--combo-list-bg);
   border-color: var(--surface-border);
   border-radius: var(--surface-radius);
 }
@@ -1203,11 +1217,71 @@
   color: var(--accent);
 }
 
-/* A selected row, written compound so it beats a row's own `:hover` as well as
- * its resting rule — both are (0,2,0), and this block is last. */
+/* A SCROLL LIST'S ROWS (viewer-skin-list-row-striping).
+ *
+ * The reference names a colour for each of four row states and every scroll
+ * list in it has all four; ours had one. These three are the rest, and they
+ * are (0,2,0) each — so, exactly as this block's header says, which one paints
+ * a row that is striped AND hovered AND selected is decided by the order they
+ * appear below and by nothing else: stripe, then hover, then selection.
+ *
+ * The stripe is stamped by `virtual_list::stripe_virtual_rows` from the row's
+ * DATA index (see `skin::STRIPE_CLASS`) — a recycled row's sibling position is
+ * its pool slot, so `:nth-child(even)` would stripe the slot and the bands
+ * would crawl as the list scrolled.
+ *
+ * `--list-row-stripe` is transparent in every flat skin, which is not a
+ * cop-out: the reference's own dark default skin sets `ScrollBGStripeColor` to
+ * `Transparent` too, and it is the light classic skins that band their lists.
+ * The role exists so such a skin can. */
+.sk-table-row.sk-stripe,
+.sk-list-row.sk-stripe {
+  background-color: var(--list-row-stripe);
+}
+
+/* A row under the pointer. A plain `:hover` and no system at all — a row's
+ * hover really is the pointer's, unlike a menu row's lit state, which the
+ * keyboard moves too.
+ *
+ * It covers a table row and a hand-rolled one alike, which retired the
+ * `.sk-picker-row:hover` the texture picker used to carry alone. Not gated on
+ * whether the list can be selected: `TableSelectionMode::None` means "the
+ * widget does not own this table's selection", not "this table is inert" —
+ * the group members list is None and answers a click through its own
+ * observer. */
+.sk-table-row:hover,
+.sk-list-row:hover {
+  background-color: var(--list-row-hover);
+}
+
+/* A selected row, written compound so it beats the two rules above as well as
+ * its resting one — all four are (0,2,0), and this block is last.
+ *
+ * Its own token rather than `--selection-bg`: a list selection and a lit
+ * toolbar button are the same colour in both flat skins and are not the same
+ * thing (the reference names `ScrollSelectedBGColor` separately), so a skin
+ * that puts its lists on a light face can move one without the other. */
 .sk-table-row.sk-active,
 .sk-list-row.sk-active {
-  background-color: var(--selection-bg);
+  background-color: var(--list-row-selected-bg);
+}
+
+/* And the text on it — `ScrollSelectedFGColor`, which the reference makes
+ * white against a selection dark enough to need it.
+ *
+ * (0,3,0), so it beats `.sk-list-surface .sk-text`'s re-rooting of the generic
+ * role to the field family: a selected row is no longer reading against the
+ * list's face. A BUTTON in the row is the exception, as it is there — it
+ * brings its own chrome surface with it — and is restated below at (0,4,0)
+ * because this rule would otherwise reach its caption too. */
+.sk-table-row.sk-active .sk-text,
+.sk-list-row.sk-active .sk-text {
+  color: var(--list-row-selected-text);
+}
+
+.sk-table-row.sk-active .sk-button .sk-text,
+.sk-list-row.sk-active .sk-button .sk-text {
+  color: var(--text-primary);
 }
 
 /* The row a drag is over. Compound and after the selection, so dragging onto
@@ -1280,5 +1354,14 @@
 }
 
 .sk-list-surface .sk-disabled-text {
+  color: var(--field-text-disabled);
+}
+
+/* And the same for a greyed cell in a row that is ALSO selected, which the
+ * selected-row text rule above would otherwise reach: its (0,3,0) beats a lone
+ * `.sk-disabled-text`, and "a greyed row must never also read as lit" is this
+ * block's own rule. Same specificity, later in the file. */
+.sk-table-row.sk-active .sk-disabled-text,
+.sk-list-row.sk-active .sk-disabled-text {
   color: var(--field-text-disabled);
 }
