@@ -333,14 +333,10 @@ fn spawn_radio_item(
     commands.spawn((
         // It names no mark: the lit pip is `.sk-radio:checked .sk-radio-pip`'s
         // `content`, so the skin owns it. An unlit option has no rule, so its
-        // span stays empty.
-        //
-        // The zero-width space is the same measurement fix as the checkbox
-        // tick's, and `ui_checkbox::spawn_checkbox` explains it: `bevy_text`
-        // styles each span by *range* and skips empty ones, so a text node with
-        // no characters is laid out at parley's defaults — a 20 px line
-        // whatever font it asked for, which inside this disc is overflow.
-        Text::new("\u{200b}"),
+        // span stays empty — which an empty `Text` may now be, the bevy fork
+        // having stopped measuring one at parley's defaults (`302316a`; see
+        // `ui_checkbox::spawn_checkbox`).
+        Text::default(),
         PseudoElementsSupport,
         UiFont::Sans.at(INDICATOR_SIZE * INDICATOR_FONT_SCALE),
         // The line box is the disc, so the pip cannot be taller than the ring

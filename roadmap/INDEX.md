@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 308 |
 | blocked | 63 |
 | in-progress | 26 |
-| bugs | 8 |
-| done | 1211 |
+| bugs | 7 |
+| done | 1212 |
 | deferred | 30 |
 | wont-do | 16 |
 | **total** | **1780** |
@@ -1290,7 +1290,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (8)
+## bugs (7)
 
 ### protocol
 
@@ -1299,8 +1299,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
-- [`viewer-bevy-empty-text-measures-at-parley-defaults`](bugs/viewer-bevy-empty-text-measures-at-parley-defaults.md)
-  — An empty text node is measured at parley's defaults, not its own font
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
   Some worn mesh hair does not render (visible in Firestorm)
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
@@ -1317,7 +1315,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1211)
+## done (1212)
 
 ### protocol
 
@@ -1792,6 +1790,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Avatar tongue protrudes (rigged mesh + base-system head)
 - [`viewer-beacons-beam-render`](done/viewer-beacons-beam-render.md) — Tracking
   beacon — beam + off-screen direction arrow
+- [`viewer-bevy-empty-text-measures-at-parley-defaults`](done/viewer-bevy-empty-text-measures-at-parley-defaults.md)
+  — An empty text node is measured at parley's defaults, not its own font
 - [`viewer-block-list`](done/viewer-block-list.md) — Block / mute list UI
   (blocked by `viewer-social-people-panel` (done), `viewer-ui-virtualized-list`
   (done))

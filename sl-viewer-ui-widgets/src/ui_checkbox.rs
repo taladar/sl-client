@@ -28,11 +28,9 @@
 //! and a skin that wants a cross, a dot or a filled square writes it in
 //! `common.css` rather than asking for a Rust change.
 //!
-//! So the widget spawns a text node that names no glyph and stops. An
-//! unchecked box has no rule, so its span stays empty; there is no glyph to
-//! rewrite and no system to rewrite it. The node is not quite *empty* — it
-//! holds one zero-width space, for a measurement reason `spawn_checkbox`
-//! explains at the line that puts it there.
+//! So the widget spawns an *empty* text node and stops. An unchecked box has
+//! no rule, so its span stays empty; there is no glyph to rewrite and no
+//! system to rewrite it.
 //!
 //! # What it is not
 //!
@@ -158,21 +156,14 @@ pub fn spawn_checkbox(
         .id();
     commands.spawn((
         // It names no glyph: the mark is `.sk-checkbox:checked
-        // .sk-checkbox-tick::before`'s `content`, so the skin chooses it.
+        // .sk-checkbox-tick::before`'s `content`, so the skin chooses it. An
+        // unchecked box matches no rule, so its span stays empty.
         //
-        // The one character it does carry is a **zero-width space**, and it is
-        // there for the measure rather than for anything anyone can see.
-        // `bevy_text` pushes each span's font as a *range* style and skips
-        // empty ranges, so a text node holding no characters is laid out at
-        // parley's own defaults — a 20 px line, whatever font the node asked
-        // for. Inside this 14 px square that is six pixels of overflow, and
-        // taffy folds a child's content into every ancestor's `content_size`,
-        // so it reappears as the checkbox overflowing, then its row, then the
-        // tab panel, then the floater: four viewer-wide layout sweeps failing
-        // at once. One default-ignorable character gives the line a range to
-        // style; the shaper gives it zero advance, so the tick stays centred.
-        // See [[viewer-bevy-empty-text-measures-at-parley-defaults]] — with
-        // that fixed upstream this goes back to `Text::default()`.
+        // Empty is safe to spawn again as of the `302316a` bevy fork pin: an
+        // empty block used to be measured at parley's defaults — a 20 px line
+        // inside this 14 px square — and carried a zero-width space here to
+        // give the line a range to style
+        // ([[viewer-bevy-empty-text-measures-at-parley-defaults]]).
         //
         // `PseudoElementsSupport` is safe to insert anywhere as of the
         // `dbaaa48` bevy_flair pin: its text branch used to spawn the
@@ -182,7 +173,7 @@ pub fn spawn_checkbox(
         // the same function always spawned one; now both do. Since `946f8a2`
         // the pseudo-element also **inherits** the font below, as CSS says it
         // does — without that it brought bevy's default 20 px along with it.
-        Text::new("\u{200b}"),
+        Text::default(),
         PseudoElementsSupport,
         UiFont::Sans.at(BOX_SIZE * TICK_FONT_SCALE),
         // The line box is the box, so the mark cannot be taller than the square
@@ -359,9 +350,8 @@ mod tests {
         );
         assert_eq!(
             world.get::<Text>(tick).map(|text| text.0.clone()),
-            Some("\u{200b}".to_owned()),
-            "the widget must name no glyph — the skin's `content` does. The one \
-             character here is the zero-width space the measure needs"
+            Some(String::new()),
+            "the widget must name no glyph — the skin's `content` does"
         );
         assert!(
             world.get::<PseudoElementsSupport>(tick).is_some(),

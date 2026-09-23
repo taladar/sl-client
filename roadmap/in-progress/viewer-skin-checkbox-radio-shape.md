@@ -173,5 +173,6 @@ would have painted bevy_flair's default silently.
 - `.sk-checkbox:disabled .sk-text` was added for the greyed caption; the
   **image-backed** form ([[viewer-skin-image-backed-widgets]]) is still the
   nine-slice swap this was built to allow.
-- The tick and ring hosts carry a zero-width space until
-  [[viewer-bevy-empty-text-measures-at-parley-defaults]] is fixed upstream.
+- ~~The tick and ring hosts carry a zero-width space~~ — fixed upstream in the
+  bevy fork (`302316a`) and both hosts are `Text::default()` again; see
+  [[viewer-bevy-empty-text-measures-at-parley-defaults]].

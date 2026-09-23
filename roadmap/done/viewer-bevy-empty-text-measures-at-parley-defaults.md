@@ -2,7 +2,7 @@
 id: viewer-bevy-empty-text-measures-at-parley-defaults
 title: An empty text node is measured at parley's defaults, not its own font
 topic: viewer
-status: bugs
+status: done
 origin: viewer-skin-checkbox-radio-shape, the checkbox tick (2026-09-22)
 refs: [viewer-skin-checkbox-radio-shape, viewer-skin-glyphs-from-content]
 ---
@@ -49,24 +49,20 @@ builder and parley lays the empty line out at its own defaults (16 px at 1.2 →
 19.2, ceiling 20). CSS says the opposite: an empty inline box still has the
 line box of its own font.
 
-## The fix
+## Fixed (2026-09-23)
 
-In the `taladar/bevy` fork, `push_default` the first section's font size, line
-height and letter spacing (and family) before the ranged loop, so an empty
-block is measured at the style it declares. The ranged pushes still win for
-every non-empty span, so nothing else changes.
+In the `taladar/bevy` fork at `302316a`, on the branch this workspace already
+pins: the first section's family, size, line height, letter spacing, weight,
+width and style are pushed as the layout's **defaults** before the ranged
+loop, so an empty block is measured at the style it declares. The ranged
+pushes still win for every non-empty span, so a block that has text is laid
+out exactly as before.
 
-Not done yet because `bevy_text` is a root dependency: repinning it rebuilds
-the whole workspace, which is a poor thing to fold into an unrelated commit.
-
-## The workaround in the tree
-
-`ui_checkbox` and `ui_radio` give their glyph hosts one **zero-width space**
-(U+200B), which gives the line a range to style; the shaper gives it zero
-advance, so the mark stays centred and nothing is drawn for it. Both sites say
-so and name this task. Delete both when the fork carries the fix — the
-checkbox's `the_tick_fits_the_box_it_sits_in` test is what proves it is safe
-to.
+The two **zero-width spaces** that stood in for this are gone; `ui_checkbox`'s
+tick and `ui_radio`'s pip spawn `Text::default()` again. The checkbox's
+`the_tick_fits_the_box_it_sits_in` is what proves the fix landed: with the
+workaround removed, that test fails the moment the measure goes back to
+parley's defaults.
 
 ## A related fix that has landed
 
