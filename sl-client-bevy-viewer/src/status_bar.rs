@@ -79,6 +79,7 @@ use crate::slt;
 use crate::ui_font::UiFont;
 use crate::ui_perf::FixedSlotContentSize;
 use crate::world_api::{AgentRegionPosition, SHOW_COORDINATES_KEY};
+use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 /// The read-out font size, in logical pixels.
 const STATUS_FONT_SIZE: f32 = 14.0;
@@ -515,7 +516,11 @@ fn spawn_readout(
         .spawn((
             Text::new(String::new()),
             UiFont::Sans.at(STATUS_FONT_SIZE),
-            TextColor(Color::WHITE),
+            // The read-out's own class carries the colour (`.sk-status-readout`
+            // in `common.css`), so this is the skinless fallback alone — and it
+            // is the role that rule paints, not white, so a stylesheet-less run
+            // looks like a styled one rather than merely legible.
+            TextColor(SkinPalette::FALLBACK.text_primary),
             text_layout,
             text_node,
             ClassList::new_with_classes(["sk-status-readout"]),

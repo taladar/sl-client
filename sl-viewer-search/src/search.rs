@@ -117,11 +117,11 @@ const SL_SEARCH_URL: &str = "https://search.secondlife.com/";
 /// A label colour.
 const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
-/// A dim secondary colour.
-const SECONDARY_COLOR: Color = Color::srgb(0.72, 0.76, 0.84);
+/// A filter label and a secondary result column: the muted role.
+const SECONDARY_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
-/// A table header colour.
-const HEADER_COLOR: Color = Color::srgb(0.78, 0.82, 0.90);
+/// A results table's column header — the heading role.
+const HEADER_COLOR: Color = SkinPalette::FALLBACK.text_heading;
 
 /// A button's background.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.16, 0.19, 0.25);

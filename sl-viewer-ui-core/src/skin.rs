@@ -391,6 +391,36 @@ pub const CONSOLE_INFO_CLASS: &str = "sk-console-info";
 /// The refused-command half of [`CONSOLE_REPLY_CLASS`].
 pub const CONSOLE_ERROR_CLASS: &str = "sk-console-error";
 
+/// The CSS class on a line that reports a **failure** — a refused save, a
+/// compile error. Compound with [`TEXT_CLASS`]; see [`text_meaning`].
+pub const ERROR_TEXT_CLASS: &str = "sk-error";
+
+/// The CSS class on a line that **warns** without having failed yet — a
+/// teleport taking longer than it should.
+pub const WARN_TEXT_CLASS: &str = "sk-warn";
+
+/// The CSS class on a **note**: a line shown exactly when something wants the
+/// reader's eye, like the count of settings a filter matched.
+pub const NOTE_TEXT_CLASS: &str = "sk-note";
+
+/// The CSS class on text in the **experience** family's accent, so every
+/// experience surface reads as one thing.
+pub const EXPERIENCE_TEXT_CLASS: &str = "sk-experience";
+
+/// The CSS class on an **overlay** drawn over the rendered world rather than
+/// inside a panel: a beacon's label, a diagnostic read-out. Its backdrop is
+/// `--overlay-bg`, the scrim a docked floater already uses.
+pub const OVERLAY_CLASS: &str = "sk-overlay";
+
+/// The CSS class on an overlay's **text**.
+///
+/// Its own token rather than a text role, and not because a skin should not
+/// choose it — it should: the difference is what the text is read *against*.
+/// Panel roles are tuned against panel surfaces, while this is read against
+/// whatever the camera happens to be pointing at, so the skin needs to answer
+/// the two questions separately.
+pub const OVERLAY_TEXT_CLASS: &str = "sk-overlay-text";
+
 /// The CSS class on an inventory **folder**'s label, which the reference draws
 /// gold against an item's plain text.
 ///
@@ -582,6 +612,26 @@ pub fn text_role(color: Color) -> (TextColor, ClassList) {
         role_class(color).map_or_else(ClassList::empty, |class| {
             ClassList::new_with_classes([class])
         }),
+    )
+}
+
+/// A [`TextColor`] and a **meaning** class, as a spawn bundle.
+///
+/// The escape hatch [`text_role`] deliberately does not provide: a colour that
+/// names none of the four roles because it means something the roles cannot say
+/// — a warning, a failure, a note asking for the eye, the emerald every
+/// experience surface wears. Those are not drift to be collapsed; the
+/// distinction has to survive a skin, and a colour-blind overlay is exactly
+/// what retunes it. So each gets a token and a class of its own, compounded
+/// over [`TEXT_CLASS`] the way an RLVa console line's is — `.sk-text.sk-warn`
+/// beats `.sk-text` on specificity, wherever the two sit in the sheet.
+///
+/// The colour passed stays the skinless fallback, as everywhere else.
+#[must_use]
+pub fn text_meaning(color: Color, meaning: &'static str) -> (TextColor, ClassList) {
+    (
+        TextColor(color),
+        ClassList::new_with_classes([TEXT_CLASS, meaning]),
     )
 }
 

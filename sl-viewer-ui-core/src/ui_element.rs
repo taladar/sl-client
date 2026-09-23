@@ -65,6 +65,8 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui_widgets::{Activate, Button};
 
+use crate::skin::text_role;
+use crate::skin_palette::SkinPalette;
 use crate::ui::{LogicalPadding, LogicalRect, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_pseudoloc::pseudolocalise;
@@ -497,7 +499,7 @@ pub fn spawn_label(commands: &mut Commands, parent: Entity, cx: ElementCx) -> En
         .with_child((
             Text::new(cx.text(SAMPLE_PROSE)),
             cx.font(UiFont::Sans),
-            TextColor(Color::WHITE),
+            text_role(SkinPalette::FALLBACK.text_primary),
             Name::new("label-text"),
         ))
         .id()
@@ -534,7 +536,7 @@ fn button(
         .with_child((
             Text::new(cx.text(label)),
             cx.font(UiFont::Sans),
-            TextColor(Color::WHITE),
+            text_role(SkinPalette::FALLBACK.text_primary),
         ))
         .observe(
             move |_activate: On<Activate>, mut actions: MessageWriter<UiAction>| {
@@ -676,7 +678,7 @@ pub fn spawn_field_grid(commands: &mut Commands, parent: Entity, cx: ElementCx) 
                     // while everything around it moves.
                     Text::new(value),
                     cx.font(UiFont::Mono),
-                    TextColor(Color::WHITE),
+                    text_role(SkinPalette::FALLBACK.text_primary),
                 ));
         }
     }
@@ -692,7 +694,7 @@ pub fn spawn_text_editor(commands: &mut Commands, parent: Entity, cx: ElementCx)
         .spawn((
             editor,
             cx.font(UiFont::Sans),
-            TextColor(Color::WHITE),
+            text_role(SkinPalette::FALLBACK.text_primary),
             // The caret / selection style is installed by the shared
             // `install_caret_style` (R28) — no bare default here.
             // An editor showing three lines of a longer text clips the rest, and

@@ -66,6 +66,7 @@ use crate::world_api::AVATAR_BOOST_PRIORITY;
 use crate::world_api::EditToolState;
 use crate::world_api::ObjectState;
 use crate::world_api::SelectionSet;
+use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 /// The tab index the Texture-tab widgets start their focus order at (well past
 /// the Object / Features tabs' fields).
@@ -982,7 +983,8 @@ fn spawn_align_button(commands: &mut Commands, parent: Entity, tab_index: &mut i
         Text::default(),
         Translated::new("build-tex-align"),
         UiFont::Sans.at(TOOL_FONT_SIZE),
-        TextColor(Color::WHITE),
+        // The colour `.sk-build-value` paints — see [`VALUE_CLASS`].
+        TextColor(SkinPalette::FALLBACK.text_primary),
         ClassList::new_with_classes([VALUE_CLASS]),
         Pickable::IGNORE,
         ChildOf(button),
@@ -997,7 +999,8 @@ fn spawn_info_row(commands: &mut Commands, parent: Entity, info: TexInfo, label_
     commands.spawn((
         Text::default(),
         UiFont::Sans.at(TOOL_FONT_SIZE),
-        TextColor(Color::WHITE),
+        // The colour `.sk-build-value` paints — see [`VALUE_CLASS`].
+        TextColor(SkinPalette::FALLBACK.text_primary),
         ClassList::new_with_classes([VALUE_CLASS]),
         info,
         // Named, like every other value node worth pointing at: this line is

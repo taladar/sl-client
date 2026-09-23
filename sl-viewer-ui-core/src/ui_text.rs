@@ -49,6 +49,8 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx};
 
+use crate::skin::text_role;
+use crate::skin_palette::SkinPalette;
 use crate::ui::{LogicalMargin, LogicalRect, UiPanelShown, UiRoot, column};
 use crate::ui_font::UiFont;
 
@@ -240,7 +242,7 @@ pub fn setup_text_demo(mut commands: Commands, visible: Res<TextDemoVisible>, ro
                 // carries the host's blank-rendering COLRv1 emoji font — see
                 // [`crate::ui_font`].
                 UiFont::Sans.at(DEMO_FONT_SIZE),
-                TextColor(Color::WHITE),
+                text_role(SkinPalette::FALLBACK.text_primary),
                 // The caret / selection style is installed by the shared
                 // `install_caret_style` (R28) — no bare default here.
                 // Reachable by `Tab` as well as by clicking, via the scaffold's

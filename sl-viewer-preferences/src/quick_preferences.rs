@@ -116,12 +116,13 @@ const ANCHOR_MARGIN: f32 = 12.0;
 /// every_scale` the first time the floater registry was swept.
 const SPAWN_POSITION: Vec2 = Vec2::splat(ANCHOR_MARGIN);
 
-/// Section-heading colour.
-const SECTION_COLOR: Color = Color::srgb(0.78, 0.83, 0.9);
+/// A section label — the heading role.
+const SECTION_COLOR: Color = SkinPalette::FALLBACK.text_heading;
 /// Row-label colour.
 const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
-/// The value-readout colour.
-const VALUE_COLOR: Color = Color::srgb(0.7, 0.74, 0.82);
+/// A slider's numeric read-out: quieter than its label, which is the muted
+/// role.
+const VALUE_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 /// A control's border colour.
 const CONTROL_BORDER: Color = Color::srgb(0.4, 0.5, 0.62);
 /// A slider track's fill.

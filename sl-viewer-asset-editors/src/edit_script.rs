@@ -90,7 +90,7 @@ use crate::intents::{OpenScript, ScriptSource};
 use crate::ui::{column, row};
 use crate::ui_element::ElementCx;
 use crate::ui_font::UiFont;
-use sl_viewer_ui_core::skin::text_role;
+use sl_viewer_ui_core::skin::{ERROR_TEXT_CLASS, text_meaning, text_role};
 
 /// The body field's height, in visible text lines — what the window opens at,
 /// being content-driven. It is a *starting* size, not a cap: the body fills, so
@@ -783,7 +783,7 @@ fn spawn_error_row(
     commands.spawn((
         Text::new(line),
         UiFont::Mono.at(font_size),
-        text_role(ERROR_COLOR),
+        text_meaning(ERROR_COLOR, ERROR_TEXT_CLASS),
         ChildOf(parent),
     ));
 }
@@ -849,7 +849,7 @@ pub fn spawn_script_editor_specimen(
         commands.spawn((
             Text::new(cx.text("Line 5, column 9: syntax error")),
             UiFont::Mono.at(cx.font_size),
-            text_role(ERROR_COLOR),
+            text_meaning(ERROR_COLOR, ERROR_TEXT_CLASS),
             ChildOf(errors),
         ));
     }

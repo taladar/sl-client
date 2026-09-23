@@ -22,6 +22,7 @@
   --card-bg: #262b34;
   /* The scrim a floating layer sits on (the dock host behind docked floaters). */
   --overlay-bg: #0f121ad9;
+  --overlay-text: #ffffff;
 
   /* Text */
   --text-primary: #e6ebf2;
@@ -141,6 +142,14 @@
    * notification kinds. */
   --console-info: #99d1a8;
   --console-error: #eb8f85;
+
+  /* Text that means something: a failure, a warning, a note that wants the
+   * eye, and the experience family's accent. Meaning-bearing like the
+   * notification kinds and the console pair. */
+  --text-error: #eb8c80;
+  --text-warn: #f2c766;
+  --text-note: #fad166;
+  --experience-accent: #6bd199;
 
   /* User-tunable palette (the preferences Colors & Skins tab). These are not
    * consumed by common.css: the viewer reads them off the styled root's

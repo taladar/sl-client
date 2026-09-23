@@ -25,6 +25,8 @@ use bevy::ui_widgets::{Activate, Button};
 use crate::gpu_avatars::crowd::GpuCrowd;
 use crate::ui::BottomArea;
 use crate::ui_font::UiFont;
+use sl_viewer_ui_core::skin::text_role;
+use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 /// The button label font size, in logical pixels — matched to the toolbar's.
 const FONT_SIZE: f32 = 13.0;
@@ -106,7 +108,7 @@ fn spawn_crowd_button(
             Text::default(),
             CrowdSpawnButtonLabel,
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(Color::WHITE),
+            text_role(SkinPalette::FALLBACK.text_primary),
             // Keep the label on one line — a flex text measure otherwise
             // under-allocates and wraps the multi-word label.
             TextLayout::no_wrap(),

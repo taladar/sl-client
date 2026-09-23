@@ -69,6 +69,7 @@ use crate::floater::{
 use crate::i18n::Translated;
 use crate::skin::TILE_CLASS;
 use crate::skin::text_role;
+use crate::skin_palette::SkinPalette;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::{ElementCx, TextMayClip};
 use crate::ui_font::UiFont;
@@ -122,8 +123,8 @@ const ESTIMATED_PICKER_HEIGHT: f32 = 440.0;
 /// exactly one tone is selected at a time — the swatch strip is a radio group.
 const SWATCH_CLASS: &str = "sk-tone-swatch";
 
-/// The preview line's text colour.
-const PREVIEW_COLOR: Color = Color::srgb(0.82, 0.86, 0.94);
+/// The preview line's shortcode text — the primary role.
+const PREVIEW_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// The emoji whose skin-tone variants the swatch row samples — a raised hand,
 /// which every skin tone renders. Resolved through [`sl_emoji`] so no glyph is
@@ -498,6 +499,8 @@ fn spawn_live_emoji_cell(commands: &mut Commands, row_entity: Entity) -> Entity 
         .spawn((
             Text::new(""),
             UiFont::Sans.at(CELL_FONT_SIZE),
+            // White is "do not tint", not a role: a colour emoji carries its
+            // own colours and any text role would wash over them.
             TextColor(Color::WHITE),
             // A fixed tile clips an over-large glyph by design, like a scroll
             // viewport — declared so the clipping check knows.
@@ -1025,6 +1028,7 @@ fn spawn_tone_swatch(
         .with_child((
             Text::new(glyph.to_owned()),
             UiFont::Sans.at(CELL_FONT_SIZE),
+            // Untinted, as above: the tone swatch *is* the emoji's own colour.
             TextColor(Color::WHITE),
             Pickable::IGNORE,
         ))
@@ -1097,6 +1101,7 @@ pub fn spawn_emoji_picker_specimen(
                 .with_child((
                     Text::new(emoji.glyph().to_owned()),
                     cx.font(UiFont::Sans),
+                    // Untinted: a colour emoji paints itself.
                     TextColor(Color::WHITE),
                 ));
         }

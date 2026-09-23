@@ -15,6 +15,7 @@
   --surface-radius: 8px;
   --card-bg: #103049;
   --overlay-bg: #06141fd9;
+  --overlay-text: #ffffff;
 
   /* Text */
   --text-primary: #eaf3ff;
@@ -126,6 +127,14 @@
    * notification kinds. */
   --console-info: #99d1a8;
   --console-error: #eb8f85;
+
+  /* Text that means something: a failure, a warning, a note that wants the
+   * eye, and the experience family's accent. Meaning-bearing like the
+   * notification kinds and the console pair. */
+  --text-error: #eb8c80;
+  --text-warn: #f2c766;
+  --text-note: #fad166;
+  --experience-accent: #6bd199;
 
   /* User-tunable palette (see graphite/skin.css for the token contract) —
    * cooler variants, so a skin switch visibly moves the swatches. */

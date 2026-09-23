@@ -59,7 +59,9 @@ use sl_client_bevy::{AgentKey, RegionHandle, SlIdentity, Vector};
 use sl_viewer_kit::coords::{metres_to_f32, sl_to_bevy_vec};
 use sl_viewer_world_objects::name_tag_billboard::tag_render_layers;
 
+use bevy_flair::style::components::ClassList;
 use sl_viewer_social::{FriendsModel, MapTracking, TrackTarget};
+use sl_viewer_ui_core::skin::{OVERLAY_CLASS, OVERLAY_TEXT_CLASS};
 use sl_viewer_ui_core::ui::UiRoot;
 use sl_viewer_ui_core::ui_font::UiFont;
 use sl_viewer_world_api::AvatarState;
@@ -91,6 +93,10 @@ const MAP_TRACK_BELOW: [f32; 3] = [0.0, 0.0, 1.0];
 /// The tracked-avatar beacon colour (a distinct green, so a tracked avatar reads
 /// differently from a tracked location's red/blue map-track beam).
 const AVATAR_TRACK_COLOR: [f32; 3] = [0.15, 0.8, 0.2];
+
+/// The label scrim's skinless fallback — what `.sk-overlay`'s `--overlay-bg`
+/// paints over.
+const OVERLAY_SCRIM: Color = Color::srgba(0.02, 0.02, 0.04, 0.6);
 
 /// The tracked-friend beacon colour (a distinct gold).
 const FRIEND_TRACK_COLOR: [f32; 3] = [1.0, 0.75, 0.1];
@@ -918,7 +924,10 @@ fn ensure_overlay(
                     padding: UiRect::axes(Val::Px(6.0), Val::Px(3.0)),
                     ..Default::default()
                 },
-                BackgroundColor(Color::srgba(0.02, 0.02, 0.04, 0.6)),
+                // The scrim behind the label, from the skin: `.sk-overlay` is
+                // the same `--overlay-bg` a docked floater's host wears.
+                BackgroundColor(OVERLAY_SCRIM),
+                ClassList::new_with_classes([OVERLAY_CLASS]),
                 GlobalZIndex(BEACON_OVERLAY_Z),
                 Pickable::IGNORE,
                 Visibility::Hidden,
@@ -930,7 +939,13 @@ fn ensure_overlay(
             .spawn((
                 Text::default(),
                 UiFont::Sans.at(13.0),
+                // Read against the world rather than a panel, so it takes the
+                // overlay class instead of a text role — a skin still chooses
+                // it (colour, and through the class its font too), just by
+                // answering a different question. The literal is what
+                // `--overlay-text` holds, so the two agree.
                 TextColor(Color::WHITE),
+                ClassList::new_with_classes([OVERLAY_TEXT_CLASS]),
                 Pickable::IGNORE,
                 ChildOf(node),
             ))

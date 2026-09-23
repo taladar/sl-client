@@ -114,6 +114,7 @@ use sl_viewer_world_api::ViewerCamera;
 use crate::quiescence::SceneQuiescence;
 use equirect::{CUBE_FACES, CubeFaces};
 use sl_viewer_ui_core::skin::text_role;
+use sl_viewer_ui_core::skin_palette::SkinPalette;
 use xmp::PanoramaMetadata;
 
 pub mod equirect;
@@ -125,11 +126,11 @@ pub const PANORAMA_FLOATER_ID: &str = "panorama";
 /// The body font size, in logical pixels.
 const FONT_SIZE: f32 = 13.0;
 
-/// A control label's colour.
-const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+/// A control label — the primary role.
+const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
-/// A dim / secondary text colour (the hint and status lines).
-const HINT_COLOR: Color = Color::srgb(0.62, 0.66, 0.74);
+/// The hint and status lines — the muted role.
+const HINT_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// A button's background.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);

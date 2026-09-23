@@ -1317,11 +1317,11 @@ const DEMO_LABEL_FONT_SIZE: f32 = 14.0;
 /// The demo panel's translucent backdrop, matching the F4 / F5 panels.
 const DEMO_PANEL_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.7);
 
-/// The demo panel's instruction-line colour.
-const DEMO_TITLE_COLOR: Color = Color::srgb(0.80, 0.85, 0.92);
+/// The demo panel's instruction line — the primary role.
+const DEMO_TITLE_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
-/// A demo row's label colour.
-const DEMO_LABEL_COLOR: Color = Color::srgb(0.72, 0.78, 0.88);
+/// A demo row's label — the muted role.
+const DEMO_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// The one-line instruction shown above the demo's fields.
 const DEMO_TITLE: &str = "Text-input demo (F8) - Tab between the fields and type / use your IME. \

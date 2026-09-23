@@ -60,7 +60,8 @@ use crate::i18n::Translated;
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{ComboBindingValues, SettingBinding, bound_checkbox, bound_slider};
 use crate::skin::{
-    MATCH_CLASS, NO_MATCH_CLASS, TEXT_CLASS, set_state_class, set_state_class_on, text_role,
+    MATCH_CLASS, NO_MATCH_CLASS, NOTE_TEXT_CLASS, TEXT_CLASS, set_state_class, set_state_class_on,
+    text_meaning, text_role,
 };
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
@@ -88,9 +89,8 @@ const SECTION_FONT: f32 = 14.0;
 /// A row label's resting colour (the shared panel label tone).
 pub const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
-/// A section heading's colour — same tone as the labels; the size difference
-/// carries the hierarchy.
-const SECTION_COLOR: Color = Color::srgb(0.75, 0.80, 0.88);
+/// A section label — the heading role.
+const SECTION_COLOR: Color = SkinPalette::FALLBACK.text_heading;
 
 /// A note's colour — the warm accent a filter hit uses, because a note is shown
 /// exactly when something wants the reader's eye.
@@ -596,7 +596,7 @@ pub(crate) fn spawn_pref_note(
             Text::default(),
             Translated::new(key),
             UiFont::Sans.at(FONT),
-            text_role(NOTE_COLOR),
+            text_meaning(NOTE_COLOR, NOTE_TEXT_CLASS),
             Name::new(format!("preferences:note:{key}")),
             ChildOf(parent),
         ))
@@ -1083,14 +1083,14 @@ fn annotate_env_pinned_rows(
                 PinKind::Seed => ENV_PIN_SEED_KEY,
             }),
             UiFont::Sans.at(FONT),
-            text_role(NOTE_COLOR),
+            text_meaning(NOTE_COLOR, NOTE_TEXT_CLASS),
             Pickable::IGNORE,
             ChildOf(row),
         ));
         commands.spawn((
             Text::new(pin.env()),
             UiFont::Mono.at(FONT),
-            text_role(NOTE_COLOR),
+            text_meaning(NOTE_COLOR, NOTE_TEXT_CLASS),
             Name::new(format!("preferences:env-pin:{}", pin.setting())),
             Pickable::IGNORE,
             ChildOf(row),

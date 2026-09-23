@@ -40,12 +40,13 @@
 use bevy::prelude::*;
 use bevy::ui_widgets::Activate;
 use bevy_flair::style::components::ClassList;
-use sl_viewer_ui_core::skin::set_state_class;
 use sl_viewer_ui_core::skin::text_role;
+use sl_viewer_ui_core::skin::{WARN_TEXT_CLASS, set_state_class, text_meaning};
 
 use sl_client_bevy::{Command, SlCommand, SlEvent, SlSessionEvent};
 
 use crate::intents::{BeginTeleportFlow, TeleportTarget, issue_teleport};
+use crate::skin_palette::SkinPalette;
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_spawn::{ButtonKind, ButtonSpec, UiLabel, spawn_button as spawn_ui_button};
@@ -85,8 +86,8 @@ const TITLE_FAILED_CLASS: &str = "sk-teleport-failed";
 /// The colour of the slow-teleport warning line.
 const WARN: Color = Color::srgb(0.95, 0.78, 0.40);
 
-/// The muted colour of the detail / status lines.
-const DETAIL: Color = Color::srgb(0.72, 0.76, 0.82);
+/// The detail line under the title — the muted role.
+const DETAIL: Color = SkinPalette::FALLBACK.text_muted;
 
 /// A cancel / dismiss button's resting background.
 const BUTTON_BG: Color = Color::srgb(0.22, 0.25, 0.31);
@@ -318,7 +319,7 @@ fn spawn_overlay(mut commands: Commands, root: Res<UiRoot>) {
         OverlayMessage,
         Text::new(""),
         UiFont::Sans.at(12.0),
-        text_role(WARN),
+        text_meaning(WARN, WARN_TEXT_CLASS),
         ChildOf(panel),
     ));
 

@@ -92,7 +92,10 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
-use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class, text_role};
+use sl_viewer_ui_core::skin::{
+    DISABLED_TEXT_CLASS, EXPERIENCE_TEXT_CLASS, TEXT_CLASS, set_state_class, text_meaning,
+    text_role,
+};
 use std::collections::BTreeSet;
 
 use sl_client_bevy::{
@@ -1863,7 +1866,7 @@ pub fn spawn_experiences_specimen(
                 ..default()
             },
             UiFont::Sans.at(FONT_SIZE),
-            text_role(HEADING_COLOR),
+            text_meaning(HEADING_COLOR, EXPERIENCE_TEXT_CLASS),
             Pickable::IGNORE,
             ChildOf(strip),
         ));

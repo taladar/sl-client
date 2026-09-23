@@ -189,8 +189,8 @@ const TAB_ACTIVE_BORDER: Color = Color::srgb(0.52, 0.68, 0.95);
 /// A tab label's colour.
 const TAB_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
-/// A tab's close-button glyph colour.
-const CLOSE_GLYPH_COLOR: Color = Color::srgb(0.72, 0.74, 0.80);
+/// A tab's close glyph — chrome, so the muted role.
+const CLOSE_GLYPH_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// The close-button glyph (a small ✕), on every non-Nearby tab.
 const CLOSE_GLYPH: &str = "\u{2715}";

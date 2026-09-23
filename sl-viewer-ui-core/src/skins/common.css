@@ -242,6 +242,28 @@
   color: var(--console-error);
 }
 
+/* Text that means something the four text roles cannot say — a failure, a
+ * warning, a note asking for the eye, the experience family's accent. Tokens
+ * of their own for the same reason the notification kinds have them: the
+ * distinction has to survive a skin, and a colour-blind overlay is exactly what
+ * retunes it. Compound with `.sk-text`, so a line that carries neither reads as
+ * plain text. */
+.sk-text.sk-error {
+  color: var(--text-error);
+}
+
+.sk-text.sk-warn {
+  color: var(--text-warn);
+}
+
+.sk-text.sk-note {
+  color: var(--text-note);
+}
+
+.sk-text.sk-experience {
+  color: var(--experience-accent);
+}
+
 /* An inventory folder's label, gold where an item's is plain — the reference's
  * own distinction, and the fastest way to read a long tree. Compound with
  * `.sk-text`, which the label also carries, so dropping this falls back to the
@@ -642,6 +664,19 @@
  * background to avoid double opacity). */
 .sk-dock-host {
   background-color: var(--overlay-bg);
+}
+
+/* An overlay drawn over the rendered world — a beacon's label, a diagnostic
+ * read-out. Skinnable like everything else, and with tokens of its own rather
+ * than the text roles: those are tuned to be read against a panel's surface,
+ * and this is read against whatever the camera is pointing at, which is a
+ * different question and deserves a separate answer. */
+.sk-overlay {
+  background-color: var(--overlay-bg);
+}
+
+.sk-overlay-text {
+  color: var(--overlay-text);
 }
 
 /* A tab page — the "content" shade the active tab shares, so the selected tab

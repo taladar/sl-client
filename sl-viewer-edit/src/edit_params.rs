@@ -91,6 +91,7 @@ const FLAGS_CAST_SHADOWS: u32 = 1 << 1;
 // The agent-relative permission bits (`FLAGS_OBJECT_MODIFY` / `_COPY` / `_MOVE`)
 // live on [`crate::objects`], shared with the build-tool permission gate.
 use crate::world_api::{FLAGS_OBJECT_COPY, FLAGS_OBJECT_MODIFY, FLAGS_OBJECT_MOVE};
+use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 /// The agent-relative `FLAGS_OBJECT_TRANSFER` bit.
 const FLAGS_OBJECT_TRANSFER: u32 = 1 << 17;
@@ -1033,8 +1034,8 @@ fn spawn_param_cycle(
     commands.spawn((
         Text::default(),
         UiFont::Sans.at(TOOL_FONT_SIZE),
-        // A skinless fallback; the skin recolours via the class token.
-        TextColor(Color::WHITE),
+        // The colour `.sk-build-value` paints — see [`VALUE_CLASS`].
+        TextColor(SkinPalette::FALLBACK.text_primary),
         ClassList::new_with_classes([VALUE_CLASS]),
         ParamCycleValue(cycle),
         Pickable::IGNORE,
@@ -1067,7 +1068,6 @@ fn spawn_action_button(
             Color::srgba(0.18, 0.18, 0.2, 1.0),
             Color::srgba(0.4, 0.4, 0.45, 1.0),
         )
-        // A skinless fallback; the skin recolours via the class token.
         .label_color(Color::WHITE)
         .font_size(TOOL_FONT_SIZE)
         .label_class(VALUE_CLASS),
@@ -1104,8 +1104,8 @@ fn spawn_info_value(commands: &mut Commands, parent: Entity, info: InfoText) {
     commands.spawn((
         Text::default(),
         UiFont::Sans.at(TOOL_FONT_SIZE),
-        // A skinless fallback; the skin recolours via the class token.
-        TextColor(Color::WHITE),
+        // The colour `.sk-build-value` paints — see [`VALUE_CLASS`].
+        TextColor(SkinPalette::FALLBACK.text_primary),
         ClassList::new_with_classes([VALUE_CLASS]),
         info,
         ChildOf(parent),
@@ -1136,7 +1136,6 @@ fn spawn_swap_label(
         Text::default(),
         Translated::new(label_key),
         UiFont::Sans.at(TOOL_FONT_SIZE),
-        // A skinless fallback; the skin recolours via the class token.
         TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
         ClassList::new_with_classes([LABEL_CLASS]),
         ChildOf(holder),

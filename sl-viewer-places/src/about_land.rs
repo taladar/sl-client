@@ -124,8 +124,9 @@ const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 /// The skin class on an action button, so `.sk-button:disabled` greys it.
 const BUTTON_CLASS: &str = "sk-button";
 
-/// A disabled control's text colour (matching the disabled text field / combo).
-const DISABLED_COLOR: Color = Color::srgb(0.45, 0.47, 0.52);
+/// A refused control's text — the disabled role, which this spelled out
+/// longhand.
+const DISABLED_COLOR: Color = SkinPalette::FALLBACK.text_disabled;
 
 /// An action button's background.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);

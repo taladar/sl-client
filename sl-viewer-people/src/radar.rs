@@ -164,17 +164,44 @@ const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 /// The dimmed header / secondary colour.
 const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
-/// A friend's name colour (the name tag's `NameTagFriend`).
-const FRIEND_COLOR: Color = Color::srgb(0.75, 0.92, 0.49);
+/// The four colours a radar row borrows from the **name-tag palette**, read
+/// from the settings store so the list agrees with the tags over the avatars'
+/// heads.
+///
+/// They used to be four local constants holding the palette's *fallback*
+/// values, which is the failure this exists to prevent: a user who retuned
+/// `NameTagColorFriend` saw it in the world and not in the radar, and nothing
+/// said the two were meant to be the same colour. `setting_color` carries the
+/// same fallbacks, so a viewer with no store still draws what those constants
+/// did.
+#[derive(Debug, Clone, Copy)]
+struct RadarTagColors {
+    /// A friend's name (`NameTagColorFriend`).
+    friend: Color,
+    /// A muted avatar's name (`NameTagColorMuted`).
+    muted: Color,
+    /// The range cell inside chat range (`NameTagDistanceColorChat`).
+    chat_range: Color,
+    /// The range cell inside shout range (`NameTagDistanceColorShout`).
+    shout_range: Color,
+}
 
-/// A muted avatar's name colour (the name tag's `NameTagMuted`).
-const MUTED_COLOR: Color = Color::srgb(0.4, 0.4, 0.4);
-
-/// The range cell inside chat range (name-tag chat distance colour).
-const CHAT_RANGE_COLOR: Color = Color::srgb(0.0, 1.0, 0.0);
-
-/// The range cell inside shout range (name-tag shout distance colour).
-const SHOUT_RANGE_COLOR: Color = Color::srgb(1.0, 1.0, 0.0);
+impl RadarTagColors {
+    /// Resolve the four from the store, or from the name-tag palette's own
+    /// fallbacks where there is none.
+    fn from_settings(settings: Option<&ViewerSettings>) -> Self {
+        use sl_viewer_ui_core::skin_colors::{
+            SETTING_NAME_TAG_DISTANCE_CHAT, SETTING_NAME_TAG_DISTANCE_SHOUT,
+            SETTING_NAME_TAG_FRIEND, SETTING_NAME_TAG_MUTED, setting_color,
+        };
+        Self {
+            friend: setting_color(settings, SETTING_NAME_TAG_FRIEND),
+            muted: setting_color(settings, SETTING_NAME_TAG_MUTED),
+            chat_range: setting_color(settings, SETTING_NAME_TAG_DISTANCE_CHAT),
+            shout_range: setting_color(settings, SETTING_NAME_TAG_DISTANCE_SHOUT),
+        }
+    }
+}
 
 /// The list viewport backdrop.
 const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
@@ -1647,6 +1674,7 @@ fn bind_radar_rows(
     view: Res<RadarView>,
     state: Res<RadarState>,
     ui: Option<Res<RadarUi>>,
+    settings: Option<Res<ViewerSettings>>,
     mut rows: Query<(Ref<VirtualRow>, &ChildOf, &TableRowCells, &mut BoundRadar)>,
     mut texts: Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
 ) {
@@ -1654,6 +1682,7 @@ fn bind_radar_rows(
         return;
     };
     let refresh_all = view.is_changed();
+    let tags = RadarTagColors::from_settings(settings.as_deref());
     for (row, child_of, cells, mut bound) in &mut rows {
         if child_of.parent() != ui.viewport {
             continue;
@@ -1672,15 +1701,15 @@ fn bind_radar_rows(
             continue;
         };
         let name_color = if data.muted {
-            MUTED_COLOR
+            tags.muted
         } else if data.friend {
-            FRIEND_COLOR
+            tags.friend
         } else {
             LABEL_COLOR
         };
         let range_color = match range_band(data.distance, state.chat_range, state.shout_range) {
-            RangeBand::Chat => CHAT_RANGE_COLOR,
-            RangeBand::Shout => SHOUT_RANGE_COLOR,
+            RangeBand::Chat => tags.chat_range,
+            RangeBand::Shout => tags.shout_range,
             RangeBand::Beyond => LABEL_COLOR,
             RangeBand::Unknown => DIM_LABEL_COLOR,
         };
@@ -1691,8 +1720,11 @@ fn bind_radar_rows(
         };
         // A jellied avatar's cost is the one the viewer refused to pay, so it is
         // dimmed rather than shown as an ordinary measurement.
+        // The **muted role**, not the muted-avatar colour: a refused cost is a
+        // measurement the viewer declined to make, which has nothing to do with
+        // whether its avatar is muted. The two shared a constant.
         let complexity_color = if data.jellied {
-            MUTED_COLOR
+            DIM_LABEL_COLOR
         } else {
             LABEL_COLOR
         };
@@ -1773,24 +1805,27 @@ pub fn spawn_radar_specimen(
         text_role(DIM_LABEL_COLOR),
         ChildOf(root),
     ));
+    // The specimen has no settings store behind it, so it draws the name-tag
+    // palette's own fallbacks — which is what a fresh viewer draws too.
+    let tags = RadarTagColors::from_settings(None);
     let rows: [SpecimenRow; 3] = [
         (
             "Nearby Resident (nearby.resident)",
-            FRIEND_COLOR,
+            tags.friend,
             "● T S",
             "8.51",
-            CHAT_RANGE_COLOR,
+            tags.chat_range,
         ),
         (
             "Passer-by Resident",
             LABEL_COLOR,
             "● A",
             "54.20",
-            SHOUT_RANGE_COLOR,
+            tags.shout_range,
         ),
         (
             "Faraway Resident",
-            MUTED_COLOR,
+            tags.muted,
             "○",
             ">128.00",
             DIM_LABEL_COLOR,

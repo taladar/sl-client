@@ -67,6 +67,7 @@ use sl_viewer_settings::env_pins::{EnvPinnedSettings, PinKind};
 use unic_langid::{LanguageIdentifier, langid};
 
 use crate::skin::text_role;
+use crate::skin_palette::SkinPalette;
 use crate::ui::{
     LogicalMargin, LogicalRect, UiDirection, UiPanelShown, UiRoot, UiScaffoldSystems, column, row,
 };
@@ -968,8 +969,8 @@ const DEMO_PANEL_MARGIN: f32 = 130.0;
 /// The demo panel's translucent backdrop, matching the scaffold demos'.
 const DEMO_PANEL_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.7);
 
-/// The demo's heading / label colour.
-const DEMO_TEXT_COLOR: Color = Color::srgb(0.82, 0.87, 0.94);
+/// The demo panel's body text — the primary role.
+const DEMO_TEXT_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A demo button's background.
 const DEMO_BUTTON_BACKGROUND: Color = Color::srgb(0.16, 0.19, 0.25);
@@ -1201,7 +1202,7 @@ fn demo_button<M>(
         .with_child((
             Text::default(),
             UiFont::Sans.at(DEMO_FONT_SIZE),
-            TextColor(Color::WHITE),
+            text_role(DEMO_TEXT_COLOR),
             line,
         ))
         .observe(on_activate);

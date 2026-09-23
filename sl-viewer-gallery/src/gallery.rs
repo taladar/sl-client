@@ -72,6 +72,7 @@ use crate::ui::{
 };
 use crate::ui_element::{ElementCx, SCRIPTS, SampleText, UiAction, UiElement};
 use crate::ui_font::{UiFont, register_ui_fonts};
+use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 /// The key that flips the layout direction.
 const DIRECTION_KEY: KeyCode = KeyCode::KeyD;
@@ -97,11 +98,12 @@ const BACKGROUND: Color = Color::srgb(0.09, 0.10, 0.13);
 /// An element card's backdrop, so each element reads as one thing.
 const CARD_BACKGROUND: Color = Color::srgba(1.0, 1.0, 1.0, 0.04);
 
-/// The colour of an element's id and summary.
-const CHROME_COLOR: Color = Color::srgb(0.62, 0.68, 0.78);
+/// An element's id and summary: the muted role, so the harness you judge a
+/// skin in is dressed by that skin too.
+const CHROME_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
-/// The colour of the header line.
-const HEADER_COLOR: Color = Color::srgb(0.95, 0.85, 0.45);
+/// The header line — a heading, which is a role the skin already names.
+const HEADER_COLOR: Color = SkinPalette::FALLBACK.text_heading;
 
 /// The sticky header bar's background — a touch lighter than the page, so the
 /// fixed legend reads as a bar above the scrolling list.
@@ -784,7 +786,7 @@ fn chip_text(label: &str) -> impl Bundle {
     (
         Text::new(label),
         UiFont::Sans.at(CHROME_FONT_SIZE),
-        TextColor(Color::WHITE),
+        text_role(SkinPalette::FALLBACK.text_primary),
     )
 }
 

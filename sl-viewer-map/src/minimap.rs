@@ -73,6 +73,8 @@ use crate::world_api::ObjectDebugInfo;
 use crate::world_api::ObjectState;
 use crate::world_api::TerrainState;
 use crate::world_api::{CameraMode, ViewerCamera};
+use sl_viewer_ui_core::skin::text_role;
+use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 /// The `element` tag the minimap attributes its [`UiAction`]s to.
 pub(crate) const MINIMAP_ELEMENT: &str = "minimap";
@@ -901,7 +903,7 @@ fn spawn_minimap(
         .spawn((
             Text::default(),
             UiFont::Sans.at(TOOLTIP_FONT_SIZE),
-            TextColor(Color::WHITE),
+            text_role(SkinPalette::FALLBACK.text_primary),
             Pickable::IGNORE,
             ChildOf(tooltip),
         ))

@@ -22,9 +22,12 @@
 
 use bevy::prelude::*;
 
+use bevy_flair::style::components::ClassList;
 use sl_viewer_kit::geometry_cache::{GeometryCache, GeometryCacheStats};
 use sl_viewer_platform::environment_assets::EnvironmentAssetManager;
 use sl_viewer_platform::sound_cache::SoundCache;
+use sl_viewer_ui_core::skin::OVERLAY_TEXT_CLASS;
+use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems};
 use sl_viewer_ui_core::ui_font::UiFont;
 use sl_viewer_world_api::{
     ANIMATION_LABEL, MATERIAL_LABEL, MESH_LABEL, PipelineStats, StorePipelineStats, TEXTURE_LABEL,
@@ -44,7 +47,10 @@ impl Plugin for PipelineOverlayPlugin {
             // keeps the overlay standalone (an app that shows it need not also
             // register the object layer's publisher).
             .init_resource::<PipelineStats>()
-            .add_systems(Startup, setup_pipeline_overlay)
+            .add_systems(
+                Startup,
+                setup_pipeline_overlay.after(UiScaffoldSystems::SpawnRoot),
+            )
             .add_systems(
                 Update,
                 (
@@ -104,22 +110,39 @@ pub(crate) struct PipelineStatusText;
 /// chat overlay). It starts [`Visibility::Hidden`] — the panel is opt-in via
 /// `PIPELINE_TOGGLE_KEY` — and is rewritten each frame it is visible from the
 /// live store snapshots.
-pub(crate) fn setup_pipeline_overlay(mut commands: Commands) {
-    commands.spawn((
-        Text::new(String::new()),
-        // Monospace, as for the frame overlay above: the panel is tabular
-        // per-pipeline counters.
-        UiFont::Mono.at(DIAG_FONT_SIZE),
-        TextColor(Color::WHITE),
-        Node {
-            position_type: PositionType::Absolute,
-            top: Val::Px(DIAG_TOP_INSET),
-            left: Val::Px(DIAG_INSET),
-            ..default()
-        },
-        Visibility::Hidden,
-        PipelineStatusText,
-    ));
+pub(crate) fn setup_pipeline_overlay(mut commands: Commands, roots: Query<Entity, With<UiRoot>>) {
+    let node = commands
+        .spawn((
+            Text::new(String::new()),
+            // Monospace, as for the frame overlay above: the panel is tabular
+            // per-pipeline counters.
+            UiFont::Mono.at(DIAG_FONT_SIZE),
+            // Read against the world rather than a panel, so it takes the
+            // overlay class instead of a text role. A class rather than a bare
+            // colour because a skin may want more than the tint — `font-size`,
+            // `font-weight` and `letter-spacing` all reach a text node through
+            // one, and a counter panel is exactly the kind of thing someone
+            // wants bigger.
+            TextColor(Color::WHITE),
+            ClassList::new_with_classes([OVERLAY_TEXT_CLASS]),
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Px(DIAG_TOP_INSET),
+                left: Val::Px(DIAG_INSET),
+                ..default()
+            },
+            Visibility::Hidden,
+            PipelineStatusText,
+        ))
+        .id();
+    // Parented to the UI root rather than left at the top level, because that is
+    // where the stylesheet reaches: bevy_flair styles the tree under the styled
+    // root, and a class on an orphan node would resolve to nothing at all. The
+    // node is absolutely positioned either way, so nothing about where it lands
+    // changes.
+    if let Some(root) = roots.iter().next() {
+        commands.entity(node).insert(ChildOf(root));
+    }
 }
 
 /// Toggle the pipeline-status overlay when `PIPELINE_TOGGLE_KEY` is pressed.

@@ -75,6 +75,7 @@ use crate::ui_combo::{ComboChanged, ComboSelection};
 use crate::ui_slider::{SliderStyle, SliderWidgetPlugin, slider_thumb, slider_track};
 use sl_viewer_settings::ViewerSettings;
 use sl_viewer_ui_core::skin::text_role;
+use sl_viewer_ui_core::skin_palette::SkinPalette;
 use sl_viewer_ui_core::ui::{
     LogicalMargin, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row,
 };
@@ -698,8 +699,8 @@ const DEMO_TITLE: &str = "Settings binding demo (F7) - toggle / drag to write th
 
 /// The demo panel's translucent backdrop, matching the other demos'.
 const DEMO_PANEL_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.7);
-/// The demo's heading / label colour.
-const DEMO_TEXT_COLOR: Color = Color::srgb(0.82, 0.87, 0.94);
+/// The demo panel's body text — the primary role.
+const DEMO_TEXT_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 /// A demo control's border. The keyboard focus ring is the shared outline the
 /// skin draws on any focusable widget (`viewer-ui-focus-ring-visible`), not a
 /// recolour of this border.

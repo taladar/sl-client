@@ -102,8 +102,8 @@ const CHANGED_MARK: &str = "*";
 /// The value shown for a layer holding no override.
 const NO_OVERRIDE: &str = "–";
 
-/// The list header's label colour (the preferences section palette).
-const HEADER_COLOR: Color = Color::srgb(0.75, 0.80, 0.88);
+/// The settings table's column header — the heading role.
+const HEADER_COLOR: Color = SkinPalette::FALLBACK.text_heading;
 
 /// The list cell / detail value colour (the preferences row-label palette).
 const CELL_COLOR: Color = SkinPalette::FALLBACK.text_primary;

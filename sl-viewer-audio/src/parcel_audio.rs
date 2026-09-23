@@ -66,6 +66,7 @@ use crate::media_audio::MixerStream;
 use crate::media_diagnostics::MediaDiagnostics;
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{SettingBinding, bound_slider};
+use crate::skin_palette::SkinPalette;
 use crate::ui::BottomArea;
 use crate::ui::row;
 use crate::ui_element::{ElementCx, UiAction};
@@ -105,10 +106,10 @@ const SLIDER: SliderStyle = SliderStyle {
 
 /// The cluster's backdrop (matches the toolbar's dark surface).
 const BAR_BACKGROUND: Color = Color::srgba(0.08, 0.09, 0.12, 0.92);
-/// Label / glyph colour.
-const BAR_LABEL: Color = Color::srgb(0.9, 0.9, 0.92);
-/// The dimmed colour for the title / an idle state.
-const BAR_LABEL_DIM: Color = Color::srgb(0.62, 0.65, 0.72);
+/// The bar's label — the primary role.
+const BAR_LABEL: Color = SkinPalette::FALLBACK.text_primary;
+/// The bar's quieter second line — the muted role.
+const BAR_LABEL_DIM: Color = SkinPalette::FALLBACK.text_muted;
 /// Button borders.
 const BUTTON_BORDER: Color = Color::srgb(0.3, 0.3, 0.35);
 /// Button fill.

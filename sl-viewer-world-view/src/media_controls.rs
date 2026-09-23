@@ -44,6 +44,7 @@ use crate::media_prim::{MediaData, MediaPrimState, media_permission_allows};
 use sl_viewer_media::media_diagnostics::MediaDiagnostics;
 use sl_viewer_media::media_engine::{MediaEngineKind, MediaEngineSystems, MediaSurfaces};
 use sl_viewer_platform::system_browser::{ExternalUrl, normalize_web_url, open_in_system_browser};
+use sl_viewer_ui_core::skin_palette::SkinPalette;
 use sl_viewer_ui_core::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use sl_viewer_ui_core::ui_element::UiAction;
 use sl_viewer_ui_core::ui_font::UiFont;
@@ -67,10 +68,11 @@ const FLAGS_OBJECT_YOU_OWNER: u32 = 1 << 5;
 /// `MediaEntry::controls` value for the reduced (mini) control set.
 const CONTROLS_MINI: i32 = 1;
 
-/// Bar text colour.
-const BAR_LABEL: Color = Color::srgb(0.9, 0.9, 0.92);
-/// Bar text colour for unavailable actions.
-const BAR_LABEL_DIM: Color = Color::srgb(0.45, 0.45, 0.5);
+/// The bar's label — the primary role.
+const BAR_LABEL: Color = SkinPalette::FALLBACK.text_primary;
+/// The label of a control the bar cannot offer: the disabled role, which is
+/// what this tone was — the two `BAR_LABEL_DIM`s meant different things.
+const BAR_LABEL_DIM: Color = SkinPalette::FALLBACK.text_disabled;
 
 /// How the seek scrubber is drawn.
 const SCRUBBER: SliderStyle = SliderStyle {

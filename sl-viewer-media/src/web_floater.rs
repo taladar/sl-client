@@ -25,6 +25,7 @@ use sl_viewer_intents::OpenWebBrowser;
 use sl_viewer_platform::system_browser::{ExternalUrl, normalize_web_url, open_in_system_browser};
 use sl_viewer_ui_core::i18n::Translated;
 use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class_on, text_role};
+use sl_viewer_ui_core::skin_palette::SkinPalette;
 use sl_viewer_ui_core::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use sl_viewer_ui_core::ui_element::UiAction;
 use sl_viewer_ui_core::ui_font::UiFont;
@@ -45,8 +46,8 @@ const DEFAULT_HOME_URL: &str = "https://secondlife.com/";
 /// The toolbar / status font size.
 const WEB_FONT_SIZE: f32 = 13.0;
 
-/// Status-row text colour.
-const STATUS_COLOR: Color = Color::srgb(0.7, 0.72, 0.78);
+/// The status line — the muted role.
+const STATUS_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// The floater's entities.
 #[derive(Debug, Resource)]

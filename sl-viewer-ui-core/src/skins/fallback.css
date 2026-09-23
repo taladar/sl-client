@@ -24,6 +24,7 @@
   --surface-border: #4d576b;
   --card-bg: #303b4f;
   --overlay-bg: #0f121ad9;
+  --overlay-text: #ffffff;
   --text-primary: #e6ebf5;
   --text-muted: #9ea8bd;
   --text-disabled: #737885;
@@ -117,6 +118,14 @@
    * notification kinds. */
   --console-info: #99d1a8;
   --console-error: #eb8f85;
+
+  /* Text that means something: a failure, a warning, a note that wants the
+   * eye, and the experience family's accent. Meaning-bearing like the
+   * notification kinds and the console pair. */
+  --text-error: #eb8c80;
+  --text-warn: #f2c766;
+  --text-note: #fad166;
+  --experience-accent: #6bd199;
 
   /* The selected keyframe marker on a day-cycle timeline. Gold rather than
    * the blue every list selection uses: it sits on a sky gradient, not in a

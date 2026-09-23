@@ -74,7 +74,10 @@ use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use bevy::text::EditableText;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
-use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class, text_role};
+use sl_viewer_ui_core::skin::{
+    DISABLED_TEXT_CLASS, EXPERIENCE_TEXT_CLASS, TEXT_CLASS, set_state_class, text_meaning,
+    text_role,
+};
 
 use sl_client_bevy::{
     Command, ExperienceInfo, ExperienceKey, ExperiencePermission, ExperienceProperties,
@@ -629,7 +632,7 @@ fn build_view_panel(commands: &mut Commands, parent: Entity) -> ViewPanel {
         .spawn((
             Text::default(),
             UiFont::Sans.at(HEADING_FONT_SIZE),
-            text_role(HEADING_COLOR),
+            text_meaning(HEADING_COLOR, EXPERIENCE_TEXT_CLASS),
             Pickable::IGNORE,
             Name::new("experience-profile-name"),
             ChildOf(panel),

@@ -49,8 +49,9 @@ use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
 use crate::skin::{
-    ACTION_BUTTON_CLASS, DisabledButtons, PRESENCE_OFFLINE_CLASS, PRESENCE_ONLINE_CLASS,
-    TEXT_CLASS, set_action_button_enabled, set_state_class_on, text_role,
+    ACTION_BUTTON_CLASS, ACTIVE_TEXT_CLASS, DisabledButtons, PRESENCE_OFFLINE_CLASS,
+    PRESENCE_ONLINE_CLASS, TEXT_CLASS, set_action_button_enabled, set_state_class_on, text_meaning,
+    text_role,
 };
 use crate::skin_palette::SkinPalette;
 use bevy::asset::RenderAssetUsages;
@@ -1568,7 +1569,7 @@ fn augment_sortable_header(
         .spawn((
             Text::new(String::new()),
             UiFont::Sans.at(ROW_FONT_SIZE),
-            text_role(TAB_ACTIVE_BORDER),
+            text_meaning(TAB_ACTIVE_BORDER, ACTIVE_TEXT_CLASS),
             Node {
                 flex_shrink: 0.0,
                 margin: UiRect::left(Val::Px(2.0)),

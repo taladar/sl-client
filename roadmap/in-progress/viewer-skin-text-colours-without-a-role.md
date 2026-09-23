@@ -2,7 +2,7 @@
 id: viewer-skin-text-colours-without-a-role
 title: The text colours that name no role, and the four kinds of reason why
 topic: viewer
-status: ready
+status: in-progress
 origin: viewer-skin-panel-text-roles census (2026-09-22)
 points: 5
 refs: [viewer-skin-panel-text-roles, viewer-audit-skin-token-coverage,
@@ -97,3 +97,57 @@ skinnable through the user-tunable palette rather than through classes.
 Every `text_role` call resolves to a role or is documented at the site as one
 of the three deliberate `Color::WHITE` cases, and the census command above
 returns nothing unexplained.
+
+## Done (2026-09-23)
+
+**Two neutrals, not three** — decided from the code rather than from taste.
+Seven files looked like they used three neutral levels at once; every one
+decomposed into something else: a section *heading* (`text_heading`), the
+*accent* used as text, a *meaning*, or chrome that is simply muted. No panel
+needs a third level of prose, so the 14 drifting constants collapse into the
+four roles that exist.
+
+What that came to:
+
+- **28 constants across 21 files** now name a role. The bright band (~.86) is
+  `text_primary`, the mid band (~.76) is `text_muted`, section and table
+  headers are `text_heading`. `BAR_LABEL_DIM`'s two definitions split — `.45`
+  was the *refused* label (disabled), `.62` a resting one (muted) — which is
+  what "they are not the same idea" meant.
+- **Meaning-bearing colours got tokens**, on the `--console-*` precedent:
+  `--text-error`, `--text-warn`, `--text-note`, `--experience-accent`, with
+  `.sk-text.sk-error` and friends, and a `skin::text_meaning(colour, class)`
+  helper beside `text_role`. Ten sites.
+- The two constants that **were the accent** spelled longhand now carry
+  `ACTIVE_TEXT_CLASS`.
+- The **32 `Color::WHITE`** are five: three untinted colour emoji (white *is*
+  "do not tint"), and the two world overlays, whose literal is exactly what
+  `--overlay-text` holds. Everything else became a role or the colour its own
+  class paints.
+
+### Two things the census turned up that were not on the list
+
+**The radar was copying the name-tag palette's fallback values.** A user who
+retuned `NameTagColorFriend` saw it over avatars' heads and not in the radar,
+and nothing said the two were meant to agree. It reads the store now
+(`setting_color`), and its jellied-complexity cell — which was borrowing the
+muted-*avatar* colour to dim a *measurement* — takes the muted role.
+
+**World overlays are skinnable now too.** A beacon's label and the pipeline
+read-out were white by fiat, justified as "read against scenery, not chrome".
+That is an argument for a different *token*, not for none: they carry
+`.sk-overlay` / `.sk-overlay-text` (`--overlay-bg` / `--overlay-text`), and
+being classes rather than bare tokens a skin can set their font as well as
+their colour. The pipeline read-out had to be **parented to the UI root**
+first: it was spawned with no parent at all, outside the tree bevy_flair
+styles, so a class on it would have resolved to nothing.
+
+### And a correction worth keeping
+
+"A skinless fallback" was the wrong name for what a `TextColor` beside a class
+is. `common.css` is an embedded asset and the UI root is always `Styled`, so a
+running viewer never goes without a stylesheet. What the Rust colour still
+decides is what the **headless harnesses** measure — the testkit builds the
+layout stack without `FlairPlugin`, so no class resolves there — and the frame
+before the sheet loads. Both want the styled answer, which is why those sites
+now pass the colour their class paints rather than white.

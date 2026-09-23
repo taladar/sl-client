@@ -115,8 +115,8 @@ const CARD_BORDER: Color = Color::srgb(0.32, 0.36, 0.44);
 /// The title (name) text colour.
 const TITLE_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
-/// The body text colour.
-const BODY_COLOR: Color = Color::srgb(0.82, 0.85, 0.90);
+/// The body text — the primary role.
+const BODY_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A dimmer label colour (the "Owner:" prefix).
 const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;

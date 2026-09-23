@@ -109,12 +109,12 @@ const SLIDER: SliderStyle = SliderStyle {
 /// The minimum width of a slider row's trailing value readout.
 const VALUE_WIDTH: f32 = 44.0;
 
-/// A section heading's colour.
-const SECTION_COLOR: Color = Color::srgb(0.78, 0.83, 0.9);
+/// A section label — the heading role.
+const SECTION_COLOR: Color = SkinPalette::FALLBACK.text_heading;
 /// A row label's colour.
 const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
-/// A value readout's colour.
-const VALUE_COLOR: Color = Color::srgb(0.7, 0.74, 0.82);
+/// A row's value read-out: quieter than its label, which is the muted role.
+const VALUE_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 /// A control's border.
 const CONTROL_BORDER: Color = Color::srgb(0.4, 0.5, 0.62);
 /// A slider track's fill.

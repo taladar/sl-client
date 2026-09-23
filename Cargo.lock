@@ -9816,6 +9816,7 @@ name = "sl-viewer-world-scene"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_flair",
  "image",
  "pretty_assertions",
  "serde",

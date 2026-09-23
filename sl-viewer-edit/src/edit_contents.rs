@@ -81,6 +81,7 @@ use crate::world_api::EditToolState;
 use crate::world_api::InputContext;
 use crate::world_api::ObjectState;
 use crate::world_api::SelectionSet;
+use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 /// The uniform height of a contents row, in logical pixels (matches the
 /// inventory list's row metric so the two read the same).
@@ -850,7 +851,8 @@ fn spawn_contents_button(
         Text::default(),
         Translated::new(label_key),
         UiFont::Sans.at(TOOL_FONT_SIZE),
-        TextColor(Color::WHITE),
+        // The colour `.sk-build-value` paints — see [`VALUE_CLASS`].
+        TextColor(SkinPalette::FALLBACK.text_primary),
         ClassList::new_with_classes([VALUE_CLASS]),
         Pickable::IGNORE,
         ChildOf(button),

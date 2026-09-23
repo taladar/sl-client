@@ -71,6 +71,7 @@ use crate::inventory::{
     query_folder_page,
 };
 use crate::inventory_actions::{MenuTarget, WornAttachments, wear_commands};
+use crate::skin_palette::SkinPalette;
 use crate::ui::UiRoot;
 use crate::ui_font::UiFont;
 use crate::virtual_list::{VirtualList, VirtualRow};
@@ -98,8 +99,8 @@ const GHOST_OFFSET: Vec2 = Vec2::new(14.0, 10.0);
 /// The ghost label's font size, in logical pixels.
 const GHOST_FONT_SIZE: f32 = 13.0;
 
-/// The ghost's text colour.
-const GHOST_COLOR: Color = Color::srgb(0.92, 0.94, 0.98);
+/// The drag ghost's label — the primary role.
+const GHOST_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// The ghost's backdrop, so it reads over any scene.
 const GHOST_BACKGROUND: Color = Color::srgba(0.10, 0.12, 0.16, 0.85);

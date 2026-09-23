@@ -114,6 +114,7 @@ use bevy::prelude::*;
 use bevy::ui_widgets::{Activate, Button};
 
 use crate::skin::text_role;
+use crate::skin_palette::SkinPalette;
 use crate::ui_font::{UiFont, register_ui_fonts};
 
 /// A node that is **fixed to the screen**: permanent chrome the user cannot drag
@@ -1332,8 +1333,8 @@ enum UiDemoText {
 /// The demo panel's translucent backdrop, matching the text panel's.
 const DEMO_PANEL_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.7);
 
-/// The demo's instruction-line colour.
-const DEMO_TITLE_COLOR: Color = Color::srgb(0.80, 0.85, 0.92);
+/// The demo's instruction line — the primary role.
+const DEMO_TITLE_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A demo button's background.
 const DEMO_BUTTON_BACKGROUND: Color = Color::srgb(0.16, 0.19, 0.25);
@@ -1399,7 +1400,7 @@ fn setup_ui_demo(mut commands: Commands, visible: Res<UiDemoVisible>, root: Res<
                         .with_child((
                             Text::default(),
                             UiFont::Sans.at(UiDemoTextSize::default().px()),
-                            TextColor(Color::WHITE),
+                            text_role(DEMO_TITLE_COLOR),
                             UiDemoText::DirectionButton,
                         ))
                         .observe(flip_ui_direction);
@@ -1408,7 +1409,7 @@ fn setup_ui_demo(mut commands: Commands, visible: Res<UiDemoVisible>, root: Res<
                         .with_child((
                             Text::default(),
                             UiFont::Sans.at(UiDemoTextSize::default().px()),
-                            TextColor(Color::WHITE),
+                            text_role(DEMO_TITLE_COLOR),
                             UiDemoText::LengthButton,
                         ))
                         .observe(flip_sample_length);
@@ -1417,7 +1418,7 @@ fn setup_ui_demo(mut commands: Commands, visible: Res<UiDemoVisible>, root: Res<
                         .with_child((
                             Text::default(),
                             UiFont::Sans.at(UiDemoTextSize::default().px()),
-                            TextColor(Color::WHITE),
+                            text_role(DEMO_TITLE_COLOR),
                             UiDemoText::SizeButton,
                         ))
                         .observe(cycle_text_size);
@@ -1454,7 +1455,7 @@ fn setup_ui_demo(mut commands: Commands, visible: Res<UiDemoVisible>, root: Res<
                 .with_child((
                     Text::default(),
                     UiFont::Sans.at(UiDemoTextSize::default().px()),
-                    TextColor(Color::WHITE),
+                    text_role(DEMO_TITLE_COLOR),
                     UiDemoText::Sample,
                 ));
         });

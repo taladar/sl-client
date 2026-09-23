@@ -78,6 +78,7 @@ use crate::render_scene::{
     scene_root_transform,
 };
 use crate::skin::text_role;
+use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 /// The command-line options for the render gallery.
 ///
@@ -163,11 +164,11 @@ const STAGE_AMBIENT: f32 = 200.0;
 /// unlit face is still faintly a shape rather than a hole.
 const OWN_LIGHTING_AMBIENT: f32 = 12.0;
 
-/// The colour of the scene's id.
-const HEADER_COLOR: Color = Color::srgb(0.95, 0.85, 0.45);
+/// The header line — a heading, which is a role the skin already names.
+const HEADER_COLOR: Color = SkinPalette::FALLBACK.text_heading;
 
-/// The colour of the scene's summary and the key hints.
-const CHROME_COLOR: Color = Color::srgb(0.70, 0.76, 0.85);
+/// The chrome around a specimen: the muted role.
+const CHROME_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
 /// Which cell of the matrix the gallery is showing.
 ///

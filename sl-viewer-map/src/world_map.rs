@@ -69,6 +69,8 @@ use crate::world_map_math::{
     self, TileRaster, WorldMapView, tile_corner, tile_level, tile_span_regions,
 };
 use crate::world_map_tiles::{TileKey, TileState, WorldMapTiles};
+use sl_viewer_ui_core::skin::text_role;
+use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 /// The `element` tag the world map attributes its [`UiAction`]s to.
 pub(crate) const WORLD_MAP_ELEMENT: &str = "worldmap";
@@ -548,7 +550,7 @@ fn build_world_map_content(
         .spawn((
             Text::default(),
             UiFont::Sans.at(PANEL_FONT_SIZE),
-            TextColor(Color::WHITE),
+            text_role(SkinPalette::FALLBACK.text_primary),
             Pickable::IGNORE,
             ChildOf(tooltip),
         ))

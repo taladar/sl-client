@@ -58,6 +58,7 @@ use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::world_api::InputContext;
 use crate::world_api::ObjectState;
 use crate::world_api::SelectionSet;
+use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 /// The floater's font size, in logical pixels.
 pub(crate) const TOOL_FONT_SIZE: f32 = 13.0;
@@ -73,8 +74,17 @@ const FIELD_WIDTH_GLYPHS: f32 = 8.0;
 /// (`--text-muted`-driven; see `assets/skins/common.css`).
 pub(crate) const LABEL_CLASS: &str = "sk-build-label";
 
-/// The skin class for the floater's value / button text
-/// (`--text-primary`-driven).
+/// The skin class for the floater's value text (`--text-primary`-driven; see
+/// `assets/skins/common.css`).
+///
+/// Every node carrying it also passes `SkinPalette::FALLBACK.text_primary` as
+/// its `TextColor`, which is the *same* colour the rule paints — deliberately,
+/// not as a "skinless fallback": `common.css` is an embedded asset and the UI
+/// root is always `Styled`, so a running viewer never goes without a
+/// stylesheet. What the Rust colour still decides is what the **headless
+/// harnesses** measure (the testkit builds the layout stack without
+/// `FlairPlugin`, so no class resolves there) and what shows in the frame
+/// before the sheet finishes loading. Both want the styled answer, not white.
 pub(crate) const VALUE_CLASS: &str = "sk-build-value";
 
 /// The skin class for the placeholder tab text (`--text-disabled`-driven).
@@ -516,7 +526,6 @@ fn build_build_tools_content(
         .spawn((
             Text::default(),
             UiFont::Sans.at(TOOL_FONT_SIZE),
-            // A skinless fallback; the skin recolours via the class token.
             TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
             ClassList::new_with_classes([LABEL_CLASS]),
             Name::new("build-tools:summary"),
@@ -615,7 +624,6 @@ fn build_build_tools_content(
                 Text::default(),
                 Translated::new("build-tab-placeholder"),
                 UiFont::Sans.at(TOOL_FONT_SIZE),
-                // A skinless fallback; the skin recolours via the class token.
                 TextColor(Color::srgba(0.6, 0.6, 0.6, 1.0)),
                 ClassList::new_with_classes([PLACEHOLDER_CLASS]),
                 ChildOf(page),
@@ -792,8 +800,8 @@ fn spawn_link_part_nav(commands: &mut Commands, parent: Entity) {
         commands.spawn((
             Text::new(glyph),
             UiFont::Sans.at(TOOL_FONT_SIZE),
-            // A skinless fallback; the skin recolours via the class token.
-            TextColor(Color::WHITE),
+            // The colour `.sk-build-value` paints — see [`VALUE_CLASS`].
+            TextColor(SkinPalette::FALLBACK.text_primary),
             ClassList::new_with_classes([VALUE_CLASS]),
             Pickable::IGNORE,
             ChildOf(button),
@@ -931,7 +939,6 @@ pub(crate) fn spawn_row_label(
                 linebreak: LineBreak::NoWrap,
                 ..Default::default()
             },
-            // A skinless fallback; the skin recolours via the class token.
             TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
             ClassList::new_with_classes([LABEL_CLASS]),
             Node {

@@ -67,8 +67,8 @@ const FONT: f32 = 13.0;
 /// The fixed width of the "Show" checkbox column, in logical pixels.
 const SHOW_COL_WIDTH: f32 = 48.0;
 
-/// The header label colour (the preferences section palette).
-const HEADER_COLOR: Color = Color::srgb(0.75, 0.80, 0.88);
+/// The alert table's column header — the heading role.
+const HEADER_COLOR: Color = SkinPalette::FALLBACK.text_heading;
 
 /// The cell label colour (the preferences row-label palette).
 const CELL_COLOR: Color = SkinPalette::FALLBACK.text_primary;

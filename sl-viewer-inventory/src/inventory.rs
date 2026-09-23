@@ -168,8 +168,8 @@ fn sort_name(
         .unwrap_or_default()
 }
 
-/// The window title / toolbar text colour.
-const CHROME_COLOR: Color = Color::srgb(0.86, 0.89, 0.95);
+/// The tree's own chrome text: ordinary body text, the primary role.
+const CHROME_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A row label's colour.
 const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
