@@ -67,6 +67,7 @@ use crate::floater::{
     Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterOp, FloaterSpec, spawn_floater,
 };
 use crate::i18n::Translated;
+use crate::skin::LIST_SURFACE_CLASS;
 use crate::skin::TILE_CLASS;
 use crate::skin::text_role;
 use crate::skin_palette::SkinPalette;
@@ -924,7 +925,10 @@ fn build_emoji_picker_content(
                 position_type: PositionType::Relative,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.25)),
+            // The rows' face, from the skin (`--list-bg`): the scrim this
+            // used to paint by hand, plus the field-family text roles the
+            // class re-roots for a light list. See `LIST_SURFACE_CLASS`.
+            ClassList::new_with_classes([LIST_SURFACE_CLASS]),
             VirtualList::new(CELL_SIZE),
             VirtualViewport,
             Pickable::default(),

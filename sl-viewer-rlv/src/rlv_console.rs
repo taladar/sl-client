@@ -73,11 +73,10 @@ use sl_viewer_world_api::rlv::{
 };
 use uuid::Uuid;
 
-use crate::style::{
-    ACTION_BACKGROUND, DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, LIST_BACKGROUND, ROW_HEIGHT,
-};
+use crate::style::{ACTION_BACKGROUND, DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, ROW_HEIGHT};
 use sl_viewer_ui_core::skin::{
-    CONSOLE_ERROR_CLASS, CONSOLE_INFO_CLASS, CONSOLE_REPLY_CLASS, TEXT_CLASS, set_state_class_on,
+    CONSOLE_ERROR_CLASS, CONSOLE_INFO_CLASS, CONSOLE_REPLY_CLASS, LIST_SURFACE_CLASS, TEXT_CLASS,
+    set_state_class_on,
 };
 
 /// The floater's stable id.
@@ -465,7 +464,10 @@ fn build_console_content(In(handle): In<FloaterHandle>, mut commands: Commands) 
                 position_type: PositionType::Relative,
                 ..default()
             },
-            BackgroundColor(LIST_BACKGROUND),
+            // The rows' face, from the skin (`--list-bg`): the scrim this
+            // used to paint by hand, plus the field-family text roles the
+            // class re-roots for a light list. See `LIST_SURFACE_CLASS`.
+            ClassList::new_with_classes([LIST_SURFACE_CLASS]),
             VirtualList::new(ROW_HEIGHT),
             VirtualViewport,
             TabIndex(1),

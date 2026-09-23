@@ -124,9 +124,6 @@ pub(crate) mod style {
 
     /// A list row's height, logical px.
     pub(crate) const ROW_HEIGHT: f32 = 20.0;
-
-    /// A scrolling list's backdrop.
-    pub(crate) const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
 }
 
 /// Every environment editor at once, for a host that wants the whole family.

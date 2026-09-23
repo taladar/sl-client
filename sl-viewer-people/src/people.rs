@@ -128,9 +128,6 @@ const TAB_ACTIVE_BORDER: Color = Color::srgb(0.52, 0.68, 0.95);
 /// A tab / label's text colour.
 const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
-/// The friends-list scroll surface background — a touch darker, a sunken well.
-const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
-
 /// An action button's background.
 const ACTION_BACKGROUND: Color = Color::srgb(0.24, 0.29, 0.38);
 
@@ -1505,9 +1502,7 @@ fn spawn_friends_content(
     let table = spawn_table(commands, list_column, &FRIENDS_TABLE);
     let table_root = table.root;
     let viewport = table.viewport;
-    commands
-        .entity(viewport)
-        .insert((BackgroundColor(LIST_BACKGROUND), TabIndex(2)));
+    commands.entity(viewport).insert(TabIndex(2));
     commands
         .entity(table.header)
         .insert(BackgroundColor(HEADER_BACKGROUND));

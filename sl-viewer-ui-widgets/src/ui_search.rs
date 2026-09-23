@@ -46,13 +46,14 @@ use bevy::text::EditableText;
 use bevy_flair::style::components::ClassList;
 
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
+use sl_viewer_ui_core::skin::FIELD_PLACEHOLDER_CLASS;
 use sl_viewer_ui_core::skin_palette::{SkinColors, SkinPalette};
 use sl_viewer_ui_core::ui::row;
 use sl_viewer_ui_core::ui_element::TextMayClip;
 use sl_viewer_ui_core::ui_font::UiFont;
 
 /// The skin class on the search box (the bordered container), so a skin can give
-/// it the same control surface as the other editable fields.
+/// it the same well as the other editable fields.
 const SEARCH_FIELD_CLASS: &str = "sk-search-field";
 
 /// The skin class on the circular clear (`×`) button.
@@ -202,7 +203,13 @@ pub fn spawn_search_field(
         commands.spawn((
             Text::new(SEARCH_GLYPH),
             UiFont::Sans.at(spec.font_size),
+            // A prompt on the field's own face, so it takes the field family's
+            // tentative colour rather than the muted chrome one. The `TextColor`
+            // is the value that class paints in the flat skins — what the
+            // headless harnesses (no `FlairPlugin`, so no class resolves) and
+            // the frame before the sheet loads measure.
             TextColor(fallback.text_muted),
+            ClassList::new_with_classes([FIELD_PLACEHOLDER_CLASS]),
             Node {
                 flex_shrink: 0.0,
                 ..default()
@@ -248,9 +255,12 @@ pub fn spawn_search_field(
             ..TextInputSpec::new(spec.element, TextInputKind::Line)
         },
     );
+    // The typed term is FIELD text, not chrome text: it is read against the
+    // box's own face, which a skin may make light while the panel behind stays
+    // dark. `.sk-text-field` paints it; this is the pre-load / headless value.
     commands
         .entity(field)
-        .insert((SearchInputField, TextColor(fallback.text_primary)));
+        .insert((SearchInputField, TextColor(fallback.field_text)));
 
     let mut placeholder = None;
     if !spec.placeholder.is_empty() {
@@ -261,7 +271,10 @@ pub fn spawn_search_field(
             // otherwise would.
             TextLayout::no_wrap(),
             UiFont::Sans.at(spec.font_size),
+            // As the glyph above: the field family's tentative colour, with the
+            // flat skins' value of it as the pre-load fallback.
             TextColor(fallback.text_muted),
+            ClassList::new_with_classes([FIELD_PLACEHOLDER_CLASS]),
             Node {
                 position_type: PositionType::Absolute,
                 // Aligned with the field's text origin: both sit one field-text

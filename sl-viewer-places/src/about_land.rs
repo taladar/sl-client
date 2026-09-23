@@ -130,9 +130,6 @@ const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
 /// An action button's border.
 const BUTTON_BORDER: Color = Color::srgb(0.34, 0.40, 0.52);
 
-/// A list background.
-const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
-
 /// The bounded height of each list (object owners, allow, ban), in logical
 /// pixels — the widget scrolls beyond it rather than growing the tab.
 const LIST_HEIGHT: f32 = 150.0;
@@ -1646,7 +1643,6 @@ fn spawn_bounded_table(
                 height: Val::Px(LIST_HEIGHT),
                 ..default()
             },
-            BackgroundColor(LIST_BACKGROUND),
             ChildOf(parent),
         ))
         .id();

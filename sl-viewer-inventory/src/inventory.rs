@@ -68,8 +68,8 @@ use crate::virtual_list::{
 };
 use bevy_flair::style::components::ClassList;
 use sl_viewer_ui_core::skin::{
-    ACTIVE_CLASS, FOLDER_LABEL_CLASS, LIST_ROW_CLASS, TEXT_CLASS, set_state_class,
-    set_state_class_on, text_role,
+    ACTIVE_CLASS, FOLDER_LABEL_CLASS, LIST_ROW_CLASS, LIST_SURFACE_CLASS, TEXT_CLASS,
+    set_state_class, set_state_class_on, text_role,
 };
 use sl_viewer_ui_core::ui_ellipsis::{RevealEllipsis, spawn_ellipsis_marker};
 
@@ -3899,7 +3899,10 @@ fn build_inventory_content(In(handle): In<FloaterHandle>, mut commands: Commands
                 position_type: PositionType::Relative,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.25)),
+            // The rows' face, from the skin (`--list-bg`): the scrim this
+            // used to paint by hand, plus the field-family text roles the
+            // class re-roots for a light list. See `LIST_SURFACE_CLASS`.
+            ClassList::new_with_classes([LIST_SURFACE_CLASS]),
             VirtualList::new(ROW_HEIGHT),
             VirtualViewport,
             Pickable::default(),

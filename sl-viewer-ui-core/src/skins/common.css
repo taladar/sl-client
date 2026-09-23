@@ -583,8 +583,16 @@
   background-color: var(--control-bg-hover);
 }
 
+/* An option's label sits on the popover's LIST face, not on chrome, so it takes
+ * the field family's text — the same argument as `.sk-list-surface .sk-text`.
+ * The anchor's value text keeps `--text-primary` from `.sk-build-value`, which
+ * is right: that one really is on a control. */
+.sk-combo-option .sk-build-value {
+  color: var(--field-text);
+}
+
 .sk-combo-option:disabled .sk-build-value {
-  color: var(--text-disabled);
+  color: var(--field-text-disabled);
 }
 
 /* THE RADIO OPTION (viewer-skin-checkbox-radio-shape).
@@ -775,9 +783,26 @@
   border-radius: var(--control-radius);
 }
 
-/* A dropped-down / popped-up menu surface. */
+/* A dropped-down / popped-up menu surface. Its own role rather than
+ * `--surface-bg`: the reference's classic skins float a menu over the chrome in
+ * a colour of its own (`MenuDefaultBgColor`, opaque black in Vintage) while the
+ * floater body stays grey. The flat skins give the two the same value, so
+ * nothing moves there. */
 .sk-menu {
-  background-color: var(--surface-bg);
+  background-color: var(--menu-bg);
+  border-color: var(--surface-border);
+  border-radius: var(--surface-radius);
+}
+
+/* A combo's open popover. It looks like a menu and it is NOT one: a drop-down
+ * list is a data surface, so it takes `--list-bg` and its rows take the field
+ * family's text — which is the whole reason it stopped sharing `.sk-menu` (the
+ * reference names it separately too, `ComboListBgColor`).
+ *
+ * Its rows keep `.sk-combo-option` / `.sk-menu-separator`: the shape and the
+ * hover are a menu's, only the colours are a list's. */
+.sk-combo-list {
+  background-color: var(--list-bg);
   border-color: var(--surface-border);
   border-radius: var(--surface-radius);
 }
@@ -823,7 +848,24 @@
   background-color: var(--control-border);
 }
 
-/* An editable text field (single- or multi-line). Every editor is tagged
+/* THE FIELD FAMILY (viewer-skin-light-surface-roles).
+ *
+ * Everything from here to `.sk-search-clear` reads the **second**
+ * surface-and-text family: `--field-*` and `--list-bg`, the roles of a place
+ * where DATA lives, as against the `--control-*` / `--text-*` chrome a button
+ * and a menu are painted from. Both shipped skins make the two families the
+ * same kind of dark, which is why one pair could stand for both for so long;
+ * the reference's classic skins do not, and cannot be expressed by a value
+ * swap — theirs is light sage grey with black text and a black caret, sitting
+ * inside dark grey chrome. A token pair asked to be both has no value that
+ * works.
+ *
+ * So: a field, a list and a combo's drop-down take the field family, and the
+ * caret and selection go with them — a white caret on a light field is
+ * invisible, which is the very class of bug the caret rule below was added to
+ * fix.
+ *
+ * An editable text field (single- or multi-line). Every editor is tagged
  * `sk-text-field` by the scaffold (src/skin.rs stamp_text_field_class), the way
  * every focusable is tagged `sk-focusable`, so this one rule routes the caret
  * and selection colours of every field — chat input, search boxes, the build
@@ -837,10 +879,30 @@
   unfocused-selection-color: var(--selection-unfocused);
   /* The typed text itself. Here rather than at each spawn site for the same
    * reason the caret is: the scaffold stamps this class on every field, so one
-   * rule reaches all of them. A field that cannot be edited — disabled, or
-   * read-only, which no pseudo-class can see — adds `.sk-disabled-text`, and
-   * the state block at the end of this file wins over this. */
+   * rule reaches all of them. The two stances that cannot be typed into are
+   * the two rules below. */
   color: var(--field-text);
+}
+
+/* Readable, copyable, unchangeable. `ReadOnlyField` is ours and no pseudo-class
+ * sees it (the field still takes focus and a caret — that is what `Ctrl+C`
+ * needs), so `ui_text_input.rs` `reflect_read_only_field` puts the class on.
+ *
+ * Its own role rather than the greyed one a refused control takes: the
+ * reference sends a read-only editor back to CHROME grey with light text, so
+ * "you cannot type here" is carried by the surface rather than by a dimmed
+ * glyph colour — a real usability idea worth keeping whichever skin is worn,
+ * and one the flat skins express by giving these the same values as the
+ * writable pair. */
+.sk-text-field.sk-read-only {
+  color: var(--field-text-readonly);
+}
+
+/* Refused outright: no focus, no caret, no selection. `:disabled` over the
+ * `InteractionDisabled` the consumer already sets, so there is no state to
+ * mirror — and last of the three, because inert beats merely unchangeable. */
+.sk-text-field:disabled {
+  color: var(--field-text-disabled);
 }
 
 /* The Conversations floater's transcript band colours — the reference's
@@ -871,27 +933,92 @@
 }
 
 /* The reusable search box (viewer-ui-search-field) — a single-line text input,
- * so it takes the skin's control surface, like the other editable fields. Used by
- * the menu-bar filter and the inventory filter. */
+ * so it takes the field family's well, like the other editable fields. Used by
+ * the menu-bar filter and the inventory filter.
+ *
+ * It carries no `color`: the box is the container, and the bare editor inside
+ * it is what holds the text, styled by `.sk-text-field` above. A `color` here
+ * would only insert a `TextColor` on a node with no text in it. */
 .sk-search-field {
   background-color: var(--field-bg);
   border-color: var(--control-border);
   border-radius: var(--control-radius);
-  color: var(--text-primary);
 }
 
 /* A decorated text field's box — the same well as the search box, which is one
- * of these with a glyph and a clear button in it. The field's TEXT is painted
- * in Rust (`reflect_uneditable_text_color`, from `--field-text` /
- * `--text-disabled`), so there is deliberately no `color` here to beat it. */
+ * of these with a glyph and a clear button in it. It is the SAME NODE as the
+ * editor (`spawn_text_input` puts both classes on one entity), which is what
+ * lets the three fills below follow the editor's own state. */
 .sk-field {
   background-color: var(--field-bg);
   border-color: var(--control-border);
 }
 
+/* The field you are typing in. The reference's light skins brighten a focused
+ * editor's face (`UIControlBGLightFocused` against `TextBgWriteableColor`);
+ * the flat skins give the two roles one value, so nothing moves there. */
+.sk-field:focus {
+  background-color: var(--field-bg-focused);
+}
+
+/* Read-only, so the surface says so — see `.sk-text-field.sk-read-only`. After
+ * `:focus`, because a read-only field still takes focus and must not then look
+ * writable. */
+.sk-field.sk-read-only {
+  background-color: var(--field-bg-readonly);
+}
+
+/* Refused, and last of the four: a field the consumer has disabled is greyed
+ * chrome, not a well at all. */
+.sk-field:disabled {
+  background-color: var(--control-bg-disabled);
+  border-color: var(--control-border-disabled);
+}
+
+/* A field's prompt, shown while it is empty — the search box's placeholder and
+ * its leading glyph. `TextFgTentativeColor` in the reference: tentative text
+ * rather than muted chrome, because it sits on the field's face and goes away
+ * the moment anything is typed. */
+.sk-field-placeholder {
+  color: var(--field-placeholder);
+}
+
 /* The circular clear (×) button inside a search box. */
 .sk-search-clear {
   background-color: var(--control-border);
+}
+
+/* A SCROLL LIST'S FACE — the other half of the field family.
+ *
+ * Every virtualised list in the viewer carries this on its viewport: the table
+ * widget's (so every table gets it without asking), the inventory tree, the
+ * groups and RLVa panes, an object's contents. Twenty-two panels used to
+ * declare their own `const LIST_BACKGROUND: Color = rgba(0, 0, 0, 0.25)` and
+ * paint it on the same node, which is the same colour reachable by nothing.
+ *
+ * The three rules under it are what makes a LIGHT list legible: inside a data
+ * surface the generic text roles resolve to the field family, because a role
+ * is only meaningful against a surface and these rows are not on chrome. They
+ * are descendant selectors, so they beat the single-class resting rules
+ * wherever those sit in this file — and the state pairs that must still win
+ * are restated at the same specificity in the state block at the end.
+ *
+ * A BUTTON inside a row is the exception: it brings its own chrome surface
+ * with it, so its caption goes back to the chrome text role. */
+.sk-list-surface {
+  background-color: var(--list-bg);
+}
+
+.sk-list-surface .sk-text {
+  color: var(--field-text);
+}
+
+.sk-list-surface .sk-title {
+  color: var(--field-placeholder);
+}
+
+.sk-list-surface .sk-button .sk-text {
+  color: var(--text-primary);
 }
 
 /* One status read-out on the top row (viewer-ui-status-bar): region / parcel /
@@ -1129,4 +1256,29 @@
 
 .sk-disabled-text {
   color: var(--text-disabled);
+}
+
+/* The same three states, restated for text on a DATA surface
+ * (viewer-skin-light-surface-roles).
+ *
+ * `.sk-list-surface .sk-text` is (0,2,0) and beats a lone `.sk-active-text`
+ * wherever the two apply — so without these a selected group row, a lit
+ * toolbar-style row or a greyed cell inside a list would lose its state the
+ * moment the list gained a face of its own. Same specificity as the surface
+ * rule above and later in the file, so the state wins, exactly as the block's
+ * header says it must.
+ *
+ * `.sk-active-text` restates the accent it already had: it is the one of the
+ * three whose meaning does not change with the surface — "this one" is the
+ * skin's accent whatever it is sitting on. */
+.sk-list-surface .sk-active-text {
+  color: var(--accent);
+}
+
+.sk-list-surface .sk-highlighted-text {
+  color: var(--field-text);
+}
+
+.sk-list-surface .sk-disabled-text {
+  color: var(--field-text-disabled);
 }

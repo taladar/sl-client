@@ -37,6 +37,19 @@
   --field-bg: #1a1f29;
   --field-text: #ffffff;
   --accent: #5cb8fa;
+  /* The rest of the field family (viewer-skin-light-surface-roles), and the
+   * list face with it. Every value here is another role's, on purpose: an
+   * unskinned world is dark-on-dark, so "the field you are typing in", "a
+   * read-only one" and "a scroll list" all resolve to what they already
+   * looked like. A skin that splits chrome from data is what gives them
+   * separate values. */
+  --field-bg-focused: #1a1f29;
+  --field-bg-readonly: #1a1f29;
+  --field-text-disabled: #737885;
+  --field-text-readonly: #737885;
+  --field-placeholder: #9ea8bd;
+  --list-bg: #00000040;
+  --menu-bg: #1c1f26f2;
   /* The accent, dimmed: a state shown for information rather than for
    * interaction (a permission a friend grants you, which you cannot change). */
   --accent-muted: #6b8db3;
@@ -55,7 +68,10 @@
   --pie-label-sub-pie: #a6dbff;
   --pie-label-disabled: #edf2fa38;
 
-  /* Text editing — the `SkinTextCaret` defaults. */
+  /* Text editing — the `SkinTextCaret` defaults. The caret belongs to the
+   * FIELD family and matches `--field-text`, not the chrome text: it is drawn
+   * on the field's face, and a caret taken from a near-white label colour
+   * disappears the moment a skin makes that face light. */
   --caret: #ffffff;
   --selection: #4d8ce673;
   --selection-unfocused: #73859e59;

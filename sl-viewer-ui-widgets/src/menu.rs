@@ -1385,6 +1385,12 @@ fn build_menu_popup(
                 positions: drop.placements(ctx.direction),
                 window_margin: 4.0,
             },
+            // `.sk-menu` paints this from `--menu-bg`, whose value in both flat
+            // skins is the surface role below — so this stays the colour the
+            // rule paints, as the pre-load / headless fallback everywhere else
+            // does. A skin that floats its menus in a colour of their own (the
+            // reference's classic skins use opaque black) changes only the
+            // token.
             BackgroundColor(SkinPalette::default().surface_bg),
             BorderColor::all(SkinPalette::default().surface_border),
             GlobalZIndex(MENU_Z_INDEX),

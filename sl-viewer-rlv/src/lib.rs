@@ -79,9 +79,6 @@ pub(crate) mod style {
     /// The dimmed header / secondary colour.
     pub(crate) const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
-    /// A list viewport's backdrop.
-    pub(crate) const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
-
     /// An action button's background.
     pub(crate) const ACTION_BACKGROUND: Color = Color::srgb(0.24, 0.29, 0.38);
 }

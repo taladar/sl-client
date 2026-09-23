@@ -102,9 +102,7 @@ use crate::settings_list::{
     FILTER_KINDS, SettingsListFilters, SettingsListRow, kind_element, kind_key, location_text,
     project, sort_rows, total,
 };
-use crate::style::{
-    ACTION_BACKGROUND, DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, LIST_BACKGROUND, ROW_HEIGHT,
-};
+use crate::style::{ACTION_BACKGROUND, DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, ROW_HEIGHT};
 use bevy_flair::style::components::ClassList;
 use sl_viewer_ui_core::skin::BUTTON_CLASS;
 use sl_viewer_ui_core::skin::{
@@ -477,9 +475,7 @@ fn build_my_environments_content(In(handle): In<FloaterHandle>, mut commands: Co
     let filter_field = spawn_filter_row(&mut commands, content);
 
     let table = spawn_table(&mut commands, content, &MY_ENVIRONMENTS_TABLE);
-    commands
-        .entity(table.viewport)
-        .insert((BackgroundColor(LIST_BACKGROUND), TabIndex(4)));
+    commands.entity(table.viewport).insert(TabIndex(4));
 
     let status_text = commands
         .spawn((

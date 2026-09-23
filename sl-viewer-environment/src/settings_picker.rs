@@ -72,9 +72,7 @@ use sl_viewer_ui_widgets::ui_table::{
 use crate::settings_list::{
     SettingsListFilters, SettingsListRow, location_text, project, sort_rows,
 };
-use crate::style::{
-    ACTION_BACKGROUND, DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, LIST_BACKGROUND, ROW_HEIGHT,
-};
+use crate::style::{ACTION_BACKGROUND, DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, ROW_HEIGHT};
 
 /// The picker's stable floater id — and the element-id prefix of its controls.
 pub const SETTINGS_PICKER_FLOATER_ID: &str = "settings-picker";
@@ -363,9 +361,7 @@ fn build_settings_picker_content(
     }
 
     let table = spawn_table(commands, content, &SETTINGS_PICKER_TABLE);
-    commands
-        .entity(table.viewport)
-        .insert((BackgroundColor(LIST_BACKGROUND), TabIndex(1)));
+    commands.entity(table.viewport).insert(TabIndex(1));
 
     let count_text = commands
         .spawn((

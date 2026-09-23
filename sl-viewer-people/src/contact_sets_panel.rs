@@ -138,9 +138,6 @@ const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 /// The dimmed header / secondary colour.
 const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
-/// The list viewport backdrop.
-const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
-
 /// An action button's background. The pre-skin fallback only: the button also
 /// carries [`BUTTON_CLASS`], and the skin's `.sk-button` rule is what actually
 /// paints it once the stylesheet has loaded.
@@ -764,9 +761,7 @@ fn spawn_contact_sets_panel(
         ))
         .id();
     let table = spawn_table(&mut commands, table_column, &CONTACT_SETS_TABLE);
-    commands
-        .entity(table.viewport)
-        .insert((BackgroundColor(LIST_BACKGROUND), TabIndex(3)));
+    commands.entity(table.viewport).insert(TabIndex(3));
 
     let count_text = commands
         .spawn((

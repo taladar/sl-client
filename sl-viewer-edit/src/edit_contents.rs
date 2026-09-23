@@ -82,6 +82,7 @@ use crate::world_api::EditToolState;
 use crate::world_api::InputContext;
 use crate::world_api::ObjectState;
 use crate::world_api::SelectionSet;
+use sl_viewer_ui_core::skin::LIST_SURFACE_CLASS;
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 /// The uniform height of a contents row, in logical pixels (matches the
@@ -807,7 +808,10 @@ fn spawn_contents_viewport(
                 position_type: PositionType::Relative,
                 ..Default::default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.25)),
+            // The rows' face, from the skin (`--list-bg`): the scrim this
+            // used to paint by hand, plus the field-family text roles the
+            // class re-roots for a light list. See `LIST_SURFACE_CLASS`.
+            ClassList::new_with_classes([LIST_SURFACE_CLASS]),
             VirtualList::new(ROW_HEIGHT),
             VirtualViewport,
             ContentsViewport(surface),

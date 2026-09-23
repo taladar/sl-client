@@ -59,7 +59,8 @@ use sl_settings::SettingValue;
 use sl_viewer_settings::ViewerSettings;
 use sl_viewer_ui_core::i18n::Translated;
 use sl_viewer_ui_core::skin::{
-    ACTIVE_CLASS, DISABLED_TEXT_CLASS, set_role_class, set_state_class, text_role,
+    ACTIVE_CLASS, DISABLED_TEXT_CLASS, LIST_SURFACE_CLASS, set_role_class, set_state_class,
+    text_role,
 };
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 use sl_viewer_ui_core::ui::UiDirection;
@@ -886,6 +887,14 @@ pub fn spawn_table(
             },
             VirtualList::new(spec.row_height),
             VirtualViewport,
+            // The rows' FACE, and the widget's rather than each panel's: a
+            // dozen tables used to have their consumer insert its own
+            // `BackgroundColor(rgba(0, 0, 0, 0.25))` on this very node. It is
+            // also what re-roots the cells' text roles onto the field family,
+            // so a skin can make a list light and keep it legible — see
+            // `LIST_SURFACE_CLASS`. The header is a sibling and stays chrome,
+            // which is what the reference does too.
+            ClassList::new_with_classes([LIST_SURFACE_CLASS]),
             Pickable::default(),
             Name::new(format!("{}:table-viewport", spec.element)),
             ChildOf(root),

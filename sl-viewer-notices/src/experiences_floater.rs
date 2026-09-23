@@ -199,9 +199,6 @@ const BUTTON_BACKGROUND: Color = Color::srgb(0.16, 0.19, 0.25);
 /// A button's fallback border — the skin's `.sk-button` overrides it.
 const BUTTON_BORDER: Color = Color::srgb(0.40, 0.50, 0.62);
 
-/// A list's background tint behind its rows.
-const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
-
 // ---------------------------------------------------------------------------
 // Tables.
 // ---------------------------------------------------------------------------
@@ -1119,13 +1116,10 @@ fn spawn_pane_table(commands: &mut Commands, panel: Entity, pane: Pane) -> PaneH
         ))
         .id();
     let table = spawn_table(commands, wrapper, pane.spec());
-    commands.entity(table.viewport).insert((
-        BackgroundColor(LIST_BACKGROUND),
-        PaneViewport {
-            pane,
-            table: table.root,
-        },
-    ));
+    commands.entity(table.viewport).insert(PaneViewport {
+        pane,
+        table: table.root,
+    });
     PaneHandles {
         table: table.root,
         viewport: table.viewport,

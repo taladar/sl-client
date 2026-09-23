@@ -23,6 +23,7 @@ mod test {
     use bevy::prelude::*;
     use bevy_flair::prelude::*;
     use pretty_assertions::{assert_eq, assert_ne};
+    use sl_viewer_ui_core::skin::SkinTextCaret;
     use sl_viewer_ui_core::skin_palette::{SkinPalette, register_palette_properties};
 
     /// A boxed error so tests can use `?` instead of `unwrap` / `expect`.
@@ -43,7 +44,24 @@ mod test {
 
     /// An app with just the CSS engine, reading the shipped `assets/`.
     fn app() -> App {
-        let assets = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
+        app_with_assets(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets"))
+    }
+
+    /// The directory holding the **test-only** stylesheets — a skin that exists
+    /// to be asserted against and must not ship, so it lives beside this file
+    /// rather than under `assets/skins/` (where `shipped_skins.rs` would walk
+    /// it and the `--skin` switcher would have to know about it).
+    fn test_assets_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("assets")
+    }
+
+    /// [`app`], with the asset root given — so a test can load a stylesheet
+    /// that is not one of the shipped skins. The embedded `common.css` /
+    /// `fallback.css` are reached through `embedded://`, which is the same
+    /// wherever the file root points.
+    fn app_with_assets(assets: &std::path::Path) -> App {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
@@ -69,6 +87,10 @@ mod test {
         // nothing and every assertion below reads the built-in fallback.
         sl_viewer_ui_core::skin::embed_fallback_stylesheet(&mut app);
         register_palette_properties(&mut app);
+        // The caret / selection shim, for the same reason: `caret-color` is not
+        // a property `bevy_flair` knows on its own, so without this the
+        // `.sk-text-field` rule's caret silently parses to nothing.
+        sl_viewer_ui_core::skin::register_caret_properties(&mut app);
         // `bevy_flair` snapshots the property registries into its CSS asset
         // loader in `Plugin::finish`, and registers the loader there — which
         // `App::update` never runs, only `App::run`. Without this pair the
@@ -884,12 +906,16 @@ mod test {
         Ok(())
     }
 
-    /// A field that cannot be edited greys, and an ordinary one does not.
+    /// A field that cannot be edited greys, and an ordinary one does not — for
+    /// **both** stances, which are no longer one look.
     ///
-    /// `.sk-text-field` is stamped on every editor by the scaffold and now
-    /// carries the typed text's colour; `reflect_uneditable_text_color` adds
-    /// `.sk-disabled-text` for a disabled *or* read-only field. Both rules are
-    /// a single class, so which wins is the file's order — the same thing
+    /// `.sk-text-field` is stamped on every editor by the scaffold and carries
+    /// the typed text's colour. A *disabled* field is reached by `:disabled`
+    /// over the `InteractionDisabled` the consumer already sets, with no code
+    /// at all; a *read-only* one needs `reflect_read_only_field` to put
+    /// `.sk-read-only` on, because no pseudo-class describes a field that takes
+    /// focus and still refuses an edit. Both are (0,2,0), so which wins where
+    /// they overlap is the file's order — the same thing
     /// `a_selected_row_beats_its_resting_rule` pins for rows.
     #[test]
     fn a_field_that_refuses_edits_greys_its_text() -> Result<(), TestError> {
@@ -910,11 +936,20 @@ mod test {
                 ChildOf(root),
             ))
             .id();
+        let read_only = app
+            .world_mut()
+            .spawn((
+                Text::new("typed"),
+                ClassList::new("sk-text-field sk-read-only"),
+                ChildOf(root),
+            ))
+            .id();
         let refused = app
             .world_mut()
             .spawn((
                 Text::new("typed"),
-                ClassList::new("sk-text-field sk-disabled-text"),
+                ClassList::new("sk-text-field"),
+                bevy::ui::InteractionDisabled,
                 ChildOf(root),
             ))
             .id();
@@ -929,10 +964,155 @@ mod test {
             "an editable field's text must take `--field-text`"
         );
         assert_eq!(
+            text(read_only),
+            Some(Color::srgb_u8(0x73, 0x7d, 0x8f)),
+            "`.sk-read-only` must beat `.sk-text-field`, or a read-only field \
+             reads as editable"
+        );
+        assert_eq!(
             text(refused),
             Some(Color::srgb_u8(0x73, 0x7d, 0x8f)),
-            "`.sk-disabled-text` must beat `.sk-text-field`, or a read-only \
-             field reads as editable"
+            "`:disabled` must reach the field's text with no class of its own, \
+             or every consumer is back to painting the grey itself"
+        );
+        Ok(())
+    }
+
+    /// **A skin can make a data surface light while the chrome stays dark**, and
+    /// everything on it stays legible — the whole point of the field family
+    /// (`viewer-skin-light-surface-roles`).
+    ///
+    /// The test skin beside this file sets the field / list tokens to the
+    /// reference's Vintage values over the embedded fallback's dark chrome, and
+    /// touches **nothing else**; `no Rust change` is the claim, so the nodes
+    /// below are exactly the classes the widget set spawns. What it pins is the
+    /// set of places a light face has to reach for the skin to be wearable at
+    /// all:
+    ///
+    /// - the field's own face and its text, and the caret drawn on it — a caret
+    ///   taken from the chrome text role is white on light sage, which is the
+    ///   bug the caret rule was added to fix in the first place;
+    /// - a scroll list's face, and the text roles **inside** it, which resolve
+    ///   to the field family rather than to the near-white chrome ones;
+    /// - a button dropped into a row, which brings its chrome back with it.
+    ///
+    /// All of it through the real engine, because every one of these is a
+    /// cascade question (specificity and file order) that no static check on
+    /// the CSS text can answer.
+    #[test]
+    fn a_light_field_family_stays_legible_over_dark_chrome() -> Result<(), TestError> {
+        let mut app = app_with_assets(&test_assets_dir());
+        let handle: Handle<StyleSheet> = app
+            .world()
+            .resource::<AssetServer>()
+            .load("light-field.css");
+        let root = app
+            .world_mut()
+            .spawn((Node::default(), Styled::new(handle.clone())))
+            .id();
+        let field = app
+            .world_mut()
+            .spawn((
+                Text::new("typed"),
+                ClassList::new("sk-field sk-text-field"),
+                ChildOf(root),
+            ))
+            .id();
+        let list = app
+            .world_mut()
+            .spawn((
+                Node::default(),
+                ClassList::new("sk-list-surface"),
+                ChildOf(root),
+            ))
+            .id();
+        let row = app
+            .world_mut()
+            .spawn((
+                Node::default(),
+                ClassList::new("sk-list-row"),
+                ChildOf(list),
+            ))
+            .id();
+        let cell = app
+            .world_mut()
+            .spawn((Text::new("Kelly"), ClassList::new("sk-text"), ChildOf(row)))
+            .id();
+        let button = app
+            .world_mut()
+            .spawn((Node::default(), ClassList::new("sk-button"), ChildOf(row)))
+            .id();
+        let caption = app
+            .world_mut()
+            .spawn((
+                Text::new("Remove"),
+                ClassList::new("sk-text"),
+                ChildOf(button),
+            ))
+            .id();
+        let panel_label = app
+            .world_mut()
+            .spawn((
+                Text::new("Nearby"),
+                ClassList::new("sk-text"),
+                ChildOf(root),
+            ))
+            .id();
+
+        load(&mut app, &handle)?;
+        app.update();
+
+        let fill = |entity| {
+            app.world()
+                .get::<BackgroundColor>(entity)
+                .map(|background| background.0)
+        };
+        let text = |entity| app.world().get::<TextColor>(entity).map(|color| color.0);
+
+        assert_eq!(
+            fill(field),
+            Some(Color::srgb_u8(0xba, 0xc3, 0xbe)),
+            "`.sk-field` did not take the light `--field-bg`"
+        );
+        assert_eq!(
+            text(field),
+            Some(Color::srgb_u8(0x00, 0x00, 0x00)),
+            "typed text must be the field family's, or it is near-white on a \
+             light face"
+        );
+        assert_eq!(
+            app.world()
+                .get::<SkinTextCaret>(field)
+                .map(|caret| caret.caret),
+            Some(Color::srgb_u8(0x00, 0x00, 0x00)),
+            "the caret must come from the field family too — a caret derived \
+             from the chrome text is invisible on a light field"
+        );
+        assert_eq!(
+            fill(list),
+            Some(Color::srgb_u8(0xc8, 0xcf, 0xcc)),
+            "`.sk-list-surface` did not take `--list-bg`"
+        );
+        assert_eq!(
+            text(cell),
+            Some(Color::srgb_u8(0x00, 0x00, 0x00)),
+            "a row's text must re-root onto the field family inside a list \
+             surface, or every cell is near-white on light sage"
+        );
+        // The fallback sheet's `--text-primary`, which this fixture leaves
+        // alone: the point is that the chrome role is untouched.
+        let chrome_text = Some(Color::srgb_u8(0xe6, 0xeb, 0xf5));
+        assert_eq!(
+            text(caption),
+            chrome_text,
+            "a button inside a row brings its own chrome, so its caption must \
+             NOT take the list's text colour"
+        );
+        assert_eq!(
+            text(panel_label),
+            chrome_text,
+            "a label outside any list must keep the chrome text role — the \
+             re-rooting has to be scoped to the data surface"
         );
         Ok(())
     }

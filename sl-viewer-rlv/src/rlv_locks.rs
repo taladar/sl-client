@@ -49,7 +49,7 @@ use sl_viewer_ui_widgets::ui_table::{
 use sl_viewer_world_api::rlv::RlvSession;
 
 use crate::rlv_behaviours::issuer_label;
-use crate::style::{DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, LIST_BACKGROUND, ROW_HEIGHT};
+use crate::style::{DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, ROW_HEIGHT};
 use sl_viewer_ui_core::skin::text_role;
 
 /// The floater's stable id.
@@ -379,9 +379,7 @@ fn build_locks_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
         .id();
 
     let table = spawn_table(&mut commands, content, &LOCK_TABLE);
-    commands
-        .entity(table.viewport)
-        .insert((BackgroundColor(LIST_BACKGROUND), TabIndex(0)));
+    commands.entity(table.viewport).insert(TabIndex(0));
 
     let count_text = commands
         .spawn((

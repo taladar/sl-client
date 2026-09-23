@@ -516,6 +516,43 @@ pub const DISABLED_TEXT_CLASS: &str = "sk-disabled-text";
 /// "table row" would be a lie on half of these.
 pub const LIST_ROW_CLASS: &str = "sk-list-row";
 
+/// The CSS class on the **face** a scroll list's rows sit on — the viewport of
+/// a virtualised list (`viewer-skin-light-surface-roles`).
+///
+/// A *data* surface rather than chrome, which is the distinction the whole
+/// field family exists to make: the reference's classic skins put a light sage
+/// list inside a dark grey window, and one surface role cannot be both. The
+/// dark skins give `--list-bg` the scrim twenty-two panels each declared as
+/// their own `const LIST_BACKGROUND`, so nothing moved when they stopped.
+///
+/// It also **re-roots the text roles** inside it: `common.css` resolves
+/// [`TEXT_CLASS`] and [`TITLE_CLASS`] under this class to the field family, so
+/// a skin that makes the face light gets black rows with no Rust involved. A
+/// button dropped into a row brings its own chrome back with it.
+///
+/// The table widget puts it on its own viewport, so every table has it without
+/// asking; a panel that builds a virtualised list by hand adds it there.
+pub const LIST_SURFACE_CLASS: &str = "sk-list-surface";
+
+/// The CSS class on a field that may be read and copied but not changed —
+/// `ui_text_input`'s `ReadOnlyField`, mirrored by `reflect_read_only_field`.
+///
+/// A class rather than a pseudo-class because **no pseudo-class can see it**:
+/// a read-only field still takes focus and still shows a caret (that is what
+/// `Ctrl+C` needs), so it is neither `:disabled` nor ordinary. Its own role
+/// rather than the greyed one, because the reference sends a read-only editor
+/// back to chrome grey with light text — the surface says "not here", not a
+/// dimmed glyph colour.
+pub const READ_ONLY_CLASS: &str = "sk-read-only";
+
+/// The CSS class on a field's prompt — the search box's placeholder and its
+/// leading glyph, shown while the field is empty.
+///
+/// `TextFgTentativeColor` in the reference: its own role rather than the muted
+/// chrome text, because it is read against the *field's* face and goes away
+/// the moment anything is typed.
+pub const FIELD_PLACEHOLDER_CLASS: &str = "sk-field-placeholder";
+
 /// The CSS class on a row the pointer or the keyboard has lit
 /// (`--control-bg-hover`), and [`HIGHLIGHTED_TEXT_CLASS`] for its label.
 ///
@@ -859,7 +896,14 @@ impl Default for SkinTextCaret {
 /// mapping `caret-color` (the standard CSS property) and the two selection
 /// colours onto [`SkinTextCaret`]'s fields. Runs in `build`, before the CSS
 /// asset loader snapshots the registry at plugin `finish`.
-fn register_caret_properties(app: &mut App) {
+///
+/// Public for the same reason
+/// [`register_palette_properties`](crate::skin_palette::register_palette_properties)
+/// is: the shipped-skin tests drive the real stylesheets through a bare
+/// `FlairPlugin` app rather than through [`ViewerSkinPlugin`], which wants the
+/// whole UI scaffold under it, and an unregistered property does not fail — the
+/// rule simply parses to nothing, and the assertion would read the fallback.
+pub fn register_caret_properties(app: &mut App) {
     app.register_component_properties::<SkinTextCaret>();
     let css = app.world().resource::<CssPropertyRegistry>();
     css.register_property("caret-color", SkinTextCaret::property_field_ref("caret"));

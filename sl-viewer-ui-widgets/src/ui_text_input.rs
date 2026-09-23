@@ -77,12 +77,18 @@
 //!   all: not a keystroke, not a caret move, not a selection. This is the
 //!   reference's stance for a greyed `LLLineEditor`, and the one a control the
 //!   agent has no right to touch wants.
-//! - [`ReadOnlyField`] — **readable but unchangeable**. Greyed the same way, but
-//!   it keeps focus, the caret, selection and `Ctrl+C`, and refuses only the
-//!   edits that would *change* the text (typing, paste, cut, delete, an IME
-//!   commit). A value worth showing is usually worth copying — an id, a price, a
-//!   name the user wants to paste elsewhere — and that is what the surrounding
-//!   platform does with a read-only control.
+//! - [`ReadOnlyField`] — **readable but unchangeable**. It keeps focus, the
+//!   caret, selection and `Ctrl+C`, and refuses only the edits that would
+//!   *change* the text (typing, paste, cut, delete, an IME commit). A value
+//!   worth showing is usually worth copying — an id, a price, a name the user
+//!   wants to paste elsewhere — and that is what the surrounding platform does
+//!   with a read-only control.
+//!
+//! The two **look** different too, and each look is the skin's: `:disabled`
+//! reaches the first with no code at all, and `reflect_read_only_field` puts
+//! [`READ_ONLY_CLASS`] on the second, because no pseudo-class describes a field
+//! that takes focus and still refuses an edit. The flat skins give the two sets
+//! of roles the same values, so they still read alike there.
 //!
 //! Both are enforced in one place, `refuse_edits_an_uneditable_field_must_not_take`,
 //! which filters each field's queued [`TextEdit`]s **before** `bevy_text` drains
@@ -120,7 +126,7 @@ use bevy::ui::UiSystems;
 
 use bevy_flair::style::components::ClassList;
 
-use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, SkinTextCaret, set_state_class};
+use sl_viewer_ui_core::skin::{READ_ONLY_CLASS, SkinTextCaret, set_state_class};
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 use sl_viewer_ui_core::ui::{LogicalMargin, LogicalRect, UiPanelShown, UiRoot, column, row};
 use sl_viewer_ui_core::ui_element::{ElementCx, TextMayClip};
@@ -130,14 +136,12 @@ use sl_viewer_ui_core::ui_font::UiFont;
 /// than the surrounding panel, so the editable area reads as a well the text
 /// sits in) and `--control-border`.
 ///
-/// The field's *text* is not here but in `.sk-text-field`, which the scaffold
-/// stamps on every editor — one rule for every field rather than one per
-/// decorated box. This used to say the text was deliberately left unstyled,
-/// because a class `color` would have beaten
-/// [`reflect_uneditable_text_color`]'s write and made a read-only field look
-/// editable. That is exactly backwards now: the rule paints the resting
-/// colour and that system adds `.sk-disabled-text`, which the state block wins
-/// with.
+/// It goes on the **same entity** as the editor, which is what lets the box
+/// follow the editor's own state: `.sk-field:focus` brightens the face,
+/// `.sk-field.sk-read-only` sends it back to chrome, `.sk-field:disabled` greys
+/// it. The field's *text* takes the matching three rules under
+/// `.sk-text-field`, which the scaffold stamps on every editor — one set for
+/// every field rather than one per decorated box.
 const FIELD_CLASS: &str = "sk-field";
 
 /// A field's border width, in logical pixels.
@@ -900,44 +904,38 @@ fn drive_caret_blink(
     }
 }
 
-/// Grey a text field's font while it cannot be edited — while it is
-/// [disabled](bevy::ui::InteractionDisabled) or [`ReadOnlyField`] — restoring
-/// the normal colour when editing comes back, so a field the caller has closed
-/// to typing (a build control greyed for lack of modify permission, a price
-/// that is not being asked) reads plainly as such, not identical to an active
-/// one. Writes only on a real change.
+/// Mark a [`ReadOnlyField`] for the skin, and unmark it when editing comes
+/// back, so a field the caller has closed to typing (a price that is not being
+/// asked, a name shown only to be copied) reads plainly as such rather than
+/// identically to an active one. Writes only on a real change.
 ///
-/// Both stances share one grey deliberately: what they have in common is what
-/// the user needs to see at a glance — *you cannot type here*. Which of the two
-/// it is shows itself the moment they try to select.
-#[expect(
-    clippy::type_complexity,
-    reason = "the query is the class list to mark and the two markers that decide it; naming \
-              the tuple would hide which two stances share the grey"
-)]
-fn reflect_uneditable_text_color(
-    mut fields: Query<
-        (
-            &mut ClassList,
-            Has<bevy::ui::InteractionDisabled>,
-            Has<ReadOnlyField>,
-        ),
-        With<EditableText>,
-    >,
+/// **Only the read-only stance needs a system.** The disabled one is
+/// [`InteractionDisabled`](bevy::ui::InteractionDisabled), which `bevy_flair`
+/// already syncs to `:disabled`, so `.sk-field:disabled` and
+/// `.sk-text-field:disabled` reach it with no code at all. Read-only is the one
+/// no pseudo-class can see: the field still takes focus and still shows a
+/// caret, because that is what `Ctrl+C` needs.
+///
+/// The two no longer share one grey. They used to, on the argument that what
+/// they have in common — *you cannot type here* — is what the user needs at a
+/// glance; but a refused control and a value that is merely fixed are different
+/// facts, and the reference says so with the **surface** (a read-only editor
+/// goes back to chrome grey with light text) rather than by dimming the glyphs.
+/// Both stances are roles now, and a skin that wants them identical gives
+/// `--field-*-readonly` the refused values — which is exactly what the two flat
+/// skins do.
+fn reflect_read_only_field(
+    mut fields: Query<(&mut ClassList, Has<ReadOnlyField>), With<EditableText>>,
 ) {
-    for (mut classes, disabled, read_only) in &mut fields {
-        // The resting colour is `.sk-text-field`'s, which the scaffold already
-        // stamped; this says only that the field cannot be edited. Read-only is
-        // why it is a class and not `:disabled` alone — no pseudo-class sees a
-        // field that takes focus and a caret but refuses an edit.
-        set_state_class(&mut classes, DISABLED_TEXT_CLASS, disabled || read_only);
+    for (mut classes, read_only) in &mut fields {
+        set_state_class(&mut classes, READ_ONLY_CLASS, read_only);
     }
 }
 
 /// The plugin for the widget's runtime half: the numeric structural validator
 /// plus the caret machinery (R28) — the skin-driven caret style installer, the
-/// reference blink envelope, and overwrite mode — and the disabled-field font
-/// greying.
+/// reference blink envelope, and overwrite mode — and the read-only field's
+/// skin class.
 ///
 /// A no-op where there are no editable fields, so adding it is always safe —
 /// the gallery and the viewer both add it. The character-set half of numeric
@@ -959,7 +957,7 @@ impl Plugin for TextInputPlugin {
             (
                 install_caret_style,
                 toggle_overwrite_mode,
-                reflect_uneditable_text_color,
+                reflect_read_only_field,
             ),
         );
         app.add_systems(
@@ -999,10 +997,9 @@ impl Plugin for TextInputPlugin {
 /// Drop input focus from a [disabled](bevy::ui::InteractionDisabled) text field
 /// before the frame's edits apply, so a field a consumer has disabled (e.g. a
 /// parcel control the agent lacks rights to change) cannot be focused or typed
-/// into — the interaction half of the greyed look
-/// [`reflect_uneditable_text_color`] paints. Runs each frame: a click that
-/// momentarily focuses a disabled field is undone here before `bevy_text`
-/// drains any keystroke.
+/// into — the interaction half of the greyed look `.sk-field:disabled` paints.
+/// Runs each frame: a click that momentarily focuses a disabled field is undone
+/// here before `bevy_text` drains any keystroke.
 ///
 /// Deliberately blind to [`ReadOnlyField`]: a read-only field *keeps* its
 /// focus, because focus is what `Ctrl+C` needs to reach it.

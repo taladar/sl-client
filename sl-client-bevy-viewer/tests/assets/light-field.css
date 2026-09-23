@@ -1,0 +1,50 @@
+/*
+ * light-field.css — a TEST-ONLY skin: light data surfaces on dark chrome.
+ *
+ * It exists to answer one question, in
+ * `skin_palette_resolves::a_light_field_family_stays_legible_over_dark_chrome`:
+ * can a skin split the field / list family away from the chrome family with
+ * NO Rust change? Both shipped skins are dark-on-dark, so neither can tell
+ * the two families apart, and a bug that leaves a field's text on the chrome
+ * role is invisible in either of them.
+ *
+ * Not under `assets/skins/`, and deliberately: a skin there ships with the
+ * binary, is walked by `shipped_skins.rs`, and would have to be registered in
+ * `SKINS` for the `--skin` switcher. This is a fixture, not a skin anyone wears.
+ *
+ * It imports the embedded fallback sheet — exactly as a shipped skin does, and
+ * so with no dependency on any file under `assets/` — which leaves the CHROME
+ * at the fallback's dark values. That is what makes the test's "a label outside
+ * the list is still near-white" assertion mean something. It then redefines the
+ * seven field / list tokens (plus the caret, which belongs to that family) to
+ * the reference's measured Vintage values, and nothing else. See
+ * roadmap/context/vintage-skin.md for where the numbers come from.
+ *
+ * The base goes into a cascade LAYER for the reason themes/dark.css documents:
+ * bevy_flair places a plainly-@imported sheet's :root so it would otherwise
+ * beat the importing file's own, and the overrides below would never apply.
+ */
+@import "embedded://sl_viewer_ui_core/skins/fallback.css" layer(fallback);
+
+:root {
+  /* TextBgWriteableColor / UIControlBGLightFocused / TextBgReadOnlyColor. */
+  --field-bg: #bac3be;
+  --field-bg-focused: #c8cfcc;
+  --field-bg-readonly: #3e3e3e;
+
+  /* TextFgColor / TextFgDisabledColor / TextFgReadOnlyColor /
+   * TextFgTentativeColor. Black text is the whole point: it is what no
+   * assignment to `--text-primary` could ever be, because that role also
+   * paints labels on dark chrome. */
+  --field-text: #000000;
+  --field-text-disabled: #00000040;
+  --field-text-readonly: #e6e6e6;
+  --field-placeholder: #666666;
+
+  /* ScrollBgWriteableColor — a scroll list's face. */
+  --list-bg: #c8cfcc;
+
+  /* TextCursorColor, which follows the field text rather than the chrome text.
+   * A caret is drawn ON the field: Graphite's near-white one would be gone. */
+  --caret: #000000;
+}

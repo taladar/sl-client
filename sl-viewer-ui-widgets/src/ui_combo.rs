@@ -39,18 +39,31 @@ use sl_viewer_ui_core::ui_font::UiFont;
 /// ([`crate::menu`]'s `10_000`) so a menu opened over a combo still wins.
 const COMBO_Z_INDEX: i32 = 9_500;
 
-/// The skin class on the open popover — the same framed surface a drop-down
-/// menu is, which is why it takes the menu's own class.
-const POPOVER_CLASS: &str = "sk-menu";
+/// The skin class on the open popover.
+///
+/// Its **own** class, not the menu's it used to share
+/// (`viewer-skin-light-surface-roles`): a drop-down list is a data surface —
+/// the reference names it separately, `ComboListBgColor` against
+/// `MenuDefaultBgColor` — so it takes `--list-bg` and its rows take the field
+/// family's text, where a menu takes `--menu-bg` and chrome text. The flat
+/// skins still make the two look alike; a skin that puts data on a light face
+/// no longer has to choose between them.
+const POPOVER_CLASS: &str = "sk-combo-list";
 
 /// The skin class on a [separator](ComboRow::Separator) row's rule — the menu
-/// popups' divider, since a combo popover and a menu popup are one surface.
+/// popups' divider, which a combo popover keeps even though its *face* is a
+/// list's: the shape of a drop-down is a menu's, only the colours are not.
 const SEPARATOR_CLASS: &str = "sk-menu-separator";
 
 /// The dropdown arrow glyph.
 const ARROW_GLYPH: &str = "\u{25be}";
 
-/// The skin class for the value / option text (`--text-primary`).
+/// The skin class for the value / option text.
+///
+/// One class, two surfaces: on the **anchor** it is chrome text
+/// (`--text-primary`), and inside the popover
+/// `.sk-combo-option .sk-build-value` re-roots it to `--field-text`, because
+/// there it is sitting on a list's face rather than on a control's.
 const VALUE_CLASS: &str = "sk-build-value";
 
 /// The skin class on the combo's anchor box. Its greyed look is the skin's
@@ -425,7 +438,10 @@ fn build_combo_popover(
                 ],
                 window_margin: 4.0,
             },
-            BackgroundColor(SkinPalette::default().surface_bg),
+            // No `BackgroundColor`: `--list-bg` is a class-only role with no
+            // palette field to pre-load from, and `bevy_flair` inserts the
+            // component itself (as it does for the radio's disc). A popover is
+            // opened by a click, long after the sheet has loaded.
             BorderColor::all(SkinPalette::default().surface_border),
             ClassList::new_with_classes([POPOVER_CLASS]),
             GlobalZIndex(COMBO_Z_INDEX),

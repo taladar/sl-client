@@ -55,9 +55,7 @@ use sl_viewer_ui_widgets::ui_table::{
 };
 use sl_viewer_world_api::rlv::RlvSession;
 
-use crate::style::{
-    ACTION_BACKGROUND, DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, LIST_BACKGROUND, ROW_HEIGHT,
-};
+use crate::style::{ACTION_BACKGROUND, DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, ROW_HEIGHT};
 
 /// The floater's stable id (persistence, the menu's check mark,
 /// `SL_VIEWER_OPEN_FLOATER`).
@@ -543,11 +541,7 @@ fn build_behaviours_content(In(handle): In<FloaterHandle>, mut commands: Command
             continue;
         };
         let table = spawn_table(&mut commands, panel, list.spec());
-        commands.entity(table.viewport).insert((
-            BackgroundColor(LIST_BACKGROUND),
-            TabIndex(1),
-            list,
-        ));
+        commands.entity(table.viewport).insert((TabIndex(1), list));
         viewports.push(table.viewport);
     }
 

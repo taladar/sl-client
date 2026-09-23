@@ -116,9 +116,6 @@ const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
 /// A button's border colour.
 const BUTTON_BORDER: Color = Color::srgb(0.34, 0.40, 0.52);
 
-/// A list scroll surface's sunken background.
-const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
-
 /// The group insignia's edge, in logical pixels.
 const INSIGNIA_EDGE: f32 = 128.0;
 
@@ -1106,9 +1103,7 @@ fn build_members_scaffold(
     // columns) fills the space below the count line.
     let members_table = spawn_table(commands, members_column, &MEMBERS_TABLE);
     let members_viewport = members_table.viewport;
-    commands
-        .entity(members_viewport)
-        .insert((BackgroundColor(LIST_BACKGROUND), TabIndex(2)));
+    commands.entity(members_viewport).insert(TabIndex(2));
 
     // The roles column below the members: the roles table (widget-owned header +
     // virtualized, sortable, resizable columns), bounded so it scrolls rather than
@@ -1138,9 +1133,7 @@ fn build_members_scaffold(
     ));
     let roles_table = spawn_table(commands, roles_column, &ROLES_TABLE);
     let roles_viewport = roles_table.viewport;
-    commands
-        .entity(roles_viewport)
-        .insert((BackgroundColor(LIST_BACKGROUND), TabIndex(2)));
+    commands.entity(roles_viewport).insert(TabIndex(2));
     // The New Role button lives in its own persistent container below the roles
     // table, so it is built once and never disturbs the pooled rows.
     let roles_new_container = commands
@@ -1191,9 +1184,7 @@ fn build_notices_scaffold(
 ) -> (Entity, Entity, Entity, Entity) {
     let notices_table = spawn_table(commands, panel, &NOTICES_TABLE);
     let notices_viewport = notices_table.viewport;
-    commands
-        .entity(notices_viewport)
-        .insert((BackgroundColor(LIST_BACKGROUND), TabIndex(2)));
+    commands.entity(notices_viewport).insert(TabIndex(2));
     let notice_body_area = commands
         .spawn((
             Node {

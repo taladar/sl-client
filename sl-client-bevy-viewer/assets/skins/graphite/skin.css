@@ -31,10 +31,12 @@
   /* The one line that names a section inside a page. */
   --text-heading: #b3d1ff;
 
-  /* Text editing (R28). The caret matches the primary text, the reference
-   * default ("use same color as text for the cursor"); the selections are
-   * translucent so the selected glyphs stay legible, the unfocused one dimmer. */
-  --caret: #e6ebf2;
+  /* Text editing (R28). The caret matches the FIELD text, the reference
+   * default ("use same color as text for the cursor") read against the surface
+   * the caret is actually drawn on — not the chrome label colour, which a skin
+   * with light fields would make invisible; the selections are translucent so
+   * the selected glyphs stay legible, the unfocused one dimmer. */
+  --caret: #ffffff;
   --selection: #4d7fbf73;
   --selection-unfocused: #73849959;
 
@@ -53,10 +55,29 @@
   --control-border-disabled: #474752;
   --control-radius: 4px;
 
-  /* Editable fields. Darker than a control so a field reads as a well rather
-   * than a button, and its text is the brightest thing on screen. */
+  /* Editable fields, scroll lists and drop-downs — the DATA family
+   * (viewer-skin-light-surface-roles). Darker than a control so a field reads
+   * as a well rather than a button, and its text is the brightest thing on
+   * screen.
+   *
+   * Graphite is dark-on-dark, so most of these deliberately repeat a chrome
+   * value: a focused field, a read-only one and a refused one look here the
+   * way they always have. The family exists so that a skin which does NOT put
+   * data on chrome — the reference's classic skins put black text on light
+   * sage inside dark grey windows — has somewhere to say so. */
   --field-bg: #1a1f29;
+  --field-bg-focused: #1a1f29;
+  --field-bg-readonly: #1a1f29;
   --field-text: #ffffff;
+  --field-text-disabled: #737d8f;
+  --field-text-readonly: #737d8f;
+  --field-placeholder: #cbd5e2;
+  /* A scroll list's face: a scrim over whatever the panel behind it is, which
+   * is the colour twenty-two panels each declared for themselves. */
+  --list-bg: #00000040;
+  /* A dropped-down menu. The floater body's colour here; a skin that floats
+   * its menus in a colour of their own changes this one token. */
+  --menu-bg: #1c1f26f2;
 
   /* Focus ring — loud, so Tab movement is unmistakable. */
   --focus-ring: #ffc740;

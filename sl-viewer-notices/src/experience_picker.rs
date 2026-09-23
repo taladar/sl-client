@@ -146,9 +146,6 @@ const BUTTON_BACKGROUND: Color = Color::srgb(0.16, 0.19, 0.25);
 /// An action button's border.
 const BUTTON_BORDER: Color = Color::srgb(0.40, 0.50, 0.62);
 
-/// The results list's background.
-const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
-
 /// The results sort by name, like the reference's `sortByColumnIndex(1, true)`.
 static PICKER_SORT: [TableSortDefault; 1] = [TableSortDefault {
     column: COL_SEARCH_NAME,
@@ -483,9 +480,6 @@ fn build_picker_content(
         ))
         .id();
     let table = spawn_table(commands, wrapper, &PICKER_TABLE);
-    commands
-        .entity(table.viewport)
-        .insert(BackgroundColor(LIST_BACKGROUND));
 
     let actions = commands
         .spawn((

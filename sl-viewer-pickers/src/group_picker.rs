@@ -76,7 +76,7 @@ use sl_client_bevy::{
     Command, DirFindFlags, DirGroupResult, GroupKey, QueryId, SlCommand, SlEvent, SlSessionEvent,
     Uuid,
 };
-use sl_viewer_ui_core::skin::{ACTIVE_CLASS, LIST_ROW_CLASS, text_role};
+use sl_viewer_ui_core::skin::{ACTIVE_CLASS, LIST_ROW_CLASS, LIST_SURFACE_CLASS, text_role};
 
 use crate::floater::{
     Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterHost, FloaterOp, FloaterOwner,
@@ -397,7 +397,10 @@ fn build_picker_content(commands: &mut Commands, handle: &FloaterHandle) -> Grou
                 overflow: Overflow::scroll_y(),
                 ..column(Val::Px(2.0))
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.25)),
+            // The rows' face, from the skin (`--list-bg`): the scrim this
+            // used to paint by hand, plus the field-family text roles the
+            // class re-roots for a light list. See `LIST_SURFACE_CLASS`.
+            ClassList::new_with_classes([LIST_SURFACE_CLASS]),
             ChildOf(content),
         ))
         .id();

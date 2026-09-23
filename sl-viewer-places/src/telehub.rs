@@ -122,9 +122,6 @@ const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
 /// An action button's border.
 const BUTTON_BORDER: Color = Color::srgb(0.34, 0.40, 0.52);
 
-/// The spawn-point list's background.
-const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
-
 /// The spawn-point list's bounded height, in logical pixels.
 const LIST_HEIGHT: f32 = 150.0;
 
@@ -358,7 +355,6 @@ fn build_telehub_content(In(handle): In<FloaterHandle>, mut commands: Commands) 
                 height: Val::Px(LIST_HEIGHT),
                 ..default()
             },
-            BackgroundColor(LIST_BACKGROUND),
             ChildOf(content),
         ))
         .id();

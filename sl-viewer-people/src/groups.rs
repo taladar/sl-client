@@ -45,8 +45,8 @@
 //! Vintage `panel_fs_contacts_groups`.
 
 use crate::skin::{
-    ACTION_BUTTON_CLASS, ACTIVE_CLASS, ACTIVE_TEXT_CLASS, DisabledButtons, TEXT_CLASS,
-    set_action_button_enabled, set_state_class, set_state_class_on, text_role,
+    ACTION_BUTTON_CLASS, ACTIVE_CLASS, ACTIVE_TEXT_CLASS, DisabledButtons, LIST_SURFACE_CLASS,
+    TEXT_CLASS, set_action_button_enabled, set_state_class, set_state_class_on, text_role,
 };
 use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
@@ -88,10 +88,6 @@ const ACTION_COL_WIDTH: f32 = 96.0;
 
 /// A group / label's text colour.
 const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
-
-/// The group-list scroll surface background — a touch darker, a sunken well (same
-/// as the friends list).
-const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
 
 /// An action button's background.
 const ACTION_BACKGROUND: Color = Color::srgb(0.24, 0.29, 0.38);
@@ -420,7 +416,10 @@ fn spawn_groups_panel(
                 position_type: PositionType::Relative,
                 ..default()
             },
-            BackgroundColor(LIST_BACKGROUND),
+            // The rows' face, from the skin (`--list-bg`): the scrim this
+            // used to paint by hand, plus the field-family text roles the
+            // class re-roots for a light list. See `LIST_SURFACE_CLASS`.
+            ClassList::new_with_classes([LIST_SURFACE_CLASS]),
             VirtualList::new(ROW_HEIGHT),
             VirtualViewport,
             Pickable::default(),

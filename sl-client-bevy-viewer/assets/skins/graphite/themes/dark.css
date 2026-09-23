@@ -23,7 +23,8 @@
   --control-bg: #14181f;
   --text-primary: #f4f7fb;
   --accent: #7cc9ff;
-  /* The caret follows the brighter text (R28); the selections fall through to
-   * Graphite's. */
-  --caret: #f4f7fb;
+  /* The caret and the selections fall through to Graphite's. The caret belongs
+   * to the FIELD family (viewer-skin-light-surface-roles) and this theme does
+   * not retune the field face, so it must not be pulled along by the brighter
+   * chrome text above — it is drawn on the field, not on a panel. */
 }

@@ -14,12 +14,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ideas | 118 |
 | ready | 307 |
 | blocked | 63 |
-| in-progress | 27 |
+| in-progress | 28 |
 | bugs | 9 |
 | done | 1213 |
 | deferred | 30 |
 | wont-do | 16 |
-| **total** | **1783** |
+| **total** | **1784** |
 
 ## ideas (118)
 
@@ -876,12 +876,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A skin can choose the glyph, not just its colour — audit where that applies
 - [`viewer-skin-icon-set`](ready/viewer-skin-icon-set.md) — A skin should be
   able to carry an icon set, not just colours
-- [`viewer-skin-light-surface-roles`](ready/viewer-skin-light-surface-roles.md)
-  — Role tokens for a light data surface on dark chrome
 - [`viewer-skin-list-row-striping`](ready/viewer-skin-list-row-striping.md) —
   Scroll-list rows — striping, hover and a selection the skin owns
 - [`viewer-skin-scrollbar-shape`](ready/viewer-skin-scrollbar-shape.md) — The
   scrollbar is a bar — the reference's has ends, a track and a shape
+- [`viewer-skin-search-box-focused-fill`](ready/viewer-skin-search-box-focused-fill.md)
+  — A search box cannot show the focused-field fill, because focus is on its
+  child
 - [`viewer-skin-text-shadow-role`](ready/viewer-skin-text-shadow-role.md) — A
   text-shadow role — the trait that makes classic UI text look classic
 - [`viewer-skin-tooltip-roles`](ready/viewer-skin-tooltip-roles.md) — The
@@ -1218,7 +1219,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Batch world changes into per-tick update bursts (blocked by
   `server-world-heartbeat`, `server-world-ecs-store`)
 
-## in-progress (27)
+## in-progress (28)
 
 ### viewer
 
@@ -1260,6 +1261,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   by `viewer-rlv-restriction-state` (done))
 - [`viewer-skin-checkbox-radio-shape`](in-progress/viewer-skin-checkbox-radio-shape.md)
   — Checkboxes are hand-rolled per panel, so no skin can shape one
+- [`viewer-skin-light-surface-roles`](in-progress/viewer-skin-light-surface-roles.md)
+  — Role tokens for a light data surface on dark chrome
 - [`viewer-skin-panel-state-classes`](in-progress/viewer-skin-panel-state-classes.md)
   — The panels paint their own states, and nine files hand-copied one role
 - [`viewer-skin-panel-text-roles`](in-progress/viewer-skin-panel-text-roles.md)

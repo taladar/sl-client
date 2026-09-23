@@ -23,8 +23,9 @@
   --text-disabled: #6f89a4;
   --text-heading: #9fd8ff;
 
-  /* Text editing (R28): caret = primary text, translucent selections. */
-  --caret: #eaf3ff;
+  /* Text editing (R28): caret = FIELD text (the surface it is drawn on),
+   * translucent selections. */
+  --caret: #ffffff;
   --selection: #3f8fd973;
   --selection-unfocused: #6f89a459;
 
@@ -43,9 +44,19 @@
   --control-border-disabled: #2b455e;
   --control-radius: 6px;
 
-  /* Editable fields */
+  /* Editable fields, scroll lists and drop-downs — the DATA family
+   * (viewer-skin-light-surface-roles). Azure is dark-on-dark like Graphite, so
+   * the focused / read-only / refused values repeat the chrome ones; the split
+   * exists for a skin that puts data on a light face. */
   --field-bg: #0b1f33;
+  --field-bg-focused: #0b1f33;
+  --field-bg-readonly: #0b1f33;
   --field-text: #ffffff;
+  --field-text-disabled: #6f89a4;
+  --field-text-readonly: #6f89a4;
+  --field-placeholder: #b9d4ee;
+  --list-bg: #00000040;
+  --menu-bg: #0f2740f2;
 
   /* Focus ring */
   --focus-ring: #ffd166;
