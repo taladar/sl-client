@@ -550,8 +550,8 @@ mod tests {
         Ok(())
     }
 
-    /// The theme combo repopulates per skin: graphite offers base + dark,
-    /// azure only base, and the bound values track the labels.
+    /// The theme combo repopulates per skin: graphite offers base + dark +
+    /// relief, azure only base, and the bound values track the labels.
     #[test]
     fn theme_combo_repopulates_per_skin() -> Result<(), TestError> {
         let mut app = test_app();
@@ -567,7 +567,7 @@ mod tests {
             ))
             .id();
         app.update();
-        // Default skin (graphite): base + dark.
+        // Default skin (graphite): base + dark + relief.
         {
             let values = app
                 .world()
@@ -580,6 +580,7 @@ mod tests {
                 vec![
                     SettingValue::String(String::new()),
                     SettingValue::String("dark".to_owned()),
+                    SettingValue::String("relief".to_owned()),
                 ]
             );
         }

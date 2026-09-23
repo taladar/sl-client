@@ -9627,6 +9627,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-viewer-skin-art"
+version = "0.1.0"
+dependencies = [
+ "fs-err",
+ "image",
+ "pretty_assertions",
+]
+
+[[package]]
 name = "sl-viewer-social"
 version = "0.1.0"
 dependencies = [

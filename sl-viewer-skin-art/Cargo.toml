@@ -1,0 +1,30 @@
+[package]
+name = "sl-viewer-skin-art"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+description = "Draws the nine-sliced widget art the viewer's image-backed skins wear: a generator for the bevel surfaces a CSS rule points at, so the PNGs in assets/ have a source rather than being opaque blobs"
+readme = { workspace = true }
+license = { workspace = true }
+
+repository = { workspace = true }
+keywords = ["gui", "opensim", "secondlife", "skin", "viewer"]
+categories = ["game-development", "graphics"]
+publish = { workspace = true }
+
+exclude = { workspace = true }
+
+[dependencies]
+fs-err = { workspace = true }
+
+# Not a workspace dependency: members disagree about `default-features`, so the
+# spec stays per-crate (see the root manifest). PNG alone — the art is written,
+# never read, and a generator has no business pulling in five decoders.
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+
+[lints]
+workspace = true

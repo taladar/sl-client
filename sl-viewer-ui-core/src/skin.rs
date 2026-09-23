@@ -94,7 +94,7 @@ pub const SKINS: &[&str] = &["graphite", "azure"];
 /// The theme overlays that ship, keyed loosely by skin: a `(skin, theme)` pair
 /// names `assets/skins/<skin>/themes/<theme>.css`. `None` in the switcher cycle
 /// means "the skin's own base, no overlay".
-pub const THEMES: &[(&str, &str)] = &[("graphite", "dark")];
+pub const THEMES: &[(&str, &str)] = &[("graphite", "dark"), ("graphite", "relief")];
 
 /// The asset path of the embedded fallback stylesheet — the sheet that is
 /// always there, whatever the asset tree holds.

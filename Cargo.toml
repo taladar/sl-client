@@ -66,6 +66,7 @@ members = [
   "sl-viewer-rlv",
   "sl-viewer-search",
   "sl-viewer-settings",
+  "sl-viewer-skin-art",
   "sl-viewer-social",
   "sl-viewer-spacenav",
   "sl-viewer-testkit",

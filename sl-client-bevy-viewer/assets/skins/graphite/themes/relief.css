@@ -1,0 +1,63 @@
+/* biome-ignore-all lint/correctness/noUnknownProperty: bevy_flair defines
+   non-standard CSS properties (-bevy-image, -bevy-image-mode) that biome,
+   a standard-CSS linter, does not know. */
+/* biome-ignore-all lint/correctness/noUnknownFunction: and a non-standard
+   value function, sliced(), which is how bevy_flair spells nine-slicing. */
+/*
+ * Relief — a raised-bevel theme OVERLAY on Graphite
+ * (viewer-skin-image-backed-widgets).
+ *
+ * Every other skin and theme changes a widget's COLOUR. This one changes its
+ * SHAPE, which the token model on its own cannot: a flat rounded rectangle
+ * recoloured is still a flat rounded rectangle, and the reference's classic
+ * skins are not built that way — their push button is a raised bevel, drawn as
+ * a nine-sliced image with the slice insets declared beside the file.
+ *
+ * `bevy_flair` maps `-bevy-image` onto `ImageNode.image` and registers that
+ * component with `auto_insert_remove`, so these rules *add* an image surface to
+ * a node that has none and take it away again when they stop matching. That is
+ * the whole mechanism: no Rust in the viewer knows this theme exists.
+ *
+ * The art is ours: the `sl-viewer-skin-art` binary in this workspace draws it,
+ * so the image files beside this one have a source rather than being opaque
+ * blobs.
+ * Only the geometry is borrowed from the reference (a raised face, a lit edge
+ * where the light is and a shaded one opposite, over a hairline frame), and
+ * geometry is not what a licence covers.
+ */
+@import "skins/graphite/skin.css" layer(skin);
+
+/*
+ * THE SURFACE, AND WHAT IT REPLACES.
+ *
+ * A skin that supplies art wants the flat paint out of the way: an `ImageNode`
+ * draws *over* the node's background colour, and a 2 px border drawn around an
+ * image that carries its own frame reads as a double edge. So the rule that
+ * brings an image also clears both, in the same block — which is what keeps
+ * the flat skins unchanged, since they simply never set an image.
+ *
+ * The insets are the file's: 24x24 art, 8 px corners, so a button of any size
+ * draws its corners 1:1 and stretches only the 8x8 centre.
+ */
+.sk-button {
+  background-color: #00000000;
+  border-width: 0;
+  -bevy-image: url("skins/graphite/widgets/push-button.png");
+  -bevy-image-mode: sliced(8px 8px 8px 8px);
+}
+
+/* The other three states the reference draws as separate textures, which is
+ * why they have to be selectable rather than painted: `:hover` and `:active`
+ * are `bevy_flair`'s sync of the pointer's own state, `:disabled` follows the
+ * `InteractionDisabled` a panel sets to refuse the press. */
+.sk-button:hover {
+  -bevy-image: url("skins/graphite/widgets/push-button-hover.png");
+}
+
+.sk-button:active {
+  -bevy-image: url("skins/graphite/widgets/push-button-pressed.png");
+}
+
+.sk-button:disabled {
+  -bevy-image: url("skins/graphite/widgets/push-button-disabled.png");
+}

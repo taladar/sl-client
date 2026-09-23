@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 118 |
-| ready | 308 |
+| ready | 307 |
 | blocked | 63 |
 | in-progress | 26 |
 | bugs | 7 |
-| done | 1212 |
+| done | 1213 |
 | deferred | 30 |
 | wont-do | 16 |
 | **total** | **1780** |
@@ -293,7 +293,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (308)
+## ready (307)
 
 ### protocol
 
@@ -876,9 +876,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A skin can choose the glyph, not just its colour — audit where that applies
 - [`viewer-skin-icon-set`](ready/viewer-skin-icon-set.md) — A skin should be
   able to carry an icon set, not just colours
-- [`viewer-skin-image-backed-widgets`](ready/viewer-skin-image-backed-widgets.md)
-  — Nine-sliced image surfaces, so a skin can change a widget's shape (blocked
-  by `viewer-skin-widget-state-classes` (done))
 - [`viewer-skin-light-surface-roles`](ready/viewer-skin-light-surface-roles.md)
   — Role tokens for a light data surface on dark chrome
 - [`viewer-skin-list-row-striping`](ready/viewer-skin-list-row-striping.md) —
@@ -1132,7 +1129,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-toolbar-customization`)
 - [`viewer-vintage-skin`](blocked/viewer-vintage-skin.md) — Ship a Vintage-alike
   skin (blocked by `viewer-skin-light-surface-roles`,
-  `viewer-skin-image-backed-widgets`)
+  `viewer-skin-image-backed-widgets` (done))
 - [`viewer-voice-call-dialogs`](blocked/viewer-voice-call-dialogs.md) — Voice
   call dialogs — incoming / outgoing, channel switching (blocked by
   `viewer-voice-audio`)
@@ -1315,7 +1312,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1212)
+## done (1213)
 
 ### protocol
 
@@ -2964,6 +2961,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   closer"
 - [`viewer-sit-target-and-stand-button`](done/viewer-sit-target-and-stand-button.md)
   — Sit target ignored on sit, and no Stand button while seated
+- [`viewer-skin-image-backed-widgets`](done/viewer-skin-image-backed-widgets.md)
+  — Nine-sliced image surfaces, so a skin can change a widget's shape (blocked
+  by `viewer-skin-widget-state-classes` (done))
 - [`viewer-skin-widget-state-classes`](done/viewer-skin-widget-state-classes.md)
   — Widget state belongs in the cascade, not in a per-frame Rust paint
 - [`viewer-skinned-bind-group-quits-on-rez`](done/viewer-skinned-bind-group-quits-on-rez.md)
