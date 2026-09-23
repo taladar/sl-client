@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 118 |
-| ready | 307 |
+| ready | 308 |
 | blocked | 63 |
 | in-progress | 26 |
-| bugs | 7 |
+| bugs | 9 |
 | done | 1213 |
 | deferred | 30 |
 | wont-do | 16 |
-| **total** | **1780** |
+| **total** | **1783** |
 
 ## ideas (118)
 
@@ -293,7 +293,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (307)
+## ready (308)
 
 ### protocol
 
@@ -929,6 +929,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   UI regression baselines — recorded geometry that may not drift by accident
   (blocked by `viewer-ui-test-harness` (done), `viewer-test-baseline-format`
   (done))
+- [`viewer-ui-button-widget`](ready/viewer-ui-button-widget.md) — The button is
+  the one control that never became a widget
 - [`viewer-ui-settings-binding-combo`](ready/viewer-ui-settings-binding-combo.md)
   — Combo↔settings two-way binding (blocked by `viewer-ui-combo-widget` (done),
   `viewer-ui-settings-binding` (done))
@@ -1287,7 +1289,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (7)
+## bugs (9)
 
 ### protocol
 
@@ -1296,10 +1298,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`viewer-emoji-picker-hover-preview-inert`](bugs/viewer-emoji-picker-hover-preview-inert.md)
+  — Hovering an emoji never fills the picker's preview line
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
   Some worn mesh hair does not render (visible in Firestorm)
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
+- [`viewer-notecard-body-draws-a-giant-artifact`](bugs/viewer-notecard-body-draws-a-giant-artifact.md)
+  — The notecard editor and reader draw a huge stray shape beside the body
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)

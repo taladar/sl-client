@@ -520,9 +520,9 @@ bevy_ecs_macro_logic = { git = "https://github.com/taladar/bevy.git", rev = "302
 bevy_ecs_macros = { git = "https://github.com/taladar/bevy.git", rev = "302316a08fa56d3338484192ba25fdb5aa0478c1" }
 bevy_encase_derive = { git = "https://github.com/taladar/bevy.git", rev = "302316a08fa56d3338484192ba25fdb5aa0478c1" }
 bevy_feathers = { git = "https://github.com/taladar/bevy.git", rev = "302316a08fa56d3338484192ba25fdb5aa0478c1" }
-# bevy_flair 0.8.0 + two fixes, both submitted upstream; drop the patch once a
-# release carries them. All flair crates come from the same rev so the graph
-# never mixes registry and git copies.
+# bevy_flair 0.8.0 + three fixes and one addition, all submitted upstream; drop
+# the patch once a release carries them. All flair crates come from the same rev
+# so the graph never mixes registry and git copies.
 #
 #  1. recalculate_style-on-Reset — a debug-build panic / release-build silent
 #     reset downgrade when a freshly spawned widget is swept into a
@@ -536,11 +536,19 @@ bevy_feathers = { git = "https://github.com/taladar/bevy.git", rev = "302316a08f
 #     measured as part of the host's text block, so a 14 px checkbox box with
 #     a `content` tick reported 20 px of content and overflowed itself, and
 #     taffy folded that into every ancestor up to the floater.
-bevy_flair = { git = "https://github.com/taladar/bevy_flair.git", rev = "946f8a23ffd83ec9c1a1a3b37e900732c0d044ae" }
-bevy_flair_core = { git = "https://github.com/taladar/bevy_flair.git", rev = "946f8a23ffd83ec9c1a1a3b37e900732c0d044ae" }
-bevy_flair_core_macros = { git = "https://github.com/taladar/bevy_flair.git", rev = "946f8a23ffd83ec9c1a1a3b37e900732c0d044ae" }
-bevy_flair_css_parser = { git = "https://github.com/taladar/bevy_flair.git", rev = "946f8a23ffd83ec9c1a1a3b37e900732c0d044ae" }
-bevy_flair_style = { git = "https://github.com/taladar/bevy_flair.git", rev = "946f8a23ffd83ec9c1a1a3b37e900732c0d044ae" }
+#  4. `-bevy-image-box` (an ADDITION, not a fix): `ImageNode::visual_box` was
+#     the one field with no property registered, so CSS could not reach it.
+#     `ImageNode` paints into the CONTENT box by default — inside the padding
+#     and border — so the `relief` theme's nine-sliced button skin was drawn
+#     at 88x18 inside a 112x32 button: a bevel hugging the caption with bare
+#     panel around it, which reads as a button that lost its padding. Every
+#     other observable (node size, handle, slicing, `ImageNodeSize`) is
+#     correct, which is what made it expensive to find.
+bevy_flair = { git = "https://github.com/taladar/bevy_flair.git", rev = "07bdd94114b8115e8922f7357e19cabf5df09b00" }
+bevy_flair_core = { git = "https://github.com/taladar/bevy_flair.git", rev = "07bdd94114b8115e8922f7357e19cabf5df09b00" }
+bevy_flair_core_macros = { git = "https://github.com/taladar/bevy_flair.git", rev = "07bdd94114b8115e8922f7357e19cabf5df09b00" }
+bevy_flair_css_parser = { git = "https://github.com/taladar/bevy_flair.git", rev = "07bdd94114b8115e8922f7357e19cabf5df09b00" }
+bevy_flair_style = { git = "https://github.com/taladar/bevy_flair.git", rev = "07bdd94114b8115e8922f7357e19cabf5df09b00" }
 bevy_gilrs = { git = "https://github.com/taladar/bevy.git", rev = "302316a08fa56d3338484192ba25fdb5aa0478c1" }
 bevy_gizmos = { git = "https://github.com/taladar/bevy.git", rev = "302316a08fa56d3338484192ba25fdb5aa0478c1" }
 bevy_gizmos_macros = { git = "https://github.com/taladar/bevy.git", rev = "302316a08fa56d3338484192ba25fdb5aa0478c1" }

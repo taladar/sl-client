@@ -178,12 +178,27 @@
  * writes the pseudo-element's `TextSpan`, so which mark a checkbox wears is a
  * stylesheet decision — Unicode has several (U+2713 ✓, U+2714 ✔, U+2717 ✗,
  * U+00D7 ×) and a skin that wants a cross, a dot or a filled square says so
- * here. An unchecked box simply has no rule, so its span stays empty.
+ * here.
  *
  * The widget spawns a text node carrying `PseudoElementsSupport` and names no
  * glyph, which is why there is no Rust system rewriting one. A skin that wants
  * a bigger or smaller mark sets `font-size` here too: the pseudo-element
- * inherits the host's otherwise, which the widget sizes from the box. */
+ * inherits the host's otherwise, which the widget sizes from the box.
+ *
+ * THE RESTING RULE BELOW IS LOAD-BEARING, for the reason the `.sk-focusable`
+ * baseline above is. An unchecked box does not "simply match no rule and stay
+ * empty": bevy_flair has no value to revert a property to when the rule that
+ * set it stops matching, so a `content` written only by `:checked` is applied
+ * once and then never taken away — tick a box, untick it, and the mark stays.
+ * The engine says as much on every toggle ("Cannot set property 'content' …
+ * to None. You should avoid this by setting a baseline style"). The colour
+ * needs a baseline for the same reason, even though an empty mark cannot show
+ * it. */
+.sk-checkbox-tick::before {
+  content: "";
+  color: var(--check-tick);
+}
+
 .sk-checkbox:checked .sk-checkbox-tick::before {
   content: "\2713";
   color: var(--check-tick);
@@ -583,11 +598,21 @@
   border-color: var(--radio-border-checked);
 }
 
-/* The pip is the SKIN'S MARK, not the widget's — the checkbox tick's trick. An
- * unlit option matches no rule, so its span stays empty and there is nothing to
- * hide. A skin that wants a bigger or smaller pip sets `font-size` here too:
- * the pseudo-element inherits the host's otherwise, which the widget sizes from
+/* The pip is the SKIN'S MARK, not the widget's — the checkbox tick's trick,
+ * including its resting baseline: an unlit option does NOT simply match no
+ * rule and stay empty, because nothing reverts a property whose rule has
+ * stopped matching. Without the rule below, lighting an option once leaves its
+ * pip lit for ever and the group shows every option you have ever chosen. See
+ * the checkbox tick above for the whole of it.
+ *
+ * A skin that wants a bigger or smaller pip sets `font-size` here too: the
+ * pseudo-element inherits the host's otherwise, which the widget sizes from
  * the disc. */
+.sk-radio-pip::before {
+  content: "";
+  color: var(--radio-pip);
+}
+
 .sk-radio:checked .sk-radio-pip::before {
   content: "\25cf";
   color: var(--radio-pip);

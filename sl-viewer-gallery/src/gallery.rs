@@ -278,6 +278,15 @@ pub fn run(assets: AssetPlugin, registry: GalleryRegistry) -> AppExit {
         // The radio widget's runtime half: reconciles each option's indicator and
         // `Checked` marker so the radio specimens respond to clicks in the gallery.
         .add_plugins(crate::ui_radio::RadioWidgetPlugin)
+        // The select box's runtime half: opens and dismisses the popover, and —
+        // the part that is not optional — installs the per-frame pointer claim.
+        // The combo's press observer takes `ResMut<UiPointerClaim>`, so without
+        // this plugin the FIRST press on any select box in the gallery fails
+        // parameter validation and takes the whole app down. Every specimen
+        // carrying a combo was a grenade until this line: the widget spawns and
+        // draws perfectly well on its own, so nothing looks wrong until someone
+        // clicks it.
+        .add_plugins(crate::ui_combo::ComboWidgetPlugin)
         // The sun / moon trackball's drawing half (viewer-ui-virtual-trackball):
         // places each marker from its aim and paints the below-horizon state.
         .add_plugins(crate::ui_trackball::TrackballPlugin)

@@ -401,6 +401,174 @@ mod test {
         Ok(())
     }
 
+    /// **Toggling `Checked` at runtime moves the mark, both ways.**
+    ///
+    /// Every other checkbox test here spawns one entity per state, so all of
+    /// them pass on an engine that computes a style once and never revisits
+    /// it. This one clicks: the mark has to appear when `Checked` arrives and
+    /// **go away again** when it leaves, on the same entity, which is the only
+    /// thing a user ever actually does to a checkbox.
+    #[test]
+    fn toggling_checked_moves_the_mark_both_ways() -> Result<(), TestError> {
+        let mut app = app();
+        let handle: Handle<StyleSheet> = app
+            .world()
+            .resource::<AssetServer>()
+            .load("skins/graphite/skin.css");
+        let root = app
+            .world_mut()
+            .spawn((Node::default(), Styled::new(handle.clone())))
+            .id();
+        let row = app
+            .world_mut()
+            .spawn((
+                Node::default(),
+                ClassList::new("sk-checkbox"),
+                ChildOf(root),
+            ))
+            .id();
+        let box_node = app
+            .world_mut()
+            .spawn((
+                Node::default(),
+                ClassList::new("sk-checkbox-box"),
+                ChildOf(row),
+            ))
+            .id();
+        let tick = app
+            .world_mut()
+            .spawn((
+                Text::default(),
+                PseudoElementsSupport,
+                ClassList::new("sk-checkbox-tick"),
+                ChildOf(box_node),
+            ))
+            .id();
+
+        load(&mut app, &handle)?;
+        app.update();
+
+        let mark = |app: &App, entity: Entity| {
+            app.world()
+                .get::<Children>(entity)
+                .and_then(|kids| kids.iter().next())
+                .and_then(|before| app.world().get::<TextSpan>(before))
+                .map(|span| span.0.clone())
+        };
+
+        assert_eq!(
+            mark(&app, tick).as_deref(),
+            Some(""),
+            "a freshly spawned unchecked box already carries a mark"
+        );
+
+        app.world_mut().entity_mut(row).insert(bevy::ui::Checked);
+        app.update();
+        assert_eq!(
+            mark(&app, tick),
+            Some("\u{2713}".to_owned()),
+            "checking the box did not bring the mark"
+        );
+
+        app.world_mut()
+            .entity_mut(row)
+            .remove::<bevy::ui::Checked>();
+        app.update();
+        assert_eq!(
+            mark(&app, tick).as_deref(),
+            Some(""),
+            "UNCHECKING the box left the mark behind — `content` is applied \
+             when the rule starts matching but never reverted when it stops"
+        );
+        Ok(())
+    }
+
+    /// **Moving a radio's selection takes the pip off the old option.**
+    ///
+    /// The checkbox's failure is worse on a radio, where it is not one stale
+    /// mark but a group that shows every option you have ever chosen at once.
+    #[test]
+    fn moving_a_radio_selection_takes_the_old_pip_away() -> Result<(), TestError> {
+        let mut app = app();
+        let handle: Handle<StyleSheet> = app
+            .world()
+            .resource::<AssetServer>()
+            .load("skins/graphite/skin.css");
+        let root = app
+            .world_mut()
+            .spawn((
+                Node::default(),
+                Styled::new(handle.clone()),
+                ClassList::new("sk-radio-group"),
+            ))
+            .id();
+        let spawn_option = |app: &mut App, checked: bool| {
+            let mut option =
+                app.world_mut()
+                    .spawn((Node::default(), ClassList::new("sk-radio"), ChildOf(root)));
+            if checked {
+                option.insert(bevy::ui::Checked);
+            }
+            let option = option.id();
+            let indicator = app
+                .world_mut()
+                .spawn((
+                    Node::default(),
+                    ClassList::new("sk-radio-indicator"),
+                    ChildOf(option),
+                ))
+                .id();
+            let pip = app
+                .world_mut()
+                .spawn((
+                    Text::default(),
+                    PseudoElementsSupport,
+                    ClassList::new("sk-radio-pip"),
+                    ChildOf(indicator),
+                ))
+                .id();
+            (option, pip)
+        };
+        let (first, first_pip) = spawn_option(&mut app, true);
+        let (second, second_pip) = spawn_option(&mut app, false);
+
+        load(&mut app, &handle)?;
+        app.update();
+
+        let mark = |app: &App, entity: Entity| {
+            app.world()
+                .get::<Children>(entity)
+                .and_then(|kids| kids.iter().next())
+                .and_then(|before| app.world().get::<TextSpan>(before))
+                .map(|span| span.0.clone())
+        };
+        assert_eq!(
+            mark(&app, first_pip),
+            Some("\u{25cf}".to_owned()),
+            "the lit option has no pip"
+        );
+
+        // Move the selection, exactly as the group's own observer does.
+        app.world_mut()
+            .entity_mut(first)
+            .remove::<bevy::ui::Checked>();
+        app.world_mut().entity_mut(second).insert(bevy::ui::Checked);
+        app.update();
+
+        assert_eq!(
+            mark(&app, second_pip),
+            Some("\u{25cf}".to_owned()),
+            "the newly lit option did not get the pip"
+        );
+        assert_eq!(
+            mark(&app, first_pip).as_deref(),
+            Some(""),
+            "the OLD option kept its pip, so the group shows two selected \
+             options at once"
+        );
+        Ok(())
+    }
+
     /// **All four checkbox looks come out of the stylesheet.**
     ///
     /// The widget paints nothing at all: `:checked` and `:disabled` reach the

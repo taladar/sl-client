@@ -33,17 +33,38 @@
  * A skin that supplies art wants the flat paint out of the way: an `ImageNode`
  * draws *over* the node's background colour, and a 2 px border drawn around an
  * image that carries its own frame reads as a double edge. So the rule that
- * brings an image also clears both, in the same block — which is what keeps
- * the flat skins unchanged, since they simply never set an image.
+ * brings an image clears both PAINTS — but only the paints.
+ *
+ * The border's WIDTH stays. It is not decoration here, it is space: bevy_ui
+ * lays a node's content out inside padding *and* border, so zeroing the width
+ * pulls the caption 2 px closer to the edge on every side, and the art's own
+ * 3 px of frame-and-bevel then eats most of what is left. The result is a
+ * caption sitting on the bevel with about two pixels of air above it — which
+ * is exactly what `border-width: 0` here looked like. Making the border
+ * transparent instead keeps the box identical to the flat skins' (the
+ * `image_backed_widgets` test pins that) and lets the art cover the whole of
+ * it, including the border band, because an `ImageNode` is drawn over the
+ * full node rect.
  *
  * The insets are the file's: 24x24 art, 8 px corners, so a button of any size
  * draws its corners 1:1 and stretches only the 8x8 centre.
+ *
+ * `-bevy-image-box: border-box` is the one that decides whether any of this is
+ * visible as a BUTTON. `ImageNode::default()` paints into the **content** box
+ * — inside the padding and the border — which for a widget surface is the
+ * wrong box by exactly the padding: a 112x32 button with `padding: 5px 10px`
+ * and a 2 px border drew its bevel at 88x18, a frame hugging the caption with
+ * bare panel all round it. That reads as a button with no margin around its
+ * text, when it is really a surface painted into the wrong rectangle. The
+ * property exists only because this theme needed it (`-bevy-image-box` is ours,
+ * added to the `bevy_flair` fork); nothing else in CSS could reach the field.
  */
 .sk-button {
   background-color: #00000000;
-  border-width: 0;
+  border-color: #00000000;
   -bevy-image: url("skins/graphite/widgets/push-button.png");
   -bevy-image-mode: sliced(8px 8px 8px 8px);
+  -bevy-image-box: border-box;
 }
 
 /* The other three states the reference draws as separate textures, which is

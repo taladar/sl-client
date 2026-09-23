@@ -55,6 +55,7 @@ pub(crate) use sl_viewer_ui_pie_menu::pie_menu;
 pub(crate) use sl_viewer_ui_widgets::floater;
 pub(crate) use sl_viewer_ui_widgets::menu;
 pub(crate) use sl_viewer_ui_widgets::ui_color_picker;
+pub(crate) use sl_viewer_ui_widgets::ui_combo;
 pub(crate) use sl_viewer_ui_widgets::ui_radio;
 pub(crate) use sl_viewer_ui_widgets::ui_search;
 pub(crate) use sl_viewer_ui_widgets::ui_tab;

@@ -26,6 +26,7 @@ mod test {
     use bevy::image::{CompressedImageFormats, ImageFilterMode, ImageLoader, ImageSampler};
     use bevy::picking::hover::Hovered;
     use bevy::prelude::*;
+    use bevy::ui::widget::ImageNodeSize;
     use bevy::ui::{InteractionDisabled, Pressed};
     use bevy_flair::prelude::*;
     use pretty_assertions::assert_eq;
@@ -43,8 +44,10 @@ mod test {
     /// The slice insets the art is drawn to: 24x24 files with 8 px corners.
     const INSET: f32 = 8.0;
 
-    /// An app with the CSS engine over the shipped `assets/`.
-    fn app() -> App {
+    /// An app with the CSS engine over the shipped `assets/`, ready for more
+    /// plugins — [`app`] is this plus the finish, and a caller that wants the
+    /// layout stack on top needs to add it *before* that.
+    fn app_unfinished() -> App {
         let assets = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
         let mut app = App::new();
         app.add_plugins((
@@ -70,6 +73,12 @@ mod test {
         app.init_asset::<Image>();
         sl_viewer_ui_core::skin::embed_fallback_stylesheet(&mut app);
         sl_viewer_ui_core::skin_palette::register_palette_properties(&mut app);
+        app
+    }
+
+    /// An app with the CSS engine over the shipped `assets/`, finished.
+    fn app() -> App {
+        let mut app = app_unfinished();
         app.finish();
         app.cleanup();
         app
@@ -166,6 +175,19 @@ mod test {
             image_path(&app, button).as_deref(),
             Some("skins/graphite/widgets/push-button.png"),
             "the resting button wears the wrong file"
+        );
+        // And the surface must be RENDERABLE, not merely present. `ImageNode`
+        // declares `#[require(Node, ImageNodeSize)]`, and the renderer's
+        // `extract_uinode_images` query asks for `&ImageNode` *and*
+        // `&ImageNodeSize` together — so a node that got the first without the
+        // second is skipped in total silence. Every other assertion here passes
+        // on such a node: the handle is right, the slicing is right, the file
+        // decodes, and the button is invisible on screen.
+        assert!(
+            app.world().get::<ImageNodeSize>(button).is_some(),
+            "the button got an `ImageNode` with no `ImageNodeSize` beside it, so \
+             `extract_uinode_images` will never match it and the art is never \
+             drawn — the rule's required components did not come with it"
         );
         Ok(())
     }
@@ -308,6 +330,169 @@ mod test {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// **Dressing a button in art does not move its caption.**
+    ///
+    /// bevy_ui lays a node's content out inside padding *and* border, so the
+    /// two together are the caption's inset — and an image-backed theme must
+    /// leave that inset alone or every button in the viewer tightens by the
+    /// border it dropped. It is a tempting thing to drop, too: the art carries
+    /// its own frame, so a painted border on top of it reads as a double edge.
+    /// The fix is to make the border *transparent* rather than zero-width, and
+    /// this is what says so — `border-width: 0` in the theme fails here with
+    /// the caption 2 px nearer the edge on every side, which on screen is a
+    /// label sitting on the bevel.
+    #[test]
+    fn the_art_does_not_shrink_the_box_the_caption_sits_in() -> Result<(), TestError> {
+        let inset = |sheet| -> Result<(f32, f32), TestError> {
+            let (app, button) = button_under(sheet, ())?;
+            let node = app
+                .world()
+                .get::<Node>(button)
+                .ok_or("the button lost its Node")?;
+            // Only the `Px` cases are meaningful here, and both sheets use
+            // them; anything else means the sheet changed shape under us.
+            let px = |value| match value {
+                Val::Px(pixels) => Ok(pixels),
+                other => Err(format!("`{sheet}` sets a non-pixel box value: {other:?}")),
+            };
+            Ok((
+                px(node.padding.top)? + px(node.border.top)?,
+                px(node.padding.left)? + px(node.border.left)?,
+            ))
+        };
+        assert_eq!(
+            inset("skins/graphite/themes/relief.css")?,
+            inset("skins/graphite/skin.css")?,
+            "the relief theme changed how far a button's caption sits from its \
+             edge — the art must replace the border's PAINT, not its WIDTH"
+        );
+        Ok(())
+    }
+
+    /// **Art does not decide how big a button is — its caption does.**
+    ///
+    /// A `bevy_ui` node carrying an `ImageNode` in `NodeImageMode::Auto` takes
+    /// a **content-size measure** from the image, and a measure replaces the
+    /// node's children as the thing that sizes it: the button stops being as
+    /// big as its label and becomes as big as the picture — 24x24, the size of
+    /// the art. `sliced()` is what clears that measure, so the whole of this
+    /// theme rests on the mode reaching `ImageNode` and *staying* there.
+    ///
+    /// The tell is an asymmetry: a button with an explicit width keeps it (the
+    /// style beats the measure) and collapses only in height, while a button
+    /// sized by its content collapses in both. So this lays two buttons out
+    /// for real — one flat, one dressed — and asserts the dressed one is no
+    /// smaller.
+    #[test]
+    fn the_art_does_not_decide_how_big_the_button_is() -> Result<(), TestError> {
+        let size_under = |sheet: &'static str| -> Result<Vec2, TestError> {
+            let mut app = app_unfinished();
+            sl_viewer_testkit::LayoutTest::new().install(&mut app, sl_viewer_testkit::UiHost::Bare);
+            app.finish();
+            app.cleanup();
+            let handle: Handle<StyleSheet> = app.world().resource::<AssetServer>().load(sheet);
+            let root = app
+                .world_mut()
+                .spawn((Node::default(), Styled::new(handle.clone())))
+                .id();
+            let button = app
+                .world_mut()
+                .spawn((Node::default(), ClassList::new("sk-button"), ChildOf(root)))
+                .id();
+            // A caption long enough that "as big as the label" and "as big as
+            // the 24x24 art" cannot be confused for one another.
+            app.world_mut().spawn((
+                Text::new("Submit this notecard"),
+                TextFont::from_font_size(14.0),
+                ChildOf(button),
+            ));
+            load(&mut app, &handle)?;
+            // Layout settles a frame behind the style that drives it.
+            app.update();
+            app.update();
+            let computed = app
+                .world()
+                .get::<ComputedNode>(button)
+                .ok_or("the button never reached layout")?;
+            Ok(computed.size())
+        };
+
+        let flat = size_under("skins/graphite/skin.css")?;
+        let dressed = size_under("skins/graphite/themes/relief.css")?;
+        assert!(
+            dressed.x >= flat.x && dressed.y >= flat.y,
+            "the relief theme shrank the button from {flat:?} to {dressed:?} — \
+             the art is sizing the node instead of the caption, which is what \
+             an `ImageNode` left in `NodeImageMode::Auto` does (the art is \
+             24x24)"
+        );
+        Ok(())
+    }
+
+    /// **The art covers the whole button, not just its caption.**
+    ///
+    /// `ImageNode::default()` paints into the **content** box — inside the
+    /// padding *and* the border — so a surface brought in by CSS covers the
+    /// node minus its padding unless the rule says otherwise. On a real dialog
+    /// button (`padding: 5px 10px`, `border: 2px`) that is a bevel drawn at
+    /// 88x18 inside a 112x32 box: a frame hugging the label with bare panel
+    /// all around it, which on screen reads as a button that lost its padding.
+    ///
+    /// Nothing else here catches it. The node keeps its size, the handle and
+    /// the slicing are right, `ImageNodeSize` is present, the file decodes —
+    /// every other assertion in this file passes while the button looks wrong.
+    /// So this one asserts the *box* the art is painted into.
+    #[test]
+    fn the_art_covers_the_button_and_not_just_its_caption() -> Result<(), TestError> {
+        let sheet = "skins/graphite/themes/relief.css";
+        let mut app = app_unfinished();
+        sl_viewer_testkit::LayoutTest::new().install(&mut app, sl_viewer_testkit::UiHost::Bare);
+        app.finish();
+        app.cleanup();
+        let handle: Handle<StyleSheet> = app.world().resource::<AssetServer>().load(sheet);
+        let root = app
+            .world_mut()
+            .spawn((Node::default(), Styled::new(handle.clone())))
+            .id();
+        // Exactly `script_dialog::spawn_grid_button`'s box.
+        let button = app
+            .world_mut()
+            .spawn((
+                Node {
+                    width: Val::Px(112.0),
+                    padding: UiRect::axes(Val::Px(6.0), Val::Px(5.0)),
+                    border: UiRect::all(Val::Px(2.0)),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                ClassList::new("sk-button"),
+                ChildOf(root),
+            ))
+            .id();
+        app.world_mut().spawn((
+            Text::new("Gift"),
+            TextFont::from_font_size(15.0),
+            ChildOf(button),
+        ));
+        load(&mut app, &handle)?;
+        app.update();
+        app.update();
+        let image = app
+            .world()
+            .get::<ImageNode>(button)
+            .ok_or_else(|| format!("`{sheet}` put no image on the button"))?;
+        assert_eq!(
+            image.visual_box,
+            VisualBox::BorderBox,
+            "`{sheet}` paints the button's art into {:?} — the default is \
+             `ContentBox`, which insets the surface by the button's padding \
+             and border and leaves a bevel hugging the caption",
+            image.visual_box
+        );
         Ok(())
     }
 
