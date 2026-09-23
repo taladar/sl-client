@@ -33,6 +33,7 @@ use crate::preferences::{CONTROL_BORDER, FONT, LABEL_COLOR};
 use crate::skin::{ACTIVE_CLASS, set_state_class_on, text_role};
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
+use crate::ui_spawn::{self, ButtonSpec, UiLabel};
 use crate::ui_tab::{
     DEFAULT_ELLIPSIS, TabPlacement, TabSpec, fill_tab_container, spawn_tab_container,
 };
@@ -739,32 +740,22 @@ fn spawn_about_button(
     action: AboutAction,
     tab_index: i32,
 ) -> Entity {
-    let button = commands
-        .spawn((
-            Button,
-            TabIndex(tab_index),
-            action,
-            Node {
-                padding: UiRect::axes(Val::Px(14.0), Val::Px(5.0)),
-                border: UiRect::all(Val::Px(2.0)),
-                ..default()
-            },
-            BorderColor::all(CONTROL_BORDER),
-            BackgroundColor(BUTTON_BACKGROUND),
-            Pickable::default(),
-            Name::new(format!("about:button:{label_key}")),
-            ChildOf(parent),
-        ))
-        .observe(on_about_action)
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(FONT),
-        text_role(LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(button),
-    ));
+    let button = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(UiLabel::key(label_key), format!("about:button:{label_key}"))
+            .tab_index(tab_index)
+            .padding(14.0, 5.0)
+            .border(2.0)
+            .colors(BUTTON_BACKGROUND, CONTROL_BORDER)
+            .label_color(LABEL_COLOR)
+            .font_size(FONT),
+    )
+    .button;
+    commands
+        .entity(button)
+        .insert(action)
+        .observe(on_about_action);
     button
 }
 

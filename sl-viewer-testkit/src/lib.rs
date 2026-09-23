@@ -75,6 +75,7 @@ use bevy::ui::update::{propagate_ui_target_cameras, update_clipping_system};
 use bevy::ui::widget::measure_text_system;
 use bevy::ui_widgets::popover::Popover;
 use bevy::ui_widgets::{Activate, Button};
+use bevy_flair::style::components::ClassList;
 
 use sl_viewer_ui_core::ui::{
     UiDirection, UiRoot, UiScaffoldSystems, apply_panel_visibility, apply_ui_direction,
@@ -1292,6 +1293,11 @@ pub fn layout_violations(app: &mut App, test: LayoutTest) -> Vec<String> {
     violations.extend(alignment_violations(app, test.direction()));
     violations.extend(radial_violations(app));
     violations.extend(radial_overlap_violations(app));
+    // Not a layout question, but it belongs to the same sweep for the same
+    // reason the others do: it has to run against what the viewer *spawns*,
+    // over every element and floater, or it is a check somebody has to remember
+    // to point at the panel that broke.
+    violations.extend(unskinned_button_violations(app));
     // Last, because it is the one check that advances the app: everything above
     // reads the layout the caller settled, and this one asks whether settling it
     // again changes it.
@@ -1477,6 +1483,74 @@ pub fn interactive_nodes(app: &mut App) -> Vec<String> {
     names.sort_unstable();
     names.dedup();
     names
+}
+
+/// Every **button that paints a box no stylesheet can reach**.
+///
+/// The check `viewer-ui-button-widget` was written around, and the one whose
+/// absence let the gap sit: the skin tests all spawned their own `.sk-button`
+/// node and asked whether the cascade painted it, so they proved the *rule*
+/// worked and never asked whether the viewer's own buttons wore the class. They
+/// mostly did not — `ButtonSpec::class` was an `Option` that began at `None`,
+/// and 14 of the 30 call sites, plus every hand-rolled box, left it there. It
+/// took a live look at a theme that dresses `.sk-button` in nine-sliced art to
+/// notice that the panels had not changed.
+///
+/// A node is in violation when it carries a button component **and** paints a
+/// visible box, but no class beginning `sk-`. Both halves are load-bearing:
+///
+/// - *a button component*, either kind — `bevy_ui`'s own marker or
+///   `bevy_ui_widgets`' headless one — because those are what the viewer's two
+///   press idioms are built on;
+/// - *and it paints a box*, because a button that paints nothing has nothing for
+///   a skin to restate. A link run and a tab scroll arrow are buttons with no
+///   surface of their own; demanding a class of them would be demanding a look
+///   they deliberately do not have.
+///
+/// **"Paints" is a question about the values, not about the components.** `Node`
+/// *requires* `BackgroundColor` and `BorderColor`, so every UI node in the world
+/// carries both and their presence says nothing at all — asking for it flagged
+/// every button in the viewer, the boxless ones included. What a skin can
+/// restate is an actually visible surface: a background with some alpha, or a
+/// border that is both coloured and non-zero-width.
+#[must_use]
+pub fn unskinned_button_violations(app: &mut App) -> Vec<String> {
+    let mut query = app.world_mut().query_filtered::<(
+        Entity,
+        Option<&Name>,
+        Option<&ClassList>,
+        &Node,
+        &BackgroundColor,
+        &BorderColor,
+    ), Or<(With<Button>, With<bevy::ui::widget::Button>)>>();
+    let mut violations = Vec::new();
+    for (entity, name, classes, node, background, border) in query.iter(app.world()) {
+        let paints_background = background.0.alpha() > 0.0;
+        let has_border_width = node.border != UiRect::ZERO;
+        let paints_border = has_border_width
+            && [border.top, border.right, border.bottom, border.left]
+                .iter()
+                .any(|side| side.alpha() > 0.0);
+        if !paints_background && !paints_border {
+            continue;
+        }
+        let skinned = classes.is_some_and(|classes| {
+            classes
+                .to_string()
+                .split_whitespace()
+                .any(|class| class.starts_with("sk-"))
+        });
+        if skinned {
+            continue;
+        }
+        violations.push(format!(
+            "{}: a button that paints its own box carries no `sk-` class, so no stylesheet can \
+             reach it — spawn it through `ui_spawn::spawn_button`, which puts `.sk-button` on by \
+             default, or name the class its family wears",
+            describe(name, entity),
+        ));
+    }
+    violations
 }
 
 /// Every named node that is a keyboard **stop**, in a stable order.

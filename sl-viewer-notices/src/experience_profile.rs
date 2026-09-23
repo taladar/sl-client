@@ -74,6 +74,7 @@ use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use bevy::text::EditableText;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
+use sl_viewer_ui_core::skin::BUTTON_CLASS;
 use sl_viewer_ui_core::skin::{
     DISABLED_TEXT_CLASS, EXPERIENCE_TEXT_CLASS, TEXT_CLASS, set_state_class, text_meaning,
     text_role,
@@ -126,9 +127,6 @@ const BUTTON_BACKGROUND: Color = Color::srgb(0.16, 0.19, 0.25);
 
 /// A button's fallback border — the skin's `.sk-button` overrides it.
 const BUTTON_BORDER: Color = Color::srgb(0.40, 0.50, 0.62);
-
-/// The skin class a button wears (`.sk-button`).
-const BUTTON_CLASS: &str = "sk-button";
 
 /// The description field's visible line count in edit mode.
 const DESCRIPTION_LINES: f32 = 4.0;

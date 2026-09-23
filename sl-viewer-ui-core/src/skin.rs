@@ -455,10 +455,40 @@ pub const TITLE_CLASS: &str = "sk-title";
 /// The CSS class on the one line that names a section inside a panel.
 pub const HEADING_CLASS: &str = "sk-heading";
 
+/// The CSS class on a **push button** — the bordered box
+/// [`ButtonSpec::bordered`](crate::ui_spawn::ButtonSpec::bordered) spawns.
+///
+/// It carries the whole resting look: the control shade, a 2 px border, the
+/// control radius and its own padding, so a skin can restate the *shape* of
+/// every button in the viewer and not merely its tint
+/// (`viewer-skin-image-backed-widgets` swaps the background for a nine-slice
+/// from here).
+///
+/// Named here because **seventeen files had declared their own copy of the
+/// string** — and, more to the point, because the class is now a *default*
+/// rather than something a call site asks for. It used to be an `Option` that
+/// began at `None`: a button was skinned only where its panel remembered to
+/// chain `.class(…)`, which 14 of the 30 `ButtonSpec` sites (and every one of
+/// the 33 hand-rolled boxes) did not.
+pub const BUTTON_CLASS: &str = "sk-button";
+
+/// [`BUTTON_CLASS`] at **row scale**: the same button where the standard box
+/// does not belong — inside a list row, a table cell, or a dense control strip
+/// beside a field.
+///
+/// A modifier rather than a class of its own, so it is worn *with*
+/// [`BUTTON_CLASS`] and restates only the geometry. It exists because the
+/// hand-rolled boxes it replaced were not all one size: a panel's action row
+/// was padded 10×5 while a cell's "remove" button was padded 6×1, and giving
+/// the second the first's box would push every row of an access list eight
+/// pixels further apart. Which of the two a button is remains a decision at the
+/// call site; what each *looks* like is the skin's.
+pub const COMPACT_BUTTON_CLASS: &str = "sk-button-compact";
+
 /// The CSS class on a flat action button — the shape a panel's button column
 /// spawns ([`ButtonSpec::flat`](crate::ui_spawn::ButtonSpec::flat)).
 ///
-/// Deliberately *not* `.sk-button`: that class carries a whole resting look
+/// Deliberately *not* [`BUTTON_CLASS`]: that class carries a whole resting look
 /// (the control shade, a 2 px border, its own padding) which these buttons do
 /// not have and should not suddenly grow. This one carries only the refused
 /// state, so the resting look stays the panel's until

@@ -74,6 +74,7 @@ use crate::material_preview::MaterialPreview;
 use crate::skin_palette::SkinPalette;
 use crate::ui::{column, row};
 use crate::ui_font::UiFont;
+use crate::ui_spawn::{self, ButtonSpec, UiLabel};
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::world_api::ui_texture::{PendingUiTexture, UiTexturePlugin};
 use sl_client_bevy::SlCommand;
@@ -601,33 +602,25 @@ fn spawn_picker_button(
     which: PickerButton,
     label_key: &'static str,
 ) -> Entity {
-    let button = commands
-        .spawn((
-            Button,
-            TabIndex(0),
-            Node {
-                padding: UiRect::axes(Val::Px(10.0), Val::Px(3.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..Default::default()
-            },
-            BorderColor::all(CONTROL_BORDER),
-            BackgroundColor(BUTTON_BACKGROUND),
-            which,
-            Pickable::default(),
-            Name::new(format!("texture-picker-button:{label_key}")),
-            ChildOf(parent),
-        ))
-        .observe(on_picker_button)
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(PICKER_FONT),
-        TextColor(TEXT_COLOR),
-        ClassList::new_with_classes([VALUE_CLASS]),
-        Pickable::IGNORE,
-        ChildOf(button),
-    ));
+    let button = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(
+            UiLabel::key(label_key),
+            format!("texture-picker-button:{label_key}"),
+        )
+        .tab_index(0)
+        .padding(10.0, 3.0)
+        .colors(BUTTON_BACKGROUND, CONTROL_BORDER)
+        .label_color(TEXT_COLOR)
+        .label_class(VALUE_CLASS)
+        .font_size(PICKER_FONT),
+    )
+    .button;
+    commands
+        .entity(button)
+        .insert(which)
+        .observe(on_picker_button);
     button
 }
 

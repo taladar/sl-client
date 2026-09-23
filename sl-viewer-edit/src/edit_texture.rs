@@ -50,7 +50,7 @@ use sl_client_bevy::{
 use crate::edit_params::set_disabled_class;
 use crate::edit_tool::{BuildTabPages, LABEL_CLASS, TOOL_FONT_SIZE, VALUE_CLASS, spawn_row_label};
 use crate::face_material::FaceMaterial;
-use crate::i18n::{TransArgs, Translated, Translator};
+use crate::i18n::{TransArgs, Translator};
 use crate::intents::TexturePicked;
 use crate::objects::{FaceTextureDebug, PrimFaceEntity, TEXTURE_EDIT_LOG_TARGET};
 use crate::ui::row;
@@ -58,6 +58,7 @@ use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
 use crate::ui_radio::{RadioLayout, RadioSelection, RadioSpec, spawn_radio_group};
+use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab_strip};
 use crate::ui_text::set_editor_text;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, TextInputValue, spawn_text_input};
@@ -959,37 +960,27 @@ fn spawn_tex_combo(commands: &mut Commands, parent: Entity, cycle: TexCycle, tab
 /// Spawn the Align-planar-faces action button; returns the button entity so the
 /// caller can tag it (e.g. with a `ShowWhen`).
 fn spawn_align_button(commands: &mut Commands, parent: Entity, tab_index: &mut i32) -> Entity {
-    let index = *tab_index;
-    *tab_index = tab_index.saturating_add(1);
-    let button = commands
-        .spawn((
-            bevy::ui_widgets::Button,
-            bevy::input_focus::tab_navigation::TabIndex(index),
-            Node {
-                padding: UiRect::axes(Val::Px(10.0), Val::Px(2.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..row(Val::ZERO)
-            },
-            BorderColor::all(Color::srgba(0.4, 0.4, 0.45, 1.0)),
-            BackgroundColor(Color::srgba(0.18, 0.18, 0.2, 1.0)),
-            TexAlignButton,
-            TexControl,
-            Pickable::default(),
-            Name::new("build-tex:align"),
-            ChildOf(parent),
-        ))
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new("build-tex-align"),
-        UiFont::Sans.at(TOOL_FONT_SIZE),
-        // The colour `.sk-build-value` paints — see [`VALUE_CLASS`].
-        TextColor(SkinPalette::FALLBACK.text_primary),
-        ClassList::new_with_classes([VALUE_CLASS]),
-        Pickable::IGNORE,
-        ChildOf(button),
-    ));
-    commands.entity(button).observe(handle_tex_align_press);
+    let button = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(UiLabel::key("build-tex-align"), "build-tex:align")
+            .kind(ButtonKind::Headless)
+            .tab_from(tab_index)
+            .padding(10.0, 2.0)
+            .colors(
+                Color::srgba(0.18, 0.18, 0.2, 1.0),
+                Color::srgba(0.4, 0.4, 0.45, 1.0),
+            )
+            // The colour `.sk-build-value` paints — see [`VALUE_CLASS`].
+            .label_color(SkinPalette::FALLBACK.text_primary)
+            .label_class(VALUE_CLASS)
+            .font_size(TOOL_FONT_SIZE),
+    )
+    .button;
+    commands
+        .entity(button)
+        .insert((TexAlignButton, TexControl))
+        .observe(handle_tex_align_press);
     button
 }
 

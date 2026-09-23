@@ -73,6 +73,7 @@ use crate::ui::{LogicalInset, LogicalRect, UiRoot, UiScaffoldSystems, column, ro
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
+use sl_viewer_ui_core::skin::BUTTON_CLASS;
 
 /// The element id the gallery specimen and its inert actions report under.
 const NOTIFICATION_ELEMENT: &str = "notification-toast";
@@ -155,9 +156,6 @@ const TEXT_CLASS: &str = "sk-toast-text";
 /// The CSS class on a toast's title header, so a skin can weight it against
 /// the body (falls back to the plain text colour unstyled).
 const TITLE_CLASS: &str = "sk-toast-title";
-
-/// The CSS class on a toast button — the shared push-button surface.
-const BUTTON_CLASS: &str = "sk-button";
 
 /// The checkbox glyph shown when the "don't show me this again" box is ticked
 /// The glyph on a toast's close button (`×`).

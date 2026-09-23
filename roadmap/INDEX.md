@@ -12,9 +12,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 118 |
-| ready | 308 |
+| ready | 307 |
 | blocked | 63 |
-| in-progress | 26 |
+| in-progress | 27 |
 | bugs | 9 |
 | done | 1213 |
 | deferred | 30 |
@@ -293,7 +293,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (308)
+## ready (307)
 
 ### protocol
 
@@ -929,8 +929,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   UI regression baselines — recorded geometry that may not drift by accident
   (blocked by `viewer-ui-test-harness` (done), `viewer-test-baseline-format`
   (done))
-- [`viewer-ui-button-widget`](ready/viewer-ui-button-widget.md) — The button is
-  the one control that never became a widget
 - [`viewer-ui-settings-binding-combo`](ready/viewer-ui-settings-binding-combo.md)
   — Combo↔settings two-way binding (blocked by `viewer-ui-combo-widget` (done),
   `viewer-ui-settings-binding` (done))
@@ -1220,7 +1218,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Batch world changes into per-tick update bursts (blocked by
   `server-world-heartbeat`, `server-world-ecs-store`)
 
-## in-progress (26)
+## in-progress (27)
 
 ### viewer
 
@@ -1270,6 +1268,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The text colours that name no role, and the four kinds of reason why
 - [`viewer-streaming-audio`](in-progress/viewer-streaming-audio.md) — Parcel
   streaming-audio / media-audio player
+- [`viewer-ui-button-widget`](in-progress/viewer-ui-button-widget.md) — The
+  button is the one control that never became a widget
 - [`viewer-ui-text-caret-grapheme-motion`](in-progress/viewer-ui-text-caret-grapheme-motion.md)
   — Upstream issue — parley caret motion steps one codepoint, not one grapheme
 - [`viewer-ui-text-parley-pr-backdelete`](in-progress/viewer-ui-text-parley-pr-backdelete.md)

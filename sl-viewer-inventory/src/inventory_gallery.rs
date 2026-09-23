@@ -37,6 +37,7 @@ use crate::inventory_properties::{OpenItemPreview, previewable};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::UiAction;
 use crate::ui_font::UiFont;
+use crate::ui_spawn::{self, ButtonSpec, UiLabel};
 use crate::world_api::ui_texture::{PendingUiTexture, UiTexturePlugin};
 
 /// The gallery font size for tile names, in logical pixels.
@@ -287,28 +288,19 @@ fn spawn_nav_button(
     glyph: &'static str,
     tab_index: i32,
 ) -> Entity {
-    commands
-        .spawn((
-            Button,
-            bevy::input_focus::tab_navigation::TabIndex(tab_index),
-            Node {
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(BUTTON_BORDER),
-            BackgroundColor(BUTTON_BACKGROUND),
-            Pickable::default(),
-            Name::new(format!("inventory-gallery-nav:{glyph}")),
-            ChildOf(parent),
-        ))
-        .with_child((
-            Text::new(glyph),
-            UiFont::Sans.at(CHROME_FONT_SIZE),
-            text_role(LABEL_COLOR),
-            Pickable::IGNORE,
-        ))
-        .id()
+    ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(
+            UiLabel::literal(glyph),
+            format!("inventory-gallery-nav:{glyph}"),
+        )
+        .tab_index(tab_index)
+        .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
+        .label_color(LABEL_COLOR)
+        .font_size(CHROME_FONT_SIZE),
+    )
+    .button
 }
 
 /// Route the gear menu's Gallery View toggle: open on the selected folder

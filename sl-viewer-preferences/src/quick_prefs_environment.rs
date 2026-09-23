@@ -62,9 +62,8 @@
 //! `panel_quick_prefs.xml`.
 
 use crate::skin_palette::SkinPalette;
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
-use bevy::ui_widgets::{Activate, Button};
+use bevy::ui_widgets::Activate;
 use sl_client_bevy::{AssetKey, SettingsKind, Uuid};
 use std::collections::HashSet;
 
@@ -79,6 +78,7 @@ use crate::ui_combo::{
     ComboChanged, ComboRow, ComboSelection, ComboSpec, SetComboOptions, spawn_combo,
 };
 use crate::ui_font::UiFont;
+use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 
 /// The Fluent key of the *Region default* sentinel (`QP_WL_Region_Default`).
 pub const KEY_REGION_DEFAULT: &str = "quick-prefs-env-region-default";
@@ -434,35 +434,35 @@ fn spawn_step_button(
 ) {
     let element = host.element(kind);
     let side = if forward { "next" } else { "prev" };
+    let button = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(
+            UiLabel::literal(if forward { NEXT_GLYPH } else { PREV_GLYPH }),
+            format!("{element}:{side}"),
+        )
+        .kind(ButtonKind::Headless)
+        .tab_index(0)
+        .compact()
+        .padding(5.0, 1.0)
+        .colors(BUTTON_FILL, BUTTON_BORDER)
+        .label_color(LABEL_COLOR)
+        .font_size(FONT)
+        .layout(|node| {
+            node.align_items = AlignItems::Center;
+            node.justify_content = JustifyContent::Center;
+            node.flex_shrink = 0.0;
+        }),
+    )
+    .button;
     commands
-        .spawn((
-            Button,
-            TabIndex(0),
-            PresetStepButton {
-                kind,
-                scope: host.scope,
-                forward,
-            },
-            Node {
-                padding: UiRect::axes(Val::Px(5.0), Val::Px(1.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                flex_shrink: 0.0,
-                ..default()
-            },
-            BorderColor::all(BUTTON_BORDER),
-            BackgroundColor(BUTTON_FILL),
-            Name::new(format!("{element}:{side}")),
-            ChildOf(parent),
-        ))
-        .observe(on_step_button)
-        .with_child((
-            Text::new(if forward { NEXT_GLYPH } else { PREV_GLYPH }),
-            UiFont::Sans.at(FONT),
-            text_role(LABEL_COLOR),
-            Pickable::IGNORE,
-        ));
+        .entity(button)
+        .insert(PresetStepButton {
+            kind,
+            scope: host.scope,
+            forward,
+        })
+        .observe(on_step_button);
 }
 
 /// Observer: turn a prev / next press into a [`StepPreset`].

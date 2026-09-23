@@ -82,6 +82,7 @@ use crate::notification_host::{
     NotificationChannelRoot, ResolveNotification, ToastSpec, adopt_toast,
 };
 use crate::notifications::{NotificationKind, NotificationManager, NotificationPriority};
+use crate::skin::BUTTON_CLASS;
 use crate::skin::text_role;
 use crate::skin_palette::SkinPalette;
 use crate::ui::{column, row};
@@ -144,9 +145,6 @@ const CARD_CLASS: &str = "sk-toast";
 
 /// The skin class the body text wears (`.sk-toast-text`).
 const TEXT_CLASS: &str = "sk-toast-text";
-
-/// The skin class a card button wears (`.sk-button`).
-const BUTTON_CLASS: &str = "sk-button";
 
 /// The close-button glyph (a multiplication sign), matching the reference toast.
 const CLOSE_GLYPH: &str = "\u{00d7}";
@@ -1088,8 +1086,7 @@ fn spawn_action_button(
         .border(2.0)
         .colors(BUTTON_BACKGROUND, border)
         .label_color(TEXT_COLOR)
-        .font_size(FONT_SIZE)
-        .class(BUTTON_CLASS),
+        .font_size(FONT_SIZE),
     )
     .button
 }

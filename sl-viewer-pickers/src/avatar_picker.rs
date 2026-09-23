@@ -58,7 +58,6 @@
 //! `floater_avatar_picker.xml`.
 
 use crate::skin_palette::SkinPalette;
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy_flair::style::components::ClassList;
@@ -77,6 +76,7 @@ use crate::intents::{AvatarPicked, OpenAvatarPicker, PickedAvatar};
 use crate::social::FriendsModel;
 use crate::ui::{UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
+use crate::ui_spawn::{self, ButtonSpec, UiLabel};
 use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab_strip};
 use crate::world_api::AvatarState;
 
@@ -494,31 +494,25 @@ fn spawn_picker_button(
     action: PickerButton,
     tab_index: i32,
 ) -> Entity {
+    let button = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(
+            UiLabel::key(label_key),
+            format!("avatar-picker:{label_key}"),
+        )
+        .tab_index(tab_index)
+        .padding(10.0, 3.0)
+        .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
+        .label_color(LABEL_COLOR)
+        .font_size(PICKER_FONT_SIZE),
+    )
+    .button;
     commands
-        .spawn((
-            Button,
-            action,
-            TabIndex(tab_index),
-            Node {
-                padding: UiRect::axes(Val::Px(10.0), Val::Px(3.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(BUTTON_BORDER),
-            BackgroundColor(BUTTON_BACKGROUND),
-            Pickable::default(),
-            Name::new(format!("avatar-picker:{label_key}")),
-            ChildOf(parent),
-        ))
-        .observe(on_picker_button)
-        .with_child((
-            Text::default(),
-            Translated::new(label_key),
-            UiFont::Sans.at(PICKER_FONT_SIZE),
-            text_role(LABEL_COLOR),
-            Pickable::IGNORE,
-        ))
-        .id()
+        .entity(button)
+        .insert(action)
+        .observe(on_picker_button);
+    button
 }
 
 /// Fire the name search for the field's current text.

@@ -116,6 +116,20 @@
   background-color: var(--control-bg-hover);
 }
 
+/* The same button at ROW SCALE — in a table cell, a list row, or a dense strip
+ * beside a field. A modifier worn with `.sk-button`, so it restates only the
+ * geometry and inherits every colour and state rule above.
+ *
+ * It exists because the boxes the button widget absorbed were not one size: a
+ * panel's action row was padded 10x5 and a cell's "remove" button 6x1, and
+ * giving the second the first's box pushes every row of an access list eight
+ * pixels apart. A skin retunes both, and the call site only says which kind of
+ * button it is spawning. */
+.sk-button-compact {
+  border-width: 1px;
+  padding: 1px 6px;
+}
+
 /* A button whose action cannot be taken right now. The panel marks it with
  * `InteractionDisabled` — which it was already doing, to refuse the press — and
  * the caption greys from here rather than from a loop that walked the button's

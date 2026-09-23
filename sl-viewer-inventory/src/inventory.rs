@@ -60,6 +60,7 @@ use crate::menu::{MenuCommand, MenuConditions, MenuDef, MenuItemDef};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
+use crate::ui_spawn::{self, ButtonSpec, UiLabel};
 use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab_strip};
 use crate::ui_text::set_text;
 use crate::virtual_list::{
@@ -3930,30 +3931,19 @@ fn spawn_toolbar_button(
     label_key: &'static str,
     tab_index: i32,
 ) -> Entity {
-    commands
-        .spawn((
-            Button,
-            TabIndex(tab_index),
-            Node {
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(BUTTON_BORDER),
-            BackgroundColor(BUTTON_BACKGROUND),
-            Pickable::default(),
-            Name::new(format!("inventory-button:{label_key}")),
-            ChildOf(parent),
-        ))
-        .with_child((
-            // Empty until `crate::i18n::apply_translations` resolves the key for
-            // the active locale (and re-resolves it on a locale switch).
-            Text::default(),
-            Translated::new(label_key),
-            UiFont::Sans.at(CHROME_FONT_SIZE),
-            text_role(CHROME_COLOR),
-        ))
-        .id()
+    ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(
+            UiLabel::key(label_key),
+            format!("inventory-button:{label_key}"),
+        )
+        .tab_index(tab_index)
+        .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
+        .label_color(CHROME_COLOR)
+        .font_size(CHROME_FONT_SIZE),
+    )
+    .button
 }
 
 // ---------------------------------------------------------------------------

@@ -36,10 +36,9 @@
 //! `quick_preferences.xml`.
 
 use crate::skin_palette::SkinPalette;
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui::InteractionDisabled;
-use bevy::ui_widgets::{Activate, Button, SliderRange, SliderStep};
+use bevy::ui_widgets::{Activate, SliderRange, SliderStep};
 use bevy::window::PrimaryWindow;
 use serde::{Deserialize, Serialize};
 use sl_settings::{Scope, SettingKind};
@@ -61,7 +60,7 @@ use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_element::ElementCx;
 use crate::ui_font::UiFont;
 use crate::ui_slider::{SliderStyle, spawn_slider};
-use crate::ui_spawn::{self, UiLabel};
+use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use sl_viewer_ui_widgets::floater_persist::FloaterOpenExempt;
 
 /// The stable floater id (its geometry-persistence key and lookup handle).
@@ -1055,30 +1054,24 @@ pub(crate) fn spawn_quick_prefs_button(
             ChildOf(area.upper_trailing),
         ))
         .id();
-    commands
-        .spawn((
-            Button,
-            TabIndex(0),
-            Node {
-                padding: UiRect::axes(Val::Px(7.0), Val::Px(3.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                flex_shrink: 0.0,
-                ..default()
-            },
-            BorderColor::all(BUTTON_BORDER),
-            BackgroundColor(BUTTON_FILL),
-            Name::new("quick-prefs-button"),
-            ChildOf(wrapper),
-        ))
-        .observe(on_quick_prefs_button)
-        .with_child((
-            Text::new("⚙"),
-            UiFont::Sans.at(BUTTON_FONT),
-            text_role(LABEL_COLOR),
-            Pickable::IGNORE,
-        ));
+    let button = ui_spawn::spawn_button(
+        &mut commands,
+        wrapper,
+        ButtonSpec::bordered(UiLabel::literal("\u{2699}"), "quick-prefs-button")
+            .kind(ButtonKind::Headless)
+            .tab_index(0)
+            .padding(7.0, 3.0)
+            .colors(BUTTON_FILL, BUTTON_BORDER)
+            .label_color(LABEL_COLOR)
+            .font_size(BUTTON_FONT)
+            .layout(|node| {
+                node.align_items = AlignItems::Center;
+                node.justify_content = JustifyContent::Center;
+                node.flex_shrink = 0.0;
+            }),
+    )
+    .button;
+    commands.entity(button).observe(on_quick_prefs_button);
 }
 
 /// Observer: toggle the quick-prefs floater, raising it when it opens.

@@ -59,6 +59,7 @@ use crate::floater::{
 use crate::i18n::Translated;
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{ComboBindingValues, SettingBinding, bound_checkbox, bound_slider};
+use crate::skin::BUTTON_CLASS;
 use crate::skin::{
     MATCH_CLASS, NO_MATCH_CLASS, NOTE_TEXT_CLASS, TEXT_CLASS, set_state_class, set_state_class_on,
     text_meaning, text_role,
@@ -119,9 +120,6 @@ const THUMB_FILL: Color = Color::srgb(0.62, 0.72, 0.86);
 
 /// A footer button's background.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.16, 0.19, 0.25);
-
-/// The skin class the footer buttons carry (hover styling).
-const BUTTON_CLASS: &str = "sk-button";
 
 /// How this panel's sliders are drawn.
 const SLIDER: SliderStyle = SliderStyle {

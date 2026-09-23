@@ -27,17 +27,16 @@
 
 use bevy::camera::primitives::Aabb;
 use bevy::input::keyboard::KeyboardInput;
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusedInput, InputFocus};
 use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx};
 use bevy::ui_widgets::{
-    Activate, Button, Slider, SliderDragState, SliderRange, SliderStep, SliderValue, ValueChange,
+    Activate, Slider, SliderDragState, SliderRange, SliderStep, SliderValue, ValueChange,
 };
 use bevy_flair::style::components::ClassList;
 use sl_cef::{PlaybackState, ValidatedMediaUrl};
 use sl_client_bevy::{Command, SlCommand};
-use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class, text_role};
+use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, set_state_class, text_role};
 
 use crate::camera::FocusTarget;
 use crate::media_prim::{MediaData, MediaPrimState, media_permission_allows};
@@ -48,6 +47,7 @@ use sl_viewer_ui_core::skin_palette::SkinPalette;
 use sl_viewer_ui_core::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use sl_viewer_ui_core::ui_element::UiAction;
 use sl_viewer_ui_core::ui_font::UiFont;
+use sl_viewer_ui_core::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use sl_viewer_ui_widgets::ui_slider::{SliderStyle, SliderWidgetPlugin, spawn_slider};
 use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use sl_viewer_world_api::MediaFocus;
@@ -406,6 +406,9 @@ fn format_media_time(seconds: f64) -> String {
     }
 }
 
+/// The glyph buttons' font size, in logical pixels.
+const GLYPH_FONT_SIZE: f32 = 12.0;
+
 /// One glyph button on the bar; returns `(button, label)`.
 fn spawn_bar_button(
     commands: &mut Commands,
@@ -414,40 +417,29 @@ fn spawn_bar_button(
     action: &'static str,
     tab_index: i32,
 ) -> (Entity, Entity) {
-    let button = commands
-        .spawn((
-            Button,
-            TabIndex(tab_index),
-            Node {
-                padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(Color::srgb(0.3, 0.3, 0.35)),
-            BackgroundColor(Color::srgb(0.16, 0.17, 0.2)),
-            Pickable::default(),
-            Name::new(format!("media-controls-button:{action}")),
-            ChildOf(parent),
-        ))
-        .observe(
-            move |_activate: On<Activate>, mut actions: MessageWriter<UiAction>| {
-                actions.write(UiAction {
-                    element: MEDIA_CONTROLS_ELEMENT,
-                    action,
-                });
-            },
+    let spawned = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(
+            UiLabel::literal(glyph.to_owned()),
+            format!("media-controls-button:{action}"),
         )
-        .id();
-    let label = commands
-        .spawn((
-            Text::new(glyph),
-            UiFont::Sans.at(12.0),
-            ClassList::new_with_classes([TEXT_CLASS]),
-            Pickable::IGNORE,
-            ChildOf(button),
-        ))
-        .id();
-    (button, label)
+        .kind(ButtonKind::Headless)
+        .tab_index(tab_index)
+        .compact()
+        .colors(Color::srgb(0.16, 0.17, 0.2), Color::srgb(0.3, 0.3, 0.35))
+        .label_color(SkinPalette::FALLBACK.text_primary)
+        .font_size(GLYPH_FONT_SIZE),
+    );
+    commands.entity(spawned.button).observe(
+        move |_activate: On<Activate>, mut actions: MessageWriter<UiAction>| {
+            actions.write(UiAction {
+                element: MEDIA_CONTROLS_ELEMENT,
+                action,
+            });
+        },
+    );
+    (spawned.button, spawned.label)
 }
 
 /// The bar's chrome queries, bundled to stay within Bevy's system-parameter

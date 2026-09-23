@@ -105,6 +105,7 @@ use sl_viewer_ui_core::i18n::Translated;
 use sl_viewer_ui_core::skin::text_role;
 use sl_viewer_ui_core::ui::{LogicalInset, LogicalRect, UiRoot, UiScaffoldSystems, column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
+use sl_viewer_ui_core::ui_spawn::{self, ButtonSpec, UiLabel};
 
 /// The picker's numeric-channel maximum (an sRGB byte).
 const CHANNEL_MAX: f32 = 255.0;
@@ -1372,33 +1373,21 @@ fn spawn_hex_row(commands: &mut Commands, parent: Entity) -> Entity {
 
 /// Spawn the eyedropper button.
 fn spawn_pipette_button(commands: &mut Commands, parent: Entity) -> Entity {
-    let button = commands
-        .spawn((
-            Button,
-            TabIndex(0),
-            Node {
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..Default::default()
-            },
-            BorderColor::all(CONTROL_BORDER),
-            BackgroundColor(BUTTON_BACKGROUND),
-            PipetteButton,
-            Pickable::default(),
-            Name::new("color-picker-pipette"),
-            ChildOf(parent),
-        ))
-        .observe(on_pipette_press)
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new("color-picker-pipette"),
-        UiFont::Sans.at(PICKER_FONT),
-        TextColor(TEXT_COLOR),
-        ClassList::new_with_classes([VALUE_CLASS]),
-        Pickable::IGNORE,
-        ChildOf(button),
-    ));
+    let button = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(UiLabel::key("color-picker-pipette"), "color-picker-pipette")
+            .tab_index(0)
+            .colors(BUTTON_BACKGROUND, CONTROL_BORDER)
+            .label_color(TEXT_COLOR)
+            .label_class(VALUE_CLASS)
+            .font_size(PICKER_FONT),
+    )
+    .button;
+    commands
+        .entity(button)
+        .insert(PipetteButton)
+        .observe(on_pipette_press);
     button
 }
 
@@ -1459,6 +1448,10 @@ fn spawn_palette(commands: &mut Commands, parent: Entity) -> [Entity; PALETTE_SI
                     },
                     BorderColor::all(CONTROL_BORDER),
                     BackgroundColor(Color::BLACK),
+                    // A swatch, not a button: its fill is the colour it holds,
+                    // and only its rim is chrome — the same split
+                    // `.sk-swatch` already makes for the picker's own swatch.
+                    ClassList::new_with_classes([SWATCH_CLASS]),
                     PaletteCell(index),
                     Pickable::default(),
                     Name::new(format!("color-picker-palette-cell:{index}")),
@@ -1486,33 +1479,25 @@ fn spawn_picker_button(
     which: PickerButton,
     label_key: &'static str,
 ) {
-    let button = commands
-        .spawn((
-            Button,
-            TabIndex(0),
-            Node {
-                padding: UiRect::axes(Val::Px(12.0), Val::Px(3.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..Default::default()
-            },
-            BorderColor::all(CONTROL_BORDER),
-            BackgroundColor(BUTTON_BACKGROUND),
-            which,
-            Pickable::default(),
-            Name::new(format!("color-picker-button:{label_key}")),
-            ChildOf(parent),
-        ))
-        .observe(on_picker_button)
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(PICKER_FONT),
-        TextColor(TEXT_COLOR),
-        ClassList::new_with_classes([VALUE_CLASS]),
-        Pickable::IGNORE,
-        ChildOf(button),
-    ));
+    let button = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(
+            UiLabel::key(label_key),
+            format!("color-picker-button:{label_key}"),
+        )
+        .tab_index(0)
+        .padding(12.0, 3.0)
+        .colors(BUTTON_BACKGROUND, CONTROL_BORDER)
+        .label_color(TEXT_COLOR)
+        .label_class(VALUE_CLASS)
+        .font_size(PICKER_FONT),
+    )
+    .button;
+    commands
+        .entity(button)
+        .insert(which)
+        .observe(on_picker_button);
 }
 
 // ---------------------------------------------------------------------------

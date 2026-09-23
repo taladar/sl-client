@@ -20,7 +20,6 @@
 //! `floater_material_editor.xml`.
 
 use crate::skin_palette::SkinPalette;
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui::Checked;
 use bevy::ui_widgets::{Slider, SliderRange, SliderStep, SliderValue, ValueChange};
@@ -617,32 +616,24 @@ fn spawn_mat_button(
     label: &str,
     tab: &mut i32,
 ) {
-    let button = commands
-        .spawn((
-            Button,
-            TabIndex(*tab),
-            Node {
-                padding: UiRect::axes(Val::Px(10.0), Val::Px(3.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..Default::default()
-            },
-            BorderColor::all(CONTROL_BORDER),
-            BackgroundColor(BUTTON_BACKGROUND),
-            kind,
-            Pickable::default(),
-            Name::new(format!("material-button:{label}")),
-            ChildOf(parent),
-        ))
-        .observe(on_mat_action_button)
-        .id();
-    commands.spawn((
-        Text::new(label.to_owned()),
-        UiFont::Sans.at(FONT),
-        text_role(LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(button),
-    ));
-    *tab = tab.saturating_add(1);
+    let button = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(
+            UiLabel::literal(label.to_owned()),
+            format!("material-button:{label}"),
+        )
+        .tab_from(tab)
+        .padding(10.0, 3.0)
+        .colors(BUTTON_BACKGROUND, CONTROL_BORDER)
+        .label_color(LABEL_COLOR)
+        .font_size(FONT),
+    )
+    .button;
+    commands
+        .entity(button)
+        .insert(kind)
+        .observe(on_mat_action_button);
 }
 
 // ---------------------------------------------------------------------------

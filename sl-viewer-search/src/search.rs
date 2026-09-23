@@ -34,7 +34,6 @@ use crate::skin_palette::SkinPalette;
 use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use bevy::text::EditableText;
-use bevy::ui_widgets::Button;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
     AgentKey, AvatarProperties, ClassifiedCategory, ClassifiedInfo, ClassifiedKey, Command,
@@ -1665,29 +1664,26 @@ fn spawn_events_filters(commands: &mut Commands, panel: Entity) -> (Entity, Enti
 /// Spawn an Events day-stepper button (`‹` back / `›` forward).
 fn spawn_events_day_button(commands: &mut Commands, parent: Entity, forward: bool) {
     let glyph = if forward { "\u{203a}" } else { "\u{2039}" };
-    let button = commands
-        .spawn((
-            Button,
-            Node {
-                padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(BUTTON_BORDER),
-            BackgroundColor(BUTTON_BACKGROUND),
-            Pickable::default(),
-            EventsDayButton { forward },
-            ChildOf(parent),
-        ))
-        .id();
-    commands.spawn((
-        Text::new(glyph.to_owned()),
-        UiFont::Sans.at(FONT),
-        text_role(LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(button),
-    ));
-    commands.entity(button).observe(on_events_day_press);
+    let button = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(
+            UiLabel::literal(glyph),
+            format!(
+                "search-events-day:{}",
+                if forward { "next" } else { "prev" }
+            ),
+        )
+        .compact()
+        .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
+        .label_color(LABEL_COLOR)
+        .font_size(FONT),
+    )
+    .button;
+    commands
+        .entity(button)
+        .insert(EventsDayButton { forward })
+        .observe(on_events_day_press);
 }
 
 /// Spawn the Events category combo over the [`EVENT_CATEGORIES`] labels.
@@ -1765,30 +1761,21 @@ fn spawn_paging_button(
     } else {
         "search-prev"
     };
-    let button = commands
-        .spawn((
-            Button,
-            Node {
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(2.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(BUTTON_BORDER),
-            BackgroundColor(BUTTON_BACKGROUND),
-            Pickable::default(),
-            PagingButton { category, forward },
-            ChildOf(parent),
-        ))
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new(key),
-        UiFont::Sans.at(FONT),
-        text_role(LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(button),
-    ));
-    commands.entity(button).observe(on_paging_press);
+    let button = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(UiLabel::key(key), format!("search-paging:{key}"))
+            .compact()
+            .padding(8.0, 2.0)
+            .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
+            .label_color(LABEL_COLOR)
+            .font_size(FONT),
+    )
+    .button;
+    commands
+        .entity(button)
+        .insert(PagingButton { category, forward })
+        .observe(on_paging_press);
 }
 
 /// Spawn a translated static label.

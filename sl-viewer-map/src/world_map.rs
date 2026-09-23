@@ -34,13 +34,12 @@
 use std::collections::HashMap;
 
 use bevy::asset::RenderAssetUsages;
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
 use bevy::text::{EditableText, FontCx, LayoutCx};
 use bevy::ui::RelativeCursorPosition;
-use bevy::ui_widgets::{Activate, Button};
+use bevy::ui_widgets::Activate;
 use bevy::window::PrimaryWindow;
 use sl_client_bevy::{
     Command, MapItem, MapItemType, MapRegionInfo, Maturity, RegionCoordinates, RegionHandle,
@@ -62,6 +61,7 @@ use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::ui_search::{SearchFieldSpec, spawn_search_field};
+use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use crate::ui_text::set_editor_text;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::world_api::AvatarState;
@@ -751,40 +751,30 @@ fn spawn_panel_button(
     label_key: &'static str,
     action: &'static str,
 ) {
-    let button = commands
-        .spawn((
-            Button,
-            TabIndex(0),
-            Node {
-                padding: UiRect::axes(Val::Px(7.0), Val::Px(3.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                justify_content: JustifyContent::Center,
-                flex_grow: 1.0,
-                ..default()
-            },
-            BorderColor::all(Color::srgb(0.35, 0.35, 0.4)),
-            BackgroundColor(Color::srgb(0.16, 0.17, 0.2)),
-            Pickable::default(),
-            Name::new(format!("worldmap-button:{action}")),
-            ChildOf(parent),
-        ))
-        .observe(
-            move |_activate: On<Activate>, mut actions: MessageWriter<UiAction>| {
-                actions.write(UiAction {
-                    element: WORLD_MAP_ELEMENT,
-                    action,
-                });
-            },
-        )
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(PANEL_FONT_SIZE),
-        TextColor(Color::srgba(0.9, 0.92, 0.96, 1.0)),
-        Pickable::IGNORE,
-        ChildOf(button),
-    ));
+    let button = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(UiLabel::key(label_key), format!("worldmap-button:{action}"))
+            .kind(ButtonKind::Headless)
+            .tab_index(0)
+            .padding(7.0, 3.0)
+            .colors(Color::srgb(0.16, 0.17, 0.2), Color::srgb(0.35, 0.35, 0.4))
+            .label_color(SkinPalette::FALLBACK.text_primary)
+            .font_size(PANEL_FONT_SIZE)
+            .layout(|node| {
+                node.justify_content = JustifyContent::Center;
+                node.flex_grow = 1.0;
+            }),
+    )
+    .button;
+    commands.entity(button).observe(
+        move |_activate: On<Activate>, mut actions: MessageWriter<UiAction>| {
+            actions.write(UiAction {
+                element: WORLD_MAP_ELEMENT,
+                action,
+            });
+        },
+    );
 }
 
 /// One layer-filter checkbox row: a mirrored check square plus a label,

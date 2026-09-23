@@ -92,6 +92,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
+use sl_viewer_ui_core::skin::BUTTON_CLASS;
 use sl_viewer_ui_core::skin::{
     DISABLED_TEXT_CLASS, EXPERIENCE_TEXT_CLASS, TEXT_CLASS, set_state_class, text_meaning,
     text_role,
@@ -152,9 +153,6 @@ pub(crate) const EXPERIENCES_SECTION: &[&str] = &["experiences"];
 /// The search tab's max-content-rating filter, stored as a `sim_access` **rating
 /// code** (see the module docs' divergence note).
 pub const SETTING_SEARCH_MATURITY: &str = "ExperienceSearchMaturity";
-
-/// The skin class a button wears (`.sk-button`).
-const BUTTON_CLASS: &str = "sk-button";
 
 /// The list / body text size, in logical pixels.
 const FONT_SIZE: f32 = 13.0;

@@ -1011,37 +1011,33 @@ fn spawn_param_cycle(
     cycle: ParamCycle,
     tab_index: &mut i32,
 ) {
-    let index = *tab_index;
-    *tab_index = tab_index.saturating_add(1);
-    let button = commands
-        .spawn((
-            bevy::ui_widgets::Button,
-            bevy::input_focus::tab_navigation::TabIndex(index),
-            Node {
-                padding: UiRect::axes(Val::Px(10.0), Val::Px(2.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..row(Val::ZERO)
-            },
-            BorderColor::all(Color::srgba(0.4, 0.4, 0.45, 1.0)),
-            BackgroundColor(Color::srgba(0.18, 0.18, 0.2, 1.0)),
-            cycle,
-            cycle_gate(cycle),
-            Pickable::default(),
-            Name::new(format!("build-params:cycle:{cycle:?}")),
-            ChildOf(parent),
-        ))
-        .id();
-    commands.spawn((
-        Text::default(),
-        UiFont::Sans.at(TOOL_FONT_SIZE),
+    let spawned = ui_spawn::spawn_button(
+        commands,
+        parent,
+        // The value text is the caption, rewritten by the sync pass.
+        ButtonSpec::bordered(
+            UiLabel::literal(String::new()),
+            format!("build-params:cycle:{cycle:?}"),
+        )
+        .kind(ButtonKind::Headless)
+        .tab_from(tab_index)
+        .padding(10.0, 2.0)
+        .colors(
+            Color::srgba(0.18, 0.18, 0.2, 1.0),
+            Color::srgba(0.4, 0.4, 0.45, 1.0),
+        )
         // The colour `.sk-build-value` paints — see [`VALUE_CLASS`].
-        TextColor(SkinPalette::FALLBACK.text_primary),
-        ClassList::new_with_classes([VALUE_CLASS]),
-        ParamCycleValue(cycle),
-        Pickable::IGNORE,
-        ChildOf(button),
-    ));
-    commands.entity(button).observe(handle_cycle_press);
+        .label_color(SkinPalette::FALLBACK.text_primary)
+        .label_class(VALUE_CLASS)
+        .font_size(TOOL_FONT_SIZE),
+    );
+    commands
+        .entity(spawned.button)
+        .insert((cycle, cycle_gate(cycle)))
+        .observe(handle_cycle_press);
+    commands
+        .entity(spawned.label)
+        .insert(ParamCycleValue(cycle));
 }
 
 /// Spawn one action button (a bordered button with a translated label).

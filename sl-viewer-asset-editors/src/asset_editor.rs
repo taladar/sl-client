@@ -43,6 +43,7 @@ use crate::floater::{
 use crate::i18n::Translated;
 use crate::notifications::{NotificationResponse, ShowNotification};
 use crate::ui_font::UiFont;
+use crate::ui_spawn::{self, ButtonSpec, UiLabel};
 use sl_viewer_ui_core::skin::text_role;
 
 /// The editors' text font size, in logical pixels.
@@ -168,30 +169,18 @@ pub(crate) fn spawn_save_button(
     label_key: &'static str,
     font_size: f32,
 ) -> Entity {
-    commands
-        .spawn((
-            Button,
-            bevy::input_focus::tab_navigation::TabIndex(2),
-            Node {
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(CONTROL_BORDER),
-            BackgroundColor(CONTROL_BACKGROUND),
-            Pickable::default(),
-            Name::new(element),
-            ChildOf(parent),
-        ))
-        .with_child((
-            Text::default(),
-            Translated::new(label_key),
-            UiFont::Sans.at(font_size),
-            text_role(LABEL_COLOR),
-            Pickable::IGNORE,
-        ))
-        .observe(on_save_pressed)
-        .id()
+    let button = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(UiLabel::key(label_key), element)
+            .tab_index(2)
+            .colors(CONTROL_BACKGROUND, CONTROL_BORDER)
+            .label_color(LABEL_COLOR)
+            .font_size(font_size),
+    )
+    .button;
+    commands.entity(button).observe(on_save_pressed);
+    button
 }
 
 /// Turn a Save press into a [`SaveEditorWindow`] naming the window it came from.

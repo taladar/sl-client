@@ -18,6 +18,9 @@ publish.workspace = true
 # spec stays per-crate (see the root manifest). `system_font_discovery` because
 # the harness shapes real text, exactly as the viewer does.
 bevy = { version = "0.19.0", features = ["system_font_discovery"] }
+# The skin-coverage sweep asks whether a spawned control carries a `ClassList`
+# a stylesheet could select, so it needs the styling engine's own component.
+bevy_flair = { version = "0.8.0" }
 fs-err = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 sl-viewer-ui-core = { workspace = true }

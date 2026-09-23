@@ -1757,8 +1757,12 @@ fn build_general_structure(
             Some(GroupProfileAction::ToggleListInProfile),
         ));
         let title_row = spawn_labeled_row(commands, panel, "group-profile-active-title");
-        let cycle = spawn_cycle_button(commands, title_row, GroupProfileAction::CycleTitle, 5);
-        ui.general_handles.title_text = Some(spawn_value_node(commands, cycle));
+        ui.general_handles.title_text = Some(spawn_cycle_button(
+            commands,
+            title_row,
+            GroupProfileAction::CycleTitle,
+            5,
+        ));
     } else {
         let join_row = spawn_button_row(commands, panel);
         if sig.join_shown {
@@ -3084,30 +3088,33 @@ fn spawn_action_button(
         .observe(on_group_profile_action);
 }
 
-/// A borderless cycle button, returning the entity the caller labels.
+/// A cycle button at row scale, returning the caption node the caller rewrites
+/// as the value cycles.
 fn spawn_cycle_button(
     commands: &mut Commands,
     parent: Entity,
     action: GroupProfileAction,
     tab_index: i32,
 ) -> Entity {
+    let spawned = ui_spawn::spawn_button(
+        commands,
+        parent,
+        // Empty: the caption is a retained value node the sync pass writes.
+        ButtonSpec::bordered(
+            UiLabel::literal(String::new()),
+            format!("group-profile-cycle:{action:?}"),
+        )
+        .tab_index(tab_index)
+        .compact()
+        .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
+        .label_color(LABEL_COLOR)
+        .font_size(FONT_SIZE),
+    );
     commands
-        .spawn((
-            Button,
-            TabIndex(tab_index),
-            action,
-            Node {
-                padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(BUTTON_BORDER),
-            BackgroundColor(BUTTON_BACKGROUND),
-            Pickable::default(),
-            ChildOf(parent),
-        ))
-        .observe(on_group_profile_action)
-        .id()
+        .entity(spawned.button)
+        .insert(action)
+        .observe(on_group_profile_action);
+    spawned.label
 }
 
 /// A flag row: a translated label in the leading column and a checkbox after

@@ -10,11 +10,10 @@
 //! pages, unlike in-world media surfaces which are isolated.
 
 use bevy::input::keyboard::KeyboardInput;
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusedInput, InputFocus};
 use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx};
-use bevy::ui_widgets::{Activate, Button};
+use bevy::ui_widgets::Activate;
 use bevy_flair::style::components::ClassList;
 
 use crate::browser_widget::{
@@ -24,11 +23,12 @@ use crate::media_engine::{MediaEngineSystems, MediaSurfaces};
 use sl_viewer_intents::OpenWebBrowser;
 use sl_viewer_platform::system_browser::{ExternalUrl, normalize_web_url, open_in_system_browser};
 use sl_viewer_ui_core::i18n::Translated;
-use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class_on, text_role};
+use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, set_state_class_on, text_role};
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 use sl_viewer_ui_core::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use sl_viewer_ui_core::ui_element::UiAction;
 use sl_viewer_ui_core::ui_font::UiFont;
+use sl_viewer_ui_core::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use sl_viewer_ui_core::ui_text::set_editor_text;
 use sl_viewer_ui_widgets::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
@@ -212,39 +212,29 @@ fn spawn_toolbar_button(
     action: &'static str,
     tab_index: i32,
 ) -> Entity {
-    let button = commands
-        .spawn((
-            Button,
-            TabIndex(tab_index),
-            Node {
-                padding: UiRect::axes(Val::Px(7.0), Val::Px(3.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(Color::srgb(0.35, 0.35, 0.4)),
-            BackgroundColor(Color::srgb(0.16, 0.17, 0.2)),
-            Pickable::default(),
-            Name::new(format!("web-browser-button:{action}")),
-            ChildOf(parent),
-        ))
-        .observe(
-            move |_activate: On<Activate>, mut actions: MessageWriter<UiAction>| {
-                actions.write(UiAction {
-                    element: WEB_BROWSER_ELEMENT,
-                    action,
-                });
-            },
+    let spawned = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(
+            UiLabel::literal(glyph.to_owned()),
+            format!("web-browser-button:{action}"),
         )
-        .id();
-    commands
-        .spawn((
-            Text::new(glyph),
-            UiFont::Sans.at(WEB_FONT_SIZE),
-            ClassList::new_with_classes([TEXT_CLASS]),
-            Pickable::IGNORE,
-            ChildOf(button),
-        ))
-        .id()
+        .kind(ButtonKind::Headless)
+        .tab_index(tab_index)
+        .padding(7.0, 3.0)
+        .colors(Color::srgb(0.16, 0.17, 0.2), Color::srgb(0.35, 0.35, 0.4))
+        .label_color(SkinPalette::FALLBACK.text_primary)
+        .font_size(WEB_FONT_SIZE),
+    );
+    commands.entity(spawned.button).observe(
+        move |_activate: On<Activate>, mut actions: MessageWriter<UiAction>| {
+            actions.write(UiAction {
+                element: WEB_BROWSER_ELEMENT,
+                action,
+            });
+        },
+    );
+    spawned.label
 }
 
 /// `Enter` in the address field navigates the view to the typed URL.

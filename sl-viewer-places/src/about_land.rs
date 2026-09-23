@@ -62,7 +62,6 @@
 use sl_viewer_ui_core::skin::TEXT_CLASS;
 
 use crate::skin_palette::SkinPalette;
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui::{Checked, InteractionDisabled};
@@ -120,9 +119,6 @@ const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A dim label / secondary text colour.
 const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
-
-/// The skin class on an action button, so `.sk-button:disabled` greys it.
-const BUTTON_CLASS: &str = "sk-button";
 
 /// A refused control's text — the disabled role, which this spelled out
 /// longhand.
@@ -4093,7 +4089,6 @@ fn spawn_action_button(
         .font_size(FONT_SIZE)
         // Both ends of `.sk-button:disabled .sk-text`, which greys a refused
         // action now that nothing repaints its caption.
-        .class(BUTTON_CLASS)
         .label_class(TEXT_CLASS),
     )
     .button;
@@ -4181,54 +4176,46 @@ fn spawn_texture_button(
     action: AboutLandAction,
     tab_index: i32,
 ) -> Entity {
-    let button = commands
-        .spawn((
-            Button,
-            TabIndex(tab_index),
-            action,
-            SwatchTexture { action },
-            WriteButton,
-            Node {
-                padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(BUTTON_BORDER),
-            BackgroundColor(BUTTON_BACKGROUND),
-            Pickable::default(),
-            ChildOf(parent),
-        ))
-        .observe(on_about_land_action)
-        .id();
-    spawn_value_node(commands, button)
+    let spawned = ui_spawn::spawn_button(
+        commands,
+        parent,
+        // Empty: the caption is the retained id node the sync pass writes.
+        ButtonSpec::bordered(
+            UiLabel::literal(String::new()),
+            format!("about-land-texture:{action:?}"),
+        )
+        .tab_index(tab_index)
+        .compact()
+        .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
+        .label_color(LABEL_COLOR)
+        .font_size(FONT_SIZE),
+    );
+    commands
+        .entity(spawned.button)
+        .insert((action, SwatchTexture { action }, WriteButton))
+        .observe(on_about_land_action);
+    spawned.label
 }
 
 /// A per-row access Remove button in a table's custom cell.
 fn spawn_remove_button(commands: &mut Commands, cell: Entity, scope: AccessScope, row: Entity) {
-    let button = commands
-        .spawn((
-            Button,
-            RemoveAccessButton { scope, row },
-            Node {
-                padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(BUTTON_BORDER),
-            BackgroundColor(BUTTON_BACKGROUND),
-            Pickable::default(),
-            ChildOf(cell),
-        ))
-        .observe(on_remove_access)
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new("about-land-remove"),
-        UiFont::Sans.at(FONT_SIZE),
-        TextColor(LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(button),
-    ));
+    let button = ui_spawn::spawn_button(
+        commands,
+        cell,
+        ButtonSpec::bordered(
+            UiLabel::key("about-land-remove"),
+            "about-land-button:remove-access",
+        )
+        .compact()
+        .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
+        .label_color(LABEL_COLOR)
+        .font_size(FONT_SIZE),
+    )
+    .button;
+    commands
+        .entity(button)
+        .insert(RemoveAccessButton { scope, row })
+        .observe(on_remove_access);
 }
 
 // ---------------------------------------------------------------------------

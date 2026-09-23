@@ -1219,7 +1219,12 @@ fn pressed_animation(
         .map(|state| AnimationKey::from(state.animation.uuid()))
 }
 
-/// A bordered translated button (greyed when not `enabled`).
+/// A bordered translated button, refused when not `enabled`.
+///
+/// Refused rather than dim-lettered: a permission gate is a *state*, so it is
+/// `InteractionDisabled` and `.sk-button:disabled` greys the box and the caption
+/// together. Naming the muted text colour instead said "secondary line" — a
+/// different idea, and one a skin retunes for a different reason.
 fn spawn_text_button(
     commands: &mut Commands,
     parent: Entity,
@@ -1236,11 +1241,8 @@ fn spawn_text_button(
         )
         .tab_index(tab_index)
         .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
-        .label_color(if enabled {
-            LABEL_COLOR
-        } else {
-            DIM_LABEL_COLOR
-        })
+        .label_color(LABEL_COLOR)
+        .disabled(!enabled)
         .font_size(PROPS_FONT_SIZE),
     )
     .button

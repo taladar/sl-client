@@ -200,9 +200,6 @@ const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 /// A dim label / secondary text colour.
 const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
-/// The skin class on an action button, so `.sk-button:disabled` greys it.
-const BUTTON_CLASS: &str = "sk-button";
-
 /// An action button's background.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
 
@@ -1092,7 +1089,6 @@ fn spawn_action_button(
         .font_size(FONT_SIZE)
         // Both ends of `.sk-button:disabled .sk-text`, which greys a refused
         // action now that nothing here repaints its caption.
-        .class(BUTTON_CLASS)
         .label_class(TEXT_CLASS),
     )
     .button;

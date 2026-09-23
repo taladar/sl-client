@@ -63,13 +63,14 @@
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::EditableText;
-use bevy::ui_widgets::{Activate, Button};
+use bevy::ui_widgets::Activate;
 
 use crate::skin::text_role;
 use crate::skin_palette::SkinPalette;
 use crate::ui::{LogicalPadding, LogicalRect, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_pseudoloc::pseudolocalise;
+use crate::ui_spawn::{ButtonKind, ButtonSpec, UiLabel, spawn_button as spawn_button_node};
 
 /// Something an element would do, had anything been listening.
 ///
@@ -519,31 +520,29 @@ fn button(
     element: &'static str,
     action: &'static str,
 ) -> Entity {
-    commands
-        .spawn((
-            Button,
-            TabIndex(tab_index),
-            Node {
-                padding: UiRect::axes(Val::Px(10.0), Val::Px(5.0)),
-                border: UiRect::all(Val::Px(2.0)),
-                ..default()
-            },
-            BorderColor::all(BUTTON_BORDER),
-            BackgroundColor(BUTTON_BACKGROUND),
-            Name::new(format!("button:{action}")),
-            ChildOf(parent),
-        ))
-        .with_child((
-            Text::new(cx.text(label)),
-            cx.font(UiFont::Sans),
-            text_role(SkinPalette::FALLBACK.text_primary),
-        ))
-        .observe(
-            move |_activate: On<Activate>, mut actions: MessageWriter<UiAction>| {
-                actions.write(UiAction { element, action });
-            },
-        )
-        .id()
+    // Through the shared helper, not hand-rolled — which is the whole point of
+    // `viewer-ui-button-widget`. A registry specimen that spawns its own box is
+    // a specimen of nothing: the skin sweeps then measure a node this file
+    // invented rather than the one the viewer's panels put on screen, which is
+    // exactly how `.sk-button` came to reach almost none of them unnoticed.
+    let spawned = spawn_button_node(
+        commands,
+        parent,
+        ButtonSpec::bordered(UiLabel::literal(cx.text(label)), format!("button:{action}"))
+            .kind(ButtonKind::Headless)
+            .tab_index(tab_index)
+            .padding(10.0, 5.0)
+            .border(2.0)
+            .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
+            .label_color(SkinPalette::FALLBACK.text_primary)
+            .font_size(cx.font_size),
+    );
+    commands.entity(spawned.button).observe(
+        move |_activate: On<Activate>, mut actions: MessageWriter<UiAction>| {
+            actions.write(UiAction { element, action });
+        },
+    );
+    spawned.button
 }
 
 /// Spawn a single button.

@@ -18,15 +18,13 @@
 //! Zero cost on a normal run: with `SL_VIEWER_CROWD` unset the button is never
 //! spawned. It is removed once the crowd is captured (its job is done).
 
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
-use bevy::ui_widgets::{Activate, Button};
+use bevy::ui_widgets::Activate;
 
 use crate::gpu_avatars::crowd::GpuCrowd;
 use crate::ui::BottomArea;
-use crate::ui_font::UiFont;
-use sl_viewer_ui_core::skin::text_role;
 use sl_viewer_ui_core::skin_palette::SkinPalette;
+use sl_viewer_ui_core::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 
 /// The button label font size, in logical pixels — matched to the toolbar's.
 const FONT_SIZE: f32 = 13.0;
@@ -38,7 +36,7 @@ const BORDER: Color = Color::srgb(0.70, 0.52, 0.18);
 /// The button background — the amber fill of a live debug call to act.
 const BACKGROUND: Color = Color::srgb(0.55, 0.40, 0.12);
 
-/// Marks the Spawn crowd button (the focusable [`Button`] node).
+/// Marks the Spawn crowd button (its focusable box).
 #[derive(Component)]
 struct CrowdSpawnButton;
 
@@ -84,36 +82,34 @@ fn spawn_crowd_button(
     let Some(area) = area else {
         return;
     };
-    commands
-        .spawn((
-            Button,
-            TabIndex(0),
-            CrowdSpawnButton,
-            Node {
-                padding: UiRect::axes(Val::Px(10.0), Val::Px(5.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                // Size to the label and never be compressed below it, so the
-                // whole label stays on one line.
-                flex_shrink: 0.0,
-                ..default()
-            },
-            BorderColor::all(BORDER),
-            BackgroundColor(BACKGROUND),
-            Name::new("crowd-debug:spawn"),
-            ChildOf(area.bar),
-        ))
-        .with_child((
-            Text::default(),
-            CrowdSpawnButtonLabel,
-            UiFont::Sans.at(FONT_SIZE),
-            text_role(SkinPalette::FALLBACK.text_primary),
+    let spawned = ui_spawn::spawn_button(
+        &mut commands,
+        area.bar,
+        // The caption carries a live count `update_crowd_button` writes, so it
+        // starts empty rather than naming a key.
+        ButtonSpec::bordered(UiLabel::literal(String::new()), "crowd-debug:spawn")
+            .kind(ButtonKind::Headless)
+            .tab_index(0)
+            .padding(10.0, 5.0)
+            .colors(BACKGROUND, BORDER)
+            .label_color(SkinPalette::FALLBACK.text_primary)
+            .font_size(FONT_SIZE)
             // Keep the label on one line — a flex text measure otherwise
             // under-allocates and wraps the multi-word label.
-            TextLayout::no_wrap(),
-        ))
+            .no_wrap()
+            .layout(|node| {
+                node.align_items = AlignItems::Center;
+                node.justify_content = JustifyContent::Center;
+                // Size to the label and never be compressed below it, so the
+                // whole label stays on one line.
+                node.flex_shrink = 0.0;
+            }),
+    );
+    commands
+        .entity(spawned.button)
+        .insert(CrowdSpawnButton)
         .observe(on_crowd_button);
+    commands.entity(spawned.label).insert(CrowdSpawnButtonLabel);
     *done = true;
 }
 

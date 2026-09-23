@@ -75,6 +75,7 @@ use crate::inventory::{InventoryModel, item_icon};
 use crate::ui::focus_within;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
+use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, VirtualViewport, amend_row_node};
 use crate::world_api::EditToolState;
@@ -831,32 +832,25 @@ fn spawn_contents_button(
     action: ContentsAction,
     tab_index: i32,
 ) -> Entity {
-    let button = commands
-        .spawn((
-            bevy::ui_widgets::Button,
-            TabIndex(tab_index),
-            Node {
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..Default::default()
-            },
-            BorderColor::all(Color::srgba(0.4, 0.4, 0.4, 1.0)),
-            BackgroundColor(Color::srgba(0.2, 0.2, 0.2, 1.0)),
-            Pickable::default(),
-            Name::new(format!("contents-button:{label_key}")),
-            ChildOf(parent),
-        ))
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(TOOL_FONT_SIZE),
+    let button = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(
+            UiLabel::key(label_key),
+            format!("contents-button:{label_key}"),
+        )
+        .kind(ButtonKind::Headless)
+        .tab_index(tab_index)
+        .colors(
+            Color::srgba(0.2, 0.2, 0.2, 1.0),
+            Color::srgba(0.4, 0.4, 0.4, 1.0),
+        )
         // The colour `.sk-build-value` paints — see [`VALUE_CLASS`].
-        TextColor(SkinPalette::FALLBACK.text_primary),
-        ClassList::new_with_classes([VALUE_CLASS]),
-        Pickable::IGNORE,
-        ChildOf(button),
-    ));
+        .label_color(SkinPalette::FALLBACK.text_primary)
+        .label_class(VALUE_CLASS)
+        .font_size(TOOL_FONT_SIZE),
+    )
+    .button;
     commands.entity(button).observe(
         move |press: On<Pointer<Press>>, mut requests: MessageWriter<ContentsActionRequest>| {
             if press.button == PointerButton::Primary {

@@ -138,9 +138,6 @@ const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
 /// A button's border.
 const BUTTON_BORDER: Color = Color::srgb(0.34, 0.40, 0.52);
 
-/// The bevy_flair class the skinnable buttons carry.
-const BUTTON_CLASS: &str = "sk-button";
-
 /// The preview frame's border.
 const PREVIEW_BORDER: Color = Color::srgb(0.30, 0.34, 0.42);
 
@@ -724,7 +721,6 @@ fn spawn_text_button(
             .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
             .label_color(LABEL_COLOR)
             .font_size(FONT_SIZE)
-            .class(BUTTON_CLASS)
             .layout(|node| node.align_self = AlignSelf::Start),
     )
     .button

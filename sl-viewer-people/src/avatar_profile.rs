@@ -50,7 +50,6 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{Hash as _, Hasher as _};
 
 use crate::skin_palette::SkinPalette;
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui::Checked;
@@ -1966,19 +1965,21 @@ fn build_classified_editor(
         },
     ));
     let category_row = spawn_labeled_row(commands, panel, "profile-classified-category");
-    let category_button =
-        spawn_cycle_button(commands, category_row, ProfileAction::CycleCategory, 7);
-    spawn_category_label_on(commands, category_button, draft.category);
+    spawn_cycle_button(
+        commands,
+        category_row,
+        ProfileAction::CycleCategory,
+        7,
+        category_label(draft.category),
+    );
     let type_row = spawn_labeled_row(commands, panel, "profile-classified-content-type");
-    let type_button = spawn_cycle_button(commands, type_row, ProfileAction::CycleContentType, 8);
-    commands.spawn((
-        Text::default(),
-        Translated::new(content_type_key(draft.mature)),
-        UiFont::Sans.at(PROFILE_FONT_SIZE),
-        text_role(LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(type_button),
-    ));
+    spawn_cycle_button(
+        commands,
+        type_row,
+        ProfileAction::CycleContentType,
+        8,
+        UiLabel::key(content_type_key(draft.mature)),
+    );
     spawn_check_button(
         commands,
         panel,
@@ -2267,31 +2268,30 @@ fn spawn_disabled_button(commands: &mut Commands, parent: Entity, label_key: &'s
         ));
 }
 
-/// A borderless cycle button (category / content type), returning the entity
-/// the caller labels.
+/// A cycle button at row scale, carrying the caption it cycles through.
 fn spawn_cycle_button(
     commands: &mut Commands,
     parent: Entity,
     action: ProfileAction,
     tab_index: i32,
+    label: UiLabel,
 ) -> Entity {
+    let button = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(label, format!("profile-cycle:{action:?}"))
+            .tab_index(tab_index)
+            .compact()
+            .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
+            .label_color(LABEL_COLOR)
+            .font_size(PROFILE_FONT_SIZE),
+    )
+    .button;
     commands
-        .spawn((
-            Button,
-            TabIndex(tab_index),
-            action,
-            Node {
-                padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(BUTTON_BORDER),
-            BackgroundColor(BUTTON_BACKGROUND),
-            Pickable::default(),
-            ChildOf(parent),
-        ))
-        .observe(on_profile_action)
-        .id()
+        .entity(button)
+        .insert(action)
+        .observe(on_profile_action);
+    button
 }
 
 /// A checkbox dispatching `action`, returning its checkbox entity so the
@@ -2487,27 +2487,12 @@ fn spawn_category_label(commands: &mut Commands, parent: Entity, category: Class
     }
 }
 
-/// Label a cycle button with a classified category (children are
-/// picking-transparent).
-fn spawn_category_label_on(commands: &mut Commands, button: Entity, category: ClassifiedCategory) {
-    let label = commands
-        .spawn((
-            Text::default(),
-            UiFont::Sans.at(PROFILE_FONT_SIZE),
-            text_role(LABEL_COLOR),
-            Pickable::IGNORE,
-            ChildOf(button),
-        ))
-        .id();
+/// A classified category as a button caption: a translated key for the named
+/// categories, the raw value for an unknown one.
+fn category_label(category: ClassifiedCategory) -> UiLabel {
     match category_key(category) {
-        Some(key) => {
-            commands.entity(label).insert(Translated::new(key));
-        }
-        None => {
-            commands
-                .entity(label)
-                .insert(Text::new(category.to_string()));
-        }
+        Some(key) => UiLabel::key(key),
+        None => UiLabel::literal(category.to_string()),
     }
 }
 

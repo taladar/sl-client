@@ -81,6 +81,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
+use sl_viewer_ui_core::skin::BUTTON_CLASS;
 use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class, text_role};
 
 use sl_client_bevy::{Command, ExperienceKey, SlCommand, SlEvent, SlSessionEvent};
@@ -117,9 +118,6 @@ use crate::world_api::AvatarState;
 /// The picker floater's stable [`Floater::id`] — the kind every instance is an
 /// instance *of*.
 const PICKER_FLOATER_ID: &str = "experience-picker";
-
-/// The skin class every button in this window carries.
-const BUTTON_CLASS: &str = "sk-button";
 
 /// The window's body font size, in logical pixels.
 const FONT_SIZE: f32 = 13.0;

@@ -50,6 +50,7 @@ use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use crate::ui_font::UiFont;
 use crate::ui_radio::{RadioLayout, RadioSelection, RadioSpec, spawn_radio_group};
+use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use crate::ui_tab::{
     DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, fill_tab_container, spawn_tab_container,
 };
@@ -784,28 +785,26 @@ fn spawn_link_part_nav(commands: &mut Commands, parent: Entity) {
         (LinkPartDir::Prev, "◀", "prev", 9_i32),
         (LinkPartDir::Next, "▶", "next", 10_i32),
     ] {
-        let button = commands
-            .spawn((
-                bevy::ui_widgets::Button,
-                bevy::input_focus::tab_navigation::TabIndex(tab_index),
-                Node {
-                    padding: UiRect::axes(Val::Px(8.0), Val::Px(2.0)),
-                    ..Default::default()
-                },
-                Pickable::default(),
-                Name::new(format!("build-tools:link-part-{name}")),
-                ChildOf(nav_row),
-            ))
-            .id();
-        commands.spawn((
-            Text::new(glyph),
-            UiFont::Sans.at(TOOL_FONT_SIZE),
+        // Flat rather than bordered: these two carry no box of their own, and
+        // `.sk-action-button` is the class that adds a state without imposing a
+        // resting look.
+        let button = ui_spawn::spawn_button(
+            commands,
+            nav_row,
+            ButtonSpec::flat(
+                UiLabel::literal(glyph),
+                format!("build-tools:link-part-{name}"),
+            )
+            .kind(ButtonKind::Headless)
+            .tab_index(tab_index)
+            .padding(8.0, 2.0)
+            .colors(Color::NONE, Color::NONE)
             // The colour `.sk-build-value` paints — see [`VALUE_CLASS`].
-            TextColor(SkinPalette::FALLBACK.text_primary),
-            ClassList::new_with_classes([VALUE_CLASS]),
-            Pickable::IGNORE,
-            ChildOf(button),
-        ));
+            .label_color(SkinPalette::FALLBACK.text_primary)
+            .label_class(VALUE_CLASS)
+            .font_size(TOOL_FONT_SIZE),
+        )
+        .button;
         commands.entity(button).observe(
             move |press: On<Pointer<Press>>,
                   mut selection: ResMut<SelectionSet>,

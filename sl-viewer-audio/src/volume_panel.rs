@@ -16,12 +16,11 @@
 //! setting from the volume, so the mixer drives the bus gain to zero while the
 //! remembered level (the slider) is untouched.
 
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
-use bevy::ui_widgets::{Activate, Button, SliderRange, SliderStep};
+use bevy::ui_widgets::{Activate, SliderRange, SliderStep};
 use bevy::window::PrimaryWindow;
 use bevy_flair::style::components::ClassList;
-use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class, text_role};
+use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, set_state_class, text_role};
 
 use sl_audio::{AudioMixer as _, Bus, BusLevel, Mixer};
 use sl_settings::SettingValue;
@@ -34,6 +33,7 @@ use crate::ui::BottomArea;
 use crate::ui::{UiPanelShown, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_slider::{SliderStyle, SliderWidgetPlugin, spawn_slider};
+use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 
 /// The persisted-settings section the bus levels live under (`[audio.bus]`),
 /// kept distinct from the parcel-stream player's own `[audio]` keys.
@@ -368,68 +368,50 @@ fn spawn_bound_slider(commands: &mut Commands, parent: Entity, bus: Bus, tab_ind
 
 /// Spawn a mute toggle button (a speaker glyph) for `bus` on `parent`.
 fn spawn_mute_button(commands: &mut Commands, parent: Entity, bus: Bus, tab_index: i32) {
-    let button = commands
-        .spawn((
-            Button,
-            TabIndex(tab_index),
-            Node {
-                padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(BUTTON_BORDER),
-            BackgroundColor(BUTTON_FILL),
-            Pickable::default(),
-            Name::new(format!("volume-mute:{}", bus.key())),
-            ChildOf(parent),
-        ))
-        .observe(
-            move |_activate: On<Activate>, mut writer: MessageWriter<ToggleMute>| {
-                writer.write(ToggleMute(bus));
-            },
+    let spawned = ui_spawn::spawn_button(
+        commands,
+        parent,
+        // The caption is the speaker glyph, which `reflect_mute_glyphs` swaps.
+        ButtonSpec::bordered(
+            UiLabel::literal("\u{1f50a}"),
+            format!("volume-mute:{}", bus.key()),
         )
-        .id();
-    commands.spawn((
-        Text::new("🔊"),
-        VolumeMuteGlyph(bus),
-        UiFont::Sans.at(FONT_SIZE),
-        ClassList::new_with_classes([TEXT_CLASS]),
-        Pickable::IGNORE,
-        ChildOf(button),
-    ));
+        .kind(ButtonKind::Headless)
+        .tab_index(tab_index)
+        .compact()
+        .colors(BUTTON_FILL, BUTTON_BORDER)
+        .label_color(SkinPalette::FALLBACK.text_primary)
+        .font_size(FONT_SIZE),
+    );
+    commands.entity(spawned.button).observe(
+        move |_activate: On<Activate>, mut writer: MessageWriter<ToggleMute>| {
+            writer.write(ToggleMute(bus));
+        },
+    );
+    commands.entity(spawned.label).insert(VolumeMuteGlyph(bus));
 }
 
 /// Spawn the ▲ button that opens / closes the pulldown.
 fn spawn_toggle_button(commands: &mut Commands, parent: Entity, tab_index: i32) {
-    let button = commands
-        .spawn((
-            Button,
-            VolumePanelToggleButton,
-            TabIndex(tab_index),
-            Node {
-                padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(BUTTON_BORDER),
-            BackgroundColor(BUTTON_FILL),
-            Pickable::default(),
-            Name::new("volume-panel-toggle"),
-            ChildOf(parent),
-        ))
+    let spawned = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(UiLabel::literal("\u{25b2}"), "volume-panel-toggle")
+            .kind(ButtonKind::Headless)
+            .tab_index(tab_index)
+            .compact()
+            .colors(BUTTON_FILL, BUTTON_BORDER)
+            .label_color(LABEL_COLOR)
+            .font_size(FONT_SIZE),
+    );
+    commands
+        .entity(spawned.button)
+        .insert(VolumePanelToggleButton)
         .observe(
             |_activate: On<Activate>, mut writer: MessageWriter<ToggleVolumePanel>| {
                 writer.write(ToggleVolumePanel);
             },
-        )
-        .id();
-    commands.spawn((
-        Text::new("▲"),
-        UiFont::Sans.at(FONT_SIZE),
-        text_role(LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(button),
-    ));
+        );
 }
 
 /// Flip a bus's mute setting when its mute button is pressed.

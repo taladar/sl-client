@@ -199,7 +199,9 @@ the stock look rather than to black.
 | `.sk-title` | an instruction / secondary line |
 | `.sk-text` | primary body text |
 | `.sk-heading` | a heading inside a page |
-| `.sk-button` | a button, plus `:hover` and `:focus-visible` states |
+| `.sk-button` | a button, plus `:hover`, `:disabled` and `:focus-visible` states |
+| `.sk-button-compact` | worn with `.sk-button`: the same button at row scale (a table cell, a dense strip) |
+| `.sk-action-button` | a flat action-column button — the refused state only, no resting look |
 | `.sk-disabled-surface` / `.sk-disabled-text` | the greyed state of either |
 | `.sk-focusable` | the keyboard focus ring (stamped automatically onto every `TabIndex`) |
 | `.sk-accent` | a leading accent bar + hanging indent (logical box demo) |

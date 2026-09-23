@@ -171,9 +171,6 @@ const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 /// A dim label / secondary text colour.
 const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
-/// The skin class on an action button, so `.sk-button:disabled` greys it.
-const BUTTON_CLASS: &str = "sk-button";
-
 /// An action button's background.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
 
@@ -3564,30 +3561,23 @@ fn spawn_experience_row_button(
     row: Entity,
     action: ExperienceRowAction,
 ) {
-    let button = commands
-        .spawn((
-            Button,
-            ExperienceRowButton { list, row, action },
-            Node {
-                padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(BUTTON_BORDER),
-            BackgroundColor(BUTTON_BACKGROUND),
-            Pickable::default(),
-            ChildOf(cell),
-        ))
-        .observe(on_experience_row_button)
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new(action.label_key()),
-        UiFont::Sans.at(FONT_SIZE),
-        TextColor(LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(button),
-    ));
+    let button = ui_spawn::spawn_button(
+        commands,
+        cell,
+        ButtonSpec::bordered(
+            UiLabel::key(action.label_key()),
+            format!("about-region-experience-row:{action:?}"),
+        )
+        .compact()
+        .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
+        .label_color(LABEL_COLOR)
+        .font_size(FONT_SIZE),
+    )
+    .button;
+    commands
+        .entity(button)
+        .insert(ExperienceRowButton { list, row, action })
+        .observe(on_experience_row_button);
 }
 
 /// Resolve and act on a per-row experience button press, in the window it was
@@ -4566,7 +4556,6 @@ fn spawn_action_button(
         .font_size(FONT_SIZE)
         // Both ends of `.sk-button:disabled .sk-text`, which greys a refused
         // action now that nothing repaints its caption.
-        .class(BUTTON_CLASS)
         .label_class(TEXT_CLASS),
     )
     .button;
@@ -4690,30 +4679,23 @@ fn spawn_maturity_combo(commands: &mut Commands, parent: Entity, tab_index: i32)
 
 /// A per-row access Remove button in a table's custom cell.
 fn spawn_remove_button(commands: &mut Commands, cell: Entity, list: AccessList, row: Entity) {
-    let button = commands
-        .spawn((
-            Button,
-            RemoveAccessButton { list, row },
-            Node {
-                padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(BUTTON_BORDER),
-            BackgroundColor(BUTTON_BACKGROUND),
-            Pickable::default(),
-            ChildOf(cell),
-        ))
-        .observe(on_remove_access)
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new("about-region-remove"),
-        UiFont::Sans.at(FONT_SIZE),
-        TextColor(LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(button),
-    ));
+    let button = ui_spawn::spawn_button(
+        commands,
+        cell,
+        ButtonSpec::bordered(
+            UiLabel::key("about-region-remove"),
+            "about-region-button:remove-access",
+        )
+        .compact()
+        .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
+        .label_color(LABEL_COLOR)
+        .font_size(FONT_SIZE),
+    )
+    .button;
+    commands
+        .entity(button)
+        .insert(RemoveAccessButton { list, row })
+        .observe(on_remove_access);
 }
 
 #[cfg(test)]

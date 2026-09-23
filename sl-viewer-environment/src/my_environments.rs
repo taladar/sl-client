@@ -106,6 +106,7 @@ use crate::style::{
     ACTION_BACKGROUND, DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, LIST_BACKGROUND, ROW_HEIGHT,
 };
 use bevy_flair::style::components::ClassList;
+use sl_viewer_ui_core::skin::BUTTON_CLASS;
 use sl_viewer_ui_core::skin::{
     ACTIVE_CLASS, DisabledButtons, TEXT_CLASS, set_action_button_enabled, set_state_class_on,
     text_role,
@@ -128,9 +129,6 @@ const COL_NAME: usize = 1;
 
 /// Column index of where the item lives.
 const COL_WHERE: usize = 2;
-
-/// The skin class on an action button, so `.sk-button:disabled` greys it.
-const BUTTON_CLASS: &str = "sk-button";
 
 /// The kinds this viewer can mint from nothing, in the add row's order — all
 /// three, since the day-cycle editor exists to open the third with.

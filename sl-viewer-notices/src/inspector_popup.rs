@@ -43,10 +43,9 @@
 //! `llinspectremoteobject.cpp`, `llinspect.cpp` (the self-dismiss base),
 //! `llurlentry` (`.../inspect` actions).
 
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
-use bevy::ui_widgets::{Activate, Button};
+use bevy::ui_widgets::Activate;
 use bevy::window::PrimaryWindow;
 
 use sl_client_bevy::{
@@ -64,6 +63,7 @@ use crate::skin_palette::SkinPalette;
 use crate::ui::{UiRoot, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_name_link::{NameLink, NameLinkSpec, NameTarget, set_name_link, spawn_name_link};
+use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use crate::url_linkify::LinkTarget;
 use crate::world_api::AvatarState;
 use sl_viewer_ui_core::skin::text_role;
@@ -909,25 +909,21 @@ fn add_button<'commands>(
     label: &str,
     tab: i32,
 ) -> bevy::ecs::system::EntityCommands<'commands> {
-    let mut button = commands.spawn((
-        Button,
-        TabIndex(tab),
-        Node {
-            padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
-            border: UiRect::all(Val::Px(1.0)),
-            ..default()
-        },
-        BackgroundColor(BUTTON_BACKGROUND),
-        BorderColor::all(BUTTON_BORDER),
-        Name::new(format!("inspector-action:{label}")),
-        ChildOf(parent),
-    ));
-    button.with_child((
-        Text::new(label.to_owned()),
-        UiFont::Sans.at(BODY_FONT_SIZE),
-        text_role(TITLE_COLOR),
-    ));
-    button
+    let spawned = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(
+            UiLabel::literal(label.to_owned()),
+            format!("inspector-action:{label}"),
+        )
+        .kind(ButtonKind::Headless)
+        .tab_index(tab)
+        .padding(8.0, 4.0)
+        .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
+        .label_color(TITLE_COLOR)
+        .font_size(BODY_FONT_SIZE),
+    );
+    commands.entity(spawned.button)
 }
 
 // ---------------------------------------------------------------------------

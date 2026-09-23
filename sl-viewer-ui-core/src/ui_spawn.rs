@@ -27,12 +27,27 @@
 //! - the marker component that says which action it is, and the observer that
 //!   runs it: [`spawn_button`] returns the entities, and the caller does
 //!   `commands.entity(spawned.button).insert(action).observe(on_action)`;
-//! - the colours. They are parameters, not defaults inherited from here,
-//!   because the colour story is its own open task
-//!   (`viewer-audit-skin-token-coverage`): 643 `Color::srgb` literals against
-//!   35 CSS classes. This module takes a `class` so a panel that *is* skinned
-//!   says so, and paints the inline colours as the skinless fallback either
-//!   way; which panels earn a class is that task's decision, not this one's.
+//! - the colours. They are parameters rather than a look inherited from here —
+//!   but since `viewer-ui-button-widget` they are the **pre-load fallback**
+//!   rather than the button's appearance: a spec carries a skin class by
+//!   default, so `common.css` paints every button and the inline colours are
+//!   what a headless harness (which resolves no stylesheet) and the frame
+//!   before the sheet lands measure.
+//!
+//! # The class is a default, not a request
+//!
+//! It used to be an `Option` that began at `None`, so a button was skinnable
+//! only where its panel remembered to chain `.class(…)` — and 14 of the 30
+//! `ButtonSpec` call sites never did. That is not a thing a test noticed,
+//! because every skin test spawned its own `.sk-button` node rather than asking
+//! what the viewer actually spawns; it was found by eye, when the `relief`
+//! theme dressed the floater chips in nine-sliced art and left the panel,
+//! preferences and debug-settings buttons flat.
+//!
+//! So [`ButtonSpec::bordered`] starts at [`BUTTON_CLASS`] and
+//! [`ButtonSpec::flat`] at [`ACTION_BUTTON_CLASS`], and [`ButtonSpec::class`]
+//! is an *override* for a panel that means a different one (the toolbar, the
+//! floater chrome). A button that reaches this module is skinned.
 //!
 //! # The one behaviour this module does decide
 //!
@@ -44,10 +59,13 @@
 
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
+use bevy::ui::InteractionDisabled;
 use bevy_flair::style::components::ClassList;
 
 use crate::i18n::Translated;
-use crate::skin::role_class;
+use crate::skin::{
+    ACTION_BUTTON_CLASS, BUTTON_CLASS, COMPACT_BUTTON_CLASS, TEXT_CLASS, role_class,
+};
 use crate::ui_font::UiFont;
 
 /// What a helper-spawned label says.
@@ -128,14 +146,25 @@ pub struct ButtonSpec {
     pub font_size: f32,
     /// The label's colour.
     pub label_color: Color,
-    /// The skin class on the box, when the panel is skinned.
+    /// The skin class on the box. Defaults to the one the constructor's shape
+    /// implies, so a button is skinned without being asked; see the [module
+    /// documentation](self).
     pub class: Option<&'static str>,
+    /// A modifier class worn *with* [`class`](Self::class), restating only its
+    /// geometry — [`COMPACT_BUTTON_CLASS`], set by [`Self::compact`].
+    pub modifier: Option<&'static str>,
     /// The skin class on the label, when its colour is skinned separately (the
-    /// build tools' value token).
+    /// build tools' value token). Defaults to the role the label's colour
+    /// names, and to [`TEXT_CLASS`] for a colour that names none — a button's
+    /// caption is chrome, and `:disabled` reaches it through that class.
     pub label_class: Option<&'static str>,
     /// Whether the label refuses to wrap — for a button in a row that must keep
     /// its caption on one line however narrow the row gets.
     pub no_wrap: bool,
+    /// Whether the action cannot be taken right now: the box carries
+    /// [`InteractionDisabled`], and the skin greys the box and its caption from
+    /// `:disabled` rather than the panel choosing a dim colour.
+    pub disabled: bool,
 }
 
 /// The dominant padding of a bordered push button, in logical pixels.
@@ -169,9 +198,11 @@ impl ButtonSpec {
             border_color: Color::srgb(0.34, 0.40, 0.52),
             font_size: DEFAULT_FONT_SIZE,
             label_color: Color::srgb(0.90, 0.92, 0.96),
-            class: None,
+            class: Some(BUTTON_CLASS),
+            modifier: None,
             label_class: None,
             no_wrap: false,
+            disabled: false,
         }
     }
 
@@ -194,6 +225,7 @@ impl ButtonSpec {
             },
             background: Color::srgb(0.24, 0.29, 0.38),
             kind: ButtonKind::Plain,
+            class: Some(ACTION_BUTTON_CLASS),
             ..Self::bordered(label, name)
         }
     }
@@ -251,10 +283,35 @@ impl ButtonSpec {
         self
     }
 
-    /// Tag the box with a skin class.
+    /// Tag the box with a skin class **instead of** the one its shape implies —
+    /// for a button whose family is its own (the toolbar, the floater chrome).
     #[must_use]
     pub const fn class(mut self, class: &'static str) -> Self {
         self.class = Some(class);
+        self
+    }
+
+    /// Spawn it at row scale: the same button, in a table cell or a dense strip
+    /// beside a field, wearing [`COMPACT_BUTTON_CLASS`] over its own class.
+    ///
+    /// Which of the two sizes a button is stays a decision here, because the
+    /// call site is the only thing that knows what the button sits in; what
+    /// each of them *looks* like is the skin's.
+    #[must_use]
+    pub const fn compact(mut self) -> Self {
+        self.modifier = Some(COMPACT_BUTTON_CLASS);
+        self
+    }
+
+    /// Refuse it: the box takes [`InteractionDisabled`], and the skin greys it
+    /// and its caption.
+    ///
+    /// Takes the predicate rather than being a bare marker, because every call
+    /// site that needs it already has one (`gates.sale`, "the agent may change
+    /// this group flag") and would otherwise spell the `if` itself.
+    #[must_use]
+    pub const fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
         self
     }
 
@@ -328,17 +385,31 @@ pub fn spawn_button(commands: &mut Commands, parent: Entity, spec: ButtonSpec) -
     if let Some(index) = spec.tab_index {
         button.insert(TabIndex(index));
     }
-    if let Some(class) = spec.class {
-        button.insert(ClassList::new_with_classes([class]));
+    if spec.disabled {
+        button.insert(InteractionDisabled);
+    }
+    let classes: Vec<&'static str> = spec.class.into_iter().chain(spec.modifier).collect();
+    if !classes.is_empty() {
+        button.insert(ClassList::new_with_classes(classes));
     }
     let button = button.id();
+    // The caption is chrome, so it ends up with a class whatever colour the
+    // panel named: its own if the panel gave it one, else the role that colour
+    // names, else the plain text class. That last fallback is what
+    // `.sk-button:disabled .sk-text` needs to reach — a caption with no class
+    // at all is one the refused state cannot grey, which is the shape the
+    // hand-rolled buttons were in.
+    let label_class = spec
+        .label_class
+        .or_else(|| role_class(spec.label_color))
+        .or(Some(TEXT_CLASS));
     let label = spawn_text(
         commands,
         button,
         &spec.label,
         spec.label_color,
         spec.font_size,
-        spec.label_class,
+        label_class,
         spec.no_wrap,
     );
     SpawnedButton { button, label }
@@ -567,7 +638,7 @@ fn spawn_text(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::skin::{DISABLED_TEXT_CLASS, HEADING_CLASS, TEXT_CLASS, TITLE_CLASS};
+    use crate::skin::{DISABLED_TEXT_CLASS, HEADING_CLASS, TITLE_CLASS};
     use crate::skin_palette::SkinPalette;
     use pretty_assertions::assert_eq;
 
@@ -626,6 +697,110 @@ mod tests {
             Some(&Pickable::IGNORE)
         );
         assert!(world.get::<Translated>(spawned.label).is_some());
+        Ok(())
+    }
+
+    /// **A button is skinned without being asked.**
+    ///
+    /// The whole of `viewer-ui-button-widget`: the class used to be an `Option`
+    /// starting at `None`, so a stylesheet reached a button only where its panel
+    /// remembered to chain `.class(…)`. Each shape now starts at the class its
+    /// family wears, `.class(…)` is an override, and `.compact()` adds the
+    /// row-scale modifier beside it.
+    ///
+    /// The caption is covered too, and by the role its colour names where there
+    /// is one — a caption with no class at all is a caption
+    /// `.sk-button:disabled .sk-text` cannot grey.
+    #[test]
+    fn every_shape_of_button_carries_a_class_the_skin_can_select() -> Result<(), TestError> {
+        let mut app = app();
+        let parent = app.world_mut().spawn(Node::default()).id();
+        let cases = [
+            (
+                ButtonSpec::bordered(UiLabel::key("about-land-buy"), "bordered"),
+                vec![BUTTON_CLASS],
+                TEXT_CLASS,
+            ),
+            (
+                ButtonSpec::flat(UiLabel::key("people-im"), "flat"),
+                vec![ACTION_BUTTON_CLASS],
+                TEXT_CLASS,
+            ),
+            (
+                ButtonSpec::bordered(UiLabel::key("about-land-remove"), "compact").compact(),
+                vec![BUTTON_CLASS, COMPACT_BUTTON_CLASS],
+                TEXT_CLASS,
+            ),
+            (
+                ButtonSpec::bordered(UiLabel::key("toolbar-chat"), "own-family")
+                    .class("sk-toolbar-button"),
+                vec!["sk-toolbar-button"],
+                TEXT_CLASS,
+            ),
+            (
+                // A caption that names a role keeps it rather than being
+                // flattened onto the plain text class.
+                ButtonSpec::bordered(UiLabel::key("build-land-apply"), "muted-caption")
+                    .label_color(SkinPalette::FALLBACK.text_muted),
+                vec![BUTTON_CLASS],
+                TITLE_CLASS,
+            ),
+        ];
+        for (spec, wanted_box, wanted_label) in cases {
+            let name = spec.name.clone();
+            let spawned = apply(&mut app, |commands| spawn_button(commands, parent, spec));
+            let world = app.world();
+            let classes = world
+                .get::<ClassList>(spawned.button)
+                .ok_or("a button with no class list at all")?;
+            for class in wanted_box {
+                assert!(
+                    classes.contains(class),
+                    "`{name}` must carry `{class}` — without it no stylesheet can reach the box"
+                );
+            }
+            assert!(
+                world
+                    .get::<ClassList>(spawned.label)
+                    .is_some_and(|classes| classes.contains(wanted_label)),
+                "`{name}`'s caption must carry `{wanted_label}`, or the refused state cannot \
+                 grey it"
+            );
+        }
+        Ok(())
+    }
+
+    /// A refused button carries the marker the cascade selects on, and nothing
+    /// else says so — the panel does not pick a dim colour of its own.
+    #[test]
+    fn a_refused_button_carries_the_marker_not_a_dim_colour() -> Result<(), TestError> {
+        let mut app = app();
+        let parent = app.world_mut().spawn(Node::default()).id();
+        let live = apply(&mut app, |commands| {
+            spawn_button(
+                commands,
+                parent,
+                ButtonSpec::bordered(UiLabel::key("item-properties-for-sale"), "live")
+                    .disabled(false),
+            )
+        });
+        let refused = apply(&mut app, |commands| {
+            spawn_button(
+                commands,
+                parent,
+                ButtonSpec::bordered(UiLabel::key("item-properties-for-sale"), "refused")
+                    .disabled(true),
+            )
+        });
+        let world = app.world();
+        assert!(world.get::<InteractionDisabled>(live.button).is_none());
+        assert!(world.get::<InteractionDisabled>(refused.button).is_some());
+        assert_eq!(
+            world.get::<TextColor>(live.label).map(|text| text.0),
+            world.get::<TextColor>(refused.label).map(|text| text.0),
+            "the refusal is a state, not a colour: both captions are painted the same and \
+             `.sk-button:disabled .sk-text` is what greys one of them"
+        );
         Ok(())
     }
 
