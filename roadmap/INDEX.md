@@ -14,9 +14,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ideas | 118 |
 | ready | 300 |
 | blocked | 62 |
-| in-progress | 26 |
+| in-progress | 25 |
 | bugs | 13 |
-| done | 1230 |
+| done | 1231 |
 | deferred | 30 |
 | wont-do | 16 |
 | **total** | **1795** |
@@ -1202,7 +1202,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Batch world changes into per-tick update bursts (blocked by
   `server-world-heartbeat`, `server-world-ecs-store`)
 
-## in-progress (26)
+## in-progress (25)
 
 ### viewer
 
@@ -1251,8 +1251,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   stand actions (blocked by `viewer-object-selection-core` (done))
 - [`viewer-streaming-audio`](in-progress/viewer-streaming-audio.md) — Parcel
   streaming-audio / media-audio player
-- [`viewer-ui-button-widget`](in-progress/viewer-ui-button-widget.md) — The
-  button is the one control that never became a widget
 - [`viewer-ui-text-caret-grapheme-motion`](in-progress/viewer-ui-text-caret-grapheme-motion.md)
   — Upstream issue — parley caret motion steps one codepoint, not one grapheme
 - [`viewer-ui-text-parley-pr-backdelete`](in-progress/viewer-ui-text-parley-pr-backdelete.md)
@@ -1313,7 +1311,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1230)
+## done (1231)
 
 ### protocol
 
@@ -3107,6 +3105,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   instead of the `Data` genome
 - [`viewer-ui-bottom-toolbar`](done/viewer-ui-bottom-toolbar.md) — Bottom
   toolbar (button bar) (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-ui-button-widget`](done/viewer-ui-button-widget.md) — The button is
+  the one control that never became a widget
 - [`viewer-ui-color-picker`](done/viewer-ui-color-picker.md) — Color picker
   floater + swatch widget (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-color-picker-advanced`](done/viewer-ui-color-picker-advanced.md) —

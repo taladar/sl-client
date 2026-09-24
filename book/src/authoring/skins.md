@@ -126,6 +126,8 @@ Defined by every skin's `skin.css`, consumed by `common.css`:
 | `--control-bg` | a button's / combo's resting background |
 | `--control-bg-hover` | the background under the pointer (hovered button, highlighted menu entry) |
 | `--control-bg-disabled` | a disabled control's background |
+| `--button-primary-bg` | the call-to-act button's background (`.sk-button-primary`: Retry, Stand Up) |
+| `--button-primary-bg-hover` | the same under the pointer |
 | `--control-border` | a control's resting border |
 | `--control-border-disabled` | a disabled control's border |
 | `--control-radius` | a button's corner radius |
@@ -294,6 +296,7 @@ the stock look rather than to black.
 | `.sk-heading` | a heading inside a page |
 | `.sk-button` | a button, plus `:hover`, `:disabled` and `:focus-visible` states |
 | `.sk-button-compact` | worn with `.sk-button`: the same button at row scale (a table cell, a dense strip) |
+| `.sk-button-primary` | worn with `.sk-button`: the call to act in its row (a failed teleport's Retry, Stand Up) — restates the fill, so it combines with `.sk-button-compact` |
 | `.sk-action-button` | a flat action-column button — the refused state only, no resting look |
 | `.sk-checkbox` / `.sk-checkbox-box` / `.sk-checkbox-tick` | a checkbox row (`:checked`, `:disabled`), its box, and the empty text node whose `::before` is the tick |
 | `.sk-radio-group` / `.sk-radio` / `.sk-radio-indicator` / `.sk-radio-pip` | a radio group (`:disabled`), one option (`:checked`), its disc, and the node whose `::before` is the pip |

@@ -47,6 +47,10 @@
    * bottom-and-right. Azure is flat, so all four are `--control-border`. */
   --button-bevel-top-left: #4a90d0;
   --button-bevel-bottom-right: #4a90d0;
+  /* The call to act (`.sk-button-primary`): a step brighter than Azure's
+   * already-blue controls, so it still stands out among them. */
+  --button-primary-bg: #2f6fae;
+  --button-primary-bg-hover: #3a80c4;
   --field-bevel-top-left: #4a90d0;
   --field-bevel-bottom-right: #4a90d0;
 

@@ -65,7 +65,8 @@ use bevy_flair::style::components::{ClassList, PseudoElementsSupport};
 use crate::glyph::GLYPH_CLASS;
 use crate::i18n::Translated;
 use crate::skin::{
-    ACTION_BUTTON_CLASS, BUTTON_CLASS, COMPACT_BUTTON_CLASS, TEXT_CLASS, role_class,
+    ACTION_BUTTON_CLASS, BUTTON_CLASS, COMPACT_BUTTON_CLASS, PRIMARY_BUTTON_CLASS, TEXT_CLASS,
+    role_class,
 };
 use crate::ui_font::UiFont;
 
@@ -159,6 +160,11 @@ pub struct ButtonSpec {
     /// A modifier class worn *with* [`class`](Self::class), restating only its
     /// geometry — [`COMPACT_BUTTON_CLASS`], set by [`Self::compact`].
     pub modifier: Option<&'static str>,
+    /// Whether it is the call to act in its row, wearing
+    /// [`PRIMARY_BUTTON_CLASS`] — set by [`Self::primary`]. Its own field
+    /// rather than a second [`modifier`](Self::modifier), because the two
+    /// restate different things (the fill, the geometry) and combine.
+    pub primary: bool,
     /// The skin class on the label, when its colour is skinned separately (the
     /// build tools' value token). Defaults to the role the label's colour
     /// names, and to [`TEXT_CLASS`] for a colour that names none — a button's
@@ -206,6 +212,7 @@ impl ButtonSpec {
             label_color: Color::srgb(0.90, 0.92, 0.96),
             class: Some(BUTTON_CLASS),
             modifier: None,
+            primary: false,
             label_class: None,
             no_wrap: false,
             disabled: false,
@@ -309,6 +316,18 @@ impl ButtonSpec {
         self
     }
 
+    /// Make it the call to act — the one button in its row the moment is
+    /// asking for — wearing [`PRIMARY_BUTTON_CLASS`] over its own class.
+    ///
+    /// Say it here rather than with [`Self::colors`]: an inline fill is only
+    /// the pre-load fallback once the box carries a skin class, so a button
+    /// singled out by colour alone is singled out by nothing a skin can see.
+    #[must_use]
+    pub const fn primary(mut self) -> Self {
+        self.primary = true;
+        self
+    }
+
     /// Refuse it: the box takes [`InteractionDisabled`], and the skin greys it
     /// and its caption.
     ///
@@ -394,7 +413,12 @@ pub fn spawn_button(commands: &mut Commands, parent: Entity, spec: ButtonSpec) -
     if spec.disabled {
         button.insert(InteractionDisabled);
     }
-    let classes: Vec<&'static str> = spec.class.into_iter().chain(spec.modifier).collect();
+    let classes: Vec<&'static str> = spec
+        .class
+        .into_iter()
+        .chain(spec.modifier)
+        .chain(spec.primary.then_some(PRIMARY_BUTTON_CLASS))
+        .collect();
     if !classes.is_empty() {
         button.insert(ClassList::new_with_classes(classes));
     }
@@ -749,6 +773,15 @@ mod tests {
             (
                 ButtonSpec::bordered(UiLabel::key("about-land-remove"), "compact").compact(),
                 vec![BUTTON_CLASS, COMPACT_BUTTON_CLASS],
+                TEXT_CLASS,
+            ),
+            (
+                // The call to act combines with the row-scale geometry: one
+                // restates the fill, the other the box.
+                ButtonSpec::bordered(UiLabel::key("teleport-retry"), "primary")
+                    .primary()
+                    .compact(),
+                vec![BUTTON_CLASS, COMPACT_BUTTON_CLASS, PRIMARY_BUTTON_CLASS],
                 TEXT_CLASS,
             ),
             (

@@ -168,6 +168,23 @@
   padding: 1px 6px;
 }
 
+/* The CALL TO ACT: the one button in its row the moment is asking for — Retry
+ * on a failed teleport, Stand Up while seated. Another modifier worn with
+ * `.sk-button`, restating the fill where `.sk-button-compact` restates the
+ * geometry, so a button can be both.
+ *
+ * Those buttons used to say it with an inline blue, and the class `.sk-button`
+ * became a default and painted over it: what had set them apart was a colour no
+ * stylesheet could see. Both rules sit after `.sk-button`'s at the same
+ * specificity, which is the only thing that lets them win. */
+.sk-button-primary {
+  background-color: var(--button-primary-bg);
+}
+
+.sk-button-primary:hover {
+  background-color: var(--button-primary-bg-hover);
+}
+
 /* A button whose action cannot be taken right now. The panel marks it with
  * `InteractionDisabled` — which it was already doing, to refuse the press — and
  * the caption greys from here rather than from a loop that walked the button's

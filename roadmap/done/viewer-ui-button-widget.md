@@ -2,7 +2,7 @@
 id: viewer-ui-button-widget
 title: The button is the one control that never became a widget
 topic: viewer
-status: in-progress
+status: done
 origin: relief-theme live look (2026-09-23)
 points: 8
 refs: [viewer-skin-image-backed-widgets, viewer-skin-widget-state-classes,
@@ -171,6 +171,17 @@ to point at the panel that broke — and both halves of its condition are
 load-bearing: a button that paints nothing (a link run, a tab scroll arrow) has
 no surface for a skin to restate, and demanding a class of it would be
 demanding a look it deliberately does not have.
+
+**The semantic colours (2026-09-24).** The "Watch out" sweep of the `.colors`
+/ `.label_color` call sites found two that said something a skin could not see:
+a failed teleport's **Retry** and the **Stand Up / Stop Flying** button were
+painted an inline blue to read as the call to act, and `.sk-button` — now a
+default — painted over it. `.sk-button-primary` is a second modifier beside
+`.sk-button-compact`, restating the *fill* (`--button-primary-bg` and its
+hover) where the other restates the geometry, so the two combine;
+`ButtonSpec::primary()` sets it. Relief's art is opaque, so that theme tints
+the image instead. The rest are the neutral panel shades or a refused state
+already on `:disabled`; the `DIM_LABEL_COLOR` hits are row labels, not buttons.
 
 ### Not done, and why
 

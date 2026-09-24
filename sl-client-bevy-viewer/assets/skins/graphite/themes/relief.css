@@ -116,3 +116,11 @@
 .sk-button:disabled {
   -bevy-image: url("skins/graphite/widgets/push-button-disabled.png");
 }
+
+/* The call to act (`.sk-button-primary`). The art is opaque edge to edge, so
+ * the fill the token sheet gives it never shows through; the theme says it the
+ * way its own medium can, by tinting the image blue. A tint multiplies, so it
+ * is pale — it shades the grey face rather than repainting it. */
+.sk-button-primary {
+  -bevy-image-color: #b8d4ff;
+}

@@ -40,6 +40,10 @@
    * `--control-border` here, so an unskinned frame stays one flat colour. */
   --button-bevel-top-left: #66809e;
   --button-bevel-bottom-right: #66809e;
+  /* The call to act (`.sk-button-primary`) — the one button in its row the
+   * moment is asking for. The blue those buttons used to paint inline. */
+  --button-primary-bg: #38669a;
+  --button-primary-bg-hover: #4a7bb0;
   --field-bevel-top-left: #66809e;
   --field-bevel-bottom-right: #66809e;
   --field-bg: #1a1f29;

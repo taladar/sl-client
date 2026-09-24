@@ -66,7 +66,8 @@ const FONT_SIZE: f32 = 13.0;
 const BORDER: Color = Color::srgb(0.30, 0.34, 0.42);
 
 /// The button background — the toolbar's lit / active blue, so the transient
-/// action reads as a live call to act, not a resting toggle.
+/// action reads as a live call to act, not a resting toggle. Only the pre-load
+/// fallback: once styled, the skin's `.sk-button-primary` says it.
 const BACKGROUND: Color = Color::srgb(0.22, 0.40, 0.60);
 
 /// The Fluent key for the Stand Up label.
@@ -159,6 +160,7 @@ fn spawn_button(
             },
         )
         .kind(ButtonKind::Headless)
+        .primary()
         .tab_index(0)
         .padding(10.0, 5.0)
         .colors(BACKGROUND, BORDER)

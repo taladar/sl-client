@@ -58,6 +58,9 @@
    * bottom-and-right. Graphite is flat, so all four are `--control-border`. */
   --button-bevel-top-left: #66809e;
   --button-bevel-bottom-right: #66809e;
+  /* The call to act (`.sk-button-primary`): Retry, Stand Up. */
+  --button-primary-bg: #38669a;
+  --button-primary-bg-hover: #4a7bb0;
   --field-bevel-top-left: #66809e;
   --field-bevel-bottom-right: #66809e;
 

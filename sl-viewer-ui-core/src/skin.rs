@@ -627,6 +627,16 @@ pub const BUTTON_CLASS: &str = "sk-button";
 /// call site; what each *looks* like is the skin's.
 pub const COMPACT_BUTTON_CLASS: &str = "sk-button-compact";
 
+/// [`BUTTON_CLASS`] as the **call to act**: the one button in its row the
+/// moment is asking for — Retry on a failed teleport, Stand Up while seated.
+///
+/// A modifier like [`COMPACT_BUTTON_CLASS`], but restating the *fill*
+/// (`--button-primary-bg`) rather than the geometry, so the two combine. It
+/// exists because those buttons used to say it with an inline blue, which
+/// `.sk-button` then painted over: once the class became a default, the only
+/// thing that had set them apart was a colour no stylesheet could see.
+pub const PRIMARY_BUTTON_CLASS: &str = "sk-button-primary";
+
 /// The CSS class on a flat action button — the shape a panel's button column
 /// spawns ([`ButtonSpec::flat`](crate::ui_spawn::ButtonSpec::flat)).
 ///
@@ -677,6 +687,10 @@ pub const TABLE_ROW_CLASS: &str = "sk-table-row";
 /// the test says so, rather than the rule quietly painting nothing.
 const HOVER_CLASSES: &[&str] = &[
     BUTTON_CLASS,
+    // Always worn with `BUTTON_CLASS`, so never the only reason a node is
+    // stamped — but a class with a `:hover` rule of its own is named here, or
+    // the list stops being the one place that says which rules can fire.
+    PRIMARY_BUTTON_CLASS,
     TILE_CLASS,
     INLINE_ITEM_CLASS,
     COMBO_OPTION_CLASS,

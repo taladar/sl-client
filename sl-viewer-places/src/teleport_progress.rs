@@ -89,11 +89,12 @@ const WARN: Color = Color::srgb(0.95, 0.78, 0.40);
 /// The detail line under the title — the muted role.
 const DETAIL: Color = SkinPalette::FALLBACK.text_muted;
 
-/// A cancel / dismiss button's resting background.
+/// A cancel / dismiss button's resting background — the pre-load fallback.
 const BUTTON_BG: Color = Color::srgb(0.22, 0.25, 0.31);
 
 /// The Retry button's background — the toolbar's lit blue, so it reads as the
-/// affirmative recovery action.
+/// affirmative recovery action. Only the pre-load fallback: once styled, the
+/// skin's `.sk-button-primary` says it.
 const RETRY_BG: Color = Color::srgb(0.22, 0.40, 0.60);
 
 /// Which phase of the handshake the teleport is currently in, for the status line.
@@ -335,63 +336,39 @@ fn spawn_overlay(mut commands: Commands, root: Res<UiRoot>) {
         ))
         .id();
 
-    spawn_button(
-        &mut commands,
-        button_row,
-        OverlayButton::Retry,
-        "Retry",
-        RETRY_BG,
-    );
-    spawn_button(
-        &mut commands,
-        button_row,
-        OverlayButton::Cancel,
-        "Cancel",
-        BUTTON_BG,
-    );
-    spawn_button(
-        &mut commands,
-        button_row,
-        OverlayButton::Dismiss,
-        "Dismiss",
-        BUTTON_BG,
-    );
+    spawn_button(&mut commands, button_row, OverlayButton::Retry, "Retry");
+    spawn_button(&mut commands, button_row, OverlayButton::Cancel, "Cancel");
+    spawn_button(&mut commands, button_row, OverlayButton::Dismiss, "Dismiss");
 }
 
 /// Spawn one overlay button of `kind` with `label`, hidden until its outcome
 /// calls for it.
-fn spawn_button(
-    commands: &mut Commands,
-    row: Entity,
-    kind: OverlayButton,
-    label: &str,
-    background: Color,
-) {
-    let button = spawn_ui_button(
-        commands,
-        row,
-        ButtonSpec::bordered(
-            UiLabel::literal(label),
-            match kind {
-                OverlayButton::Cancel => "teleport-button:cancel",
-                OverlayButton::Dismiss => "teleport-button:dismiss",
-                OverlayButton::Retry => "teleport-button:retry",
-            },
-        )
-        .kind(ButtonKind::Headless)
-        .tab_index(0)
-        .padding(12.0, 5.0)
-        .colors(background, PANEL_BORDER)
-        .label_color(Color::WHITE)
-        .no_wrap()
-        .layout(|node| {
-            node.align_items = AlignItems::Center;
-            node.justify_content = JustifyContent::Center;
-            // Sized to its label and never compressed below it.
-            node.flex_shrink = 0.0;
-        }),
+fn spawn_button(commands: &mut Commands, row: Entity, kind: OverlayButton, label: &str) {
+    // Retry is the recovery the failure is asking for; Cancel and Dismiss
+    // only close the overlay.
+    let primary = matches!(kind, OverlayButton::Retry);
+    let spec = ButtonSpec::bordered(
+        UiLabel::literal(label),
+        match kind {
+            OverlayButton::Cancel => "teleport-button:cancel",
+            OverlayButton::Dismiss => "teleport-button:dismiss",
+            OverlayButton::Retry => "teleport-button:retry",
+        },
     )
-    .button;
+    .kind(ButtonKind::Headless)
+    .tab_index(0)
+    .padding(12.0, 5.0)
+    .colors(if primary { RETRY_BG } else { BUTTON_BG }, PANEL_BORDER)
+    .label_color(Color::WHITE)
+    .no_wrap()
+    .layout(|node| {
+        node.align_items = AlignItems::Center;
+        node.justify_content = JustifyContent::Center;
+        // Sized to its label and never compressed below it.
+        node.flex_shrink = 0.0;
+    });
+    let spec = if primary { spec.primary() } else { spec };
+    let button = spawn_ui_button(commands, row, spec).button;
     commands
         .entity(button)
         .insert((kind, Visibility::Hidden))
