@@ -113,6 +113,17 @@
 //! switch is still one whose tabs must be readable. The active tab keeps its
 //! highlight for the same reason.
 //!
+//! # Tabs that come and go
+//!
+//! A strip spawned by [`spawn_tab_strip`] has the tabs its spec named, for
+//! good. The Conversations floater needs a strip that grows a tab when an IM
+//! opens and drops one when it closes, which is what [`spawn_dynamic_tab_strip`]
+//! and its [`DynamicTabStrip::add_tab`] / [`DynamicTabStrip::remove_tab`] are
+//! for. A dynamic tab is addressed by its button entity rather than by index,
+//! and [`TabStrip::active`] follows the *tab* that was active through every
+//! change — see [`DynamicTabStrip`]. It is a bare strip: whoever grows tabs at
+//! runtime keeps its own panes.
+//!
 //! # Constructible without wiring
 //!
 //! Per the registry rule (`ui_element`): selecting a tab is pure UI
@@ -214,7 +225,11 @@ pub const TAB_LABEL_CLASS: &str = "sk-tab-label";
 
 /// The skin class on the panel area — the "content" shade the active tab
 /// shares (`--card-bg`).
-const PANEL_CLASS: &str = "sk-tab-panel";
+///
+/// `pub` for a caller that keeps its own panes beside a [`DynamicTabStrip`],
+/// so the area its selected tab merges into is the shade the skin gives that
+/// tab rather than a colour of its own.
+pub const TAB_PANEL_CLASS: &str = "sk-tab-panel";
 
 /// The skin class on a gallery demo panel's heading — brighter than the body,
 /// so a tab switch (which swaps the heading) is unmistakable.
@@ -326,6 +341,9 @@ impl TabPlacement {
             node.max_height = Val::Px(TAB_STRIP_MAX_HEIGHT);
             if let Some(width) = width {
                 node.width = Val::Px(width);
+                // A pinned width is the divider's to change, not the row's: a
+                // tight window squeezes the panel beside the strip instead.
+                node.flex_shrink = 0.0;
             }
         } else {
             node.min_width = Val::Px(0.0);
@@ -421,27 +439,80 @@ impl TabSpec<'_> {
         self.placement.is_vertical() && self.strip_width.is_some()
     }
 
-    /// The text a label node starts with: empty for a translated strip (the key
-    /// is not display text, and `i18n::Translated` fills the real text once
-    /// the bundle loads), otherwise the literal label.
-    fn initial_label(&self, label: &str) -> String {
+    /// The caption one of [`labels`](Self::labels) is: a Fluent key on a
+    /// translated strip, the literal text otherwise.
+    const fn caption<'label>(&self, label: &'label str) -> TabCaption<'label> {
         if self.translate_labels {
-            String::new()
+            TabCaption::Key(label)
         } else {
-            label.to_owned()
+            TabCaption::Literal(label)
+        }
+    }
+
+    /// What every tab of this strip is spawned from — the part of the spec a
+    /// tab added later still needs, once the spec itself is gone.
+    const fn look(&self) -> TabLook {
+        TabLook {
+            element: self.element,
+            placement: self.placement,
+            font_size: self.font_size,
+            clip: self.is_resizable(),
+            ellipsis: self.ellipsis,
         }
     }
 }
 
-/// Bind a tab-label node to its Fluent key when the strip is translated, so
-/// `i18n::apply_translations` keeps it resolved; a no-op for a literal
-/// strip.
-fn translate_tab_label(commands: &mut Commands, label_entity: Entity, spec: &TabSpec, label: &str) {
-    if spec.translate_labels {
-        commands
-            .entity(label_entity)
-            .insert(sl_viewer_ui_core::i18n::Translated::new(label.to_owned()));
+/// What a tab's caption is.
+///
+/// Per tab rather than per strip because a [dynamic](DynamicTabStrip) strip
+/// can hold both: the Conversations strip's People tab is a translated word,
+/// while a conversation's tab is a resident's or a group's name, which is data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TabCaption<'label> {
+    /// Display text, shown as it is. A caller that changes it later writes the
+    /// label node [`TabHandle::label`] names.
+    Literal(&'label str),
+    /// A Fluent key, resolved by `i18n::Translated` and re-resolved on a locale
+    /// change. The label starts empty and fills once the bundle loads.
+    Key(&'label str),
+}
+
+impl TabCaption<'_> {
+    /// The text a label node starts with: empty for a key (it is not display
+    /// text), otherwise the literal.
+    fn initial_text(self) -> String {
+        match self {
+            Self::Literal(text) => text.to_owned(),
+            Self::Key(_) => String::new(),
+        }
     }
+
+    /// Bind a label node to its Fluent key, so `i18n::apply_translations`
+    /// keeps it resolved; a no-op for a literal.
+    fn bind(self, commands: &mut Commands, label: Entity) {
+        if let Self::Key(key) = self {
+            commands
+                .entity(label)
+                .insert(sl_viewer_ui_core::i18n::Translated::new(key.to_owned()));
+        }
+    }
+}
+
+/// The part of a [`TabSpec`] every tab of one strip shares, kept so a tab added
+/// after the strip was spawned looks like the ones it was spawned with.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct TabLook {
+    /// The element id the tab's nodes are named under.
+    element: &'static str,
+    /// The strip's placement, for the tab's rounded corners.
+    placement: TabPlacement,
+    /// The caption's font size, in logical pixels.
+    font_size: f32,
+    /// Whether the strip is resizable, so a caption clips behind an ellipsis
+    /// rather than growing its tab.
+    clip: bool,
+    /// The glyphs a clipped caption ends in.
+    ellipsis: &'static str,
 }
 
 /// A tab strip's state: which tab is active. The **single source of truth** — the
@@ -696,6 +767,161 @@ fn apply_tab_corner_radius(
 /// is the source of truth: a consumer that only needs the selection reacts to
 /// `Changed<TabStrip>` and reads it.
 pub fn spawn_tab_strip(commands: &mut Commands, parent: Entity, spec: &TabSpec) -> Entity {
+    spawn_dynamic_tab_strip(commands, parent, spec).strip
+}
+
+/// A strip whose tabs can come and go after it was spawned — what
+/// [`spawn_dynamic_tab_strip`] hands back.
+///
+/// A tab is addressed by its **button entity**, which [`add_tab`] returns and
+/// which stays the same tab however many tabs are added or removed before it.
+/// An index would not: the Conversations strip closes tabs out of order, and an
+/// index-addressed API would push the renumbering back onto the caller, which
+/// is half of what kept that strip hand-rolled. A caller that needs to know
+/// *what* a tab stands for puts its own component on the button (the
+/// conversation key, say) and reads it back from the active one.
+///
+/// [`TabStrip::active`] stays the single source of truth throughout: after
+/// every add or remove the widget re-derives each tab's
+/// [`TabButton::index`] from the strip's order and moves `active` to wherever
+/// the active tab now sits — or, when the active tab is the one removed, to
+/// the tab that took its place, marking the strip changed so a consumer
+/// reading `Changed<TabStrip>` hears that its selection moved.
+///
+/// A dynamic strip is a **bare** strip: there is no panel per tab for it to
+/// switch, because a caller whose tabs come and go keeps its own panes (the
+/// Conversations floater builds one per conversation, with its own input).
+///
+/// [`add_tab`]: Self::add_tab
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DynamicTabStrip {
+    /// The strip — the [`RadioGroup`] carrying [`TabStrip`].
+    pub strip: Entity,
+    /// The scrolling viewport the tab buttons flow in, in tab order.
+    viewport: Entity,
+    /// What each tab is spawned from.
+    look: TabLook,
+}
+
+/// A tab added to a [`DynamicTabStrip`]: its button, which is also how the
+/// strip addresses it, and its caption node, for a caller that rewrites the
+/// caption as its data changes (an unread count, a renamed resident).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TabHandle {
+    /// The tab's button.
+    pub button: Entity,
+    /// The tab's caption text node.
+    pub label: Entity,
+}
+
+impl DynamicTabStrip {
+    /// Add a tab, at `position` in the strip or at the end for `None` (a
+    /// position past the end is the end).
+    ///
+    /// A tab added to an empty strip becomes the active one; otherwise the
+    /// active tab stays active, even when the new one lands before it.
+    pub fn add_tab(
+        &self,
+        commands: &mut Commands,
+        caption: TabCaption,
+        position: Option<usize>,
+    ) -> TabHandle {
+        let handle = spawn_tab_button(
+            commands,
+            self.look,
+            self.strip,
+            self.viewport,
+            None,
+            caption,
+        );
+        if let Some(position) = position {
+            commands
+                .entity(self.viewport)
+                .insert_child(position, handle.button);
+        }
+        self.reindex(commands);
+        handle
+    }
+
+    /// Remove the tab whose button is `button`. Removing the active tab makes
+    /// its successor active (or, for the last tab, its predecessor).
+    pub fn remove_tab(&self, commands: &mut Commands, button: Entity) {
+        commands.entity(button).despawn();
+        self.reindex(commands);
+    }
+
+    /// Queue the renumbering behind whatever structural change was just queued,
+    /// so it sees the strip's new order.
+    fn reindex(&self, commands: &mut Commands) {
+        let (strip, viewport) = (self.strip, self.viewport);
+        commands.queue(move |world: &mut World| reindex_tab_strip(world, strip, viewport));
+    }
+
+    /// Let the strip fill its parent on the scroll axis rather than stop at the
+    /// widget's own bound, so a strip down the side of a resizable window grows
+    /// with it — [`fill_tab_container`]'s treatment of a container's strip.
+    pub fn fill_parent(&self, commands: &mut Commands, width: Option<f32>) {
+        commands
+            .entity(self.strip)
+            .insert(filled_wrapper_node(self.look.placement, width));
+    }
+}
+
+/// Re-derive every tab's [`TabButton::index`] from the viewport's child order,
+/// and [`TabStrip::active`] from which tab is [`Checked`] — the tab that was
+/// active is still the active one, wherever it moved to. With no tab checked
+/// (the active tab was removed, or the strip was empty) the tab now at the old
+/// index takes over, clamped to the end.
+fn reindex_tab_strip(world: &mut World, strip: Entity, viewport: Entity) {
+    let buttons: Vec<Entity> = world
+        .get::<Children>(viewport)
+        .map(|children| {
+            children
+                .iter()
+                .filter(|child| world.get::<TabButton>(*child).is_some())
+                .collect()
+        })
+        .unwrap_or_default();
+    for (index, &button) in buttons.iter().enumerate() {
+        if let Some(mut tab) = world.get_mut::<TabButton>(button)
+            && tab.index != index
+        {
+            tab.index = index;
+        }
+    }
+    let checked = buttons
+        .iter()
+        .position(|button| world.get::<Checked>(*button).is_some());
+    let Some(active) = world.get::<TabStrip>(strip).map(|state| state.active) else {
+        return;
+    };
+    let (wanted, successor) = match checked {
+        Some(index) => (index, None),
+        None => {
+            let index = active.min(buttons.len().saturating_sub(1));
+            (index, buttons.get(index).copied())
+        }
+    };
+    if let Some(button) = successor {
+        world.entity_mut(button).insert(Checked);
+    }
+    if let Some(mut state) = world.get_mut::<TabStrip>(strip) {
+        if state.active != wanted {
+            state.active = wanted;
+        } else if successor.is_some() {
+            // Same number, different tab: the consumer still has to hear it.
+            state.set_changed();
+        }
+    }
+}
+
+/// Spawn a strip whose tabs can be added and removed later — see
+/// [`DynamicTabStrip`]. `spec.labels` are its first tabs, and may be empty.
+pub fn spawn_dynamic_tab_strip(
+    commands: &mut Commands,
+    parent: Entity,
+    spec: &TabSpec,
+) -> DynamicTabStrip {
     // Clamp rather than trust: an out-of-range active would leave no tab checked,
     // which the arrow handler reads as "start from the end" and the highlight as
     // "none lit". `saturating_sub` keeps an empty strip at 0 without underflow.
@@ -735,11 +961,21 @@ pub fn spawn_tab_strip(commands: &mut Commands, parent: Entity, spec: &TabSpec) 
         ))
         .id();
 
+    let look = spec.look();
     for (index, label) in spec.labels.iter().enumerate() {
-        let is_active = index == active;
-        let button = spawn_tab_button(commands, strip, viewport, spec, index, label, is_active);
-        if is_active {
-            commands.entity(button).insert(Checked);
+        let tab = spawn_tab_button(
+            commands,
+            look,
+            strip,
+            viewport,
+            Some(index),
+            spec.caption(label),
+        );
+        if index == active {
+            // The selected tab is `Checked` from its first frame, so the skin's
+            // `:checked` rule dresses it before the reconcile runs. The
+            // reconcile keeps it in step from then on.
+            commands.entity(tab.button).insert(Checked);
         }
     }
 
@@ -753,7 +989,11 @@ pub fn spawn_tab_strip(commands: &mut Commands, parent: Entity, spec: &TabSpec) 
         spawn_tab_scroll_arrows(commands, strip, viewport, spec);
     }
 
-    strip
+    DynamicTabStrip {
+        strip,
+        viewport,
+        look,
+    }
 }
 
 /// Spawn a vertical strip's scrollbar (the shared
@@ -976,7 +1216,8 @@ pub fn spawn_tab_container(
     // (`viewer-ui-focus-scroll-into-view`).
     commands.entity(strip).insert(FocusRevealBounds(container));
 
-    let divider = resizable.then(|| spawn_divider(commands, container, spec, strip));
+    let divider = resizable
+        .then(|| spawn_tab_divider(commands, container, spec.element, spec.placement, strip));
 
     let panel_area = commands
         .spawn((
@@ -993,7 +1234,7 @@ pub fn spawn_tab_container(
             // The "content" backdrop the active tab shares its shade with, so the
             // selected tab reads as merging into its panel.
             BackgroundColor(SkinPalette::default().card_bg),
-            ClassList::new_with_classes([PANEL_CLASS]),
+            ClassList::new_with_classes([TAB_PANEL_CLASS]),
             Name::new(format!("{}:tab-panels", spec.element)),
             ChildOf(container),
         ))
@@ -1080,16 +1321,9 @@ pub fn fill_tab_container(
     container_node.min_width = Val::Px(0.0);
     container_node.min_height = Val::Px(0.0);
     commands.entity(handle.container).insert(container_node);
-    // The strip's scroll-axis cap becomes the parent's size, so the tab bar
-    // widens (or, vertical, lengthens) with the floater instead of stopping at
-    // the fixed bound.
-    let mut strip_node = placement.wrapper_node(None);
-    if placement.is_vertical() {
-        strip_node.max_height = Val::Percent(100.0);
-    } else {
-        strip_node.max_width = Val::Percent(100.0);
-    }
-    commands.entity(handle.strip).insert(strip_node);
+    commands
+        .entity(handle.strip)
+        .insert(filled_wrapper_node(placement, None));
     commands.entity(handle.panel_area).insert(Node {
         display: Display::Grid,
         // `1fr`, not `auto`: the cell takes the area's size, so the panels
@@ -1136,6 +1370,19 @@ pub fn fill_tab_container(
     }
 }
 
+/// A strip wrapper whose scroll-axis cap is its parent's size rather than the
+/// widget's fixed bound, so the tab bar widens (or, vertical, lengthens) with a
+/// resizable window. `width` pins a resizable vertical strip, as at spawn.
+fn filled_wrapper_node(placement: TabPlacement, width: Option<f32>) -> Node {
+    let mut node = placement.wrapper_node(width);
+    if placement.is_vertical() {
+        node.max_height = Val::Percent(100.0);
+    } else {
+        node.max_width = Val::Percent(100.0);
+    }
+    node
+}
+
 /// The clamped active index a spec resolves to — shared by the strip (for
 /// `Checked`) and the container (for which panel starts shown).
 fn handle_active(spec: &TabSpec) -> usize {
@@ -1145,6 +1392,11 @@ fn handle_active(spec: &TabSpec) -> usize {
 /// Spawn one tab button — a [`RadioButton`] styled as a tab. Not focusable
 /// itself: per the ARIA tablist pattern the strip is the focus stop and the
 /// arrows move the selection within it.
+///
+/// `index` is the tab's place for a strip spawned whole; `None` for a tab a
+/// [`DynamicTabStrip`] adds, whose index the reindex that follows assigns, and
+/// whose nodes are named without one (an index in a name would go stale the
+/// moment an earlier tab closed).
 ///
 /// A tab label never wraps ([`LineBreak::NoWrap`]). On a **content-sized** strip
 /// the button grows to fit its label, centred. On a **resizable** strip the
@@ -1156,22 +1408,28 @@ fn handle_active(spec: &TabSpec) -> usize {
 /// so the harness's clipping check knows the slice is by design.
 fn spawn_tab_button(
     commands: &mut Commands,
+    look: TabLook,
     strip: Entity,
     parent: Entity,
-    spec: &TabSpec,
-    index: usize,
-    label: &str,
-    active: bool,
-) -> Entity {
+    index: Option<usize>,
+    caption: TabCaption,
+) -> TabHandle {
     // A resizable strip is the one that clips and truncates its labels.
-    let clip = spec.is_resizable();
+    let clip = look.clip;
+    let name = |part: &str| match index {
+        Some(index) => Name::new(format!("{}:{part}:{index}", look.element)),
+        None => Name::new(format!("{}:{part}", look.element)),
+    };
     let button = commands
         .spawn((
             RadioButton,
             TabButton {
                 strip,
-                index,
-                placement: spec.placement,
+                // A dynamic tab's real index is the reindex's to assign; until
+                // it runs (in the same command flush) it matches no strip's
+                // `active`.
+                index: index.unwrap_or(usize::MAX),
+                placement: look.placement,
             },
             Node {
                 padding: UiRect::axes(Val::Px(10.0), Val::Px(5.0)),
@@ -1204,18 +1462,12 @@ fn spawn_tab_button(
             // tab needs no state class and nothing paints it from Rust.
             ClassList::new_with_classes([TAB_CLASS]),
             Pickable::default(),
-            Name::new(format!("{}:tab:{index}", spec.element)),
+            name("tab"),
             ChildOf(parent),
         ))
         .id();
-    if active {
-        // The selected tab is `Checked` from its first frame, so the skin's
-        // `:checked` rule dresses it before the reconcile runs. The reconcile
-        // keeps it in step from then on.
-        commands.entity(button).insert(Checked);
-    }
 
-    if clip {
+    let label = if clip {
         // A node clips its **descendants**, not its own glyphs — so a text node
         // that clips itself still paints its glyphs past its box, over the
         // ellipsis. The label text therefore sits inside a clipping *container*:
@@ -1240,15 +1492,15 @@ fn spawn_tab_button(
                              strip can be narrower than the longest tab name; a trailing ellipsis \
                              marks it",
                 },
-                Name::new(format!("{}:tab-label:{index}", spec.element)),
+                name("tab-label"),
                 ChildOf(button),
             ))
             .id();
-        let label_entity = commands
+        let label = commands
             .spawn((
-                Text::new(spec.initial_label(label)),
+                Text::new(caption.initial_text()),
                 TextLayout::no_wrap(),
-                UiFont::Sans.at(spec.font_size),
+                UiFont::Sans.at(look.font_size),
                 ClassList::new_with_classes([TAB_LABEL_CLASS]),
                 // Natural width, so the container — not the text — is what shrinks
                 // and clips, and the text overflows the container's trailing edge.
@@ -1259,8 +1511,7 @@ fn spawn_tab_button(
                 ChildOf(label_clip),
             ))
             .id();
-        translate_tab_label(commands, label_entity, spec, label);
-        let ellipsis = spawn_tab_ellipsis(commands, button, spec, index);
+        let ellipsis = spawn_tab_ellipsis(commands, button, look, name("tab-ellipsis"));
         // Greys with its label, from the same `.sk-tab:disabled` ancestor rule.
         commands
             .entity(ellipsis)
@@ -1268,21 +1519,22 @@ fn spawn_tab_button(
         commands
             .entity(label_clip)
             .insert(RevealEllipsis { marker: ellipsis });
+        label
     } else {
-        let label_entity = commands
+        commands
             .spawn((
-                Text::new(spec.initial_label(label)),
+                Text::new(caption.initial_text()),
                 TextLayout::no_wrap(),
-                UiFont::Sans.at(spec.font_size),
+                UiFont::Sans.at(look.font_size),
                 ClassList::new_with_classes([TAB_LABEL_CLASS]),
-                Name::new(format!("{}:tab-label:{index}", spec.element)),
+                name("tab-label"),
                 ChildOf(button),
             ))
-            .id();
-        translate_tab_label(commands, label_entity, spec, label);
-    }
+            .id()
+    };
+    caption.bind(commands, label);
 
-    button
+    TabHandle { button, label }
 }
 
 /// Spawn a clipped tab's trailing ellipsis marker (`…`, or whatever
@@ -1294,19 +1546,17 @@ fn spawn_tab_button(
 fn spawn_tab_ellipsis(
     commands: &mut Commands,
     button: Entity,
-    spec: &TabSpec,
-    index: usize,
+    look: TabLook,
+    name: Name,
 ) -> Entity {
     let marker = spawn_ellipsis_marker(
         commands,
         button,
-        spec.font_size,
+        look.font_size,
         tab_label_color(&SkinPalette::default()),
-        spec.ellipsis,
+        look.ellipsis,
     );
-    commands
-        .entity(marker)
-        .insert(Name::new(format!("{}:tab-ellipsis:{index}", spec.element)));
+    commands.entity(marker).insert(name);
     marker
 }
 
@@ -1372,13 +1622,18 @@ fn scroll_tabs_with_wheel(
 
 /// Spawn the draggable divider between a resizable strip and its panel, wiring
 /// the drag that resizes the strip.
-fn spawn_divider(
+///
+/// `pub` for a caller that lays out its own panes beside a
+/// [`DynamicTabStrip`] (the Conversations floater), so its split is the same
+/// skinned handle as a container's rather than a second copy of it. The
+/// divider is placed wherever `container` puts its next child.
+pub fn spawn_tab_divider(
     commands: &mut Commands,
     container: Entity,
-    spec: &TabSpec,
+    element: &'static str,
+    placement: TabPlacement,
     strip: Entity,
 ) -> Entity {
-    let placement = spec.placement;
     let divider = commands
         .spawn((
             Node {
@@ -1395,7 +1650,7 @@ fn spawn_divider(
             ClassList::new_with_classes([DIVIDER_CLASS]),
             Pickable::default(),
             TabDivider { strip },
-            Name::new(format!("{}:tab-divider", spec.element)),
+            Name::new(format!("{element}:tab-divider")),
             ChildOf(container),
         ))
         .id();
@@ -1411,7 +1666,7 @@ fn spawn_divider(
         BackgroundColor(SkinPalette::default().accent),
         ClassList::new_with_classes([DIVIDER_GRIP_CLASS]),
         Pickable::IGNORE,
-        Name::new(format!("{}:tab-divider-grip", spec.element)),
+        Name::new(format!("{element}:tab-divider-grip")),
         ChildOf(divider),
     ));
     commands
@@ -3015,6 +3270,196 @@ mod tests {
                 .get::<bevy::ui::InteractionDisabled>(live)
                 .is_none(),
             "its neighbour does not"
+        );
+        Ok(())
+    }
+
+    /// Spawn an empty dynamic strip into `app` and settle a frame.
+    fn spawn_dynamic(app: &mut App) -> super::DynamicTabStrip {
+        let parent = root(app);
+        let mut queue = CommandQueue::default();
+        let strip = {
+            let mut commands = Commands::new(&mut queue, app.world());
+            super::spawn_dynamic_tab_strip(
+                &mut commands,
+                parent,
+                &fixture_spec(&[], TabPlacement::InlineStart, 0, Some(120.0)),
+            )
+        };
+        queue.apply(app.world_mut());
+        app.update();
+        strip
+    }
+
+    /// Add a literal tab to `strip` at `position` and settle a frame.
+    fn add_tab(
+        app: &mut App,
+        strip: super::DynamicTabStrip,
+        caption: &str,
+        position: Option<usize>,
+    ) -> super::TabHandle {
+        let mut queue = CommandQueue::default();
+        let handle = {
+            let mut commands = Commands::new(&mut queue, app.world());
+            strip.add_tab(&mut commands, super::TabCaption::Literal(caption), position)
+        };
+        queue.apply(app.world_mut());
+        app.update();
+        handle
+    }
+
+    /// Remove `button` from `strip` and settle a frame.
+    fn remove_tab(app: &mut App, strip: super::DynamicTabStrip, button: Entity) {
+        let mut queue = CommandQueue::default();
+        {
+            let mut commands = Commands::new(&mut queue, app.world());
+            strip.remove_tab(&mut commands, button);
+        }
+        queue.apply(app.world_mut());
+        app.update();
+    }
+
+    /// Every tab's [`TabButton::index`], in the strip's order.
+    fn indices(app: &App, buttons: &[Entity]) -> Vec<Option<usize>> {
+        buttons
+            .iter()
+            .map(|button| app.world().get::<TabButton>(*button).map(|tab| tab.index))
+            .collect()
+    }
+
+    /// The first tab added to an empty dynamic strip is the active one, and a
+    /// tab added later leaves it active.
+    #[test]
+    fn a_dynamic_strip_keeps_its_first_tab_active() -> Result<(), TestError> {
+        let mut app = tab_app();
+        let strip = spawn_dynamic(&mut app);
+        let first = add_tab(&mut app, strip, "Nearby", None);
+        let second = add_tab(&mut app, strip, "Friend", None);
+
+        assert_eq!(strip_active(&app, strip.strip), 0);
+        assert!(is_checked(&app, first.button));
+        assert!(!is_checked(&app, second.button));
+        assert_eq!(
+            indices(&app, &[first.button, second.button]),
+            vec![Some(0), Some(1)]
+        );
+        assert_eq!(
+            app.world()
+                .get::<Text>(second.label)
+                .map(|text| text.0.as_str()),
+            Some("Friend"),
+            "the handle's label is the caption node"
+        );
+        Ok(())
+    }
+
+    /// A tab inserted **before** the active one moves the active *index*, not
+    /// the active *tab*: the selection belongs to the tab, and the index is
+    /// only where it currently sits.
+    #[test]
+    fn a_tab_added_before_the_active_one_keeps_the_selection() -> Result<(), TestError> {
+        let mut app = tab_app();
+        let strip = spawn_dynamic(&mut app);
+        let nearby = add_tab(&mut app, strip, "Nearby", None);
+        let people = add_tab(&mut app, strip, "People", Some(0));
+
+        assert_eq!(
+            indices(&app, &[people.button, nearby.button]),
+            vec![Some(0), Some(1)]
+        );
+        assert_eq!(strip_active(&app, strip.strip), 1);
+        assert!(is_checked(&app, nearby.button));
+        assert!(!is_checked(&app, people.button));
+        Ok(())
+    }
+
+    /// How many times a `Changed<TabStrip>` reader has fired.
+    #[derive(Resource, Default)]
+    struct HeardChanges(usize);
+
+    /// Count the frames a strip reports a change — what a consumer of the
+    /// selection sees.
+    fn hear_strip_changes(changed: Query<(), Changed<TabStrip>>, mut heard: ResMut<HeardChanges>) {
+        heard.0 = heard.0.saturating_add(changed.iter().count());
+    }
+
+    /// Closing a tab before the active one renumbers the rest and keeps the
+    /// active tab; closing the active tab hands the selection to the tab that
+    /// took its place — and says so, even when the number did not move.
+    #[test]
+    fn removing_tabs_renumbers_and_hands_on_the_selection() -> Result<(), TestError> {
+        let mut app = tab_app();
+        let strip = spawn_dynamic(&mut app);
+        let a = add_tab(&mut app, strip, "A", None);
+        let b = add_tab(&mut app, strip, "B", None);
+        let c = add_tab(&mut app, strip, "C", None);
+        let d = add_tab(&mut app, strip, "D", None);
+        select(&mut app, strip.strip, c.button);
+        assert_eq!(strip_active(&app, strip.strip), 2);
+
+        remove_tab(&mut app, strip, a.button);
+        assert_eq!(
+            indices(&app, &[b.button, c.button, d.button]),
+            vec![Some(0), Some(1), Some(2)]
+        );
+        assert_eq!(strip_active(&app, strip.strip), 1, "C moved up one");
+        assert!(is_checked(&app, c.button));
+
+        // Removing the active tab: D slides into index 1, which is the number
+        // `active` already holds — only the change flag tells a consumer.
+        app.init_resource::<HeardChanges>()
+            .add_systems(Update, hear_strip_changes);
+        app.update();
+        app.world_mut().resource_mut::<HeardChanges>().0 = 0;
+        remove_tab(&mut app, strip, c.button);
+        assert_eq!(strip_active(&app, strip.strip), 1);
+        assert!(is_checked(&app, d.button), "the successor took over");
+        assert_eq!(
+            app.world().resource::<HeardChanges>().0,
+            1,
+            "a consumer reading `Changed<TabStrip>` hears the selection move"
+        );
+
+        // The last tab, active, goes: its predecessor takes over.
+        remove_tab(&mut app, strip, d.button);
+        assert_eq!(strip_active(&app, strip.strip), 0);
+        assert!(is_checked(&app, b.button));
+
+        remove_tab(&mut app, strip, b.button);
+        assert_eq!(
+            strip_active(&app, strip.strip),
+            0,
+            "an empty strip rests at 0"
+        );
+        Ok(())
+    }
+
+    /// A dynamic tab's caption can be a Fluent key, bound for translation and
+    /// blank until the bundle fills it — the Conversations strip's People tab
+    /// beside its literal conversation names.
+    #[test]
+    fn a_dynamic_tab_can_carry_a_translated_caption() -> Result<(), TestError> {
+        let mut app = tab_app();
+        let strip = spawn_dynamic(&mut app);
+        let mut queue = CommandQueue::default();
+        let handle = {
+            let mut commands = Commands::new(&mut queue, app.world());
+            strip.add_tab(&mut commands, super::TabCaption::Key("people-tab"), None)
+        };
+        queue.apply(app.world_mut());
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<Text>(handle.label)
+                .map(|text| text.0.as_str()),
+            Some(""),
+            "a key is not display text"
+        );
+        assert!(
+            app.world()
+                .get::<sl_viewer_ui_core::i18n::Translated>(handle.label)
+                .is_some(),
+            "the caption is bound to its key"
         );
         Ok(())
     }

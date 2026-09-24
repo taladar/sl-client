@@ -2,7 +2,7 @@
 id: viewer-ui-tab-widget-dynamic-tabs
 title: The tab widget cannot grow a tab, so the one strip that needs to is hand-rolled
 topic: viewer
-status: ready
+status: done
 origin: viewer-skin-panel-state-classes sweep (2026-09-22)
 points: 5
 refs: [viewer-ui-tab-widget, viewer-social-im-conversations,
@@ -77,3 +77,51 @@ Conversations and People spawn their tabs through `ui_tab`, a conversation
 opening or closing adds or removes one tab rather than rebuilding a strip, no
 tab colour is named outside the widget, and an unread tab's attention is the
 skin's animation rather than a per-frame colour flip.
+
+## Done (2026-09-24)
+
+**Addressed by button entity, not index.** `spawn_dynamic_tab_strip` returns a
+`DynamicTabStrip` whose `add_tab(caption, position)` hands back a `TabHandle`
+(the button and its caption node) and whose `remove_tab(button)` drops one. The
+button *is* the key: a caller that needs to know what a tab stands for puts its
+own component on it (`ConversationTab(ConversationKey)`) and reads it off
+whichever tab the strip makes active — which also closes the per-tab payload
+gap without the widget growing a generic key type. After every add or remove a
+queued world command re-derives each `TabButton::index` from the viewport's
+child order and moves `TabStrip::active` to wherever the `Checked` tab now
+sits; removing the active tab hands `Checked` to the tab that took its place
+and marks the strip changed even when the number did not move. Reorder was
+left out: nothing needs it, and an unused operation would be forward-looking
+surface.
+
+A dynamic strip is a **bare** strip. The Conversations floater keeps one pane
+per conversation, each with its own input, so the widget's panel switching was
+never what it wanted. Captions are per tab (`TabCaption::Literal` /
+`::Key`) because the one strip holds both a translated word (People) and data
+(a resident's name).
+
+**Adoption.** Conversations and People spawn their tabs through it; the
+hand-rolled buttons, their press observers, `SelectConversation`,
+`SelectPeople`, the divider copy (`spawn_tab_divider` is now `pub`) and all
+seven colour constants are gone. `follow_strip_selection` carries a click into
+the model (runs before the refresh, which carries the model's own selections
+back onto the strip; both write only on a real difference). The People tab
+wears `ExternalStripTab`, which is how the conversations module tells it apart
+without knowing what it is, and the friends list now seeds on the People pane's
+first showing rather than on a press message. Keyboard selection came free:
+the strip is a `RadioGroup`, so the arrow keys walk it.
+
+**Attention** is `ATTENTION_CLASS` on the tab, with a `.sk-tab.sk-attention`
+pulse of its own in `common.css` (from the tab's `--surface-bg`, where the
+toolbar button's pulse starts from `--control-bg`). `BLINK_HZ` and the
+per-frame colour flip are gone.
+
+The panel area and the two corner buttons (close, add participants) that
+occlude a transcript line now wear `.sk-tab-panel`, so the pane the selected
+tab merges into follows the same skin shade as that tab.
+
+Tests: four in `ui_tab` (first tab active, an insert before the active tab
+keeps the selection, removal renumbers and hands the selection on — heard by a
+`Changed<TabStrip>` reader even when the index is unchanged — and a translated
+caption), and `strip_sync` in `conversations.rs`, which drives the real
+dynamic strip with People put in front of Nearby.

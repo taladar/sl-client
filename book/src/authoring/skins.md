@@ -173,7 +173,9 @@ Defined by every skin's `skin.css`, consumed by `common.css`:
 | `--tab-scroll-bg` / `--tab-scroll-bg-hover` | a horizontal tab strip's overflow buttons' face, at rest (transparent in the shipped skins — they sit on the strip) and under the pointer |
 | `--tab-scroll-arrow` | their glyphs' colour |
 | `--tab-jump-buttons` | **a `display` value**: `flex` shows the jump-to-first and jump-to-last buttons beside back and on, as the reference does; `none` leaves only the single steps |
-| `--slider-thumb` | a slider handle or trackball marker |
+| `--slider-thumb` | a slider handle |
+| `--trackball-sun` / `--trackball-moon` | a sun / moon trackball's marker: filled above the horizon, the outline of a hollow one below it |
+| `--trackball-marker-outline` | the marker's outline above the horizon — dark, so a pale marker reads on a pale disc |
 | `--title-bar-active` | the focused floater's title band (a translucent wash over its body) |
 | `--title-text-inactive` | an unfocused floater's title text |
 | `--glyph-button-bg` | a title-bar glyph button's fill |
@@ -299,6 +301,8 @@ the stock look rather than to black.
 | `.sk-swatch` | a colour swatch's rim (its fill is the colour it carries); `:disabled` dims it |
 | `.sk-tone-swatch` | an emoji skin-tone tile; `:checked` outlines the chosen one |
 | `.sk-trackball` / `.sk-trackball-disc` | a sun / moon trackball (`:disabled`) and its disc's rim |
+| `.sk-trackball-sun` / `.sk-trackball-moon` | on the trackball, which body it aims — picks its marker's colour |
+| `.sk-trackball-marker` / `.sk-below-horizon` | the marker, and the class that says its aim is below the horizon (drawn hollow) |
 | `.sk-rights-cell` | a Friends-list permission icon: dim, `:checked` (a right you grant) or `:checked:disabled` (one granted to you) |
 | `.sk-tile` | one tile of a dense grid (an emoji cell), with its `:hover` wash |
 | `.sk-gallery-tile` | an inventory gallery tile's backing |
@@ -374,7 +378,7 @@ other:
 | `.sk-active` / `.sk-active-text` | toggled on or selected: a lit toolbar button, a selected row, the focused floater's title |
 | `.sk-stripe` | every other row of a scroll list, by the row's **data** index (so the bands do not crawl as a recycled list scrolls) |
 | `.sk-drop-target` | the row a drag is over |
-| `.sk-attention` | wants attention — the Conversations button with unread messages; an animation, so a skin that would rather not blink overrides it with a static paint |
+| `.sk-attention` | wants attention — the Conversations button with unread messages, and a conversation's tab with unread lines while another tab is open (`.sk-tab.sk-attention`, its own pulse from the tab's resting shade); an animation, so a skin that would rather not blink overrides it with a static paint |
 | `.sk-focus-within` | a container whose editor has focus — the search box, which brightens and rings while you type in it (there is no `:focus-within`) |
 
 They come **last** in `common.css`, in the order highlighted, active, disabled,

@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 117 |
-| ready | 302 |
+| ready | 301 |
 | blocked | 62 |
-| in-progress | 27 |
+| in-progress | 26 |
 | bugs | 9 |
-| done | 1227 |
+| done | 1229 |
 | deferred | 30 |
 | wont-do | 16 |
 | **total** | **1790** |
@@ -291,7 +291,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (302)
+## ready (301)
 
 ### protocol
 
@@ -929,9 +929,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-styling-interaction-tests`](ready/viewer-ui-styling-interaction-tests.md)
   — bevy_flair state styling under synthetic hover and focus (blocked by
   `viewer-ui-interaction-harness` (done))
-- [`viewer-ui-tab-widget-dynamic-tabs`](ready/viewer-ui-tab-widget-dynamic-tabs.md)
-  — The tab widget cannot grow a tab, so the one strip that needs to is
-  hand-rolled
 - [`viewer-underwater-alpha-fog-remaining-materials`](ready/viewer-underwater-alpha-fog-remaining-materials.md)
   — The particle billboards do not carry the water fog
 - [`viewer-url-context-menus`](ready/viewer-url-context-menus.md) — Right-click
@@ -1204,7 +1201,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Batch world changes into per-tick update bursts (blocked by
   `server-world-heartbeat`, `server-world-ecs-store`)
 
-## in-progress (27)
+## in-progress (26)
 
 ### viewer
 
@@ -1251,8 +1248,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   by `viewer-rlv-restriction-state` (done))
 - [`viewer-sit-stand-actions`](in-progress/viewer-sit-stand-actions.md) — Sit /
   stand actions (blocked by `viewer-object-selection-core` (done))
-- [`viewer-skin-panel-state-classes`](in-progress/viewer-skin-panel-state-classes.md)
-  — The panels paint their own states, and nine files hand-copied one role
 - [`viewer-streaming-audio`](in-progress/viewer-streaming-audio.md) — Parcel
   streaming-audio / media-audio player
 - [`viewer-ui-button-widget`](in-progress/viewer-ui-button-widget.md) — The
@@ -1306,7 +1301,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1227)
+## done (1229)
 
 ### protocol
 
@@ -2974,6 +2969,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Role tokens for a light data surface on dark chrome
 - [`viewer-skin-list-row-striping`](done/viewer-skin-list-row-striping.md) —
   Scroll-list rows — striping, hover and a selection the skin owns
+- [`viewer-skin-panel-state-classes`](done/viewer-skin-panel-state-classes.md) —
+  The panels paint their own states, and nine files hand-copied one role
 - [`viewer-skin-panel-text-roles`](done/viewer-skin-panel-text-roles.md) — Panel
   text does not follow the skin, only the widgets it is built from
 - [`viewer-skin-scrollbar-shape`](done/viewer-skin-scrollbar-shape.md) — The
@@ -3168,6 +3165,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-ui-tab-widget`](done/viewer-ui-tab-widget.md) — Reusable tab widget
   (horizontal + vertical) (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-ui-tab-widget-dynamic-tabs`](done/viewer-ui-tab-widget-dynamic-tabs.md)
+  — The tab widget cannot grow a tab, so the one strip that needs to is
+  hand-rolled
 - [`viewer-ui-table-widget`](done/viewer-ui-table-widget.md) — Reusable table
   widget (columns / header / virtualized rows / truncation)
 - [`viewer-ui-test-harness`](done/viewer-ui-test-harness.md) — UI test harness —

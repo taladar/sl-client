@@ -3,19 +3,26 @@
 //! messages, group chats and ad-hoc conferences — as a set of **vertical tabs**
 //! down the leading edge, each fronting a transcript pane and its own chat input.
 //!
-//! # Why this is bespoke and not [`crate::ui_tab`]
+//! # The strip is the shared widget's; the panes are this module's
 //!
-//! The reusable tab widget takes a **fixed** label set at spawn time
-//! ([`crate::ui_tab::spawn_tab_container`]); conversations are **dynamic** — a tab
-//! appears the moment a new IM / group / conference message (or invite) arrives
-//! and lives for the session (or until its close button ends it). So this module
-//! manages its own strip of tab buttons and its own stack of panels, adding and
-//! removing one of each as conversations come and go, in the same visual language
-//! as the shared widget. It *does* reuse the widget's [`TabStripWidth`] /
-//! [`TabDivider`] so the strip / pane split is a **draggable, persisted** divider
-//! for free (`crate::floater_persist` saves it per host floater). The Nearby Chat
-//! tab is always present, always first, and cannot be closed (the reference
-//! viewer's arrangement).
+//! Conversations are **dynamic** — a tab appears the moment a new IM / group /
+//! conference message (or invite) arrives and lives for the session (or until
+//! its close button ends it). The strip is a [`DynamicTabStrip`], the tab
+//! widget's form for exactly that: a tab is added when a conversation opens
+//! and removed when it closes, each button carrying its `ConversationTab`
+//! key, and its selected, refused and attention looks are the skin's. The
+//! panes stay this module's, one per conversation with its own input, because
+//! a strip whose tabs come and go has no fixed panel set to switch. The
+//! strip's resizable width and its divider are the widget's too, so the split
+//! is a **draggable, persisted** divider for free (`crate::floater_persist`
+//! saves it per host floater). The Nearby Chat tab is always present and
+//! cannot be closed (the reference viewer's arrangement).
+//!
+//! Which tab is active has two writers — a click or arrow key on the strip,
+//! and the model selecting a conversation for itself (an IM opened from a
+//! profile). `follow_strip_selection` carries the first into the model and
+//! `refresh_conversations` the second onto the strip; each writes only on a
+//! real difference, so neither echoes the other.
 //!
 //! # The model is pure; the ECS is a mirror of it
 //!
@@ -82,16 +89,21 @@ use crate::linkified_text::{LinkTextStyle, spawn_linkified_text};
 use crate::local_chat_input::{LocalChatSubmit, spawn_local_chat_input};
 use crate::skin::SkinChatBands;
 use crate::skin::text_role;
+use crate::skin::{ATTENTION_CLASS, set_state_class_on};
 use crate::social::{MuteModel, short_id};
 use crate::ui::BOTTOM_BAR_Z;
 use crate::ui::BottomArea;
 use crate::ui::{
-    LogicalInset, LogicalPadding, LogicalRect, UiDirection, UiRoot, UiScaffoldSystems, column, row,
+    LogicalInset, LogicalPadding, LogicalRect, UiRoot, UiScaffoldSystems, column, row,
 };
 use crate::ui_font::UiFont;
-use crate::ui_tab::{TabDivider, TabPlacement, TabStrip, TabStripWidth, resize_strip_width};
+use crate::ui_tab::{
+    DEFAULT_ELLIPSIS, DynamicTabStrip, TAB_PANEL_CLASS, TabButton, TabCaption, TabHandle,
+    TabPlacement, TabSpec, TabStrip, spawn_dynamic_tab_strip, spawn_tab_divider,
+};
 use crate::ui_text::set_node_text;
 use crate::world_api::rlv::swallows_owner_say;
+use bevy_flair::style::components::ClassList;
 use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
 
 /// The hosting floater's [`crate::floater::FloaterSpec::id`] — it also keys the
@@ -99,7 +111,7 @@ use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
 pub const CONVERSATIONS_FLOATER_ID: &str = "conversations";
 
 /// The tab strip's element id — the key [`crate::floater_persist`] remembers the
-/// strip / pane split width under (via the reused [`TabStrip`] / [`TabStripWidth`]).
+/// strip / pane split width under.
 const STRIP_ELEMENT: &str = "conversations-strip";
 
 /// The most transcript lines kept per conversation in memory. Older lines scroll
@@ -165,31 +177,6 @@ const LINE_SCROLL_PIXELS: f32 = 24.0;
 /// end lands on the last line.
 const SCROLL_TO_BOTTOM: f32 = 1.0e6;
 
-/// The attention flash's frequency, in blinks per second — the tab / button
-/// alternates its highlight at this rate while a conversation has unread lines.
-pub const BLINK_HZ: f32 = 1.5;
-
-/// An inactive tab's background — recessed, matching [`crate::ui_tab`]'s look.
-const TAB_INACTIVE_BACKGROUND: Color = Color::srgb(0.11, 0.13, 0.17);
-
-/// The active tab's background — the panel shade, so the selected tab reads as
-/// merging into its content.
-const TAB_ACTIVE_BACKGROUND: Color = Color::srgb(0.19, 0.23, 0.31);
-
-/// The flash colour for a tab with unread lines, alternated with its resting
-/// background at [`BLINK_HZ`] — a warm amber that reads as "look here".
-const TAB_ATTENTION_BACKGROUND: Color = Color::srgb(0.42, 0.33, 0.12);
-
-/// An inactive tab's border.
-const TAB_BORDER: Color = Color::srgb(0.28, 0.33, 0.42);
-
-/// The active tab's border — a bright accent, the loudest "this one is selected"
-/// signal.
-const TAB_ACTIVE_BORDER: Color = Color::srgb(0.52, 0.68, 0.95);
-
-/// A tab label's colour.
-const TAB_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
-
 /// A tab's close glyph — chrome, so the muted role.
 const CLOSE_GLYPH_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
@@ -205,7 +192,10 @@ const ADD_PARTICIPANTS_GLYPH: &str = "\u{271A}";
 /// a field name would share one picker and lose the first pane's request.
 const ADD_PARTICIPANTS_REQUESTER: &str = "conversations-add-participants";
 
-/// The panel area's background — the content shade the active tab shares.
+/// The panel area's background — the content shade the active tab shares. The
+/// spawn-time value only: the area and the two buttons that occlude a
+/// transcript line in its corner wear [`TAB_PANEL_CLASS`], so a skin that
+/// retunes the selected tab's shade retunes the panel it merges into as well.
 const PANEL_BACKGROUND: Color = Color::srgb(0.19, 0.23, 0.31);
 
 /// The transcript scroll surface's background — a touch darker than the panel so
@@ -255,18 +245,6 @@ const ACCEPT_BACKGROUND: Color = Color::srgb(0.20, 0.42, 0.26);
 
 /// The Decline button's background — a muted red.
 const DECLINE_BACKGROUND: Color = Color::srgb(0.45, 0.22, 0.24);
-
-/// The tab strip / divider thickness, in logical pixels.
-const DIVIDER_THICKNESS: f32 = 6.0;
-
-/// The divider bar's colour.
-const DIVIDER_COLOR: Color = Color::srgb(0.34, 0.41, 0.53);
-
-/// The divider grip nub's length, in logical pixels.
-const DIVIDER_GRIP_LENGTH: f32 = 28.0;
-
-/// The divider grip nub's colour — brighter than the bar, so it reads as a handle.
-const DIVIDER_GRIP_COLOR: Color = Color::srgb(0.60, 0.72, 0.92);
 
 /// The dock host's leading (left, mirrored under RTL) inset from the window edge,
 /// in logical pixels — flush to the corner like the nearby-chat bar.
@@ -879,8 +857,8 @@ pub(crate) struct ConversationsUi {
     /// [`refresh_conversations`] reads the transcript band colours
     /// ([`SkinChatBands`]) off it.
     floater_root: Entity,
-    /// The vertical tab strip the tab buttons flow into.
-    strip: Entity,
+    /// The vertical tab strip every conversation's tab is added to.
+    strip: DynamicTabStrip,
     /// The panel area the per-conversation panes stack in (only the active one
     /// is displayed).
     panel_area: Entity,
@@ -893,8 +871,9 @@ pub(crate) struct ConversationsUi {
 
 impl ConversationsUi {
     /// The vertical tab strip, so an external pane ([`crate::people`]) can add its
-    /// own pinned tab button into the same strip as the conversation tabs.
-    pub(crate) const fn strip(&self) -> Entity {
+    /// own pinned tab into the same strip as the conversation tabs. Such a tab
+    /// wears [`ExternalStripTab`], which is how this module tells it apart.
+    pub(crate) const fn strip(&self) -> DynamicTabStrip {
         self.strip
     }
 
@@ -908,10 +887,10 @@ impl ConversationsUi {
 /// The ECS nodes of one conversation's tab and pane.
 #[derive(Debug, Clone, Copy)]
 struct ConversationView {
-    /// The tab button box (recoloured active / inactive / flashing).
-    tab_button: Entity,
-    /// The tab's label text node (title + unread badge).
-    tab_label: Entity,
+    /// The conversation's tab on the strip: its button (which wears
+    /// [`ATTENTION_CLASS`] while it has unread lines) and its caption (title +
+    /// unread badge).
+    tab: TabHandle,
     /// The pane node (displayed only while this is the active conversation).
     panel: Entity,
     /// The pending-invite bar (Accept / Decline), shown only while invited.
@@ -930,13 +909,17 @@ struct ConversationView {
     rendered_revision: u64,
 }
 
-/// A request to make `key`'s conversation the active one — written by a tab
-/// button's press observer, applied by [`apply_conversation_selection`].
-#[derive(Message, Debug, Clone, Copy)]
-struct SelectConversation {
-    /// The conversation to activate.
-    key: ConversationKey,
-}
+/// The conversation a strip tab stands for — put on the button the widget
+/// returns, and read back off whichever tab the strip makes active.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+struct ConversationTab(ConversationKey);
+
+/// A tab on the conversations strip that fronts an **external** pane
+/// ([`StripFocus`]) rather than a conversation — the People tab. Selecting it
+/// gives the strip to that pane; the marker is all this module knows about
+/// what the pane is.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ExternalStripTab;
 
 /// A request to close `key`'s conversation — written by a tab's close button.
 #[derive(Message, Debug, Clone, Copy)]
@@ -1079,7 +1062,6 @@ impl Plugin for ConversationsPlugin {
             .init_resource::<StripFocus>()
             .init_resource::<NearbyRecallState>()
             .init_resource::<KeyedRecallState>()
-            .add_message::<SelectConversation>()
             .add_message::<CloseConversation>()
             .add_message::<RespondToInvite>()
             .add_message::<OpenConversation>()
@@ -1100,7 +1082,7 @@ impl Plugin for ConversationsPlugin {
                     apply_participant_picks,
                     start_conferences,
                     open_conversations,
-                    apply_conversation_selection,
+                    follow_strip_selection,
                     respond_to_invites,
                     close_conversations,
                     spawn_conversation_tabs,
@@ -1209,9 +1191,9 @@ fn spawn_conversations_floater(mut commands: Commands, root: Res<UiRoot>) {
         .insert(crate::i18n::Translated::new("conversations-title"));
     // The skin class the `.sk-conversations` CSS rule matches — it lands the
     // transcript band colours on this root as a `SkinChatBands` component.
-    commands.entity(handle.root).insert(
-        bevy_flair::style::components::ClassList::new_with_classes([CONVERSATIONS_CLASS]),
-    );
+    commands
+        .entity(handle.root)
+        .insert(ClassList::new_with_classes([CONVERSATIONS_CLASS]));
     let builder = commands.register_system(build_conversations_content);
     commands
         .entity(handle.root)
@@ -1238,55 +1220,34 @@ fn build_conversations_content(In(handle): In<FloaterHandle>, mut commands: Comm
         ))
         .id();
 
-    // The vertical tab strip — a scrolling column of tab buttons. It reuses the
-    // tab widget's `TabStrip` / `TabStripWidth` so the split is a draggable,
-    // persisted divider (crate::floater_persist keys on those); no ui_tab system
-    // drives a bare `TabStrip`, so it only supplies the width + persistence key.
-    //
-    // The width and the persistence key sit on a row holding the scrolling
-    // column of buttons and its scrollbar, so the divider resizes both and the
-    // bar is never scrolled away with the tabs.
-    let strip_row = commands
-        .spawn((
-            Node {
-                width: Val::Px(STRIP_WIDTH),
-                flex_shrink: 0.0,
-                min_height: Val::Px(0.0),
-                ..row(Val::ZERO)
-            },
-            BackgroundColor(TAB_INACTIVE_BACKGROUND),
-            TabStrip {
-                element: STRIP_ELEMENT,
-                active: 0,
-            },
-            TabStripWidth(STRIP_WIDTH),
-            Name::new("conversations-strip-row"),
-            ChildOf(split),
-        ))
-        .id();
-    let strip = commands
-        .spawn((
-            Node {
-                flex_grow: 1.0,
-                min_width: Val::Px(0.0),
-                min_height: Val::Px(0.0),
-                overflow: Overflow::scroll_y(),
-                ..column(Val::Px(2.0))
-            },
-            ScrollPosition::default(),
-            Name::new("conversations-strip"),
-            ChildOf(strip_row),
-        ))
-        .id();
-    spawn_scrollbar(
+    // The vertical tab strip — the shared widget's dynamic form, empty until
+    // the Nearby tab below and every later conversation add theirs. Resizable,
+    // so its width is persisted per floater and long names clip behind an
+    // ellipsis; filled, so it runs the floater's full height rather than
+    // stopping at the widget's own bound.
+    let strip = spawn_dynamic_tab_strip(
         &mut commands,
-        strip_row,
-        ScrollTarget::Container(strip),
-        Node::default(),
-        "conversations-strip-scrollbar",
+        split,
+        &TabSpec {
+            element: STRIP_ELEMENT,
+            placement: TabPlacement::InlineStart,
+            labels: &[],
+            active: 0,
+            tab_index: 0,
+            font_size: CHROME_FONT_SIZE,
+            strip_width: Some(STRIP_WIDTH),
+            ellipsis: DEFAULT_ELLIPSIS,
+            translate_labels: false,
+        },
     );
-
-    spawn_divider(&mut commands, split, strip_row);
+    strip.fill_parent(&mut commands, Some(STRIP_WIDTH));
+    spawn_tab_divider(
+        &mut commands,
+        split,
+        STRIP_ELEMENT,
+        TabPlacement::InlineStart,
+        strip.strip,
+    );
 
     // The panel area — the panes stack here, only the active one displayed.
     let panel_area = commands
@@ -1298,6 +1259,7 @@ fn build_conversations_content(In(handle): In<FloaterHandle>, mut commands: Comm
                 ..column(Val::ZERO)
             },
             BackgroundColor(PANEL_BACKGROUND),
+            ClassList::new_with_classes([TAB_PANEL_CLASS]),
             Name::new("conversations-panel-area"),
             ChildOf(split),
         ))
@@ -1318,110 +1280,21 @@ fn build_conversations_content(In(handle): In<FloaterHandle>, mut commands: Comm
     });
 }
 
-/// Spawn the draggable divider between the strip and the pane area — reuses the
-/// tab widget's width math ([`resize_strip_width`]) so a leading strip grows and
-/// shrinks correctly under LTR and RTL.
-fn spawn_divider(commands: &mut Commands, split: Entity, strip: Entity) {
-    let divider = commands
-        .spawn((
-            Node {
-                width: Val::Px(DIVIDER_THICKNESS),
-                flex_shrink: 0.0,
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                ..default()
-            },
-            BackgroundColor(DIVIDER_COLOR),
-            TabDivider { strip },
-            Pickable::default(),
-            Name::new("conversations-divider"),
-            ChildOf(split),
-        ))
-        .id();
-    commands.spawn((
-        Node {
-            width: Val::Px(DIVIDER_THICKNESS * 0.5),
-            height: Val::Px(DIVIDER_GRIP_LENGTH),
-            border_radius: BorderRadius::all(Val::Px(DIVIDER_THICKNESS * 0.25)),
-            ..default()
-        },
-        BackgroundColor(DIVIDER_GRIP_COLOR),
-        Pickable::IGNORE,
-        Name::new("conversations-divider-grip"),
-        ChildOf(divider),
-    ));
-    commands.entity(divider).observe(
-        move |drag: On<Pointer<Drag>>,
-              mut widths: Query<&mut TabStripWidth>,
-              direction: Res<UiDirection>| {
-            if drag.button != PointerButton::Primary {
-                return;
-            }
-            if let Ok(mut width) = widths.get_mut(strip) {
-                width.0 = resize_strip_width(
-                    width.0,
-                    drag.delta.x,
-                    TabPlacement::InlineStart,
-                    *direction,
-                );
-            }
-        },
-    );
-}
-
 /// Spawn one conversation's tab button and pane, returning the view. The Nearby
 /// tab uses the local-chat-input widget and has no close button; every other tab
 /// uses the plain chat-input and a close button.
 fn spawn_conversation_view(
     commands: &mut Commands,
-    strip: Entity,
+    strip: DynamicTabStrip,
     panel_area: Entity,
     key: ConversationKey,
 ) -> ConversationView {
     let nearby = key.is_nearby();
-    // The tab button — a row of [label | close], padded and bordered.
-    let tab_button = commands
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(5.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                align_items: AlignItems::Center,
-                overflow: Overflow::clip(),
-                ..row(Val::Px(4.0))
-            },
-            BorderColor::all(TAB_BORDER),
-            BackgroundColor(TAB_INACTIVE_BACKGROUND),
-            Pickable {
-                should_block_lower: true,
-                is_hoverable: true,
-            },
-            Name::new("conversations-tab"),
-            ChildOf(strip),
-        ))
-        .observe(
-            move |press: On<Pointer<Press>>, mut select: MessageWriter<SelectConversation>| {
-                if press.button == PointerButton::Primary {
-                    select.write(SelectConversation { key });
-                }
-            },
-        )
-        .id();
-    let tab_label = commands
-        .spawn((
-            Text::new(String::new()),
-            UiFont::Sans.at(CHROME_FONT_SIZE),
-            text_role(TAB_LABEL_COLOR),
-            Node {
-                flex_grow: 1.0,
-                min_width: Val::Px(0.0),
-                ..default()
-            },
-            Pickable::IGNORE,
-            Name::new("conversations-tab-label"),
-            ChildOf(tab_button),
-        ))
-        .id();
+    // The tab: the widget's, captioned by `refresh_conversations` (which knows
+    // the title and the unread count), and keyed so a selection on the strip
+    // can be read back as a conversation.
+    let tab = strip.add_tab(commands, TabCaption::Literal(""), None);
+    commands.entity(tab.button).insert(ConversationTab(key));
     // The pane — [invite bar | transcript scroll | typing | input], hidden unless
     // active. A closable tab's close button lives in the pane's top-trailing
     // corner (below), not on the strip tab — the reference viewer's arrangement.
@@ -1554,8 +1427,7 @@ fn spawn_conversation_view(
     }
 
     ConversationView {
-        tab_button,
-        tab_label,
+        tab,
         panel,
         invite_bar,
         transcript_column,
@@ -1588,6 +1460,7 @@ fn spawn_pane_close_button(commands: &mut Commands, panel: Entity, key: Conversa
                 ..LogicalRect::AUTO
             }),
             BackgroundColor(PANEL_BACKGROUND),
+            ClassList::new_with_classes([TAB_PANEL_CLASS]),
             Pickable {
                 should_block_lower: true,
                 is_hoverable: true,
@@ -1636,6 +1509,7 @@ fn spawn_add_participants_button(commands: &mut Commands, panel: Entity, key: Co
                 ..LogicalRect::AUTO
             }),
             BackgroundColor(PANEL_BACKGROUND),
+            ClassList::new_with_classes([TAB_PANEL_CLASS]),
             Pickable {
                 should_block_lower: true,
                 is_hoverable: true,
@@ -1835,17 +1709,20 @@ pub(crate) struct ConversationFacts<'w> {
 
 /// The transcript view's widgets, bundled as one
 /// [`SystemParam`](bevy::ecs::system::SystemParam): the tab labels and typing
-/// lines, the tab backgrounds and borders, the panes' display flags, the
+/// lines, the tabs' attention class and the strip's active tab, the panes'
+/// display flags, the
 /// transcript scroll, the skin's chat-band colours, and the commands that
 /// respawn a changed transcript.
 #[derive(bevy::ecs::system::SystemParam)]
 struct ConversationChrome<'w, 's> {
     /// The tab labels and typing lines.
     texts: Query<'w, 's, &'static mut Text>,
-    /// The tab buttons' backgrounds.
-    backgrounds: Query<'w, 's, &'static mut BackgroundColor>,
-    /// Their borders.
-    borders: Query<'w, 's, &'static mut BorderColor>,
+    /// The tab buttons' skin classes, for the attention state.
+    classes: Query<'w, 's, &'static mut ClassList>,
+    /// The tab buttons' places on the strip.
+    tabs: Query<'w, 's, &'static TabButton>,
+    /// The strip, whose active tab follows the model.
+    strips: Query<'w, 's, &'static mut TabStrip>,
     /// The panes' and bars' display flags.
     nodes: Query<'w, 's, &'static mut Node>,
     /// The transcript scroll, pinned to the newest line.
@@ -1857,14 +1734,11 @@ struct ConversationChrome<'w, 's> {
 }
 
 /// The refresh's own cadence, bundled as one
-/// [`SystemParam`](bevy::ecs::system::SystemParam): the clock the unread flash
-/// blinks on, plus the palette and alias revision the transcripts were last
-/// rendered against — so a change to either re-renders them and nothing else
-/// does.
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the palette and alias
+/// revision the transcripts were last rendered against — so a change to either
+/// re-renders them and nothing else does.
 #[derive(Debug, bevy::ecs::system::SystemParam)]
-struct RefreshMemo<'w, 's> {
-    /// The clock the unread flash blinks on.
-    time: Res<'w, Time>,
+struct RefreshMemo<'s> {
     /// The palette the transcripts were last rendered with.
     last_palette: Local<'s, Option<[Color; 5]>>,
     /// The alias revision they were last rendered against.
@@ -2483,17 +2357,46 @@ fn request_conversation_names(
     }
 }
 
-/// Apply the pending tab selections to the model. Selecting a conversation tab
-/// also hands the strip back from any external pane ([`StripFocus`]), so its pane
-/// shows and the external one is suppressed.
-fn apply_conversation_selection(
-    mut selections: MessageReader<SelectConversation>,
+/// Carry a selection made **on the strip** — a click, or an arrow key on the
+/// focused strip — into the model: a conversation tab selects its
+/// conversation and hands the strip back from any external pane
+/// ([`StripFocus`]); an [`ExternalStripTab`] gives the strip to its pane.
+///
+/// Runs before [`refresh_conversations`], which writes the model's own
+/// selections back onto the strip: the other order would overwrite a click with
+/// the selection it replaced before this ever read it. Both halves write only
+/// on a real difference, so the refresh's write, heard here a frame later, is
+/// a no-op.
+fn follow_strip_selection(
+    ui: Option<Res<ConversationsUi>>,
+    strips: Query<&TabStrip, Changed<TabStrip>>,
+    tabs: Query<(&TabButton, Option<&ConversationTab>, Has<ExternalStripTab>)>,
     mut model: ResMut<ConversationModel>,
     mut focus: ResMut<StripFocus>,
 ) {
-    for selection in selections.read() {
-        model.select(selection.key);
-        focus.external = false;
+    let Some(ui) = ui else {
+        return;
+    };
+    let strip = ui.strip.strip;
+    let Ok(state) = strips.get(strip) else {
+        return;
+    };
+    let Some((conversation, external)) = tabs
+        .iter()
+        .find(|(tab, _, _)| tab.strip == strip && tab.index == state.active)
+        .map(|(_, conversation, external)| (conversation.copied(), external))
+    else {
+        return;
+    };
+    if let Some(ConversationTab(key)) = conversation {
+        if model.active_key() != key {
+            model.select(key);
+        }
+        if focus.is_external() {
+            focus.external = false;
+        }
+    } else if external && !focus.is_external() {
+        focus.take_external();
     }
 }
 
@@ -2530,8 +2433,8 @@ fn close_conversations(
         if model.close(close.key)
             && let Some(view) = ui.views.remove(&close.key)
         {
-            // Despawn the tab and pane (their children go with them).
-            commands.entity(view.tab_button).despawn();
+            // Drop the tab and the pane (their children go with them).
+            ui.strip.remove_tab(&mut commands, view.tab.button);
             commands.entity(view.panel).despawn();
         }
     }
@@ -2563,7 +2466,7 @@ fn spawn_conversation_tabs(
         .collect();
     for key in stale {
         if let Some(view) = ui.views.remove(&key) {
-            commands.entity(view.tab_button).despawn();
+            ui.strip.remove_tab(&mut commands, view.tab.button);
             commands.entity(view.panel).despawn();
         }
     }
@@ -2590,8 +2493,8 @@ struct RefreshContext<'w> {
     avatars: Option<Res<'w, crate::world_api::AvatarState>>,
 }
 
-/// Keep the view in step with the model: each tab's label + colours (with the
-/// unread flash), the active pane's visibility, the invite bar, the typing line,
+/// Keep the view in step with the model: each tab's label and attention state,
+/// the strip's active tab, the active pane's visibility, the invite bar, the typing line,
 /// and each transcript node when its revision has advanced.
 fn refresh_conversations(
     model: Res<ConversationModel>,
@@ -2673,8 +2576,6 @@ fn refresh_conversations(
     let active_key = model.active_key();
     let you = translator.get(YOU_LABEL_KEY);
     let nearby_title = translator.get(NEARBY_TITLE_KEY);
-    // The blink phase: on for the first half of each period, off for the second.
-    let blink_on = (memo.time.elapsed_secs() * BLINK_HZ).fract() < 0.5;
 
     for entry in &model.entries {
         let Some(view) = ui.views.get_mut(&entry.key) else {
@@ -2702,23 +2603,20 @@ fn refresh_conversations(
             },
         };
         let label = tab_label(&title, entry.unread, is_active);
-        set_node_text(&mut chrome.texts, view.tab_label, &label);
+        set_node_text(&mut chrome.texts, view.tab.label, &label);
 
-        // Tab colours track the active one, and flash while it has unread lines.
-        let (background, border) = if is_active {
-            (TAB_ACTIVE_BACKGROUND, TAB_ACTIVE_BORDER)
-        } else if flashing && blink_on {
-            (TAB_ATTENTION_BACKGROUND, TAB_ACTIVE_BORDER)
-        } else {
-            (TAB_INACTIVE_BACKGROUND, TAB_BORDER)
-        };
-        set_background(&mut chrome.backgrounds, view.tab_button, background);
-        if let Ok(mut color) = chrome.borders.get_mut(view.tab_button) {
-            let wanted = BorderColor::all(border);
-            if *color != wanted {
-                *color = wanted;
-            }
+        // The model's selection onto the strip. The selected look is the
+        // widget's `:checked`, and a tab with unread lines says only that it
+        // wants attention — whether that blinks is the skin's `.sk-attention`.
+        if is_active && let Ok(tab) = chrome.tabs.get(view.tab.button) {
+            select_strip_tab(&mut chrome.strips, ui.strip.strip, tab.index);
         }
+        set_state_class_on(
+            &mut chrome.classes,
+            view.tab.button,
+            ATTENTION_CLASS,
+            flashing,
+        );
 
         // Pane visibility — only the active pane is laid out.
         set_display(&mut chrome.nodes, view.panel, is_active);
@@ -2825,12 +2723,15 @@ fn typing_status(translator: &Translator, typing: &BTreeMap<AgentKey, String>) -
     }
 }
 
-/// Write a node's background only on a real change.
-fn set_background(backgrounds: &mut Query<&mut BackgroundColor>, entity: Entity, color: Color) {
-    if let Ok(mut background) = backgrounds.get_mut(entity)
-        && background.0 != color
+/// Make the strip's tab at `index` the active one, guarded so an unchanged
+/// selection does not mark the strip changed (which [`follow_strip_selection`]
+/// would otherwise hear every frame). The widget's own reconcile moves
+/// `Checked` to follow.
+pub(crate) fn select_strip_tab(strips: &mut Query<&mut TabStrip>, strip: Entity, index: usize) {
+    if let Ok(mut state) = strips.get_mut(strip)
+        && state.active != index
     {
-        background.0 = color;
+        state.active = index;
     }
 }
 
@@ -3801,5 +3702,160 @@ mod tests {
             })
             .unwrap_or_default();
         assert_eq!(band, vec!["kept"]);
+    }
+
+    /// **The strip and the model agree, whichever of them moved.** A click on
+    /// the strip lands in the widget's `TabStrip::active`;
+    /// `follow_strip_selection` is what carries it into the model — a
+    /// conversation tab selects its conversation and takes the strip back from
+    /// the People pane, the People tab gives the strip away. Driven through the
+    /// real dynamic strip, so the tab indices it reads are the ones the widget
+    /// re-derives when the People tab is put in front of Nearby.
+    mod strip_sync {
+        use bevy::ecs::world::CommandQueue;
+        use bevy::prelude::*;
+        use pretty_assertions::assert_eq;
+        use sl_client_bevy::{AgentKey, Uuid};
+
+        use super::super::{
+            ConversationKey, ConversationModel, ConversationTab, ConversationsUi, ExternalStripTab,
+            STRIP_ELEMENT, StripFocus, follow_strip_selection,
+        };
+        use crate::ui_tab::{
+            DEFAULT_ELLIPSIS, DynamicTabStrip, TabButton, TabCaption, TabPlacement, TabSpec,
+            TabStrip, spawn_dynamic_tab_strip,
+        };
+
+        /// A boxed error so tests can use `?`.
+        type TestError = Box<dyn core::error::Error>;
+
+        /// Run `build` against the world's commands and settle a frame.
+        fn with_commands<T>(app: &mut App, build: impl FnOnce(&mut Commands) -> T) -> T {
+            let mut queue = CommandQueue::default();
+            let out = {
+                let mut commands = Commands::new(&mut queue, app.world());
+                build(&mut commands)
+            };
+            queue.apply(app.world_mut());
+            app.update();
+            out
+        }
+
+        /// The app, the strip, and its Nearby / People tab buttons: the strip
+        /// the floater builds, with People put in front of Nearby the way
+        /// `crate::people` does.
+        fn strip_app() -> (App, DynamicTabStrip, Entity, Entity) {
+            let mut app = App::new();
+            app.init_resource::<ConversationModel>()
+                .init_resource::<StripFocus>()
+                .add_systems(Update, follow_strip_selection);
+            let parent = app.world_mut().spawn(Node::default()).id();
+            let strip = with_commands(&mut app, |commands| {
+                spawn_dynamic_tab_strip(
+                    commands,
+                    parent,
+                    &TabSpec {
+                        element: STRIP_ELEMENT,
+                        placement: TabPlacement::InlineStart,
+                        labels: &[],
+                        active: 0,
+                        tab_index: 0,
+                        font_size: 13.0,
+                        strip_width: Some(150.0),
+                        ellipsis: DEFAULT_ELLIPSIS,
+                        translate_labels: false,
+                    },
+                )
+            });
+            let nearby = with_commands(&mut app, |commands| {
+                let tab = strip.add_tab(commands, TabCaption::Literal("Nearby"), None);
+                commands
+                    .entity(tab.button)
+                    .insert(ConversationTab(ConversationKey::Nearby));
+                tab.button
+            });
+            let people = with_commands(&mut app, |commands| {
+                let tab = strip.add_tab(commands, TabCaption::Key("people-tab"), Some(0));
+                commands.entity(tab.button).insert(ExternalStripTab);
+                tab.button
+            });
+            app.insert_resource(ConversationsUi {
+                floater_root: Entity::PLACEHOLDER,
+                strip,
+                panel_area: Entity::PLACEHOLDER,
+                nearby_field: Entity::PLACEHOLDER,
+                views: std::collections::BTreeMap::new(),
+            });
+            app.update();
+            (app, strip, nearby, people)
+        }
+
+        /// Make the tab whose button is `button` the strip's active one, as the
+        /// widget's click observer does, and run a frame.
+        fn click(app: &mut App, strip: DynamicTabStrip, button: Entity) -> Result<(), TestError> {
+            let index = app
+                .world()
+                .get::<TabButton>(button)
+                .ok_or("not a tab")?
+                .index;
+            app.world_mut()
+                .get_mut::<TabStrip>(strip.strip)
+                .ok_or("no strip")?
+                .active = index;
+            app.update();
+            Ok(())
+        }
+
+        /// Whether the People pane owns the strip.
+        fn external(app: &App) -> bool {
+            app.world().resource::<StripFocus>().is_external()
+        }
+
+        #[test]
+        fn a_click_on_the_strip_moves_the_model() -> Result<(), TestError> {
+            let (mut app, strip, nearby, people) = strip_app();
+            assert_eq!(
+                app.world()
+                    .get::<TabStrip>(strip.strip)
+                    .map(|state| state.active),
+                Some(1),
+                "People went in front, and Nearby is still the open tab"
+            );
+            assert!(!external(&app));
+
+            click(&mut app, strip, people)?;
+            assert!(external(&app), "the People tab takes the strip");
+
+            click(&mut app, strip, nearby)?;
+            assert!(!external(&app), "a conversation tab takes it back");
+            assert_eq!(
+                app.world().resource::<ConversationModel>().active_key(),
+                ConversationKey::Nearby
+            );
+
+            let peer = ConversationKey::Direct(AgentKey::from(Uuid::from_u128(7)));
+            app.world_mut()
+                .resource_mut::<ConversationModel>()
+                .push_remote(
+                    peer,
+                    AgentKey::from(Uuid::from_u128(7)),
+                    "Avatar Seven",
+                    "hi",
+                );
+            let direct = with_commands(&mut app, |commands| {
+                let tab = strip.add_tab(commands, TabCaption::Literal(""), None);
+                commands.entity(tab.button).insert(ConversationTab(peer));
+                tab.button
+            });
+            click(&mut app, strip, direct)?;
+            let model = app.world().resource::<ConversationModel>();
+            assert_eq!(model.active_key(), peer, "the IM is the open conversation");
+            assert_eq!(
+                model.entries.get(1).map(|entry| entry.unread),
+                Some(0),
+                "and opening it read it"
+            );
+            Ok(())
+        }
     }
 }

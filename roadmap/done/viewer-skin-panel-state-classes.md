@@ -2,7 +2,7 @@
 id: viewer-skin-panel-state-classes
 title: The panels paint their own states, and nine files hand-copied one role
 topic: viewer
-status: in-progress
+status: done
 origin: survey during viewer-skin-widget-state-classes (2026-09-21)
 points: 5
 refs: [viewer-skin-widget-state-classes, viewer-skin-panel-text-roles]
@@ -185,26 +185,36 @@ gone.
 `skin::TEXT_CLASS` now exists and the **fifteen** crate-local copies of
 `const … = "sk-text"` (under five different names) are gone with it.
 
-Still to do:
+### The last two (2026-09-24)
 
-- `sl-viewer-people` — the hand-rolled tab buttons in `conversations.rs` and
-  `people.rs` (`TAB_ACTIVE_*` / `TAB_INACTIVE_*` / `TAB_ATTENTION_*`). Part
-  3's widget-adoption question, now its own task:
-  [[viewer-ui-tab-widget-dynamic-tabs]]. The strip already *is* a `TabStrip`;
-  what the widget cannot do is grow or drop a tab at runtime, which is why the
-  buttons were written twice. Converting their colours in place would dress a
-  hand-rolled strip to look like the widget, which is the wrong half of the
-  fix.
-- `sl-viewer-ui-widgets` — `ui_trackball.rs`'s `DISABLED_MARKER` is the one
-  case that resists a split: the marker's enabled colour is the *body's*
-  (sun / moon) and the horizon swaps which of fill and rim carries it, so
-  Rust and the cascade would be writing the same two properties. Converting
-  it means tokenising the sun and moon colours, which is a design decision of
-  its own.
-- A general list-row **hover** is still not a thing the shared `.sk-list-row`
-  carries: the picker got its own class rather than give a dozen panels a
-  hover they do not have today. [[viewer-skin-list-row-striping]] owns that
-  for all of them.
+- **The People / Conversations tab strip** is the shared widget now:
+  [[viewer-ui-tab-widget-dynamic-tabs]] gave `ui_tab` tabs that come and go,
+  and both panels spawn theirs through it. The seven `TAB_*` constants went
+  with the hand-rolled buttons, the selected look is the widget's `:checked`,
+  and the unread blink is `.sk-tab.sk-attention` — a skin animation, no longer
+  a colour flipped from Rust at `BLINK_HZ`.
+- **The trackball's `DISABLED_MARKER`** resisted a split because Rust and the
+  cascade would both have written the marker's fill and outline. The decision:
+  the marker is *entirely* the cascade's. The sun and moon colours became
+  tokens (`--trackball-sun`, `--trackball-moon`, with
+  `--trackball-marker-outline`), the trackball names its body with a class
+  (`.sk-trackball-sun` / `-moon`), and the marker carries
+  `.sk-below-horizon` while its aim is below — the one fact Rust still says,
+  because the hemisphere is the control's data. Hollow below the horizon and
+  grey when refused (`--text-disabled`, the nearest existing role and a hair
+  off the old constant) are rules in `common.css`. The disc's *fill* stays the
+  widget's: it expresses the hemisphere, not a UI state.
+  `the_marker_says_its_hemisphere_and_the_skin_draws_it` toggles one marker
+  across the horizon both ways.
+
+A general list-row **hover** landed with [[viewer-skin-list-row-striping]].
+
+Live look (2026-09-24, local OpenSim): the Conversations strip selects, resizes
+and keys through the widget; an unread IM tab pulses and stops once opened;
+each trackball's marker turns hollow and filled again as its elevation slider
+crosses the horizon. The **grey** refused marker cannot be seen live, because
+no window disables a trackball today; it rests on the `common.css` rule and the
+widget's own tests.
 
 Not this task, though a grep for state names turns them up: the three copies
 of `DISABLED_COLOR` (`about_region.rs`, `about_land.rs`,

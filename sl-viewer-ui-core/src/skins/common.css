@@ -189,6 +189,43 @@
   border-color: var(--control-border-disabled);
 }
 
+/* A trackball's marker: the body's colour, set by the body class on the
+ * trackball, with a dark outline so a pale marker reads against a pale disc.
+ * Below the horizon it is hollow, outlined in the body's colour — the
+ * reference's "back" thumb image, and the only thing on the disc that says
+ * which side of the horizon the aim is on. A refused control greys the marker
+ * whichever body it holds; its compass letters hide instead (the widget's). */
+.sk-trackball-marker {
+  border-color: var(--trackball-marker-outline);
+}
+
+.sk-trackball-sun .sk-trackball-marker {
+  background-color: var(--trackball-sun);
+}
+
+.sk-trackball-moon .sk-trackball-marker {
+  background-color: var(--trackball-moon);
+}
+
+.sk-trackball-sun .sk-trackball-marker.sk-below-horizon {
+  background-color: #00000000;
+  border-color: var(--trackball-sun);
+}
+
+.sk-trackball-moon .sk-trackball-marker.sk-below-horizon {
+  background-color: #00000000;
+  border-color: var(--trackball-moon);
+}
+
+.sk-trackball:disabled .sk-trackball-marker {
+  background-color: var(--text-disabled);
+}
+
+.sk-trackball:disabled .sk-trackball-marker.sk-below-horizon {
+  background-color: #00000000;
+  border-color: var(--text-disabled);
+}
+
 /* A colour swatch a panel opens the picker from. Its fill is the colour it
  * carries — the widget's, not the skin's — but its rim is chrome, and a swatch
  * the consumer has refused dims from `:disabled` over the
@@ -880,10 +917,10 @@
 }
 
 /* A tab page — the "content" shade the active tab shares, so the selected tab
- * reads as merging into its panel. The tab BUTTONS are absent for the same
- * reason the floater title bar is: their active / inactive / disabled paints
- * are Rust-driven from the `--card-bg`, `--surface-bg`, `--accent`,
- * `--surface-border` and `--text-disabled` roles. */
+ * reads as merging into its panel. Also worn by the panes a caller keeps
+ * beside a dynamic strip (the Conversations floater) and by the two buttons in
+ * a pane's corner that occlude a transcript line, so all three follow the
+ * selected tab's shade together. */
 .sk-tab-panel {
   background-color: var(--card-bg);
 }
@@ -1619,6 +1656,29 @@
  * rule with a static paint and nothing else changes. */
 .sk-attention {
   animation: sk-attention-pulse 1s infinite;
+}
+
+/* A TAB wanting attention: a conversation with unread lines, while another
+ * tab is open. Its own pulse because a tab rests on `--surface-bg`, not the
+ * toolbar button's `--control-bg`, and a pulse that started from the wrong
+ * shade would jump on every cycle. The open tab never carries the class, so
+ * `:checked` needs no rule against it. */
+.sk-tab.sk-attention {
+  animation: sk-tab-attention-pulse 1s infinite;
+}
+
+@keyframes sk-tab-attention-pulse {
+  from {
+    background-color: var(--surface-bg);
+  }
+
+  50% {
+    background-color: var(--selection-bg);
+  }
+
+  to {
+    background-color: var(--surface-bg);
+  }
 }
 
 @keyframes sk-attention-pulse {

@@ -63,7 +63,7 @@ use bevy_flair::style::components::ClassList;
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 use sl_viewer_ui_core::i18n::Translated;
-use sl_viewer_ui_core::skin::text_role;
+use sl_viewer_ui_core::skin::{set_state_class_on, text_role};
 use sl_viewer_ui_core::ui_font::UiFont;
 
 /// The control's outer square, logical px. The aiming circle is inscribed in it
@@ -120,18 +120,30 @@ const DISC_CLASS: &str = "sk-trackball-disc";
 /// The compass letters' colour.
 const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
-/// The sun marker's colour.
+/// The skin class on the marker. Its whole look is the skin's: the body's
+/// colour (`--trackball-sun` / `--trackball-moon`, from the body class on the
+/// trackball), hollow below the horizon, and `--text-disabled` on a refused
+/// control — so a marker is one thing the cascade paints rather than two
+/// properties Rust and the cascade would both be writing.
+const MARKER_CLASS: &str = "sk-trackball-marker";
+
+/// The class on a marker whose aim is below the horizon, where the reference
+/// draws it hollow. Which hemisphere the aim is in is the control's data, not a
+/// UI state, but it is what decides the marker's look, so the widget says it
+/// and the skin draws it.
+const BELOW_HORIZON_CLASS: &str = "sk-below-horizon";
+
+/// The sun marker's colour before the skin has resolved — the pre-load
+/// fallback of `--trackball-sun`.
 const SUN_COLOR: Color = Color::srgb(1.0, 0.85, 0.35);
 
-/// The moon marker's colour.
+/// The moon marker's colour before the skin has resolved — the pre-load
+/// fallback of `--trackball-moon`.
 const MOON_COLOR: Color = Color::srgb(0.82, 0.86, 0.95);
 
-/// A marker's outline above the horizon — dark, so a pale marker reads against
-/// a pale disc.
+/// A marker's outline above the horizon before the skin has resolved — the
+/// pre-load fallback of `--trackball-marker-outline`.
 const MARKER_OUTLINE: Color = Color::srgba(0.06, 0.07, 0.10, 1.0);
-
-/// A disabled marker's colour, whichever body it is.
-const DISABLED_MARKER: Color = Color::srgb(0.42, 0.44, 0.48);
 
 // ---------------------------------------------------------------------------
 // The value.
@@ -147,11 +159,20 @@ pub enum TrackballBody {
 }
 
 impl TrackballBody {
-    /// The marker colour this body is drawn in.
+    /// The marker colour this body is drawn in until the skin resolves.
     const fn color(self) -> Color {
         match self {
             Self::Sun => SUN_COLOR,
             Self::Moon => MOON_COLOR,
+        }
+    }
+
+    /// The skin class on a trackball aiming this body, which picks its
+    /// marker's colour.
+    const fn class(self) -> &'static str {
+        match self {
+            Self::Sun => "sk-trackball-sun",
+            Self::Moon => "sk-trackball-moon",
         }
     }
 
@@ -315,7 +336,7 @@ pub fn spawn_trackball(
             },
             body,
             aim,
-            ClassList::new_with_classes([TRACKBALL_CLASS]),
+            ClassList::new_with_classes([TRACKBALL_CLASS, body.class()]),
             TrackballDrag::default(),
             TabIndex(tab_index),
             Pickable::default(),
@@ -372,6 +393,11 @@ pub fn spawn_trackball(
         },
         BorderColor::all(MARKER_OUTLINE),
         BackgroundColor(body.color()),
+        if aim.above_horizon() {
+            ClassList::new_with_classes([MARKER_CLASS])
+        } else {
+            ClassList::new_with_classes([MARKER_CLASS, BELOW_HORIZON_CLASS])
+        },
         TrackballMarker,
         Pickable::IGNORE,
         Name::new(format!("{element}-{}:trackball-marker", body.slug())),
@@ -667,8 +693,10 @@ fn on_trackball_key(
 // Drawing.
 // ---------------------------------------------------------------------------
 
-/// Place every trackball's marker and paint the disc, the marker and the
-/// compass letters for the hemisphere it is in and whether it is enabled.
+/// Place every trackball's marker, and bring the disc's fill, the marker's
+/// hemisphere class and the compass letters in step with the hemisphere the
+/// aim is in and whether the control is enabled. The marker's colours are the
+/// skin's from there.
 ///
 /// One query per component type rather than one per role: two
 /// `Query<&mut BackgroundColor>` in a single system are a conflicting access
@@ -676,12 +704,7 @@ fn on_trackball_key(
 /// compare, so a control nobody is touching re-marks nothing and never
 /// re-enters layout.
 fn sync_trackballs(
-    balls: Query<(
-        &TrackballAim,
-        &TrackballBody,
-        &Children,
-        Has<InteractionDisabled>,
-    )>,
+    balls: Query<(&TrackballAim, &Children, Has<InteractionDisabled>)>,
     parts: Query<(
         Has<TrackballDisc>,
         Has<TrackballMarker>,
@@ -689,17 +712,12 @@ fn sync_trackballs(
     )>,
     mut nodes: Query<&mut Node>,
     mut backgrounds: Query<&mut BackgroundColor>,
-    mut borders: Query<&mut BorderColor>,
+    mut classes: Query<&mut ClassList>,
     mut visibilities: Query<&mut Visibility>,
 ) {
-    for (aim, body, children, disabled) in &balls {
+    for (aim, children, disabled) in &balls {
         let above = aim.above_horizon();
         let at = marker_inset(*aim);
-        let marker_color = if disabled {
-            DISABLED_MARKER
-        } else {
-            body.color()
-        };
         for child in children.iter() {
             let Ok((is_disc, is_marker, is_label)) = parts.get(child) else {
                 continue;
@@ -716,13 +734,10 @@ fn sync_trackballs(
                 place_marker(child, at, &mut nodes);
                 // Below the horizon the marker is hollow — the reference's
                 // "back" thumb image, and the only thing on the disc that says
-                // which side of the horizon it is showing.
-                let (fill, outline) = if above {
-                    (marker_color, MARKER_OUTLINE)
-                } else {
-                    (Color::NONE, marker_color)
-                };
-                paint(child, fill, outline, &mut backgrounds, &mut borders);
+                // which side of the horizon it is showing. The skin draws that,
+                // and the refused look, from this class and the ancestor
+                // `:disabled`.
+                set_state_class_on(&mut classes, child, BELOW_HORIZON_CLASS, !above);
             }
             if is_label && let Ok(mut visibility) = visibilities.get_mut(child) {
                 // The reference hides the direction labels on a disabled
@@ -737,27 +752,6 @@ fn sync_trackballs(
                 }
             }
         }
-    }
-}
-
-/// Write a node's fill and outline, each only if it would change.
-fn paint(
-    entity: Entity,
-    fill: Color,
-    outline: Color,
-    backgrounds: &mut Query<&mut BackgroundColor>,
-    borders: &mut Query<&mut BorderColor>,
-) {
-    if let Ok(mut background) = backgrounds.get_mut(entity)
-        && background.0 != fill
-    {
-        background.0 = fill;
-    }
-    let wanted = BorderColor::all(outline);
-    if let Ok(mut border) = borders.get_mut(entity)
-        && *border != wanted
-    {
-        *border = wanted;
     }
 }
 
@@ -853,6 +847,7 @@ mod tests {
     use bevy::input_focus::InputFocus;
     use bevy::prelude::*;
     use bevy::ui_widgets::ValueChange;
+    use bevy_flair::style::components::ClassList;
     use pretty_assertions::assert_eq;
 
     use super::{
@@ -1157,6 +1152,71 @@ mod tests {
         app.update();
         let north = marker_at(&app, trackball).ok_or("no marker")?;
         assert!(north.y < centre.y, "{north} is not north of {centre}");
+        Ok(())
+    }
+
+    /// The marker's classes: the one the skin paints it through, and the
+    /// below-horizon one on this marker only while its aim is below.
+    fn marker_classes(app: &App, trackball: Entity) -> Option<Vec<String>> {
+        let children: Vec<Entity> = app.world().get::<Children>(trackball)?.iter().collect();
+        let marker = children
+            .into_iter()
+            .find(|child| app.world().get::<super::TrackballMarker>(*child).is_some())?;
+        let classes = app.world().get::<ClassList>(marker)?;
+        Some(
+            [super::MARKER_CLASS, super::BELOW_HORIZON_CLASS]
+                .into_iter()
+                .filter(|class| classes.contains(*class))
+                .map(str::to_owned)
+                .collect(),
+        )
+    }
+
+    /// **The marker's look is the skin's, from what the widget says.** The
+    /// trackball names its body, so the skin picks the colour; the marker says
+    /// which hemisphere it is in, so the skin draws it hollow below the
+    /// horizon; and the refused state is the ancestor `:disabled` the consumer
+    /// already sets — nothing is painted from Rust. Toggled on one entity, both
+    /// ways, because the other shape passes on a widget that sets a class once
+    /// and never takes it off.
+    #[test]
+    fn the_marker_says_its_hemisphere_and_the_skin_draws_it() -> Result<(), TestError> {
+        let (mut app, trackball) = trackball_app(TrackballBody::Moon, TrackballAim::ZENITH);
+        assert!(
+            app.world()
+                .get::<ClassList>(trackball)
+                .is_some_and(|classes| classes.contains("sk-trackball-moon")),
+            "the trackball names the body the skin colours its marker by"
+        );
+        assert_eq!(
+            marker_classes(&app, trackball),
+            Some(vec![super::MARKER_CLASS.to_owned()])
+        );
+
+        app.world_mut().entity_mut(trackball).insert(TrackballAim {
+            azimuth: 45.0,
+            elevation: -30.0,
+        });
+        app.update();
+        assert_eq!(
+            marker_classes(&app, trackball),
+            Some(vec![
+                super::MARKER_CLASS.to_owned(),
+                super::BELOW_HORIZON_CLASS.to_owned()
+            ]),
+            "below the horizon"
+        );
+
+        app.world_mut().entity_mut(trackball).insert(TrackballAim {
+            azimuth: 45.0,
+            elevation: 30.0,
+        });
+        app.update();
+        assert_eq!(
+            marker_classes(&app, trackball),
+            Some(vec![super::MARKER_CLASS.to_owned()]),
+            "and back above it"
+        );
         Ok(())
     }
 

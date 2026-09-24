@@ -128,6 +128,12 @@
   --title-text-inactive: #7f9bb5;
   --glyph-button-bg: #ffffff14;
 
+  /* The sun / moon trackball's marker: the body's colour, and the dark
+   * outline that keeps a pale marker readable on a pale disc. */
+  --trackball-sun: #ffd959;
+  --trackball-moon: #d1dbf2;
+  --trackball-marker-outline: #10121a;
+
   /* Pie menu */
   --pie-bg: #0f2740cc;
   --pie-line: #00000080;

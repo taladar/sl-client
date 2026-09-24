@@ -67,7 +67,7 @@ use sl_client_bevy::{
 
 use sl_settings::SettingValue;
 
-use crate::conversations::{ConversationsUi, StripFocus};
+use crate::conversations::{ConversationsUi, ExternalStripTab, StripFocus, select_strip_tab};
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::intents::OpenAvatarProfile;
 use crate::intents::RequestBlock;
@@ -78,7 +78,9 @@ use crate::social::{FriendRow, FriendsModel, short_id};
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonSpec, UiLabel};
-use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab_strip};
+use crate::ui_tab::{
+    DEFAULT_ELLIPSIS, TabButton, TabCaption, TabPlacement, TabSpec, TabStrip, spawn_tab_strip,
+};
 use crate::ui_table::{
     MultiSort, TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableSelectionMode,
     TableSpec, TableState, register_table_settings, spawn_table, spawn_table_row,
@@ -111,21 +113,7 @@ const RIGHT_COL_WIDTH: f32 = 22.0;
 /// pixels.
 const ICON_DISPLAY: f32 = 15.0;
 
-/// An inactive tab's background — recessed, matching [`crate::conversations`]'s
-/// tab palette so the People tab is visually one of the strip's tabs.
-const TAB_INACTIVE_BACKGROUND: Color = Color::srgb(0.11, 0.13, 0.17);
-
-/// The active tab's background — the panel shade, so the selected tab merges into
-/// its pane.
-const TAB_ACTIVE_BACKGROUND: Color = Color::srgb(0.19, 0.23, 0.31);
-
-/// An inactive tab's border.
-const TAB_BORDER: Color = Color::srgb(0.28, 0.33, 0.42);
-
-/// The active tab's border — the bright "this one is selected" accent.
-const TAB_ACTIVE_BORDER: Color = Color::srgb(0.52, 0.68, 0.95);
-
-/// A tab / label's text colour.
+/// A label's text colour.
 const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// An action button's background.
@@ -874,8 +862,8 @@ pub(crate) struct FriendActionButton {
 /// The People tab / pane entities — the ECS mirror of [`FriendsModel`].
 #[derive(Resource, Debug)]
 pub(crate) struct PeopleUi {
-    /// The People tab button in the conversations strip (recoloured active /
-    /// inactive).
+    /// The People tab's button on the conversations strip, made the strip's
+    /// active tab while the People pane is front.
     tab_button: Entity,
     /// The People pane, displayed only while the strip focus is external.
     pane: Entity,
@@ -1042,11 +1030,6 @@ struct PendingGrant {
     rights: FriendRights,
 }
 
-/// A request to make the People tab the front surface — written by the People tab
-/// button's press observer.
-#[derive(Message, Debug, Clone, Copy)]
-struct SelectPeople;
-
 /// Which of the People pane's sub-tabs a request wants fronted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PeopleSubTab {
@@ -1133,7 +1116,6 @@ impl Plugin for PeoplePlugin {
             .init_resource::<FriendClickTracker>()
             .init_resource::<PendingGrantConfirm>()
             .init_resource::<PendingPeopleSubTab>()
-            .add_message::<SelectPeople>()
             .add_message::<OpenPeopleSubTab>()
             .add_message::<SortByColumn>()
             .add_systems(Startup, register_people_settings)
@@ -1144,7 +1126,7 @@ impl Plugin for PeoplePlugin {
                     ingest_friend_events,
                     notify_friend_presence,
                     request_friend_names,
-                    apply_people_selection,
+                    seed_friends_on_first_show,
                     apply_people_sub_tab,
                     mirror_friend_selection,
                     seed_sort_from_settings.after(load_account_settings),
@@ -1202,51 +1184,14 @@ fn spawn_people_tab(
     let panel_area = conversations.panel_area();
     let icons = PeopleIcons::generate(&mut images);
 
-    // The pinned People tab button — a label, no close button (un-closable like
-    // Nearby Chat), styled to match the conversation tabs.
-    let tab_button = commands
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(5.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                align_items: AlignItems::Center,
-                overflow: Overflow::clip(),
-                ..row(Val::Px(4.0))
-            },
-            BorderColor::all(TAB_BORDER),
-            BackgroundColor(TAB_INACTIVE_BACKGROUND),
-            Pickable {
-                should_block_lower: true,
-                is_hoverable: true,
-            },
-            Name::new("people-tab"),
-        ))
-        .observe(
-            |press: On<Pointer<Press>>, mut select: MessageWriter<SelectPeople>| {
-                if press.button == PointerButton::Primary {
-                    select.write(SelectPeople);
-                }
-            },
-        )
-        .id();
-    // Insert the People tab as the **first** tab in the strip, above Nearby Chat,
-    // so every chat tab (nearby + IMs + groups) stays grouped below it.
-    commands.entity(strip).insert_child(0, tab_button);
-    commands.spawn((
-        Text::new(String::new()),
-        UiFont::Sans.at(CHROME_FONT_SIZE),
-        text_role(LABEL_COLOR),
-        Translated::new(PEOPLE_TAB_KEY),
-        Node {
-            flex_grow: 1.0,
-            min_width: Val::Px(0.0),
-            ..default()
-        },
-        Pickable::IGNORE,
-        Name::new("people-tab-label"),
-        ChildOf(tab_button),
-    ));
+    // The pinned People tab — the strip's own widget tab, un-closable like
+    // Nearby Chat, and **first**, above it, so every chat tab (nearby + IMs +
+    // groups) stays grouped below. Its marker is what tells the conversations
+    // strip that selecting it fronts this pane rather than a conversation.
+    let tab_button = strip
+        .add_tab(&mut commands, TabCaption::Key(PEOPLE_TAB_KEY), Some(0))
+        .button;
+    commands.entity(tab_button).insert(ExternalStripTab);
 
     // The pane — hidden unless the People tab owns the strip.
     let pane = commands
@@ -1564,7 +1509,7 @@ fn augment_sortable_header(
         .spawn((
             Text::new(String::new()),
             UiFont::Sans.at(ROW_FONT_SIZE),
-            text_meaning(TAB_ACTIVE_BORDER, ACTIVE_TEXT_CLASS),
+            text_meaning(SkinPalette::FALLBACK.accent, ACTIVE_TEXT_CLASS),
             Node {
                 flex_shrink: 0.0,
                 margin: UiRect::left(Val::Px(2.0)),
@@ -1869,27 +1814,19 @@ fn request_friend_names(
 // Selection / view / refresh
 // ---------------------------------------------------------------------------
 
-/// Give the strip to the People pane when its tab is pressed, and seed the buddy
-/// list with a [`Command::QueryFriends`] the first time (later kept live by the
-/// granular friend events).
-fn apply_people_selection(
-    mut selects: MessageReader<SelectPeople>,
-    mut focus: ResMut<StripFocus>,
+/// Seed the buddy list with a [`Command::QueryFriends`] the first time the
+/// People pane is fronted — by its tab on the strip or by a menu asking for one
+/// of its sub-tabs — after which the granular friend events keep it live.
+fn seed_friends_on_first_show(
+    focus: Res<StripFocus>,
     mut seeded: Local<bool>,
     mut commands: MessageWriter<SlCommand>,
 ) {
-    let mut selected = false;
-    for _select in selects.read() {
-        selected = true;
-    }
-    if !selected {
+    if *seeded || !focus.is_external() {
         return;
     }
-    focus.take_external();
-    if !*seeded {
-        *seeded = true;
-        commands.write(SlCommand(Command::QueryFriends));
-    }
+    *seeded = true;
+    commands.write(SlCommand(Command::QueryFriends));
 }
 
 /// Front the People pane with the requested sub-tab selected, retrying each
@@ -2169,29 +2106,30 @@ fn refresh_friend_actions(
 }
 
 /// The People pane's chrome, bundled as one
-/// [`SystemParam`](bevy::ecs::system::SystemParam): the tab background and
-/// border, the display flags of the pane and its four sub-tab contents, and the
-/// two sort arrows' glyphs.
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the strips (the
+/// conversations strip the People tab sits on, and the pane's own sub-strip),
+/// the People tab's place on the first, the display flags of the pane and its
+/// four sub-tab contents, and the two sort arrows' glyphs.
 #[derive(Debug, bevy::ecs::system::SystemParam)]
 struct PeopleChrome<'w, 's> {
-    /// The tab button's background.
-    backgrounds: Query<'w, 's, &'static mut BackgroundColor>,
-    /// Its border.
-    borders: Query<'w, 's, &'static mut BorderColor>,
+    /// Both strips' selections.
+    strips: Query<'w, 's, &'static mut TabStrip>,
+    /// The People tab's place on the conversations strip.
+    tabs: Query<'w, 's, &'static TabButton>,
     /// The pane's and the sub-tab contents' display flags.
     nodes: Query<'w, 's, &'static mut Node>,
     /// The two sort arrows.
     texts: Query<'w, 's, &'static mut Text>,
 }
 
-/// Keep the People surface in step: the tab colours (active while the strip focus
-/// is external), the pane visibility, the Friends / Groups sub-content switch, and
+/// Keep the People surface in step: the People tab active on the strip while
+/// the strip focus is external, the pane visibility, the Friends / Groups sub-content switch, and
 /// the Name / Status sort-direction arrows from the primary sort key.
 fn refresh_people(
     focus: Res<StripFocus>,
     ui: Option<Res<PeopleUi>>,
     sort: Res<SortState>,
-    strips: Query<&TabStrip>,
+    conversations: Option<Res<ConversationsUi>>,
     mut chrome: PeopleChrome,
 ) {
     let Some(ui) = ui else {
@@ -2212,17 +2150,14 @@ fn refresh_people(
         sort_arrow(primary, SortColumn::Online),
     );
 
-    let (background, border) = if active {
-        (TAB_ACTIVE_BACKGROUND, TAB_ACTIVE_BORDER)
-    } else {
-        (TAB_INACTIVE_BACKGROUND, TAB_BORDER)
-    };
-    set_background(&mut chrome.backgrounds, ui.tab_button, background);
-    if let Ok(mut color) = chrome.borders.get_mut(ui.tab_button) {
-        let wanted = BorderColor::all(border);
-        if *color != wanted {
-            *color = wanted;
-        }
+    // Fronted by something other than a click on the tab itself (a menu
+    // asking for a sub-tab): the strip follows, and its `:checked` is the
+    // selected look.
+    if active
+        && let Some(conversations) = conversations.as_deref()
+        && let Ok(tab) = chrome.tabs.get(ui.tab_button)
+    {
+        select_strip_tab(&mut chrome.strips, conversations.strip().strip, tab.index);
     }
 
     set_display(&mut chrome.nodes, ui.pane, active);
@@ -2230,7 +2165,8 @@ fn refresh_people(
     // Switch the Friends / Groups / Blocked / Contact Sets content from the
     // sub-strip's active tab (an unreadable strip falls back to Friends, the
     // default tab).
-    let sub_tab = strips
+    let sub_tab = chrome
+        .strips
         .get(ui.sub_strip)
         .map_or(FRIENDS_TAB_INDEX, |strip| strip.active);
     set_display(
@@ -2253,15 +2189,6 @@ fn refresh_people(
         ui.contact_sets_content,
         sub_tab == CONTACT_SETS_TAB_INDEX,
     );
-}
-
-/// Set a node's background only on a real change.
-fn set_background(backgrounds: &mut Query<&mut BackgroundColor>, entity: Entity, color: Color) {
-    if let Ok(mut background) = backgrounds.get_mut(entity)
-        && background.0 != color
-    {
-        background.0 = color;
-    }
 }
 
 /// Toggle a node shown / hidden only on a real change.
