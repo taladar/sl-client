@@ -112,7 +112,15 @@
   --notice-notify: #8c99ad;
   --notice-alert: #f2b84d;
   --notice-modal: #e65c52;
+  /* The keyboard focus ring: its colour, and its GEOMETRY. The two lengths are
+   * tokens because a ring is as much a shape as a colour — a classic skin draws
+   * a 1 px hairline tight against the widget where a modern one draws a 2 px
+   * halo standing off it — and without them a skin could only change that by
+   * restating all three rules that ring (`.sk-focusable:focus-visible`, a
+   * focused editor, a focused search box). */
   --focus-ring: #ffc740;
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 1px;
 
   /* A friend's presence. Meaning-bearing for the same reason as the kinds
    * above, and the values the Friends list carried before they were roles. */

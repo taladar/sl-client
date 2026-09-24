@@ -1,0 +1,24 @@
+/*
+ * hairline-ring.css — a TEST-ONLY skin: the focus ring as a classic skin would
+ * draw it, a 1 px hairline tight against the widget instead of a 2 px halo
+ * standing off it.
+ *
+ * It answers one question, in
+ * `skin_palette_resolves::a_skin_can_reshape_the_focus_ring_by_value`: are
+ * `--focus-ring-width` / `--focus-ring-offset` real tokens, or does a skin
+ * still have to restate the three rules that ring (a focusable widget, a
+ * focused editor, a focused search box) to change the shape of one? Both shipped skins
+ * give them the same values, so neither can tell a live token from a literal
+ * that happens to agree with it — and a `var()` bevy_flair failed to parse in a
+ * LENGTH property would leave no ring at all, silently.
+ *
+ * A fixture, not a skin anyone wears, so it lives beside this file rather than
+ * under `assets/skins/` — see light-field.css for the whole reason, and for why
+ * the base goes into a cascade LAYER.
+ */
+@import "embedded://sl_viewer_ui_core/skins/fallback.css" layer(fallback);
+
+:root {
+  --focus-ring-width: 1px;
+  --focus-ring-offset: 0px;
+}

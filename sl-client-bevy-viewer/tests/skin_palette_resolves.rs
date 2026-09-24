@@ -1369,6 +1369,80 @@ mod test {
         Ok(())
     }
 
+    /// **A skin can reshape the focus ring, not only recolour it.**
+    ///
+    /// The ring's colour was always `--focus-ring`; its *geometry* was a pair
+    /// of literals repeated by the three rules that ring — a focusable widget,
+    /// a focused editor, a focused search box — so a skin whose whole look is a
+    /// hairline tight against the control could only get one by restating all
+    /// three. `--focus-ring-width` / `--focus-ring-offset` make it a value.
+    ///
+    /// Worth a test of its own because both shipped skins give the tokens the
+    /// same numbers the literals had, so neither can tell a live token from a
+    /// literal that agrees with it — and a `var()` `bevy_flair` failed to parse
+    /// in a *length* property would leave the ring at nothing, with no log.
+    /// The fixture beside this file sets a 1 px ring at zero offset and touches
+    /// nothing else.
+    #[test]
+    fn a_skin_can_reshape_the_focus_ring_by_value() -> Result<(), TestError> {
+        use bevy::input_focus::{InputFocus, InputFocusVisible};
+
+        let mut app = app_with_assets(&test_assets_dir());
+        let handle: Handle<StyleSheet> = app
+            .world()
+            .resource::<AssetServer>()
+            .load("hairline-ring.css");
+        let root = app
+            .world_mut()
+            .spawn((Node::default(), Styled::new(handle.clone())))
+            .id();
+        // One of each ringed thing: a plain focusable (Tab only), an editor
+        // (any focus), and a search box (which is ringed through its class).
+        let focusable = app
+            .world_mut()
+            .spawn((
+                Node::default(),
+                ClassList::new("sk-focusable sk-button"),
+                ChildOf(root),
+            ))
+            .id();
+        let search = app
+            .world_mut()
+            .spawn((
+                Node::default(),
+                ClassList::new("sk-search-field sk-focus-within"),
+                ChildOf(root),
+            ))
+            .id();
+        app.world_mut()
+            .insert_resource(InputFocus::from_entity(focusable));
+        app.world_mut().insert_resource(InputFocusVisible(true));
+
+        load(&mut app, &handle)?;
+        app.update();
+
+        let outline = |entity| {
+            app.world()
+                .get::<Outline>(entity)
+                .map(|outline| (outline.width, outline.offset))
+        };
+        assert_eq!(
+            outline(focusable).ok_or("the focusable resolved no outline at all")?,
+            (Val::Px(1.0), Val::Px(0.0)),
+            "a skin that sets `--focus-ring-width` / `--focus-ring-offset` must \
+             get that ring — if these are still the fallback's 2px/1px the \
+             tokens are not wired, and if they are zero the `var()` did not \
+             parse in a length property"
+        );
+        assert_eq!(
+            outline(search).ok_or("the search box resolved no outline at all")?,
+            (Val::Px(1.0), Val::Px(0.0)),
+            "every rule that rings must read the same pair, or a skin reshapes \
+             the ring in some places and not others"
+        );
+        Ok(())
+    }
+
     /// **A combo's drop-down has a surface of its own, and an opaque one.**
     ///
     /// It is a *list*, so it takes the field family's text — and it **floats**,

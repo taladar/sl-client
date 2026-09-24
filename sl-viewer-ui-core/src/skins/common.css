@@ -351,8 +351,13 @@
  *
  * Drawn as an outline rather than a border recolour: an outline sits *outside*
  * the border box, so it never disturbs the widget's own frame or reflows it,
- * and a widget need not reserve a border to be ringed. It is themed by the
- * --focus-ring token, so a user theme recolours it with everything else.
+ * and a widget need not reserve a border to be ringed. Its three properties are
+ * all tokens — --focus-ring, --focus-ring-width and --focus-ring-offset — so a
+ * user theme recolours it with everything else, and a skin whose whole look is
+ * a thin hairline can draw one by VALUE rather than by restating these rules
+ * (and the two others that ring: a focused editor, and a search box). The
+ * resting width stays a literal 0px: that is not a choice a skin makes, it is
+ * what "not focused" means.
  *
  * :focus-visible tracks bevy_input_focus's InputFocusVisible — true on Tab,
  * false on a pointer click (both driven by the plugins, see src/ui.rs) — so the
@@ -370,13 +375,13 @@
 .sk-focusable {
   outline-width: 0px;
   outline-color: var(--focus-ring);
-  outline-offset: 1px;
+  outline-offset: var(--focus-ring-offset);
 }
 
 .sk-focusable:focus-visible {
   outline-color: var(--focus-ring);
-  outline-width: 2px;
-  outline-offset: 1px;
+  outline-width: var(--focus-ring-width);
+  outline-offset: var(--focus-ring-offset);
 }
 
 /* A leading accent bar with a hanging indent — the logical box case. Under RTL
@@ -942,8 +947,8 @@
  * `.sk-focusable` rule's zero width is what it collapses back to on blur. */
 .sk-text-field:focus {
   outline-color: var(--focus-ring);
-  outline-width: 2px;
-  outline-offset: 1px;
+  outline-width: var(--focus-ring-width);
+  outline-offset: var(--focus-ring-offset);
 }
 
 /* The reusable search box (viewer-ui-search-field) — a single-line text input,
@@ -963,7 +968,7 @@
    * box would ring once and keep the ring for ever. */
   outline-width: 0px;
   outline-color: var(--focus-ring);
-  outline-offset: 1px;
+  outline-offset: var(--focus-ring-offset);
 }
 
 /* THE BOX IS WHAT LIGHTS, not the editor inside it.
@@ -980,8 +985,8 @@
 .sk-search-field.sk-focus-within {
   background-color: var(--field-bg-focused);
   outline-color: var(--focus-ring);
-  outline-width: 2px;
-  outline-offset: 1px;
+  outline-width: var(--focus-ring-width);
+  outline-offset: var(--focus-ring-offset);
 }
 
 /* ...so the editor inside it does NOT ring. Both rules above the search box

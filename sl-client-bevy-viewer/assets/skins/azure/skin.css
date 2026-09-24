@@ -72,6 +72,8 @@
 
   /* Focus ring */
   --focus-ring: #ffd166;
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 1px;
 
   /* Accent */
   --accent: #38bdf8;

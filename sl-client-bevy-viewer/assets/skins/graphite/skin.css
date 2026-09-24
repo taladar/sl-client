@@ -93,8 +93,11 @@
   --list-row-selected-bg: #3d57858c;
   --list-row-selected-text: #e6ebf2;
 
-  /* Focus ring — loud, so Tab movement is unmistakable. */
+  /* Focus ring — loud, so Tab movement is unmistakable, and standing off the
+   * widget by a pixel so it reads as a ring rather than a second border. */
   --focus-ring: #ffc740;
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 1px;
 
   /* Accent */
   --accent: #5cb8fa;

@@ -122,7 +122,8 @@ Defined by every skin's `skin.css`, consumed by `common.css`:
 | `--field-bg` | an editable field's recessed well |
 | `--field-text` | the text being edited |
 | `--caret` / `--selection` / `--selection-unfocused` | the text caret and its two selection washes |
-| `--focus-ring` | the keyboard-focus ring |
+| `--focus-ring` | the keyboard-focus ring's colour |
+| `--focus-ring-width` / `--focus-ring-offset` | its geometry: how thick the ring is, and how far it stands off the widget (a classic hairline is `1px` / `0px`) |
 | `--accent` | accent bars, an active tab's frame, a lit radio, a drag grip |
 | `--selection-bg` | a lit control's (translucent) background: a toggled toolbar button, an active tab |
 | `--list-row-bg` | a scroll list's ordinary row — transparent in both shipped skins, so the list's own face shows through |

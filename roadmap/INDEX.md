@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 63 |
 | in-progress | 28 |
 | bugs | 8 |
-| done | 1217 |
+| done | 1218 |
 | deferred | 30 |
 | wont-do | 16 |
-| **total** | **1787** |
+| **total** | **1788** |
 
 ## ideas (118)
 
@@ -1318,7 +1318,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1217)
+## done (1218)
 
 ### protocol
 
@@ -2971,6 +2971,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   closer"
 - [`viewer-sit-target-and-stand-button`](done/viewer-sit-target-and-stand-button.md)
   — Sit target ignored on sit, and no Stand button while seated
+- [`viewer-skin-focus-ring-geometry-tokens`](done/viewer-skin-focus-ring-geometry-tokens.md)
+  — The focus ring's shape becomes a value, not three repeated literals
 - [`viewer-skin-image-backed-widgets`](done/viewer-skin-image-backed-widgets.md)
   — Nine-sliced image surfaces, so a skin can change a widget's shape (blocked
   by `viewer-skin-widget-state-classes` (done))
