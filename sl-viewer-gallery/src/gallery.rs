@@ -59,6 +59,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui_widgets::{Activate, Button, ControlOrientation, Scrollbar, ScrollbarThumb};
 use bevy::window::PresentMode;
+use bevy::winit::{UpdateMode, WinitSettings};
 use bevy_flair::style::components::ClassList;
 use tracing::info;
 
@@ -384,6 +385,7 @@ pub fn run(assets: AssetPlugin, registry: GalleryRegistry) -> AppExit {
             Startup,
             (
                 register_ui_fonts,
+                read_dump_element_request,
                 spawn_gallery_camera,
                 spawn_ui_root.in_set(UiScaffoldSystems::SpawnRoot),
                 setup_gallery.after(UiScaffoldSystems::SpawnRoot),
@@ -426,6 +428,8 @@ pub fn run(assets: AssetPlugin, registry: GalleryRegistry) -> AppExit {
                 // Reads the same computed boxes to keep the stored offset from
                 // banking slack past the end of the page.
                 clamp_gallery_scroll,
+                // And the diagnostic that reads them to answer "what is that".
+                dump_element_card,
             )
                 .after(bevy::ui::UiSystems::Layout),
         )
@@ -1010,7 +1014,16 @@ fn spawn_element_cards(
     // person should not have to scroll to the bottom to find the openers.
     spawn_floater_switcher(commands, parent, registry);
     for element in registry.elements {
-        let card = commands.spawn(card_bundle(parent)).id();
+        let card = commands
+            .spawn((
+                card_bundle(parent),
+                // Named after the element it holds, so a diagnosis has
+                // something to address: `dump_element_card` finds a card this
+                // way, and an entity inspector shows which card a stray node
+                // belongs to without counting siblings.
+                Name::new(format!("{GALLERY_CARD_PREFIX}{}", element.id)),
+            ))
+            .id();
         commands.spawn((
             Text::new(format!("{} — {}", element.id, element.summary)),
             UiFont::Mono.at(CHROME_FONT_SIZE),
@@ -1094,6 +1107,178 @@ fn spawn_resizable_tabs_card(commands: &mut Commands, parent: Entity, cell: Gall
         ChildOf(card),
     ));
     crate::ui_tab::spawn_tabs_resizable_demo(commands, card, cell.cx());
+}
+
+/// The prefix on an element card's [`Name`], ahead of the element's own id.
+const GALLERY_CARD_PREFIX: &str = "gallery-card:";
+
+/// The environment variable naming an element whose card subtree to dump once
+/// the layout has settled — `SL_GALLERY_DUMP_ELEMENT=notecard-reader`.
+const DUMP_ELEMENT_ENV: &str = "SL_GALLERY_DUMP_ELEMENT";
+
+/// How many frames to let pass before dumping, so the dump reads a settled
+/// layout rather than the first frame's guesses (fonts load, text measures, and
+/// a scroll container resolves over several frames).
+///
+/// Overridable with `SL_GALLERY_DUMP_AFTER`, because "the dump never appeared"
+/// has two causes — the countdown has not finished, or the system is not
+/// running at all — and being able to ask for frame 1 tells them apart.
+const DUMP_SETTLE_FRAMES: u32 = 120;
+
+/// How often to say the countdown is still running, in frames. Without this a
+/// silent log is ambiguous between "still settling" and "never scheduled".
+const DUMP_PROGRESS_EVERY: u32 = 30;
+
+/// A pending [`dump_element_card`] request: which card, and how many frames of
+/// settling are left.
+#[derive(Resource, Debug, Clone)]
+struct DumpElementCard {
+    /// The element id [`DUMP_ELEMENT_ENV`] named.
+    id: String,
+    /// Frames still to wait.
+    countdown: u32,
+}
+
+/// Install the [`DUMP_ELEMENT_ENV`] request, if the environment asks for one.
+fn read_dump_element_request(mut commands: Commands) {
+    let Ok(id) = std::env::var(DUMP_ELEMENT_ENV) else {
+        return;
+    };
+    if id.is_empty() {
+        return;
+    }
+    let countdown = std::env::var("SL_GALLERY_DUMP_AFTER")
+        .ok()
+        .and_then(|frames| frames.parse::<u32>().ok())
+        .unwrap_or(DUMP_SETTLE_FRAMES);
+    info!(element = %id, frames = countdown, "will dump this element card's laid-out subtree");
+    commands.insert_resource(DumpElementCard { id, countdown });
+    // **Keep the frames coming.** `bevy_winit`'s default throttles an unfocused
+    // window to react-on-event, and a dump run is unattended by definition — the
+    // window never takes focus, so the settle countdown simply stopped, at 90
+    // frames left, for the whole run. Continuous while a dump is pending, and
+    // only then: the gallery is a desktop app the rest of the time and has no
+    // reason to spin a GPU at 60 Hz for a still picture.
+    commands.insert_resource(WinitSettings {
+        focused_mode: UpdateMode::Continuous,
+        unfocused_mode: UpdateMode::Continuous,
+    });
+}
+
+/// Everything [`dump_element_card`] reads off the tree.
+///
+/// One [`SystemParam`] rather than six parameters, because six plus the request
+/// and the commands is past what a system may take — and they really are one
+/// thing: the row this prints per node.
+#[derive(bevy::ecs::system::SystemParam)]
+struct DumpQueries<'w, 's> {
+    /// Every named entity, for the card lookup and each node's own label.
+    names: Query<'w, 's, (Entity, &'static Name)>,
+    /// The tree walk.
+    children: Query<'w, 's, &'static Children>,
+    /// The geometry. `UiGlobalTransform`, **not** `GlobalTransform`: a
+    /// `bevy_ui` node carries the former, and a query for the latter matches
+    /// nothing and so reports every node in the tree as "not laid out".
+    nodes: Query<'w, 's, (&'static ComputedNode, &'static bevy::ui::UiGlobalTransform)>,
+    /// What a node says, if it says anything.
+    texts: Query<'w, 's, &'static Text>,
+    /// What a node draws, if it draws a texture — the question that sends a
+    /// diagnosis down the "is this an unloaded image" path or away from it.
+    images: Query<'w, 's, &'static bevy::ui::widget::ImageNode>,
+    /// And what it fills, if it fills anything.
+    backgrounds: Query<'w, 's, &'static BackgroundColor>,
+}
+
+/// Log one element card's laid-out subtree: every node's name, box, position
+/// and what it draws.
+///
+/// The tool for "something large is being drawn and nothing says what"
+/// (`viewer-notecard-body-draws-a-giant-artifact`). A headless
+/// `spawn_element` probe answers a different question — it measures the layout
+/// stub, where the fonts, the text engine and the real widget systems are not
+/// — so an artifact that appears only in the running viewer has to be measured
+/// in the running viewer, and the gallery is the cheapest place that has one.
+///
+/// Runs **after** `UiSystems::Layout`, or it would read last frame's boxes, and
+/// only once the layout has settled ([`DUMP_SETTLE_FRAMES`]). Each line carries
+/// the node's own `Name` and its depth, so the indentation *is* the ancestry —
+/// a name alone does not say which card a stray node belongs to.
+///
+/// Sizes are logical pixels (the units a stylesheet and a bug report are
+/// written in); the position is the node's centre, which is what a
+/// `GlobalTransform` holds for a UI node.
+fn dump_element_card(
+    mut commands: Commands,
+    request: Option<ResMut<DumpElementCard>>,
+    tree: DumpQueries,
+) {
+    let DumpQueries {
+        names,
+        children,
+        nodes,
+        texts,
+        images,
+        backgrounds,
+    } = &tree;
+    let Some(mut request) = request else {
+        return;
+    };
+    if let Some(left) = request.countdown.checked_sub(1) {
+        request.countdown = left;
+        if left % DUMP_PROGRESS_EVERY == 0 {
+            info!(frames_left = left, "settling before the card dump");
+        }
+        return;
+    }
+    let wanted = format!("{GALLERY_CARD_PREFIX}{}", request.id);
+    let Some((card, _)) = names.iter().find(|(_, name)| name.as_str() == wanted) else {
+        warn!(element = %request.id, "no gallery card by that name — nothing dumped");
+        commands.remove_resource::<DumpElementCard>();
+        return;
+    };
+    info!(element = %request.id, "=== card subtree ===");
+    let mut stack = vec![(card, 0_usize)];
+    while let Some((entity, depth)) = stack.pop() {
+        let indent = "  ".repeat(depth);
+        let name = names
+            .get(entity)
+            .map_or_else(|_error| String::from("-"), |(_, name)| name.to_string());
+        let geometry = nodes.get(entity).map_or_else(
+            |_error| String::from("(not a laid-out node)"),
+            |(computed, transform)| {
+                // Component-wise, in plain `f32`: the whole-vector form is a
+                // `Vec2 * f32` operator, which the workspace's
+                // `arithmetic_side_effects` lint refuses on an overloaded type.
+                let scale = computed.inverse_scale_factor();
+                format!(
+                    "{:.0}x{:.0} at ({:.0},{:.0})",
+                    computed.size.x * scale,
+                    computed.size.y * scale,
+                    transform.translation.x * scale,
+                    transform.translation.y * scale,
+                )
+            },
+        );
+        let mut draws = Vec::new();
+        if let Ok(text) = texts.get(entity) {
+            let shown: String = text.0.chars().take(24).collect();
+            draws.push(format!("text {shown:?} ({} chars)", text.0.chars().count()));
+        }
+        if let Ok(image) = images.get(entity) {
+            draws.push(format!("image tint={:?}", image.color));
+        }
+        if let Ok(background) = backgrounds.get(entity)
+            && background.0.alpha() > 0.0
+        {
+            draws.push(format!("bg={:?}", background.0));
+        }
+        info!("{indent}{name} {geometry} {}", draws.join(" "));
+        if let Ok(kids) = children.get(entity) {
+            // Reversed, so the pop order above walks them front to back.
+            stack.extend(kids.iter().rev().map(|kid| (kid, depth.saturating_add(1))));
+        }
+    }
+    commands.remove_resource::<DumpElementCard>();
 }
 
 /// Spawn the page's scrollbar — a `bevy_ui_widgets` [`Scrollbar`] pointed at

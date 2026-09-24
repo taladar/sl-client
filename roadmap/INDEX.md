@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 308 |
 | blocked | 63 |
 | in-progress | 28 |
-| bugs | 9 |
-| done | 1215 |
+| bugs | 8 |
+| done | 1216 |
 | deferred | 30 |
 | wont-do | 16 |
 | **total** | **1787** |
@@ -1294,7 +1294,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (9)
+## bugs (8)
 
 ### protocol
 
@@ -1309,8 +1309,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Some worn mesh hair does not render (visible in Firestorm)
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
-- [`viewer-notecard-body-draws-a-giant-artifact`](bugs/viewer-notecard-body-draws-a-giant-artifact.md)
-  — The notecard editor and reader draw a huge stray shape beside the body
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
@@ -1323,7 +1321,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1215)
+## done (1216)
 
 ### protocol
 
@@ -2266,6 +2264,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A notecard created on OpenSim opened as "could not be read"
 - [`viewer-nonblocking-overlay-steals-focus`](done/viewer-nonblocking-overlay-steals-focus.md)
   — A see-through container in front of a field clears its focus, at random
+- [`viewer-notecard-body-draws-a-giant-artifact`](done/viewer-notecard-body-draws-a-giant-artifact.md)
+  — The notecard editor and reader draw a huge stray shape beside the body
 - [`viewer-notecard-copied-item-loses-permissions`](done/viewer-notecard-copied-item-loses-permissions.md)
   — An item copied out of a notecard arrives with no permissions
 - [`viewer-notecard-format`](done/viewer-notecard-format.md) — Notecard format —

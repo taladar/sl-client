@@ -46,11 +46,20 @@
 //! is therefore a real `TextColor` — and, if it asks for one, a real
 //! [`Underline`] — resolved by the renderer exactly like a text span's.
 //!
-//! [`RichTextStyle::Hidden`] is the other half of the same mechanism: a zero font
-//! size over a range keeps its characters in the buffer (so the cursor still
-//! steps over them, a backspace still deletes them, and a save still sees them)
-//! while giving them no advance and no glyph. That is what makes an embedded
-//! item's marker code point invisible *underneath* the box drawn for it.
+//! [`RichTextStyle::Hidden`] is the other half of the same mechanism, and it
+//! takes **two** properties over a range: a zero font size, so the characters
+//! keep their place in the buffer (the cursor still steps over them, a backspace
+//! still deletes them, a save still sees them) while taking no advance, and a
+//! transparent section of the field's own, so they have no visible glyph
+//! either. That is what makes an embedded item's marker code point
+//! invisible *underneath* the box drawn for it.
+//!
+//! The second half is not belt-and-braces. A zero font size takes the advance
+//! away but the glyph is still emitted, and what its quad samples at a
+//! degenerate size is the rasteriser's business — with the size alone, the
+//! notecard editor and reader each drew a few hundred pixels of raw glyph atlas
+//! beside the body (`viewer-notecard-body-draws-a-giant-artifact`). *Hidden*
+//! has to mean invisible on its own terms.
 //!
 //! # Read-only
 //!
@@ -477,6 +486,24 @@ fn sync_rich_text_sections(mut fields: SectionFields, mut commands: Commands) {
             }
             sections.entities.push(section.id());
         }
+        // **The hidden section, last and always present.** A hidden range is
+        // given a zero font size, which is what takes its advance away — but a
+        // zero-size glyph is still a glyph the renderer emits a quad for, and
+        // what that quad samples at zero size is not defined by anything here.
+        // A transparent section makes "hidden" mean invisible in its own right,
+        // rather than resting on a rasteriser's behaviour at a degenerate size.
+        // Always spawned, even for a field with no classes, so the index is a
+        // function of the class count alone.
+        let hidden = commands.spawn((
+            Node {
+                display: Display::None,
+                ..default()
+            },
+            TextColor(Color::NONE),
+            RichTextSectionOf { field },
+            ChildOf(config.root),
+        ));
+        sections.entities.push(hidden.id());
         // The renderer reads the section list off the block; nothing else on an
         // editable field writes it, so this is the whole handshake.
         block.set_entities(sections.entities.iter().map(|entity| TextEntity {
@@ -544,17 +571,34 @@ fn sync_rich_text_model(
         let styles = content
             .ranges
             .iter()
-            .map(|styled| {
-                let property = match styled.style {
-                    // A zero font size is how a character keeps its place in the
-                    // buffer while taking none on the screen.
-                    RichTextStyle::Hidden => StyleProperty::FontSize(0.0),
-                    RichTextStyle::Class(class) => StyleProperty::Brush(TextBrush::new(
-                        section_index(class, config.classes.len()),
-                        smoothing,
-                    )),
-                };
-                (styled.range.clone(), property)
+            .flat_map(|styled| {
+                let range = styled.range.clone();
+                match styled.style {
+                    // **Two properties, not one.** The zero font size is what
+                    // takes the character's advance away; the transparent brush
+                    // is what makes it invisible. Relying on the size alone left
+                    // a zero-size glyph for the renderer to emit a quad for, and
+                    // what that quad samples is a rasteriser's business at a
+                    // degenerate size — not something a widget should bet a
+                    // blank screen area on.
+                    RichTextStyle::Hidden => vec![
+                        (range.clone(), StyleProperty::FontSize(0.0)),
+                        (
+                            range,
+                            StyleProperty::Brush(TextBrush::new(
+                                hidden_section_index(config.classes.len()),
+                                smoothing,
+                            )),
+                        ),
+                    ],
+                    RichTextStyle::Class(class) => vec![(
+                        range,
+                        StyleProperty::Brush(TextBrush::new(
+                            section_index(class, config.classes.len()),
+                            smoothing,
+                        )),
+                    )],
+                }
             })
             .collect();
         editor.set_range_styles(styles);
@@ -569,6 +613,18 @@ fn section_index(class: usize, declared: usize) -> u32 {
         return 0;
     }
     u32::try_from(class.saturating_add(1)).unwrap_or(0)
+}
+
+/// The brush section index of the **transparent** section every field carries
+/// after its classes — what a [`RichTextStyle::Hidden`] range is drawn in.
+///
+/// One past the last class, because `sync_rich_text_sections` appends it after
+/// the class loop and before the handshake. Falls back to section 0 (the field's
+/// own colour) only if the count does not fit a `u32`, which no real field
+/// reaches; a hidden range would then be visible rather than addressing a
+/// section nothing answers.
+fn hidden_section_index(declared: usize) -> u32 {
+    u32::try_from(declared.saturating_add(1)).unwrap_or(0)
 }
 
 // ---------------------------------------------------------------------------
@@ -1057,6 +1113,72 @@ mod tests {
         assert!((super::object_top(-5.0, 15.0, 11.0) - 4.0).abs() < TOLERANCE);
         // No text on the line: parley's placement stands.
         assert!((super::object_top(-5.0, 15.0, 0.0) + 5.0).abs() < TOLERANCE);
+    }
+
+    /// **A hidden range has a transparent section to be drawn in.**
+    ///
+    /// Hiding a range used to be a zero font size and nothing else, on the
+    /// reasoning that a zero-size glyph has no advance *and* no glyph. Only the
+    /// first half is true: the quad is still emitted, and at a degenerate size
+    /// what it samples is the rasteriser's business — in the viewer it came out
+    /// as a few hundred pixels of raw glyph atlas beside a notecard's body,
+    /// white in the editor and grey with letter shapes in the reader
+    /// (`viewer-notecard-body-draws-a-giant-artifact`).
+    ///
+    /// Nothing about the *layout* is wrong in that state, which is why a
+    /// geometric test cannot see it and a headless dump of the tree finds
+    /// nothing oversized: the shape is not a node. What this pins instead is the
+    /// mechanism — the field's section list ends with a transparent section, at
+    /// the index [`super::hidden_section_index`] hands to a hidden range's
+    /// brush — because that is the part a future edit could quietly drop.
+    #[test]
+    fn a_hidden_range_is_drawn_in_a_transparent_section() -> Result<(), TestError> {
+        let classes = vec![
+            RichTextClass {
+                color: Color::srgb(0.1, 0.2, 0.3),
+                underline: true,
+                clickable: true,
+            },
+            RichTextClass {
+                color: Color::srgb(0.4, 0.5, 0.6),
+                underline: false,
+                clickable: false,
+            },
+        ];
+        let declared = classes.len();
+        let (app, handle) = field_app("one two", classes);
+
+        let sections = app
+            .world()
+            .get::<super::RichTextSections>(handle.field)
+            .ok_or("the field has no section list")?
+            .entities
+            .clone();
+        // The field itself, one node per class, then the hidden one.
+        assert_eq!(
+            sections.len(),
+            declared.saturating_add(2),
+            "the section list is not field + classes + hidden"
+        );
+        assert_eq!(
+            sections.first().copied(),
+            Some(handle.field),
+            "section 0 must stay the field itself, or a press on prose stops \
+             placing the caret"
+        );
+        let index = usize::try_from(super::hidden_section_index(declared))
+            .map_err(|_error| "the hidden section index does not fit a usize")?;
+        let hidden = sections
+            .get(index)
+            .copied()
+            .ok_or("the hidden section index is past the end of the list")?;
+        assert_eq!(
+            app.world().get::<TextColor>(hidden).map(|color| color.0),
+            Some(Color::NONE),
+            "the section a hidden range is drawn in must be transparent — a \
+             zero font size alone leaves a glyph for the renderer to draw"
+        );
+        Ok(())
     }
 
     /// **The overlay draws over the field, not under it.** `bevy_ui` stacks
