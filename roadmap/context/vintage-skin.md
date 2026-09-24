@@ -246,11 +246,12 @@ Not expressible at all today:
 - **A light data surface.** There is one `--control-bg` / `--text-primary`
   pair; Vintage needs a *second* family (light field / list surfaces with
   black text) that diverges maximally from the first.
-- **A bevel.** `bevy_ui` has no inset box-shadow, so the only ways to draw one
-  are a 9-sliced image or per-side border colours — and `border-left-color` /
-  `border-right-color` are on `BANNED_PHYSICAL_PROPERTIES` with the rationale
-  "a colour has no handedness". A bevel's light source does have one, and it
-  must *not* mirror under RTL. See `viewer-skin-bevel-border-policy`.
+- ~~**A bevel.**~~ Expressible since `viewer-skin-bevel-border-policy`
+  (2026-09-24): `bevy_ui` has no inset box-shadow, so it is per-side border
+  colours, written by `common.css` from `--button-bevel-top-left` /
+  `-bottom-right` and `--field-bevel-top-left` / `-bottom-right`. The side
+  properties stay banned in a skin; the light source is physical and does not
+  mirror under RTL.
 - **Row striping.** Neither `ui_table` nor `virtual_list` alternates a row
   background at all.
 - **A skinnable icon set.** Inventory icons are emoji glyphs chosen in Rust

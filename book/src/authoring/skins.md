@@ -387,6 +387,30 @@ border-top-left-radius  border-top-right-radius
 border-bottom-left-radius  border-bottom-right-radius
 ```
 
+**A bevel is the exception with no logical spelling.** `border-left-color` and
+`border-right-color` are banned in a skin, but not because a colour has no
+handedness: their one use is a bevel — a lit edge and a shaded one — and a
+bevel's light source belongs to the rendering, not to the writing direction.
+Mirrored under a right-to-left locale it would look lit from the wrong corner,
+which is why no desktop toolkit mirrors one. So the side colours are physical
+**on purpose**, and only the structural sheet writes them: the push button and
+the field wells (`.sk-field`, `.sk-search-field`) read four tokens, and a skin
+draws a bevel by setting those.
+
+| Token | Paints |
+| --- | --- |
+| `--button-bevel-top-left` | a push button's top and left edges |
+| `--button-bevel-bottom-right` | its bottom and right edges |
+| `--field-bevel-top-left` | a field well's top and left edges |
+| `--field-bevel-bottom-right` | its bottom and right edges |
+
+They name physical edges rather than "light" and "shadow" because which corner
+is lit is the skin's choice, and differs per widget: the Windows convention
+raises a button and sinks a field (dark on opposite corners), while Vintage
+draws both dark at the top-left. A flat skin gives all four its
+`--control-border` and keeps a one-colour frame. A refused field drops back to
+a flat `--control-border-disabled` frame whatever its bevel.
+
 **Symmetric shorthands are fine** when they carry a *single* value, because a
 single value is the same on every side and cannot be handed the wrong way:
 `padding: 12px`, `border-width: 1px`, `border-radius: 6px`. Avoid the

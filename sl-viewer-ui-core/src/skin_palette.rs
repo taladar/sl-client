@@ -531,22 +531,23 @@ mod tests {
         Ok(())
     }
 
-    /// The embedded sheets obey the physical-property ban too.
+    /// The embedded token sheet obeys the physical-property ban too.
     ///
     /// The viewer binary's `shipped_skins` test scans the skins in its own
-    /// `assets/`; these two are the sheets that moved here, and a physical
-    /// `left` / `right` in the *structural* rules would mirror wrongly in every
-    /// skin at once rather than in one.
+    /// `assets/`; this is the one that moved here. `common.css` is held to
+    /// the same ban by `skin.rs`'s
+    /// `common_css_writes_side_colours_only_from_bevel_tokens`, with the one
+    /// exception the bevel policy grants it: a physical `left` / `right` in
+    /// the *structural* rules would mirror wrongly in every skin at once
+    /// rather than in one, but a bevel's side colours must not mirror at all.
     #[test]
-    fn the_embedded_sheets_use_no_banned_property() {
-        for (name, css) in [("common.css", COMMON_CSS), ("fallback.css", FALLBACK_CSS)] {
-            let findings = crate::skin::scan_banned_properties(css);
-            assert!(
-                findings.is_empty(),
-                "{name} uses banned physical properties {findings:?}; \
-                 write the logical name instead"
-            );
-        }
+    fn the_embedded_token_sheet_uses_no_banned_property() {
+        let findings = crate::skin::scan_banned_properties(FALLBACK_CSS);
+        assert!(
+            findings.is_empty(),
+            "fallback.css uses banned physical properties {findings:?}; \
+             write the logical name instead"
+        );
     }
 
     /// With no styled root in the world, the palette reads as the unskinned

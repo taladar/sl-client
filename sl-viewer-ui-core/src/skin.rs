@@ -23,7 +23,9 @@
 //! - **the paint layer** — `background-color` / `border-color` / `color` /
 //!   `font-*` / `-bevy-image` apply straight onto the node's paint components;
 //!   these carry no handedness, so `bevy_flair`'s native (physical) support is
-//!   used as-is.
+//!   used as-is. The one paint that *does* have a side is a **bevel**, whose
+//!   light source is physical and must not mirror; see
+//!   [`BANNED_PHYSICAL_PROPERTIES`] for who is allowed to draw one.
 //!
 //! # Bidi: logical properties through the shipped resolver
 //!
@@ -1206,7 +1208,9 @@ impl SkinPadding {
 /// A node's border widths in logical edges, written by the
 /// `border-inline-*-width` / `border-block-*-width` CSS properties and folded
 /// into `Node::border`. (The border *colour* is `border-color`, handled by
-/// `bevy_flair` natively — colour has no handedness.)
+/// `bevy_flair` natively. A one-colour frame has no handedness; a bevel's
+/// per-side colours do, and are deliberately *not* logical — see
+/// [`BANNED_PHYSICAL_PROPERTIES`].)
 #[derive(Component, ComponentProperties, Reflect, Debug, Clone, Copy, PartialEq)]
 #[properties(auto_insert_remove)]
 #[reflect(Default)]
@@ -1610,6 +1614,27 @@ fn sync_skin_attributes(
 /// `assets/skins/` — the binary — and because the
 /// `viewer-ui-skin-l10n-functions` / user-skin follow-up wants the same scan at
 /// run time for user-authored skins.
+///
+/// # The bevel exception (`viewer-skin-bevel-border-policy`)
+///
+/// `border-left-color` / `border-right-color` are banned for a different reason
+/// from the rest, and have no logical spelling to offer instead. Their only use
+/// is a **bevel** — a lit edge and a shaded one — and a bevel's light source is
+/// a property of the rendering, not of the writing direction: mirrored under an
+/// RTL locale it would look lit from the wrong corner, which is why no desktop
+/// toolkit mirrors one. So the per-side colours are **physical on purpose**,
+/// and the structural sheet (`skins/common.css`) is the one place that writes
+/// them: `.sk-button` and the two field wells read `--button-bevel-top-left` /
+/// `--button-bevel-bottom-right` / `--field-bevel-top-left` /
+/// `--field-bevel-bottom-right`, and a skin draws a bevel by setting those
+/// tokens. Keeping the side properties banned *in a skin* means one rule owns
+/// the handedness, rather than every skin re-deciding it; a test in this module
+/// holds `common.css` to writing them from bevel tokens only.
+///
+/// The tokens name the physical edges rather than "light" and "shadow" because
+/// which corner is lit is itself the skin's choice, and differs per widget:
+/// the Windows convention raises a button and sinks a field (opposite
+/// corners), while Vintage draws both dark at the top-left.
 pub const BANNED_PHYSICAL_PROPERTIES: &[&str] = &[
     "margin-left",
     "margin-right",
@@ -1639,7 +1664,11 @@ pub fn logical_replacement(physical: &str) -> Option<&'static str> {
         "border-left-width" | "border-right-width" => {
             "border-inline-start-width / border-inline-end-width"
         }
-        "border-left-color" | "border-right-color" => "border-color (a colour has no handedness)",
+        "border-left-color" | "border-right-color" => {
+            "border-color for a one-colour frame; for a bevel, the \
+             --button-bevel-* / --field-bevel-* tokens (a light source is \
+             physical and must not mirror, so common.css owns the sides)"
+        }
         "left" | "right" => "inset-inline-start / inset-inline-end",
         "inset" => "the four inset-inline-* / inset-block-* longhands",
         "border-top-left-radius"
@@ -1727,6 +1756,52 @@ mod tests {
             Some("margin-left")
         );
         assert_eq!(findings.first().map(|f| f.line), Some(2));
+    }
+
+    /// **The structural sheet writes a side colour only to draw a bevel.**
+    ///
+    /// `common.css` is not a skin and is not scanned by
+    /// [`scan_banned_properties`]: it is the one sheet allowed the physical
+    /// side colours, because a bevel's light source must not mirror (see
+    /// [`BANNED_PHYSICAL_PROPERTIES`]). That licence is narrow, and this holds
+    /// it there — every per-side colour it declares reads a `--*-bevel-*`
+    /// token, and it declares no *other* banned property at all, so a physical
+    /// margin or radius cannot slip in under the bevel's cover.
+    #[test]
+    fn common_css_writes_side_colours_only_from_bevel_tokens() {
+        const COMMON_CSS: &str = include_str!("skins/common.css");
+        const SIDE_COLOURS: [&str; 4] = [
+            "border-top-color",
+            "border-right-color",
+            "border-bottom-color",
+            "border-left-color",
+        ];
+        let mut bevel_sides = 0_usize;
+        for (index, line) in COMMON_CSS.lines().enumerate() {
+            let Some((head, value)) = line.split_once(':') else {
+                continue;
+            };
+            let name = head.trim();
+            if SIDE_COLOURS.contains(&name) {
+                let value = value.trim().trim_end_matches(';');
+                assert!(
+                    value.starts_with("var(--") && value.contains("-bevel-"),
+                    "common.css:{}: `{name}: {value}` — a side colour that is not a \
+                     bevel token has handedness no skin chose",
+                    index.saturating_add(1)
+                );
+                bevel_sides = bevel_sides.saturating_add(1);
+            } else {
+                assert!(
+                    !BANNED_PHYSICAL_PROPERTIES.contains(&name),
+                    "common.css:{}: `{name}` is banned in a skin and has no bevel \
+                     excuse here either",
+                    index.saturating_add(1)
+                );
+            }
+        }
+        // The button and the two field wells, four sides each.
+        assert_eq!(bevel_sides, 12, "the bevel rules moved or lost a side");
     }
 
     /// Every banned property has a logical replacement suggestion for its error.

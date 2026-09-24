@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 118 |
-| ready | 307 |
+| ready | 306 |
 | blocked | 63 |
 | in-progress | 28 |
 | bugs | 8 |
-| done | 1218 |
+| done | 1219 |
 | deferred | 30 |
 | wont-do | 16 |
 | **total** | **1788** |
@@ -293,7 +293,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (307)
+## ready (306)
 
 ### protocol
 
@@ -872,8 +872,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — export / import (blocked by `viewer-preferences-floater` (done))
 - [`viewer-sit-stand-actions`](ready/viewer-sit-stand-actions.md) — Sit / stand
   actions (blocked by `viewer-object-selection-core` (done))
-- [`viewer-skin-bevel-border-policy`](ready/viewer-skin-bevel-border-policy.md)
-  — A bevel's light source has a handedness the logical-property ban denies
 - [`viewer-skin-book-token-table-behind`](ready/viewer-skin-book-token-table-behind.md)
   — The skin chapter's token table is four tasks behind the vocabulary
 - [`viewer-skin-glyphs-from-content`](ready/viewer-skin-glyphs-from-content.md)
@@ -1318,7 +1316,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1218)
+## done (1219)
 
 ### protocol
 
@@ -2971,6 +2969,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   closer"
 - [`viewer-sit-target-and-stand-button`](done/viewer-sit-target-and-stand-button.md)
   — Sit target ignored on sit, and no Stand button while seated
+- [`viewer-skin-bevel-border-policy`](done/viewer-skin-bevel-border-policy.md) —
+  A bevel's light source has a handedness the logical-property ban denies
 - [`viewer-skin-focus-ring-geometry-tokens`](done/viewer-skin-focus-ring-geometry-tokens.md)
   — The focus ring's shape becomes a value, not three repeated literals
 - [`viewer-skin-image-backed-widgets`](done/viewer-skin-image-backed-widgets.md)

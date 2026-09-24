@@ -2,7 +2,7 @@
 id: viewer-skin-bevel-border-policy
 title: A bevel's light source has a handedness the logical-property ban denies
 topic: viewer
-status: ready
+status: done
 origin: Vintage skin fidelity audit (2026-09-20)
 points: 2
 refs: [viewer-ui-skin-tokens, viewer-skin-image-backed-widgets]
@@ -67,3 +67,40 @@ agree with it, and a scratch rule draws a Vintage-style bevel — dark top-left,
 light bottom-right, note the **inverted** convention measured in the context
 file — that stays lit from the same corner when the root is flipped to
 `dir="rtl"`.
+
+## Done (2026-09-24)
+
+**Option 2, with the tokens named for edges rather than for light.** The
+suggested `--bevel-light` / `--bevel-shadow` pair with one `.sk-bevel` rule
+cannot say what Vintage says: its push button *and* its text field are both
+dark at the top-left (the widget-art table in the context file), while the
+Windows convention raises a button and sinks a field — dark on opposite
+corners. Which corner is lit is therefore a per-widget choice the skin makes,
+not one light direction, so the tokens are:
+
+| Token | Paints |
+| --- | --- |
+| `--button-bevel-top-left` / `--button-bevel-bottom-right` | `.sk-button` |
+| `--field-bevel-top-left` / `--field-bevel-bottom-right` | `.sk-field`, `.sk-search-field` |
+
+The ban is unchanged for skins: `border-left-color` / `border-right-color` stay
+on `BANNED_PHYSICAL_PROPERTIES`, and `common.css` is the one sheet that writes
+per-side colours. The policy is the doc comment on that constant; the
+replacement hint no longer claims a colour has no handedness, and points a
+skin author at the tokens. Both flat skins and the fallback give all four
+tokens their `--control-border`, so nothing moves visibly. `.sk-field:disabled`
+still sets a one-colour `border-color`, so a refused well is flat, as the
+reference's disabled art is.
+
+Tests:
+
+- `skin::tests::common_css_writes_side_colours_only_from_bevel_tokens` — the
+  licence is narrow: every side colour in `common.css` reads a `--*-bevel-*`
+  token, and no other banned property appears there. It replaces the
+  `common.css` half of `the_embedded_sheets_use_no_banned_property`, which
+  now scans `fallback.css` only.
+- `skin_palette_resolves::a_bevel_stays_lit_from_the_same_corner_under_rtl` —
+  a fixture (`tests/assets/vintage-bevel.css`) sets Vintage's inverted bevel;
+  the button, field and search box resolve it edge by edge, again after the
+  root flips to `dir="rtl"`, and the refused field's `border-color` beats the
+  bevel longhands.

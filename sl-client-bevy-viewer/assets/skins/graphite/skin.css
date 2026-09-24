@@ -54,6 +54,12 @@
   --control-border: #66809e;
   --control-border-disabled: #474752;
   --control-radius: 4px;
+  /* Bevels: a button's and a field's top-and-left edges, then their
+   * bottom-and-right. Graphite is flat, so all four are `--control-border`. */
+  --button-bevel-top-left: #66809e;
+  --button-bevel-bottom-right: #66809e;
+  --field-bevel-top-left: #66809e;
+  --field-bevel-bottom-right: #66809e;
 
   /* Editable fields, scroll lists and drop-downs — the DATA family
    * (viewer-skin-light-surface-roles). Darker than a control so a field reads

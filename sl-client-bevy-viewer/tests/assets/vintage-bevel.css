@@ -1,0 +1,35 @@
+/*
+ * vintage-bevel.css — a TEST-ONLY skin: the bevel as Vintage draws it.
+ *
+ * It answers one question, in
+ * `skin_palette_resolves::a_bevel_stays_lit_from_the_same_corner_under_rtl`:
+ * can a skin draw a bevel by setting tokens alone, with no physical property
+ * in the skin and no Rust change — and does that bevel keep its light source
+ * when the locale runs right to left? Both shipped skins are flat (all four
+ * bevel tokens are their `--control-border`), so neither can tell a bevel
+ * that reached its edges from one that collapsed to a single colour.
+ *
+ * Vintage is the interesting case because its convention is INVERTED from
+ * the Windows one: the push button and the text field are both DARK at the
+ * top-left and light at the bottom-right (roadmap/context/vintage-skin.md,
+ * the widget-art table). A token pair named "light" / "shadow" with a fixed
+ * raised button and sunken field could not say that; edge-named tokens can.
+ *
+ * The button's pair is the reference's bevel-box colours,
+ * `DefaultShadowLight` (#000000) and `DefaultHighlightLight` (#73849b). The
+ * field's dark edge is its measured black; its light edge is not measured, so
+ * it is a value of its own here, chosen only to differ from the button's —
+ * which is what lets the test tell the two pairs apart.
+ *
+ * A fixture, not a skin anyone wears, so it lives beside this file rather than
+ * under `assets/skins/` — see light-field.css for the whole reason, and for why
+ * the base goes into a cascade LAYER.
+ */
+@import "embedded://sl_viewer_ui_core/skins/fallback.css" layer(fallback);
+
+:root {
+  --button-bevel-top-left: #000000;
+  --button-bevel-bottom-right: #73849b;
+  --field-bevel-top-left: #000000;
+  --field-bevel-bottom-right: #d8d8d8;
+}

@@ -1443,6 +1443,100 @@ mod test {
         Ok(())
     }
 
+    /// **A skin draws a bevel by value, and it stays lit from the same corner
+    /// under RTL** (`viewer-skin-bevel-border-policy`).
+    ///
+    /// A bevel is the one paint with a handedness that must *not* follow the
+    /// writing direction — mirrored, it looks lit from the wrong side — so its
+    /// four side colours are physical, written by `common.css` from the
+    /// `--button-bevel-*` / `--field-bevel-*` tokens and forbidden to a skin.
+    /// The fixture beside this file sets those tokens to Vintage's inverted
+    /// bevel (dark top-left, light bottom-right, on the button and the field
+    /// alike) and nothing else.
+    ///
+    /// Four things pinned: each widget's two edge groups land on the right
+    /// sides; the button and the field read their own pairs rather than one;
+    /// flipping the root to `dir="rtl"` — the attribute every locale-aware
+    /// selector reads — moves no edge; and a refused field drops back to a
+    /// flat frame, because `:disabled`'s one-colour `border-color` has to
+    /// beat the bevel's longhands, which is a cascade question the CSS text
+    /// cannot answer on its own.
+    #[test]
+    fn a_bevel_stays_lit_from_the_same_corner_under_rtl() -> Result<(), TestError> {
+        let mut app = app_with_assets(&test_assets_dir());
+        let handle: Handle<StyleSheet> = app
+            .world()
+            .resource::<AssetServer>()
+            .load("vintage-bevel.css");
+        let mut direction = AttributeList::new();
+        direction.set_attribute("dir", "ltr");
+        let root = app
+            .world_mut()
+            .spawn((Node::default(), Styled::new(handle.clone()), direction))
+            .id();
+        let mut spawn = |classes: &str| {
+            app.world_mut()
+                .spawn((Node::default(), ClassList::new(classes), ChildOf(root)))
+                .id()
+        };
+        let button = spawn("sk-button");
+        let field = spawn("sk-field");
+        let search = spawn("sk-search-field");
+        let refused = spawn("sk-field");
+        app.world_mut()
+            .entity_mut(refused)
+            .insert(bevy::ui::InteractionDisabled);
+
+        load(&mut app, &handle)?;
+        app.update();
+
+        let black = Color::srgb_u8(0x00, 0x00, 0x00);
+        let bevel = |top_left: Color, bottom_right: Color| BorderColor {
+            top: top_left,
+            left: top_left,
+            bottom: bottom_right,
+            right: bottom_right,
+        };
+        let raised_button = bevel(black, Color::srgb_u8(0x73, 0x84, 0x9b));
+        let sunken_field = bevel(black, Color::srgb_u8(0xd8, 0xd8, 0xd8));
+        let border = |app: &App, entity| app.world().get::<BorderColor>(entity).copied();
+
+        for pass in ["ltr", "rtl"] {
+            app.world_mut()
+                .get_mut::<AttributeList>(root)
+                .ok_or("the root lost its attribute list")?
+                .set_attribute("dir", pass);
+            app.update();
+            assert_eq!(
+                border(&app, button),
+                Some(raised_button),
+                "{pass}: the button's top/left must take `--button-bevel-top-left` \
+                 and its bottom/right the other token — a mirrored or collapsed \
+                 bevel is lit from a corner no skin chose"
+            );
+            assert_eq!(
+                border(&app, field),
+                Some(sunken_field),
+                "{pass}: a field reads its OWN pair — if this is the button's, \
+                 one token pair is doing two widgets' jobs"
+            );
+            assert_eq!(
+                border(&app, search),
+                Some(sunken_field),
+                "{pass}: a search box is a field well and must bevel like one"
+            );
+        }
+        let flat = Color::srgb_u8(0x47, 0x47, 0x52);
+        assert_eq!(
+            border(&app, refused),
+            Some(BorderColor::all(flat)),
+            "a refused field is flat `--control-border-disabled` on all four \
+             sides — `border-color` in `.sk-field:disabled` must beat the \
+             bevel's per-side longhands"
+        );
+        Ok(())
+    }
+
     /// **A combo's drop-down has a surface of its own, and an opaque one.**
     ///
     /// It is a *list*, so it takes the field family's text — and it **floats**,

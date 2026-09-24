@@ -102,11 +102,28 @@
   color: var(--text-primary);
 }
 
-/* A push button, with hover and keyboard-focus states. */
+/* A push button, with hover and keyboard-focus states.
+ *
+ * Its frame is a BEVEL (viewer-skin-bevel-border-policy): the top and left
+ * edges take one colour and the bottom and right the other, so a skin can draw
+ * the raised button of every classic desktop — or Vintage's, which is lit from
+ * the other corner — by setting two tokens. A flat skin gives both the value of
+ * `--control-border` and gets the one-colour frame it always had.
+ *
+ * These are the only PHYSICAL side colours in the style system, and on
+ * purpose: a bevel's light source belongs to the rendering, not to the writing
+ * direction, so it must not mirror under RTL — which is why no desktop toolkit
+ * mirrors one. A skin cannot write them (they stay on
+ * `BANNED_PHYSICAL_PROPERTIES`); it sets the tokens, and this sheet decides
+ * which edge each one lands on. The policy is on `BANNED_PHYSICAL_PROPERTIES`
+ * in src/skin.rs. */
 .sk-button {
   background-color: var(--control-bg);
   color: var(--text-primary);
-  border-color: var(--control-border);
+  border-top-color: var(--button-bevel-top-left);
+  border-left-color: var(--button-bevel-top-left);
+  border-bottom-color: var(--button-bevel-bottom-right);
+  border-right-color: var(--button-bevel-bottom-right);
   border-width: 2px;
   border-radius: var(--control-radius);
   padding: 5px 10px;
@@ -960,7 +977,12 @@
  * would only insert a `TextColor` on a node with no text in it. */
 .sk-search-field {
   background-color: var(--field-bg);
-  border-color: var(--control-border);
+  /* A well, so a sunken bevel — the same pair `.sk-field` reads, since a
+   * search box is one of those with a glyph in it. */
+  border-top-color: var(--field-bevel-top-left);
+  border-left-color: var(--field-bevel-top-left);
+  border-bottom-color: var(--field-bevel-bottom-right);
+  border-right-color: var(--field-bevel-bottom-right);
   border-radius: var(--control-radius);
   /* The resting ring, for the reason `.sk-focusable`'s is: the focused rule
    * below is the only thing that widens it, and bevy_flair has no value to
@@ -1009,7 +1031,16 @@
  * lets the three fills below follow the editor's own state. */
 .sk-field {
   background-color: var(--field-bg);
-  border-color: var(--control-border);
+  /* The field's bevel: its own pair rather than the button's, because a well
+   * and a raised face are lit from opposite edges in the Windows convention
+   * and from the same one in Vintage — so which corner is dark is a per-widget
+   * choice a skin makes, not one light direction. The physical sides are this
+   * sheet's for the reason `.sk-button` gives. `:disabled` below restores a
+   * flat one-colour frame, as the reference's disabled art does. */
+  border-top-color: var(--field-bevel-top-left);
+  border-left-color: var(--field-bevel-top-left);
+  border-bottom-color: var(--field-bevel-bottom-right);
+  border-right-color: var(--field-bevel-bottom-right);
 }
 
 /* The field you are typing in. The reference's light skins brighten a focused
