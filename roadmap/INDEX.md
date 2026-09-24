@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 63 |
 | in-progress | 28 |
 | bugs | 9 |
-| done | 1222 |
+| done | 1223 |
 | deferred | 30 |
 | wont-do | 16 |
-| **total** | **1789** |
+| **total** | **1790** |
 
 ## ideas (118)
 
@@ -657,6 +657,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-movement-controls-floater`](ready/viewer-movement-controls-floater.md)
   — Movement controls floater + stand / stop-flying buttons (blocked by
   `viewer-ui-widget-scaffold` (done))
+- [`viewer-multiline-editor-scrollbar`](ready/viewer-multiline-editor-scrollbar.md)
+  — Multi-line text fields scroll with no scrollbar, and no table scrolls
+  sideways
 - [`viewer-name-tags-click-select`](ready/viewer-name-tags-click-select.md) —
   Name tags — click a tag to select the avatar
 - [`viewer-name-tags-decorations`](ready/viewer-name-tags-decorations.md) — Name
@@ -876,8 +879,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A skin can choose the glyph, not just its colour — audit where that applies
 - [`viewer-skin-icon-set`](ready/viewer-skin-icon-set.md) — A skin should be
   able to carry an icon set, not just colours
-- [`viewer-skin-scrollbar-shape`](ready/viewer-skin-scrollbar-shape.md) — The
-  scrollbar is a bar — the reference's has ends, a track and a shape
 - [`viewer-snapshot-composition-guides`](ready/viewer-snapshot-composition-guides.md)
   — Snapshot composition guides, capture frame & filename patterns
 - [`viewer-snapshot-highres-quiet`](ready/viewer-snapshot-highres-quiet.md) —
@@ -1313,7 +1314,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1222)
+## done (1223)
 
 ### protocol
 
@@ -2977,6 +2978,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   by `viewer-skin-widget-state-classes` (done))
 - [`viewer-skin-list-row-striping`](done/viewer-skin-list-row-striping.md) —
   Scroll-list rows — striping, hover and a selection the skin owns
+- [`viewer-skin-scrollbar-shape`](done/viewer-skin-scrollbar-shape.md) — The
+  scrollbar is a bar — the reference's has ends, a track and a shape
 - [`viewer-skin-search-box-focused-fill`](done/viewer-skin-search-box-focused-fill.md)
   — A search box cannot show the focused-field fill, because focus is on its
   child

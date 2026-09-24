@@ -60,7 +60,11 @@ use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 use bevy_flair::style::components::ClassList;
 
-use crate::skin::{SCROLLBAR_THUMB_CLASS, SCROLLBAR_TRACK_CLASS, STRIPE_CLASS, set_state_class};
+use crate::scrollbar::{
+    SCROLLBAR_MIN_THUMB, SCROLLBAR_THICKNESS, ScrollTarget, ScrollbarFrame,
+    ensure_scrollbar_widget, spawn_scrollbar,
+};
+use crate::skin::{SCROLLBAR_THUMB_CLASS, STRIPE_CLASS, set_state_class};
 use crate::skin_palette::SkinPalette;
 use crate::ui::{LogicalInset, LogicalRect, UiDirection};
 
@@ -84,6 +88,8 @@ impl Plugin for VirtualListPlugin {
     /// row positions they write are plain [`Node`] fields that the `PostUpdate`
     /// layout pass then resolves.
     fn build(&self, app: &mut App) {
+        // Every list's bar is the shared widget, whose arrows repeat through it.
+        ensure_scrollbar_widget(app);
         app.add_systems(
             Update,
             (
@@ -101,69 +107,68 @@ impl Plugin for VirtualListPlugin {
 // The scrollbar.
 // ---------------------------------------------------------------------------
 
-/// The scrollbar track's thickness, in logical pixels (the tab strip's value).
-///
-/// Public because a visible bar **reserves** this much of the viewport's
-/// trailing inline edge rather than floating over the content, and a consumer
-/// that lays anything out beside the rows — a table's column header — has to
-/// reserve the same width or the two stop lining up. Read it through
-/// [`VirtualList::scrollbar_inset`], which is `0.0` while the bar is hidden.
-pub const SCROLLBAR_THICKNESS: f32 = 10.0;
-
-/// The thumb's shortest length, in logical pixels, so it stays grabbable on a
-/// very long list.
-const SCROLLBAR_MIN_THUMB: f32 = 24.0;
-
-/// A [`VirtualList`] viewport's scrollbar track, naming its viewport.
-/// Bevy's `Scrollbar` widget drives the native `ScrollPosition`, which a
-/// virtual list does not use (it owns its own clamped offset), so the bar is
-/// driven from [`VirtualList`] directly by `drive_virtual_scrollbars`.
+/// A list's scrollbar groove, naming its viewport. Bevy's `Scrollbar` widget
+/// drives the native `ScrollPosition`, which a virtual list does not use (it
+/// owns its own clamped offset), so the groove is driven from [`VirtualList`]
+/// directly by `drive_virtual_scrollbars`.
 #[derive(Component, Debug, Clone, Copy)]
-struct VirtualScrollbar {
-    /// The [`VirtualList`] viewport this bar reflects and drives.
+struct VirtualScrollGroove {
+    /// The [`VirtualList`] viewport this groove reflects and drives.
     viewport: Entity,
 }
 
-/// The draggable thumb inside a [`VirtualScrollbar`] track.
+/// The draggable thumb inside a [`VirtualScrollGroove`].
 #[derive(Component, Debug, Clone, Copy)]
 struct VirtualScrollbarThumb;
 
-/// Spawn the scrollbar for a [`VirtualList`] `viewport`: a slim track pinned to
-/// the viewport's trailing inline edge, holding a thumb whose size and position
-/// `drive_virtual_scrollbars` keeps proportional to the scroll state. Hidden
-/// while the content fits. Dragging the thumb scrolls the list; the wheel path
-/// is untouched (hover on the bar still bubbles to the viewport).
+/// Spawn the scrollbar for a [`VirtualList`] `viewport`: the shared
+/// [`scrollbar`](crate::scrollbar) widget, pinned to the viewport's trailing
+/// inline edge, whose thumb `drive_virtual_scrollbars` keeps proportional to
+/// the scroll state. Hidden while the content fits. Dragging the thumb
+/// scrolls the list, and so do the arrow ends when a skin shows them; the
+/// wheel path is untouched (hover on the bar still bubbles to the viewport).
 ///
-/// The track is absolutely positioned, but it is **not** an overlay: while it
-/// is visible the rows are inset by [`SCROLLBAR_THICKNESS`] on the same edge
-/// (see [`layout_virtual_lists`]), so the bar sits beside the content rather
-/// than on top of its last column. That is what the reference does —
+/// The bar is absolutely positioned, but it is **not** an overlay: while it
+/// is visible the rows are inset by its width on the same edge (see
+/// [`layout_virtual_lists`]), so the bar sits beside the content rather than
+/// on top of its last column. That is what the reference does —
 /// `LLScrollListCtrl::updateLayout` narrows `mItemListRect` by the bar's width
 /// when the bar is visible, and lays the columns out inside the result.
 pub fn spawn_virtual_scrollbar(commands: &mut Commands, viewport: Entity) -> Entity {
-    let track = commands
-        .spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                width: Val::Px(SCROLLBAR_THICKNESS),
-                ..default()
-            },
-            LogicalInset(LogicalRect {
-                inline_end: Val::Px(0.0),
-                block_start: Val::Px(0.0),
-                block_end: Val::Px(0.0),
-                ..LogicalRect::AUTO
-            }),
-            BackgroundColor(SkinPalette::default().track_bg),
-            ClassList::new_with_classes([SCROLLBAR_TRACK_CLASS]),
-            // Above the pooled rows, which are appended later in paint order.
-            ZIndex(1),
-            Visibility::Hidden,
-            VirtualScrollbar { viewport },
-            Name::new("virtual-list:scrollbar"),
-            ChildOf(viewport),
-        ))
-        .id();
+    let frame = spawn_scrollbar(
+        commands,
+        viewport,
+        ScrollTarget::List(viewport),
+        Node {
+            position_type: PositionType::Absolute,
+            ..default()
+        },
+        "virtual-list:scrollbar",
+    );
+    commands.entity(frame).insert((
+        LogicalInset(LogicalRect {
+            inline_end: Val::Px(0.0),
+            block_start: Val::Px(0.0),
+            block_end: Val::Px(0.0),
+            ..LogicalRect::AUTO
+        }),
+        // Above the pooled rows, which are appended later in paint order.
+        ZIndex(1),
+    ));
+    frame
+}
+
+/// Fill a list scrollbar's `groove` (spawned by
+/// [`spawn_scrollbar`]) with the thumb this module drives, named `name`.
+pub(crate) fn spawn_list_groove(
+    commands: &mut Commands,
+    groove: Entity,
+    viewport: Entity,
+    name: &str,
+) {
+    commands
+        .entity(groove)
+        .insert(VirtualScrollGroove { viewport });
     commands
         .spawn((
             Node {
@@ -177,32 +182,42 @@ pub fn spawn_virtual_scrollbar(commands: &mut Commands, viewport: Entity) -> Ent
             ClassList::new_with_classes([SCROLLBAR_THUMB_CLASS]),
             Pickable::default(),
             VirtualScrollbarThumb,
-            Name::new("virtual-list:scrollbar-thumb"),
-            ChildOf(track),
+            Name::new(name.to_owned()),
+            ChildOf(groove),
         ))
         .observe(
             move |mut drag: On<Pointer<Drag>>,
-                  mut lists: Query<(&mut VirtualList, &ComputedNode)>| {
+                  mut lists: Query<(&mut VirtualList, &ComputedNode)>,
+                  grooves: Query<&ComputedNode, With<VirtualScrollGroove>>| {
                 drag.propagate(false);
                 if drag.button != PointerButton::Primary {
                     return;
                 }
+                let Ok(track_length) = grooves.get(groove).map(logical_height) else {
+                    return;
+                };
                 let Ok((mut list, computed)) = lists.get_mut(viewport) else {
                     return;
                 };
-                let viewport_height = computed.size().y * computed.inverse_scale_factor();
-                let Some(geometry) =
-                    scrollbar_geometry(list.item_count, list.row_height, viewport_height)
-                else {
+                let Some(geometry) = scrollbar_geometry(
+                    list.item_count,
+                    list.row_height,
+                    logical_height(computed),
+                    track_length,
+                ) else {
                     return;
                 };
                 // A pointer step maps through the thumb's travel range to the
                 // scroll range, so the thumb tracks the pointer exactly.
-                let travel = (viewport_height - geometry.thumb_height).max(f32::EPSILON);
+                let travel = (track_length - geometry.thumb_height).max(f32::EPSILON);
                 list.scroll_by(drag.delta.y * geometry.max_scroll / travel);
             },
         );
-    track
+}
+
+/// A node's laid-out height, in logical pixels.
+fn logical_height(computed: &ComputedNode) -> f32 {
+    computed.size().y * computed.inverse_scale_factor()
 }
 
 /// A scrollbar's derived geometry for one frame: how long the thumb is and how
@@ -216,41 +231,51 @@ struct ScrollbarGeometry {
 }
 
 /// The [`ScrollbarGeometry`] for a list of `item_count` rows of `row_height`
-/// in a `viewport_height` window — the track spans the viewport's height.
+/// in a `viewport_height` window, with a groove `track_length` long.
+///
+/// The groove is **not** the viewport: a skin that shows the arrow ends takes
+/// their length out of the groove, so the thumb is the visible fraction *of
+/// the groove*. Whether there is a bar at all is still the viewport's
+/// question.
 fn scrollbar_geometry(
     item_count: usize,
     row_height: f32,
     viewport_height: f32,
+    track_length: f32,
 ) -> Option<ScrollbarGeometry> {
     let content = content_height(item_count, row_height);
     if viewport_height <= 0.0 || content <= viewport_height {
         return None;
     }
-    let thumb_height = (viewport_height * viewport_height / content)
+    let track_length = track_length.max(0.0);
+    let thumb_height = (track_length * viewport_height / content)
         .max(SCROLLBAR_MIN_THUMB)
-        .min(viewport_height);
+        .min(track_length);
     Some(ScrollbarGeometry {
         thumb_height,
         max_scroll: max_scroll(item_count, row_height, viewport_height),
     })
 }
 
-/// Keep every [`VirtualScrollbar`] agreeing with its list: hidden while the
-/// content fits, otherwise a thumb proportional to the visible fraction,
-/// positioned at the scroll fraction. Runs after [`layout_virtual_lists`] so
-/// it reads the frame's clamped offset.
+/// Keep every list scrollbar agreeing with its list: the frame hidden while
+/// the content fits, otherwise a thumb proportional to the visible fraction,
+/// positioned at the scroll fraction along the groove. Runs after
+/// [`layout_virtual_lists`] so it reads the frame's clamped offset.
 fn drive_virtual_scrollbars(
     lists: Query<(&VirtualList, &ComputedNode)>,
-    mut tracks: Query<(&VirtualScrollbar, &mut Visibility, &Children)>,
+    mut frames: Query<(&ScrollbarFrame, &mut Visibility)>,
+    grooves: Query<(&VirtualScrollGroove, &ComputedNode, &Children)>,
     mut thumbs: Query<&mut Node, With<VirtualScrollbarThumb>>,
 ) {
-    for (bar, mut visibility, children) in &mut tracks {
-        let Ok((list, computed)) = lists.get(bar.viewport) else {
+    for (frame, mut visibility) in &mut frames {
+        let ScrollTarget::List(viewport) = frame.target else {
             continue;
         };
-        let viewport_height = computed.size().y * computed.inverse_scale_factor();
-        let geometry = scrollbar_geometry(list.item_count, list.row_height, viewport_height);
-        let want = if geometry.is_some() {
+        let Ok((list, computed)) = lists.get(viewport) else {
+            continue;
+        };
+        let overflows = content_height(list.item_count, list.row_height) > logical_height(computed);
+        let want = if overflows && logical_height(computed) > 0.0 {
             Visibility::Inherited
         } else {
             Visibility::Hidden
@@ -258,7 +283,18 @@ fn drive_virtual_scrollbars(
         if *visibility != want {
             *visibility = want;
         }
-        let Some(geometry) = geometry else {
+    }
+    for (groove, groove_node, children) in &grooves {
+        let Ok((list, computed)) = lists.get(groove.viewport) else {
+            continue;
+        };
+        let track_length = logical_height(groove_node);
+        let Some(geometry) = scrollbar_geometry(
+            list.item_count,
+            list.row_height,
+            logical_height(computed),
+            track_length,
+        ) else {
             continue;
         };
         let fraction = if geometry.max_scroll > 0.0 {
@@ -266,7 +302,7 @@ fn drive_virtual_scrollbars(
         } else {
             0.0
         };
-        let top = fraction * (viewport_height - geometry.thumb_height).max(0.0);
+        let top = fraction * (track_length - geometry.thumb_height).max(0.0);
         for child in children {
             let Ok(mut node) = thumbs.get_mut(*child) else {
                 continue;
@@ -302,8 +338,9 @@ pub struct VirtualList {
     /// is only ever changed through the systems that clamp it.
     scroll: f32,
     /// How much of the trailing inline edge the visible scrollbar is holding,
-    /// in logical pixels — [`SCROLLBAR_THICKNESS`] while it shows, `0.0` while
-    /// the content fits. Written by [`layout_virtual_lists`], which also insets
+    /// in logical pixels — the bar's measured width while it shows (the skin's
+    /// `--scrollbar-thickness`, [`SCROLLBAR_THICKNESS`] until it has been laid
+    /// out), `0.0` while the content fits. Written by [`layout_virtual_lists`], which also insets
     /// the rows by it; read through [`scrollbar_inset`](Self::scrollbar_inset).
     scrollbar_inset: f32,
 }
@@ -322,8 +359,9 @@ impl VirtualList {
     }
 
     /// How much of the trailing inline edge the scrollbar is holding, in
-    /// logical pixels: [`SCROLLBAR_THICKNESS`] while the bar is visible, `0.0`
-    /// while the content fits.
+    /// logical pixels: the bar's width while it is visible, `0.0` while the
+    /// content fits. The width is the skin's (`--scrollbar-thickness`), read
+    /// back off the laid-out bar, and [`SCROLLBAR_THICKNESS`] before that.
     ///
     /// The rows are already inset by this; a consumer reads it to reserve the
     /// same width in anything it lays out *beside* them — a table's column
@@ -620,6 +658,7 @@ pub fn layout_virtual_lists(
     mut commands: Commands,
     direction: Res<UiDirection>,
     mut lists: Query<(Entity, &mut VirtualList, &ComputedNode)>,
+    frames: Query<(&ScrollbarFrame, &ComputedNode)>,
     children: Query<&Children>,
     mut rows: Query<(&mut VirtualRow, &mut Node)>,
 ) {
@@ -635,12 +674,12 @@ pub fn layout_virtual_lists(
         if (clamped - list.scroll).abs() > f32::EPSILON {
             list.scroll = clamped;
         }
-        let gutter =
-            if scrollbar_geometry(list.item_count, list.row_height, viewport_height).is_some() {
-                SCROLLBAR_THICKNESS
-            } else {
-                0.0
-            };
+        let overflows = content_height(list.item_count, list.row_height) > viewport_height;
+        let gutter = if overflows {
+            bar_width(&frames, list_entity)
+        } else {
+            0.0
+        };
         if (gutter - list.scrollbar_inset).abs() > f32::EPSILON {
             list.scrollbar_inset = gutter;
         }
@@ -723,6 +762,25 @@ pub fn layout_virtual_lists(
             }
         }
     }
+}
+
+/// The width of `viewport`'s scrollbar, in logical pixels: what the frame was
+/// laid out at, which is the skin's `--scrollbar-thickness`, or
+/// [`SCROLLBAR_THICKNESS`] while it has not been laid out yet (its first
+/// frame, and every frame of a list that has no bar at all).
+///
+/// Read back off the layout rather than off the stylesheet because the
+/// stylesheet is not something a system can ask; the bar's own box is where
+/// the skin's answer lands. A skin that changes the thickness therefore moves
+/// the gutter one frame after it moves the bar — the same one frame every
+/// measured-size consumer in the UI pays.
+fn bar_width(frames: &Query<(&ScrollbarFrame, &ComputedNode)>, viewport: Entity) -> f32 {
+    frames
+        .iter()
+        .find(|(frame, _)| frame.target == ScrollTarget::List(viewport))
+        .map(|(_, computed)| computed.size().x * computed.inverse_scale_factor())
+        .filter(|width| *width > 0.0)
+        .unwrap_or(SCROLLBAR_THICKNESS)
 }
 
 /// Stripe every other row of every virtualised list, by the **data** index the
@@ -1003,16 +1061,23 @@ mod tests {
     #[test]
     fn scrollbar_geometry_tracks_the_visible_fraction() -> Result<(), TestError> {
         // Content that fits, and a degenerate viewport: no bar at all.
-        assert!(scrollbar_geometry(5, 20.0, 100.0).is_none());
-        assert!(scrollbar_geometry(50, 20.0, 0.0).is_none());
+        assert!(scrollbar_geometry(5, 20.0, 100.0, 100.0).is_none());
+        assert!(scrollbar_geometry(50, 20.0, 0.0, 0.0).is_none());
         // Two fifths of the content is visible, so the thumb covers two fifths
         // of the track, and the content scrolls by everything below the fold.
-        let geometry = scrollbar_geometry(25, 10.0, 100.0).ok_or("a 25-row list must scroll")?;
+        let geometry =
+            scrollbar_geometry(25, 10.0, 100.0, 100.0).ok_or("a 25-row list must scroll")?;
         assert_eq!(geometry.thumb_height, 40.0);
         assert_eq!(geometry.max_scroll, 150.0);
+        // A skin's arrow ends take their length out of the GROOVE: the thumb is
+        // two fifths of what is left, and the scroll range does not move.
+        let ends = scrollbar_geometry(25, 10.0, 100.0, 80.0).ok_or("a 25-row list must scroll")?;
+        assert_eq!(ends.thumb_height, 32.0);
+        assert_eq!(ends.max_scroll, 150.0);
         // A very long list would compute a sub-pixel thumb; it is floored at the
         // minimum so it stays grabbable.
-        let long = scrollbar_geometry(100_000, 20.0, 100.0).ok_or("a huge list must scroll")?;
+        let long =
+            scrollbar_geometry(100_000, 20.0, 100.0, 100.0).ok_or("a huge list must scroll")?;
         assert_eq!(long.thumb_height, super::SCROLLBAR_MIN_THUMB);
         Ok(())
     }

@@ -2172,4 +2172,301 @@ mod test {
         }
         Ok(())
     }
+
+    /// Spawn one scrollbar through the widget's own spawner — what every
+    /// scrolling surface in the viewer builds — under `root`, and return its
+    /// frame. Its target is `root`: nothing here scrolls, and the question is
+    /// only what the stylesheet makes of the parts.
+    fn spawn_bar(app: &mut App, root: Entity) -> Entity {
+        use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
+        let frame = {
+            let mut commands = app.world_mut().commands();
+            spawn_scrollbar(
+                &mut commands,
+                root,
+                ScrollTarget::Container(root),
+                Node::default(),
+                "bar",
+            )
+        };
+        app.world_mut().flush();
+        frame
+    }
+
+    /// A named node's entity.
+    fn named(app: &mut App, name: &str) -> Result<Entity, TestError> {
+        let mut query = app.world_mut().query::<(Entity, &Name)>();
+        query
+            .iter(app.world())
+            .find(|(_, candidate)| candidate.as_str() == name)
+            .map(|(entity, _)| entity)
+            .ok_or_else(|| format!("no node named {name}").into())
+    }
+
+    /// The text a glyph host's `::before` pseudo-element carries, and its
+    /// colour.
+    fn before_glyph(app: &App, host: Entity) -> Option<(String, Srgba)> {
+        let before = app.world().get::<Children>(host)?.iter().next()?;
+        let span = app.world().get::<TextSpan>(before)?.0.clone();
+        let color = app.world().get::<TextColor>(before)?.0.to_srgba();
+        Some((span, color))
+    }
+
+    /// **A skin can give every scrollbar arrow ends, a thickness and four
+    /// colours by tokens alone** (`viewer-skin-scrollbar-shape`).
+    ///
+    /// Built through `scrollbar::spawn_scrollbar`, so the test sees the
+    /// viewer's own parts, Rust fallbacks and all. Pinned: the ends show
+    /// (`display` from `--scrollbar-arrows`, the one keyword-valued token);
+    /// the frame and each end take `--scrollbar-thickness`; the groove, thumb,
+    /// arrow face and glyph take their four roles; and each end draws its own
+    /// arrow as a `::before` glyph.
+    #[test]
+    fn a_skin_can_give_the_scrollbar_arrow_ends() -> Result<(), TestError> {
+        let mut app = app_with_assets(&test_assets_dir());
+        let handle: Handle<StyleSheet> = app
+            .world()
+            .resource::<AssetServer>()
+            .load("vintage-scrollbar.css");
+        let root = app
+            .world_mut()
+            .spawn((Node::default(), Styled::new(handle.clone())))
+            .id();
+        let frame = spawn_bar(&mut app, root);
+
+        load(&mut app, &handle)?;
+        app.update();
+
+        let hex = |value: &str| Srgba::hex(value).map_err(|error| error.to_string());
+        let fill = |app: &App, entity| {
+            app.world()
+                .get::<BackgroundColor>(entity)
+                .map(|background| background.0.to_srgba())
+        };
+        assert_eq!(
+            app.world().get::<Node>(frame).map(|node| node.width),
+            Some(Val::Px(15.0)),
+            "`--scrollbar-thickness` did not reach the frame"
+        );
+        for (name, glyph) in [("bar:up", "\u{25b2}"), ("bar:down", "\u{25bc}")] {
+            let arrow = named(&mut app, name)?;
+            let node = app
+                .world()
+                .get::<Node>(arrow)
+                .ok_or("an arrow end lost its Node")?;
+            assert_eq!(
+                node.display,
+                Display::Flex,
+                "{name} is still hidden: `display: var(--scrollbar-arrows)` did not \
+                 resolve, so no skin can turn the ends on"
+            );
+            assert_eq!(
+                node.height,
+                Val::Px(15.0),
+                "{name} is not square in the thickened bar"
+            );
+            assert_eq!(fill(&app, arrow), Some(hex("d8d8d8")?), "{name}'s face");
+            let host = app
+                .world()
+                .get::<Children>(arrow)
+                .and_then(|kids| kids.iter().next())
+                .ok_or("an arrow end has no glyph host")?;
+            assert_eq!(
+                before_glyph(&app, host),
+                Some((glyph.to_owned(), hex("0a0a0a")?)),
+                "{name} draws the wrong arrow, or in the wrong colour"
+            );
+        }
+        let groove = named(&mut app, "bar:track")?;
+        assert_eq!(
+            fill(&app, groove),
+            Some(hex("999999")?),
+            "the groove is `--scrollbar-track`, not the slider's `--track-bg`"
+        );
+        let thumb = named(&mut app, "bar:thumb")?;
+        assert_eq!(fill(&app, thumb), Some(hex("3c4c7c")?), "the thumb");
+        Ok(())
+    }
+
+    /// **A flat skin keeps the plain bar.** Both shipped skins leave the ends
+    /// off and the bar at its old thickness, so wearing either changes
+    /// nothing about a scrollbar but where its colours come from.
+    #[test]
+    fn a_flat_skin_keeps_the_plain_scrollbar() -> Result<(), TestError> {
+        for skin in ["skins/graphite/skin.css", "skins/azure/skin.css"] {
+            let mut app = app();
+            let handle: Handle<StyleSheet> = app.world().resource::<AssetServer>().load(skin);
+            let root = app
+                .world_mut()
+                .spawn((Node::default(), Styled::new(handle.clone())))
+                .id();
+            let frame = spawn_bar(&mut app, root);
+
+            load(&mut app, &handle)?;
+            app.update();
+
+            assert_eq!(
+                app.world().get::<Node>(frame).map(|node| node.width),
+                Some(Val::Px(10.0)),
+                "{skin}: the bar changed thickness"
+            );
+            for name in ["bar:up", "bar:down"] {
+                let arrow = named(&mut app, name)?;
+                assert_eq!(
+                    app.world().get::<Node>(arrow).map(|node| node.display),
+                    Some(Display::None),
+                    "{skin}: {name} shows in a flat skin"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// A horizontal scrollbar takes the thickness as its **height**, and its
+    /// ends the thickness as their width — the vertical rule turned on its
+    /// side, which is only right if each orientation's rule reaches only its
+    /// own bar.
+    #[test]
+    fn a_horizontal_bar_is_the_vertical_one_on_its_side() -> Result<(), TestError> {
+        use sl_viewer_ui_core::scrollbar::spawn_horizontal_scrollbar;
+
+        let mut app = app_with_assets(&test_assets_dir());
+        let handle: Handle<StyleSheet> = app
+            .world()
+            .resource::<AssetServer>()
+            .load("vintage-scrollbar.css");
+        let root = app
+            .world_mut()
+            .spawn((Node::default(), Styled::new(handle.clone())))
+            .id();
+        let frame = {
+            let mut commands = app.world_mut().commands();
+            spawn_horizontal_scrollbar(&mut commands, root, root, Node::default(), "hbar")
+        };
+        app.world_mut().flush();
+
+        load(&mut app, &handle)?;
+        app.update();
+
+        let node = app
+            .world()
+            .get::<Node>(frame)
+            .ok_or("the frame lost its Node")?;
+        assert_eq!(
+            node.height,
+            Val::Px(15.0),
+            "the bar's height is the thickness"
+        );
+        assert_ne!(
+            node.width,
+            Val::Px(15.0),
+            "the vertical bar's width rule reached a horizontal bar"
+        );
+        for (name, glyph) in [("hbar:left", "\u{25c0}"), ("hbar:right", "\u{25b6}")] {
+            let arrow = named(&mut app, name)?;
+            let arrow_node = app
+                .world()
+                .get::<Node>(arrow)
+                .ok_or("an arrow end lost its Node")?;
+            assert_eq!(arrow_node.display, Display::Flex, "{name} is hidden");
+            assert_eq!(
+                arrow_node.width,
+                Val::Px(15.0),
+                "{name} is not square in the bar"
+            );
+            let host = app
+                .world()
+                .get::<Children>(arrow)
+                .and_then(|kids| kids.iter().next())
+                .ok_or("an arrow end has no glyph host")?;
+            assert_eq!(
+                before_glyph(&app, host).map(|(text, _)| text),
+                Some(glyph.to_owned()),
+                "{name} draws the wrong arrow"
+            );
+        }
+        Ok(())
+    }
+
+    /// **A tab strip's overflow glyphs turn round under RTL, and a skin can
+    /// drop the two jumps.** The four buttons are named in reading order, so
+    /// "first" points left in a left-to-right locale and right in a
+    /// right-to-left one; the fixture sets `--tab-jump-buttons: none`, and a
+    /// flat skin leaves them showing.
+    #[test]
+    fn the_tab_overflow_glyphs_follow_the_reading_direction() -> Result<(), TestError> {
+        for (sheet, jumps) in [
+            ("vintage-scrollbar.css", Display::None),
+            ("skins/graphite/skin.css", Display::Flex),
+        ] {
+            let assets = if sheet.starts_with("skins/") {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets")
+            } else {
+                test_assets_dir()
+            };
+            let mut app = app_with_assets(&assets);
+            let handle: Handle<StyleSheet> = app.world().resource::<AssetServer>().load(sheet);
+            let mut direction = AttributeList::new();
+            direction.set_attribute("dir", "ltr");
+            let root = app
+                .world_mut()
+                .spawn((Node::default(), Styled::new(handle.clone()), direction))
+                .id();
+            let mut hosts = Vec::new();
+            for step in ["first", "prev", "next", "last"] {
+                let button = app
+                    .world_mut()
+                    .spawn((
+                        Node::default(),
+                        ClassList::new(&format!("sk-tab-scroll-button sk-tab-scroll-{step}")),
+                        ChildOf(root),
+                    ))
+                    .id();
+                let host = app
+                    .world_mut()
+                    .spawn((
+                        Text::default(),
+                        PseudoElementsSupport,
+                        ClassList::new("sk-tab-scroll-glyph"),
+                        ChildOf(button),
+                    ))
+                    .id();
+                hosts.push((step, button, host));
+            }
+
+            load(&mut app, &handle)?;
+            app.update();
+
+            for (pass, glyphs) in [
+                ("ltr", ["|\u{25c0}", "\u{25c0}", "\u{25b6}", "\u{25b6}|"]),
+                ("rtl", ["\u{25b6}|", "\u{25b6}", "\u{25c0}", "|\u{25c0}"]),
+            ] {
+                app.world_mut()
+                    .get_mut::<AttributeList>(root)
+                    .ok_or("the root lost its attribute list")?
+                    .set_attribute("dir", pass);
+                app.update();
+                for (&(step, _, host), glyph) in hosts.iter().zip(glyphs) {
+                    assert_eq!(
+                        before_glyph(&app, host).map(|(text, _)| text),
+                        Some(glyph.to_owned()),
+                        "{sheet} {pass}: the {step} button's glyph"
+                    );
+                }
+            }
+            for &(step, button, _) in &hosts {
+                let want = if matches!(step, "first" | "last") {
+                    jumps
+                } else {
+                    Display::Flex
+                };
+                assert_eq!(
+                    app.world().get::<Node>(button).map(|node| node.display),
+                    Some(want),
+                    "{sheet}: the {step} button's display"
+                );
+            }
+        }
+        Ok(())
+    }
 }

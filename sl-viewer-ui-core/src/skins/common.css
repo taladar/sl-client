@@ -485,6 +485,72 @@
   color: var(--text-disabled);
 }
 
+/* A HORIZONTAL TAB STRIP'S OVERFLOW BUTTONS (viewer-skin-scrollbar-shape) —
+ * the reference tab container's four: jump to the first tab, back one, on
+ * one, jump to the last. They show only while the tabs overflow. Back and on
+ * repeat while held.
+ *
+ * The two jumps are `--tab-jump-buttons`, a `display` value: every shipped
+ * skin shows them, as the reference does, and a skin that wants only the
+ * single steps says `none`.
+ *
+ * The glyphs are the skin's and name the INLINE direction, so under
+ * `dir="rtl"` — where "first" is the rightmost tab and its button sits on the
+ * right — each one turns round. */
+.sk-tab-scroll-button {
+  background-color: var(--tab-scroll-bg);
+}
+
+.sk-tab-scroll-button:hover {
+  background-color: var(--tab-scroll-bg-hover);
+}
+
+.sk-tab-scroll-first,
+.sk-tab-scroll-last {
+  display: var(--tab-jump-buttons);
+}
+
+.sk-tab-scroll-glyph::before {
+  content: "";
+  color: var(--tab-scroll-arrow);
+}
+
+.sk-tab-scroll-first .sk-tab-scroll-glyph::before {
+  content: "|\25C0";
+  color: var(--tab-scroll-arrow);
+}
+
+.sk-tab-scroll-prev .sk-tab-scroll-glyph::before {
+  content: "\25C0";
+  color: var(--tab-scroll-arrow);
+}
+
+.sk-tab-scroll-next .sk-tab-scroll-glyph::before {
+  content: "\25B6";
+  color: var(--tab-scroll-arrow);
+}
+
+.sk-tab-scroll-last .sk-tab-scroll-glyph::before {
+  content: "\25B6|";
+  color: var(--tab-scroll-arrow);
+}
+
+:root[dir="rtl"] .sk-tab-scroll-first .sk-tab-scroll-glyph::before {
+  content: "\25B6|";
+}
+
+:root[dir="rtl"] .sk-tab-scroll-prev .sk-tab-scroll-glyph::before {
+  content: "\25B6";
+}
+
+:root[dir="rtl"] .sk-tab-scroll-next .sk-tab-scroll-glyph::before {
+  content: "\25C0";
+}
+
+:root[dir="rtl"] .sk-tab-scroll-last .sk-tab-scroll-glyph::before {
+  content: "|\25C0";
+}
+
 /* A permission checkbox in the friends list — a white glyph mask tinted by
  * `-bevy-image-color`, like the status-bar parcel icons.
  *
@@ -828,13 +894,99 @@
   text-shadow: var(--text-shadow);
 }
 
-/* A scrollbar, in both the tab strip and the windowed list. */
+/* A SCROLLBAR (viewer-skin-scrollbar-shape) — every one in the viewer, since
+ * they are all the one widget: a frame holding an arrow, a groove with the
+ * thumb in it, and another arrow, stacked down for a vertical bar and across
+ * for a horizontal one.
+ *
+ * The frame's thickness is a token, and the arrows are square in it. The
+ * windowed list reads the width back off the laid-out bar to hold the rows
+ * clear of it, so a thicker bar moves the rows rather than covering them. */
+.sk-scrollbar-vertical {
+  width: var(--scrollbar-thickness);
+}
+
+.sk-scrollbar-horizontal {
+  height: var(--scrollbar-thickness);
+}
+
+.sk-scrollbar-vertical .sk-scrollbar-arrow {
+  height: var(--scrollbar-thickness);
+}
+
+.sk-scrollbar-horizontal .sk-scrollbar-arrow {
+  width: var(--scrollbar-thickness);
+}
+
+/* The groove. Its own token, not the slider's `--track-bg`: the reference
+ * names the two separately (`ScrollbarTrackColor`), and a classic skin's
+ * scroll groove is a mid grey where its slider trough is not. */
 .sk-scrollbar-track {
-  background-color: var(--track-bg);
+  background-color: var(--scrollbar-track);
+}
+
+/* The square where a vertical and a horizontal bar meet. */
+.sk-scrollbar-corner {
+  width: var(--scrollbar-thickness);
+  height: var(--scrollbar-thickness);
+  background-color: var(--scrollbar-track);
 }
 
 .sk-scrollbar-thumb {
   background-color: var(--scrollbar-thumb);
+}
+
+.sk-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover);
+}
+
+/* THE ARROW ENDS. Always spawned, and shown by this rule alone: `display` is
+ * the `--scrollbar-arrows` token, `none` in a flat skin and `flex` in a
+ * classic one. The groove flex-grows into whatever they leave, and the thumb
+ * is sized against the groove, so turning them on costs the thumb its travel
+ * and costs the list's scrolling nothing.
+ *
+ * The rule is also the resting baseline for `display`, which is what lets a
+ * theme overlay turn the ends on and a switch back to the base skin turn them
+ * off again (bevy_flair reverts nothing a matching rule stops writing). */
+.sk-scrollbar-arrow {
+  display: var(--scrollbar-arrows);
+  background-color: var(--scrollbar-arrow-bg);
+}
+
+.sk-scrollbar-arrow:hover {
+  background-color: var(--scrollbar-arrow-bg-hover);
+}
+
+/* The arrow is the skin's glyph, the checkbox tick's way: the widget spawns
+ * an empty text host and this fills its `::before`. The resting rule states
+ * an empty `content` for the reason the tick's does. */
+.sk-scrollbar-arrow-glyph::before {
+  content: "";
+  color: var(--scrollbar-arrow);
+}
+
+.sk-scrollbar-arrow-up .sk-scrollbar-arrow-glyph::before {
+  content: "\25B2";
+  color: var(--scrollbar-arrow);
+}
+
+.sk-scrollbar-arrow-down .sk-scrollbar-arrow-glyph::before {
+  content: "\25BC";
+  color: var(--scrollbar-arrow);
+}
+
+/* A horizontal bar's ends are physical — the bar maps a physical offset — so
+ * these two do not swap under `dir="rtl"`, and the widget keeps them on
+ * their own sides. */
+.sk-scrollbar-arrow-left .sk-scrollbar-arrow-glyph::before {
+  content: "\25C0";
+  color: var(--scrollbar-arrow);
+}
+
+.sk-scrollbar-arrow-right .sk-scrollbar-arrow-glyph::before {
+  content: "\25B6";
+  color: var(--scrollbar-arrow);
 }
 
 /* The draggable splitter between a resizable tab strip and its page, and the

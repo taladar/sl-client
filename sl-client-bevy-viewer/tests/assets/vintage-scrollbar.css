@@ -1,0 +1,37 @@
+/*
+ * vintage-scrollbar.css — a TEST-ONLY skin: the scrollbar as a classic skin
+ * draws it, with arrow ends.
+ *
+ * It answers one question, in
+ * `skin_palette_resolves::a_skin_can_give_the_scrollbar_arrow_ends`: can a
+ * skin turn the arrow ends on, thicken the bar and recolour all four parts by
+ * setting tokens alone? Both shipped skins keep the plain bar
+ * (`--scrollbar-arrows: none`), so neither can tell a live token from a rule
+ * that never ran — and `display` is a keyword property, the first one a token
+ * feeds, so a `var()` bevy_flair failed to parse there would leave the ends
+ * hidden with nothing logged.
+ *
+ * It also turns off a horizontal tab strip's two jump buttons
+ * (`--tab-jump-buttons`), the other `display`-valued token this work added,
+ * which every shipped skin leaves on.
+ *
+ * The groove and thumb are Vintage's measured colours (the reference's
+ * `ScrollbarTrackColor` and its thumb art, roadmap/context/vintage-skin.md);
+ * the thickness is its `scroll_bar.xml`'s 15. The arrows' face and glyph are
+ * values of their own, chosen only to differ from everything else here.
+ *
+ * A fixture, not a skin anyone wears, so it lives beside this file rather than
+ * under `assets/skins/` — see light-field.css for the whole reason, and for why
+ * the base goes into a cascade LAYER.
+ */
+@import "embedded://sl_viewer_ui_core/skins/fallback.css" layer(fallback);
+
+:root {
+  --scrollbar-arrows: flex;
+  --scrollbar-thickness: 15px;
+  --scrollbar-track: #999999;
+  --scrollbar-thumb: #3c4c7c;
+  --scrollbar-arrow-bg: #d8d8d8;
+  --scrollbar-arrow: #0a0a0a;
+  --tab-jump-buttons: none;
+}

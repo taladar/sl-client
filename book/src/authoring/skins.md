@@ -162,8 +162,17 @@ Defined by every skin's `skin.css`, consumed by `common.css`:
 | `--radio-bg-checked` / `--radio-border-checked` | the lit option's disc |
 | `--radio-pip` | the mark inside the lit disc |
 | `--divider` | a splitter, a rule, a column resize handle |
-| `--track-bg` | the trough a scrollbar thumb or slider handle runs in |
+| `--track-bg` | the trough a slider handle runs in |
 | `--scrollbar-thumb` | a scrollbar thumb |
+| `--scrollbar-thumb-hover` | the thumb under the pointer |
+| `--scrollbar-track` | the groove a scrollbar thumb runs in — its own role, not the slider's `--track-bg`, because a classic skin's scroll groove is a mid grey where its slider trough is not |
+| `--scrollbar-thickness` | every scrollbar's width, and the edge of its square arrow ends; a list's rows stop clear of whatever it is |
+| `--scrollbar-arrows` | **a `display` value**: `none` for the plain bar both shipped skins draw, `flex` for the classic bar with a step arrow at each end (press to step a row, hold to repeat); the ends take their length out of the groove, never out of the content |
+| `--scrollbar-arrow-bg` / `--scrollbar-arrow-bg-hover` | an arrow end's face, at rest and under the pointer |
+| `--scrollbar-arrow` | the arrow glyph's colour (the glyph itself is `content` — see the pseudo-elements note below) |
+| `--tab-scroll-bg` / `--tab-scroll-bg-hover` | a horizontal tab strip's overflow buttons' face, at rest (transparent in the shipped skins — they sit on the strip) and under the pointer |
+| `--tab-scroll-arrow` | their glyphs' colour |
+| `--tab-jump-buttons` | **a `display` value**: `flex` shows the jump-to-first and jump-to-last buttons beside back and on, as the reference does; `none` leaves only the single steps |
 | `--slider-thumb` | a slider handle or trackball marker |
 | `--title-bar-active` | the focused floater's title band (a translucent wash over its body) |
 | `--title-text-inactive` | an unfocused floater's title text |
@@ -306,6 +315,9 @@ the stock look rather than to black.
 | `.sk-accent` | a leading accent bar + hanging indent (logical box demo) |
 | `.sk-tab` / `.sk-tab-label` | a tab button with asymmetric top corners (`:checked` when selected, `:disabled` when refused) and its caption |
 | `.sk-no-match` | worn with `.sk-tab-label`: a tab a live search left with no matching row |
+| `.sk-tab-scroll-button` | one of a horizontal tab strip's overflow buttons (`:hover`), shown only while its tabs overflow |
+| `.sk-tab-scroll-first` / `.sk-tab-scroll-prev` / `.sk-tab-scroll-next` / `.sk-tab-scroll-last` | which one: jump to the first tab, back one, on one, jump to the last — named in reading order, so their glyphs turn round under `dir="rtl"` |
+| `.sk-tab-scroll-glyph` | the empty text node inside an overflow button whose `::before` is its arrow |
 | `.sk-gain` / `.sk-loss` | meaning-bearing colour swatches |
 | `.sk-menu-bar` / `.sk-menu` | the top bar / a drop-down menu surface |
 | `.sk-menu-bar-item` / `.sk-menu-item` | a bar button, an entry (`:disabled` greys it) |
@@ -317,7 +329,12 @@ the stock look rather than to black.
 | `.sk-floater-button` / `.sk-floater-glyph` / `.sk-floater-grip` | its title-bar buttons, their glyphs, the resize grip |
 | `.sk-dock-host` | the strip docked floaters flow into |
 | `.sk-tab-panel` | a tab page |
-| `.sk-scrollbar-track` / `.sk-scrollbar-thumb` | a scrollbar, in both the tab strip and the windowed list |
+| `.sk-scrollbar-vertical` / `.sk-scrollbar-horizontal` | a scrollbar's frame, by axis — every scrollbar in the viewer is one widget, so these reach them all |
+| `.sk-scrollbar-track` / `.sk-scrollbar-thumb` | its groove and its thumb (`:hover`) |
+| `.sk-scrollbar-corner` | the square where a vertical and a horizontal bar meet |
+| `.sk-scrollbar-arrow` | either arrow end (`:hover`), hidden unless `--scrollbar-arrows` shows it |
+| `.sk-scrollbar-arrow-up` / `.sk-scrollbar-arrow-down` / `.sk-scrollbar-arrow-left` / `.sk-scrollbar-arrow-right` | which end it is — a horizontal bar is physical, so its left and right never swap under RTL |
+| `.sk-scrollbar-arrow-glyph` | the empty text node inside an arrow end whose `::before` is the arrow |
 | `.sk-divider` / `.sk-divider-grip` / `.sk-column-resizer` | a pane splitter, its nub, a table column's drag handle |
 | `.sk-list-row` / `.sk-table-row` | one row of a scroll list, plus its `:hover`; worn with `.sk-stripe` on every other row and `.sk-active` when selected |
 | `.sk-field` | an editable text field's box, plus `:focus` and `:disabled` |

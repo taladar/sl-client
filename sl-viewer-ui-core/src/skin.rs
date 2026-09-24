@@ -682,6 +682,9 @@ const HOVER_CLASSES: &[&str] = &[
     COMBO_OPTION_CLASS,
     TABLE_ROW_CLASS,
     LIST_ROW_CLASS,
+    SCROLLBAR_THUMB_CLASS,
+    SCROLLBAR_ARROW_CLASS,
+    TAB_SCROLL_BUTTON_CLASS,
 ];
 
 /// What [`stamp_hover_state`] walks: the classed nodes that could still need
@@ -1055,16 +1058,55 @@ pub fn set_action_button_enabled(
     }
 }
 
-/// The CSS class on a scrollbar's track (`--track-bg`). Named here rather than
-/// beside either bar because two crates draw one — the windowed list in
-/// [`crate::virtual_list`] and the tab strip's own bar in
-/// `sl-viewer-ui-widgets` — and a skin must be able to restyle both with one
-/// rule.
+/// The CSS class on a vertical scrollbar's frame — the column holding its
+/// arrows and groove, `--scrollbar-thickness` wide. Every scrollbar in the
+/// viewer is the one [`crate::scrollbar`] widget, so one rule reaches all of
+/// them.
+pub const SCROLLBAR_VERTICAL_CLASS: &str = "sk-scrollbar-vertical";
+
+/// The CSS class on a horizontal scrollbar's frame — the row holding its
+/// arrows and groove, `--scrollbar-thickness` tall.
+pub const SCROLLBAR_HORIZONTAL_CLASS: &str = "sk-scrollbar-horizontal";
+
+/// The CSS class on the square where a vertical and a horizontal scrollbar
+/// meet (`--scrollbar-track`, `--scrollbar-thickness` square).
+pub const SCROLLBAR_CORNER_CLASS: &str = "sk-scrollbar-corner";
+
+/// The CSS class on each of a horizontal tab strip's four overflow buttons
+/// (`--tab-scroll-bg`). Named here because its `:hover` rule puts it in
+/// `HOVER_CLASSES`.
+pub const TAB_SCROLL_BUTTON_CLASS: &str = "sk-tab-scroll-button";
+
+/// The CSS class on a scrollbar's groove, the part the thumb runs in
+/// (`--scrollbar-track`).
 pub const SCROLLBAR_TRACK_CLASS: &str = "sk-scrollbar-track";
 
-/// The CSS class on a scrollbar's thumb (`--scrollbar-thumb`). See
-/// [`SCROLLBAR_TRACK_CLASS`] for why it lives here.
+/// The CSS class on a scrollbar's thumb (`--scrollbar-thumb`, and
+/// `--scrollbar-thumb-hover` under the pointer).
 pub const SCROLLBAR_THUMB_CLASS: &str = "sk-scrollbar-thumb";
+
+/// The CSS class on both of a scrollbar's arrow ends
+/// (`--scrollbar-arrow-bg`). Its `display` is the `--scrollbar-arrows` token,
+/// which is how a skin turns the ends on.
+pub const SCROLLBAR_ARROW_CLASS: &str = "sk-scrollbar-arrow";
+
+/// The CSS class on the arrow that steps toward the start, beside
+/// [`SCROLLBAR_ARROW_CLASS`] — what the glyph rule selects the `▲` by.
+pub const SCROLLBAR_ARROW_UP_CLASS: &str = "sk-scrollbar-arrow-up";
+
+/// The CSS class on the arrow that steps toward the end — the `▼`.
+pub const SCROLLBAR_ARROW_DOWN_CLASS: &str = "sk-scrollbar-arrow-down";
+
+/// The CSS class on a horizontal bar's arrow that steps left — the `◀`. A
+/// horizontal bar is physical, so this never mirrors.
+pub const SCROLLBAR_ARROW_LEFT_CLASS: &str = "sk-scrollbar-arrow-left";
+
+/// The CSS class on a horizontal bar's arrow that steps right — the `▶`.
+pub const SCROLLBAR_ARROW_RIGHT_CLASS: &str = "sk-scrollbar-arrow-right";
+
+/// The CSS class on an arrow's glyph host, whose `::before` `content` is the
+/// arrow a skin draws (`--scrollbar-arrow`).
+pub const SCROLLBAR_ARROW_GLYPH_CLASS: &str = "sk-scrollbar-arrow-glyph";
 
 /// The CSS class the scaffold tags every editable text field with (R28), so the
 /// skin's caret / selection colour rule (`.sk-text-field`) and its any-focus

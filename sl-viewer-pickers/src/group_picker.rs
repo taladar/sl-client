@@ -76,6 +76,7 @@ use sl_client_bevy::{
     Command, DirFindFlags, DirGroupResult, GroupKey, QueryId, SlCommand, SlEvent, SlSessionEvent,
     Uuid,
 };
+use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
 use sl_viewer_ui_core::skin::{ACTIVE_CLASS, LIST_ROW_CLASS, LIST_SURFACE_CLASS, text_role};
 
 use crate::floater::{
@@ -390,10 +391,22 @@ fn build_picker_content(commands: &mut Commands, handle: &FloaterHandle) -> Grou
     );
     let _go = spawn_picker_button(commands, search_row, "group-picker-go", PickerButton::Go, 3);
 
-    let list = commands
+    let list_row = commands
         .spawn((
             Node {
                 height: Val::Px(LIST_HEIGHT),
+                ..row(Val::ZERO)
+            },
+            Name::new("group-picker-list-row"),
+            ChildOf(content),
+        ))
+        .id();
+    let list = commands
+        .spawn((
+            Node {
+                flex_grow: 1.0,
+                min_width: Val::Px(0.0),
+                min_height: Val::Px(0.0),
                 overflow: Overflow::scroll_y(),
                 ..column(Val::Px(2.0))
             },
@@ -401,9 +414,16 @@ fn build_picker_content(commands: &mut Commands, handle: &FloaterHandle) -> Grou
             // used to paint by hand, plus the field-family text roles the
             // class re-roots for a light list. See `LIST_SURFACE_CLASS`.
             ClassList::new_with_classes([LIST_SURFACE_CLASS]),
-            ChildOf(content),
+            ChildOf(list_row),
         ))
         .id();
+    spawn_scrollbar(
+        commands,
+        list_row,
+        ScrollTarget::Container(list),
+        Node::default(),
+        "group-picker-scrollbar",
+    );
 
     let buttons = commands
         .spawn((

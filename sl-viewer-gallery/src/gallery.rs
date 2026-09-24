@@ -57,7 +57,7 @@ use bevy::input_focus::tab_navigation::{TabIndex, TabNavigationPlugin};
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
 use bevy::text::EditableText;
-use bevy::ui_widgets::{Activate, Button, ControlOrientation, Scrollbar, ScrollbarThumb};
+use bevy::ui_widgets::{Activate, Button};
 use bevy::window::PresentMode;
 use bevy::winit::{UpdateMode, WinitSettings};
 use bevy_flair::style::components::ClassList;
@@ -74,6 +74,9 @@ use crate::ui::{
 };
 use crate::ui_element::{ElementCx, SCRIPTS, SampleText, UiAction, UiElement};
 use crate::ui_font::{UiFont, register_ui_fonts};
+use sl_viewer_ui_core::scrollbar::{
+    ScrollTarget, scrollbar_corner, spawn_horizontal_scrollbar, spawn_scrollbar,
+};
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 /// The key that flips the layout direction.
@@ -185,14 +188,6 @@ struct GalleryPage;
 /// matching [`sl_viewer_ui_core::virtual_list`] so the two surfaces scroll at one speed.
 const LINE_SCROLL_PIXELS: f32 = 48.0;
 
-/// The gallery's scrollbar thickness and shortest thumb, in logical pixels —
-/// the widget set's own values, so the page's bar matches the ones inside the
-/// elements it is showing.
-const SCROLLBAR_THICKNESS: f32 = sl_viewer_ui_core::virtual_list::SCROLLBAR_THICKNESS;
-
-/// How short the thumb may get on a very long page, so it stays grabbable.
-const SCROLLBAR_MIN_THUMB: f32 = 24.0;
-
 /// How much of the current view a `PageUp` / `PageDown` keeps, in logical
 /// pixels — one wheel notch's worth, so the eye has an anchor across the jump
 /// rather than landing in unrelated content.
@@ -288,7 +283,9 @@ pub fn run(assets: AssetPlugin, registry: GalleryRegistry) -> AppExit {
         .add_plugins(crate::menu::MenuWidgetPlugin)
         .init_resource::<PointerMenuStyle>()
         // The tab widget's runtime half: a resizable strip's width reaching layout
-        // (the divider demo) and each tab's corners tracking the direction.
+        // (the divider demo) and each tab's corners tracking the direction. It
+        // also brings the scrollbar's runtime half, which hides the page's own
+        // bars while there is nothing to scroll.
         .add_plugins(crate::ui_tab::TabWidgetPlugin)
         // The radio widget's runtime half: reconciles each option's indicator and
         // `Checked` marker so the radio specimens respond to clicks in the gallery.
@@ -619,9 +616,11 @@ fn setup_gallery(
         ))
         .id();
     spawn_skin_switcher(&mut commands, header);
-    // The page and its scrollbar share a row: the bar sits *beside* the content
-    // and holds its own width open, rather than floating over the cards' right
-    // edge where it would cover whatever a card put there.
+    // The page and its scrollbars: a row of [page column, bar column], where the
+    // page column is [page, horizontal bar] and the bar column [vertical bar,
+    // corner]. Each bar sits *beside* the content and holds its own space open,
+    // rather than floating over the cards' edge where it would cover whatever a
+    // card put there, and the corner is the square the two bars' ends meet at.
     let body = commands
         .spawn((
             Node {
@@ -634,6 +633,18 @@ fn setup_gallery(
             },
             Name::new("gallery-body"),
             ChildOf(root.0),
+        ))
+        .id();
+    let page_column = commands
+        .spawn((
+            Node {
+                flex_grow: 1.0,
+                min_height: Val::Px(0.0),
+                min_width: Val::Px(0.0),
+                ..column(Val::ZERO)
+            },
+            Name::new("gallery-page-column"),
+            ChildOf(body),
         ))
         .id();
     let page = commands
@@ -662,10 +673,10 @@ fn setup_gallery(
             // and [`scroll_gallery`] (to move it) need present from the start.
             ScrollPosition::default(),
             GalleryPage,
-            ChildOf(body),
+            ChildOf(page_column),
         ))
         .id();
-    spawn_gallery_scrollbar(&mut commands, body, page);
+    spawn_gallery_scrollbars(&mut commands, body, page_column, page);
     let elements = commands
         .spawn((
             Node {
@@ -1281,37 +1292,54 @@ fn dump_element_card(
     commands.remove_resource::<DumpElementCard>();
 }
 
-/// Spawn the page's scrollbar — a `bevy_ui_widgets` [`Scrollbar`] pointed at
-/// the page, so the thumb sizes and drags itself against the page's own scroll
-/// range.
+/// Spawn the page's two scrollbars — the shared
+/// [`scrollbar`](sl_viewer_ui_core::scrollbar) widget pointed at the page, so
+/// each thumb sizes and drags itself against the page's own scroll range: a
+/// vertical bar in a column beside the page column, a horizontal one under the
+/// page, and the corner square where they meet.
 ///
-/// The same widget, thickness and skin classes the tab strip and the windowed
-/// list use, because a person looking at the gallery is looking at those: a
-/// chrome bar of its own invention would be one more thing on screen that is
-/// not what the viewer does.
-fn spawn_gallery_scrollbar(commands: &mut Commands, parent: Entity, page: Entity) {
-    commands
+/// The same widget every list and tab strip wears, because a person looking
+/// at the gallery is looking at those: a chrome bar of its own invention would
+/// be one more thing on screen that is not what the viewer does — and a skin
+/// that gives scrollbars arrow ends gives these them too.
+///
+/// Each bar shows only while the page overflows on its axis — the horizontal
+/// one rarely, for a wide card or a long translation.
+fn spawn_gallery_scrollbars(
+    commands: &mut Commands,
+    body: Entity,
+    page_column: Entity,
+    page: Entity,
+) {
+    let bar_column = commands
         .spawn((
-            Scrollbar {
-                target: page,
-                orientation: ControlOrientation::Vertical,
-                min_thumb_length: SCROLLBAR_MIN_THUMB,
-            },
             Node {
-                width: Val::Px(SCROLLBAR_THICKNESS),
                 flex_shrink: 0.0,
-                ..default()
+                ..column(Val::ZERO)
             },
-            BackgroundColor(SkinPalette::default().track_bg),
-            ClassList::new_with_classes([sl_viewer_ui_core::skin::SCROLLBAR_TRACK_CLASS]),
-            Name::new("gallery-scrollbar"),
-            ChildOf(parent),
+            Name::new("gallery-bar-column"),
+            ChildOf(body),
         ))
-        .with_child((
-            ScrollbarThumb::default(),
-            BackgroundColor(SkinPalette::default().scrollbar_thumb),
-            ClassList::new_with_classes([sl_viewer_ui_core::skin::SCROLLBAR_THUMB_CLASS]),
-        ));
+        .id();
+    spawn_scrollbar(
+        commands,
+        bar_column,
+        ScrollTarget::Container(page),
+        Node {
+            flex_grow: 1.0,
+            min_height: Val::Px(0.0),
+            ..default()
+        },
+        "gallery-scrollbar",
+    );
+    commands.spawn(scrollbar_corner(bar_column));
+    spawn_horizontal_scrollbar(
+        commands,
+        page_column,
+        page,
+        Node::default(),
+        "gallery-hscrollbar",
+    );
 }
 
 /// Read the gallery's keys into [`GalleryCell`] / [`UiDirection`].

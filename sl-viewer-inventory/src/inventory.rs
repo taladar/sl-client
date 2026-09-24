@@ -65,6 +65,7 @@ use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab
 use crate::ui_text::set_text;
 use crate::virtual_list::{
     VirtualList, VirtualRow, VirtualViewport, amend_row_node, index_to_f32, layout_virtual_lists,
+    spawn_virtual_scrollbar,
 };
 use bevy_flair::style::components::ClassList;
 use sl_viewer_ui_core::skin::{
@@ -3917,6 +3918,8 @@ fn build_inventory_content(In(handle): In<FloaterHandle>, mut commands: Commands
         // press first, so only true background clicks reach this.
         .observe(crate::inventory_actions::on_viewport_context)
         .id();
+    // The list's own scrollbar: the rows stop clear of it while it shows.
+    spawn_virtual_scrollbar(&mut commands, viewport);
 
     commands.insert_resource(InventoryUi {
         panel,

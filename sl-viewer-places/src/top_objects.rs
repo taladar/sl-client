@@ -155,7 +155,8 @@ use crate::ui_table::{
     spawn_table, spawn_table_row,
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
-use crate::virtual_list::{SCROLLBAR_THICKNESS, VirtualList, VirtualRow, layout_virtual_lists};
+use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
+use sl_viewer_ui_core::scrollbar::SCROLLBAR_THICKNESS;
 
 /// The Top Scripts window's stable [`Floater::id`](crate::floater::Floater::id).
 pub const TOP_SCRIPTS_FLOATER_ID: &str = "top-scripts";
@@ -443,6 +444,11 @@ const CONTENT_PADDING: f32 = 8.0;
 /// scrollbar gutter the header holds open. A window narrower than this pushes
 /// its own columns out of sight — the table widget does not scroll sideways —
 /// so it is what both windows floor their width at.
+///
+/// The gutter is the bar's *unskinned* thickness: the floor is fixed when the
+/// window is built, before any stylesheet has been asked, so a skin that
+/// thickens its scrollbars squeezes the Name column by the difference rather
+/// than moving this floor.
 fn table_floor(spec: &TableSpec) -> f32 {
     let fixed: f32 = spec
         .columns

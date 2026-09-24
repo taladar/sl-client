@@ -60,6 +60,7 @@ use bevy::text::EditableText;
 use bevy::ui_widgets::Button;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{AssetKey, InventoryFolderKey, InventoryType, TextureKey, Uuid};
+use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
 use sl_viewer_ui_core::skin::{ACTIVE_CLASS, set_state_class, text_role};
 use std::hash::{Hash, Hasher as _};
 
@@ -506,22 +507,42 @@ fn build_picker_content(commands: &mut Commands, handle: FloaterHandle, open: &O
             ChildOf(content),
         ))
         .id();
-    let tree = commands
+    // The tree and its scrollbar share a row of the tree's size.
+    let tree_row = commands
         .spawn((
             Node {
                 width: Val::Px(TREE_WIDTH),
                 height: Val::Px(TREE_HEIGHT),
+                ..row(Val::ZERO)
+            },
+            BackgroundColor(EMPTY_FILL),
+            Name::new("texture-picker-tree-row"),
+            ChildOf(middle),
+        ))
+        .id();
+    let tree = commands
+        .spawn((
+            Node {
+                flex_grow: 1.0,
+                min_width: Val::Px(0.0),
+                min_height: Val::Px(0.0),
                 flex_direction: FlexDirection::Column,
                 overflow: Overflow::scroll_y(),
                 ..Default::default()
             },
             ScrollPosition::default(),
-            BackgroundColor(EMPTY_FILL),
             Pickable::default(),
             Name::new("texture-picker-tree"),
-            ChildOf(middle),
+            ChildOf(tree_row),
         ))
         .id();
+    spawn_scrollbar(
+        commands,
+        tree_row,
+        ScrollTarget::Container(tree),
+        Node::default(),
+        "texture-picker-tree-scrollbar",
+    );
     let preview = commands
         .spawn((
             Node {

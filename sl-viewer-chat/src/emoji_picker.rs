@@ -78,7 +78,9 @@ use crate::ui_search::{SearchFieldSpec, spawn_search_field};
 use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab_strip};
 use crate::virtual_list::{
     VirtualList, VirtualRow, VirtualViewport, amend_row_node, layout_virtual_lists,
+    spawn_virtual_scrollbar,
 };
+use sl_viewer_ui_core::scrollbar::SCROLLBAR_THICKNESS;
 
 /// The stable id of the picker's floater, keying its persisted geometry.
 pub(crate) const EMOJI_FLOATER_ID: &str = "emoji-picker";
@@ -98,9 +100,13 @@ const GRID_COLUMNS: usize = 9;
 const CELL_SIZE: f32 = 30.0;
 
 /// The scrolling grid viewport's width, in logical pixels: exactly
-/// [`GRID_COLUMNS`] cells wide, so the tiled cells fill it with no slack. Kept in
-/// step with [`GRID_COLUMNS`] by a unit test.
-const VIEWPORT_WIDTH: f32 = CELL_SIZE * 9.0;
+/// [`GRID_COLUMNS`] cells wide plus the scrollbar the rows stop short of, so
+/// the tiled cells fill it with no slack beside a bar of the unskinned
+/// thickness. Kept in step with [`GRID_COLUMNS`] by a unit test.
+///
+/// A skin with a thicker bar takes the difference out of the cells, which may
+/// shrink ([`spawn_live_emoji_cell`]), rather than clipping the last column.
+const VIEWPORT_WIDTH: f32 = CELL_SIZE * 9.0 + SCROLLBAR_THICKNESS;
 
 /// The scrolling grid viewport's height, in logical pixels — a **definite** height
 /// (a scroll viewport is the case the content-sizing convention carves out, like
@@ -525,7 +531,11 @@ fn spawn_live_emoji_cell(commands: &mut Commands, row_entity: Entity) -> Entity 
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
                 overflow: Overflow::clip(),
-                flex_shrink: 0.0,
+                // Shrinks rather than overflowing the row, so a skin's thicker
+                // scrollbar narrows all nine cells a little instead of cutting
+                // the ninth off at the bar.
+                flex_shrink: 1.0,
+                min_width: Val::Px(0.0),
                 ..default()
             },
             BackgroundColor(Color::NONE),
@@ -950,6 +960,9 @@ fn build_emoji_picker_content(
             }
         })
         .id();
+    // The grid's scrollbar: the list's own, so the rows stop clear of it and a
+    // skin dresses it with every other bar.
+    spawn_virtual_scrollbar(commands, viewport);
 
     // The skin-tone swatch row.
     build_tone_row(commands, content);
@@ -1164,9 +1177,10 @@ mod tests {
     /// `unwrap` / `expect`.
     type TestError = Box<dyn core::error::Error>;
 
-    /// The viewport is exactly [`GRID_COLUMNS`] cells wide, so the tiled cells
-    /// fill it with no slack. The three constants are pinned to their literals
-    /// (30 × 9 = 270) so changing one without the others trips here.
+    /// The viewport is exactly [`GRID_COLUMNS`] cells wide plus the bar, so the
+    /// tiled cells fill it with no slack. The constants are pinned to their
+    /// literals (30 × 9 + 10 = 280) so changing one without the others trips
+    /// here.
     #[expect(
         clippy::float_cmp,
         reason = "the cell and viewport sizes are exact, representable literals, asserted exactly"
@@ -1175,7 +1189,7 @@ mod tests {
     fn viewport_width_is_columns_of_cells() {
         assert_eq!(CELL_SIZE, 30.0);
         assert_eq!(GRID_COLUMNS, 9);
-        assert_eq!(VIEWPORT_WIDTH, 270.0);
+        assert_eq!(VIEWPORT_WIDTH, 280.0);
     }
 
     /// A blank query shows the active group's own list; a non-blank query shows

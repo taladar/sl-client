@@ -90,6 +90,7 @@ use crate::intents::{OpenScript, ScriptSource};
 use crate::ui::{column, row};
 use crate::ui_element::ElementCx;
 use crate::ui_font::UiFont;
+use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
 use sl_viewer_ui_core::skin::{ERROR_TEXT_CLASS, text_meaning, text_role};
 
 /// The body field's height, in visible text lines — what the window opens at,
@@ -465,19 +466,40 @@ fn populate_editor(
         // squeeze the body field, which shrinks to fit, into nothing) — the
         // window's height is fixed, so this list's growth has to stop somewhere
         // reachable.
-        let errors = commands
+        // The list and its scrollbar share a row, which is what the height
+        // bound applies to.
+        let errors_row = commands
             .spawn((
                 Node {
                     max_height: Val::Px(DIAGNOSTICS_HEIGHT),
+                    ..row(Val::ZERO)
+                },
+                Name::new("script-diagnostics-row"),
+                ChildOf(content),
+            ))
+            .id();
+        let errors = commands
+            .spawn((
+                Node {
+                    flex_grow: 1.0,
+                    min_width: Val::Px(0.0),
+                    min_height: Val::Px(0.0),
                     overflow: Overflow::scroll_y(),
                     ..column(Val::Px(2.0))
                 },
                 ScrollPosition::default(),
                 Pickable::default(),
                 Name::new("script-diagnostics"),
-                ChildOf(content),
+                ChildOf(errors_row),
             ))
             .id();
+        spawn_scrollbar(
+            commands,
+            errors_row,
+            ScrollTarget::Container(errors),
+            Node::default(),
+            "script-diagnostics-scrollbar",
+        );
         commands.entity(errors).observe(on_diagnostics_scroll);
         (Some(status), Some(errors))
     } else {

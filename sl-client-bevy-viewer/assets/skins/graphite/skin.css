@@ -130,6 +130,23 @@
   --track-bg: #1f242e;
   --scrollbar-thumb: #667a99;
   --slider-thumb: #bfc7d9;
+  /* The scrollbar: groove, thumb under the pointer, and the arrow ends'
+   * face, hover and glyph. A flat skin keeps the plain bar, so the ends stay
+   * off (`--scrollbar-arrows` is a `display` value). */
+  --scrollbar-thickness: 10px;
+  --scrollbar-track: #1f242e;
+  --scrollbar-thumb-hover: #7f93b3;
+  --scrollbar-arrows: none;
+  --scrollbar-arrow-bg: #2a2f3a;
+  --scrollbar-arrow-bg-hover: #353c4a;
+  --scrollbar-arrow: #bfc7d9;
+  /* A horizontal tab strip's overflow buttons: their face (none — they sit
+   * on the strip), their face under the pointer, the glyph, and whether the
+   * two jump-to-end buttons show (a `display` value). */
+  --tab-scroll-bg: #00000000;
+  --tab-scroll-bg-hover: #353c4a;
+  --tab-scroll-arrow: #e6ebf2;
+  --tab-jump-buttons: flex;
 
   /* Floater chrome. The title bar and its glyph buttons are painted OVER the
    * floater body, so they are a translucent lightening rather than a colour of

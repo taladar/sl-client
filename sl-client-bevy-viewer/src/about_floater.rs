@@ -20,8 +20,9 @@ use bevy::diagnostic::SystemInfo;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::render::renderer::RenderAdapterInfo;
-use bevy::ui_widgets::{Button, ControlOrientation, Scrollbar, ScrollbarThumb};
+use bevy::ui_widgets::Button;
 use bevy_flair::style::components::ClassList;
+use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
 
 use crate::build_info;
 use crate::clipboard::{ViewerClipboard, copy_to_clipboard};
@@ -58,18 +59,6 @@ const PROJECT_LICENSE: &str = include_str!("../LICENSE");
 /// The support-block value shown for session facts that do not exist yet
 /// (before login, or before the grid supplied them).
 const NOT_CONNECTED: &str = "(not connected)";
-
-/// The scrollbar thickness for this floater's scroll panes, in logical pixels.
-const SCROLLBAR_THICKNESS: f32 = 8.0;
-
-/// The scrollbar thumb's minimum length, in logical pixels.
-const SCROLLBAR_MIN_THUMB: f32 = 24.0;
-
-/// The scrollbar track colour.
-const SCROLLBAR_TRACK_COLOR: Color = Color::srgba(1.0, 1.0, 1.0, 0.06);
-
-/// The scrollbar thumb colour.
-const SCROLLBAR_THUMB_COLOR: Color = Color::srgba(1.0, 1.0, 1.0, 0.35);
 
 /// The action buttons' background colour.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.16, 0.19, 0.25);
@@ -531,26 +520,13 @@ fn spawn_scroll_column(commands: &mut Commands, parent: Entity, name: &'static s
             ChildOf(scroll_row),
         ))
         .id();
-    commands
-        .spawn((
-            Scrollbar {
-                target: content,
-                orientation: ControlOrientation::Vertical,
-                min_thumb_length: SCROLLBAR_MIN_THUMB,
-            },
-            Node {
-                width: Val::Px(SCROLLBAR_THICKNESS),
-                flex_shrink: 0.0,
-                ..default()
-            },
-            BackgroundColor(SCROLLBAR_TRACK_COLOR),
-            Name::new(format!("{name}:scrollbar")),
-            ChildOf(scroll_row),
-        ))
-        .with_child((
-            ScrollbarThumb::default(),
-            BackgroundColor(SCROLLBAR_THUMB_COLOR),
-        ));
+    spawn_scrollbar(
+        commands,
+        scroll_row,
+        ScrollTarget::Container(content),
+        Node::default(),
+        &format!("{name}:scrollbar"),
+    );
     content
 }
 

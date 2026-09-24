@@ -15,6 +15,9 @@
 //!   on a host with no fonts installed.
 //! - [`ui_text`], [`virtual_list`] — text nodes and a windowed list, plus the
 //!   one guarded [`ui_text::set_text`] every panel re-binds its rows through.
+//! - [`scrollbar`] — the one scrollbar every scrolling surface wears, windowed
+//!   list or not, either axis: a groove, a thumb, and the arrow ends a skin can
+//!   switch on. [`hold_repeat`] is what makes a held arrow keep stepping.
 //! - [`ui_spawn`] — the three shapes a panel assembles its chrome from (a push
 //!   button, a labelled row, a label), which were reimplemented in a dozen
 //!   crates before they lived here.
@@ -48,7 +51,9 @@
               this codebase does not follow"
 )]
 
+pub mod hold_repeat;
 pub mod i18n;
+pub mod scrollbar;
 pub mod skin;
 pub mod skin_colors;
 pub mod skin_palette;

@@ -47,6 +47,21 @@
 }
 
 /*
+ * THE CLASSIC SCROLLBAR (viewer-skin-scrollbar-shape).
+ *
+ * The reference's classic skins end every scrollbar in a pair of step arrows,
+ * and a resident of long standing has clicking them in their hands. Two
+ * tokens: the ends on, and the bar thick enough for an arrow to be a target
+ * — 14 px, the checkbox's box, where the reference draws 15. The widget takes
+ * the arrows' length out of the groove, and the lists read the bar's width
+ * back, so neither the scrolling nor the rows' clearance needs anything else.
+ */
+:root {
+  --scrollbar-arrows: flex;
+  --scrollbar-thickness: 14px;
+}
+
+/*
  * THE SURFACE, AND WHAT IT REPLACES.
  *
  * A skin that supplies art wants the flat paint out of the way: an `ImageNode`

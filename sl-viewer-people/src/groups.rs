@@ -66,6 +66,7 @@ use crate::ui_spawn::{self, ButtonSpec, UiLabel};
 use crate::ui_text::set_text;
 use crate::virtual_list::{
     VirtualList, VirtualRow, VirtualViewport, amend_row_node, layout_virtual_lists,
+    spawn_virtual_scrollbar,
 };
 
 /// A group-list row's uniform height, in logical pixels — matched to the friends
@@ -435,6 +436,8 @@ fn spawn_groups_panel(
             },
         )
         .id();
+    // The list's own scrollbar: the rows stop clear of it while it shows.
+    spawn_virtual_scrollbar(&mut commands, viewport);
 
     // The count line under the list.
     let count_text = commands

@@ -70,6 +70,7 @@ use crate::ui_slider::{SliderStyle, SliderWidgetPlugin, spawn_slider};
 use crate::ui_spawn::{self, ButtonSpec, LabeledRowSpec, UiLabel};
 use crate::ui_texture_picker::{TextureSwatchValue, spawn_texture_swatch};
 use crate::world_api::DecodedTextures;
+use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
 use sl_viewer_ui_core::skin::text_role;
 
 /// The Shape gender radio group's element id.
@@ -464,18 +465,37 @@ fn open_wearable_editor(
         .id();
 
     // Scrollable list of texture pickers, the tint swatch, then the sliders.
-    let list = commands
+    let list_row = commands
         .spawn((
             Node {
                 height: Val::Px(LIST_HEIGHT),
+                ..row(Val::ZERO)
+            },
+            Name::new("wearable-list-row"),
+            ChildOf(ui.content),
+        ))
+        .id();
+    let list = commands
+        .spawn((
+            Node {
+                flex_grow: 1.0,
+                min_width: Val::Px(0.0),
+                min_height: Val::Px(0.0),
                 overflow: Overflow::scroll_y(),
                 ..column(Val::Px(4.0))
             },
             ScrollPosition::default(),
             WearScrollList,
-            ChildOf(ui.content),
+            ChildOf(list_row),
         ))
         .id();
+    spawn_scrollbar(
+        &mut commands,
+        list_row,
+        ScrollTarget::Container(list),
+        Node::default(),
+        "wearable-list-scrollbar",
+    );
 
     // Shape: a height read-out and a gender toggle head the list (the reference's
     // Body sub-tab). Other slots have neither.

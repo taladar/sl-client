@@ -77,7 +77,9 @@ use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
-use crate::virtual_list::{VirtualList, VirtualRow, VirtualViewport, amend_row_node};
+use crate::virtual_list::{
+    VirtualList, VirtualRow, VirtualViewport, amend_row_node, spawn_virtual_scrollbar,
+};
 use crate::world_api::EditToolState;
 use crate::world_api::InputContext;
 use crate::world_api::ObjectState;
@@ -799,7 +801,7 @@ fn spawn_contents_viewport(
     surface: ContentsSurface,
     tab_index: i32,
 ) -> Entity {
-    commands
+    let viewport = commands
         .spawn((
             Node {
                 flex_grow: 1.0,
@@ -824,7 +826,10 @@ fn spawn_contents_viewport(
             }),
             ChildOf(parent),
         ))
-        .id()
+        .id();
+    // The list's own scrollbar: the rows stop clear of it while it shows.
+    spawn_virtual_scrollbar(commands, viewport);
+    viewport
 }
 
 /// Spawn one contents action button (a focusable, clickable labelled box).

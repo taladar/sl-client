@@ -76,6 +76,7 @@ use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow};
 use crate::world_api::ui_texture::{PendingUiTexture, UiTexturePlugin};
 use crate::world_map::OpenWorldMap;
+use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
 use sl_viewer_ui_core::skin::text_role;
 
 // ---------------------------------------------------------------------------
@@ -1526,7 +1527,8 @@ fn spawn_category_panels(commands: &mut Commands, tabs: &TabContainerHandle) -> 
 
 /// The details-pane handles.
 struct DetailHandles {
-    /// The details pane root.
+    /// The details pane root — what the selection shows and hides, holding
+    /// the scrolling column and its bar.
     panel: Entity,
     /// The snapshot image box.
     snapshot: Entity,
@@ -1538,21 +1540,43 @@ const SNAPSHOT_EDGE: f32 = DETAIL_WIDTH - 16.0;
 /// Build the shared details pane (title, aux lines, location, description, action
 /// buttons), returning its root. Hidden until a subject is selected.
 fn spawn_detail_pane(commands: &mut Commands, parent: Entity) -> DetailHandles {
-    let panel = commands
+    // The pane is a row of [scrolling column, scrollbar]; the row is what the
+    // selection shows and hides, so the bar goes with it.
+    let pane = commands
         .spawn((
             Node {
                 width: Val::Px(DETAIL_WIDTH),
                 flex_shrink: 0.0,
                 display: Display::None,
+                ..row(Val::ZERO)
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.20)),
+            Name::new("search-detail-pane"),
+            ChildOf(parent),
+        ))
+        .id();
+    let panel = commands
+        .spawn((
+            Node {
+                flex_grow: 1.0,
+                min_width: Val::Px(0.0),
+                min_height: Val::Px(0.0),
                 overflow: Overflow::scroll_y(),
                 padding: UiRect::all(Val::Px(8.0)),
                 ..column(Val::Px(6.0))
             },
             ScrollPosition::default(),
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.20)),
-            ChildOf(parent),
+            Name::new("search-detail-scroll"),
+            ChildOf(pane),
         ))
         .id();
+    spawn_scrollbar(
+        commands,
+        pane,
+        ScrollTarget::Container(panel),
+        Node::default(),
+        "search-detail-scrollbar",
+    );
     // The snapshot box: a fixed 4:3 image the poll system fills once decoded.
     let snapshot = commands
         .spawn((
@@ -1600,7 +1624,10 @@ fn spawn_detail_pane(commands: &mut Commands, parent: Entity) -> DetailHandles {
         let button = spawn_action_button(commands, actions, key, action);
         commands.entity(button).observe(on_detail_action);
     }
-    DetailHandles { panel, snapshot }
+    DetailHandles {
+        panel: pane,
+        snapshot,
+    }
 }
 
 /// Spawn a details-pane value node with the given field marker.

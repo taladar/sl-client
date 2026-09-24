@@ -69,6 +69,7 @@ use crate::world_map_math::{
     self, TileRaster, WorldMapView, tile_corner, tile_level, tile_span_regions,
 };
 use crate::world_map_tiles::{TileKey, TileState, WorldMapTiles};
+use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
 use sl_viewer_ui_core::skin;
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 
@@ -572,21 +573,43 @@ fn build_world_map_content(
             ..SearchFieldSpec::new(WORLD_MAP_ELEMENT)
         },
     );
-    let results = commands
+    // The results and their scrollbar share a row that takes the side
+    // panel's spare height.
+    let results_row = commands
         .spawn((
             Node {
                 width: Val::Percent(100.0),
                 flex_grow: 1.0,
+                min_height: Val::Px(0.0),
+                flex_direction: FlexDirection::Row,
+                ..default()
+            },
+            Name::new("worldmap-results-row"),
+            ChildOf(side),
+        ))
+        .id();
+    let results = commands
+        .spawn((
+            Node {
+                flex_grow: 1.0,
+                min_width: Val::Px(0.0),
                 min_height: Val::Px(0.0),
                 overflow: Overflow::scroll_y(),
                 ..column(Val::Px(2.0))
             },
             ScrollPosition::default(),
             Name::new("worldmap-results"),
-            ChildOf(side),
+            ChildOf(results_row),
         ))
         .observe(on_results_scroll)
         .id();
+    spawn_scrollbar(
+        &mut commands,
+        results_row,
+        ScrollTarget::Container(results),
+        Node::default(),
+        "worldmap-results-scrollbar",
+    );
 
     // The selected-location block: readout, X/Y/Z fields, action buttons.
     let location_text = commands

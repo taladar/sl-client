@@ -45,14 +45,26 @@
 //! too — right-hand vertical tabs the reference cannot express — and it mirrors
 //! under RTL like any other logical placement.
 //!
-//! # Content-sizing, not scroll arrows
+//! # When the tabs outgrow the strip
 //!
-//! When tabs outgrow their space the reference grows scroll arrows
-//! (`mJumpPrevArrowBtn` … and the `mScrollPos` machinery). We do not: convention
-//! 2 says a strip of text sizes to its content and **reflows** rather than
-//! clipping, so a horizontal strip wraps to a second line (`FlexWrap::Wrap`) when
-//! a larger UI font or a longer translation outgrows the row. A longer label
-//! grows its tab; nothing is measured once in English and pinned.
+//! A strip sizes to its content where it can, but a floater of fixed width
+//! and a long list of tabs (or a long translation) can overflow it. The tabs
+//! then scroll inside a clipped viewport, and a control appears beside them —
+//! from available space, never from configuration:
+//!
+//! - a **vertical** strip gets the shared
+//!   [`scrollbar`](sl_viewer_ui_core::scrollbar), so it wears whatever a skin
+//!   gives every other bar (thickness, arrow ends). The reference gives a
+//!   vertical tab container a pair of ▲ / ▼ step buttons instead; a bar is
+//!   kept on purpose, because it also shows *where* in a long list you are and
+//!   drags, and a skin that wants the step buttons turns on the bar's ends.
+//! - a **horizontal** strip gets the reference tab container's four overflow
+//!   buttons (`mJumpPrevArrowBtn`, `mPrevArrowBtn`, `mNextArrowBtn`,
+//!   `mJumpNextArrowBtn`): jump to the first tab, back one, on one, jump to
+//!   the last. A step moves by a **tab**, not by pixels, lining the next tab's
+//!   leading edge up with the strip's, and back / on repeat while held. The
+//!   glyphs are the skin's, and a skin can drop the two jumps
+//!   (`--tab-jump-buttons`).
 //!
 //! # Selection and focus come from the scaffold and upstream
 //!
@@ -121,18 +133,18 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 use bevy::ui::{Checked, UiSystems};
-use bevy::ui_widgets::{
-    Button, ControlOrientation, RadioButton, RadioGroup, Scrollbar, ScrollbarThumb, ValueChange,
-};
+use bevy::ui_widgets::{Activate, ActivateOnPress, Button, RadioButton, RadioGroup, ValueChange};
 
-use bevy_flair::style::components::ClassList;
+use bevy_flair::style::components::{ClassList, PseudoElementsSupport};
 use sl_viewer_ui_core::ui::{
     FocusRevealBounds, HideWith, PanelVisibility, TabStopsFollowVisibility, UiDirection, column,
     row,
 };
 use sl_viewer_ui_core::ui_element::{ElementCx, TextMayClip, UiAction};
 
-use sl_viewer_ui_core::skin::{SCROLLBAR_THUMB_CLASS, SCROLLBAR_TRACK_CLASS, TEXT_CLASS};
+use sl_viewer_ui_core::hold_repeat::{HoldToRepeat, ensure_hold_repeat};
+use sl_viewer_ui_core::scrollbar::{ScrollTarget, ensure_scrollbar_widget, spawn_scrollbar};
+use sl_viewer_ui_core::skin::{TAB_SCROLL_BUTTON_CLASS, TEXT_CLASS};
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 use sl_viewer_ui_core::ui_ellipsis::{RevealEllipsis, spawn_ellipsis_marker};
 use sl_viewer_ui_core::ui_font::UiFont;
@@ -230,23 +242,12 @@ const DIVIDER_CLASS: &str = "sk-divider";
 /// bar, so the handle stands out.
 const DIVIDER_GRIP_CLASS: &str = "sk-divider-grip";
 
-/// The scrollbar's thickness, in logical pixels — the width of a vertical strip's
-/// bar (and the reserved gutter, so tabs do not jump when it appears).
-const SCROLLBAR_THICKNESS: f32 = 10.0;
+/// How far one wheel notch moves a vertical strip's tabs, in logical pixels.
+const WHEEL_LINE_STEP: f32 = 64.0;
 
-/// The scrollbar thumb's shortest length, in logical pixels, so it stays grabbable
-/// when the content is far taller than the strip.
-const SCROLLBAR_MIN_THUMB: f32 = 24.0;
-
-/// How far one click of a horizontal strip's scroll arrow moves the tabs, in
-/// logical pixels.
-const ARROW_SCROLL_STEP: f32 = 64.0;
-
-/// The scroll arrow that points toward the **inline start** (`◀` under LTR).
-const ARROW_TOWARD_START: &str = "\u{25c0}";
-
-/// The scroll arrow that points toward the **inline end** (`▶` under LTR).
-const ARROW_TOWARD_END: &str = "\u{25b6}";
+/// The skin class on an overflow button's glyph host, whose `::before` is the
+/// arrow (`--tab-scroll-arrow`).
+const TAB_SCROLL_GLYPH_CLASS: &str = "sk-tab-scroll-glyph";
 
 /// The action a strip emits when the user switches tabs. A single verb — "a
 /// switch happened" — because the *which* is readable directly from
@@ -512,34 +513,60 @@ pub struct TabViewport {
     pub vertical: bool,
 }
 
-/// A strip's scroll control — the vertical scrollbar or the horizontal arrow
-/// group — shown by `apply_tab_scroll_controls` only while its viewport
-/// overflows, so it appears from available space, never configuration.
+/// A horizontal strip's group of overflow buttons, shown by
+/// `apply_tab_scroll_controls` only while its viewport overflows, so it
+/// appears from available space, never configuration. (A vertical strip's
+/// scrollbar hides itself: the shared widget does that for every bar.)
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TabScrollControl {
-    /// The [`TabViewport`] this control scrolls / reflects.
+    /// The [`TabViewport`] these buttons scroll.
     pub viewport: Entity,
-    /// The measurement axis: block (vertical strip) or inline (horizontal).
-    pub vertical: bool,
 }
 
-/// One of a horizontal strip's two scroll-arrow buttons.
-#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TabScrollArrow {
-    /// The viewport this arrow scrolls.
-    pub viewport: Entity,
-    /// Whether it scrolls toward the inline **end** (`▶` under LTR) or the inline
-    /// **start** (`◀`). The physical direction and glyph both fold in the live
-    /// `UiDirection`.
-    pub toward_end: bool,
+/// What one of a horizontal strip's overflow buttons does — the reference
+/// tab container's four: jump to the first tab, step back one, step on one,
+/// jump to the last. Named for the **inline** order, so under RTL "first" is
+/// the rightmost tab and its button sits on the right.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TabStep {
+    /// Scroll the first tab into the leading edge (`jump_left` in the
+    /// reference).
+    First,
+    /// Scroll one tab back toward the first.
+    Prev,
+    /// Scroll one tab on toward the last.
+    Next,
+    /// Scroll the last tab into the trailing edge (`jump_right`).
+    Last,
 }
 
-/// A scroll arrow's glyph text, so `apply_tab_arrow_glyphs` can point it the
-/// right physical way for the live direction.
+impl TabStep {
+    /// All four, in inline order — the order the buttons are spawned in.
+    const ALL: [Self; 4] = [Self::First, Self::Prev, Self::Next, Self::Last];
+
+    /// The name suffix and the skin class that tells the four apart.
+    const fn name_and_class(self) -> (&'static str, &'static str) {
+        match self {
+            Self::First => ("first", "sk-tab-scroll-first"),
+            Self::Prev => ("prev", "sk-tab-scroll-prev"),
+            Self::Next => ("next", "sk-tab-scroll-next"),
+            Self::Last => ("last", "sk-tab-scroll-last"),
+        }
+    }
+
+    /// Whether it steps one tab at a time — the two that repeat while held.
+    const fn is_step(self) -> bool {
+        matches!(self, Self::Prev | Self::Next)
+    }
+}
+
+/// One of a horizontal strip's overflow buttons.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TabArrowGlyph {
-    /// Matches its [`TabScrollArrow::toward_end`].
-    pub toward_end: bool,
+struct TabScrollButton {
+    /// The viewport it scrolls.
+    viewport: Entity,
+    /// What it does.
+    step: TabStep,
 }
 
 /// What [`spawn_tab_container`] hands back: the outer container, the panel
@@ -577,12 +604,15 @@ pub struct TabWidgetPlugin;
 
 impl Plugin for TabWidgetPlugin {
     fn build(&self, app: &mut App) {
+        // The overflow buttons' previous / next repeat while held, and a
+        // vertical strip's bar hides itself while the tabs fit.
+        ensure_hold_repeat(app);
+        ensure_scrollbar_widget(app);
         app.add_systems(PostUpdate, apply_tab_strip_width.before(UiSystems::Layout))
             .add_systems(
                 Update,
                 (
                     apply_tab_corner_radius,
-                    apply_tab_arrow_glyphs,
                     apply_programmatic_tab_selection,
                     scroll_tabs_with_wheel,
                 ),
@@ -726,42 +756,24 @@ pub fn spawn_tab_strip(commands: &mut Commands, parent: Entity, spec: &TabSpec) 
     strip
 }
 
-/// Spawn a vertical strip's scrollbar (a `bevy_ui_widgets` [`Scrollbar`] driving
-/// the viewport) at the strip's trailing edge, hidden until it is needed.
+/// Spawn a vertical strip's scrollbar (the shared
+/// [`scrollbar`](sl_viewer_ui_core::scrollbar) widget, driving the viewport) at
+/// the strip's trailing edge, hidden until it is needed.
 fn spawn_tab_scrollbar(commands: &mut Commands, strip: Entity, viewport: Entity, spec: &TabSpec) {
-    commands
-        .spawn((
-            Scrollbar {
-                target: viewport,
-                orientation: ControlOrientation::Vertical,
-                min_thumb_length: SCROLLBAR_MIN_THUMB,
-            },
-            Node {
-                width: Val::Px(SCROLLBAR_THICKNESS),
-                flex_shrink: 0.0,
-                ..default()
-            },
-            BackgroundColor(SkinPalette::default().track_bg),
-            ClassList::new_with_classes([SCROLLBAR_TRACK_CLASS]),
-            // Reserved space (hidden, not removed) so the tabs never jump when the
-            // bar appears, which also keeps the overflow measurement stable.
-            Visibility::Hidden,
-            TabScrollControl {
-                viewport,
-                vertical: true,
-            },
-            Name::new(format!("{}:tab-scrollbar", spec.element)),
-            ChildOf(strip),
-        ))
-        .with_child((
-            ScrollbarThumb::default(),
-            BackgroundColor(SkinPalette::default().scrollbar_thumb),
-            ClassList::new_with_classes([SCROLLBAR_THUMB_CLASS]),
-        ));
+    // Shown by the widget itself only while the tabs overflow — hidden, not
+    // removed, so the tabs never jump when it appears.
+    spawn_scrollbar(
+        commands,
+        strip,
+        ScrollTarget::Container(viewport),
+        Node::default(),
+        &format!("{}:tab-scrollbar", spec.element),
+    );
 }
 
-/// Spawn a horizontal strip's two scroll arrows at its trailing edge, hidden
-/// until they are needed.
+/// Spawn a horizontal strip's overflow buttons at its trailing edge — jump to
+/// first, previous, next, jump to last, as the reference's tab container has
+/// them — hidden until the tabs overflow.
 fn spawn_tab_scroll_arrows(
     commands: &mut Commands,
     strip: Entity,
@@ -773,101 +785,167 @@ fn spawn_tab_scroll_arrows(
             Node {
                 flex_direction: FlexDirection::Row,
                 flex_shrink: 0.0,
-                align_items: AlignItems::Center,
+                align_items: AlignItems::Stretch,
                 ..default()
             },
             Visibility::Hidden,
-            TabScrollControl {
-                viewport,
-                vertical: false,
-            },
+            TabScrollControl { viewport },
             Name::new(format!("{}:tab-arrows", spec.element)),
             ChildOf(strip),
         ))
         .id();
-    for toward_end in [false, true] {
-        spawn_tab_scroll_arrow(commands, arrows, viewport, spec, toward_end);
+    for step in TabStep::ALL {
+        spawn_tab_scroll_button(commands, arrows, viewport, spec, step);
     }
 }
 
-/// Spawn one horizontal scroll arrow — a triangle button that nudges the viewport
-/// toward the inline start (`toward_end == false`) or end.
-fn spawn_tab_scroll_arrow(
+/// Spawn one overflow button: an empty glyph host whose `::before` the skin
+/// fills (and turns round under `dir="rtl"`), on a face the skin paints. The
+/// two single steps repeat while held; the two jumps do not, as in the
+/// reference.
+fn spawn_tab_scroll_button(
     commands: &mut Commands,
     parent: Entity,
     viewport: Entity,
     spec: &TabSpec,
-    toward_end: bool,
+    step: TabStep,
 ) {
-    commands
-        .spawn((
-            Button,
-            TabScrollArrow {
-                viewport,
-                toward_end,
-            },
-            Node {
-                padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            Pickable::default(),
-            Name::new(format!(
-                "{}:tab-arrow:{}",
-                spec.element,
-                usize::from(toward_end)
-            )),
-            ChildOf(parent),
-        ))
-        .observe(on_tab_scroll_arrow)
-        .with_child((
-            // The glyph is set for the live direction by `apply_tab_arrow_glyphs`;
-            // start with the LTR default.
-            Text::new(if toward_end {
-                ARROW_TOWARD_END
-            } else {
-                ARROW_TOWARD_START
-            }),
-            UiFont::Sans.at(spec.font_size),
-            TextColor(tab_label_color(&SkinPalette::default())),
-            TabArrowGlyph { toward_end },
-        ));
+    let (suffix, class) = step.name_and_class();
+    let mut button = commands.spawn((
+        Button,
+        ActivateOnPress,
+        TabScrollButton { viewport, step },
+        Node {
+            padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            ..default()
+        },
+        ClassList::new_with_classes([TAB_SCROLL_BUTTON_CLASS, class]),
+        Pickable::default(),
+        Name::new(format!("{}:tab-arrow:{suffix}", spec.element)),
+        ChildOf(parent),
+    ));
+    if step.is_step() {
+        button.insert(HoldToRepeat::default());
+    }
+    let button = button.observe(on_tab_scroll_button).id();
+    commands.spawn((
+        Text::default(),
+        PseudoElementsSupport,
+        UiFont::Sans.at(spec.font_size),
+        TextColor(tab_label_color(&SkinPalette::default())),
+        ClassList::new_with_classes([TAB_SCROLL_GLYPH_CLASS]),
+        Pickable::IGNORE,
+        ChildOf(button),
+    ));
 }
 
-/// A scroll arrow's observer: nudge its viewport toward the inline start or end,
-/// folding the physical direction in from the live [`UiDirection`].
-fn on_tab_scroll_arrow(
-    press: On<Pointer<Press>>,
-    arrows: Query<&TabScrollArrow>,
-    mut positions: Query<&mut ScrollPosition>,
+/// An overflow button was pressed (or a step button is being held): scroll
+/// its viewport to the offset [`tab_scroll_target`] picks.
+fn on_tab_scroll_button(
+    activate: On<Activate>,
+    buttons: Query<&TabScrollButton>,
+    mut viewports: Query<(
+        &mut ScrollPosition,
+        &ComputedNode,
+        &UiGlobalTransform,
+        &Children,
+    )>,
+    tabs: Query<(&ComputedNode, &UiGlobalTransform), With<TabButton>>,
     direction: Res<UiDirection>,
 ) {
-    if press.button != PointerButton::Primary {
-        return;
-    }
-    let Ok(arrow) = arrows.get(press.entity) else {
+    let Ok(button) = buttons.get(activate.entity) else {
         return;
     };
-    let Ok(mut position) = positions.get_mut(arrow.viewport) else {
+    let Ok((mut position, computed, transform, children)) = viewports.get_mut(button.viewport)
+    else {
         return;
     };
-    // `bevy_ui` clamps the far end at layout time, so flooring at zero is all that
-    // is needed here.
-    position.0.x = (position.0.x + arrow_scroll_delta(arrow.toward_end, *direction)).max(0.0);
+    let scale = computed.inverse_scale_factor();
+    let visible = (computed.size().x - computed.scrollbar_size.x) * scale;
+    let range = (computed.content_size().x * scale - visible).max(0.0);
+    // Each tab's two edges in content coordinates: where it is on screen,
+    // relative to the viewport's own left edge, plus how far the content has
+    // already scrolled.
+    let viewport_left = (transform.translation.x - computed.size().x / 2.0) * scale;
+    let edges: Vec<(f32, f32)> = children
+        .iter()
+        .filter_map(|child| tabs.get(child).ok())
+        .map(|(tab, tab_transform)| {
+            let left = (tab_transform.translation.x - tab.size().x / 2.0) * scale - viewport_left
+                + position.x;
+            (left, left + tab.size().x * scale)
+        })
+        .collect();
+    position.x = tab_scroll_target(
+        button.step,
+        &edges,
+        position.x,
+        visible,
+        range,
+        direction.is_rtl(),
+    );
 }
 
-/// The horizontal scroll delta one click of an arrow applies, folding the
-/// physical direction in from the live [`UiDirection`]: inline end is `+x` under
-/// LTR and `-x` under RTL.
-fn arrow_scroll_delta(toward_end: bool, direction: UiDirection) -> f32 {
-    let toward_end_sign = if direction.is_rtl() { -1.0 } else { 1.0 };
-    let sign = if toward_end {
-        toward_end_sign
-    } else {
-        -toward_end_sign
+/// The horizontal offset an overflow button scrolls a strip to.
+///
+/// `edges` are the tabs' left and right edges in content coordinates,
+/// `offset` the current scroll, `visible` the viewport's width and `range`
+/// how far it can scroll. A single step lines the **next tab's leading edge**
+/// up with the viewport's leading edge — the reference's `mScrollPos`, which
+/// counts tabs rather than pixels — so a click never leaves a tab half
+/// scrolled in. Under LTR the leading edge is the left one; under RTL the
+/// right one, and "toward the end" is toward a smaller offset.
+fn tab_scroll_target(
+    step: TabStep,
+    edges: &[(f32, f32)],
+    offset: f32,
+    visible: f32,
+    range: f32,
+    rtl: bool,
+) -> f32 {
+    /// How far a candidate must be from the current offset to count as a step,
+    /// in logical pixels, so rounding never makes a click a no-op.
+    const EPSILON: f32 = 0.5;
+    // The offset that lines each tab's leading edge up with the viewport's.
+    let mut stops: Vec<f32> = edges
+        .iter()
+        .map(|&(left, right)| if rtl { right - visible } else { left })
+        .map(|stop| stop.clamp(0.0, range))
+        .collect();
+    stops.sort_by(f32::total_cmp);
+    // The inline start is offset 0 under LTR and the far end of the range
+    // under RTL; "on" is toward the other one.
+    let (start, end) = if rtl { (range, 0.0) } else { (0.0, range) };
+    let forward = !rtl;
+    let target = match step {
+        TabStep::First => start,
+        TabStep::Last => end,
+        TabStep::Next if forward => stops
+            .iter()
+            .copied()
+            .find(|stop| *stop > offset + EPSILON)
+            .unwrap_or(end),
+        TabStep::Next => stops
+            .iter()
+            .rev()
+            .copied()
+            .find(|stop| *stop < offset - EPSILON)
+            .unwrap_or(end),
+        TabStep::Prev if forward => stops
+            .iter()
+            .rev()
+            .copied()
+            .find(|stop| *stop < offset - EPSILON)
+            .unwrap_or(start),
+        TabStep::Prev => stops
+            .iter()
+            .copied()
+            .find(|stop| *stop > offset + EPSILON)
+            .unwrap_or(start),
     };
-    sign * ARROW_SCROLL_STEP
+    target.clamp(0.0, range)
 }
 
 /// Spawn the whole tab widget under `parent`: a [`spawn_tab_strip`] strip plus a
@@ -1041,38 +1119,20 @@ pub fn fill_tab_container(
             TabViewport { vertical: true },
         ));
         // The panel's scrollbar: a later sibling in the same grid cell (so it
-        // draws over the panel), hugging the trailing edge. Shown by
-        // `apply_tab_scroll_controls` only while the panel overflows and is
-        // itself visible.
-        commands
-            .spawn((
-                Scrollbar {
-                    target: *panel,
-                    orientation: ControlOrientation::Vertical,
-                    min_thumb_length: SCROLLBAR_MIN_THUMB,
-                },
-                Node {
-                    grid_column: GridPlacement::start(1),
-                    grid_row: GridPlacement::start(1),
-                    justify_self: JustifySelf::End,
-                    width: Val::Px(SCROLLBAR_THICKNESS),
-                    ..default()
-                },
-                BackgroundColor(SkinPalette::default().track_bg),
-                ClassList::new_with_classes([SCROLLBAR_TRACK_CLASS]),
-                Visibility::Hidden,
-                TabScrollControl {
-                    viewport: *panel,
-                    vertical: true,
-                },
-                Name::new("fill-panel-scrollbar"),
-                ChildOf(handle.panel_area),
-            ))
-            .with_child((
-                ScrollbarThumb::default(),
-                BackgroundColor(SkinPalette::default().scrollbar_thumb),
-                ClassList::new_with_classes([SCROLLBAR_THUMB_CLASS]),
-            ));
+        // draws over the panel), hugging the trailing edge. The widget shows it
+        // only while the panel overflows and is not itself the hidden one.
+        spawn_scrollbar(
+            commands,
+            handle.panel_area,
+            ScrollTarget::Container(*panel),
+            Node {
+                grid_column: GridPlacement::start(1),
+                grid_row: GridPlacement::start(1),
+                justify_self: JustifySelf::End,
+                ..default()
+            },
+            "fill-panel-scrollbar",
+        );
     }
 }
 
@@ -1250,57 +1310,26 @@ fn spawn_tab_ellipsis(
     marker
 }
 
-/// Show a strip's scroll control (scrollbar or arrows) exactly when its viewport
-/// overflows on the scroll axis, and hide it when the tabs fit — so the control
-/// appears from available space, never configuration. Hidden, not removed, so the
-/// tabs never jump and the measurement stays stable.
-///
-/// A viewport that is itself `Visibility::Hidden` (a fill-mode tab **panel**
-/// whose tab is not selected) keeps its control hidden regardless of overflow
-/// — the panels stack in one grid cell, so an inactive panel's scrollbar would
-/// otherwise draw over the visible one.
+/// Show a horizontal strip's overflow buttons exactly when its viewport
+/// overflows, and hide them when the tabs fit — so they appear from available
+/// space, never configuration. Hidden, not removed, so the tabs never jump and
+/// the measurement stays stable.
 fn apply_tab_scroll_controls(
-    viewports: Query<(&ComputedNode, Option<&Visibility>), With<TabViewport>>,
+    viewports: Query<&ComputedNode, With<TabViewport>>,
     mut controls: Query<(&TabScrollControl, &mut Visibility), Without<TabViewport>>,
 ) {
     for (control, mut visibility) in &mut controls {
-        let Ok((computed, viewport_visibility)) = viewports.get(control.viewport) else {
+        let Ok(computed) = viewports.get(control.viewport) else {
             continue;
         };
-        let viewport_hidden = viewport_visibility.is_some_and(|vis| *vis == Visibility::Hidden);
-        let overflow = if control.vertical {
-            computed.content_size.y > computed.size.y + f32::EPSILON
-        } else {
-            computed.content_size.x > computed.size.x + f32::EPSILON
-        };
-        let wanted = if overflow && !viewport_hidden {
+        let overflow = computed.content_size.x > computed.size.x + f32::EPSILON;
+        let wanted = if overflow {
             Visibility::Inherited
         } else {
             Visibility::Hidden
         };
         if *visibility != wanted {
             *visibility = wanted;
-        }
-    }
-}
-
-/// Point each horizontal scroll arrow the right physical way for the live
-/// direction: toward the inline end is `▶` under LTR and `◀` under RTL.
-fn apply_tab_arrow_glyphs(
-    direction: Res<UiDirection>,
-    mut glyphs: Query<(&TabArrowGlyph, &mut Text)>,
-) {
-    for (glyph, mut text) in &mut glyphs {
-        // toward-end points right under LTR, left under RTL; toward-start the
-        // reverse — the same XOR the corner rounding uses.
-        let points_right = glyph.toward_end != direction.is_rtl();
-        let wanted = if points_right {
-            ARROW_TOWARD_END
-        } else {
-            ARROW_TOWARD_START
-        };
-        if text.0 != wanted {
-            wanted.clone_into(&mut text.0);
         }
     }
 }
@@ -1319,7 +1348,7 @@ fn scroll_tabs_with_wheel(
         return;
     }
     let delta = match wheel.unit {
-        MouseScrollUnit::Line => wheel.delta.y * ARROW_SCROLL_STEP,
+        MouseScrollUnit::Line => wheel.delta.y * WHEEL_LINE_STEP,
         MouseScrollUnit::Pixel => wheel.delta.y,
     };
     // Scroll the first hovered entity that is (or is inside) a vertical viewport,
@@ -1794,11 +1823,12 @@ pub fn spawn_tabs_scroll_demo(
 #[cfg(test)]
 mod tests {
     use super::{
-        ARROW_SCROLL_STEP, MAX_STRIP_WIDTH, MIN_STRIP_WIDTH, RevealEllipsis, SAMPLE_LABELS,
-        TAB_SELECTED_ACTION, TabButton, TabContainerHandle, TabDivider, TabPanel, TabPlacement,
-        TabScrollControl, TabSpec, TabStrip, TabStripWidth, TabViewport, apply_tab_strip_width,
-        arrow_scroll_delta, resize_strip_width, spawn_tab_container, spawn_tab_strip,
+        MAX_STRIP_WIDTH, MIN_STRIP_WIDTH, RevealEllipsis, SAMPLE_LABELS, TAB_SELECTED_ACTION,
+        TabButton, TabContainerHandle, TabDivider, TabPanel, TabPlacement, TabScrollControl,
+        TabSpec, TabStep, TabStrip, TabStripWidth, TabViewport, apply_tab_strip_width,
+        resize_strip_width, spawn_tab_container, spawn_tab_strip, tab_scroll_target,
     };
+    use sl_viewer_ui_core::scrollbar::{ScrollTarget, ScrollbarFrame};
 
     use bevy::ecs::system::SystemState;
     use bevy::ecs::world::CommandQueue;
@@ -2333,17 +2363,25 @@ mod tests {
             }
 
             // A scroll control of the right orientation exists, hidden at rest
-            // (few tabs, and no layout in this bare app to measure overflow).
-            let mut controls = app.world_mut().query::<(&TabScrollControl, &Visibility)>();
-            let control = controls
-                .iter(app.world())
-                .find(|(control, _)| control.viewport == viewport)
-                .ok_or("no scroll control for the viewport")?;
-            assert_eq!(control.0.vertical, vertical, "{placement:?} control axis");
+            // (few tabs, and no layout in this bare app to measure overflow):
+            // the shared scrollbar for a vertical strip, the overflow buttons
+            // for a horizontal one.
+            let hidden = if vertical {
+                let mut bars = app.world_mut().query::<(&ScrollbarFrame, &Visibility)>();
+                bars.iter(app.world())
+                    .find(|(frame, _)| frame.target == ScrollTarget::Container(viewport))
+                    .map(|(_, visibility)| *visibility)
+            } else {
+                let mut controls = app.world_mut().query::<(&TabScrollControl, &Visibility)>();
+                controls
+                    .iter(app.world())
+                    .find(|(control, _)| control.viewport == viewport)
+                    .map(|(_, visibility)| *visibility)
+            };
             assert_eq!(
-                *control.1,
+                hidden.ok_or("no scroll control for the viewport")?,
                 Visibility::Hidden,
-                "the control is hidden until the tabs overflow"
+                "{placement:?}: the control is hidden until the tabs overflow"
             );
         }
         Ok(())
@@ -2846,31 +2884,54 @@ mod tests {
         Ok(())
     }
 
-    /// A scroll arrow's step folds in placement intent and direction: toward the
-    /// inline end is `+x` under LTR and `-x` under RTL, toward the start the
-    /// reverse.
+    /// **The overflow buttons count tabs, not pixels.** Four 100-wide tabs
+    /// with 10 of gap in a 150-wide viewport (range 280): a step lines the next
+    /// tab's leading edge up with the viewport's, so no click leaves a tab
+    /// half scrolled in, and the jumps go to either end.
+    ///
+    /// Under RTL the leading edge is the right one and "on" is toward a
+    /// smaller offset — the first tab is the rightmost, at the far end of the
+    /// range.
     #[expect(
         clippy::float_cmp,
-        reason = "the step is an exact multiple of the constant, asserted exactly"
+        reason = "the stops are exact sums of the fixture's widths, asserted exactly"
     )]
     #[test]
-    fn arrow_scroll_delta_folds_in_direction() {
+    fn the_overflow_buttons_step_a_tab_at_a_time() {
+        let edges = [(0.0, 100.0), (110.0, 210.0), (220.0, 320.0), (330.0, 430.0)];
+        let (visible, range) = (150.0, 280.0);
+        let ltr = |step, offset| tab_scroll_target(step, &edges, offset, visible, range, false);
+        assert_eq!(ltr(TabStep::Next, 0.0), 110.0, "on to the second tab");
+        assert_eq!(ltr(TabStep::Next, 110.0), 220.0, "and the third");
+        assert_eq!(ltr(TabStep::Next, 220.0), 280.0, "the last stop is the end");
+        assert_eq!(ltr(TabStep::Next, 280.0), 280.0, "and it stays there");
+        assert_eq!(ltr(TabStep::Prev, 280.0), 220.0, "back one tab");
         assert_eq!(
-            arrow_scroll_delta(true, UiDirection::Ltr),
-            ARROW_SCROLL_STEP
+            ltr(TabStep::Prev, 150.0),
+            110.0,
+            "back to a tab edge, not by a width"
         );
+        assert_eq!(ltr(TabStep::Prev, 0.0), 0.0, "and never past the start");
+        assert_eq!(ltr(TabStep::First, 200.0), 0.0);
+        assert_eq!(ltr(TabStep::Last, 0.0), 280.0);
+
+        let rtl = |step, offset| tab_scroll_target(step, &edges, offset, visible, range, true);
+        // The trailing (right) edges less the viewport: -50, 60, 170, 280,
+        // clamped to 0, 60, 170, 280.
         assert_eq!(
-            arrow_scroll_delta(true, UiDirection::Rtl),
-            -ARROW_SCROLL_STEP
+            rtl(TabStep::First, 0.0),
+            280.0,
+            "the first tab is the rightmost"
         );
+        assert_eq!(rtl(TabStep::Last, 280.0), 0.0);
         assert_eq!(
-            arrow_scroll_delta(false, UiDirection::Ltr),
-            -ARROW_SCROLL_STEP
+            rtl(TabStep::Next, 280.0),
+            170.0,
+            "on is toward a smaller offset"
         );
-        assert_eq!(
-            arrow_scroll_delta(false, UiDirection::Rtl),
-            ARROW_SCROLL_STEP
-        );
+        assert_eq!(rtl(TabStep::Next, 60.0), 0.0);
+        assert_eq!(rtl(TabStep::Prev, 60.0), 170.0);
+        assert_eq!(rtl(TabStep::Prev, 280.0), 280.0, "never past the start");
     }
 
     // -----------------------------------------------------------------------
@@ -2981,7 +3042,9 @@ mod tests {
         };
         use crate::ui_tab::TabWidgetPlugin;
         use crate::ui_test::interact::{self, InteractionTest, centre_of};
-        use crate::ui_test::{drain_actions, enable_action_recording, find_by_name, settle};
+        use crate::ui_test::{
+            box_of, drain_actions, enable_action_recording, find_by_name, settle,
+        };
         use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems};
         use sl_viewer_ui_core::ui_element::UiAction;
 
@@ -3163,6 +3226,166 @@ mod tests {
                 (narrowed - START_WIDTH).abs() < 1.0,
                 "dragging back returns the strip to {START_WIDTH}: {narrowed}"
             );
+            Ok(())
+        }
+
+        /// A horizontal strip of `count` tabs under the real pointer stack —
+        /// more than fit, so the overflow buttons show.
+        fn overflowing_strip_app(count: usize) -> App {
+            strip_app(TabPlacement::BlockStart, count)
+        }
+
+        /// A strip of `count` tabs at `placement` under the real pointer stack.
+        fn strip_app(placement: TabPlacement, count: usize) -> App {
+            let mut app = InteractionTest::new().build();
+            app.add_plugins(TabWidgetPlugin);
+            enable_action_recording(&mut app);
+            app.add_systems(
+                Startup,
+                (move |mut commands: Commands, root: Res<UiRoot>| {
+                    let labels: Vec<String> =
+                        (1..=count).map(|number| format!("Tab {number}")).collect();
+                    spawn_tab_container(
+                        &mut commands,
+                        root.0,
+                        &TabSpec {
+                            element: ELEMENT,
+                            placement,
+                            labels: &labels,
+                            active: 0,
+                            tab_index: 1,
+                            font_size: 15.0,
+                            strip_width: None,
+                            ellipsis: super::super::DEFAULT_ELLIPSIS,
+                            translate_labels: false,
+                        },
+                    );
+                })
+                .after(UiScaffoldSystems::SpawnRoot),
+            );
+            settle(&mut app);
+            settle(&mut app);
+            app
+        }
+
+        /// The strip's horizontal scroll offset.
+        fn strip_offset(app: &mut App) -> Option<f32> {
+            let viewport = find_by_name(app, "fixture:tab-viewport")?;
+            app.world()
+                .get::<ScrollPosition>(viewport)
+                .map(|position| position.x)
+        }
+
+        /// Whether some tab's leading (left) edge sits exactly on the
+        /// viewport's — what a step by a *tab* leaves, and a step by pixels
+        /// almost never does.
+        fn a_tab_is_flush_with_the_leading_edge(app: &mut App, count: usize) -> bool {
+            let Some(viewport) = box_of(app, "fixture:tab-viewport") else {
+                return false;
+            };
+            (0..count).any(|index| {
+                box_of(app, &format!("fixture:tab:{index}"))
+                    .is_some_and(|tab| (tab.min.x - viewport.min.x).abs() < 1.0)
+            })
+        }
+
+        /// **A horizontal strip that overflows grows the reference's four
+        /// buttons, and they move by tabs.** On steps so the next tab is flush
+        /// with the strip's leading edge; last goes to the end; first back to
+        /// the start; and back, held, keeps stepping until it is let go.
+        #[test]
+        fn the_overflow_buttons_walk_the_strip_by_tabs() -> Result<(), TestError> {
+            use bevy::time::TimeUpdateStrategy;
+            use std::time::Duration;
+
+            const COUNT: usize = 24;
+            let mut app = overflowing_strip_app(COUNT);
+            app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO));
+            let arrows =
+                find_by_name(&mut app, "fixture:tab-arrows").ok_or("no overflow buttons")?;
+            assert_eq!(
+                app.world().get::<Visibility>(arrows),
+                Some(&Visibility::Inherited),
+                "{COUNT} tabs overflow the strip, so its buttons show"
+            );
+            assert_eq!(
+                strip_offset(&mut app),
+                Some(0.0),
+                "it starts at the first tab"
+            );
+
+            interact::click_node(&mut app, "fixture:tab-arrow:next")?;
+            settle(&mut app);
+            let stepped = strip_offset(&mut app).ok_or("the viewport lost its scroll")?;
+            assert!(stepped > 0.0, "on moves the strip");
+            assert!(
+                a_tab_is_flush_with_the_leading_edge(&mut app, COUNT),
+                "on stops with a tab flush with the leading edge, not part-way through one"
+            );
+            interact::click_node(&mut app, "fixture:tab-arrow:next")?;
+            settle(&mut app);
+            let twice = strip_offset(&mut app).ok_or("the viewport lost its scroll")?;
+            assert!(twice > stepped, "and on again moves it further");
+
+            interact::click_node(&mut app, "fixture:tab-arrow:last")?;
+            settle(&mut app);
+            let end = strip_offset(&mut app).ok_or("the viewport lost its scroll")?;
+            let viewport = box_of(&mut app, "fixture:tab-viewport").ok_or("no viewport")?;
+            let last =
+                box_of(&mut app, &format!("fixture:tab:{}", COUNT - 1)).ok_or("no last tab")?;
+            assert!(
+                (last.max.x - viewport.max.x).abs() < 1.0,
+                "last shows the last tab at the trailing edge: {last:?} in {viewport:?}"
+            );
+
+            // Hold back for a second of 100 ms frames: several tabs, not one.
+            app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
+                100,
+            )));
+            let prev = centre_of(&mut app, "fixture:tab-arrow:prev").ok_or("no back button")?;
+            interact::hover(&mut app, prev);
+            interact::press(&mut app, MouseButton::Left);
+            settle(&mut app);
+            let after_press = strip_offset(&mut app).ok_or("the viewport lost its scroll")?;
+            for _frame in 0..10 {
+                app.update();
+            }
+            let held = strip_offset(&mut app).ok_or("the viewport lost its scroll")?;
+            assert!(after_press < end, "the press steps back once");
+            assert!(held < after_press, "holding it keeps stepping back");
+            interact::release(&mut app, MouseButton::Left);
+            for _frame in 0..10 {
+                app.update();
+            }
+            assert_eq!(strip_offset(&mut app), Some(held), "letting go stops it");
+
+            app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO));
+            interact::click_node(&mut app, "fixture:tab-arrow:first")?;
+            settle(&mut app);
+            assert_eq!(
+                strip_offset(&mut app),
+                Some(0.0),
+                "first goes back to the start"
+            );
+            Ok(())
+        }
+
+        /// **A vertical strip's scrollbar shows only while there is something
+        /// to scroll.** A bar whose thumb fills its whole groove says nothing
+        /// but "this could scroll", so two tabs show none and twenty-four,
+        /// which overflow the strip, show it.
+        #[test]
+        fn a_vertical_strips_bar_shows_only_while_its_tabs_overflow() -> Result<(), TestError> {
+            for (count, want) in [(2_usize, Visibility::Hidden), (24, Visibility::Inherited)] {
+                let mut app = strip_app(TabPlacement::InlineStart, count);
+                let bar = find_by_name(&mut app, "fixture:tab-scrollbar")
+                    .ok_or("the strip has no bar")?;
+                assert_eq!(
+                    app.world().get::<Visibility>(bar),
+                    Some(&want),
+                    "{count} tabs: the bar's visibility"
+                );
+            }
             Ok(())
         }
     }

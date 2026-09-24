@@ -267,8 +267,12 @@ mod tests {
                 )));
             }
             // Out of view: press the arrow that walks the bar towards it.
-            let toward_end = usize::from(tab.min.x >= viewport.min.x);
-            interact::click_node(app, &format!("build-tabs:tab-arrow:{toward_end}"))?;
+            let step = if tab.min.x >= viewport.min.x {
+                "next"
+            } else {
+                "prev"
+            };
+            interact::click_node(app, &format!("build-tabs:tab-arrow:{step}"))?;
             settle(app, 2);
         }
         Err(TestError::from(format!(

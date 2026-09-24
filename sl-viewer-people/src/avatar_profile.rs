@@ -53,7 +53,7 @@ use crate::skin_palette::SkinPalette;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui::Checked;
-use bevy::ui_widgets::{ControlOrientation, Scrollbar, ScrollbarThumb, ValueChange};
+use bevy::ui_widgets::ValueChange;
 use sl_client_bevy::{
     AgentKey, AvatarClassified, AvatarGroupMembership, AvatarPick, AvatarProperties,
     ClassifiedCategory, ClassifiedInfo, ClassifiedKey, ClassifiedUpdate, Command, FriendKey,
@@ -61,6 +61,7 @@ use sl_client_bevy::{
     PickUpdate, ProfileUpdate, RegionCoordinates, RegionHandle, SlCommand, SlEvent, SlIdentity,
     SlSessionEvent, TextureKey, Uuid, Vector,
 };
+use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
 
 use crate::floater::{
     Floater, FloaterCaps, FloaterHandle, FloaterKey, FloaterSpec, FloaterSystems, KeyedFloaterOpen,
@@ -103,15 +104,6 @@ const GROUP_LINK_COLOR: Color = Color::srgb(0.52, 0.68, 0.95);
 
 /// The 2nd-Life group list's bounded scroll height, in logical pixels.
 const GROUP_LIST_HEIGHT: f32 = 120.0;
-
-/// The group list scrollbar's track thickness, in logical pixels.
-const SCROLLBAR_THICKNESS: f32 = 10.0;
-/// The group list scrollbar's minimum thumb length, in logical pixels.
-const SCROLLBAR_MIN_THUMB: f32 = 24.0;
-/// The group list scrollbar track colour.
-const SCROLLBAR_TRACK_COLOR: Color = Color::srgb(0.12, 0.14, 0.18);
-/// The group list scrollbar thumb colour.
-const SCROLLBAR_THUMB_COLOR: Color = Color::srgb(0.34, 0.40, 0.52);
 
 /// The longest gap between two clicks on the same group row still counted as a
 /// double-click (which opens the group profile), in seconds.
@@ -1176,26 +1168,13 @@ fn build_second_life_structure(
         .id();
     ui.sl_handles.groups_container = Some(groups_container);
     // A visible vertical scrollbar driving the group list.
-    commands
-        .spawn((
-            Scrollbar {
-                target: groups_container,
-                orientation: ControlOrientation::Vertical,
-                min_thumb_length: SCROLLBAR_MIN_THUMB,
-            },
-            Node {
-                width: Val::Px(SCROLLBAR_THICKNESS),
-                flex_shrink: 0.0,
-                ..default()
-            },
-            BackgroundColor(SCROLLBAR_TRACK_COLOR),
-            Name::new("profile-groups-scrollbar"),
-            ChildOf(groups_row),
-        ))
-        .with_child((
-            ScrollbarThumb::default(),
-            BackgroundColor(SCROLLBAR_THUMB_COLOR),
-        ));
+    spawn_scrollbar(
+        commands,
+        groups_row,
+        ScrollTarget::Container(groups_container),
+        Node::default(),
+        "profile-groups-scrollbar",
+    );
 
     // About — an empty container filled once from properties.
     spawn_section_label(commands, panel, "profile-about");

@@ -92,6 +92,7 @@ use crate::ui_font::UiFont;
 use crate::ui_tab::{TabDivider, TabPlacement, TabStrip, TabStripWidth, resize_strip_width};
 use crate::ui_text::set_node_text;
 use crate::world_api::rlv::swallows_owner_say;
+use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
 
 /// The hosting floater's [`crate::floater::FloaterSpec::id`] — it also keys the
 /// window's remembered geometry in [`crate::floater_persist`].
@@ -1241,28 +1242,51 @@ fn build_conversations_content(In(handle): In<FloaterHandle>, mut commands: Comm
     // tab widget's `TabStrip` / `TabStripWidth` so the split is a draggable,
     // persisted divider (crate::floater_persist keys on those); no ui_tab system
     // drives a bare `TabStrip`, so it only supplies the width + persistence key.
-    let strip = commands
+    //
+    // The width and the persistence key sit on a row holding the scrolling
+    // column of buttons and its scrollbar, so the divider resizes both and the
+    // bar is never scrolled away with the tabs.
+    let strip_row = commands
         .spawn((
             Node {
                 width: Val::Px(STRIP_WIDTH),
                 flex_shrink: 0.0,
                 min_height: Val::Px(0.0),
-                overflow: Overflow::scroll_y(),
-                ..column(Val::Px(2.0))
+                ..row(Val::ZERO)
             },
-            ScrollPosition::default(),
             BackgroundColor(TAB_INACTIVE_BACKGROUND),
             TabStrip {
                 element: STRIP_ELEMENT,
                 active: 0,
             },
             TabStripWidth(STRIP_WIDTH),
-            Name::new("conversations-strip"),
+            Name::new("conversations-strip-row"),
             ChildOf(split),
         ))
         .id();
+    let strip = commands
+        .spawn((
+            Node {
+                flex_grow: 1.0,
+                min_width: Val::Px(0.0),
+                min_height: Val::Px(0.0),
+                overflow: Overflow::scroll_y(),
+                ..column(Val::Px(2.0))
+            },
+            ScrollPosition::default(),
+            Name::new("conversations-strip"),
+            ChildOf(strip_row),
+        ))
+        .id();
+    spawn_scrollbar(
+        &mut commands,
+        strip_row,
+        ScrollTarget::Container(strip),
+        Node::default(),
+        "conversations-strip-scrollbar",
+    );
 
-    spawn_divider(&mut commands, split, strip);
+    spawn_divider(&mut commands, split, strip_row);
 
     // The panel area — the panes stack here, only the active one displayed.
     let panel_area = commands
@@ -1421,11 +1445,25 @@ fn spawn_conversation_view(
         ))
         .id();
     let invite_bar = spawn_invite_bar(commands, panel, key);
-    let transcript_scroll = commands
+    // The transcript and its scrollbar share a row that takes the pane's
+    // spare height.
+    let transcript_row = commands
         .spawn((
             Node {
                 width: Val::Percent(100.0),
                 flex_grow: 1.0,
+                min_height: Val::Px(0.0),
+                ..row(Val::ZERO)
+            },
+            Name::new("conversations-transcript-row"),
+            ChildOf(panel),
+        ))
+        .id();
+    let transcript_scroll = commands
+        .spawn((
+            Node {
+                flex_grow: 1.0,
+                min_width: Val::Px(0.0),
                 min_height: Val::Px(0.0),
                 padding: UiRect::all(Val::Px(6.0)),
                 overflow: Overflow::scroll_y(),
@@ -1438,9 +1476,16 @@ fn spawn_conversation_view(
                 is_hoverable: true,
             },
             Name::new("conversations-transcript-scroll"),
-            ChildOf(panel),
+            ChildOf(transcript_row),
         ))
         .id();
+    spawn_scrollbar(
+        commands,
+        transcript_row,
+        ScrollTarget::Container(transcript_scroll),
+        Node::default(),
+        "conversations-transcript-scrollbar",
+    );
     // The transcript is a vertical column of per-line linkified rows (rebuilt on a
     // new line), so a speaker name and any URLs / SLURLs render as clickable links.
     let transcript_column = commands

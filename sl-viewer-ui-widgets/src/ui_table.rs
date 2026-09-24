@@ -2623,9 +2623,10 @@ mod tests {
         use crate::ui_table::{TableRow, TableRowCells, TableWidgetPlugin};
         use crate::ui_test::interact::{self, InteractionTest, centre_of, centre_of_entity};
         use crate::ui_test::{find_by_name, settle};
+        use sl_viewer_ui_core::scrollbar::SCROLLBAR_THICKNESS;
         use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems};
         use sl_viewer_ui_core::virtual_list::{
-            SCROLLBAR_THICKNESS, VirtualList, VirtualListPlugin, VirtualRow, index_to_f32,
+            VirtualList, VirtualListPlugin, VirtualRow, index_to_f32,
         };
 
         /// How many rows the fixture's consumer has. Small enough that the
@@ -3139,10 +3140,28 @@ mod tests {
         #[test]
         fn dragging_the_scrollbar_thumb_scrolls_further_than_the_pointer() -> Result<(), TestError>
         {
+            drag_the_thumb(false)
+        }
+
+        /// The same drag with a skin's **arrow ends** showing: they take their
+        /// length out of the groove, so the thumb's travel is shorter, and the
+        /// drag must still map it onto the whole scroll range rather than
+        /// stalling or overshooting (`viewer-skin-scrollbar-shape`).
+        #[test]
+        fn dragging_the_thumb_between_arrow_ends_still_scrolls_the_list() -> Result<(), TestError> {
+            drag_the_thumb(true)
+        }
+
+        /// The body of the two drag tests: `ends` says whether the arrow ends
+        /// are showing.
+        fn drag_the_thumb(ends: bool) -> Result<(), TestError> {
             const TRAVEL: f32 = 40.0;
 
             let mut app = table_app_with(LONG_LIST);
-            let thumb = centre_of(&mut app, "virtual-list:scrollbar-thumb")
+            if ends {
+                show_arrow_ends(&mut app)?;
+            }
+            let thumb = centre_of(&mut app, "virtual-list:scrollbar:thumb")
                 .ok_or("the scrollbar never laid out")?;
             interact::drag(
                 &mut app,
@@ -3164,6 +3183,162 @@ mod tests {
                 first > 0,
                 "and the window followed the thumb rather than staying at the top"
             );
+            Ok(())
+        }
+
+        /// Show the list scrollbar's two arrow ends, as a skin whose
+        /// `--scrollbar-arrows` is `flex` does — this harness resolves no
+        /// stylesheet, so the `display` the rule would write is written here.
+        fn show_arrow_ends(app: &mut App) -> Result<(), TestError> {
+            for name in ["virtual-list:scrollbar:up", "virtual-list:scrollbar:down"] {
+                let arrow = find_by_name(app, name).ok_or("the bar has no arrow end")?;
+                app.world_mut()
+                    .get_mut::<Node>(arrow)
+                    .ok_or("an arrow end without a node")?
+                    .display = Display::Flex;
+            }
+            settle(app);
+            settle(app);
+            Ok(())
+        }
+
+        /// A node's top and bottom edges, in logical pixels.
+        fn vertical_extent(app: &mut App, name: &str) -> Option<(f32, f32)> {
+            let entity = find_by_name(app, name)?;
+            let node = app.world().get::<ComputedNode>(entity)?;
+            let centre = centre_of_entity(app, entity)?;
+            let half = node.size().y * node.inverse_scale_factor() / 2.0;
+            Some((centre.y - half, centre.y + half))
+        }
+
+        /// **The arrow ends come out of the groove.** With them showing, the
+        /// thumb starts under the up arrow and, scrolled to the end, stops on
+        /// top of the down arrow — it neither hides behind an arrow nor leaves
+        /// the last rows unreachable. The scroll range itself is untouched:
+        /// the end of the list is where it was.
+        #[test]
+        fn the_thumb_travels_the_groove_between_the_arrow_ends() -> Result<(), TestError> {
+            let mut app = table_app_with(LONG_LIST);
+            show_arrow_ends(&mut app)?;
+
+            let (_, up_bottom) =
+                vertical_extent(&mut app, "virtual-list:scrollbar:up").ok_or("no up arrow")?;
+            let (down_top, _) =
+                vertical_extent(&mut app, "virtual-list:scrollbar:down").ok_or("no down arrow")?;
+            let (thumb_top, _) =
+                vertical_extent(&mut app, "virtual-list:scrollbar:thumb").ok_or("no thumb")?;
+            assert!(
+                (thumb_top - up_bottom).abs() < 0.5,
+                "at the top the thumb starts at {thumb_top}, not under the up arrow at {up_bottom}"
+            );
+
+            let viewport =
+                find_by_name(&mut app, "test:table-viewport").ok_or("no table viewport")?;
+            app.world_mut()
+                .get_mut::<VirtualList>(viewport)
+                .ok_or("the viewport lost its list")?
+                .scroll_to_index(LONG_LIST);
+            settle(&mut app);
+            settle(&mut app);
+
+            let (_, thumb_bottom) =
+                vertical_extent(&mut app, "virtual-list:scrollbar:thumb").ok_or("no thumb")?;
+            assert!(
+                (thumb_bottom - down_top).abs() < 0.5,
+                "at the end the thumb stops at {thumb_bottom}, not on the down arrow at {down_top}"
+            );
+            let viewport_height = app
+                .world()
+                .get::<ComputedNode>(viewport)
+                .map(|node| node.size().y * node.inverse_scale_factor())
+                .ok_or("the viewport never laid out")?;
+            let end = index_to_f32(LONG_LIST) * SORTABLE_SPEC.row_height - viewport_height;
+            let scrolled = scroll_offset(&mut app).ok_or("the list lost its scroll")?;
+            assert!(
+                (scrolled - end).abs() < 0.5,
+                "the arrows must not move the end of the list: {scrolled} against {end}"
+            );
+            Ok(())
+        }
+
+        /// **An arrow steps one row per press, and repeats while held.**
+        ///
+        /// The reference's arrow is a button with a held-down callback: one
+        /// line on the press, then a repeat once it has been held past the
+        /// button's delay, until it is let go. The clock is driven by hand so
+        /// "held" means the same thing on a loaded machine.
+        #[test]
+        fn an_arrow_end_steps_a_row_and_repeats_while_held() -> Result<(), TestError> {
+            use bevy::time::TimeUpdateStrategy;
+            use std::time::Duration;
+
+            let mut app = table_app_with(LONG_LIST);
+            show_arrow_ends(&mut app)?;
+            // A stopped clock, so two frames of a click are never a hold.
+            app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO));
+            let row = SORTABLE_SPEC.row_height;
+
+            let down = centre_of(&mut app, "virtual-list:scrollbar:down")
+                .ok_or("the down arrow never laid out")?;
+            interact::click(&mut app, down, MouseButton::Left);
+            settle(&mut app);
+            assert_eq!(scroll_offset(&mut app), Some(row), "one press, one row");
+            interact::click(&mut app, down, MouseButton::Left);
+            settle(&mut app);
+            assert_eq!(scroll_offset(&mut app), Some(row * 2.0), "and another");
+
+            let up = centre_of(&mut app, "virtual-list:scrollbar:up")
+                .ok_or("the up arrow never laid out")?;
+            interact::click(&mut app, up, MouseButton::Left);
+            settle(&mut app);
+            assert_eq!(
+                scroll_offset(&mut app),
+                Some(row),
+                "the up arrow steps back"
+            );
+
+            // Hold the down arrow for a second of 100 ms frames: the press
+            // steps, the first half second waits, the rest repeats.
+            app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
+                100,
+            )));
+            interact::hover(&mut app, down);
+            interact::press(&mut app, MouseButton::Left);
+            for _frame in 0..10 {
+                app.update();
+            }
+            let held = scroll_offset(&mut app).ok_or("the list lost its scroll")?;
+            assert!(
+                held >= row * 5.0,
+                "a second's hold must repeat past the one row the press gave, got {held}"
+            );
+
+            interact::release(&mut app, MouseButton::Left);
+            for _frame in 0..10 {
+                app.update();
+            }
+            assert_eq!(
+                scroll_offset(&mut app),
+                Some(held),
+                "letting go stops the repeat"
+            );
+            Ok(())
+        }
+
+        /// With no skin asking for them — the flat skins, and a world with no
+        /// stylesheet at all — the arrow ends are spawned but not laid out, so
+        /// the bar is the plain groove it always was.
+        #[test]
+        fn a_flat_bar_has_no_arrow_to_press() -> Result<(), TestError> {
+            let mut app = table_app_with(LONG_LIST);
+            for name in ["virtual-list:scrollbar:up", "virtual-list:scrollbar:down"] {
+                let arrow = find_by_name(&mut app, name).ok_or("the bar has no arrow end")?;
+                assert_eq!(
+                    app.world().get::<Node>(arrow).map(|node| node.display),
+                    Some(Display::None),
+                    "{name} shows with no skin asking for it"
+                );
+            }
             Ok(())
         }
     }

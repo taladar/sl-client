@@ -25,6 +25,7 @@ use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{FolderType, InventoryFolderKey, InventoryType, SlCommand, TextureKey};
+use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
 use sl_viewer_ui_core::skin::ACTIVE_CLASS;
 use sl_viewer_ui_core::skin::text_role;
 
@@ -253,6 +254,17 @@ fn spawn_gallery_floater(mut commands: Commands, root: Res<UiRoot>) {
     // The scrollable tile grid: a wrapping row inside a clipped, scrolled
     // viewport (the shared UI-gallery pattern — `bevy_ui` clips, the wheel
     // system moves the offset).
+    //
+    // It wraps, so it never overflows sideways and scrolls on one axis only;
+    // the scrollbar sits beside it, outside the grid's own width, so the tiles
+    // per line do not change when it appears.
+    let grid_row = commands
+        .spawn((
+            Node { ..row(Val::ZERO) },
+            Name::new("inventory-gallery-grid-row"),
+            ChildOf(content),
+        ))
+        .id();
     let grid = commands
         .spawn((
             Node {
@@ -263,16 +275,23 @@ fn spawn_gallery_floater(mut commands: Commands, root: Res<UiRoot>) {
                 align_content: AlignContent::FlexStart,
                 column_gap: Val::Px(6.0),
                 row_gap: Val::Px(6.0),
-                overflow: Overflow::scroll(),
+                overflow: Overflow::scroll_y(),
                 ..default()
             },
             ScrollPosition::default(),
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.20)),
             Pickable::default(),
             Name::new("inventory-gallery-grid"),
-            ChildOf(content),
+            ChildOf(grid_row),
         ))
         .id();
+    spawn_scrollbar(
+        &mut commands,
+        grid_row,
+        ScrollTarget::Container(grid),
+        Node::default(),
+        "inventory-gallery-scrollbar",
+    );
 
     commands.insert_resource(GalleryUi {
         panel: handle.root,

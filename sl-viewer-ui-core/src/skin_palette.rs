@@ -145,7 +145,9 @@ pub struct SkinPalette {
     // -- Structure --------------------------------------------------------
     /// A splitter or rule between two panes.
     pub divider: Color,
-    /// The trough a scrollbar thumb or a slider handle runs in.
+    /// The trough a slider handle runs in — and the colour a scrollbar's groove
+    /// shows before a stylesheet reaches it, since the two were one role until
+    /// the groove took its own (`--scrollbar-track`, a class token).
     pub track_bg: Color,
     /// A scrollbar thumb.
     pub scrollbar_thumb: Color,

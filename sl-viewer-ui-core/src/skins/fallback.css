@@ -85,6 +85,25 @@
   --track-bg: #1f242e;
   --scrollbar-thumb: #667a99;
   --slider-thumb: #bfc7d9;
+  /* The scrollbar (viewer-skin-scrollbar-shape): its groove, its thumb under
+   * the pointer, and its arrow ends — their face, their face under the
+   * pointer, and the glyph. The groove is the slider trough's value; the ends
+   * are a control's face and its hover. `--scrollbar-arrows` is a `display`
+   * value, and `none` keeps the plain bar an unskinned world always had. */
+  --scrollbar-thickness: 10px;
+  --scrollbar-track: #1f242e;
+  --scrollbar-thumb-hover: #8193b3;
+  --scrollbar-arrows: none;
+  --scrollbar-arrow-bg: #293040;
+  --scrollbar-arrow-bg-hover: #475775;
+  --scrollbar-arrow: #bfc7d9;
+  /* A horizontal tab strip's overflow buttons: their face (none — they sit
+   * on the strip), their face under the pointer, the glyph, and whether the
+   * two jump-to-end buttons show (a `display` value). */
+  --tab-scroll-bg: #00000000;
+  --tab-scroll-bg-hover: #475775;
+  --tab-scroll-arrow: #e6ebf5;
+  --tab-jump-buttons: flex;
   --title-bar-active: #ffffff1a;
   --title-text-inactive: #8c94a3;
   --glyph-button-bg: #ffffff0f;
