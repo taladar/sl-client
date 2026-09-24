@@ -187,6 +187,157 @@ mod test {
         Ok(())
     }
 
+    /// **The skin chapter names every token and every class `common.css`
+    /// uses, and no token it no longer reads.**
+    ///
+    /// `book/src/authoring/skins.md` is what a third-party skin author works
+    /// from, and its tables say they are the whole vocabulary. A token they
+    /// omit is one such a skin never defines, which fails the silent way
+    /// [`every_token_common_css_reads_is_defined_by_every_skin`] guards against
+    /// for the shipped skins only: the rule paints bevy_flair's default. The
+    /// chapter fell two thirds behind before anything noticed
+    /// (`viewer-skin-book-token-table-behind`), so a one-off catch-up is not
+    /// the fix; this is.
+    ///
+    /// Only the **leading cell of a `Token` or `Class` table** counts as
+    /// documenting a name — one mentioned in prose, or in another row's
+    /// description, has not been given a row. The reverse direction (a row for
+    /// a name the sheet stopped using) skips the per-glyph `--` modifier
+    /// classes, which Rust stamps and no rule in the sheet names
+    /// (`.sk-parcel-icon--voice`).
+    ///
+    /// The chapter is read at run time, never embedded, so this crate's
+    /// commit-hook relevance stays its own directory (see
+    /// `book/src/tools/build-performance.md`). The price is that an edit to the
+    /// chapter alone does not re-run this test; the next change to the viewer
+    /// or to `common.css` does.
+    #[test]
+    fn the_skin_chapter_names_every_token_and_class_common_css_uses() -> Result<(), TestError> {
+        let common = without_comments(&common_css()?);
+        let chapter = fs_err::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("..")
+                .join("book")
+                .join("src")
+                .join("authoring")
+                .join("skins.md"),
+        )?;
+        let rows = vocabulary_cells(&chapter);
+
+        let tokens = css_names(&common, "var(--", "--");
+        let classes = css_names(&common, ".sk-", ".sk-");
+        assert!(
+            tokens.len() > 20 && classes.len() > 20,
+            "only {} tokens and {} classes found — the parse, not the chapter, is what broke",
+            tokens.len(),
+            classes.len()
+        );
+
+        let undocumented: Vec<&String> = tokens
+            .iter()
+            .chain(&classes)
+            .filter(|name| !rows.iter().any(|row| mentions(row, name)))
+            .collect();
+        assert!(
+            undocumented.is_empty(),
+            "common.css uses these and no table in book/src/authoring/skins.md names \
+             them, so a skin written from the chapter never defines them: {undocumented:#?}"
+        );
+
+        let documented_tokens = rows
+            .iter()
+            .flat_map(|row| css_names(row, "`--", "--"))
+            .collect::<std::collections::BTreeSet<_>>();
+        let documented_classes = rows
+            .iter()
+            .flat_map(|row| css_names(row, "`.sk-", ".sk-"))
+            .filter(|class| !class.contains("--"))
+            .collect::<std::collections::BTreeSet<_>>();
+        let stale: Vec<&String> = documented_tokens
+            .difference(&tokens)
+            .chain(documented_classes.difference(&classes))
+            .collect();
+        assert!(
+            stale.is_empty(),
+            "book/src/authoring/skins.md documents these, but common.css no longer \
+             uses them: {stale:#?}"
+        );
+        Ok(())
+    }
+
+    /// Every name in `text` that follows `marker`, spelled with `prefix`
+    /// (which is the tail of `marker`) and running to the first character
+    /// that cannot continue a CSS identifier.
+    ///
+    /// On the chapter's side the marker includes the opening backtick, so only
+    /// a name written as code counts — a table's `| --- |` rule is not a token.
+    fn css_names(text: &str, marker: &str, prefix: &str) -> std::collections::BTreeSet<String> {
+        text.match_indices(marker)
+            .filter_map(|(at, _marker)| {
+                let start = at.saturating_add(marker.len()).checked_sub(prefix.len())?;
+                let tail = text.get(start..)?;
+                let end = tail
+                    .char_indices()
+                    .skip(prefix.len())
+                    .find(|&(_index, ch)| !is_ident_char(ch))
+                    .map_or(tail.len(), |(index, _ch)| index);
+                let name = tail.get(..end)?;
+                (name.len() > prefix.len()).then(|| name.to_owned())
+            })
+            .collect()
+    }
+
+    /// The leading cell of every body row of every table in `markdown` whose
+    /// first column is headed `Token` or `Class`.
+    fn vocabulary_cells(markdown: &str) -> Vec<&str> {
+        let mut cells = Vec::new();
+        let mut in_vocabulary_table = false;
+        let mut previous_was_row = false;
+        for line in markdown.lines() {
+            let Some(row) = line.trim().strip_prefix('|') else {
+                previous_was_row = false;
+                continue;
+            };
+            let first = row.split('|').next().unwrap_or_default().trim();
+            if !previous_was_row {
+                in_vocabulary_table = first == "Token" || first == "Class";
+            } else if in_vocabulary_table && !first.starts_with("---") {
+                cells.push(first);
+            }
+            previous_was_row = true;
+        }
+        cells
+    }
+
+    /// Whether `row` names `name` whole — `--list-row` is not named by a row
+    /// that only mentions `--list-row-bg`.
+    fn mentions(row: &str, name: &str) -> bool {
+        row.match_indices(name).any(|(at, _name)| {
+            row.get(at.saturating_add(name.len())..)
+                .and_then(|rest| rest.chars().next())
+                .is_none_or(|next| !is_ident_char(next))
+        })
+    }
+
+    /// Whether `ch` can continue a CSS custom property or class name.
+    const fn is_ident_char(ch: char) -> bool {
+        ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'
+    }
+
+    /// `css` with its `/* … */` comments removed, so a class a comment only
+    /// mentions — a retired one, or a skin author's example — is not taken
+    /// for one the sheet uses.
+    fn without_comments(css: &str) -> String {
+        let mut out = String::with_capacity(css.len());
+        let mut rest = css;
+        while let Some((code, after)) = rest.split_once("/*") {
+            out.push_str(code);
+            rest = after.split_once("*/").map_or("", |(_comment, tail)| tail);
+        }
+        out.push_str(rest);
+        out
+    }
+
     /// Every chrome role the widget set paints from is wired in `common.css`
     /// and defined by every shipped skin.
     ///

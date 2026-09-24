@@ -2,7 +2,7 @@
 id: viewer-skin-book-token-table-behind
 title: The skin chapter's token table is four tasks behind the vocabulary
 topic: viewer
-status: ready
+status: done
 origin: viewer-skin-list-row-striping (2026-09-23)
 points: 2
 refs: [viewer-ui-skin-tokens, viewer-skin-light-surface-roles,
@@ -56,3 +56,32 @@ chose. The test catches it for the **shipped** skins only.
 
 Every token `common.css` reads appears in the chapter, and a test fails when
 one does not.
+
+## Done (2026-09-24)
+
+The gap was bigger than the list above: **39 tokens and 59 classes**
+`common.css` uses were missing from the chapter, not only the tokens. Both
+tables are now complete, the chapter gained a *Chrome and data surfaces*
+subsection (the `.sk-list-surface` re-rooting) and a state-class table
+(`.sk-highlighted`, `.sk-active`, `.sk-stripe`, `.sk-drop-target`,
+`.sk-attention`, `.sk-focus-within`), and three stale statements went:
+`.sk-menu-item-disabled` (now `:disabled`), "a menu / combo popover" under
+`--surface-bg` (they have `--menu-bg` / `--combo-list-bg`), and "there are no
+pseudo-elements" (the tick and the pip are `::before` + `content`). The
+supported pseudo-classes now include `:checked` / `:disabled`, and the
+never-reverts rule (every state rule needs a resting one) is written down for
+authors.
+
+The deliverable is
+`the_skin_chapter_names_every_token_and_class_common_css_uses`
+in `sl-client-bevy-viewer/tests/shipped_skins.rs`, checking **both
+directions**: every token and class the comment-stripped `common.css` uses must
+lead a row of a `Token` or `Class` table, and every name leading such a row
+must still be used (the per-glyph `--` modifier classes, stamped from Rust,
+excepted). Mutation-checked: dropping a row and adding a bogus one each fail
+it.
+
+One known limit, stated in the test's doc: it reads the chapter at run time
+(never `include_str!`, to keep the viewer crate's hook relevance local), so an
+edit to the chapter alone does not re-run it — the next viewer or `common.css`
+change does.

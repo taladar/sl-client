@@ -104,15 +104,21 @@ Defined by every skin's `skin.css`, consumed by `common.css`:
 
 | Token | Role |
 | --- | --- |
-| `--surface-bg` | a framed surface: a panel, a floater body, a menu, a combo popover |
+| `--surface-bg` | a framed surface: a panel, a floater body, a tab, the menu bar and the toolbar strip, a toast card |
 | `--surface-border` | that surface's frame, and a menu's separator rule |
 | `--surface-radius` | a framed surface's corner radius |
 | `--card-bg` | a background-only surface inside a framed one: a card, a bar, a tab page, the active tab |
-| `--overlay-bg` | the scrim a floating layer sits on (the dock host behind docked floaters) |
+| `--overlay-bg` | the scrim a floating layer sits on (the dock host behind docked floaters, an overlay over the world) |
+| `--overlay-text` | text drawn straight over the rendered world — a beacon's label, a diagnostic read-out — which is read against whatever the camera sees, not against a panel |
+| `--menu-bg` | a dropped-down menu's face; a role of its own because a classic skin floats its menus in a colour the floater body does not share (the flat skins give it `--surface-bg`'s value) |
 | `--text-primary` | primary body text: a label, a table cell, a menu entry, a tab caption |
 | `--text-muted` | secondary text: a caption, a hint, a column header, a resize grip |
 | `--text-disabled` | text of a control whose action does not apply right now |
 | `--text-heading` | a heading inside a page |
+| `--text-error` / `--text-warn` / `--text-note` | text that reports a failure, a warning, or a note asking for the eye — roles of their own so a colour-blind overlay can keep them apart |
+| `--experience-accent` | the experience family's accent text |
+| `--folder-label` | an inventory folder's label, set apart from an item's (gold in the reference) |
+| `--console-info` / `--console-error` | an RLVa console line that reports, or fails; a reply takes `--text-muted` |
 | `--control-bg` | a button's / combo's resting background |
 | `--control-bg-hover` | the background under the pointer (hovered button, highlighted menu entry) |
 | `--control-bg-disabled` | a disabled control's background |
@@ -120,18 +126,36 @@ Defined by every skin's `skin.css`, consumed by `common.css`:
 | `--control-border-disabled` | a disabled control's border |
 | `--control-radius` | a button's corner radius |
 | `--field-bg` | an editable field's recessed well |
-| `--field-text` | the text being edited |
+| `--field-bg-focused` | the well of the field you are typing in (a search box's too) |
+| `--field-bg-readonly` | the well of a field you can read and copy but not change |
+| `--field-text` | the text being edited, and any text on a data surface (see below) |
+| `--field-text-readonly` / `--field-text-disabled` | a read-only field's text, and a refused field's or list entry's |
+| `--field-placeholder` | a field's prompt while it is empty, and the secondary text on a data surface |
+| `--list-bg` | a scroll list's face — a scrim over the panel behind it in both shipped skins |
+| `--combo-list-bg` | a combo's open drop-down; **opaque**, unlike `--list-bg`, because a drop-down floats and has no panel behind it |
 | `--caret` / `--selection` / `--selection-unfocused` | the text caret and its two selection washes |
 | `--focus-ring` | the keyboard-focus ring's colour |
 | `--focus-ring-width` / `--focus-ring-offset` | its geometry: how thick the ring is, and how far it stands off the widget (a classic hairline is `1px` / `0px`) |
-| `--accent` | accent bars, an active tab's frame, a lit radio, a drag grip |
+| `--accent` | accent bars, an active tab's frame, a chosen skin-tone swatch, a drag grip |
+| `--accent-muted` | the accent dimmed to say "set, but not by you": a Friends-list right the friend grants you |
 | `--selection-bg` | a lit control's (translucent) background: a toggled toolbar button, an active tab |
 | `--list-row-bg` | a scroll list's ordinary row — transparent in both shipped skins, so the list's own face shows through |
 | `--list-row-stripe` | every other row of a scroll list, by the row's data index |
 | `--list-row-hover` | the row under the pointer |
 | `--list-row-selected-bg` | a selected row's (translucent) background |
 | `--list-row-selected-text` | a selected row's text, which a light list moves off the field family |
+| `--drop-target` | the row a drag is over — drawn over the selection, so dropping onto the selected folder still shows where it lands |
 | `--match-highlight` | the glyphs of a filter match inside an ordinary label |
+| `--tile-bg` | an inventory gallery tile's backing, a scrim so a thumbnail reads against any panel |
+| `--tile-hover` | the wash under the pointer on a dense grid's tile (an emoji cell) |
+| `--inline-item-bg` / `--inline-item-bg-hover` | an item embedded in notecard prose, at rest and under the pointer |
+| `--marker-selected` | the selected keyframe on the day-cycle timeline (a colour of its own because it sits on a sky gradient) |
+| `--check-bg` / `--check-border` | a checkbox's box, unchecked |
+| `--check-bg-checked` / `--check-border-checked` | the same box, checked |
+| `--check-tick` | the tick's colour (the tick itself is a `content` glyph — see the pseudo-elements note below) |
+| `--radio-bg` / `--radio-border` | a radio option's disc, unlit |
+| `--radio-bg-checked` / `--radio-border-checked` | the lit option's disc |
+| `--radio-pip` | the mark inside the lit disc |
 | `--divider` | a splitter, a rule, a column resize handle |
 | `--track-bg` | the trough a scrollbar thumb or slider handle runs in |
 | `--scrollbar-thumb` | a scrollbar thumb |
@@ -143,8 +167,42 @@ Defined by every skin's `skin.css`, consumed by `common.css`:
 | `--pie-label-sub-pie` | a wedge caption that opens a sub-pie |
 | `--pie-label-disabled` | a wedge caption that is present but unavailable |
 | `--chat-recall` / `--chat-server-history` / `--chat-live` | the Conversations transcript bands |
-| `--gain` | **meaning-bearing**: a positive / up / gain value |
-| `--loss` | **meaning-bearing**: a negative / down / loss value |
+| `--gain` | **meaning-bearing**: a positive / up / gain value; also an arrived teleport |
+| `--loss` | **meaning-bearing**: a negative / down / loss value; also the parcel-restriction icons and a failed teleport |
+| `--presence-online` / `--presence-offline` | **meaning-bearing**: a friend's presence dot |
+| `--notice-tip` / `--notice-notify` / `--notice-alert` / `--notice-modal` | **meaning-bearing**: a notification toast's frame by kind, and its default button's |
+
+#### Chrome and data surfaces
+
+The tokens come in **two surface-and-text families**. Chrome — floaters, the
+menu bar, toolbars, buttons — is painted from `--control-*`, `--surface-*` and
+`--text-*`. A place where *data* lives — a text field, a scroll list, a combo's
+drop-down — is painted from `--field-*`, `--list-bg` and `--combo-list-bg`. The
+shipped skins make both dark, so the split is invisible in them; it exists for a
+skin that puts its data on a light face inside dark chrome, as the reference's
+classic skins do, where one pair of tokens cannot be both.
+
+What makes that work is `.sk-list-surface`, which every scroll list's viewport
+carries. **Inside it the generic text roles re-root onto the field family:** an
+`.sk-text` resolves to `--field-text` and an `.sk-title` to
+`--field-placeholder`, because a role only means something against the surface
+it sits on. Two exceptions, both deliberate: a button inside a row brings its
+own chrome with it, so its caption goes back to `--text-primary`, and a
+*selected* row's text takes `--list-row-selected-text`. The state classes
+(`.sk-active-text`, `.sk-highlighted-text`, `.sk-disabled-text`) are restated
+for a data surface, so a list's face never swallows a state.
+
+A refused checkbox, radio, field or combo does not have tokens of its own: it
+greys to `--control-bg-disabled` / `--control-border-disabled`, and its caption
+and mark to `--text-disabled`.
+
+This table, the bevel table and the class tables below are held to
+`common.css` by a test
+(`the_skin_chapter_names_every_token_and_class_common_css_uses` in
+`tests/shipped_skins.rs`): a token or a class the structural sheet uses that no
+table in this chapter names fails it, and so does a table row naming a token
+the sheet no longer reads. A skin author can take the tables as the whole
+vocabulary.
 
 On top of these each skin defines the **user-tunable palette** — the chat,
 name-tag and minimap colours the preferences' *Colors & Skins* tab exposes.
@@ -204,46 +262,91 @@ the stock look rather than to black.
 | `.sk-card` | a background-only surface (bg + radius, no border/padding) |
 | `.sk-title` | an instruction / secondary line |
 | `.sk-text` | primary body text |
+| `.sk-error` / `.sk-warn` / `.sk-note` / `.sk-experience` | worn with `.sk-text`: a failure, a warning, a note, the experience accent |
+| `.sk-folder-label` | worn with `.sk-text`: an inventory folder's label |
+| `.sk-console-reply` / `.sk-console-info` / `.sk-console-error` | worn with `.sk-text`: an RLVa console line by kind (a typed command wears none) |
+| `.sk-match` | text that matched an active filter term |
 | `.sk-heading` | a heading inside a page |
 | `.sk-button` | a button, plus `:hover`, `:disabled` and `:focus-visible` states |
 | `.sk-button-compact` | worn with `.sk-button`: the same button at row scale (a table cell, a dense strip) |
 | `.sk-action-button` | a flat action-column button — the refused state only, no resting look |
+| `.sk-checkbox` / `.sk-checkbox-box` / `.sk-checkbox-tick` | a checkbox row (`:checked`, `:disabled`), its box, and the empty text node whose `::before` is the tick |
+| `.sk-radio-group` / `.sk-radio` / `.sk-radio-indicator` / `.sk-radio-pip` | a radio group (`:disabled`), one option (`:checked`), its disc, and the node whose `::before` is the pip |
+| `.sk-combo` / `.sk-combo-list` / `.sk-combo-option` | a combo's anchor box (`:disabled`), its open drop-down, one option row (`:hover`, `:disabled`) |
+| `.sk-swatch` | a colour swatch's rim (its fill is the colour it carries); `:disabled` dims it |
+| `.sk-tone-swatch` | an emoji skin-tone tile; `:checked` outlines the chosen one |
+| `.sk-trackball` / `.sk-trackball-disc` | a sun / moon trackball (`:disabled`) and its disc's rim |
+| `.sk-rights-cell` | a Friends-list permission icon: dim, `:checked` (a right you grant) or `:checked:disabled` (one granted to you) |
+| `.sk-tile` | one tile of a dense grid (an emoji cell), with its `:hover` wash |
+| `.sk-gallery-tile` | an inventory gallery tile's backing |
+| `.sk-inline-item` | an item embedded in notecard prose, with its `:hover` |
+| `.sk-day-marker` | a keyframe marker on the day-cycle timeline; `.sk-active` when selected |
+| `.sk-teleport-title` / `.sk-teleport-arrived` / `.sk-teleport-failed` | the teleport-progress title, and the two outcomes it ends in |
+| `.sk-presence-online` / `.sk-presence-offline` | a friend's presence dot |
+| `.sk-pie-label` / `.sk-pie-label-sub-pie` / `.sk-pie-label-unavailable` | a pie slice's caption: ordinary, one that opens a sub-pie, one that cannot be picked |
+| `.sk-overlay` / `.sk-overlay-text` | an overlay over the rendered world and its text |
 | `.sk-disabled-surface` / `.sk-disabled-text` | the greyed state of either |
 | `.sk-focusable` | the keyboard focus ring (stamped automatically onto every `TabIndex`) |
 | `.sk-accent` | a leading accent bar + hanging indent (logical box demo) |
-| `.sk-tab` | a tab shape with asymmetric top corners (logical corner demo) |
+| `.sk-tab` / `.sk-tab-label` | a tab button with asymmetric top corners (`:checked` when selected, `:disabled` when refused) and its caption |
+| `.sk-no-match` | worn with `.sk-tab-label`: a tab a live search left with no matching row |
 | `.sk-gain` / `.sk-loss` | meaning-bearing colour swatches |
 | `.sk-menu-bar` / `.sk-menu` | the top bar / a drop-down menu surface |
-| `.sk-menu-bar-item` / `.sk-menu-item` / `.sk-menu-item-disabled` | a bar button, an entry, a greyed entry |
+| `.sk-menu-bar-item` / `.sk-menu-item` | a bar button, an entry (`:disabled` greys it) |
+| `.sk-menu-item-label` / `.sk-menu-accessory` | an entry's label spans, and its accelerator text or submenu arrow |
+| `.sk-menu-item-match` | an entry that matched the menu search |
 | `.sk-menu-separator` | the rule between two groups of entries |
 | `.sk-floater` | a floater's body |
+| `.sk-floater-title-bar` / `.sk-floater-title-text` | its title band and title, at rest; the focused floater's wear `.sk-active` / `.sk-active-text` |
 | `.sk-floater-button` / `.sk-floater-glyph` / `.sk-floater-grip` | its title-bar buttons, their glyphs, the resize grip |
 | `.sk-dock-host` | the strip docked floaters flow into |
 | `.sk-tab-panel` | a tab page |
 | `.sk-scrollbar-track` / `.sk-scrollbar-thumb` | a scrollbar, in both the tab strip and the windowed list |
 | `.sk-divider` / `.sk-divider-grip` / `.sk-column-resizer` | a pane splitter, its nub, a table column's drag handle |
 | `.sk-list-row` / `.sk-table-row` | one row of a scroll list, plus its `:hover`; worn with `.sk-stripe` on every other row and `.sk-active` when selected |
-| `.sk-field` | an editable text field's box |
+| `.sk-field` | an editable text field's box, plus `:focus` and `:disabled` |
+| `.sk-read-only` | worn with `.sk-field` / `.sk-text-field`: a field that can be read and copied but not changed |
+| `.sk-field-placeholder` | a field's prompt while it is empty, and a search box's leading glyph |
+| `.sk-list-surface` | a scroll list's face — and the scope inside which the text roles re-root onto the field family (see *Chrome and data surfaces*) |
 | `.sk-text-field` | the caret / selection colours of **every** editor (stamped automatically) |
 | `.sk-search-field` / `.sk-search-clear` | the shared search box and its `×` button |
-| `.sk-focus-within` | worn by a container whose editor has focus — the search box, which brightens and rings while you type in it (there is no `:focus-within`) |
-| `.sk-toolbar-bar` / `.sk-toolbar-button` | the bottom toolbar strip and its buttons |
+| `.sk-toolbar-bar` / `.sk-toolbar-button` / `.sk-toolbar-label` | the bottom toolbar strip, its buttons, and their labels |
 | `.sk-toast` / `.sk-toast-text` | a notification toast card and its text |
+| `.sk-toast-tip` / `.sk-toast-notify` / `.sk-toast-alert` / `.sk-toast-modal` | worn with `.sk-toast`: its kind, which frames the card |
+| `.sk-toast-default` | the card's default button (the one Enter or expiry takes), framed in its kind's colour |
 | `.sk-build-label` / `.sk-build-value` / `.sk-build-placeholder` / `.sk-build-disabled` | the Build Tools floater's text roles |
 | `.sk-conversations` | the Conversations transcript bands |
 | `.sk-status-readout` | a status-row read-out (region / coordinates / balance / time / FPS) |
 | `.sk-parcel-icon` | a parcel-permission icon on the status row (see below) |
 
 A few things are deliberately **absent** from that list even though they are
-skinnable — the pie menu's disc and wedges above all, which are a **shader**
-rather than nodes the cascade can reach. They take their colours from the role
-palette instead: retuning the role token restyles them, and there is no class
-to write a rule against.
+skinnable — the pie menu's disc and wedges above all (its captions are in it),
+which are a **shader** rather than nodes the cascade can reach. They take their
+colours from the role palette instead: retuning the role token restyles them,
+and there is no class to write a rule against.
+
+#### The state classes
 
 Widget **state** is not in that group: hovered, selected, toggled and refused
-are classes and pseudo-classes in `common.css` (`.sk-active`,
-`.sk-highlighted`, `:hover`, `:checked`, `:disabled`), so a skin restyles a
-selected row or a lit toolbar button by writing a rule like any other.
+are pseudo-classes where the engine can see the state (`:hover`, `:checked`,
+`:disabled`, `:focus`, `:focus-visible`) and classes where only the viewer can —
+a menu row lit by the keyboard, the floater a toolbar button toggles being open,
+a list row's data index. A widget's own system adds and removes these, and a
+skin restyles a selected row or a lit toolbar button by writing a rule like any
+other:
+
+| Class | State |
+| --- | --- |
+| `.sk-highlighted` / `.sk-highlighted-text` | lit by the pointer *or the keyboard* — a menu entry, a menu-bar button |
+| `.sk-active` / `.sk-active-text` | toggled on or selected: a lit toolbar button, a selected row, the focused floater's title |
+| `.sk-stripe` | every other row of a scroll list, by the row's **data** index (so the bands do not crawl as a recycled list scrolls) |
+| `.sk-drop-target` | the row a drag is over |
+| `.sk-attention` | wants attention — the Conversations button with unread messages; an animation, so a skin that would rather not blink overrides it with a static paint |
+| `.sk-focus-within` | a container whose editor has focus — the search box, which brightens and rings while you type in it (there is no `:focus-within`) |
+
+They come **last** in `common.css`, in the order highlighted, active, disabled,
+because they carry the same specificity as the resting rules they override and
+only file order separates them: a greyed row must never also read as lit.
 
 ### The status-bar parcel-permission icons
 
@@ -422,11 +525,25 @@ physical left/right and will not mirror; use the logical longhands instead.
 - **Colours** use `bevy_flair`'s parser: hex (`#rgb`, `#rrggbb`, `#rrggbbaa`),
   `rgb(...)`, `oklch(...)`, named colours, and `var(...)`. Alpha via 8-digit hex
   (`#1c1f26f2`) works.
-- **Pseudo-classes** supported: `:hover`, `:active`, `:focus`, `:focus-visible`.
-  `:focus-visible` tracks the viewer's **keyboard (Tab) focus** — so a
-  `:focus-visible` ring shows on Tab and hides on click, which is exactly what
-  you want for a focus ring. There are **no pseudo-elements** (`::before`,
-  etc.).
+- **Pseudo-classes** supported: `:hover`, `:active`, `:focus`, `:focus-visible`,
+  `:checked` and `:disabled`. `:focus-visible` tracks the viewer's **keyboard
+  (Tab) focus** — so a `:focus-visible` ring shows on Tab and hides on click,
+  which is exactly what you want for a focus ring. `:checked` follows a widget's
+  `Checked` (a ticked box, a lit radio option, the selected tab) and `:disabled`
+  its `InteractionDisabled`. There is no `:focus-within` and no reliable
+  `:has()`; the viewer stamps `.sk-focus-within` instead.
+- **`::before` with `content`** works on a node the widget built for it — the
+  checkbox tick and the radio pip are written this way, so which mark a box
+  wears is the skin's choice (`content: "\2714";`). It is not general: a
+  pseudo-element exists only where the widget opted the node in, so there is no
+  `::before` to write on an arbitrary class.
+- **A property is never reverted.** When a state rule stops matching,
+  `bevy_flair` does not put back the value the property had before — it only
+  ever applies the winning rule. So every property a state rule writes needs a
+  **resting rule** that writes it too, or the state sticks: a `:hover` wash
+  stays on every tile the pointer ever crossed, a tick stays after the box is
+  unticked. `common.css` gives every state its resting counterpart, and any new
+  state rule must come with one.
 - **`var()` has no fallback value** — `var(--x, blue)` is not supported. Define
   every token.
 - **Images are local bundled files only.** A texture token points at a file
