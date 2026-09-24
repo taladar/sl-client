@@ -2,7 +2,7 @@
 id: viewer-sit-stand-actions
 title: Sit / stand actions
 topic: viewer
-status: ready
+status: in-progress
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-sit-stand
 blocked_by: [viewer-object-selection-core]
 ---
@@ -48,3 +48,14 @@ key can sit/stand; the reference default chord is Alt+Shift+S.
 Parity-audit extension: a block-left-click-sit option
 (`FSBlockClickSit`, Firestorm tab; modes off / on / on-unless-scripted)
 so a stray click on click-to-sit furniture doesn't seat the avatar.
+
+## Status (2026-09-24): the residue
+
+The sit itself is done ([[viewer-sit-target-and-stand-button]]). What this file
+still carries is the two parity-audit additions, neither of which is in the
+code:
+
+- `toggle_sit` as a bindable `Action` in the input action map (the reference's
+  Alt+Shift+S).
+- The block-left-click-sit option (`FSBlockClickSit`: off / on /
+  on-unless-scripted).

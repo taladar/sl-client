@@ -2,7 +2,7 @@
 id: viewer-skin-light-surface-roles
 title: Role tokens for a light data surface on dark chrome
 topic: viewer
-status: in-progress
+status: done
 origin: Vintage skin fidelity audit (2026-09-20)
 points: 5
 refs: [viewer-ui-skin-tokens, viewer-vintage-skin]
@@ -163,3 +163,8 @@ nothing static about the CSS text can answer a specificity question. It needed
 - **The live look.** Nothing here can be judged headlessly beyond legibility,
   and the two things worth an eye are the header strips above and whether a
   graphite viewer looks unchanged.
+
+## Closed (2026-09-24)
+
+Visually confirmed by the user in the live viewer; the work above was complete
+and the file had only been left in `in-progress/` waiting on that look.

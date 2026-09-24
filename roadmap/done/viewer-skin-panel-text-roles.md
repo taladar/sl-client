@@ -2,7 +2,7 @@
 id: viewer-skin-panel-text-roles
 title: Panel text does not follow the skin, only the widgets it is built from
 topic: viewer
-status: in-progress
+status: done
 origin: viewer-audit-skin-token-coverage (2026-09-20)
 points: 5
 refs: [viewer-audit-skin-token-coverage]
@@ -263,3 +263,8 @@ meaningful and simple: **does a skin switch in the gallery recolour
 everything?** Two defects this work turned up (the cascade ordering, the
 phototools double-writer) were invisible headlessly, so it is worth doing
 before this is called finished.
+
+## Closed (2026-09-24)
+
+Visually confirmed by the user in the live viewer; the work above was complete
+and the file had only been left in `in-progress/` waiting on that look.

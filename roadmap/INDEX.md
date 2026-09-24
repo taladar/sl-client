@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 118 |
-| ready | 303 |
-| blocked | 63 |
-| in-progress | 28 |
+| ideas | 117 |
+| ready | 302 |
+| blocked | 62 |
+| in-progress | 27 |
 | bugs | 9 |
-| done | 1223 |
+| done | 1227 |
 | deferred | 30 |
 | wont-do | 16 |
 | **total** | **1790** |
 
-## ideas (118)
+## ideas (117)
 
 ### protocol
 
@@ -87,8 +87,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — open the grid's marketplace storefront
 - [`viewer-material-asset-authoring`](ideas/viewer-material-asset-authoring.md)
   — Create and upload GLTF material assets
-- [`viewer-menu-touch-object`](ideas/viewer-menu-touch-object.md) — Touch an
-  object from the object and attachment menus
 - [`viewer-minimap-collision-parcels`](ideas/viewer-minimap-collision-parcels.md)
   — Minimap collision-parcel ("banned from here") fill
 - [`viewer-mouselook-combat`](ideas/viewer-mouselook-combat.md) — Mouselook
@@ -293,7 +291,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (303)
+## ready (302)
 
 ### protocol
 
@@ -690,9 +688,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-object-ping-forward-interpolation`](ready/viewer-object-ping-forward-interpolation.md)
   — Nudge dead-reckoned objects forward by half the ping (sPingInterpolate
   parity)
-- [`viewer-object-rezzing`](ready/viewer-object-rezzing.md) — Object rezzing
-  from inventory (blocked by `viewer-object-selection-core` (done),
-  `viewer-inventory-context-actions` (done))
 - [`viewer-object-target-omega-spin`](ready/viewer-object-target-omega-spin.md)
   — Client-side llTargetOmega spin for non-physical prims
 - [`viewer-object-texture-refresh`](ready/viewer-object-texture-refresh.md) —
@@ -873,8 +868,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Seamless seated region crossing (keep sit-implied permissions)
 - [`viewer-settings-backup`](ready/viewer-settings-backup.md) — Settings backup
   — export / import (blocked by `viewer-preferences-floater` (done))
-- [`viewer-sit-stand-actions`](ready/viewer-sit-stand-actions.md) — Sit / stand
-  actions (blocked by `viewer-object-selection-core` (done))
 - [`viewer-skin-glyphs-from-content`](ready/viewer-skin-glyphs-from-content.md)
   — A skin can choose the glyph, not just its colour — audit where that applies
 - [`viewer-skin-icon-set`](ready/viewer-skin-icon-set.md) — A skin should be
@@ -948,6 +941,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-world-map-floater` (done))
 - [`viewer-viewer-effect-render`](ready/viewer-viewer-effect-render.md) — Render
   inbound ViewerEffects (beams, spheres)
+- [`viewer-vintage-skin`](ready/viewer-vintage-skin.md) — Ship a Vintage-alike
+  skin (blocked by `viewer-skin-light-surface-roles` (done),
+  `viewer-skin-image-backed-widgets` (done))
 - [`viewer-vintage-ui-chrome-crosscheck`](ready/viewer-vintage-ui-chrome-crosscheck.md)
   — Measure skin fidelity instead of arguing about it
 - [`viewer-voice-audio`](ready/viewer-voice-audio.md) — Voice audio transport
@@ -1009,7 +1005,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-world-heartbeat`](ready/server-world-heartbeat.md) — A region
   heartbeat — the fake grid has no simulation loop at all
 
-## blocked (63)
+## blocked (62)
 
 ### protocol
 
@@ -1120,9 +1116,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-vintage-bottom-bar`](blocked/viewer-vintage-bottom-bar.md) — Classic
   (Vintage) bottom-bar arrangement (blocked by `viewer-animation-overrider`,
   `viewer-toolbar-customization`)
-- [`viewer-vintage-skin`](blocked/viewer-vintage-skin.md) — Ship a Vintage-alike
-  skin (blocked by `viewer-skin-light-surface-roles`,
-  `viewer-skin-image-backed-widgets` (done))
 - [`viewer-voice-call-dialogs`](blocked/viewer-voice-call-dialogs.md) — Voice
   call dialogs — incoming / outgoing, channel switching (blocked by
   `viewer-voice-audio`)
@@ -1211,7 +1204,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Batch world changes into per-tick update bursts (blocked by
   `server-world-heartbeat`, `server-world-ecs-store`)
 
-## in-progress (28)
+## in-progress (27)
 
 ### viewer
 
@@ -1232,8 +1225,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Audit the other per-subject singletons onto the keyed-floater scaffold
 - [`viewer-media-prim-browser`](in-progress/viewer-media-prim-browser.md) —
   Media-on-a-prim & embedded web browser
+- [`viewer-menu-touch-object`](in-progress/viewer-menu-touch-object.md) — Touch
+  an object from the object and attachment menus
 - [`viewer-notecard-editor`](in-progress/viewer-notecard-editor.md) — Notecard
   viewer & editor (rich text with embedded items)
+- [`viewer-object-rezzing`](in-progress/viewer-object-rezzing.md) — Object
+  rezzing from inventory (blocked by `viewer-object-selection-core` (done),
+  `viewer-inventory-context-actions` (done))
 - [`viewer-perf-pbr-shadow-cluster-rez`](in-progress/viewer-perf-pbr-shadow-cluster-rez.md)
   — Tune main-view shadow specialization + clustered lighting during rez
 - [`viewer-realtime-mirrors`](in-progress/viewer-realtime-mirrors.md) —
@@ -1251,16 +1249,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rlva-floaters-toggles`](in-progress/viewer-rlva-floaters-toggles.md)
   — "RLVa UI: console, restrictions/strings/locks floaters + toggles" (blocked
   by `viewer-rlv-restriction-state` (done))
-- [`viewer-skin-checkbox-radio-shape`](in-progress/viewer-skin-checkbox-radio-shape.md)
-  — Checkboxes are hand-rolled per panel, so no skin can shape one
-- [`viewer-skin-light-surface-roles`](in-progress/viewer-skin-light-surface-roles.md)
-  — Role tokens for a light data surface on dark chrome
+- [`viewer-sit-stand-actions`](in-progress/viewer-sit-stand-actions.md) — Sit /
+  stand actions (blocked by `viewer-object-selection-core` (done))
 - [`viewer-skin-panel-state-classes`](in-progress/viewer-skin-panel-state-classes.md)
   — The panels paint their own states, and nine files hand-copied one role
-- [`viewer-skin-panel-text-roles`](in-progress/viewer-skin-panel-text-roles.md)
-  — Panel text does not follow the skin, only the widgets it is built from
-- [`viewer-skin-text-colours-without-a-role`](in-progress/viewer-skin-text-colours-without-a-role.md)
-  — The text colours that name no role, and the four kinds of reason why
 - [`viewer-streaming-audio`](in-progress/viewer-streaming-audio.md) — Parcel
   streaming-audio / media-audio player
 - [`viewer-ui-button-widget`](in-progress/viewer-ui-button-widget.md) — The
@@ -1314,7 +1306,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1223)
+## done (1227)
 
 ### protocol
 
@@ -2971,18 +2963,26 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   A bevel's light source has a handedness the logical-property ban denies
 - [`viewer-skin-book-token-table-behind`](done/viewer-skin-book-token-table-behind.md)
   — The skin chapter's token table is four tasks behind the vocabulary
+- [`viewer-skin-checkbox-radio-shape`](done/viewer-skin-checkbox-radio-shape.md)
+  — Checkboxes are hand-rolled per panel, so no skin can shape one
 - [`viewer-skin-focus-ring-geometry-tokens`](done/viewer-skin-focus-ring-geometry-tokens.md)
   — The focus ring's shape becomes a value, not three repeated literals
 - [`viewer-skin-image-backed-widgets`](done/viewer-skin-image-backed-widgets.md)
   — Nine-sliced image surfaces, so a skin can change a widget's shape (blocked
   by `viewer-skin-widget-state-classes` (done))
+- [`viewer-skin-light-surface-roles`](done/viewer-skin-light-surface-roles.md) —
+  Role tokens for a light data surface on dark chrome
 - [`viewer-skin-list-row-striping`](done/viewer-skin-list-row-striping.md) —
   Scroll-list rows — striping, hover and a selection the skin owns
+- [`viewer-skin-panel-text-roles`](done/viewer-skin-panel-text-roles.md) — Panel
+  text does not follow the skin, only the widgets it is built from
 - [`viewer-skin-scrollbar-shape`](done/viewer-skin-scrollbar-shape.md) — The
   scrollbar is a bar — the reference's has ends, a track and a shape
 - [`viewer-skin-search-box-focused-fill`](done/viewer-skin-search-box-focused-fill.md)
   — A search box cannot show the focused-field fill, because focus is on its
   child
+- [`viewer-skin-text-colours-without-a-role`](done/viewer-skin-text-colours-without-a-role.md)
+  — The text colours that name no role, and the four kinds of reason why
 - [`viewer-skin-text-shadow-role`](done/viewer-skin-text-shadow-role.md) — A
   text-shadow role — the trait that makes classic UI text look classic
 - [`viewer-skin-tooltip-roles`](done/viewer-skin-tooltip-roles.md) — The tooltip

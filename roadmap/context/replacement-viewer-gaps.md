@@ -50,10 +50,11 @@ excluded on purpose:
 - **Upstream work** (the four `viewer-ui-text-parley-*` items) — filed
   against `linebender/parley`; nothing of ours waits on them.
 
-## Three tasks whose files the code has already overtaken
+## Three tasks the code had partly overtaken
 
-Found while compiling this list; each needs a verification pass, not
-implementation, and none of them should be scheduled as a gap:
+Found while compiling this list, and verified 2026-09-24: each is partly
+done and now `in-progress`, its file rewritten down to the residue, so none of
+them should be scheduled as a gap:
 
 - `viewer-object-rezzing` (ready) — "drag an object from inventory into the
   world" is implemented: `sl-viewer-inventory/src/inventory_drag.rs` builds

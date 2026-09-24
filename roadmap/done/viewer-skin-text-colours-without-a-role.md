@@ -2,7 +2,7 @@
 id: viewer-skin-text-colours-without-a-role
 title: The text colours that name no role, and the four kinds of reason why
 topic: viewer
-status: in-progress
+status: done
 origin: viewer-skin-panel-text-roles census (2026-09-22)
 points: 5
 refs: [viewer-skin-panel-text-roles, viewer-audit-skin-token-coverage,
@@ -151,3 +151,8 @@ decides is what the **headless harnesses** measure — the testkit builds the
 layout stack without `FlairPlugin`, so no class resolves there — and the frame
 before the sheet loads. Both want the styled answer, which is why those sites
 now pass the colour their class paints rather than white.
+
+## Closed (2026-09-24)
+
+Visually confirmed by the user in the live viewer; the work above was complete
+and the file had only been left in `in-progress/` waiting on that look.

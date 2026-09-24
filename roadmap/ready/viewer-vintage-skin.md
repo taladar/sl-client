@@ -2,7 +2,7 @@
 id: viewer-vintage-skin
 title: Ship a Vintage-alike skin
 topic: viewer
-status: blocked
+status: ready
 origin: Vintage skin fidelity audit (2026-09-20)
 points: 8
 refs: [viewer-ui-skin-tokens, viewer-vintage-bottom-bar,

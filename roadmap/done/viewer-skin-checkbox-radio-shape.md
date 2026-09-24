@@ -2,7 +2,7 @@
 id: viewer-skin-checkbox-radio-shape
 title: Checkboxes are hand-rolled per panel, so no skin can shape one
 topic: viewer
-status: in-progress
+status: done
 origin: Vintage skin fidelity audit (2026-09-20)
 points: 5
 refs: [viewer-ui-radio-widget, viewer-ui-settings-binding, viewer-vintage-skin,
@@ -176,3 +176,8 @@ would have painted bevy_flair's default silently.
 - ~~The tick and ring hosts carry a zero-width space~~ — fixed upstream in the
   bevy fork (`302316a`) and both hosts are `Text::default()` again; see
   [[viewer-bevy-empty-text-measures-at-parley-defaults]].
+
+## Closed (2026-09-24)
+
+Visually confirmed by the user in the live viewer; the work above was complete
+and the file had only been left in `in-progress/` waiting on that look.
