@@ -50,7 +50,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::skin::{ACTIVE_CLASS, set_state_class};
+use crate::skin::{SELECTED_CLASS, set_state_class};
 use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
@@ -1990,7 +1990,7 @@ fn bind_role_rows(
             set_row_cell(&mut texts, cells, 1, &role_row.title, false);
             set_row_cell(&mut texts, cells, 2, &role_row.members.to_string(), false);
             if let Ok(mut classes) = classes.get_mut(row_entity) {
-                set_state_class(&mut classes, ACTIVE_CLASS, selected);
+                set_state_class(&mut classes, SELECTED_CLASS, selected);
             }
         }
     }
@@ -2442,7 +2442,7 @@ fn bind_member_rows(
             set_row_cell(&mut texts, cells, 2, &member_row.contribution, false);
             set_row_cell(&mut texts, cells, 3, &member_row.status, false);
             if let Ok(mut classes) = classes.get_mut(row_entity) {
-                set_state_class(&mut classes, ACTIVE_CLASS, selected);
+                set_state_class(&mut classes, SELECTED_CLASS, selected);
             }
         }
     }
@@ -2564,7 +2564,7 @@ fn bind_notice_rows(
             set_row_cell(&mut texts, cells, 2, &notice_row.date, false);
             let selected = state.selected_notice == Some(notice_row.index);
             if let Ok(mut classes) = classes.get_mut(row_entity) {
-                set_state_class(&mut classes, ACTIVE_CLASS, selected);
+                set_state_class(&mut classes, SELECTED_CLASS, selected);
             }
         }
     }

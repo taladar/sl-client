@@ -106,7 +106,7 @@ use crate::style::{ACTION_BACKGROUND, DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, R
 use bevy_flair::style::components::ClassList;
 use sl_viewer_ui_core::skin::BUTTON_CLASS;
 use sl_viewer_ui_core::skin::{
-    ACTIVE_CLASS, DisabledButtons, TEXT_CLASS, set_action_button_enabled, set_state_class_on,
+    DisabledButtons, SELECTED_CLASS, TEXT_CLASS, set_action_button_enabled, set_state_class_on,
     text_role,
 };
 
@@ -939,11 +939,11 @@ fn bind_environment_rows(
             }
         }
         // The one selection highlight, not this window's copy of its value:
-        // `.sk-active` over the row class the table widget already spawned.
+        // `.sk-selected` over the row class the table widget already spawned.
         set_state_class_on(
             &mut classes,
             row_entity,
-            ACTIVE_CLASS,
+            SELECTED_CLASS,
             data.is_some() && selected.0 == bound.0,
         );
     }

@@ -2,7 +2,7 @@
 id: viewer-skin-active-class-means-selected-not-pressed
 title: .sk-active means "selected", which is not what CSS's :active means, and nothing but relief draws a press
 topic: viewer
-status: bugs
+status: done
 origin: the user comparing the reference's bottom bar while viewer-skin-glyphs-from-content was in progress (2026-09-24)
 refs: [viewer-skin-widget-state-classes, viewer-skin-image-backed-widgets,
   viewer-vintage-skin, viewer-skin-glyphs-from-content]
@@ -67,3 +67,45 @@ No class in the skin vocabulary shares a name with a CSS pseudo-class that
 means something else, a press is visible on every button in both flat skins,
 and a scratch skin can give the bottom bar's buttons a distinct pressed look
 by CSS alone.
+
+## Resolution (2026-09-24)
+
+**The name split in four**, by what each use actually meant:
+
+| Was | Now | For |
+| --- | --- | --- |
+| `.sk-active` on a row, tile, marker | `.sk-selected` (`SELECTED_CLASS`) | the selected item of a collection — a class, because rows are recycled and selection follows the data index |
+| `.sk-active` on a toggle button | `bevy_ui::Checked` → `:checked` (`skin::set_button_on`) | the bottom toolbar's open-floater buttons, the day-cycle track being edited, the Photo Tools time preset — the same engine state a tab or a tick box carries |
+| `.sk-active` / `-text` on a floater title | `.sk-frontmost` / `.sk-frontmost-text` | the front-most floater (`:focus` would be the same trap: it need not hold focus) |
+| `.sk-active-text` on a label | `.sk-accent-text` (`ACCENT_TEXT_CLASS`) | accent text that was never a selection: the active group, the People sort arrow, a profile's group links |
+
+The toolbar's greyed placeholders moved from `.sk-disabled-surface` to
+`InteractionDisabled` → `:disabled`, so its three states are all engine state
+and its label follows them as descendant rules.
+`no_class_is_named_after_a_pseudo_class` guards the vocabulary.
+
+**The press.** `PRESS_CLASSES` + `stamp_press_state` (on `stamp_hover_state`'s
+model) give every button box with neither button component a `PressTracked`
+marker, and four global pointer observers keep `bevy_ui::Pressed` on it while
+the primary button holds it (not on a refused one; release, drag end and cancel
+let it up). `every_press_rule_has_something_to_press` holds the list to exactly
+the classes `common.css` writes `:active` for. Every family has a rule and a
+token: `.sk-button` (face darkens, bevel turns inside out; `:disabled` restates
+the resting surface after it, because `bevy_ui`'s legacy `Interaction` presses a
+refused button too), `.sk-action-button`, `.sk-toolbar-button` (plus
+`:checked:active` → `--control-bg-pressed-selected`), `.sk-floater-button`,
+`.sk-scrollbar-arrow`, `.sk-tab-scroll-button`.
+
+**Found on the way:** `.sk-action-button` had state rules and no resting rule,
+so a re-enabled action button stayed grey and a Photo Tools time button stayed
+lit (bevy_flair reverts nothing). It now rests on `--action-button-bg` /
+`--action-button-border`, which moves the Photo Tools and parcel audio buttons
+(which wear that class over a darker hand-painted fill) onto the flat action
+buttons' face.
+
+Cascade tests (`skin_palette_resolves`): every family goes down and comes back
+up in both flat skins; the toolbar button walks rest → pressed → lit → lit and
+pressed → off → greyed on one entity; and a scratch sheet
+(`tests/assets/pressed-toolbar.css`) restyles the toolbar press with one rule.
+
+Visually confirmed by the user in the live viewer on the local grid.

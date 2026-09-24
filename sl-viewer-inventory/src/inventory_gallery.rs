@@ -26,7 +26,7 @@ use bevy::prelude::*;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{FolderType, InventoryFolderKey, InventoryType, SlCommand, TextureKey};
 use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
-use sl_viewer_ui_core::skin::ACTIVE_CLASS;
+use sl_viewer_ui_core::skin::SELECTED_CLASS;
 use sl_viewer_ui_core::skin::text_role;
 
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
@@ -76,7 +76,7 @@ const BUTTON_BORDER: Color = Color::srgb(0.34, 0.40, 0.52);
 
 /// The skin class on a gallery tile. Its resting backing is a scrim rather
 /// than transparent (`--tile-bg`), so a thumbnail reads against whatever is
-/// behind the panel; a selected tile adds [`ACTIVE_CLASS`].
+/// behind the panel; a selected tile adds [`SELECTED_CLASS`].
 const TILE_CLASS: &str = "sk-gallery-tile";
 
 /// Two clicks on the same tile within this window are a double-click, in
@@ -484,7 +484,7 @@ fn spawn_tile(
                 ..column(Val::Px(3.0))
             },
             ClassList::new_with_classes(
-                core::iter::once(TILE_CLASS).chain(selected.then_some(ACTIVE_CLASS)),
+                core::iter::once(TILE_CLASS).chain(selected.then_some(SELECTED_CLASS)),
             ),
             Pickable::default(),
             TileKey(key),

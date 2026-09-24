@@ -306,8 +306,16 @@ impl Plugin for ViewerSkinPlugin {
                     // that pseudo-class is read from — nothing else does
                     // (`viewer-skin-list-row-striping`).
                     stamp_hover_state,
+                    // And everything an `:active` rule selects the press
+                    // state that pseudo-class is read from
+                    // (`viewer-skin-active-class-means-selected-not-pressed`).
+                    stamp_press_state,
                 ),
             )
+            .add_observer(press_tracked_on_press)
+            .add_observer(press_tracked_on_release)
+            .add_observer(press_tracked_on_drag_end)
+            .add_observer(press_tracked_on_cancel)
             .add_systems(
                 PostUpdate,
                 (invalidate_skin_boxes, resolve_skin_boxes)
@@ -374,7 +382,7 @@ pub const TEXT_CLASS: &str = "sk-text";
 /// The CSS class on the row a drag is currently over — the folder an
 /// inventory drop would land in.
 ///
-/// Louder than [`ACTIVE_CLASS`] and written to beat it, because during a drag
+/// Louder than [`SELECTED_CLASS`] and written to beat it, because during a drag
 /// the question on screen is "where will this land", not "what was selected
 /// before it started". It used to be arranged by *skipping* the selection
 /// system for the duration of the drag; the cascade settles it instead.
@@ -647,6 +655,17 @@ pub const PRIMARY_BUTTON_CLASS: &str = "sk-button-primary";
 /// `viewer-skin-panel-text-roles` moves it to tokens as well.
 pub const ACTION_BUTTON_CLASS: &str = "sk-action-button";
 
+/// The CSS class on a bottom-toolbar button. Named here rather than beside the
+/// toolbar because `PRESS_CLASSES` has to name it: the button is a plain
+/// pickable box, and its `:active` rule matches only what
+/// `stamp_press_state` gives it.
+pub const TOOLBAR_BUTTON_CLASS: &str = "sk-toolbar-button";
+
+/// The CSS class on a floater's title-bar glyph button (close, minimise,
+/// dock) — `--glyph-button-bg`. Here for the same reason as
+/// [`TOOLBAR_BUTTON_CLASS`].
+pub const FLOATER_BUTTON_CLASS: &str = "sk-floater-button";
+
 /// The CSS class on a control whose action does not apply right now — greyed
 /// rather than removed, so a row of actions keeps its shape as the selection
 /// moves. [`DISABLED_TEXT_CLASS`] greys its label.
@@ -661,7 +680,7 @@ pub const DISABLED_TEXT_CLASS: &str = "sk-disabled-text";
 
 /// The CSS class on one row of a list a panel builds itself, rather than
 /// through the table widget — the pickers, the inventory tree, the About box's
-/// licence list. Its selected look is [`ACTIVE_CLASS`]; this carries the
+/// licence list. Its selected look is [`SELECTED_CLASS`]; this carries the
 /// resting one, so dropping the state class has somewhere to land.
 ///
 /// The table widget's own rows use [`TABLE_ROW_CLASS`], which shares every
@@ -760,6 +779,127 @@ fn stamp_hover_state(mut commands: Commands, hoverable: HoverCandidates) {
     }
 }
 
+/// Every class `common.css` writes an `:active` rule for — every button family
+/// the viewer has.
+///
+/// The input to [`stamp_press_state`]; `every_press_rule_has_something_to_press`
+/// asserts it is exactly the set the stylesheet names, for the reason
+/// [`HOVER_CLASSES`] has the same test.
+const PRESS_CLASSES: &[&str] = &[
+    BUTTON_CLASS,
+    ACTION_BUTTON_CLASS,
+    TOOLBAR_BUTTON_CLASS,
+    FLOATER_BUTTON_CLASS,
+    SCROLLBAR_ARROW_CLASS,
+    TAB_SCROLL_BUTTON_CLASS,
+];
+
+/// A button box whose press the skin tracks itself: [`stamp_press_state`] puts
+/// it on a node that wears a [`PRESS_CLASSES`] class and carries no button
+/// component, and the pointer observers keep `bevy_ui::Pressed` on it while the
+/// primary button holds it down.
+#[derive(Component, Debug, Clone, Copy, Default)]
+struct PressTracked;
+
+/// What [`stamp_press_state`] walks: classed nodes that could still need their
+/// press tracked. Both button components are excluded because each already
+/// supplies the pseudo-state — `bevy_ui`'s through `Interaction`,
+/// `bevy_ui_widgets`' by keeping `Pressed` itself — and two writers of one
+/// state is a race.
+type PressCandidates<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static ClassList),
+    (
+        Changed<ClassList>,
+        Without<PressTracked>,
+        Without<Interaction>,
+        Without<bevy::ui_widgets::Button>,
+    ),
+>;
+
+/// Give every button box an `:active` rule selects a press state the rule can
+/// read (`viewer-skin-active-class-means-selected-not-pressed`).
+///
+/// `bevy_flair`'s `:active` is `Interaction::Pressed` or the `Pressed` marker,
+/// and a button spawned as a plain pickable box — every flat action button, the
+/// bottom toolbar, a floater's close box — has neither. So the pressed rule
+/// parsed, matched nothing and painted nothing, which is why a press was
+/// invisible on every one of them. Keyed off the classes, on
+/// [`stamp_hover_state`]'s model: a button built next year gets its press by
+/// wearing the class.
+fn stamp_press_state(mut commands: Commands, candidates: PressCandidates) {
+    for (entity, classes) in &candidates {
+        if PRESS_CLASSES.iter().any(|class| classes.contains(*class)) {
+            commands.entity(entity).insert(PressTracked);
+        }
+    }
+}
+
+/// A primary press on a [`PressTracked`] box holds it down — unless it is
+/// refused, which a press must never appear to reach.
+///
+/// Never stops the propagation: the box's own `Pointer<Press>` observer, and any
+/// ancestor's, still see the press exactly as before.
+fn press_tracked_on_press(
+    press: On<Pointer<Press>>,
+    tracked: Query<Has<bevy::ui::InteractionDisabled>, With<PressTracked>>,
+    mut commands: Commands,
+) {
+    if press.button != PointerButton::Primary {
+        return;
+    }
+    if let Ok(disabled) = tracked.get(press.entity)
+        && !disabled
+    {
+        commands.entity(press.entity).insert(bevy::ui::Pressed);
+    }
+}
+
+/// Let a [`PressTracked`] box up again. The three ways a hold ends are the
+/// three `bevy_ui_widgets`' button listens for: the release over it, the end
+/// of a drag that carried the pointer off it, and a cancel.
+fn release_tracked(
+    entity: Entity,
+    tracked: &Query<(), With<PressTracked>>,
+    commands: &mut Commands,
+) {
+    if tracked.contains(entity) {
+        commands.entity(entity).remove::<bevy::ui::Pressed>();
+    }
+}
+
+/// [`release_tracked`] on a release over the box.
+fn press_tracked_on_release(
+    release: On<Pointer<Release>>,
+    tracked: Query<(), With<PressTracked>>,
+    mut commands: Commands,
+) {
+    if release.button == PointerButton::Primary {
+        release_tracked(release.entity, &tracked, &mut commands);
+    }
+}
+
+/// [`release_tracked`] at the end of a drag that began on the box.
+fn press_tracked_on_drag_end(
+    drag_end: On<Pointer<DragEnd>>,
+    tracked: Query<(), With<PressTracked>>,
+    mut commands: Commands,
+) {
+    if drag_end.button == PointerButton::Primary {
+        release_tracked(drag_end.entity, &tracked, &mut commands);
+    }
+}
+
+/// [`release_tracked`] when the pointer is cancelled.
+fn press_tracked_on_cancel(
+    cancel: On<Pointer<Cancel>>,
+    tracked: Query<(), With<PressTracked>>,
+    mut commands: Commands,
+) {
+    release_tracked(cancel.entity, &tracked, &mut commands);
+}
+
 /// The CSS class on every other row of a scroll list
 /// (`viewer-skin-list-row-striping`), stamped by
 /// [`stripe_virtual_rows`](crate::virtual_list::stripe_virtual_rows) from the
@@ -855,12 +995,40 @@ pub const MATCH_CLASS: &str = "sk-match";
 /// widget's own.
 pub const NO_MATCH_CLASS: &str = "sk-no-match";
 
-/// The CSS class on a widget that is toggled on or selected — a toolbar button
-/// whose floater is open, the active tab, a selected table row.
-pub const ACTIVE_CLASS: &str = "sk-active";
+/// The CSS class on the **selected** item of a collection — a row of a scroll
+/// list or table, a gallery tile, a keyframe marker on a timeline.
+///
+/// Named for what it means, and on purpose not `sk-active`, which it used to
+/// be: CSS's `:active` is the pointer holding a control down, and a skin author
+/// who knows CSS read `.sk-active` as the pressed state and wrote the wrong
+/// rule. A class because the rows are recycled by the virtual list, so which one
+/// is selected is a property of its *data* index, which no engine state tracks.
+///
+/// A **toggle** is not selected, it is on — a toolbar button whose floater is
+/// open, a time-of-day preset in force. Those carry `bevy_ui::Checked`, the
+/// engine's own `:checked`, like a tab or a tick box. The press itself is
+/// `:active`, supplied by `stamp_press_state` wherever a button component
+/// does not already supply it.
+pub const SELECTED_CLASS: &str = "sk-selected";
 
-/// The label half of [`ACTIVE_CLASS`].
-pub const ACTIVE_TEXT_CLASS: &str = "sk-active-text";
+/// The CSS class on the title band of the **front-most** floater — the window
+/// keyboard and `Ctrl+W` act on — and [`FRONTMOST_TEXT_CLASS`] on its title.
+///
+/// Not "active" and not "focused", for the same reason as [`SELECTED_CLASS`]:
+/// both are CSS pseudo-classes (`:active`, `:focus`) meaning something else,
+/// and the front-most window need not hold keyboard focus at all.
+pub const FRONTMOST_CLASS: &str = "sk-frontmost";
+
+/// The label half of [`FRONTMOST_CLASS`].
+pub const FRONTMOST_TEXT_CLASS: &str = "sk-frontmost-text";
+
+/// The CSS class on text drawn in the skin's **accent** — a mark that says
+/// "this one" without being a selection: the active group's name and marker,
+/// a list's sort arrow, a profile's group links.
+///
+/// It used to be the text half of the selection class, which is how a label
+/// that was never selected came to wear the selection's name.
+pub const ACCENT_TEXT_CLASS: &str = "sk-accent-text";
 
 /// The CSS class on a widget asking to be noticed (unread IMs behind a closed
 /// Conversations window). The viewer says only *that* it wants attention; the
@@ -1068,6 +1236,36 @@ pub fn set_action_button_enabled(
             commands
                 .entity(entity)
                 .insert(bevy::ui::InteractionDisabled);
+        }
+    }
+}
+
+/// What [`set_button_on`] reads: whether a button already carries
+/// `bevy_ui::Checked`, for the reason [`DisabledButtons`] exists — a marker
+/// re-inserted every frame is a change every frame.
+pub type CheckedButtons<'w, 's> = Query<'w, 's, (), With<bevy::ui::Checked>>;
+
+/// Turn one **toggle** button on or off: a bottom-toolbar button whose floater
+/// is open, the day-cycle track being edited, the Photo Tools time preset in
+/// force.
+///
+/// A toggle that is on is `:checked` — `bevy_ui::Checked`, the engine state a
+/// tab, a tick box and a menu tick already use, which `bevy_flair` syncs to the
+/// pseudo-class — not a class of our own. It used to be `.sk-active`, a name
+/// that says "held down" to anyone who knows CSS
+/// (`viewer-skin-active-class-means-selected-not-pressed`), and the marker is
+/// what an accessibility tree reads as a pressed toggle as well.
+pub fn set_button_on(
+    commands: &mut Commands<'_, '_>,
+    checked: &CheckedButtons<'_, '_>,
+    entity: Entity,
+    on: bool,
+) {
+    if checked.contains(entity) != on {
+        if on {
+            commands.entity(entity).insert(bevy::ui::Checked);
+        } else {
+            commands.entity(entity).remove::<bevy::ui::Checked>();
         }
     }
 }
@@ -1981,8 +2179,10 @@ mod tests {
                 );
             }
         }
-        // The button and the two field wells, four sides each.
-        assert_eq!(bevel_sides, 12, "the bevel rules moved or lost a side");
+        // The button at rest, held down (the bevel turned inside out) and
+        // refused (the resting bevel restated over a press), and the two field
+        // wells: four sides each.
+        assert_eq!(bevel_sides, 20, "the bevel rules moved or lost a side");
     }
 
     /// Every banned property has a logical replacement suggestion for its error.
@@ -2177,6 +2377,221 @@ mod tests {
             app.world().get::<Hovered>(nothing_hoverable).is_none(),
             "a class with no `:hover` rule gains nothing — the component is \
              only free while the set stays the set the stylesheet names"
+        );
+    }
+
+    /// Trigger a pointer event on an entity by hand and settle a frame — the
+    /// observer call a real press makes, without a picking backend to aim one.
+    /// A macro because `World::trigger` wants the concrete `Pointer<E>`.
+    macro_rules! trigger_pointer {
+        ($app:expr, $entity:expr, $event:expr $(,)?) => {{
+            let location = bevy::picking::pointer::Location {
+                target: bevy::camera::NormalizedRenderTarget::None {
+                    width: 800,
+                    height: 600,
+                },
+                position: Vec2::ZERO,
+            };
+            $app.world_mut().trigger(Pointer::new(
+                bevy::picking::pointer::PointerId::Mouse,
+                location,
+                $event,
+                $entity,
+            ));
+            $app.update();
+        }};
+    }
+
+    /// **A plain button box is held down by a press and let up by the release,**
+    /// which is the whole of what `:active` reads.
+    ///
+    /// Toggled on one entity rather than spawned once per state, because the
+    /// failure this guards is a state that arrives and never leaves (or never
+    /// arrives), and only a toggle sees both halves. A refused box never goes
+    /// down, a secondary press does not hold it, and a node that brings a
+    /// button component of its own is left to it.
+    #[test]
+    fn a_plain_button_box_is_held_down_while_pressed() {
+        use super::{
+            ACTION_BUTTON_CLASS, PressTracked, TOOLBAR_BUTTON_CLASS, press_tracked_on_cancel,
+            press_tracked_on_drag_end, press_tracked_on_press, press_tracked_on_release,
+            stamp_press_state,
+        };
+        use bevy::picking::backend::HitData;
+        use bevy::picking::events::{DragEnd, Press, Release};
+        use bevy::picking::pointer::PointerButton;
+        use bevy::ui::{InteractionDisabled, Pressed};
+
+        let mut app = App::new();
+        app.add_systems(Update, stamp_press_state)
+            .add_observer(press_tracked_on_press)
+            .add_observer(press_tracked_on_release)
+            .add_observer(press_tracked_on_drag_end)
+            .add_observer(press_tracked_on_cancel);
+
+        let toolbar = app
+            .world_mut()
+            .spawn(ClassList::new_with_classes([TOOLBAR_BUTTON_CLASS]))
+            .id();
+        let refused = app
+            .world_mut()
+            .spawn((
+                ClassList::new_with_classes([ACTION_BUTTON_CLASS]),
+                InteractionDisabled,
+            ))
+            .id();
+        let widget = app
+            .world_mut()
+            .spawn((
+                ClassList::new_with_classes([ACTION_BUTTON_CLASS]),
+                bevy::ui_widgets::Button,
+            ))
+            .id();
+        let legacy = app
+            .world_mut()
+            .spawn((
+                ClassList::new_with_classes([ACTION_BUTTON_CLASS]),
+                Interaction::default(),
+            ))
+            .id();
+        let panel = app
+            .world_mut()
+            .spawn(ClassList::new_with_classes(["sk-panel"]))
+            .id();
+        app.update();
+
+        assert!(app.world().get::<PressTracked>(toolbar).is_some());
+        assert!(app.world().get::<PressTracked>(refused).is_some());
+        assert!(
+            app.world().get::<PressTracked>(widget).is_none(),
+            "a `bevy_ui_widgets` button keeps its own `Pressed`"
+        );
+        assert!(
+            app.world().get::<PressTracked>(legacy).is_none(),
+            "an `Interaction` button's press is synced from that"
+        );
+        assert!(app.world().get::<PressTracked>(panel).is_none());
+
+        let press = |button| Press {
+            button,
+            hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
+            count: 1,
+        };
+        let release = || Release {
+            button: PointerButton::Primary,
+            hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
+        };
+        let held = |app: &App, entity| app.world().get::<Pressed>(entity).is_some();
+
+        trigger_pointer!(app, toolbar, press(PointerButton::Secondary));
+        assert!(!held(&app, toolbar), "a secondary press does not hold it");
+
+        trigger_pointer!(app, toolbar, press(PointerButton::Primary));
+        assert!(held(&app, toolbar), "the press did not hold the box down");
+        trigger_pointer!(app, toolbar, release());
+        assert!(!held(&app, toolbar), "the release did not let it up");
+
+        trigger_pointer!(app, toolbar, press(PointerButton::Primary));
+        assert!(held(&app, toolbar));
+        trigger_pointer!(
+            app,
+            toolbar,
+            DragEnd {
+                button: PointerButton::Primary,
+                distance: Vec2::new(40.0, 0.0),
+            },
+        );
+        assert!(
+            !held(&app, toolbar),
+            "a drag off the box and a release elsewhere left it down"
+        );
+
+        trigger_pointer!(app, refused, press(PointerButton::Primary));
+        assert!(!held(&app, refused), "a refused button must not go down");
+    }
+
+    /// The class the pseudo-class at `at` in `css` hangs off, walking back over
+    /// any pseudo-classes compounded before it — `.sk-button:checked:active`
+    /// names `sk-button`.
+    fn class_before(css: &str, at: usize) -> Option<&str> {
+        let mut before = css.get(..at)?;
+        loop {
+            let head =
+                before.trim_end_matches(|c: char| c.is_alphanumeric() || c == '-' || c == '_');
+            if let Some(pseudo) = head.strip_suffix(':') {
+                before = pseudo;
+                continue;
+            }
+            let class = before.get(head.len()..)?;
+            return (head.ends_with('.') && !class.is_empty()).then_some(class);
+        }
+    }
+
+    /// **Every `:active` rule in `common.css` selects something that can
+    /// actually be pressed,** and every class stamped for a press has a rule —
+    /// the press twin of `every_hover_rule_has_something_to_hover`, for the same
+    /// reason: a cascade test supplies `Pressed` itself and cannot see that
+    /// nothing else does.
+    #[test]
+    fn every_press_rule_has_something_to_press() {
+        use super::PRESS_CLASSES;
+
+        let css = strip_css_comments(include_str!("skins/common.css"));
+        let mut named: Vec<&str> = css
+            .match_indices(":active")
+            .filter_map(|(at, _)| class_before(&css, at))
+            .collect();
+        named.sort_unstable();
+        named.dedup();
+        let mut declared: Vec<&str> = PRESS_CLASSES.to_vec();
+        declared.sort_unstable();
+        assert_eq!(
+            named, declared,
+            "`common.css` writes an `:active` rule for a class `stamp_press_state` \
+             does not stamp, or stamps one no rule presses any more"
+        );
+        let missing: Vec<&str> = PRESS_CLASSES
+            .iter()
+            .copied()
+            .filter(|class| {
+                !css.contains(&format!(".{class} {{")) && !css.contains(&format!(".{class},"))
+            })
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "these classes have an `:active` rule and no resting rule, so the \
+             first press would stick: {missing:?}"
+        );
+    }
+
+    /// **No class in the skin vocabulary shares its name with a CSS
+    /// pseudo-class that means something else.** `.sk-active` meant *selected*
+    /// and was read as *pressed* by anyone who knows CSS; a class that is a
+    /// pseudo-class's name is the same trap, whatever it is meant to mean.
+    #[test]
+    fn no_class_is_named_after_a_pseudo_class() {
+        // The pseudo-classes whose *meaning* a class could be mistaken for.
+        // A longer name that merely starts with one (`.sk-disabled-surface`,
+        // `.sk-focus-within`) says what it is and is not a clash.
+        const PSEUDO_CLASSES: &[&str] = &[
+            "active", "hover", "focus", "checked", "enabled", "visited", "target",
+        ];
+        let css = strip_css_comments(include_str!("skins/common.css"));
+        let clashing: Vec<&str> = PSEUDO_CLASSES
+            .iter()
+            .copied()
+            .filter(|name| {
+                let class = format!(".sk-{name}");
+                css.match_indices(&class).any(|(at, _)| {
+                    css.get(at.saturating_add(class.len())..)
+                        .and_then(|rest| rest.chars().next())
+                        .is_none_or(|next| !(next.is_alphanumeric() || next == '-' || next == '_'))
+                })
+            })
+            .collect();
+        assert!(
+            clashing.is_empty(),
+            "`common.css` has a class spelled like a pseudo-class: {clashing:?}"
         );
     }
 

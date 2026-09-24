@@ -61,7 +61,7 @@ use bevy::ui_widgets::Button;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{AssetKey, InventoryFolderKey, InventoryType, TextureKey, Uuid};
 use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
-use sl_viewer_ui_core::skin::{ACTIVE_CLASS, set_state_class, text_role};
+use sl_viewer_ui_core::skin::{SELECTED_CLASS, set_state_class, text_role};
 use std::hash::{Hash, Hasher as _};
 
 use crate::floater::{
@@ -120,7 +120,7 @@ const CONTROL_BORDER: Color = Color::srgba(0.4, 0.4, 0.45, 1.0);
 const SWATCH_CLASS: &str = "sk-swatch";
 
 /// The skin class on one row of the picker's tree: the shared resting look,
-/// selection and pointer hover (`.sk-list-row`, `.sk-active`,
+/// selection and pointer hover (`.sk-list-row`, `.sk-selected`,
 /// `.sk-list-row:hover`).
 ///
 /// It used to carry a second `sk-picker-row` for the hover alone, because this
@@ -947,7 +947,7 @@ fn rebuild_tree(
 
 /// Mark the selected texture item's row on the existing rows (so a selection
 /// change never respawns rows). What selected *looks* like is
-/// `.sk-list-row.sk-active`'s — which is also why the hover no longer has to be
+/// `.sk-list-row.sk-selected`'s — which is also why the hover no longer has to be
 /// worked around here: that compound beats `.sk-list-row:hover`, where this
 /// used to keep the two apart by comparing colours.
 fn paint_tree_selection(
@@ -960,7 +960,7 @@ fn paint_tree_selection(
             if parents.get(row_entity).map(ChildOf::parent) != Ok(ui.tree) {
                 continue;
             }
-            set_state_class(&mut classes, ACTIVE_CLASS, row.0 == state.selected);
+            set_state_class(&mut classes, SELECTED_CLASS, row.0 == state.selected);
         }
     }
 }

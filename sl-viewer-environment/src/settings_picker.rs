@@ -55,7 +55,7 @@ use sl_viewer_intents::{OpenSettingsPicker, PickedSettings, SettingsPicked};
 use sl_viewer_inventory::inventory::InventoryModel;
 use sl_viewer_inventory::settings_index::SettingsIndex;
 use sl_viewer_ui_core::i18n::{TransArgs, Translated, Translator};
-use sl_viewer_ui_core::skin::{ACTIVE_CLASS, set_state_class_on, text_role};
+use sl_viewer_ui_core::skin::{SELECTED_CLASS, set_state_class_on, text_role};
 use sl_viewer_ui_core::ui::{UiScaffoldSystems, column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
 use sl_viewer_ui_core::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
@@ -702,11 +702,11 @@ fn bind_picker_rows(
                 }
             }
             // The one selection highlight, not this picker's copy of its
-            // value: `.sk-active` over the table widget's row class.
+            // value: `.sk-selected` over the table widget's row class.
             set_state_class_on(
                 &mut classes,
                 row_entity,
-                ACTIVE_CLASS,
+                SELECTED_CLASS,
                 data.is_some() && state.selected == bound.0,
             );
         }

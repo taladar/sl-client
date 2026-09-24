@@ -53,6 +53,15 @@
   --control-bg-disabled: #232730;
   --control-border: #66809e;
   --control-border-disabled: #474752;
+  /* Held down: darker than rest where hover is lighter, a brighter frame, and
+   * the face of a lit toggle while it is held (pressing it is how it goes
+   * off). */
+  --control-bg-pressed: #1d2129;
+  --control-border-pressed: #8fa6c2;
+  --control-bg-pressed-selected: #2e4266;
+  /* A flat action-column button's face, and its frame where it has one. */
+  --action-button-bg: #3d4a61;
+  --action-button-border: #4d576b;
   --control-radius: 4px;
   /* Bevels: a button's and a field's top-and-left edges, then their
    * bottom-and-right. Graphite is flat, so all four are `--control-border`. */
@@ -142,12 +151,14 @@
   --scrollbar-arrows: none;
   --scrollbar-arrow-bg: #2a2f3a;
   --scrollbar-arrow-bg-hover: #353c4a;
+  --scrollbar-arrow-bg-pressed: #1d2129;
   --scrollbar-arrow: #bfc7d9;
   /* A horizontal tab strip's overflow buttons: their face (none — they sit
    * on the strip), their face under the pointer, the glyph, and whether the
    * two jump-to-end buttons show (a `display` value). */
   --tab-scroll-bg: #00000000;
   --tab-scroll-bg-hover: #353c4a;
+  --tab-scroll-bg-pressed: #1d2129;
   --tab-scroll-arrow: #e6ebf2;
   --tab-jump-buttons: flex;
 
@@ -157,6 +168,7 @@
   --title-bar-active: #ffffff1a;
   --title-text-inactive: #8c94a3;
   --glyph-button-bg: #ffffff0f;
+  --glyph-button-bg-pressed: #00000040;
 
   /* The sun / moon trackball's marker: the body's colour, and the dark
    * outline that keeps a pale marker readable on a pale disc. */

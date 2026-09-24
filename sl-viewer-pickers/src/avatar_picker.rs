@@ -65,7 +65,7 @@ use sl_client_bevy::{
     AgentKey, AvatarPickerResult, Command, QueryId, SlCommand, SlEvent, SlIdentity, SlSessionEvent,
     Uuid,
 };
-use sl_viewer_ui_core::skin::{ACTIVE_CLASS, LIST_ROW_CLASS, LIST_SURFACE_CLASS, text_role};
+use sl_viewer_ui_core::skin::{LIST_ROW_CLASS, LIST_SURFACE_CLASS, SELECTED_CLASS, text_role};
 
 use crate::floater::{
     Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterHost, FloaterOp, FloaterOwner,
@@ -839,7 +839,7 @@ fn rebuild_picker_list(
                         ..row(Val::Px(8.0))
                     },
                     ClassList::new_with_classes(
-                        core::iter::once(LIST_ROW_CLASS).chain(selected.then_some(ACTIVE_CLASS)),
+                        core::iter::once(LIST_ROW_CLASS).chain(selected.then_some(SELECTED_CLASS)),
                     ),
                     Pickable::default(),
                     Name::new("avatar-picker-row"),

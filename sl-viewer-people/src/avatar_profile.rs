@@ -74,7 +74,7 @@ use crate::intents::RequestFriendship;
 use crate::intents::{ConversationKey, OpenAvatarProfile, OpenConversation};
 use crate::inventory_drag::AgentDropTarget;
 use crate::inventory_properties::format_unix_date;
-use crate::skin::{ACTIVE_TEXT_CLASS, text_meaning, text_role};
+use crate::skin::{ACCENT_TEXT_CLASS, text_meaning, text_role};
 use crate::social::FriendsModel;
 use crate::social::GroupsModel;
 use crate::ui::{column, row};
@@ -2411,7 +2411,7 @@ fn spawn_profile_group_row(
         .spawn((
             Text::new(name),
             UiFont::Sans.at(PROFILE_FONT_SIZE),
-            text_meaning(GROUP_LINK_COLOR, ACTIVE_TEXT_CLASS),
+            text_meaning(GROUP_LINK_COLOR, ACCENT_TEXT_CLASS),
             ProfileGroupRow(group_id),
             Pickable::default(),
             Name::new("profile-group-row"),

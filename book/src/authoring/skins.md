@@ -126,6 +126,9 @@ Defined by every skin's `skin.css`, consumed by `common.css`:
 | `--control-bg` | a button's / combo's resting background |
 | `--control-bg-hover` | the background under the pointer (hovered button, highlighted menu entry) |
 | `--control-bg-disabled` | a disabled control's background |
+| `--control-bg-pressed` / `--control-border-pressed` | a button **held down** (`:active`): its face, and its frame where it has a one-colour frame (a push button's bevel turns inside out instead) |
+| `--control-bg-pressed-selected` | a toggle that is on **and** held down — pressing a lit toolbar button is how its floater is closed, so the press has to read against the lit face (the reference's `image_pressed_selected`) |
+| `--action-button-bg` / `--action-button-border` | a flat action-column button's face, and its frame where it has one (the flat shape has none) |
 | `--button-primary-bg` | the call-to-act button's background (`.sk-button-primary`: Retry, Stand Up) |
 | `--button-primary-bg-hover` | the same under the pointer |
 | `--control-border` | a control's resting border |
@@ -145,7 +148,7 @@ Defined by every skin's `skin.css`, consumed by `common.css`:
 | `--text-shadow` | the drop shadow under **chrome** text — a label, a button's or a tab's caption, a floater title, a status read-out — as a whole `text-shadow` value (`1px 1px #000000a6`, or `none`); data text never takes it (see below) |
 | `--accent` | accent bars, an active tab's frame, a chosen skin-tone swatch, a drag grip |
 | `--accent-muted` | the accent dimmed to say "set, but not by you": a Friends-list right the friend grants you |
-| `--selection-bg` | a lit control's (translucent) background: a toggled toolbar button, an active tab |
+| `--selection-bg` | a lit control's (translucent) background: a toolbar button that is on, a selected gallery tile |
 | `--list-row-bg` | a scroll list's ordinary row — transparent in both shipped skins, so the list's own face shows through |
 | `--list-row-stripe` | every other row of a scroll list, by the row's data index |
 | `--list-row-hover` | the row under the pointer |
@@ -170,17 +173,17 @@ Defined by every skin's `skin.css`, consumed by `common.css`:
 | `--scrollbar-track` | the groove a scrollbar thumb runs in — its own role, not the slider's `--track-bg`, because a classic skin's scroll groove is a mid grey where its slider trough is not |
 | `--scrollbar-thickness` | every scrollbar's width, and the edge of its square arrow ends; a list's rows stop clear of whatever it is |
 | `--scrollbar-arrows` | **a `display` value**: `none` for the plain bar both shipped skins draw, `flex` for the classic bar with a step arrow at each end (press to step a row, hold to repeat); the ends take their length out of the groove, never out of the content |
-| `--scrollbar-arrow-bg` / `--scrollbar-arrow-bg-hover` | an arrow end's face, at rest and under the pointer |
+| `--scrollbar-arrow-bg` / `--scrollbar-arrow-bg-hover` / `--scrollbar-arrow-bg-pressed` | an arrow end's face, at rest, under the pointer and held down |
 | `--scrollbar-arrow` | the arrow glyph's colour (the glyph itself is `content` — see the pseudo-elements note below) |
-| `--tab-scroll-bg` / `--tab-scroll-bg-hover` | a horizontal tab strip's overflow buttons' face, at rest (transparent in the shipped skins — they sit on the strip) and under the pointer |
+| `--tab-scroll-bg` / `--tab-scroll-bg-hover` / `--tab-scroll-bg-pressed` | a horizontal tab strip's overflow buttons' face, at rest (transparent in the shipped skins — they sit on the strip), under the pointer and held down |
 | `--tab-scroll-arrow` | their glyphs' colour |
 | `--tab-jump-buttons` | **a `display` value**: `flex` shows the jump-to-first and jump-to-last buttons beside back and on, as the reference does; `none` leaves only the single steps |
 | `--slider-thumb` | a slider handle |
 | `--trackball-sun` / `--trackball-moon` | a sun / moon trackball's marker: filled above the horizon, the outline of a hollow one below it |
 | `--trackball-marker-outline` | the marker's outline above the horizon — dark, so a pale marker reads on a pale disc |
-| `--title-bar-active` | the focused floater's title band (a translucent wash over its body) |
-| `--title-text-inactive` | an unfocused floater's title text |
-| `--glyph-button-bg` | a title-bar glyph button's fill |
+| `--title-bar-active` | the front-most floater's title band (a translucent wash over its body) |
+| `--title-text-inactive` | the title text of every floater but the front-most |
+| `--glyph-button-bg` / `--glyph-button-bg-pressed` | a title-bar glyph button's fill, at rest and held down |
 | `--pie-bg` / `--pie-line` / `--pie-selected` | the pie menu's disc, spokes and hovered wedge |
 | `--pie-label-sub-pie` | a wedge caption that opens a sub-pie |
 | `--pie-label-disabled` | a wedge caption that is present but unavailable |
@@ -207,7 +210,7 @@ carries. **Inside it the generic text roles re-root onto the field family:** an
 it sits on. Two exceptions, both deliberate: a button inside a row brings its
 own chrome with it, so its caption goes back to `--text-primary`, and a
 *selected* row's text takes `--list-row-selected-text`. The state classes
-(`.sk-active-text`, `.sk-highlighted-text`, `.sk-disabled-text`) are restated
+(`.sk-accent-text`, `.sk-highlighted-text`, `.sk-disabled-text`) are restated
 for a data surface, so a list's face never swallows a state.
 
 The text shadow follows the same line. `--text-shadow` reaches only chrome
@@ -294,10 +297,10 @@ the stock look rather than to black.
 | `.sk-console-reply` / `.sk-console-info` / `.sk-console-error` | worn with `.sk-text`: an RLVa console line by kind (a typed command wears none) |
 | `.sk-match` | text that matched an active filter term |
 | `.sk-heading` | a heading inside a page |
-| `.sk-button` | a button, plus `:hover`, `:disabled` and `:focus-visible` states |
+| `.sk-button` | a button, plus `:hover`, `:active` (held down: the face darkens and the bevel turns inside out), `:disabled` and `:focus-visible` states |
 | `.sk-button-compact` | worn with `.sk-button`: the same button at row scale (a table cell, a dense strip) |
 | `.sk-button-primary` | worn with `.sk-button`: the call to act in its row (a failed teleport's Retry, Stand Up) — restates the fill, so it combines with `.sk-button-compact` |
-| `.sk-action-button` | a flat action-column button — the refused state only, no resting look |
+| `.sk-action-button` | a flat action-column button: at rest, `:checked` (a toggle that is on — the day-cycle track being edited, the Photo Tools time preset in force), `:active`, both at once, and `:disabled` |
 | `.sk-checkbox` / `.sk-checkbox-box` / `.sk-checkbox-tick` | a checkbox row (`:checked`, `:disabled`), its box, and the empty text node whose `::before` is the tick |
 | `.sk-radio-group` / `.sk-radio` / `.sk-radio-indicator` / `.sk-radio-pip` | a radio group (`:disabled`), one option (`:checked`), its disc, and the node whose `::before` is the pip |
 | `.sk-combo` / `.sk-combo-list` / `.sk-combo-option` | a combo's anchor box (`:disabled`), its open drop-down, one option row (`:hover`, `:disabled`) |
@@ -310,7 +313,7 @@ the stock look rather than to black.
 | `.sk-tile` | one tile of a dense grid (an emoji cell), with its `:hover` wash |
 | `.sk-gallery-tile` | an inventory gallery tile's backing |
 | `.sk-inline-item` | an item embedded in notecard prose, with its `:hover` |
-| `.sk-day-marker` | a keyframe marker on the day-cycle timeline; `.sk-active` when selected |
+| `.sk-day-marker` | a keyframe marker on the day-cycle timeline; `.sk-selected` when selected |
 | `.sk-teleport-title` / `.sk-teleport-arrived` / `.sk-teleport-failed` | the teleport-progress title, and the two outcomes it ends in |
 | `.sk-presence-online` / `.sk-presence-offline` | a friend's presence dot |
 | `.sk-pie-label` / `.sk-pie-label-sub-pie` / `.sk-pie-label-unavailable` | a pie slice's caption: ordinary, one that opens a sub-pie, one that cannot be picked |
@@ -322,7 +325,7 @@ the stock look rather than to black.
 | `.sk-accent` | a leading accent bar + hanging indent (logical box demo) |
 | `.sk-tab` / `.sk-tab-label` | a tab button with asymmetric top corners (`:checked` when selected, `:disabled` when refused) and its caption |
 | `.sk-no-match` | worn with `.sk-tab-label`: a tab a live search left with no matching row |
-| `.sk-tab-scroll-button` | one of a horizontal tab strip's overflow buttons (`:hover`), shown only while its tabs overflow |
+| `.sk-tab-scroll-button` | one of a horizontal tab strip's overflow buttons (`:hover`, `:active`), shown only while its tabs overflow |
 | `.sk-tab-scroll-first` / `.sk-tab-scroll-prev` / `.sk-tab-scroll-next` / `.sk-tab-scroll-last` | which one: jump to the first tab, back one, on one, jump to the last — named in reading order, so their glyphs turn round under `dir="rtl"` |
 | `.sk-tab-scroll-glyph` | the empty text node inside an overflow button whose `::before` is its arrow |
 | `.sk-gain` / `.sk-loss` | meaning-bearing colour swatches |
@@ -332,25 +335,25 @@ the stock look rather than to black.
 | `.sk-menu-item-match` | an entry that matched the menu search |
 | `.sk-menu-separator` | the rule between two groups of entries |
 | `.sk-floater` | a floater's body |
-| `.sk-floater-title-bar` / `.sk-floater-title-text` | its title band and title, at rest; the focused floater's wear `.sk-active` / `.sk-active-text` |
-| `.sk-floater-button` / `.sk-floater-glyph` / `.sk-floater-grip` | its title-bar buttons, their glyphs' colour, the resize grip's (the marks are glyph slots, below) |
+| `.sk-floater-title-bar` / `.sk-floater-title-text` | its title band and title, at rest; the front-most floater's wear `.sk-frontmost` / `.sk-frontmost-text` |
+| `.sk-floater-button` / `.sk-floater-glyph` / `.sk-floater-grip` | its title-bar buttons (`:active`), their glyphs' colour, the resize grip's (the marks are glyph slots, below) |
 | `.sk-dock-host` | the strip docked floaters flow into |
 | `.sk-tab-panel` | a tab page |
 | `.sk-scrollbar-vertical` / `.sk-scrollbar-horizontal` | a scrollbar's frame, by axis — every scrollbar in the viewer is one widget, so these reach them all |
 | `.sk-scrollbar-track` / `.sk-scrollbar-thumb` | its groove and its thumb (`:hover`) |
 | `.sk-scrollbar-corner` | the square where a vertical and a horizontal bar meet |
-| `.sk-scrollbar-arrow` | either arrow end (`:hover`), hidden unless `--scrollbar-arrows` shows it |
+| `.sk-scrollbar-arrow` | either arrow end (`:hover`, `:active`), hidden unless `--scrollbar-arrows` shows it |
 | `.sk-scrollbar-arrow-up` / `.sk-scrollbar-arrow-down` / `.sk-scrollbar-arrow-left` / `.sk-scrollbar-arrow-right` | which end it is — a horizontal bar is physical, so its left and right never swap under RTL |
 | `.sk-scrollbar-arrow-glyph` | the empty text node inside an arrow end whose `::before` is the arrow |
 | `.sk-divider` / `.sk-divider-grip` / `.sk-column-resizer` | a pane splitter, its nub, a table column's drag handle |
-| `.sk-list-row` / `.sk-table-row` | one row of a scroll list, plus its `:hover`; worn with `.sk-stripe` on every other row and `.sk-active` when selected |
+| `.sk-list-row` / `.sk-table-row` | one row of a scroll list, plus its `:hover`; worn with `.sk-stripe` on every other row and `.sk-selected` when selected |
 | `.sk-field` | an editable text field's box, plus `:focus` and `:disabled` |
 | `.sk-read-only` | worn with `.sk-field` / `.sk-text-field`: a field that can be read and copied but not changed |
 | `.sk-field-placeholder` | a field's prompt while it is empty, and a search box's leading glyph |
 | `.sk-list-surface` | a scroll list's face — and the scope inside which the text roles re-root onto the field family (see *Chrome and data surfaces*) |
 | `.sk-text-field` | the caret / selection colours of **every** editor (stamped automatically) |
 | `.sk-search-field` / `.sk-search-clear` | the shared search box and its `×` button |
-| `.sk-toolbar-bar` / `.sk-toolbar-button` / `.sk-toolbar-label` | the bottom toolbar strip, its buttons, and their labels |
+| `.sk-toolbar-bar` / `.sk-toolbar-button` / `.sk-toolbar-label` | the bottom toolbar strip, its buttons — `:checked` while the floater a button toggles is open, `:active` held down, `:checked:active` both, `:disabled` for a target that has not landed — and their labels, which the button's states reach as descendant rules |
 | `.sk-toast` / `.sk-toast-text` | a notification toast card and its text |
 | `.sk-toast-tip` / `.sk-toast-notify` / `.sk-toast-alert` / `.sk-toast-modal` | worn with `.sk-toast`: its kind, which frames the card |
 | `.sk-toast-default` | the card's default button (the one Enter or expiry takes), framed in its kind's colour |
@@ -367,26 +370,36 @@ and there is no class to write a rule against.
 
 #### The state classes
 
-Widget **state** is not in that group: hovered, selected, toggled and refused
-are pseudo-classes where the engine can see the state (`:hover`, `:checked`,
-`:disabled`, `:focus`, `:focus-visible`) and classes where only the viewer can —
-a menu row lit by the keyboard, the floater a toolbar button toggles being open,
-a list row's data index. A widget's own system adds and removes these, and a
-skin restyles a selected row or a lit toolbar button by writing a rule like any
-other:
+Widget **state** is not in that group: hovered, held down, toggled on and
+refused are pseudo-classes where the engine can see the state (`:hover`,
+`:active`, `:checked`, `:disabled`, `:focus`, `:focus-visible`) and classes
+where only the viewer can — a menu row lit by the keyboard, a list row's data
+index, the front-most window. A widget's own system adds and removes these, and
+a skin restyles a selected row or a pressed toolbar button by writing a rule
+like any other.
+
+The pseudo-classes mean what CSS says they mean. `:active` is the pointer
+holding a control down, never "selected" — the selection is `.sk-selected` —
+and a toggle that is on (a toolbar button whose floater is open) is `:checked`,
+the same state a tab or a tick box carries. Every button family has an
+`:active` rule, and every button box gets the press state it reads, including
+the plain clickable boxes that carry no button component:
 
 | Class | State |
 | --- | --- |
 | `.sk-highlighted` / `.sk-highlighted-text` | lit by the pointer *or the keyboard* — a menu entry, a menu-bar button |
-| `.sk-active` / `.sk-active-text` | toggled on or selected: a lit toolbar button, a selected row, the focused floater's title |
+| `.sk-selected` | the selected item of a collection: a row, a gallery tile, a keyframe marker |
+| `.sk-frontmost` / `.sk-frontmost-text` | the front-most floater's title band and title |
+| `.sk-accent-text` | text in the accent that says "this one" without being a selection: the active group, a sort arrow, a profile's group links |
 | `.sk-stripe` | every other row of a scroll list, by the row's **data** index (so the bands do not crawl as a recycled list scrolls) |
 | `.sk-drop-target` | the row a drag is over |
 | `.sk-attention` | wants attention — the Conversations button with unread messages, and a conversation's tab with unread lines while another tab is open (`.sk-tab.sk-attention`, its own pulse from the tab's resting shade); an animation, so a skin that would rather not blink overrides it with a static paint |
 | `.sk-focus-within` | a container whose editor has focus — the search box, which brightens and rings while you type in it (there is no `:focus-within`) |
 
-They come **last** in `common.css`, in the order highlighted, active, disabled,
-because they carry the same specificity as the resting rules they override and
-only file order separates them: a greyed row must never also read as lit.
+They come **last** in `common.css`, in the order highlighted, selected,
+disabled, because they carry the same specificity as the resting rules they
+override and only file order separates them: a greyed row must never also read
+as lit.
 
 ### The glyph slots — marks a skin draws
 
@@ -469,7 +482,7 @@ mark needs:
 | `.sk-expanded` | a tree row open |
 | `.sk-sort-ascending` / `.sk-sort-descending` | the primary sort column's direction |
 | `.sk-precise` | a position known precisely rather than coarsely |
-| `.sk-current` | the one current entry — not `.sk-active`, which means *selected* and paints a selection background |
+| `.sk-current` | the one current entry — not `.sk-selected`, which paints a selection background |
 | `.sk-changed` | a value that differs from its default |
 | `.sk-loading` / `.sk-playing` / `.sk-zoomed` / `.sk-muted` | a page loading, media playing, zoomed in on, a sound muted |
 
@@ -653,9 +666,12 @@ physical left/right and will not mirror; use the logical longhands instead.
 - **Pseudo-classes** supported: `:hover`, `:active`, `:focus`, `:focus-visible`,
   `:checked` and `:disabled`. `:focus-visible` tracks the viewer's **keyboard
   (Tab) focus** — so a `:focus-visible` ring shows on Tab and hides on click,
-  which is exactly what you want for a focus ring. `:checked` follows a widget's
-  `Checked` (a ticked box, a lit radio option, the selected tab) and `:disabled`
-  its `InteractionDisabled`. There is no `:focus-within` and no reliable
+  which is exactly what you want for a focus ring. `:active` is a button held
+  down by the primary pointer button — `bevy_ui`'s `Pressed`, which the viewer
+  keeps on every button box, including those with no button component.
+  `:checked` follows a widget's `Checked` (a ticked box, a lit radio option, the
+  selected tab, a toolbar toggle that is on) and `:disabled` its
+  `InteractionDisabled`. There is no `:focus-within` and no reliable
   `:has()`; the viewer stamps `.sk-focus-within` instead.
 - **`::before` with `content`** works on a node the widget built for it — the
   checkbox tick and the radio pip are written this way, so which mark a box

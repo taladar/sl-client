@@ -81,7 +81,7 @@ mod tests {
     use super::floater_app;
     use crate::floater::{Floater, FloaterCommand, FloaterGeometry, FloaterOp, FloaterSpec};
     use crate::floaters::FLOATERS;
-    use crate::skin::ACTIVE_CLASS;
+    use crate::skin::FRONTMOST_CLASS;
     use crate::ui::{UiPanelShown, UiRoot};
     use crate::ui_test::interact::{self, InteractionTest, centre_of_entity};
     use crate::ui_test::{
@@ -756,13 +756,13 @@ mod tests {
                 ));
             }
             // The *look* of the lit bar is the skin's (`.sk-floater-title-bar`
-            // plus `.sk-active`, `viewer-skin-widget-state-classes`), and this
+            // plus `.sk-frontmost`, `viewer-skin-widget-state-classes`), and this
             // harness excludes styling entirely — so what is observable here,
             // and what the skin's rule selects on, is the class itself.
             let lit = app
                 .world()
                 .get::<ClassList>(title_bar)
-                .is_some_and(|classes| classes.contains(ACTIVE_CLASS));
+                .is_some_and(|classes| classes.contains(FRONTMOST_CLASS));
             if !lit {
                 failures.push(format!(
                     "floater `{}`: pressed and raised, but its title bar does not carry the \

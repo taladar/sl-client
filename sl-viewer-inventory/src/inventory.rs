@@ -70,7 +70,7 @@ use crate::virtual_list::{
 use bevy_flair::style::components::{ClassList, PseudoElementsSupport};
 use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::skin::{
-    ACTIVE_CLASS, FOLDER_LABEL_CLASS, LIST_ROW_CLASS, LIST_SURFACE_CLASS, TEXT_CLASS, role_class,
+    FOLDER_LABEL_CLASS, LIST_ROW_CLASS, LIST_SURFACE_CLASS, SELECTED_CLASS, TEXT_CLASS, role_class,
     set_state_class, set_state_class_on, text_role,
 };
 use sl_viewer_ui_core::ui_ellipsis::{RevealEllipsis, spawn_ellipsis_marker};
@@ -3090,7 +3090,7 @@ fn populate_new_rows(
         amend_tree_row_node(&mut commands, row_entity);
         commands.entity(row_entity).insert((
             Pickable::default(),
-            // The resting look, the selection (`.sk-active`) and the
+            // The resting look, the selection (`.sk-selected`) and the
             // drag-and-drop target (`.sk-drop-target`,
             // [`crate::inventory_drag`]) are all this one class list's.
             ClassList::new_with_classes([LIST_ROW_CLASS]),
@@ -3554,7 +3554,7 @@ fn on_row_press(
 
 /// Mark each pooled row that is selected. No longer skipped mid-drag: the
 /// drop-target highlight is its own class now and `.sk-drop-target` beats
-/// `.sk-active` in the cascade, so the two no longer have to take turns owning
+/// `.sk-selected` in the cascade, so the two no longer have to take turns owning
 /// one `BackgroundColor`.
 fn paint_selection(
     ui: Option<Res<InventoryUi>>,
@@ -3573,7 +3573,7 @@ fn paint_selection(
             .index
             .and_then(|index| view.rows.get(index))
             .is_some_and(|display| selection.contains(display.key()));
-        set_state_class(&mut classes, ACTIVE_CLASS, selected);
+        set_state_class(&mut classes, SELECTED_CLASS, selected);
     }
 }
 

@@ -1,0 +1,18 @@
+/*
+ * pressed-toolbar.css — a TEST-ONLY skin: a bottom-toolbar press of its own.
+ *
+ * It answers the question
+ * `skin_palette_resolves::a_skin_restyles_the_toolbar_press_by_css_alone`
+ * asks: can a skin give the bottom bar's buttons a distinct pressed look with
+ * one rule and no Rust? The press is `:active`, the state CSS names for it, so
+ * the rule is the one any CSS author would write first.
+ *
+ * A fixture, not a skin anyone wears, so it lives beside this file rather than
+ * under `assets/skins/` — see light-field.css for the whole reason, and for why
+ * the base goes into a cascade LAYER.
+ */
+@import "embedded://sl_viewer_ui_core/skins/fallback.css" layer(fallback);
+
+.sk-toolbar-button:active {
+  background-color: #ff00ff;
+}

@@ -197,7 +197,7 @@ pub const SORT_ASCENDING: &str = "sk-sort-ascending";
 pub const SORT_DESCENDING: &str = "sk-sort-descending";
 
 /// The one entry of a list that is current — the active group. Not
-/// [`ACTIVE_CLASS`](crate::skin::ACTIVE_CLASS), which means *selected* and
+/// [`SELECTED_CLASS`](crate::skin::SELECTED_CLASS), which means *selected* and
 /// paints a selection background.
 pub const CURRENT: &str = "sk-current";
 

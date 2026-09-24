@@ -49,7 +49,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
 use crate::skin::{
-    ACTION_BUTTON_CLASS, ACTIVE_TEXT_CLASS, DisabledButtons, PRESENCE_OFFLINE_CLASS,
+    ACCENT_TEXT_CLASS, ACTION_BUTTON_CLASS, DisabledButtons, PRESENCE_OFFLINE_CLASS,
     PRESENCE_ONLINE_CLASS, TEXT_CLASS, set_action_button_enabled, set_state_class_on, text_role,
 };
 use crate::skin_palette::SkinPalette;
@@ -1492,13 +1492,13 @@ fn augment_sortable_header(
         return Entity::PLACEHOLDER;
     };
     commands.entity(cell).observe(sort_on_press(column));
-    // The skin's `glyph::SORT` mark, in the accent `ACTIVE_TEXT_CLASS` paints.
+    // The skin's `glyph::SORT` mark, in the accent `ACCENT_TEXT_CLASS` paints.
     commands
         .spawn((
             glyph::glyph_host(
                 glyph::SORT,
                 UiFont::Sans.at(ROW_FONT_SIZE),
-                [TEXT_CLASS, ACTIVE_TEXT_CLASS],
+                [TEXT_CLASS, ACCENT_TEXT_CLASS],
             ),
             TextColor(SkinPalette::FALLBACK.accent),
             Node {

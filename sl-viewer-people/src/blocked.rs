@@ -53,7 +53,7 @@
 //! `llfloatergetblockedobjectname`, `menu_people_blocked_{gear,plus,view}.xml`,
 //! `floater_mute_object.xml`.
 
-use crate::skin::{ACTIVE_CLASS, set_state_class, text_role};
+use crate::skin::{SELECTED_CLASS, set_state_class, text_role};
 use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
@@ -860,7 +860,7 @@ fn bind_blocked_rows(
         if let Ok(mut classes) = classes.get_mut(row_entity) {
             set_state_class(
                 &mut classes,
-                ACTIVE_CLASS,
+                SELECTED_CLASS,
                 data.is_some() && selected.0 == bound.0,
             );
         }

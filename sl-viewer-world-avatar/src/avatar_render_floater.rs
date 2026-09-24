@@ -35,7 +35,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::AgentKey;
-use sl_viewer_ui_core::skin::{ACTIVE_CLASS, set_state_class, text_role};
+use sl_viewer_ui_core::skin::{SELECTED_CLASS, set_state_class, text_role};
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 use crate::avatar_complexity::RenderOverride;
@@ -788,7 +788,7 @@ fn bind_render_settings_rows(
         if let Ok(mut classes) = table.classes.get_mut(row_entity) {
             set_state_class(
                 &mut classes,
-                ACTIVE_CLASS,
+                SELECTED_CLASS,
                 selected.0 == Some(AgentKey::from(data.entry.agent)),
             );
         }

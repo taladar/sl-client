@@ -17,7 +17,7 @@ publish.workspace = true
 # Not a workspace dependency: members disagree about `default-features`, so the
 # spec stays per-crate (see the root manifest).
 bevy = { version = "0.19.0" }
-# The gallery's tiles carry the shared `.sk-active` class when selected, so
+# The gallery's tiles carry the shared `.sk-selected` class when selected, so
 # this crate names the CSS engine directly. Already in the closure through
 # sl-viewer-ui-core; the package set is unchanged.
 bevy_flair = { version = "0.8.0" }

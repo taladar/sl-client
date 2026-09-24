@@ -34,6 +34,18 @@
   --control-bg-disabled: #1f1f24;
   --control-border: #66809e;
   --control-border-disabled: #474752;
+  /* A button held down (viewer-skin-active-class-means-selected-not-pressed):
+   * the face and frame of `:active`, and the face of a toggle that is on AND
+   * held — the reference's `image_pressed_selected`, because pressing a lit
+   * toolbar button is how its floater is closed. Darker than rest, where hover
+   * is lighter, so the three never read alike. */
+  --control-bg-pressed: #1a1f2b;
+  --control-border-pressed: #8fa6c2;
+  --control-bg-pressed-selected: #2c4063;
+  /* A flat action-column button's face, and its frame where it has one (the
+   * flat shape has none). The colour those buttons used to paint themselves. */
+  --action-button-bg: #3d4a61;
+  --action-button-border: #4d576b;
   /* The two bevels (viewer-skin-bevel-border-policy): a button's and a field's
    * top-and-left edges, then their bottom-and-right. Physical names on
    * purpose — a bevel's light source does not mirror under RTL. All four are
@@ -100,17 +112,22 @@
   --scrollbar-arrows: none;
   --scrollbar-arrow-bg: #293040;
   --scrollbar-arrow-bg-hover: #475775;
+  --scrollbar-arrow-bg-pressed: #1a1f2b;
   --scrollbar-arrow: #bfc7d9;
   /* A horizontal tab strip's overflow buttons: their face (none — they sit
    * on the strip), their face under the pointer, the glyph, and whether the
    * two jump-to-end buttons show (a `display` value). */
   --tab-scroll-bg: #00000000;
   --tab-scroll-bg-hover: #475775;
+  --tab-scroll-bg-pressed: #1a1f2b;
   --tab-scroll-arrow: #e6ebf5;
   --tab-jump-buttons: flex;
   --title-bar-active: #ffffff1a;
   --title-text-inactive: #8c94a3;
   --glyph-button-bg: #ffffff0f;
+  /* Held down, a title-bar button darkens the body under it where the resting
+   * one lightens it — translucent for the same reason. */
+  --glyph-button-bg-pressed: #00000040;
   --trackball-sun: #ffd959;
   --trackball-moon: #d1dbf2;
   --trackball-marker-outline: #10121a;

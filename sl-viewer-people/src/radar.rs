@@ -39,7 +39,7 @@
 //! are `viewer-avatar-moderation-actions`, and light up in the pie, here and
 //! the minimap at once when that shared layer lands.
 
-use crate::skin::{ACTIVE_CLASS, LIST_ROW_CLASS, set_state_class, text_role};
+use crate::skin::{LIST_ROW_CLASS, SELECTED_CLASS, set_state_class, text_role};
 use crate::skin_palette::SkinPalette;
 use bevy::ecs::system::SystemParam;
 use bevy::input_focus::tab_navigation::TabIndex;
@@ -1865,7 +1865,7 @@ pub fn spawn_radar_specimen(
                 // the specimen shows the skin's highlight rather than a copy of
                 // one skin's value.
                 ClassList::new_with_classes(
-                    core::iter::once(LIST_ROW_CLASS).chain((index == 0).then_some(ACTIVE_CLASS)),
+                    core::iter::once(LIST_ROW_CLASS).chain((index == 0).then_some(SELECTED_CLASS)),
                 ),
                 ChildOf(root),
             ))

@@ -42,6 +42,13 @@
   --control-bg-disabled: #142d44;
   --control-border: #4a90d0;
   --control-border-disabled: #2b455e;
+  /* Held down: a deeper blue than rest, where hover is a brighter one. */
+  --control-bg-pressed: #0f2944;
+  --control-border-pressed: #7fb6e8;
+  --control-bg-pressed-selected: #1d4f80;
+  /* A flat action-column button's face, and its frame where it has one. */
+  --action-button-bg: #1f4e79;
+  --action-button-border: #4a90d0;
   --control-radius: 6px;
   /* Bevels: a button's and a field's top-and-left edges, then their
    * bottom-and-right. Azure is flat, so all four are `--control-border`. */
@@ -118,12 +125,14 @@
   --scrollbar-arrows: none;
   --scrollbar-arrow-bg: #173a5c;
   --scrollbar-arrow-bg-hover: #1f4e79;
+  --scrollbar-arrow-bg-pressed: #0f2944;
   --scrollbar-arrow: #cfe4f7;
   /* A horizontal tab strip's overflow buttons: their face (none — they sit
    * on the strip), their face under the pointer, the glyph, and whether the
    * two jump-to-end buttons show (a `display` value). */
   --tab-scroll-bg: #00000000;
   --tab-scroll-bg-hover: #1f4e79;
+  --tab-scroll-bg-pressed: #0f2944;
   --tab-scroll-arrow: #eaf3ff;
   --tab-jump-buttons: flex;
 
@@ -131,6 +140,7 @@
   --title-bar-active: #ffffff1f;
   --title-text-inactive: #7f9bb5;
   --glyph-button-bg: #ffffff14;
+  --glyph-button-bg-pressed: #00000040;
 
   /* The sun / moon trackball's marker: the body's colour, and the dark
    * outline that keeps a pale marker readable on a pale disc. */

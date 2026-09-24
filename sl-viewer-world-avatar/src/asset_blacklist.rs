@@ -40,7 +40,7 @@ use bevy::text::EditableText;
 use bevy_flair::style::components::{ClassList, PseudoElementsSupport};
 use sl_client_bevy::Uuid;
 use sl_viewer_ui_core::glyph;
-use sl_viewer_ui_core::skin::{ACTIVE_CLASS, set_state_class, text_role};
+use sl_viewer_ui_core::skin::{SELECTED_CLASS, set_state_class, text_role};
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 use crate::derender::UnDerender;
@@ -720,7 +720,7 @@ fn bind_blacklist_rows(
         }
         set_permanent_mark(&mut table.texts, cells, data.permanent);
         if let Ok(mut classes) = table.classes.get_mut(row_entity) {
-            set_state_class(&mut classes, ACTIVE_CLASS, selected.0 == Some(data.id));
+            set_state_class(&mut classes, SELECTED_CLASS, selected.0 == Some(data.id));
         }
     }
 }

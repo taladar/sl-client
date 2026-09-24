@@ -63,7 +63,7 @@
 
 use crate::skin::BUTTON_CLASS;
 use crate::skin::{
-    ACTIVE_CLASS, DISABLED_SURFACE_CLASS, DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class,
+    DISABLED_SURFACE_CLASS, DISABLED_TEXT_CLASS, SELECTED_CLASS, TEXT_CLASS, set_state_class,
     set_state_class_on, text_role,
 };
 use crate::skin_palette::SkinPalette;
@@ -1569,7 +1569,7 @@ fn bind_member_rows(
         if let Ok(mut classes) = classes.get_mut(row_entity) {
             set_state_class(
                 &mut classes,
-                ACTIVE_CLASS,
+                SELECTED_CLASS,
                 data.is_some() && selected.0 == bound.0,
             );
         }

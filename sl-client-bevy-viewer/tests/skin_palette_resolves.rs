@@ -367,7 +367,7 @@ mod test {
     /// A selected row really is painted, and a resting one really is not.
     ///
     /// `.sk-table-row` / `.sk-list-row` declare the resting `transparent`, and
-    /// `.sk-active` the selection — two rules of equal specificity, so which
+    /// `.sk-selected` the selection — two rules of equal specificity, so which
     /// one wins is decided by the order they appear in `common.css` and by
     /// nothing else. That is a property of the file, not of the code that adds
     /// the class, and no Rust test can see it.
@@ -386,7 +386,7 @@ mod test {
             .world_mut()
             .spawn((
                 Node::default(),
-                ClassList::new("sk-table-row sk-active"),
+                ClassList::new("sk-table-row sk-selected"),
                 ChildOf(root),
             ))
             .id();
@@ -421,6 +421,233 @@ mod test {
             Some(Srgba::NONE),
             "a resting row must be transparent"
         );
+        Ok(())
+    }
+
+    /// A node's resolved background, as `Srgba` — a resolved colour arrives as
+    /// `Srgba` and a literal may be another variant of the same colour.
+    fn background_of(app: &App, entity: Entity) -> Option<Srgba> {
+        app.world()
+            .get::<BackgroundColor>(entity)
+            .map(|background| background.0.to_srgba())
+    }
+
+    /// A text node's resolved colour, as `Srgba`.
+    fn text_of(app: &App, entity: Entity) -> Option<Srgba> {
+        app.world()
+            .get::<TextColor>(entity)
+            .map(|color| color.0.to_srgba())
+    }
+
+    /// **A press is visible on every button family, in both flat skins, and
+    /// lets go again** (`viewer-skin-active-class-means-selected-not-pressed`).
+    ///
+    /// One entity per family, *toggled*: `Pressed` goes on and the face must
+    /// change, then comes off and the face must be the resting one again. A
+    /// test that spawned a pressed button beside a resting one would pass on an
+    /// engine that styles once and never revisits, and the second half — the
+    /// face coming back — is the one `bevy_flair` does not give for free: it
+    /// reverts nothing, so a family whose `:active` rule had no resting
+    /// counterpart would stay pressed after the first click.
+    ///
+    /// The press state itself is supplied here, as a cascade test must;
+    /// `every_press_rule_has_something_to_press` in `sl-viewer-ui-core` is the
+    /// check that the live viewer supplies it too.
+    #[test]
+    fn every_button_family_goes_down_and_comes_back_up() -> Result<(), TestError> {
+        use bevy::ui::Pressed;
+
+        const FAMILIES: [&str; 6] = [
+            "sk-button",
+            "sk-action-button",
+            "sk-toolbar-button",
+            "sk-floater-button",
+            "sk-scrollbar-arrow",
+            "sk-tab-scroll-button",
+        ];
+        for skin in ["skins/graphite/skin.css", "skins/azure/skin.css"] {
+            let mut app = app();
+            let handle: Handle<StyleSheet> = app.world().resource::<AssetServer>().load(skin);
+            let root = app
+                .world_mut()
+                .spawn((Node::default(), Styled::new(handle.clone())))
+                .id();
+            let buttons: Vec<(&str, Entity)> = FAMILIES
+                .iter()
+                .map(|&class| {
+                    let entity = app
+                        .world_mut()
+                        .spawn((Node::default(), ClassList::new(class), ChildOf(root)))
+                        .id();
+                    (class, entity)
+                })
+                .collect();
+            load(&mut app, &handle)?;
+            app.update();
+
+            for &(class, entity) in &buttons {
+                let resting = background_of(&app, entity);
+                app.world_mut().entity_mut(entity).insert(Pressed);
+                app.update();
+                let pressed = background_of(&app, entity);
+                assert_ne!(
+                    pressed, resting,
+                    "{skin}: `.{class}:active` did not change the face, so a \
+                     press on it is invisible"
+                );
+                app.world_mut().entity_mut(entity).remove::<Pressed>();
+                app.update();
+                assert_eq!(
+                    background_of(&app, entity),
+                    resting,
+                    "{skin}: `.{class}` stayed pressed after the release"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// **The bottom toolbar's button through every state it has, on one entity,
+    /// and back** — lit is `:checked`, held is `:active`, both at once is the
+    /// reference's `image_pressed_selected`, greyed is `:disabled`, and the
+    /// label follows each from its button.
+    ///
+    /// Graphite's values, because what is being pinned is which *role* each
+    /// state lands on: a lit button held down must not look like a resting one
+    /// held down (pressing it is how its floater is closed), and neither may
+    /// look lit once let go and switched off.
+    #[test]
+    fn a_toolbar_button_is_lit_pressed_and_greyed_by_engine_state() -> Result<(), TestError> {
+        use bevy::ui::{Checked, InteractionDisabled, Pressed};
+
+        let mut app = app();
+        let handle: Handle<StyleSheet> = app
+            .world()
+            .resource::<AssetServer>()
+            .load("skins/graphite/skin.css");
+        let root = app
+            .world_mut()
+            .spawn((Node::default(), Styled::new(handle.clone())))
+            .id();
+        let button = app
+            .world_mut()
+            .spawn((
+                Node::default(),
+                ClassList::new("sk-toolbar-button"),
+                ChildOf(root),
+            ))
+            .id();
+        let label = app
+            .world_mut()
+            .spawn((
+                Text::new("Inventory"),
+                ClassList::new("sk-toolbar-label"),
+                ChildOf(button),
+            ))
+            .id();
+        load(&mut app, &handle)?;
+        app.update();
+
+        let rest = Srgba::rgb_u8(0x2a, 0x2f, 0x3a);
+        let pressed = Srgba::rgb_u8(0x1d, 0x21, 0x29);
+        let lit = Srgba::rgba_u8(0x3d, 0x57, 0x85, 0x8c);
+        let lit_pressed = Srgba::rgb_u8(0x2e, 0x42, 0x66);
+        let greyed = Srgba::rgb_u8(0x23, 0x27, 0x30);
+        let text = Srgba::rgb_u8(0xe6, 0xeb, 0xf2);
+        let accent = Srgba::rgb_u8(0x5c, 0xb8, 0xfa);
+        let text_disabled = Srgba::rgb_u8(0x73, 0x7d, 0x8f);
+
+        let step = |app: &mut App, change: &dyn Fn(&mut EntityWorldMut<'_>)| {
+            change(&mut app.world_mut().entity_mut(button));
+            app.update();
+            (background_of(app, button), text_of(app, label))
+        };
+        assert_eq!(
+            step(&mut app, &|_button| {}),
+            (Some(rest), Some(text)),
+            "at rest"
+        );
+        assert_eq!(
+            step(&mut app, &|button| {
+                button.insert(Pressed);
+            }),
+            (Some(pressed), Some(text)),
+            "held down"
+        );
+        assert_eq!(
+            step(&mut app, &|button| {
+                button.remove::<Pressed>().insert(Checked);
+            }),
+            (Some(lit), Some(accent)),
+            "let go and switched on: lit, with the label in the accent"
+        );
+        assert_eq!(
+            step(&mut app, &|button| {
+                button.insert(Pressed);
+            }),
+            (Some(lit_pressed), Some(accent)),
+            "a lit button held down is its own face, not the resting press"
+        );
+        assert_eq!(
+            step(&mut app, &|button| {
+                button.remove::<(Pressed, Checked)>();
+            }),
+            (Some(rest), Some(text)),
+            "switched off again: nothing of the lit state may stick"
+        );
+        assert_eq!(
+            step(&mut app, &|button| {
+                button.insert(InteractionDisabled);
+            }),
+            (Some(greyed), Some(text_disabled)),
+            "an unlanded target is greyed, label and all"
+        );
+        Ok(())
+    }
+
+    /// **A skin gives the bottom bar's buttons a pressed look of its own with
+    /// one CSS rule** — `.sk-toolbar-button:active`, the selector a CSS author
+    /// writes first — and it reaches a lit button's press as well, since a
+    /// skin's unlayered rule outranks the layered base whatever the base's
+    /// specificity.
+    #[test]
+    fn a_skin_restyles_the_toolbar_press_by_css_alone() -> Result<(), TestError> {
+        use bevy::ui::{Checked, Pressed};
+
+        let mut app = app_with_assets(&test_assets_dir());
+        let handle: Handle<StyleSheet> = app
+            .world()
+            .resource::<AssetServer>()
+            .load("pressed-toolbar.css");
+        let root = app
+            .world_mut()
+            .spawn((Node::default(), Styled::new(handle.clone())))
+            .id();
+        let plain = app
+            .world_mut()
+            .spawn((
+                Node::default(),
+                ClassList::new("sk-toolbar-button"),
+                Pressed,
+                ChildOf(root),
+            ))
+            .id();
+        let lit = app
+            .world_mut()
+            .spawn((
+                Node::default(),
+                ClassList::new("sk-toolbar-button"),
+                Pressed,
+                Checked,
+                ChildOf(root),
+            ))
+            .id();
+        load(&mut app, &handle)?;
+        app.update();
+
+        let magenta = Some(Srgba::rgb_u8(0xff, 0x00, 0xff));
+        assert_eq!(background_of(&app, plain), magenta);
+        assert_eq!(background_of(&app, lit), magenta);
         Ok(())
     }
 
@@ -463,7 +690,7 @@ mod test {
         let striped = row("sk-table-row sk-stripe", false);
         let hovered = row("sk-table-row", true);
         let striped_hovered = row("sk-table-row sk-stripe", true);
-        let selected_hovered = row("sk-table-row sk-active", true);
+        let selected_hovered = row("sk-table-row sk-selected", true);
         let hovered_hand_rolled = row("sk-list-row", true);
 
         // The text half: a cell in a selected row against one in an ordinary
@@ -481,7 +708,7 @@ mod test {
             .world_mut()
             .spawn((
                 Node::default(),
-                ClassList::new("sk-table-row sk-active"),
+                ClassList::new("sk-table-row sk-selected"),
                 ChildOf(list),
             ))
             .id();
@@ -1776,7 +2003,7 @@ mod test {
         let resting = row("sk-list-row", false);
         let striped = row("sk-list-row sk-stripe", false);
         let hovered = row("sk-list-row", true);
-        let selected = row("sk-list-row sk-active", false);
+        let selected = row("sk-list-row sk-selected", false);
 
         let selected_cell = app
             .world_mut()

@@ -185,10 +185,44 @@
   background-color: var(--button-primary-bg-hover);
 }
 
+/* HELD DOWN (viewer-skin-active-class-means-selected-not-pressed). `:active` is
+ * CSS's own meaning — the pointer holding the button down — and nothing else in
+ * this sheet is spelled like it: what is SELECTED is `.sk-selected`, what is
+ * toggled ON is `:checked`.
+ *
+ * The button sinks: a darker face, and the bevel turned inside out, so a skin
+ * lit from the top-left draws the classic pressed-in look from the two tokens
+ * it already set. A flat skin gives both bevels one colour, so only the face
+ * changes. After the call to act's rules, so a pressed Retry reads pressed too.
+ *
+ * Every button family has a rule of this shape below, and every one of them
+ * is kept honest by `every_press_rule_has_something_to_press` in src/skin.rs:
+ * `:active` is only as good as the press state the node carries, and a plain
+ * clickable box carries none until `stamp_press_state` gives it one. */
+.sk-button:active {
+  background-color: var(--control-bg-pressed);
+  border-top-color: var(--button-bevel-bottom-right);
+  border-left-color: var(--button-bevel-bottom-right);
+  border-bottom-color: var(--button-bevel-top-left);
+  border-right-color: var(--button-bevel-top-left);
+}
+
 /* A button whose action cannot be taken right now. The panel marks it with
  * `InteractionDisabled` — which it was already doing, to refuse the press — and
  * the caption greys from here rather than from a loop that walked the button's
- * children repainting them. */
+ * children repainting them.
+ *
+ * The surface restates the resting face and bevel, after `:active` at the same
+ * specificity: `bevy_ui`'s legacy `Interaction` goes to `Pressed` on a refused
+ * button all the same, and a greyed button must never appear to go down. */
+.sk-button:disabled {
+  background-color: var(--control-bg);
+  border-top-color: var(--button-bevel-top-left);
+  border-left-color: var(--button-bevel-top-left);
+  border-bottom-color: var(--button-bevel-bottom-right);
+  border-right-color: var(--button-bevel-bottom-right);
+}
+
 .sk-button:disabled .sk-text {
   color: var(--text-disabled);
 }
@@ -418,15 +452,40 @@
 }
 
 /* A flat action button in a panel's button column — the shape `ButtonSpec::flat`
- * spawns. Only its refused state is here; its resting look is still the panel's
- * own (`viewer-skin-panel-text-roles` owns that), which is why this is not
- * `.sk-button`: that class carries a whole resting look these buttons do not
- * have.
+ * spawns — and the Photo Tools / parcel audio buttons that share its states.
+ * Not `.sk-button`: that class carries a bevel and a box of its own that these
+ * buttons do not have.
  *
- * Compound rather than a lone class, so it also beats `.sk-active` wherever a
- * button is both lit and refused — the day-cycle editor's track buttons on a
- * window with no session. */
-.sk-action-button:disabled {
+ * It has a resting rule because its states need one to fall back to. bevy_flair
+ * reverts nothing a rule stops writing, so while this block held only the
+ * refused state, a button re-enabled kept its grey, and a lit one stayed lit.
+ * `--action-button-border` shows only where the button has a border width at
+ * all: the flat shape has none.
+ *
+ * Its states, in order: toggled on (`:checked` — the day-cycle track being
+ * edited, the Photo Tools time preset in force), held down, both, refused. The
+ * refused rule comes last and also names the one compound that would outrank
+ * it, so a greyed button never reads as lit or pressed. */
+.sk-action-button {
+  background-color: var(--action-button-bg);
+  border-color: var(--action-button-border);
+}
+
+.sk-action-button:checked {
+  background-color: var(--selection-bg);
+}
+
+.sk-action-button:active {
+  background-color: var(--control-bg-pressed);
+  border-color: var(--control-border-pressed);
+}
+
+.sk-action-button:checked:active {
+  background-color: var(--control-bg-pressed-selected);
+}
+
+.sk-action-button:disabled,
+.sk-action-button:checked:active:disabled {
   background-color: var(--control-bg-disabled);
   border-color: var(--control-border-disabled);
 }
@@ -559,6 +618,11 @@
   background-color: var(--tab-scroll-bg-hover);
 }
 
+/* Held down — which for a step button lasts as long as it keeps repeating. */
+.sk-tab-scroll-button:active {
+  background-color: var(--tab-scroll-bg-pressed);
+}
+
 .sk-tab-scroll-first,
 .sk-tab-scroll-last {
   display: var(--tab-jump-buttons);
@@ -661,7 +725,7 @@
   background-color: var(--slider-thumb);
 }
 
-.sk-day-marker.sk-active {
+.sk-day-marker.sk-selected {
   background-color: var(--marker-selected);
 }
 
@@ -835,20 +899,20 @@
 }
 
 /* The title band, at rest: transparent over the floater body, with the title
- * greyed. The focused floater's bar takes `.sk-active` and its text
- * `.sk-active-text` (src/floater.rs `highlight_active_floater`), which is the
- * pair a skin needs to express focus at all — it used to be a Rust repaint no
+ * greyed. The front-most floater's bar takes `.sk-frontmost` and its text
+ * `.sk-frontmost-text` (src/floater.rs `highlight_active_floater`), which is
+ * the pair a skin needs to express it at all — it used to be a Rust repaint no
  * selector could reach.
  *
- * The active title is `--text-primary` rather than the generic accent: a window
- * title says "this window has focus", not "pick me". That is what the compound
- * selector is for — the state class stays a plain marker, and the widget says
- * what the state looks like on it. */
+ * The front-most title is `--text-primary` rather than the accent: a window
+ * title says "this is the window you are working in", not "pick me". That is
+ * what the compound selector is for — the state class stays a plain marker, and
+ * the widget says what the state looks like on it. */
 .sk-floater-title-bar {
   background-color: transparent;
 }
 
-.sk-floater-title-bar.sk-active {
+.sk-floater-title-bar.sk-frontmost {
   background-color: var(--title-bar-active);
 }
 
@@ -857,7 +921,7 @@
   text-shadow: var(--text-shadow);
 }
 
-.sk-floater-title-text.sk-active-text {
+.sk-floater-title-text.sk-frontmost-text {
   color: var(--text-primary);
 }
 
@@ -866,6 +930,10 @@
  * colour of its own, so it reads right on any body colour. */
 .sk-floater-button {
   background-color: var(--glyph-button-bg);
+}
+
+.sk-floater-button:active {
+  background-color: var(--glyph-button-bg-pressed);
 }
 
 .sk-floater-glyph {
@@ -1010,6 +1078,10 @@
 
 .sk-scrollbar-arrow:hover {
   background-color: var(--scrollbar-arrow-bg-hover);
+}
+
+.sk-scrollbar-arrow:active {
+  background-color: var(--scrollbar-arrow-bg-pressed);
 }
 
 /* The arrow is the skin's glyph, the checkbox tick's way: the widget spawns
@@ -1419,24 +1491,53 @@
   background-color: var(--surface-bg);
 }
 
-/* A bottom-toolbar button at rest. Lit (its floater is open) and greyed (not
- * wired yet) are `.sk-active` / `.sk-disabled-surface`, added and removed by
- * src/bottom_toolbar.rs `update_toolbar_button_states`; unread IMs behind a
- * closed Conversations window add `.sk-attention`, which is why the blink is an
- * animation up there and not a colour the viewer flips twice a second. The
- * resting background is stated so dropping a state class has somewhere to land.
- */
+/* A bottom-toolbar button at rest, and its states. They are all the engine's
+ * own now, set by src/bottom_toolbar.rs `update_toolbar_button_states`: lit
+ * (its floater is open) is `:checked`, because a toolbar button is a toggle;
+ * held down is `:active`; greyed (not wired yet) is `:disabled`. Unread IMs
+ * behind a closed Conversations window add `.sk-attention`, which is why the
+ * blink is an animation up there and not a colour the viewer flips twice a
+ * second.
+ *
+ * Pressed-and-lit is its own role (the reference's `image_pressed_selected`):
+ * pressing a lit button is how its floater is closed, and the press must read
+ * against the lit face, not against the resting one. */
 .sk-toolbar-button {
   background-color: var(--control-bg);
   border-color: var(--control-border);
   border-radius: var(--control-radius);
 }
 
+.sk-toolbar-button:checked {
+  background-color: var(--selection-bg);
+}
+
+.sk-toolbar-button:active {
+  background-color: var(--control-bg-pressed);
+  border-color: var(--control-border-pressed);
+}
+
+.sk-toolbar-button:checked:active {
+  background-color: var(--control-bg-pressed-selected);
+}
+
+.sk-toolbar-button:disabled {
+  background-color: var(--control-bg-disabled);
+}
+
 /* A toolbar button's label — the text half, since bevy_ui has no style
- * inheritance. `.sk-active-text` / `.sk-disabled-text` override it per state. */
+ * inheritance, so its states reach it from the button. */
 .sk-toolbar-label {
   color: var(--text-primary);
   text-shadow: var(--text-shadow);
+}
+
+.sk-toolbar-button:checked .sk-toolbar-label {
+  color: var(--accent);
+}
+
+.sk-toolbar-button:disabled .sk-toolbar-label {
+  color: var(--text-disabled);
 }
 
 /* A parcel-permission icon on the status row. It is shown only while its
@@ -1542,9 +1643,9 @@
  * since a headless world resolves no stylesheet.
  *
  * So: resting rules above, state rules here, and within these highlighted,
- * then active, then disabled — a greyed row must never also read as lit. A
+ * then selected, then disabled — a greyed row must never also read as lit. A
  * pairing that needs a colour of its own is written compound beside its widget
- * (`.sk-day-marker.sk-active`, `.sk-floater-title-bar.sk-active`) and wins on
+ * (`.sk-day-marker.sk-selected`, `.sk-floater-title-bar.sk-frontmost`) and wins on
  * specificity from wherever it sits.
  *
  * `a_selected_row_beats_its_resting_rule` in the viewer's skin test is what
@@ -1553,7 +1654,7 @@
 
 /* WIDGET STATE (viewer-skin-widget-state-classes).
  *
- * Hovered, highlighted, toggled-on: the states a widget spends its most
+ * Hovered, highlighted, selected: the states a widget spends its most
  * visually loaded moments in, and the ones a skin most wants to own. They used
  * to be painted from Rust every frame, which meant a skin could not reach them
  * at all — in the reference's Vintage skin a pressed control is not a tint but
@@ -1562,10 +1663,11 @@
  *
  * Each is a class the widget's own system adds and removes, because the state
  * is ours and not the engine's: `:hover` cannot see a menu row lit by keyboard
- * navigation, nor the ancestor chain of an open sub-menu, nor "the floater this
- * button toggles is open". Where the state genuinely *is* a pointer hover the
- * rule above (`.sk-button:hover`) still does it with no code at all — prefer
- * that whenever a selector can reach the paint.
+ * navigation, nor the ancestor chain of an open sub-menu, nor which row of a
+ * recycled list is the selected one. Where the state genuinely *is* the
+ * engine's — a pointer hover, a press (`:active`), a toggle that is on
+ * (`:checked`) — the rules above do it with no class at all; prefer that
+ * whenever a selector can reach the paint.
  *
  * Paired surface/text rules again, for the same reason as the disabled pair:
  * bevy_ui has no style inheritance, so a row and its label are separate nodes.
@@ -1579,14 +1681,19 @@
   color: var(--text-primary);
 }
 
-/* Toggled on / selected: a lit toolbar button whose floater is open, the active
- * tab in a strip, the selected row of a table. Distinct from highlighted, which
- * follows the pointer or the keyboard and is gone the moment either moves. */
-.sk-active {
+/* Selected: the chosen row of a table, a gallery tile, a keyframe marker.
+ * Distinct from highlighted, which follows the pointer or the keyboard and is
+ * gone the moment either moves.
+ *
+ * It used to be `.sk-active`, which anyone who knows CSS reads as the press;
+ * the press is `:active` above, and a toggle that is on is `:checked`. */
+.sk-selected {
   background-color: var(--selection-bg);
 }
 
-.sk-active-text {
+/* Text in the skin's accent: a mark that says "this one" without being a
+ * selection — the active group's name, a sort arrow, a profile's group links. */
+.sk-accent-text {
   color: var(--accent);
 }
 
@@ -1634,8 +1741,8 @@
  * toolbar button are the same colour in both flat skins and are not the same
  * thing (the reference names `ScrollSelectedBGColor` separately), so a skin
  * that puts its lists on a light face can move one without the other. */
-.sk-table-row.sk-active,
-.sk-list-row.sk-active {
+.sk-table-row.sk-selected,
+.sk-list-row.sk-selected {
   background-color: var(--list-row-selected-bg);
 }
 
@@ -1647,13 +1754,13 @@
  * list's face. A BUTTON in the row is the exception, as it is there — it
  * brings its own chrome surface with it — and is restated below at (0,4,0)
  * because this rule would otherwise reach its caption too. */
-.sk-table-row.sk-active .sk-text,
-.sk-list-row.sk-active .sk-text {
+.sk-table-row.sk-selected .sk-text,
+.sk-list-row.sk-selected .sk-text {
   color: var(--list-row-selected-text);
 }
 
-.sk-table-row.sk-active .sk-button .sk-text,
-.sk-list-row.sk-active .sk-button .sk-text {
+.sk-table-row.sk-selected .sk-button .sk-text,
+.sk-list-row.sk-selected .sk-button .sk-text {
   color: var(--text-primary);
 }
 
@@ -1731,17 +1838,17 @@
 /* The same three states, restated for text on a DATA surface
  * (viewer-skin-light-surface-roles).
  *
- * `.sk-list-surface .sk-text` is (0,2,0) and beats a lone `.sk-active-text`
+ * `.sk-list-surface .sk-text` is (0,2,0) and beats a lone `.sk-accent-text`
  * wherever the two apply — so without these a selected group row, a lit
  * toolbar-style row or a greyed cell inside a list would lose its state the
  * moment the list gained a face of its own. Same specificity as the surface
  * rule above and later in the file, so the state wins, exactly as the block's
  * header says it must.
  *
- * `.sk-active-text` restates the accent it already had: it is the one of the
+ * `.sk-accent-text` restates the accent it already had: it is the one of the
  * three whose meaning does not change with the surface — "this one" is the
  * skin's accent whatever it is sitting on. */
-.sk-list-surface .sk-active-text {
+.sk-list-surface .sk-accent-text {
   color: var(--accent);
 }
 
@@ -1757,8 +1864,8 @@
  * selected-row text rule above would otherwise reach: its (0,3,0) beats a lone
  * `.sk-disabled-text`, and "a greyed row must never also read as lit" is this
  * block's own rule. Same specificity, later in the file. */
-.sk-table-row.sk-active .sk-disabled-text,
-.sk-list-row.sk-active .sk-disabled-text {
+.sk-table-row.sk-selected .sk-disabled-text,
+.sk-list-row.sk-selected .sk-disabled-text {
   color: var(--field-text-disabled);
 }
 

@@ -66,6 +66,7 @@
 
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
+use bevy::ui::{Checked, InteractionDisabled};
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
 
@@ -77,10 +78,7 @@ use crate::inventory::INVENTORY_FLOATER_ID;
 use crate::minimap::MINIMAP_FLOATER_ID;
 use crate::nearby_chat_bar::NearbyChatBar;
 use crate::search::SEARCH_FLOATER_ID;
-use crate::skin::{
-    ACTIVE_CLASS, ACTIVE_TEXT_CLASS, ATTENTION_CLASS, DISABLED_SURFACE_CLASS, DISABLED_TEXT_CLASS,
-    set_state_class, set_state_class_on,
-};
+use crate::skin::{ATTENTION_CLASS, TOOLBAR_BUTTON_CLASS, set_state_class};
 use crate::snapshot_floater::SNAPSHOT_FLOATER_ID;
 use crate::ui::{
     BOTTOM_BAR_Z, BottomArea, LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems,
@@ -122,13 +120,10 @@ const BUTTON_BORDER: Color = Color::srgb(0.30, 0.34, 0.42);
 /// The CSS class on the bar strip, so a skin recolours its surface.
 const BAR_CLASS: &str = "sk-toolbar-bar";
 
-/// The CSS class on every toolbar button. Carries the resting look; the lit and
-/// greyed states are the state classes in [`ToolbarButtonVisual::classes`].
-const BUTTON_CLASS: &str = "sk-toolbar-button";
-
 /// The CSS class on every toolbar button's label, the text half of
-/// [`BUTTON_CLASS`] (`bevy_ui` has no style inheritance, so the label is its
-/// own styled node).
+/// [`TOOLBAR_BUTTON_CLASS`] (`bevy_ui` has no style inheritance, so the label
+/// is its own styled node, and the button's states reach it as
+/// `.sk-toolbar-button:checked .sk-toolbar-label` and the like).
 const BUTTON_LABEL_CLASS: &str = "sk-toolbar-label";
 
 /// How a toolbar button currently reads — the three visual states its background
@@ -146,29 +141,25 @@ enum ToolbarButtonVisual {
 }
 
 impl ToolbarButtonVisual {
-    /// This state's `(surface, label)` skin classes, `None` for the resting
-    /// state — which carries no state class at all, so the base
-    /// `.sk-toolbar-button` / `.sk-toolbar-label` rules show through.
+    /// Whether the button is a toggle that is **on** — `bevy_ui::Checked`, which
+    /// `bevy_flair` syncs to `:checked`.
     ///
-    /// Classes rather than the colours this used to hold: what a lit or greyed
-    /// button looks like is the skin's business, and it could not reach either
-    /// while they were `Color` literals here
-    /// (`viewer-skin-widget-state-classes`). `const`, and the single source of
-    /// truth the spawn, the live update and the specimen all read.
-    const fn classes(self) -> (Option<&'static str>, Option<&'static str>) {
-        match self {
-            Self::Enabled => (None, None),
-            Self::Active => (Some(ACTIVE_CLASS), Some(ACTIVE_TEXT_CLASS)),
-            Self::Disabled => (Some(DISABLED_SURFACE_CLASS), Some(DISABLED_TEXT_CLASS)),
-        }
+    /// Engine state rather than a class of our own
+    /// (`viewer-skin-active-class-means-selected-not-pressed`): the lit state
+    /// used to be `.sk-active`, a name that says "held down" to anyone who knows
+    /// CSS, while the press itself went undrawn. `const`, and with
+    /// [`Self::refused`] the single source of truth the spawn, the live update
+    /// and the specimen all read.
+    const fn checked(self) -> bool {
+        matches!(self, Self::Active)
     }
 
-    /// Every state class a toolbar button's surface can carry, so a state
-    /// change can clear the others without naming them one by one.
-    const SURFACE_CLASSES: [&'static str; 2] = [ACTIVE_CLASS, DISABLED_SURFACE_CLASS];
-
-    /// Every state class a toolbar button's label can carry.
-    const LABEL_CLASSES: [&'static str; 2] = [ACTIVE_TEXT_CLASS, DISABLED_TEXT_CLASS];
+    /// Whether the button is refused — `InteractionDisabled`, `:disabled`. An
+    /// unlanded target has nothing to toggle, so the press is refused as well
+    /// as drawn greyed.
+    const fn refused(self) -> bool {
+        matches!(self, Self::Disabled)
+    }
 }
 
 /// Which floater / panel a toolbar button toggles.
@@ -332,9 +323,6 @@ static TOOLBAR_BUTTONS: &[ToolbarButtonDef] = &[
 struct ToolbarButton {
     /// What this button toggles.
     target: ToolbarTarget,
-    /// The label text node, so [`update_toolbar_button_states`] can dim it in the
-    /// disabled state.
-    label: Entity,
 }
 
 /// The bottom toolbar's runtime: spawn the bar, route its presses, and keep each
@@ -590,10 +578,9 @@ fn spawn_live_button(commands: &mut Commands, bar: Entity, index: usize, def: &T
         .entity(label)
         .insert(Translated::new(def.label_key));
 
-    commands.entity(button).insert(ToolbarButton {
-        target: def.target,
-        label,
-    });
+    commands
+        .entity(button)
+        .insert(ToolbarButton { target: def.target });
 
     if wired {
         // Focusable and keyboard-activatable, in bar order.
@@ -616,7 +603,7 @@ fn spawn_live_button(commands: &mut Commands, bar: Entity, index: usize, def: &T
 /// Build a toolbar button's box and label text node, returning `(box, label)`.
 ///
 /// The shared half of the live button and the specimen: a padded, bordered box
-/// (the skin carries its corner via [`BUTTON_CLASS`]) with a centred label as a
+/// (the skin carries its corner via [`TOOLBAR_BUTTON_CLASS`]) with a centred label as a
 /// plain child — the text carries no decoration of its own, per the
 /// text-measure caveat. `label` is passed already resolved (the specimen's swept
 /// sample); the live path leaves it empty and binds a [`Translated`] key over it.
@@ -637,22 +624,25 @@ fn build_button_box(
                 ..default()
             },
             BorderColor::all(BUTTON_BORDER),
-            // The state classes the button is born with, so it reads right on
-            // its first frame rather than on the first run of
-            // `update_toolbar_button_states`.
-            ClassList::new_with_classes(core::iter::once(BUTTON_CLASS).chain(visual.classes().0)),
+            ClassList::new_with_classes([TOOLBAR_BUTTON_CLASS]),
             Pickable::default(),
             Name::new(format!("bottom-toolbar-button:{name}")),
             ChildOf(parent),
         ))
         .id();
+    // The state the button is born with, so it reads right on its first frame
+    // rather than on the first run of `update_toolbar_button_states`.
+    if visual.checked() {
+        commands.entity(button).insert(Checked);
+    }
+    if visual.refused() {
+        commands.entity(button).insert(InteractionDisabled);
+    }
     let label = commands
         .spawn((
             Text::default(),
             UiFont::Sans.at(TOOLBAR_FONT_SIZE),
-            ClassList::new_with_classes(
-                core::iter::once(BUTTON_LABEL_CLASS).chain(visual.classes().1),
-            ),
+            ClassList::new_with_classes([BUTTON_LABEL_CLASS]),
             Name::new("bottom-toolbar-label"),
             ChildOf(button),
         ))
@@ -717,6 +707,20 @@ fn resolve_target_open(
     }
 }
 
+/// What [`update_toolbar_button_states`] walks: each button, its class list (for
+/// the attention class) and the two engine states it carries.
+type ToolbarButtonStates<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static ToolbarButton,
+        &'static mut ClassList,
+        Has<Checked>,
+        Has<InteractionDisabled>,
+    ),
+>;
+
 /// Keep each toolbar button's look current: lit while its floater is open, resting
 /// while closed, greyed while unlanded — writing through change detection only on
 /// a real change so an idle bar does not re-trigger layout.
@@ -724,9 +728,9 @@ fn update_toolbar_button_states(
     floaters: Query<(Entity, &Floater)>,
     conversation_model: Option<Res<ConversationModel>>,
     nearby_chat: Option<Res<NearbyChatBar>>,
-    mut buttons: Query<(&ToolbarButton, &mut ClassList)>,
+    mut buttons: ToolbarButtonStates,
     panels: Query<&UiPanelShown>,
-    mut labels: Query<&mut ClassList, Without<ToolbarButton>>,
+    mut commands: Commands,
 ) {
     let nearby_chat = nearby_chat.as_deref();
     // The Conversations button asks to be noticed while the window is closed and
@@ -737,18 +741,27 @@ fn update_toolbar_button_states(
     let conversations_want_attention = conversation_model
         .as_deref()
         .is_some_and(ConversationModel::has_im_attention);
-    for (button, mut classes) in &mut buttons {
+    for (entity, button, mut classes, checked, refused) in &mut buttons {
         let visual = match resolve_target_open(button.target, &floaters, nearby_chat, &panels) {
             Some(true) => ToolbarButtonVisual::Active,
             Some(false) => ToolbarButtonVisual::Enabled,
             None => ToolbarButtonVisual::Disabled,
         };
-        let (surface, label) = visual.classes();
-        for class in ToolbarButtonVisual::SURFACE_CLASSES {
-            set_state_class(&mut classes, class, surface == Some(class));
+        // Each marker only on a real change: a marker re-inserted every frame
+        // is a restyle every frame.
+        if checked != visual.checked() {
+            if visual.checked() {
+                commands.entity(entity).insert(Checked);
+            } else {
+                commands.entity(entity).remove::<Checked>();
+            }
         }
-        for class in ToolbarButtonVisual::LABEL_CLASSES {
-            set_state_class_on(&mut labels, button.label, class, label == Some(class));
+        if refused != visual.refused() {
+            if visual.refused() {
+                commands.entity(entity).insert(InteractionDisabled);
+            } else {
+                commands.entity(entity).remove::<InteractionDisabled>();
+            }
         }
         set_state_class(
             &mut classes,
@@ -840,7 +853,7 @@ mod tests {
     };
     use crate::ui::UiRoot;
     use bevy::prelude::*;
-    use pretty_assertions::{assert_eq, assert_ne};
+    use pretty_assertions::assert_eq;
 
     /// The wired toolbar buttons today are the leading nearby-chat toggle,
     /// Conversations (its semantic pair, right beside it), Inventory, the
@@ -1022,48 +1035,15 @@ mod tests {
     /// the same as a resting or a disabled one, or the "floater is open"
     /// feedback is invisible.
     ///
-    /// What each state *looks* like is now the skin's
-    /// (`viewer-skin-widget-state-classes`), so what has to hold here is that
-    /// the three select differently: a state whose classes matched another's
-    /// could not be told apart by any stylesheet, however it was written.
+    /// What each state *looks* like is the skin's, so what has to hold here is
+    /// that the three carry different engine state: a state whose markers
+    /// matched another's could not be told apart by any stylesheet, however it
+    /// was written. The resting state carries neither, so the base rules show.
     #[test]
     fn the_visual_states_differ() {
-        let enabled = ToolbarButtonVisual::Enabled.classes();
-        let active = ToolbarButtonVisual::Active.classes();
-        let disabled = ToolbarButtonVisual::Disabled.classes();
-        assert_ne!(enabled, active);
-        assert_ne!(enabled, disabled);
-        assert_ne!(active, disabled);
-    }
-
-    /// Every state class a button or label can carry appears in the matching
-    /// `*_CLASSES` sweep.
-    ///
-    /// `update_toolbar_button_states` clears the classes a state does *not*
-    /// want by iterating those arrays, so one missed by the array is a class
-    /// that is added and never removed — a button that stays lit after its
-    /// floater closes, which is exactly the failure the per-frame colour write
-    /// could not have.
-    #[test]
-    fn every_state_class_is_in_the_clearing_sweep() {
-        for visual in [
-            ToolbarButtonVisual::Enabled,
-            ToolbarButtonVisual::Active,
-            ToolbarButtonVisual::Disabled,
-        ] {
-            let (surface, label) = visual.classes();
-            if let Some(class) = surface {
-                assert!(
-                    ToolbarButtonVisual::SURFACE_CLASSES.contains(&class),
-                    "{visual:?}'s surface class {class} is never cleared"
-                );
-            }
-            if let Some(class) = label {
-                assert!(
-                    ToolbarButtonVisual::LABEL_CLASSES.contains(&class),
-                    "{visual:?}'s label class {class} is never cleared"
-                );
-            }
-        }
+        let markers = |visual: ToolbarButtonVisual| (visual.checked(), visual.refused());
+        assert_eq!(markers(ToolbarButtonVisual::Enabled), (false, false));
+        assert_eq!(markers(ToolbarButtonVisual::Active), (true, false));
+        assert_eq!(markers(ToolbarButtonVisual::Disabled), (false, true));
     }
 }

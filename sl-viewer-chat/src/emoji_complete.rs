@@ -37,7 +37,7 @@ use bevy::text::{EditableText, FontCx, LayoutCx};
 use bevy_flair::style::components::ClassList;
 use sl_emoji::{ShortcodeMatch, complete};
 
-use sl_viewer_ui_core::skin::{ACTIVE_CLASS, LIST_ROW_CLASS, set_state_class, text_role};
+use sl_viewer_ui_core::skin::{LIST_ROW_CLASS, SELECTED_CLASS, set_state_class, text_role};
 use sl_viewer_ui_core::ui::column;
 use sl_viewer_ui_core::ui_font::UiFont;
 
@@ -479,7 +479,7 @@ fn highlight_colon_rows(
             };
             let selected = completer.open && row.index == completer.selected;
             if let Ok(mut classes) = classes.get_mut(row_entity) {
-                set_state_class(&mut classes, ACTIVE_CLASS, selected);
+                set_state_class(&mut classes, SELECTED_CLASS, selected);
             }
         }
     }

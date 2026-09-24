@@ -44,7 +44,7 @@ use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{ChatChannel, ChatType};
 
 use crate::chat_input::{ChatInputHandle, ChatInputSpec, ChatInputSubmit, spawn_chat_input};
-use crate::skin::{ACTIVE_CLASS, LIST_ROW_CLASS, set_state_class, text_role};
+use crate::skin::{LIST_ROW_CLASS, SELECTED_CLASS, set_state_class, text_role};
 use crate::skin_palette::SkinPalette;
 use crate::ui::column;
 use crate::ui_font::UiFont;
@@ -540,7 +540,7 @@ fn reflect_volume_select(
         // The same pair every hand-rolled list in the viewer takes: the row's
         // resting look and the one translucent highlight, rather than this
         // dropdown's own opaque blue.
-        set_state_class(&mut classes, ACTIVE_CLASS, input.volume == option.volume);
+        set_state_class(&mut classes, SELECTED_CLASS, input.volume == option.volume);
     }
 }
 

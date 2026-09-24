@@ -83,7 +83,7 @@ use sl_viewer_pickers::ui_texture_picker::TextureSwatchValue;
 use sl_viewer_platform::environment_assets::EnvironmentAssetManager;
 use sl_viewer_ui_core::i18n::{TransArgs, Translated, Translator};
 use sl_viewer_ui_core::skin::{
-    ACTIVE_CLASS, set_action_button_enabled, set_state_class, text_role,
+    SELECTED_CLASS, set_action_button_enabled, set_button_on, set_state_class, text_role,
 };
 use sl_viewer_ui_core::ui::{
     LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row,
@@ -148,7 +148,7 @@ const MARKER_WIDTH: f32 = 9.0;
 const TICKS: usize = 5;
 
 /// The skin class on a timeline marker — the cursor and every keyframe. The
-/// selected keyframe adds `ACTIVE_CLASS`; the cursor never does.
+/// selected keyframe adds `SELECTED_CLASS`; the cursor never does.
 const MARKER_CLASS: &str = "sk-day-marker";
 
 /// How many columns a knob page lays its controls out in.
@@ -300,19 +300,22 @@ struct DayCloneSource;
 
 /// The node families [`sync_day_chrome`] walks: the track buttons, the action
 /// buttons, the timeline's tick labels, the children a label is re-translated
-/// through, and the class lists a button's state is written through.
+/// through.
 type ChromeWidgets<'w, 's> = (
     Query<'w, 's, (Entity, &'static DayTrackButton)>,
     Query<'w, 's, (Entity, &'static DayButton)>,
     Query<'w, 's, (Entity, &'static DayTick)>,
     Query<'w, 's, &'static Children>,
-    Query<'w, 's, &'static mut ClassList>,
 );
 
 /// What [`paint_button`] writes through — the shared
-/// [`DisabledButtons`](sl_viewer_ui_core::skin::DisabledButtons), named for
-/// this window's chrome.
-type ChromePaint<'w, 's> = sl_viewer_ui_core::skin::DisabledButtons<'w, 's>;
+/// [`DisabledButtons`](sl_viewer_ui_core::skin::DisabledButtons) and
+/// [`CheckedButtons`](sl_viewer_ui_core::skin::CheckedButtons), named for this
+/// window's chrome.
+type ChromePaint<'w, 's> = (
+    sl_viewer_ui_core::skin::DisabledButtons<'w, 's>,
+    sl_viewer_ui_core::skin::CheckedButtons<'w, 's>,
+);
 
 // ---------------------------------------------------------------------------
 // State.
@@ -1637,10 +1640,10 @@ fn rebuild_day_markers(
             inset.0.inline_start = offset;
         }
         // The cursor never selects, so only a keyframe marker lights; the
-        // skin decides what that looks like (`.sk-day-marker.sk-active`).
+        // skin decides what that looks like (`.sk-day-marker.sk-selected`).
         set_state_class(
             &mut classes,
-            ACTIVE_CLASS,
+            SELECTED_CLASS,
             matches!(marker.strip, StripKind::Keyframes) && selected,
         );
     }
@@ -2094,7 +2097,7 @@ fn sync_day_chrome(
         mut options,
         mut commands,
     } = out;
-    let (tracks, buttons, ticks, labels, mut classes) = widgets;
+    let (tracks, buttons, ticks, labels) = widgets;
     let day_length = environment.map_or(0, |environment| environment.settings.day_length);
     let settings_supported = support.supported();
     // A locale switch re-resolves every `Translated` label through the
@@ -2128,20 +2131,13 @@ fn sync_day_chrome(
         // The track buttons: the selected one is lit.
         for (entity, button) in &tracks {
             let selected = session.is_some_and(|session| session.track == button.0);
-            paint_button(
-                &mut commands,
-                &mut classes,
-                &paint,
-                entity,
-                session.is_some(),
-                selected,
-            );
+            paint_button(&mut commands, &paint, entity, session.is_some(), selected);
         }
 
         // The action buttons.
         for (entity, button) in &buttons {
             let enabled = action_enabled(button.0, session, settings_supported);
-            paint_button(&mut commands, &mut classes, &paint, entity, enabled, false);
+            paint_button(&mut commands, &paint, entity, enabled, false);
         }
 
         // The readout, and the ticks it shares its formatting with.
@@ -2374,25 +2370,22 @@ fn show(nodes: &mut Query<&mut Node>, entity: Option<Entity>, visible: bool) {
     }
 }
 
-/// Mark a button enabled or disabled, and lit or not — this window's colours
-/// over the shared [`set_action_button_enabled`], which owns the
-/// `InteractionDisabled` half.
+/// Mark a button enabled or disabled, and on or not — the shared
+/// [`set_action_button_enabled`] and [`set_button_on`], which own the
+/// `InteractionDisabled` and `Checked` markers the skin reads.
 fn paint_button(
     commands: &mut Commands,
-    classes: &mut Query<&mut ClassList>,
     paint: &ChromePaint,
     entity: Entity,
     enabled: bool,
     lit: bool,
 ) {
-    set_action_button_enabled(commands, paint, entity, enabled);
-    // The selected track button reads as lit. `.sk-active` is the same class
-    // the toolbar's open-floater buttons take, and `.sk-button:disabled` wins
-    // over it in the cascade, so a track button on a window with no session
-    // greys rather than staying lit.
-    if let Ok(mut list) = classes.get_mut(entity) {
-        set_state_class(&mut list, ACTIVE_CLASS, lit);
-    }
+    set_action_button_enabled(commands, &paint.0, entity, enabled);
+    // The track being edited is a toggle that is on — `:checked`, the state
+    // the toolbar's open-floater buttons carry too — and
+    // `.sk-action-button:disabled` comes after it in the cascade, so a track
+    // button on a window with no session greys rather than staying lit.
+    set_button_on(commands, &paint.1, entity, lit);
 }
 
 /// Point a button's label at a different Fluent key (the Play / Pause swap).

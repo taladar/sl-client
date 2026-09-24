@@ -45,7 +45,7 @@
 //! (`FloaterQuickPrefs::getIsPhototools`), `menu_viewer.xml`
 //! (World ▸ Photo and Video ▸ Phototools, `alt|P`).
 
-use crate::skin::{ACTION_BUTTON_CLASS, ACTIVE_CLASS, TEXT_CLASS, set_state_class, text_role};
+use crate::skin::{ACTION_BUTTON_CLASS, TEXT_CLASS, text_role};
 use crate::skin_palette::SkinPalette;
 use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use bevy::input_focus::tab_navigation::TabIndex;
@@ -845,7 +845,7 @@ fn sync_environment_controls(
     environment: Option<Res<EnvironmentState>>,
     rlv: Option<Res<RlvSession>>,
     mut groups: Query<&mut ComboSelection, With<PhotoEnvGroupCombo>>,
-    mut times: Query<(&PhotoTimeButton, &mut ClassList)>,
+    times: Query<(Entity, &PhotoTimeButton, Has<Checked>)>,
     gated: Query<(Entity, Has<InteractionDisabled>), With<PhotoEnvGated>>,
     mut commands: Commands,
 ) {
@@ -872,14 +872,21 @@ fn sync_environment_controls(
         }
     }
     let group_shown = groups.single().ok().map(|selection| selection.active);
-    for (button, mut classes) in &mut times {
+    for (entity, button, lit) in &times {
         let active = fixed.is_some_and(|fixed| time_of(fixed) == button.0)
             && fixed.map(group_index_of) == group_shown;
-        // Only the lit half is written here. The refused half is the
-        // `InteractionDisabled` the loop above already sets, which
-        // `.sk-action-button:disabled` selects on — and which beats `.sk-active`
-        // in the cascade, so a button that is both lit and refused greys.
-        set_state_class(&mut classes, ACTIVE_CLASS, active);
+        // Only the lit half is written here: the preset in force is a toggle
+        // that is on, `:checked`. The refused half is the `InteractionDisabled`
+        // the loop above already sets, which `.sk-action-button:disabled`
+        // selects on — and which comes after `:checked` in the cascade, so a
+        // button that is both lit and refused greys.
+        if lit != active {
+            if active {
+                commands.entity(entity).insert(Checked);
+            } else {
+                commands.entity(entity).remove::<Checked>();
+            }
+        }
     }
 }
 

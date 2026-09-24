@@ -45,7 +45,7 @@
 //! Vintage `panel_fs_contacts_groups`.
 
 use crate::skin::{
-    ACTION_BUTTON_CLASS, ACTIVE_CLASS, ACTIVE_TEXT_CLASS, DisabledButtons, LIST_SURFACE_CLASS,
+    ACCENT_TEXT_CLASS, ACTION_BUTTON_CLASS, DisabledButtons, LIST_SURFACE_CLASS, SELECTED_CLASS,
     TEXT_CLASS, set_action_button_enabled, set_state_class, set_state_class_on, text_role,
 };
 use crate::skin_palette::SkinPalette;
@@ -972,7 +972,7 @@ fn populate_group_rows(
                 glyph::glyph_host(
                     glyph::CURRENT_MARK,
                     UiFont::Sans.at(ROW_FONT_SIZE),
-                    [ACTIVE_TEXT_CLASS],
+                    [ACCENT_TEXT_CLASS],
                 ),
                 ChildOf(active_cell),
             ))
@@ -1037,7 +1037,7 @@ fn bind_group_rows(
         set_state_class_on(
             &mut classes,
             parts.label,
-            ACTIVE_TEXT_CLASS,
+            ACCENT_TEXT_CLASS,
             group_row.active,
         );
         // The active marker — lit for the active group; the mark is the skin's.
@@ -1046,7 +1046,7 @@ fn bind_group_rows(
         }
         let is_selected = selected.0 == Some(group_row.group);
         if let Ok(mut classes) = classes.get_mut(row_entity) {
-            set_state_class(&mut classes, ACTIVE_CLASS, is_selected);
+            set_state_class(&mut classes, SELECTED_CLASS, is_selected);
         }
     }
 }

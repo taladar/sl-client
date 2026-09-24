@@ -117,7 +117,9 @@ use bevy::window::PrimaryWindow;
 use bevy_flair::style::components::ClassList;
 
 use sl_viewer_ui_core::glyph;
-use sl_viewer_ui_core::skin::{ACTIVE_CLASS, ACTIVE_TEXT_CLASS, set_state_class_on};
+use sl_viewer_ui_core::skin::{
+    FLOATER_BUTTON_CLASS, FRONTMOST_CLASS, FRONTMOST_TEXT_CLASS, set_state_class_on,
+};
 use sl_viewer_ui_core::skin_palette::{SkinColors, SkinPalette};
 use sl_viewer_ui_core::ui::{
     BOTTOM_BAR_Z, LogicalBorder, LogicalInset, LogicalPadding, LogicalRect, UiDirection,
@@ -151,17 +153,14 @@ const CHROME_FONT_SIZE: f32 = 14.0;
 /// [`SkinPalette::surface_border`]) are the unskinned fallback.
 const FLOATER_CLASS: &str = "sk-floater";
 
-/// The skin class on the title bar. Carries the **inactive** look; the focused
-/// floater's bar adds [`ACTIVE_CLASS`], which is how a skin reaches a state it
+/// The skin class on the title bar. Carries the **inactive** look; the front-most
+/// floater's bar adds [`FRONTMOST_CLASS`], which is how a skin reaches a state it
 /// previously could not (`viewer-skin-widget-state-classes`).
 const TITLE_BAR_CLASS: &str = "sk-floater-title-bar";
 
 /// The skin class on the title text, the label half of [`TITLE_BAR_CLASS`]
 /// (`bevy_ui` has no style inheritance, so the two are separate nodes).
 const TITLE_TEXT_CLASS: &str = "sk-floater-title-text";
-
-/// The skin class on a title-bar glyph button's box (`--glyph-button-bg`).
-const CHROME_BUTTON_CLASS: &str = "sk-floater-button";
 
 /// The skin class on a title-bar glyph itself (`--text-primary`) — the
 /// reference's `FloaterButtonImageColor` = `LtGray`.
@@ -1729,7 +1728,7 @@ fn build_floater_chrome(
             Text::new(title.to_owned()),
             font.clone(),
             // Focus is a class now (`highlight_active_floater` adds and removes
-            // `ACTIVE_TEXT_CLASS`), so the skin owns both states. The old note
+            // `FRONTMOST_TEXT_CLASS`), so the skin owns both states. The old note
             // here said a class `color` would beat the Rust-painted value and
             // flatten the distinction — true while Rust was the writer, which
             // it no longer is.
@@ -1855,7 +1854,7 @@ fn chrome_button(
                 ..default()
             },
             BackgroundColor(fallback.glyph_button_bg),
-            ClassList::new_with_classes([CHROME_BUTTON_CLASS]),
+            ClassList::new_with_classes([FLOATER_BUTTON_CLASS]),
             Pickable {
                 should_block_lower: true,
                 is_hoverable: true,
@@ -2339,8 +2338,13 @@ fn highlight_active_floater(
     }
     for (entity, parts) in &floaters {
         let is_active = active.0 == Some(entity);
-        set_state_class_on(&mut classes, parts.title_bar, ACTIVE_CLASS, is_active);
-        set_state_class_on(&mut classes, parts.title_text, ACTIVE_TEXT_CLASS, is_active);
+        set_state_class_on(&mut classes, parts.title_bar, FRONTMOST_CLASS, is_active);
+        set_state_class_on(
+            &mut classes,
+            parts.title_text,
+            FRONTMOST_TEXT_CLASS,
+            is_active,
+        );
     }
 }
 
@@ -4237,7 +4241,7 @@ mod tests {
         use crate::ui_test::interact::{self, InteractionTest, centre_of};
         use crate::ui_test::{find_by_name, settle};
         use bevy_flair::style::components::ClassList;
-        use sl_viewer_ui_core::skin::ACTIVE_CLASS;
+        use sl_viewer_ui_core::skin::FRONTMOST_CLASS;
         use sl_viewer_ui_core::ui::{UiPanelShown, UiRoot, UiScaffoldSystems};
 
         /// Where the fixture floater opens, in logical pixels.
@@ -4593,13 +4597,13 @@ mod tests {
             // And the highlight follows the front, on both windows at once:
             // the active one carries the class the skin washes it with, the
             // other does not. The colour itself is the cascade's
-            // (`.sk-floater-title-bar.sk-active`) and this world has no
+            // (`.sk-floater-title-bar.sk-frontmost`) and this world has no
             // stylesheet, so the class is both what is observable here and
             // exactly what the rule selects on.
             let lit = |app: &App, bar: Entity| {
                 app.world()
                     .get::<ClassList>(bar)
-                    .is_some_and(|classes| classes.contains(ACTIVE_CLASS))
+                    .is_some_and(|classes| classes.contains(FRONTMOST_CLASS))
             };
             assert!(lit(&app, lower_bar), "the active window is not highlighted");
             assert!(

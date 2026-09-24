@@ -60,7 +60,7 @@ use sl_viewer_settings::ViewerSettings;
 use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::i18n::Translated;
 use sl_viewer_ui_core::skin::{
-    ACTIVE_CLASS, DISABLED_TEXT_CLASS, LIST_ROW_CLASS, LIST_SURFACE_CLASS, STRIPE_CLASS,
+    DISABLED_TEXT_CLASS, LIST_ROW_CLASS, LIST_SURFACE_CLASS, SELECTED_CLASS, STRIPE_CLASS,
     TABLE_ROW_CLASS, TEXT_CLASS, role_class, set_role_class, set_state_class, text_role,
 };
 use sl_viewer_ui_core::skin_palette::SkinPalette;
@@ -89,7 +89,7 @@ const RESIZER_CLASS: &str = "sk-column-resizer";
 /// `sl_viewer_ui_core::skin` beside the hand-rolled lists' [`LIST_ROW_CLASS`]
 /// because the scaffold that gives a row its hover has to know both.
 ///
-/// A selected row adds [`ACTIVE_CLASS`]; `bevy_ui::Checked` would have fitted
+/// A selected row adds [`SELECTED_CLASS`]; `bevy_ui::Checked` would have fitted
 /// the selector but not the meaning — it carries checkbox semantics into the
 /// accessibility tree, and a list row is not a checkbox.
 const ROW_CLASS: &str = TABLE_ROW_CLASS;
@@ -1751,7 +1751,7 @@ pub fn register_table_settings(settings: &mut ViewerSettings, section: &[&str], 
 /// specimen makes: a skin author choosing `--list-row-stripe` needs to see it
 /// against the ordinary row it alternates with, and against the selection that
 /// has to stay louder than both. Nothing here is painted from Rust — the rows
-/// carry `.sk-list-row`, `.sk-stripe` and `.sk-active` and the stylesheet
+/// carry `.sk-list-row`, `.sk-stripe` and `.sk-selected` and the stylesheet
 /// decides — so this is also where a skin's row family is checked.
 ///
 /// The **hover** is the one state not laid out here, because it cannot be: it
@@ -1794,7 +1794,7 @@ pub fn spawn_list_row_states_element(
                 ClassList::new_with_classes(
                     core::iter::once(LIST_ROW_CLASS)
                         .chain(striped.then_some(STRIPE_CLASS))
-                        .chain(selected.then_some(ACTIVE_CLASS)),
+                        .chain(selected.then_some(SELECTED_CLASS)),
                 ),
                 // Blocking, so the row answers the pointer and its `:hover`
                 // rule is reachable — which is the whole demonstration of the
@@ -1899,7 +1899,7 @@ fn apply_table_selection_highlight(
             continue;
         }
         let selected = row.index.is_some_and(|index| state.is_selected(index));
-        set_state_class(&mut classes, ACTIVE_CLASS, selected);
+        set_state_class(&mut classes, SELECTED_CLASS, selected);
     }
 }
 

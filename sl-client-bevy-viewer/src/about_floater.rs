@@ -31,7 +31,7 @@ use crate::floater::{
 };
 use crate::i18n::{Translated, UiLocale};
 use crate::preferences::{CONTROL_BORDER, FONT, LABEL_COLOR};
-use crate::skin::{ACTIVE_CLASS, set_state_class_on, text_role};
+use crate::skin::{SELECTED_CLASS, set_state_class_on, text_role};
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonSpec, UiLabel};
@@ -880,7 +880,7 @@ fn refresh_license_pane(
         *text = Text::new(content);
     }
     for (index, row_entity) in ui.license_rows.iter().enumerate() {
-        set_state_class_on(&mut classes, *row_entity, ACTIVE_CLASS, index == selected);
+        set_state_class_on(&mut classes, *row_entity, SELECTED_CLASS, index == selected);
     }
     state.rendered_license = Some(selected);
 }

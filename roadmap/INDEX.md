@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 300 |
 | blocked | 62 |
 | in-progress | 25 |
-| bugs | 13 |
-| done | 1231 |
+| bugs | 12 |
+| done | 1232 |
 | deferred | 30 |
 | wont-do | 16 |
 | **total** | **1795** |
@@ -1270,7 +1270,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (13)
+## bugs (12)
 
 ### protocol
 
@@ -1297,9 +1297,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Own avatar looks broken after a teleport
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
-- [`viewer-skin-active-class-means-selected-not-pressed`](bugs/viewer-skin-active-class-means-selected-not-pressed.md)
-  — .sk-active means "selected", which is not what CSS's :active means, and
-  nothing but relief draws a press
 - [`viewer-sliced-art-seam-at-fractional-ui-scale`](bugs/viewer-sliced-art-seam-at-fractional-ui-scale.md)
   — A nine-sliced button's frame changes thickness along the quad's diagonal at
   a fractional UI scale
@@ -1311,7 +1308,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1231)
+## done (1232)
 
 ### protocol
 
@@ -2964,6 +2961,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   closer"
 - [`viewer-sit-target-and-stand-button`](done/viewer-sit-target-and-stand-button.md)
   — Sit target ignored on sit, and no Stand button while seated
+- [`viewer-skin-active-class-means-selected-not-pressed`](done/viewer-skin-active-class-means-selected-not-pressed.md)
+  — .sk-active means "selected", which is not what CSS's :active means, and
+  nothing but relief draws a press
 - [`viewer-skin-bevel-border-policy`](done/viewer-skin-bevel-border-policy.md) —
   A bevel's light source has a handedness the logical-property ban denies
 - [`viewer-skin-book-token-table-behind`](done/viewer-skin-book-token-table-behind.md)
