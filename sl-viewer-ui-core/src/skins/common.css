@@ -92,14 +92,35 @@
   border-radius: var(--control-radius);
 }
 
+/* THE TEXT SHADOW (viewer-skin-text-shadow-role).
+ *
+ * `--text-shadow` is a whole `text-shadow` value — offset and colour, or
+ * `none` — and every rule that dresses CHROME text reads it: a label, a title
+ * or heading, a button's and a tab's caption, a floater's title, a status
+ * read-out, a toolbar caption, a toast. That is the reference's own split. Its
+ * classic skins give every static label a soft drop shadow (`font_shadow` in
+ * `text.xml`), and buttons, tabs and floater headers the same through their own
+ * attributes; it never shadows the text in a scroll list, a line or text
+ * editor, or a menu. So the data surfaces below take `none` back, and a menu
+ * row's label names no shadow at all.
+ *
+ * The flat skins set `none`. A shadow is drawn behind the glyphs and is no part
+ * of the text's measure, so turning one on moves nothing.
+ *
+ * Each text class states it for itself. bevy_ui has no style inheritance, so a
+ * shadow set on a container reaches no text, and the compound meaning rules
+ * (`.sk-text.sk-error` and friends) keep the one their `.sk-text` gives them. */
+
 /* An instruction / secondary line. */
 .sk-title {
   color: var(--text-muted);
+  text-shadow: var(--text-shadow);
 }
 
 /* Primary body text. */
 .sk-text {
   color: var(--text-primary);
+  text-shadow: var(--text-shadow);
 }
 
 /* A push button, with hover and keyboard-focus states.
@@ -449,6 +470,7 @@
  * buys. */
 .sk-tab-label {
   color: var(--text-primary);
+  text-shadow: var(--text-shadow);
 }
 
 /* A tab a live search left with no matching row. Dimmer than a caption that
@@ -501,6 +523,7 @@
  * green and red is exactly what needs to retune them. */
 .sk-teleport-title {
   color: var(--text-primary);
+  text-shadow: var(--text-shadow);
 }
 
 .sk-teleport-title.sk-teleport-arrived {
@@ -616,6 +639,7 @@
  * is right: that one really is on a control. */
 .sk-combo-option .sk-build-value {
   color: var(--field-text);
+  text-shadow: none;
 }
 
 .sk-combo-option:disabled .sk-build-value {
@@ -710,6 +734,7 @@
 
 .sk-floater-title-text {
   color: var(--title-text-inactive);
+  text-shadow: var(--text-shadow);
 }
 
 .sk-floater-title-text.sk-active-text {
@@ -765,6 +790,7 @@
 /* A heading inside a page — the one line that names the section. */
 .sk-heading {
   color: var(--text-heading);
+  text-shadow: var(--text-shadow);
 }
 
 /* A scrollbar, in both the tab strip and the windowed list. */
@@ -918,6 +944,9 @@
    * rule reaches all of them. The two stances that cannot be typed into are
    * the two rules below. */
   color: var(--field-text);
+  /* And never shadowed: the reference draws an editor's text with none in
+   * every skin it ships, a shadowed label's among them. */
+  text-shadow: none;
 }
 
 /* Readable, copyable, unchangeable. `ReadOnlyField` is ours and no pseudo-class
@@ -1110,12 +1139,36 @@
   color: var(--text-primary);
 }
 
+/* A list's text is not shadowed, whatever the chrome's is: the reference draws
+ * every scroll-list cell with none. It is a legibility rule as much as a
+ * fidelity one — a classic skin's list text is black on a light face, and a
+ * dark shadow under black glyphs only smudges them (the reference goes as far
+ * as dropping any shadow under text darker than 35% luminance).
+ *
+ * `.sk-list-row` as well as the surface, for the lists a panel builds itself
+ * with no list face under them — a picker's rows, a pop-up's options. And the
+ * button exception again, at (0,3,0): a button in a row brings its chrome
+ * caption with it, shadow included. */
+.sk-list-surface .sk-text,
+.sk-list-surface .sk-title,
+.sk-list-surface .sk-heading,
+.sk-list-row .sk-text,
+.sk-list-row .sk-title {
+  text-shadow: none;
+}
+
+.sk-list-surface .sk-button .sk-text,
+.sk-list-row .sk-button .sk-text {
+  text-shadow: var(--text-shadow);
+}
+
 /* One status read-out on the top row (viewer-ui-status-bar): region / parcel /
  * coordinates, balance, time, FPS. The read-outs fill the (full-width) menu
  * bar's row, so they take that same surface; this rule carries only the skin's
  * text colour. */
 .sk-status-readout {
   color: var(--text-primary);
+  text-shadow: var(--text-shadow);
 }
 
 /* The bottom toolbar strip (viewer-ui-bottom-toolbar) — the persistent row of
@@ -1142,6 +1195,7 @@
  * inheritance. `.sk-active-text` / `.sk-disabled-text` override it per state. */
 .sk-toolbar-label {
   color: var(--text-primary);
+  text-shadow: var(--text-shadow);
 }
 
 /* A parcel-permission icon on the status row. It is shown only while its
@@ -1195,6 +1249,7 @@
 /* A toast's body / label text. */
 .sk-toast-text {
   color: var(--text-primary);
+  text-shadow: var(--text-shadow);
 }
 
 /* Meaning-bearing swatches. These are the semantic tokens the culture-colour
@@ -1212,10 +1267,12 @@
  * values and placeholder text recolour with the skin's text role tokens. */
 .sk-build-label {
   color: var(--text-muted);
+  text-shadow: var(--text-shadow);
 }
 
 .sk-build-value {
   color: var(--text-primary);
+  text-shadow: var(--text-shadow);
 }
 
 .sk-build-placeholder {

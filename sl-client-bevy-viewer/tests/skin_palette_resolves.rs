@@ -1807,4 +1807,243 @@ mod test {
         );
         Ok(())
     }
+
+    /// What a piece of text should get from `--text-shadow`.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum ShadowRole {
+        /// Chrome text: a label, caption or title — the skin's shadow.
+        Chrome,
+        /// Data text: a list cell, an editor, a drop-down option — `none`,
+        /// stated, whatever the chrome's is.
+        Data,
+        /// Named by no shadow rule at all: a menu row's label.
+        Unnamed,
+    }
+
+    /// One of every kind of text the shadow rules decide about, under `root`:
+    /// its name (for the failure message), its entity and what it should get.
+    ///
+    /// Plain `Node`s wear the text classes: a `text-shadow` rule inserts the
+    /// component whatever else the entity carries, and a `Text` here would only
+    /// add requirements this headless app has no plugin for.
+    fn spawn_shadow_specimens(
+        app: &mut App,
+        root: Entity,
+    ) -> Vec<(&'static str, Entity, ShadowRole)> {
+        let mut spawn = |classes: &str, parent: Entity| {
+            app.world_mut()
+                .spawn((Node::default(), ClassList::new(classes), ChildOf(parent)))
+                .id()
+        };
+        let button = spawn("sk-button", root);
+        let tab = spawn("sk-tab", root);
+        let list = spawn("sk-list-surface", root);
+        let list_button = spawn("sk-button", list);
+        let row = spawn("sk-list-row", root);
+        let row_button = spawn("sk-button", row);
+        let combo_option = spawn("sk-combo-option", root);
+        let menu_item = spawn("sk-menu-item", root);
+        vec![
+            ("a label", spawn("sk-text", root), ShadowRole::Chrome),
+            (
+                "a secondary line",
+                spawn("sk-title", root),
+                ShadowRole::Chrome,
+            ),
+            ("a heading", spawn("sk-heading", root), ShadowRole::Chrome),
+            (
+                "an error line",
+                spawn("sk-text sk-error", root),
+                ShadowRole::Chrome,
+            ),
+            (
+                "a button's caption",
+                spawn("sk-text", button),
+                ShadowRole::Chrome,
+            ),
+            (
+                "a tab's caption",
+                spawn("sk-tab-label", tab),
+                ShadowRole::Chrome,
+            ),
+            (
+                "a floater title",
+                spawn("sk-floater-title-text", root),
+                ShadowRole::Chrome,
+            ),
+            (
+                "a status read-out",
+                spawn("sk-status-readout", root),
+                ShadowRole::Chrome,
+            ),
+            (
+                "a toolbar caption",
+                spawn("sk-toolbar-label", root),
+                ShadowRole::Chrome,
+            ),
+            (
+                "a toast's text",
+                spawn("sk-toast-text", root),
+                ShadowRole::Chrome,
+            ),
+            (
+                "a build label",
+                spawn("sk-build-label", root),
+                ShadowRole::Chrome,
+            ),
+            (
+                "a build value",
+                spawn("sk-build-value", root),
+                ShadowRole::Chrome,
+            ),
+            (
+                "a teleport title",
+                spawn("sk-teleport-title", root),
+                ShadowRole::Chrome,
+            ),
+            ("a list cell", spawn("sk-text", list), ShadowRole::Data),
+            (
+                "a list's secondary line",
+                spawn("sk-title", list),
+                ShadowRole::Data,
+            ),
+            (
+                "a heading in a list",
+                spawn("sk-heading", list),
+                ShadowRole::Data,
+            ),
+            (
+                "a button caption in a list",
+                spawn("sk-text", list_button),
+                ShadowRole::Chrome,
+            ),
+            (
+                "a hand-built row's text",
+                spawn("sk-text", row),
+                ShadowRole::Data,
+            ),
+            (
+                "a button caption in a row",
+                spawn("sk-text", row_button),
+                ShadowRole::Chrome,
+            ),
+            (
+                "a text field",
+                spawn("sk-text-field", root),
+                ShadowRole::Data,
+            ),
+            (
+                "a drop-down option",
+                spawn("sk-build-value", combo_option),
+                ShadowRole::Data,
+            ),
+            (
+                "a menu row's label",
+                spawn("sk-menu-item-label", menu_item),
+                ShadowRole::Unnamed,
+            ),
+        ]
+    }
+
+    /// **A skin that sets `--text-shadow` shadows its chrome text, and only
+    /// that** (`viewer-skin-text-shadow-role`).
+    ///
+    /// The shipped Relief theme sets one, so it is asserted against the real
+    /// sheet: every label, caption and title takes it; a list's cells, an
+    /// editor and a drop-down's options take `none` back — the reference never
+    /// shadows those, and a dark shadow under the black text of a classic
+    /// skin's light list only smudges it — while a *button* in a list or row
+    /// keeps its chrome caption's shadow; and a menu row's label, which no
+    /// shadow rule names, gets no component at all.
+    ///
+    /// Every one of these is a separate rule a stylesheet edit can quietly
+    /// drop, because `bevy_ui` has no style inheritance and a shadow reaches
+    /// only the text a selector names. Nor is a `var()` holding a whole
+    /// multi-token value something the other token tests exercise.
+    #[test]
+    fn a_skin_shadows_its_chrome_text_and_never_its_data() -> Result<(), TestError> {
+        let mut app = app();
+        // Relief dresses its buttons in `-bevy-image` art, and the loader asks
+        // for a `Handle<Image>` while parsing: an unregistered asset type is a
+        // panic inside the loader, which reads as "the stylesheet failed to
+        // load" (`image_backed_widgets.rs` has the whole story).
+        app.init_asset::<Image>();
+        let handle: Handle<StyleSheet> = app
+            .world()
+            .resource::<AssetServer>()
+            .load("skins/graphite/themes/relief.css");
+        let root = app
+            .world_mut()
+            .spawn((Node::default(), Styled::new(handle.clone())))
+            .id();
+        let specimens = spawn_shadow_specimens(&mut app, root);
+
+        load(&mut app, &handle)?;
+        app.update();
+
+        let relief = bevy::ui::widget::TextShadow {
+            offset: Vec2::new(1.0, 1.0),
+            color: Color::srgba_u8(0x00, 0x00, 0x00, 0xa6),
+        };
+        for (name, entity, role) in specimens {
+            let shadow = app
+                .world()
+                .get::<bevy::ui::widget::TextShadow>(entity)
+                .copied();
+            match role {
+                ShadowRole::Chrome => assert_eq!(
+                    shadow,
+                    Some(relief),
+                    "{name} is chrome text and must take the theme's \
+                     `--text-shadow`"
+                ),
+                ShadowRole::Data => assert!(
+                    shadow.is_some_and(|shadow| shadow.color.alpha() <= 0.0),
+                    "{name} is data and must state `text-shadow: none`, which \
+                     beats the chrome rule it also matches — got {shadow:?}"
+                ),
+                ShadowRole::Unnamed => assert_eq!(
+                    shadow, None,
+                    "{name} is named by no shadow rule and must carry no shadow"
+                ),
+            }
+        }
+        Ok(())
+    }
+
+    /// **A flat skin draws no shadow anywhere.**
+    ///
+    /// Both shipped skins set `--text-shadow: none`, so the rules above still
+    /// run and every chrome label is given a `TextShadow` — a fully transparent
+    /// one, which draws nothing (and which the `bevy_ui_render` fork skips at
+    /// extraction, so it does not cost a second copy of every glyph either).
+    /// "Draws nothing" is what is asserted: no specimen may carry a shadow with
+    /// any alpha, so a flat skin's labels are pixel-unchanged.
+    #[test]
+    fn a_flat_skin_draws_no_text_shadow() -> Result<(), TestError> {
+        for skin in ["skins/graphite/skin.css", "skins/azure/skin.css"] {
+            let mut app = app();
+            let handle: Handle<StyleSheet> = app.world().resource::<AssetServer>().load(skin);
+            let root = app
+                .world_mut()
+                .spawn((Node::default(), Styled::new(handle.clone())))
+                .id();
+            let specimens = spawn_shadow_specimens(&mut app, root);
+
+            load(&mut app, &handle)?;
+            app.update();
+
+            for (name, entity, _role) in specimens {
+                let shadow = app
+                    .world()
+                    .get::<bevy::ui::widget::TextShadow>(entity)
+                    .copied();
+                assert!(
+                    shadow.is_none_or(|shadow| shadow.color.alpha() <= 0.0),
+                    "{skin}: {name} carries a visible shadow {shadow:?} in a flat skin"
+                );
+            }
+        }
+        Ok(())
+    }
 }

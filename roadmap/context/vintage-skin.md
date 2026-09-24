@@ -238,8 +238,12 @@ to attach it to:
   node that has none. The reference's `scale.left/top/right/bottom` maps
   straight onto `sliced()`. What is missing is widgets that carry classes to
   target, art to point at, and state expressed in CSS rather than Rust.
-- **Text shadows.** `text-shadow` is parsed and maps onto bevy's `TextShadow`.
-  No skin uses it and no label carries a class that could.
+- ~~**Text shadows.**~~ Expressible since `viewer-skin-text-shadow-role`
+  (2026-09-24): `--text-shadow` is a whole `text-shadow` value that every
+  chrome text rule reads, and data text (list cells, editors, drop-down
+  options) states `none`. Bevy draws one offset copy, not the reference's
+  five-pass soft halo, so a Vintage value is matched by eye; Graphite's
+  *Relief* theme sets `1px 1px #000000a6`.
 
 Not expressible at all today:
 

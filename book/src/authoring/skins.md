@@ -136,6 +136,7 @@ Defined by every skin's `skin.css`, consumed by `common.css`:
 | `--caret` / `--selection` / `--selection-unfocused` | the text caret and its two selection washes |
 | `--focus-ring` | the keyboard-focus ring's colour |
 | `--focus-ring-width` / `--focus-ring-offset` | its geometry: how thick the ring is, and how far it stands off the widget (a classic hairline is `1px` / `0px`) |
+| `--text-shadow` | the drop shadow under **chrome** text — a label, a button's or a tab's caption, a floater title, a status read-out — as a whole `text-shadow` value (`1px 1px #000000a6`, or `none`); data text never takes it (see below) |
 | `--accent` | accent bars, an active tab's frame, a chosen skin-tone swatch, a drag grip |
 | `--accent-muted` | the accent dimmed to say "set, but not by you": a Friends-list right the friend grants you |
 | `--selection-bg` | a lit control's (translucent) background: a toggled toolbar button, an active tab |
@@ -191,6 +192,15 @@ own chrome with it, so its caption goes back to `--text-primary`, and a
 *selected* row's text takes `--list-row-selected-text`. The state classes
 (`.sk-active-text`, `.sk-highlighted-text`, `.sk-disabled-text`) are restated
 for a data surface, so a list's face never swallows a state.
+
+The text shadow follows the same line. `--text-shadow` reaches only chrome
+text: inside `.sk-list-surface` or an `.sk-list-row`, and in a text field or a
+drop-down option, the rules state `text-shadow: none`, because the reference
+shadows its labels and captions and never a list cell, an editor or a menu —
+and a dark shadow under a light list's black text only smudges it. A button in
+a row keeps its caption's shadow, as it keeps its colour. The shipped skins set
+`none`; the Graphite *Relief* theme sets one. A shadow is drawn behind the
+glyphs and is no part of the text's measure, so turning it on moves nothing.
 
 A refused checkbox, radio, field or combo does not have tokens of its own: it
 greys to `--control-bg-disabled` / `--control-border-disabled`, and its caption

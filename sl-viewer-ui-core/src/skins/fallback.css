@@ -130,6 +130,11 @@
   --focus-ring-width: 2px;
   --focus-ring-offset: 1px;
 
+  /* The drop shadow under chrome text — labels, captions, titles. A whole
+   * `text-shadow` value, so a classic skin writes an offset and a colour; an
+   * unskinned world draws none, as it always has. */
+  --text-shadow: none;
+
   /* A friend's presence. Meaning-bearing for the same reason as the kinds
    * above, and the values the Friends list carried before they were roles. */
   --presence-online: #66cc6b;

@@ -105,6 +105,12 @@
   --focus-ring-width: 2px;
   --focus-ring-offset: 1px;
 
+  /* The chrome text's drop shadow (viewer-skin-text-shadow-role): a whole
+   * `text-shadow` value, read by every label, caption and title rule in
+   * common.css. None here — this skin is flat, and the reference's modern skin
+   * shadows no static label either. */
+  --text-shadow: none;
+
   /* Accent */
   --accent: #5cb8fa;
   /* The accent, dimmed — informational rather than interactive. */

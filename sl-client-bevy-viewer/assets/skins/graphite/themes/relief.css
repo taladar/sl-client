@@ -28,6 +28,25 @@
 @import "skins/graphite/skin.css" layer(skin);
 
 /*
+ * THE CLASSIC LABEL (viewer-skin-text-shadow-role).
+ *
+ * A raised bevel under a flat caption reads as two eras at once; the classic
+ * skins this theme borrows its shape from put a drop shadow under every label,
+ * button caption, tab caption and floater title, and so does this. A token, not
+ * a rule: common.css already decides which text is chrome (shadowed) and which
+ * is data (never), so a theme only says what the shadow looks like.
+ *
+ * One pixel down and to the right, in black at about two-thirds. The reference
+ * draws its "soft" shadow as five offset copies at 30% each — a halo weighted
+ * downwards — which one `TextShadow` cannot; a single offset copy a little
+ * stronger than one of those passes, and a little weaker than their sum, is the
+ * nearest by eye.
+ */
+:root {
+  --text-shadow: 1px 1px #000000a6;
+}
+
+/*
  * THE SURFACE, AND WHAT IT REPLACES.
  *
  * A skin that supplies art wants the flat paint out of the way: an `ImageNode`

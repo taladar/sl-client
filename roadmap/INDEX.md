@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 118 |
-| ready | 305 |
+| ready | 304 |
 | blocked | 63 |
 | in-progress | 28 |
-| bugs | 8 |
-| done | 1220 |
+| bugs | 9 |
+| done | 1221 |
 | deferred | 30 |
 | wont-do | 16 |
-| **total** | **1788** |
+| **total** | **1789** |
 
 ## ideas (118)
 
@@ -293,7 +293,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (305)
+## ready (304)
 
 ### protocol
 
@@ -878,8 +878,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   able to carry an icon set, not just colours
 - [`viewer-skin-scrollbar-shape`](ready/viewer-skin-scrollbar-shape.md) — The
   scrollbar is a bar — the reference's has ends, a track and a shape
-- [`viewer-skin-text-shadow-role`](ready/viewer-skin-text-shadow-role.md) — A
-  text-shadow role — the trait that makes classic UI text look classic
 - [`viewer-skin-tooltip-roles`](ready/viewer-skin-tooltip-roles.md) — The
   tooltip is a skinned surface everywhere but here
 - [`viewer-snapshot-composition-guides`](ready/viewer-snapshot-composition-guides.md)
@@ -1287,7 +1285,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (8)
+## bugs (9)
 
 ### protocol
 
@@ -1306,6 +1304,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Own avatar looks broken after a teleport
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
+- [`viewer-sliced-art-seam-at-fractional-ui-scale`](bugs/viewer-sliced-art-seam-at-fractional-ui-scale.md)
+  — A nine-sliced button's frame changes thickness along the quad's diagonal at
+  a fractional UI scale
 - [`viewer-sliders-show-no-value`](bugs/viewer-sliders-show-no-value.md) — A
   slider shows no value, and no bounds or step either
 
@@ -1314,7 +1315,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1220)
+## done (1221)
 
 ### protocol
 
@@ -2981,6 +2982,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-skin-search-box-focused-fill`](done/viewer-skin-search-box-focused-fill.md)
   — A search box cannot show the focused-field fill, because focus is on its
   child
+- [`viewer-skin-text-shadow-role`](done/viewer-skin-text-shadow-role.md) — A
+  text-shadow role — the trait that makes classic UI text look classic
 - [`viewer-skin-widget-state-classes`](done/viewer-skin-widget-state-classes.md)
   — Widget state belongs in the cascade, not in a per-frame Rust paint
 - [`viewer-skinned-bind-group-quits-on-rez`](done/viewer-skinned-bind-group-quits-on-rez.md)
