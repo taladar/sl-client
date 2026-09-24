@@ -56,7 +56,8 @@ use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::input_focus::tab_navigation::{TabIndex, TabNavigationPlugin};
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
-use bevy::ui_widgets::{Activate, Button};
+use bevy::text::EditableText;
+use bevy::ui_widgets::{Activate, Button, ControlOrientation, Scrollbar, ScrollbarThumb};
 use bevy::window::PresentMode;
 use bevy_flair::style::components::ClassList;
 use tracing::info;
@@ -182,6 +183,19 @@ struct GalleryPage;
 /// Logical pixels scrolled per wheel notch reported in [`MouseScrollUnit::Line`],
 /// matching [`sl_viewer_ui_core::virtual_list`] so the two surfaces scroll at one speed.
 const LINE_SCROLL_PIXELS: f32 = 48.0;
+
+/// The gallery's scrollbar thickness and shortest thumb, in logical pixels —
+/// the widget set's own values, so the page's bar matches the ones inside the
+/// elements it is showing.
+const SCROLLBAR_THICKNESS: f32 = sl_viewer_ui_core::virtual_list::SCROLLBAR_THICKNESS;
+
+/// How short the thumb may get on a very long page, so it stays grabbable.
+const SCROLLBAR_MIN_THUMB: f32 = 24.0;
+
+/// How much of the current view a `PageUp` / `PageDown` keeps, in logical
+/// pixels — one wheel notch's worth, so the eye has an anchor across the jump
+/// rather than landing in unrelated content.
+const PAGE_KEY_OVERLAP: f32 = LINE_SCROLL_PIXELS;
 
 /// A marker on the node holding the element cards, so a cell change can clear
 /// and respawn them without touching the chrome.
@@ -384,6 +398,7 @@ pub fn run(assets: AssetPlugin, registry: GalleryRegistry) -> AppExit {
                 update_skin_switcher_label,
                 update_pointer_menu_label,
                 scroll_gallery,
+                scroll_gallery_by_keys,
                 log_actions,
                 quit_on_escape,
             ),
@@ -405,7 +420,14 @@ pub fn run(assets: AssetPlugin, registry: GalleryRegistry) -> AppExit {
         // into-view, and the tab order is re-numbered from on-screen position.
         .add_systems(
             PostUpdate,
-            (order_gallery_tab_stops, scroll_focus_into_view).after(bevy::ui::UiSystems::Layout),
+            (
+                order_gallery_tab_stops,
+                scroll_focus_into_view,
+                // Reads the same computed boxes to keep the stored offset from
+                // banking slack past the end of the page.
+                clamp_gallery_scroll,
+            )
+                .after(bevy::ui::UiSystems::Layout),
         )
         .run()
 }
@@ -476,6 +498,77 @@ fn scroll_gallery(
     }
 }
 
+/// How far this page can scroll, in logical pixels.
+///
+/// `bevy_ui` computes the same quantity at layout (`max_possible_offset`) but
+/// clamps it into [`ComputedNode::scroll_position`] **only** — the
+/// `ScrollPosition` component the app writes is left exactly as it was found.
+/// So a surface that scrolls itself has to know its own end, or the stored
+/// offset walks off past the content and every press that should come back up
+/// is spent undoing a number nothing on screen reflects.
+fn max_page_scroll(computed: &ComputedNode) -> f32 {
+    let physical = (computed.content_size.y - computed.size.y + computed.scrollbar_size.y).max(0.0);
+    physical * computed.inverse_scale_factor()
+}
+
+/// Move the gallery page with `Home` / `End` / `PageUp` / `PageDown`.
+///
+/// A gallery is a long list read by someone looking for one card, and a wheel
+/// is the slowest way to cross it. The page keys jump by a viewport less
+/// [`PAGE_KEY_OVERLAP`], and `Home` / `End` go to the ends.
+///
+/// **A focused editor owns these keys.** Every one of them is a text motion,
+/// and the gallery is full of live text fields — a `Home` meant for a caret
+/// must not also throw the page to the top. That is why this checks
+/// [`InputFocus`] where [`drive_gallery_keys`] does not: `D` / `L` / `S` are
+/// the gallery's own letters, and typing one into a field is a nuisance; these
+/// four are keys the field legitimately wants.
+fn scroll_gallery_by_keys(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    focus: Res<bevy::input_focus::InputFocus>,
+    editors: Query<(), With<EditableText>>,
+    mut pages: Query<(&mut ScrollPosition, &ComputedNode), With<GalleryPage>>,
+) {
+    if focus.get().is_some_and(|entity| editors.contains(entity)) {
+        return;
+    }
+    for (mut position, computed) in &mut pages {
+        let viewport = computed.size.y * computed.inverse_scale_factor();
+        let page = (viewport - PAGE_KEY_OVERLAP).max(viewport * 0.5);
+        let end = max_page_scroll(computed);
+        let wanted = if keyboard.just_pressed(KeyCode::Home) {
+            0.0
+        } else if keyboard.just_pressed(KeyCode::End) {
+            end
+        } else if keyboard.just_pressed(KeyCode::PageDown) {
+            position.0.y + page
+        } else if keyboard.just_pressed(KeyCode::PageUp) {
+            position.0.y - page
+        } else {
+            continue;
+        };
+        position.0.y = wanted.clamp(0.0, end);
+    }
+}
+
+/// Pull the page's stored offset back to where the layout could actually take
+/// it.
+///
+/// The wheel floors at zero and lets `bevy_ui` deal with the far end — which it
+/// does for what it *draws*, and not for the `ScrollPosition` it was handed
+/// (see [`max_page_scroll`]). So scrolling hard at the bottom of the page used
+/// to bank an offset far past the content, and the next several notches upward
+/// did nothing at all while the stored number came back down through the slack.
+/// Running after layout, this keeps the number and the picture the same thing.
+fn clamp_gallery_scroll(mut pages: Query<(&mut ScrollPosition, &ComputedNode), With<GalleryPage>>) {
+    for (mut position, computed) in &mut pages {
+        let end = max_page_scroll(computed);
+        if position.0.y > end {
+            position.0.y = end;
+        }
+    }
+}
+
 /// Spawn the chrome and the element list under the scaffold's root.
 fn setup_gallery(
     mut commands: Commands,
@@ -522,20 +615,40 @@ fn setup_gallery(
         ))
         .id();
     spawn_skin_switcher(&mut commands, header);
+    // The page and its scrollbar share a row: the bar sits *beside* the content
+    // and holds its own width open, rather than floating over the cards' right
+    // edge where it would cover whatever a card put there.
+    let body = commands
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                flex_grow: 1.0,
+                // Same reason as the page's own: let the flex child shrink below
+                // its content so the page inside it clips and scrolls.
+                min_height: Val::Px(0.0),
+                ..row(Val::ZERO)
+            },
+            Name::new("gallery-body"),
+            ChildOf(root.0),
+        ))
+        .id();
     let page = commands
         .spawn((
             Node {
-                // Takes the height the header leaves (`flex_grow` in the root's
-                // column) and scrolls its content: the element list runs past the
+                // Takes the width the scrollbar leaves and the height the header
+                // leaves, and scrolls its content: the element list runs past the
                 // window at the larger font sizes, and a gallery that cannot reach
                 // its own last element is not one. `min_height: 0` is what lets a
                 // flex child shrink below its content so the overflow actually
-                // clips and scrolls rather than growing off-screen. Both axes, so a
-                // wide element or translation stays reachable too. Driven by
-                // [`scroll_gallery`].
-                width: Val::Percent(100.0),
+                // clips and scrolls rather than growing off-screen; `min_width: 0`
+                // is the same thing on the inline axis, without which a wide card
+                // would push the scrollbar off the window instead of clipping.
+                // Both overflow axes, so a wide element or translation stays
+                // reachable too. Driven by [`scroll_gallery`],
+                // [`scroll_gallery_by_keys`] and the bar beside it.
                 flex_grow: 1.0,
                 min_height: Val::Px(0.0),
+                min_width: Val::Px(0.0),
                 padding: UiRect::all(Val::Px(16.0)),
                 overflow: Overflow::scroll(),
                 ..column(Val::Px(12.0))
@@ -545,9 +658,10 @@ fn setup_gallery(
             // and [`scroll_gallery`] (to move it) need present from the start.
             ScrollPosition::default(),
             GalleryPage,
-            ChildOf(root.0),
+            ChildOf(body),
         ))
         .id();
+    spawn_gallery_scrollbar(&mut commands, body, page);
     let elements = commands
         .spawn((
             Node {
@@ -982,6 +1096,39 @@ fn spawn_resizable_tabs_card(commands: &mut Commands, parent: Entity, cell: Gall
     crate::ui_tab::spawn_tabs_resizable_demo(commands, card, cell.cx());
 }
 
+/// Spawn the page's scrollbar — a `bevy_ui_widgets` [`Scrollbar`] pointed at
+/// the page, so the thumb sizes and drags itself against the page's own scroll
+/// range.
+///
+/// The same widget, thickness and skin classes the tab strip and the windowed
+/// list use, because a person looking at the gallery is looking at those: a
+/// chrome bar of its own invention would be one more thing on screen that is
+/// not what the viewer does.
+fn spawn_gallery_scrollbar(commands: &mut Commands, parent: Entity, page: Entity) {
+    commands
+        .spawn((
+            Scrollbar {
+                target: page,
+                orientation: ControlOrientation::Vertical,
+                min_thumb_length: SCROLLBAR_MIN_THUMB,
+            },
+            Node {
+                width: Val::Px(SCROLLBAR_THICKNESS),
+                flex_shrink: 0.0,
+                ..default()
+            },
+            BackgroundColor(SkinPalette::default().track_bg),
+            ClassList::new_with_classes([sl_viewer_ui_core::skin::SCROLLBAR_TRACK_CLASS]),
+            Name::new("gallery-scrollbar"),
+            ChildOf(parent),
+        ))
+        .with_child((
+            ScrollbarThumb::default(),
+            BackgroundColor(SkinPalette::default().scrollbar_thumb),
+            ClassList::new_with_classes([sl_viewer_ui_core::skin::SCROLLBAR_THUMB_CLASS]),
+        ));
+}
+
 /// Read the gallery's keys into [`GalleryCell`] / [`UiDirection`].
 fn drive_gallery_keys(
     keyboard: Res<ButtonInput<KeyCode>>,
@@ -1048,7 +1195,8 @@ fn update_gallery_header(
     }
     let wanted = format!(
         "UI gallery — {} elements, {} floaters | strings: {} (L) | size: {} px (S) | \
-         direction: {} (D) | Tab walks, Enter activates (inert), Escape quits",
+         direction: {} (D) | Home/End/PgUp/PgDn scroll | Tab walks, Enter activates \
+         (inert), Escape quits",
         registry.elements.len(),
         registry.floaters.len(),
         cell.text.name(),

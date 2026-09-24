@@ -14,9 +14,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ideas | 118 |
 | ready | 308 |
 | blocked | 63 |
-| in-progress | 29 |
+| in-progress | 28 |
 | bugs | 9 |
-| done | 1214 |
+| done | 1215 |
 | deferred | 30 |
 | wont-do | 16 |
 | **total** | **1787** |
@@ -1221,7 +1221,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Batch world changes into per-tick update bursts (blocked by
   `server-world-heartbeat`, `server-world-ecs-store`)
 
-## in-progress (29)
+## in-progress (28)
 
 ### viewer
 
@@ -1238,8 +1238,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-environment-personal-lighting`](in-progress/viewer-environment-personal-lighting.md)
   — Personal lighting — local environment override (blocked by
   `viewer-ui-widget-scaffold` (done))
-- [`viewer-gallery-scrollbar-and-page-keys`](in-progress/viewer-gallery-scrollbar-and-page-keys.md)
-  — The gallery can only be crossed by mouse wheel
 - [`viewer-keyed-floater-audit`](in-progress/viewer-keyed-floater-audit.md) —
   Audit the other per-subject singletons onto the keyed-floater scaffold
 - [`viewer-media-prim-browser`](in-progress/viewer-media-prim-browser.md) —
@@ -1325,7 +1323,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1214)
+## done (1215)
 
 ### protocol
 
@@ -2030,6 +2028,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — "Stop flycam" button overlaps the "Chat" button in the bottom bar
 - [`viewer-fps-label-intermittent`](done/viewer-fps-label-intermittent.md) — FPS
   status readout intermittently drops its "fps" label
+- [`viewer-gallery-scrollbar-and-page-keys`](done/viewer-gallery-scrollbar-and-page-keys.md)
+  — The gallery can only be crossed by mouse wheel
 - [`viewer-glow-bloom`](done/viewer-glow-bloom.md) — Full-screen glow / bloom
 - [`viewer-gpu-avatars-1b-slow-shutdown-high-rss`](done/viewer-gpu-avatars-1b-slow-shutdown-high-rss.md)
   — GPU-avatar (1b) session — 10.6 GB RSS + ~2 min 263%-CPU shutdown spin
