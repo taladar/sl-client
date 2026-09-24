@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 118 |
-| ready | 308 |
+| ready | 307 |
 | blocked | 63 |
 | in-progress | 28 |
 | bugs | 8 |
-| done | 1216 |
+| done | 1217 |
 | deferred | 30 |
 | wont-do | 16 |
 | **total** | **1787** |
@@ -293,7 +293,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (308)
+## ready (307)
 
 ### protocol
 
@@ -882,9 +882,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   able to carry an icon set, not just colours
 - [`viewer-skin-scrollbar-shape`](ready/viewer-skin-scrollbar-shape.md) — The
   scrollbar is a bar — the reference's has ends, a track and a shape
-- [`viewer-skin-search-box-focused-fill`](ready/viewer-skin-search-box-focused-fill.md)
-  — A search box cannot show the focused-field fill, because focus is on its
-  child
 - [`viewer-skin-text-shadow-role`](ready/viewer-skin-text-shadow-role.md) — A
   text-shadow role — the trait that makes classic UI text look classic
 - [`viewer-skin-tooltip-roles`](ready/viewer-skin-tooltip-roles.md) — The
@@ -1321,7 +1318,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1216)
+## done (1217)
 
 ### protocol
 
@@ -2979,6 +2976,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   by `viewer-skin-widget-state-classes` (done))
 - [`viewer-skin-list-row-striping`](done/viewer-skin-list-row-striping.md) —
   Scroll-list rows — striping, hover and a selection the skin owns
+- [`viewer-skin-search-box-focused-fill`](done/viewer-skin-search-box-focused-fill.md)
+  — A search box cannot show the focused-field fill, because focus is on its
+  child
 - [`viewer-skin-widget-state-classes`](done/viewer-skin-widget-state-classes.md)
   — Widget state belongs in the cascade, not in a per-frame Rust paint
 - [`viewer-skinned-bind-group-quits-on-rez`](done/viewer-skinned-bind-group-quits-on-rez.md)

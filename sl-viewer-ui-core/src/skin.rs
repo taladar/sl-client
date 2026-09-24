@@ -670,6 +670,22 @@ pub const READ_ONLY_CLASS: &str = "sk-read-only";
 /// the moment anything is typed.
 pub const FIELD_PLACEHOLDER_CLASS: &str = "sk-field-placeholder";
 
+/// The CSS class on a **container whose descendant has keyboard focus** — CSS's
+/// `:focus-within`, which `bevy_flair` does not have.
+///
+/// The engine parses six non-tree-structural pseudo-classes and this is not
+/// among them; `:has()` parses but would not *invalidate*, since a descendant's
+/// focus moving marks only that descendant's style data (`sync_input_focus`),
+/// leaving an ancestor rule right in a unit test and intermittent on screen. So
+/// the widget that knows which editor is inside it mirrors the state onto its
+/// own box, the way every state the engine cannot see is mirrored.
+///
+/// Its one wearer today is the search box (`ui_search.rs`), which is a
+/// container around a *bare* field: `.sk-field:focus` reaches a decorated field
+/// because the class and the editor are one entity, and the search box is
+/// exactly the case where they are not.
+pub const FOCUS_WITHIN_CLASS: &str = "sk-focus-within";
+
 /// The CSS class on a row the pointer or the keyboard has lit
 /// (`--control-bg-hover`), and [`HIGHLIGHTED_TEXT_CLASS`] for its label.
 ///

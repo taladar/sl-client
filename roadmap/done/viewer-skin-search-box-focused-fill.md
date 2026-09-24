@@ -2,7 +2,7 @@
 id: viewer-skin-search-box-focused-fill
 title: A search box cannot show the focused-field fill, because focus is on its child
 topic: viewer
-status: ready
+status: done
 origin: viewer-skin-light-surface-roles (2026-09-23)
 points: 3
 refs: [viewer-skin-light-surface-roles, viewer-ui-search-field, viewer-vintage-skin]
@@ -67,3 +67,40 @@ just the caret; the flat skins are unchanged because they give `--field-bg` and
 `--field-bg-focused` one value; and a test asserts the class arrives and leaves
 with focus, plus one in `skin_palette_resolves` that the compound rule resolves
 to the light value under the `light-field.css` fixture.
+
+## Done (2026-09-24)
+
+`sk-focus-within` — named for CSS's pseudo-class, because that is exactly what
+it stands in for — lives in `skin.rs` with the rest of the state vocabulary, and
+`ui_search.rs`'s `reflect_search_box_focus` puts it on the box while the field
+inside it holds focus. The box had to be told which field that is
+(`SearchFieldBox`, inserted once the field exists), and the write goes through
+`set_state_class`, so a settled box never wakes the style engine. One system,
+one class, fifteen consumers: every search box in the viewer is the widget.
+
+**The ring moved with the fill, and that is the half that needed a test.** Two
+rules already ring every focused editor — `.sk-text-field:focus` on any focus
+and the scaffold's `.sk-focusable:focus-visible` on Tab — and a search box's
+field is *bare* and fills only the middle, between the glyph and the clear
+button. Left alone, the box lights and a second ring is drawn inside it around
+part of it. `.sk-search-field .sk-text-field:focus` and its `:focus-visible`
+sibling take it off at (0,3,0) against their (0,2,0), which puts the ring where
+the reference draws it — on the box's own border
+(`mBorder->setKeyboardFocusHighlight`) — and is the sort of claim no reading of
+the CSS text can settle, so
+`a_focused_search_box_rings_the_box_and_not_the_editor` asserts it through the
+engine with both of those rules live and `InputFocusVisible` true.
+
+The resting `.sk-search-field` rule gained an `outline-width: 0px` baseline for
+the reason `.sk-focusable`'s has one: `bevy_flair` has no value to revert a
+property to, so a ring written only by the focused rule would be given once and
+never taken away.
+
+### Not done
+
+- `:focus-within` itself. The class is the stand-in; if `bevy_flair` ever grows
+  the pseudo-class (and the invalidation to go with it), these two rules and one
+  system collapse into a selector.
+- No other container wears the class today. It is named generically because the
+  state is, not because a second wearer is planned — a combo box's editor and a
+  spinner's would be the candidates.

@@ -1257,6 +1257,118 @@ mod test {
         Ok(())
     }
 
+    /// **The search box you are typing in brightens, and is ringed once.**
+    ///
+    /// The other half of `viewer-skin-search-box-focused-fill`: the widget puts
+    /// `.sk-focus-within` on the box (its own test), and this is what the class
+    /// then buys — `--field-bg-focused` on the container, which is the only way
+    /// a search box can show the focused face at all, since the editor that
+    /// takes focus is a different entity from the box that paints.
+    ///
+    /// The ring is the part that cannot be read off the CSS text. Two rules
+    /// already ring every focused editor — `.sk-text-field:focus` on any focus
+    /// and the scaffold's `.sk-focusable:focus-visible` on Tab — and a bare
+    /// field fills only the middle of the box, so left alone a focused search
+    /// box draws a second ring inside the first, around part of it. The
+    /// suppression is a descendant rule at (0,3,0) against their (0,2,0), and
+    /// specificity is exactly the kind of claim a static check cannot make: it
+    /// is asserted here, through the engine, with **both** of those rules live.
+    #[test]
+    fn a_focused_search_box_rings_the_box_and_not_the_editor() -> Result<(), TestError> {
+        use bevy::input_focus::{InputFocus, InputFocusVisible};
+
+        let mut app = app_with_assets(&test_assets_dir());
+        let handle: Handle<StyleSheet> = app
+            .world()
+            .resource::<AssetServer>()
+            .load("light-field.css");
+        let root = app
+            .world_mut()
+            .spawn((Node::default(), Styled::new(handle.clone())))
+            .id();
+        // Two boxes, each holding a bare editor with the classes the scaffold
+        // stamps on every one (`stamp_text_field_class` / `stamp_focus_ring_class`).
+        let resting = app
+            .world_mut()
+            .spawn((
+                Node::default(),
+                ClassList::new("sk-search-field"),
+                ChildOf(root),
+            ))
+            .id();
+        app.world_mut().spawn((
+            Text::new("typed"),
+            ClassList::new("sk-text-field sk-focusable"),
+            ChildOf(resting),
+        ));
+        let lit = app
+            .world_mut()
+            .spawn((
+                Node::default(),
+                ClassList::new("sk-search-field sk-focus-within"),
+                ChildOf(root),
+            ))
+            .id();
+        let editor = app
+            .world_mut()
+            .spawn((
+                Text::new("typed"),
+                ClassList::new("sk-text-field sk-focusable"),
+                ChildOf(lit),
+            ))
+            .id();
+        // Focus, and *visibly* so: the suppression has to beat the any-focus
+        // rule and the Tab-only one at once.
+        app.world_mut()
+            .insert_resource(InputFocus::from_entity(editor));
+        app.world_mut().insert_resource(InputFocusVisible(true));
+
+        load(&mut app, &handle)?;
+        app.update();
+
+        let fill = |entity| {
+            app.world()
+                .get::<BackgroundColor>(entity)
+                .map(|background| background.0)
+        };
+        let ring = |entity| {
+            app.world()
+                .get::<Outline>(entity)
+                .map(|outline| outline.width)
+        };
+
+        assert_eq!(
+            fill(resting),
+            Some(Color::srgb_u8(0xba, 0xc3, 0xbe)),
+            "a box nobody is typing in must keep `--field-bg`"
+        );
+        assert_eq!(
+            fill(lit),
+            Some(Color::srgb_u8(0xc8, 0xcf, 0xcc)),
+            "`.sk-focus-within` must bring `--field-bg-focused` to the BOX — \
+             `.sk-field:focus` cannot, because the box is not what has focus"
+        );
+        assert_eq!(
+            ring(lit),
+            Some(Val::Px(2.0)),
+            "the focus ring belongs on the box, the way the reference lights \
+             the search editor's own border"
+        );
+        assert_eq!(
+            ring(editor),
+            Some(Val::Px(0.0)),
+            "and must be taken off the editor inside it, or a focused search \
+             box is ringed twice — once around part of itself"
+        );
+        assert_eq!(
+            ring(resting),
+            Some(Val::Px(0.0)),
+            "a resting box needs a baseline of its own, or the ring it is given \
+             once is never taken away"
+        );
+        Ok(())
+    }
+
     /// **A combo's drop-down has a surface of its own, and an opaque one.**
     ///
     /// It is a *list*, so it takes the field family's text — and it **floats**,

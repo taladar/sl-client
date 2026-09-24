@@ -957,6 +957,45 @@
   background-color: var(--field-bg);
   border-color: var(--control-border);
   border-radius: var(--control-radius);
+  /* The resting ring, for the reason `.sk-focusable`'s is: the focused rule
+   * below is the only thing that widens it, and bevy_flair has no value to
+   * revert a property to when a rule stops matching — so without a baseline the
+   * box would ring once and keep the ring for ever. */
+  outline-width: 0px;
+  outline-color: var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* THE BOX IS WHAT LIGHTS, not the editor inside it.
+ *
+ * A search box is a container around a BARE field, so `.sk-field:focus` — which
+ * works for a decorated field because the class and the editor are one entity —
+ * has nothing to match here, and neither `:focus-within` nor a reliable
+ * `:has()` exists to reach up from the child (see FOCUS_WITHIN_CLASS in
+ * src/skin.rs). `ui_search.rs` `reflect_search_box_focus` mirrors "my field has
+ * focus" onto the box as this class, and these two declarations are what it is
+ * for: the brighter face of the field you are typing in, and the focus ring the
+ * reference draws on the box's own border (`mBorder->setKeyboardFocusHighlight`)
+ * rather than inside it. */
+.sk-search-field.sk-focus-within {
+  background-color: var(--field-bg-focused);
+  outline-color: var(--focus-ring);
+  outline-width: 2px;
+  outline-offset: 1px;
+}
+
+/* ...so the editor inside it does NOT ring. Both rules above the search box
+ * ring every focused editor — `.sk-text-field:focus` on any focus, and the
+ * scaffold's `.sk-focusable:focus-visible` on Tab — and a bare field fills only
+ * the middle of the box, between the glyph and the clear button. Left alone,
+ * focusing a search box draws a second ring INSIDE the first, around part of
+ * it. These are (0,3,0) against those rules' (0,2,0), so they win wherever the
+ * two overlap regardless of file order;
+ * `a_focused_search_box_rings_the_box_and_not_the_editor` pins that, because
+ * specificity is not something the CSS text shows. */
+.sk-search-field .sk-text-field:focus,
+.sk-search-field .sk-focusable:focus-visible {
+  outline-width: 0px;
 }
 
 /* A decorated text field's box — the same well as the search box, which is one

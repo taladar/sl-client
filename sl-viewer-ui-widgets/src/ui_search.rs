@@ -33,6 +33,14 @@
 //! round it that are its own: the clear (`×`) button goes inert and grey, and
 //! `Escape` no longer empties the field.
 //!
+//! **The box shows the field's focus**, since the field inside it is bare: a
+//! decorated field wears `.sk-field` on the same entity as its editor and so
+//! takes `:focus` for free, while here the two are different nodes and no
+//! selector reaches up from the focused one. `reflect_search_box_focus` mirrors
+//! it onto the container as [`FOCUS_WITHIN_CLASS`], and the
+//! skin does the rest — the brighter face and the ring, which `common.css` then
+//! takes *off* the editor so the box is ringed once rather than twice.
+//!
 //! Direction-neutral by construction: the box is a `ui::row`, so the
 //! leading glyph and the trailing clear button swap ends under RTL with no code
 //! here saying so (convention 1).
@@ -46,7 +54,7 @@ use bevy::text::EditableText;
 use bevy_flair::style::components::ClassList;
 
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
-use sl_viewer_ui_core::skin::FIELD_PLACEHOLDER_CLASS;
+use sl_viewer_ui_core::skin::{FIELD_PLACEHOLDER_CLASS, FOCUS_WITHIN_CLASS, set_state_class};
 use sl_viewer_ui_core::skin_palette::{SkinColors, SkinPalette};
 use sl_viewer_ui_core::ui::row;
 use sl_viewer_ui_core::ui_element::TextMayClip;
@@ -98,6 +106,20 @@ const FIELD_TEXT_INSET: f32 = 6.0;
 /// editable fields, and a consumer can tell the widget's field from any other.
 #[derive(Component, Debug, Clone, Copy)]
 pub struct SearchInputField;
+
+/// The search **box** — the bordered container — naming the field inside it, so
+/// `reflect_search_box_focus` can mirror that field's focus onto the box.
+///
+/// The box has to be told, because nothing else can tell it: a decorated field
+/// carries `.sk-field` on the same entity as its editor, so `.sk-field:focus`
+/// paints the focused face for free, while a search box is a *container* around
+/// a bare one and the engine has no selector that reaches up from a focused
+/// child (see [`FOCUS_WITHIN_CLASS`]).
+#[derive(Component, Debug, Clone, Copy)]
+pub struct SearchFieldBox {
+    /// The field whose focus this box shows.
+    field: Entity,
+}
 
 /// The clear (`×`) button, naming the field it clears. Shown by
 /// `toggle_search_clear` only while that field holds a term.
@@ -261,6 +283,9 @@ pub fn spawn_search_field(
     commands
         .entity(field)
         .insert((SearchInputField, TextColor(fallback.field_text)));
+    // Now that there is a field, the box can be told which one it holds — the
+    // focus it shows is that field's.
+    commands.entity(container).insert(SearchFieldBox { field });
 
     let mut placeholder = None;
     if !spec.placeholder.is_empty() {
@@ -386,6 +411,7 @@ impl Plugin for SearchFieldPlugin {
             (
                 toggle_search_clear,
                 reflect_search_clear_disabled,
+                reflect_search_box_focus,
                 toggle_search_placeholder,
                 clear_focused_search_on_escape,
             ),
@@ -441,6 +467,34 @@ fn reflect_search_clear_disabled(
                 color.0 = wanted;
             }
         }
+    }
+}
+
+/// Put [`FOCUS_WITHIN_CLASS`] on a search box while the field inside it holds
+/// keyboard focus, so the skin can brighten the box's face and ring its border —
+/// the reference's `UIControlBGLightFocused` over `TextBgWriteableColor`, and the
+/// keyboard-focus highlight it lights on a search editor's *border*
+/// (`mBorder->setKeyboardFocusHighlight`) rather than inside it.
+///
+/// A class rather than a selector because there is no selector: `bevy_flair`
+/// parses no `:focus-within`, and `:has()` would not be *invalidated* when a
+/// descendant's focus moves — only the focused entity's own style data is
+/// marked. This is the same answer every state the engine cannot see gets.
+///
+/// [`set_state_class`] keeps the write change-guarded: a settled box does not
+/// wake the style engine, which is the whole reason a class is cheaper than the
+/// per-frame paint it replaces.
+fn reflect_search_box_focus(
+    focus: Res<InputFocus>,
+    mut boxes: Query<(&SearchFieldBox, &mut ClassList)>,
+) {
+    let focused = focus.get();
+    for (search_box, mut classes) in &mut boxes {
+        set_state_class(
+            &mut classes,
+            FOCUS_WITHIN_CLASS,
+            focused == Some(search_box.field),
+        );
     }
 }
 
@@ -789,6 +843,66 @@ mod tests {
             interact::text_of(&mut app, "test-search:field"),
             Some(String::new()),
             "an enabled field is cleared by its button"
+        );
+        Ok(())
+    }
+
+    /// **The box knows when its field is being typed into** — the state a
+    /// skin needs to brighten the search box's face and ring its border, and
+    /// the one `bevy_flair` cannot see for itself (no `:focus-within`, and a
+    /// `:has()` that would not be invalidated when a child's focus moves).
+    ///
+    /// Driven by a real click and a real blur rather than by poking
+    /// `InputFocus` at the *box*: what is being asserted is that focus landing
+    /// on the **field** reaches the container, so a test that focused the
+    /// container would pass on a widget where the mirroring had been deleted.
+    #[test]
+    fn the_box_carries_its_fields_focus() -> Result<(), TestError> {
+        use crate::ui_test::interact::{self, InteractionTest};
+        use bevy_flair::style::components::ClassList;
+        use sl_viewer_ui_core::skin::FOCUS_WITHIN_CLASS;
+
+        let mut app = InteractionTest::new().build();
+        app.add_plugins(SearchFieldPlugin).add_systems(
+            Startup,
+            (|mut commands: Commands, root: Res<UiRoot>| {
+                spawn_search_field(
+                    &mut commands,
+                    root.0,
+                    &SearchFieldSpec {
+                        search_glyph: true,
+                        ..SearchFieldSpec::new("test-search")
+                    },
+                );
+            })
+            .after(UiScaffoldSystems::SpawnRoot),
+        );
+        settle(&mut app);
+
+        let container =
+            find_by_name(&mut app, "test-search:search").ok_or("the box did not spawn")?;
+        let lit = |app: &App| {
+            app.world()
+                .entity(container)
+                .get::<ClassList>()
+                .is_some_and(|classes| classes.contains(FOCUS_WITHIN_CLASS))
+        };
+        assert!(!lit(&app), "an untouched box must not look focused");
+
+        interact::click_node(&mut app, "test-search:field")?;
+        settle(&mut app);
+        assert!(
+            lit(&app),
+            "focusing the field must light the box — the skin has no selector \
+             that reaches up from the editor to the container it sits in"
+        );
+
+        interact::blur(&mut app);
+        settle(&mut app);
+        assert!(
+            !lit(&app),
+            "the class must leave with the focus, or every box that was ever \
+             typed into stays lit"
         );
         Ok(())
     }

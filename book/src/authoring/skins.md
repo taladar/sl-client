@@ -225,6 +225,7 @@ the stock look rather than to black.
 | `.sk-field` | an editable text field's box |
 | `.sk-text-field` | the caret / selection colours of **every** editor (stamped automatically) |
 | `.sk-search-field` / `.sk-search-clear` | the shared search box and its `×` button |
+| `.sk-focus-within` | worn by a container whose editor has focus — the search box, which brightens and rings while you type in it (there is no `:focus-within`) |
 | `.sk-toolbar-bar` / `.sk-toolbar-button` | the bottom toolbar strip and its buttons |
 | `.sk-toast` / `.sk-toast-text` | a notification toast card and its text |
 | `.sk-build-label` / `.sk-build-value` / `.sk-build-placeholder` / `.sk-build-disabled` | the Build Tools floater's text roles |
