@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 117 |
-| ready | 301 |
+| ideas | 118 |
+| ready | 300 |
 | blocked | 62 |
 | in-progress | 26 |
-| bugs | 9 |
-| done | 1229 |
+| bugs | 13 |
+| done | 1230 |
 | deferred | 30 |
 | wont-do | 16 |
-| **total** | **1790** |
+| **total** | **1795** |
 
-## ideas (117)
+## ideas (118)
 
 ### protocol
 
@@ -89,6 +89,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Create and upload GLTF material assets
 - [`viewer-minimap-collision-parcels`](ideas/viewer-minimap-collision-parcels.md)
   — Minimap collision-parcel ("banned from here") fill
+- [`viewer-minimized-floaters-move-to-a-shelf`](ideas/viewer-minimized-floaters-move-to-a-shelf.md)
+  — A minimized floater should move to a shelf of minimized windows, not
+  collapse where it stands
 - [`viewer-mouselook-combat`](ideas/viewer-mouselook-combat.md) — Mouselook
   combat conveniences
 - [`viewer-mouselook-ui-options`](ideas/viewer-mouselook-ui-options.md) —
@@ -291,7 +294,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (301)
+## ready (300)
 
 ### protocol
 
@@ -868,8 +871,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Seamless seated region crossing (keep sit-implied permissions)
 - [`viewer-settings-backup`](ready/viewer-settings-backup.md) — Settings backup
   — export / import (blocked by `viewer-preferences-floater` (done))
-- [`viewer-skin-glyphs-from-content`](ready/viewer-skin-glyphs-from-content.md)
-  — A skin can choose the glyph, not just its colour — audit where that applies
 - [`viewer-skin-icon-set`](ready/viewer-skin-icon-set.md) — A skin should be
   able to carry an icon set, not just colours
 - [`viewer-snapshot-composition-guides`](ready/viewer-snapshot-composition-guides.md)
@@ -1271,7 +1272,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (9)
+## bugs (13)
 
 ### protocol
 
@@ -1282,6 +1283,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`viewer-emoji-picker-hover-preview-inert`](bugs/viewer-emoji-picker-hover-preview-inert.md)
   — Hovering an emoji never fills the picker's preview line
+- [`viewer-floater-minimize-caps-follow-no-pattern`](bugs/viewer-floater-minimize-caps-follow-no-pattern.md)
+  — Which floaters have a minimize button follows no pattern, and most that lack
+  one should have it
+- [`viewer-friends-list-shows-a-sixth-rights-column`](bugs/viewer-friends-list-shows-a-sixth-rights-column.md)
+  — The Friends list shows six rights columns; the reference shows five
+- [`viewer-gallery-floaters-are-mostly-stubs`](bugs/viewer-gallery-floaters-are-mostly-stubs.md)
+  — 43 of the gallery's 56 floaters show a line of prose instead of their
+  content
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
   Some worn mesh hair does not render (visible in Firestorm)
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
@@ -1290,6 +1299,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Own avatar looks broken after a teleport
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
+- [`viewer-skin-active-class-means-selected-not-pressed`](bugs/viewer-skin-active-class-means-selected-not-pressed.md)
+  — .sk-active means "selected", which is not what CSS's :active means, and
+  nothing but relief draws a press
 - [`viewer-sliced-art-seam-at-fractional-ui-scale`](bugs/viewer-sliced-art-seam-at-fractional-ui-scale.md)
   — A nine-sliced button's frame changes thickness along the quad's diagonal at
   a fractional UI scale
@@ -1301,7 +1313,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1229)
+## done (1230)
 
 ### protocol
 
@@ -2962,6 +2974,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Checkboxes are hand-rolled per panel, so no skin can shape one
 - [`viewer-skin-focus-ring-geometry-tokens`](done/viewer-skin-focus-ring-geometry-tokens.md)
   — The focus ring's shape becomes a value, not three repeated literals
+- [`viewer-skin-glyphs-from-content`](done/viewer-skin-glyphs-from-content.md) —
+  A skin can choose the glyph, not just its colour — audit where that applies
 - [`viewer-skin-image-backed-widgets`](done/viewer-skin-image-backed-widgets.md)
   — Nine-sliced image surfaces, so a skin can change a widget's shape (blocked
   by `viewer-skin-widget-state-classes` (done))

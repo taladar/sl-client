@@ -23,7 +23,8 @@ mod test {
     use bevy::prelude::*;
     use bevy_flair::prelude::*;
     use pretty_assertions::{assert_eq, assert_ne};
-    use sl_viewer_ui_core::skin::SkinTextCaret;
+    use sl_viewer_ui_core::glyph;
+    use sl_viewer_ui_core::skin::{PRESENCE_ONLINE_CLASS, SkinTextCaret};
     use sl_viewer_ui_core::skin_palette::{SkinPalette, register_palette_properties};
 
     /// A boxed error so tests can use `?` instead of `unwrap` / `expect`.
@@ -2466,6 +2467,664 @@ mod test {
                     "{sheet}: the {step} button's display"
                 );
             }
+        }
+        Ok(())
+    }
+
+    /// **A glyph is its host's colour** (`viewer-skin-glyphs-from-content`).
+    ///
+    /// The engine question the whole glyph vocabulary rests on: `color:
+    /// inherit` on a text host's `::before` follows the host as a rule changes
+    /// it. `bevy_flair` copies the host's `TextColor` into the pseudo-element
+    /// once, at spawn, so without inheritance every state that greys or lights
+    /// a glyph's host would need a second rule for the glyph itself.
+    #[test]
+    fn a_glyph_takes_its_colour_from_its_host() -> Result<(), TestError> {
+        let mut app = app_with_assets(&test_assets_dir());
+        let handle: Handle<StyleSheet> = app
+            .world()
+            .resource::<AssetServer>()
+            .load("glyph-inherit.css");
+        let root = app
+            .world_mut()
+            .spawn((Node::default(), Styled::new(handle.clone())))
+            .id();
+        let host = app
+            .world_mut()
+            .spawn((
+                Text::default(),
+                PseudoElementsSupport,
+                ClassList::new_with_classes(["probe-host", "sk-glyph"]),
+                ChildOf(root),
+            ))
+            .id();
+
+        load(&mut app, &handle)?;
+        app.update();
+
+        let hex = |value: &str| Srgba::hex(value).map_err(|error| error.to_string());
+        assert_eq!(
+            before_glyph(&app, host),
+            Some(("x".to_owned(), hex("ff0000")?)),
+            "the glyph did not inherit its host's resting colour"
+        );
+
+        app.world_mut()
+            .get_mut::<ClassList>(host)
+            .ok_or("the host lost its class list")?
+            .add("probe-state");
+        app.update();
+        app.update();
+        assert_eq!(
+            before_glyph(&app, host),
+            Some(("x".to_owned(), hex("00ff00")?)),
+            "the glyph kept its old colour when its host's state changed"
+        );
+        Ok(())
+    }
+
+    /// One glyph host to spawn, and the mark the shipped skins give it
+    /// (`viewer-skin-glyphs-from-content`).
+    struct GlyphCase {
+        /// The slot class, from `sl_viewer_ui_core::glyph`.
+        slot: &'static str,
+        /// The state classes the host wears beside it.
+        states: &'static [&'static str],
+        /// Whether the host sits in a `:checked` menu row — the one slot whose
+        /// state is an ancestor's pseudo-class rather than a class of its own.
+        checked_menu_row: bool,
+        /// Whether the mark is the host's `::after` (a host that has text of
+        /// its own) rather than an empty host's `::before`.
+        after: bool,
+        /// What the shipped `common.css` draws.
+        mark: &'static str,
+    }
+
+    /// Every slot in every state that changes its mark. Its order is the
+    /// numbering of `tests/assets/glyph-scratch.css`.
+    const GLYPH_CASES: &[GlyphCase] = &[
+        GlyphCase {
+            slot: glyph::CLOSE,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{2715}",
+        },
+        GlyphCase {
+            slot: glyph::DISMISS,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{d7}",
+        },
+        GlyphCase {
+            slot: glyph::MINIMIZE,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{2014}",
+        },
+        GlyphCase {
+            slot: glyph::MINIMIZE,
+            states: &[glyph::MINIMIZED],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{25ad}",
+        },
+        GlyphCase {
+            slot: glyph::DOCK,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{25a4}",
+        },
+        GlyphCase {
+            slot: glyph::DOCK,
+            states: &[glyph::DOCKED],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{25a5}",
+        },
+        GlyphCase {
+            slot: glyph::RESIZE,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{25e2}",
+        },
+        GlyphCase {
+            slot: glyph::DROP_DOWN,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{25be}",
+        },
+        GlyphCase {
+            slot: glyph::SEARCH,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{1f50d}",
+        },
+        GlyphCase {
+            slot: glyph::CLEAR,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{d7}",
+        },
+        GlyphCase {
+            slot: glyph::MENU_CHECK,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "",
+        },
+        GlyphCase {
+            slot: glyph::MENU_CHECK,
+            states: &[],
+            checked_menu_row: true,
+            after: false,
+            mark: "\u{2713}",
+        },
+        GlyphCase {
+            slot: glyph::SUBMENU,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{25b6}",
+        },
+        GlyphCase {
+            slot: glyph::SORT,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "",
+        },
+        GlyphCase {
+            slot: glyph::SORT,
+            states: &[glyph::SORT_ASCENDING],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{25b2}",
+        },
+        GlyphCase {
+            slot: glyph::SORT,
+            states: &[glyph::SORT_DESCENDING],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{25bc}",
+        },
+        GlyphCase {
+            slot: glyph::DISCLOSURE,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{25b8}",
+        },
+        GlyphCase {
+            slot: glyph::DISCLOSURE,
+            states: &[glyph::EXPANDED],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{25be}",
+        },
+        GlyphCase {
+            slot: glyph::PRESENCE,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{25cb}",
+        },
+        GlyphCase {
+            slot: glyph::PRESENCE,
+            states: &[PRESENCE_ONLINE_CLASS],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{25cf}",
+        },
+        GlyphCase {
+            slot: glyph::POSITION,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{25cb}",
+        },
+        GlyphCase {
+            slot: glyph::POSITION,
+            states: &[glyph::PRECISE],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{25cf}",
+        },
+        GlyphCase {
+            slot: glyph::CURRENT_MARK,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "",
+        },
+        GlyphCase {
+            slot: glyph::CURRENT_MARK,
+            states: &[glyph::CURRENT],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{25cf}",
+        },
+        GlyphCase {
+            slot: glyph::YES,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{2714}",
+        },
+        GlyphCase {
+            slot: glyph::CHANGED_MARK,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "",
+        },
+        GlyphCase {
+            slot: glyph::CHANGED_MARK,
+            states: &[glyph::CHANGED],
+            checked_menu_row: false,
+            after: false,
+            mark: "*",
+        },
+        GlyphCase {
+            slot: glyph::BULLET,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{2022}\u{a0}",
+        },
+        GlyphCase {
+            slot: glyph::BACK,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{25c0}",
+        },
+        GlyphCase {
+            slot: glyph::FORWARD,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{25b6}",
+        },
+        GlyphCase {
+            slot: glyph::PREVIOUS,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{2039}",
+        },
+        GlyphCase {
+            slot: glyph::NEXT,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{203a}",
+        },
+        GlyphCase {
+            slot: glyph::UP,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{2b06}",
+        },
+        GlyphCase {
+            slot: glyph::EXPAND_UP,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{25b2}",
+        },
+        GlyphCase {
+            slot: glyph::CYCLE,
+            states: &[],
+            checked_menu_row: false,
+            after: true,
+            mark: " \u{25b8}",
+        },
+        GlyphCase {
+            slot: glyph::HOME,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{2302}",
+        },
+        GlyphCase {
+            slot: glyph::EXTERNAL,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{2197}",
+        },
+        GlyphCase {
+            slot: glyph::SECURE,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{1f512}",
+        },
+        GlyphCase {
+            slot: glyph::RELOAD,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{27f3}",
+        },
+        GlyphCase {
+            slot: glyph::RELOAD,
+            states: &[glyph::LOADING],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{2715}",
+        },
+        GlyphCase {
+            slot: glyph::PLAY_PAUSE,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{25b6}",
+        },
+        GlyphCase {
+            slot: glyph::PLAY_PAUSE,
+            states: &[glyph::PLAYING],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{275a}\u{275a}",
+        },
+        GlyphCase {
+            slot: glyph::PLAY_STOP,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{25b6}",
+        },
+        GlyphCase {
+            slot: glyph::PLAY_STOP,
+            states: &[glyph::PLAYING],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{25a0}",
+        },
+        GlyphCase {
+            slot: glyph::MUSIC,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{266b}",
+        },
+        GlyphCase {
+            slot: glyph::ZOOM,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{2295}",
+        },
+        GlyphCase {
+            slot: glyph::ZOOM,
+            states: &[glyph::ZOOMED],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{2296}",
+        },
+        GlyphCase {
+            slot: glyph::SPEAKER,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{1f50a}",
+        },
+        GlyphCase {
+            slot: glyph::SPEAKER,
+            states: &[glyph::MUTED],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{1f507}",
+        },
+        GlyphCase {
+            slot: glyph::ADD,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{271a}",
+        },
+        GlyphCase {
+            slot: glyph::SETTINGS,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{2699}",
+        },
+        GlyphCase {
+            slot: glyph::EMOJI,
+            states: &[],
+            checked_menu_row: false,
+            after: false,
+            mark: "\u{1f642}",
+        },
+    ];
+
+    /// Spawn every [`GLYPH_CASES`] host under a fresh root styled by `sheet`
+    /// (loaded from `assets`), and return the app, the root and the hosts.
+    fn glyph_app(
+        assets: &std::path::Path,
+        sheet: &'static str,
+    ) -> Result<(App, Entity, Vec<Entity>), TestError> {
+        let mut app = app_with_assets(assets);
+        let handle: Handle<StyleSheet> = app.world().resource::<AssetServer>().load(sheet);
+        let mut direction = AttributeList::new();
+        direction.set_attribute("dir", "ltr");
+        let root = app
+            .world_mut()
+            .spawn((Node::default(), Styled::new(handle.clone()), direction))
+            .id();
+        let mut hosts = Vec::new();
+        for case in GLYPH_CASES {
+            let parent = if case.checked_menu_row {
+                app.world_mut()
+                    .spawn((
+                        Node::default(),
+                        ClassList::new("sk-menu-item"),
+                        bevy::ui::Checked,
+                        ChildOf(root),
+                    ))
+                    .id()
+            } else {
+                root
+            };
+            let text = if case.after {
+                Text::new("3 more")
+            } else {
+                Text::default()
+            };
+            hosts.push(
+                app.world_mut()
+                    .spawn((
+                        text,
+                        PseudoElementsSupport,
+                        ClassList::new_with_classes(
+                            [glyph::GLYPH_CLASS, case.slot]
+                                .into_iter()
+                                .chain(case.states.iter().copied()),
+                        ),
+                        ChildOf(parent),
+                    ))
+                    .id(),
+            );
+        }
+        load(&mut app, &handle)?;
+        app.update();
+        Ok((app, root, hosts))
+    }
+
+    /// The mark a host's pseudo-element carries: its `::before` (the first
+    /// child bevy_flair spawns), or its `::after` (the second).
+    fn glyph_mark(app: &App, host: Entity, after: bool) -> Option<String> {
+        let kids = app.world().get::<Children>(host)?;
+        let pseudo = kids.iter().nth(usize::from(after))?;
+        Some(app.world().get::<TextSpan>(pseudo)?.0.clone())
+    }
+
+    /// **Every glyph slot draws a mark, in every state, in both shipped skins**
+    /// — and the case table covers every slot `glyph::SLOTS` names, so a slot
+    /// added without a mark (or without a row here) fails.
+    #[test]
+    fn every_glyph_slot_takes_its_mark_from_the_skin() -> Result<(), TestError> {
+        for slot in glyph::SLOTS {
+            assert!(
+                GLYPH_CASES.iter().any(|case| case.slot == *slot),
+                "{slot} has no case, so nothing holds a skin to drawing it"
+            );
+        }
+        let assets = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
+        for sheet in ["skins/graphite/skin.css", "skins/azure/skin.css"] {
+            let (app, _root, hosts) = glyph_app(&assets, sheet)?;
+            for (case, host) in GLYPH_CASES.iter().zip(&hosts) {
+                assert_eq!(
+                    glyph_mark(&app, *host, case.after).as_deref(),
+                    Some(case.mark),
+                    "{sheet}: {} {:?}",
+                    case.slot,
+                    case.states
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// **A scratch skin redraws every mark by CSS alone** — the task's "done
+    /// when". `glyph-scratch.css` gives each case a mark of its own; a slot the
+    /// Rust side still drew, or a state that never reached a selector, would
+    /// show something else.
+    #[test]
+    fn a_scratch_skin_redraws_every_mark() -> Result<(), TestError> {
+        let (app, _root, hosts) = glyph_app(&test_assets_dir(), "glyph-scratch.css")?;
+        for (index, (case, host)) in GLYPH_CASES.iter().zip(&hosts).enumerate() {
+            assert_eq!(
+                glyph_mark(&app, *host, case.after),
+                Some(format!("s{index:02}")),
+                "{} {:?} kept a mark the scratch skin did not write",
+                case.slot,
+                case.states
+            );
+        }
+        Ok(())
+    }
+
+    /// **A state comes and goes** — the one thing a static table cannot show.
+    /// `bevy_flair` never reverts a property whose rule stopped matching, so a
+    /// stateful slot whose resting mark were missing would keep the lit one
+    /// after the state went. Reload → stop → reload, and a menu tick that
+    /// is taken away.
+    #[test]
+    fn a_glyph_state_is_taken_back() -> Result<(), TestError> {
+        let assets = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
+        let (mut app, root, _hosts) = glyph_app(&assets, "skins/graphite/skin.css")?;
+        let reload = app
+            .world_mut()
+            .spawn((
+                Text::default(),
+                PseudoElementsSupport,
+                ClassList::new_with_classes([glyph::GLYPH_CLASS, glyph::RELOAD]),
+                ChildOf(root),
+            ))
+            .id();
+        let row = app
+            .world_mut()
+            .spawn((
+                Node::default(),
+                ClassList::new("sk-menu-item"),
+                bevy::ui::Checked,
+                ChildOf(root),
+            ))
+            .id();
+        let tick = app
+            .world_mut()
+            .spawn((
+                Text::default(),
+                PseudoElementsSupport,
+                ClassList::new_with_classes([glyph::GLYPH_CLASS, glyph::MENU_CHECK]),
+                ChildOf(row),
+            ))
+            .id();
+        app.update();
+        app.update();
+        assert_eq!(glyph_mark(&app, reload, false).as_deref(), Some("\u{27f3}"));
+        assert_eq!(glyph_mark(&app, tick, false).as_deref(), Some("\u{2713}"));
+
+        app.world_mut()
+            .get_mut::<ClassList>(reload)
+            .ok_or("reload lost its class list")?
+            .add(glyph::LOADING);
+        app.world_mut()
+            .entity_mut(row)
+            .remove::<bevy::ui::Checked>();
+        app.update();
+        app.update();
+        assert_eq!(
+            glyph_mark(&app, reload, false).as_deref(),
+            Some("\u{2715}"),
+            "loading did not turn reload into stop"
+        );
+        assert_eq!(
+            glyph_mark(&app, tick, false).as_deref(),
+            Some(""),
+            "an unchecked menu row kept its tick"
+        );
+
+        app.world_mut()
+            .get_mut::<ClassList>(reload)
+            .ok_or("reload lost its class list")?
+            .remove(glyph::LOADING);
+        app.update();
+        app.update();
+        assert_eq!(
+            glyph_mark(&app, reload, false).as_deref(),
+            Some("\u{27f3}"),
+            "the stop mark stuck after loading ended"
+        );
+        Ok(())
+    }
+
+    /// **The stepping marks mirror under right-to-left**, and nothing else
+    /// does: a back arrow points toward the start of the line, which is the
+    /// right under `dir="rtl"`. A disclosure triangle points toward the inline
+    /// end while closed. Transport and chrome marks stay put.
+    #[test]
+    fn stepping_marks_mirror_under_rtl() -> Result<(), TestError> {
+        let assets = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
+        let (mut app, root, hosts) = glyph_app(&assets, "skins/graphite/skin.css")?;
+        app.world_mut()
+            .get_mut::<AttributeList>(root)
+            .ok_or("the root lost its attribute list")?
+            .set_attribute("dir", "rtl");
+        app.update();
+        app.update();
+        let mirrored = [
+            (glyph::BACK, &[][..], "\u{25b6}"),
+            (glyph::FORWARD, &[][..], "\u{25c0}"),
+            (glyph::PREVIOUS, &[][..], "\u{203a}"),
+            (glyph::NEXT, &[][..], "\u{2039}"),
+            (glyph::DISCLOSURE, &[][..], "\u{25c2}"),
+            (glyph::DISCLOSURE, &[glyph::EXPANDED][..], "\u{25be}"),
+        ];
+        for (case, host) in GLYPH_CASES.iter().zip(&hosts) {
+            let want = mirrored
+                .iter()
+                .find(|(slot, states, _)| *slot == case.slot && *states == case.states)
+                .map_or(case.mark, |(_, _, mark)| *mark);
+            assert_eq!(
+                glyph_mark(&app, *host, case.after).as_deref(),
+                Some(want),
+                "rtl: {} {:?}",
+                case.slot,
+                case.states
+            );
         }
         Ok(())
     }

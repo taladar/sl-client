@@ -88,8 +88,8 @@ use crate::intents::{
 use crate::linkified_text::{LinkTextStyle, spawn_linkified_text};
 use crate::local_chat_input::{LocalChatSubmit, spawn_local_chat_input};
 use crate::skin::SkinChatBands;
-use crate::skin::text_role;
 use crate::skin::{ATTENTION_CLASS, set_state_class_on};
+use crate::skin::{role_class, text_role};
 use crate::social::{MuteModel, short_id};
 use crate::ui::BOTTOM_BAR_Z;
 use crate::ui::BottomArea;
@@ -104,6 +104,7 @@ use crate::ui_tab::{
 use crate::ui_text::set_node_text;
 use crate::world_api::rlv::swallows_owner_say;
 use bevy_flair::style::components::ClassList;
+use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
 
 /// The hosting floater's [`crate::floater::FloaterSpec::id`] — it also keys the
@@ -179,12 +180,6 @@ const SCROLL_TO_BOTTOM: f32 = 1.0e6;
 
 /// A tab's close glyph — chrome, so the muted role.
 const CLOSE_GLYPH_COLOR: Color = SkinPalette::FALLBACK.text_muted;
-
-/// The close-button glyph (a small ✕), on every non-Nearby tab.
-const CLOSE_GLYPH: &str = "\u{2715}";
-
-/// The add-participants glyph (a small ✚), on a one-to-one or conference pane.
-const ADD_PARTICIPANTS_GLYPH: &str = "\u{271A}";
 
 /// The [`crate::intents::OpenAvatarPicker::field`] prefix the
 /// add-participants button opens its picker under. The conversation's own key
@@ -1469,10 +1464,13 @@ fn spawn_pane_close_button(commands: &mut Commands, panel: Entity, key: Conversa
             ChildOf(panel),
         ))
         .with_child((
-            Text::new(CLOSE_GLYPH.to_owned()),
-            UiFont::Sans.at(CHROME_FONT_SIZE),
-            text_role(CLOSE_GLYPH_COLOR),
-            Pickable::IGNORE,
+            // The skin's `glyph::CLOSE` mark, on every non-Nearby tab.
+            glyph::glyph_host(
+                glyph::CLOSE,
+                UiFont::Sans.at(CHROME_FONT_SIZE),
+                role_class(CLOSE_GLYPH_COLOR),
+            ),
+            TextColor(CLOSE_GLYPH_COLOR),
         ))
         .observe(
             move |mut press: On<Pointer<Press>>, mut close: MessageWriter<CloseConversation>| {
@@ -1519,10 +1517,13 @@ fn spawn_add_participants_button(commands: &mut Commands, panel: Entity, key: Co
             ChildOf(panel),
         ))
         .with_child((
-            Text::new(ADD_PARTICIPANTS_GLYPH.to_owned()),
-            UiFont::Sans.at(CHROME_FONT_SIZE),
-            text_role(CLOSE_GLYPH_COLOR),
-            Pickable::IGNORE,
+            // The skin's `glyph::ADD` mark, on a one-to-one or conference pane.
+            glyph::glyph_host(
+                glyph::ADD,
+                UiFont::Sans.at(CHROME_FONT_SIZE),
+                role_class(CLOSE_GLYPH_COLOR),
+            ),
+            TextColor(CLOSE_GLYPH_COLOR),
         ))
         .observe(
             move |mut press: On<Pointer<Press>>, mut pickers: MessageWriter<OpenAvatarPicker>| {

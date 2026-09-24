@@ -59,6 +59,7 @@ use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::world_api::InputContext;
 use crate::world_api::ObjectState;
 use crate::world_api::SelectionSet;
+use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 /// The floater's font size, in logical pixels.
@@ -781,9 +782,9 @@ fn spawn_link_part_nav(commands: &mut Commands, parent: Entity) {
         ))
         .id();
     spawn_row_label(commands, nav_row, "build-link-part-label");
-    for (dir, glyph, name, tab_index) in [
-        (LinkPartDir::Prev, "◀", "prev", 9_i32),
-        (LinkPartDir::Next, "▶", "next", 10_i32),
+    for (dir, slot, name, tab_index) in [
+        (LinkPartDir::Prev, glyph::BACK, "prev", 9_i32),
+        (LinkPartDir::Next, glyph::FORWARD, "next", 10_i32),
     ] {
         // Flat rather than bordered: these two carry no box of their own, and
         // `.sk-action-button` is the class that adds a state without imposing a
@@ -792,7 +793,7 @@ fn spawn_link_part_nav(commands: &mut Commands, parent: Entity) {
             commands,
             nav_row,
             ButtonSpec::flat(
-                UiLabel::literal(glyph),
+                UiLabel::Glyph(slot),
                 format!("build-tools:link-part-{name}"),
             )
             .kind(ButtonKind::Headless)

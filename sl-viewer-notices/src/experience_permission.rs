@@ -88,8 +88,9 @@ use crate::ui::{column, row};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
+use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::skin::BUTTON_CLASS;
-use sl_viewer_ui_core::skin::text_role;
+use sl_viewer_ui_core::skin::role_class;
 
 /// The catalogue-template sentinel an experience card reports as (it is not a real
 /// [`crate::notifications::NOTIFICATIONS`] entry — the card is bespoke — but the
@@ -106,12 +107,6 @@ const CARD_CLASS: &str = "sk-toast";
 
 /// The skin class the intro / body text wears (`.sk-toast-text`).
 const TEXT_CLASS: &str = "sk-toast-text";
-
-/// The close-button glyph (a multiplication sign), matching the reference toast.
-const CLOSE_GLYPH: &str = "\u{00d7}";
-
-/// The bullet glyph prefixing each `[QUESTIONS]` permission line.
-const BULLET_GLYPH: &str = "\u{2022}\u{00a0}";
 
 /// A card's widest allowed width, in logical pixels.
 const CARD_MAX_WIDTH: f32 = 360.0;
@@ -398,13 +393,7 @@ fn build_experience_card(commands: &mut Commands, content: &ExperienceContent) -
         DIM_TEXT_COLOR,
     );
     for line in &content.permission_lines {
-        spawn_bounded_text(
-            commands,
-            root,
-            &format!("{BULLET_GLYPH}{line}"),
-            FONT_SIZE,
-            DIM_TEXT_COLOR,
-        );
+        spawn_bullet_line(commands, root, line, FONT_SIZE, DIM_TEXT_COLOR);
     }
     spawn_bounded_text(commands, root, &content.confirm, FONT_SIZE, TEXT_COLOR);
 
@@ -744,9 +733,13 @@ fn spawn_close_button(commands: &mut Commands, card: Entity) -> Entity {
             ChildOf(close_row),
         ))
         .with_child((
-            Text::new(CLOSE_GLYPH),
-            UiFont::Sans.at(FONT_SIZE),
-            text_role(TEXT_COLOR),
+            // The skin's `glyph::DISMISS` mark.
+            glyph::glyph_host(
+                glyph::DISMISS,
+                UiFont::Sans.at(FONT_SIZE),
+                role_class(TEXT_COLOR),
+            ),
+            TextColor(TEXT_COLOR),
         ))
         .id()
 }
@@ -822,6 +815,48 @@ fn spawn_experience_name(
     spawn_linkified_text(commands, box_entity, &linked, style);
 }
 
+/// One `[QUESTIONS]` permission line: the skin's [`glyph::BULLET`] mark, then the line, in a
+/// width-bounded row — so a line that wraps hangs clear of its bullet rather
+/// than running back under it. An empty line spawns nothing.
+fn spawn_bullet_line(
+    commands: &mut Commands,
+    parent: Entity,
+    text: &str,
+    font_size: f32,
+    color: Color,
+) {
+    if text.is_empty() {
+        return;
+    }
+    let line = commands
+        .spawn((
+            Node {
+                max_width: Val::Px(FULL_TEXT_MAX_WIDTH),
+                ..default()
+            },
+            Pickable::IGNORE,
+            ChildOf(parent),
+        ))
+        .id();
+    commands.spawn((
+        glyph::glyph_host(glyph::BULLET, UiFont::Sans.at(font_size), [TEXT_CLASS]),
+        TextColor(color),
+        Node {
+            flex_shrink: 0.0,
+            ..default()
+        },
+        ChildOf(line),
+    ));
+    commands.spawn((
+        Text::new(text.to_owned()),
+        UiFont::Sans.at(font_size),
+        TextColor(color),
+        ClassList::new_with_classes([TEXT_CLASS]),
+        Pickable::IGNORE,
+        ChildOf(line),
+    ));
+}
+
 /// The gallery / `ui_test` specimen: a static experience card, so the intro /
 /// name / note / permission-line / action layout is swept login-free (a live card
 /// needs a scripted object running under an experience). Registered in
@@ -843,9 +878,9 @@ pub fn spawn_experience_specimen(commands: &mut Commands, parent: Entity, cx: El
              where the experience is active:",
         ),
         permission_lines: vec![
-            cx.text("\u{2022}\u{00a0}Act on your control inputs"),
-            cx.text("\u{2022}\u{00a0}Animate your avatar"),
-            cx.text("\u{2022}\u{00a0}Teleport you"),
+            cx.text("Act on your control inputs"),
+            cx.text("Animate your avatar"),
+            cx.text("Teleport you"),
         ],
         confirm: cx.text("Is this OK?"),
         yes_label: cx.text("Yes"),

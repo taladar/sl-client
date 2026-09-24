@@ -61,6 +61,7 @@ use crate::ui_element::ElementCx;
 use crate::ui_font::UiFont;
 use crate::ui_slider::{SliderStyle, spawn_slider};
 use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
+use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_widgets::floater_persist::FloaterOpenExempt;
 
 /// The stable floater id (its geometry-persistence key and lookup handle).
@@ -1057,7 +1058,7 @@ pub(crate) fn spawn_quick_prefs_button(
     let button = ui_spawn::spawn_button(
         &mut commands,
         wrapper,
-        ButtonSpec::bordered(UiLabel::literal("\u{2699}"), "quick-prefs-button")
+        ButtonSpec::bordered(UiLabel::Glyph(glyph::SETTINGS), "quick-prefs-button")
             .kind(ButtonKind::Headless)
             .tab_index(0)
             .padding(7.0, 3.0)

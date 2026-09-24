@@ -43,7 +43,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui::{Checked, InteractionDisabled};
 use bevy::ui_widgets::{Activate, ValueChange};
-use bevy_flair::style::components::ClassList;
+use bevy_flair::style::components::{ClassList, PseudoElementsSupport};
 use sl_rlv::is_debug_setting_locked;
 use sl_settings::{Scope, SettingDecl, SettingKind, SettingValue};
 
@@ -55,7 +55,7 @@ use crate::i18n::Translated;
 use crate::preferences::CONTROL_BORDER;
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{SettingBinding, bound_checkbox};
-use crate::skin::text_role;
+use crate::skin::{role_class, set_state_class, text_role};
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
@@ -70,6 +70,7 @@ use crate::ui_table::{
 use crate::ui_text_input::{TextInputKind, TextInputSpec, TextInputValue, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 use crate::world_api::rlv::RlvSession;
+use sl_viewer_ui_core::glyph;
 
 /// The floater's stable id (geometry persistence, menu toggle, tests).
 pub const DEBUG_SETTINGS_FLOATER_ID: &str = "debug_settings";
@@ -95,9 +96,6 @@ const CHANGED_COL_WIDTH: f32 = 22.0;
 /// the value column aligned across the rows (a longer translation may widen
 /// its own row rather than overflow).
 const DETAIL_LABEL_WIDTH: f32 = 84.0;
-
-/// The changed-marker glyph shown beside an overridden setting.
-const CHANGED_MARK: &str = "*";
 
 /// The value shown for a layer holding no override.
 const NO_OVERRIDE: &str = "–";
@@ -1011,6 +1009,9 @@ fn populate_debug_rows(
         let (Some(changed_cell), Some(name_cell)) = (cells.cell(0), cells.cell(1)) else {
             continue;
         };
+        // The changed column holds no text: an overridden setting's cell is the
+        // skin's `glyph::CHANGED_MARK` under `glyph::CHANGED`.
+        commands.entity(changed_cell).insert(PseudoElementsSupport);
         commands.entity(row_entity).insert(DebugRowParts {
             changed_cell,
             name_cell,
@@ -1018,7 +1019,7 @@ fn populate_debug_rows(
     }
 }
 
-/// Project the view into the pooled rows: the `*` changed marker and the
+/// Project the view into the pooled rows: the changed marker and the
 /// setting name. Re-runs per row on a window move, and for every row on a
 /// model rebuild or a store change (an override toggling moves the marker
 /// without changing the view).
@@ -1050,12 +1051,16 @@ fn bind_debug_rows(
         else {
             continue;
         };
-        let marker = if settings.store().is_overridden(&entry.name) {
-            CHANGED_MARK
-        } else {
-            ""
-        };
-        set_table_cell(&mut texts, parts.changed_cell, marker, CELL_COLOR);
+        set_table_cell(&mut texts, parts.changed_cell, "", CELL_COLOR);
+        if let Ok((_, _, Some(mut classes))) = texts.get_mut(parts.changed_cell) {
+            set_state_class(&mut classes, glyph::GLYPH_CLASS, true);
+            set_state_class(&mut classes, glyph::CHANGED_MARK, true);
+            set_state_class(
+                &mut classes,
+                glyph::CHANGED,
+                settings.store().is_overridden(&entry.name),
+            );
+        }
         set_table_cell(&mut texts, parts.name_cell, &entry.name, CELL_COLOR);
     }
 }
@@ -1775,12 +1780,17 @@ pub fn spawn_debug_settings_specimen(
                 ChildOf(left),
             ))
             .id();
-        // The marker is a glyph, not prose — deliberately untranslated, so the
-        // fixed marker column never has to fit a long translation.
+        // The marker is the skin's glyph, not prose — so the fixed marker
+        // column never has to fit a long translation.
         commands.spawn((
-            Text::new(if changed { CHANGED_MARK } else { "" }),
-            cx.font(UiFont::Mono),
-            text_role(CELL_COLOR),
+            glyph::glyph_host(
+                glyph::CHANGED_MARK,
+                cx.font(UiFont::Mono),
+                role_class(CELL_COLOR)
+                    .into_iter()
+                    .chain(changed.then_some(glyph::CHANGED)),
+            ),
+            TextColor(CELL_COLOR),
             Node {
                 width: Val::Px(CHANGED_COL_WIDTH),
                 flex_shrink: 0.0,

@@ -57,10 +57,11 @@ use bevy_flair::style::components::ClassList;
 use sl_settings::SettingValue;
 
 use sl_viewer_settings::ViewerSettings;
+use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::i18n::Translated;
 use sl_viewer_ui_core::skin::{
     ACTIVE_CLASS, DISABLED_TEXT_CLASS, LIST_ROW_CLASS, LIST_SURFACE_CLASS, STRIPE_CLASS,
-    TABLE_ROW_CLASS, TEXT_CLASS, set_role_class, set_state_class, text_role,
+    TABLE_ROW_CLASS, TEXT_CLASS, role_class, set_role_class, set_state_class, text_role,
 };
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 use sl_viewer_ui_core::ui::UiDirection;
@@ -95,14 +96,6 @@ const ROW_CLASS: &str = TABLE_ROW_CLASS;
 
 /// The gap between a header label and its sort-direction arrow, in logical pixels.
 const ARROW_GAP: f32 = 2.0;
-
-/// The sort-direction arrow shown on the primary sort column's header when it is
-/// ascending (`▲`).
-const SORT_ASCENDING_GLYPH: &str = "\u{25B2}";
-
-/// The sort-direction arrow shown on the primary sort column's header when it is
-/// descending (`▼`).
-const SORT_DESCENDING_GLYPH: &str = "\u{25BC}";
 
 /// The ellipsis shown before any locale bundle has resolved `i18n`'s
 /// `ui-ellipsis` — the Latin single ellipsis, matching the tab widget's default.
@@ -1079,12 +1072,15 @@ fn spawn_header_cell(
         ChildOf(clip),
     ));
     if builtin_sort {
+        // The arrow is the skin's `glyph::SORT` mark: the widget only says
+        // which direction is true, as a state class on the host. The header's
+        // role class rides beside it, which is what the mark inherits its
+        // colour — and its greying — from.
+        let role = role_class(spec.header_color);
         commands.spawn((
-            Text::new(String::new()),
+            glyph::glyph_host(glyph::SORT, UiFont::Sans.at(spec.font_size), role),
             TextLayout::no_wrap(),
-            UiFont::Sans.at(spec.font_size),
             TextColor(spec.header_color),
-            text_role(spec.header_color).1,
             TableHeaderText { table: root, cell },
             Node {
                 flex_shrink: 0.0,
@@ -1095,7 +1091,6 @@ fn spawn_header_cell(
                 table: root,
                 column: index,
             },
-            Pickable::IGNORE,
             Name::new(format!("{}:table-header-arrow:{index}", spec.element)),
             ChildOf(cell),
         ));
@@ -1557,28 +1552,26 @@ fn reserve_table_header_gutter(
 }
 
 /// Set each sortable header's arrow from its table's primary sort key — the
-/// ascending / descending glyph on the most-significant column, blank elsewhere.
+/// ascending / descending state on the most-significant column, neither
+/// elsewhere. Which mark each direction wears is the skin's.
 fn drive_table_sort_arrows(
     tables: Query<&TableState>,
-    mut arrows: Query<(&TableHeaderArrow, &mut Text)>,
+    mut arrows: Query<(&TableHeaderArrow, &mut ClassList)>,
 ) {
-    for (arrow, mut text) in &mut arrows {
+    for (arrow, mut classes) in &mut arrows {
         let Ok(state) = tables.get(arrow.table) else {
             continue;
         };
-        let glyph = match state.sort.primary() {
-            Some((column, ascending)) if column == arrow.column => {
-                if ascending {
-                    SORT_ASCENDING_GLYPH
-                } else {
-                    SORT_DESCENDING_GLYPH
-                }
-            }
-            _other => "",
+        let direction = match state.sort.primary() {
+            Some((column, ascending)) if column == arrow.column => Some(ascending),
+            _other => None,
         };
-        if text.0 != glyph {
-            glyph.clone_into(&mut text.0);
-        }
+        set_state_class(&mut classes, glyph::SORT_ASCENDING, direction == Some(true));
+        set_state_class(
+            &mut classes,
+            glyph::SORT_DESCENDING,
+            direction == Some(false),
+        );
     }
 }
 
@@ -2623,6 +2616,8 @@ mod tests {
         use crate::ui_table::{TableRow, TableRowCells, TableWidgetPlugin};
         use crate::ui_test::interact::{self, InteractionTest, centre_of, centre_of_entity};
         use crate::ui_test::{find_by_name, settle};
+        use bevy_flair::style::components::ClassList;
+        use sl_viewer_ui_core::glyph;
         use sl_viewer_ui_core::scrollbar::SCROLLBAR_THICKNESS;
         use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems};
         use sl_viewer_ui_core::virtual_list::{
@@ -2717,10 +2712,22 @@ mod tests {
             state(app)?.sort().primary()
         }
 
-        /// The glyph the named column's sort arrow is showing.
-        fn arrow(app: &mut App, column: usize) -> Option<String> {
-            let entity = find_by_name(app, &format!("test:table-header-arrow:{column}"))?;
-            app.world().get::<Text>(entity).map(|text| text.0.clone())
+        /// The direction the named column's sort arrow says — the state class
+        /// on its host, `None` for neither. The mark itself is the skin's.
+        fn arrow(app: &mut App, column: usize) -> Result<Option<bool>, TestError> {
+            let entity = find_by_name(app, &format!("test:table-header-arrow:{column}"))
+                .ok_or("the sort arrow did not spawn")?;
+            let classes = app
+                .world()
+                .get::<ClassList>(entity)
+                .ok_or("the sort arrow has no class list")?;
+            Ok(if classes.contains(glyph::SORT_ASCENDING) {
+                Some(true)
+            } else if classes.contains(glyph::SORT_DESCENDING) {
+                Some(false)
+            } else {
+                None
+            })
         }
 
         /// A header click sorts by that column, and clicking it again flips the
@@ -2741,13 +2748,10 @@ mod tests {
                 Some((1, true)),
                 "a fresh column is promoted ascending"
             );
+            assert_eq!(arrow(&mut app, 1)?, Some(true));
             assert_eq!(
-                arrow(&mut app, 1),
-                Some(super::super::SORT_ASCENDING_GLYPH.to_owned())
-            );
-            assert_eq!(
-                arrow(&mut app, 0),
-                Some(String::new()),
+                arrow(&mut app, 0)?,
+                None,
                 "the demoted column drops its arrow"
             );
 
@@ -2758,10 +2762,7 @@ mod tests {
                 Some((1, false)),
                 "re-clicking the front column flips it"
             );
-            assert_eq!(
-                arrow(&mut app, 1),
-                Some(super::super::SORT_DESCENDING_GLYPH.to_owned())
-            );
+            assert_eq!(arrow(&mut app, 1)?, Some(false));
             Ok(())
         }
 

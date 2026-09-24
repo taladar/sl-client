@@ -79,6 +79,7 @@ use crate::ui_combo::{
 };
 use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
+use sl_viewer_ui_core::glyph;
 
 /// The Fluent key of the *Region default* sentinel (`QP_WL_Region_Default`).
 pub const KEY_REGION_DEFAULT: &str = "quick-prefs-env-region-default";
@@ -115,11 +116,6 @@ const LEGACY_SKIES: [(FixedSky, &str); 4] = [
     (FixedSky::Sunset, "quick-prefs-time-sunset"),
     (FixedSky::Midnight, "quick-prefs-time-midnight"),
 ];
-
-/// The prev / next buttons' glyphs.
-const PREV_GLYPH: &str = "\u{2039}";
-/// The next button's glyph.
-const NEXT_GLYPH: &str = "\u{203a}";
 
 /// The combos' and buttons' font size, in logical pixels.
 const FONT: f32 = 13.0;
@@ -438,7 +434,12 @@ fn spawn_step_button(
         commands,
         parent,
         ButtonSpec::bordered(
-            UiLabel::literal(if forward { NEXT_GLYPH } else { PREV_GLYPH }),
+            // The skin's step marks, which mirror under right-to-left.
+            UiLabel::Glyph(if forward {
+                glyph::NEXT
+            } else {
+                glyph::PREVIOUS
+            }),
             format!("{element}:{side}"),
         )
         .kind(ButtonKind::Headless)

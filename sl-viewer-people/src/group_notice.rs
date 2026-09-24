@@ -65,7 +65,7 @@ use crate::notifications::{
     NotificationId, NotificationKind, NotificationManager, NotificationPriority,
 };
 use crate::skin::BUTTON_CLASS;
-use crate::skin::text_role;
+use crate::skin::{role_class, text_role};
 use crate::skin_palette::SkinPalette;
 use crate::slt;
 use crate::social::GroupsModel;
@@ -74,6 +74,7 @@ use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use crate::world_api::ui_texture::{PendingUiTexture, UiTexturePlugin};
+use sl_viewer_ui_core::glyph;
 
 /// The catalogue-template sentinel a group-notice toast reports as (it is not a
 /// real [`crate::notifications::NOTIFICATIONS`] entry — the card is bespoke — but
@@ -112,10 +113,6 @@ const CARD_CLASS: &str = "sk-toast";
 
 /// The skin class the body / title text wears (`.sk-toast-text`).
 const TEXT_CLASS: &str = "sk-toast-text";
-
-/// The close-button glyph (a multiplication sign), matching the reference toast's
-/// close affordance.
-const CLOSE_GLYPH: &str = "\u{00d7}";
 
 /// The placeholder glyph for a group with no insignia, and the generic
 /// attachment glyph fallback.
@@ -795,9 +792,13 @@ fn spawn_close_button(commands: &mut Commands, card: Entity) -> Entity {
             ChildOf(close_row),
         ))
         .with_child((
-            Text::new(CLOSE_GLYPH),
-            UiFont::Sans.at(FONT_SIZE),
-            text_role(TEXT_COLOR),
+            // The skin's `glyph::DISMISS` mark.
+            glyph::glyph_host(
+                glyph::DISMISS,
+                UiFont::Sans.at(FONT_SIZE),
+                role_class(TEXT_COLOR),
+            ),
+            TextColor(TEXT_COLOR),
         ))
         .id()
 }

@@ -1,0 +1,225 @@
+/*
+ * glyph-scratch.css — a TEST-ONLY skin that redraws EVERY glyph slot
+ * (viewer-skin-glyphs-from-content).
+ *
+ * It answers the task's "done when": can a skin change every mark in the
+ * chrome — tick, arrows, mute, reload — by editing CSS alone? Each slot, in
+ * each of its states, gets a mark no shipped skin would draw ("s00", "s01",
+ * …), numbered in the order of `GLYPH_CASES` in
+ * `skin_palette_resolves::every_glyph_slot_takes_its_mark_from_the_skin`.
+ * A slot the Rust side still drew itself would show its old character there,
+ * and a state that did not reach the selector would show its resting number.
+ *
+ * The base goes into a cascade LAYER, so these unlayered rules beat the
+ * shipped marks whatever their specificity — which is why every state is
+ * restated here and not only the resting mark.
+ */
+@import "embedded://sl_viewer_ui_core/skins/fallback.css" layer(fallback);
+
+.sk-glyph-close::before {
+  content: "s00";
+}
+
+.sk-glyph-dismiss::before {
+  content: "s01";
+}
+
+.sk-glyph-minimize::before {
+  content: "s02";
+}
+
+.sk-glyph-minimize.sk-minimized::before {
+  content: "s03";
+}
+
+.sk-glyph-dock::before {
+  content: "s04";
+}
+
+.sk-glyph-dock.sk-docked::before {
+  content: "s05";
+}
+
+.sk-glyph-resize::before {
+  content: "s06";
+}
+
+.sk-glyph-drop-down::before {
+  content: "s07";
+}
+
+.sk-glyph-search::before {
+  content: "s08";
+}
+
+.sk-glyph-clear::before {
+  content: "s09";
+}
+
+.sk-glyph-menu-check::before {
+  content: "s10";
+}
+
+.sk-menu-item:checked .sk-glyph-menu-check::before {
+  content: "s11";
+}
+
+.sk-glyph-submenu::before {
+  content: "s12";
+}
+
+.sk-glyph-sort::before {
+  content: "s13";
+}
+
+.sk-glyph-sort.sk-sort-ascending::before {
+  content: "s14";
+}
+
+.sk-glyph-sort.sk-sort-descending::before {
+  content: "s15";
+}
+
+.sk-glyph-disclosure::before {
+  content: "s16";
+}
+
+.sk-glyph-disclosure.sk-expanded::before {
+  content: "s17";
+}
+
+.sk-glyph-presence::before {
+  content: "s18";
+}
+
+.sk-glyph-presence.sk-presence-online::before {
+  content: "s19";
+}
+
+.sk-glyph-position::before {
+  content: "s20";
+}
+
+.sk-glyph-position.sk-precise::before {
+  content: "s21";
+}
+
+.sk-glyph-current::before {
+  content: "s22";
+}
+
+.sk-glyph-current.sk-current::before {
+  content: "s23";
+}
+
+.sk-glyph-yes::before {
+  content: "s24";
+}
+
+.sk-glyph-changed::before {
+  content: "s25";
+}
+
+.sk-glyph-changed.sk-changed::before {
+  content: "s26";
+}
+
+.sk-glyph-bullet::before {
+  content: "s27";
+}
+
+.sk-glyph-back::before {
+  content: "s28";
+}
+
+.sk-glyph-forward::before {
+  content: "s29";
+}
+
+.sk-glyph-previous::before {
+  content: "s30";
+}
+
+.sk-glyph-next::before {
+  content: "s31";
+}
+
+.sk-glyph-up::before {
+  content: "s32";
+}
+
+.sk-glyph-expand-up::before {
+  content: "s33";
+}
+
+.sk-glyph-cycle::after {
+  content: "s34";
+}
+
+.sk-glyph-home::before {
+  content: "s35";
+}
+
+.sk-glyph-external::before {
+  content: "s36";
+}
+
+.sk-glyph-secure::before {
+  content: "s37";
+}
+
+.sk-glyph-reload::before {
+  content: "s38";
+}
+
+.sk-glyph-reload.sk-loading::before {
+  content: "s39";
+}
+
+.sk-glyph-play-pause::before {
+  content: "s40";
+}
+
+.sk-glyph-play-pause.sk-playing::before {
+  content: "s41";
+}
+
+.sk-glyph-play-stop::before {
+  content: "s42";
+}
+
+.sk-glyph-play-stop.sk-playing::before {
+  content: "s43";
+}
+
+.sk-glyph-music::before {
+  content: "s44";
+}
+
+.sk-glyph-zoom::before {
+  content: "s45";
+}
+
+.sk-glyph-zoom.sk-zoomed::before {
+  content: "s46";
+}
+
+.sk-glyph-speaker::before {
+  content: "s47";
+}
+
+.sk-glyph-speaker.sk-muted::before {
+  content: "s48";
+}
+
+.sk-glyph-add::before {
+  content: "s49";
+}
+
+.sk-glyph-settings::before {
+  content: "s50";
+}
+
+.sk-glyph-emoji::before {
+  content: "s51";
+}

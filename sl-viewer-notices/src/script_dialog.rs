@@ -62,8 +62,9 @@ use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
+use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::skin::BUTTON_CLASS;
-use sl_viewer_ui_core::skin::text_role;
+use sl_viewer_ui_core::skin::{role_class, text_role};
 
 /// The catalogue-template sentinel a script-dialog toast reports as (it is not a
 /// real [`crate::notifications::NOTIFICATIONS`] entry — the card is bespoke — but
@@ -83,9 +84,6 @@ const CARD_CLASS: &str = "sk-toast";
 
 /// The skin class the title / body text wears (`.sk-toast-text`).
 const TEXT_CLASS: &str = "sk-toast-text";
-
-/// The close-button glyph (a multiplication sign), matching the reference toast.
-const CLOSE_GLYPH: &str = "\u{00d7}";
 
 /// The most script buttons a dialog can carry (`SCRIPT_DIALOG_MAX_BUTTONS`); a
 /// simulator never sends more, but a malformed message is clamped so the grid
@@ -664,9 +662,13 @@ fn spawn_close_button(commands: &mut Commands, card: Entity) -> Entity {
             ChildOf(close_row),
         ))
         .with_child((
-            Text::new(CLOSE_GLYPH),
-            UiFont::Sans.at(FONT_SIZE),
-            text_role(TEXT_COLOR),
+            // The skin's `glyph::DISMISS` mark.
+            glyph::glyph_host(
+                glyph::DISMISS,
+                UiFont::Sans.at(FONT_SIZE),
+                role_class(TEXT_COLOR),
+            ),
+            TextColor(TEXT_COLOR),
         ))
         .id()
 }

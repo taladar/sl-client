@@ -51,7 +51,7 @@ use bevy::ui::Checked;
 use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use bevy::text::EditableText;
 use bevy::ui_widgets::{Activate, Button};
-use bevy_flair::style::components::ClassList;
+use bevy_flair::style::components::{ClassList, PseudoElementsSupport};
 use sl_client_bevy::{
     Command, Diagnostic, SlCommand, SlCommandFailed, SlDiagnostic, SlEvent, SlSessionEvent,
 };
@@ -73,7 +73,8 @@ use crate::ui::{LogicalInset, LogicalRect, UiRoot, UiScaffoldSystems, column, ro
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
-use sl_viewer_ui_core::skin::BUTTON_CLASS;
+use sl_viewer_ui_core::glyph;
+use sl_viewer_ui_core::skin::{BUTTON_CLASS, TEXT_CLASS as SK_TEXT_CLASS, role_class};
 
 /// The element id the gallery specimen and its inert actions report under.
 const NOTIFICATION_ELEMENT: &str = "notification-toast";
@@ -156,14 +157,6 @@ const TEXT_CLASS: &str = "sk-toast-text";
 /// The CSS class on a toast's title header, so a skin can weight it against
 /// the body (falls back to the plain text colour unstyled).
 const TITLE_CLASS: &str = "sk-toast-title";
-
-/// The checkbox glyph shown when the "don't show me this again" box is ticked
-/// The glyph on a toast's close button (`×`).
-const CLOSE_GLYPH: &str = "\u{00d7}";
-
-/// The glyph on the overflow control's cycle button (`▸`), which rotates the
-/// hidden queue into view.
-const CYCLE_GLYPH: &str = "\u{25b8}";
 
 /// The most toasts shown at once; the rest queue (hidden and paused) and are
 /// reached by dismissing a visible one or cycling the overflow control — so a
@@ -585,6 +578,10 @@ fn spawn_notification_channel(mut commands: Commands, root: Res<UiRoot>) {
     // The overflow control: a "N more ▸" cycle button that hugs the trailing edge
     // below the visible stack, hidden until there are queued toasts. Its Text and
     // display are driven by [`apply_toast_overflow`]; a click cycles the queue.
+    //
+    // The `▸` is not in that text: it is the skin's `glyph::CYCLE` mark, drawn
+    // as the control's `::after` so it trails the count. The text class is what
+    // colours the label, and so the mark that inherits from it.
     let overflow = commands
         .spawn((
             Button,
@@ -598,11 +595,12 @@ fn spawn_notification_channel(mut commands: Commands, root: Res<UiRoot>) {
                 ..default()
             },
             Text::default(),
+            PseudoElementsSupport,
             UiFont::Sans.at(TOAST_FONT_SIZE),
             TextColor(TEXT_COLOR),
             BackgroundColor(CARD_BACKGROUND),
             BorderColor::all(BUTTON_BORDER),
-            ClassList::new_with_classes([BUTTON_CLASS]),
+            ClassList::new_with_classes([BUTTON_CLASS, SK_TEXT_CLASS, glyph::CYCLE]),
             Name::new("notification-overflow"),
             ChildOf(channel),
         ))
@@ -733,8 +731,12 @@ fn build_toast_card(commands: &mut Commands, content: &ToastContent) -> ToastCar
                 ChildOf(close_row),
             ))
             .with_child((
-                Text::new(CLOSE_GLYPH),
-                UiFont::Sans.at(content.font_size),
+                // The skin's `glyph::DISMISS` mark.
+                glyph::glyph_host(
+                    glyph::DISMISS,
+                    UiFont::Sans.at(content.font_size),
+                    role_class(TEXT_COLOR),
+                ),
                 TextColor(TEXT_COLOR),
             ))
             .id();
@@ -1822,12 +1824,9 @@ fn update_overflow_control(
         && let Ok(mut text) = control_text.get_mut(channel.overflow)
     {
         let count = i64::try_from(hidden).unwrap_or(i64::MAX);
-        let label = format!(
-            "{} {CYCLE_GLYPH}",
-            translator.format(
-                "notification-overflow",
-                &crate::i18n::TransArgs::new().int("count", count),
-            )
+        let label = translator.format(
+            "notification-overflow",
+            &crate::i18n::TransArgs::new().int("count", count),
         );
         if text.0 != label {
             text.0 = label;

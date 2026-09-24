@@ -54,7 +54,10 @@ use bevy::text::EditableText;
 use bevy_flair::style::components::ClassList;
 
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
-use sl_viewer_ui_core::skin::{FIELD_PLACEHOLDER_CLASS, FOCUS_WITHIN_CLASS, set_state_class};
+use sl_viewer_ui_core::glyph;
+use sl_viewer_ui_core::skin::{
+    FIELD_PLACEHOLDER_CLASS, FOCUS_WITHIN_CLASS, TEXT_CLASS, set_state_class,
+};
 use sl_viewer_ui_core::skin_palette::{SkinColors, SkinPalette};
 use sl_viewer_ui_core::ui::row;
 use sl_viewer_ui_core::ui_element::TextMayClip;
@@ -86,15 +89,8 @@ const BOX_PADDING_Y: f32 = 3.0;
 /// The clear button's diameter, in logical pixels.
 const CLEAR_SIZE: f32 = 16.0;
 
-/// The `×` glyph the clear button draws (U+00D7).
-const CLEAR_GLYPH: &str = "\u{00d7}";
-
 /// The clear button's glyph size, in logical pixels.
 const CLEAR_FONT: f32 = 12.0;
-
-/// The leading search glyph (🔍, U+1F50D), shown when
-/// [`SearchFieldSpec::search_glyph`] is set.
-const SEARCH_GLYPH: &str = "\u{1f50d}";
 
 /// The inset of the field's text from its box, in logical pixels — matches
 /// [`crate::ui_text_input`]'s field padding, so the placeholder overlay lands
@@ -223,20 +219,22 @@ pub fn spawn_search_field(
 
     if spec.search_glyph {
         commands.spawn((
-            Text::new(SEARCH_GLYPH),
-            UiFont::Sans.at(spec.font_size),
+            // The magnifier is the skin's `glyph::SEARCH` mark.
+            glyph::glyph_host(
+                glyph::SEARCH,
+                UiFont::Sans.at(spec.font_size),
+                [FIELD_PLACEHOLDER_CLASS],
+            ),
             // A prompt on the field's own face, so it takes the field family's
             // tentative colour rather than the muted chrome one. The `TextColor`
             // is the value that class paints in the flat skins — what the
             // headless harnesses (no `FlairPlugin`, so no class resolves) and
             // the frame before the sheet loads measure.
             TextColor(fallback.text_muted),
-            ClassList::new_with_classes([FIELD_PLACEHOLDER_CLASS]),
             Node {
                 flex_shrink: 0.0,
                 ..default()
             },
-            Pickable::IGNORE,
             Name::new(format!("{}:search-glyph", spec.element)),
             ChildOf(container),
         ));
@@ -360,10 +358,9 @@ fn spawn_clear_button(
         ))
         .id();
     commands.spawn((
-        Text::new(CLEAR_GLYPH),
-        UiFont::Sans.at(CLEAR_FONT),
+        // The `×` is the skin's `glyph::CLEAR` mark, in the chrome text colour.
+        glyph::glyph_host(glyph::CLEAR, UiFont::Sans.at(CLEAR_FONT), [TEXT_CLASS]),
         TextColor(SkinPalette::default().text_primary),
-        Pickable::IGNORE,
         Name::new(format!("{element}:search-clear-glyph")),
         ChildOf(clear),
     ));

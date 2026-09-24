@@ -597,10 +597,10 @@
  * accent, one the friend grants you as the same hue dimmed — informational,
  * not interactive — and a withheld one stays dim.
  *
- * The ticked / empty *icon* is still swapped in Rust: CSS cannot change which
- * image a node shows, and a skin carrying its own icon set is
- * `viewer-skin-icon-set`. So the distinction survives a skin that recolours
- * badly, the way the radio's ring does. */
+ * The ticked / empty *icon* is still swapped in Rust. A skin could choose it
+ * with `-bevy-image`, as the parcel icons show, but a skin carrying its own
+ * icon set is `viewer-skin-icon-set`'s. So the distinction survives a skin
+ * that recolours badly, the way the radio's ring does. */
 .sk-rights-cell {
   -bevy-image-color: var(--text-disabled);
 }
@@ -1743,4 +1743,281 @@
 .sk-table-row.sk-active .sk-disabled-text,
 .sk-list-row.sk-active .sk-disabled-text {
   color: var(--field-text-disabled);
+}
+
+/* THE GLYPH SLOTS (viewer-skin-glyphs-from-content).
+ *
+ * Every decorative mark in the chrome is a SLOT: an empty text host carrying
+ * `.sk-glyph` and one `.sk-glyph-<slot>` class naming what the mark means, and
+ * the character is this file's. A skin that wants a heavier close box, a
+ * different disclosure triangle or a mute that is a word writes one `content`
+ * rule; no Rust names a character. The vocabulary lives in
+ * `sl-viewer-ui-core/src/glyph.rs`.
+ *
+ * A mark that follows a STATE is the same slot with a state class beside it on
+ * the host (`.sk-glyph-reload.sk-loading`), or a pseudo-class on an ancestor
+ * the engine already tracks (`.sk-menu-item:checked`). The system that used to
+ * choose a string now only says which state is true.
+ *
+ * COLOUR IS THE HOST'S. bevy_flair copies the host's colour into the
+ * pseudo-element once, at spawn; `inherit` is what makes the mark follow the
+ * host after that — a refused button's caption greys, and a glyph that is its
+ * caption greys with it. So no slot below sets a colour.
+ *
+ * THE BASELINE COMES FIRST AND IS LOAD-BEARING, for the reason the checkbox
+ * tick's is: bevy_flair never reverts a property whose rule stopped matching,
+ * so a state-only `content` would stick. Every stateful slot therefore states
+ * its resting mark (possibly empty) as well as its lit one. The baseline and a
+ * slot rule are equally specific, so the slot rules must stay below it. */
+.sk-glyph::before {
+  content: "";
+  color: inherit;
+}
+
+/* Window chrome. */
+.sk-glyph-close::before {
+  content: "\2715";
+}
+
+.sk-glyph-dismiss::before {
+  content: "\d7";
+}
+
+.sk-glyph-minimize::before {
+  content: "\2014";
+}
+
+.sk-glyph-minimize.sk-minimized::before {
+  content: "\25ad";
+}
+
+.sk-glyph-dock::before {
+  content: "\25a4";
+}
+
+.sk-glyph-dock.sk-docked::before {
+  content: "\25a5";
+}
+
+.sk-glyph-resize::before {
+  content: "\25e2";
+}
+
+/* Fields and lists. */
+.sk-glyph-drop-down::before {
+  content: "\25be";
+}
+
+.sk-glyph-search::before {
+  content: "\1f50d";
+}
+
+.sk-glyph-clear::before {
+  content: "\d7";
+}
+
+.sk-glyph-menu-check::before {
+  content: "";
+}
+
+.sk-menu-item:checked .sk-glyph-menu-check::before {
+  content: "\2713";
+}
+
+.sk-glyph-submenu::before {
+  content: "\25b6";
+}
+
+.sk-glyph-sort::before {
+  content: "";
+}
+
+.sk-glyph-sort.sk-sort-ascending::before {
+  content: "\25b2";
+}
+
+.sk-glyph-sort.sk-sort-descending::before {
+  content: "\25bc";
+}
+
+.sk-glyph-disclosure::before {
+  content: "\25b8";
+}
+
+.sk-glyph-disclosure.sk-expanded::before {
+  content: "\25be";
+}
+
+/* Under right-to-left a closed row's triangle points toward the inline end,
+ * which is now the left. */
+:root[dir="rtl"] .sk-glyph-disclosure::before {
+  content: "\25c2";
+}
+
+:root[dir="rtl"] .sk-glyph-disclosure.sk-expanded::before {
+  content: "\25be";
+}
+
+.sk-glyph-presence::before {
+  content: "\25cb";
+}
+
+.sk-glyph-presence.sk-presence-online::before {
+  content: "\25cf";
+}
+
+.sk-glyph-position::before {
+  content: "\25cb";
+}
+
+.sk-glyph-position.sk-precise::before {
+  content: "\25cf";
+}
+
+.sk-glyph-current::before {
+  content: "";
+}
+
+.sk-glyph-current.sk-current::before {
+  content: "\25cf";
+}
+
+.sk-glyph-yes::before {
+  content: "\2714";
+}
+
+.sk-glyph-changed::before {
+  content: "";
+}
+
+.sk-glyph-changed.sk-changed::before {
+  content: "*";
+}
+
+/* A bullet and the no-break space that holds it to its line. */
+.sk-glyph-bullet::before {
+  content: "\2022\a0";
+}
+
+/* Stepping. BACK / FORWARD and PREVIOUS / NEXT are logical, so they mirror
+ * under right-to-left, where the layout that carries them already has. */
+.sk-glyph-back::before {
+  content: "\25c0";
+}
+
+.sk-glyph-forward::before {
+  content: "\25b6";
+}
+
+.sk-glyph-previous::before {
+  content: "\2039";
+}
+
+.sk-glyph-next::before {
+  content: "\203a";
+}
+
+:root[dir="rtl"] .sk-glyph-back::before {
+  content: "\25b6";
+}
+
+:root[dir="rtl"] .sk-glyph-forward::before {
+  content: "\25c0";
+}
+
+:root[dir="rtl"] .sk-glyph-previous::before {
+  content: "\203a";
+}
+
+:root[dir="rtl"] .sk-glyph-next::before {
+  content: "\2039";
+}
+
+.sk-glyph-up::before {
+  content: "\2b06";
+}
+
+.sk-glyph-expand-up::before {
+  content: "\25b2";
+}
+
+/* The one slot drawn AFTER its host's own text rather than into an empty host:
+ * the toast queue's "N more ▸". A pseudo-element's span always follows the
+ * host's text in bevy, but `::after` says so. */
+.sk-glyph-cycle::after {
+  content: " \25b8";
+  color: inherit;
+}
+
+/* Media and the browser. Play and pause are not mirrored: a transport's
+ * symbols mean the same thing in every script. */
+.sk-glyph-home::before {
+  content: "\2302";
+}
+
+.sk-glyph-external::before {
+  content: "\2197";
+}
+
+.sk-glyph-secure::before {
+  content: "\1f512";
+}
+
+.sk-glyph-reload::before {
+  content: "\27f3";
+}
+
+.sk-glyph-reload.sk-loading::before {
+  content: "\2715";
+}
+
+/* Transport glyphs are chosen for the bundled faces' coverage: U+23F5 / U+23F8
+ * are in none of them and render as tofu, which no headless test can see. */
+.sk-glyph-play-pause::before {
+  content: "\25b6";
+}
+
+.sk-glyph-play-pause.sk-playing::before {
+  content: "\275a\275a";
+}
+
+.sk-glyph-play-stop::before {
+  content: "\25b6";
+}
+
+.sk-glyph-play-stop.sk-playing::before {
+  content: "\25a0";
+}
+
+.sk-glyph-music::before {
+  content: "\266b";
+}
+
+.sk-glyph-zoom::before {
+  content: "\2295";
+}
+
+.sk-glyph-zoom.sk-zoomed::before {
+  content: "\2296";
+}
+
+.sk-glyph-speaker::before {
+  content: "\1f50a";
+}
+
+.sk-glyph-speaker.sk-muted::before {
+  content: "\1f507";
+}
+
+/* Actions. */
+.sk-glyph-add::before {
+  content: "\271a";
+}
+
+.sk-glyph-settings::before {
+  content: "\2699";
+}
+
+.sk-glyph-emoji::before {
+  content: "\1f642";
 }

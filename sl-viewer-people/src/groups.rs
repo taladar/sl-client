@@ -68,6 +68,7 @@ use crate::virtual_list::{
     VirtualList, VirtualRow, VirtualViewport, amend_row_node, layout_virtual_lists,
     spawn_virtual_scrollbar,
 };
+use sl_viewer_ui_core::glyph;
 
 /// A group-list row's uniform height, in logical pixels — matched to the friends
 /// list beside it so the whole pane reads as one surface.
@@ -98,9 +99,6 @@ const HEADER_BACKGROUND: Color = Color::srgb(0.14, 0.17, 0.22);
 
 /// The table header / count text colour — dim, so it reads as chrome.
 const HEADER_TEXT_COLOR: Color = SkinPalette::FALLBACK.text_muted;
-
-/// The filled marker glyph shown in the Active column for the active group.
-const ACTIVE_GLYPH: &str = "\u{25CF}";
 
 /// The longest gap between two clicks on the same row still counted as a
 /// double-click, in seconds — a double-click opens the group's IM, like the IM
@@ -968,12 +966,14 @@ fn populate_group_rows(
             .id();
         let marker = commands
             .spawn((
-                Text::new(String::new()),
-                UiFont::Sans.at(ROW_FONT_SIZE),
-                // Always the accent: the marker is either the filled glyph or
-                // nothing at all, so it has no second colour to take.
-                ClassList::new_with_classes([ACTIVE_TEXT_CLASS]),
-                Pickable::IGNORE,
+                // The skin's `glyph::CURRENT_MARK`, lit by `glyph::CURRENT`.
+                // Always the accent: the marker is either the mark or nothing
+                // at all, so it has no second colour to take.
+                glyph::glyph_host(
+                    glyph::CURRENT_MARK,
+                    UiFont::Sans.at(ROW_FONT_SIZE),
+                    [ACTIVE_TEXT_CLASS],
+                ),
                 ChildOf(active_cell),
             ))
             .id();
@@ -1040,9 +1040,9 @@ fn bind_group_rows(
             ACTIVE_TEXT_CLASS,
             group_row.active,
         );
-        // The active marker — the filled glyph for the active group, else empty.
-        if let Ok(mut text) = texts.get_mut(parts.marker) {
-            set_text(&mut text, if group_row.active { ACTIVE_GLYPH } else { "" });
+        // The active marker — lit for the active group; the mark is the skin's.
+        if let Ok(mut marker) = classes.get_mut(parts.marker) {
+            set_state_class(&mut marker, glyph::CURRENT, group_row.active);
         }
         let is_selected = selected.0 == Some(group_row.group);
         if let Ok(mut classes) = classes.get_mut(row_entity) {

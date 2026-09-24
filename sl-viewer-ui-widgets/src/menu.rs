@@ -101,6 +101,7 @@ use bevy::ui_widgets::popover::{Popover, PopoverAlign, PopoverPlacement, Popover
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
 
+use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::i18n::{Translated, Translator};
 use sl_viewer_ui_core::skin::{HIGHLIGHTED_CLASS, set_state_class};
 use sl_viewer_ui_core::skin_palette::SkinPalette;
@@ -571,12 +572,6 @@ const MENU_MIN_WIDTH: f32 = 140.0;
 /// The font size a drop-down entry / bar button sets its text at, in logical px.
 const ENTRY_FONT: f32 = 15.0;
 
-/// The check-mark glyph. The reference uses U+2714 HEAVY CHECK MARK; we use the
-/// lighter U+2713 CHECK MARK, drawn a couple of points smaller than the label
-/// ([`CHECK_FONT`]), which reads as a mark against the entry rather than a
-/// competing glyph.
-const CHECK_GLYPH: &str = "\u{2713}";
-
 /// The font size the check mark is drawn at, in logical pixels — smaller than
 /// the label so the mark sits quietly in its gutter.
 const CHECK_FONT: f32 = ENTRY_FONT - 3.0;
@@ -584,11 +579,6 @@ const CHECK_FONT: f32 = ENTRY_FONT - 3.0;
 /// The gap between the check gutter and the entry's label, in logical pixels —
 /// logical, so it stays on the label side of the gutter under RTL.
 const GUTTER_LABEL_GAP: f32 = 6.0;
-
-/// The submenu-arrow glyph (U+25B6), the reference's `BRANCH_SUFFIX`. One fixed
-/// glyph, not mirrored: it means "there is more, toward the inline end", and the
-/// popup it points at is placed there too, so under RTL both move together.
-const SUBMENU_ARROW: &str = "\u{25B6}";
 
 /// The z-index a menu popup renders at — above every floater and panel.
 const MENU_Z_INDEX: i32 = 10_000;
@@ -1642,7 +1632,7 @@ fn spawn_command_line(
     // closes the stack.
     commands.entity(row).observe(emit_menu_action);
     attach_row_press(commands, row);
-    spawn_gutter(commands, row, if checked { CHECK_GLYPH } else { "" });
+    spawn_gutter(commands, row);
     spawn_entry_label(
         commands,
         row,
@@ -1720,7 +1710,7 @@ fn spawn_dynamic_line(
         .observe(emit_dynamic_pick)
         .id();
     attach_row_press(commands, row);
-    spawn_gutter(commands, row, "");
+    spawn_gutter(commands, row);
     let label_entity = spawn_entry_label(commands, row, label, None);
     commands.entity(label_entity).insert(MenuDynamicLabel);
 }
@@ -1763,13 +1753,18 @@ fn spawn_submenu_line(
     if let Some((key, _)) = draw.jump {
         commands.entity(row).insert(MenuMnemonic { key });
     }
-    spawn_gutter(commands, row, "");
+    spawn_gutter(commands, row);
     spawn_entry_label(commands, row, draw.label, draw.jump.map(|(_, off)| off));
     commands.spawn((
-        Text::new(SUBMENU_ARROW),
-        UiFont::Sans.at(ENTRY_FONT),
-        ClassList::new_with_classes([ENTRY_ACCESSORY_CLASS]),
-        Pickable::IGNORE,
+        // The skin's `glyph::SUBMENU` mark — the reference's `BRANCH_SUFFIX`,
+        // U+25B6. Not mirrored: it means "there is more, toward the inline
+        // end", and the popup it points at is placed there too, so under RTL
+        // both move together.
+        glyph::glyph_host(
+            glyph::SUBMENU,
+            UiFont::Sans.at(ENTRY_FONT),
+            [ENTRY_ACCESSORY_CLASS],
+        ),
         Name::new("menu-submenu-arrow"),
         ChildOf(row),
     ));
@@ -1789,11 +1784,18 @@ fn entry_row_node() -> Node {
     }
 }
 
-/// Spawn an entry's leading check gutter, holding `glyph` (empty for none).
+/// Spawn an entry's leading check gutter.
+///
+/// It names no mark: a checked row carries [`Checked`], and
+/// `.sk-menu-item:checked .sk-glyph-menu-check::before` is the skin's tick —
+/// the reference's U+2714, or the lighter U+2713 the shipped skins draw a
+/// couple of points smaller than the label ([`CHECK_FONT`]), which reads as a
+/// mark against the entry rather than a competing glyph. An unchecked row and a
+/// sub-menu row match only the empty resting rule.
 ///
 /// `Pickable::IGNORE`, like every entry child, so the pointer's target is the
 /// **row**, not this child.
-fn spawn_gutter(commands: &mut Commands, row: Entity, glyph: &str) {
+fn spawn_gutter(commands: &mut Commands, row: Entity) {
     commands.spawn((
         Node {
             width: Val::Px(CHECK_GUTTER_WIDTH),
@@ -1806,10 +1808,11 @@ fn spawn_gutter(commands: &mut Commands, row: Entity, glyph: &str) {
             inline_end: Val::Px(GUTTER_LABEL_GAP),
             ..LogicalRect::ZERO
         }),
-        Text::new(glyph),
-        UiFont::Sans.at(CHECK_FONT),
-        ClassList::new_with_classes([ENTRY_LABEL_CLASS]),
-        Pickable::IGNORE,
+        glyph::glyph_host(
+            glyph::MENU_CHECK,
+            UiFont::Sans.at(CHECK_FONT),
+            [ENTRY_LABEL_CLASS],
+        ),
         Name::new("menu-item-check"),
         ChildOf(row),
     ));
@@ -2885,17 +2888,18 @@ pub const TOP_MENU_ELEMENT: &str = "top-menu-bar";
 #[cfg(test)]
 mod tests {
     use super::{
-        CHECK_GLYPH, DropDirection, FIXTURE_AVATAR, FIXTURE_MENU_BAR, FIXTURE_WORLD, MenuBranch,
-        MenuCommand, MenuConditions, MenuDef, MenuDynamicPick, MenuDynamicSlots, MenuEntryAction,
-        MenuHost, MenuItemDef, MenuKeyboard, MenuMnemonic, MenuSource, MnemonicSpan, SUBMENU_ARROW,
-        SetMenuDynamicLabels, Translator, action_paths, assign_jump_keys, build_menu_popup,
-        spawn_menu_bar_specimen,
+        DropDirection, FIXTURE_AVATAR, FIXTURE_MENU_BAR, FIXTURE_WORLD, MenuBranch, MenuCommand,
+        MenuConditions, MenuDef, MenuDynamicPick, MenuDynamicSlots, MenuEntryAction, MenuHost,
+        MenuItemDef, MenuKeyboard, MenuMnemonic, MenuSource, MnemonicSpan, SetMenuDynamicLabels,
+        Translator, action_paths, assign_jump_keys, build_menu_popup, spawn_menu_bar_specimen,
     };
     use bevy::input_focus::{FocusCause, InputFocus};
     use bevy::picking::hover::HoverMap;
     use bevy::prelude::*;
     use bevy::ui_widgets::Activate;
+    use bevy_flair::style::components::ClassList;
     use pretty_assertions::{assert_eq, assert_ne};
+    use sl_viewer_ui_core::glyph;
 
     use crate::ui_test::{
         LayoutTest, TestError, activate, drain_actions, enable_action_recording, find_by_name,
@@ -3268,11 +3272,19 @@ mod tests {
             "five commands: two separators are not commands"
         );
 
+        // The tick is the skin's `content`, so what the widget owes it is a
+        // check gutter under a `Checked` row — exactly one, the held item's.
         let checks = app
             .world_mut()
-            .query::<&Text>()
+            .query::<(&ClassList, &ChildOf)>()
             .iter(app.world())
-            .filter(|text| text.0 == CHECK_GLYPH)
+            .filter(|(classes, parent)| {
+                classes.contains(glyph::MENU_CHECK)
+                    && app
+                        .world()
+                        .get::<bevy::ui::Checked>(parent.parent())
+                        .is_some()
+            })
             .count();
         assert_eq!(checks, 1, "only the held check item shows a check mark");
 
@@ -3336,9 +3348,9 @@ mod tests {
         );
         let arrows = app
             .world_mut()
-            .query::<&Text>()
+            .query::<&ClassList>()
             .iter(app.world())
-            .filter(|text| text.0 == SUBMENU_ARROW)
+            .filter(|classes| classes.contains(glyph::SUBMENU))
             .count();
         assert_eq!(arrows, 1, "the submenu row draws one branch arrow");
         Ok(())

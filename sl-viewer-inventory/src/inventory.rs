@@ -67,9 +67,10 @@ use crate::virtual_list::{
     VirtualList, VirtualRow, VirtualViewport, amend_row_node, index_to_f32, layout_virtual_lists,
     spawn_virtual_scrollbar,
 };
-use bevy_flair::style::components::ClassList;
+use bevy_flair::style::components::{ClassList, PseudoElementsSupport};
+use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::skin::{
-    ACTIVE_CLASS, FOLDER_LABEL_CLASS, LIST_ROW_CLASS, LIST_SURFACE_CLASS, TEXT_CLASS,
+    ACTIVE_CLASS, FOLDER_LABEL_CLASS, LIST_ROW_CLASS, LIST_SURFACE_CLASS, TEXT_CLASS, role_class,
     set_state_class, set_state_class_on, text_role,
 };
 use sl_viewer_ui_core::ui_ellipsis::{RevealEllipsis, spawn_ellipsis_marker};
@@ -1866,15 +1867,43 @@ enum RowArrow {
 }
 
 impl RowArrow {
-    /// The glyph for this arrow state. Empty for a leaf — the arrow sits in a
-    /// min-width column ([`ARROW_COL_WIDTH`]), so an item's blank arrow still
-    /// lines its icon up under a folder's.
-    const fn glyph(self) -> &'static str {
+    /// The glyph classes this arrow state wears beside [`glyph::GLYPH_CLASS`]:
+    /// the [`glyph::DISCLOSURE`] slot for a folder, with [`glyph::EXPANDED`]
+    /// when it is open. Which triangle each is drawn as is the skin's.
+    ///
+    /// None for a leaf, whose host then matches only the empty baseline — the
+    /// arrow sits in a min-width column ([`ARROW_COL_WIDTH`]), so an item's
+    /// blank arrow still lines its icon up under a folder's.
+    const fn classes(self) -> &'static [&'static str] {
         match self {
-            Self::Collapsed => "\u{25b8}",
-            Self::Expanded => "\u{25be}",
-            Self::Leaf => "",
+            Self::Collapsed => &[glyph::DISCLOSURE],
+            Self::Expanded => &[glyph::DISCLOSURE, glyph::EXPANDED],
+            Self::Leaf => &[],
         }
+    }
+
+    /// Put an arrow host's classes into this state, touching the list only
+    /// where it changes.
+    fn apply(self, classes: &mut Mut<'_, ClassList>) {
+        for class in [glyph::DISCLOSURE, glyph::EXPANDED] {
+            set_state_class(classes, class, self.classes().contains(&class));
+        }
+    }
+
+    /// A host for this arrow, in `font` and the chrome text role.
+    fn host(self, font: TextFont) -> impl Bundle {
+        (
+            Text::default(),
+            PseudoElementsSupport,
+            font,
+            TextColor(CHROME_COLOR),
+            ClassList::new_with_classes(
+                [glyph::GLYPH_CLASS]
+                    .into_iter()
+                    .chain(role_class(CHROME_COLOR))
+                    .chain(self.classes().iter().copied()),
+            ),
+        )
     }
 }
 
@@ -3139,9 +3168,7 @@ fn spawn_row_parts(commands: &mut Commands, row_entity: Entity) -> RowParts {
         .id();
     let arrow = commands
         .spawn((
-            Text::new(""),
-            UiFont::Mono.at(ROW_FONT_SIZE),
-            text_role(CHROME_COLOR),
+            RowArrow::Leaf.host(UiFont::Mono.at(ROW_FONT_SIZE)),
             Node {
                 min_width: Val::Px(ARROW_COL_WIDTH),
                 ..default()
@@ -3337,8 +3364,8 @@ fn bind_rows(
         if let Ok(mut indent) = nodes.get_mut(parts.indent) {
             indent.width = Val::Px(depth_indent(display.depth));
         }
-        if let Ok((mut text, _color)) = texts.get_mut(parts.arrow) {
-            set_text(&mut text, display.arrow.glyph());
+        if let Ok(mut arrow) = classes.get_mut(parts.arrow) {
+            display.arrow.apply(&mut arrow);
         }
         if let Ok((mut text, _color)) = texts.get_mut(parts.icon) {
             set_text(&mut text, display.icon);
@@ -4061,12 +4088,7 @@ fn spawn_sample_row(
     // survives the harness's font-size sweep, where a fixed column narrower than
     // a large emoji glyph would clip. The live rows (a fixed row font) keep the
     // min-width columns that align the tree.
-    commands.spawn((
-        Text::new(arrow.glyph().to_owned()),
-        cx.font(UiFont::Mono),
-        text_role(CHROME_COLOR),
-        ChildOf(row_entity),
-    ));
+    commands.spawn((arrow.host(cx.font(UiFont::Mono)), ChildOf(row_entity)));
     commands.spawn((
         Text::new(icon.to_owned()),
         cx.font(UiFont::Sans),
@@ -5410,7 +5432,7 @@ mod row_layout_tests {
     //! floater through.
 
     use super::{
-        Permissions, ROW_HEIGHT, RevealEllipsis, RowArrow, RowDecorations, RowParts,
+        Permissions, ROW_HEIGHT, RevealEllipsis, RowDecorations, RowParts,
         SUFFIX_ABBREVIATION_HYSTERESIS, SUFFIX_ABBREVIATION_WIDTH, SuffixStyle, depth_indent,
         item_icon,
     };
@@ -5497,9 +5519,6 @@ mod row_layout_tests {
                 amend_row_node(&mut commands, parts.indent, move |node| {
                     node.width = Val::Px(depth_indent(depth));
                 });
-                commands
-                    .entity(parts.arrow)
-                    .insert(Text::new(RowArrow::Leaf.glyph().to_owned()));
                 commands
                     .entity(parts.icon)
                     .insert(Text::new(item_icon(InventoryType::Wearable).to_owned()));

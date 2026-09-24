@@ -39,14 +39,15 @@
 //! are `viewer-avatar-moderation-actions`, and light up in the pie, here and
 //! the minimap at once when that shared layer lands.
 
-use crate::skin::{ACTIVE_CLASS, LIST_ROW_CLASS, text_role};
+use crate::skin::{ACTIVE_CLASS, LIST_ROW_CLASS, set_state_class, text_role};
 use crate::skin_palette::SkinPalette;
 use bevy::ecs::system::SystemParam;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::text::EditableText;
-use bevy_flair::style::components::ClassList;
+use bevy_flair::style::components::{ClassList, PseudoElementsSupport};
+use sl_viewer_ui_core::glyph;
 
 use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use sl_client_bevy::{
@@ -1625,7 +1626,12 @@ fn populate_radar_rows(
         if child_of.parent() != ui.viewport {
             continue;
         }
-        spawn_table_row(&mut commands, row_entity, ui.table, &RADAR_TABLE);
+        let cells = spawn_table_row(&mut commands, row_entity, ui.table, &RADAR_TABLE);
+        // The region column holds no text: it is the skin's `glyph::POSITION`
+        // mark, filled under `glyph::PRECISE`. `bind_radar_rows` says which.
+        if let Some(cell) = cells.cell(COL_REGION) {
+            commands.entity(cell).insert(PseudoElementsSupport);
+        }
         commands
             .entity(row_entity)
             .insert(BoundRadar(None))
@@ -1693,6 +1699,7 @@ fn bind_radar_rows(
                     set_table_cell(&mut texts, cell, "", LABEL_COLOR);
                 }
             }
+            set_position_mark(&mut texts, cells, None);
             continue;
         };
         let name_color = if data.muted {
@@ -1725,11 +1732,7 @@ fn bind_radar_rows(
         };
         let cell_values: [(usize, String, Color); 9] = [
             (COL_NAME, name_cell_text(data), name_color),
-            (
-                COL_REGION,
-                if data.coarse_only { "○" } else { "●" }.to_owned(),
-                region_color,
-            ),
+            (COL_REGION, String::new(), region_color),
             (COL_STATUS, status_cell_text(data), DIM_LABEL_COLOR),
             (COL_TITLE, data.title.clone(), LABEL_COLOR),
             (
@@ -1761,6 +1764,25 @@ fn bind_radar_rows(
                 set_table_cell(&mut texts, cell, &value, color);
             }
         }
+        set_position_mark(&mut texts, cells, Some(!data.coarse_only));
+    }
+}
+
+/// Put a row's region cell in its [`glyph::POSITION`] state: `Some(precise)`
+/// for a bound row, `None` (no mark at all) for an empty one. The cell is
+/// always a glyph host, so the mark takes the cell's role colour.
+fn set_position_mark(
+    texts: &mut Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
+    cells: &TableRowCells,
+    precise: Option<bool>,
+) {
+    let Some(cell) = cells.cell(COL_REGION) else {
+        return;
+    };
+    if let Ok((_, _, Some(mut classes))) = texts.get_mut(cell) {
+        set_state_class(&mut classes, glyph::GLYPH_CLASS, true);
+        set_state_class(&mut classes, glyph::POSITION, precise.is_some());
+        set_state_class(&mut classes, glyph::PRECISE, precise == Some(true));
     }
 }
 

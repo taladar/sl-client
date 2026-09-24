@@ -20,6 +20,7 @@ use bevy::prelude::*;
 use bevy::ui_widgets::{Activate, SliderRange, SliderStep};
 use bevy::window::PrimaryWindow;
 use bevy_flair::style::components::ClassList;
+use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, set_state_class, text_role};
 
 use sl_audio::{AudioMixer as _, Bus, BusLevel, Mixer};
@@ -142,7 +143,8 @@ const fn label_key(bus: Bus) -> &'static str {
 #[derive(Component)]
 struct VolumePanelRoot;
 
-/// The glyph text of a mute control, kept in sync with the bus's mute state.
+/// The glyph host of a mute control, whose [`glyph::MUTED`] state is kept in
+/// sync with the bus's mute setting.
 #[derive(Component, Clone, Copy)]
 struct VolumeMuteGlyph(Bus);
 
@@ -371,9 +373,10 @@ fn spawn_mute_button(commands: &mut Commands, parent: Entity, bus: Bus, tab_inde
     let spawned = ui_spawn::spawn_button(
         commands,
         parent,
-        // The caption is the speaker glyph, which `reflect_mute_glyphs` swaps.
+        // The caption is the skin's speaker mark; `sync_mute_glyphs` says
+        // whether it is muted.
         ButtonSpec::bordered(
-            UiLabel::literal("\u{1f50a}"),
+            UiLabel::Glyph(glyph::SPEAKER),
             format!("volume-mute:{}", bus.key()),
         )
         .kind(ButtonKind::Headless)
@@ -396,7 +399,7 @@ fn spawn_toggle_button(commands: &mut Commands, parent: Entity, tab_index: i32) 
     let spawned = ui_spawn::spawn_button(
         commands,
         parent,
-        ButtonSpec::bordered(UiLabel::literal("\u{25b2}"), "volume-panel-toggle")
+        ButtonSpec::bordered(UiLabel::Glyph(glyph::EXPAND_UP), "volume-panel-toggle")
             .kind(ButtonKind::Headless)
             .tab_index(tab_index)
             .compact()
@@ -451,22 +454,20 @@ fn apply_panel_toggle(
 /// setting.
 fn sync_mute_glyphs(
     settings: Option<Res<ViewerSettings>>,
-    mut glyphs: Query<(&VolumeMuteGlyph, &mut Text, &mut ClassList)>,
+    mut glyphs: Query<(&VolumeMuteGlyph, &mut ClassList)>,
 ) {
     let Some(settings) = settings else {
         return;
     };
-    for (glyph, mut text, mut classes) in &mut glyphs {
+    for (mute, mut classes) in &mut glyphs {
         let muted = settings
             .store()
-            .get_bool(&mute_key(glyph.0))
+            .get_bool(&mute_key(mute.0))
             .unwrap_or(false);
-        let want = if muted { "🔇" } else { "🔊" };
-        if text.0 != want {
-            want.clone_into(&mut text.0);
-        }
-        // The glyph itself still changes — CSS cannot swap text content — so a
-        // muted bus reads as muted by shape as well as by colour.
+        // The mark follows `glyph::MUTED` (the skin's struck-through speaker)
+        // and the colour greys, so a muted bus reads as muted by shape as well
+        // as by colour.
+        set_state_class(&mut classes, glyph::MUTED, muted);
         set_state_class(&mut classes, DISABLED_TEXT_CLASS, muted);
     }
 }

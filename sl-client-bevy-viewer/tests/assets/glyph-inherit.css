@@ -1,0 +1,21 @@
+/*
+ * glyph-inherit.css — a TEST-ONLY sheet for
+ * `skin_palette_resolves::a_glyph_takes_its_colour_from_its_host`.
+ *
+ * It asks one engine question: does `color: inherit` on a text host's
+ * `::before` follow the HOST's colour as a rule changes it? If it does, one
+ * `.sk-glyph::before` rule serves every glyph slot, and a slot's greying is
+ * its host's rather than a second rule per state.
+ */
+.probe-host {
+  color: #ff0000;
+}
+
+.probe-host.probe-state {
+  color: #00ff00;
+}
+
+.sk-glyph::before {
+  content: "x";
+  color: inherit;
+}

@@ -22,8 +22,9 @@ use crate::browser_widget::{
 use crate::media_engine::{MediaEngineSystems, MediaSurfaces};
 use sl_viewer_intents::OpenWebBrowser;
 use sl_viewer_platform::system_browser::{ExternalUrl, normalize_web_url, open_in_system_browser};
+use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::i18n::Translated;
-use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, set_state_class_on, text_role};
+use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, role_class, set_state_class_on, text_role};
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 use sl_viewer_ui_core::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use sl_viewer_ui_core::ui_element::UiAction;
@@ -139,14 +140,18 @@ fn spawn_web_floater(mut commands: Commands, root: Res<UiRoot>) {
             ChildOf(content),
         ))
         .id();
-    let back_label = spawn_toolbar_button(&mut commands, toolbar, "◀", "back", 1);
-    let forward_label = spawn_toolbar_button(&mut commands, toolbar, "▶", "forward", 2);
-    let reload_label = spawn_toolbar_button(&mut commands, toolbar, "⟳", "reload-or-stop", 3);
+    let back_label = spawn_toolbar_button(&mut commands, toolbar, glyph::BACK, "back", 1);
+    let forward_label = spawn_toolbar_button(&mut commands, toolbar, glyph::FORWARD, "forward", 2);
+    let reload_label =
+        spawn_toolbar_button(&mut commands, toolbar, glyph::RELOAD, "reload-or-stop", 3);
     let lock = commands
         .spawn((
-            Text::new("🔒"),
-            UiFont::Sans.at(WEB_FONT_SIZE),
-            text_role(STATUS_COLOR),
+            glyph::glyph_host(
+                glyph::SECURE,
+                UiFont::Sans.at(WEB_FONT_SIZE),
+                role_class(STATUS_COLOR),
+            ),
+            TextColor(STATUS_COLOR),
             Visibility::Hidden,
             ChildOf(toolbar),
         ))
@@ -165,7 +170,8 @@ fn spawn_web_floater(mut commands: Commands, root: Res<UiRoot>) {
         },
     );
     commands.entity(address).observe(on_address_key);
-    let _external = spawn_toolbar_button(&mut commands, toolbar, "↗", "open-external", 5);
+    let _external =
+        spawn_toolbar_button(&mut commands, toolbar, glyph::EXTERNAL, "open-external", 5);
 
     // The page itself.
     let view = spawn_browser_view(
@@ -208,23 +214,20 @@ fn spawn_web_floater(mut commands: Commands, root: Res<UiRoot>) {
 fn spawn_toolbar_button(
     commands: &mut Commands,
     parent: Entity,
-    glyph: &str,
+    slot: &'static str,
     action: &'static str,
     tab_index: i32,
 ) -> Entity {
     let spawned = ui_spawn::spawn_button(
         commands,
         parent,
-        ButtonSpec::bordered(
-            UiLabel::literal(glyph.to_owned()),
-            format!("web-browser-button:{action}"),
-        )
-        .kind(ButtonKind::Headless)
-        .tab_index(tab_index)
-        .padding(7.0, 3.0)
-        .colors(Color::srgb(0.16, 0.17, 0.2), Color::srgb(0.35, 0.35, 0.4))
-        .label_color(SkinPalette::FALLBACK.text_primary)
-        .font_size(WEB_FONT_SIZE),
+        ButtonSpec::bordered(UiLabel::Glyph(slot), format!("web-browser-button:{action}"))
+            .kind(ButtonKind::Headless)
+            .tab_index(tab_index)
+            .padding(7.0, 3.0)
+            .colors(Color::srgb(0.16, 0.17, 0.2), Color::srgb(0.35, 0.35, 0.4))
+            .label_color(SkinPalette::FALLBACK.text_primary)
+            .font_size(WEB_FONT_SIZE),
     );
     commands.entity(spawned.button).observe(
         move |_activate: On<Activate>, mut actions: MessageWriter<UiAction>| {
@@ -441,12 +444,13 @@ fn sync_web_floater(
         DISABLED_TEXT_CLASS,
         !status.can_go_forward,
     );
-    if let Ok(mut reload) = texts.get_mut(ui.reload_label) {
-        let want = if status.loading { "✕" } else { "⟳" };
-        if reload.0 != want {
-            want.clone_into(&mut reload.0);
-        }
-    }
+    // Reload or stop: the state is ours, the mark the skin's.
+    set_state_class_on(
+        &mut classes,
+        ui.reload_label,
+        glyph::LOADING,
+        status.loading,
+    );
     if let Ok(mut lock) = visibilities.get_mut(ui.lock) {
         let want = if status.url.starts_with("https://") {
             Visibility::Inherited

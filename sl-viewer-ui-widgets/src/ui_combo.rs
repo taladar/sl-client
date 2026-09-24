@@ -30,6 +30,7 @@ use bevy::ui_widgets::Button;
 use bevy::ui_widgets::popover::{Popover, PopoverAlign, PopoverPlacement, PopoverSide};
 use bevy_flair::style::components::ClassList;
 
+use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::i18n::Translated;
 use sl_viewer_ui_core::skin::COMBO_OPTION_CLASS;
 use sl_viewer_ui_core::skin_palette::SkinPalette;
@@ -55,9 +56,6 @@ const POPOVER_CLASS: &str = "sk-combo-list";
 /// popups' divider, which a combo popover keeps even though its *face* is a
 /// list's: the shape of a drop-down is a menu's, only the colours are not.
 const SEPARATOR_CLASS: &str = "sk-menu-separator";
-
-/// The dropdown arrow glyph.
-const ARROW_GLYPH: &str = "\u{25be}";
 
 /// The skin class for the value / option text.
 ///
@@ -327,13 +325,15 @@ pub fn spawn_combo(commands: &mut Commands, parent: Entity, spec: &ComboSpec) ->
     seed_value_text(commands, value, spec, active);
 
     commands.spawn((
-        Text::new(ARROW_GLYPH),
-        UiFont::Sans.at(spec.font_size),
-        // The same class as the value text, so the arrow greys with the anchor
-        // through `.sk-combo:disabled .sk-build-value` — as it did when both
-        // were painted `text_primary` here.
-        ClassList::new_with_classes([VALUE_CLASS]),
-        Pickable::IGNORE,
+        // The arrow is the skin's `glyph::DROP_DOWN` mark. It wears the same
+        // class as the value text, so it greys with the anchor through
+        // `.sk-combo:disabled .sk-build-value` — the mark inherits its host's
+        // colour.
+        glyph::glyph_host(
+            glyph::DROP_DOWN,
+            UiFont::Sans.at(spec.font_size),
+            [VALUE_CLASS],
+        ),
         Name::new(format!("{}:combo-arrow", spec.element)),
         ChildOf(anchor),
     ));

@@ -76,6 +76,7 @@ use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow};
 use crate::world_api::ui_texture::{PendingUiTexture, UiTexturePlugin};
 use crate::world_map::OpenWorldMap;
+use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
 use sl_viewer_ui_core::skin::text_role;
 
@@ -1688,14 +1689,18 @@ fn spawn_events_filters(commands: &mut Commands, panel: Entity) -> (Entity, Enti
     (mode_radio, category_combo, day_label)
 }
 
-/// Spawn an Events day-stepper button (`‹` back / `›` forward).
+/// Spawn an Events day-stepper button — the skin's previous / next marks
+/// (`‹` / `›` in the shipped skins, mirrored under right-to-left).
 fn spawn_events_day_button(commands: &mut Commands, parent: Entity, forward: bool) {
-    let glyph = if forward { "\u{203a}" } else { "\u{2039}" };
     let button = ui_spawn::spawn_button(
         commands,
         parent,
         ButtonSpec::bordered(
-            UiLabel::literal(glyph),
+            UiLabel::Glyph(if forward {
+                glyph::NEXT
+            } else {
+                glyph::PREVIOUS
+            }),
             format!(
                 "search-events-day:{}",
                 if forward { "next" } else { "prev" }

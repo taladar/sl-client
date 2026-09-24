@@ -50,8 +50,7 @@ use std::collections::BTreeSet;
 
 use crate::skin::{
     ACTION_BUTTON_CLASS, ACTIVE_TEXT_CLASS, DisabledButtons, PRESENCE_OFFLINE_CLASS,
-    PRESENCE_ONLINE_CLASS, TEXT_CLASS, set_action_button_enabled, set_state_class_on, text_meaning,
-    text_role,
+    PRESENCE_ONLINE_CLASS, TEXT_CLASS, set_action_button_enabled, set_state_class_on, text_role,
 };
 use crate::skin_palette::SkinPalette;
 use bevy::asset::RenderAssetUsages;
@@ -60,7 +59,7 @@ use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::ui::Checked;
-use bevy_flair::style::components::ClassList;
+use bevy_flair::style::components::{ClassList, PseudoElementsSupport};
 use sl_client_bevy::{
     AgentKey, Command, FriendKey, FriendRights, MuteType, SlCommand, SlEvent, SlSessionEvent,
 };
@@ -87,6 +86,7 @@ use crate::ui_table::{
 };
 use crate::ui_text::set_text;
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
+use sl_viewer_ui_core::glyph;
 
 /// A friend-list row's uniform height, in logical pixels — matched to the
 /// conversation-transcript density so the whole floater reads as one surface.
@@ -135,12 +135,6 @@ const HEADER_TEXT_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 /// changed (only the granted cells carry the toggle observer) — so this also
 /// puts into the accessibility tree what was previously only a tint.
 const RIGHTS_CELL_CLASS: &str = "sk-rights-cell";
-
-/// The filled presence dot glyph, shown for an online friend.
-const ONLINE_GLYPH: &str = "\u{25CF}";
-
-/// The hollow presence dot glyph, shown for an offline / not-visible friend.
-const OFFLINE_GLYPH: &str = "\u{25CB}";
 
 /// The Fluent key for the People strip tab's label.
 const PEOPLE_TAB_KEY: &str = "people-tab";
@@ -310,13 +304,6 @@ const FRIENDS_TABLE: TableSpec = TableSpec {
     sort_setting: None,
     widths_setting: Some(FRIENDS_WIDTHS_SETTING),
 };
-
-/// The sort-direction arrow shown on the primary sort column's header — ascending.
-const SORT_ASCENDING_GLYPH: &str = "\u{25B2}";
-
-/// The sort-direction arrow shown on the primary sort column's header —
-/// descending.
-const SORT_DESCENDING_GLYPH: &str = "\u{25BC}";
 
 /// The longest gap between two clicks on the same row still counted as a
 /// double-click, in seconds — a double-click opens a one-to-one IM, like the IM
@@ -1505,17 +1492,20 @@ fn augment_sortable_header(
         return Entity::PLACEHOLDER;
     };
     commands.entity(cell).observe(sort_on_press(column));
+    // The skin's `glyph::SORT` mark, in the accent `ACTIVE_TEXT_CLASS` paints.
     commands
         .spawn((
-            Text::new(String::new()),
-            UiFont::Sans.at(ROW_FONT_SIZE),
-            text_meaning(SkinPalette::FALLBACK.accent, ACTIVE_TEXT_CLASS),
+            glyph::glyph_host(
+                glyph::SORT,
+                UiFont::Sans.at(ROW_FONT_SIZE),
+                [TEXT_CLASS, ACTIVE_TEXT_CLASS],
+            ),
+            TextColor(SkinPalette::FALLBACK.accent),
             Node {
                 flex_shrink: 0.0,
                 margin: UiRect::left(Val::Px(2.0)),
                 ..default()
             },
-            Pickable::IGNORE,
             Name::new("people-header-arrow"),
             ChildOf(cell),
         ))
@@ -2109,7 +2099,7 @@ fn refresh_friend_actions(
 /// [`SystemParam`](bevy::ecs::system::SystemParam): the strips (the
 /// conversations strip the People tab sits on, and the pane's own sub-strip),
 /// the People tab's place on the first, the display flags of the pane and its
-/// four sub-tab contents, and the two sort arrows' glyphs.
+/// four sub-tab contents, and the two sort arrows' direction classes.
 #[derive(Debug, bevy::ecs::system::SystemParam)]
 struct PeopleChrome<'w, 's> {
     /// Both strips' selections.
@@ -2118,8 +2108,8 @@ struct PeopleChrome<'w, 's> {
     tabs: Query<'w, 's, &'static TabButton>,
     /// The pane's and the sub-tab contents' display flags.
     nodes: Query<'w, 's, &'static mut Node>,
-    /// The two sort arrows.
-    texts: Query<'w, 's, &'static mut Text>,
+    /// The two sort arrows' direction classes.
+    classes: Query<'w, 's, &'static mut ClassList>,
 }
 
 /// Keep the People surface in step: the People tab active on the strip while
@@ -2140,12 +2130,12 @@ fn refresh_people(
     // Sort-direction arrows: only the primary (most-significant) column shows one.
     let primary = sort.primary();
     set_arrow(
-        &mut chrome.texts,
+        &mut chrome.classes,
         ui.name_arrow,
         sort_arrow(primary, SortColumn::Name),
     );
     set_arrow(
-        &mut chrome.texts,
+        &mut chrome.classes,
         ui.status_arrow,
         sort_arrow(primary, SortColumn::Online),
     );
@@ -2201,28 +2191,31 @@ fn set_display(nodes: &mut Query<&mut Node>, entity: Entity, shown: bool) {
     }
 }
 
-/// The arrow glyph a header shows: an up / down arrow when `column` is the primary
-/// sort key, else empty (only the most-significant column is marked).
-fn sort_arrow(primary: Option<(SortColumn, bool)>, column: SortColumn) -> &'static str {
+/// The direction a header's arrow shows: ascending (`Some(true)`) or
+/// descending when `column` is the primary sort key, else `None` (only the
+/// most-significant column is marked).
+fn sort_arrow(primary: Option<(SortColumn, bool)>, column: SortColumn) -> Option<bool> {
     match primary {
-        Some((key, ascending)) if key == column => {
-            if ascending {
-                SORT_ASCENDING_GLYPH
-            } else {
-                SORT_DESCENDING_GLYPH
-            }
-        }
-        _other => "",
+        Some((key, ascending)) if key == column => Some(ascending),
+        _other => None,
     }
 }
 
-/// Set a header arrow node's glyph only on a real change.
-fn set_arrow(texts: &mut Query<&mut Text>, entity: Entity, glyph: &str) {
-    if let Ok(mut text) = texts.get_mut(entity)
-        && text.0 != glyph
-    {
-        glyph.clone_into(&mut text.0);
-    }
+/// Put a header arrow in `direction`'s state class, touching it only on a real
+/// change. The mark each direction wears is the skin's.
+fn set_arrow(classes: &mut Query<&mut ClassList>, entity: Entity, direction: Option<bool>) {
+    set_state_class_on(
+        classes,
+        entity,
+        glyph::SORT_ASCENDING,
+        direction == Some(true),
+    );
+    set_state_class_on(
+        classes,
+        entity,
+        glyph::SORT_DESCENDING,
+        direction == Some(false),
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -2269,9 +2262,18 @@ fn populate_friend_rows(
         // The dot is always in one of its two presence states, so it spawns in
         // the resting one rather than classless; `bind_friend_rows` settles it
         // on the same frame it takes a friend.
-        commands
-            .entity(presence)
-            .insert(ClassList::new_with_classes([PRESENCE_OFFLINE_CLASS]));
+        //
+        // The dot is the skin's `glyph::PRESENCE` mark, filled under the
+        // online class that also colours it — so the mark and its colour are
+        // one state, and cannot disagree.
+        commands.entity(presence).insert((
+            PseudoElementsSupport,
+            ClassList::new_with_classes([
+                glyph::GLYPH_CLASS,
+                glyph::PRESENCE,
+                PRESENCE_OFFLINE_CLASS,
+            ]),
+        ));
         commands
             .entity(row_entity)
             .insert((
@@ -2479,9 +2481,6 @@ fn bind_friend_rows(
         commands
             .entity(row_entity)
             .insert(crate::inventory_drag::AgentDropTarget(friend_row.agent));
-        if let Ok(mut text) = texts.get_mut(parts.presence) {
-            set_text(&mut text, presence_glyph(friend_row.online));
-        }
         // The dot's colour is the skin's, and the pair is exclusive: there is
         // no third presence, so neither class has a resting rule to fall to.
         set_state_class_on(
@@ -2504,10 +2503,10 @@ fn bind_friend_rows(
         for (checkbox, column) in parts.rights.iter().zip(RIGHT_COLUMNS) {
             let set = column_is_set(friend_row, column);
             if let Ok((mut image, mut cell_friend)) = checkboxes.get_mut(*checkbox) {
-                // The icon asset is still ours to swap — CSS cannot change
-                // which image a node shows, and putting icon paths in the skin
-                // is `viewer-skin-icon-set`'s business. The *tint* is the
-                // skin's, through `Checked`.
+                // The icon asset is still ours to swap. A skin *could* choose
+                // it (`-bevy-image`, as the parcel icons do), but giving these
+                // cells skin art is `viewer-skin-icon-set`'s business. The
+                // *tint* is the skin's, through `Checked`.
                 let wanted = ui.icons.checkbox(set);
                 if image.image != wanted {
                     image.image = wanted;
@@ -2561,11 +2560,6 @@ fn on_friend_row_press(
         tracker.friend = Some(friend);
         tracker.time = now;
     }
-}
-
-/// The presence-dot glyph for an online / offline friend.
-const fn presence_glyph(online: bool) -> &'static str {
-    if online { ONLINE_GLYPH } else { OFFLINE_GLYPH }
 }
 
 #[cfg(test)]

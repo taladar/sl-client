@@ -37,8 +37,9 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::text::EditableText;
-use bevy_flair::style::components::ClassList;
+use bevy_flair::style::components::{ClassList, PseudoElementsSupport};
 use sl_client_bevy::Uuid;
+use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::skin::{ACTIVE_CLASS, set_state_class, text_role};
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 
@@ -85,9 +86,6 @@ const ACTION_BACKGROUND: Color = Color::srgb(0.24, 0.29, 0.38);
 
 /// The trailing action column's width, logical px.
 const ACTION_COL_WIDTH: f32 = 140.0;
-
-/// The glyph marking a permanent (blacklisted) entry — the reference's ✔.
-const PERMANENT_GLYPH: &str = "\u{2714}";
 
 // --- Table ----------------------------------------------------------------
 
@@ -594,7 +592,13 @@ fn populate_blacklist_rows(
         if child_of.parent() != ui.viewport {
             continue;
         }
-        spawn_table_row(&mut commands, row_entity, ui.table, &BLACKLIST_TABLE);
+        let cells = spawn_table_row(&mut commands, row_entity, ui.table, &BLACKLIST_TABLE);
+        // The Permanent column holds no text: a permanent entry's cell is the
+        // skin's `glyph::YES` mark (the reference's ✔), a temporary one's is
+        // empty. `bind_blacklist_rows` says which.
+        if let Some(cell) = cells.cell(COL_PERMANENT) {
+            commands.entity(cell).insert(PseudoElementsSupport);
+        }
         commands
             .entity(row_entity)
             .insert(BoundBlacklist(None))
@@ -685,6 +689,7 @@ fn bind_blacklist_rows(
                     set_table_cell(&mut table.texts, cell, "", LABEL_COLOR);
                 }
             }
+            set_permanent_mark(&mut table.texts, cells, false);
             continue;
         };
         let name = if data.name.trim().is_empty() {
@@ -706,24 +711,35 @@ fn bind_blacklist_rows(
                 format_date(data.added_epoch_secs, zone.as_deref()),
                 DIM_LABEL_COLOR,
             ),
-            (
-                COL_PERMANENT,
-                if data.permanent {
-                    PERMANENT_GLYPH.to_owned()
-                } else {
-                    String::new()
-                },
-                LABEL_COLOR,
-            ),
+            (COL_PERMANENT, String::new(), LABEL_COLOR),
         ];
         for (column, value, color) in cell_values {
             if let Some(cell) = cells.cell(column) {
                 set_table_cell(&mut table.texts, cell, &value, color);
             }
         }
+        set_permanent_mark(&mut table.texts, cells, data.permanent);
         if let Ok(mut classes) = table.classes.get_mut(row_entity) {
             set_state_class(&mut classes, ACTIVE_CLASS, selected.0 == Some(data.id));
         }
+    }
+}
+
+/// Show or clear the Permanent column's [`glyph::YES`] mark on a row. The
+/// cell is always a glyph host (so the mark takes the cell's role colour);
+/// only the slot comes and goes, and without it the host matches the empty
+/// baseline.
+fn set_permanent_mark(
+    texts: &mut Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
+    cells: &TableRowCells,
+    permanent: bool,
+) {
+    let Some(cell) = cells.cell(COL_PERMANENT) else {
+        return;
+    };
+    if let Ok((_, _, Some(mut classes))) = texts.get_mut(cell) {
+        set_state_class(&mut classes, glyph::GLYPH_CLASS, true);
+        set_state_class(&mut classes, glyph::YES, permanent);
     }
 }
 

@@ -50,11 +50,12 @@ use bevy::text::{EditableText, FontCx, LayoutCx};
 
 use crate::emoji_complete::{ColonCompleteSet, attach_colon_complete};
 use crate::emoji_picker::OpenEmojiPicker;
-use crate::skin::text_role;
+use crate::skin::{role_class, text_role};
 use crate::skin_palette::SkinPalette;
 use crate::ui::row;
 use crate::ui_font::UiFont;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
+use sl_viewer_ui_core::glyph;
 
 /// The box's border colour.
 const BOX_BORDER: Color = Color::srgb(0.30, 0.36, 0.46);
@@ -64,9 +65,6 @@ const BOX_BACKGROUND: Color = Color::srgb(0.10, 0.12, 0.16);
 
 /// The typed-text colour.
 const TEXT_COLOR: Color = SkinPalette::FALLBACK.text_primary;
-
-/// The emoji button's glyph — a smiling face, as the reference chat bar shows.
-const EMOJI_GLYPH: &str = "\u{1f642}";
 
 /// The emoji button's background.
 const EMOJI_BUTTON_BACKGROUND: Color = Color::srgba(1.0, 1.0, 1.0, 0.06);
@@ -321,10 +319,14 @@ fn spawn_emoji_button(
             ChildOf(container),
         ))
         .with_child((
-            Text::new(EMOJI_GLYPH),
-            UiFont::Sans.at(spec.font_size),
-            text_role(TEXT_COLOR),
-            Pickable::IGNORE,
+            // The skin's `glyph::EMOJI` mark — a smiling face in the shipped
+            // skins, as the reference chat bar shows.
+            glyph::glyph_host(
+                glyph::EMOJI,
+                UiFont::Sans.at(spec.font_size),
+                role_class(TEXT_COLOR),
+            ),
+            TextColor(TEXT_COLOR),
         ))
         .id();
     commands.entity(button).observe(

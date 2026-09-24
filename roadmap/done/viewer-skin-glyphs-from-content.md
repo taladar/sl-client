@@ -2,7 +2,7 @@
 id: viewer-skin-glyphs-from-content
 title: A skin can choose the glyph, not just its colour — audit where that applies
 topic: viewer
-status: ready
+status: done
 origin: raised while building viewer-skin-checkbox-radio-shape (2026-09-22)
 points: 5
 refs: [viewer-skin-checkbox-radio-shape, viewer-skin-icon-set,
@@ -101,3 +101,75 @@ No widget chooses a decorative glyph in Rust where a selector already
 describes the state, the fixed decorations are `content` rules, and a scratch
 skin can change every mark in the chrome — tick, arrows, mute, reload — by
 editing CSS alone.
+
+## Progress (2026-09-24)
+
+**The open question is settled, and inheritance goes further than the font.**
+The `946f8a2` fork fix copies the host's font into the pseudo-element, and
+`color: inherit` on a `::before` follows the host *live*
+(`a_glyph_takes_its_colour_from_its_host`). So one rule,
+`.sk-glyph::before { content: ""; color: inherit; }`, serves every slot: a
+glyph greys with its host and no slot needs a colour rule.
+
+**The vocabulary** is `sl-viewer-ui-core/src/glyph.rs`: `GLYPH_CLASS`, 35
+slot classes (`sk-glyph-close`, `-reload`, `-disclosure`, …), the state
+classes they read (`sk-loading`, `sk-expanded`, `sk-sort-ascending`, …), a
+`glyph_host` bundle, and `UiLabel::Glyph(slot)` for a button whose caption is
+a mark. `common.css` gives every slot its shipped character; the stepping
+marks and a closed disclosure triangle mirror under `dir="rtl"`.
+
+**Converted**, the Rust constant deleted in each case:
+
+- widgets: floater close / minimize↔restore / dock↔tear-off / resize grip;
+  combo arrow; search magnifier and clear; menu tick (`:checked` on the row)
+  and sub-menu arrow; table sort arrows.
+- panels: People presence dot and sort arrows; Groups' active marker (its own
+  `sk-current`, since `.sk-active` paints a selection background);
+  Conversations close / add; the seven toast and dialog close boxes
+  (`DISMISS`); the toast queue's "N more ▸" (a `::after`, the one slot with
+  text of its own); the permission toasts' bullets (now a hanging-indent row;
+  the gallery specimens also passed pre-bulleted lines, so they drew two);
+  media bar play↔pause, back, forward, home, reload↔stop, mute, zoom,
+  external, padlock; web browser back / forward / reload↔stop / external /
+  padlock; parcel audio ♫, play↔stop, mute; volume panel mute and ▲;
+  inventory disclosure (a leaf drops the slot); inventory gallery back /
+  forward / up; Build Tools link-part stepper; quick-prefs preset stepper and
+  gear; Search's Events day stepper; chat bar emoji button; the asset
+  blacklist's Permanent ✔; the radar's region dot (`sk-precise`); debug
+  settings' changed `*`.
+- The pie menu has no sub-menu marker to convert: sub-pies are ruled out by
+  construction.
+
+**Tests.** `every_glyph_slot_takes_its_mark_from_the_skin` pins all 52
+slot × state cases in both shipped skins, and fails if a slot in
+`glyph::SLOTS` has no case. `a_scratch_skin_redraws_every_mark` loads
+`tests/assets/glyph-scratch.css`, which gives every case its own mark, and so
+proves the "done when" by CSS alone. `a_glyph_state_is_taken_back` covers the
+never-revert trap, and `stepping_marks_mirror_under_rtl` the mirroring. The
+book's skin chapter has a *glyph slots* section and the state classes, which
+the vocabulary test holds it to.
+
+## Left as they are, deliberately
+
+- **Glyphs inside translated strings**: `search-prev` / `search-next`
+  ("‹ Prev"), `experiences-page-previous` / `-next`, `menu-inventory-gear` (⚙),
+  `radar-col-region` (●), the stream-metadata notification's ♫. They are
+  `.ftl` text, which a translator owns. Making them slots means a glyph-plus-key
+  label, and for the gear a menu-bar label that can be a glyph.
+- **Type icons** (inventory items and folders, notice attachments, notecard
+  embeds, offer kinds) belong to [[viewer-skin-icon-set]].
+- The radar's status letters (T / S / A) are abbreviations, not marks, and its
+  gallery specimen still composes "● T S" as one sample string.
+- The four slots that already worked this way (checkbox tick, radio pip,
+  tab-scroll and scrollbar arrows) keep their own classes and colour rules.
+- The gallery header's own chips ("Skin ▸").
+
+## Closed (2026-09-24)
+
+The user checked the gallery: the floater chrome glyphs, the combo arrow and
+the search box marks render and toggle. Closed on the user's word with the
+menu tick / sub-menu arrow and the toast overflow unseen live (both pinned by
+the skin tests; the overflow has no specimen, which
+[[viewer-gallery-floaters-are-mostly-stubs]] now tracks). The same look
+filed [[viewer-floater-minimize-caps-follow-no-pattern]] and
+[[viewer-minimized-floaters-move-to-a-shelf]].

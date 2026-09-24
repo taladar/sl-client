@@ -40,6 +40,7 @@ use crate::ui_element::UiAction;
 use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonSpec, UiLabel};
 use crate::world_api::ui_texture::{PendingUiTexture, UiTexturePlugin};
+use sl_viewer_ui_core::glyph;
 
 /// The gallery font size for tile names, in logical pixels.
 const TILE_FONT_SIZE: f32 = 12.0;
@@ -211,7 +212,7 @@ fn spawn_gallery_floater(mut commands: Commands, root: Res<UiRoot>) {
             ChildOf(content),
         ))
         .id();
-    let back = spawn_nav_button(&mut commands, nav, "\u{25c0}", 1);
+    let back = spawn_nav_button(&mut commands, nav, glyph::BACK, "back", 1);
     commands.entity(back).observe(
         |press: On<Pointer<Press>>, mut state: ResMut<GalleryState>| {
             if press.button == PointerButton::Primary {
@@ -219,7 +220,7 @@ fn spawn_gallery_floater(mut commands: Commands, root: Res<UiRoot>) {
             }
         },
     );
-    let forward = spawn_nav_button(&mut commands, nav, "\u{25b6}", 2);
+    let forward = spawn_nav_button(&mut commands, nav, glyph::FORWARD, "forward", 2);
     commands.entity(forward).observe(
         |press: On<Pointer<Press>>, mut state: ResMut<GalleryState>| {
             if press.button == PointerButton::Primary {
@@ -227,7 +228,7 @@ fn spawn_gallery_floater(mut commands: Commands, root: Res<UiRoot>) {
             }
         },
     );
-    let up = spawn_nav_button(&mut commands, nav, "\u{2b06}", 3);
+    let up = spawn_nav_button(&mut commands, nav, glyph::UP, "up", 3);
     commands.entity(up).observe(
         |press: On<Pointer<Press>>, model: Res<InventoryModel>, mut state: ResMut<GalleryState>| {
             if press.button != PointerButton::Primary {
@@ -304,15 +305,16 @@ fn spawn_gallery_floater(mut commands: Commands, root: Res<UiRoot>) {
 fn spawn_nav_button(
     commands: &mut Commands,
     parent: Entity,
-    glyph: &'static str,
+    slot: &'static str,
+    name: &str,
     tab_index: i32,
 ) -> Entity {
     ui_spawn::spawn_button(
         commands,
         parent,
         ButtonSpec::bordered(
-            UiLabel::literal(glyph),
-            format!("inventory-gallery-nav:{glyph}"),
+            UiLabel::Glyph(slot),
+            format!("inventory-gallery-nav:{name}"),
         )
         .tab_index(tab_index)
         .colors(BUTTON_BACKGROUND, BUTTON_BORDER)

@@ -36,7 +36,10 @@ use bevy::ui_widgets::{
 use bevy_flair::style::components::ClassList;
 use sl_cef::{PlaybackState, ValidatedMediaUrl};
 use sl_client_bevy::{Command, SlCommand};
-use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, set_state_class, text_role};
+use sl_viewer_ui_core::glyph;
+use sl_viewer_ui_core::skin::{
+    DISABLED_TEXT_CLASS, role_class, set_state_class, set_state_class_on, text_role,
+};
 
 use crate::camera::FocusTarget;
 use crate::media_prim::{MediaData, MediaPrimState, media_permission_allows};
@@ -197,15 +200,17 @@ fn spawn_media_controls(mut commands: Commands, root: Res<UiRoot>) {
             ChildOf(bar),
         ))
         .id();
-    let play = spawn_bar_button(&mut commands, buttons, "▶", "play-pause", 29);
-    let back = spawn_bar_button(&mut commands, buttons, "◀", "back", 30);
-    let forward = spawn_bar_button(&mut commands, buttons, "▶", "forward", 31);
-    let (home, _home_label) = spawn_bar_button(&mut commands, buttons, "⌂", "home", 32);
+    let play = spawn_bar_button(&mut commands, buttons, glyph::PLAY_PAUSE, "play-pause", 29);
+    let back = spawn_bar_button(&mut commands, buttons, glyph::BACK, "back", 30);
+    let forward = spawn_bar_button(&mut commands, buttons, glyph::FORWARD, "forward", 31);
+    let (home, _home_label) = spawn_bar_button(&mut commands, buttons, glyph::HOME, "home", 32);
     let (_reload, reload_label) =
-        spawn_bar_button(&mut commands, buttons, "⟳", "reload-or-stop", 33);
-    let (_mute, mute_label) = spawn_bar_button(&mut commands, buttons, "🔊", "mute-toggle", 34);
-    let (_zoom, zoom_label) = spawn_bar_button(&mut commands, buttons, "⊕", "zoom-toggle", 35);
-    let _external = spawn_bar_button(&mut commands, buttons, "↗", "open-external", 36);
+        spawn_bar_button(&mut commands, buttons, glyph::RELOAD, "reload-or-stop", 33);
+    let (_mute, mute_label) =
+        spawn_bar_button(&mut commands, buttons, glyph::SPEAKER, "mute-toggle", 34);
+    let (_zoom, zoom_label) =
+        spawn_bar_button(&mut commands, buttons, glyph::ZOOM, "zoom-toggle", 35);
+    let _external = spawn_bar_button(&mut commands, buttons, glyph::EXTERNAL, "open-external", 36);
     let status_text = commands
         .spawn((
             Text::default(),
@@ -228,9 +233,12 @@ fn spawn_media_controls(mut commands: Commands, root: Res<UiRoot>) {
         .id();
     let lock = commands
         .spawn((
-            Text::new("🔒"),
-            UiFont::Sans.at(11.0),
-            text_role(BAR_LABEL_DIM),
+            glyph::glyph_host(
+                glyph::SECURE,
+                UiFont::Sans.at(11.0),
+                role_class(BAR_LABEL_DIM),
+            ),
+            TextColor(BAR_LABEL_DIM),
             Visibility::Hidden,
             ChildOf(url_row),
         ))
@@ -413,7 +421,7 @@ const GLYPH_FONT_SIZE: f32 = 12.0;
 fn spawn_bar_button(
     commands: &mut Commands,
     parent: Entity,
-    glyph: &str,
+    slot: &'static str,
     action: &'static str,
     tab_index: i32,
 ) -> (Entity, Entity) {
@@ -421,7 +429,7 @@ fn spawn_bar_button(
         commands,
         parent,
         ButtonSpec::bordered(
-            UiLabel::literal(glyph.to_owned()),
+            UiLabel::Glyph(slot),
             format!("media-controls-button:{action}"),
         )
         .kind(ButtonKind::Headless)
@@ -647,17 +655,11 @@ fn update_media_controls(
         set_display(&mut chrome.nodes, ui.forward.0, !video);
         set_display(&mut chrome.nodes, ui.home, !video);
         if video {
-            if let Ok(mut play) = chrome.texts.get_mut(ui.play.1) {
-                // Glyphs chosen for bundled-font coverage: U+23F5/U+23F8 are
-                // in none of the UI faces (they render as tofu).
-                let want = match playback.map(|playback| playback.state) {
-                    Some(PlaybackState::Playing | PlaybackState::Buffering) => "❚❚",
-                    _paused_or_none => "▶",
-                };
-                if play.0 != want {
-                    want.clone_into(&mut play.0);
-                }
-            }
+            let playing = matches!(
+                playback.map(|playback| playback.state),
+                Some(PlaybackState::Playing | PlaybackState::Buffering)
+            );
+            set_state_class_on(&mut chrome.classes, ui.play.1, glyph::PLAYING, playing);
             if let Ok(mut time) = chrome.texts.get_mut(ui.time_text)
                 && let Some(playback) = playback
             {
@@ -679,32 +681,26 @@ fn update_media_controls(
             set_label_enabled(&mut chrome.classes, ui.back.1, status.can_go_back);
             set_label_enabled(&mut chrome.classes, ui.forward.1, status.can_go_forward);
         }
-        if let Ok(mut reload) = chrome.texts.get_mut(ui.reload_label) {
-            let want = if !video && status.loading {
-                "✕"
-            } else {
-                "⟳"
-            };
-            if reload.0 != want {
-                want.clone_into(&mut reload.0);
-            }
-        }
-        if let Ok(mut mute) = chrome.texts.get_mut(ui.mute_label) {
-            let want = if slot.surface.muted() { "🔇" } else { "🔊" };
-            if mute.0 != want {
-                want.clone_into(&mut mute.0);
-            }
-        }
-        if let Ok(mut zoom) = chrome.texts.get_mut(ui.zoom_label) {
-            let want = if bar.state.zoomed == Some(target) {
-                "⊖"
-            } else {
-                "⊕"
-            };
-            if zoom.0 != want {
-                want.clone_into(&mut zoom.0);
-            }
-        }
+        // The four toggling marks say only which state is true; which glyph
+        // each state wears is the skin's.
+        set_state_class_on(
+            &mut chrome.classes,
+            ui.reload_label,
+            glyph::LOADING,
+            !video && status.loading,
+        );
+        set_state_class_on(
+            &mut chrome.classes,
+            ui.mute_label,
+            glyph::MUTED,
+            slot.surface.muted(),
+        );
+        set_state_class_on(
+            &mut chrome.classes,
+            ui.zoom_label,
+            glyph::ZOOMED,
+            bar.state.zoomed == Some(target),
+        );
         if let Ok(mut lock) = chrome.visibilities.get_mut(ui.lock) {
             let want = if !video && status.url.starts_with("https://") {
                 Visibility::Inherited

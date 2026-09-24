@@ -330,7 +330,7 @@ the stock look rather than to black.
 | `.sk-menu-separator` | the rule between two groups of entries |
 | `.sk-floater` | a floater's body |
 | `.sk-floater-title-bar` / `.sk-floater-title-text` | its title band and title, at rest; the focused floater's wear `.sk-active` / `.sk-active-text` |
-| `.sk-floater-button` / `.sk-floater-glyph` / `.sk-floater-grip` | its title-bar buttons, their glyphs, the resize grip |
+| `.sk-floater-button` / `.sk-floater-glyph` / `.sk-floater-grip` | its title-bar buttons, their glyphs' colour, the resize grip's (the marks are glyph slots, below) |
 | `.sk-dock-host` | the strip docked floaters flow into |
 | `.sk-tab-panel` | a tab page |
 | `.sk-scrollbar-vertical` / `.sk-scrollbar-horizontal` | a scrollbar's frame, by axis — every scrollbar in the viewer is one widget, so these reach them all |
@@ -384,6 +384,91 @@ other:
 They come **last** in `common.css`, in the order highlighted, active, disabled,
 because they carry the same specificity as the resting rules they override and
 only file order separates them: a greyed row must never also read as lit.
+
+### The glyph slots — marks a skin draws
+
+Every decorative mark in the chrome is the skin's, not the viewer's: the close
+box, a combo's drop arrow, a menu's tick, a sort arrow, mute, reload, a tree
+row's disclosure triangle. The widget spawns an **empty** text node carrying
+`.sk-glyph` and one slot class saying what the mark *means*, and `common.css`
+gives each slot its character through `content` on a `::before`:
+
+```css
+.sk-glyph-close::before {
+  content: "\2715";
+}
+```
+
+A skin that wants a heavier close box, a different triangle or a word instead
+of a speaker writes its own `content` rule — no Rust names a character. The
+slots are listed in `sl-viewer-ui-core/src/glyph.rs`.
+
+Three things to know when you write one:
+
+- **Colour is the host's.** `.sk-glyph::before { color: inherit; }` makes
+  every mark follow whatever colours its host, so a refused button's glyph
+  greys with its caption. Set `color` on a slot only to break that.
+- **State a resting mark for every stateful slot.** `bevy_flair` never reverts
+  a property whose rule stopped matching, so a mark written only for
+  `.sk-loading` would stay after loading ended. The shipped rules always
+  pair the two, and an override should too.
+- **Stepping marks mirror.** Back, forward, previous, next and a closed
+  disclosure triangle turn round under `dir="rtl"`
+  (`:root[dir="rtl"] .sk-glyph-back::before`); transport and window marks do
+  not.
+
+Not everything that looks like a glyph is a slot. Data is not (a name, a row's
+value, a truncation ellipsis), and neither is a *kind of thing* — an inventory
+item's type icon, a notice's attachment icon — which is an icon set, a family a
+skin swaps wholesale.
+
+| Class | The mark (shipped) |
+| --- | --- |
+| `.sk-glyph` | every glyph host — the empty text node whose `::before` is the mark; carries the baseline (empty mark, inherited colour) |
+| `.sk-glyph-close` | close a window or a conversation (✕) |
+| `.sk-glyph-dismiss` | dismiss a toast or a dialog (×) |
+| `.sk-glyph-minimize` | a floater's minimize box (—); `.sk-minimized` makes it the restore box (▭) |
+| `.sk-glyph-dock` | a floater's dock box (▤); `.sk-docked` makes it the tear-off box (▥) |
+| `.sk-glyph-resize` | a floater's resize grip (◢) |
+| `.sk-glyph-drop-down` | a combo's arrow (▾) |
+| `.sk-glyph-search` | a search box's magnifier (🔍) |
+| `.sk-glyph-clear` | a search box's clear box (×) |
+| `.sk-glyph-menu-check` | a menu entry's tick (✓), drawn only under `.sk-menu-item:checked` |
+| `.sk-glyph-submenu` | a menu entry that opens a sub-menu (▶) |
+| `.sk-glyph-sort` | a sortable header — nothing, ▲ under `.sk-sort-ascending`, ▼ under `.sk-sort-descending` |
+| `.sk-glyph-disclosure` | a folder row closed (▸), open under `.sk-expanded` (▾); an item row has no slot class and so no mark |
+| `.sk-glyph-presence` | a friend offline (○), online under `.sk-presence-online` (●) |
+| `.sk-glyph-position` | the radar's region column: a coarse map position (○), `.sk-precise` for one seen in a connected region (●) |
+| `.sk-glyph-current` | the current entry of a list — the active group — nothing, ● under `.sk-current` |
+| `.sk-glyph-yes` | a yes in a yes / no column (✔); a no is a cell without the slot |
+| `.sk-glyph-changed` | debug settings' changed marker — nothing, `*` under `.sk-changed` |
+| `.sk-glyph-bullet` | a list item's bullet and the no-break space after it |
+| `.sk-glyph-back` / `.sk-glyph-forward` | a browser's or a gallery's history, a linked part's step (◀ / ▶) |
+| `.sk-glyph-previous` / `.sk-glyph-next` | step through a small cycle — a preset, a day (‹ / ›) |
+| `.sk-glyph-up` | a folder's parent (⬆) |
+| `.sk-glyph-expand-up` | a bar button whose panel unfolds upward (▲) |
+| `.sk-glyph-cycle` | the toast queue's "N more" — drawn as the host's `::after`, since that host has text of its own |
+| `.sk-glyph-home` / `.sk-glyph-external` / `.sk-glyph-secure` | a browser's home page (⌂), open in the system browser (↗), a secure page's padlock (🔒) |
+| `.sk-glyph-reload` | reload (⟳), stop under `.sk-loading` (✕) |
+| `.sk-glyph-play-pause` | play (▶), pause under `.sk-playing` (❚❚) |
+| `.sk-glyph-play-stop` | play a stream (▶), stop under `.sk-playing` (■) |
+| `.sk-glyph-music` | the parcel audio bar's music mark (♫) |
+| `.sk-glyph-zoom` | zoom in on media (⊕), back out under `.sk-zoomed` (⊖) |
+| `.sk-glyph-speaker` | a sound (🔊), muted under `.sk-muted` (🔇) |
+| `.sk-glyph-add` / `.sk-glyph-settings` / `.sk-glyph-emoji` | add participants (✚), settings (⚙), the emoji picker (🙂) |
+
+The state classes a slot reads are the widget's to set; they mean only what the
+mark needs:
+
+| Class | State |
+| --- | --- |
+| `.sk-minimized` / `.sk-docked` | a floater minimized / docked (on its minimize / dock box) |
+| `.sk-expanded` | a tree row open |
+| `.sk-sort-ascending` / `.sk-sort-descending` | the primary sort column's direction |
+| `.sk-precise` | a position known precisely rather than coarsely |
+| `.sk-current` | the one current entry — not `.sk-active`, which means *selected* and paints a selection background |
+| `.sk-changed` | a value that differs from its default |
+| `.sk-loading` / `.sk-playing` / `.sk-zoomed` / `.sk-muted` | a page loading, media playing, zoomed in on, a sound muted |
 
 ### The status-bar parcel-permission icons
 

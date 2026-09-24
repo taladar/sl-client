@@ -60,8 +60,9 @@
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui::InteractionDisabled;
-use bevy_flair::style::components::ClassList;
+use bevy_flair::style::components::{ClassList, PseudoElementsSupport};
 
+use crate::glyph::GLYPH_CLASS;
 use crate::i18n::Translated;
 use crate::skin::{
     ACTION_BUTTON_CLASS, BUTTON_CLASS, COMPACT_BUTTON_CLASS, TEXT_CLASS, role_class,
@@ -82,6 +83,11 @@ pub enum UiLabel {
     Key(String),
     /// Text that is already in the user's language and is not translatable.
     Literal(String),
+    /// No text at all: a **glyph slot** ([`crate::glyph`]) whose mark is the
+    /// skin's `content`. The label is an empty text host carrying
+    /// [`GLYPH_CLASS`] and this slot class beside its colour class, so a
+    /// refused button's glyph greys with it.
+    Glyph(&'static str),
 }
 
 impl UiLabel {
@@ -625,9 +631,23 @@ fn spawn_text(
         UiLabel::Literal(literal) => {
             text.insert(Text::new(literal.clone()));
         }
+        UiLabel::Glyph(_) => {
+            text.insert((Text::default(), PseudoElementsSupport));
+        }
     }
-    if let Some(class) = class.or_else(|| role_class(color)) {
-        text.insert(ClassList::new_with_classes([class]));
+    let class = class.or_else(|| role_class(color));
+    match (label, class) {
+        (UiLabel::Glyph(slot), class) => {
+            // The colour class, when there is one, is what the glyph inherits;
+            // without it the mark keeps the colour it was spawned with.
+            text.insert(ClassList::new_with_classes(
+                class.into_iter().chain([GLYPH_CLASS, *slot]),
+            ));
+        }
+        (UiLabel::Key(_) | UiLabel::Literal(_), Some(class)) => {
+            text.insert(ClassList::new_with_classes([class]));
+        }
+        (UiLabel::Key(_) | UiLabel::Literal(_), None) => {}
     }
     if no_wrap {
         text.insert(TextLayout::no_wrap());

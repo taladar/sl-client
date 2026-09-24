@@ -83,12 +83,13 @@ use crate::notification_host::{
 };
 use crate::notifications::{NotificationKind, NotificationManager, NotificationPriority};
 use crate::skin::BUTTON_CLASS;
-use crate::skin::text_role;
+use crate::skin::role_class;
 use crate::skin_palette::SkinPalette;
 use crate::ui::{column, row};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
+use sl_viewer_ui_core::glyph;
 
 /// The catalogue-template sentinel an inventory-offer card reports as. Like the
 /// sibling bespoke cards these are not real [`crate::notifications::NOTIFICATIONS`]
@@ -145,9 +146,6 @@ const CARD_CLASS: &str = "sk-toast";
 
 /// The skin class the body text wears (`.sk-toast-text`).
 const TEXT_CLASS: &str = "sk-toast-text";
-
-/// The close-button glyph (a multiplication sign), matching the reference toast.
-const CLOSE_GLYPH: &str = "\u{00d7}";
 
 /// A card's widest allowed width, in logical pixels.
 const CARD_MAX_WIDTH: f32 = 360.0;
@@ -1118,9 +1116,13 @@ fn spawn_close_button(commands: &mut Commands, card: Entity) -> Entity {
             ChildOf(close_row),
         ))
         .with_child((
-            Text::new(CLOSE_GLYPH),
-            UiFont::Sans.at(FONT_SIZE),
-            text_role(TEXT_COLOR),
+            // The skin's `glyph::DISMISS` mark.
+            glyph::glyph_host(
+                glyph::DISMISS,
+                UiFont::Sans.at(FONT_SIZE),
+                role_class(TEXT_COLOR),
+            ),
+            TextColor(TEXT_COLOR),
         ))
         .id()
 }

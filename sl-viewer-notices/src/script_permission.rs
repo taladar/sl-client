@@ -83,8 +83,9 @@ use crate::ui::{column, row};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
+use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::skin::BUTTON_CLASS;
-use sl_viewer_ui_core::skin::text_role;
+use sl_viewer_ui_core::skin::role_class;
 
 /// The catalogue-template sentinel a standard permission card reports as (it is
 /// not a real [`crate::notifications::NOTIFICATIONS`] entry — the card is bespoke
@@ -110,12 +111,6 @@ const CARD_CLASS: &str = "sk-toast";
 
 /// The skin class the intro / body text wears (`.sk-toast-text`).
 const TEXT_CLASS: &str = "sk-toast-text";
-
-/// The close-button glyph (a multiplication sign), matching the reference toast.
-const CLOSE_GLYPH: &str = "\u{00d7}";
-
-/// The bullet glyph prefixing each requested-permission line.
-const BULLET_GLYPH: &str = "\u{2022}\u{00a0}";
 
 /// A card's widest allowed width, in logical pixels.
 const CARD_MAX_WIDTH: f32 = 360.0;
@@ -394,13 +389,7 @@ fn build_script_permission_card(
         DIM_TEXT_COLOR,
     );
     for line in &content.permission_lines {
-        spawn_bounded_text(
-            commands,
-            root,
-            &format!("{BULLET_GLYPH}{line}"),
-            FONT_SIZE,
-            DIM_TEXT_COLOR,
-        );
+        spawn_bullet_line(commands, root, line, FONT_SIZE, DIM_TEXT_COLOR);
     }
     spawn_bounded_text(commands, root, &content.confirm, FONT_SIZE, TEXT_COLOR);
 
@@ -698,9 +687,13 @@ fn spawn_close_button(commands: &mut Commands, card: Entity) -> Entity {
             ChildOf(close_row),
         ))
         .with_child((
-            Text::new(CLOSE_GLYPH),
-            UiFont::Sans.at(FONT_SIZE),
-            text_role(TEXT_COLOR),
+            // The skin's `glyph::DISMISS` mark.
+            glyph::glyph_host(
+                glyph::DISMISS,
+                UiFont::Sans.at(FONT_SIZE),
+                role_class(TEXT_COLOR),
+            ),
+            TextColor(TEXT_COLOR),
         ))
         .id()
 }
@@ -738,6 +731,48 @@ fn spawn_bounded_text(
     ));
 }
 
+/// One requested-permission line: the skin's [`glyph::BULLET`] mark, then the line, in a
+/// width-bounded row — so a line that wraps hangs clear of its bullet rather
+/// than running back under it. An empty line spawns nothing.
+fn spawn_bullet_line(
+    commands: &mut Commands,
+    parent: Entity,
+    text: &str,
+    font_size: f32,
+    color: Color,
+) {
+    if text.is_empty() {
+        return;
+    }
+    let line = commands
+        .spawn((
+            Node {
+                max_width: Val::Px(FULL_TEXT_MAX_WIDTH),
+                ..default()
+            },
+            Pickable::IGNORE,
+            ChildOf(parent),
+        ))
+        .id();
+    commands.spawn((
+        glyph::glyph_host(glyph::BULLET, UiFont::Sans.at(font_size), [TEXT_CLASS]),
+        TextColor(color),
+        Node {
+            flex_shrink: 0.0,
+            ..default()
+        },
+        ChildOf(line),
+    ));
+    commands.spawn((
+        Text::new(text.to_owned()),
+        UiFont::Sans.at(font_size),
+        TextColor(color),
+        ClassList::new_with_classes([TEXT_CLASS]),
+        Pickable::IGNORE,
+        ChildOf(line),
+    ));
+}
+
 /// The gallery / `ui_test` specimen (standard card): a static permission request
 /// with a few listed permissions, so the intro / line / confirm / action layout
 /// is swept login-free (a live card needs a scripted object). Registered in
@@ -754,9 +789,9 @@ pub fn spawn_script_permission_specimen(
         ],
         lines_header: cx.text(""),
         permission_lines: vec![
-            cx.text("\u{2022}\u{00a0}Act on your control inputs"),
-            cx.text("\u{2022}\u{00a0}Animate your avatar"),
-            cx.text("\u{2022}\u{00a0}Control your camera"),
+            cx.text("Act on your control inputs"),
+            cx.text("Animate your avatar"),
+            cx.text("Control your camera"),
         ],
         confirm: cx.text("Is this OK?"),
         grant_label: cx.text("Yes"),
@@ -792,7 +827,7 @@ pub fn spawn_script_permission_caution_specimen(
             ),
         ],
         lines_header: cx.text("It is also requesting the following permissions:"),
-        permission_lines: vec![cx.text("\u{2022}\u{00a0}Animate your avatar")],
+        permission_lines: vec![cx.text("Animate your avatar")],
         confirm: cx.text(""),
         grant_label: cx.text("Allow access"),
         deny_label: cx.text("Deny"),

@@ -116,6 +116,7 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_flair::style::components::ClassList;
 
+use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::skin::{ACTIVE_CLASS, ACTIVE_TEXT_CLASS, set_state_class_on};
 use sl_viewer_ui_core::skin_palette::{SkinColors, SkinPalette};
 use sl_viewer_ui_core::ui::{
@@ -164,6 +165,12 @@ const CHROME_BUTTON_CLASS: &str = "sk-floater-button";
 
 /// The skin class on a title-bar glyph itself (`--text-primary`) — the
 /// reference's `FloaterButtonImageColor` = `LtGray`.
+///
+/// Its colour, not its mark: each button's host also carries a
+/// [`glyph`](sl_viewer_ui_core::glyph) slot — [`glyph::CLOSE`],
+/// [`glyph::MINIMIZE`], [`glyph::DOCK`] — and the skin's `content` for that
+/// slot is what it draws. The two toggling boxes follow
+/// [`glyph::MINIMIZED`] / [`glyph::DOCKED`] on the host.
 const CHROME_GLYPH_CLASS: &str = "sk-floater-glyph";
 
 /// The skin class on the corner resize grip (`--text-muted`), a touch brighter
@@ -173,25 +180,6 @@ const RESIZE_GRIP_CLASS: &str = "sk-floater-grip";
 /// The skin class on the **dock host** behind docked floaters
 /// (`--overlay-bg`).
 const DOCK_HOST_CLASS: &str = "sk-dock-host";
-
-/// The close-button glyph.
-const GLYPH_CLOSE: &str = "\u{2715}";
-
-/// The minimize-button glyph (an expanded floater — click to collapse).
-const GLYPH_MINIMIZE: &str = "\u{2014}";
-
-/// The restore-button glyph (a minimized floater — click to expand).
-const GLYPH_RESTORE: &str = "\u{25ad}";
-
-/// The dock-button glyph while **free-floating** (click to dock into the host).
-const GLYPH_DOCK: &str = "\u{25a4}";
-
-/// The dock-button glyph while **docked** (click to tear off into a free window).
-const GLYPH_TEAROFF: &str = "\u{25a5}";
-
-/// The resize-grip glyph — a lower-right corner wedge, standing in for the
-/// reference's `Resize_Corner` image.
-const GLYPH_RESIZE: &str = "\u{25e2}";
 
 /// How far each further **instance** of a keyed floater is offset from the one
 /// before it, in logical pixels — the reference's `UIFloaterOffset` (16,
@@ -1764,20 +1752,21 @@ fn build_floater_chrome(
         ))
         .id();
     let (dock_button, dock_glyph) = if caps.dockable {
-        let (button, glyph) = chrome_button(commands, cluster, GLYPH_DOCK, font.clone(), "dock");
+        let (button, glyph) = chrome_button(commands, cluster, glyph::DOCK, font.clone(), "dock");
         (Some(button), Some(glyph))
     } else {
         (None, None)
     };
     let (minimize_button, minimize_glyph) = if caps.minimizable {
         let (button, glyph) =
-            chrome_button(commands, cluster, GLYPH_MINIMIZE, font.clone(), "minimize");
+            chrome_button(commands, cluster, glyph::MINIMIZE, font.clone(), "minimize");
         (Some(button), Some(glyph))
     } else {
         (None, None)
     };
     let close_button = if caps.closable {
-        let (button, _glyph) = chrome_button(commands, cluster, GLYPH_CLOSE, font.clone(), "close");
+        let (button, _glyph) =
+            chrome_button(commands, cluster, glyph::CLOSE, font.clone(), "close");
         Some(button)
     } else {
         None
@@ -1823,10 +1812,8 @@ fn build_floater_chrome(
                     ChildOf(parent),
                 ))
                 .with_child((
-                    Text::new(GLYPH_RESIZE.to_owned()),
-                    font,
+                    glyph::glyph_host(glyph::RESIZE, font, [RESIZE_GRIP_CLASS]),
                     TextColor(fallback.text_muted),
-                    ClassList::new_with_classes([RESIZE_GRIP_CLASS]),
                 ))
                 .id(),
         )
@@ -1848,11 +1835,12 @@ fn build_floater_chrome(
 }
 
 /// Spawn one chrome button (a small padded box with a centred glyph) under
-/// `parent`, returning the box and its glyph text.
+/// `parent`, returning the box and its glyph host. `slot` names the mark; the
+/// skin draws it.
 fn chrome_button(
     commands: &mut Commands,
     parent: Entity,
-    glyph: &str,
+    slot: &'static str,
     font: TextFont,
     name: &str,
 ) -> (Entity, Entity) {
@@ -1878,10 +1866,8 @@ fn chrome_button(
         .id();
     let glyph = commands
         .spawn((
-            Text::new(glyph.to_owned()),
-            font,
+            glyph::glyph_host(slot, font, [CHROME_GLYPH_CLASS]),
             TextColor(fallback.text_primary),
-            ClassList::new_with_classes([CHROME_GLYPH_CLASS]),
             ChildOf(button),
         ))
         .id();
@@ -2307,38 +2293,25 @@ fn set_display(nodes: &mut Query<&mut Node>, entity: Entity, shown: bool) {
     }
 }
 
-/// Reflect a changed floater into its toggling glyphs: minimize ↔ restore, and
-/// dock ↔ tear-off.
+/// Reflect a changed floater into its toggling glyphs' state classes:
+/// [`glyph::MINIMIZED`] on the minimize box, [`glyph::DOCKED`] on the dock box.
+/// Which mark each state wears is the skin's.
 fn apply_floater_glyphs(
     floaters: Query<(&Floater, &FloaterParts), Changed<Floater>>,
-    mut texts: Query<&mut Text>,
+    mut classes: Query<&mut ClassList>,
 ) {
     for (floater, parts) in &floaters {
-        if let Some(glyph) = parts.minimize_glyph {
-            let wanted = if floater.minimized {
-                GLYPH_RESTORE
-            } else {
-                GLYPH_MINIMIZE
-            };
-            set_glyph(&mut texts, glyph, wanted);
+        if let Some(host) = parts.minimize_glyph {
+            set_state_class_on(&mut classes, host, glyph::MINIMIZED, floater.minimized);
         }
-        if let Some(glyph) = parts.dock_glyph {
-            let wanted = if floater.docked_in.is_some() {
-                GLYPH_TEAROFF
-            } else {
-                GLYPH_DOCK
-            };
-            set_glyph(&mut texts, glyph, wanted);
+        if let Some(host) = parts.dock_glyph {
+            set_state_class_on(
+                &mut classes,
+                host,
+                glyph::DOCKED,
+                floater.docked_in.is_some(),
+            );
         }
-    }
-}
-
-/// Set a glyph text node's string, writing only on a real change.
-fn set_glyph(texts: &mut Query<&mut Text>, entity: Entity, glyph: &str) {
-    if let Ok(mut text) = texts.get_mut(entity)
-        && text.0 != glyph
-    {
-        glyph.clone_into(&mut text.0);
     }
 }
 

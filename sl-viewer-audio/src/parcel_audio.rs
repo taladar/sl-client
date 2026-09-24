@@ -58,8 +58,9 @@ use bevy_flair::style::components::ClassList;
 use sl_audio::{Bus, Mixer};
 use sl_client_bevy::SlAgentParcel;
 use sl_gst::{AudioStreamPlayer, AudioStreamState, ValidatedMediaUrl};
+use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::skin::{
-    ACTION_BUTTON_CLASS, DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class_on, text_role,
+    ACTION_BUTTON_CLASS, DISABLED_TEXT_CLASS, TEXT_CLASS, role_class, set_state_class_on, text_role,
 };
 
 use crate::media_audio::MixerStream;
@@ -397,10 +398,7 @@ pub(crate) fn spawn_parcel_audio_bar(
         .id();
     let marker = commands
         .spawn((
-            Text::new("♫"),
-            UiFont::Sans.at(BAR_FONT_SIZE),
-            ClassList::new_with_classes([TEXT_CLASS]),
-            Pickable::IGNORE,
+            glyph::glyph_host(glyph::MUSIC, UiFont::Sans.at(BAR_FONT_SIZE), [TEXT_CLASS]),
             ChildOf(cluster),
         ))
         .id();
@@ -424,9 +422,9 @@ pub(crate) fn spawn_parcel_audio_bar(
         ))
         .id();
     let (play_button, play_label) =
-        spawn_glyph_button(&mut commands, cluster, "▶", "play-stop", 20);
+        spawn_glyph_button(&mut commands, cluster, glyph::PLAY_STOP, "play-stop", 20);
     let (mute_button, mute_label) =
-        spawn_glyph_button(&mut commands, cluster, "🔊", "mute-toggle", 21);
+        spawn_glyph_button(&mut commands, cluster, glyph::SPEAKER, "mute-toggle", 21);
     spawn_slider(
         &mut commands,
         cluster,
@@ -459,7 +457,7 @@ pub(crate) fn spawn_parcel_audio_bar(
 fn spawn_glyph_button(
     commands: &mut Commands,
     parent: Entity,
-    glyph: &str,
+    slot: &'static str,
     action: &'static str,
     tab_index: i32,
 ) -> (Entity, Entity) {
@@ -490,10 +488,7 @@ fn spawn_glyph_button(
         .id();
     let label = commands
         .spawn((
-            Text::new(glyph),
-            UiFont::Sans.at(BAR_FONT_SIZE),
-            ClassList::new_with_classes([TEXT_CLASS]),
-            Pickable::IGNORE,
+            glyph::glyph_host(slot, UiFont::Sans.at(BAR_FONT_SIZE), [TEXT_CLASS]),
             ChildOf(button),
         ))
         .id();
@@ -656,9 +651,10 @@ fn sync_parcel_audio_ui(
         .unwrap_or(false);
 
     // The ♫ marker greys with the cluster rather than with a button, so it
-    // carries the class directly. The ▶/■ play glyph is a child of its button
-    // and greys from `.sk-action-button:disabled .sk-text`; the mute 🔊/🔇 is a
-    // colour emoji that ignores tint, so the button chrome is its greyed cue.
+    // carries the class directly. The play / stop mark is a child of its button
+    // and greys from `.sk-action-button:disabled .sk-text`, which the mark
+    // inherits; the shipped mute mark is a colour emoji that ignores tint, so
+    // the button chrome is its greyed cue.
     set_state_class_on(&mut classes, ui.marker, DISABLED_TEXT_CLASS, !active);
 
     // Disable the two buttons. What that *looks* like is
@@ -673,24 +669,14 @@ fn sync_parcel_audio_ui(
     }
 
     let status = audio.player.status();
-    if let Ok(mut play) = texts.get_mut(ui.play_label) {
-        // U+25A0/U+25B6, not U+23F9/U+23F5: the latter are in no bundled
-        // font face and render as tofu.
-        let want = if stream_running(status.state) {
-            "■"
-        } else {
-            "▶"
-        };
-        if play.0 != want {
-            want.clone_into(&mut play.0);
-        }
-    }
-    if let Ok(mut mute) = texts.get_mut(ui.mute_label) {
-        let want = if music_muted { "🔇" } else { "🔊" };
-        if mute.0 != want {
-            want.clone_into(&mut mute.0);
-        }
-    }
+    // Which state each toggle is in; the marks are the skin's.
+    set_state_class_on(
+        &mut classes,
+        ui.play_label,
+        glyph::PLAYING,
+        stream_running(status.state),
+    );
+    set_state_class_on(&mut classes, ui.mute_label, glyph::MUTED, music_muted);
     if let Ok(mut title) = texts.get_mut(ui.title) {
         // No stream: a plain placeholder. Otherwise the loud path first — only
         // while the stream is actually in error, preferring the precise probed
@@ -748,9 +734,8 @@ pub fn spawn_parcel_audio_specimen(
         ))
         .id();
     commands.spawn((
-        Text::new("♫"),
-        cx.font(UiFont::Sans),
-        text_role(BAR_LABEL),
+        glyph::glyph_host(glyph::MUSIC, cx.font(UiFont::Sans), role_class(BAR_LABEL)),
+        TextColor(BAR_LABEL),
         ChildOf(cluster),
     ));
     let title_clip = commands
