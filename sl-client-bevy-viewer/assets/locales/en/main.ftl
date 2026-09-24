@@ -3940,6 +3940,7 @@ preferences-skin-graphite = Graphite
 preferences-skin-azure = Azure
 preferences-theme-base = Skin default
 preferences-theme-dark = Dark
+preferences-theme-relief = Relief
 preferences-section-chat-colors = Chat colors
 preferences-row-chat-color-self = My chat
 preferences-row-chat-color-others = Other avatars

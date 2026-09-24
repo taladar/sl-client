@@ -201,6 +201,23 @@
   --text-note: #fad166;
   --experience-accent: #6bd199;
 
+  /* The tooltip (viewer-skin-tooltip-roles): a rounded, opaque dark plate
+   * with light text — opaque because a tip is read over text.
+   * Colours and shape both, since a classic skin changes both. */
+  --tooltip-bg: #0f121a;
+  --tooltip-border: #4d576b;
+  --tooltip-text: #f2f2f2;
+  --tooltip-border-width: 1px;
+  --tooltip-radius: 4px;
+  --tooltip-padding-block: 5px;
+  --tooltip-padding-inline: 8px;
+  --tooltip-max-width: 400px;
+
+  /* The inspector card an avatar or object click opens: its own plate, not
+   * the tooltip's. */
+  --inspector-bg: #141721fa;
+  --inspector-border: #525c70;
+
   /* User-tunable palette (the preferences Colors & Skins tab). These are not
    * consumed by common.css: the viewer reads them off the styled root's
    * resolved vars and feeds them into the settings store as the skin-supplied

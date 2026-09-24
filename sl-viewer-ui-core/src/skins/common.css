@@ -778,6 +778,41 @@
   color: var(--overlay-text);
 }
 
+/* A tooltip (viewer-skin-tooltip-roles) — every tip the viewer pops: the
+ * world hover tip, a link's URL, the minimap's and the world map's. Shape as
+ * well as colour comes from the tokens, since the reference varies both per
+ * skin (Vintage's is square, 4 px padded and 200 px wide).
+ *
+ * Two rules, because bevy_ui has no style inheritance: the box's colour would
+ * never reach the text node inside it. What no rule here may change is the
+ * pair that makes a tip a tip — it ignores the pointer and draws over every
+ * other layer — which is why those are not style properties at all
+ * (skin.rs `tooltip_box`).
+ *
+ * The text states `text-shadow: none`: a tip is read on its own plate, and a
+ * chrome shadow tuned for a panel would muddy a light one. */
+.sk-tooltip {
+  background-color: var(--tooltip-bg);
+  border-color: var(--tooltip-border);
+  border-width: var(--tooltip-border-width);
+  border-radius: var(--tooltip-radius);
+  padding: var(--tooltip-padding-block) var(--tooltip-padding-inline);
+  max-width: var(--tooltip-max-width);
+}
+
+.sk-tooltip-text {
+  color: var(--tooltip-text);
+  text-shadow: none;
+}
+
+/* An inspector card — the popup an avatar or object click opens. Not a
+ * tooltip: the reference gives it its own plate (`Inspector_Background`), and
+ * it takes clicks. Its text and buttons wear their own roles. */
+.sk-inspector {
+  background-color: var(--inspector-bg);
+  border-color: var(--inspector-border);
+}
+
 /* A tab page — the "content" shade the active tab shares, so the selected tab
  * reads as merging into its panel. The tab BUTTONS are absent for the same
  * reason the floater title bar is: their active / inactive / disabled paints

@@ -427,6 +427,131 @@ pub const OVERLAY_CLASS: &str = "sk-overlay";
 /// the two questions separately.
 pub const OVERLAY_TEXT_CLASS: &str = "sk-overlay-text";
 
+/// The CSS class on a **tooltip**'s box (`viewer-skin-tooltip-roles`): its
+/// face, frame, corners, padding and wrap width, all from the `--tooltip-*`
+/// tokens.
+///
+/// One class for every tip — the world hover tip, a link's URL tip, the
+/// minimap's and the world map's — because the reference treats the tooltip
+/// as one skinned widget (`tool_tip.xml`), and a skin whose floaters are dark
+/// grey draws its tips as a *light* plate precisely so that "the viewer is
+/// telling you something" does not read as part of the panel under it. Four
+/// hand-spelled looks could never agree on that.
+///
+/// Spawn it through [`tooltip_box`], which also carries the two properties a
+/// skin is not allowed to change.
+pub const TOOLTIP_CLASS: &str = "sk-tooltip";
+
+/// The CSS class on a tooltip's **text** (`--tooltip-text`). A rule of its own
+/// rather than a `color` on [`TOOLTIP_CLASS`], because `bevy_ui` has no style
+/// inheritance: the box's colour would never reach the text node inside it.
+pub const TOOLTIP_TEXT_CLASS: &str = "sk-tooltip-text";
+
+/// The CSS class on an **inspector** card — the small click-to-open popup
+/// about an avatar or an object (`--inspector-bg` / `--inspector-border`).
+///
+/// Not a tooltip, although it pops up where a tooltip would: the reference
+/// builds it as a floater with its own plate (`Inspector_Background`), it
+/// takes clicks where a tip must never take one, and a skin that draws its
+/// tips as a light plate keeps its inspector dark. Its text and buttons are
+/// already skinned through their own roles; this is the card they sit on.
+pub const INSPECTOR_CLASS: &str = "sk-inspector";
+
+/// A tooltip's face before the stylesheet lands, and in a headless world that
+/// resolves none: `fallback.css`'s `--tooltip-bg`. The skin decides the real
+/// one; `tooltip_fallback_matches_the_fallback_sheet` holds the two together.
+///
+/// Opaque on purpose: a tip is read over whatever is under the pointer — chat
+/// text, a field, a map — and any translucency lets that bleed into the words.
+pub const TOOLTIP_BACKGROUND: Color = Color::srgb(0.06, 0.07, 0.10);
+
+/// A tooltip's frame colour before the stylesheet lands (`--tooltip-border`).
+pub const TOOLTIP_BORDER: Color = Color::srgb(0.30, 0.34, 0.42);
+
+/// A tooltip's text colour before the stylesheet lands (`--tooltip-text`).
+pub const TOOLTIP_TEXT: Color = Color::srgb(0.95, 0.95, 0.95);
+
+/// A tooltip's frame width before the stylesheet lands, in logical pixels
+/// (`--tooltip-border-width`).
+pub const TOOLTIP_BORDER_WIDTH: f32 = 1.0;
+
+/// A tooltip's corner radius before the stylesheet lands, in logical pixels
+/// (`--tooltip-radius`).
+pub const TOOLTIP_RADIUS: f32 = 4.0;
+
+/// A tooltip's padding above and below its text before the stylesheet lands,
+/// in logical pixels (`--tooltip-padding-block`).
+pub const TOOLTIP_PADDING_BLOCK: f32 = 5.0;
+
+/// A tooltip's padding either side of its text before the stylesheet lands, in
+/// logical pixels (`--tooltip-padding-inline`).
+pub const TOOLTIP_PADDING_INLINE: f32 = 8.0;
+
+/// The width a tooltip wraps at before the stylesheet lands, in logical pixels
+/// (`--tooltip-max-width`).
+pub const TOOLTIP_MAX_WIDTH: f32 = 400.0;
+
+/// An inspector card's face before the stylesheet lands (`--inspector-bg`).
+pub const INSPECTOR_BACKGROUND: Color = Color::srgba(0.08, 0.09, 0.13, 0.98);
+
+/// An inspector card's frame before the stylesheet lands
+/// (`--inspector-border`).
+pub const INSPECTOR_BORDER: Color = Color::srgb(0.32, 0.36, 0.44);
+
+/// The global z-order every tooltip draws at: above every other UI layer,
+/// the inspector card included, so a tip can describe anything on screen.
+pub const TOOLTIP_Z: i32 = i32::MAX;
+
+/// A tooltip's box, hidden-agnostic and unpositioned: an absolutely placed
+/// column wearing [`TOOLTIP_CLASS`], with the fallback look beside the class
+/// for the frame before the stylesheet lands.
+///
+/// The caller adds its own `Visibility` (or `Display`), `Name` and parent, and
+/// writes `left` / `top` as the pointer moves. What it does **not** get to
+/// choose, and neither does a skin, is the pair that makes a tip a tip:
+///
+/// - [`Pickable::IGNORE`] — a tip must never swallow the click or the hover
+///   meant for the thing it describes, which is directly under it;
+/// - [`GlobalZIndex`]`(`[`TOOLTIP_Z`]`)` — a tip that falls behind a floater
+///   describes nothing.
+///
+/// Neither is a style property, so no stylesheet can reach them; that is the
+/// point of spawning them here rather than leaving each consumer to remember.
+#[must_use]
+pub fn tooltip_box() -> impl Bundle {
+    (
+        Node {
+            position_type: PositionType::Absolute,
+            flex_direction: FlexDirection::Column,
+            max_width: Val::Px(TOOLTIP_MAX_WIDTH),
+            padding: UiRect::axes(
+                Val::Px(TOOLTIP_PADDING_INLINE),
+                Val::Px(TOOLTIP_PADDING_BLOCK),
+            ),
+            border: UiRect::all(Val::Px(TOOLTIP_BORDER_WIDTH)),
+            border_radius: BorderRadius::all(Val::Px(TOOLTIP_RADIUS)),
+            ..default()
+        },
+        BackgroundColor(TOOLTIP_BACKGROUND),
+        BorderColor::all(TOOLTIP_BORDER),
+        ClassList::new_with_classes([TOOLTIP_CLASS]),
+        Pickable::IGNORE,
+        GlobalZIndex(TOOLTIP_Z),
+    )
+}
+
+/// A tooltip's text colour and class — [`TOOLTIP_TEXT_CLASS`] beside the
+/// fallback [`TOOLTIP_TEXT`] — for the text node inside a [`tooltip_box`].
+/// The text node is the caller's, since only it knows its font and content;
+/// it should carry [`Pickable::IGNORE`] too.
+#[must_use]
+pub fn tooltip_text() -> (TextColor, ClassList) {
+    (
+        TextColor(TOOLTIP_TEXT),
+        ClassList::new_with_classes([TOOLTIP_TEXT_CLASS]),
+    )
+}
+
 /// The CSS class on an inventory **folder**'s label, which the reference draws
 /// gold against an item's plain text.
 ///

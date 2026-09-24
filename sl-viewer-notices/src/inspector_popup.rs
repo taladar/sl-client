@@ -66,7 +66,8 @@ use crate::ui_name_link::{NameLink, NameLinkSpec, NameTarget, set_name_link, spa
 use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use crate::url_linkify::LinkTarget;
 use crate::world_api::AvatarState;
-use sl_viewer_ui_core::skin::text_role;
+use bevy_flair::style::components::ClassList;
+use sl_viewer_ui_core::skin::{self, text_role};
 
 /// The card's fixed width, in logical pixels.
 const CARD_WIDTH: f32 = 280.0;
@@ -106,12 +107,6 @@ const LINGER_SECONDS: f64 = 0.7;
 /// it is elided.
 const SNIPPET_CHARS: usize = 160;
 
-/// The card background (a dark, near-opaque surface).
-const CARD_BACKGROUND: Color = Color::srgba(0.08, 0.09, 0.13, 0.98);
-
-/// The card border colour.
-const CARD_BORDER: Color = Color::srgb(0.32, 0.36, 0.44);
-
 /// The title (name) text colour.
 const TITLE_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
@@ -129,10 +124,10 @@ const BUTTON_BORDER: Color = Color::srgb(0.38, 0.46, 0.58);
 
 /// The card's global z-order: above every UI surface it can be opened over — the
 /// bottom bar ([`crate::ui::BOTTOM_BAR_Z`] = 9000) and any docked /
-/// floating window — but just below the hover tooltip (`i32::MAX`) so a tip can
+/// floating window — but just below every tooltip (`skin::TOOLTIP_Z`) so a tip can
 /// still appear over the card. A too-low z was why an inspector opened over the
 /// docked chat window was hidden behind it.
-const INSPECTOR_Z: i32 = i32::MAX - 1000;
+const INSPECTOR_Z: i32 = skin::TOOLTIP_Z - 1000;
 
 // ---------------------------------------------------------------------------
 // Public messages.
@@ -767,8 +762,11 @@ fn build_card(
                 border: UiRect::all(Val::Px(1.0)),
                 ..column(Val::Px(CARD_ROW_GAP))
             },
-            BackgroundColor(CARD_BACKGROUND),
-            BorderColor::all(CARD_BORDER),
+            // The skin's inspector plate (`--inspector-bg` / `-border`), with
+            // the fallback beside the class for the frame before it lands.
+            BackgroundColor(skin::INSPECTOR_BACKGROUND),
+            BorderColor::all(skin::INSPECTOR_BORDER),
+            ClassList::new_with_classes([skin::INSPECTOR_CLASS]),
             GlobalZIndex(INSPECTOR_Z),
             Pickable {
                 should_block_lower: true,

@@ -34,7 +34,6 @@
 //! Reference (Firestorm, read-only): `llui/lltextbase` (segment rendering + hit
 //! testing), `llui/llurlaction` (the click actions).
 
-use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui_widgets::Button;
@@ -53,7 +52,7 @@ use crate::ui_font::UiFont;
 use crate::ui_name_link::{NAME_LINK_COLOR, NAME_PLAIN_COLOR};
 use crate::url_linkify::{AgentNameStyle, LinkIcon, LinkLabel, LinkTarget, TextRun, linkify};
 use crate::world_api::{AvatarState, NameRecord};
-use sl_viewer_ui_core::skin::text_role;
+use sl_viewer_ui_core::skin;
 
 /// The leading-icon size, in logical pixels, relative to the label font size.
 const ICON_SCALE: f32 = 1.0;
@@ -75,15 +74,6 @@ const LOADING_KEY: &str = "link-loading";
 
 /// The default label font size, in logical pixels.
 const DEFAULT_FONT_SIZE: f32 = 14.0;
-
-/// The tooltip's background, used when no skin overrides it.
-const TOOLTIP_BACKGROUND: Color = Color::srgba(0.06, 0.07, 0.10, 0.97);
-
-/// The tooltip's border colour.
-const TOOLTIP_BORDER: Color = Color::srgb(0.30, 0.34, 0.42);
-
-/// The tooltip's text colour.
-const TOOLTIP_TEXT: Color = SkinPalette::FALLBACK.text_primary;
 
 /// The tooltip's text size, in logical pixels.
 const TOOLTIP_FONT_SIZE: f32 = 12.0;
@@ -596,23 +586,14 @@ struct LinkTooltipUi {
     text_entity: Entity,
 }
 
-/// Spawn the shared tooltip box once, hidden, under the UI root.
+/// Spawn the shared tooltip box once, hidden, under the UI root — the skinned
+/// tooltip every tip shares ([`skin::tooltip_box`]), which is also what keeps it
+/// from eating a click meant for the link under it.
 fn setup_link_tooltip(mut commands: Commands, root: Res<UiRoot>) {
     let box_entity = commands
         .spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                display: Display::None,
-                padding: UiRect::axes(Val::Px(6.0), Val::Px(3.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                max_width: Val::Px(520.0),
-                ..default()
-            },
-            BackgroundColor(TOOLTIP_BACKGROUND),
-            BorderColor::all(TOOLTIP_BORDER),
-            // The tooltip must never eat a click meant for the world / UI beneath.
-            Pickable::IGNORE,
-            GlobalZIndex(1000),
+            skin::tooltip_box(),
+            Visibility::Hidden,
             Name::new("link-tooltip"),
             ChildOf(root.0),
         ))
@@ -621,7 +602,7 @@ fn setup_link_tooltip(mut commands: Commands, root: Res<UiRoot>) {
         .spawn((
             Text::new(String::new()),
             UiFont::Sans.at(TOOLTIP_FONT_SIZE),
-            text_role(TOOLTIP_TEXT),
+            skin::tooltip_text(),
             Pickable::IGNORE,
             ChildOf(box_entity),
         ))
@@ -640,31 +621,33 @@ fn position_link_tooltip(
     tooltip: Option<Res<LinkTooltipUi>>,
     translator: Translator,
     windows: Query<&Window, With<PrimaryWindow>>,
-    mut nodes: Query<&mut Node>,
+    mut boxes: Query<(&mut Node, &mut Visibility)>,
     mut texts: Query<&mut Text>,
 ) {
     let Some(tooltip) = tooltip else {
         return;
     };
-    let Ok(mut box_node) = nodes.get_mut(tooltip.box_entity) else {
+    let Ok((mut box_node, mut visibility)) = boxes.get_mut(tooltip.box_entity) else {
         return;
     };
     let Some(info) = hovered.link.as_ref() else {
-        if box_node.display != Display::None {
-            box_node.display = Display::None;
-        }
+        visibility.set_if_neq(Visibility::Hidden);
         return;
     };
     // Follow the cursor; without a cursor position (e.g. off-window) keep hidden.
     let Some(cursor) = windows.single().ok().and_then(Window::cursor_position) else {
-        if box_node.display != Display::None {
-            box_node.display = Display::None;
-        }
+        visibility.set_if_neq(Visibility::Hidden);
         return;
     };
-    box_node.display = Display::Flex;
-    box_node.left = Val::Px(cursor.x + TOOLTIP_CURSOR_OFFSET.x);
-    box_node.top = Val::Px(cursor.y + TOOLTIP_CURSOR_OFFSET.y);
+    visibility.set_if_neq(Visibility::Inherited);
+    let left = Val::Px(cursor.x + TOOLTIP_CURSOR_OFFSET.x);
+    let top = Val::Px(cursor.y + TOOLTIP_CURSOR_OFFSET.y);
+    if box_node.left != left {
+        box_node.left = left;
+    }
+    if box_node.top != top {
+        box_node.top = top;
+    }
     // Show the link's actual destination URL, under a localised category line, so
     // the user can vet where the link goes before clicking.
     let wanted = format!("{}\n{}", translator.get(info.tooltip_key), info.url);

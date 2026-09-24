@@ -173,6 +173,22 @@
   --text-note: #fad166;
   --experience-accent: #6bd199;
 
+  /* The tooltip (viewer-skin-tooltip-roles): the overlay's deep blue, opaque,
+   * with the skin's primary text, rounded like its controls. */
+  --tooltip-bg: #06141f;
+  --tooltip-border: #2b455e;
+  --tooltip-text: #eaf3ff;
+  --tooltip-border-width: 1px;
+  --tooltip-radius: 6px;
+  --tooltip-padding-block: 5px;
+  --tooltip-padding-inline: 8px;
+  --tooltip-max-width: 400px;
+
+  /* The inspector card an avatar or object click opens: its own plate, not
+   * the tooltip's. */
+  --inspector-bg: #0b1f33fa;
+  --inspector-border: #4a90d0;
+
   /* User-tunable palette (see graphite/skin.css for the token contract) —
    * cooler variants, so a skin switch visibly moves the swatches. */
 

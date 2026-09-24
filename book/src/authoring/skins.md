@@ -110,6 +110,10 @@ Defined by every skin's `skin.css`, consumed by `common.css`:
 | `--card-bg` | a background-only surface inside a framed one: a card, a bar, a tab page, the active tab |
 | `--overlay-bg` | the scrim a floating layer sits on (the dock host behind docked floaters, an overlay over the world) |
 | `--overlay-text` | text drawn straight over the rendered world — a beacon's label, a diagnostic read-out — which is read against whatever the camera sees, not against a panel |
+| `--tooltip-bg` / `--tooltip-border` / `--tooltip-text` | every tooltip's plate, frame and text — the world hover tip, a link's URL, the minimap's and the world map's; a classic skin makes it a light plate with black text so a tip never reads as part of the panel under it |
+| `--tooltip-border-width` / `--tooltip-radius` | the tip's frame width and corner radius (a classic tip is square) |
+| `--tooltip-padding-block` / `--tooltip-padding-inline` / `--tooltip-max-width` | the tip's padding above-and-below and either side, and the width it wraps at |
+| `--inspector-bg` / `--inspector-border` | the inspector card an avatar or object click opens — its own plate, not the tooltip's, because it takes clicks |
 | `--menu-bg` | a dropped-down menu's face; a role of its own because a classic skin floats its menus in a colour the floater body does not share (the flat skins give it `--surface-bg`'s value) |
 | `--text-primary` | primary body text: a label, a table cell, a menu entry, a tab caption |
 | `--text-muted` | secondary text: a caption, a hint, a column header, a resize grip |
@@ -295,6 +299,8 @@ the stock look rather than to black.
 | `.sk-presence-online` / `.sk-presence-offline` | a friend's presence dot |
 | `.sk-pie-label` / `.sk-pie-label-sub-pie` / `.sk-pie-label-unavailable` | a pie slice's caption: ordinary, one that opens a sub-pie, one that cannot be picked |
 | `.sk-overlay` / `.sk-overlay-text` | an overlay over the rendered world and its text |
+| `.sk-tooltip` / `.sk-tooltip-text` | a tooltip's box and its text; spawned by `skin::tooltip_box`, which also keeps it unpickable and topmost — two things no skin can change |
+| `.sk-inspector` | an inspector card's plate |
 | `.sk-disabled-surface` / `.sk-disabled-text` | the greyed state of either |
 | `.sk-focusable` | the keyboard focus ring (stamped automatically onto every `TabIndex`) |
 | `.sk-accent` | a leading accent bar + hanging indent (logical box demo) |

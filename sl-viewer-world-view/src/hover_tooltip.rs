@@ -41,6 +41,8 @@ use crate::gpu_pick::{GpuPickResolved, GpuPicker, PICK_HZ, PickPurpose, PickReso
 use crate::hud_pick::HudRayCast;
 use sl_viewer_social::{GroupsModel, short_id};
 use sl_viewer_ui_core::i18n::Translator;
+use sl_viewer_ui_core::skin;
+use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems};
 use sl_viewer_world_api::AvatarState;
 use sl_viewer_world_api::ObjectState;
 use sl_viewer_world_api::pointer_over_blocking_ui;
@@ -69,9 +71,6 @@ const MOTION_RESET_PX: f32 = 1.5;
 /// reference's tooltip placement).
 const TIP_CURSOR_OFFSET_PX: f32 = 16.0;
 
-/// The tip text's maximum width, logical px, before it wraps.
-const TIP_MAX_WIDTH_PX: f32 = 400.0;
-
 /// Register the hover-tip settings.
 pub fn register_settings(settings: &mut sl_viewer_settings::ViewerSettings) {
     settings.register_in(
@@ -88,10 +87,19 @@ pub fn register_settings(settings: &mut sl_viewer_settings::ViewerSettings) {
     );
 }
 
-/// Marker on the cursor-anchored tooltip box (a `Text` node with a dark
-/// backdrop that `update_hover_tooltip` positions and rewrites).
+/// Marker on the cursor-anchored tooltip **box** — the skinned plate that
+/// `apply_hover_tooltip` positions and shows / hides.
 #[derive(Component, Debug, Clone, Copy)]
 pub struct HoverTooltip;
+
+/// Marker on the tooltip's **text** node, the one child of [`HoverTooltip`],
+/// which `apply_hover_tooltip` rewrites.
+///
+/// Two nodes rather than the one `Text` with a background this used to be,
+/// because the box and its text each wear their own skin class and `bevy_ui`
+/// has no style inheritance — see `skin::TOOLTIP_TEXT_CLASS`.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct HoverTooltipText;
 
 /// The hover-tooltip runtime state: the dwell timer, the cached
 /// properties-family replies, and the request de-dup guards.
@@ -281,28 +289,30 @@ fn ingest_hover_picks(
     }
 }
 
-/// Spawn the tooltip box (hidden) — a dark-backed, cursor-anchored `Text` node
-/// drawn over everything and never itself pickable.
-fn setup_hover_tooltip(mut commands: Commands) {
+/// Spawn the tooltip (hidden): the shared skinned box
+/// ([`skin::tooltip_box`], which also makes it unpickable and topmost) holding
+/// one text node.
+///
+/// Under the UI root, which it was not until the tip became skinnable: a node
+/// outside the tree `bevy_flair` styles resolves no class at all, so the
+/// `.sk-tooltip` rule would have painted nothing.
+fn setup_hover_tooltip(mut commands: Commands, root: Res<UiRoot>) {
+    let tip = commands
+        .spawn((
+            skin::tooltip_box(),
+            Visibility::Hidden,
+            HoverTooltip,
+            Name::new("hover-tooltip"),
+            ChildOf(root.0),
+        ))
+        .id();
     commands.spawn((
         Text::new(String::new()),
         sl_viewer_ui_core::ui_font::UiFont::Sans.at(14.0),
-        TextColor(Color::srgb(0.95, 0.95, 0.95)),
-        Node {
-            position_type: PositionType::Absolute,
-            max_width: Val::Px(TIP_MAX_WIDTH_PX),
-            padding: UiRect::axes(Val::Px(8.0), Val::Px(5.0)),
-            border_radius: BorderRadius::all(Val::Px(4.0)),
-            ..default()
-        },
-        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.75)),
-        // The tip must never occlude what it describes, and must draw over
-        // every other UI layer.
+        skin::tooltip_text(),
         Pickable::IGNORE,
-        GlobalZIndex(i32::MAX),
-        Visibility::Hidden,
-        HoverTooltip,
-        Name::new("hover-tooltip"),
+        HoverTooltipText,
+        ChildOf(tip),
     ));
 }
 
@@ -599,9 +609,13 @@ fn update_hover_tooltip(
 /// so its `Visibility` / `Node` / `Text` writes stay clear of the pick reads.
 fn apply_hover_tooltip(
     state: Res<HoverTooltipState>,
-    mut overlay: Query<(&mut Node, &mut Text, &mut Visibility), With<HoverTooltip>>,
+    mut overlay: Query<(&mut Node, &mut Visibility), With<HoverTooltip>>,
+    mut texts: Query<&mut Text, With<HoverTooltipText>>,
 ) {
-    let Ok((mut node, mut text, mut visibility)) = overlay.single_mut() else {
+    let Ok((mut node, mut visibility)) = overlay.single_mut() else {
+        return;
+    };
+    let Ok(mut text) = texts.single_mut() else {
         return;
     };
     match &state.render {
@@ -747,7 +761,10 @@ pub struct HoverTooltipPlugin;
 impl Plugin for HoverTooltipPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<HoverTooltipState>()
-            .add_systems(Startup, setup_hover_tooltip)
+            .add_systems(
+                Startup,
+                setup_hover_tooltip.after(UiScaffoldSystems::SpawnRoot),
+            )
             .add_systems(
                 Update,
                 (

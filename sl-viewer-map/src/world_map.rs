@@ -69,7 +69,7 @@ use crate::world_map_math::{
     self, TileRaster, WorldMapView, tile_corner, tile_level, tile_span_regions,
 };
 use crate::world_map_tiles::{TileKey, TileState, WorldMapTiles};
-use sl_viewer_ui_core::skin::text_role;
+use sl_viewer_ui_core::skin;
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 /// The `element` tag the world map attributes its [`UiAction`]s to.
@@ -530,18 +530,12 @@ fn build_world_map_content(
         .observe(on_world_map_context)
         .id();
 
+    // The shared skinned tip (`skin::tooltip_box`), so the map's hover card
+    // looks like every other tooltip and cannot swallow the map's own drag.
     let tooltip = commands
         .spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                top: Val::Px(0.0),
-                padding: UiRect::all(Val::Px(4.0)),
-                ..column(Val::ZERO)
-            },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.8)),
+            skin::tooltip_box(),
             Visibility::Hidden,
-            Pickable::IGNORE,
             Name::new("worldmap-tooltip"),
             ChildOf(surface),
         ))
@@ -550,7 +544,7 @@ fn build_world_map_content(
         .spawn((
             Text::default(),
             UiFont::Sans.at(PANEL_FONT_SIZE),
-            text_role(SkinPalette::FALLBACK.text_primary),
+            skin::tooltip_text(),
             Pickable::IGNORE,
             ChildOf(tooltip),
         ))

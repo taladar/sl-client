@@ -135,6 +135,27 @@
    * unskinned world draws none, as it always has. */
   --text-shadow: none;
 
+  /* The tooltip (viewer-skin-tooltip-roles): one widget for every tip — the
+   * world hover tip, a link's URL, the minimap's and the world map's. Colours
+   * AND shape, because the reference varies both per skin: a classic skin
+   * draws a square, tight, light plate with black text where this one is a
+   * rounded dark one — opaque, since a tip is read over text. `skin.rs`'s TOOLTIP_* constants repeat these values
+   * for the frame before the sheet lands, and
+   * `tooltip_fallback_matches_the_fallback_sheet` holds the two together. */
+  --tooltip-bg: #0f121a;
+  --tooltip-border: #4d576b;
+  --tooltip-text: #f2f2f2;
+  --tooltip-border-width: 1px;
+  --tooltip-radius: 4px;
+  --tooltip-padding-block: 5px;
+  --tooltip-padding-inline: 8px;
+  --tooltip-max-width: 400px;
+
+  /* The inspector card an avatar or object click opens. Not a tooltip: the
+   * reference gives it its own plate, and it takes clicks. */
+  --inspector-bg: #141721fa;
+  --inspector-border: #525c70;
+
   /* A friend's presence. Meaning-bearing for the same reason as the kinds
    * above, and the values the Friends list carried before they were roles. */
   --presence-online: #66cc6b;

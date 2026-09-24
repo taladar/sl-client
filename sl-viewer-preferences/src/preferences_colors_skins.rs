@@ -97,17 +97,19 @@ pub fn stored_skin_choice(settings: &ViewerSettings) -> (Option<String>, Option<
 struct ThemeComboAnchor;
 
 /// The Fluent key of a skin's combo option label.
-fn skin_label_key(skin: &str) -> String {
+#[must_use]
+pub fn skin_label_key(skin: &str) -> String {
     format!("preferences-skin-{skin}")
 }
 
 /// The Fluent key of a theme's combo option label.
-fn theme_label_key(theme: &str) -> String {
+#[must_use]
+pub fn theme_label_key(theme: &str) -> String {
     format!("preferences-theme-{theme}")
 }
 
 /// The Fluent key of the theme combo's "no overlay" option.
-const THEME_BASE_KEY: &str = "preferences-theme-base";
+pub const THEME_BASE_KEY: &str = "preferences-theme-base";
 
 /// Build the tab's content: the skin section (two combos), then one
 /// colour-swatch row per [`COLOR_TOKENS`] entry, grouped into chat / name-tag /

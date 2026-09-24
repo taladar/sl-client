@@ -1443,6 +1443,132 @@ mod test {
         Ok(())
     }
 
+    /// **A skin can make every tooltip a light plate with black text, and
+    /// reshape it, without touching Rust** (`viewer-skin-tooltip-roles`).
+    ///
+    /// Spawned through `skin::tooltip_box` / `skin::tooltip_text` — the very
+    /// helpers the four tips (world hover, link, minimap, world map) spawn
+    /// through — rather than a hand-built `.sk-tooltip` node, so the test sees
+    /// what the viewer actually builds, including the Rust fallback beside the
+    /// class that the skin has to beat.
+    ///
+    /// Pinned: the plate, frame and text colours; the four lengths, each of
+    /// which a `var()` bevy_flair failed to parse would leave at the fallback
+    /// silently (the padding is a two-`var()` shorthand, the riskiest); that
+    /// the two properties no skin may change — unpickable, topmost — survive
+    /// the restyle; and that the inspector card takes its **own** plate, not
+    /// the tooltip's.
+    #[test]
+    fn a_skin_can_make_the_tooltip_a_light_plate() -> Result<(), TestError> {
+        use sl_viewer_ui_core::skin::{INSPECTOR_CLASS, TOOLTIP_Z, tooltip_box, tooltip_text};
+
+        let mut app = app_with_assets(&test_assets_dir());
+        let handle: Handle<StyleSheet> = app
+            .world()
+            .resource::<AssetServer>()
+            .load("light-tooltip.css");
+        let root = app
+            .world_mut()
+            .spawn((Node::default(), Styled::new(handle.clone())))
+            .id();
+        let tip = app.world_mut().spawn((tooltip_box(), ChildOf(root))).id();
+        let text = app
+            .world_mut()
+            .spawn((Text::new("A tip"), tooltip_text(), ChildOf(tip)))
+            .id();
+        let card = app
+            .world_mut()
+            .spawn((
+                Node::default(),
+                ClassList::new(INSPECTOR_CLASS),
+                ChildOf(root),
+            ))
+            .id();
+
+        load(&mut app, &handle)?;
+        app.update();
+
+        let hex = |value: &str| Srgba::hex(value).map_err(|error| error.to_string());
+        let fill = |entity| {
+            app.world()
+                .get::<BackgroundColor>(entity)
+                .map(|background| background.0.to_srgba())
+        };
+        let frame = |entity| {
+            app.world()
+                .get::<BorderColor>(entity)
+                .map(|border| border.top.to_srgba())
+        };
+        assert_eq!(
+            fill(tip),
+            Some(hex("b7b8bc")?),
+            "the plate is `--tooltip-bg`"
+        );
+        assert_eq!(
+            frame(tip),
+            Some(hex("7a7b80")?),
+            "the frame is `--tooltip-border`"
+        );
+        assert_eq!(
+            app.world()
+                .get::<TextColor>(text)
+                .map(|color| color.0.to_srgba()),
+            Some(hex("000000")?),
+            "the tip's text is `--tooltip-text` — black on the light plate, \
+             not the chrome's near-white"
+        );
+
+        let node = app
+            .world()
+            .get::<Node>(tip)
+            .ok_or("the tooltip lost its Node")?;
+        assert_eq!(
+            node.border,
+            UiRect::all(Val::Px(2.0)),
+            "`--tooltip-border-width` did not reach the frame"
+        );
+        assert_eq!(
+            node.border_radius.top_left,
+            Val::Px(0.0),
+            "`--tooltip-radius` did not square the corners"
+        );
+        assert_eq!(
+            node.padding,
+            UiRect::all(Val::Px(4.0)),
+            "`padding: var(--tooltip-padding-block) var(--tooltip-padding-inline)` \
+             did not resolve — the fallback is 5px / 8px"
+        );
+        assert_eq!(
+            node.max_width,
+            Val::Px(200.0),
+            "`--tooltip-max-width` did not reach the wrap width"
+        );
+
+        assert!(
+            app.world()
+                .get::<Pickable>(tip)
+                .is_some_and(|pickable| !pickable.should_block_lower && !pickable.is_hoverable),
+            "a restyled tip must still ignore the pointer"
+        );
+        assert_eq!(
+            app.world().get::<GlobalZIndex>(tip).map(|z| z.0),
+            Some(TOOLTIP_Z),
+            "a restyled tip must still draw over every other layer"
+        );
+
+        assert_eq!(
+            fill(card),
+            Some(hex("3e3e3e")?),
+            "the inspector card takes `--inspector-bg`, not the tooltip's plate"
+        );
+        assert_eq!(
+            frame(card),
+            Some(hex("0a0a0a")?),
+            "the inspector card takes `--inspector-border`"
+        );
+        Ok(())
+    }
+
     /// **A skin draws a bevel by value, and it stays lit from the same corner
     /// under RTL** (`viewer-skin-bevel-border-policy`).
     ///

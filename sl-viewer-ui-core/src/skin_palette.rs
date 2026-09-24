@@ -531,6 +531,73 @@ mod tests {
         Ok(())
     }
 
+    /// The pixel length `fallback.css` gives a token (`--name: 4px;`).
+    fn fallback_length(token: &str) -> Option<f32> {
+        let declaration = format!("--{token}:");
+        FALLBACK_CSS
+            .lines()
+            .map(str::trim)
+            .find(|line| line.starts_with(&declaration))?
+            .strip_prefix(&declaration)?
+            .trim()
+            .strip_suffix("px;")?
+            .parse()
+            .ok()
+    }
+
+    /// The tooltip's and the inspector card's Rust fallbacks *are*
+    /// `fallback.css`'s tokens (`viewer-skin-tooltip-roles`).
+    ///
+    /// The same argument as [`fallback_tokens_match_rust`], for the values that
+    /// are not palette fields: `skin::tooltip_box` paints them beside the class
+    /// so a headless harness and the frame before the sheet lands measure the
+    /// styled look, and a copy nothing checks drifts. Lengths too — the wrap
+    /// width is what decides how many lines a headless layout test sees.
+    #[test]
+    fn tooltip_fallback_matches_the_fallback_sheet() -> Result<(), TestError> {
+        use crate::skin;
+
+        for (token, rust) in [
+            ("tooltip-bg", skin::TOOLTIP_BACKGROUND),
+            ("tooltip-border", skin::TOOLTIP_BORDER),
+            ("tooltip-text", skin::TOOLTIP_TEXT),
+            ("inspector-bg", skin::INSPECTOR_BACKGROUND),
+            ("inspector-border", skin::INSPECTOR_BORDER),
+        ] {
+            let css = fallback_token(token)
+                .ok_or_else(|| format!("fallback.css does not define --{token} as a colour"))?
+                .to_srgba();
+            let rust = rust.to_srgba();
+            for (channel, (from_css, from_rust)) in [
+                ("red", (css.red, rust.red)),
+                ("green", (css.green, rust.green)),
+                ("blue", (css.blue, rust.blue)),
+                ("alpha", (css.alpha, rust.alpha)),
+            ] {
+                assert!(
+                    (from_css - from_rust).abs() <= 1.0 / 255.0,
+                    "--{token} {channel} is {from_css} in fallback.css but \
+                     {from_rust} in skin.rs"
+                );
+            }
+        }
+        for (token, rust) in [
+            ("tooltip-border-width", skin::TOOLTIP_BORDER_WIDTH),
+            ("tooltip-radius", skin::TOOLTIP_RADIUS),
+            ("tooltip-padding-block", skin::TOOLTIP_PADDING_BLOCK),
+            ("tooltip-padding-inline", skin::TOOLTIP_PADDING_INLINE),
+            ("tooltip-max-width", skin::TOOLTIP_MAX_WIDTH),
+        ] {
+            let css = fallback_length(token)
+                .ok_or_else(|| format!("fallback.css does not define --{token} in px"))?;
+            assert!(
+                (css - rust).abs() < f32::EPSILON,
+                "--{token} is {css}px in fallback.css but {rust} in skin.rs"
+            );
+        }
+        Ok(())
+    }
+
     /// The embedded token sheet obeys the physical-property ban too.
     ///
     /// The viewer binary's `shipped_skins` test scans the skins in its own

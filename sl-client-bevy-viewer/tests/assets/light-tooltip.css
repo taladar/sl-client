@@ -1,0 +1,39 @@
+/*
+ * light-tooltip.css — a TEST-ONLY skin: the tooltip as Vintage draws it, a
+ * square, tightly padded, narrow LIGHT plate with black text, over the
+ * embedded fallback's dark chrome.
+ *
+ * It answers one question, in
+ * `skin_palette_resolves::a_skin_can_make_the_tooltip_a_light_plate`: can a
+ * skin reshape and recolour every tooltip by setting tokens alone? Both
+ * shipped skins draw a dark rounded scrim, so neither can tell a live token
+ * from a Rust fallback that happens to agree with it — and a `var()` that
+ * bevy_flair failed to parse in a LENGTH property (the padding, the wrap
+ * width, the corner) would leave the fallback standing with no log.
+ *
+ * The plate, text and geometry are the reference's (roadmap/context/
+ * vintage-skin.md, `tool_tip.xml`: `#b7b8bc` plate, `ToolTipTextColor` black,
+ * `padding="4"`, `max_width="200"`, square corners). The frame colour is not
+ * measured — Vintage draws a darker top edge into its plate art — so it is a
+ * value of its own here. The inspector pair is set too, to a value distinct
+ * from the tip's, which is what shows the card did NOT take the tooltip's
+ * plate.
+ *
+ * A fixture, not a skin anyone wears, so it lives beside this file rather than
+ * under `assets/skins/` — see light-field.css for the whole reason, and for why
+ * the base goes into a cascade LAYER.
+ */
+@import "embedded://sl_viewer_ui_core/skins/fallback.css" layer(fallback);
+
+:root {
+  --tooltip-bg: #b7b8bc;
+  --tooltip-border: #7a7b80;
+  --tooltip-text: #000000;
+  --tooltip-border-width: 2px;
+  --tooltip-radius: 0px;
+  --tooltip-padding-block: 4px;
+  --tooltip-padding-inline: 4px;
+  --tooltip-max-width: 200px;
+  --inspector-bg: #3e3e3e;
+  --inspector-border: #0a0a0a;
+}

@@ -64,7 +64,7 @@ use crate::settings::ViewerSettings;
 use crate::skin_colors;
 use crate::social::MuteModel;
 use crate::social::{FriendsModel, MapTracking, TrackTarget};
-use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column};
+use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::water::{DEFAULT_WATER_HEIGHT, WaterState};
@@ -73,8 +73,7 @@ use crate::world_api::ObjectDebugInfo;
 use crate::world_api::ObjectState;
 use crate::world_api::TerrainState;
 use crate::world_api::{CameraMode, ViewerCamera};
-use sl_viewer_ui_core::skin::text_role;
-use sl_viewer_ui_core::skin_palette::SkinPalette;
+use sl_viewer_ui_core::skin;
 
 /// The `element` tag the minimap attributes its [`UiAction`]s to.
 pub(crate) const MINIMAP_ELEMENT: &str = "minimap";
@@ -883,18 +882,12 @@ fn spawn_minimap(
         wrapper
     });
 
+    // The shared skinned tip (`skin::tooltip_box`), so the map's hover card
+    // looks like every other tooltip and cannot swallow the map's own drag.
     let tooltip = commands
         .spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                top: Val::Px(0.0),
-                padding: UiRect::all(Val::Px(4.0)),
-                ..column(Val::ZERO)
-            },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.8)),
+            skin::tooltip_box(),
             Visibility::Hidden,
-            Pickable::IGNORE,
             Name::new("minimap-tooltip"),
             ChildOf(surface),
         ))
@@ -903,7 +896,7 @@ fn spawn_minimap(
         .spawn((
             Text::default(),
             UiFont::Sans.at(TOOLTIP_FONT_SIZE),
-            text_role(SkinPalette::FALLBACK.text_primary),
+            skin::tooltip_text(),
             Pickable::IGNORE,
             ChildOf(tooltip),
         ))

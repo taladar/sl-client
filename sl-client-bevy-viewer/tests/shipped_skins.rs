@@ -104,6 +104,41 @@ mod test {
         Ok(())
     }
 
+    /// Every shipped skin and theme has a label in the English bundle, and so
+    /// does the theme combo's "no overlay" option.
+    ///
+    /// The preferences Colors & Skins tab builds each option's Fluent key from
+    /// the id, so a skin or theme added to `SKINS` / `THEMES` without a label
+    /// shows its raw key in the combo — which is how `relief` shipped. The keys
+    /// are the tab's own (`skin_label_key` / `theme_label_key`), not a copy of
+    /// their format, so a renamed key scheme is covered too.
+    #[test]
+    fn every_shipped_skin_and_theme_has_a_label() {
+        use sl_viewer_preferences::preferences_colors_skins::{
+            THEME_BASE_KEY, skin_label_key, theme_label_key,
+        };
+
+        const EN_FTL: &str = include_str!("../assets/locales/en/main.ftl");
+        let defined = |key: &str| {
+            EN_FTL
+                .lines()
+                .any(|line| line.split_once('=').is_some_and(|(id, _)| id.trim() == key))
+        };
+        let mut missing: Vec<String> = SKINS
+            .iter()
+            .map(|skin| skin_label_key(skin))
+            .chain(THEMES.iter().map(|(_skin, theme)| theme_label_key(theme)))
+            .chain(core::iter::once(THEME_BASE_KEY.to_owned()))
+            .filter(|key| !defined(key))
+            .collect();
+        missing.dedup();
+        assert!(
+            missing.is_empty(),
+            "en/main.ftl has no label for {missing:?}; the preferences skin / \
+             theme combo would show the raw key"
+        );
+    }
+
     /// Every shipped skin defines every palette token, so no skin silently
     /// falls back to another skin's colours.
     #[test]
