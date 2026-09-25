@@ -59,6 +59,7 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::text::EditableText;
+use bevy::ui_widgets::Activate;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
     CircuitId, Command, FolderType, InventoryKey, InventoryType, ObjectKey, Permissions,
@@ -1175,11 +1176,11 @@ fn spawn_contents_button(
     )
     .button;
     commands.entity(button).observe(
-        move |press: On<Pointer<Press>>, requests: Option<MessageWriter<ContentsActionRequest>>| {
+        // `Activate`, not `Pointer<Press>`: the headless button raises it for a
+        // primary click and for `Enter` / `Space` on the focused button alike.
+        move |_activate: On<Activate>, requests: Option<MessageWriter<ContentsActionRequest>>| {
             // Absent only in the gallery, whose specimen has no contents to act on.
-            if press.button == PointerButton::Primary
-                && let Some(mut requests) = requests
-            {
+            if let Some(mut requests) = requests {
                 requests.write(ContentsActionRequest { surface, action });
             }
         },
@@ -2651,5 +2652,83 @@ mod tests {
         // Already being re-fetched: the reply is about to replace it anyway.
         cache.mark_stale(&task);
         assert!(!cache.is_stale_against(&task, 4));
+    }
+    /// **A contents action button acts from the keyboard as from the mouse.**
+    ///
+    /// The buttons used to observe `Pointer<Press>`, so `Tab` reached them and
+    /// `Enter` / `Space` did nothing (`viewer-floater-buttons-ignore-keyboard-
+    /// activate`). Each gesture in a fresh app, driven through the real input
+    /// and focus stack, must raise the same one request.
+    #[test]
+    fn a_contents_button_acts_on_enter_space_and_a_click() -> Result<(), String> {
+        use super::{
+            ContentsAction, ContentsActionRequest, ContentsSurface, spawn_contents_button,
+        };
+        use crate::ui::{UiRoot, UiScaffoldSystems};
+        use bevy::input::keyboard::Key;
+        use bevy::prelude::*;
+        use sl_viewer_testkit::interact::{self, InteractionTest};
+        use sl_viewer_testkit::{drain, find_by_name, record, settle};
+
+        /// The Refresh button's node name, per `spawn_contents_button`.
+        const REFRESH: &str = "contents-button:build-content-refresh";
+
+        /// The requests one gesture on the Refresh button raised.
+        fn requests_after(
+            gesture: fn(&mut App, Entity) -> Result<(), String>,
+        ) -> Result<Vec<(ContentsSurface, ContentsAction)>, String> {
+            let mut app = InteractionTest::new().build();
+            record::<ContentsActionRequest>(&mut app);
+            app.add_systems(
+                Startup,
+                (|mut commands: Commands, root: Res<UiRoot>| {
+                    spawn_contents_button(
+                        &mut commands,
+                        root.0,
+                        "build-content-refresh",
+                        ContentsSurface::BuildTab,
+                        ContentsAction::Refresh,
+                        1,
+                        13.0,
+                    );
+                })
+                .after(UiScaffoldSystems::SpawnRoot),
+            );
+            settle(&mut app);
+            let button = find_by_name(&mut app, REFRESH).ok_or("no Refresh button")?;
+            let _spawned = drain::<ContentsActionRequest>(&mut app);
+            gesture(&mut app, button)?;
+            settle(&mut app);
+            Ok(drain::<ContentsActionRequest>(&mut app)
+                .into_iter()
+                .map(|request| (request.surface, request.action))
+                .collect())
+        }
+
+        let want = vec![(ContentsSurface::BuildTab, ContentsAction::Refresh)];
+        assert_eq!(
+            requests_after(|app, _button| interact::click_node(app, REFRESH))?,
+            want,
+            "a primary click"
+        );
+        assert_eq!(
+            requests_after(|app, button| {
+                interact::focus(app, button);
+                interact::tap(app, KeyCode::Enter, Key::Enter);
+                Ok(())
+            })?,
+            want,
+            "Enter on the focused button"
+        );
+        assert_eq!(
+            requests_after(|app, button| {
+                interact::focus(app, button);
+                interact::tap(app, KeyCode::Space, Key::Space);
+                Ok(())
+            })?,
+            want,
+            "Space on the focused button"
+        );
+        Ok(())
     }
 }

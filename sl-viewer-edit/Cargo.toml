@@ -39,6 +39,7 @@ sl-viewer-world-view = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
+sl-viewer-testkit = { workspace = true }
 
 [lints]
 workspace = true

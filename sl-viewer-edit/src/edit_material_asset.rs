@@ -22,7 +22,7 @@
 use crate::skin_palette::SkinPalette;
 use bevy::prelude::*;
 use bevy::ui::Checked;
-use bevy::ui_widgets::{Slider, SliderRange, SliderStep, SliderValue, ValueChange};
+use bevy::ui_widgets::{Activate, Slider, SliderRange, SliderStep, SliderValue, ValueChange};
 
 use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use sl_client_bevy::{
@@ -40,7 +40,7 @@ use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, row};
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_font::UiFont;
 use crate::ui_slider::{SliderStyle, SliderWidgetPlugin, spawn_slider};
-use crate::ui_spawn::{self, ButtonSpec, LabeledRowSpec, UiLabel};
+use crate::ui_spawn::{self, ButtonKind, ButtonSpec, LabeledRowSpec, UiLabel};
 use crate::ui_text::set_node_text;
 use crate::ui_texture_picker::{TextureSwatchValue, spawn_texture_swatch};
 use sl_viewer_ui_core::skin::text_role;
@@ -684,6 +684,7 @@ fn spawn_text_button(
         commands,
         parent,
         ButtonSpec::bordered(UiLabel::literal(label), "material-text-button")
+            .kind(ButtonKind::Headless)
             .tab_from(tab)
             .padding(10.0, 3.0)
             .colors(BUTTON_BACKGROUND, CONTROL_BORDER)
@@ -713,6 +714,7 @@ fn spawn_mat_button(
             UiLabel::literal(label.to_owned()),
             format!("material-button:{label}"),
         )
+        .kind(ButtonKind::Headless)
         .tab_from(tab)
         .padding(10.0, 3.0)
         .colors(BUTTON_BACKGROUND, CONTROL_BORDER)
@@ -818,16 +820,14 @@ fn apply_mat_color_picked(
     }
 }
 
-/// A text-button press: cycle the alpha mode.
+/// A text button was activated — by a primary click, `Enter` or `Space`:
+/// cycle the alpha mode.
 fn on_mat_toggle(
-    press: On<Pointer<Press>>,
+    activate: On<Activate>,
     alpha: Query<&MatAlphaButton>,
     state: Option<ResMut<MatEditState>>,
     mut texts: Query<&mut Text>,
 ) {
-    if press.button != PointerButton::Primary {
-        return;
-    }
     // Absent only in the gallery, whose specimen has no edit.
     let Some(mut state) = state else {
         return;
@@ -835,7 +835,7 @@ fn on_mat_toggle(
     let Some(edit) = state.active.as_mut() else {
         return;
     };
-    if alpha.get(press.entity).is_ok() {
+    if alpha.get(activate.entity).is_ok() {
         edit.edited.alpha_mode = next_alpha_mode(edit.edited.alpha_mode);
         set_node_text(
             &mut texts,
@@ -905,18 +905,16 @@ fn sync_material_sliders(
     }
 }
 
-/// Save (write the edited material back onto the item) or Revert.
+/// Save (write the edited material back onto the item) or Revert, from a
+/// primary click or from `Enter` / `Space` on the focused button alike.
 fn on_mat_action_button(
-    press: On<Pointer<Press>>,
+    activate: On<Activate>,
     buttons: Query<&MatButton>,
     state: Option<ResMut<MatEditState>>,
     commands: Option<MessageWriter<SlCommand>>,
     mut texts: Query<&mut Text>,
 ) {
-    if press.button != PointerButton::Primary {
-        return;
-    }
-    let Ok(kind) = buttons.get(press.entity).copied() else {
+    let Ok(kind) = buttons.get(activate.entity).copied() else {
         return;
     };
     // Both are absent only in the gallery, whose specimen has no edit to save.
@@ -1036,5 +1034,204 @@ const fn next_alpha_mode(mode: GltfAlphaMode) -> GltfAlphaMode {
         GltfAlphaMode::Opaque => GltfAlphaMode::Mask,
         GltfAlphaMode::Mask => GltfAlphaMode::Blend,
         GltfAlphaMode::Blend => GltfAlphaMode::Opaque,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        MatAlphaButton, MatButton, MatEdit, MatEditState, MatPhase, spawn_mat_button,
+        spawn_text_button,
+    };
+    use crate::ui::{UiRoot, UiScaffoldSystems};
+    use bevy::input::keyboard::Key;
+    use bevy::prelude::*;
+    use pretty_assertions::assert_eq;
+    use sl_client_bevy::{
+        AgentKey, AssetKey, AssetType, GltfAlphaMode, GltfMaterial, InventoryFolderKey,
+        InventoryKey, InventoryType, ItemInfo, OwnerKey, Permissions, Permissions5, SlCommand,
+        Uuid,
+    };
+    use sl_viewer_testkit::interact::{self, InteractionTest};
+    use sl_viewer_testkit::{find_by_name, settle};
+
+    /// The Revert button's node name, per `spawn_mat_button`.
+    const REVERT: &str = "material-button:Revert";
+
+    /// The alpha-mode button's node name, per `spawn_text_button`.
+    const ALPHA: &str = "material-text-button";
+
+    /// One way of pressing a button: a click, or a key on the focused button.
+    type Gesture = fn(&mut App, Entity) -> Result<(), String>;
+
+    /// A primary click on the button's centre.
+    fn click(app: &mut App, button: Entity) -> Result<(), String> {
+        let at = interact::centre_of_entity(app, button).ok_or("the button has no box")?;
+        interact::click(app, at, MouseButton::Left);
+        Ok(())
+    }
+
+    /// `Enter` on the focused button.
+    fn enter(app: &mut App, button: Entity) -> Result<(), String> {
+        interact::focus(app, button);
+        interact::tap(app, KeyCode::Enter, Key::Enter);
+        Ok(())
+    }
+
+    /// `Space` on the focused button.
+    fn space(app: &mut App, button: Entity) -> Result<(), String> {
+        interact::focus(app, button);
+        interact::tap(app, KeyCode::Space, Key::Space);
+        Ok(())
+    }
+
+    /// Every way a button is pressed, named for a failure message.
+    const GESTURES: [(&str, Gesture); 3] = [("click", click), ("Enter", enter), ("Space", space)];
+
+    /// The material item being edited.
+    fn item() -> ItemInfo {
+        ItemInfo {
+            item_id: InventoryKey::from(Uuid::from_u128(0x11)),
+            folder_id: InventoryFolderKey::from(Uuid::from_u128(0x22)),
+            name: "A material".to_owned(),
+            description: String::new(),
+            asset_id: Uuid::from_u128(0x33),
+            asset_type: AssetType::Material,
+            inv_type: InventoryType::Material,
+            flags: 0,
+            sale: sl_client_bevy::SaleInfo::default(),
+            creation_date: 0,
+            owner: OwnerKey::Agent(AgentKey::from(Uuid::from_u128(0x44))),
+            last_owner_id: Uuid::nil(),
+            creator_id: AgentKey::from(Uuid::from_u128(0x44)),
+            group: None,
+            permissions: Permissions5 {
+                base: Permissions::from_bits(0x7fff_ffff),
+                owner: Permissions::from_bits(0x7fff_ffff),
+                group: Permissions::empty(),
+                everyone: Permissions::empty(),
+                next_owner: Permissions::from_bits(0x0008_2000),
+            },
+        }
+    }
+
+    /// An editor with an open, edited material, its Revert and alpha-mode
+    /// buttons, and a status readout — under the real input and focus stack.
+    fn editor_app() -> Result<App, String> {
+        let mut app = InteractionTest::new().build();
+        app.add_message::<SlCommand>()
+            .init_resource::<MatEditState>();
+        app.add_systems(
+            Startup,
+            (|mut commands: Commands, root: Res<UiRoot>, mut state: ResMut<MatEditState>| {
+                let mut tab = 0_i32;
+                spawn_mat_button(
+                    &mut commands,
+                    root.0,
+                    MatButton::Revert,
+                    "Revert",
+                    &mut tab,
+                    13.0,
+                );
+                let alpha_label = spawn_text_button(
+                    &mut commands,
+                    root.0,
+                    "Opaque",
+                    MatAlphaButton,
+                    &mut tab,
+                    13.0,
+                );
+                let status = commands
+                    .spawn((Text::new(String::new()), ChildOf(root.0)))
+                    .id();
+                let edited = GltfMaterial {
+                    double_sided: true,
+                    ..GltfMaterial::default()
+                };
+                state.active = Some(MatEdit {
+                    item: item(),
+                    asset: AssetKey::from(Uuid::from_u128(0x33)),
+                    original: GltfMaterial::default(),
+                    edited,
+                    phase: MatPhase::Ready,
+                    dirty: false,
+                    saving: false,
+                    preview: None,
+                    alpha_label: Some(alpha_label),
+                    double_check: None,
+                    status: Some(status),
+                });
+            })
+            .after(UiScaffoldSystems::SpawnRoot),
+        );
+        settle(&mut app);
+        let active = app.world().resource::<MatEditState>().active.is_some();
+        if active {
+            Ok(app)
+        } else {
+            Err("the edit was never opened".to_owned())
+        }
+    }
+
+    /// The open edit's state after `gesture` on the node named `node`: its
+    /// status line, whether it went back to the original material, its phase
+    /// and its alpha mode.
+    fn after(
+        node: &str,
+        gesture: Gesture,
+    ) -> Result<(String, bool, MatPhase, GltfAlphaMode), String> {
+        let mut app = editor_app()?;
+        let button = find_by_name(&mut app, node).ok_or_else(|| format!("no `{node}`"))?;
+        gesture(&mut app, button)?;
+        settle(&mut app);
+        let state = app.world().resource::<MatEditState>();
+        let edit = state.active.as_ref().ok_or("the edit went away")?;
+        let status = edit
+            .status
+            .and_then(|status| app.world().get::<Text>(status))
+            .map(|text| text.0.clone())
+            .unwrap_or_default();
+        Ok((
+            status,
+            edit.edited == edit.original,
+            edit.phase,
+            edit.edited.alpha_mode,
+        ))
+    }
+
+    /// **Revert acts from the keyboard as from the mouse.**
+    ///
+    /// The button used to observe `Pointer<Press>`, so `Tab` reached it and
+    /// `Enter` / `Space` did nothing (`viewer-floater-buttons-ignore-keyboard-
+    /// activate`).
+    #[test]
+    fn revert_answers_enter_space_and_a_click() -> Result<(), String> {
+        for (how, gesture) in GESTURES {
+            assert_eq!(
+                after(REVERT, gesture)?,
+                (
+                    "Reverted.".to_owned(),
+                    true,
+                    MatPhase::Rebuild,
+                    GltfAlphaMode::Opaque
+                ),
+                "Revert by {how}"
+            );
+        }
+        Ok(())
+    }
+
+    /// **The alpha-mode button steps from the keyboard as from the mouse** — once
+    /// per gesture, and without touching anything else.
+    #[test]
+    fn the_alpha_mode_button_answers_enter_space_and_a_click() -> Result<(), String> {
+        for (how, gesture) in GESTURES {
+            assert_eq!(
+                after(ALPHA, gesture)?,
+                (String::new(), false, MatPhase::Ready, GltfAlphaMode::Mask),
+                "the alpha-mode button by {how}"
+            );
+        }
+        Ok(())
     }
 }

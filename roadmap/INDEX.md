@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 305 |
 | blocked | 62 |
 | in-progress | 25 |
-| bugs | 13 |
-| done | 1234 |
+| bugs | 12 |
+| done | 1235 |
 | deferred | 30 |
 | wont-do | 16 |
 | **total** | **1803** |
@@ -1284,7 +1284,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (13)
+## bugs (12)
 
 ### protocol
 
@@ -1298,9 +1298,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   from the markers
 - [`viewer-emoji-picker-hover-preview-inert`](bugs/viewer-emoji-picker-hover-preview-inert.md)
   — Hovering an emoji never fills the picker's preview line
-- [`viewer-floater-buttons-ignore-keyboard-activate`](bugs/viewer-floater-buttons-ignore-keyboard-activate.md)
-  — The material editor, wearable editor and object contents buttons act on a
-  mouse press only
 - [`viewer-floater-minimize-caps-follow-no-pattern`](bugs/viewer-floater-minimize-caps-follow-no-pattern.md)
   — Which floaters have a minimize button follows no pattern, and most that lack
   one should have it
@@ -1325,7 +1322,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1234)
+## done (1235)
 
 ### protocol
 
@@ -2017,6 +2014,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   prims against their simulated geometry
 - [`viewer-flexi-resettle-after-snapshot`](done/viewer-flexi-resettle-after-snapshot.md)
   — Flexi prims re-settle after taking a snapshot
+- [`viewer-floater-buttons-ignore-keyboard-activate`](done/viewer-floater-buttons-ignore-keyboard-activate.md)
+  — The material editor, wearable editor and object contents buttons act on a
+  mouse press only
 - [`viewer-floater-interaction-tests`](done/viewer-floater-interaction-tests.md)
   — Floater chrome under a real pointer (blocked by
   `viewer-ui-interaction-harness` (done), `viewer-floater-registry` (done))

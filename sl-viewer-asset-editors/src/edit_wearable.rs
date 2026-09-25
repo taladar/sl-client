@@ -43,7 +43,7 @@ use crate::skin_palette::SkinPalette;
 use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
-use bevy::ui_widgets::{Slider, SliderRange, SliderStep, SliderValue, ValueChange};
+use bevy::ui_widgets::{Activate, Slider, SliderRange, SliderStep, SliderValue, ValueChange};
 use sl_client_bevy::{
     AssetType, Command, InventoryType, ItemInfo, JointOverrides, ParamEffect, ParamGroup, ParamSex,
     ResolvedParams, SkeletalDeformations, SlCommand, SlEvent, SlSessionEvent, TextureKey,
@@ -67,7 +67,7 @@ use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_font::UiFont;
 use crate::ui_radio::{RadioLayout, RadioSelection, RadioSpec, spawn_radio_group};
 use crate::ui_slider::{SliderStyle, SliderWidgetPlugin, spawn_slider};
-use crate::ui_spawn::{self, ButtonSpec, LabeledRowSpec, UiLabel};
+use crate::ui_spawn::{self, ButtonKind, ButtonSpec, LabeledRowSpec, UiLabel};
 use crate::ui_texture_picker::{TextureSwatchValue, spawn_texture_swatch};
 use crate::world_api::DecodedTextures;
 use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
@@ -877,6 +877,7 @@ fn spawn_action_button(
         commands,
         parent,
         ButtonSpec::bordered(UiLabel::literal(label), format!("wearable-button:{label}"))
+            .kind(ButtonKind::Headless)
             .tab_from(tab)
             .padding(10.0, 3.0)
             .colors(BUTTON_BACKGROUND, CONTROL_BORDER)
@@ -1093,23 +1094,25 @@ fn sync_wearable_sliders(
 // Save / Save-As / Revert.
 // ---------------------------------------------------------------------------
 
-/// A chrome button press: Save (in place), Save As (new item), or Revert.
+/// A chrome button activated — by a primary click, `Enter` or `Space`: Save
+/// (in place), Save As (new item), or Revert.
 ///
 /// Save is not carried out here — it is written as a [`SaveEditorWindow`] for
 /// [`save_wearable`], the same message the unsaved-work confirmation's "Save"
 /// answer writes, so the button and the confirmation cannot come to save
 /// different things.
 fn on_wear_button(
-    press: On<Pointer<Press>>,
+    activate: On<Activate>,
     buttons: Query<&WearButton>,
     ui: Option<Res<WearEditorUi>>,
     state: Option<ResMut<WearEditState>>,
-    preview: Option<WearPreview>,
+    mut preview: Option<WearPreview>,
     out: Option<WearSaveOut>,
     mut texts: Query<&mut Text>,
 ) {
-    // All three are absent only in the gallery, whose specimen has no edit.
-    let (Some(mut state), Some(mut preview), Some(out)) = (state, preview, out) else {
+    // Both are absent only in the gallery, whose specimen has no edit. The
+    // preview is too, and only Revert reads it, so only Revert asks for it.
+    let (Some(mut state), Some(out)) = (state, out) else {
         return;
     };
     let WearSaveOut {
@@ -1117,10 +1120,7 @@ fn on_wear_button(
         mut commands,
         mut saves,
     } = out;
-    if press.button != PointerButton::Primary {
-        return;
-    }
-    let Ok(kind) = buttons.get(press.entity).copied() else {
+    let Ok(kind) = buttons.get(activate.entity).copied() else {
         return;
     };
     let Some(edit) = state.active.as_mut() else {
@@ -1161,6 +1161,9 @@ fn on_wear_button(
             set_status(&mut texts, edit.status, "Saving a copy…");
         }
         WearButton::Revert => {
+            let Some(preview) = preview.as_mut() else {
+                return;
+            };
             edit.edited.clone_from(&edit.original);
             // Re-derive the preview from the restored asset.
             preview.restore(&edit.original);
@@ -1523,6 +1526,13 @@ mod tests {
             .init_resource::<PendingItemCreations>()
             .add_systems(Update, (report_wearable_save, report_wearable_save_as));
         let status = app.world_mut().spawn(Text::new(String::new())).id();
+        app.world_mut().resource_mut::<WearEditState>().active = Some(open_edit(status));
+        app.update();
+        (app, status)
+    }
+
+    /// An open, modified edit of [`shirt`] reporting to `status`.
+    fn open_edit(status: Entity) -> WearEdit {
         let asset = WearableAsset {
             version: super::WEARABLE_VERSION,
             name: "A shirt".to_owned(),
@@ -1530,7 +1540,7 @@ mod tests {
             params: BTreeMap::new(),
             textures: BTreeMap::new(),
         };
-        app.world_mut().resource_mut::<WearEditState>().active = Some(WearEdit {
+        WearEdit {
             item: shirt(),
             wearable_type: WearableType::Shirt,
             original: asset.clone(),
@@ -1546,9 +1556,7 @@ mod tests {
             creation: None,
             dirty: true,
             status: Some(status),
-        });
-        app.update();
-        (app, status)
+        }
     }
 
     /// What the status readout says.
@@ -1728,6 +1736,112 @@ mod tests {
             .write_message(crate::intents::ItemCreationFinished { ticket, item: None });
         app.update();
         assert_eq!(status_of(&app, status), "Saving a copy failed.");
+        Ok(())
+    }
+
+    /// **Save and Save As act from the keyboard as from the mouse.**
+    ///
+    /// The chrome buttons used to observe `Pointer<Press>`, so `Tab` reached
+    /// them and `Enter` / `Space` did nothing (`viewer-floater-buttons-ignore-
+    /// keyboard-activate`). Each gesture, in a fresh app under the real input
+    /// and focus stack, must do exactly what the click does.
+    #[test]
+    fn the_save_buttons_answer_enter_space_and_a_click() -> Result<(), TestError> {
+        use super::{WearButton, WearEditorUi, spawn_action_button};
+        use crate::asset_editor::SaveEditorWindow;
+        use crate::ui::{UiRoot, UiScaffoldSystems};
+        use bevy::input::keyboard::Key;
+        use sl_client_bevy::{Command, SlCommand};
+        use sl_viewer_testkit::interact::{self, InteractionTest};
+        use sl_viewer_testkit::{drain, find_by_name, record, settle};
+
+        /// One way of pressing a button: a click, or a key on the focused one.
+        type Gesture = fn(&mut App, Entity) -> Result<(), String>;
+
+        /// What one gesture on the button named `node` left behind: the
+        /// windows asked to save, the uploads sent, and the status line.
+        type Outcome = (Vec<Entity>, usize, String);
+
+        /// A primary click on the button's centre.
+        fn click(app: &mut App, button: Entity) -> Result<(), String> {
+            let at = interact::centre_of_entity(app, button).ok_or("the button has no box")?;
+            interact::click(app, at, MouseButton::Left);
+            Ok(())
+        }
+
+        /// `Enter` on the focused button.
+        fn enter(app: &mut App, button: Entity) -> Result<(), String> {
+            interact::focus(app, button);
+            interact::tap(app, KeyCode::Enter, Key::Enter);
+            Ok(())
+        }
+
+        /// `Space` on the focused button.
+        fn space(app: &mut App, button: Entity) -> Result<(), String> {
+            interact::focus(app, button);
+            interact::tap(app, KeyCode::Space, Key::Space);
+            Ok(())
+        }
+
+        /// The editor's window stand-in, and what `gesture` on the button
+        /// named `node` did to an open edit.
+        fn after(node: &str, gesture: Gesture) -> Result<(Entity, Outcome), TestError> {
+            let mut app = InteractionTest::new().build();
+            app.init_resource::<PendingItemCreations>();
+            record::<SaveEditorWindow>(&mut app);
+            record::<SlCommand>(&mut app);
+            let window = app.world_mut().spawn_empty().id();
+            let status = app.world_mut().spawn(Text::new(String::new())).id();
+            app.insert_resource(WearEditorUi {
+                panel: window,
+                content: window,
+                title: window,
+            });
+            app.insert_resource(WearEditState {
+                active: Some(open_edit(status)),
+            });
+            app.add_systems(
+                Startup,
+                (|mut commands: Commands, root: Res<UiRoot>| {
+                    let mut tab = 0_i32;
+                    for (kind, label) in
+                        [(WearButton::Save, "Save"), (WearButton::SaveAs, "Save As")]
+                    {
+                        spawn_action_button(&mut commands, root.0, kind, label, &mut tab, 13.0);
+                    }
+                })
+                .after(UiScaffoldSystems::SpawnRoot),
+            );
+            settle(&mut app);
+            let button = find_by_name(&mut app, node).ok_or_else(|| format!("no `{node}`"))?;
+            gesture(&mut app, button)?;
+            settle(&mut app);
+            let saves = drain::<SaveEditorWindow>(&mut app)
+                .into_iter()
+                .map(|save| save.window)
+                .collect();
+            let uploads = drain::<SlCommand>(&mut app)
+                .into_iter()
+                .filter(|command| matches!(command.0, Command::UploadAsset { .. }))
+                .count();
+            Ok((window, (saves, uploads, status_of(&app, status))))
+        }
+
+        let gestures: [(&str, Gesture); 3] = [("click", click), ("Enter", enter), ("Space", space)];
+        for (how, gesture) in gestures {
+            let (window, saved) = after("wearable-button:Save", gesture)?;
+            assert_eq!(
+                saved,
+                (vec![window], 0, String::new()),
+                "Save by {how} asks for its window to be saved, once"
+            );
+            let (_window, copied) = after("wearable-button:Save As", gesture)?;
+            assert_eq!(
+                copied,
+                (Vec::new(), 1, "Saving a copy…".to_owned()),
+                "Save As by {how} sends one upload"
+            );
+        }
         Ok(())
     }
 }
