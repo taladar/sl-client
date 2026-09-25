@@ -1847,7 +1847,7 @@ const fn selection_background(selected: bool) -> Color {
 }
 
 /// Write `value` into a row text node only when it changed (avoids re-measuring).
-fn set_row_text(text: &mut Text, value: &str) {
+fn set_row_text(text: &mut Mut<'_, Text>, value: &str) {
     if text.0 != value {
         value.clone_into(&mut text.0);
     }

@@ -268,3 +268,97 @@ the live viewer has this too. Fixed in our Bevy fork (`de3251e1`, see the
 schedule per frame. The UI-text rows above (`text_system`,
 `measure_text_system`) may be this. **Re-measure before anything else** — the
 ceiling may have moved.
+
+### Re-measured after the fork fix (2026-09-25)
+
+Release `profile-tracy` build at Bevy fork `de3251e1`, whole-session
+`tracy-capture`s, visible steady-state windows (last 60 s / 90 s, no
+occluded frames):
+
+| | local OpenSim (2299 frames) | aditi (1835 frames) |
+| --- | --- | --- |
+| frame p50 / mean / p95 | **20.6** / 25.7 / 30.9 ms (≈49 fps) | **44.7** / 49.0 / 86.0 ms (≈22 fps) |
+| `Main` p50 | 16.3 ms | 36.4 ms (PostUpdate 19.8, Update 11.8) |
+| `Render` p50 | 17.8 ms | 40.5 ms |
+| `ExtractSchedule` p50 | 1.5 ms | 2.3 ms (was 7.1) |
+| `vkQueuePresentKHR` p50 | — | 0.09 ms (no GPU / vsync wait) |
+| `ui_layout_system` | 4.7 ms, ~every other frame | **4.7 ms every frame** |
+| text systems | ≤0.13 ms | ≤0.2 ms (were 49–63 ms spikes) |
+
+- The text-field fix removed the text-system costs, but the headline barely
+  moved: aditi is still ~22 fps, OpenSim ~49 fps. The frame is still
+  **co-limited, CPU on both threads**; on aditi `Render` is now the (slightly)
+  longer one. `render_system` 18.8 ms p50 of which `camera_driver` (3D +
+  shadow + reflection-probe pass encoding) 13.5 ms; the rest of `Render` is
+  the render-world prepare/queue phase (~21 ms).
+- **New concrete lever: `ui_layout_system` ~4.7 ms on every aditi frame**
+  (was ~1.1 ms in the 2026-08-12 capture). Something other than
+  `EditableText` still dirties taffy every frame — find it with a `Last`
+  system counting per-frame changes of the taffy dirty sources (`Node`,
+  `ContentSize`, `ComputedUiRenderTargetInfo`, `Children`), skipping its first
+  run (see the `editable-text-per-frame-relayout` finding).
+- Other Main costs per frame (whole session, aditi): `collect_visible_cpu_
+  culled_entities` 6.3 ms, `mark_3d_meshes_as_changed…` 1.8,
+  `build_static_colliders` 1.7, the `check_entities_needing_specialization`
+  family ~1 ms each (parallel).
+
+### The `ui_layout_system` cost, chased down (2026-09-25)
+
+The 4.7 ms per aditi frame had two parts, both fixed:
+
+- **Every refresh helper "guarded" its write through a `&mut T` parameter.**
+  `ui_text::set_text(text: &mut Text, …)` compared before writing, but its
+  callers hold a `Mut<Text>`, and the coercion to `&mut Text` is a `DerefMut`,
+  which flags the component changed *before* the comparison runs. So every
+  per-frame refresh re-flagged its text (a docked Conversations tab label,
+  unchanged all session, re-measured every frame) and dirtied the whole main
+  UI tree. `set_text`, `set_disabled_class`, `edit_contents::set_row_text` and
+  the two slider `show_value`s now take `&mut Mut<T>`.
+- **Any change anywhere re-laid-out the whole screen.** Our Bevy fork now has
+  an `IndependentLayout` marker and lays out only dirty layout roots; every
+  free floater carries it. The minimap compass (which also had a rounded-size
+  feedback loop moving it a fraction of a pixel every frame, now read from the
+  unrounded size) costs ~0.1 ms instead of the whole screen.
+- Also fixed on the way: bevy_flair flagged every styled component of a
+  restyled entity changed (`Node`, `TextFont`…) for a colour animation.
+
+Aditi, visible steady state (p50):
+
+| | before | after |
+| --- | --- | --- |
+| `ui_layout_system` | 4.75 ms, every frame | 0.41 ms, 75 % of frames (0.55 ms/frame) |
+| `PostUpdate` | 18.7 ms | 12.4 ms |
+| `Main` | 37.2 ms | 27.2 ms |
+| frame | 49.2 ms (≈20 fps) | **36.6 ms (≈27 fps)** |
+
+`Render` (33.5 ms p50) is now the longer thread: the next levers are the
+render-world prepare/queue phase and `camera_driver`'s pass encoding.
+
+### What dominates now (aditi, 2026-09-25, after the layout work)
+
+Steady window (1832 frames), per frame: frame p50 36.6 ms, `Main` 27.2,
+`Render` 33.5 — **render is the gater**.
+
+| Render-thread cost | ms/frame | note |
+| --- | --- | --- |
+| main camera `camera_driver` | ~18.5 | Camera 0's 3D + shadow + probe passes |
+| ↳ transparent pass `CommandEncoder::finish` | **13.5 mean** | p50 2.1 / frame, **p90 55.7**, single calls up to 188 ms |
+| `collect_visible_cpu_culled_entities` | 5.1 | render-world visibility gather |
+| `submit_pending_command_buffers` | 4.6 | submit + wgpu maintain |
+| shadows (queue + specialize + pass) | ~4.8 | |
+| other cameras | ~2.8 | two small camera schedules |
+| `vkQueuePresentKHR` | 0.1 | no GPU / vsync wait |
+
+- **The spike source:** wgpu's CPU-side command-buffer processing (validation,
+  resource tracking) of the main camera's **transparent** pass. Usually cheap,
+  but ~1 frame in 10 it costs 50–190 ms, which is most of the 13.5 ms mean and
+  the 104 ms p95. It points at a very large number of individually-bound
+  transparent draws (alpha-blended prim faces, name tags …). Next: count
+  `Transparent3d` items / draws per frame and what they are; check whether our
+  `Transparent3d` re-sort or per-face materials defeat batching, and whether
+  the spikes line up with bursts of new bind groups (`Device::create_bind_group`
+  147/frame, `BindGroup::drop` max 135 ms) as textures stream in.
+- `Main` (no longer gating): `PostUpdate` 12.4 ms of many small systems
+  (`build_static_colliders` 1.5, `mark_3d_meshes_as_changed…` 1.5, the
+  `check_entities_needing_specialization` family ~1.3 each in parallel,
+  bounds / visibility ~1 each), `Update` 10.9 ms; UI layout 0.5 ms/frame.

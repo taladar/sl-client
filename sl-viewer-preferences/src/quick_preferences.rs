@@ -1319,7 +1319,7 @@ fn update_quick_pref_values(
 
 /// Write `value` into one slider's readout, formatted as its label asks. The
 /// drawing half of [`update_quick_pref_values`], shared with the specimen.
-fn show_value(text: &mut Text, label: &QuickPrefValueLabel, value: f32) {
+fn show_value(text: &mut Mut<'_, Text>, label: &QuickPrefValueLabel, value: f32) {
     let wanted = if label.integer {
         format!("{}", value.round())
     } else {

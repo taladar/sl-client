@@ -1548,7 +1548,7 @@ fn update_photo_values(
 
 /// Write `value` into one slider's readout, formatted as its label asks. The
 /// drawing half of [`update_photo_values`], shared with the specimen.
-fn show_value(text: &mut Text, label: &PhotoValueLabel, value: f32) {
+fn show_value(text: &mut Mut<'_, Text>, label: &PhotoValueLabel, value: f32) {
     let wanted = if label.integer {
         format!("{}", value.round())
     } else {

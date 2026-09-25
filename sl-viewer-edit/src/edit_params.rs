@@ -2306,7 +2306,7 @@ type InfoQuery<'w, 's> =
     Query<'w, 's, (&'static InfoText, &'static mut Text), Without<ParamCycleValue>>;
 
 /// Add or remove the greyed-out skin class on a widget text.
-pub(crate) fn set_disabled_class(class_list: &mut ClassList, disabled: bool) {
+pub(crate) fn set_disabled_class(class_list: &mut Mut<'_, ClassList>, disabled: bool) {
     if disabled {
         if !class_list.contains(DISABLED_CLASS) {
             class_list.add(DISABLED_CLASS);

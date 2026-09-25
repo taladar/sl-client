@@ -1437,6 +1437,11 @@ pub fn spawn_keyed_floater(
             },
             UiPanelShown(false),
             FloaterWasShown(false),
+            // A free window is a layout root of its own: a change inside it
+            // re-lays-out only this window, and a change anywhere else in the
+            // UI does not re-lay-out it. `dock` takes this off (a docked
+            // window is part of its host's flow) and `tear_off` puts it back.
+            IndependentLayout,
             Floater {
                 id: spec.id,
                 key,
@@ -2171,7 +2176,12 @@ fn dock(
     floater.docked_in = Some(host);
     floater.last_host = Some(host);
     floater.minimized = false;
-    commands.entity(entity).insert(ChildOf(host));
+    // A docked window is part of its host's flow, so it rejoins the host's
+    // layout rather than being laid out on its own (see `spawn_keyed_floater`).
+    commands
+        .entity(entity)
+        .insert(ChildOf(host))
+        .remove::<IndependentLayout>();
     // Sit the docked floater in its **host's** z-plane rather than a hardcoded 0.
     // `GlobalZIndex` is global (not inherited), so a docked window at 0 loses the
     // pick to anything drawn over it — e.g. the Conversations floater's dock host
@@ -2198,7 +2208,9 @@ fn tear_off(
     z_top: &mut FloaterZTop,
 ) {
     floater.docked_in = None;
-    commands.entity(entity).insert(ChildOf(root));
+    commands
+        .entity(entity)
+        .insert((ChildOf(root), IndependentLayout));
     raise(entity, z_indices, z_top);
 }
 

@@ -300,7 +300,14 @@ pub fn apply_text_demo_visibility(
 /// writing the same string back still marks `Text` changed, which re-measures
 /// the node and re-runs layout for nothing. This was written six times across
 /// the viewer, and one of the six had lost the guard — hence one shared copy.
-pub fn set_text(text: &mut Text, value: &str) {
+///
+/// It takes the change-detecting [`Mut`], not a `&mut Text`, and that is what
+/// makes the guard real: handing a `Mut<Text>` to a `&mut Text` parameter goes
+/// through `DerefMut`, which flags the component changed **before** the
+/// comparison runs. It did, for every caller, on every frame — a docked
+/// Conversations tab re-measured and re-laid-out its unchanged label sixty
+/// times a second. Here the comparison reads, and only a real change writes.
+pub fn set_text(text: &mut Mut<'_, Text>, value: &str) {
     if text.0 != value {
         value.clone_into(&mut text.0);
     }

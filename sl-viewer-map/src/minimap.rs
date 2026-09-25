@@ -2584,7 +2584,12 @@ fn layout_minimap_compass(
     let Ok(surface) = computed.get(ui.surface) else {
         return;
     };
-    let surface_logical = vec2_scale(surface.size(), surface.inverse_scale_factor());
+    // Unrounded sizes, both: a node's rounded size depends on where its edges
+    // fall on the pixel grid, i.e. on the very position computed from it
+    // here, and feeding it back moved every compass letter by a fraction of a
+    // pixel on every frame — a re-layout of the minimap sixty times a second
+    // with the map standing still.
+    let surface_logical = vec2_scale(surface.unrounded_size(), surface.inverse_scale_factor());
     if surface_logical.x < 1.0 || surface_logical.y < 1.0 {
         return;
     }
@@ -2592,7 +2597,7 @@ fn layout_minimap_compass(
         let label_logical = computed
             .get(*wrapper)
             .map_or(Vec2::new(12.0, 12.0), |node| {
-                vec2_scale(node.size(), node.inverse_scale_factor())
+                vec2_scale(node.unrounded_size(), node.inverse_scale_factor())
             });
         let Some(placement) =
             compass_label_placement(index, surface_logical, label_logical, state.view.rotation)
@@ -2617,11 +2622,28 @@ fn layout_minimap_compass(
             // (`ui_perf::ui_layout_dirty`) into a full-tree relayout on every
             // frame the minimap is open — the dominant per-frame cost measured
             // while rezzing with the minimap up.
-            if node.left != left || node.top != top {
+            //
+            // "A real move" is at least a tenth of a pixel: the map rotation
+            // follows the camera heading, which drifts by sub-pixel amounts on
+            // every frame without anyone turning, and each drift written was a
+            // re-layout of the minimap for a change nobody could see.
+            if moved_visibly(node.left, left) || moved_visibly(node.top, top) {
                 node.left = left;
                 node.top = top;
             }
         }
+    }
+}
+
+/// The smallest compass-label move, in logical pixels, worth a re-layout.
+const COMPASS_MOVE_EPSILON: f32 = 0.1;
+
+/// Whether an inset moving from `current` to `wanted` is a move anyone could
+/// see: a change of kind, or of more than [`COMPASS_MOVE_EPSILON`] pixels.
+fn moved_visibly(current: Val, wanted: Val) -> bool {
+    match (current, wanted) {
+        (Val::Px(from), Val::Px(to)) => (from - to).abs() > COMPASS_MOVE_EPSILON,
+        (from, to) => from != to,
     }
 }
 
