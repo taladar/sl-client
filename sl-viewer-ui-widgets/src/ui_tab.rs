@@ -151,7 +151,7 @@ use sl_viewer_ui_core::ui::{
     FocusRevealBounds, HideWith, PanelVisibility, TabStopsFollowVisibility, UiDirection, column,
     row,
 };
-use sl_viewer_ui_core::ui_element::{ElementCx, TextMayClip, UiAction};
+use sl_viewer_ui_core::ui_element::{ContentMayOverflow, ElementCx, TextMayClip, UiAction};
 
 use sl_viewer_ui_core::hold_repeat::{HoldToRepeat, ensure_hold_repeat};
 use sl_viewer_ui_core::scrollbar::{ScrollTarget, ensure_scrollbar_widget, spawn_scrollbar};
@@ -222,6 +222,13 @@ const TAB_CLASS: &str = "sk-tab";
 /// search hangs [`NO_MATCH_CLASS`](sl_viewer_ui_core::skin::NO_MATCH_CLASS) on
 /// this node, and its fixture spawns the same pair.
 pub const TAB_LABEL_CLASS: &str = "sk-tab-label";
+
+/// Why a clipped tab label may hold more than it shows — the widget's
+/// declaration for both harness checks it would otherwise trip: the label
+/// outgrowing its clip, and the text sliced at the clip's edge.
+const TAB_LABEL_CLIP_REASON: &str = "a resizable tab strip clips a label longer than its column \
+                                     so the strip can be narrower than the longest tab name; a \
+                                     trailing ellipsis marks it";
 
 /// The skin class on the panel area — the "content" shade the active tab
 /// shares (`--card-bg`).
@@ -1488,9 +1495,10 @@ fn spawn_tab_button(
                     ..default()
                 },
                 TextMayClip {
-                    reason: "a resizable tab strip clips a label longer than its column so the \
-                             strip can be narrower than the longest tab name; a trailing ellipsis \
-                             marks it",
+                    reason: TAB_LABEL_CLIP_REASON,
+                },
+                ContentMayOverflow {
+                    reason: TAB_LABEL_CLIP_REASON,
                 },
                 name("tab-label"),
                 ChildOf(button),

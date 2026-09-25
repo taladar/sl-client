@@ -39,7 +39,7 @@
 //! are `viewer-avatar-moderation-actions`, and light up in the pie, here and
 //! the minimap at once when that shared layer lands.
 
-use crate::skin::{LIST_ROW_CLASS, SELECTED_CLASS, set_state_class, text_role};
+use crate::skin::{set_state_class, text_role};
 use crate::skin_palette::SkinPalette;
 use bevy::ecs::system::SystemParam;
 use bevy::input_focus::tab_navigation::TabIndex;
@@ -96,9 +96,9 @@ use crate::ui_font::UiFont;
 use crate::ui_search::{SearchFieldSpec, spawn_search_field};
 use crate::ui_sounds::{PlayUiSound, UiSound};
 use crate::ui_table::{
-    TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells, TableSelectionMode,
-    TableSortDefault, TableSpec, TableState, register_table_settings, set_table_cell, spawn_table,
-    spawn_table_row,
+    SpecimenTable, TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells,
+    TableSelectionMode, TableSortDefault, TableSpec, TableState, register_table_settings,
+    set_table_cell, spawn_specimen_table_rows, spawn_table, spawn_table_row,
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
@@ -144,20 +144,8 @@ const SETTING_RANGE: &str = "RadarNearMeRange";
 /// Header / cell font size, logical px.
 const FONT_SIZE: f32 = 13.0;
 
-/// Table row height at the live cell font ([`FONT_SIZE`]), logical px.
+/// Table row height, logical px.
 const ROW_HEIGHT: f32 = 22.0;
-
-/// The row height that goes with a cell font of `font_size`, logical px —
-/// [`ROW_HEIGHT`] at [`FONT_SIZE`], and in proportion to it elsewhere.
-///
-/// A row is a box with **one line of text** in it, so its height is a function
-/// of the font rather than a constant: a line of 22 px text lays out 27 px tall,
-/// and a 22 px row cuts its descenders off. The live table's font is a constant
-/// today, so this changes nothing there; the specimen sweeps the font size and
-/// needs the row that goes with each one.
-const fn row_height(font_size: f32) -> f32 {
-    font_size * (ROW_HEIGHT / FONT_SIZE)
-}
 
 /// The default cell / label colour.
 const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
@@ -1006,6 +994,24 @@ fn build_radar_content(
     mut commands: Commands,
     settings: Option<Res<ViewerSettings>>,
 ) {
+    let initial_range = settings
+        .as_deref()
+        .and_then(|settings| settings.store().get_f32(SETTING_RANGE).ok())
+        .unwrap_or(162.0);
+    let ui = spawn_radar_content(&mut commands, handle.content, FONT_SIZE, initial_range);
+    commands.insert_resource(ui);
+}
+
+/// Build the radar's content into `parent` at `font_size`: the filter / limit
+/// row (the range field showing `initial_range`), the counts line, the table,
+/// and the trailing action buttons. Shared by the live first-open build and the
+/// gallery specimen.
+fn spawn_radar_content(
+    commands: &mut Commands,
+    parent: Entity,
+    font_size: f32,
+    initial_range: f32,
+) -> RadarUi {
     let content = commands
         .spawn((
             Node {
@@ -1015,7 +1021,7 @@ fn build_radar_content(
                 ..column(Val::Px(4.0))
             },
             Name::new("radar-content"),
-            ChildOf(handle.content),
+            ChildOf(parent),
         ))
         .id();
 
@@ -1033,11 +1039,11 @@ fn build_radar_content(
         ))
         .id();
     let search = spawn_search_field(
-        &mut commands,
+        commands,
         controls,
         &SearchFieldSpec {
             tab_index: 0,
-            font_size: FONT_SIZE,
+            font_size,
             min_width: 140.0,
             placeholder: "Filter by name".to_owned(),
             search_glyph: true,
@@ -1052,29 +1058,25 @@ fn build_radar_content(
     // The range limit: the shared widget, carrying its own caption so a click on
     // the words toggles it too, bound to the setting the projection reads.
     let limit = spawn_checkbox(
-        &mut commands,
+        commands,
         controls,
         &CheckboxSpec {
             element: "radar-limit",
             label: "radar-limit-range".to_owned(),
             tab_index: 0,
-            font_size: FONT_SIZE,
+            font_size,
             translate_label: true,
         },
     );
     commands
         .entity(limit.checkbox)
         .insert(bound_checkbox(SettingBinding::account(SETTING_LIMIT)));
-    let initial_range = settings
-        .as_deref()
-        .and_then(|settings| settings.store().get_f32(SETTING_RANGE).ok())
-        .unwrap_or(162.0);
     let range_field = spawn_text_input(
-        &mut commands,
+        commands,
         controls,
         &TextInputSpec {
             initial: format!("{initial_range}"),
-            font_size: FONT_SIZE,
+            font_size,
             width_glyphs: 6.0,
             ..TextInputSpec::new("radar-range", TextInputKind::Float)
         },
@@ -1084,7 +1086,7 @@ fn build_radar_content(
     let counts_text = commands
         .spawn((
             Text::default(),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(DIM_LABEL_COLOR),
             Node {
                 flex_shrink: 0.0,
@@ -1120,14 +1122,16 @@ fn build_radar_content(
             ChildOf(body),
         ))
         .id();
-    let table = spawn_table(&mut commands, table_column, &RADAR_TABLE);
+    let table = spawn_table(commands, table_column, &RADAR_TABLE);
     commands.entity(table.viewport).insert(TabIndex(1));
 
     // The trailing action buttons, acting on the selection.
     let actions = commands
         .spawn((
             Node {
-                width: Val::Px(92.0),
+                // A floor, not a width: the column grows to its longest label,
+                // which a translation can make wider than 92 px.
+                min_width: Val::Px(92.0),
                 flex_shrink: 0.0,
                 align_items: AlignItems::Stretch,
                 ..column(Val::Px(4.0))
@@ -1136,20 +1140,28 @@ fn build_radar_content(
             ChildOf(body),
         ))
         .id();
-    spawn_radar_action_button(&mut commands, actions, "radar-action-profile", |agent| {
-        RadarButtonAction::Profile(agent)
-    });
-    spawn_radar_action_button(&mut commands, actions, "radar-action-im", |agent| {
-        RadarButtonAction::Im(agent)
-    });
+    spawn_radar_action_button(
+        commands,
+        actions,
+        "radar-action-profile",
+        font_size,
+        RadarButtonAction::Profile,
+    );
+    spawn_radar_action_button(
+        commands,
+        actions,
+        "radar-action-im",
+        font_size,
+        RadarButtonAction::Im,
+    );
 
-    commands.insert_resource(RadarUi {
+    RadarUi {
         table: table.root,
         viewport: table.viewport,
         counts_text,
         filter_field: search.field,
         range_field,
-    });
+    }
 }
 
 /// What a trailing action button does with the selected agent.
@@ -1171,6 +1183,7 @@ fn spawn_radar_action_button(
     commands: &mut Commands,
     parent: Entity,
     label_key: &'static str,
+    font_size: f32,
     action: fn(AgentKey) -> RadarButtonAction,
 ) {
     commands
@@ -1192,20 +1205,27 @@ fn spawn_radar_action_button(
         ))
         .with_child((
             Text::new(String::new()),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(LABEL_COLOR),
             Translated::new(label_key),
             Pickable::IGNORE,
         ))
         .observe(
+            // Each optional so a press in a host with no radar state (the
+            // gallery's specimen) is a no-op rather than a failed observer.
             move |mut press: On<Pointer<Press>>,
-                  selected: Res<RadarSelection>,
-                  mut profiles: MessageWriter<OpenAvatarProfile>,
-                  mut conversations: MessageWriter<OpenConversation>| {
+                  selected: Option<Res<RadarSelection>>,
+                  profiles: Option<MessageWriter<OpenAvatarProfile>>,
+                  conversations: Option<MessageWriter<OpenConversation>>| {
                 press.propagate(false);
                 if press.button != PointerButton::Primary {
                     return;
                 }
+                let (Some(selected), Some(mut profiles), Some(mut conversations)) =
+                    (selected, profiles, conversations)
+                else {
+                    return;
+                };
                 let Some(agent) = selected.primary() else {
                     return;
                 };
@@ -1597,19 +1617,27 @@ fn rebuild_radar_view(
     if let Ok(mut list) = widgets.lists.get_mut(ui.viewport) {
         list.item_count = radar.view.rows.len();
     }
-    let (total, in_region, in_chat) = radar.view.counts;
-    let label = translator.format(
-        "radar-counts",
-        &TransArgs::new()
-            .int("total", i64::try_from(total).unwrap_or(i64::MAX))
-            .int("region", i64::try_from(in_region).unwrap_or(i64::MAX))
-            .int("chat", i64::try_from(in_chat).unwrap_or(i64::MAX)),
-    );
+    let label = radar_counts_label(&translator, radar.view.counts);
     if let Ok(mut text) = widgets.texts.get_mut(ui.counts_text)
         && text.0 != label
     {
         text.0 = label;
     }
+}
+
+/// The counts line: `radar-counts` formatted with the `(total, in region, in
+/// chat range)` counts.
+fn radar_counts_label(
+    translator: &Translator,
+    (total, in_region, in_chat): (usize, usize, usize),
+) -> String {
+    translator.format(
+        "radar-counts",
+        &TransArgs::new()
+            .int("total", i64::try_from(total).unwrap_or(i64::MAX))
+            .int("region", i64::try_from(in_region).unwrap_or(i64::MAX))
+            .int("chat", i64::try_from(in_chat).unwrap_or(i64::MAX)),
+    )
 }
 
 /// Build the widget cells of each freshly-pooled radar row and attach the
@@ -1702,63 +1730,7 @@ fn bind_radar_rows(
             set_position_mark(&mut texts, cells, None);
             continue;
         };
-        let name_color = if data.muted {
-            tags.muted
-        } else if data.friend {
-            tags.friend
-        } else {
-            LABEL_COLOR
-        };
-        let range_color = match range_band(data.distance, state.chat_range, state.shout_range) {
-            RangeBand::Chat => tags.chat_range,
-            RangeBand::Shout => tags.shout_range,
-            RangeBand::Beyond => LABEL_COLOR,
-            RangeBand::Unknown => DIM_LABEL_COLOR,
-        };
-        let region_color = if data.in_own_region {
-            LABEL_COLOR
-        } else {
-            DIM_LABEL_COLOR
-        };
-        // A jellied avatar's cost is the one the viewer refused to pay, so it is
-        // dimmed rather than shown as an ordinary measurement.
-        // The **muted role**, not the muted-avatar colour: a refused cost is a
-        // measurement the viewer declined to make, which has nothing to do with
-        // whether its avatar is muted. The two shared a constant.
-        let complexity_color = if data.jellied {
-            DIM_LABEL_COLOR
-        } else {
-            LABEL_COLOR
-        };
-        let cell_values: [(usize, String, Color); 9] = [
-            (COL_NAME, name_cell_text(data), name_color),
-            (COL_REGION, String::new(), region_color),
-            (COL_STATUS, status_cell_text(data), DIM_LABEL_COLOR),
-            (COL_TITLE, data.title.clone(), LABEL_COLOR),
-            (
-                COL_PAYMENT,
-                data.payment.cell_text().to_owned(),
-                LABEL_COLOR,
-            ),
-            (
-                COL_AGE,
-                data.age_days.map(|age| age.to_string()).unwrap_or_default(),
-                LABEL_COLOR,
-            ),
-            (COL_SEEN, format_seen(data.seen_seconds), DIM_LABEL_COLOR),
-            (
-                COL_RANGE,
-                format_range(data.distance, state.draw_distance),
-                range_color,
-            ),
-            (
-                COL_COMPLEXITY,
-                data.complexity
-                    .map(|score| score.to_string())
-                    .unwrap_or_default(),
-                complexity_color,
-            ),
-        ];
+        let cell_values = radar_row_values(data, tags, &state);
         for (column, value, color) in cell_values {
             if let Some(cell) = cells.cell(column) {
                 set_table_cell(&mut texts, cell, &value, color);
@@ -1766,6 +1738,74 @@ fn bind_radar_rows(
         }
         set_position_mark(&mut texts, cells, Some(!data.coarse_only));
     }
+}
+
+/// The `(column, value, colour)` cells of one radar row: the name in its friend /
+/// muted tint, the region dot's role colour, the status glyphs, and the range in
+/// its chat / shout band — the projection [`bind_radar_rows`] paints a pooled row
+/// with, and the specimen its sample rows.
+fn radar_row_values(
+    data: &RadarRow,
+    tags: RadarTagColors,
+    state: &RadarState,
+) -> [(usize, String, Color); 9] {
+    let name_color = if data.muted {
+        tags.muted
+    } else if data.friend {
+        tags.friend
+    } else {
+        LABEL_COLOR
+    };
+    let range_color = match range_band(data.distance, state.chat_range, state.shout_range) {
+        RangeBand::Chat => tags.chat_range,
+        RangeBand::Shout => tags.shout_range,
+        RangeBand::Beyond => LABEL_COLOR,
+        RangeBand::Unknown => DIM_LABEL_COLOR,
+    };
+    let region_color = if data.in_own_region {
+        LABEL_COLOR
+    } else {
+        DIM_LABEL_COLOR
+    };
+    // A jellied avatar's cost is the one the viewer refused to pay, so it is
+    // dimmed rather than shown as an ordinary measurement.
+    // The **muted role**, not the muted-avatar colour: a refused cost is a
+    // measurement the viewer declined to make, which has nothing to do with
+    // whether its avatar is muted. The two shared a constant.
+    let complexity_color = if data.jellied {
+        DIM_LABEL_COLOR
+    } else {
+        LABEL_COLOR
+    };
+    [
+        (COL_NAME, name_cell_text(data), name_color),
+        (COL_REGION, String::new(), region_color),
+        (COL_STATUS, status_cell_text(data), DIM_LABEL_COLOR),
+        (COL_TITLE, data.title.clone(), LABEL_COLOR),
+        (
+            COL_PAYMENT,
+            data.payment.cell_text().to_owned(),
+            LABEL_COLOR,
+        ),
+        (
+            COL_AGE,
+            data.age_days.map(|age| age.to_string()).unwrap_or_default(),
+            LABEL_COLOR,
+        ),
+        (COL_SEEN, format_seen(data.seen_seconds), DIM_LABEL_COLOR),
+        (
+            COL_RANGE,
+            format_range(data.distance, state.draw_distance),
+            range_color,
+        ),
+        (
+            COL_COMPLEXITY,
+            data.complexity
+                .map(|score| score.to_string())
+                .unwrap_or_default(),
+            complexity_color,
+        ),
+    ]
 }
 
 /// Put a row's region cell in its [`glyph::POSITION`] state: `Some(precise)`
@@ -1780,144 +1820,183 @@ fn set_position_mark(
         return;
     };
     if let Ok((_, _, Some(mut classes))) = texts.get_mut(cell) {
-        set_state_class(&mut classes, glyph::GLYPH_CLASS, true);
-        set_state_class(&mut classes, glyph::POSITION, precise.is_some());
-        set_state_class(&mut classes, glyph::PRECISE, precise == Some(true));
+        position_mark_classes(&mut classes, precise);
     }
+}
+
+/// The region cell's classes: always a glyph host, with the
+/// [`glyph::POSITION`] slot while a row is bound and [`glyph::PRECISE`] while
+/// its avatar is fully streamed.
+fn position_mark_classes(classes: &mut Mut<'_, ClassList>, precise: Option<bool>) {
+    set_state_class(classes, glyph::GLYPH_CLASS, true);
+    set_state_class(classes, glyph::POSITION, precise.is_some());
+    set_state_class(classes, glyph::PRECISE, precise == Some(true));
 }
 
 // --- Gallery specimen -----------------------------------------------------
 
-/// One static specimen row: name (+ its tint), status glyphs, and the range
-/// cell (+ its band tint). The values are data (avatar names, clocks,
-/// metres), so only the translatable strings go through the sample-text
-/// transform.
-type SpecimenRow = (&'static str, Color, &'static str, &'static str, Color);
-
-/// The gallery / `ui_test` specimen: a static sketch of the radar floater's
-/// content — the counts line, three auto-sized rows spanning the range bands
-/// (friend / plain / muted-coarse), and the trailing action buttons. The
-/// live floater binds the shared virtualized table widget (swept by its own
-/// consumers); here the radar-specific composition is static so its layout
-/// is swept.
+/// The radar floater's gallery / `ui_test` specimen, also the `radar` gallery
+/// element: the live content, built by the same `spawn_radar_content` at the
+/// cell's font size, with the table filled from sample avatars through the live
+/// projection — the counts ([`counts`]), the table's default sort
+/// ([`sort_rows`]), the cell mapping (`radar_row_values`) and the region mark
+/// (`position_mark_classes`) — and the first row selected through the
+/// table's own selection, which the widget paints.
+///
+/// The name tints are the name-tag palette's own fallbacks (a specimen host has
+/// no settings store), which is what a fresh viewer draws too; the ranges are
+/// banded against the model's default chat / shout ranges. The rows carry no
+/// press observer — what it would write lives in resources a specimen host has
+/// none of.
 pub fn spawn_radar_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: crate::ui_element::ElementCx,
 ) -> Entity {
-    let root = commands
-        .spawn((
-            column(Val::Px(4.0)),
-            Name::new("radar-specimen"),
-            ChildOf(parent),
-        ))
-        .id();
-    commands.spawn((
-        Text::new(cx.text("3 nearby — 2 in region, 1 in chat range")),
-        TextLayout {
-            linebreak: LineBreak::NoWrap,
-            ..default()
-        },
-        UiFont::Sans.at(cx.font_size),
-        text_role(DIM_LABEL_COLOR),
-        ChildOf(root),
-    ));
-    // The specimen has no settings store behind it, so it draws the name-tag
-    // palette's own fallbacks — which is what a fresh viewer draws too.
+    let ui = spawn_radar_content(commands, parent, cx.font_size, 162.0);
+    let state = RadarState::default();
+    let mut rows = specimen_rows(cx);
+    let (total, in_region, in_chat) = counts(&rows, state.chat_range);
+    let keys: Vec<(SortColumn, bool)> = RADAR_TABLE
+        .default_sort
+        .iter()
+        .filter_map(|key| {
+            RADAR_TABLE
+                .columns
+                .get(key.column)
+                .and_then(|column| SortColumn::from_token(column.token))
+                .map(|column| (column, key.ascending))
+        })
+        .collect();
+    sort_rows(&mut rows, &keys);
     let tags = RadarTagColors::from_settings(None);
-    let rows: [SpecimenRow; 3] = [
-        (
-            "Nearby Resident (nearby.resident)",
-            tags.friend,
-            "● T S",
-            "8.51",
-            tags.chat_range,
-        ),
-        (
-            "Passer-by Resident",
-            LABEL_COLOR,
-            "● A",
-            "54.20",
-            tags.shout_range,
-        ),
-        (
-            "Faraway Resident",
-            tags.muted,
-            "○",
-            ">128.00",
-            DIM_LABEL_COLOR,
-        ),
-    ];
-    for (index, (name, name_color, glyphs, range, range_color)) in rows.iter().enumerate() {
-        let row_node = commands
-            .spawn((
-                Node {
-                    // The row that goes with *this cell's* font, not the live
-                    // one: the specimen sweeps font sizes, and a row fixed at
-                    // the 13 px font's height cuts the descenders off a 22 px
-                    // line.
-                    height: Val::Px(row_height(cx.font_size)),
-                    align_items: AlignItems::Center,
-                    padding: UiRect::horizontal(Val::Px(4.0)),
-                    ..row(Val::Px(10.0))
-                },
-                // The same pair the live list takes from the table widget, so
-                // the specimen shows the skin's highlight rather than a copy of
-                // one skin's value.
-                ClassList::new_with_classes(
-                    core::iter::once(LIST_ROW_CLASS).chain((index == 0).then_some(SELECTED_CLASS)),
-                ),
-                ChildOf(root),
-            ))
-            .id();
-        for (value, color) in [
-            (*name, *name_color),
-            (*glyphs, DIM_LABEL_COLOR),
-            (*range, *range_color),
-        ] {
-            commands.spawn((
-                Text::new(value),
-                TextLayout {
-                    linebreak: LineBreak::NoWrap,
-                    ..default()
-                },
-                UiFont::Sans.at(cx.font_size),
-                text_role(color),
-                Pickable::IGNORE,
-                ChildOf(row_node),
-            ));
+    let values: Vec<Vec<(String, Color)>> = rows
+        .iter()
+        .map(|data| {
+            let mut cells = vec![(String::new(), LABEL_COLOR); RADAR_TABLE.columns.len()];
+            for (column, value, color) in radar_row_values(data, tags, &state) {
+                if let Some(cell) = cells.get_mut(column) {
+                    *cell = (value, color);
+                }
+            }
+            cells
+        })
+        .collect();
+    let table = SpecimenTable {
+        root: ui.table,
+        viewport: ui.viewport,
+    };
+    let bound = spawn_specimen_table_rows(commands, table, &RADAR_TABLE, &values);
+    for (data, (row, cells)) in rows.iter().zip(&bound) {
+        if let Some(cell) = cells.cell(COL_REGION) {
+            let precise = Some(!data.coarse_only);
+            commands
+                .entity(cell)
+                .insert(PseudoElementsSupport)
+                .entry::<ClassList>()
+                .and_modify(move |mut classes| position_mark_classes(&mut classes, precise));
         }
+        commands.entity(*row).insert(BoundRadar(Some(data.agent)));
     }
-    let actions = commands
-        .spawn((
-            Node {
-                align_items: AlignItems::Center,
-                ..row(Val::Px(6.0))
-            },
-            ChildOf(root),
-        ))
-        .id();
-    for label in ["Profile", "IM"] {
-        commands
-            .spawn((
-                Node {
-                    padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
-                    ..default()
-                },
-                BackgroundColor(ACTION_BACKGROUND),
-                ChildOf(actions),
-            ))
-            .with_child((
-                Text::new(cx.text(label)),
-                TextLayout {
-                    linebreak: LineBreak::NoWrap,
-                    ..default()
-                },
-                UiFont::Sans.at(cx.font_size),
-                text_role(LABEL_COLOR),
-            ));
+    commands
+        .entity(ui.table)
+        .entry::<TableState>()
+        .and_modify(|mut table| table.set_selection(vec![0], Some(0)));
+    // The live counts line is `radar-counts` formatted with the three counts,
+    // which takes the translator — so it is formatted in a queued step.
+    let counts_text = ui.counts_text;
+    commands.queue(move |world: &mut World| {
+        if let Err(error) = world.run_system_cached_with(
+            write_radar_specimen_counts,
+            (counts_text, (total, in_region, in_chat), cx),
+        ) {
+            warn!("radar specimen: the counts line was not written: {error}");
+        }
+    });
+    parent
+}
+
+/// The specimen's counts line: [`radar_counts_label`], as the live rebuild
+/// writes it, then the cell's text transform.
+fn write_radar_specimen_counts(
+    In((entity, counts, cx)): In<(Entity, (usize, usize, usize), crate::ui_element::ElementCx)>,
+    translator: Translator,
+    mut texts: Query<&mut Text>,
+) {
+    if let Ok(mut text) = texts.get_mut(entity) {
+        text.0 = cx.text(&radar_counts_label(&translator, counts));
     }
-    root
+}
+
+/// A fixed sample of nearby avatars spanning the range bands and the row
+/// states: a typing, seated friend in chat range, an away resident in shout
+/// range, and a muted, coarse-only one out in another region beyond draw
+/// distance — no real residents' names.
+fn specimen_rows(cx: crate::ui_element::ElementCx) -> Vec<RadarRow> {
+    let row = |id: u128, name: &str, username: &str, distance: Option<f32>| RadarRow {
+        agent: AgentKey::from(sl_client_bevy::Uuid::from_u128(id)),
+        name: cx.text(name),
+        username: username.to_owned(),
+        title: String::new(),
+        payment: PaymentInfo::None,
+        age_days: None,
+        seen_seconds: 0,
+        distance,
+        coarse_only: false,
+        in_own_region: true,
+        typing: false,
+        sitting: false,
+        away: false,
+        friend: false,
+        muted: false,
+        complexity: None,
+        jellied: false,
+    };
+    vec![
+        RadarRow {
+            title: cx.text("Sample Group Member"),
+            payment: PaymentInfo::Transacted,
+            age_days: Some(2_150),
+            seen_seconds: 754,
+            typing: true,
+            sitting: true,
+            friend: true,
+            complexity: Some(48_200),
+            ..row(
+                0x5a11_e000_0000_4000_8000_0000_0000_0011,
+                "Nearby Resident",
+                "nearby.resident",
+                Some(8.51),
+            )
+        },
+        RadarRow {
+            payment: PaymentInfo::Identified,
+            age_days: Some(412),
+            seen_seconds: 95,
+            away: true,
+            complexity: Some(131_900),
+            jellied: true,
+            ..row(
+                0x5a11_e000_0000_4000_8000_0000_0000_0012,
+                "Passer-by Resident",
+                "",
+                Some(54.2),
+            )
+        },
+        RadarRow {
+            age_days: Some(3),
+            seen_seconds: 12,
+            coarse_only: true,
+            in_own_region: false,
+            muted: true,
+            ..row(
+                0x5a11_e000_0000_4000_8000_0000_0000_0013,
+                "Faraway Resident",
+                "",
+                None,
+            )
+        },
+    ]
 }
 
 /// A press on a pooled radar row.

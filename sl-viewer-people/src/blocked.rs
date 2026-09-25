@@ -352,7 +352,7 @@ struct BlockedMenuTarget(Option<BlockedKey>);
 /// The block list's retained entities (inserted by the deferred panel build;
 /// consumers take `Option<Res<BlockedUi>>` until then).
 #[derive(Resource, Debug)]
-struct BlockedUi {
+pub(crate) struct BlockedUi {
     /// The table root (carries [`TableState`]).
     table: Entity,
     /// The virtualized viewport (carries [`VirtualList`]).
@@ -462,8 +462,19 @@ fn spawn_blocked_panel(
     let Some(people) = people else {
         return;
     };
-    let content = people.blocked_content();
+    let ui = spawn_blocked_list(&mut commands, people.blocked_content(), FONT_SIZE);
+    commands.insert_resource(ui);
+}
 
+/// Build the block list into `content` (the People pane's Blocked slot) at
+/// `font_size`: the filter row, the table with its count line and the trailing
+/// action column. Shared by the live deferred spawn and the Conversations
+/// floater's specimen, which composes the whole People pane.
+pub(crate) fn spawn_blocked_list(
+    commands: &mut Commands,
+    content: Entity,
+    font_size: f32,
+) -> BlockedUi {
     // The filter row.
     let controls = commands
         .spawn((
@@ -479,11 +490,11 @@ fn spawn_blocked_panel(
         ))
         .id();
     let search = spawn_search_field(
-        &mut commands,
+        commands,
         controls,
         &SearchFieldSpec {
             tab_index: 1,
-            font_size: FONT_SIZE,
+            font_size,
             min_width: 140.0,
             placeholder: "Filter by name".to_owned(),
             search_glyph: true,
@@ -522,13 +533,13 @@ fn spawn_blocked_panel(
             ChildOf(body),
         ))
         .id();
-    let table = spawn_table(&mut commands, table_column, &BLOCKED_TABLE);
+    let table = spawn_table(commands, table_column, &BLOCKED_TABLE);
     commands.entity(table.viewport).insert(TabIndex(2));
 
     let count_text = commands
         .spawn((
             Text::default(),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(DIM_LABEL_COLOR),
             Node {
                 flex_shrink: 0.0,
@@ -558,19 +569,24 @@ fn spawn_blocked_panel(
         BlockedButton::BlockResident,
         BlockedButton::BlockObject,
     ] {
-        spawn_blocked_button(&mut commands, actions, button);
+        spawn_blocked_button(commands, actions, button, font_size);
     }
 
-    commands.insert_resource(BlockedUi {
+    BlockedUi {
         table: table.root,
         viewport: table.viewport,
         filter_field: search.field,
         count_text,
-    });
+    }
 }
 
 /// Spawn one trailing action button.
-fn spawn_blocked_button(commands: &mut Commands, parent: Entity, button: BlockedButton) {
+fn spawn_blocked_button(
+    commands: &mut Commands,
+    parent: Entity,
+    button: BlockedButton,
+    font_size: f32,
+) {
     commands
         .spawn((
             Node {
@@ -596,7 +612,7 @@ fn spawn_blocked_button(commands: &mut Commands, parent: Entity, button: Blocked
                 linebreak: LineBreak::NoWrap,
                 ..default()
             },
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(LABEL_COLOR),
             Pickable::IGNORE,
         ))
@@ -630,12 +646,34 @@ fn spawn_block_by_name_floater(mut commands: Commands, root: Res<UiRoot>) {
     commands
         .entity(handle.title_text)
         .insert(Translated::new("block-by-name-title"));
-    let content = handle.content;
+    let field = spawn_block_by_name_content(&mut commands, handle.content, FONT_SIZE);
+    commands.insert_resource(BlockByNameUi {
+        panel: handle.root,
+        field,
+    });
+}
+
+/// The by-name floater's gallery / `ui_test` specimen: the live content, built
+/// by the same `spawn_block_by_name_content` the viewer's floater is, at the
+/// cell's font size. It needs no sample data — the window is a form.
+pub fn spawn_block_by_name_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: crate::ui_element::ElementCx,
+) -> Entity {
+    spawn_block_by_name_content(commands, parent, cx.font_size);
+    parent
+}
+
+/// Build the by-name floater's content into `content` at `font_size`: the
+/// prompt, the note, the name field and the OK / Cancel row. Returns the name
+/// field's entity. Shared by the live floater and its specimen.
+fn spawn_block_by_name_content(commands: &mut Commands, content: Entity, font_size: f32) -> Entity {
     for key in ["block-by-name-prompt", "block-by-name-note"] {
         commands.spawn((
             Text::default(),
             Translated::new(key),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             TextColor(if key == "block-by-name-note" {
                 DIM_LABEL_COLOR
             } else {
@@ -646,10 +684,10 @@ fn spawn_block_by_name_floater(mut commands: Commands, root: Res<UiRoot>) {
         ));
     }
     let field = spawn_text_input(
-        &mut commands,
+        commands,
         content,
         &TextInputSpec {
-            font_size: FONT_SIZE,
+            font_size,
             width_glyphs: 28.0,
             tab_index: 1,
             ..TextInputSpec::new("block-by-name-field", TextInputKind::Line)
@@ -687,17 +725,13 @@ fn spawn_block_by_name_floater(mut commands: Commands, root: Res<UiRoot>) {
                 } else {
                     "block-by-name-cancel"
                 }),
-                UiFont::Sans.at(FONT_SIZE),
+                UiFont::Sans.at(font_size),
                 text_role(LABEL_COLOR),
                 Pickable::IGNORE,
             ))
             .observe(on_block_by_name_press);
     }
-
-    commands.insert_resource(BlockByNameUi {
-        panel: handle.root,
-        field,
-    });
+    field
 }
 
 /// Which of the by-name floater's two buttons a node is.

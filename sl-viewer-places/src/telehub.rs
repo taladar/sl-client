@@ -89,12 +89,14 @@ use crate::social::{DebugBeacon, DebugBeacons};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonSpec, UiLabel, spawn_button};
+use crate::ui_tab::TabViewport;
 use crate::ui_table::{
-    TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableSelectionMode, TableSpec,
-    TableState, set_table_cell, spawn_table, spawn_table_row,
+    TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableHandle, TableSelectionMode,
+    TableSpec, TableState, set_table_cell, spawn_table, spawn_table_row,
 };
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 use crate::world_api::{ObjectState, SelectionSet};
+use sl_viewer_ui_core::scrollbar::{ScrollTarget, ensure_scrollbar_widget, spawn_scrollbar};
 
 /// The floater's stable [`Floater::id`].
 pub const TELEHUB_FLOATER_ID: &str = "telehub";
@@ -236,6 +238,9 @@ pub struct TelehubPlugin;
 
 impl Plugin for TelehubPlugin {
     fn build(&self, app: &mut App) {
+        // The content column's scrollbar hides itself while there is nothing to
+        // scroll only with the widget's runtime half present.
+        ensure_scrollbar_widget(app);
         app.add_message::<OpenTelehub>()
             .init_resource::<TelehubState>()
             // The three shared models this window reads and writes. Their real
@@ -282,7 +287,10 @@ pub fn telehub_floater_spec() -> FloaterSpec {
         // tools", and the same reasoning applies here: the window is worked
         // alongside a selection, so it opens clear of the tools on the right.
         position: Vec2::new(160.0, 140.0),
-        default_size: Some(Vec2::new(360.0, 380.0)),
+        // Tall enough for the whole column (status, help, the list, its
+        // buttons and the footer) at the default font, so it opens without a
+        // scrollbar.
+        default_size: Some(Vec2::new(360.0, 420.0)),
         min_size: Some(Vec2::new(280.0, 260.0)),
         dock_host: None,
         caps: FloaterCaps {
@@ -311,80 +319,212 @@ fn spawn_telehub_floater(mut commands: Commands, root: Res<UiRoot>) {
 // Content.
 // ---------------------------------------------------------------------------
 
-/// First-open content build: the status lines, the connect row, the spawn-point
-/// list and its two buttons, and the reference's explanatory footer.
+/// First-open content build: the shared [`spawn_telehub_content`] into the
+/// floater's content slot, and the handles the in-place updates need.
 fn build_telehub_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
+    let parts = spawn_telehub_content(&mut commands, handle.content, FONT_SIZE);
+    commands.insert_resource(TelehubUi {
+        panel: handle.root,
+        status: parts.status,
+        help: parts.help,
+        table: parts.table.root,
+        viewport: parts.table.viewport,
+    });
+}
+
+/// The nodes of a built Telehub window the updates write into.
+#[derive(Debug)]
+struct TelehubParts {
+    /// The status line.
+    status: Entity,
+    /// The help line under it.
+    help: Entity,
+    /// The spawn-point table.
+    table: TableHandle,
+}
+
+/// Build the window's content into `content` at `font_size`: the status lines,
+/// the connect row, the spawn-point list and its two buttons, and the
+/// reference's explanatory footer. Shared by the live floater and its specimen.
+fn spawn_telehub_content(commands: &mut Commands, parent: Entity, font_size: f32) -> TelehubParts {
+    // A one-cell grid holding the scrolling column and, over its trailing edge,
+    // the column's scrollbar — the tab panels' arrangement, so the bar (shown
+    // only while the column overflows) never takes width from the content.
+    let frame = commands
+        .spawn((
+            Node {
+                display: Display::Grid,
+                grid_template_columns: vec![GridTrack::flex(1.0)],
+                grid_template_rows: vec![GridTrack::flex(1.0)],
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                min_width: Val::Px(0.0),
+                min_height: Val::Px(0.0),
+                ..default()
+            },
+            Name::new("telehub:frame"),
+            ChildOf(parent),
+        ))
+        .id();
+    // **Scrolls, rather than squeezing.** The window's reference size holds the
+    // whole column in English at the default font, but a long translation or a
+    // large font wraps the status, help and footer lines to several times their
+    // height; the column then scrolls instead of pushing the footer out of the
+    // window (or the list down to nothing).
     let content = commands
         .spawn((
             Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
+                grid_column: GridPlacement::start(1),
+                grid_row: GridPlacement::start(1),
+                min_width: Val::Px(0.0),
                 min_height: Val::Px(0.0),
                 padding: UiRect::all(Val::Px(8.0)),
+                overflow: Overflow::scroll_y(),
                 ..column(Val::Px(6.0))
             },
+            ScrollPosition::default(),
+            TabViewport { vertical: true },
             Name::new("telehub:content"),
-            ChildOf(handle.content),
+            ChildOf(frame),
         ))
         .id();
+    spawn_scrollbar(
+        commands,
+        frame,
+        ScrollTarget::Container(content),
+        Node {
+            grid_column: GridPlacement::start(1),
+            grid_row: GridPlacement::start(1),
+            justify_self: JustifySelf::End,
+            ..default()
+        },
+        "telehub:scrollbar",
+    );
 
-    let status = spawn_line(&mut commands, content, LABEL_COLOR);
-    let help = spawn_line(&mut commands, content, DIM_LABEL_COLOR);
+    let status = spawn_line(commands, content, LABEL_COLOR, font_size);
+    let help = spawn_line(commands, content, DIM_LABEL_COLOR, font_size);
 
-    let connect_row = spawn_row(&mut commands, content);
+    let connect_row = spawn_row(commands, content);
     spawn_action_button(
-        &mut commands,
+        commands,
         connect_row,
         "telehub-connect",
         TelehubAction::Connect,
         0,
+        font_size,
     );
     spawn_action_button(
-        &mut commands,
+        commands,
         connect_row,
         "telehub-disconnect",
         TelehubAction::Disconnect,
         1,
+        font_size,
     );
 
-    spawn_label(&mut commands, content, "telehub-spawn-points");
+    spawn_label(commands, content, "telehub-spawn-points", font_size);
     let wrapper = commands
         .spawn((
             Node {
                 width: Val::Percent(100.0),
                 height: Val::Px(LIST_HEIGHT),
+                // A height, not a suggestion: the column scrolls when it runs
+                // out of room, so the list keeps its rows rather than being the
+                // one child a tight column squeezes to nothing.
+                flex_shrink: 0.0,
                 ..default()
             },
             ChildOf(content),
         ))
         .id();
-    let table = spawn_table(&mut commands, wrapper, &SPAWN_TABLE);
+    let table = spawn_table(commands, wrapper, &SPAWN_TABLE);
 
-    let spawn_row_entity = spawn_row(&mut commands, content);
+    let spawn_row_entity = spawn_row(commands, content);
     spawn_action_button(
-        &mut commands,
+        commands,
         spawn_row_entity,
         "telehub-add-spawn",
         TelehubAction::AddSpawn,
         2,
+        font_size,
     );
     spawn_action_button(
-        &mut commands,
+        commands,
         spawn_row_entity,
         "telehub-remove-spawn",
         TelehubAction::RemoveSpawn,
         3,
+        font_size,
     );
 
-    spawn_note(&mut commands, content, "telehub-spawn-help");
+    spawn_note(commands, content, "telehub-spawn-help", font_size);
 
-    commands.insert_resource(TelehubUi {
-        panel: handle.root,
+    TelehubParts {
         status,
         help,
-        table: table.root,
-        viewport: table.viewport,
-    });
+        table,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Gallery specimen.
+// ---------------------------------------------------------------------------
+
+/// The Telehub window's gallery / `ui_test` specimen: the live content, built
+/// by the same `spawn_telehub_content` the viewer's floater is, showing a
+/// connected telehub with three spawn points (the last one selected, as a reply
+/// leaves it). The rows are written with the live `format_position`.
+pub fn spawn_telehub_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: crate::ui_element::ElementCx,
+) -> Entity {
+    let parts = spawn_telehub_content(commands, parent, cx.font_size);
+    // The buttons carry the live press observer, whose parameters name these
+    // models; a host without the plugin (the gallery) would fail its parameter
+    // validation on a click. With them present it finds no `TelehubUi` and
+    // does nothing, which is what a specimen's button should do.
+    commands.init_resource::<TelehubState>();
+    commands.init_resource::<SelectionSet>();
+    commands.init_resource::<ObjectState>();
+    // `telehub-status-connected` takes the object's name, and a formatted
+    // string needs the `Translator` a specimen has no system to hold — so the
+    // English form is written, through the cell's transform.
+    commands.entity(parts.status).insert(Text::new(
+        cx.text("Telehub connected to object Sample Telehub"),
+    ));
+    commands
+        .entity(parts.help)
+        .insert(Translated::new("telehub-help-connected"));
+    let rows: Vec<Vec<String>> = [
+        Vector {
+            x: 0.0,
+            y: 4.5,
+            z: 0.0,
+        },
+        Vector {
+            x: -3.2,
+            y: -2.0,
+            z: 0.5,
+        },
+        Vector {
+            x: 3.2,
+            y: -2.0,
+            z: 0.5,
+        },
+    ]
+    .iter()
+    .map(|position| vec![format_position(position)])
+    .collect();
+    let last = rows.len().saturating_sub(1);
+    crate::specimen::spawn_sample_table_rows(
+        commands,
+        crate::ui_table::SpecimenTable::from(&parts.table),
+        &SPAWN_TABLE,
+        &rows,
+        &[last],
+    );
+    parent
 }
 
 /// A wrapping row of controls.
@@ -402,11 +542,11 @@ fn spawn_row(commands: &mut Commands, parent: Entity) -> Entity {
 }
 
 /// An empty text line the caller updates in place.
-fn spawn_line(commands: &mut Commands, parent: Entity, color: Color) -> Entity {
+fn spawn_line(commands: &mut Commands, parent: Entity, color: Color, font_size: f32) -> Entity {
     commands
         .spawn((
             Text::new(String::new()),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(color),
             Pickable::IGNORE,
             ChildOf(parent),
@@ -415,18 +555,18 @@ fn spawn_line(commands: &mut Commands, parent: Entity, color: Color) -> Entity {
 }
 
 /// A translated label on its own line.
-fn spawn_label(commands: &mut Commands, parent: Entity, key: &'static str) {
+fn spawn_label(commands: &mut Commands, parent: Entity, key: &'static str, font_size: f32) {
     ui_spawn::spawn_label(
         commands,
         parent,
         UiLabel::key(key),
         DIM_LABEL_COLOR,
-        FONT_SIZE,
+        font_size,
     );
 }
 
 /// The wrapped explanatory footer.
-fn spawn_note(commands: &mut Commands, parent: Entity, key: &'static str) {
+fn spawn_note(commands: &mut Commands, parent: Entity, key: &'static str, font_size: f32) {
     commands
         .spawn((
             Node {
@@ -438,7 +578,7 @@ fn spawn_note(commands: &mut Commands, parent: Entity, key: &'static str) {
         .with_child((
             Text::default(),
             Translated::new(key),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(DIM_LABEL_COLOR),
             Pickable::IGNORE,
         ));
@@ -451,6 +591,7 @@ fn spawn_action_button(
     label_key: &'static str,
     action: TelehubAction,
     tab_index: i32,
+    font_size: f32,
 ) {
     let button = spawn_button(
         commands,
@@ -462,7 +603,7 @@ fn spawn_action_button(
         .tab_index(tab_index)
         .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
         .label_color(LABEL_COLOR)
-        .font_size(FONT_SIZE)
+        .font_size(font_size)
         // The greyed look of a refused action is the skin's now
         // (`.sk-button:disabled .sk-text`), which needs both ends of that
         // selector to exist.

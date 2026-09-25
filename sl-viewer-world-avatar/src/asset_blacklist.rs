@@ -15,7 +15,7 @@
 //! - **Clear temporary** drops every session-only entry at once (the
 //!   reference's "Clear temporary" button).
 //!
-//! Every [`DerenderKind`](sl_viewer_world_api::DerenderKind) is listed here, asset
+//! Every [`DerenderKind`] is listed here, asset
 //! entries included: the model honours a blacklisted sound / animation / texture
 //! at its own point of use, so this is where one is seen and removed even though
 //! no surface produces one yet (the explorer floaters will).
@@ -55,11 +55,12 @@ use sl_viewer_ui_widgets::floater::{
 };
 use sl_viewer_ui_widgets::ui_search::{SearchFieldSpec, spawn_search_field};
 use sl_viewer_ui_widgets::ui_table::{
-    TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells, TableSelectionMode,
-    TableSortDefault, TableSpec, TableState, order_by_sort_keys, register_table_settings,
-    set_table_cell, spawn_table, spawn_table_row,
+    SpecimenTable, TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells,
+    TableSelectionMode, TableSortDefault, TableSpec, TableState, order_by_sort_keys,
+    register_table_settings, set_table_cell, spawn_specimen_table_rows, spawn_table,
+    spawn_table_row,
 };
-use sl_viewer_world_api::{DerenderEntry, DerenderList};
+use sl_viewer_world_api::{DerenderEntry, DerenderKind, DerenderList};
 
 /// The floater's stable id (persistence, `SL_VIEWER_OPEN_FLOATER`).
 pub const BLACKLIST_FLOATER_ID: &str = "asset-blacklist";
@@ -342,6 +343,14 @@ fn spawn_blacklist_floater(mut commands: Commands, root: Res<UiRoot>) {
 /// First-open content build: the filter row, the table with its count line, and
 /// the trailing action buttons.
 fn build_blacklist_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
+    let ui = spawn_blacklist_content(&mut commands, handle.content, FONT_SIZE);
+    commands.insert_resource(ui);
+}
+
+/// Build the floater's content into `parent` at `font_size`: the filter row,
+/// the table with its count line, and the trailing action buttons. Shared by
+/// the live floater's first-open build and its specimen.
+fn spawn_blacklist_content(commands: &mut Commands, parent: Entity, font_size: f32) -> BlacklistUi {
     let content = commands
         .spawn((
             Node {
@@ -351,7 +360,7 @@ fn build_blacklist_content(In(handle): In<FloaterHandle>, mut commands: Commands
                 ..column(Val::Px(4.0))
             },
             Name::new("blacklist-content"),
-            ChildOf(handle.content),
+            ChildOf(parent),
         ))
         .id();
 
@@ -368,11 +377,11 @@ fn build_blacklist_content(In(handle): In<FloaterHandle>, mut commands: Commands
         ))
         .id();
     let search = spawn_search_field(
-        &mut commands,
+        commands,
         controls,
         &SearchFieldSpec {
             tab_index: 0,
-            font_size: FONT_SIZE,
+            font_size,
             min_width: 160.0,
             placeholder: "Filter the blacklist".to_owned(),
             search_glyph: true,
@@ -409,13 +418,13 @@ fn build_blacklist_content(In(handle): In<FloaterHandle>, mut commands: Commands
             ChildOf(body),
         ))
         .id();
-    let table = spawn_table(&mut commands, table_column, &BLACKLIST_TABLE);
+    let table = spawn_table(commands, table_column, &BLACKLIST_TABLE);
     commands.entity(table.viewport).insert(TabIndex(1));
 
     let count_text = commands
         .spawn((
             Text::default(),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(DIM_LABEL_COLOR),
             Node {
                 flex_shrink: 0.0,
@@ -441,19 +450,28 @@ fn build_blacklist_content(In(handle): In<FloaterHandle>, mut commands: Commands
         ))
         .id();
     for button in [BlacklistButton::ReRender, BlacklistButton::ClearTemporary] {
-        spawn_blacklist_action(&mut commands, actions, button);
+        spawn_blacklist_action(commands, actions, button, font_size);
     }
 
-    commands.insert_resource(BlacklistUi {
+    BlacklistUi {
         table: table.root,
         viewport: table.viewport,
         filter_field: search.field,
         count_text,
-    });
+    }
 }
 
 /// Spawn one trailing action button and its press observer.
-fn spawn_blacklist_action(commands: &mut Commands, parent: Entity, button: BlacklistButton) {
+///
+/// The selection and the request queue are optional so a press in a host that
+/// has neither (the gallery's specimen) is a no-op rather than a failed
+/// observer.
+fn spawn_blacklist_action(
+    commands: &mut Commands,
+    parent: Entity,
+    button: BlacklistButton,
+    font_size: f32,
+) {
     commands
         .spawn((
             button,
@@ -474,19 +492,22 @@ fn spawn_blacklist_action(commands: &mut Commands, parent: Entity, button: Black
         ))
         .with_child((
             Text::new(String::new()),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(LABEL_COLOR),
             Translated::new(button.label_key()),
             Pickable::IGNORE,
         ))
         .observe(
             move |mut press: On<Pointer<Press>>,
-                  mut selected: ResMut<SelectedBlacklistEntry>,
-                  mut requests: MessageWriter<UnDerender>| {
+                  selected: Option<ResMut<SelectedBlacklistEntry>>,
+                  requests: Option<MessageWriter<UnDerender>>| {
                 press.propagate(false);
                 if press.button != PointerButton::Primary {
                     return;
                 }
+                let (Some(mut selected), Some(mut requests)) = (selected, requests) else {
+                    return;
+                };
                 match button {
                     BlacklistButton::ReRender => {
                         if let Some(id) = selected.0.take() {
@@ -692,27 +713,13 @@ fn bind_blacklist_rows(
             set_permanent_mark(&mut table.texts, cells, false);
             continue;
         };
-        let name = if data.name.trim().is_empty() {
-            unnamed.clone()
-        } else {
-            data.name.clone()
-        };
-        let region = if data.region.trim().is_empty() {
-            unknown_region.clone()
-        } else {
-            data.region.clone()
-        };
-        let cell_values: [(usize, String, Color); 5] = [
-            (COL_NAME, name, LABEL_COLOR),
-            (COL_REGION, region, DIM_LABEL_COLOR),
-            (COL_TYPE, translator.get(data.kind.label_key()), LABEL_COLOR),
-            (
-                COL_DATE,
-                format_date(data.added_epoch_secs, zone.as_deref()),
-                DIM_LABEL_COLOR,
-            ),
-            (COL_PERMANENT, String::new(), LABEL_COLOR),
-        ];
+        let cell_values = blacklist_row_values(
+            data,
+            &unnamed,
+            &unknown_region,
+            translator.get(data.kind.label_key()),
+            zone.as_deref(),
+        );
         for (column, value, color) in cell_values {
             if let Some(cell) = cells.cell(column) {
                 set_table_cell(&mut table.texts, cell, &value, color);
@@ -738,9 +745,180 @@ fn set_permanent_mark(
         return;
     };
     if let Ok((_, _, Some(mut classes))) = texts.get_mut(cell) {
-        set_state_class(&mut classes, glyph::GLYPH_CLASS, true);
-        set_state_class(&mut classes, glyph::YES, permanent);
+        permanent_mark_classes(&mut classes, permanent);
     }
+}
+
+/// The Permanent cell's classes: always a glyph host, with the
+/// [`glyph::YES`] slot only while the entry is permanent.
+fn permanent_mark_classes(classes: &mut Mut<'_, ClassList>, permanent: bool) {
+    set_state_class(classes, glyph::GLYPH_CLASS, true);
+    set_state_class(classes, glyph::YES, permanent);
+}
+
+/// The `(column, value, colour)` cells of one blacklist row. A blank name or
+/// region shows `unnamed` / `unknown_region`; `type_label` is the entry kind's
+/// translated name. The Permanent cell holds no text — its mark is a class
+/// ([`permanent_mark_classes`]).
+fn blacklist_row_values(
+    data: &DerenderEntry,
+    unnamed: &str,
+    unknown_region: &str,
+    type_label: String,
+    zone: Option<&LocalTimeZone>,
+) -> [(usize, String, Color); 5] {
+    let name = if data.name.trim().is_empty() {
+        unnamed.to_owned()
+    } else {
+        data.name.clone()
+    };
+    let region = if data.region.trim().is_empty() {
+        unknown_region.to_owned()
+    } else {
+        data.region.clone()
+    };
+    [
+        (COL_NAME, name, LABEL_COLOR),
+        (COL_REGION, region, DIM_LABEL_COLOR),
+        (COL_TYPE, type_label, LABEL_COLOR),
+        (
+            COL_DATE,
+            format_date(data.added_epoch_secs, zone),
+            DIM_LABEL_COLOR,
+        ),
+        (COL_PERMANENT, String::new(), LABEL_COLOR),
+    ]
+}
+
+// --- Gallery specimen -----------------------------------------------------
+
+/// The Asset Blacklist floater's gallery / `ui_test` specimen: the live
+/// content, built by the same `spawn_blacklist_content` the floater is, with
+/// the table filled from sample entries through the live filter-free
+/// projection — [`sort_rows`] in the table's default order, then the live
+/// cell mapping (`blacklist_row_values`) and Permanent mark
+/// (`permanent_mark_classes`). The first row is shown selected.
+///
+/// The Type cell is the one the live bind translates; with no translator in a
+/// specimen host it is bound to its key as a [`Translated`] label instead,
+/// which resolves to the same string. The rows carry no press observer — the
+/// selection it would write lives in resources a specimen host has none of.
+pub fn spawn_blacklist_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: sl_viewer_ui_core::ui_element::ElementCx,
+) -> Entity {
+    let ui = spawn_blacklist_content(commands, parent, cx.font_size);
+    let table = SpecimenTable {
+        root: ui.table,
+        viewport: ui.viewport,
+    };
+    let mut rows = specimen_entries(cx);
+    let total = rows.len();
+    let keys: Vec<(&str, bool)> = BLACKLIST_TABLE
+        .default_sort
+        .iter()
+        .filter_map(|key| {
+            BLACKLIST_TABLE
+                .columns
+                .get(key.column)
+                .map(|column| (column.token, key.ascending))
+        })
+        .collect();
+    sort_rows(&mut rows, &keys);
+    let values: Vec<Vec<(String, Color)>> = rows
+        .iter()
+        .map(|data| {
+            let mut cells = vec![(String::new(), LABEL_COLOR); BLACKLIST_TABLE.columns.len()];
+            for (column, value, color) in blacklist_row_values(data, "", "", String::new(), None) {
+                if let Some(cell) = cells.get_mut(column) {
+                    *cell = (value, color);
+                }
+            }
+            cells
+        })
+        .collect();
+    let bound = spawn_specimen_table_rows(commands, table, &BLACKLIST_TABLE, &values);
+    for (index, (data, (row, cells))) in rows.iter().zip(&bound).enumerate() {
+        if let Some(cell) = cells.cell(COL_TYPE) {
+            commands
+                .entity(cell)
+                .insert(Translated::new(data.kind.label_key()));
+        }
+        if let Some(cell) = cells.cell(COL_PERMANENT) {
+            let permanent = data.permanent;
+            commands
+                .entity(cell)
+                .insert(PseudoElementsSupport)
+                .entry::<ClassList>()
+                .and_modify(move |mut classes| permanent_mark_classes(&mut classes, permanent));
+        }
+        commands
+            .entity(*row)
+            .insert(BoundBlacklist(Some(data.id)))
+            .entry::<ClassList>()
+            .and_modify(move |mut classes| {
+                set_state_class(&mut classes, SELECTED_CLASS, index == 0);
+            });
+    }
+    // The live line is `blacklist-count` formatted with the two counts; the
+    // specimen has no translator to format with, so it writes the English
+    // sentence that key produces.
+    commands.entity(ui.count_text).insert(Text::new(
+        cx.text(&format!("{} of {total} blacklisted", rows.len())),
+    ));
+    parent
+}
+
+/// A fixed sample of blacklist entries, one of each common kind, temporary and
+/// permanent — no real residents' or regions' names.
+fn specimen_entries(cx: sl_viewer_ui_core::ui_element::ElementCx) -> Vec<DerenderEntry> {
+    [
+        (
+            1_u128,
+            "Flashing Sign",
+            "Sample Region",
+            DerenderKind::Object,
+            true,
+            1_750_000_000,
+        ),
+        (
+            2,
+            "Sample Resident",
+            "Test Parcel Region",
+            DerenderKind::Resident,
+            false,
+            1_750_086_400,
+        ),
+        (
+            3,
+            "Particle Fountain",
+            "Sample Region",
+            DerenderKind::Object,
+            false,
+            1_750_172_800,
+        ),
+        (
+            4,
+            "Loud Door Chime",
+            "Example Island",
+            DerenderKind::Sound,
+            true,
+            1_750_259_200,
+        ),
+    ]
+    .into_iter()
+    .map(
+        |(id, name, region, kind, permanent, added_epoch_secs)| DerenderEntry {
+            id: Uuid::from_u128(0x6b1e_0000_0000_4000_8000_0000_0000_0000 | id),
+            name: cx.text(name),
+            region: cx.text(region),
+            kind,
+            permanent,
+            added_epoch_secs,
+        },
+    )
+    .collect()
 }
 
 #[cfg(test)]

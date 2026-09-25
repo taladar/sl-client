@@ -25,7 +25,8 @@
 use sl_client_bevy::{InventoryKey, SettingsKind, Uuid};
 use sl_viewer_inventory::inventory::InventoryModel;
 use sl_viewer_inventory::settings_index::{SettingsAsset, SettingsIndex};
-use sl_viewer_ui_widgets::ui_table::order_by_sort_keys;
+use sl_viewer_ui_core::ui_element::ElementCx;
+use sl_viewer_ui_widgets::ui_table::{TableSpec, order_by_sort_keys};
 
 /// The three kinds in the reference's filter-row order (`chk_days`,
 /// `chk_skies`, `chk_water`) — which is also the order [`SettingsListFilters`]
@@ -258,6 +259,56 @@ pub fn total(index: &SettingsIndex) -> usize {
         .into_iter()
         .map(|kind| index.of_kind(kind).len())
         .sum()
+}
+
+/// The rows a gallery / `ui_test` specimen of a settings list shows: two of
+/// each kind, one the user's own and one from the Library — the spread a real
+/// inventory has, with no inventory behind it. Names and folders go through the
+/// cell's transform; the order is the caller's to sort, as a projection's is.
+pub(crate) fn sample_rows(cx: ElementCx) -> Vec<SettingsListRow> {
+    [
+        ("Sample Midday", SettingsKind::Sky, false, "Settings"),
+        ("Example Sunset", SettingsKind::Sky, true, "Environments"),
+        ("Test Water", SettingsKind::Water, false, "Settings"),
+        (
+            "Example Deep Water",
+            SettingsKind::Water,
+            true,
+            "Environments",
+        ),
+        ("Sample Day", SettingsKind::DayCycle, false, "Settings"),
+        (
+            "Example Four-Hour Day",
+            SettingsKind::DayCycle,
+            true,
+            "Environments",
+        ),
+    ]
+    .into_iter()
+    .zip(1_u128..)
+    .map(|((name, kind, library, folder), id)| SettingsListRow {
+        item: InventoryKey::from(Uuid::from_u128(id)),
+        asset_id: Uuid::from_u128(id.saturating_add(0x100)),
+        name: cx.text(name),
+        kind,
+        library,
+        folder: cx.text(folder),
+    })
+    .collect()
+}
+
+/// The `(column token, ascending)` keys a table spec's default sort names — what
+/// [`sort_rows`] orders a specimen's sample rows by, as the live list is
+/// ordered before anyone clicks a header.
+pub(crate) fn default_sort_keys(spec: &TableSpec) -> Vec<(&'static str, bool)> {
+    spec.default_sort
+        .iter()
+        .filter_map(|key| {
+            spec.columns
+                .get(key.column)
+                .map(|column| (column.token, key.ascending))
+        })
+        .collect()
 }
 
 #[cfg(test)]

@@ -19,7 +19,7 @@
 //!
 //! # Two arrangements that are not incidental
 //!
-//! **The window is parked to fit.** The shipped floater is 420 × 640 logical
+//! **The window is parked to fit.** The shipped floater is 510 × 640 logical
 //! pixels; the fixture viewport is 800 × 600. At its own opening position the
 //! whole tab shell hangs off the bottom, and a control laid out past the
 //! viewport edge is one no pointer can click — so

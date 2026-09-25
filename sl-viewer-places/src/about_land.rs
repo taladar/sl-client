@@ -76,10 +76,10 @@ use sl_client_bevy::{
     SlIdentity, SlParcel, SlRegionIdentity, SlSessionEvent, TextureKey, Uuid,
 };
 
-use crate::edit_fields::{FieldSeed, seed_one_field, set_combo};
+use crate::edit_fields::{FieldSeed, seed_field_deferred, seed_one_field, set_combo};
 use crate::floater::{
-    Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterHost, FloaterKey, FloaterOp,
-    FloaterSpec, FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater,
+    Floater, FloaterCaps, FloaterCommand, FloaterHost, FloaterKey, FloaterOp, FloaterSpec,
+    FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater,
 };
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::intents::{AvatarPicked, OpenAvatarPicker};
@@ -87,7 +87,8 @@ use crate::intents::{GroupPicked, OpenGroupPicker};
 use crate::intents::{OpenTexturePicker, PickerKind, TexturePicked};
 use crate::inventory_properties::format_unix_date;
 use crate::land_environment::{
-    LandEnvironmentPlugin, LandEnvironmentSubject, LandPanelKind, spawn_land_environment_panel,
+    LandEnvironmentPlugin, LandEnvironmentSubject, LandPanelKind, show_sample_land_environment,
+    spawn_land_environment_panel,
 };
 use crate::name_revisions::{NameRevisions, ViewBuilt};
 use crate::social::GroupsModel;
@@ -1095,7 +1096,11 @@ pub fn about_land_floater_spec() -> FloaterSpec {
         id: ABOUT_LAND_FLOATER_ID,
         title: "About Land".to_owned(),
         position: Vec2::new(360.0, 80.0),
-        default_size: Some(Vec2::new(500.0, 480.0)),
+        // Wide enough that the whole nine-tab strip shows rather than
+        // scrolling, and tall enough for the tallest tabs (Options, Access)
+        // without a scrollbar — at the default font, in English; both still
+        // fit a 1280x800 screen from `position`.
+        default_size: Some(Vec2::new(890.0, 630.0)),
         min_size: Some(Vec2::new(420.0, 320.0)),
         dock_host: None,
         caps: FloaterCaps {
@@ -1107,13 +1112,63 @@ pub fn about_land_floater_spec() -> FloaterSpec {
     }
 }
 
-/// Build one window's content: the tab container and every tab, returning the
-/// handles the update passes write through.
+/// Every tab's retained handles, as [`build_land_content`] returns them — the
+/// window's [`AboutLandUi`] less its title, which the content does not own.
+#[derive(Debug)]
+struct LandTabs {
+    /// The General tab's handles.
+    general: GeneralHandles,
+    /// The Covenant tab's handles.
+    covenant: CovenantHandles,
+    /// The Objects tab's handles.
+    objects: ObjectHandles,
+    /// The Options tab's handles.
+    options: OptionsHandles,
+    /// The Media tab's handles.
+    media: MediaHandles,
+    /// The Sound tab's handles.
+    sound: SoundHandles,
+    /// The Access tab's handles.
+    access: AccessHandles,
+    /// The Environment tab's handles.
+    environment: EnvironmentHandles,
+}
+
+impl AboutLandUi {
+    /// A window's handles: its title text node and the tabs built into it.
+    const fn new(title_text: Entity, tabs: LandTabs) -> Self {
+        let LandTabs {
+            general: general_handles,
+            covenant: covenant_handles,
+            objects: object_handles,
+            options: options_handles,
+            media: media_handles,
+            sound: sound_handles,
+            access: access_handles,
+            environment: environment_handles,
+        } = tabs;
+        Self {
+            title_text,
+            general_handles,
+            covenant_handles,
+            object_handles,
+            options_handles,
+            media_handles,
+            sound_handles,
+            access_handles,
+            environment_handles,
+        }
+    }
+}
+
+/// Build one window's content into `content` at `font_size`: the tab container
+/// and every tab, returning the handles the update passes write through.
+/// Shared by the live window and its specimen.
 ///
 /// Called once per window, as it is spawned — a keyed instance's content is
 /// built into the window it belongs to, not deferred to a first open that no
 /// longer exists ([`KeyedFloaters`]).
-fn build_land_content(commands: &mut Commands, handle: FloaterHandle) -> AboutLandUi {
+fn build_land_content(commands: &mut Commands, content: Entity, font_size: f32) -> LandTabs {
     let labels: Vec<String> = [
         "about-land-tab-general",
         "about-land-tab-covenant",
@@ -1130,43 +1185,143 @@ fn build_land_content(commands: &mut Commands, handle: FloaterHandle) -> AboutLa
     .collect();
     let tabs: TabContainerHandle = spawn_tab_container(
         commands,
-        handle.content,
+        content,
         &TabSpec {
             element: "about-land-tabs",
             placement: TabPlacement::BlockStart,
             labels: &labels,
             active: 0,
             tab_index: 1,
-            font_size: FONT_SIZE,
+            font_size,
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
         },
     );
     fill_tab_container(commands, TabPlacement::BlockStart, &tabs);
-    let panel = |index: usize| tabs.panels.get(index).copied().unwrap_or(handle.content);
+    let panel = |index: usize| tabs.panels.get(index).copied().unwrap_or(content);
 
-    let general_handles = build_general_tab(commands, panel(0));
-    let covenant_handles = build_covenant_tab(commands, panel(1));
-    let object_handles = build_objects_tab(commands, panel(2));
-    let options_handles = build_options_tab(commands, panel(3));
-    let media_handles = build_media_tab(commands, panel(4));
-    let sound_handles = build_sound_tab(commands, panel(5));
-    let access_handles = build_access_tab(commands, panel(6));
-    build_experiences_tab(commands, panel(7));
-    let environment_handles = build_environment_tab(commands, panel(8));
+    let general_handles = build_general_tab(commands, panel(0), font_size);
+    let covenant_handles = build_covenant_tab(commands, panel(1), font_size);
+    let object_handles = build_objects_tab(commands, panel(2), font_size);
+    let options_handles = build_options_tab(commands, panel(3), font_size);
+    let media_handles = build_media_tab(commands, panel(4), font_size);
+    let sound_handles = build_sound_tab(commands, panel(5), font_size);
+    let access_handles = build_access_tab(commands, panel(6), font_size);
+    build_experiences_tab(commands, panel(7), font_size);
+    let environment_handles = build_environment_tab(commands, panel(8), font_size);
 
-    AboutLandUi {
-        title_text: handle.title_text,
-        general_handles,
-        covenant_handles,
-        object_handles,
-        options_handles,
-        media_handles,
-        sound_handles,
-        access_handles,
-        environment_handles,
+    LandTabs {
+        general: general_handles,
+        covenant: covenant_handles,
+        objects: object_handles,
+        options: options_handles,
+        media: media_handles,
+        sound: sound_handles,
+        access: access_handles,
+        environment: environment_handles,
     }
+}
+
+// ---------------------------------------------------------------------------
+// Gallery specimen.
+// ---------------------------------------------------------------------------
+
+/// The About Land window's gallery / `ui_test` specimen: the live content,
+/// built by the same `build_land_content` the viewer's window is (every tab,
+/// as the live window builds them all), with the General tab — the one it
+/// opens on — showing a parcel the agent may edit. Its fields are seeded as
+/// `seed_edit_fields` seeds them, and its values are the live
+/// `product_key`, `maturity_key`, [`format_unix_date`] and
+/// `format_dwell` renderings of the sample. The Environment tab, which the
+/// shared land-environment panel's own plugin composes, is drawn by that
+/// panel's systems (`show_sample_environment_tab`).
+pub fn spawn_about_land_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: crate::ui_element::ElementCx,
+) -> Entity {
+    // The buttons' live press observer names these; a host without the plugin
+    // (the gallery) would fail its parameter validation on a click. With them
+    // present the press finds no window state and does nothing, which is what
+    // a specimen's button should do.
+    commands.init_resource::<SlIdentity>();
+    commands.init_resource::<AgentRegionPosition>();
+    commands.init_resource::<OwnerTallyQueue>();
+    commands.init_resource::<Messages<OpenAvatarPicker>>();
+    commands.init_resource::<Messages<OpenGroupPicker>>();
+    commands.init_resource::<Messages<OpenTexturePicker>>();
+
+    let tabs = build_land_content(commands, parent, cx.font_size);
+    let general = &tabs.general;
+    seed_field_deferred(commands, general.name_field, cx.text("Test Parcel"));
+    seed_field_deferred(
+        commands,
+        general.desc_field,
+        cx.text("A quiet beach parcel with a public sandbox by the water."),
+    );
+    let values = [
+        (general.parcel_id, 42.to_string()),
+        (general.area, 4096.to_string()),
+        (general.claimed, format_unix_date(1_700_000_000)),
+        (general.traffic, format_dwell(152.5)),
+        // The name links resolve through the name caches a specimen host does
+        // not run, so the sample names are written where they would land.
+        (general.owner, cx.text("Sample Resident")),
+        (general.group, cx.text("Example Group")),
+    ];
+    for (node, value) in values {
+        if let Some(node) = node {
+            commands.entity(node).insert(Text::new(value));
+        }
+    }
+    let keys = [
+        (
+            general.land_type,
+            product_key(Some(ProductType::FullRegion)),
+        ),
+        (general.rating, maturity_key(Some(Maturity::Mature))),
+        (general.for_sale, "about-land-not-for-sale"),
+    ];
+    for (node, key) in keys {
+        if let Some(node) = node {
+            commands.entity(node).insert(Translated::new(key));
+        }
+    }
+    show_sample_environment_tab(commands, &tabs.environment);
+    parent
+}
+
+/// The specimen's Environment tab: the parcel record's two facts as
+/// `update_environment_tab` renders them, and the shared land-environment
+/// panel aimed at the sample parcel as `aim_environment_panel` aims it and
+/// drawn by that panel's own systems
+/// ([`show_sample_land_environment`]) — its plugin composes the panel into
+/// this window live, and no specimen host adds it.
+fn show_sample_environment_tab(commands: &mut Commands, handles: &EnvironmentHandles) {
+    if let Some(node) = handles.override_allowed {
+        commands
+            .entity(node)
+            .insert(Translated::new("about-land-yes"));
+    }
+    if let Some(node) = handles.version {
+        commands.entity(node).insert(Text::new(3.to_string()));
+    }
+    let Some(panel) = handles.panel else {
+        return;
+    };
+    let subject = LandEnvironmentSubject {
+        parcel_id: Some(42),
+        live: true,
+        editable: true,
+        allow_override: true,
+        area: LandArea(4096),
+    };
+    commands.queue(move |world: &mut World| {
+        let mut settings = sl_client_bevy::EnvironmentSettings::legacy_windlight_default();
+        settings.parcel_id = 42;
+        show_sample_land_environment(world, panel, subject, &settings);
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -1174,21 +1329,24 @@ fn build_land_content(commands: &mut Commands, handle: FloaterHandle) -> AboutLa
 // ---------------------------------------------------------------------------
 
 /// Build the General tab.
-fn build_general_tab(commands: &mut Commands, panel: Entity) -> GeneralHandles {
+fn build_general_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> GeneralHandles {
     let mut handles = GeneralHandles::default();
-    let name_row = spawn_labeled_row(commands, panel, "about-land-name");
+    let name_row = spawn_labeled_row(commands, panel, "about-land-name", font_size);
     handles.name_field = Some(spawn_edit_field(
         commands,
         name_row,
-        "about-land-name-field",
-        TextInputKind::Line,
-        30.0,
-        2,
-        63,
+        EditFieldShape {
+            element: "about-land-name-field",
+            kind: TextInputKind::Line,
+            width_glyphs: 30.0,
+            tab_index: 2,
+            max_characters: 63,
+        },
+        font_size,
     ));
-    let id_row = spawn_labeled_row(commands, panel, "about-land-parcel-id");
-    handles.parcel_id = Some(spawn_value_node(commands, id_row));
-    spawn_section_label(commands, panel, "about-land-description");
+    let id_row = spawn_labeled_row(commands, panel, "about-land-parcel-id", font_size);
+    handles.parcel_id = Some(spawn_value_node(commands, id_row, font_size));
+    spawn_section_label(commands, panel, "about-land-description", font_size);
     handles.desc_field = Some(spawn_multiline_field(
         commands,
         panel,
@@ -1196,19 +1354,20 @@ fn build_general_tab(commands: &mut Commands, panel: Entity) -> GeneralHandles {
         3.0,
         3,
         255,
+        font_size,
     ));
-    let type_row = spawn_labeled_row(commands, panel, "about-land-type");
-    handles.land_type = Some(spawn_value_node(commands, type_row));
-    let rating_row = spawn_labeled_row(commands, panel, "about-land-rating");
-    handles.rating = Some(spawn_value_node(commands, rating_row));
-    let owner_row = spawn_labeled_row(commands, panel, "about-land-owner");
+    let type_row = spawn_labeled_row(commands, panel, "about-land-type", font_size);
+    handles.land_type = Some(spawn_value_node(commands, type_row, font_size));
+    let rating_row = spawn_labeled_row(commands, panel, "about-land-rating", font_size);
+    handles.rating = Some(spawn_value_node(commands, rating_row, font_size));
+    let owner_row = spawn_labeled_row(commands, panel, "about-land-owner", font_size);
     handles.owner = Some(spawn_name_link(
         commands,
         owner_row,
         NameLinkSpec::new("about-land-loading", "about-land-none")
             .with_group_suffix("about-land-group-owned"),
     ));
-    let group_row = spawn_labeled_row(commands, panel, "about-land-group");
+    let group_row = spawn_labeled_row(commands, panel, "about-land-group", font_size);
     handles.group = Some(spawn_name_link(
         commands,
         group_row,
@@ -1223,61 +1382,63 @@ fn build_general_tab(commands: &mut Commands, panel: Entity) -> GeneralHandles {
         AboutLandAction::SetGroup,
         4,
         true,
+        font_size,
     );
-    let area_row = spawn_labeled_row(commands, panel, "about-land-area");
-    handles.area = Some(spawn_value_node(commands, area_row));
-    let claimed_row = spawn_labeled_row(commands, panel, "about-land-claimed");
-    handles.claimed = Some(spawn_value_node(commands, claimed_row));
-    let traffic_row = spawn_labeled_row(commands, panel, "about-land-traffic");
-    handles.traffic = Some(spawn_value_node(commands, traffic_row));
-    let sale_row = spawn_labeled_row(commands, panel, "about-land-for-sale");
-    handles.for_sale = Some(spawn_value_node(commands, sale_row));
-    spawn_apply_button(commands, panel, 5);
+    let area_row = spawn_labeled_row(commands, panel, "about-land-area", font_size);
+    handles.area = Some(spawn_value_node(commands, area_row, font_size));
+    let claimed_row = spawn_labeled_row(commands, panel, "about-land-claimed", font_size);
+    handles.claimed = Some(spawn_value_node(commands, claimed_row, font_size));
+    let traffic_row = spawn_labeled_row(commands, panel, "about-land-traffic", font_size);
+    handles.traffic = Some(spawn_value_node(commands, traffic_row, font_size));
+    let sale_row = spawn_labeled_row(commands, panel, "about-land-for-sale", font_size);
+    handles.for_sale = Some(spawn_value_node(commands, sale_row, font_size));
+    spawn_apply_button(commands, panel, 5, font_size);
     handles
 }
 
 /// Build the Covenant tab (read-only).
-fn build_covenant_tab(commands: &mut Commands, panel: Entity) -> CovenantHandles {
+fn build_covenant_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> CovenantHandles {
     let mut handles = CovenantHandles::default();
-    let estate_row = spawn_labeled_row(commands, panel, "about-land-estate");
-    handles.estate = Some(spawn_value_node(commands, estate_row));
-    let owner_row = spawn_labeled_row(commands, panel, "about-land-estate-owner");
-    handles.estate_owner = Some(spawn_value_node(commands, owner_row));
-    handles.text = Some(spawn_value_block(commands, panel));
-    let timestamp_row = spawn_labeled_row(commands, panel, "about-land-last-modified");
-    handles.timestamp = Some(spawn_value_node(commands, timestamp_row));
-    let region_row = spawn_labeled_row(commands, panel, "about-land-region");
-    handles.region = Some(spawn_value_node(commands, region_row));
-    let type_row = spawn_labeled_row(commands, panel, "about-land-region-type");
-    handles.region_type = Some(spawn_value_node(commands, type_row));
-    let rating_row = spawn_labeled_row(commands, panel, "about-land-region-rating");
-    handles.region_rating = Some(spawn_value_node(commands, rating_row));
-    let resale_row = spawn_labeled_row(commands, panel, "about-land-resale");
-    handles.resale = Some(spawn_value_node(commands, resale_row));
-    let subdivide_row = spawn_labeled_row(commands, panel, "about-land-subdivide");
-    handles.subdivide = Some(spawn_value_node(commands, subdivide_row));
+    let estate_row = spawn_labeled_row(commands, panel, "about-land-estate", font_size);
+    handles.estate = Some(spawn_value_node(commands, estate_row, font_size));
+    let owner_row = spawn_labeled_row(commands, panel, "about-land-estate-owner", font_size);
+    handles.estate_owner = Some(spawn_value_node(commands, owner_row, font_size));
+    handles.text = Some(spawn_value_block(commands, panel, font_size));
+    let timestamp_row = spawn_labeled_row(commands, panel, "about-land-last-modified", font_size);
+    handles.timestamp = Some(spawn_value_node(commands, timestamp_row, font_size));
+    let region_row = spawn_labeled_row(commands, panel, "about-land-region", font_size);
+    handles.region = Some(spawn_value_node(commands, region_row, font_size));
+    let type_row = spawn_labeled_row(commands, panel, "about-land-region-type", font_size);
+    handles.region_type = Some(spawn_value_node(commands, type_row, font_size));
+    let rating_row = spawn_labeled_row(commands, panel, "about-land-region-rating", font_size);
+    handles.region_rating = Some(spawn_value_node(commands, rating_row, font_size));
+    let resale_row = spawn_labeled_row(commands, panel, "about-land-resale", font_size);
+    handles.resale = Some(spawn_value_node(commands, resale_row, font_size));
+    let subdivide_row = spawn_labeled_row(commands, panel, "about-land-subdivide", font_size);
+    handles.subdivide = Some(spawn_value_node(commands, subdivide_row, font_size));
     handles
 }
 
 /// Build the Objects tab: the prim counts and the object-owners table.
-fn build_objects_tab(commands: &mut Commands, panel: Entity) -> ObjectHandles {
+fn build_objects_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> ObjectHandles {
     let mut handles = ObjectHandles::default();
-    let capacity_row = spawn_labeled_row(commands, panel, "about-land-region-capacity");
-    handles.region_capacity = Some(spawn_value_node(commands, capacity_row));
-    let parcel_capacity_row = spawn_labeled_row(commands, panel, "about-land-parcel-capacity");
-    handles.parcel_capacity = Some(spawn_value_node(commands, parcel_capacity_row));
-    let impact_row = spawn_labeled_row(commands, panel, "about-land-parcel-impact");
-    handles.parcel_impact = Some(spawn_value_node(commands, impact_row));
-    let owner_row = spawn_labeled_row(commands, panel, "about-land-owner-objects");
-    handles.owner_objects = Some(spawn_value_node(commands, owner_row));
-    let group_row = spawn_labeled_row(commands, panel, "about-land-group-objects");
-    handles.group_objects = Some(spawn_value_node(commands, group_row));
-    let other_row = spawn_labeled_row(commands, panel, "about-land-other-objects");
-    handles.other_objects = Some(spawn_value_node(commands, other_row));
-    let selected_row = spawn_labeled_row(commands, panel, "about-land-selected-objects");
-    handles.selected_objects = Some(spawn_value_node(commands, selected_row));
-    let autoreturn_row = spawn_labeled_row(commands, panel, "about-land-autoreturn");
-    handles.autoreturn = Some(spawn_value_node(commands, autoreturn_row));
+    let capacity_row = spawn_labeled_row(commands, panel, "about-land-region-capacity", font_size);
+    handles.region_capacity = Some(spawn_value_node(commands, capacity_row, font_size));
+    let parcel_capacity_row =
+        spawn_labeled_row(commands, panel, "about-land-parcel-capacity", font_size);
+    handles.parcel_capacity = Some(spawn_value_node(commands, parcel_capacity_row, font_size));
+    let impact_row = spawn_labeled_row(commands, panel, "about-land-parcel-impact", font_size);
+    handles.parcel_impact = Some(spawn_value_node(commands, impact_row, font_size));
+    let owner_row = spawn_labeled_row(commands, panel, "about-land-owner-objects", font_size);
+    handles.owner_objects = Some(spawn_value_node(commands, owner_row, font_size));
+    let group_row = spawn_labeled_row(commands, panel, "about-land-group-objects", font_size);
+    handles.group_objects = Some(spawn_value_node(commands, group_row, font_size));
+    let other_row = spawn_labeled_row(commands, panel, "about-land-other-objects", font_size);
+    handles.other_objects = Some(spawn_value_node(commands, other_row, font_size));
+    let selected_row = spawn_labeled_row(commands, panel, "about-land-selected-objects", font_size);
+    handles.selected_objects = Some(spawn_value_node(commands, selected_row, font_size));
+    let autoreturn_row = spawn_labeled_row(commands, panel, "about-land-autoreturn", font_size);
+    handles.autoreturn = Some(spawn_value_node(commands, autoreturn_row, font_size));
 
     let header = spawn_row(commands, panel);
     spawn_key_label(
@@ -1285,6 +1446,7 @@ fn build_objects_tab(commands: &mut Commands, panel: Entity) -> ObjectHandles {
         header,
         "about-land-object-owners",
         DIM_LABEL_COLOR,
+        font_size,
     );
     spawn_action_button(
         commands,
@@ -1293,8 +1455,9 @@ fn build_objects_tab(commands: &mut Commands, panel: Entity) -> ObjectHandles {
         AboutLandAction::RefreshOwners,
         3,
         false,
+        font_size,
     );
-    handles.owners_status = Some(spawn_disabled_value(commands, header));
+    handles.owners_status = Some(spawn_disabled_value(commands, header, font_size));
     let table = spawn_bounded_table(commands, panel, &OWNERS_TABLE);
     handles.owners_viewport = Some(table.viewport);
     handles.owners_table = Some(table.root);
@@ -1302,99 +1465,113 @@ fn build_objects_tab(commands: &mut Commands, panel: Entity) -> ObjectHandles {
 }
 
 /// Build the Options tab.
-fn build_options_tab(commands: &mut Commands, panel: Entity) -> OptionsHandles {
+fn build_options_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> OptionsHandles {
     let mut handles = OptionsHandles::default();
-    spawn_section_label(commands, panel, "about-land-options-allow");
+    spawn_section_label(commands, panel, "about-land-options-allow", font_size);
     spawn_check(
         commands,
         panel,
         "about-land-opt-terraform",
         CheckKind::Flag(ParcelFlags::ALLOW_TERRAFORM),
+        font_size,
     );
     spawn_check(
         commands,
         panel,
         "about-land-opt-fly",
         CheckKind::Flag(ParcelFlags::ALLOW_FLY),
+        font_size,
     );
     spawn_check(
         commands,
         panel,
         "about-land-opt-build",
         CheckKind::Flag(ParcelFlags::CREATE_OBJECTS),
+        font_size,
     );
     spawn_check(
         commands,
         panel,
         "about-land-opt-build-group",
         CheckKind::Flag(ParcelFlags::CREATE_GROUP_OBJECTS),
+        font_size,
     );
     spawn_check(
         commands,
         panel,
         "about-land-opt-entry",
         CheckKind::Flag(ParcelFlags::ALLOW_ALL_OBJECT_ENTRY),
+        font_size,
     );
     spawn_check(
         commands,
         panel,
         "about-land-opt-entry-group",
         CheckKind::Flag(ParcelFlags::ALLOW_GROUP_OBJECT_ENTRY),
+        font_size,
     );
     spawn_check(
         commands,
         panel,
         "about-land-opt-scripts",
         CheckKind::Flag(ParcelFlags::ALLOW_OTHER_SCRIPTS),
+        font_size,
     );
     spawn_check(
         commands,
         panel,
         "about-land-opt-scripts-group",
         CheckKind::Flag(ParcelFlags::ALLOW_GROUP_SCRIPTS),
+        font_size,
     );
-    spawn_section_label(commands, panel, "about-land-options-land");
+    spawn_section_label(commands, panel, "about-land-options-land", font_size);
     spawn_check(
         commands,
         panel,
         "about-land-opt-safe",
         CheckKind::FlagInverted(ParcelFlags::ALLOW_DAMAGE),
+        font_size,
     );
     spawn_check(
         commands,
         panel,
         "about-land-opt-no-push",
         CheckKind::Flag(ParcelFlags::RESTRICT_PUSHOBJECT),
+        font_size,
     );
     spawn_check(
         commands,
         panel,
         "about-land-opt-search",
         CheckKind::Flag(ParcelFlags::SHOW_DIRECTORY),
+        font_size,
     );
     spawn_check(
         commands,
         panel,
         "about-land-opt-mature",
         CheckKind::Flag(ParcelFlags::MATURE_PUBLISH),
+        font_size,
     );
-    let category_row = spawn_labeled_row(commands, panel, "about-land-category");
+    let category_row = spawn_labeled_row(commands, panel, "about-land-category", font_size);
     handles.category_combo = Some(spawn_options_combo(
         commands,
         category_row,
         "about-land-category-combo",
         CATEGORY_KEYS,
         5,
+        font_size,
     ));
-    let snapshot_row = spawn_labeled_row(commands, panel, "about-land-snapshot");
+    let snapshot_row = spawn_labeled_row(commands, panel, "about-land-snapshot", font_size);
     handles.snapshot_value = Some(spawn_texture_button(
         commands,
         snapshot_row,
         AboutLandAction::PickSnapshot,
         6,
+        font_size,
     ));
-    let landing_row = spawn_labeled_row(commands, panel, "about-land-landing-point");
-    handles.landing_point = Some(spawn_value_node(commands, landing_row));
+    let landing_row = spawn_labeled_row(commands, panel, "about-land-landing-point", font_size);
+    handles.landing_point = Some(spawn_value_node(commands, landing_row, font_size));
     let landing_buttons = spawn_row(commands, panel);
     spawn_action_button(
         commands,
@@ -1403,6 +1580,7 @@ fn build_options_tab(commands: &mut Commands, panel: Entity) -> OptionsHandles {
         AboutLandAction::SetLandingPoint,
         7,
         true,
+        font_size,
     );
     spawn_action_button(
         commands,
@@ -1411,158 +1589,185 @@ fn build_options_tab(commands: &mut Commands, panel: Entity) -> OptionsHandles {
         AboutLandAction::ClearLandingPoint,
         8,
         true,
+        font_size,
     );
-    let routing_row = spawn_labeled_row(commands, panel, "about-land-teleport-routing");
+    let routing_row = spawn_labeled_row(commands, panel, "about-land-teleport-routing", font_size);
     handles.landing_combo = Some(spawn_options_combo(
         commands,
         routing_row,
         "about-land-routing-combo",
         ROUTING_KEYS,
         9,
+        font_size,
     ));
-    spawn_apply_button(commands, panel, 10);
+    spawn_apply_button(commands, panel, 10, font_size);
     handles
 }
 
 /// Build the Media tab.
-fn build_media_tab(commands: &mut Commands, panel: Entity) -> MediaHandles {
+fn build_media_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> MediaHandles {
     let mut handles = MediaHandles::default();
-    let url_row = spawn_labeled_row(commands, panel, "about-land-media-url");
+    let url_row = spawn_labeled_row(commands, panel, "about-land-media-url", font_size);
     handles.url_field = Some(spawn_edit_field(
         commands,
         url_row,
-        "about-land-media-url-field",
-        TextInputKind::Line,
-        28.0,
-        2,
-        255,
+        EditFieldShape {
+            element: "about-land-media-url-field",
+            kind: TextInputKind::Line,
+            width_glyphs: 28.0,
+            tab_index: 2,
+            max_characters: 255,
+        },
+        font_size,
     ));
-    let texture_row = spawn_labeled_row(commands, panel, "about-land-media-texture");
+    let texture_row = spawn_labeled_row(commands, panel, "about-land-media-texture", font_size);
     handles.texture_value = Some(spawn_texture_button(
         commands,
         texture_row,
         AboutLandAction::PickMediaTexture,
         3,
+        font_size,
     ));
     spawn_check(
         commands,
         panel,
         "about-land-media-autoscale",
         CheckKind::MediaAutoScale,
+        font_size,
     );
     spawn_check(
         commands,
         panel,
         "about-land-media-loop",
         CheckKind::MediaLoop,
+        font_size,
     );
-    let type_row = spawn_labeled_row(commands, panel, "about-land-media-type");
-    handles.media_type = Some(spawn_disabled_value(commands, type_row));
-    let size_row = spawn_labeled_row(commands, panel, "about-land-media-size");
-    handles.media_size = Some(spawn_disabled_value(commands, size_row));
-    spawn_apply_button(commands, panel, 4);
+    let type_row = spawn_labeled_row(commands, panel, "about-land-media-type", font_size);
+    handles.media_type = Some(spawn_disabled_value(commands, type_row, font_size));
+    let size_row = spawn_labeled_row(commands, panel, "about-land-media-size", font_size);
+    handles.media_size = Some(spawn_disabled_value(commands, size_row, font_size));
+    spawn_apply_button(commands, panel, 4, font_size);
     handles
 }
 
 /// Build the Sound tab.
-fn build_sound_tab(commands: &mut Commands, panel: Entity) -> SoundHandles {
+fn build_sound_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> SoundHandles {
     let mut handles = SoundHandles::default();
-    let music_row = spawn_labeled_row(commands, panel, "about-land-music-url");
+    let music_row = spawn_labeled_row(commands, panel, "about-land-music-url", font_size);
     handles.music_field = Some(spawn_edit_field(
         commands,
         music_row,
-        "about-land-music-url-field",
-        TextInputKind::Line,
-        28.0,
-        2,
-        255,
+        EditFieldShape {
+            element: "about-land-music-url-field",
+            kind: TextInputKind::Line,
+            width_glyphs: 28.0,
+            tab_index: 2,
+            max_characters: 255,
+        },
+        font_size,
     ));
     spawn_check(
         commands,
         panel,
         "about-land-sound-local",
         CheckKind::Flag(ParcelFlags::SOUND_LOCAL),
+        font_size,
     );
     spawn_check(
         commands,
         panel,
         "about-land-voice-enable",
         CheckKind::Flag(ParcelFlags::ALLOW_VOICE),
+        font_size,
     );
     spawn_check(
         commands,
         panel,
         "about-land-voice-local",
         CheckKind::FlagInverted(ParcelFlags::USE_ESTATE_VOICE_CHAN),
+        font_size,
     );
     spawn_check(
         commands,
         panel,
         "about-land-av-sounds",
         CheckKind::AnyAvSounds,
+        font_size,
     );
     spawn_check(
         commands,
         panel,
         "about-land-av-sounds-group",
         CheckKind::GroupAvSounds,
+        font_size,
     );
-    spawn_apply_button(commands, panel, 3);
+    spawn_apply_button(commands, panel, 3, font_size);
     handles
 }
 
 /// Build the Access tab.
-fn build_access_tab(commands: &mut Commands, panel: Entity) -> AccessHandles {
+fn build_access_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> AccessHandles {
     let mut handles = AccessHandles::default();
     spawn_check(
         commands,
         panel,
         "about-land-access-public",
         CheckKind::FlagInverted(ParcelFlags::USE_ACCESS_LIST),
+        font_size,
     );
     spawn_check(
         commands,
         panel,
         "about-land-access-payment",
         CheckKind::Flag(ParcelFlags::DENY_ANONYMOUS),
+        font_size,
     );
     spawn_check(
         commands,
         panel,
         "about-land-access-age",
         CheckKind::Flag(ParcelFlags::DENY_AGEUNVERIFIED),
+        font_size,
     );
     spawn_check(
         commands,
         panel,
         "about-land-access-group",
         CheckKind::Flag(ParcelFlags::USE_ACCESS_GROUP),
+        font_size,
     );
     spawn_check(
         commands,
         panel,
         "about-land-access-passes",
         CheckKind::Flag(ParcelFlags::USE_PASS_LIST),
+        font_size,
     );
-    let price_row = spawn_labeled_row(commands, panel, "about-land-pass-price");
+    let price_row = spawn_labeled_row(commands, panel, "about-land-pass-price", font_size);
     handles.pass_price_field = Some(spawn_edit_field(
         commands,
         price_row,
-        "about-land-pass-price-field",
-        TextInputKind::NonNegativeInteger,
-        8.0,
-        2,
-        8,
+        EditFieldShape {
+            element: "about-land-pass-price-field",
+            kind: TextInputKind::NonNegativeInteger,
+            width_glyphs: 8.0,
+            tab_index: 2,
+            max_characters: 8,
+        },
+        font_size,
     ));
-    let hours_row = spawn_labeled_row(commands, panel, "about-land-pass-hours");
+    let hours_row = spawn_labeled_row(commands, panel, "about-land-pass-hours", font_size);
     handles.pass_hours_field = Some(spawn_edit_field(
         commands,
         hours_row,
-        "about-land-pass-hours-field",
-        TextInputKind::Float,
-        8.0,
-        3,
-        8,
+        EditFieldShape {
+            element: "about-land-pass-hours-field",
+            kind: TextInputKind::Float,
+            width_glyphs: 8.0,
+            tab_index: 3,
+            max_characters: 8,
+        },
+        font_size,
     ));
 
     let allow_header = spawn_row(commands, panel);
@@ -1571,6 +1776,7 @@ fn build_access_tab(commands: &mut Commands, panel: Entity) -> AccessHandles {
         allow_header,
         "about-land-allowed",
         DIM_LABEL_COLOR,
+        font_size,
     );
     spawn_action_button(
         commands,
@@ -1579,13 +1785,20 @@ fn build_access_tab(commands: &mut Commands, panel: Entity) -> AccessHandles {
         AboutLandAction::AddAllowed,
         4,
         true,
+        font_size,
     );
     let allow = spawn_bounded_table(commands, panel, &ALLOW_TABLE);
     handles.allow_viewport = Some(allow.viewport);
     handles.allow_table = Some(allow.root);
 
     let ban_header = spawn_row(commands, panel);
-    spawn_key_label(commands, ban_header, "about-land-banned", DIM_LABEL_COLOR);
+    spawn_key_label(
+        commands,
+        ban_header,
+        "about-land-banned",
+        DIM_LABEL_COLOR,
+        font_size,
+    );
     spawn_action_button(
         commands,
         ban_header,
@@ -1593,6 +1806,7 @@ fn build_access_tab(commands: &mut Commands, panel: Entity) -> AccessHandles {
         AboutLandAction::AddBanned,
         5,
         true,
+        font_size,
     );
     let ban = spawn_bounded_table(commands, panel, &BAN_TABLE);
     handles.ban_viewport = Some(ban.viewport);
@@ -1601,18 +1815,27 @@ fn build_access_tab(commands: &mut Commands, panel: Entity) -> AccessHandles {
 }
 
 /// Build the Experiences tab (a note — no per-parcel experience protocol).
-fn build_experiences_tab(commands: &mut Commands, panel: Entity) {
-    spawn_note(commands, panel, "about-land-experiences-unavailable");
+fn build_experiences_tab(commands: &mut Commands, panel: Entity, font_size: f32) {
+    spawn_note(
+        commands,
+        panel,
+        "about-land-experiences-unavailable",
+        font_size,
+    );
 }
 
 /// Build the Environment tab: the parcel record's two read-only facts, then
 /// the shared land-environment panel that publishes to this parcel.
-fn build_environment_tab(commands: &mut Commands, panel: Entity) -> EnvironmentHandles {
+fn build_environment_tab(
+    commands: &mut Commands,
+    panel: Entity,
+    font_size: f32,
+) -> EnvironmentHandles {
     let mut handles = EnvironmentHandles::default();
-    let override_row = spawn_labeled_row(commands, panel, "about-land-env-override");
-    handles.override_allowed = Some(spawn_value_node(commands, override_row));
-    let version_row = spawn_labeled_row(commands, panel, "about-land-env-version");
-    handles.version = Some(spawn_value_node(commands, version_row));
+    let override_row = spawn_labeled_row(commands, panel, "about-land-env-override", font_size);
+    handles.override_allowed = Some(spawn_value_node(commands, override_row, font_size));
+    let version_row = spawn_labeled_row(commands, panel, "about-land-env-version", font_size);
+    handles.version = Some(spawn_value_node(commands, version_row, font_size));
     handles.panel = Some(spawn_land_environment_panel(
         commands,
         panel,
@@ -1641,6 +1864,13 @@ fn spawn_bounded_table(
             Node {
                 width: Val::Percent(100.0),
                 height: Val::Px(LIST_HEIGHT),
+                // A height, not a suggestion: the tab panel scrolls when its
+                // column runs out of room, but a flex item's default
+                // `flex_shrink: 1` squeezes whatever has a fixed height first —
+                // at a large font the lists lost every row to the labels above
+                // them. Refusing to shrink puts the overflow on the panel's
+                // scrollbar instead.
+                flex_shrink: 0.0,
                 ..default()
             },
             ChildOf(parent),
@@ -1815,7 +2045,10 @@ fn open_about_land(
         let opened = windows.open(about_land_floater_spec(), key);
         let window = opened.root();
         if let KeyedFloaterOpen::Spawned(handle) = opened {
-            let ui = build_land_content(&mut spawner, handle);
+            let ui = AboutLandUi::new(
+                handle.title_text,
+                build_land_content(&mut spawner, handle.content, FONT_SIZE),
+            );
             spawner
                 .entity(handle.title_text)
                 .insert(Translated::new("about-land-title"));
@@ -2555,7 +2788,6 @@ fn update_control_enable(
     }
 }
 
-/// Refresh the General tab's read-only values in place.
 /// Refresh each window's General tab read-only values in place.
 fn update_general_tab(
     mut windows: Query<(&mut AboutLandDirty, &AboutLandUi, &AboutLandState)>,
@@ -2624,8 +2856,6 @@ fn update_general_tab(
     }
 }
 
-/// Refresh the Options / Media / Sound controls in place: checkbox glyphs (with
-/// their enabled greying), combos, texture ids, media read-outs, landing point.
 /// Refresh each window's Options / Media / Sound controls in place: checkbox
 /// glyphs (with their enabled greying), combos, texture ids, media read-outs,
 /// landing point.
@@ -2692,7 +2922,6 @@ fn update_editable_tab(
     }
 }
 
-/// Refresh the Covenant tab's values in place.
 /// Refresh each window's Covenant tab values in place.
 fn update_covenant_tab(
     mut windows: Query<(&mut AboutLandDirty, &AboutLandUi, &AboutLandState)>,
@@ -2765,7 +2994,6 @@ fn update_covenant_tab(
     }
 }
 
-/// Refresh the Objects tab's counts in place.
 /// Refresh each window's Objects tab read-only values in place.
 fn update_objects_tab(
     mut windows: Query<(&mut AboutLandDirty, &AboutLandUi, &AboutLandState)>,
@@ -3140,7 +3368,7 @@ fn populate_access_rows(
             };
             let cells = spawn_table_row(&mut commands, row_entity, table, spec);
             if let Some(custom) = cells.cell(2) {
-                spawn_remove_button(&mut commands, custom, scope, row_entity);
+                spawn_remove_button(&mut commands, custom, scope, row_entity, FONT_SIZE);
             }
             break;
         }
@@ -3748,24 +3976,32 @@ const ROUTING_KEYS: &[&str] = &[
 
 /// The land-type display text for a region product type.
 fn product_text(product: Option<ProductType>, translator: &Translator) -> String {
-    let key = match product {
+    translator.get(product_key(product))
+}
+
+/// The Fluent key naming a region product type.
+const fn product_key(product: Option<ProductType>) -> &'static str {
+    match product {
         Some(ProductType::FullRegion) => "about-land-product-full",
         Some(ProductType::Homestead) => "about-land-product-homestead",
         Some(ProductType::Openspace) => "about-land-product-openspace",
         _unknown => "about-land-product-unknown",
-    };
-    translator.get(key)
+    }
 }
 
 /// The content-rating display text for a maturity.
 fn maturity_text(maturity: Option<Maturity>, translator: &Translator) -> String {
-    let key = match maturity {
+    translator.get(maturity_key(maturity))
+}
+
+/// The Fluent key naming a maturity rating.
+const fn maturity_key(maturity: Option<Maturity>) -> &'static str {
+    match maturity {
         Some(Maturity::Pg) => "about-land-rating-pg",
         Some(Maturity::Mature) => "about-land-rating-mature",
         Some(Maturity::Adult) => "about-land-rating-adult",
         _unknown => "about-land-rating-unknown",
-    };
-    translator.get(key)
+    }
 }
 
 /// The sale-state display text.
@@ -3907,13 +4143,18 @@ fn spawn_row(commands: &mut Commands, parent: Entity) -> Entity {
 }
 
 /// A wrapping row leading with a translated dim label.
-fn spawn_labeled_row(commands: &mut Commands, parent: Entity, label_key: &'static str) -> Entity {
+fn spawn_labeled_row(
+    commands: &mut Commands,
+    parent: Entity,
+    label_key: &'static str,
+    font_size: f32,
+) -> Entity {
     ui_spawn::spawn_labeled_row(
         commands,
         parent,
         LabeledRowSpec::new(UiLabel::key(label_key))
             .label_color(DIM_LABEL_COLOR)
-            .font_size(FONT_SIZE)
+            .font_size(font_size)
             .gap(Val::Px(8.0))
             .wrap(),
     )
@@ -3921,11 +4162,16 @@ fn spawn_labeled_row(commands: &mut Commands, parent: Entity, label_key: &'stati
 }
 
 /// A translated section label on its own line.
-fn spawn_section_label(commands: &mut Commands, parent: Entity, label_key: &'static str) {
+fn spawn_section_label(
+    commands: &mut Commands,
+    parent: Entity,
+    label_key: &'static str,
+    font_size: f32,
+) {
     commands.spawn((
         Text::default(),
         Translated::new(label_key),
-        UiFont::Sans.at(FONT_SIZE),
+        UiFont::Sans.at(font_size),
         TextColor(DIM_LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(parent),
@@ -3933,7 +4179,7 @@ fn spawn_section_label(commands: &mut Commands, parent: Entity, label_key: &'sta
 }
 
 /// A wrapped translated note paragraph.
-fn spawn_note(commands: &mut Commands, parent: Entity, key: &'static str) {
+fn spawn_note(commands: &mut Commands, parent: Entity, key: &'static str, font_size: f32) {
     commands
         .spawn((
             Node {
@@ -3945,18 +4191,24 @@ fn spawn_note(commands: &mut Commands, parent: Entity, key: &'static str) {
         .with_child((
             Text::default(),
             Translated::new(key),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             TextColor(DIM_LABEL_COLOR),
             Pickable::IGNORE,
         ));
 }
 
 /// A translated label in `color`.
-fn spawn_key_label(commands: &mut Commands, parent: Entity, key: &'static str, color: Color) {
+fn spawn_key_label(
+    commands: &mut Commands,
+    parent: Entity,
+    key: &'static str,
+    color: Color,
+    font_size: f32,
+) {
     commands.spawn((
         Text::default(),
         Translated::new(key),
-        UiFont::Sans.at(FONT_SIZE),
+        UiFont::Sans.at(font_size),
         TextColor(color),
         Pickable::IGNORE,
         ChildOf(parent),
@@ -3964,11 +4216,11 @@ fn spawn_key_label(commands: &mut Commands, parent: Entity, key: &'static str, c
 }
 
 /// An empty value node the caller updates in place.
-fn spawn_value_node(commands: &mut Commands, parent: Entity) -> Entity {
+fn spawn_value_node(commands: &mut Commands, parent: Entity, font_size: f32) -> Entity {
     commands
         .spawn((
             Text::new(String::new()),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             TextColor(LABEL_COLOR),
             Pickable::IGNORE,
             ChildOf(parent),
@@ -3977,11 +4229,11 @@ fn spawn_value_node(commands: &mut Commands, parent: Entity) -> Entity {
 }
 
 /// An always-disabled read-only value node (greyed to read as non-editable).
-fn spawn_disabled_value(commands: &mut Commands, parent: Entity) -> Entity {
+fn spawn_disabled_value(commands: &mut Commands, parent: Entity, font_size: f32) -> Entity {
     commands
         .spawn((
             Text::new(String::new()),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             TextColor(DISABLED_COLOR),
             Pickable::IGNORE,
             ChildOf(parent),
@@ -3990,7 +4242,7 @@ fn spawn_disabled_value(commands: &mut Commands, parent: Entity) -> Entity {
 }
 
 /// A wrapped, clipped read-only text value node (covenant body).
-fn spawn_value_block(commands: &mut Commands, parent: Entity) -> Entity {
+fn spawn_value_block(commands: &mut Commands, parent: Entity, font_size: f32) -> Entity {
     let block = commands
         .spawn((
             Node {
@@ -4005,7 +4257,7 @@ fn spawn_value_block(commands: &mut Commands, parent: Entity) -> Entity {
     commands
         .spawn((
             Text::new(String::new()),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             TextColor(LABEL_COLOR),
             Pickable::IGNORE,
             ChildOf(block),
@@ -4013,21 +4265,41 @@ fn spawn_value_block(commands: &mut Commands, parent: Entity) -> Entity {
         .id()
 }
 
+/// What a single-line edit field is: its element id, what it accepts, how wide
+/// it is, where it sits in the tab order and how much it holds.
+#[derive(Debug, Clone, Copy)]
+struct EditFieldShape {
+    /// The field's element id.
+    element: &'static str,
+    /// What the field accepts.
+    kind: TextInputKind,
+    /// Its width, in glyphs.
+    width_glyphs: f32,
+    /// Its place in the tab order.
+    tab_index: i32,
+    /// The most characters it holds.
+    max_characters: usize,
+}
+
 /// A single-line edit field, gated on parcel ownership.
 fn spawn_edit_field(
     commands: &mut Commands,
     parent: Entity,
-    element: &'static str,
-    kind: TextInputKind,
-    width_glyphs: f32,
-    tab_index: i32,
-    max_characters: usize,
+    shape: EditFieldShape,
+    font_size: f32,
 ) -> Entity {
+    let EditFieldShape {
+        element,
+        kind,
+        width_glyphs,
+        tab_index,
+        max_characters,
+    } = shape;
     let field = spawn_text_input(
         commands,
         parent,
         &TextInputSpec {
-            font_size: FONT_SIZE,
+            font_size,
             width_glyphs,
             tab_index,
             max_characters: Some(max_characters),
@@ -4046,12 +4318,13 @@ fn spawn_multiline_field(
     visible_lines: f32,
     tab_index: i32,
     max_characters: usize,
+    font_size: f32,
 ) -> Entity {
     let field = spawn_text_input(
         commands,
         parent,
         &TextInputSpec {
-            font_size: FONT_SIZE,
+            font_size,
             visible_lines,
             tab_index,
             max_characters: Some(max_characters),
@@ -4071,6 +4344,7 @@ fn spawn_action_button(
     action: AboutLandAction,
     tab_index: i32,
     write: bool,
+    font_size: f32,
 ) -> Entity {
     let button = spawn_button(
         commands,
@@ -4082,7 +4356,7 @@ fn spawn_action_button(
         .tab_index(tab_index)
         .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
         .label_color(LABEL_COLOR)
-        .font_size(FONT_SIZE)
+        .font_size(font_size)
         // Both ends of `.sk-button:disabled .sk-text`, which greys a refused
         // action now that nothing repaints its caption.
         .label_class(TEXT_CLASS),
@@ -4097,7 +4371,7 @@ fn spawn_action_button(
 }
 
 /// The shared Apply button for an editable tab.
-fn spawn_apply_button(commands: &mut Commands, parent: Entity, tab_index: i32) {
+fn spawn_apply_button(commands: &mut Commands, parent: Entity, tab_index: i32, font_size: f32) {
     let row_entity = spawn_row(commands, parent);
     spawn_action_button(
         commands,
@@ -4106,6 +4380,7 @@ fn spawn_apply_button(commands: &mut Commands, parent: Entity, tab_index: i32) {
         AboutLandAction::Apply,
         tab_index,
         true,
+        font_size,
     );
 }
 
@@ -4116,7 +4391,13 @@ fn spawn_apply_button(commands: &mut Commands, parent: Entity, tab_index: i32) {
 ///
 /// The Fluent key doubles as the widget's element id, so every checkbox in the
 /// window is addressable by its own name rather than sharing one.
-fn spawn_check(commands: &mut Commands, parent: Entity, label_key: &'static str, kind: CheckKind) {
+fn spawn_check(
+    commands: &mut Commands,
+    parent: Entity,
+    label_key: &'static str,
+    kind: CheckKind,
+    font_size: f32,
+) {
     let row_entity = spawn_row(commands, parent);
     let checkbox = spawn_checkbox(
         commands,
@@ -4125,7 +4406,7 @@ fn spawn_check(commands: &mut Commands, parent: Entity, label_key: &'static str,
             element: label_key,
             label: label_key.to_owned(),
             tab_index: 0,
-            font_size: FONT_SIZE,
+            font_size,
             translate_label: true,
         },
     );
@@ -4147,6 +4428,7 @@ fn spawn_options_combo(
     element: &'static str,
     keys: &[&'static str],
     tab_index: i32,
+    font_size: f32,
 ) -> Entity {
     let labels: Vec<String> = keys.iter().map(|key| (*key).to_owned()).collect();
     let combo = spawn_combo(
@@ -4157,7 +4439,7 @@ fn spawn_options_combo(
             labels: &labels,
             active: 0,
             tab_index,
-            font_size: FONT_SIZE,
+            font_size,
             translate_labels: true,
         },
     );
@@ -4171,6 +4453,7 @@ fn spawn_texture_button(
     parent: Entity,
     action: AboutLandAction,
     tab_index: i32,
+    font_size: f32,
 ) -> Entity {
     let spawned = ui_spawn::spawn_button(
         commands,
@@ -4184,7 +4467,7 @@ fn spawn_texture_button(
         .compact()
         .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
         .label_color(LABEL_COLOR)
-        .font_size(FONT_SIZE),
+        .font_size(font_size),
     );
     commands
         .entity(spawned.button)
@@ -4194,7 +4477,13 @@ fn spawn_texture_button(
 }
 
 /// A per-row access Remove button in a table's custom cell.
-fn spawn_remove_button(commands: &mut Commands, cell: Entity, scope: AccessScope, row: Entity) {
+fn spawn_remove_button(
+    commands: &mut Commands,
+    cell: Entity,
+    scope: AccessScope,
+    row: Entity,
+    font_size: f32,
+) {
     let button = ui_spawn::spawn_button(
         commands,
         cell,
@@ -4205,7 +4494,7 @@ fn spawn_remove_button(commands: &mut Commands, cell: Entity, scope: AccessScope
         .compact()
         .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
         .label_color(LABEL_COLOR)
-        .font_size(FONT_SIZE),
+        .font_size(font_size),
     )
     .button;
     commands

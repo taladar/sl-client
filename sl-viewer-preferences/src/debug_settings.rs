@@ -52,10 +52,9 @@ use crate::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, floater_shown, spawn_floater,
 };
 use crate::i18n::Translated;
-use crate::preferences::CONTROL_BORDER;
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{SettingBinding, bound_checkbox};
-use crate::skin::{role_class, set_state_class, text_role};
+use crate::skin::{set_state_class, text_role};
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
@@ -68,7 +67,7 @@ use crate::ui_table::{
     TableState, set_table_cell, spawn_table, spawn_table_row,
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, TextInputValue, spawn_text_input};
-use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
+use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists, spawn_specimen_row};
 use crate::world_api::rlv::RlvSession;
 use sl_viewer_ui_core::glyph;
 
@@ -395,10 +394,35 @@ fn spawn_debug_settings_floater(mut commands: Commands, root: Res<UiRoot>) {
         .insert(DeferredFloaterContent { builder, handle });
 }
 
-/// First-open content build: the left search + list pane, the right detail
-/// pane with one editor stack per [`SettingKind`] — ending with the
+/// First-open content build: the editor's content
+/// ([`spawn_debug_settings_body`]), the two buttons' behaviour, and the
 /// [`DebugSettingsUi`] insert.
 fn build_debug_settings_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
+    let parts = spawn_debug_settings_body(&mut commands, handle.content);
+    commands
+        .entity(parts.copy_button)
+        .observe(on_copy_setting_name);
+    commands
+        .entity(parts.reset_button)
+        .observe(on_reset_setting);
+    commands.insert_resource(parts.ui);
+}
+
+/// The entities of a built editor, what [`spawn_debug_settings_body`] returns.
+#[derive(Debug, Clone, Copy)]
+struct DebugSettingsParts {
+    /// The retained entities the live systems address.
+    ui: DebugSettingsUi,
+    /// The copy-name button.
+    copy_button: Entity,
+    /// The reset-to-default button.
+    reset_button: Entity,
+}
+
+/// Build the editor's content into `slot`: the left search + list pane, the
+/// right detail pane with one editor stack per [`SettingKind`]. Shared by the
+/// live floater and its specimen; the caller attaches the buttons' behaviour.
+fn spawn_debug_settings_body(commands: &mut Commands, slot: Entity) -> DebugSettingsParts {
     // Two panes side by side, filling the content slot.
     let content = commands
         .spawn((
@@ -409,7 +433,7 @@ fn build_debug_settings_content(In(handle): In<FloaterHandle>, mut commands: Com
                 ..row(Val::Px(10.0))
             },
             Name::new("debug-settings:content"),
-            ChildOf(handle.content),
+            ChildOf(slot),
         ))
         .id();
 
@@ -428,7 +452,7 @@ fn build_debug_settings_content(In(handle): In<FloaterHandle>, mut commands: Com
         ))
         .id();
     let search = spawn_search_field(
-        &mut commands,
+        commands,
         left,
         &SearchFieldSpec {
             tab_index: 0,
@@ -457,7 +481,7 @@ fn build_debug_settings_content(In(handle): In<FloaterHandle>, mut commands: Com
         ))
         .id();
     let changed_only = spawn_checkbox(
-        &mut commands,
+        commands,
         changed_only_row,
         &CheckboxSpec {
             element: "debug-settings:changed-only",
@@ -478,7 +502,7 @@ fn build_debug_settings_content(In(handle): In<FloaterHandle>, mut commands: Com
         Pickable::IGNORE,
         ChildOf(changed_only_row),
     ));
-    let table = spawn_table(&mut commands, left, &DEBUG_TABLE);
+    let table = spawn_table(commands, left, &DEBUG_TABLE);
 
     // --- Right pane: the detail read-outs and the per-kind editor stacks. ---
     let right = commands
@@ -515,13 +539,8 @@ fn build_debug_settings_content(In(handle): In<FloaterHandle>, mut commands: Com
             ChildOf(name_row),
         ))
         .id();
-    let copy_button = crate::preferences::spawn_footer_button(
-        &mut commands,
-        name_row,
-        "debug-settings-copy-name",
-        0,
-    );
-    commands.entity(copy_button).observe(on_copy_setting_name);
+    let copy_button =
+        crate::preferences::spawn_footer_button(commands, name_row, "debug-settings-copy-name", 0);
 
     // The comment and type read-outs.
     let comment_text = commands
@@ -533,11 +552,11 @@ fn build_debug_settings_content(In(handle): In<FloaterHandle>, mut commands: Com
             ChildOf(right),
         ))
         .id();
-    let type_text = spawn_detail_value_row(&mut commands, right, "debug-settings-type");
-    let default_value = spawn_detail_value_row(&mut commands, right, "debug-settings-default");
-    let global_value = spawn_detail_value_row(&mut commands, right, "debug-settings-global");
-    let account_value = spawn_detail_value_row(&mut commands, right, "debug-settings-account");
-    let effective_value = spawn_detail_value_row(&mut commands, right, "debug-settings-effective");
+    let type_text = spawn_detail_value_row(commands, right, "debug-settings-type");
+    let default_value = spawn_detail_value_row(commands, right, "debug-settings-default");
+    let global_value = spawn_detail_value_row(commands, right, "debug-settings-global");
+    let account_value = spawn_detail_value_row(commands, right, "debug-settings-account");
+    let effective_value = spawn_detail_value_row(commands, right, "debug-settings-effective");
 
     // The scope selector: which layer edits and resets write to.
     let scope_row = commands
@@ -550,7 +569,7 @@ fn build_debug_settings_content(In(handle): In<FloaterHandle>, mut commands: Com
             ChildOf(right),
         ))
         .id();
-    let scope_label = spawn_detail_label_slot(&mut commands, scope_row);
+    let scope_label = spawn_detail_label_slot(commands, scope_row);
     commands.spawn((
         Text::default(),
         Translated::new("debug-settings-scope"),
@@ -564,7 +583,7 @@ fn build_debug_settings_content(In(handle): In<FloaterHandle>, mut commands: Com
         "debug-settings-scope-account".to_owned(),
     ];
     let scope_combo = spawn_combo(
-        &mut commands,
+        commands,
         scope_row,
         &ComboSpec {
             element: "debug-settings-scope",
@@ -595,9 +614,9 @@ fn build_debug_settings_content(In(handle): In<FloaterHandle>, mut commands: Com
     // --- The per-kind editor stacks, built once and `Display`-toggled. ---
 
     // Bool: a checkbox (no `SettingBinding` — see `DebugBoolCheckbox`).
-    let bool_row = spawn_editor_row(&mut commands, right, "debug-settings:edit:bool");
+    let bool_row = spawn_editor_row(commands, right, "debug-settings:edit:bool");
     let bool_checkbox = spawn_checkbox(
-        &mut commands,
+        commands,
         bool_row,
         &CheckboxSpec {
             element: "debug-settings:edit:bool",
@@ -611,9 +630,9 @@ fn build_debug_settings_content(In(handle): In<FloaterHandle>, mut commands: Com
     commands.entity(bool_checkbox).insert(DebugBoolCheckbox);
 
     // String: a line field.
-    let string_row = spawn_editor_row(&mut commands, right, "debug-settings:edit:string");
+    let string_row = spawn_editor_row(commands, right, "debug-settings:edit:string");
     let string_field = spawn_editor_field(
-        &mut commands,
+        commands,
         string_row,
         "debug-settings-string",
         TextInputKind::Line,
@@ -622,25 +641,25 @@ fn build_debug_settings_content(In(handle): In<FloaterHandle>, mut commands: Com
 
     // The three scalar numerics, one pre-spawned field per kind (a numeric
     // field's kind is fixed at spawn).
-    let f32_row = spawn_editor_row(&mut commands, right, "debug-settings:edit:f32");
+    let f32_row = spawn_editor_row(commands, right, "debug-settings:edit:f32");
     let f32_field = spawn_editor_field(
-        &mut commands,
+        commands,
         f32_row,
         "debug-settings-f32",
         TextInputKind::Float,
         12.0,
     );
-    let i32_row = spawn_editor_row(&mut commands, right, "debug-settings:edit:i32");
+    let i32_row = spawn_editor_row(commands, right, "debug-settings:edit:i32");
     let i32_field = spawn_editor_field(
-        &mut commands,
+        commands,
         i32_row,
         "debug-settings-i32",
         TextInputKind::Integer,
         12.0,
     );
-    let u32_row = spawn_editor_row(&mut commands, right, "debug-settings:edit:u32");
+    let u32_row = spawn_editor_row(commands, right, "debug-settings:edit:u32");
     let u32_field = spawn_editor_field(
-        &mut commands,
+        commands,
         u32_row,
         "debug-settings-u32",
         TextInputKind::NonNegativeInteger,
@@ -649,22 +668,22 @@ fn build_debug_settings_content(In(handle): In<FloaterHandle>, mut commands: Com
 
     // The 3-vector (Vec3 / Vec3d) and rectangle component fields, labelled
     // with their conventional single-letter axis names.
-    let vec_row = spawn_editor_row(&mut commands, right, "debug-settings:edit:vec");
+    let vec_row = spawn_editor_row(commands, right, "debug-settings:edit:vec");
     let vec_fields = ["X", "Y", "Z"].map(|axis| {
-        spawn_component_label(&mut commands, vec_row, axis);
+        spawn_component_label(commands, vec_row, axis);
         spawn_editor_field(
-            &mut commands,
+            commands,
             vec_row,
             "debug-settings-vec",
             TextInputKind::Float,
             8.0,
         )
     });
-    let rect_row = spawn_editor_row(&mut commands, right, "debug-settings:edit:rect");
+    let rect_row = spawn_editor_row(commands, right, "debug-settings:edit:rect");
     let rect_fields = ["L", "T", "R", "B"].map(|edge| {
-        spawn_component_label(&mut commands, rect_row, edge);
+        spawn_component_label(commands, rect_row, edge);
         spawn_editor_field(
-            &mut commands,
+            commands,
             rect_row,
             "debug-settings-rect",
             TextInputKind::Integer,
@@ -673,13 +692,12 @@ fn build_debug_settings_content(In(handle): In<FloaterHandle>, mut commands: Com
     });
 
     // The colour swatch (Color3 / Color4) and the Color4 alpha field.
-    let color_row = spawn_editor_row(&mut commands, right, "debug-settings:edit:color");
-    let color_swatch =
-        spawn_color_swatch(&mut commands, color_row, "debug-settings", 0, Color::BLACK);
-    let alpha_row = spawn_editor_row(&mut commands, right, "debug-settings:edit:alpha");
-    spawn_component_label(&mut commands, alpha_row, "A");
+    let color_row = spawn_editor_row(commands, right, "debug-settings:edit:color");
+    let color_swatch = spawn_color_swatch(commands, color_row, "debug-settings", 0, Color::BLACK);
+    let alpha_row = spawn_editor_row(commands, right, "debug-settings:edit:alpha");
+    spawn_component_label(commands, alpha_row, "A");
     let alpha_field = spawn_editor_field(
-        &mut commands,
+        commands,
         alpha_row,
         "debug-settings-alpha",
         TextInputKind::Float,
@@ -698,10 +716,9 @@ fn build_debug_settings_content(In(handle): In<FloaterHandle>, mut commands: Com
         ))
         .id();
     let reset_button =
-        crate::preferences::spawn_footer_button(&mut commands, footer, "debug-settings-reset", 0);
-    commands.entity(reset_button).observe(on_reset_setting);
+        crate::preferences::spawn_footer_button(commands, footer, "debug-settings-reset", 0);
 
-    commands.insert_resource(DebugSettingsUi {
+    let ui = DebugSettingsUi {
         search_field: search.field,
         table: table.root,
         viewport: table.viewport,
@@ -732,7 +749,12 @@ fn build_debug_settings_content(In(handle): In<FloaterHandle>, mut commands: Com
         color_swatch,
         alpha_row,
         alpha_field,
-    });
+    };
+    DebugSettingsParts {
+        ui,
+        copy_button,
+        reset_button,
+    }
 }
 
 /// Spawn one detail read-out row — a fixed-width translated label beside a
@@ -1005,18 +1027,31 @@ fn populate_debug_rows(
         if child_of.parent() != ui.viewport {
             continue;
         }
-        let cells = spawn_table_row(&mut commands, row_entity, ui.table, &DEBUG_TABLE);
-        let (Some(changed_cell), Some(name_cell)) = (cells.cell(0), cells.cell(1)) else {
-            continue;
-        };
-        // The changed column holds no text: an overridden setting's cell is the
-        // skin's `glyph::CHANGED_MARK` under `glyph::CHANGED`.
-        commands.entity(changed_cell).insert(PseudoElementsSupport);
-        commands.entity(row_entity).insert(DebugRowParts {
-            changed_cell,
-            name_cell,
-        });
+        dress_debug_row(&mut commands, row_entity, ui.table);
     }
+}
+
+/// Give one pooled row of the list under `table` its table cells and the
+/// [`DebugRowParts`] wiring (also returned). `None` when the table spec yields
+/// no such cells.
+fn dress_debug_row(
+    commands: &mut Commands,
+    row_entity: Entity,
+    table: Entity,
+) -> Option<DebugRowParts> {
+    let cells = spawn_table_row(commands, row_entity, table, &DEBUG_TABLE);
+    let (Some(changed_cell), Some(name_cell)) = (cells.cell(0), cells.cell(1)) else {
+        return None;
+    };
+    // The changed column holds no text: an overridden setting's cell is the
+    // skin's `glyph::CHANGED_MARK` under `glyph::CHANGED`.
+    commands.entity(changed_cell).insert(PseudoElementsSupport);
+    let parts = DebugRowParts {
+        changed_cell,
+        name_cell,
+    };
+    commands.entity(row_entity).insert(parts);
+    Some(parts)
 }
 
 /// Project the view into the pooled rows: the changed marker and the
@@ -1051,18 +1086,30 @@ fn bind_debug_rows(
         else {
             continue;
         };
-        set_table_cell(&mut texts, parts.changed_cell, "", CELL_COLOR);
-        if let Ok((_, _, Some(mut classes))) = texts.get_mut(parts.changed_cell) {
-            set_state_class(&mut classes, glyph::GLYPH_CLASS, true);
-            set_state_class(&mut classes, glyph::CHANGED_MARK, true);
-            set_state_class(
-                &mut classes,
-                glyph::CHANGED,
-                settings.store().is_overridden(&entry.name),
-            );
-        }
-        set_table_cell(&mut texts, parts.name_cell, &entry.name, CELL_COLOR);
+        bind_debug_row(
+            &mut texts,
+            parts,
+            entry,
+            settings.store().is_overridden(&entry.name),
+        );
     }
+}
+
+/// Show `entry` in one dressed row: the changed marker (lit when
+/// `overridden`) and the setting name.
+fn bind_debug_row(
+    texts: &mut Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
+    parts: &DebugRowParts,
+    entry: &DebugEntry,
+    overridden: bool,
+) {
+    set_table_cell(texts, parts.changed_cell, "", CELL_COLOR);
+    if let Ok((_, _, Some(mut classes))) = texts.get_mut(parts.changed_cell) {
+        set_state_class(&mut classes, glyph::GLYPH_CLASS, true);
+        set_state_class(&mut classes, glyph::CHANGED_MARK, true);
+        set_state_class(&mut classes, glyph::CHANGED, overridden);
+    }
+    set_table_cell(texts, parts.name_cell, &entry.name, CELL_COLOR);
 }
 
 /// Follow the table's selection into [`DebugEditorState::selected`], mapping
@@ -1275,6 +1322,33 @@ fn sync_debug_detail(
     focus: Option<Res<InputFocus>>,
     widgets: DebugDetailWidgets,
 ) {
+    let (Some(ui), Some(settings)) = (ui, settings) else {
+        return;
+    };
+    if !state.is_changed() && !settings.is_changed() {
+        return;
+    }
+    let focused = focus.as_ref().and_then(|focus| focus.get());
+    draw_detail(
+        &ui,
+        settings.store(),
+        state.selected.as_deref(),
+        focused,
+        widgets,
+    );
+}
+
+/// Draw the setting named `selected` (nothing selected: `None`) from `store`
+/// into the detail pane `ui`: the read-outs, which editor stack is visible,
+/// and the visible editors' values (the `focused` field left alone). The
+/// drawing half of [`sync_debug_detail`], shared with the specimen.
+fn draw_detail(
+    ui: &DebugSettingsUi,
+    store: &sl_settings::SettingsStore,
+    selected: Option<&str>,
+    focused: Option<Entity>,
+    widgets: DebugDetailWidgets,
+) {
     let DebugDetailWidgets {
         checkboxes,
         mut texts,
@@ -1283,17 +1357,7 @@ fn sync_debug_detail(
         mut swatches,
         mut commands,
     } = widgets;
-    let (Some(ui), Some(settings)) = (ui, settings) else {
-        return;
-    };
-    if !state.is_changed() && !settings.is_changed() {
-        return;
-    }
-    let store = settings.store();
-    let selected = state
-        .selected
-        .as_deref()
-        .and_then(|name| store.declaration(name).map(|decl| (name, decl)));
+    let selected = selected.and_then(|name| store.declaration(name).map(|decl| (name, decl)));
 
     // The read-outs.
     let override_line = |scope: Scope, name: &str| {
@@ -1380,7 +1444,6 @@ fn sync_debug_detail(
 
     // Seed the visible editors from the **effective** value (whichever layer
     // it resolves through); the scope selector only chooses the write target.
-    let focused = focus.as_ref().and_then(|focus| focus.get());
     let Some((name, _decl)) = selected else {
         return;
     };
@@ -1722,205 +1785,171 @@ fn on_copy_setting_name(
 // The gallery specimen.
 // ---------------------------------------------------------------------------
 
-/// The static debug-settings-editor specimen for the gallery / headless
-/// harness: the search box, a short stand-in settings list with a changed
-/// marker, and the detail column with a scope combo, a numeric field and the
-/// two buttons — the layout, with none of the live behaviour (per the element
-/// registry's rule: no plugin, no store, no observers).
+/// The debug-settings editor's gallery / `ui_test` specimen: the live
+/// content, built by the same `spawn_debug_settings_body`, then filled the
+/// way the editor's runtime fills it — over a small sample store
+/// (`sample_store`) instead of the viewer's: the list's rows pooled
+/// ([`spawn_specimen_row`]), dressed and bound by the live helpers, one of them
+/// selected, and the detail pane drawn for it by the live `draw_detail`.
+///
+/// It inserts no `DebugSettingsUi`, and its buttons carry no behaviour, so
+/// the live systems leave it alone.
 pub fn spawn_debug_settings_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: ElementCx,
 ) -> Entity {
-    // The card is content-sized with a floor (the quick-preferences specimen
-    // idiom): it grows to its widest row, so no text is ever squeezed into
-    // wrapping inside a stale measured box.
-    let card = commands
-        .spawn((
-            Node {
-                padding: UiRect::all(Val::Px(10.0)),
-                min_width: Val::Px(520.0),
-                ..row(Val::Px(12.0))
-            },
-            Name::new("debug-settings-specimen"),
-            ChildOf(parent),
-        ))
-        .id();
+    let ui = spawn_debug_settings_body(commands, parent).ui;
+    commands.queue(move |world: &mut World| {
+        let rows = match world.run_system_cached_with(dress_debug_specimen, (ui, cx)) {
+            Ok(rows) => rows,
+            Err(error) => {
+                warn!("debug settings specimen: the list was not pooled: {error}");
+                return;
+            }
+        };
+        if let Err(error) = world.run_system_cached_with(bind_debug_specimen, (cx, rows)) {
+            warn!("debug settings specimen: the list was not bound: {error}");
+        }
+        if let Err(error) = world.run_system_cached_with(draw_debug_specimen, (ui, cx)) {
+            warn!("debug settings specimen: the detail pane was not drawn: {error}");
+        }
+    });
+    parent
+}
 
-    // The left pane: search over a static three-row list.
-    let left = commands
-        .spawn((
-            Node {
-                ..column(Val::Px(6.0))
-            },
-            ChildOf(card),
-        ))
-        .id();
-    spawn_search_field(
-        commands,
-        left,
-        &SearchFieldSpec {
-            font_size: cx.font_size,
-            search_glyph: true,
-            ..SearchFieldSpec::new("debug-settings-specimen")
-        },
-    );
-    let list_rows: [(&str, bool); 3] = [
-        ("AudioMasterVolume", true),
-        ("MiniMapRotate", false),
-        ("ShowPropertyLines", false),
+/// The name of the setting the specimen selects.
+const SPECIMEN_SELECTED: &str = "AudioLevelMaster";
+
+/// The specimen's settings: a handful of each kind the editor has a stack
+/// for, two of them overridden, so the list shows the changed marker both ways
+/// and the detail pane a value that differs from its default. Sample data
+/// strings (the comments) go through `cx`.
+fn sample_store(cx: ElementCx) -> sl_settings::SettingsStore {
+    let mut store = sl_settings::SettingsStore::new();
+    let declarations = [
+        (
+            SPECIMEN_SELECTED,
+            SettingValue::F32(1.0),
+            "Master audio level, from 0 (silent) to 1 (full).",
+        ),
+        (
+            "AvatarSitOnAway",
+            SettingValue::Bool(false),
+            "Sit down when the away timer fires.",
+        ),
+        (
+            "ChatBubbleOpacity",
+            SettingValue::F32(0.8),
+            "Opacity of the chat bubbles over avatars' heads.",
+        ),
+        (
+            "DebugSettingsHideDefault",
+            SettingValue::Bool(false),
+            "List only the settings that differ from their defaults.",
+        ),
+        (
+            "MiniMapRotate",
+            SettingValue::Bool(true),
+            "Rotate the mini-map with the camera.",
+        ),
+        (
+            "RenderFarClip",
+            SettingValue::F32(128.0),
+            "The draw distance, in metres.",
+        ),
+        (
+            "RenderMaxPartCount",
+            SettingValue::U32(4096),
+            "The most particles drawn at once.",
+        ),
+        (
+            "SkinCurrent",
+            SettingValue::String("default".to_owned()),
+            "The UI skin in use.",
+        ),
+        (
+            "UserChatColor",
+            SettingValue::Color3([1.0, 1.0, 1.0]),
+            "The colour of your own chat.",
+        ),
     ];
-    for (name, changed) in list_rows {
-        let list_row = commands
-            .spawn((
-                Node {
-                    align_items: AlignItems::Center,
-                    ..row(Val::Px(6.0))
-                },
-                ChildOf(left),
-            ))
-            .id();
-        // The marker is the skin's glyph, not prose — so the fixed marker
-        // column never has to fit a long translation.
-        commands.spawn((
-            glyph::glyph_host(
-                glyph::CHANGED_MARK,
-                cx.font(UiFont::Mono),
-                role_class(CELL_COLOR)
-                    .into_iter()
-                    .chain(changed.then_some(glyph::CHANGED)),
-            ),
-            TextColor(CELL_COLOR),
-            Node {
-                width: Val::Px(CHANGED_COL_WIDTH),
-                flex_shrink: 0.0,
-                ..default()
-            },
-            ChildOf(list_row),
-        ));
-        commands.spawn((
-            Text::new(cx.text(name)),
-            cx.font(UiFont::Mono),
-            text_role(CELL_COLOR),
-            ChildOf(list_row),
-        ));
+    for (name, default, comment) in declarations {
+        if let Err(error) = store.register(name, default, cx.text(comment)) {
+            warn!("debug settings specimen: {name} was not declared: {error}");
+        }
     }
+    for (name, value) in [
+        (SPECIMEN_SELECTED, SettingValue::F32(0.5)),
+        ("MiniMapRotate", SettingValue::Bool(false)),
+    ] {
+        if let Err(error) = store.set(Scope::Global, name, value) {
+            warn!("debug settings specimen: {name} was not overridden: {error}");
+        }
+    }
+    store
+}
 
-    // The right pane: the read-outs, scope combo, a numeric editor stand-in
-    // and the buttons.
-    let right = commands
-        .spawn((
-            Node {
-                ..column(Val::Px(6.0))
-            },
-            ChildOf(card),
-        ))
-        .id();
-    commands.spawn((
-        Text::new(cx.text("AudioMasterVolume")),
-        cx.font(UiFont::Mono),
-        text_role(CELL_COLOR),
-        ChildOf(right),
-    ));
-    commands.spawn((
-        Text::new(cx.text("Master audio level")),
-        cx.font(UiFont::Sans),
-        text_role(MUTED_COLOR),
-        ChildOf(right),
-    ));
-    let detail_rows: [(&str, &str); 4] = [
-        ("Type", "F32"),
-        ("Default", "1"),
-        ("Global", "0.5"),
-        ("Effective", "0.5"),
-    ];
-    for (label, value) in detail_rows {
-        let detail_row = commands
-            .spawn((
-                Node {
-                    align_items: AlignItems::Center,
-                    ..row(Val::Px(8.0))
-                },
-                ChildOf(right),
-            ))
-            .id();
-        let label_slot = commands
-            .spawn((
-                Node {
-                    min_width: Val::Px(DETAIL_LABEL_WIDTH),
-                    flex_shrink: 0.0,
-                    ..default()
-                },
-                ChildOf(detail_row),
-            ))
-            .id();
-        commands.spawn((
-            Text::new(cx.text(label)),
-            cx.font(UiFont::Sans),
-            text_role(MUTED_COLOR),
-            ChildOf(label_slot),
-        ));
-        commands.spawn((
-            Text::new(cx.text(value)),
-            cx.font(UiFont::Mono),
-            text_role(CELL_COLOR),
-            ChildOf(detail_row),
-        ));
-    }
-    let scope_labels = [cx.text("Global"), cx.text("Account")];
-    spawn_combo(
-        commands,
-        right,
-        &ComboSpec {
-            element: "debug-settings-specimen-scope",
-            labels: &scope_labels,
-            active: 0,
-            tab_index: 0,
-            font_size: cx.font_size,
-            translate_labels: false,
-        },
+/// The specimen's first pass: list the sample store as [`refresh_debug_view`]
+/// lists the real one (no filter, every setting), size the viewport to it, and
+/// pool and dress a row per entry. Returns each dressed row with its entry.
+fn dress_debug_specimen(
+    In((ui, cx)): In<(DebugSettingsUi, ElementCx)>,
+    mut lists: Query<&mut VirtualList>,
+    mut commands: Commands,
+) -> Vec<(DebugRowParts, DebugEntry)> {
+    let store = sample_store(cx);
+    let entries = build_entries(&store);
+    let view = build_view(
+        &entries,
+        "",
+        false,
+        |name| store.is_overridden(name),
+        |_name| false,
     );
-    spawn_text_input(
-        commands,
-        right,
-        &TextInputSpec {
-            initial: "0.5".to_owned(),
-            font_size: cx.font_size,
-            width_glyphs: 12.0,
-            ..TextInputSpec::new("debug-settings-specimen-value", TextInputKind::Float)
-        },
-    );
-    let buttons = commands
-        .spawn((
-            Node {
-                justify_content: JustifyContent::FlexEnd,
-                ..row(Val::Px(8.0))
-            },
-            ChildOf(right),
-        ))
-        .id();
-    for label in ["Copy name", "Reset to default"] {
-        let button = commands
-            .spawn((
-                Node {
-                    padding: UiRect::axes(Val::Px(14.0), Val::Px(5.0)),
-                    border: UiRect::all(Val::Px(2.0)),
-                    ..default()
-                },
-                BorderColor::all(CONTROL_BORDER),
-                BackgroundColor(Color::srgb(0.16, 0.19, 0.25)),
-                ChildOf(buttons),
-            ))
-            .id();
-        commands.spawn((
-            Text::new(cx.text(label)),
-            cx.font(UiFont::Sans),
-            text_role(CELL_COLOR),
-            ChildOf(button),
-        ));
+    if let Ok(mut list) = lists.get_mut(ui.viewport) {
+        list.item_count = view.len();
     }
+    view.iter()
+        .enumerate()
+        .filter_map(|(index, entry_index)| {
+            let entry = entries.get(*entry_index)?.clone();
+            let row = spawn_specimen_row(&mut commands, ui.viewport, index, ROW_HEIGHT);
+            let parts = dress_debug_row(&mut commands, row, ui.table)?;
+            Some((parts, entry))
+        })
+        .collect()
+}
 
-    card
+/// The specimen's second pass: bind each dressed row to its entry, as
+/// [`bind_debug_rows`] does.
+fn bind_debug_specimen(
+    In((cx, rows)): In<(ElementCx, Vec<(DebugRowParts, DebugEntry)>)>,
+    mut texts: Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
+) {
+    let store = sample_store(cx);
+    for (parts, entry) in &rows {
+        bind_debug_row(&mut texts, parts, entry, store.is_overridden(&entry.name));
+    }
+}
+
+/// The specimen's third pass: select [`SPECIMEN_SELECTED`] in the table and
+/// draw it into the detail pane, as a click and [`sync_debug_detail`] would.
+fn draw_debug_specimen(
+    In((ui, cx)): In<(DebugSettingsUi, ElementCx)>,
+    mut tables: Query<&mut TableState>,
+    widgets: DebugDetailWidgets,
+) {
+    let store = sample_store(cx);
+    let entries = build_entries(&store);
+    if let Some(index) = entries
+        .iter()
+        .position(|entry| entry.name == SPECIMEN_SELECTED)
+        && let Ok(mut table) = tables.get_mut(ui.table)
+    {
+        table.set_selection(vec![index], Some(index));
+    }
+    draw_detail(&ui, &store, Some(SPECIMEN_SELECTED), None, widgets);
 }
 
 #[cfg(test)]

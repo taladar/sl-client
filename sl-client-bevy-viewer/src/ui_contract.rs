@@ -238,6 +238,28 @@ pub(crate) struct ElementContract {
 mod contracts;
 pub(crate) use contracts::CONTRACTS;
 
+/// The virtual list's and the table widget's runtime halves: a table specimen
+/// lays out its rows, sizes its scrollbar, hides that bar while the rows fit,
+/// and syncs its column widths the way a live table does.
+///
+/// Without them a specimen table is the spawn-time shell — a scrollbar thumb at
+/// its spawn length in a groove shorter than it, a bar showing over three rows
+/// that fit — and every sweep would report the shell's geometry as the table's.
+/// Shared by both hosts that lay a registered floater out: this element host
+/// (and so the floater chrome tests) and `ui_test`'s layout sweep.
+pub(crate) fn install_list_widgets(app: &mut App) {
+    // The list's wheel system reads the pointer's input state. The layout
+    // sweep has no input plugins, and an idle wheel over no hovered node is
+    // exactly what a layout measurement wants; an interaction host already has
+    // both, and `init_resource` leaves them as they are.
+    app.init_resource::<bevy::input::mouse::AccumulatedMouseScroll>()
+        .init_resource::<bevy::picking::hover::HoverMap>();
+    app.add_plugins((
+        crate::virtual_list::VirtualListPlugin,
+        crate::ui_table::TableWidgetPlugin,
+    ));
+}
+
 /// Stand up the registrations an element's spawn-attached observers read.
 ///
 /// The registry's `spawn` functions attach observers belonging to widgets
@@ -285,6 +307,7 @@ pub(crate) fn install_element_hosting(app: &mut App) {
         crate::local_chat_input::LocalChatInputPlugin,
         crate::ui_trackball::TrackballPlugin,
     ));
+    install_list_widgets(app);
     // The messages whose *writers* are attached by a spawn but whose
     // registration lives in a plugin the sweep does not want whole.
     // `radial-menu-target`'s right-click observer opens a pie; the chat
@@ -300,6 +323,10 @@ pub(crate) fn install_element_hosting(app: &mut App) {
     // resolve, or the sweep's press is a failed observer rather than an inert
     // button.
     app.add_message::<crate::asset_editor::SaveEditorWindow>();
+    // The environment preset combos' prev / next buttons (Quick Preferences,
+    // Phototools) turn a press into a step request their plugin's system
+    // walks. The sweep wants the press, not the walk.
+    app.add_message::<crate::quick_prefs_environment::StepPreset>();
     // `browser-view`: every pointer and key observer reads the surface
     // table before it reaches the disabled check. Empty is the right
     // fixture — no CEF, no engine, and the widget stays the placeholder.

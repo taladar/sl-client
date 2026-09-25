@@ -254,3 +254,17 @@ outliers to 722 ms; ratios are max/mean over the session):
   ([[viewer-perf-pbr-shadow-cluster-rez]] item 3), then the ground probe.
 - Confirm any fix at the status bar (60 fps restored) AND in the trace
   (Main / PostUpdate / Update medians), window visible and focused.
+
+## A lead found elsewhere (2026-09-25)
+
+While chasing a slow gallery, `bevy_ui::layout::ui_layout_system` turned out to
+re-lay-out most of the UI tree **every frame**: Bevy 0.19's
+`update_editable_text_layout` flagged every `EditableText` as changed each
+frame, so every text field's `ContentSize` was re-set and taffy re-laid-out
+(and re-measured the text of) the field and all its ancestors. The cost scales
+with how many text fields exist, hidden and not-yet-opened windows included —
+the live viewer has this too. Fixed in our Bevy fork (`de3251e1`, see the
+`[patch.crates-io]` comment); the gallery went from ~380 ms to ~25 ms of main
+schedule per frame. The UI-text rows above (`text_system`,
+`measure_text_system`) may be this. **Re-measure before anything else** — the
+ceiling may have moved.

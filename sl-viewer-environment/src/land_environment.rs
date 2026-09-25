@@ -1906,6 +1906,41 @@ struct CheckMarkers {
     refused: bool,
 }
 
+// ---------------------------------------------------------------------------
+// Gallery specimen.
+// ---------------------------------------------------------------------------
+
+/// Show a land environment in the panel `panel` the way the live panel shows
+/// the grid's answer: `subject` written on it as the hosting floater writes
+/// it, `settings` taken as the reply `ingest_land_environment` takes, and the
+/// panel then drawn by its own `reseed_land_widgets` and
+/// `paint_land_controls`, its day sliders' readouts by the shared rows sync.
+///
+/// For a host floater's gallery / `ui_test` specimen. Neither specimen host
+/// adds [`LandEnvironmentPlugin`], so without this the panel shows none of the
+/// state its plugin composes into it — blank track names and readouts, and the
+/// controls of a panel that has been told nothing. Runs over a built panel:
+/// queue it after the commands that spawn one.
+pub fn show_sample_land_environment(
+    world: &mut World,
+    panel: Entity,
+    subject: LandEnvironmentSubject,
+    settings: &EnvironmentSettings,
+) {
+    let Ok(mut entity) = world.get_entity_mut(panel) else {
+        error!("land environment specimen: panel {panel} does not exist");
+        return;
+    };
+    entity.insert(subject);
+    if let Some(mut state) = entity.get_mut::<LandEnvironmentState>() {
+        state.current = Some(Box::new(settings.clone()));
+        state.seed_from(settings);
+    }
+    crate::specimen::run_once(world, ELEMENT, reseed_land_widgets);
+    crate::specimen::run_once(world, ELEMENT, paint_land_controls);
+    crate::specimen::draw_slider_readouts(world, ELEMENT);
+}
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;

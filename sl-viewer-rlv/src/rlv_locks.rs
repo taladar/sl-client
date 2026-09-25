@@ -43,8 +43,9 @@ use sl_viewer_ui_widgets::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, floater_shown, spawn_floater,
 };
 use sl_viewer_ui_widgets::ui_table::{
-    TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells, TableSelectionMode,
-    TableSpec, set_table_cell, spawn_table, spawn_table_row,
+    TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableHandle, TableRowCells,
+    TableSelectionMode, TableSpec, set_table_cell, spawn_specimen_table_rows, spawn_table,
+    spawn_table_row,
 };
 use sl_viewer_world_api::rlv::RlvSession;
 
@@ -365,6 +366,21 @@ fn spawn_locks_floater(mut commands: Commands, root: Res<UiRoot>) {
 
 /// First-open content build: the table and its count line.
 fn build_locks_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
+    let (table, count_text) = spawn_locks_content(&mut commands, handle.content, FONT_SIZE);
+    commands.insert_resource(LocksUi {
+        viewport: table.viewport,
+        count_text,
+    });
+}
+
+/// Build the floater's content into `parent` at `font_size`: the lock table
+/// and its count line, returned in that order. Shared by the live floater's
+/// first-open build and its specimen.
+fn spawn_locks_content(
+    commands: &mut Commands,
+    parent: Entity,
+    font_size: f32,
+) -> (TableHandle, Entity) {
     let content = commands
         .spawn((
             Node {
@@ -374,17 +390,17 @@ fn build_locks_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
                 ..column(Val::Px(4.0))
             },
             Name::new("rlv-locks-content"),
-            ChildOf(handle.content),
+            ChildOf(parent),
         ))
         .id();
 
-    let table = spawn_table(&mut commands, content, &LOCK_TABLE);
+    let table = spawn_table(commands, content, &LOCK_TABLE);
     commands.entity(table.viewport).insert(TabIndex(0));
 
     let count_text = commands
         .spawn((
             Text::default(),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(DIM_LABEL_COLOR),
             Node {
                 flex_shrink: 0.0,
@@ -397,10 +413,53 @@ fn build_locks_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
         ))
         .id();
 
-    commands.insert_resource(LocksUi {
-        viewport: table.viewport,
-        count_text,
-    });
+    (table, count_text)
+}
+
+// --- Gallery specimen -----------------------------------------------------
+
+/// The Locks floater's gallery / `ui_test` specimen: the live content, built by
+/// the same `spawn_locks_content` the floater is, with the table filled from
+/// the shared sample [`RlvState`] through the live projection ([`project`]) and
+/// cell mapping (`lock_row_values`).
+///
+/// The Type column is the one cell the live bind translates; with no
+/// translator in a specimen host it is bound to its key as a [`Translated`]
+/// label instead, which resolves to the same string.
+pub fn spawn_rlv_locks_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: sl_viewer_ui_core::ui_element::ElementCx,
+) -> Entity {
+    let (table, count_text) = spawn_locks_content(commands, parent, cx.font_size);
+    let rows = project(&crate::specimen::sample_state());
+    let values: Vec<Vec<(String, Color)>> = rows
+        .iter()
+        .map(|entry| {
+            let mut cells = vec![(String::new(), LABEL_COLOR); LOCK_TABLE.columns.len()];
+            for (column, value, color) in lock_row_values(Some(entry), |_| String::new()) {
+                if let Some(cell) = cells.get_mut(column) {
+                    *cell = (cx.text(&value), color);
+                }
+            }
+            cells
+        })
+        .collect();
+    let bound = spawn_specimen_table_rows(commands, (&table).into(), &LOCK_TABLE, &values);
+    for (entry, (_, cells)) in rows.iter().zip(&bound) {
+        if let Some(cell) = cells.cell(COL_TYPE) {
+            commands
+                .entity(cell)
+                .insert(Translated::new(entry.category.label_key()));
+        }
+    }
+    // The live line is `rlv-locks-count` formatted with the count; the specimen
+    // has no translator to format with, so it writes the English sentence that
+    // key produces.
+    commands.entity(count_text).insert(Text::new(
+        cx.text(&format!("{} locks in force", rows.len())),
+    ));
+    parent
 }
 
 // --- View systems ---------------------------------------------------------
@@ -444,15 +503,22 @@ fn populate_lock_rows(
     mut commands: Commands,
     ui: Option<Res<LocksUi>>,
     new_rows: Query<(Entity, &ChildOf), Added<VirtualRow>>,
+    parents: Query<&ChildOf>,
 ) {
     let Some(ui) = ui else {
+        return;
+    };
+    // The table root — the viewport's parent — is what a row's cells name as
+    // their table, and what carries the `TableState` the column-width sync and
+    // the ellipsis read. Naming the viewport left them pointing at nothing.
+    let Ok(table) = parents.get(ui.viewport).map(ChildOf::parent) else {
         return;
     };
     for (row_entity, child_of) in &new_rows {
         if child_of.parent() != ui.viewport {
             continue;
         }
-        spawn_table_row(&mut commands, row_entity, ui.viewport, &LOCK_TABLE);
+        spawn_table_row(&mut commands, row_entity, table, &LOCK_TABLE);
     }
 }
 
@@ -476,29 +542,35 @@ fn bind_lock_rows(
             continue;
         }
         let entry = row.index.and_then(|index| view.rows.get(index));
-        let values: [(usize, String, Color); 4] = match entry {
-            Some(entry) => [
-                (
-                    COL_TYPE,
-                    translator.get(entry.category.label_key()),
-                    LABEL_COLOR,
-                ),
-                (COL_DIRECTION, entry.direction.clone(), LABEL_COLOR),
-                (COL_TARGET, entry.target.clone(), LABEL_COLOR),
-                (COL_ORIGIN, entry.origin.clone(), DIM_LABEL_COLOR),
-            ],
-            None => [
-                (COL_TYPE, String::new(), LABEL_COLOR),
-                (COL_DIRECTION, String::new(), LABEL_COLOR),
-                (COL_TARGET, String::new(), LABEL_COLOR),
-                (COL_ORIGIN, String::new(), LABEL_COLOR),
-            ],
-        };
+        let values = lock_row_values(entry, |entry| translator.get(entry.category.label_key()));
         for (column, value, color) in values {
             if let Some(cell) = cells.cell(column) {
                 set_table_cell(&mut texts, cell, &value, color);
             }
         }
+    }
+}
+
+/// The `(column, value, colour)` cells of one lock row, or four blanks for a
+/// parked row. `type_label` names the entry's category for the Type column —
+/// the one cell that is translated.
+fn lock_row_values(
+    entry: Option<&LockRow>,
+    type_label: impl FnOnce(&LockRow) -> String,
+) -> [(usize, String, Color); 4] {
+    match entry {
+        Some(entry) => [
+            (COL_TYPE, type_label(entry), LABEL_COLOR),
+            (COL_DIRECTION, entry.direction.clone(), LABEL_COLOR),
+            (COL_TARGET, entry.target.clone(), LABEL_COLOR),
+            (COL_ORIGIN, entry.origin.clone(), DIM_LABEL_COLOR),
+        ],
+        None => [
+            (COL_TYPE, String::new(), LABEL_COLOR),
+            (COL_DIRECTION, String::new(), LABEL_COLOR),
+            (COL_TARGET, String::new(), LABEL_COLOR),
+            (COL_ORIGIN, String::new(), LABEL_COLOR),
+        ],
     }
 }
 

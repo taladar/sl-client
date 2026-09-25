@@ -111,6 +111,19 @@ fn set_field_text(fields: &mut Query<&mut EditableText>, field: Option<Entity>, 
     }
 }
 
+/// Seed a text field's content through `commands` — the write
+/// [`set_field_text`] makes, for a gallery / `ui_test` specimen that holds no
+/// query over the fields. Applied when the commands flush, after the field's own
+/// spawn, so the field built just before is there to take it.
+pub(crate) fn seed_field_deferred(commands: &mut Commands, field: Option<Entity>, value: String) {
+    if let Some(field) = field {
+        commands
+            .entity(field)
+            .entry::<EditableText>()
+            .and_modify(move |mut editable| editable.editor_mut().set_text(&value));
+    }
+}
+
 /// Set a combo's selection in place (a programmatic write emits no `ComboChanged`).
 pub(crate) fn set_combo(
     combos: &mut Query<&mut ComboSelection>,
@@ -122,5 +135,16 @@ pub(crate) fn set_combo(
         && selection.active != active
     {
         selection.active = active;
+    }
+}
+
+/// Set a combo's selection through `commands` — the write [`set_combo`] makes,
+/// for a gallery / `ui_test` specimen that holds no query over the combos.
+pub(crate) fn set_combo_deferred(commands: &mut Commands, combo: Option<Entity>, active: usize) {
+    if let Some(combo) = combo {
+        commands
+            .entity(combo)
+            .entry::<ComboSelection>()
+            .and_modify(move |mut selection| selection.active = active);
     }
 }

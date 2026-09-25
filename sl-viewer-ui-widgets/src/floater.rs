@@ -2543,35 +2543,21 @@ pub struct FloaterElement {
     pub summary: &'static str,
     /// The window's [`FloaterSpec`], shared with the viewer's own spawn.
     pub spec: fn() -> FloaterSpec,
-    /// What goes in the content slot.
-    pub content: FloaterContent,
+    /// The window's content: the module's own content builder, filled with
+    /// fixed sample data, spawned into the content slot exactly as a
+    /// registered element is spawned into a gallery card.
+    ///
+    /// A function rather than a choice between content and a placeholder. The
+    /// registry once allowed a line of prose in its place "until someone
+    /// writes one", and 43 of 56 windows sat that way — every one showing a
+    /// skin author, and the layout sweep, a sentence instead of the window. A
+    /// window that registers writes its content.
+    pub content: FloaterContentFn,
 }
 
-/// What a registered floater puts in its content slot.
-///
-/// The split the roadmap item asks for, and it is a real distinction rather
-/// than a convenience: a window's chrome is always constructible, while its
-/// *content* is sometimes a live view of a session — an inventory tree, a
-/// profile, a parcel. Where a module has already written the static specimen of
-/// that content for [`sl_viewer_ui_core::ui_element::UiElement`], the floater
-/// reuses it and the sweep measures the window around the real layout. Where it
-/// has not, the window is swept with a stub, which still holds the chrome to
-/// account — a title that runs long in Arabic, a button glyph clipped at 22 px,
-/// a window that opens off screen — and leaves an obvious, greppable place for
-/// the specimen when someone writes one.
-#[derive(Debug, Clone, Copy)]
-pub enum FloaterContent {
-    /// The module's own static content specimen, spawned into the content slot
-    /// exactly as a registered element is spawned into a gallery card.
-    Specimen(fn(&mut Commands, Entity, ElementCx) -> Entity),
-    /// No content of its own: a single line naming what the live window fills
-    /// itself with. The `&'static str` is that line, and it is deliberately
-    /// prose rather than a placeholder box — the sweep's question for a stubbed
-    /// floater is whether the *chrome* survives the cell, and a line of the
-    /// cell's own sample text is what makes the content slot non-empty enough
-    /// to answer it.
-    Stub(&'static str),
-}
+/// A registered floater's content builder: spawns the window's content into the
+/// slot `Entity` for the cell's [`ElementCx`], returning its root.
+pub type FloaterContentFn = fn(&mut Commands, Entity, ElementCx) -> Entity;
 
 impl core::fmt::Debug for FloaterElement {
     /// Hand-written for the same reason [`UiElement`](sl_viewer_ui_core::ui_element::UiElement)'s
@@ -2602,40 +2588,10 @@ impl FloaterElement {
         spec.title = cx.text(&spec.title);
         let handle = spawn_floater(commands, root, spec);
         commands.entity(handle.root).insert(UiPanelShown(true));
-        match self.content {
-            FloaterContent::Specimen(spawn) => {
-                spawn(commands, handle.content, cx);
-            }
-            FloaterContent::Stub(prose) => {
-                commands.spawn((
-                    Text::new(cx.text(prose)),
-                    cx.font(UiFont::Sans),
-                    TextColor(SkinPalette::default().text_muted),
-                    ClassList::new_with_classes([STUB_CLASS]),
-                    Node {
-                        max_width: Val::Px(STUB_MAX_WIDTH),
-                        ..default()
-                    },
-                    Name::new("floater-stub-content"),
-                    ChildOf(handle.content),
-                ));
-            }
-        }
+        (self.content)(commands, handle.content, cx);
         handle
     }
 }
-
-/// The skin class on a [`FloaterContent::Stub`]'s prose — the shared
-/// secondary-text class, so it is drawn dimmer than real content and a person
-/// looking at the gallery can tell at a glance which windows are still
-/// standing in for themselves.
-const STUB_CLASS: &str = "sk-title";
-
-/// The width a stub's prose wraps at, in logical pixels. A bound, not a size:
-/// a window with a `default_size` is wider than this and the stub simply sits
-/// inside it, while a content-driven one is sized by the stub and must not run
-/// off the screen.
-const STUB_MAX_WIDTH: f32 = 360.0;
 
 /// Register the floater manager's **layout-affecting** systems into a harness
 /// app, for [`sl_viewer_ui_core`]-level tests that lay a registered floater out.

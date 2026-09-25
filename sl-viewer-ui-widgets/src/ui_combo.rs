@@ -441,6 +441,20 @@ fn build_combo_popover(
                         align: PopoverAlign::Start,
                         gap: 0.0,
                     },
+                    // End-aligned fallbacks: a list wider than its combo, on a
+                    // combo at a window's trailing edge (the Quick Preferences
+                    // panel anchors itself to the bottom-right corner), would
+                    // otherwise run past the edge of the screen.
+                    PopoverPlacement {
+                        side: PopoverSide::Bottom,
+                        align: PopoverAlign::End,
+                        gap: 0.0,
+                    },
+                    PopoverPlacement {
+                        side: PopoverSide::Top,
+                        align: PopoverAlign::End,
+                        gap: 0.0,
+                    },
                 ],
                 window_margin: 4.0,
             },

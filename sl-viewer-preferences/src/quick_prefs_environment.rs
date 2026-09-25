@@ -659,22 +659,75 @@ fn refresh_preset_lists(
     let index = index.as_deref().unwrap_or(&empty);
     for kind in KINDS {
         let rows = build_rows(kind, index.of_kind(kind));
-        let labels: Vec<String> = rows.iter().map(|row| row.label(&translator)).collect();
-        let row_states: Vec<ComboRow> = rows.iter().map(PresetRow::combo_row).collect();
-        for (anchor, combo) in &combos {
-            if combo.kind != kind {
-                continue;
-            }
-            set_options.write(SetComboOptions {
-                combo: anchor,
-                labels: labels.clone(),
-                rows: row_states.clone(),
-            });
-        }
+        offer_rows(kind, &rows, &translator, combos.iter(), |message| {
+            set_options.write(message);
+        });
         let held = lists.of_kind_mut(kind);
         if *held != rows {
             *held = rows;
         }
+    }
+}
+
+/// Put one kind's `rows` into each of `combos`: their labels, resolved through
+/// `translator`, and their row states, through `write` (a [`SetComboOptions`]
+/// per combo). The drawing half of [`refresh_preset_lists`], shared with the
+/// hosts' specimens.
+fn offer_rows<'a>(
+    kind: SettingsKind,
+    rows: &[PresetRow],
+    translator: &Translator,
+    combos: impl Iterator<Item = (Entity, &'a PresetCombo)>,
+    mut write: impl FnMut(SetComboOptions),
+) {
+    let labels: Vec<String> = rows.iter().map(|row| row.label(translator)).collect();
+    let row_states: Vec<ComboRow> = rows.iter().map(PresetRow::combo_row).collect();
+    for (anchor, combo) in combos {
+        if combo.kind != kind {
+            continue;
+        }
+        write(SetComboOptions {
+            combo: anchor,
+            labels: labels.clone(),
+            rows: row_states.clone(),
+        });
+    }
+}
+
+/// What the preset combos' runtime adds to a host's specimen once its content
+/// exists: the row lists `refresh_preset_lists` offers for an inventory that
+/// holds no settings assets — the sentinels, and for the sky the Legacy
+/// WindLight presets. Only the combos of the host whose [`PresetHost::scope`]
+/// is `scope` are filled.
+pub fn compose_preset_rows_specimen(commands: &mut Commands, scope: &'static str) {
+    commands.run_system_cached_with(offer_specimen_rows, scope);
+}
+
+/// One-shot behind [`compose_preset_rows_specimen`]. A host without the combo
+/// widget's runtime has no [`SetComboOptions`] channel and could not apply new
+/// options anyway; its combos keep the seed row.
+fn offer_specimen_rows(
+    In(scope): In<&'static str>,
+    combos: Query<(Entity, &PresetCombo)>,
+    translator: Translator,
+    messages: Option<ResMut<Messages<SetComboOptions>>>,
+) {
+    let Some(mut messages) = messages else {
+        return;
+    };
+    for kind in KINDS {
+        let rows = build_rows(kind, &[]);
+        offer_rows(
+            kind,
+            &rows,
+            &translator,
+            combos
+                .iter()
+                .filter(|(_anchor, combo)| combo.scope == scope),
+            |message| {
+                messages.write(message);
+            },
+        );
     }
 }
 

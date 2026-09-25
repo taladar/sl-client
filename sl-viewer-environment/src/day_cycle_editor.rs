@@ -134,9 +134,6 @@ const MAX_KEYFRAMES: usize = 20;
 /// `DAY_CYCLE_PLAY_TIME_SECONDS`.
 const PLAY_SECONDS: f32 = 60.0;
 
-/// The timeline's width, logical px. Both strips and the tick labels share it.
-const TIMELINE_WIDTH: f32 = 430.0;
-
 /// A timeline strip's height, logical px.
 const STRIP_HEIGHT: f32 = 14.0;
 
@@ -151,8 +148,11 @@ const TICKS: usize = 5;
 /// selected keyframe adds `SELECTED_CLASS`; the cursor never does.
 const MARKER_CLASS: &str = "sk-day-marker";
 
-/// How many columns a knob page lays its controls out in.
-const COLUMNS: usize = 3;
+/// How many columns a knob page lays its controls out in: the swatches, then
+/// three of sliders. Four rather than the sky editor's three because this
+/// window gives its height to the timeline first, and three columns left the
+/// Sun & Moon and Density pages scrolling for their last quarter.
+const COLUMNS: usize = 4;
 
 // ---------------------------------------------------------------------------
 // Actions.
@@ -655,11 +655,15 @@ pub fn day_cycle_editor_floater_spec() -> FloaterSpec {
     FloaterSpec {
         id: DAY_CYCLE_EDITOR_FLOATER_ID,
         title: "Day Cycle".to_owned(),
-        position: Vec2::new(140.0, 120.0),
-        // Wide enough for the track buttons beside the timeline, and for three
-        // knob columns under both; tall enough for the timeline, its two rows of
-        // actions, the longest knob column and the buttons.
-        default_size: Some(Vec2::new(600.0, 620.0)),
+        // High enough on the screen that the window's full height still fits a
+        // 1280×800 laptop.
+        position: Vec2::new(140.0, 40.0),
+        // The reference's width (`floater_edit_ext_day_cycle.xml`, 705): room
+        // for the track buttons beside the timeline, and for four knob columns
+        // under both. Tall enough for the timeline, its two rows of actions,
+        // the longest knob column and the buttons — every sky page shows
+        // whole, with no scrollbar for its last few rows.
+        default_size: Some(Vec2::new(705.0, 715.0)),
         min_size: Some(Vec2::new(360.0, 300.0)),
         dock_host: None,
         caps: FloaterCaps {
@@ -700,37 +704,11 @@ fn spawn_day_cycle_editor(mut commands: Commands, root: Res<UiRoot>) {
 /// The window's content: the name row, the timeline and its actions, the knob
 /// pages, and the save row.
 fn build_day_cycle_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
-    let element = DAY_CYCLE_EDITOR_FLOATER_ID;
-    let content = commands
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                min_height: Val::Px(0.0),
-                padding: UiRect::all(Val::Px(6.0)),
-                ..column(Val::Px(6.0))
-            },
-            Name::new(format!("{element}:content")),
-            ChildOf(handle.content),
-        ))
-        .id();
-    let mut tab = 0_i32;
-
-    spawn_name_row(&mut commands, content, &mut tab);
-    let (readout, clone_source) = spawn_timeline(&mut commands, content, &mut tab);
-    let hint = spawn_hint(&mut commands, content);
-    let sky_pages = spawn_pages(&mut commands, content, SKY_ELEMENT, SKY_TABS, &mut tab);
-    let water_pages = spawn_pages(&mut commands, content, WATER_ELEMENT, WATER_TABS, &mut tab);
-    let status = spawn_save_row(&mut commands, content, &mut tab);
+    let parts = spawn_day_cycle_content(&mut commands, handle.content, FONT_SIZE);
 
     commands.queue(move |world: &mut World| {
         if let Some(mut state) = world.get_resource_mut::<DayCycleEditorState>() {
-            state.ui.status = Some(status);
-            state.ui.sky_pages = Some(sky_pages);
-            state.ui.water_pages = Some(water_pages);
-            state.ui.hint = Some(hint);
-            state.ui.readout = Some(readout);
-            state.ui.clone_source = Some(clone_source);
+            parts.install(&mut state.ui);
             // The content is built on the window's first open, a frame after the
             // session that asked for it was installed — so the widgets that have
             // just appeared have never been seeded. Ask for it now.
@@ -742,8 +720,91 @@ fn build_day_cycle_content(In(handle): In<FloaterHandle>, mut commands: Commands
     });
 }
 
-/// The name row: a label and the field the cycle's name is edited in.
-fn spawn_name_row(commands: &mut Commands, parent: Entity, tab: &mut i32) {
+/// The entities [`spawn_day_cycle_content`] hands back: the content root and the
+/// handles [`DayUi`] keeps.
+#[derive(Debug, Clone, Copy)]
+struct DayContent {
+    /// The content root.
+    content: Entity,
+    /// The status line.
+    status: Entity,
+    /// The sky knob pages.
+    sky_pages: Entity,
+    /// The water knob pages.
+    water_pages: Entity,
+    /// The "select a keyframe" hint.
+    hint: Entity,
+    /// The time readout.
+    readout: Entity,
+    /// The clone-source combo.
+    clone_source: Entity,
+}
+
+impl DayContent {
+    /// Record the handles in the window's [`DayUi`], leaving its panel alone.
+    const fn install(self, ui: &mut DayUi) {
+        ui.status = Some(self.status);
+        ui.sky_pages = Some(self.sky_pages);
+        ui.water_pages = Some(self.water_pages);
+        ui.hint = Some(self.hint);
+        ui.readout = Some(self.readout);
+        ui.clone_source = Some(self.clone_source);
+    }
+}
+
+/// Build the window's content into `slot` with its text at `font_size`. Shared
+/// by the live window and its specimen.
+fn spawn_day_cycle_content(commands: &mut Commands, slot: Entity, font_size: f32) -> DayContent {
+    let element = DAY_CYCLE_EDITOR_FLOATER_ID;
+    let content = commands
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                min_height: Val::Px(0.0),
+                padding: UiRect::all(Val::Px(6.0)),
+                ..column(Val::Px(6.0))
+            },
+            Name::new(format!("{element}:content")),
+            ChildOf(slot),
+        ))
+        .id();
+    let mut tab = 0_i32;
+
+    spawn_name_row(commands, content, font_size, &mut tab);
+    let (readout, clone_source) = spawn_timeline(commands, content, font_size, &mut tab);
+    let hint = spawn_hint(commands, content, font_size);
+    let sky_pages = spawn_pages(
+        commands,
+        content,
+        SKY_ELEMENT,
+        SKY_TABS,
+        font_size,
+        &mut tab,
+    );
+    let water_pages = spawn_pages(
+        commands,
+        content,
+        WATER_ELEMENT,
+        WATER_TABS,
+        font_size,
+        &mut tab,
+    );
+    let status = spawn_save_row(commands, content, font_size, &mut tab);
+    DayContent {
+        content,
+        status,
+        sky_pages,
+        water_pages,
+        hint,
+        readout,
+        clone_source,
+    }
+}
+
+/// The name row: a label and the field the cycle's name is edited in, at
+/// `font_size`.
+fn spawn_name_row(commands: &mut Commands, parent: Entity, font_size: f32, tab: &mut i32) {
     let element = DAY_CYCLE_EDITOR_FLOATER_ID;
     let holder = commands
         .spawn((
@@ -758,7 +819,7 @@ fn spawn_name_row(commands: &mut Commands, parent: Entity, tab: &mut i32) {
         .id();
     commands.spawn((
         Text::new(String::new()),
-        UiFont::Sans.at(FONT_SIZE),
+        UiFont::Sans.at(font_size),
         text_role(LABEL_COLOR),
         Translated::new("settings-editor-name"),
         ChildOf(holder),
@@ -768,7 +829,7 @@ fn spawn_name_row(commands: &mut Commands, parent: Entity, tab: &mut i32) {
         holder,
         &TextInputSpec {
             tab_index: *tab,
-            font_size: FONT_SIZE,
+            font_size,
             fill: true,
             max_characters: Some(63),
             ..TextInputSpec::new("day-cycle-editor-name", TextInputKind::Line)
@@ -779,9 +840,14 @@ fn spawn_name_row(commands: &mut Commands, parent: Entity, tab: &mut i32) {
 }
 
 /// The timeline block: the track buttons beside the ticks, the two strips, the
-/// readout and play controls, and the track / frame action rows. Returns the
-/// readout text entity and the clone-source combo.
-fn spawn_timeline(commands: &mut Commands, parent: Entity, tab: &mut i32) -> (Entity, Entity) {
+/// readout and play controls, and the track / frame action rows, its text at
+/// `font_size`. Returns the readout text entity and the clone-source combo.
+fn spawn_timeline(
+    commands: &mut Commands,
+    parent: Entity,
+    font_size: f32,
+    tab: &mut i32,
+) -> (Entity, Entity) {
     let element = DAY_CYCLE_EDITOR_FLOATER_ID;
     let holder = commands
         .spawn((
@@ -840,12 +906,14 @@ fn spawn_timeline(commands: &mut Commands, parent: Entity, tab: &mut i32) -> (En
         ))
         .id();
 
-    // The tick labels, evenly spread over the strips' width.
+    // The tick labels, over the strips' width. Every row of the timeline is
+    // as wide as the column the window leaves it rather than a fixed width, so
+    // a long track caption beside it (or a narrow window) squeezes the
+    // timeline instead of pushing it out of the window.
     let ticks = commands
         .spawn((
             Node {
-                width: Val::Px(TIMELINE_WIDTH),
-                justify_content: JustifyContent::SpaceBetween,
+                width: Val::Percent(100.0),
                 ..row(Val::Px(2.0))
             },
             Name::new(format!("{element}-ticks:row")),
@@ -853,13 +921,21 @@ fn spawn_timeline(commands: &mut Commands, parent: Entity, tab: &mut i32) -> (En
         ))
         .id();
     for index in 0..TICKS {
+        let (grow, justify) = tick_layout(index);
         commands.spawn((
             Text::new(String::new()),
+            // A label wraps between its percentage and its clock time rather
+            // than running into its neighbour.
             TextLayout {
-                linebreak: LineBreak::NoWrap,
-                ..TextLayout::default()
+                justify,
+                linebreak: LineBreak::WordBoundary,
             },
-            UiFont::Sans.at(FONT_SIZE),
+            Node {
+                flex_grow: grow,
+                flex_basis: Val::Px(0.0),
+                ..Node::default()
+            },
+            UiFont::Sans.at(font_size),
             text_role(DIM_LABEL_COLOR),
             DayTick(index),
             Name::new(format!("{element}-tick-{index}")),
@@ -874,8 +950,10 @@ fn spawn_timeline(commands: &mut Commands, parent: Entity, tab: &mut i32) -> (En
     let transport = commands
         .spawn((
             Node {
-                width: Val::Px(TIMELINE_WIDTH),
+                width: Val::Percent(100.0),
                 align_items: AlignItems::Center,
+                flex_wrap: FlexWrap::Wrap,
+                row_gap: Val::Px(4.0),
                 ..row(Val::Px(6.0))
             },
             Name::new(format!("{element}-transport:row")),
@@ -885,11 +963,7 @@ fn spawn_timeline(commands: &mut Commands, parent: Entity, tab: &mut i32) -> (En
     let readout = commands
         .spawn((
             Text::new(String::new()),
-            TextLayout {
-                linebreak: LineBreak::NoWrap,
-                ..TextLayout::default()
-            },
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(LABEL_COLOR),
             Node {
                 min_width: Val::Px(120.0),
@@ -911,9 +985,10 @@ fn spawn_timeline(commands: &mut Commands, parent: Entity, tab: &mut i32) -> (En
     let track_row = commands
         .spawn((
             Node {
-                width: Val::Px(TIMELINE_WIDTH),
+                width: Val::Percent(100.0),
                 align_items: AlignItems::Center,
                 flex_wrap: FlexWrap::Wrap,
+                row_gap: Val::Px(4.0),
                 ..row(Val::Px(6.0))
             },
             Name::new(format!("{element}-track-actions:row")),
@@ -931,7 +1006,7 @@ fn spawn_timeline(commands: &mut Commands, parent: Entity, tab: &mut i32) -> (En
             labels: &labels,
             active: 0,
             tab_index: *tab,
-            font_size: FONT_SIZE,
+            font_size,
             translate_labels: true,
         },
     );
@@ -949,9 +1024,10 @@ fn spawn_timeline(commands: &mut Commands, parent: Entity, tab: &mut i32) -> (En
     let frame_row = commands
         .spawn((
             Node {
-                width: Val::Px(TIMELINE_WIDTH),
+                width: Val::Percent(100.0),
                 align_items: AlignItems::Center,
                 flex_wrap: FlexWrap::Wrap,
+                row_gap: Val::Px(4.0),
                 ..row(Val::Px(6.0))
             },
             Name::new(format!("{element}-frame-actions:row")),
@@ -979,7 +1055,7 @@ fn spawn_strip(commands: &mut Commands, parent: Entity, kind: StripKind, markers
     let strip = commands
         .spawn((
             Node {
-                width: Val::Px(TIMELINE_WIDTH),
+                width: Val::Percent(100.0),
                 height: Val::Px(STRIP_HEIGHT),
                 flex_shrink: 0.0,
                 border: UiRect::all(Val::Px(1.0)),
@@ -994,12 +1070,32 @@ fn spawn_strip(commands: &mut Commands, parent: Entity, kind: StripKind, markers
         .observe(on_day_strip_press)
         .observe(on_day_strip_drag)
         .id();
+    // The markers travel a rail a marker's width short of the strip at its
+    // trailing end, so a marker placed by percentage of the rail — the strip is
+    // as wide as the window lets it be — ends flush with the strip at 100%.
+    let rail = commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                ..Node::default()
+            },
+            LogicalInset(LogicalRect {
+                inline_end: Val::Px(MARKER_WIDTH),
+                ..LogicalRect::ZERO
+            }),
+            Pickable::IGNORE,
+            ChildOf(strip),
+        ))
+        .id();
     for index in 0..markers {
         commands.spawn((
             Node {
                 position_type: PositionType::Absolute,
                 width: Val::Px(MARKER_WIDTH),
-                height: Val::Px(STRIP_HEIGHT),
+                // The rail's height — the strip inside its border — rather
+                // than the strip's outer height, which hung a marker over the
+                // bottom border and out of the strip's box.
+                height: Val::Percent(100.0),
                 display: Display::None,
                 ..Node::default()
             },
@@ -1012,17 +1108,17 @@ fn spawn_strip(commands: &mut Commands, parent: Entity, kind: StripKind, markers
             // swallow the press that was aimed at the track behind it.
             Pickable::IGNORE,
             DayMarker { strip: kind, index },
-            ChildOf(strip),
+            ChildOf(rail),
         ));
     }
 }
 
-/// The "select a keyframe" hint line above the knob pages.
-fn spawn_hint(commands: &mut Commands, parent: Entity) -> Entity {
+/// The "select a keyframe" hint line above the knob pages, at `font_size`.
+fn spawn_hint(commands: &mut Commands, parent: Entity, font_size: f32) -> Entity {
     commands
         .spawn((
             Text::new(String::new()),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(DIM_LABEL_COLOR),
             Translated::new("day-cycle-select-a-keyframe"),
             Name::new(format!("{DAY_CYCLE_EDITOR_FLOATER_ID}-hint")),
@@ -1031,13 +1127,15 @@ fn spawn_hint(commands: &mut Commands, parent: Entity) -> Entity {
         .id()
 }
 
-/// One set of knob pages — the sky's four tabs, or the water's one. Returns the
-/// container the track selection shows and hides.
+/// One set of knob pages — the sky's four tabs, or the water's one, the tab
+/// labels at `font_size`. Returns the container the track selection shows and
+/// hides.
 fn spawn_pages(
     commands: &mut Commands,
     parent: Entity,
     element: &'static str,
     pages: &'static [TabPage],
+    font_size: f32,
     tab: &mut i32,
 ) -> Entity {
     let holder = commands
@@ -1063,7 +1161,7 @@ fn spawn_pages(
             labels: &labels,
             active: 0,
             tab_index: *tab,
-            font_size: FONT_SIZE,
+            font_size,
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
@@ -1140,7 +1238,7 @@ fn spawn_pages(
     holder
 }
 
-/// Three columns inside a tab panel: the swatches, then two of sliders.
+/// [`COLUMNS`] columns inside a tab panel: the swatches, then the sliders.
 fn spawn_columns(
     commands: &mut Commands,
     panel: Entity,
@@ -1151,7 +1249,10 @@ fn spawn_columns(
         .spawn((
             Node {
                 width: Val::Percent(100.0),
-                min_height: Val::Px(0.0),
+                // The panel scrolls, so the strip keeps its full height and
+                // overflows into that scroll rather than being squeezed to
+                // the panel and spilling its columns past its own box.
+                flex_shrink: 0.0,
                 ..row(Val::Px(10.0))
             },
             Name::new(format!("{element}-{tab_name}:columns")),
@@ -1186,9 +1287,14 @@ fn slider_column(columns: &[Entity], index: usize, total: usize) -> Option<Entit
         .copied()
 }
 
-/// The Save / Save As / Revert row and the status line under it. Returns the
-/// status text entity.
-fn spawn_save_row(commands: &mut Commands, parent: Entity, tab: &mut i32) -> Entity {
+/// The Save / Save As / Revert row and the status line under it, the status at
+/// `font_size`. Returns the status text entity.
+fn spawn_save_row(
+    commands: &mut Commands,
+    parent: Entity,
+    font_size: f32,
+    tab: &mut i32,
+) -> Entity {
     let element = DAY_CYCLE_EDITOR_FLOATER_ID;
     let holder = commands
         .spawn((
@@ -1207,7 +1313,7 @@ fn spawn_save_row(commands: &mut Commands, parent: Entity, tab: &mut i32) -> Ent
     commands
         .spawn((
             Text::new(String::new()),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(DIM_LABEL_COLOR),
             Name::new(format!("{element}-status")),
             ChildOf(parent),
@@ -1613,7 +1719,6 @@ fn rebuild_day_markers(
         return;
     }
     session.relist = false;
-    let span = TIMELINE_WIDTH - MARKER_WIDTH;
     let cursor = session.position;
     let keyframes: Vec<(f32, bool)> = session
         .keyframes()
@@ -1635,7 +1740,7 @@ fn rebuild_day_markers(
         if node.display != Display::Flex {
             node.display = Display::Flex;
         }
-        let offset = Val::Px(position.clamp(0.0, 1.0) * span);
+        let offset = Val::Percent(position.clamp(0.0, 1.0) * 100.0);
         if inset.0.inline_start != offset {
             inset.0.inline_start = offset;
         }
@@ -2209,6 +2314,22 @@ fn sync_day_chrome(
     state.shown_readout = shown_readout;
     state.shown_ticks = shown_ticks;
     state.play_label_playing = play_label;
+}
+
+/// How tick `index` shares the ticks row: its flex grow and its alignment.
+///
+/// Each middle tick takes twice an end tick's share and centres its label, so
+/// its centre sits exactly on the fraction it marks (a quarter, a half, three
+/// quarters); the two end ticks take a half share each and hug the strip's
+/// start and end, where the day begins and ends.
+const fn tick_layout(index: usize) -> (f32, Justify) {
+    if index == 0 {
+        (1.0, Justify::Start)
+    } else if index.saturating_add(1) >= TICKS {
+        (1.0, Justify::End)
+    } else {
+        (2.0, Justify::Center)
+    }
 }
 
 /// The fraction of the day tick `index` of [`TICKS`] marks.
@@ -2965,6 +3086,87 @@ fn named_cycle(cycle: &DayCycle, name: &str) -> DayCycle {
     let mut cycle = cycle.clone();
     name.clone_into(&mut cycle.name);
     cycle
+}
+
+// ---------------------------------------------------------------------------
+// Gallery specimen.
+// ---------------------------------------------------------------------------
+
+/// The keyframes the specimen's sample cycle adds to the default one at
+/// midnight: where each sits, its name, and how high its sun stands — so the
+/// timeline shows a spread of markers and the knobs a sky worth looking at.
+const SAMPLE_KEYFRAMES: [(f32, &str, f32); 3] = [
+    (0.25, "Sample Sunrise", 4.0),
+    (0.5, "Sample Midday", 70.0),
+    (0.75, "Sample Dusk", 2.0),
+];
+
+/// The day-cycle editor's gallery / `ui_test` specimen: the live content, built
+/// by the same `spawn_day_cycle_content` the viewer's window is at the cell's
+/// font size, then drawn by the live `rebuild_day_markers`,
+/// `reseed_day_widgets` and `sync_day_chrome` (and the slider readouts by
+/// the shared rows sync) from a sample session — the
+/// legacy default cycle with a sunrise, a midday and a dusk keyframe added to
+/// its ground track, the midday one selected, as if the user had just clicked
+/// it. The item behind it is a stand-in (nil keys); nothing here saves.
+///
+/// The sample session stays installed as the window's state, so a drag on a
+/// specimen slider or strip edits it as it would live. A specimen stands in for
+/// a session on a grid that stores settings, so the save row is not greyed.
+pub fn spawn_day_cycle_editor_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: sl_viewer_ui_core::ui_element::ElementCx,
+) -> Entity {
+    let parts = spawn_day_cycle_content(commands, parent, cx.font_size);
+    let mut cycle = sl_client_bevy::EnvironmentSettings::legacy_windlight_default().day_cycle;
+    cycle.name = cx.text("Sample Day");
+    for (position, name, elevation) in SAMPLE_KEYFRAMES {
+        let mut sky = SkySettings::legacy_windlight_default(&cx.text(name));
+        SkyKnob::SunElevation.write(&mut sky, elevation);
+        drop(cycle.insert_sky_keyframe(DayTrack::GROUND, position, sky));
+    }
+    let mut session = DaySession {
+        source: DaySource::Inventory(EditedItem {
+            item_id: InventoryKey::from(sl_client_bevy::Uuid::nil()),
+            folder_id: InventoryFolderKey::from(sl_client_bevy::Uuid::nil()),
+            editable: true,
+        }),
+        name: cycle.name.clone(),
+        original: cycle.clone(),
+        edited: cycle,
+        track: DayTrack::GROUND,
+        position: 0.0,
+        selected: None,
+        playing: None,
+        dirty: false,
+        modified: false,
+        reseed: true,
+        relist: true,
+        saving: false,
+    };
+    session.select_at(0.5, KEYFRAME_SLOP);
+    commands.queue(move |world: &mut World| {
+        {
+            let mut state = world.get_resource_or_init::<DayCycleEditorState>();
+            parts.install(&mut state.ui);
+            state.session = Some(session);
+            // Whatever an earlier specimen drew is not what these widgets show.
+            state.clone_rows.clear();
+            state.play_label_playing = None;
+            state.shown_readout = None;
+            state.shown_ticks = None;
+        }
+        if !world.contains_resource::<SettingsInventorySupport>() {
+            world.insert_resource(SettingsInventorySupport::new(true));
+        }
+        crate::specimen::ensure_message::<SetComboOptions>(world);
+        crate::specimen::run_once(world, DAY_CYCLE_EDITOR_FLOATER_ID, rebuild_day_markers);
+        crate::specimen::run_once(world, DAY_CYCLE_EDITOR_FLOATER_ID, reseed_day_widgets);
+        crate::specimen::run_once(world, DAY_CYCLE_EDITOR_FLOATER_ID, sync_day_chrome);
+        crate::specimen::draw_slider_readouts(world, DAY_CYCLE_EDITOR_FLOATER_ID);
+    });
+    parts.content
 }
 
 #[cfg(test)]

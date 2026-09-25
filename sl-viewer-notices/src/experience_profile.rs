@@ -80,9 +80,11 @@ use sl_viewer_ui_core::skin::{
     text_role,
 };
 
+use bevy::ecs::system::RunSystemOnce as _;
 use sl_client_bevy::{
-    Command, ExperienceInfo, ExperienceKey, ExperiencePermission, ExperienceProperties,
-    ExperienceUpdate, SlCommand, SlCurrentRegion, SlEvent, SlRegionIdentity, SlSessionEvent,
+    AgentKey, Command, ExperienceInfo, ExperienceKey, ExperiencePermission, ExperienceProperties,
+    ExperienceUpdate, OwnerKey, SlCommand, SlCurrentRegion, SlEvent, SlRegionIdentity,
+    SlSessionEvent, Uuid,
 };
 
 use crate::floater::{
@@ -109,6 +111,12 @@ const FONT_SIZE: f32 = 13.0;
 
 /// The experience-name heading size, in logical pixels.
 const HEADING_FONT_SIZE: f32 = 16.0;
+
+/// The heading's size for a body text size: the live window's step above it,
+/// kept as a step so a specimen at another body size keeps the hierarchy.
+const fn heading_size(font_size: f32) -> f32 {
+    font_size + (HEADING_FONT_SIZE - FONT_SIZE)
+}
 
 /// The window's content width, in logical pixels.
 const CONTENT_WIDTH: f32 = 360.0;
@@ -540,6 +548,20 @@ fn build_profile_content(
     commands
         .entity(handle.title_text)
         .insert(Translated::new("experience-profile-title"));
+    let ui = spawn_profile_content(commands, handle.content, FONT_SIZE);
+    let mut state = ExperienceProfileState::new(experience);
+    state.touch();
+    commands.entity(handle.root).insert((state, ui));
+}
+
+/// Build a window's content into `slot` at `font_size` — the view column over
+/// the (hidden) edit column — and return its widget handles. Shared by the live
+/// window and its gallery specimen.
+fn spawn_profile_content(
+    commands: &mut Commands,
+    slot: Entity,
+    font_size: f32,
+) -> ExperienceProfileUi {
     let content = commands
         .spawn((
             Node {
@@ -547,40 +569,85 @@ fn build_profile_content(
                 ..column(Val::Px(6.0))
             },
             Name::new("experience-profile-content"),
-            ChildOf(handle.content),
+            ChildOf(slot),
         ))
         .id();
 
-    let view = build_view_panel(commands, content);
-    let edit = build_edit_panel(commands, content);
+    let view = build_view_panel(commands, content, font_size);
+    let edit = build_edit_panel(commands, content, font_size);
 
+    ExperienceProfileUi {
+        view_panel: view.panel,
+        edit_panel: edit.panel,
+        name_text: view.name_text,
+        description_text: view.description_text,
+        rating_text: view.rating_text,
+        owner_link: view.owner_link,
+        location_text: view.location_text,
+        scope_text: view.scope_text,
+        privileged_text: view.privileged_text,
+        allow_button: view.allow_button,
+        forget_button: view.forget_button,
+        block_button: view.block_button,
+        edit_button: view.edit_button.button,
+        status_text: view.status_text,
+        name_field: edit.name_field,
+        description_field: edit.description_field,
+        maturity_combo: edit.maturity_combo,
+        edit_location_text: edit.location_text,
+        enable_check: edit.enable_check,
+        private_check: edit.private_check,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Gallery specimen.
+// ---------------------------------------------------------------------------
+
+/// The profile window's gallery / `ui_test` specimen: the live content, built by
+/// the same `spawn_profile_content` the viewer's window is, at the cell's font
+/// size, then painted by the live `paint_profile_windows` from a sample
+/// record — a grid-wide, Moderate experience with a home location, which the
+/// agent has allowed and administers (so Allow reads as the no-op and Edit is
+/// shown). The edit column is built too, hidden, as it is live.
+///
+/// The state rides on `parent` the way the live state rides on the window
+/// root, so a locale change repaints the specimen through the same system. The
+/// owner link stays on its loading label: resolving a name needs a grid.
+pub fn spawn_experience_profile_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: crate::ui_element::ElementCx,
+) -> Entity {
+    let ui = spawn_profile_content(commands, parent, cx.font_size);
+    let experience = ExperienceKey::from(Uuid::from_u128(0x5a));
     let mut state = ExperienceProfileState::new(experience);
+    state.info = Some(ExperienceInfo {
+        public_id: experience,
+        name: cx.text("Sample Experience"),
+        description: cx.text(
+            "An example experience that teleports visitors between the sample \
+             gardens and keeps score for the test course.",
+        ),
+        owner: Some(OwnerKey::Agent(AgentKey::from(Uuid::from_u128(0x5b)))),
+        properties: ExperienceProperties(sl_types::experience::PROPERTY_GRID),
+        maturity: MATURITY_MODERATE,
+        slurl: url::Url::parse("http://maps.secondlife.com/secondlife/Test%20Region/128/128/25")
+            .ok(),
+        ..ExperienceInfo::default()
+    });
+    state.reset_edit_buffer();
+    state.can_edit = true;
+    state.permission = Some(ExperiencePermission::Allow);
+    state.permission_known = true;
     state.touch();
-    commands.entity(handle.root).insert((
-        state,
-        ExperienceProfileUi {
-            view_panel: view.panel,
-            edit_panel: edit.panel,
-            name_text: view.name_text,
-            description_text: view.description_text,
-            rating_text: view.rating_text,
-            owner_link: view.owner_link,
-            location_text: view.location_text,
-            scope_text: view.scope_text,
-            privileged_text: view.privileged_text,
-            allow_button: view.allow_button,
-            forget_button: view.forget_button,
-            block_button: view.block_button,
-            edit_button: view.edit_button.button,
-            status_text: view.status_text,
-            name_field: edit.name_field,
-            description_field: edit.description_field,
-            maturity_combo: edit.maturity_combo,
-            edit_location_text: edit.location_text,
-            enable_check: edit.enable_check,
-            private_check: edit.private_check,
-        },
-    ));
+    commands.entity(parent).insert((state, ui));
+    commands.queue(|world: &mut World| {
+        if let Err(error) = world.run_system_once(paint_profile_windows) {
+            error!("experience-profile specimen: its sample data could not be drawn: {error}");
+        }
+    });
+    parent
 }
 
 /// The read-only column's handles, returned by [`build_view_panel`].
@@ -615,7 +682,7 @@ struct ViewPanel {
 
 /// Build the read-only column: the name heading, the fields, the three
 /// permission buttons, Edit, and the status line.
-fn build_view_panel(commands: &mut Commands, parent: Entity) -> ViewPanel {
+fn build_view_panel(commands: &mut Commands, parent: Entity, font_size: f32) -> ViewPanel {
     let panel = commands
         .spawn((
             Node {
@@ -629,7 +696,7 @@ fn build_view_panel(commands: &mut Commands, parent: Entity) -> ViewPanel {
     let name_text = commands
         .spawn((
             Text::default(),
-            UiFont::Sans.at(HEADING_FONT_SIZE),
+            UiFont::Sans.at(heading_size(font_size)),
             text_meaning(HEADING_COLOR, EXPERIENCE_TEXT_CLASS),
             Pickable::IGNORE,
             Name::new("experience-profile-name"),
@@ -639,15 +706,15 @@ fn build_view_panel(commands: &mut Commands, parent: Entity) -> ViewPanel {
     let description_text = commands
         .spawn((
             Text::default(),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(TEXT_COLOR),
             Pickable::IGNORE,
             Name::new("experience-profile-description"),
             ChildOf(panel),
         ))
         .id();
-    let rating_text = spawn_field_row(commands, panel, "experience-profile-rating");
-    let owner_row = spawn_caption_row(commands, panel, "experience-profile-owner");
+    let rating_text = spawn_field_row(commands, panel, "experience-profile-rating", font_size);
+    let owner_row = spawn_caption_row(commands, panel, "experience-profile-owner", font_size);
     let owner_link = spawn_name_link(
         commands,
         owner_row,
@@ -656,11 +723,11 @@ fn build_view_panel(commands: &mut Commands, parent: Entity) -> ViewPanel {
             "experience-profile-owner-none",
         ),
     );
-    let location_text = spawn_field_row(commands, panel, "experience-profile-location");
+    let location_text = spawn_field_row(commands, panel, "experience-profile-location", font_size);
     let scope_text = commands
         .spawn((
             Text::default(),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(DIM_TEXT_COLOR),
             Pickable::IGNORE,
             Name::new("experience-profile-scope"),
@@ -671,7 +738,7 @@ fn build_view_panel(commands: &mut Commands, parent: Entity) -> ViewPanel {
         .spawn((
             Text::default(),
             Translated::new("experience-profile-privileged"),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(DIM_TEXT_COLOR),
             Pickable::IGNORE,
             Name::new("experience-profile-privileged"),
@@ -683,6 +750,10 @@ fn build_view_panel(commands: &mut Commands, parent: Entity) -> ViewPanel {
         .spawn((
             Node {
                 width: Val::Percent(100.0),
+                // Four buttons outgrow the column in a long translation or at a
+                // large font: they wrap onto a second line instead.
+                flex_wrap: FlexWrap::Wrap,
+                row_gap: Val::Px(6.0),
                 ..row(Val::Px(6.0))
             },
             Name::new("experience-profile-actions"),
@@ -695,6 +766,7 @@ fn build_view_panel(commands: &mut Commands, parent: Entity) -> ViewPanel {
         "experience-profile-allow",
         ProfileButton::Allow,
         1,
+        font_size,
     );
     let forget_button = spawn_action(
         commands,
@@ -702,6 +774,7 @@ fn build_view_panel(commands: &mut Commands, parent: Entity) -> ViewPanel {
         "experience-profile-forget",
         ProfileButton::Forget,
         2,
+        font_size,
     );
     let block_button = spawn_action(
         commands,
@@ -709,6 +782,7 @@ fn build_view_panel(commands: &mut Commands, parent: Entity) -> ViewPanel {
         "experience-profile-block",
         ProfileButton::Block,
         3,
+        font_size,
     );
     let edit_button = spawn_action(
         commands,
@@ -716,11 +790,12 @@ fn build_view_panel(commands: &mut Commands, parent: Entity) -> ViewPanel {
         "experience-profile-edit",
         ProfileButton::Edit,
         4,
+        font_size,
     );
     let status_text = commands
         .spawn((
             Text::default(),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(DIM_TEXT_COLOR),
             Pickable::IGNORE,
             Name::new("experience-profile-status"),
@@ -765,7 +840,7 @@ struct EditPanel {
 
 /// Build the edit column: the three typed / chosen fields, the two location
 /// buttons, the two property toggles, and Save / Cancel. Starts hidden.
-fn build_edit_panel(commands: &mut Commands, parent: Entity) -> EditPanel {
+fn build_edit_panel(commands: &mut Commands, parent: Entity, font_size: f32) -> EditPanel {
     let panel = commands
         .spawn((
             Node {
@@ -777,23 +852,33 @@ fn build_edit_panel(commands: &mut Commands, parent: Entity) -> EditPanel {
             ChildOf(parent),
         ))
         .id();
-    spawn_caption(commands, panel, "experience-profile-name-caption");
+    spawn_caption(
+        commands,
+        panel,
+        "experience-profile-name-caption",
+        font_size,
+    );
     let name_field = spawn_text_input(
         commands,
         panel,
         &TextInputSpec {
-            font_size: FONT_SIZE,
+            font_size,
             width_glyphs: NAME_FIELD_GLYPHS,
             tab_index: 5,
             ..TextInputSpec::new("experience-profile-name-field", TextInputKind::Line)
         },
     );
-    spawn_caption(commands, panel, "experience-profile-description-caption");
+    spawn_caption(
+        commands,
+        panel,
+        "experience-profile-description-caption",
+        font_size,
+    );
     let description_field = spawn_text_input(
         commands,
         panel,
         &TextInputSpec {
-            font_size: FONT_SIZE,
+            font_size,
             visible_lines: DESCRIPTION_LINES,
             tab_index: 6,
             ..TextInputSpec::new(
@@ -802,7 +887,7 @@ fn build_edit_panel(commands: &mut Commands, parent: Entity) -> EditPanel {
             )
         },
     );
-    let rating_row = spawn_caption_row(commands, panel, "experience-profile-rating");
+    let rating_row = spawn_caption_row(commands, panel, "experience-profile-rating", font_size);
     let labels: Vec<String> = MATURITY_KEYS.iter().map(|key| (*key).to_owned()).collect();
     let maturity_combo = spawn_combo(
         commands,
@@ -812,15 +897,15 @@ fn build_edit_panel(commands: &mut Commands, parent: Entity) -> EditPanel {
             labels: &labels,
             active: 0,
             tab_index: 7,
-            font_size: FONT_SIZE,
+            font_size,
             translate_labels: true,
         },
     );
-    let location_row = spawn_caption_row(commands, panel, "experience-profile-location");
+    let location_row = spawn_caption_row(commands, panel, "experience-profile-location", font_size);
     let location_text = commands
         .spawn((
             Text::default(),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(TEXT_COLOR),
             Pickable::IGNORE,
             Name::new("experience-profile-edit-location"),
@@ -830,6 +915,8 @@ fn build_edit_panel(commands: &mut Commands, parent: Entity) -> EditPanel {
     let location_buttons = commands
         .spawn((
             Node {
+                flex_wrap: FlexWrap::Wrap,
+                row_gap: Val::Px(6.0),
                 ..row(Val::Px(6.0))
             },
             ChildOf(panel),
@@ -841,6 +928,7 @@ fn build_edit_panel(commands: &mut Commands, parent: Entity) -> EditPanel {
         "experience-profile-set-location",
         ProfileButton::SetLocation,
         8,
+        font_size,
     );
     let _clear = spawn_action(
         commands,
@@ -848,6 +936,7 @@ fn build_edit_panel(commands: &mut Commands, parent: Entity) -> EditPanel {
         "experience-profile-clear-location",
         ProfileButton::ClearLocation,
         9,
+        font_size,
     );
     let enable_check = spawn_toggle(
         commands,
@@ -855,6 +944,7 @@ fn build_edit_panel(commands: &mut Commands, parent: Entity) -> EditPanel {
         "experience-profile-enabled",
         ProfileButton::ToggleEnabled,
         10,
+        font_size,
     );
     let private_check = spawn_toggle(
         commands,
@@ -862,10 +952,13 @@ fn build_edit_panel(commands: &mut Commands, parent: Entity) -> EditPanel {
         "experience-profile-private",
         ProfileButton::TogglePrivate,
         11,
+        font_size,
     );
     let save_row = commands
         .spawn((
             Node {
+                flex_wrap: FlexWrap::Wrap,
+                row_gap: Val::Px(6.0),
                 ..row(Val::Px(6.0))
             },
             ChildOf(panel),
@@ -877,6 +970,7 @@ fn build_edit_panel(commands: &mut Commands, parent: Entity) -> EditPanel {
         "experience-profile-save",
         ProfileButton::Save,
         12,
+        font_size,
     );
     let _cancel = spawn_action(
         commands,
@@ -884,6 +978,7 @@ fn build_edit_panel(commands: &mut Commands, parent: Entity) -> EditPanel {
         "experience-profile-cancel",
         ProfileButton::Cancel,
         13,
+        font_size,
     );
 
     EditPanel {
@@ -898,11 +993,16 @@ fn build_edit_panel(commands: &mut Commands, parent: Entity) -> EditPanel {
 }
 
 /// Spawn a caption line on its own.
-fn spawn_caption(commands: &mut Commands, parent: Entity, caption_key: &'static str) {
+fn spawn_caption(
+    commands: &mut Commands,
+    parent: Entity,
+    caption_key: &'static str,
+    font_size: f32,
+) {
     commands.spawn((
         Text::default(),
         Translated::new(caption_key),
-        UiFont::Sans.at(FONT_SIZE),
+        UiFont::Sans.at(font_size),
         text_role(DIM_TEXT_COLOR),
         Pickable::IGNORE,
         ChildOf(parent),
@@ -911,27 +1011,42 @@ fn spawn_caption(commands: &mut Commands, parent: Entity, caption_key: &'static 
 
 /// Spawn a `caption value` row and return the row, for a caller that fills the
 /// value side with something other than a plain text node.
-fn spawn_caption_row(commands: &mut Commands, parent: Entity, caption_key: &'static str) -> Entity {
+fn spawn_caption_row(
+    commands: &mut Commands,
+    parent: Entity,
+    caption_key: &'static str,
+    font_size: f32,
+) -> Entity {
     let row_entity = commands
         .spawn((
             Node {
                 align_items: AlignItems::Center,
+                // A value wider than what the caption leaves (a home-location
+                // SLURL is one unbreakable word) drops below the caption
+                // rather than running out of the column.
+                flex_wrap: FlexWrap::Wrap,
+                row_gap: Val::Px(2.0),
                 ..row(Val::Px(6.0))
             },
             ChildOf(parent),
         ))
         .id();
-    spawn_caption(commands, row_entity, caption_key);
+    spawn_caption(commands, row_entity, caption_key, font_size);
     row_entity
 }
 
 /// Spawn a `caption value` row and return the value text node.
-fn spawn_field_row(commands: &mut Commands, parent: Entity, caption_key: &'static str) -> Entity {
-    let row_entity = spawn_caption_row(commands, parent, caption_key);
+fn spawn_field_row(
+    commands: &mut Commands,
+    parent: Entity,
+    caption_key: &'static str,
+    font_size: f32,
+) -> Entity {
+    let row_entity = spawn_caption_row(commands, parent, caption_key, font_size);
     commands
         .spawn((
             Text::default(),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(TEXT_COLOR),
             Pickable::IGNORE,
             ChildOf(row_entity),
@@ -946,6 +1061,7 @@ fn spawn_action(
     label_key: &'static str,
     button: ProfileButton,
     tab: i32,
+    font_size: f32,
 ) -> ActionHandle {
     let entity = commands
         .spawn((
@@ -968,7 +1084,7 @@ fn spawn_action(
         .spawn((
             Text::default(),
             Translated::new(label_key),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             ClassList::new_with_classes([TEXT_CLASS]),
             Pickable::IGNORE,
             ChildOf(entity),
@@ -989,6 +1105,7 @@ fn spawn_toggle(
     label_key: &'static str,
     button: ProfileButton,
     tab: i32,
+    font_size: f32,
 ) -> Entity {
     let checkbox = spawn_checkbox(
         commands,
@@ -997,7 +1114,7 @@ fn spawn_toggle(
             element: label_key,
             label: label_key.to_owned(),
             tab_index: tab,
-            font_size: FONT_SIZE,
+            font_size,
             translate_label: true,
         },
     );

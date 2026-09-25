@@ -59,7 +59,11 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui_widgets::Button;
 use bevy_flair::style::components::ClassList;
-use sl_client_bevy::{AssetKey, InventoryFolderKey, InventoryType, TextureKey, Uuid};
+use sl_client_bevy::{
+    AgentKey, AssetKey, AssetType, FolderInfo, FolderState, FolderType, InventoryFolderKey,
+    InventoryKey, InventoryType, ItemInfo, OwnerKey, Permissions, Permissions5, SaleInfo,
+    TextureKey, Uuid,
+};
 use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
 use sl_viewer_ui_core::skin::{SELECTED_CLASS, set_state_class, text_role};
 use std::hash::{Hash, Hasher as _};
@@ -83,7 +87,8 @@ use sl_client_bevy::SlCommand;
 /// The blank / white texture (`IMG_WHITE`) the **Blank** quick choice picks.
 const IMG_BLANK: Uuid = Uuid::from_u128(0x5748_decc_f629_461c_9a36_a35a_221f_e21f);
 
-/// A tree row's height, in logical pixels.
+/// A tree row's height floor, in logical pixels — the height at the live font
+/// size; a larger font or a name that wraps grows the row past it.
 const ROW_HEIGHT: f32 = 20.0;
 
 /// The indent added per tree depth, in logical pixels.
@@ -449,13 +454,64 @@ fn build_picker_content(commands: &mut Commands, handle: FloaterHandle, open: &O
     commands
         .entity(handle.title_text)
         .insert(Translated::new("texture-picker-title"));
+    let parts = spawn_picker_content(commands, handle.content, PICKER_FONT);
+    commands.entity(handle.root).insert((
+        TexturePickerState {
+            requester: Some(open.requester),
+            kind: open.kind,
+            original: open.current,
+            selected: open.current,
+            filter: String::new(),
+            expanded: HashSet::new(),
+            requested: HashSet::new(),
+            dirty: true,
+            last_rows_sig: 0,
+        },
+        TexturePickerUi {
+            title_text: handle.title_text,
+            search: parts.search,
+            tree: parts.tree,
+            preview: parts.preview,
+            count: parts.count,
+            blank_button: parts.blank_button,
+            default_button: parts.default_button,
+        },
+    ));
+}
+
+/// The entities of one picker window's content that its systems address —
+/// everything of [`TexturePickerUi`] but the chrome's title, which the content
+/// builder does not own.
+struct TexturePickerParts {
+    /// The search text field.
+    search: Entity,
+    /// The scrolling tree container.
+    tree: Entity,
+    /// The selected-texture preview.
+    preview: Entity,
+    /// The shown / total count read-out.
+    count: Entity,
+    /// The **Blank** quick choice.
+    blank_button: Entity,
+    /// The **Default** quick choice.
+    default_button: Entity,
+}
+
+/// Build one picker window's content into `slot` at `font_size`: the search
+/// row, the (empty) tree, the preview pane, the quick choices and the reply
+/// row. Shared by the live window and its gallery specimen.
+fn spawn_picker_content(
+    commands: &mut Commands,
+    slot: Entity,
+    font_size: f32,
+) -> TexturePickerParts {
     let content = commands
         .spawn((
             Node {
                 padding: UiRect::all(Val::Px(8.0)),
                 ..column(Val::Px(8.0))
             },
-            ChildOf(handle.content),
+            ChildOf(slot),
         ))
         .id();
 
@@ -472,7 +528,7 @@ fn build_picker_content(commands: &mut Commands, handle: FloaterHandle, open: &O
     commands.spawn((
         Text::default(),
         Translated::new("texture-picker-search"),
-        UiFont::Sans.at(PICKER_FONT),
+        UiFont::Sans.at(font_size),
         text_role(TEXT_COLOR),
         ChildOf(search_row),
     ));
@@ -480,7 +536,7 @@ fn build_picker_content(commands: &mut Commands, handle: FloaterHandle, open: &O
         commands,
         search_row,
         &TextInputSpec {
-            font_size: PICKER_FONT,
+            font_size,
             width_glyphs: 18.0,
             tab_index: 1,
             ..TextInputSpec::new("texture-picker-search", TextInputKind::Line)
@@ -489,7 +545,7 @@ fn build_picker_content(commands: &mut Commands, handle: FloaterHandle, open: &O
     let count = commands
         .spawn((
             Text::new("0"),
-            UiFont::Sans.at(PICKER_FONT),
+            UiFont::Sans.at(font_size),
             TextColor(TEXT_COLOR),
             ClassList::new_with_classes([VALUE_CLASS]),
             Name::new("texture-picker-count"),
@@ -568,14 +624,26 @@ fn build_picker_content(commands: &mut Commands, handle: FloaterHandle, open: &O
             ChildOf(content),
         ))
         .id();
-    spawn_picker_button(commands, quick, PickerButton::None, "texture-picker-none");
-    let blank_button =
-        spawn_picker_button(commands, quick, PickerButton::Blank, "texture-picker-blank");
+    spawn_picker_button(
+        commands,
+        quick,
+        PickerButton::None,
+        "texture-picker-none",
+        font_size,
+    );
+    let blank_button = spawn_picker_button(
+        commands,
+        quick,
+        PickerButton::Blank,
+        "texture-picker-blank",
+        font_size,
+    );
     let default_button = spawn_picker_button(
         commands,
         quick,
         PickerButton::Default,
         "texture-picker-default",
+        font_size,
     );
 
     // OK / Cancel row.
@@ -589,36 +657,173 @@ fn build_picker_content(commands: &mut Commands, handle: FloaterHandle, open: &O
             ChildOf(content),
         ))
         .id();
-    spawn_picker_button(commands, buttons, PickerButton::Ok, "texture-picker-ok");
+    spawn_picker_button(
+        commands,
+        buttons,
+        PickerButton::Ok,
+        "texture-picker-ok",
+        font_size,
+    );
     spawn_picker_button(
         commands,
         buttons,
         PickerButton::Cancel,
         "texture-picker-cancel",
+        font_size,
     );
 
-    commands.entity(handle.root).insert((
-        TexturePickerState {
-            requester: Some(open.requester),
-            kind: open.kind,
-            original: open.current,
-            selected: open.current,
-            filter: String::new(),
-            expanded: HashSet::new(),
-            requested: HashSet::new(),
-            dirty: true,
-            last_rows_sig: 0,
+    TexturePickerParts {
+        search,
+        tree,
+        preview,
+        count,
+        blank_button,
+        default_button,
+    }
+}
+
+// --- Gallery specimen -------------------------------------------------------
+
+/// The texture picker's gallery / `ui_test` specimen: the live content, built by
+/// the same `spawn_picker_content` the viewer's window is, at the cell's font
+/// size, composed the way a texture-kind open composes it.
+///
+/// A sample [`InventoryModel`] (My Inventory ▸ Textures with three textures and
+/// a collapsed Sample Photos, an Objects folder holding no texture, and the
+/// Trash) is flattened by the live `build_tree_rows` under a
+/// `TexturePickerState` that has My Inventory and Textures expanded, drawn by
+/// the rebuild's own `spawn_tree_rows` (which also gives the count read-out),
+/// and the selected texture's row is marked the way `paint_tree_selection`
+/// marks it. The quick choices take the display `handle_open_texture_picker`
+/// gives them for the kind.
+///
+/// The preview pane stays empty: its thumbnail is a texture fetch
+/// ([`PendingUiTexture`]) and a specimen has no grid to fetch from. The state is
+/// not inserted on the window, so the live systems leave the specimen alone.
+pub fn spawn_texture_picker_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: crate::ui_element::ElementCx,
+) -> Entity {
+    let parts = spawn_picker_content(commands, parent, cx.font_size);
+    let (inventory, state) = sample_texture_inventory(cx);
+    let rows = build_tree_rows(&inventory, &state);
+    let (count, spawned) = spawn_tree_rows(commands, parts.tree, &rows, state.kind, cx.font_size);
+    for (row_data, row_entity) in rows.iter().zip(spawned) {
+        let selected = matches!(row_data, TreeRow::Item { key, .. } if *key == state.selected);
+        commands
+            .entity(row_entity)
+            .entry::<ClassList>()
+            .and_modify(move |mut classes| set_state_class(&mut classes, SELECTED_CLASS, selected));
+    }
+    commands.entity(parts.count).insert(Text::new(count));
+    let quick_display = quick_choice_display(state.kind);
+    for button in [parts.blank_button, parts.default_button] {
+        commands
+            .entity(button)
+            .entry::<Node>()
+            .and_modify(move |mut node| node.display = quick_display);
+    }
+    parent
+}
+
+/// The inventory and picker state the specimen draws from: the model stood up
+/// by hand through [`InventoryModel::merge_folders`] / [`InventoryModel::
+/// set_items`], and a texture-kind state with the root and Textures expanded
+/// and the wood floor selected. Sample names go through `cx.text`, so the
+/// sweep's script / pseudolocale cells transform them.
+fn sample_texture_inventory(
+    cx: crate::ui_element::ElementCx,
+) -> (InventoryModel, TexturePickerState) {
+    let folder_key = |id: u128| InventoryFolderKey::from(Uuid::from_u128(id));
+    let folder = |id: u128, parent: Option<u128>, name: &str, folder_type: FolderType| FolderInfo {
+        folder_id: folder_key(id),
+        parent_id: parent.map(folder_key),
+        name: cx.text(name),
+        folder_type,
+        version: 1,
+        state: FolderState::Loaded { version: 1 },
+    };
+    let owner = AgentKey::from(Uuid::from_u128(0x5A));
+    let full = Permissions::MODIFY | Permissions::COPY | Permissions::TRANSFER | Permissions::MOVE;
+    let item = |id: u128, folder: u128, name: &str, inv_type: InventoryType| ItemInfo {
+        item_id: InventoryKey::from(Uuid::from_u128(id)),
+        folder_id: folder_key(folder),
+        name: cx.text(name),
+        description: String::new(),
+        asset_id: Uuid::from_u128(id.saturating_add(0x1000)),
+        asset_type: match inv_type {
+            InventoryType::Object => AssetType::Object,
+            _texture => AssetType::Texture,
         },
-        TexturePickerUi {
-            title_text: handle.title_text,
-            search,
-            tree,
-            preview,
-            count,
-            blank_button,
-            default_button,
+        inv_type,
+        flags: 0,
+        sale: SaleInfo::default(),
+        creation_date: 1_710_000_000,
+        owner: OwnerKey::Agent(owner),
+        last_owner_id: Uuid::nil(),
+        creator_id: owner,
+        group: None,
+        permissions: Permissions5 {
+            base: full,
+            owner: full,
+            group: Permissions::empty(),
+            everyone: Permissions::empty(),
+            next_owner: full,
         },
-    ));
+    };
+    let mut inventory = InventoryModel::default();
+    inventory.merge_folders(
+        &[
+            folder(0x100, None, "My Inventory", FolderType::RootInventory),
+            folder(0x101, Some(0x100), "Textures", FolderType::Texture),
+            folder(0x102, Some(0x100), "Objects", FolderType::Object),
+            folder(0x103, Some(0x100), "Trash", FolderType::Trash),
+            folder(0x104, Some(0x101), "Sample Photos", FolderType::None),
+        ],
+        false,
+    );
+    inventory.set_items(
+        folder_key(0x101),
+        &[
+            item(0x301, 0x101, "Brick Wall", InventoryType::Texture),
+            item(0x302, 0x101, "Sample Wood Floor", InventoryType::Texture),
+            item(0x303, 0x101, "Test Pattern", InventoryType::Texture),
+        ],
+    );
+    inventory.set_items(
+        folder_key(0x102),
+        &[item(0x304, 0x102, "Sample Chair", InventoryType::Object)],
+    );
+    inventory.set_items(
+        folder_key(0x104),
+        &[item(
+            0x305,
+            0x104,
+            "Sample Snapshot",
+            InventoryType::Snapshot,
+        )],
+    );
+    let selected = TextureKey::from(Uuid::from_u128(0x302_u128.saturating_add(0x1000)));
+    let state = TexturePickerState {
+        kind: PickerKind::Texture,
+        original: selected,
+        selected,
+        expanded: HashSet::from_iter([folder_key(0x100), folder_key(0x101)]),
+        ..TexturePickerState::default()
+    };
+    (inventory, state)
+}
+
+/// The display of the texture-only quick choices (**Blank**, **Default**) for a
+/// picker `kind`: both are texture UUIDs, meaningless as a material, so they
+/// are hidden in material mode. Shared by [`handle_open_texture_picker`] and the
+/// specimen.
+const fn quick_choice_display(kind: PickerKind) -> Display {
+    match kind {
+        PickerKind::Texture => Display::Flex,
+        PickerKind::Material => Display::None,
+    }
 }
 
 /// Spawn a picker button, returning its entity.
@@ -627,6 +832,7 @@ fn spawn_picker_button(
     parent: Entity,
     which: PickerButton,
     label_key: &'static str,
+    font_size: f32,
 ) -> Entity {
     let button = ui_spawn::spawn_button(
         commands,
@@ -640,7 +846,7 @@ fn spawn_picker_button(
         .colors(BUTTON_BACKGROUND, CONTROL_BORDER)
         .label_color(TEXT_COLOR)
         .label_class(VALUE_CLASS)
-        .font_size(PICKER_FONT),
+        .font_size(font_size),
     )
     .button;
     commands
@@ -679,10 +885,7 @@ fn handle_open_texture_picker(
             PickerKind::Texture => "texture-picker-title",
             PickerKind::Material => "texture-picker-title-material",
         };
-        let quick_display = match open.kind {
-            PickerKind::Texture => Display::Flex,
-            PickerKind::Material => Display::None,
-        };
+        let quick_display = quick_choice_display(open.kind);
         spec.title = String::from(match open.kind {
             PickerKind::Texture => "Pick: Texture",
             PickerKind::Material => "Pick: Material",
@@ -928,20 +1131,43 @@ fn rebuild_tree(
                 commands.entity(child).despawn();
             }
         }
-        let total = rows.len();
-        let shown = total.min(MAX_ROWS);
-        if let Some(slice) = rows.get(..shown) {
-            for row_data in slice {
-                spawn_tree_row(&mut commands, ui.tree, row_data, state.kind);
-            }
-        }
+        let (count, _rows) =
+            spawn_tree_rows(&mut commands, ui.tree, &rows, state.kind, PICKER_FONT);
         if let Ok(mut text) = counts.get_mut(ui.count) {
-            text.0 = if total > shown {
-                format!("{shown} / {total} — refine search")
-            } else {
-                format!("{total}")
-            };
+            text.0 = count;
         }
+    }
+}
+
+/// Spawn the first [`MAX_ROWS`] of `rows` into `tree` at `font_size`, and
+/// return the count read-out's text for them with the spawned rows (in `rows`
+/// order). What the rebuild draws, and the specimen with it.
+fn spawn_tree_rows(
+    commands: &mut Commands,
+    tree: Entity,
+    rows: &[TreeRow],
+    kind: PickerKind,
+    font_size: f32,
+) -> (String, Vec<Entity>) {
+    let total = rows.len();
+    let shown = total.min(MAX_ROWS);
+    let spawned = rows
+        .get(..shown)
+        .unwrap_or_default()
+        .iter()
+        .map(|row_data| spawn_tree_row(commands, tree, row_data, kind, font_size))
+        .collect();
+    (count_label(total), spawned)
+}
+
+/// The count read-out's text for a tree of `total` rows: the total, or — when
+/// [`MAX_ROWS`] caps what is drawn — how many of them are shown.
+fn count_label(total: usize) -> String {
+    let shown = total.min(MAX_ROWS);
+    if total > shown {
+        format!("{shown} / {total} — refine search")
+    } else {
+        format!("{total}")
     }
 }
 
@@ -968,7 +1194,14 @@ fn paint_tree_selection(
 /// Spawn one tree row (a folder or an item). The item glyph follows `kind` (a
 /// material icon in material mode). The selection highlight is applied by
 /// [`paint_tree_selection`], not here, so a selection change never respawns.
-fn spawn_tree_row(commands: &mut Commands, tree: Entity, row_data: &TreeRow, kind: PickerKind) {
+/// Returns the row's entity.
+fn spawn_tree_row(
+    commands: &mut Commands,
+    tree: Entity,
+    row_data: &TreeRow,
+    kind: PickerKind,
+    font_size: f32,
+) -> Entity {
     let item_icon_type = match kind {
         PickerKind::Texture => InventoryType::Texture,
         PickerKind::Material => InventoryType::Material,
@@ -999,7 +1232,11 @@ fn spawn_tree_row(commands: &mut Commands, tree: Entity, row_data: &TreeRow, kin
         .spawn((
             Button,
             Node {
-                height: Val::Px(ROW_HEIGHT),
+                // A floor, not a height: the row holds text, which a larger font
+                // or a long (wrapping) name makes taller than the live size.
+                min_height: Val::Px(ROW_HEIGHT),
+                // The tree scrolls; a row never shrinks below its text to fit.
+                flex_shrink: 0.0,
                 align_items: AlignItems::Center,
                 padding: UiRect::left(Val::Px(4.0 + depth_indent(depth))),
                 column_gap: Val::Px(4.0),
@@ -1030,18 +1267,19 @@ fn spawn_tree_row(commands: &mut Commands, tree: Entity, row_data: &TreeRow, kin
     }
     commands.spawn((
         Text::new(glyph),
-        UiFont::Sans.at(PICKER_FONT),
+        UiFont::Sans.at(font_size),
         text_role(colour),
         Pickable::IGNORE,
         ChildOf(row_entity),
     ));
     commands.spawn((
         Text::new(label),
-        UiFont::Sans.at(PICKER_FONT),
+        UiFont::Sans.at(font_size),
         text_role(colour),
         Pickable::IGNORE,
         ChildOf(row_entity),
     ));
+    row_entity
 }
 
 /// The left indent for a tree row at `depth`.

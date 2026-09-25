@@ -338,8 +338,9 @@ pub fn build_tools_floater_spec() -> FloaterSpec {
         // A definite, resizable content area (like the profile floater):
         // the tab bar and pages track the window and the pages scroll
         // their overflow, so the parameter editors stay reachable at any
-        // size.
-        default_size: Some(Vec2::new(420.0, 640.0)),
+        // size. Wide enough that the five tab labels fit their strip
+        // without scrolling it at the default font.
+        default_size: Some(Vec2::new(510.0, 640.0)),
         min_size: Some(Vec2::new(340.0, 400.0)),
         dock_host: None,
         caps: FloaterCaps {
@@ -430,12 +431,63 @@ fn spawn_build_floater(mut commands: Commands, root: Option<Res<UiRoot>>) {
 /// [`spawn_build_floater`] and
 /// [`DeferredFloaterContent`]): fill the content slot and insert
 /// [`BuildToolsUi`], whose appearance wakes its `Option<Res<BuildToolsUi>>`
-/// consumers.
+/// consumers, and [`BuildTabPages`], whose appearance has the per-aspect
+/// editors ([`crate::edit_params`], [`crate::edit_texture`],
+/// [`crate::edit_contents`]) fill the tab pages.
 fn build_build_tools_content(
     In(handle): In<FloaterHandle>,
     mut commands: Commands,
     state: Res<EditToolState>,
 ) {
+    let parts =
+        spawn_build_tools_content(&mut commands, handle.content, TOOL_FONT_SIZE, state.tool);
+    commands.insert_resource(parts.create_ui);
+    commands.insert_resource(parts.land_ui);
+    commands.insert_resource(parts.pages);
+    commands.insert_resource(BuildToolsUi {
+        panel: handle.root,
+        fields: parts.fields,
+        grid_field: parts.grid_field,
+        summary_text: parts.summary_text,
+        tab_strip: parts.tab_strip,
+        tab_pages: parts.tab_pages,
+    });
+}
+
+/// The Build Tools content's entities, what [`spawn_build_tools_content`]
+/// hands back for the live window to publish (and the specimen to fill).
+#[derive(Debug)]
+struct BuildToolsParts {
+    /// The nine transform fields, position / rotation / size × X / Y / Z.
+    fields: [Entity; 9],
+    /// The grid-unit field.
+    grid_field: Entity,
+    /// The selection-summary text.
+    summary_text: Entity,
+    /// The tab strip.
+    tab_strip: Entity,
+    /// The five tab pages, in tab order.
+    tab_pages: [Entity; 5],
+    /// The same five pages, as the per-aspect editors address them.
+    pages: BuildTabPages,
+    /// The Create tool's panel.
+    create_ui: crate::edit_create::CreatePanelUi,
+    /// The Land tool's panel.
+    land_ui: crate::edit_land::LandPanelUi,
+}
+
+/// Build the Build Tools content into `slot` (the floater's content slot) at
+/// `font_size`, with the tool row on `tool`: the tool radio, the toggle rows,
+/// the linked-part row, the grid unit, the selection summary, the Create and
+/// Land panels and the five-tab shell with the transform rows in its Object
+/// page. The pages' editors are the per-aspect modules', built once the pages
+/// are published. Shared by the live floater and its specimen.
+fn spawn_build_tools_content(
+    commands: &mut Commands,
+    slot: Entity,
+    font_size: f32,
+    tool: EditTool,
+) -> BuildToolsParts {
     let content = commands
         .spawn((
             Node {
@@ -448,7 +500,7 @@ fn build_build_tools_content(
                 min_height: Val::Px(0.0),
                 ..column(Val::Px(6.0))
             },
-            ChildOf(handle.content),
+            ChildOf(slot),
         ))
         .id();
 
@@ -470,14 +522,14 @@ fn build_build_tools_content(
         "build-tool-select-land".to_owned(),
     ];
     let tool_radio = spawn_radio_group(
-        &mut commands,
+        commands,
         content,
         &RadioSpec {
             element: "build-tool",
             labels: &tool_labels,
-            active: state.tool.radio_index(),
+            active: tool.radio_index(),
             tab_index: 1,
-            font_size: TOOL_FONT_SIZE,
+            font_size,
             layout: RadioLayout::Row,
             translate_labels: true,
         },
@@ -491,13 +543,13 @@ fn build_build_tools_content(
         (BuildToggle::EditLinked, "build-toggle-edit-linked", 6),
         (BuildToggle::StretchBoth, "build-toggle-stretch-both", 7),
     ] {
-        spawn_toggle_row(&mut commands, content, toggle, key, tab_index);
+        spawn_toggle_row(commands, content, toggle, key, tab_index, font_size);
     }
 
     // Linked-part navigation row (the reference's prev_part_btn / next_part_btn):
     // shown only in edit-linked-parts mode ([`sync_link_part_nav`]), it cycles
     // the selection through the linkset's prims.
-    spawn_link_part_nav(&mut commands, content);
+    spawn_link_part_nav(commands, content, font_size);
 
     // Grid unit row.
     let grid_row = commands
@@ -509,13 +561,13 @@ fn build_build_tools_content(
             ChildOf(content),
         ))
         .id();
-    spawn_row_label(&mut commands, grid_row, "build-grid-unit-label");
+    spawn_row_label(commands, grid_row, "build-grid-unit-label", font_size);
     let grid_field = spawn_text_input(
-        &mut commands,
+        commands,
         grid_row,
         &TextInputSpec {
             initial: format_metres(DEFAULT_GRID_UNIT),
-            font_size: TOOL_FONT_SIZE,
+            font_size,
             width_glyphs: 6.0,
             tab_index: 8,
             ..TextInputSpec::new("build-grid-unit", TextInputKind::Float)
@@ -527,7 +579,7 @@ fn build_build_tools_content(
     let summary_text = commands
         .spawn((
             Text::default(),
-            UiFont::Sans.at(TOOL_FONT_SIZE),
+            UiFont::Sans.at(font_size),
             TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
             ClassList::new_with_classes([LABEL_CLASS]),
             Name::new("build-tools:summary"),
@@ -538,13 +590,13 @@ fn build_build_tools_content(
     // The Create-tool panel (viewer-prim-creation): the base-type picker shown
     // only while the Create tool is active, in place of the per-aspect tabs. It
     // sits above the tab shell so, when shown, it reads as the floater's body.
-    crate::edit_create::spawn_create_panel(&mut commands, content);
+    let create_ui = crate::edit_create::spawn_create_panel(commands, content, font_size);
 
     // The Land-tool panel (viewer-terrain-edit-brushes / viewer-parcel-join-split):
     // the brush picker, the bulldozer sliders and the parcel actions, shown only
     // while the Land tool is active and standing in for the per-aspect tabs the
     // same way the Create panel does.
-    crate::edit_land::spawn_land_panel(&mut commands, content);
+    let land_ui = crate::edit_land::spawn_land_panel(commands, content, font_size);
 
     // The tab shell: the reference's per-aspect editor tabs, in its order —
     // General (name / description; permissions are their own tasks), Object
@@ -559,7 +611,7 @@ fn build_build_tools_content(
         "build-tab-content".to_owned(),
     ];
     let tabs = spawn_tab_container(
-        &mut commands,
+        commands,
         content,
         &TabSpec {
             element: "build-tabs",
@@ -567,7 +619,7 @@ fn build_build_tools_content(
             labels: &tab_labels,
             active: 0,
             tab_index: 20,
-            font_size: TOOL_FONT_SIZE,
+            font_size,
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
@@ -576,7 +628,7 @@ fn build_build_tools_content(
     // The floater is resizable (a definite content area), so the widget must
     // track it rather than content-size — the bar widens with the window and
     // the panels grow and scroll (the profile floater's arrangement).
-    fill_tab_container(&mut commands, TabPlacement::BlockStart, &tabs);
+    fill_tab_container(commands, TabPlacement::BlockStart, &tabs);
     // Mark the tab container so [`sync_tab_visibility`] can hide the tabs while
     // a tool's own panel (Create's, Land's) stands in for them.
     commands.entity(tabs.container).insert(BuildTabContainer);
@@ -625,7 +677,7 @@ fn build_build_tools_content(
             commands.spawn((
                 Text::default(),
                 Translated::new("build-tab-placeholder"),
-                UiFont::Sans.at(TOOL_FONT_SIZE),
+                UiFont::Sans.at(font_size),
                 TextColor(Color::srgba(0.6, 0.6, 0.6, 1.0)),
                 ClassList::new_with_classes([PLACEHOLDER_CLASS]),
                 ChildOf(page),
@@ -660,7 +712,7 @@ fn build_build_tools_content(
                 ChildOf(object_page),
             ))
             .id();
-        let label = spawn_row_label(&mut commands, transform_row, key);
+        let label = spawn_row_label(commands, transform_row, key, font_size);
         commands.entity(label).insert(BuildTransformLabel(group));
         for axis in 0_usize..3_usize {
             // One element name per *axis*, not per row: the name is the node's
@@ -680,10 +732,10 @@ fn build_build_tools_content(
             };
             let slot_index = group_index.saturating_mul(3).saturating_add(axis);
             let field = spawn_text_input(
-                &mut commands,
+                commands,
                 transform_row,
                 &TextInputSpec {
-                    font_size: TOOL_FONT_SIZE,
+                    font_size,
                     width_glyphs: FIELD_WIDTH_GLYPHS,
                     tab_index: i32::try_from(slot_index.saturating_add(21)).unwrap_or(21),
                     ..TextInputSpec::new(element, TextInputKind::Float)
@@ -698,25 +750,27 @@ fn build_build_tools_content(
         }
     }
 
-    commands.insert_resource(BuildTabPages {
+    let pages = BuildTabPages {
         general: tab_pages.first().copied().unwrap_or(content),
         object: tab_pages.get(1).copied().unwrap_or(content),
         features: tab_pages.get(2).copied().unwrap_or(content),
         texture: tab_pages.get(3).copied().unwrap_or(content),
         content: tab_pages.get(4).copied().unwrap_or(content),
-    });
-    commands.insert_resource(BuildToolsUi {
-        panel: handle.root,
+    };
+    BuildToolsParts {
         fields,
         grid_field,
         summary_text,
         tab_strip,
         tab_pages,
-    });
+        pages,
+        create_ui,
+        land_ui,
+    }
 }
 
-/// Spawn one toggle row — the shared checkbox widget — flipping a
-/// [`BuildToggle`].
+/// Spawn one toggle row — the shared checkbox widget, at `font_size` — flipping
+/// a [`BuildToggle`].
 ///
 /// The Fluent key is the widget's element id, so each toggle is addressable by
 /// its own name (`build-toggle-snap:checkbox`).
@@ -726,6 +780,7 @@ fn spawn_toggle_row(
     toggle: BuildToggle,
     label_key: &'static str,
     tab_index: i32,
+    font_size: f32,
 ) {
     let checkbox = spawn_checkbox(
         commands,
@@ -734,12 +789,17 @@ fn spawn_toggle_row(
             element: label_key,
             label: label_key.to_owned(),
             tab_index,
-            font_size: TOOL_FONT_SIZE,
+            font_size,
             translate_label: true,
         },
     );
+    // The state is read optionally: absent only in the gallery / `ui_test`
+    // hosts, whose specimen has no edit tool behind it.
     commands.entity(checkbox.checkbox).insert(toggle).observe(
-        move |change: On<ValueChange<bool>>, mut state: ResMut<EditToolState>| {
+        move |change: On<ValueChange<bool>>, state: Option<ResMut<EditToolState>>| {
+            let Some(mut state) = state else {
+                return;
+            };
             // The widget has already moved its own tick; `sync_toggle_ticks`
             // agrees with it on the next frame, from the state this writes.
             if toggle.get(&state) != change.value {
@@ -767,7 +827,7 @@ struct LinkPartNavRow;
 /// cycle the selection through the current linkset's prims (the reference's
 /// `prev_part_btn` / `next_part_btn`). Hidden by default; [`sync_link_part_nav`]
 /// reveals it in edit-linked-parts mode.
-fn spawn_link_part_nav(commands: &mut Commands, parent: Entity) {
+fn spawn_link_part_nav(commands: &mut Commands, parent: Entity, font_size: f32) {
     let nav_row = commands
         .spawn((
             Node {
@@ -781,7 +841,7 @@ fn spawn_link_part_nav(commands: &mut Commands, parent: Entity) {
             ChildOf(parent),
         ))
         .id();
-    spawn_row_label(commands, nav_row, "build-link-part-label");
+    spawn_row_label(commands, nav_row, "build-link-part-label", font_size);
     for (dir, slot, name, tab_index) in [
         (LinkPartDir::Prev, glyph::BACK, "prev", 9_i32),
         (LinkPartDir::Next, glyph::FORWARD, "next", 10_i32),
@@ -803,15 +863,16 @@ fn spawn_link_part_nav(commands: &mut Commands, parent: Entity) {
             // The colour `.sk-build-value` paints — see [`VALUE_CLASS`].
             .label_color(SkinPalette::FALLBACK.text_primary)
             .label_class(VALUE_CLASS)
-            .font_size(TOOL_FONT_SIZE),
+            .font_size(font_size),
         )
         .button;
         commands.entity(button).observe(
             move |press: On<Pointer<Press>>,
-                  mut selection: ResMut<SelectionSet>,
-                  tool: Res<EditToolState>,
-                  objects: Res<ObjectState>| {
-                if press.button == PointerButton::Primary {
+                  session: Option<(ResMut<SelectionSet>, Res<EditToolState>, Res<ObjectState>)>| {
+                // Absent only in the gallery / `ui_test` hosts.
+                if let Some((mut selection, tool, objects)) = session
+                    && press.button == PointerButton::Primary
+                {
                     cycle_link_part(dir, &mut selection, &tool, &objects);
                 }
             },
@@ -918,17 +979,18 @@ fn sync_link_part_nav(
     }
 }
 
-/// Spawn a translated row label.
+/// Spawn a translated row label at `font_size`.
 pub(crate) fn spawn_row_label(
     commands: &mut Commands,
     parent: Entity,
     key: &'static str,
+    font_size: f32,
 ) -> Entity {
     commands
         .spawn((
             Text::default(),
             Translated::new(key),
-            UiFont::Sans.at(TOOL_FONT_SIZE),
+            UiFont::Sans.at(font_size),
             // Keep the label on one line: as a flex item it would otherwise shrink
             // below its content width and wrap, and the text measure then computes
             // the wrong row height so it overlaps the row below (a longer label
@@ -1063,8 +1125,19 @@ fn sync_toggle_ticks(
     if !state.is_changed() {
         return;
     }
-    for (entity, toggle, ticked) in &toggles {
-        let on = toggle.get(&state);
+    tick_toggles(&state, &mut commands, &toggles);
+}
+
+/// Tick each toggle row whose flag `state` has on, and clear the rest — the
+/// body of [`sync_toggle_ticks`], which the gallery specimen runs for the state
+/// a fresh window opens in.
+fn tick_toggles(
+    state: &EditToolState,
+    commands: &mut Commands<'_, '_>,
+    toggles: &Query<(Entity, &BuildToggle, Has<Checked>)>,
+) {
+    for (entity, toggle, ticked) in toggles {
+        let on = toggle.get(state);
         if on && !ticked {
             commands.entity(entity).insert(Checked);
         } else if !on && ticked {
@@ -1116,57 +1189,91 @@ fn update_selection_summary(
     let Ok(mut text) = texts.get_mut(ui.summary_text) else {
         return;
     };
-    let want = if selection.is_empty() {
-        translator.get("build-selection-none")
-    } else {
-        let count = i64::try_from(selection.len()).unwrap_or(i64::MAX);
-        let mut line = translator.format(
-            "build-selection-count",
-            &TransArgs::new().int("count", count),
-        );
-        // The prim count across the distinct linksets the selection touches —
-        // "how many prims are in the selected linkset(s)".
-        let prims = selection_prim_count(&selection, &objects);
-        if prims > 0 {
-            let prims = i64::try_from(prims).unwrap_or(i64::MAX);
-            line.push_str(" — ");
-            line.push_str(&translator.format(
-                "build-selection-prims",
-                &TransArgs::new().int("count", prims),
-            ));
-        }
-        // Edit-linked-parts, one part selected: that part's Second Life link
-        // number (the reference's `link_number` read-out).
-        if tool.edit_linked
-            && selection.len() == 1
-            && let Some(number) = selection
-                .primary()
-                .and_then(|primary| link_number(primary.scoped, &objects))
-        {
-            line.push_str(" — ");
-            line.push_str(&translator.format(
-                "build-selection-link",
-                &TransArgs::new().int("number", i64::from(number)),
-            ));
-        }
-        if let Some(properties) = selection
+    let summary = (!selection.is_empty()).then(|| {
+        let properties = selection
             .primary()
-            .and_then(|primary| primary.properties.as_ref())
-        {
-            if !properties.name.is_empty() {
-                line.push_str(" — ");
-                line.push_str(&properties.name);
-            }
-            if !properties.permissions.owner.contains(Permissions::MODIFY) {
-                line.push_str(" — ");
-                line.push_str(&translator.get("build-selection-no-modify"));
-            }
+            .and_then(|primary| primary.properties.as_ref());
+        SelectionSummary {
+            count: selection.len(),
+            // The prim count across the distinct linksets the selection
+            // touches — "how many prims are in the selected linkset(s)".
+            prims: selection_prim_count(&selection, &objects),
+            // Edit-linked-parts, one part selected: that part's Second Life
+            // link number (the reference's `link_number` read-out).
+            link: if tool.edit_linked && selection.len() == 1 {
+                selection
+                    .primary()
+                    .and_then(|primary| link_number(primary.scoped, &objects))
+            } else {
+                None
+            },
+            name: properties.map(|properties| properties.name.as_str()),
+            no_modify: properties.is_some_and(|properties| {
+                !properties.permissions.owner.contains(Permissions::MODIFY)
+            }),
         }
-        line
-    };
+    });
+    let want = selection_summary_line(summary.as_ref(), &translator);
     if text.0 != want {
         text.0 = want;
     }
+}
+
+/// What the selection-summary line says about a non-empty selection.
+#[derive(Debug, Clone, Copy)]
+struct SelectionSummary<'a> {
+    /// How many objects are selected.
+    count: usize,
+    /// How many prims the selected linksets hold (none said when zero).
+    prims: usize,
+    /// The one selected part's link number, in edit-linked-parts mode.
+    link: Option<u32>,
+    /// The primary's name, once its properties reply landed.
+    name: Option<&'a str>,
+    /// Whether the primary is known not to be modifiable.
+    no_modify: bool,
+}
+
+/// The selection-summary line for `summary` (`None` for nothing selected):
+/// the count, the prim count, the link number, the name and the no-modify
+/// warning, each segment present only when it has something to say. Shared
+/// by [`update_selection_summary`] and the gallery specimen.
+fn selection_summary_line(
+    summary: Option<&SelectionSummary<'_>>,
+    translator: &Translator<'_>,
+) -> String {
+    let Some(summary) = summary else {
+        return translator.get("build-selection-none");
+    };
+    let count = i64::try_from(summary.count).unwrap_or(i64::MAX);
+    let mut line = translator.format(
+        "build-selection-count",
+        &TransArgs::new().int("count", count),
+    );
+    if summary.prims > 0 {
+        let prims = i64::try_from(summary.prims).unwrap_or(i64::MAX);
+        line.push_str(" — ");
+        line.push_str(&translator.format(
+            "build-selection-prims",
+            &TransArgs::new().int("count", prims),
+        ));
+    }
+    if let Some(number) = summary.link {
+        line.push_str(" — ");
+        line.push_str(&translator.format(
+            "build-selection-link",
+            &TransArgs::new().int("number", i64::from(number)),
+        ));
+    }
+    if let Some(name) = summary.name.filter(|name| !name.is_empty()) {
+        line.push_str(" — ");
+        line.push_str(name);
+    }
+    if summary.no_modify {
+        line.push_str(" — ");
+        line.push_str(&translator.get("build-selection-no-modify"));
+    }
+    line
 }
 
 /// The total prim count across the distinct linksets the selection touches —
@@ -1233,6 +1340,16 @@ fn group_values(motion: &ObjectSlMotion, group: FieldGroup) -> [f32; 3] {
         }
         FieldGroup::Size => [motion.scale.x, motion.scale.y, motion.scale.z],
     }
+}
+
+/// What a transform field shows for `motion` (the primary's, or `None` for
+/// nothing selected): its row's value on its axis, formatted as the fields
+/// display it.
+fn transform_field_text(motion: Option<&ObjectSlMotion>, marker: &BuildNumericField) -> String {
+    motion.map_or_else(String::new, |motion| {
+        let values = group_values(motion, marker.group);
+        format_metres(*values.get(marker.axis).unwrap_or(&0.0))
+    })
 }
 
 /// The transform-field widgets the sync rewrites, bundled as one
@@ -1331,10 +1448,7 @@ fn sync_numeric_fields(
         let Ok(marker) = widgets.markers.get(field) else {
             continue;
         };
-        let want = primary_motion.map_or_else(String::new, |motion| {
-            let values = group_values(motion, marker.group);
-            format_metres(*values.get(marker.axis).unwrap_or(&0.0))
-        });
+        let want = transform_field_text(primary_motion, marker);
         if let Ok(mut editor) = widgets.editors.get_mut(field)
             && editor.value().to_string() != want
         {
@@ -1540,114 +1654,126 @@ fn commit_numeric_fields(
     }));
 }
 
-/// Spawn the gallery specimen of the Build Tools panel: the static shape —
-/// tool buttons, a toggle row, and one numeric transform row — with no live
-/// behaviour, for the no-login gallery and the `ui_test` matrix.
+// ---------------------------------------------------------------------------
+// Gallery specimen
+// ---------------------------------------------------------------------------
+
+/// The Build Tools window's gallery / `ui_test` specimen: the whole window as
+/// the viewer composes it, with a sample prim selected under the Move tool.
+///
+/// The content is the live `spawn_build_tools_content` at the cell's font
+/// size, and the tab pages are filled by the same builders the per-aspect
+/// modules run once the live window publishes its pages — the General /
+/// Object / Features editors ([`crate::edit_params`]), the Texture tab with its
+/// material channels ([`crate::edit_texture`], [`crate::edit_material`]) and
+/// the Content tab ([`crate::edit_contents`]). The Create and Land panels are
+/// built too, hidden, as the Move tool leaves them.
+///
+/// The sample prim — a modifiable wooden box the agent owns, with a small
+/// listing — is drawn through each module's own drawing half of its sync: the
+/// selection summary, the nine transform fields and the toggle ticks here, the
+/// parameter snapshot, the representative face and the contents rows there.
+///
+/// It publishes none of the live window's resources, so the live systems
+/// leave it alone.
 pub fn spawn_build_tools_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: crate::ui_element::ElementCx,
 ) -> Entity {
-    let root = commands
-        .spawn((
-            Node {
-                padding: UiRect::all(Val::Px(8.0)),
-                ..column(Val::Px(6.0))
-            },
-            Name::new("build-tools-specimen"),
-            ChildOf(parent),
-        ))
-        .id();
-    // The tool-mode radio group — the same widget the live floater builds, so
-    // the swept specimen matches. Literal labels (not Fluent keys) because the
-    // gallery / harness supply their own sampled strings.
-    let tool_labels: [String; 5] = [
-        cx.text("Create"),
-        cx.text("Move"),
-        cx.text("Rotate"),
-        cx.text("Stretch"),
-        cx.text("Select Face"),
-    ];
-    spawn_radio_group(
+    let parts = spawn_build_tools_content(commands, parent, cx.font_size, EditTool::Move);
+    crate::edit_params::spawn_param_tabs_into(commands, &parts.pages, cx.font_size);
+    let texture =
+        crate::edit_texture::spawn_texture_tab_into(commands, parts.pages.texture, cx.font_size);
+    let contents = crate::edit_contents::spawn_contents_tab_into(
         commands,
-        root,
-        &RadioSpec {
-            element: "build-tool",
-            labels: &tool_labels,
-            active: 0,
-            tab_index: 1,
-            font_size: cx.font_size,
-            layout: RadioLayout::Row,
-            translate_labels: false,
-        },
+        parts.pages.content,
+        cx.font_size,
+        cx.font_size,
     );
-    let toggle = commands
-        .spawn((
-            Node {
-                align_items: AlignItems::Center,
-                flex_wrap: FlexWrap::Wrap,
-                row_gap: Val::Px(6.0),
-                ..row(Val::Px(6.0))
+
+    let sample = BuildToolsSample {
+        summary_text: parts.summary_text,
+        fields: parts.fields,
+        name: cx.text("Sample Box"),
+        motion: ObjectSlMotion {
+            position: Vector {
+                x: 128.0,
+                y: 64.5,
+                z: 23.125,
             },
-            ChildOf(root),
-        ))
-        .id();
-    // The real widget, ticked: a specimen is what a skin author looks at, so a
-    // box painted to look like one would be showing them the wrong thing.
-    let snap = spawn_checkbox(
-        commands,
-        toggle,
-        &CheckboxSpec {
-            element: "build-specimen-snap",
-            label: cx.text("Snap to grid"),
-            tab_index: 0,
-            font_size: cx.font_size,
-            translate_label: false,
+            rotation: euler_deg_to_rotation([0.0, 0.0, 45.0]),
+            scale: Vector {
+                x: 0.5,
+                y: 0.5,
+                z: 0.5,
+            },
+            is_root: true,
+            attachment: false,
         },
-    );
-    commands.entity(snap.checkbox).insert(Checked);
-    let transform_row = commands
-        .spawn((
-            Node {
-                align_items: AlignItems::Center,
-                flex_wrap: FlexWrap::Wrap,
-                row_gap: Val::Px(4.0),
-                ..row(Val::Px(4.0))
-            },
-            ChildOf(root),
-        ))
-        .id();
-    commands
-        .spawn((
-            Node {
-                min_width: Val::Px(64.0),
-                max_width: Val::Px(220.0),
-                ..Default::default()
-            },
-            ChildOf(transform_row),
-        ))
-        .with_child((
-            Text::new(cx.text("Position")),
-            cx.font(UiFont::Sans),
-            TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
-        ));
-    for (element, value) in [
-        ("build-specimen-x", "128.000"),
-        ("build-specimen-y", "64.500"),
-        ("build-specimen-z", "23.125"),
-    ] {
-        spawn_text_input(
-            commands,
-            transform_row,
-            &TextInputSpec {
-                initial: value.to_owned(),
-                font_size: cx.font_size,
-                width_glyphs: FIELD_WIDTH_GLYPHS,
-                ..TextInputSpec::new(element, TextInputKind::Float)
-            },
-        );
+    };
+    commands.queue(move |world: &mut World| {
+        if let Err(error) = world.run_system_cached_with(show_build_tools_specimen, sample) {
+            warn!("build tools specimen: the sample selection was not drawn: {error}");
+        }
+    });
+    crate::edit_params::fill_param_tabs_specimen(commands, cx);
+    crate::edit_texture::fill_texture_tab_specimen(commands, texture);
+    crate::edit_contents::fill_contents_tab_specimen(commands, contents, cx, cx.font_size);
+    parent
+}
+
+/// What the specimen's one-shot draws into the window's own rows: the
+/// summary line and transform fields it writes, and the sample prim.
+#[derive(Debug)]
+struct BuildToolsSample {
+    /// The selection-summary text.
+    summary_text: Entity,
+    /// The nine transform fields.
+    fields: [Entity; 9],
+    /// The sample prim's name.
+    name: String,
+    /// The sample prim's Second Life transform.
+    motion: ObjectSlMotion,
+}
+
+/// The specimen's one-shot: the summary line for one selected, modifiable
+/// prim, its transform in the nine fields, and the toggle ticks of a fresh
+/// window — what [`update_selection_summary`], [`sync_numeric_fields`] and
+/// [`sync_toggle_ticks`] draw for a live selection.
+fn show_build_tools_specimen(
+    In(sample): In<BuildToolsSample>,
+    translator: Translator,
+    mut widgets: NumericFieldWidgets,
+    mut texts: Query<&mut Text>,
+    toggles: Query<(Entity, &BuildToggle, Has<Checked>)>,
+    mut commands: Commands,
+) {
+    let summary = SelectionSummary {
+        count: 1,
+        prims: 1,
+        link: None,
+        name: Some(&sample.name),
+        no_modify: false,
+    };
+    if let Ok(mut text) = texts.get_mut(sample.summary_text) {
+        text.0 = selection_summary_line(Some(&summary), &translator);
     }
-    root
+    for field in sample.fields {
+        let Ok(marker) = widgets.markers.get(field) else {
+            continue;
+        };
+        let want = transform_field_text(Some(&sample.motion), marker);
+        if let Ok(mut editor) = widgets.editors.get_mut(field) {
+            set_editor_text(
+                &mut editor,
+                &want,
+                &mut widgets.font_cx,
+                &mut widgets.layout_cx,
+            );
+        }
+    }
+    tick_toggles(&EditToolState::default(), &mut commands, &toggles);
 }
 
 /// Run condition: true while the build tool is **inactive** — the gate that

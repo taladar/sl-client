@@ -82,13 +82,20 @@ use bevy::text::EditableText;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
 use sl_viewer_ui_core::skin::BUTTON_CLASS;
-use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class, text_role};
+use sl_viewer_ui_core::skin::{
+    DISABLED_TEXT_CLASS, SELECTED_CLASS, TEXT_CLASS, set_state_class, text_role,
+};
 
-use sl_client_bevy::{Command, ExperienceKey, SlCommand, SlEvent, SlSessionEvent};
+use bevy::ecs::system::RunSystemOnce as _;
+use sl_client_bevy::{
+    Command, ExperienceInfo, ExperienceKey, GroupKey, OwnerKey, SlCommand, SlEvent, SlSessionEvent,
+    Uuid,
+};
 use sl_settings::{Scope, SettingValue};
 
 use crate::experience_profile::{
-    MATURITY_KEYS, OpenExperienceProfile, maturity_from_index, maturity_index,
+    MATURITY_ADULT, MATURITY_GENERAL, MATURITY_KEYS, MATURITY_MODERATE, OpenExperienceProfile,
+    maturity_from_index, maturity_index,
 };
 use crate::experience_search::{
     COL_SEARCH_NAME, COL_SEARCH_OWNER, COL_SEARCH_RATING, ExperienceInfos, ExperienceRow,
@@ -96,8 +103,8 @@ use crate::experience_search::{
 };
 use crate::experiences_floater::{SETTING_SEARCH_MATURITY, search_ceiling};
 use crate::floater::{
-    Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterHost, FloaterOp, FloaterOwner,
-    FloaterSpec, FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater, picker_identity,
+    Floater, FloaterCaps, FloaterCommand, FloaterHost, FloaterOp, FloaterOwner, FloaterSpec,
+    FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater, picker_identity,
 };
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::intents::{ExperiencePicked, ExperiencePickerFilter, OpenExperiencePicker};
@@ -109,8 +116,8 @@ use crate::ui_combo::{ComboChanged, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
 use crate::ui_search::{SearchFieldSpec, spawn_search_field};
 use crate::ui_table::{
-    TableRowCells, TableSelectionMode, TableSortDefault, TableSpec, TableState, set_table_cell,
-    spawn_table, spawn_table_row,
+    SpecimenTable, TableRowCells, TableSelectionMode, TableSortDefault, TableSpec, TableState,
+    set_table_cell, spawn_specimen_table_rows, spawn_table, spawn_table_row,
 };
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 use crate::world_api::AvatarState;
@@ -125,11 +132,16 @@ const FONT_SIZE: f32 = 13.0;
 /// One result row's height, in logical pixels.
 const ROW_HEIGHT: f32 = 18.0;
 
-/// The results viewport's height floor, in logical pixels.
-const LIST_MIN_HEIGHT: f32 = 180.0;
+/// The results viewport's height floor, in logical pixels: the header and five
+/// rows. Only a floor — the table grows into whatever the window has spare — so
+/// it stays low enough that a large font or a long translation, which wraps the
+/// action row onto extra lines, still leaves the window's rows room.
+const LIST_MIN_HEIGHT: f32 = 6.0 * ROW_HEIGHT;
 
-/// The window's default content size.
-const CONTENT_SIZE: Vec2 = Vec2::new(420.0, 340.0);
+/// The window's default content size (the reference's
+/// `floater_experience_search.xml` is 350 tall with its 18 px header; the extra
+/// holds the action row once it wraps at a large font).
+const CONTENT_SIZE: Vec2 = Vec2::new(420.0, 380.0);
 
 /// The window's minimum content size.
 const MIN_CONTENT_SIZE: Vec2 = Vec2::new(320.0, 240.0);
@@ -363,7 +375,7 @@ fn open_experience_picker(
         let opened = windows.open(experience_picker_floater_spec(), key);
         match opened {
             KeyedFloaterOpen::Spawned(handle) => {
-                let ui = build_picker_content(&mut spawner, &handle, rating);
+                let ui = build_picker_content(&mut spawner, handle.content, rating, FONT_SIZE);
                 spawner
                     .entity(handle.title_text)
                     .insert(Translated::new("experience-picker-title"));
@@ -388,14 +400,16 @@ fn open_experience_picker(
     }
 }
 
-/// Build one window's content: the query row, the rating filter, the results
-/// table and the reply row.
+/// Build one window's content into `content` at `font_size`: the query row,
+/// the rating filter, the results table and the reply row. Shared by the live
+/// window and its gallery specimen. The table keeps its own static spec's size:
+/// [`spawn_table`] takes a `'static` [`TableSpec`].
 fn build_picker_content(
     commands: &mut Commands,
-    handle: &FloaterHandle,
+    content: Entity,
     rating: usize,
+    font_size: f32,
 ) -> ExperiencePickerUi {
-    let content = handle.content;
     let query_row = commands
         .spawn((
             Node {
@@ -411,7 +425,7 @@ fn build_picker_content(
         query_row,
         &SearchFieldSpec {
             tab_index: 1,
-            font_size: FONT_SIZE,
+            font_size,
             min_width: 160.0,
             placeholder: String::new(),
             search_glyph: true,
@@ -429,6 +443,7 @@ fn build_picker_content(
         "experiences-find",
         PickerButton::Find,
         2,
+        font_size,
     );
 
     let filter_row = commands
@@ -444,7 +459,7 @@ fn build_picker_content(
     commands.spawn((
         Text::default(),
         Translated::new("experiences-search-rating"),
-        UiFont::Sans.at(FONT_SIZE),
+        UiFont::Sans.at(font_size),
         text_role(DIM_TEXT_COLOR),
         Pickable::IGNORE,
         ChildOf(filter_row),
@@ -460,7 +475,7 @@ fn build_picker_content(
             // preference, so it survives the window that does not.
             active: rating,
             tab_index: 3,
-            font_size: FONT_SIZE,
+            font_size,
             translate_labels: true,
         },
     );
@@ -504,6 +519,7 @@ fn build_picker_content(
         "experience-picker-select",
         PickerButton::Select,
         4,
+        font_size,
     );
     let _cancel = spawn_action(
         commands,
@@ -511,6 +527,7 @@ fn build_picker_content(
         "experience-picker-cancel",
         PickerButton::Cancel,
         5,
+        font_size,
     );
     let _profile = spawn_action(
         commands,
@@ -518,6 +535,7 @@ fn build_picker_content(
         "experiences-profile",
         PickerButton::Profile,
         6,
+        font_size,
     );
     let _previous = spawn_action(
         commands,
@@ -525,6 +543,7 @@ fn build_picker_content(
         "experiences-page-previous",
         PickerButton::Page(false),
         7,
+        font_size,
     );
     let _next = spawn_action(
         commands,
@@ -532,11 +551,12 @@ fn build_picker_content(
         "experiences-page-next",
         PickerButton::Page(true),
         8,
+        font_size,
     );
     let status = commands
         .spawn((
             Text::default(),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(DIM_TEXT_COLOR),
             Pickable::IGNORE,
             Name::new("experience-picker-status"),
@@ -553,6 +573,106 @@ fn build_picker_content(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Gallery specimen.
+// ---------------------------------------------------------------------------
+
+/// The experience picker's gallery / `ui_test` specimen: the live content,
+/// built by the same `build_picker_content` the viewer's window is, at the
+/// cell's font size (the results table keeps its static spec's), with the
+/// rating filter at Adult and a sample first page of results.
+///
+/// The rows are what the live view draws: rendered by the same
+/// `render_rows` (the rating through the translator, the owner through the
+/// group-name cache, here a local one holding the sample group), sorted by the
+/// same `sort_experience_rows`, and pooled / bound into the real table by the
+/// table widget's specimen helper with the cells `bind_picker_rows` writes.
+/// The first row is selected, and the status line is `status_line`'s for a
+/// landed page one. That needs the translator, so it runs as a one-shot system
+/// once the content exists. It carries no `ExperiencePickerState`: the live
+/// view systems read session resources a specimen host need not have.
+pub fn spawn_experience_picker_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: crate::ui_element::ElementCx,
+) -> Entity {
+    let ui = build_picker_content(
+        commands,
+        parent,
+        maturity_index(MATURITY_ADULT),
+        cx.font_size,
+    );
+    let group = GroupKey::from(Uuid::from_u128(0x6b));
+    let group_name = cx.text("Example Group");
+    let infos: ExperienceInfos = [
+        ("Sample Race Course", MATURITY_GENERAL),
+        ("Test Adventure", MATURITY_MODERATE),
+        ("Example Arena", MATURITY_ADULT),
+    ]
+    .into_iter()
+    .zip(0x61_u128..)
+    .map(|((name, maturity), id)| {
+        let key = ExperienceKey::from(Uuid::from_u128(id));
+        let info = ExperienceInfo {
+            public_id: key,
+            name: cx.text(name),
+            owner: Some(OwnerKey::Group(group)),
+            maturity,
+            ..ExperienceInfo::default()
+        };
+        (key, info)
+    })
+    .collect();
+    let ids: Vec<ExperienceKey> = infos.keys().copied().collect();
+    let table = SpecimenTable {
+        root: ui.table,
+        viewport: ui.viewport,
+    };
+    let status = ui.status;
+    commands.queue(move |world: &mut World| {
+        let drawn = world.run_system_once(move |mut commands: Commands, translator: Translator| {
+            let mut groups = GroupsModel::default();
+            groups.note_resolved_name(group, &group_name);
+            let mut rows = render_rows(&infos, &ids, &AvatarState::default(), &groups, &translator);
+            sort_experience_rows(&mut rows, &[("name", true)]);
+            let cells: Vec<Vec<(String, Color)>> = rows
+                .into_iter()
+                .map(|row| {
+                    vec![
+                        (row.rating, TEXT_COLOR),
+                        (row.name, TEXT_COLOR),
+                        (row.owner, TEXT_COLOR),
+                    ]
+                })
+                .collect();
+            let bound = spawn_specimen_table_rows(&mut commands, table, &PICKER_TABLE, &cells);
+            // The selection's look is the row class the table widget paints
+            // from its state; a specimen host runs no table plugin to paint it.
+            if let Some((first, _cells)) = bound.first() {
+                commands
+                    .entity(*first)
+                    .entry::<ClassList>()
+                    .and_modify(|mut classes| set_state_class(&mut classes, SELECTED_CLASS, true));
+            }
+            commands
+                .entity(table.root)
+                .entry::<TableState>()
+                .and_modify(|mut state| state.set_selection(vec![0], Some(0)));
+            let progress = SearchProgress::Done {
+                has_next_page: true,
+                has_previous_page: false,
+            };
+            commands
+                .entity(status)
+                .insert(Text::new(status_line(progress, 1, &translator)));
+        });
+        if let Err(error) = drawn {
+            error!("experience-picker specimen: its sample data could not be drawn: {error}");
+        }
+    });
+    parent
+}
+
 /// Spawn one of a window's action buttons, wired to the shared observer.
 fn spawn_action(
     commands: &mut Commands,
@@ -560,6 +680,7 @@ fn spawn_action(
     label_key: &'static str,
     button: PickerButton,
     tab: i32,
+    font_size: f32,
 ) -> Entity {
     let entity = commands
         .spawn((
@@ -584,7 +705,7 @@ fn spawn_action(
     commands.spawn((
         Text::default(),
         Translated::new(label_key),
-        UiFont::Sans.at(FONT_SIZE),
+        UiFont::Sans.at(font_size),
         ClassList::new_with_classes([TEXT_CLASS]),
         Pickable::IGNORE,
         ChildOf(entity),
@@ -913,19 +1034,25 @@ fn paint_picker_actions(
                 }
             }
         }
-        let line = match state.progress {
-            SearchProgress::Idle => String::new(),
-            SearchProgress::Searching => translator.get("experiences-searching"),
-            SearchProgress::Done { .. } => translator.format(
-                "experiences-search-page",
-                &TransArgs::new().int("page", i64::from(state.page)),
-            ),
-        };
+        let line = status_line(state.progress, state.page, &translator);
         if let Ok(mut text) = texts.get_mut(ui.status)
             && text.0 != line
         {
             text.0 = line;
         }
+    }
+}
+
+/// A window's status line for a search at `progress` on `page`: empty before
+/// any search, "searching" while one is out, and the page number once it lands.
+fn status_line(progress: SearchProgress, page: i32, translator: &Translator) -> String {
+    match progress {
+        SearchProgress::Idle => String::new(),
+        SearchProgress::Searching => translator.get("experiences-searching"),
+        SearchProgress::Done { .. } => translator.format(
+            "experiences-search-page",
+            &TransArgs::new().int("page", i64::from(page)),
+        ),
     }
 }
 
@@ -1028,7 +1155,7 @@ fn on_picker_button(
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
-    use sl_client_bevy::{ExperienceInfo, ExperienceProperties, Uuid};
+    use sl_client_bevy::ExperienceProperties;
     use sl_types::experience::{PROPERTY_GRID, PROPERTY_PRIVILEGED};
 
     use super::*;

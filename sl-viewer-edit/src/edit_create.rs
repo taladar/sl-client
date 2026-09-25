@@ -39,7 +39,7 @@ use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{Command, PrimShape, SlCommand, Vector, pcode};
 
 use crate::coords::bevy_to_sl_vec;
-use crate::edit_tool::{LABEL_CLASS, TOOL_FONT_SIZE, VALUE_CLASS, spawn_row_label};
+use crate::edit_tool::{LABEL_CLASS, VALUE_CLASS, spawn_row_label};
 use crate::gizmos::{GizmoInteraction, on_gizmo_layer};
 use crate::i18n::Translated;
 use crate::objects::{ObjectCategory, ObjectSlMotion, SceneObject};
@@ -333,7 +333,7 @@ struct CreateBaseRadio;
 
 /// The create panel's entities, for the visibility / selection systems.
 #[derive(Resource, Debug, Clone, Copy)]
-struct CreatePanelUi {
+pub(crate) struct CreatePanelUi {
     /// The panel root holding the base radio and hint (a [`UiPanelShown`] gate).
     panel: Entity,
     /// The tree-species row (a [`UiPanelShown`] gate, shown for a tree base).
@@ -566,11 +566,16 @@ fn distance_to_segment(point: Vec2, a: Vec2, b: Vec2) -> f32 {
     (point.x - cx).hypot(point.y - cy)
 }
 
-/// Spawn the create panel under `parent` (the floater content): the base-type
-/// radio, a build hint, and the tree / grass species rows. Publishes
-/// [`CreatePanelUi`]. The panel and species rows start hidden ([`UiPanelShown`]);
-/// `sync_create_panel` reveals them with the Create tool.
-pub(crate) fn spawn_create_panel(commands: &mut Commands, parent: Entity) {
+/// Spawn the create panel under `parent` (the floater content) at `font_size`:
+/// the base-type radio, a build hint, and the tree / grass species rows.
+/// Returns the [`CreatePanelUi`] the live floater publishes. The panel and
+/// species rows start hidden ([`UiPanelShown`]); `sync_create_panel` reveals
+/// them with the Create tool.
+pub(crate) fn spawn_create_panel(
+    commands: &mut Commands,
+    parent: Entity,
+    font_size: f32,
+) -> CreatePanelUi {
     // The panel root: hidden until the Create tool is active.
     let panel = commands
         .spawn((
@@ -599,7 +604,7 @@ pub(crate) fn spawn_create_panel(commands: &mut Commands, parent: Entity) {
             labels: &base_labels,
             active: 0,
             tab_index: 30,
-            font_size: TOOL_FONT_SIZE,
+            font_size,
             layout: RadioLayout::Row,
             translate_labels: true,
         },
@@ -610,7 +615,7 @@ pub(crate) fn spawn_create_panel(commands: &mut Commands, parent: Entity) {
     commands.spawn((
         Text::default(),
         Translated::new("build-create-hint"),
-        UiFont::Sans.at(TOOL_FONT_SIZE),
+        UiFont::Sans.at(font_size),
         // A skinless fallback; the skin recolours via the class token.
         TextColor(Color::srgba(0.6, 0.6, 0.6, 1.0)),
         ClassList::new_with_classes([LABEL_CLASS]),
@@ -627,6 +632,7 @@ pub(crate) fn spawn_create_panel(commands: &mut Commands, parent: Entity) {
         TREE_COMBO_ELEMENT,
         &TREE_SPECIES,
         31,
+        font_size,
     );
     let (grass_row, grass_combo) = spawn_species_row(
         commands,
@@ -635,19 +641,20 @@ pub(crate) fn spawn_create_panel(commands: &mut Commands, parent: Entity) {
         GRASS_COMBO_ELEMENT,
         &GRASS_SPECIES,
         32,
+        font_size,
     );
 
-    commands.insert_resource(CreatePanelUi {
+    CreatePanelUi {
         panel,
         tree_row,
         grass_row,
         tree_combo,
         grass_combo,
-    });
+    }
 }
 
-/// Spawn one species row: a label and a combo of the species names. Returns the
-/// row (a [`UiPanelShown`] gate) and the combo anchor.
+/// Spawn one species row at `font_size`: a label and a combo of the species
+/// names. Returns the row (a [`UiPanelShown`] gate) and the combo anchor.
 fn spawn_species_row(
     commands: &mut Commands,
     parent: Entity,
@@ -655,6 +662,7 @@ fn spawn_species_row(
     element: &'static str,
     species: &[(u8, &str)],
     tab_index: i32,
+    font_size: f32,
 ) -> (Entity, Entity) {
     let row_entity = commands
         .spawn((
@@ -667,7 +675,7 @@ fn spawn_species_row(
             ChildOf(parent),
         ))
         .id();
-    spawn_row_label(commands, row_entity, label_key);
+    spawn_row_label(commands, row_entity, label_key, font_size);
     let labels: Vec<String> = species
         .iter()
         .map(|(_byte, name)| (*name).to_owned())
@@ -680,7 +688,7 @@ fn spawn_species_row(
             labels: &labels,
             active: 0,
             tab_index,
-            font_size: TOOL_FONT_SIZE,
+            font_size,
             // Literal species names, not Fluent keys.
             translate_labels: false,
         },

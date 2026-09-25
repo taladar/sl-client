@@ -119,12 +119,14 @@ const PREVIEW_BACKGROUND: Color = Color::srgb(0.02, 0.02, 0.03);
 
 /// The widest the preview image is drawn, in logical pixels; its height follows
 /// the captured frame's aspect (letterboxed inside a fixed frame so the floater
-/// does not resize between shots). Sized for a comfortable compose-the-shot view.
-const PREVIEW_MAX_WIDTH: f32 = 640.0;
+/// does not resize between shots). Sized for a comfortable compose-the-shot view
+/// that still leaves the whole window on a 1280×800 laptop screen: at 640×400
+/// the floater ran 50 px past the bottom edge once its labels were translated.
+const PREVIEW_MAX_WIDTH: f32 = 512.0;
 
 /// The tallest the preview image is drawn, in logical pixels (see
 /// [`PREVIEW_MAX_WIDTH`]).
-const PREVIEW_MAX_HEIGHT: f32 = 400.0;
+const PREVIEW_MAX_HEIGHT: f32 = 320.0;
 
 /// How many frames to wait after hiding the excluded layers before the shutter,
 /// so the hidden UI / disabled HUD camera is actually rendered out first.
@@ -445,17 +447,32 @@ fn build_snapshot_content(
     mut commands: Commands,
     state: Res<SnapshotState>,
 ) {
+    let ui = spawn_snapshot_content(&mut commands, handle.content, FONT_SIZE, state.format);
+    commands.insert_resource(ui);
+}
+
+/// Build the snapshot floater's content into `parent` at `font_size`, with the
+/// format combo showing preset `format`: the preview frame, the Refresh row,
+/// the three include toggles, the format row, the status line and the
+/// destination tabs. Returns the entities the update systems write into.
+/// Shared by the live floater and its specimen.
+fn spawn_snapshot_content(
+    commands: &mut Commands,
+    parent: Entity,
+    font_size: f32,
+    format: usize,
+) -> SnapshotUi {
     let content = commands
         .spawn((
             Node {
                 width: Val::Px(PREVIEW_MAX_WIDTH),
                 ..column(Val::Px(8.0))
             },
-            ChildOf(handle.content),
+            ChildOf(parent),
         ))
         .id();
 
-    let (preview, preview_hint) = spawn_preview(&mut commands, content);
+    let (preview, preview_hint) = spawn_preview(commands, content, font_size);
 
     // The Refresh row.
     let refresh_row = commands
@@ -467,24 +484,25 @@ fn build_snapshot_content(
             ChildOf(content),
         ))
         .id();
-    let refresh = spawn_text_button(&mut commands, refresh_row, "snapshot-refresh", 1);
+    let refresh = spawn_text_button(commands, refresh_row, "snapshot-refresh", 1, font_size);
     commands.entity(refresh).observe(
         |_activate: On<Activate>, mut requests: MessageWriter<RequestSnapshotCapture>| {
             requests.write(RequestSnapshotCapture { save: false });
         },
     );
 
-    let ui_check = spawn_snapshot_check(&mut commands, content, "snapshot-include-ui", 2);
+    let ui_check = spawn_snapshot_check(commands, content, "snapshot-include-ui", 2, font_size);
     commands
         .entity(ui_check)
         .insert(SnapshotToggle::Ui)
         .observe(toggle_pressed);
-    let hud_check = spawn_snapshot_check(&mut commands, content, "snapshot-include-hud", 3);
+    let hud_check = spawn_snapshot_check(commands, content, "snapshot-include-hud", 3, font_size);
     commands
         .entity(hud_check)
         .insert(SnapshotToggle::Hud)
         .observe(toggle_pressed);
-    let balance_check = spawn_snapshot_check(&mut commands, content, "snapshot-hide-balance", 4);
+    let balance_check =
+        spawn_snapshot_check(commands, content, "snapshot-hide-balance", 4, font_size);
     commands
         .entity(balance_check)
         .insert(SnapshotToggle::Balance)
@@ -503,19 +521,19 @@ fn build_snapshot_content(
     commands.spawn((
         Text::default(),
         Translated::new("snapshot-format-label"),
-        UiFont::Sans.at(FONT_SIZE),
+        UiFont::Sans.at(font_size),
         TextColor(LABEL_COLOR),
         ChildOf(format_row),
     ));
     let format_combo = spawn_combo(
-        &mut commands,
+        commands,
         format_row,
         &ComboSpec {
             element: "snapshot-format",
             labels: &format_labels(),
-            active: state.format,
+            active: format,
             tab_index: 5,
-            font_size: FONT_SIZE,
+            font_size,
             translate_labels: false,
         },
     );
@@ -523,16 +541,16 @@ fn build_snapshot_content(
     let status = commands
         .spawn((
             Text::default(),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             TextColor(HINT_COLOR),
             Name::new("snapshot-status"),
             ChildOf(content),
         ))
         .id();
 
-    spawn_destination_tabs(&mut commands, content);
+    spawn_destination_tabs(commands, content, font_size);
 
-    commands.insert_resource(SnapshotUi {
+    SnapshotUi {
         preview,
         preview_hint,
         ui_check,
@@ -540,13 +558,31 @@ fn build_snapshot_content(
         balance_check,
         format_combo,
         status,
-    });
+    }
+}
+
+/// The snapshot floater's gallery / `ui_test` specimen: the live content,
+/// built by the same [`spawn_snapshot_content`] the viewer's floater is, in
+/// the state a fresh viewer opens it in — the default format, no shot taken
+/// yet (so the preview frame shows its hint), the "ready" status line — with
+/// the HUD toggle ticked so both checkbox states are on show.
+pub(crate) fn spawn_snapshot_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: crate::ui_element::ElementCx,
+) -> Entity {
+    let ui = spawn_snapshot_content(commands, parent, cx.font_size, DEFAULT_FORMAT);
+    commands
+        .entity(ui.status)
+        .insert(Translated::new("snapshot-status-ready"));
+    commands.entity(ui.hud_check).insert(Checked);
+    parent
 }
 
 /// Spawn the preview frame: a fixed, centred frame holding the (initially empty)
 /// preview [`ImageNode`] and a "click Refresh" hint shown until the first shot.
 /// Returns the image node and the hint node.
-fn spawn_preview(commands: &mut Commands, parent: Entity) -> (Entity, Entity) {
+fn spawn_preview(commands: &mut Commands, parent: Entity, font_size: f32) -> (Entity, Entity) {
     let frame = commands
         .spawn((
             Node {
@@ -580,7 +616,7 @@ fn spawn_preview(commands: &mut Commands, parent: Entity) -> (Entity, Entity) {
         .spawn((
             Text::default(),
             Translated::new("snapshot-preview-empty"),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             TextColor(HINT_COLOR),
             ChildOf(frame),
         ))
@@ -590,7 +626,7 @@ fn spawn_preview(commands: &mut Commands, parent: Entity) -> (Entity, Entity) {
 
 /// Spawn the destination tabs: **Save to Disk** (live) and the placeholder
 /// Postcard / Profile / Inventory tabs (each a "coming in its own task" note).
-fn spawn_destination_tabs(commands: &mut Commands, parent: Entity) {
+fn spawn_destination_tabs(commands: &mut Commands, parent: Entity, font_size: f32) {
     let labels: Vec<String> = [
         "snapshot-tab-disk",
         "snapshot-tab-postcard",
@@ -609,7 +645,7 @@ fn spawn_destination_tabs(commands: &mut Commands, parent: Entity) {
             labels: &labels,
             active: 0,
             tab_index: 6,
-            font_size: FONT_SIZE,
+            font_size,
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
@@ -620,26 +656,26 @@ fn spawn_destination_tabs(commands: &mut Commands, parent: Entity) {
 
     // Save to Disk: the Save button and a one-line hint.
     let disk = panel(0);
-    let save = spawn_text_button(commands, disk, "snapshot-save-disk", 7);
+    let save = spawn_text_button(commands, disk, "snapshot-save-disk", 7, font_size);
     commands.entity(save).observe(
         |_activate: On<Activate>, mut requests: MessageWriter<RequestSnapshotCapture>| {
             requests.write(RequestSnapshotCapture { save: true });
         },
     );
-    spawn_note(commands, disk, "snapshot-hint");
+    spawn_note(commands, disk, "snapshot-hint", font_size);
 
     // The placeholder destinations, each pointing at its own follow-up task.
-    spawn_note(commands, panel(1), "snapshot-postcard-todo");
-    spawn_note(commands, panel(2), "snapshot-profile-todo");
-    spawn_note(commands, panel(3), "snapshot-inventory-todo");
+    spawn_note(commands, panel(1), "snapshot-postcard-todo", font_size);
+    spawn_note(commands, panel(2), "snapshot-profile-todo", font_size);
+    spawn_note(commands, panel(3), "snapshot-inventory-todo", font_size);
 }
 
 /// Spawn a dim, wrapping note line under `parent`.
-fn spawn_note(commands: &mut Commands, parent: Entity, key: &'static str) {
+fn spawn_note(commands: &mut Commands, parent: Entity, key: &'static str, font_size: f32) {
     commands.spawn((
         Text::default(),
         Translated::new(key),
-        UiFont::Sans.at(FONT_SIZE),
+        UiFont::Sans.at(font_size),
         TextColor(HINT_COLOR),
         Node {
             max_width: Val::Px(PREVIEW_MAX_WIDTH),
@@ -655,6 +691,7 @@ fn spawn_text_button(
     parent: Entity,
     label_key: &'static str,
     tab: i32,
+    font_size: f32,
 ) -> Entity {
     ui_spawn::spawn_button(
         commands,
@@ -666,7 +703,7 @@ fn spawn_text_button(
             .border(2.0)
             .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
             .label_color(LABEL_COLOR)
-            .font_size(FONT_SIZE)
+            .font_size(font_size)
             .layout(|node| node.align_self = AlignSelf::Start),
     )
     .button
@@ -680,6 +717,7 @@ fn spawn_snapshot_check(
     parent: Entity,
     label_key: &'static str,
     tab: i32,
+    font_size: f32,
 ) -> Entity {
     let checkbox = spawn_checkbox(
         commands,
@@ -688,7 +726,7 @@ fn spawn_snapshot_check(
             element: label_key,
             label: label_key.to_owned(),
             tab_index: tab,
-            font_size: FONT_SIZE,
+            font_size,
             translate_label: true,
         },
     );
@@ -1271,7 +1309,7 @@ mod tests {
     #[test]
     fn preview_fits_and_keeps_aspect() {
         // A 16:9 window fits to the frame width.
-        assert_eq!(fit_within(1920, 1080), bevy::math::Vec2::new(640.0, 360.0));
+        assert_eq!(fit_within(1920, 1080), bevy::math::Vec2::new(512.0, 288.0));
         // A tall window fits to the frame height.
         let portrait = fit_within(600, 800);
         assert!(portrait.y <= PREVIEW_MAX_HEIGHT + 0.01);

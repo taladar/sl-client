@@ -67,6 +67,7 @@ use crate::skin::{
     set_state_class_on, text_role,
 };
 use crate::skin_palette::SkinPalette;
+use bevy::ecs::system::RunSystemOnce as _;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
@@ -79,8 +80,8 @@ use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use sl_client_bevy::{AgentKey, Command, SlCommand};
 
 use crate::contact_sets::{
-    ALL_SETS_LABEL, ContactSet, ContactSets, NO_SETS_LABEL, PSEUDONYMS_KEY, RequestContactSet,
-    SetAutoresponseMode, apply_contact_set_requests,
+    ALL_SETS_LABEL, ContactSet, ContactSetRefusal, ContactSets, NO_SETS_LABEL, PSEUDONYMS_KEY,
+    RequestContactSet, SetAutoresponseMode, apply_contact_set_requests,
 };
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::{TransArgs, Translated, Translator};
@@ -300,7 +301,7 @@ struct SelectedMember(Option<AgentKey>);
 /// The panel's retained entities (inserted by the deferred build; consumers take
 /// `Option<Res<ContactSetsUi>>` until then).
 #[derive(Resource, Debug)]
-struct ContactSetsUi {
+pub(crate) struct ContactSetsUi {
     /// The set-chooser combo.
     chooser: Entity,
     /// The table root (carries [`TableState`]).
@@ -366,6 +367,14 @@ struct ConfigUi {
     panel: Entity,
     /// The floater's title text, rewritten with the set's name.
     title: Entity,
+    /// The content's controls.
+    parts: ConfigParts,
+}
+
+/// The set-settings floater's content controls — built by
+/// [`spawn_config_content`] for the live window and its specimen alike.
+#[derive(Debug, Clone, Copy)]
+struct ConfigParts {
     /// The set-name field's [`EditableText`] entity.
     name_field: Entity,
     /// The set-colour swatch (also the [`ColorPicked`] requester).
@@ -382,7 +391,24 @@ struct ConfigUi {
     non_friends_reply: ConfigAutoresponseUi,
 }
 
-impl ConfigUi {
+impl ConfigParts {
+    /// Where each of the five checkboxes belongs for `set`, as
+    /// `(checkbox, ticked)` — what the live sync moves the ticks to on every
+    /// change, and what a floater built already showing a set starts with.
+    fn checks(&self, set: &ContactSet) -> Vec<(Entity, bool)> {
+        let mut checks = vec![
+            (self.notify_glyph, set.notify()),
+            (self.sort_glyph, set.sorts_by_online_status()),
+        ];
+        checks.extend(AUTORESPONSE_MODES.iter().map(|mode| {
+            (
+                self.autoresponse(*mode).glyph,
+                set.autoresponse(*mode).enabled(),
+            )
+        }));
+        checks
+    }
+
     /// The block for one reply mode.
     const fn autoresponse(&self, mode: SetAutoresponseMode) -> ConfigAutoresponseUi {
         match mode {
@@ -665,8 +691,20 @@ fn spawn_contact_sets_panel(
     let Some(people) = people else {
         return;
     };
-    let content = people.contact_sets_content();
+    let ui = spawn_contact_sets_list(&mut commands, people.contact_sets_content(), FONT_SIZE);
+    commands.insert_resource(ui);
+}
 
+/// Build the Contact Sets panel into `content` (the People pane's Contact
+/// Sets slot) at `font_size`: the chooser row, the filter row, the member
+/// table with its count line and the trailing action column. Shared by the live
+/// deferred spawn and the Conversations floater's specimen, which composes the
+/// whole People pane.
+pub(crate) fn spawn_contact_sets_list(
+    commands: &mut Commands,
+    content: Entity,
+    font_size: f32,
+) -> ContactSetsUi {
     // The chooser row: which set the list is showing, and the three buttons that
     // change the set itself.
     let chooser_row = commands
@@ -683,14 +721,14 @@ fn spawn_contact_sets_panel(
         ))
         .id();
     let chooser = spawn_combo(
-        &mut commands,
+        commands,
         chooser_row,
         &ComboSpec {
             element: "contact-sets-chooser",
             labels: &[ALL_SETS_LABEL.to_owned(), NO_SETS_LABEL.to_owned()],
             active: 0,
             tab_index: 1,
-            font_size: FONT_SIZE,
+            font_size,
             translate_labels: false,
         },
     );
@@ -699,7 +737,7 @@ fn spawn_contact_sets_panel(
         ContactSetsButton::Configure,
         ContactSetsButton::DeleteSet,
     ] {
-        spawn_panel_button(&mut commands, chooser_row, button);
+        spawn_panel_button(commands, chooser_row, button, font_size);
     }
 
     // The filter row.
@@ -717,11 +755,11 @@ fn spawn_contact_sets_panel(
         ))
         .id();
     let search = spawn_search_field(
-        &mut commands,
+        commands,
         filter_row,
         &SearchFieldSpec {
             tab_index: 2,
-            font_size: FONT_SIZE,
+            font_size,
             min_width: 140.0,
             placeholder: "Filter by name".to_owned(),
             search_glyph: true,
@@ -760,13 +798,13 @@ fn spawn_contact_sets_panel(
             ChildOf(body),
         ))
         .id();
-    let table = spawn_table(&mut commands, table_column, &CONTACT_SETS_TABLE);
+    let table = spawn_table(commands, table_column, &CONTACT_SETS_TABLE);
     commands.entity(table.viewport).insert(TabIndex(3));
 
     let count_text = commands
         .spawn((
             Text::default(),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(DIM_LABEL_COLOR),
             Node {
                 flex_shrink: 0.0,
@@ -802,20 +840,25 @@ fn spawn_contact_sets_panel(
         ContactSetsButton::ClearAlias,
         ContactSetsButton::RemoveDisplayName,
     ] {
-        spawn_panel_button(&mut commands, actions, button);
+        spawn_panel_button(commands, actions, button, font_size);
     }
 
-    commands.insert_resource(ContactSetsUi {
+    ContactSetsUi {
         chooser,
         table: table.root,
         viewport: table.viewport,
         filter_field: search.field,
         count_text,
-    });
+    }
 }
 
 /// Spawn one panel button.
-fn spawn_panel_button(commands: &mut Commands, parent: Entity, button: ContactSetsButton) {
+fn spawn_panel_button(
+    commands: &mut Commands,
+    parent: Entity,
+    button: ContactSetsButton,
+    font_size: f32,
+) {
     let label = commands
         .spawn((
             Text::default(),
@@ -824,7 +867,7 @@ fn spawn_panel_button(commands: &mut Commands, parent: Entity, button: ContactSe
                 linebreak: LineBreak::NoWrap,
                 ..default()
             },
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             TextColor(LABEL_COLOR),
             ClassList::new_with_classes([TEXT_CLASS]),
             Pickable::IGNORE,
@@ -883,11 +926,38 @@ fn spawn_add_to_set_floater(mut commands: Commands, root: Res<UiRoot>) {
     commands
         .entity(handle.title_text)
         .insert(Translated::new("add-to-contact-set-title"));
-    let content = handle.content;
+    let parts = spawn_add_to_set_content(&mut commands, handle.content, FONT_SIZE, &[]);
+    commands.insert_resource(AddToSetUi {
+        panel: handle.root,
+        prompt: parts.prompt,
+        chooser: parts.chooser,
+        options: Vec::new(),
+    });
+}
+
+/// The add-to-set floater's content nodes its callers fill in afterwards.
+#[derive(Debug, Clone, Copy)]
+struct AddToSetParts {
+    /// The "Add <name> to contact set:" prompt line.
+    prompt: Entity,
+    /// The set combo.
+    chooser: Entity,
+}
+
+/// Build the add-to-set floater's content into `content` at `font_size`: the
+/// (empty) prompt line, the set combo offering `options`, and the Add /
+/// New Set… / Cancel row. Shared by the live floater — which starts with no
+/// options and is handed them on every open — and its specimen.
+fn spawn_add_to_set_content(
+    commands: &mut Commands,
+    content: Entity,
+    font_size: f32,
+    options: &[String],
+) -> AddToSetParts {
     let prompt = commands
         .spawn((
             Text::default(),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(LABEL_COLOR),
             Pickable::IGNORE,
             Name::new("add-to-contact-set-prompt"),
@@ -895,14 +965,14 @@ fn spawn_add_to_set_floater(mut commands: Commands, root: Res<UiRoot>) {
         ))
         .id();
     let chooser = spawn_combo(
-        &mut commands,
+        commands,
         content,
         &ComboSpec {
             element: "add-to-contact-set-chooser",
-            labels: &[],
+            labels: options,
             active: 0,
             tab_index: 1,
-            font_size: FONT_SIZE,
+            font_size,
             translate_labels: false,
         },
     );
@@ -945,20 +1015,20 @@ fn spawn_add_to_set_floater(mut commands: Commands, root: Res<UiRoot>) {
                     AddToSetButton::NewSet => "add-to-contact-set-new",
                     AddToSetButton::Cancel => "add-to-contact-set-cancel",
                 }),
-                UiFont::Sans.at(FONT_SIZE),
+                UiFont::Sans.at(font_size),
                 TextColor(LABEL_COLOR),
                 ClassList::new_with_classes([TEXT_CLASS]),
                 Pickable::IGNORE,
             ))
             .observe(on_add_to_set_press);
     }
+    AddToSetParts { prompt, chooser }
+}
 
-    commands.insert_resource(AddToSetUi {
-        panel: handle.root,
-        prompt,
-        chooser,
-        options: Vec::new(),
-    });
+/// The set names the add-to-set combo offers, in the model's order — what the
+/// live open hands the combo, and what the specimen spawns it with.
+fn add_to_set_options(sets: &ContactSets) -> Vec<String> {
+    sets.sets().map(|set| set.name().to_owned()).collect()
 }
 
 /// The contact set config floater's [`FloaterSpec`] — shared with the `FLOATERS`
@@ -987,7 +1057,28 @@ pub fn contact_set_config_floater_spec() -> FloaterSpec {
 /// built.
 fn spawn_config_floater(mut commands: Commands, root: Res<UiRoot>) {
     let handle = spawn_floater(&mut commands, root.0, contact_set_config_floater_spec());
-    let content = handle.content;
+    let parts = spawn_config_content(&mut commands, handle.content, FONT_SIZE, None);
+    commands.insert_resource(ConfigUi {
+        panel: handle.root,
+        title: handle.title_text,
+        parts,
+    });
+}
+
+/// Build the set-settings floater's content into `content` at `font_size`: the
+/// name field with its Rename button, the colour swatch, the two behaviour
+/// checkboxes, the three reply blocks and Close.
+///
+/// `shown` is the set the floater starts out showing: the live floater is built
+/// hidden and empty (`None`) and has a set drawn into it on open by
+/// [`sync_config_floater`]; the specimen passes its sample set, whose name,
+/// colour, ticks and replies the fields then start with.
+fn spawn_config_content(
+    commands: &mut Commands,
+    content: Entity,
+    font_size: f32,
+    shown: Option<&ContactSet>,
+) -> ConfigParts {
     let name_row = commands
         .spawn((
             Node {
@@ -1001,22 +1092,23 @@ fn spawn_config_floater(mut commands: Commands, root: Res<UiRoot>) {
     commands.spawn((
         Text::default(),
         Translated::new("contact-set-config-name"),
-        UiFont::Sans.at(FONT_SIZE),
+        UiFont::Sans.at(font_size),
         text_role(DIM_LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(name_row),
     ));
     let name_field = spawn_text_input(
-        &mut commands,
+        commands,
         name_row,
         &TextInputSpec {
-            font_size: FONT_SIZE,
+            initial: shown.map(|set| set.name().to_owned()).unwrap_or_default(),
+            font_size,
             width_glyphs: 24.0,
             tab_index: 1,
             ..TextInputSpec::new("contact-set-config-name-field", TextInputKind::Line)
         },
     );
-    spawn_config_button(&mut commands, name_row, ConfigButton::Rename);
+    spawn_config_button(commands, name_row, ConfigButton::Rename, font_size);
 
     let color_row = commands
         .spawn((
@@ -1031,48 +1123,71 @@ fn spawn_config_floater(mut commands: Commands, root: Res<UiRoot>) {
     commands.spawn((
         Text::default(),
         Translated::new("contact-set-config-color"),
-        UiFont::Sans.at(FONT_SIZE),
+        UiFont::Sans.at(font_size),
         text_role(DIM_LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(color_row),
     ));
     let swatch = spawn_color_swatch(
-        &mut commands,
+        commands,
         color_row,
         "contact-set-config",
         2,
-        LABEL_COLOR,
+        shown.map_or(LABEL_COLOR, ContactSet::color),
     );
 
     // The two behaviour checkboxes, then one block per reply mode: a toggle over
     // the reply this set answers with.
     let notify_glyph = spawn_config_toggle(
-        &mut commands,
+        commands,
         content,
         "contact-set-config-notify",
         3,
         ConfigToggle::Notify,
+        font_size,
     );
     let sort_glyph = spawn_config_toggle(
-        &mut commands,
+        commands,
         content,
         "contact-set-config-sort-online",
         4,
         ConfigToggle::SortByOnlineStatus,
+        font_size,
     );
     // Two focus stops per block (the toggle and its field), after the four
     // above, in the order [`AUTORESPONSE_MODES`] lists them.
-    let busy_reply =
-        spawn_config_autoresponse(&mut commands, content, SetAutoresponseMode::Busy, 5);
-    let autorespond_reply =
-        spawn_config_autoresponse(&mut commands, content, SetAutoresponseMode::Autorespond, 7);
-    let non_friends_reply =
-        spawn_config_autoresponse(&mut commands, content, SetAutoresponseMode::NonFriends, 9);
-    spawn_config_button(&mut commands, content, ConfigButton::Close);
+    let reply = |mode: SetAutoresponseMode| {
+        shown
+            .map(|set| set.autoresponse(mode).text().to_owned())
+            .unwrap_or_default()
+    };
+    let busy_reply = spawn_config_autoresponse(
+        commands,
+        content,
+        SetAutoresponseMode::Busy,
+        5,
+        font_size,
+        reply(SetAutoresponseMode::Busy),
+    );
+    let autorespond_reply = spawn_config_autoresponse(
+        commands,
+        content,
+        SetAutoresponseMode::Autorespond,
+        7,
+        font_size,
+        reply(SetAutoresponseMode::Autorespond),
+    );
+    let non_friends_reply = spawn_config_autoresponse(
+        commands,
+        content,
+        SetAutoresponseMode::NonFriends,
+        9,
+        font_size,
+        reply(SetAutoresponseMode::NonFriends),
+    );
+    spawn_config_button(commands, content, ConfigButton::Close, font_size);
 
-    commands.insert_resource(ConfigUi {
-        panel: handle.root,
-        title: handle.title_text,
+    let parts = ConfigParts {
         name_field,
         swatch,
         notify_glyph,
@@ -1080,7 +1195,17 @@ fn spawn_config_floater(mut commands: Commands, root: Res<UiRoot>) {
         busy_reply,
         autorespond_reply,
         non_friends_reply,
-    });
+    };
+    // A set shown from the start gets its ticks now, the same ones the live
+    // sync moves them to.
+    if let Some(set) = shown {
+        for (checkbox, ticked) in parts.checks(set) {
+            if ticked {
+                commands.entity(checkbox).insert(Checked);
+            }
+        }
+    }
+    parts
 }
 
 /// Spawn one of the settings floater's checkboxes — the shared widget —
@@ -1091,6 +1216,7 @@ fn spawn_config_toggle(
     label_key: &'static str,
     tab: i32,
     toggle: ConfigToggle,
+    font_size: f32,
 ) -> Entity {
     let checkbox = spawn_checkbox(
         commands,
@@ -1099,7 +1225,7 @@ fn spawn_config_toggle(
             element: label_key,
             label: label_key.to_owned(),
             tab_index: tab,
-            font_size: FONT_SIZE,
+            font_size,
             translate_label: true,
         },
     );
@@ -1111,12 +1237,14 @@ fn spawn_config_toggle(
 }
 
 /// Spawn one reply block: the "use a reply of this set's own" toggle over the
-/// reply field it enables.
+/// reply field it enables, which starts out holding `initial`.
 fn spawn_config_autoresponse(
     commands: &mut Commands,
     parent: Entity,
     mode: SetAutoresponseMode,
     tab: i32,
+    font_size: f32,
+    initial: String,
 ) -> ConfigAutoresponseUi {
     let glyph = spawn_config_toggle(
         commands,
@@ -1128,12 +1256,14 @@ fn spawn_config_autoresponse(
         },
         tab,
         ConfigToggle::Autoresponse(mode),
+        font_size,
     );
     let field = spawn_text_input(
         commands,
         parent,
         &TextInputSpec {
-            font_size: FONT_SIZE,
+            initial,
+            font_size,
             visible_lines: 3.0,
             tab_index: tab.saturating_add(1),
             ..TextInputSpec::new(
@@ -1152,7 +1282,12 @@ fn spawn_config_autoresponse(
 }
 
 /// Spawn one settings-floater button.
-fn spawn_config_button(commands: &mut Commands, parent: Entity, button: ConfigButton) {
+fn spawn_config_button(
+    commands: &mut Commands,
+    parent: Entity,
+    button: ConfigButton,
+    font_size: f32,
+) {
     commands
         .spawn((
             Node {
@@ -1179,12 +1314,96 @@ fn spawn_config_button(commands: &mut Commands, parent: Entity, button: ConfigBu
                 ConfigButton::Rename => "contact-set-config-rename",
                 ConfigButton::Close => "contact-set-config-close",
             }),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             TextColor(LABEL_COLOR),
             ClassList::new_with_classes([TEXT_CLASS]),
             Pickable::IGNORE,
         ))
         .observe(on_config_button_press);
+}
+
+// --- Gallery specimens ------------------------------------------------------
+
+/// The one sample set both specimens show: a named, recoloured set that
+/// announces its members and answers Do Not Disturb with a reply of its own.
+///
+/// One set, not several: a script cell turns every short sample string into the
+/// same one, and the model rightly refuses a second set of the same name.
+fn sample_contact_sets(
+    cx: crate::ui_element::ElementCx,
+) -> Result<(String, ContactSets), ContactSetRefusal> {
+    let name = cx.text("Builders");
+    let mut sets = ContactSets::default();
+    sets.create_set(&name)?;
+    sets.recolor_set(&name, Color::srgb(0.36, 0.72, 0.52))?;
+    sets.set_notify(&name, true)?;
+    sets.set_autoresponse(
+        &name,
+        SetAutoresponseMode::Busy,
+        true,
+        &cx.text("Out building for the afternoon, back soon."),
+    )?;
+    Ok((name, sets))
+}
+
+/// The add-to-set floater's gallery / `ui_test` specimen: the live content,
+/// built by the same `spawn_add_to_set_content` at the cell's font size, its
+/// combo offering the sample set and its prompt naming a sample resident.
+///
+/// The live prompt is formatted by the translator on open
+/// (`add_to_set_prompt`), so the specimen formats it the same way in a queued
+/// one-shot, then carries it through the cell's transform.
+pub fn spawn_add_to_set_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: crate::ui_element::ElementCx,
+) -> Entity {
+    let options = match sample_contact_sets(cx) {
+        Ok((_name, sets)) => add_to_set_options(&sets),
+        Err(refusal) => {
+            error!("add-to-contact-set specimen: the sample set was refused: {refusal}");
+            Vec::new()
+        }
+    };
+    let parts = spawn_add_to_set_content(commands, parent, cx.font_size, &options);
+    let prompt = parts.prompt;
+    commands.queue(move |world: &mut World| {
+        let written =
+            world.run_system_once(move |translator: Translator, mut texts: Query<&mut Text>| {
+                if let Ok(mut text) = texts.get_mut(prompt) {
+                    text.0 = cx.text(&add_to_set_prompt(
+                        &translator,
+                        Some("Sample Resident"),
+                        1,
+                        false,
+                    ));
+                }
+            });
+        if let Err(error) = written {
+            error!("add-to-contact-set specimen: the prompt was not written: {error}");
+        }
+    });
+    parent
+}
+
+/// The set-settings floater's gallery / `ui_test` specimen: the live content,
+/// built by the same `spawn_config_content` at the cell's font size and
+/// showing the sample set — its name, colour, ticks and Do Not Disturb reply.
+pub fn spawn_contact_set_config_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: crate::ui_element::ElementCx,
+) -> Entity {
+    match sample_contact_sets(cx) {
+        Ok((name, sets)) => {
+            spawn_config_content(commands, parent, cx.font_size, sets.set(&name));
+        }
+        Err(refusal) => {
+            error!("contact-set-config specimen: the sample set was refused: {refusal}");
+            spawn_config_content(commands, parent, cx.font_size, None);
+        }
+    }
+    parent
 }
 
 // --- View -----------------------------------------------------------------
@@ -1784,7 +2003,7 @@ fn handle_open_add_to_set(
         floater.target.agents = residents;
         floater.target.move_from.clone_from(&request.move_from);
 
-        let labels: Vec<String> = sets.sets().map(|set| set.name().to_owned()).collect();
+        let labels = add_to_set_options(&sets);
         let active = request
             .move_from
             .as_ref()
@@ -1804,23 +2023,12 @@ fn handle_open_add_to_set(
 
         // The reference's own split: one resident is named in the prompt, several
         // are counted (the names are on the lines the user just picked from).
-        let prompt = match floater.target.single() {
-            Some((_agent, name)) => translator.format(
-                if request.move_from.is_some() {
-                    "move-to-contact-set-prompt"
-                } else {
-                    "add-to-contact-set-prompt"
-                },
-                &TransArgs::new().text("name", name),
-            ),
-            None => translator.format(
-                "add-to-contact-set-prompt-multiple",
-                &TransArgs::new().int(
-                    "count",
-                    i64::try_from(floater.target.agents.len()).unwrap_or(i64::MAX),
-                ),
-            ),
-        };
+        let prompt = add_to_set_prompt(
+            &translator,
+            floater.target.single().map(|(_agent, name)| name.as_str()),
+            floater.target.agents.len(),
+            request.move_from.is_some(),
+        );
         if let Ok(mut text) = floater.texts.get_mut(ui.prompt)
             && text.0 != prompt
         {
@@ -1829,6 +2037,32 @@ fn handle_open_add_to_set(
         if let Ok(mut shown) = floater.panels.get_mut(ui.panel) {
             shown.0 = true;
         }
+    }
+}
+
+/// The add-to-set floater's prompt line — the reference's own split: one
+/// resident (`single`) is named, in the add or the move (`moving`) wording;
+/// several are counted (`count`), since their names are on the lines the user
+/// just picked from.
+fn add_to_set_prompt(
+    translator: &Translator,
+    single: Option<&str>,
+    count: usize,
+    moving: bool,
+) -> String {
+    match single {
+        Some(name) => translator.format(
+            if moving {
+                "move-to-contact-set-prompt"
+            } else {
+                "add-to-contact-set-prompt"
+            },
+            &TransArgs::new().text("name", name),
+        ),
+        None => translator.format(
+            "add-to-contact-set-prompt-multiple",
+            &TransArgs::new().int("count", i64::try_from(count).unwrap_or(i64::MAX)),
+        ),
     }
 }
 
@@ -1961,7 +2195,7 @@ fn on_config_button_press(
             };
             let to = widgets
                 .editors
-                .get(ui.name_field)
+                .get(ui.parts.name_field)
                 .map(|field| field.value().to_string())
                 .unwrap_or_default();
             if to.trim().is_empty() {
@@ -2051,7 +2285,7 @@ fn on_config_toggle_press(
         }
         ConfigToggle::Autoresponse(mode) => {
             let text = fields
-                .get(ui.autoresponse(mode).field)
+                .get(ui.parts.autoresponse(mode).field)
                 .map(|field| field.value().to_string())
                 .unwrap_or_default();
             requests.write(RequestContactSet::SetAutoresponse {
@@ -2088,7 +2322,7 @@ fn commit_config_autoresponses(
     };
     if let Some(set) = sets.set(&name) {
         for mode in AUTORESPONSE_MODES {
-            let block = ui.autoresponse(*mode);
+            let block = ui.parts.autoresponse(*mode);
             // While the field has focus the user is still typing in it, so only
             // a switch away from this set forces the write.
             if !switching && focus.get() == Some(block.field) {
@@ -2163,38 +2397,21 @@ fn sync_config_floater(
     // The swatch follows the set on every change (a recolour lands here too);
     // the name field is seeded only when the floater turns to a new set, so a
     // half-typed rename is not overwritten under the user's hands.
-    if let Ok(mut value) = widgets.swatches.get_mut(ui.swatch)
+    if let Ok(mut value) = widgets.swatches.get_mut(ui.parts.swatch)
         && value.0 != set.color()
     {
         value.0 = set.color();
     }
     // The five checkboxes follow the set on every change too — each is flipped
     // through the model, so this is what actually draws the new state.
-    set_config_check(
-        &mut widgets.commands,
-        &widgets.ticked,
-        ui.notify_glyph,
-        set.notify(),
-    );
-    set_config_check(
-        &mut widgets.commands,
-        &widgets.ticked,
-        ui.sort_glyph,
-        set.sorts_by_online_status(),
-    );
-    for mode in AUTORESPONSE_MODES {
-        set_config_check(
-            &mut widgets.commands,
-            &widgets.ticked,
-            ui.autoresponse(*mode).glyph,
-            set.autoresponse(*mode).enabled(),
-        );
+    for (checkbox, ticked) in ui.parts.checks(set) {
+        set_config_check(&mut widgets.commands, &widgets.ticked, checkbox, ticked);
     }
     if shown_for.as_deref() == Some(name.as_str()) {
         return;
     }
     *shown_for = Some(name.clone());
-    if let Ok(mut editor) = widgets.editors.get_mut(ui.name_field) {
+    if let Ok(mut editor) = widgets.editors.get_mut(ui.parts.name_field) {
         crate::ui_text::set_editor_text(
             &mut editor,
             &name,
@@ -2207,7 +2424,7 @@ fn sync_config_floater(
     // would fight the user's typing.
     for mode in AUTORESPONSE_MODES {
         let text = set.autoresponse(*mode).text().to_owned();
-        if let Ok(mut editor) = widgets.editors.get_mut(ui.autoresponse(*mode).field) {
+        if let Ok(mut editor) = widgets.editors.get_mut(ui.parts.autoresponse(*mode).field) {
             crate::ui_text::set_editor_text(
                 &mut editor,
                 &text,
@@ -2311,7 +2528,7 @@ fn handle_contact_set_colors(
     for pick in picks.read() {
         // Only the committed pick: a live drag would rewrite the store on every
         // frame of the drag for a colour the user has not settled on.
-        if pick.requester != ui.swatch || !pick.final_pick {
+        if pick.requester != ui.parts.swatch || !pick.final_pick {
             continue;
         }
         let Some(name) = target.0.clone() else {
@@ -2716,5 +2933,25 @@ mod tests {
                 ("SET".to_owned(), "Builders".to_owned()),
             ]
         );
+    }
+
+    /// The settings specimen is the live content showing the sample set: its
+    /// ticks are the ones the live sync would put there — the set announces
+    /// its members and answers Do Not Disturb, and nothing else.
+    #[test]
+    fn the_config_specimen_shows_the_sample_sets_ticks() {
+        use bevy::prelude::{Node, World};
+        use bevy::ui::Checked;
+
+        let mut world = World::new();
+        let parent = world.spawn(Node::default()).id();
+        super::spawn_contact_set_config_specimen(
+            &mut world.commands(),
+            parent,
+            crate::ui_element::ElementCx::new(),
+        );
+        world.flush();
+        let ticked = world.query::<&Checked>().iter(&world).count();
+        assert_eq!(ticked, 2, "notify and the Do Not Disturb reply");
     }
 }

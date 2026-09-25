@@ -434,8 +434,47 @@ fn spawn_filters_floater(mut commands: Commands, root: Res<UiRoot>) {
 /// First-open content build (see the chrome spawn above): the type boxes and
 /// date controls, ending with the [`InventoryFiltersUi`] insert.
 fn build_filters_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
-    let content = handle.content;
+    let ui = spawn_filters_content(&mut commands, handle.content, FILTER_FONT_SIZE);
+    commands.insert_resource(ui);
+}
 
+// ---------------------------------------------------------------------------
+// Gallery specimen.
+// ---------------------------------------------------------------------------
+
+/// The filters floater's gallery / `ui_test` specimen: the live content, built
+/// by the same `spawn_filters_content` the viewer's floater is, at the cell's
+/// font size, with a sample filter ticked into its boxes by the live
+/// `sync_toggle_ticks` — Textures and Sounds unticked, worn-only on.
+///
+/// The sample goes in as the `InventoryFilterState` resource, which is also
+/// what the boxes' own observers write: a click in the gallery then edits the
+/// sample rather than failing on a missing resource.
+pub fn spawn_inventory_filters_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: crate::ui_element::ElementCx,
+) -> Entity {
+    let ui = spawn_filters_content(commands, parent, cx.font_size);
+    let mut state = InventoryFilterState::default();
+    state.filter.types.set(TypeFilter::Texture, false);
+    state.filter.types.set(TypeFilter::Sound, false);
+    state.filter.worn_only = true;
+    commands.insert_resource(state);
+    commands.insert_resource(ui);
+    commands.run_system_cached(sync_toggle_ticks);
+    parent
+}
+
+/// Build the filters floater's content into `content` at `font_size`: the
+/// thirteen type boxes with All / None, the worn and since-login boxes, the
+/// newer / older pair, the hours / days fields and Reset. Returns the handles
+/// the window keeps. Shared by the live floater and its specimen.
+fn spawn_filters_content(
+    commands: &mut Commands,
+    content: Entity,
+    font_size: f32,
+) -> InventoryFiltersUi {
     // The thirteen type boxes, in the reference finder's order.
     let types_column = commands
         .spawn((
@@ -447,10 +486,11 @@ fn build_filters_content(In(handle): In<FloaterHandle>, mut commands: Commands) 
         .id();
     for (index, filter) in TypeFilter::ALL.into_iter().enumerate() {
         let toggle = spawn_toggle_row(
-            &mut commands,
+            commands,
             types_column,
             filter.label_key(),
             i32::try_from(index).unwrap_or(0).saturating_add(1),
+            font_size,
         );
         commands.entity(toggle).insert(TypeToggle(filter)).observe(
             move |change: On<ValueChange<bool>>, mut state: ResMut<InventoryFilterState>| {
@@ -468,7 +508,13 @@ fn build_filters_content(In(handle): In<FloaterHandle>, mut commands: Commands) 
             ChildOf(content),
         ))
         .id();
-    let all_button = spawn_text_button(&mut commands, all_none_row, "inventory-filter-all", 20);
+    let all_button = spawn_text_button(
+        commands,
+        all_none_row,
+        "inventory-filter-all",
+        20,
+        font_size,
+    );
     commands.entity(all_button).observe(
         |press: On<Pointer<Press>>, mut state: ResMut<InventoryFilterState>| {
             if press.button == PointerButton::Primary {
@@ -476,7 +522,13 @@ fn build_filters_content(In(handle): In<FloaterHandle>, mut commands: Commands) 
             }
         },
     );
-    let none_button = spawn_text_button(&mut commands, all_none_row, "inventory-filter-none", 21);
+    let none_button = spawn_text_button(
+        commands,
+        all_none_row,
+        "inventory-filter-none",
+        21,
+        font_size,
+    );
     commands.entity(none_button).observe(
         |press: On<Pointer<Press>>, mut state: ResMut<InventoryFilterState>| {
             if press.button == PointerButton::Primary {
@@ -486,13 +538,19 @@ fn build_filters_content(In(handle): In<FloaterHandle>, mut commands: Commands) 
     );
 
     // Worn / since-login.
-    let worn = spawn_toggle_row(&mut commands, content, "inventory-filter-worn", 22);
+    let worn = spawn_toggle_row(commands, content, "inventory-filter-worn", 22, font_size);
     commands.entity(worn).insert(WornToggle).observe(
         |change: On<ValueChange<bool>>, mut state: ResMut<InventoryFilterState>| {
             state.filter.worn_only = change.value;
         },
     );
-    let since = spawn_toggle_row(&mut commands, content, "inventory-filter-since-login", 23);
+    let since = spawn_toggle_row(
+        commands,
+        content,
+        "inventory-filter-since-login",
+        23,
+        font_size,
+    );
     commands.entity(since).insert(SinceLoginToggle).observe(
         |change: On<ValueChange<bool>>, mut state: ResMut<InventoryFilterState>| {
             state.filter.since_login = change.value;
@@ -500,7 +558,13 @@ fn build_filters_content(In(handle): In<FloaterHandle>, mut commands: Commands) 
     );
 
     // Newer-than / older-than direction (a two-way radio).
-    let newer = spawn_toggle_row(&mut commands, content, "inventory-filter-newer-than", 24);
+    let newer = spawn_toggle_row(
+        commands,
+        content,
+        "inventory-filter-newer-than",
+        24,
+        font_size,
+    );
     commands
         .entity(newer)
         .insert(DirectionToggle(DateDirection::Newer))
@@ -512,7 +576,13 @@ fn build_filters_content(In(handle): In<FloaterHandle>, mut commands: Commands) 
                 state.filter.direction = DateDirection::Newer;
             },
         );
-    let older = spawn_toggle_row(&mut commands, content, "inventory-filter-older-than", 25);
+    let older = spawn_toggle_row(
+        commands,
+        content,
+        "inventory-filter-older-than",
+        25,
+        font_size,
+    );
     commands
         .entity(older)
         .insert(DirectionToggle(DateDirection::Older))
@@ -533,11 +603,11 @@ fn build_filters_content(In(handle): In<FloaterHandle>, mut commands: Commands) 
         ))
         .id();
     let hours_field = crate::ui_text_input::spawn_text_input(
-        &mut commands,
+        commands,
         range_row,
         &crate::ui_text_input::TextInputSpec {
             initial: "0".to_owned(),
-            font_size: FILTER_FONT_SIZE,
+            font_size,
             width_glyphs: 6.0,
             tab_index: 26,
             ..crate::ui_text_input::TextInputSpec::new(
@@ -546,13 +616,18 @@ fn build_filters_content(In(handle): In<FloaterHandle>, mut commands: Commands) 
             )
         },
     );
-    spawn_label(&mut commands, range_row, "inventory-filter-hours-label");
+    spawn_label(
+        commands,
+        range_row,
+        "inventory-filter-hours-label",
+        font_size,
+    );
     let days_field = crate::ui_text_input::spawn_text_input(
-        &mut commands,
+        commands,
         range_row,
         &crate::ui_text_input::TextInputSpec {
             initial: "0".to_owned(),
-            font_size: FILTER_FONT_SIZE,
+            font_size,
             width_glyphs: 6.0,
             tab_index: 27,
             ..crate::ui_text_input::TextInputSpec::new(
@@ -561,7 +636,12 @@ fn build_filters_content(In(handle): In<FloaterHandle>, mut commands: Commands) 
             )
         },
     );
-    spawn_label(&mut commands, range_row, "inventory-filter-days-label");
+    spawn_label(
+        commands,
+        range_row,
+        "inventory-filter-days-label",
+        font_size,
+    );
 
     // Reset.
     let reset_row = commands
@@ -572,7 +652,7 @@ fn build_filters_content(In(handle): In<FloaterHandle>, mut commands: Commands) 
             ChildOf(content),
         ))
         .id();
-    let reset = spawn_text_button(&mut commands, reset_row, "inventory-filter-reset", 28);
+    let reset = spawn_text_button(commands, reset_row, "inventory-filter-reset", 28, font_size);
     commands.entity(reset).observe(
         |press: On<Pointer<Press>>,
          mut state: ResMut<InventoryFilterState>,
@@ -585,10 +665,10 @@ fn build_filters_content(In(handle): In<FloaterHandle>, mut commands: Commands) 
         },
     );
 
-    commands.insert_resource(InventoryFiltersUi {
+    InventoryFiltersUi {
         hours_field,
         days_field,
-    });
+    }
 }
 
 /// Spawn one toggle: the shared checkbox widget, carrying its own translated
@@ -599,6 +679,7 @@ fn spawn_toggle_row(
     parent: Entity,
     label_key: &'static str,
     tab_index: i32,
+    font_size: f32,
 ) -> Entity {
     let checkbox = spawn_checkbox(
         commands,
@@ -607,7 +688,7 @@ fn spawn_toggle_row(
             element: label_key,
             label: label_key.to_owned(),
             tab_index,
-            font_size: FILTER_FONT_SIZE,
+            font_size,
             translate_label: true,
         },
     );
@@ -620,6 +701,7 @@ fn spawn_text_button(
     parent: Entity,
     label_key: &'static str,
     tab_index: i32,
+    font_size: f32,
 ) -> Entity {
     ui_spawn::spawn_button(
         commands,
@@ -631,19 +713,19 @@ fn spawn_text_button(
         .tab_index(tab_index)
         .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
         .label_color(LABEL_COLOR)
-        .font_size(FILTER_FONT_SIZE),
+        .font_size(font_size),
     )
     .button
 }
 
 /// Spawn a plain translated label.
-fn spawn_label(commands: &mut Commands, parent: Entity, label_key: &'static str) {
+fn spawn_label(commands: &mut Commands, parent: Entity, label_key: &'static str, font_size: f32) {
     ui_spawn::spawn_label(
         commands,
         parent,
         UiLabel::key(label_key),
         LABEL_COLOR,
-        FILTER_FONT_SIZE,
+        font_size,
     );
 }
 

@@ -58,14 +58,14 @@ use crate::floater::{
 use crate::i18n::Translated;
 use crate::menu::{MenuCommand, MenuConditions, MenuDef, MenuItemDef};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
-use crate::ui_element::{ElementCx, UiAction};
+use crate::ui_element::{ContentMayOverflow, ElementCx, TextMayClip, UiAction};
 use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonSpec, UiLabel};
 use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab_strip};
 use crate::ui_text::set_text;
 use crate::virtual_list::{
     VirtualList, VirtualRow, VirtualViewport, amend_row_node, index_to_f32, layout_virtual_lists,
-    spawn_virtual_scrollbar,
+    spawn_specimen_row, spawn_virtual_scrollbar,
 };
 use bevy_flair::style::components::{ClassList, PseudoElementsSupport};
 use sl_viewer_ui_core::glyph;
@@ -78,6 +78,20 @@ use sl_viewer_ui_core::ui_ellipsis::{RevealEllipsis, spawn_ellipsis_marker};
 /// The uniform height of a tree row, in logical pixels. Drives the virtualized
 /// list's windowing.
 const ROW_HEIGHT: f32 = 22.0;
+
+/// The height of a tree row whose parts are drawn at `font_size`: [`ROW_HEIGHT`]
+/// at [`ROW_FONT_SIZE`], and in proportion above it, so a larger font's line
+/// (and a tall emoji icon) stays inside its fixed-height row instead of
+/// spilling into the rows above and below. Never less than [`ROW_HEIGHT`]: a
+/// smaller font keeps the row a comfortable click target.
+fn row_height(font_size: f32) -> f32 {
+    ROW_HEIGHT.max((font_size * ROW_HEIGHT / ROW_FONT_SIZE).ceil())
+}
+
+/// Why a row's label clip may slice the name it holds: it is the row's
+/// ellipsis cell, and the `…` marker beside it says the tail is hidden.
+const LABEL_CLIP_REASON: &str =
+    "an inventory row's name clips at the row's end behind its revealed `…` marker";
 
 /// How far each tree depth level indents a row, in logical pixels.
 const INDENT_PER_DEPTH: f32 = 16.0;
@@ -3033,7 +3047,7 @@ fn bridge_tab_selection(
 
 /// The persistent inner parts of a pooled row, so binding updates them in place
 /// rather than respawning (which would re-measure text every scroll frame).
-#[derive(Component)]
+#[derive(Component, Debug, Clone, Copy)]
 struct RowParts {
     /// The leading indent spacer, whose width encodes the depth.
     indent: Entity,
@@ -3087,36 +3101,47 @@ fn populate_new_rows(
         if child_of.parent() != ui.viewport {
             continue;
         }
-        amend_tree_row_node(&mut commands, row_entity);
-        commands.entity(row_entity).insert((
-            Pickable::default(),
-            // The resting look, the selection (`.sk-selected`) and the
-            // drag-and-drop target (`.sk-drop-target`,
-            // [`crate::inventory_drag`]) are all this one class list's.
-            ClassList::new_with_classes([LIST_ROW_CLASS]),
-        ));
-        let parts = spawn_row_parts(&mut commands, row_entity);
-        commands
-            .entity(row_entity)
-            .insert(parts)
-            .observe(on_row_press)
-            .observe(crate::inventory_actions::on_row_context)
-            .observe(crate::inventory_drag::on_row_drag_start)
-            .observe(crate::inventory_drag::on_row_drag_end);
+        dress_tree_row(&mut commands, row_entity, ROW_FONT_SIZE);
     }
 }
 
+/// Dress one pooled row container as a tree row at `font_size`: its geometry,
+/// its pickability and row class, its lifetime parts and the press / context /
+/// drag observers. Returns the parts. Shared by [`populate_new_rows`] and the
+/// gallery specimen, which pools its own rows.
+fn dress_tree_row(commands: &mut Commands, row_entity: Entity, font_size: f32) -> RowParts {
+    amend_tree_row_node(commands, row_entity, font_size);
+    commands.entity(row_entity).insert((
+        Pickable::default(),
+        // The resting look, the selection (`.sk-selected`) and the
+        // drag-and-drop target (`.sk-drop-target`,
+        // [`crate::inventory_drag`]) are all this one class list's.
+        ClassList::new_with_classes([LIST_ROW_CLASS]),
+    ));
+    let parts = spawn_row_parts(commands, row_entity, font_size);
+    commands
+        .entity(row_entity)
+        .insert(parts)
+        .observe(on_row_press)
+        .observe(crate::inventory_actions::on_row_context)
+        .observe(crate::inventory_drag::on_row_drag_start)
+        .observe(crate::inventory_drag::on_row_drag_end);
+    parts
+}
+
 /// Give a pooled row container the tree row's own geometry: a full-width band
-/// of one row's height, laying its parts out in a line with a 4 px gap.
+/// of one row's height at `font_size` ([`row_height`]), laying its parts out in
+/// a line with a 4 px gap.
 ///
 /// Amended, not inserted: `top` and `display` are the virtual list's, and it
 /// spawns the container before this ever sees it.
-fn amend_tree_row_node(commands: &mut Commands, row_entity: Entity) {
-    amend_row_node(commands, row_entity, |node| {
+fn amend_tree_row_node(commands: &mut Commands, row_entity: Entity, font_size: f32) {
+    let height = row_height(font_size);
+    amend_row_node(commands, row_entity, move |node| {
         node.position_type = PositionType::Absolute;
         node.left = Val::Px(0.0);
         node.right = Val::Px(0.0);
-        node.height = Val::Px(ROW_HEIGHT);
+        node.height = Val::Px(height);
         node.align_items = AlignItems::Center;
         node.column_gap = Val::Px(4.0);
     });
@@ -3154,7 +3179,7 @@ fn amend_tree_row_node(commands: &mut Commands, row_entity: Entity) {
 ///   name read as fitting, the marker hid, the suffix grew back — and the row
 ///   flipped between the two states forever. It also drew on two lines inside a
 ///   fixed-height row, since shrinking a wrapping `Text` wraps it.
-fn spawn_row_parts(commands: &mut Commands, row_entity: Entity) -> RowParts {
+fn spawn_row_parts(commands: &mut Commands, row_entity: Entity, font_size: f32) -> RowParts {
     // The depth indent: a fixed width that must not be given back under
     // pressure, or the row drifts left as the panel narrows.
     let indent = commands
@@ -3168,9 +3193,11 @@ fn spawn_row_parts(commands: &mut Commands, row_entity: Entity) -> RowParts {
         .id();
     let arrow = commands
         .spawn((
-            RowArrow::Leaf.host(UiFont::Mono.at(ROW_FONT_SIZE)),
+            RowArrow::Leaf.host(UiFont::Mono.at(font_size)),
+            // Never given back either: a shrunk column slices its glyph.
             Node {
                 min_width: Val::Px(ARROW_COL_WIDTH),
+                flex_shrink: 0.0,
                 ..default()
             },
             ChildOf(row_entity),
@@ -3179,10 +3206,11 @@ fn spawn_row_parts(commands: &mut Commands, row_entity: Entity) -> RowParts {
     let icon = commands
         .spawn((
             Text::new(""),
-            UiFont::Sans.at(ROW_FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(LABEL_COLOR),
             Node {
                 min_width: Val::Px(ICON_COL_WIDTH),
+                flex_shrink: 0.0,
                 ..default()
             },
             ChildOf(row_entity),
@@ -3192,14 +3220,26 @@ fn spawn_row_parts(commands: &mut Commands, row_entity: Entity) -> RowParts {
     // with a no-wrap `Text` child, so a name wider than the row draws on a
     // single line with its tail hidden rather than wrapping into the rows
     // above and below.
+    // It is the row's one ellipsis cell, so it declares the clip the layout
+    // harness would otherwise flag, exactly as a table cell does.
     let label_clip = commands
-        .spawn((label_clip_node(), Pickable::IGNORE, ChildOf(row_entity)))
+        .spawn((
+            label_clip_node(),
+            ContentMayOverflow {
+                reason: LABEL_CLIP_REASON,
+            },
+            TextMayClip {
+                reason: LABEL_CLIP_REASON,
+            },
+            Pickable::IGNORE,
+            ChildOf(row_entity),
+        ))
         .id();
     let label = commands
         .spawn((
             Text::new(""),
             TextLayout::no_wrap(),
-            UiFont::Sans.at(ROW_FONT_SIZE),
+            UiFont::Sans.at(font_size),
             ClassList::new_with_classes([TEXT_CLASS]),
             // The text keeps its full width; the clip container is what
             // shrinks, so an over-long name overflows the clip and reveals
@@ -3219,7 +3259,7 @@ fn spawn_row_parts(commands: &mut Commands, row_entity: Entity) -> RowParts {
     let ellipsis = spawn_ellipsis_marker(
         commands,
         row_entity,
-        ROW_FONT_SIZE,
+        font_size,
         LABEL_COLOR,
         FALLBACK_ELLIPSIS,
     );
@@ -3233,7 +3273,7 @@ fn spawn_row_parts(commands: &mut Commands, row_entity: Entity) -> RowParts {
         .spawn((
             Text::new(""),
             TextLayout::no_wrap(),
-            UiFont::Sans.at(ROW_FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(SUFFIX_COLOR),
             Node {
                 flex_shrink: 0.0,
@@ -3334,14 +3374,8 @@ fn bind_rows(
     style: Res<SuffixStyle>,
     ui: Option<Res<InventoryUi>>,
     rows: Query<(Ref<VirtualRow>, &ChildOf, &RowParts)>,
-    paint: RowPaint,
+    mut paint: RowPaint,
 ) {
-    let RowPaint {
-        mut nodes,
-        mut texts,
-        mut fonts,
-        mut classes,
-    } = paint;
     let Some(ui) = ui else {
         return;
     };
@@ -3361,50 +3395,63 @@ fn bind_rows(
         let Some(display) = view.rows.get(index) else {
             continue;
         };
-        if let Ok(mut indent) = nodes.get_mut(parts.indent) {
-            indent.width = Val::Px(depth_indent(display.depth));
+        bind_row(&mut paint, parts, display, *style);
+    }
+}
+
+/// Write one [`DisplayRow`] into a row's parts, with its decoration spelled for
+/// `style` — the per-row half of [`bind_rows`], shared with the gallery
+/// specimen's sample rows.
+fn bind_row(paint: &mut RowPaint, parts: &RowParts, display: &DisplayRow, style: SuffixStyle) {
+    let RowPaint {
+        nodes,
+        texts,
+        fonts,
+        classes,
+    } = paint;
+    if let Ok(mut indent) = nodes.get_mut(parts.indent) {
+        indent.width = Val::Px(depth_indent(display.depth));
+    }
+    if let Ok(mut arrow) = classes.get_mut(parts.arrow) {
+        display.arrow.apply(&mut arrow);
+    }
+    if let Ok((mut text, _color)) = texts.get_mut(parts.icon) {
+        set_text(&mut text, display.icon);
+    }
+    if let Ok((mut text, _color)) = texts.get_mut(parts.label) {
+        set_text(&mut text, &display.name);
+    }
+    // A folder's name reads gold against an item's plain text — the
+    // reference's own distinction, and the skin's to retune.
+    set_state_class_on(
+        classes,
+        parts.label,
+        FOLDER_LABEL_CLASS,
+        matches!(display.key, RowKey::Folder(_)),
+    );
+    // A worn item's label draws bold, an unworn link italic (the
+    // reference's `getLabelStyle`); write-guarded so an unchanged style
+    // does not re-measure the text.
+    if let Ok(mut font) = fonts.get_mut(parts.label) {
+        let weight = if display.bold {
+            FontWeight::BOLD
+        } else {
+            FontWeight::NORMAL
+        };
+        if font.weight != weight {
+            font.weight = weight;
         }
-        if let Ok(mut arrow) = classes.get_mut(parts.arrow) {
-            display.arrow.apply(&mut arrow);
+        let slant = if display.italic {
+            FontStyle::Italic
+        } else {
+            FontStyle::Normal
+        };
+        if font.style != slant {
+            font.style = slant;
         }
-        if let Ok((mut text, _color)) = texts.get_mut(parts.icon) {
-            set_text(&mut text, display.icon);
-        }
-        if let Ok((mut text, _color)) = texts.get_mut(parts.label) {
-            set_text(&mut text, &display.name);
-        }
-        // A folder's name reads gold against an item's plain text — the
-        // reference's own distinction, and the skin's to retune.
-        set_state_class_on(
-            &mut classes,
-            parts.label,
-            FOLDER_LABEL_CLASS,
-            matches!(display.key, RowKey::Folder(_)),
-        );
-        // A worn item's label draws bold, an unworn link italic (the
-        // reference's `getLabelStyle`); write-guarded so an unchanged style
-        // does not re-measure the text.
-        if let Ok(mut font) = fonts.get_mut(parts.label) {
-            let weight = if display.bold {
-                FontWeight::BOLD
-            } else {
-                FontWeight::NORMAL
-            };
-            if font.weight != weight {
-                font.weight = weight;
-            }
-            let style = if display.italic {
-                FontStyle::Italic
-            } else {
-                FontStyle::Normal
-            };
-            if font.style != style {
-                font.style = style;
-            }
-        }
-        if let Ok((mut text, _color)) = texts.get_mut(parts.suffix) {
-            set_text(&mut text, &display.decorations.text(*style));
-        }
+    }
+    if let Ok((mut text, _color)) = texts.get_mut(parts.suffix) {
+        set_text(&mut text, &display.decorations.text(style));
     }
 }
 
@@ -3813,16 +3860,36 @@ fn spawn_inventory_panel(mut commands: Commands, root: Res<UiRoot>) {
 /// [`InventoryUi`] — whose appearance wakes every `Option<Res<InventoryUi>>`
 /// consumer, exactly as the old startup build did.
 fn build_inventory_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
-    let panel = handle.root;
-    let content = handle.content;
+    let ui = spawn_inventory_content(
+        &mut commands,
+        handle.root,
+        handle.content,
+        CHROME_FONT_SIZE,
+        ROW_FONT_SIZE,
+    );
+    commands.insert_resource(ui);
+}
 
+/// Build the inventory window's content into `content` at `font_size`: the tab
+/// strip, the expand / collapse / gear / add row, the search field and the
+/// virtualized viewport with its scrollbar, whose rows are [`row_height`] tall
+/// for rows drawn at `row_font_size`. Returns the handles the window keeps
+/// (naming `panel` as its root). Shared by the live floater and its gallery
+/// specimen.
+fn spawn_inventory_content(
+    commands: &mut Commands,
+    panel: Entity,
+    content: Entity,
+    font_size: f32,
+    row_font_size: f32,
+) -> InventoryUi {
     // Tabs — the reusable strip widget ([`crate::ui_tab`]) in its horizontal
     // (top-edge) placement. One focus stop; the arrow keys move between the
     // Everything / Recent / Worn tabs, and the active one drives the shared list
     // via [`bridge_tab_selection`]. The labels are spawned in [`TAB_ORDER`].
     let tab_labels = TAB_ORDER.map(|tab| tab.label_key().to_owned());
     let tab_strip = spawn_tab_strip(
-        &mut commands,
+        commands,
         content,
         &TabSpec {
             element: "inventory-tabs",
@@ -3830,29 +3897,35 @@ fn build_inventory_content(In(handle): In<FloaterHandle>, mut commands: Commands
             labels: &tab_labels,
             active: 0,
             tab_index: 1,
-            font_size: CHROME_FONT_SIZE,
+            font_size,
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
         },
     );
 
-    // Expand / collapse all.
+    // Expand / collapse all. The row wraps: four buttons at a large font or in
+    // a long translation are wider than the window, and a wrapped button still
+    // works where one pushed past the window's edge does not.
     let expand_row = commands
         .spawn((
             Node {
+                flex_wrap: FlexWrap::Wrap,
+                row_gap: Val::Px(4.0),
                 ..row(Val::Px(4.0))
             },
             ChildOf(content),
         ))
         .id();
-    let expand_all = spawn_toolbar_button(&mut commands, expand_row, "inventory-expand-all", 2);
+    let expand_all =
+        spawn_toolbar_button(commands, expand_row, "inventory-expand-all", 2, font_size);
     commands.entity(expand_all).observe(
         |_press: On<Pointer<Press>>, mut actions: MessageWriter<InventoryUiAction>| {
             actions.write(InventoryUiAction::ExpandAll);
         },
     );
-    let collapse_all = spawn_toolbar_button(&mut commands, expand_row, "inventory-collapse-all", 3);
+    let collapse_all =
+        spawn_toolbar_button(commands, expand_row, "inventory-collapse-all", 3, font_size);
     commands.entity(collapse_all).observe(
         |_press: On<Pointer<Press>>, mut actions: MessageWriter<InventoryUiAction>| {
             actions.write(InventoryUiAction::CollapseAll);
@@ -3867,7 +3940,7 @@ fn build_inventory_content(In(handle): In<FloaterHandle>, mut commands: Commands
     // the rest of the reference's gear entries (sort, filters, new window) are a
     // placeholder for future tasks.
     let gear_host = crate::menu::spawn_menu_button(
-        &mut commands,
+        commands,
         expand_row,
         ElementCx::new(),
         &INVENTORY_GEAR_MENU,
@@ -3882,7 +3955,7 @@ fn build_inventory_content(In(handle): In<FloaterHandle>, mut commands: Commands
     // New-item entries (`menu_inventory_add.xml`), targeting the selected
     // folder. Its defs and routing live in [`crate::inventory_actions`].
     let add_host = crate::menu::spawn_menu_button(
-        &mut commands,
+        commands,
         expand_row,
         ElementCx::new(),
         &crate::inventory_actions::INVENTORY_ADD_MENU,
@@ -3900,11 +3973,11 @@ fn build_inventory_content(In(handle): In<FloaterHandle>, mut commands: Commands
     // *means* (`read_search_field` narrows the shown rows to it). `bevy_ui_widgets`
     // focuses the field on click, so no press observer is needed here.
     let search = crate::ui_search::spawn_search_field(
-        &mut commands,
+        commands,
         content,
         &crate::ui_search::SearchFieldSpec {
             tab_index: 4,
-            font_size: CHROME_FONT_SIZE,
+            font_size,
             placeholder: "Search inventory".to_owned(),
             search_glyph: true,
             ..crate::ui_search::SearchFieldSpec::new("inventory")
@@ -3931,7 +4004,7 @@ fn build_inventory_content(In(handle): In<FloaterHandle>, mut commands: Commands
             // used to paint by hand, plus the field-family text roles the
             // class re-roots for a light list. See `LIST_SURFACE_CLASS`.
             ClassList::new_with_classes([LIST_SURFACE_CLASS]),
-            VirtualList::new(ROW_HEIGHT),
+            VirtualList::new(row_height(row_font_size)),
             VirtualViewport,
             Pickable::default(),
             TabIndex(7),
@@ -3946,14 +4019,14 @@ fn build_inventory_content(In(handle): In<FloaterHandle>, mut commands: Commands
         .observe(crate::inventory_actions::on_viewport_context)
         .id();
     // The list's own scrollbar: the rows stop clear of it while it shows.
-    spawn_virtual_scrollbar(&mut commands, viewport);
+    spawn_virtual_scrollbar(commands, viewport);
 
-    commands.insert_resource(InventoryUi {
+    InventoryUi {
         panel,
         viewport,
         search,
         tab_strip,
-    });
+    }
 }
 
 /// Spawn one toolbar button (a focusable, clickable box with a centred label)
@@ -3963,6 +4036,7 @@ fn spawn_toolbar_button(
     parent: Entity,
     label_key: &'static str,
     tab_index: i32,
+    font_size: f32,
 ) -> Entity {
     ui_spawn::spawn_button(
         commands,
@@ -3974,7 +4048,7 @@ fn spawn_toolbar_button(
         .tab_index(tab_index)
         .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
         .label_color(CHROME_COLOR)
-        .font_size(CHROME_FONT_SIZE),
+        .font_size(font_size),
     )
     .button
 }
@@ -4112,6 +4186,197 @@ fn spawn_sample_row(
 }
 
 // ---------------------------------------------------------------------------
+// Gallery specimen
+// ---------------------------------------------------------------------------
+
+/// A small fixed inventory the gallery / `ui_test` specimens draw from — this
+/// window's tree and [`crate::inventory_gallery`]'s grid — so both show the
+/// same sample through the live model rather than hand-made rows.
+pub(crate) struct SampleInventory {
+    /// The model, stood up by hand through [`InventoryModel::merge_folders`] /
+    /// [`InventoryModel::set_items`] and expanded down to the Clothing folder.
+    pub(crate) model: InventoryModel,
+    /// The tracked worn set (the jacket), for the bold `(worn)` decoration.
+    pub(crate) worn: HashSet<InventoryKey>,
+    /// The Clothing folder, which the gallery view shows.
+    pub(crate) clothing: InventoryFolderKey,
+    /// The selected row (the jacket).
+    pub(crate) selected: RowKey,
+}
+
+/// Stand up the [`SampleInventory`]: My Inventory with Clothing (a sub-folder, a
+/// worn jacket, a no-copy pair of boots and a link), Objects (a no-modify chair),
+/// Textures (collapsed) and the Trash, beside a collapsed Library. Sample names
+/// go through `cx.text`, so the sweep's script / pseudolocale cells transform
+/// them.
+pub(crate) fn sample_inventory(cx: ElementCx) -> SampleInventory {
+    let folder_key = |id: u128| InventoryFolderKey::from(Uuid::from_u128(id));
+    let folder = |id: u128, parent: Option<u128>, name: &str, folder_type: FolderType| FolderInfo {
+        folder_id: folder_key(id),
+        parent_id: parent.map(folder_key),
+        name: cx.text(name),
+        folder_type,
+        version: 1,
+        state: FolderState::Loaded { version: 1 },
+    };
+    let owner = sl_client_bevy::AgentKey::from(Uuid::from_u128(0x5A));
+    let full = Permissions::MODIFY | Permissions::COPY | Permissions::TRANSFER | Permissions::MOVE;
+    let item = |id: u128, folder: u128, name: &str, kind: (InventoryType, AssetType, u32)| {
+        let (inv_type, asset_type, flags) = kind;
+        ItemInfo {
+            item_id: InventoryKey::from(Uuid::from_u128(id)),
+            folder_id: folder_key(folder),
+            name: cx.text(name),
+            description: String::new(),
+            asset_id: Uuid::from_u128(id.saturating_add(0x1000)),
+            asset_type,
+            inv_type,
+            flags,
+            sale: sl_client_bevy::SaleInfo::default(),
+            // Distinct dates, so the default newest-first sort has an order.
+            creation_date: 1_710_000_000_i32.saturating_add(i32::try_from(id).unwrap_or(0)),
+            owner: sl_client_bevy::OwnerKey::Agent(owner),
+            last_owner_id: Uuid::nil(),
+            creator_id: owner,
+            group: None,
+            permissions: sl_client_bevy::Permissions5 {
+                base: full,
+                owner: full,
+                group: Permissions::empty(),
+                everyone: Permissions::empty(),
+                next_owner: full,
+            },
+        }
+    };
+    let wearable = |kind: WearableType| {
+        (
+            InventoryType::Wearable,
+            AssetType::Clothing,
+            u32::from(kind.to_code()),
+        )
+    };
+
+    let mut model = InventoryModel::default();
+    model.merge_folders(
+        &[
+            folder(0x100, None, "My Inventory", FolderType::RootInventory),
+            folder(0x101, Some(0x100), "Clothing", FolderType::Clothing),
+            folder(0x102, Some(0x100), "Objects", FolderType::Object),
+            folder(0x103, Some(0x100), "Textures", FolderType::Texture),
+            folder(0x104, Some(0x100), "Trash", FolderType::Trash),
+            folder(0x105, Some(0x101), "Sample Outfit", FolderType::None),
+        ],
+        false,
+    );
+    model.merge_folders(
+        &[folder(0x200, None, "Library", FolderType::RootInventory)],
+        true,
+    );
+    let jacket = item(
+        0x301,
+        0x101,
+        "Sample Denim Jacket",
+        wearable(WearableType::Jacket),
+    );
+    let mut boots = item(
+        0x302,
+        0x101,
+        "Sample Leather Boots",
+        wearable(WearableType::Shoes),
+    );
+    boots.permissions.owner = full.difference(Permissions::COPY);
+    let mut link = item(0x303, 0x101, "Sample Shirt", wearable(WearableType::Shirt));
+    link.asset_type = AssetType::Other(ASSET_TYPE_LINK);
+    let mut chair = item(
+        0x304,
+        0x102,
+        "Sample Wooden Chair",
+        (InventoryType::Object, AssetType::Object, 0),
+    );
+    chair.permissions.owner = full.difference(Permissions::MODIFY);
+    let snapshot = item(
+        0x305,
+        0x103,
+        "Sample Snapshot",
+        (InventoryType::Snapshot, AssetType::Texture, 0),
+    );
+    let (jacket_key, clothing) = (jacket.item_id, folder_key(0x101));
+    model.set_items(clothing, &[jacket, boots, link]);
+    model.set_items(folder_key(0x102), &[chair]);
+    model.set_items(folder_key(0x103), &[snapshot]);
+    for expanded in [0x100, 0x101, 0x102] {
+        model.expanded.insert(folder_key(expanded));
+    }
+    SampleInventory {
+        model,
+        worn: HashSet::from([jacket_key]),
+        clothing,
+        selected: RowKey::Item(jacket_key),
+    }
+}
+
+/// The inventory window's gallery / `ui_test` specimen: the live content, built
+/// by the same `spawn_inventory_content` the viewer's floater is, at the
+/// cell's font size, with the `SampleInventory`'s Everything tree in its list.
+///
+/// The rows are the live rows: the model flattens them ([`InventoryModel::
+/// build_rows`]), `dress_tree_row` gives each pooled container its parts and
+/// `bind_row` writes them, spelling the decorations the way the live window
+/// does at its default width. The gallery and the sweep schedule no
+/// `layout_virtual_lists`, so each row is pooled by the list's own
+/// [`spawn_specimen_row`], where the list would put it unscrolled.
+pub fn spawn_inventory_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: crate::ui_element::ElementCx,
+) -> Entity {
+    let ui = spawn_inventory_content(commands, parent, parent, cx.font_size, cx.font_size);
+    let sample = sample_inventory(cx);
+    let rows = sample.model.build_rows(
+        InventoryTab::Everything,
+        &ViewSpec {
+            query: "",
+            tracked_attachments: &sample.worn,
+            sort: SortSpec::default(),
+            filter: &crate::inventory_filters::ItemFilter::default(),
+            now_unix: 0,
+            login_unix: 0,
+        },
+    );
+    let count = rows.len();
+    commands
+        .entity(ui.viewport)
+        .entry::<VirtualList>()
+        .and_modify(move |mut list| list.item_count = count);
+    let mut bound = Vec::with_capacity(count);
+    for (index, display) in rows.into_iter().enumerate() {
+        let row = spawn_specimen_row(commands, ui.viewport, index, row_height(cx.font_size));
+        let parts = dress_tree_row(commands, row, cx.font_size);
+        if display.key() == sample.selected {
+            commands
+                .entity(row)
+                .entry::<ClassList>()
+                .and_modify(|mut classes| set_state_class(&mut classes, SELECTED_CLASS, true));
+        }
+        bound.push((parts, display));
+    }
+    let style = suffix_style_for(PANEL_WIDTH, SuffixStyle::default());
+    commands.run_system_cached_with(bind_sample_rows, (bound, style));
+    parent
+}
+
+/// Bind the specimen's pooled rows through the live [`bind_row`] — run once,
+/// after the rows' parts exist.
+fn bind_sample_rows(
+    In((rows, style)): In<(Vec<(RowParts, DisplayRow)>, SuffixStyle)>,
+    mut paint: RowPaint,
+) {
+    for (parts, display) in &rows {
+        bind_row(&mut paint, parts, display, style);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Requests carrying an inventory item
 // ---------------------------------------------------------------------------
 //
@@ -4230,6 +4495,51 @@ mod tests {
             &[item(10, 2, "Blue shirt", InventoryType::Wearable)],
         );
         model
+    }
+
+    /// **The gallery specimen's sample shows every row state the tree draws**:
+    /// an expanded and a collapsed folder, a worn (bold) item, a link (italic),
+    /// a withheld-permission decoration, and nothing from a collapsed folder.
+    /// The specimen flattens it through the live `build_rows`, so this is what
+    /// a skin author sees in the gallery.
+    #[test]
+    fn specimen_sample_tree_covers_the_row_states() {
+        let sample = super::sample_inventory(sl_viewer_ui_core::ui_element::ElementCx::new());
+        let rows = sample.model.build_rows(
+            InventoryTab::Everything,
+            &super::ViewSpec {
+                query: "",
+                tracked_attachments: &sample.worn,
+                sort: super::SortSpec::default(),
+                filter: &crate::inventory_filters::ItemFilter::default(),
+                now_unix: 0,
+                login_unix: 0,
+            },
+        );
+        let row = |name: &str| rows.iter().find(|row| row.name == name);
+        let arrow = |name: &str| row(name).map(|row| row.arrow);
+        assert_eq!(arrow("My Inventory"), Some(RowArrow::Expanded));
+        assert_eq!(arrow("Clothing"), Some(RowArrow::Expanded));
+        assert_eq!(arrow("Textures"), Some(RowArrow::Collapsed));
+        assert_eq!(arrow("Library"), Some(RowArrow::Collapsed));
+        assert!(
+            row("Sample Snapshot").is_none(),
+            "a collapsed folder's item showed"
+        );
+        let jacket = row("Sample Denim Jacket");
+        assert_eq!(
+            jacket.map(|row| (row.bold, row.key)),
+            Some((true, sample.selected))
+        );
+        assert_eq!(row("Sample Shirt").map(|row| row.italic), Some(true));
+        assert_eq!(
+            row("Sample Leather Boots").map(|row| row.decorations.text(SuffixStyle::Spelled)),
+            Some("(no copy)".to_owned())
+        );
+        assert_eq!(
+            row("Sample Wooden Chair").map(|row| row.decorations.text(SuffixStyle::Spelled)),
+            Some("(no modify)".to_owned())
+        );
     }
 
     /// **A save rebinds its item to the asset the save wrote.**
@@ -5513,8 +5823,8 @@ mod row_layout_tests {
                     ))
                     .id();
                 let row = commands.spawn((Name::new("row"), ChildOf(panel))).id();
-                super::amend_tree_row_node(&mut commands, row);
-                let parts = super::spawn_row_parts(&mut commands, row);
+                super::amend_tree_row_node(&mut commands, row, super::ROW_FONT_SIZE);
+                let parts = super::spawn_row_parts(&mut commands, row, super::ROW_FONT_SIZE);
                 // What `bind_rows` writes into the parts, for one row.
                 amend_row_node(&mut commands, parts.indent, move |node| {
                     node.width = Val::Px(depth_indent(depth));

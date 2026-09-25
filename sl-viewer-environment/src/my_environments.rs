@@ -62,6 +62,7 @@
 //! `floater_my_environments.xml`, `menu_settings_gear.xml`,
 //! `menu_settings_add.xml`.
 
+use bevy::ecs::system::RunSystemOnce as _;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
@@ -90,9 +91,9 @@ use sl_viewer_ui_widgets::menu::{MenuCommand, MenuDef, MenuItemDef, OpenContextM
 use sl_viewer_ui_widgets::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use sl_viewer_ui_widgets::ui_search::{SearchFieldSpec, spawn_search_field};
 use sl_viewer_ui_widgets::ui_table::{
-    TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells, TableSelectionMode,
-    TableSortDefault, TableSpec, TableState, register_table_settings, set_table_cell, spawn_table,
-    spawn_table_row,
+    SpecimenTable, TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells,
+    TableSelectionMode, TableSortDefault, TableSpec, TableState, register_table_settings,
+    set_table_cell, spawn_specimen_table_rows, spawn_table, spawn_table_row,
 };
 use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use sl_viewer_world_api::rlv::{RlvSession, can_change_environment};
@@ -106,8 +107,8 @@ use crate::style::{ACTION_BACKGROUND, DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, R
 use bevy_flair::style::components::ClassList;
 use sl_viewer_ui_core::skin::BUTTON_CLASS;
 use sl_viewer_ui_core::skin::{
-    DisabledButtons, SELECTED_CLASS, TEXT_CLASS, set_action_button_enabled, set_state_class_on,
-    text_role,
+    DisabledButtons, SELECTED_CLASS, TEXT_CLASS, set_action_button_enabled, set_state_class,
+    set_state_class_on, text_role,
 };
 
 /// The floater's stable id.
@@ -458,6 +459,18 @@ fn spawn_my_environments_floater(mut commands: Commands, root: Res<UiRoot>) {
 /// First-open content build: the filter row, the list, the rename row and the
 /// bottom actions.
 fn build_my_environments_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
+    let (_content, ui) = spawn_my_environments_content(&mut commands, handle.content, FONT_SIZE);
+    commands.insert_resource(ui);
+}
+
+/// Build the window's content into `slot` with its text at `font_size` (the
+/// list's own rows are the table spec's). Returns the content root and the
+/// handles the window keeps. Shared by the live floater and its specimen.
+fn spawn_my_environments_content(
+    commands: &mut Commands,
+    slot: Entity,
+    font_size: f32,
+) -> (Entity, MyEnvironmentsUi) {
     let content = commands
         .spawn((
             Node {
@@ -468,19 +481,19 @@ fn build_my_environments_content(In(handle): In<FloaterHandle>, mut commands: Co
                 ..column(Val::Px(4.0))
             },
             Name::new("my-environments:content"),
-            ChildOf(handle.content),
+            ChildOf(slot),
         ))
         .id();
 
-    let filter_field = spawn_filter_row(&mut commands, content);
+    let filter_field = spawn_filter_row(commands, content, font_size);
 
-    let table = spawn_table(&mut commands, content, &MY_ENVIRONMENTS_TABLE);
+    let table = spawn_table(commands, content, &MY_ENVIRONMENTS_TABLE);
     commands.entity(table.viewport).insert(TabIndex(4));
 
     let status_text = commands
         .spawn((
             Text::default(),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(DIM_LABEL_COLOR),
             Node {
                 flex_shrink: 0.0,
@@ -493,21 +506,24 @@ fn build_my_environments_content(In(handle): In<FloaterHandle>, mut commands: Co
         ))
         .id();
 
-    let rename_field = spawn_rename_row(&mut commands, content);
-    spawn_action_row(&mut commands, content);
+    let rename_field = spawn_rename_row(commands, content, font_size);
+    spawn_action_row(commands, content, font_size);
 
-    commands.insert_resource(MyEnvironmentsUi {
-        table: table.root,
-        viewport: table.viewport,
-        filter_field,
-        rename_field,
-        status_text,
-    });
+    (
+        content,
+        MyEnvironmentsUi {
+            table: table.root,
+            viewport: table.viewport,
+            filter_field,
+            rename_field,
+            status_text,
+        },
+    )
 }
 
-/// The filter row: the three kind checkboxes and the name filter under them.
-/// Returns the filter field's [`EditableText`] entity.
-fn spawn_filter_row(commands: &mut Commands, parent: Entity) -> Entity {
+/// The filter row: the three kind checkboxes and the name filter under them, at
+/// `font_size`. Returns the filter field's [`EditableText`] entity.
+fn spawn_filter_row(commands: &mut Commands, parent: Entity, font_size: f32) -> Entity {
     let checks = commands
         .spawn((
             Node {
@@ -521,7 +537,7 @@ fn spawn_filter_row(commands: &mut Commands, parent: Entity) -> Entity {
         ))
         .id();
     for (index, kind) in FILTER_KINDS.into_iter().enumerate() {
-        spawn_kind_checkbox(commands, checks, index, kind);
+        spawn_kind_checkbox(commands, checks, index, kind, font_size);
     }
 
     let search = spawn_search_field(
@@ -529,7 +545,7 @@ fn spawn_filter_row(commands: &mut Commands, parent: Entity) -> Entity {
         parent,
         &SearchFieldSpec {
             tab_index: 3,
-            font_size: FONT_SIZE,
+            font_size,
             min_width: 160.0,
             placeholder: "Filter Environments".to_owned(),
             search_glyph: true,
@@ -544,8 +560,15 @@ fn spawn_filter_row(commands: &mut Commands, parent: Entity) -> Entity {
     search.field
 }
 
-/// One kind checkbox with its caption, ticked to start (all three kinds show).
-fn spawn_kind_checkbox(commands: &mut Commands, parent: Entity, index: usize, kind: SettingsKind) {
+/// One kind checkbox with its caption at `font_size`, ticked to start (all three
+/// kinds show).
+fn spawn_kind_checkbox(
+    commands: &mut Commands,
+    parent: Entity,
+    index: usize,
+    kind: SettingsKind,
+    font_size: f32,
+) {
     let checkbox = spawn_checkbox(
         commands,
         parent,
@@ -553,7 +576,7 @@ fn spawn_kind_checkbox(commands: &mut Commands, parent: Entity, index: usize, ki
             element: kind_element(kind),
             label: kind_key(kind).to_owned(),
             tab_index: i32::try_from(index).unwrap_or(0),
-            font_size: FONT_SIZE,
+            font_size,
             translate_label: true,
         },
     );
@@ -564,8 +587,8 @@ fn spawn_kind_checkbox(commands: &mut Commands, parent: Entity, index: usize, ki
 }
 
 /// The rename row: a label, the field seeded from the selection, and the button
-/// that commits it. Returns the field's [`EditableText`] entity.
-fn spawn_rename_row(commands: &mut Commands, parent: Entity) -> Entity {
+/// that commits it, at `font_size`. Returns the field's [`EditableText`] entity.
+fn spawn_rename_row(commands: &mut Commands, parent: Entity, font_size: f32) -> Entity {
     let holder = commands
         .spawn((
             Node {
@@ -581,7 +604,7 @@ fn spawn_rename_row(commands: &mut Commands, parent: Entity) -> Entity {
     commands.spawn((
         Text::default(),
         Translated::new("my-environments-name"),
-        UiFont::Sans.at(FONT_SIZE),
+        UiFont::Sans.at(font_size),
         text_role(LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(holder),
@@ -591,26 +614,37 @@ fn spawn_rename_row(commands: &mut Commands, parent: Entity) -> Entity {
         holder,
         &TextInputSpec {
             tab_index: 5,
-            font_size: FONT_SIZE,
+            font_size,
             fill: true,
             max_characters: Some(63),
             ..TextInputSpec::new("my-environments-rename", TextInputKind::Line)
         },
     );
-    spawn_action_button(commands, holder, MyEnvironmentsButton::Rename, 6, false);
+    spawn_action_button(
+        commands,
+        holder,
+        MyEnvironmentsButton::Rename,
+        6,
+        false,
+        font_size,
+    );
     field
 }
 
 /// The bottom action row: the creators, then the trash at the trailing edge —
 /// the reference's `pnl_bottom` (its add menu flattened to its three entries,
-/// and its gear menu moved onto the rows).
-fn spawn_action_row(commands: &mut Commands, parent: Entity) {
+/// and its gear menu moved onto the rows). Captions at `font_size`.
+fn spawn_action_row(commands: &mut Commands, parent: Entity, font_size: f32) {
     let holder = commands
         .spawn((
             Node {
                 width: Val::Percent(100.0),
                 flex_shrink: 0.0,
                 align_items: AlignItems::Center,
+                // Long captions (or a large font) put the buttons on a second
+                // line rather than past the window's edge.
+                flex_wrap: FlexWrap::Wrap,
+                row_gap: Val::Px(4.0),
                 ..row(Val::Px(6.0))
             },
             Name::new("my-environments-actions:row"),
@@ -625,6 +659,7 @@ fn spawn_action_row(commands: &mut Commands, parent: Entity) {
             MyEnvironmentsButton::New(kind),
             tab,
             false,
+            font_size,
         );
         tab = tab.saturating_add(1);
     }
@@ -637,16 +672,24 @@ fn spawn_action_row(commands: &mut Commands, parent: Entity) {
         Pickable::IGNORE,
         ChildOf(holder),
     ));
-    spawn_action_button(commands, holder, MyEnvironmentsButton::Delete, tab, false);
+    spawn_action_button(
+        commands,
+        holder,
+        MyEnvironmentsButton::Delete,
+        tab,
+        false,
+        font_size,
+    );
 }
 
-/// One bottom-row button.
+/// One bottom-row button, its caption at `font_size`.
 fn spawn_action_button(
     commands: &mut Commands,
     parent: Entity,
     button: MyEnvironmentsButton,
     tab: i32,
     disabled: bool,
+    font_size: f32,
 ) -> Entity {
     let spawned = ui_spawn::spawn_button(
         commands,
@@ -658,7 +701,7 @@ fn spawn_action_button(
         .tab_index(tab)
         .colors(ACTION_BACKGROUND, ACTION_BACKGROUND)
         .label_color(LABEL_COLOR)
-        .font_size(FONT_SIZE)
+        .font_size(font_size)
         // Both ends of `.sk-button:disabled .sk-text`. The marker itself goes
         // on below when the button is born refused, so it reads right on its
         // first frame rather than waiting for the first sync.
@@ -819,13 +862,19 @@ fn rebuild_my_environments_view(
     if let Ok(mut list) = lists.get_mut(ui.viewport) {
         list.item_count = view.rows.len();
     }
-    let label = translator.format(
+    let label = count_label(&translator, view.rows.len(), view.total);
+    set_status(&mut texts, Some(ui.status_text), &label);
+}
+
+/// The count line: how many rows the filters let through, of how many settings
+/// assets there are at all.
+fn count_label(translator: &Translator, shown: usize, total: usize) -> String {
+    translator.format(
         "my-environments-count",
         &TransArgs::new()
-            .int("shown", i64::try_from(view.rows.len()).unwrap_or(i64::MAX))
-            .int("total", i64::try_from(view.total).unwrap_or(i64::MAX)),
-    );
-    set_status(&mut texts, Some(ui.status_text), &label);
+            .int("shown", i64::try_from(shown).unwrap_or(i64::MAX))
+            .int("total", i64::try_from(total).unwrap_or(i64::MAX)),
+    )
 }
 
 /// Keep the rename field showing the selected item's name.
@@ -919,21 +968,7 @@ fn bind_environment_rows(
         }
         let data = row.index.and_then(|index| view.rows.get(index));
         bound.0 = data.map(|entry| entry.item);
-        let (kind, name, location) = data.map_or_else(
-            || (String::new(), String::new(), String::new()),
-            |entry| {
-                (
-                    translator.get(kind_key(entry.kind)),
-                    entry.name.clone(),
-                    location_text(&library_label, entry.library, &entry.folder),
-                )
-            },
-        );
-        for (column, value, color) in [
-            (COL_KIND, kind, DIM_LABEL_COLOR),
-            (COL_NAME, name, LABEL_COLOR),
-            (COL_WHERE, location, DIM_LABEL_COLOR),
-        ] {
+        for (column, value, color) in environment_row_values(&translator, &library_label, data) {
             if let Some(cell) = cells.cell(column) {
                 set_table_cell(&mut texts, cell, &value, color);
             }
@@ -947,6 +982,31 @@ fn bind_environment_rows(
             data.is_some() && selected.0 == bound.0,
         );
     }
+}
+
+/// One list row's cells, by column — the kind, the name and where it lives —
+/// with the colours the list draws them in. `None` is a parked row: every cell
+/// empty.
+fn environment_row_values(
+    translator: &Translator,
+    library_label: &str,
+    entry: Option<&SettingsListRow>,
+) -> [(usize, String, Color); 3] {
+    let (kind, name, location) = entry.map_or_else(
+        || (String::new(), String::new(), String::new()),
+        |entry| {
+            (
+                translator.get(kind_key(entry.kind)),
+                entry.name.clone(),
+                location_text(library_label, entry.library, &entry.folder),
+            )
+        },
+    );
+    [
+        (COL_KIND, kind, DIM_LABEL_COLOR),
+        (COL_NAME, name, LABEL_COLOR),
+        (COL_WHERE, location, DIM_LABEL_COLOR),
+    ]
 }
 
 // --- Interaction ----------------------------------------------------------
@@ -1489,5 +1549,91 @@ fn set_status<F: bevy::ecs::query::QueryFilter>(
         && text.0 != message
     {
         message.clone_into(&mut text.0);
+    }
+}
+
+// --- Gallery specimen -----------------------------------------------------
+
+/// The My Environments floater's gallery / `ui_test` specimen: the live
+/// content, built by the same `spawn_my_environments_content` the viewer's
+/// floater is at the cell's font size, with the list filled from sample rows
+/// (`settings_list::sample_rows`) in the
+/// default sort order — two of each kind, the user's own and the Library's.
+///
+/// The rows are pooled by the table widget's specimen helper (no host of a
+/// specimen runs the virtual list or this window's populate / bind), and drawn
+/// by `draw_my_environments_specimen` through the live window's own cell
+/// projection and count line. The first row is selected, and the rename field
+/// holds its name, as a click on it would leave them.
+pub fn spawn_my_environments_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: sl_viewer_ui_core::ui_element::ElementCx,
+) -> Entity {
+    let (content, ui) = spawn_my_environments_content(commands, parent, cx.font_size);
+    let mut rows = crate::settings_list::sample_rows(cx);
+    sort_rows(
+        &mut rows,
+        &crate::settings_list::default_sort_keys(&MY_ENVIRONMENTS_TABLE),
+    );
+    commands.queue(move |world: &mut World| {
+        // The filters the kind checkboxes' observer writes, so ticking one on
+        // the specimen is inert rather than a failed observer.
+        world.init_resource::<SettingsListFilters>();
+        crate::specimen::report(
+            MY_ENVIRONMENTS_FLOATER_ID,
+            world.run_system_once_with(draw_my_environments_specimen, (ui, rows)),
+        );
+    });
+    content
+}
+
+/// Draw the specimen's sample `rows` into the list, and its count line and
+/// rename field — the cells through [`environment_row_values`], the line
+/// through [`count_label`], exactly as the live bind and rebuild write them.
+fn draw_my_environments_specimen(
+    In((ui, rows)): In<(MyEnvironmentsUi, Vec<SettingsListRow>)>,
+    translator: Translator,
+    mut commands: Commands,
+    mut texts: Query<&mut Text>,
+    mut fields: Query<&mut EditableText>,
+) {
+    let library_label = translator.get("my-environments-library");
+    let values: Vec<Vec<(String, Color)>> = rows
+        .iter()
+        .map(|entry| {
+            let mut cells = vec![(String::new(), LABEL_COLOR); MY_ENVIRONMENTS_TABLE.columns.len()];
+            for (column, value, color) in
+                environment_row_values(&translator, &library_label, Some(entry))
+            {
+                if let Some(cell) = cells.get_mut(column) {
+                    *cell = (value, color);
+                }
+            }
+            cells
+        })
+        .collect();
+    let table = SpecimenTable {
+        root: ui.table,
+        viewport: ui.viewport,
+    };
+    let bound = spawn_specimen_table_rows(&mut commands, table, &MY_ENVIRONMENTS_TABLE, &values);
+    for ((row, _cells), entry) in bound.iter().zip(&rows) {
+        commands
+            .entity(*row)
+            .insert(BoundEnvironment(Some(entry.item)));
+    }
+    if let Some((row, _cells)) = bound.first() {
+        commands
+            .entity(*row)
+            .entry::<ClassList>()
+            .and_modify(|mut classes| set_state_class(&mut classes, SELECTED_CLASS, true));
+    }
+    let label = count_label(&translator, rows.len(), rows.len());
+    set_status(&mut texts, Some(ui.status_text), &label);
+    if let Some(first) = rows.first()
+        && let Ok(mut field) = fields.get_mut(ui.rename_field)
+    {
+        field.editor.set_text(&first.name);
     }
 }

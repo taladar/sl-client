@@ -48,6 +48,21 @@ use sl_viewer_ui_core::skin::text_role;
 /// The chrome font size, in logical pixels.
 const FONT: f32 = 13.0;
 
+/// The labelled rows' label-column width at [`FONT`], in logical pixels.
+const LABEL_WIDTH: f32 = 110.0;
+
+/// A factor slider's value-readout width at [`FONT`], in logical pixels.
+const READOUT_WIDTH: f32 = 34.0;
+
+/// A text column's width at `font_size`: `width` at [`FONT`], and in
+/// proportion above it, so a larger font's label or `0.00` readout stays
+/// inside its column. Still a fixed width at a given font size, so successive
+/// rows keep their controls aligned and a readout's slider does not jitter as
+/// the value changes.
+fn column_width(width: f32, font_size: f32) -> f32 {
+    width.max((font_size * width / FONT).ceil())
+}
+
 /// How a material factor's slider is drawn.
 const SLIDER: SliderStyle = SliderStyle {
     track_width: 140.0,
@@ -345,6 +360,64 @@ fn populate_material_editor(
     edit.dirty = true;
 
     commands.entity(ui.content).despawn_related::<Children>();
+    let controls = spawn_material_controls(&mut commands, ui.content, FONT, &material);
+    edit.preview = Some(controls.preview);
+    edit.alpha_label = Some(controls.alpha_label);
+    edit.double_check = Some(controls.double_check);
+    edit.status = Some(controls.status);
+}
+
+/// The control entities [`spawn_material_controls`] returns, the ones the
+/// edit's systems update afterwards.
+#[derive(Debug, Clone, Copy)]
+struct MatControls {
+    /// The preview sphere node.
+    preview: Entity,
+    /// The alpha-mode button's label node.
+    alpha_label: Entity,
+    /// The double-sided checkbox.
+    double_check: Entity,
+    /// The status readout node.
+    status: Entity,
+}
+
+// ---------------------------------------------------------------------------
+// Gallery specimen.
+// ---------------------------------------------------------------------------
+
+/// The material editor's gallery / `ui_test` specimen: the live controls,
+/// built by the same `spawn_material_controls` at the cell's font size from
+/// a sample material — a tinted, half-metallic, alpha-masked, double-sided
+/// surface with no texture maps (a specimen fetches nothing), so every swatch,
+/// slider readout and toggle shows a non-default value.
+pub fn spawn_material_editor_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: crate::ui_element::ElementCx,
+) -> Entity {
+    let material = GltfMaterial {
+        base_color: [0.62, 0.34, 0.18, 1.0],
+        metallic_factor: 0.5,
+        roughness_factor: 0.35,
+        emissive_factor: [0.05, 0.1, 0.3],
+        alpha_mode: GltfAlphaMode::Mask,
+        alpha_cutoff: 0.4,
+        double_sided: true,
+        ..GltfMaterial::default()
+    };
+    spawn_material_controls(commands, parent, cx.font_size, &material);
+    parent
+}
+
+/// Build the editor's controls for `material` into `content` at `font_size`:
+/// the Save / Revert row, the status line, the preview sphere and one row per
+/// channel. Shared by the live editor and its specimen.
+fn spawn_material_controls(
+    commands: &mut Commands,
+    content: Entity,
+    font_size: f32,
+    material: &GltfMaterial,
+) -> MatControls {
     let mut tab = 0_i32;
 
     // Action buttons + status.
@@ -354,22 +427,22 @@ fn populate_material_editor(
                 margin: UiRect::bottom(Val::Px(6.0)),
                 ..row(Val::Px(6.0))
             },
-            ChildOf(ui.content),
+            ChildOf(content),
         ))
         .id();
     for (kind, label) in [(MatButton::Save, "Save"), (MatButton::Revert, "Revert")] {
-        spawn_mat_button(&mut commands, button_row, kind, label, &mut tab);
+        spawn_mat_button(commands, button_row, kind, label, &mut tab, font_size);
     }
     let status = commands
         .spawn((
             Text::new(String::new()),
-            UiFont::Sans.at(FONT),
+            UiFont::Sans.at(font_size),
             text_role(LABEL_COLOR),
             Node {
                 margin: UiRect::bottom(Val::Px(4.0)),
                 ..Default::default()
             },
-            ChildOf(ui.content),
+            ChildOf(content),
         ))
         .id();
 
@@ -384,19 +457,19 @@ fn populate_material_editor(
                 ..Default::default()
             },
             BorderColor::all(CONTROL_BORDER),
-            MaterialPreview::Material(Box::new(material)),
-            ChildOf(ui.content),
+            MaterialPreview::Material(Box::new(*material)),
+            ChildOf(content),
         ))
         .id();
 
     // Base colour: tint swatch + texture.
-    let base_row = spawn_labeled_row(&mut commands, ui.content, "Base Color");
-    let base_color = base_linear_color(&material);
-    let swatch = spawn_color_swatch(&mut commands, base_row, "material-base", tab, base_color);
+    let base_row = spawn_labeled_row(commands, content, "Base Color", font_size);
+    let base_color = base_linear_color(material);
+    let swatch = spawn_color_swatch(commands, base_row, "material-base", tab, base_color);
     commands.entity(swatch).insert(MatColorSlot::Base);
     tab = tab.saturating_add(1);
     let base_tex = spawn_texture_swatch(
-        &mut commands,
+        commands,
         base_row,
         "material-base-tex",
         tab,
@@ -407,24 +480,26 @@ fn populate_material_editor(
 
     // Metallic / roughness: two factor sliders + the packed texture.
     spawn_factor_slider(
-        &mut commands,
-        ui.content,
+        commands,
+        content,
         "Metallic",
         MatFactor::Metallic,
         material.metallic_factor,
         &mut tab,
+        font_size,
     );
     spawn_factor_slider(
-        &mut commands,
-        ui.content,
+        commands,
+        content,
         "Roughness",
         MatFactor::Roughness,
         material.roughness_factor,
         &mut tab,
+        font_size,
     );
-    let mr_row = spawn_labeled_row(&mut commands, ui.content, "Metal/Rough Map");
+    let mr_row = spawn_labeled_row(commands, content, "Metal/Rough Map", font_size);
     let mr_tex = spawn_texture_swatch(
-        &mut commands,
+        commands,
         mr_row,
         "material-mr-tex",
         tab,
@@ -436,9 +511,9 @@ fn populate_material_editor(
     tab = tab.saturating_add(1);
 
     // Normal map.
-    let normal_row = spawn_labeled_row(&mut commands, ui.content, "Normal Map");
+    let normal_row = spawn_labeled_row(commands, content, "Normal Map", font_size);
     let normal_tex = spawn_texture_swatch(
-        &mut commands,
+        commands,
         normal_row,
         "material-normal-tex",
         tab,
@@ -448,14 +523,14 @@ fn populate_material_editor(
     tab = tab.saturating_add(1);
 
     // Emissive: tint swatch + texture.
-    let emissive_row = spawn_labeled_row(&mut commands, ui.content, "Emissive");
+    let emissive_row = spawn_labeled_row(commands, content, "Emissive", font_size);
     let emissive_color = Color::linear_rgb(
         material.emissive_factor.first().copied().unwrap_or(0.0),
         material.emissive_factor.get(1).copied().unwrap_or(0.0),
         material.emissive_factor.get(2).copied().unwrap_or(0.0),
     );
     let em_swatch = spawn_color_swatch(
-        &mut commands,
+        commands,
         emissive_row,
         "material-emissive",
         tab,
@@ -464,7 +539,7 @@ fn populate_material_editor(
     commands.entity(em_swatch).insert(MatColorSlot::Emissive);
     tab = tab.saturating_add(1);
     let em_tex = spawn_texture_swatch(
-        &mut commands,
+        commands,
         emissive_row,
         "material-emissive-tex",
         tab,
@@ -474,35 +549,37 @@ fn populate_material_editor(
     tab = tab.saturating_add(1);
 
     // Alpha mode (cycle) + cutoff.
-    let alpha_row = spawn_labeled_row(&mut commands, ui.content, "Alpha Mode");
+    let alpha_row = spawn_labeled_row(commands, content, "Alpha Mode", font_size);
     let alpha_label = spawn_text_button(
-        &mut commands,
+        commands,
         alpha_row,
         alpha_mode_name(material.alpha_mode),
         MatAlphaButton,
         &mut tab,
+        font_size,
     );
     spawn_factor_slider(
-        &mut commands,
-        ui.content,
+        commands,
+        content,
         "Alpha Cutoff",
         MatFactor::Cutoff,
         material.alpha_cutoff,
         &mut tab,
+        font_size,
     );
 
     // Double-sided toggle: the shared checkbox widget, caption-less because this
     // editor's rows carry their label in a leading column (as the alerts table
     // does) rather than beside each control.
-    let double_row = spawn_labeled_row(&mut commands, ui.content, "Double Sided");
+    let double_row = spawn_labeled_row(commands, content, "Double Sided", font_size);
     let double_check = spawn_checkbox(
-        &mut commands,
+        commands,
         double_row,
         &CheckboxSpec {
             element: "material-double-sided",
             label: String::new(),
             tab_index: tab,
-            font_size: FONT,
+            font_size,
             translate_label: false,
         },
     );
@@ -514,31 +591,40 @@ fn populate_material_editor(
         commands.entity(double_check.checkbox).insert(Checked);
     }
 
-    edit.preview = Some(preview);
-    edit.alpha_label = Some(alpha_label);
-    edit.double_check = Some(double_check.checkbox);
-    edit.status = Some(status);
+    MatControls {
+        preview,
+        alpha_label,
+        double_check: double_check.checkbox,
+        status,
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Control spawn helpers.
 // ---------------------------------------------------------------------------
 
-/// Spawn a labelled row and return the row entity to parent the control into.
-fn spawn_labeled_row(commands: &mut Commands, parent: Entity, label: &str) -> Entity {
+/// Spawn a labelled row at `font_size` and return the row entity to parent the
+/// control into.
+fn spawn_labeled_row(
+    commands: &mut Commands,
+    parent: Entity,
+    label: &str,
+    font_size: f32,
+) -> Entity {
     ui_spawn::spawn_labeled_row(
         commands,
         parent,
         LabeledRowSpec::new(UiLabel::literal(label))
             .label_color(LABEL_COLOR)
-            .font_size(FONT)
-            .label_width(Val::Px(110.0))
+            .font_size(font_size)
+            .label_width(Val::Px(column_width(LABEL_WIDTH, font_size)))
             .margin(UiRect::bottom(Val::Px(3.0))),
     )
     .row
 }
 
-/// Spawn a factor slider row (`0..=1`) tagged with its [`MatFactor`].
+/// Spawn a factor slider row (`0..=1`) at `font_size`, tagged with its
+/// [`MatFactor`].
 fn spawn_factor_slider(
     commands: &mut Commands,
     parent: Entity,
@@ -546,15 +632,17 @@ fn spawn_factor_slider(
     kind: MatFactor,
     value: f32,
     tab: &mut i32,
+    font_size: f32,
 ) {
-    let row_entity = spawn_labeled_row(commands, parent, label);
+    let row_entity = spawn_labeled_row(commands, parent, label, font_size);
     let readout = commands
         .spawn((
             Text::new(format!("{value:.2}")),
-            UiFont::Sans.at(FONT),
+            UiFont::Sans.at(font_size),
             text_role(LABEL_COLOR),
             Node {
-                width: Val::Px(34.0),
+                width: Val::Px(column_width(READOUT_WIDTH, font_size)),
+                flex_shrink: 0.0,
                 ..Default::default()
             },
             ChildOf(row_entity),
@@ -582,14 +670,15 @@ fn spawn_factor_slider(
     *tab = tab.saturating_add(1);
 }
 
-/// Spawn a bordered text button carrying `marker`, and return its label node so
-/// the caller can update the button's text later.
+/// Spawn a bordered text button at `font_size` carrying `marker`, and return
+/// its label node so the caller can update the button's text later.
 fn spawn_text_button(
     commands: &mut Commands,
     parent: Entity,
     label: &str,
     marker: impl Component,
     tab: &mut i32,
+    font_size: f32,
 ) -> Entity {
     let spawned = ui_spawn::spawn_button(
         commands,
@@ -599,7 +688,7 @@ fn spawn_text_button(
             .padding(10.0, 3.0)
             .colors(BUTTON_BACKGROUND, CONTROL_BORDER)
             .label_color(LABEL_COLOR)
-            .font_size(FONT),
+            .font_size(font_size),
     );
     commands
         .entity(spawned.button)
@@ -608,13 +697,14 @@ fn spawn_text_button(
     spawned.label
 }
 
-/// Spawn one chrome action button (Save / Revert).
+/// Spawn one chrome action button (Save / Revert) at `font_size`.
 fn spawn_mat_button(
     commands: &mut Commands,
     parent: Entity,
     kind: MatButton,
     label: &str,
     tab: &mut i32,
+    font_size: f32,
 ) {
     let button = ui_spawn::spawn_button(
         commands,
@@ -627,7 +717,7 @@ fn spawn_mat_button(
         .padding(10.0, 3.0)
         .colors(BUTTON_BACKGROUND, CONTROL_BORDER)
         .label_color(LABEL_COLOR)
-        .font_size(FONT),
+        .font_size(font_size),
     )
     .button;
     commands
@@ -644,7 +734,7 @@ fn spawn_mat_button(
 fn on_mat_slider_change(
     change: On<ValueChange<f32>>,
     sliders: Query<&MatFactorSlider>,
-    mut state: ResMut<MatEditState>,
+    state: Option<ResMut<MatEditState>>,
     mut commands: Commands,
 ) {
     let Ok(info) = sliders.get(change.source) else {
@@ -652,7 +742,10 @@ fn on_mat_slider_change(
     };
     let clamped = change.value.clamp(0.0, 1.0);
     commands.entity(change.source).insert(SliderValue(clamped));
-    if let Some(edit) = state.active.as_mut() {
+    // Absent only in the gallery, whose specimen has no edit to record into.
+    if let Some(mut state) = state
+        && let Some(edit) = state.active.as_mut()
+    {
         match info.kind {
             MatFactor::Metallic => edit.edited.metallic_factor = clamped,
             MatFactor::Roughness => edit.edited.roughness_factor = clamped,
@@ -729,12 +822,16 @@ fn apply_mat_color_picked(
 fn on_mat_toggle(
     press: On<Pointer<Press>>,
     alpha: Query<&MatAlphaButton>,
-    mut state: ResMut<MatEditState>,
+    state: Option<ResMut<MatEditState>>,
     mut texts: Query<&mut Text>,
 ) {
     if press.button != PointerButton::Primary {
         return;
     }
+    // Absent only in the gallery, whose specimen has no edit.
+    let Some(mut state) = state else {
+        return;
+    };
     let Some(edit) = state.active.as_mut() else {
         return;
     };
@@ -754,13 +851,14 @@ fn on_mat_toggle(
 fn on_mat_double_sided(
     change: On<ValueChange<bool>>,
     double: Query<&MatDoubleSidedButton>,
-    mut state: ResMut<MatEditState>,
+    mut state: Option<ResMut<MatEditState>>,
     mut commands: Commands,
 ) {
     if double.get(change.source).is_err() {
         return;
     }
-    let Some(edit) = state.active.as_mut() else {
+    // The state is absent only in the gallery, whose specimen has no edit.
+    let Some(edit) = state.as_mut().and_then(|state| state.active.as_mut()) else {
         // No material open: the box has no draft to write to, so put its tick
         // back rather than leaving it claiming something.
         if change.value {
@@ -811,14 +909,18 @@ fn sync_material_sliders(
 fn on_mat_action_button(
     press: On<Pointer<Press>>,
     buttons: Query<&MatButton>,
-    mut state: ResMut<MatEditState>,
-    mut commands: MessageWriter<SlCommand>,
+    state: Option<ResMut<MatEditState>>,
+    commands: Option<MessageWriter<SlCommand>>,
     mut texts: Query<&mut Text>,
 ) {
     if press.button != PointerButton::Primary {
         return;
     }
     let Ok(kind) = buttons.get(press.entity).copied() else {
+        return;
+    };
+    // Both are absent only in the gallery, whose specimen has no edit to save.
+    let (Some(mut state), Some(mut commands)) = (state, commands) else {
         return;
     };
     let Some(edit) = state.active.as_mut() else {

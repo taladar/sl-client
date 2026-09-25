@@ -287,7 +287,21 @@ fn refresh_output_device_options(
     *next_poll = Some(now + DEVICE_POLL_SECONDS);
 
     let options = device_options(enumerator.devices(), &status.requested);
-    for (combo, mut values) in &mut combos {
+    offer_output_devices(&options, &mut combos, |message| {
+        writer.write(message);
+    });
+}
+
+/// Put `options` into every output-device combo: the paired
+/// [`ComboBindingValues`] directly, the labels through `write` (a
+/// [`SetComboOptions`] per combo). The drawing half of
+/// [`refresh_output_device_options`], shared with the preferences specimen.
+fn offer_output_devices(
+    options: &[(String, SettingValue)],
+    combos: &mut Query<(Entity, &mut ComboBindingValues), With<OutputDeviceCombo>>,
+    mut write: impl FnMut(SetComboOptions),
+) {
+    for (combo, mut values) in combos.iter_mut() {
         let new_values: Vec<SettingValue> =
             options.iter().map(|(_, value)| value.clone()).collect();
         // Guarded write, so an unchanged list does not dirty the component
@@ -295,11 +309,37 @@ fn refresh_output_device_options(
         if values.0 != new_values {
             values.0 = new_values;
         }
-        writer.write(SetComboOptions::new(
+        write(SetComboOptions::new(
             combo,
             options.iter().map(|(label, _)| label.clone()).collect(),
         ));
     }
+}
+
+/// One-shot for the preferences specimen: offer `devices` in the output-device
+/// combo, the list [`refresh_output_device_options`] offers once an enumerator
+/// answers. A host without the combo widget's runtime has no
+/// [`SetComboOptions`] channel and could not apply new options anyway — its
+/// combo keeps the system default the tab build gave it, as a live viewer
+/// without an audio host does.
+fn offer_sample_output_devices(
+    In(devices): In<Vec<String>>,
+    mut combos: Query<(Entity, &mut ComboBindingValues), With<OutputDeviceCombo>>,
+    messages: Option<ResMut<Messages<SetComboOptions>>>,
+) {
+    let Some(mut messages) = messages else {
+        return;
+    };
+    let options = device_options(devices, "");
+    offer_output_devices(&options, &mut combos, |message| {
+        messages.write(message);
+    });
+}
+
+/// What this tab's runtime adds to the preferences specimen once its content
+/// exists: the output devices an enumerator would report, `devices`.
+pub(crate) fn compose_audio_specimen(commands: &mut Commands, devices: Vec<String>) {
+    commands.run_system_cached_with(offer_sample_output_devices, devices);
 }
 
 /// Show the note under the output-device combo exactly while the chosen device

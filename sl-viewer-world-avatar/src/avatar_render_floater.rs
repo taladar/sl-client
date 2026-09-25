@@ -54,9 +54,10 @@ use sl_viewer_ui_widgets::floater::{
 };
 use sl_viewer_ui_widgets::ui_search::{SearchFieldSpec, spawn_search_field};
 use sl_viewer_ui_widgets::ui_table::{
-    TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells, TableSelectionMode,
-    TableSortDefault, TableSpec, TableState, order_by_sort_keys, register_table_settings,
-    set_table_cell, spawn_table, spawn_table_row,
+    SpecimenTable, TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells,
+    TableSelectionMode, TableSortDefault, TableSpec, TableState, order_by_sort_keys,
+    register_table_settings, set_table_cell, spawn_specimen_table_rows, spawn_table,
+    spawn_table_row,
 };
 
 /// The floater's stable id (persistence, `SL_VIEWER_OPEN_FLOATER`).
@@ -88,7 +89,7 @@ const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 /// An action button's background.
 const ACTION_BACKGROUND: Color = Color::srgb(0.24, 0.29, 0.38);
 
-/// The trailing action column's width, logical px.
+/// The trailing action column's least width, logical px.
 const ACTION_COL_WIDTH: f32 = 140.0;
 
 // --- Table ----------------------------------------------------------------
@@ -373,6 +374,18 @@ fn spawn_render_settings_floater(mut commands: Commands, root: Res<UiRoot>) {
 /// First-open content build: the filter row, the table with its count line, and
 /// the trailing action buttons.
 fn build_render_settings_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
+    let ui = spawn_render_settings_content(&mut commands, handle.content, FONT_SIZE);
+    commands.insert_resource(ui);
+}
+
+/// Build the floater's content into `parent` at `font_size`: the filter row,
+/// the table with its count line, and the trailing action buttons. Shared by
+/// the live floater's first-open build and its specimen.
+fn spawn_render_settings_content(
+    commands: &mut Commands,
+    parent: Entity,
+    font_size: f32,
+) -> RenderSettingsUi {
     let content = commands
         .spawn((
             Node {
@@ -382,7 +395,7 @@ fn build_render_settings_content(In(handle): In<FloaterHandle>, mut commands: Co
                 ..column(Val::Px(4.0))
             },
             Name::new("avatar-render-content"),
-            ChildOf(handle.content),
+            ChildOf(parent),
         ))
         .id();
 
@@ -399,11 +412,11 @@ fn build_render_settings_content(In(handle): In<FloaterHandle>, mut commands: Co
         ))
         .id();
     let search = spawn_search_field(
-        &mut commands,
+        commands,
         controls,
         &SearchFieldSpec {
             tab_index: 0,
-            font_size: FONT_SIZE,
+            font_size,
             min_width: 160.0,
             placeholder: "Filter the exceptions".to_owned(),
             search_glyph: true,
@@ -440,13 +453,13 @@ fn build_render_settings_content(In(handle): In<FloaterHandle>, mut commands: Co
             ChildOf(body),
         ))
         .id();
-    let table = spawn_table(&mut commands, table_column, &RENDER_SETTINGS_TABLE);
+    let table = spawn_table(commands, table_column, &RENDER_SETTINGS_TABLE);
     commands.entity(table.viewport).insert(TabIndex(1));
 
     let count_text = commands
         .spawn((
             Text::default(),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(DIM_LABEL_COLOR),
             Node {
                 flex_shrink: 0.0,
@@ -462,7 +475,11 @@ fn build_render_settings_content(In(handle): In<FloaterHandle>, mut commands: Co
     let actions = commands
         .spawn((
             Node {
-                width: Val::Px(ACTION_COL_WIDTH),
+                // A floor, not a width: the column is as wide as its longest
+                // label. Pinned to the English width, a longer translation
+                // wrapped every label to three lines and the five buttons ran
+                // out of the bottom of the window.
+                min_width: Val::Px(ACTION_COL_WIDTH),
                 flex_shrink: 0.0,
                 align_items: AlignItems::Stretch,
                 ..column(Val::Px(4.0))
@@ -478,22 +495,27 @@ fn build_render_settings_content(In(handle): In<FloaterHandle>, mut commands: Co
         RenderSettingsButton::AddFully,
         RenderSettingsButton::AddNever,
     ] {
-        spawn_render_settings_action(&mut commands, actions, button);
+        spawn_render_settings_action(commands, actions, button, font_size);
     }
 
-    commands.insert_resource(RenderSettingsUi {
+    RenderSettingsUi {
         table: table.root,
         viewport: table.viewport,
         filter_field: search.field,
         count_text,
-    });
+    }
 }
 
 /// Spawn one trailing action button and its press observer.
+///
+/// The selection, the store and the two message queues are optional so a
+/// press in a host that has none of them (the gallery's specimen) is a no-op
+/// rather than a failed observer.
 fn spawn_render_settings_action(
     commands: &mut Commands,
     parent: Entity,
     button: RenderSettingsButton,
+    font_size: f32,
 ) {
     commands
         .spawn((
@@ -515,21 +537,26 @@ fn spawn_render_settings_action(
         ))
         .with_child((
             Text::new(String::new()),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(LABEL_COLOR),
             Translated::new(button.label_key()),
             Pickable::IGNORE,
         ))
         .observe(
             move |mut press: On<Pointer<Press>>,
-                  selected: Res<SelectedRenderException>,
-                  store: Res<AvatarRenderSettings>,
-                  mut requests: MessageWriter<RequestRenderException>,
-                  mut pickers: MessageWriter<OpenAvatarPicker>| {
+                  selected: Option<Res<SelectedRenderException>>,
+                  store: Option<Res<AvatarRenderSettings>>,
+                  requests: Option<MessageWriter<RequestRenderException>>,
+                  pickers: Option<MessageWriter<OpenAvatarPicker>>| {
                 press.propagate(false);
                 if press.button != PointerButton::Primary {
                     return;
                 }
+                let (Some(selected), Some(store), Some(mut requests), Some(mut pickers)) =
+                    (selected, store, requests, pickers)
+                else {
+                    return;
+                };
                 if let Some(field) = button.picker_tag() {
                     // The reference's Add buttons open a multi-picker: one
                     // decision, however many residents it is about.
@@ -767,19 +794,11 @@ fn bind_render_settings_rows(
             }
             continue;
         };
-        let cell_values: [(usize, String, Color); 3] = [
-            (COL_NAME, data.label.clone(), LABEL_COLOR),
-            (
-                COL_SETTING,
-                translator.get(data.entry.setting.label_key()),
-                LABEL_COLOR,
-            ),
-            (
-                COL_DATE,
-                crate::asset_blacklist::format_date(data.entry.added_epoch_secs, zone.as_deref()),
-                DIM_LABEL_COLOR,
-            ),
-        ];
+        let cell_values = render_settings_row_values(
+            data,
+            translator.get(data.entry.setting.label_key()),
+            zone.as_deref(),
+        );
         for (column, value, color) in cell_values {
             if let Some(cell) = cells.cell(column) {
                 set_table_cell(&mut table.texts, cell, &value, color);
@@ -793,6 +812,132 @@ fn bind_render_settings_rows(
             );
         }
     }
+}
+
+/// The `(column, value, colour)` cells of one exception row; `setting_label`
+/// is the exception's translated name.
+fn render_settings_row_values(
+    data: &ExceptionRow,
+    setting_label: String,
+    zone: Option<&LocalTimeZone>,
+) -> [(usize, String, Color); 3] {
+    [
+        (COL_NAME, data.label.clone(), LABEL_COLOR),
+        (COL_SETTING, setting_label, LABEL_COLOR),
+        (
+            COL_DATE,
+            crate::asset_blacklist::format_date(data.entry.added_epoch_secs, zone),
+            DIM_LABEL_COLOR,
+        ),
+    ]
+}
+
+// --- Gallery specimen -----------------------------------------------------
+
+/// The Avatar Render Settings floater's gallery / `ui_test` specimen: the live
+/// content, built by the same `spawn_render_settings_content` the floater
+/// is, with the table filled from sample exceptions through the live
+/// projection — [`name_label`] (one entry with no stored name, to show the id
+/// fallback), [`sort_rows`] in the table's default order, and the live cell
+/// mapping (`render_settings_row_values`). The first row is shown selected.
+///
+/// The Setting cell is the one the live bind translates; with no translator in
+/// a specimen host it is bound to its key as a [`Translated`] label instead,
+/// which resolves to the same string. The rows carry no press observer — the
+/// selection it would write lives in resources a specimen host has none of.
+pub fn spawn_render_settings_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: sl_viewer_ui_core::ui_element::ElementCx,
+) -> Entity {
+    let ui = spawn_render_settings_content(commands, parent, cx.font_size);
+    let mut rows: Vec<ExceptionRow> = specimen_exceptions(cx)
+        .into_iter()
+        .map(|entry| ExceptionRow {
+            label: name_label(&entry, None),
+            entry,
+        })
+        .collect();
+    let total = rows.len();
+    let keys: Vec<(&str, bool)> = RENDER_SETTINGS_TABLE
+        .default_sort
+        .iter()
+        .filter_map(|key| {
+            RENDER_SETTINGS_TABLE
+                .columns
+                .get(key.column)
+                .map(|column| (column.token, key.ascending))
+        })
+        .collect();
+    sort_rows(&mut rows, &keys);
+    let values: Vec<Vec<(String, Color)>> = rows
+        .iter()
+        .map(|data| {
+            let mut cells = vec![(String::new(), LABEL_COLOR); RENDER_SETTINGS_TABLE.columns.len()];
+            for (column, value, color) in render_settings_row_values(data, String::new(), None) {
+                if let Some(cell) = cells.get_mut(column) {
+                    *cell = (value, color);
+                }
+            }
+            cells
+        })
+        .collect();
+    let table = SpecimenTable {
+        root: ui.table,
+        viewport: ui.viewport,
+    };
+    let bound = spawn_specimen_table_rows(commands, table, &RENDER_SETTINGS_TABLE, &values);
+    for (index, (data, (row, cells))) in rows.iter().zip(&bound).enumerate() {
+        if let Some(cell) = cells.cell(COL_SETTING) {
+            commands
+                .entity(cell)
+                .insert(Translated::new(data.entry.setting.label_key()));
+        }
+        commands
+            .entity(*row)
+            .insert(BoundRenderException(Some(AgentKey::from(data.entry.agent))))
+            .entry::<ClassList>()
+            .and_modify(move |mut classes| {
+                set_state_class(&mut classes, SELECTED_CLASS, index == 0);
+            });
+    }
+    // The live line is `avatar-render-count` formatted with the two counts;
+    // the specimen has no translator to format with, so it writes the English
+    // sentence that key produces.
+    commands.entity(ui.count_text).insert(Text::new(
+        cx.text(&format!("{} of {total} exceptions", rows.len())),
+    ));
+    parent
+}
+
+/// A fixed sample of render exceptions — both settings, and one entry whose
+/// name never resolved — with no real residents' names.
+fn specimen_exceptions(cx: sl_viewer_ui_core::ui_element::ElementCx) -> Vec<RenderException> {
+    [
+        (
+            1_u128,
+            "Sample Resident",
+            RenderOverride::AlwaysFull,
+            1_750_000_000,
+        ),
+        (2, "Example Dancer", RenderOverride::Never, 1_750_172_800),
+        (3, "Test Visitor", RenderOverride::Never, 1_750_345_600),
+        (4, "", RenderOverride::AlwaysFull, 1_750_518_400),
+    ]
+    .into_iter()
+    .map(|(id, name, setting, added_epoch_secs)| RenderException {
+        agent: sl_client_bevy::Uuid::from_u128(0x2d7c_0000_0000_4000_8000_0000_0000_0000 | id),
+        // A blank name stays blank, so the row shows the id fallback in every
+        // cell — the pseudolocale would otherwise dress it into a name.
+        name: if name.is_empty() {
+            String::new()
+        } else {
+            cx.text(name)
+        },
+        setting,
+        added_epoch_secs,
+    })
+    .collect()
 }
 
 /// How a row names its avatar: the **live** name if the name cache has one (so

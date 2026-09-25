@@ -82,6 +82,9 @@ const WEARABLE_VERSION: i32 = 22;
 /// The chrome font size, in logical pixels.
 const FONT: f32 = 13.0;
 
+/// A slider row's value-readout width at [`FONT`], in logical pixels.
+const READOUT_WIDTH: f32 = 38.0;
+
 /// The scrollable param list's height, in logical pixels.
 const LIST_HEIGHT: f32 = 380.0;
 
@@ -274,7 +277,11 @@ pub fn wearable_editor_floater_spec() -> FloaterSpec {
         id: "wearable-editor",
         title: "Edit Wearable".to_owned(),
         position: Vec2::new(300.0, 80.0),
-        default_size: Some(Vec2::new(320.0, 520.0)),
+        // A little wider than the reference's 333 px panel: a slider row is a
+        // fixed-width track plus a font-sized readout, so the label column is
+        // all that gives, and at a large font a long translated label's widest
+        // word needs the extra room.
+        default_size: Some(Vec2::new(360.0, 520.0)),
         min_size: Some(Vec2::new(280.0, 240.0)),
         dock_host: None,
         caps: FloaterCaps {
@@ -432,7 +439,67 @@ fn open_wearable_editor(
         let _prev = edited.params.entry(slider.id).or_insert(slider.value);
     }
 
-    // --- Build the controls. ---
+    let gender_param = library
+        .as_deref()
+        .and_then(|library| library.params().by_name("male"))
+        .map(|param| param.id);
+    let controls = spawn_wearable_controls(
+        &mut commands,
+        ui.content,
+        FONT,
+        &edited,
+        &sliders,
+        gender_param,
+    );
+
+    state.active = Some(WearEdit {
+        item,
+        wearable_type: slot,
+        original: edited.clone(),
+        edited,
+        tint_params,
+        tint_swatch: controls.tint_swatch,
+        gender_param,
+        height_label: controls.height_label,
+        pending_textures: HashSet::new(),
+        shape_dirty: true,
+        bake_dirty: true,
+        saving: None,
+        creation: None,
+        dirty: false,
+        status: Some(controls.status),
+    });
+
+    if let Ok(mut shown) = panels.get_mut(ui.panel) {
+        shown.0 = true;
+    }
+}
+
+/// The control entities [`spawn_wearable_controls`] returns, the ones the
+/// edit keeps to update or filter by afterwards.
+#[derive(Debug, Clone, Copy)]
+struct WearControls {
+    /// The status readout node.
+    status: Entity,
+    /// The tint swatch, for a slot that has one.
+    tint_swatch: Option<Entity>,
+    /// The Shape height read-out.
+    height_label: Option<Entity>,
+}
+
+/// Build the editor's controls for `edited` into `content` at `font_size`: the
+/// Save / Save As / Revert row, the status line, and the scrolling list of the
+/// slot's texture pickers, tint swatch and one slider per `sliders` entry
+/// (headed, for a Shape, by the height read-out and the gender toggle driving
+/// `gender_param`). Shared by the live editor and its specimen.
+fn spawn_wearable_controls(
+    commands: &mut Commands,
+    content: Entity,
+    font_size: f32,
+    edited: &WearableAsset,
+    sliders: &[ParamSliderSpec],
+    gender_param: Option<i32>,
+) -> WearControls {
     let mut tab = 0_i32;
     // Action buttons row.
     let button_row = commands
@@ -441,7 +508,7 @@ fn open_wearable_editor(
                 margin: UiRect::bottom(Val::Px(6.0)),
                 ..row(Val::Px(6.0))
             },
-            ChildOf(ui.content),
+            ChildOf(content),
         ))
         .id();
     for (kind, label) in [
@@ -449,18 +516,18 @@ fn open_wearable_editor(
         (WearButton::SaveAs, "Save As"),
         (WearButton::Revert, "Revert"),
     ] {
-        spawn_action_button(&mut commands, button_row, kind, label, &mut tab);
+        spawn_action_button(commands, button_row, kind, label, &mut tab, font_size);
     }
     let status = commands
         .spawn((
             Text::new(String::new()),
-            UiFont::Sans.at(FONT),
+            UiFont::Sans.at(font_size),
             text_role(LABEL_COLOR),
             Node {
                 margin: UiRect::bottom(Val::Px(4.0)),
                 ..Default::default()
             },
-            ChildOf(ui.content),
+            ChildOf(content),
         ))
         .id();
 
@@ -472,7 +539,7 @@ fn open_wearable_editor(
                 ..row(Val::ZERO)
             },
             Name::new("wearable-list-row"),
-            ChildOf(ui.content),
+            ChildOf(content),
         ))
         .id();
     let list = commands
@@ -490,7 +557,7 @@ fn open_wearable_editor(
         ))
         .id();
     spawn_scrollbar(
-        &mut commands,
+        commands,
         list_row,
         ScrollTarget::Container(list),
         Node::default(),
@@ -499,18 +566,14 @@ fn open_wearable_editor(
 
     // Shape: a height read-out and a gender toggle head the list (the reference's
     // Body sub-tab). Other slots have neither.
-    let gender_param = library
-        .as_deref()
-        .and_then(|library| library.params().by_name("male"))
-        .map(|param| param.id);
     let mut height_label = None;
-    if slot == WearableType::Shape {
-        let height_row = spawn_labeled_row(&mut commands, list, "Height");
+    if edited.wearable_type == WearableType::Shape {
+        let height_row = spawn_labeled_row(commands, list, "Height", font_size);
         height_label = Some(
             commands
                 .spawn((
                     Text::new("— m"),
-                    UiFont::Sans.at(FONT),
+                    UiFont::Sans.at(font_size),
                     text_role(LABEL_COLOR),
                     ChildOf(height_row),
                 ))
@@ -519,17 +582,17 @@ fn open_wearable_editor(
         let male = gender_param
             .and_then(|id| edited.params.get(&id).copied())
             .unwrap_or(0.0);
-        let gender_row = spawn_labeled_row(&mut commands, list, "Gender");
+        let gender_row = spawn_labeled_row(commands, list, "Gender", font_size);
         let labels = [String::from("Female"), String::from("Male")];
         let group = spawn_radio_group(
-            &mut commands,
+            commands,
             gender_row,
             &RadioSpec {
                 element: GENDER_ELEMENT,
                 labels: &labels,
                 active: usize::from(male > 0.5),
                 tab_index: tab,
-                font_size: FONT,
+                font_size,
                 layout: RadioLayout::Row,
                 translate_labels: false,
             },
@@ -538,53 +601,90 @@ fn open_wearable_editor(
         tab = tab.saturating_add(1);
     }
 
-    for (te, label) in wearable_texture_slots(slot) {
+    for (te, label) in wearable_texture_slots(edited.wearable_type) {
         let current = edited
             .textures
             .get(&u32::try_from(te).unwrap_or_default())
             .copied()
             .map_or_else(|| TextureKey::from(Uuid::nil()), TextureKey::from);
-        let picker_row = spawn_labeled_row(&mut commands, list, &label);
-        let swatch = spawn_texture_swatch(&mut commands, picker_row, "wearable", tab, current);
+        let picker_row = spawn_labeled_row(commands, list, &label, font_size);
+        let swatch = spawn_texture_swatch(commands, picker_row, "wearable", tab, current);
         commands.entity(swatch).insert(WearTextureSwatch(te));
         tab = tab.saturating_add(1);
     }
 
     let mut tint_swatch = None;
-    if let Some([r, g, b]) = tint_params {
-        let color = tint_color(&edited, [r, g, b]);
-        let tint_row = spawn_labeled_row(&mut commands, list, "Color / Tint");
-        let swatch = spawn_color_swatch(&mut commands, tint_row, "wearable-tint", tab, color);
+    if let Some([r, g, b]) = wearable_tint_params(edited.wearable_type) {
+        let color = tint_color(edited, [r, g, b]);
+        let tint_row = spawn_labeled_row(commands, list, "Color / Tint", font_size);
+        let swatch = spawn_color_swatch(commands, tint_row, "wearable-tint", tab, color);
         commands.entity(swatch).insert(WearTintSwatch);
         tint_swatch = Some(swatch);
         tab = tab.saturating_add(1);
     }
 
-    for slider in &sliders {
-        spawn_param_slider(&mut commands, list, slider, &mut tab);
+    for slider in sliders {
+        spawn_param_slider(commands, list, slider, &mut tab, font_size);
     }
 
-    state.active = Some(WearEdit {
-        item,
-        wearable_type: slot,
-        original: edited.clone(),
-        edited,
-        tint_params,
+    WearControls {
+        status,
         tint_swatch,
-        gender_param,
         height_label,
-        pending_textures: HashSet::new(),
-        shape_dirty: true,
-        bake_dirty: true,
-        saving: None,
-        creation: None,
-        dirty: false,
-        status: Some(status),
-    });
-
-    if let Ok(mut shown) = panels.get_mut(ui.panel) {
-        shown.0 = true;
     }
+}
+
+// ---------------------------------------------------------------------------
+// Gallery specimen.
+// ---------------------------------------------------------------------------
+
+/// The wearable editor's gallery / `ui_test` specimen: the live controls,
+/// built by the same `spawn_wearable_controls` at the cell's font size, for
+/// a sample **shirt** — its fabric picker (the slot list the live editor
+/// derives), its tint swatch on a sample colour and a handful of fit sliders.
+///
+/// The sliders are sample rows rather than the slot's real `avatar_lad`
+/// params: those come from the avatar-asset library, which a specimen does not
+/// load. The ids and ranges are the shirt's own.
+pub fn spawn_wearable_editor_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: crate::ui_element::ElementCx,
+) -> Entity {
+    let sliders = [
+        (600, "Sleeve Length", 0.0, 0.85, 0.7, false),
+        (601, "Shirt Bottom", 0.0, 1.0, 0.8, false),
+        (602, "Collar Front", 0.0, 1.0, 0.35, false),
+        (778, "Collar Back", 0.0, 1.0, 0.75, false),
+        (828, "Loose Shirt", 0.0, 1.0, 0.2, false),
+        (868, "Shirt Wrinkles", 0.0, 1.0, 0.0, true),
+    ]
+    .into_iter()
+    .map(|(id, label, min, max, value, is_bake)| ParamSliderSpec {
+        id,
+        is_bake,
+        min,
+        max,
+        value,
+        label: cx.text(label),
+    })
+    .collect::<Vec<_>>();
+    let mut params = sliders
+        .iter()
+        .map(|slider| (slider.id, slider.value))
+        .collect::<BTreeMap<_, _>>();
+    if let Some([r, g, b]) = wearable_tint_params(WearableType::Shirt) {
+        params.extend([(r, 0.28), (g, 0.45), (b, 0.62)]);
+    }
+    let edited = WearableAsset {
+        version: WEARABLE_VERSION,
+        name: cx.text("Sample Shirt"),
+        wearable_type: WearableType::Shirt,
+        params,
+        textures: BTreeMap::new(),
+    };
+    spawn_wearable_controls(commands, parent, cx.font_size, &edited, &sliders, None);
+    parent
 }
 
 /// One editable visual param, and everything its slider row is built from: the
@@ -681,27 +781,42 @@ fn tint_color(asset: &WearableAsset, [r, g, b]: [i32; 3]) -> Color {
 // Control spawn helpers.
 // ---------------------------------------------------------------------------
 
-/// Spawn a labelled row (a left label plus a slot for the control) and return
-/// the row entity to parent the control into.
-fn spawn_labeled_row(commands: &mut Commands, parent: Entity, label: &str) -> Entity {
+/// Spawn a labelled row (a left label plus a slot for the control) at
+/// `font_size` and return the row entity to parent the control into.
+fn spawn_labeled_row(
+    commands: &mut Commands,
+    parent: Entity,
+    label: &str,
+    font_size: f32,
+) -> Entity {
     ui_spawn::spawn_labeled_row(
         commands,
         parent,
         LabeledRowSpec::new(UiLabel::literal(label))
             .label_color(LABEL_COLOR)
-            .font_size(FONT)
+            .font_size(font_size)
             .label_width(Val::Px(120.0)),
     )
     .row
 }
 
-/// Spawn one param slider row: a label, a slider track + thumb (over
-/// `[min, max]`), and a value readout, tagged [`WearParamSlider`].
+/// The width of a slider row's value readout, in logical pixels: 38 at the
+/// editor's [`FONT`], and in proportion above it, so a larger font's
+/// `0.00`-style value stays inside its column. A fixed width at a given font
+/// size (not the text's own), so the slider track does not jitter as the value
+/// changes.
+fn readout_width(font_size: f32) -> f32 {
+    READOUT_WIDTH.max((font_size * READOUT_WIDTH / FONT).ceil())
+}
+
+/// Spawn one param slider row at `font_size`: a label, a slider track + thumb
+/// (over `[min, max]`), and a value readout, tagged [`WearParamSlider`].
 fn spawn_param_slider(
     commands: &mut Commands,
     parent: Entity,
     spec: &ParamSliderSpec,
     tab: &mut i32,
+    font_size: f32,
 ) {
     let &ParamSliderSpec {
         id,
@@ -711,14 +826,15 @@ fn spawn_param_slider(
         value,
         ref label,
     } = spec;
-    let row_entity = spawn_labeled_row(commands, parent, label);
+    let row_entity = spawn_labeled_row(commands, parent, label, font_size);
     let readout = commands
         .spawn((
             Text::new(format!("{value:.2}")),
-            UiFont::Sans.at(FONT),
+            UiFont::Sans.at(font_size),
             text_role(LABEL_COLOR),
             Node {
-                width: Val::Px(38.0),
+                width: Val::Px(readout_width(font_size)),
+                flex_shrink: 0.0,
                 ..Default::default()
             },
             ChildOf(row_entity),
@@ -748,13 +864,14 @@ fn spawn_param_slider(
     *tab = tab.saturating_add(1);
 }
 
-/// Spawn one chrome action button (Save / Save As / Revert).
+/// Spawn one chrome action button (Save / Save As / Revert) at `font_size`.
 fn spawn_action_button(
     commands: &mut Commands,
     parent: Entity,
     kind: WearButton,
     label: &str,
     tab: &mut i32,
+    font_size: f32,
 ) {
     let button = ui_spawn::spawn_button(
         commands,
@@ -764,7 +881,7 @@ fn spawn_action_button(
             .padding(10.0, 3.0)
             .colors(BUTTON_BACKGROUND, CONTROL_BORDER)
             .label_color(LABEL_COLOR)
-            .font_size(FONT),
+            .font_size(font_size),
     )
     .button;
     commands.entity(button).insert(kind).observe(on_wear_button);
@@ -779,7 +896,7 @@ fn spawn_action_button(
 fn on_wear_slider_change(
     change: On<ValueChange<f32>>,
     sliders: Query<(&WearParamSlider, &SliderRange)>,
-    mut state: ResMut<WearEditState>,
+    state: Option<ResMut<WearEditState>>,
     mut commands: Commands,
 ) {
     let Ok((info, range)) = sliders.get(change.source) else {
@@ -787,7 +904,10 @@ fn on_wear_slider_change(
     };
     let clamped = range.clamp(change.value);
     commands.entity(change.source).insert(SliderValue(clamped));
-    if let Some(edit) = state.active.as_mut() {
+    // Absent only in the gallery, whose specimen has no edit to record into.
+    if let Some(mut state) = state
+        && let Some(edit) = state.active.as_mut()
+    {
         let _prev = edit.edited.params.insert(info.id, clamped);
         edit.dirty = true;
         if info.is_bake {
@@ -983,11 +1103,15 @@ fn on_wear_button(
     press: On<Pointer<Press>>,
     buttons: Query<&WearButton>,
     ui: Option<Res<WearEditorUi>>,
-    mut state: ResMut<WearEditState>,
-    mut preview: WearPreview,
-    out: WearSaveOut,
+    state: Option<ResMut<WearEditState>>,
+    preview: Option<WearPreview>,
+    out: Option<WearSaveOut>,
     mut texts: Query<&mut Text>,
 ) {
+    // All three are absent only in the gallery, whose specimen has no edit.
+    let (Some(mut state), Some(mut preview), Some(out)) = (state, preview, out) else {
+        return;
+    };
     let WearSaveOut {
         mut pending,
         mut commands,

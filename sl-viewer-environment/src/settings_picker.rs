@@ -45,6 +45,7 @@
 //! Reference (Firestorm, read-only): `llsettingspicker.cpp`,
 //! `floater_settings_picker.xml`.
 
+use bevy::ecs::system::RunSystemOnce as _;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
@@ -55,7 +56,7 @@ use sl_viewer_intents::{OpenSettingsPicker, PickedSettings, SettingsPicked};
 use sl_viewer_inventory::inventory::InventoryModel;
 use sl_viewer_inventory::settings_index::SettingsIndex;
 use sl_viewer_ui_core::i18n::{TransArgs, Translated, Translator};
-use sl_viewer_ui_core::skin::{SELECTED_CLASS, set_state_class_on, text_role};
+use sl_viewer_ui_core::skin::{SELECTED_CLASS, set_state_class, set_state_class_on, text_role};
 use sl_viewer_ui_core::ui::{UiScaffoldSystems, column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
 use sl_viewer_ui_core::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
@@ -65,8 +66,9 @@ use sl_viewer_ui_widgets::floater::{
 };
 use sl_viewer_ui_widgets::ui_search::{SearchFieldSpec, spawn_search_field};
 use sl_viewer_ui_widgets::ui_table::{
-    TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells, TableSelectionMode,
-    TableSortDefault, TableSpec, TableState, set_table_cell, spawn_table, spawn_table_row,
+    SpecimenTable, TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells,
+    TableSelectionMode, TableSortDefault, TableSpec, TableState, set_table_cell,
+    spawn_specimen_table_rows, spawn_table, spawn_table_row,
 };
 
 use crate::settings_list::{
@@ -317,6 +319,44 @@ fn build_settings_picker_content(
     handle: &FloaterHandle,
     commands: &mut Commands,
 ) -> SettingsPickerUi {
+    let parts = spawn_settings_picker_content(commands, handle.content, FONT_SIZE);
+    SettingsPickerUi {
+        title_text: handle.title_text,
+        field_text: parts.field_text,
+        table: parts.table,
+        viewport: parts.viewport,
+        filter_field: parts.filter_field,
+        count_text: parts.count_text,
+    }
+}
+
+/// The entities [`spawn_settings_picker_content`] hands back — what
+/// [`SettingsPickerUi`] keeps of them, less the title (the chrome's), plus the
+/// content root.
+#[derive(Debug, Clone, Copy)]
+struct PickerContent {
+    /// The content root.
+    content: Entity,
+    /// The line naming the field being picked for.
+    field_text: Entity,
+    /// The table root.
+    table: Entity,
+    /// The virtualized viewport.
+    viewport: Entity,
+    /// The name-filter field.
+    filter_field: Entity,
+    /// The count line.
+    count_text: Entity,
+}
+
+/// Build one window's content into `slot` with its text at `font_size` (the
+/// list's own rows are the table spec's). Shared by the live window and its
+/// specimen.
+fn spawn_settings_picker_content(
+    commands: &mut Commands,
+    slot: Entity,
+    font_size: f32,
+) -> PickerContent {
     let content = commands
         .spawn((
             Node {
@@ -327,14 +367,14 @@ fn build_settings_picker_content(
                 ..column(Val::Px(4.0))
             },
             Name::new("settings-picker:content"),
-            ChildOf(handle.content),
+            ChildOf(slot),
         ))
         .id();
 
     let field_text = commands
         .spawn((
             Text::default(),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(DIM_LABEL_COLOR),
             Pickable::IGNORE,
             Name::new("settings-picker-field"),
@@ -347,7 +387,7 @@ fn build_settings_picker_content(
         content,
         &SearchFieldSpec {
             tab_index: 0,
-            font_size: FONT_SIZE,
+            font_size,
             min_width: 160.0,
             placeholder: "Filter Settings".to_owned(),
             search_glyph: true,
@@ -366,7 +406,7 @@ fn build_settings_picker_content(
     let count_text = commands
         .spawn((
             Text::default(),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(DIM_LABEL_COLOR),
             Node {
                 flex_shrink: 0.0,
@@ -400,11 +440,12 @@ fn build_settings_picker_content(
             buttons,
             button,
             i32::try_from(index).unwrap_or(0).saturating_add(2),
+            font_size,
         );
     }
 
-    SettingsPickerUi {
-        title_text: handle.title_text,
+    PickerContent {
+        content,
         field_text,
         table: table.root,
         viewport: table.viewport,
@@ -413,12 +454,13 @@ fn build_settings_picker_content(
     }
 }
 
-/// One reply button.
+/// One reply button, its caption at `font_size`.
 fn spawn_picker_button(
     commands: &mut Commands,
     parent: Entity,
     button: PickerButton,
     tab: i32,
+    font_size: f32,
 ) -> Entity {
     commands
         .spawn((
@@ -446,7 +488,7 @@ fn spawn_picker_button(
                 linebreak: LineBreak::NoWrap,
                 ..default()
             },
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(LABEL_COLOR),
             Pickable::IGNORE,
         ))
@@ -575,16 +617,50 @@ fn rebuild_picker_rows(
         if let Ok(mut list) = lists.get_mut(ui.viewport) {
             list.item_count = state.rows.len();
         }
-        let label = translator.format(
-            "settings-picker-count",
-            &TransArgs::new().int("shown", i64::try_from(state.rows.len()).unwrap_or(i64::MAX)),
-        );
+        let label = count_label(&translator, state.rows.len());
         if let Ok(mut text) = texts.get_mut(ui.count_text)
             && text.0 != label
         {
             text.0 = label;
         }
     }
+}
+
+/// The count line: how many rows the filter lets through.
+fn count_label(translator: &Translator, shown: usize) -> String {
+    translator.format(
+        "settings-picker-count",
+        &TransArgs::new().int("shown", i64::try_from(shown).unwrap_or(i64::MAX)),
+    )
+}
+
+/// The line under the title naming the field being picked for.
+fn field_label(translator: &Translator, field: &str) -> String {
+    translator.format(
+        "settings-picker-field",
+        &TransArgs::new().text("field", field),
+    )
+}
+
+/// One list row's cells, by column — the name and where it lives — with the
+/// colours the list draws them in. `None` is a parked row: both cells empty.
+fn picker_row_values(
+    library_label: &str,
+    entry: Option<&SettingsListRow>,
+) -> [(usize, String, Color); 2] {
+    let (name, location) = entry.map_or_else(
+        || (String::new(), String::new()),
+        |entry| {
+            (
+                entry.name.clone(),
+                location_text(library_label, entry.library, &entry.folder),
+            )
+        },
+    );
+    [
+        (COL_NAME, name, LABEL_COLOR),
+        (COL_WHERE, location, DIM_LABEL_COLOR),
+    ]
 }
 
 /// Select the row carrying the asset the opener named, once one is on screen.
@@ -666,10 +742,7 @@ fn bind_picker_rows(
         if state.is_changed()
             && let Ok((mut text, _color, _classes)) = cells_text.get_mut(ui.field_text)
         {
-            let label = translator.format(
-                "settings-picker-field",
-                &TransArgs::new().text("field", &state.field),
-            );
+            let label = field_label(&translator, &state.field);
             if text.0 != label {
                 text.0 = label;
             }
@@ -684,19 +757,7 @@ fn bind_picker_rows(
             }
             let data = row.index.and_then(|index| state.rows.get(index));
             bound.0 = data.map(|entry| entry.item);
-            let (name, location) = data.map_or_else(
-                || (String::new(), String::new()),
-                |entry| {
-                    (
-                        entry.name.clone(),
-                        location_text(&library_label, entry.library, &entry.folder),
-                    )
-                },
-            );
-            for (column, value, color) in [
-                (COL_NAME, name, LABEL_COLOR),
-                (COL_WHERE, location, DIM_LABEL_COLOR),
-            ] {
+            for (column, value, color) in picker_row_values(&library_label, data) {
                 if let Some(cell) = cells.cell(column) {
                     set_table_cell(&mut cells_text, cell, &value, color);
                 }
@@ -819,6 +880,96 @@ fn revert_picker_on_close(
             chosen: state.original.clone(),
             final_pick: false,
         });
+    }
+}
+
+// --- Gallery specimen -----------------------------------------------------
+
+/// The settings picker's gallery / `ui_test` specimen: the live content, built
+/// by the same `spawn_settings_picker_content` the viewer's window is at the
+/// cell's font size, aimed at a sample sky field — the list holds the sample
+/// rows (`settings_list::sample_rows`)
+/// that the opener's fixed filter lets through, in the default sort order.
+///
+/// The rows are pooled by the table widget's specimen helper (no host of a
+/// specimen runs the virtual list or this window's populate / bind), and drawn
+/// by `draw_settings_picker_specimen` through the live window's own cell
+/// projection, field line and count line. The first row is selected, as the
+/// opener's current asset would be. The window carries no picker state — it
+/// answers nobody — so its row and button presses find no window to act for
+/// and do nothing.
+pub fn spawn_settings_picker_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: sl_viewer_ui_core::ui_element::ElementCx,
+) -> Entity {
+    let parts = spawn_settings_picker_content(commands, parent, cx.font_size);
+    let filters = SettingsListFilters::only(SettingsKind::Sky);
+    let mut rows = crate::settings_list::sample_rows(cx);
+    rows.retain(|row| filters.shows(row.kind));
+    sort_rows(
+        &mut rows,
+        &crate::settings_list::default_sort_keys(&SETTINGS_PICKER_TABLE),
+    );
+    let field = cx.text("Sky");
+    commands.queue(move |world: &mut World| {
+        // The reply channel the OK / Cancel observers take, so a press on the
+        // specimen's buttons is inert rather than a failed observer.
+        crate::specimen::ensure_message::<SettingsPicked>(world);
+        crate::specimen::report(
+            SETTINGS_PICKER_FLOATER_ID,
+            world.run_system_once_with(draw_settings_picker_specimen, (parts, rows, field)),
+        );
+    });
+    parts.content
+}
+
+/// Draw the specimen's sample `rows` into the list, and its field and count
+/// lines — the cells through [`picker_row_values`], the lines through
+/// [`field_label`] and [`count_label`], exactly as the live bind and rebuild
+/// write them.
+fn draw_settings_picker_specimen(
+    In((parts, rows, field)): In<(PickerContent, Vec<SettingsListRow>, String)>,
+    translator: Translator,
+    mut commands: Commands,
+    mut texts: Query<&mut Text>,
+) {
+    let library_label = translator.get("my-environments-library");
+    let values: Vec<Vec<(String, Color)>> = rows
+        .iter()
+        .map(|entry| {
+            let mut cells = vec![(String::new(), LABEL_COLOR); SETTINGS_PICKER_TABLE.columns.len()];
+            for (column, value, color) in picker_row_values(&library_label, Some(entry)) {
+                if let Some(cell) = cells.get_mut(column) {
+                    *cell = (value, color);
+                }
+            }
+            cells
+        })
+        .collect();
+    let table = SpecimenTable {
+        root: parts.table,
+        viewport: parts.viewport,
+    };
+    let bound = spawn_specimen_table_rows(&mut commands, table, &SETTINGS_PICKER_TABLE, &values);
+    for ((row, _cells), entry) in bound.iter().zip(&rows) {
+        commands
+            .entity(*row)
+            .insert(BoundPickerRow(Some(entry.item)));
+    }
+    if let Some((row, _cells)) = bound.first() {
+        commands
+            .entity(*row)
+            .entry::<ClassList>()
+            .and_modify(|mut classes| set_state_class(&mut classes, SELECTED_CLASS, true));
+    }
+    for (entity, label) in [
+        (parts.field_text, field_label(&translator, &field)),
+        (parts.count_text, count_label(&translator, rows.len())),
+    ] {
+        if let Ok(mut text) = texts.get_mut(entity) {
+            text.0 = label;
+        }
     }
 }
 

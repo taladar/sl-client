@@ -414,11 +414,6 @@ fn spawn_compass_label(
     key: &'static str,
     direction: Vec2,
 ) {
-    // The letter's *box* is placed, not its centre, so it is inset by its own
-    // size the same way the marker is — and by `RIM_PAD` further, to sit just
-    // inside the rim rather than straddling it.
-    let travel = RADIUS - LABEL_BOX / 2.0 - RIM_PAD;
-    let centre = TRACKBALL_SIZE / 2.0;
     commands.spawn((
         Text::new(String::new()),
         Translated::new(key),
@@ -428,17 +423,51 @@ fn spawn_compass_label(
         },
         UiFont::Sans.at(LABEL_FONT),
         text_role(LABEL_COLOR),
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(centre + direction.x * travel - LABEL_BOX / 2.0),
-            top: Val::Px(centre - direction.y * travel - LABEL_BOX / 2.0),
-            width: Val::Px(LABEL_BOX),
-            ..Default::default()
-        },
+        compass_label_node(direction),
         TrackballLabel,
         Pickable::IGNORE,
         ChildOf(trackball),
     ));
+}
+
+/// The box a compass letter is laid out in, at the rim in `direction` — one of
+/// the four unit axes.
+///
+/// A letter is a translation, so its width is not known here: a 12 px box held
+/// "N" but not a pseudolocalised or wider-script one, which then hung out of
+/// it. So each letter is anchored by the edge that faces the rim and grows
+/// inward from it — north and south span the control and centre their letter,
+/// east and west hug their side at least a letter's box wide — and the box is
+/// always as wide as what it holds. For a one-glyph letter this is the same
+/// place the old centred box put it: `LABEL_BOX` inset by its own half and by
+/// `RIM_PAD` further, to sit just inside the rim rather than straddling it.
+fn compass_label_node(direction: Vec2) -> Node {
+    let travel = RADIUS - LABEL_BOX / 2.0 - RIM_PAD;
+    let centre = TRACKBALL_SIZE / 2.0;
+    let top = Val::Px(centre - direction.y * travel - LABEL_BOX / 2.0);
+    let base = Node {
+        position_type: PositionType::Absolute,
+        top,
+        min_width: Val::Px(LABEL_BOX),
+        ..Default::default()
+    };
+    if direction.x > 0.0 {
+        Node {
+            right: Val::Px(TRACKBALL_SIZE - (centre + travel + LABEL_BOX / 2.0)),
+            ..base
+        }
+    } else if direction.x < 0.0 {
+        Node {
+            left: Val::Px(centre - travel - LABEL_BOX / 2.0),
+            ..base
+        }
+    } else {
+        Node {
+            left: Val::Px(0.0),
+            right: Val::Px(0.0),
+            ..base
+        }
+    }
 }
 
 /// Where a marker's **box** goes for an aim: its top-left corner in the

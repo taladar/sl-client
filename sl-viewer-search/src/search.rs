@@ -34,6 +34,7 @@ use crate::skin_palette::SkinPalette;
 use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use bevy::text::EditableText;
+use bevy::ui::Checked;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
     AgentKey, AvatarProperties, ClassifiedCategory, ClassifiedInfo, ClassifiedKey, Command,
@@ -69,8 +70,9 @@ use crate::ui_tab::{
     spawn_tab_container,
 };
 use crate::ui_table::{
-    TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells, TableSelectionMode,
-    TableSpec, TableState, set_table_cell, spawn_table, spawn_table_row,
+    SpecimenTable, TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells,
+    TableSelectionMode, TableSpec, TableState, set_table_cell, spawn_specimen_table_rows,
+    spawn_table, spawn_table_row,
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow};
@@ -78,7 +80,7 @@ use crate::world_api::ui_texture::{PendingUiTexture, UiTexturePlugin};
 use crate::world_map::OpenWorldMap;
 use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
-use sl_viewer_ui_core::skin::text_role;
+use sl_viewer_ui_core::skin::{SELECTED_CLASS, set_state_class, text_role};
 
 // ---------------------------------------------------------------------------
 // Constants.
@@ -993,6 +995,8 @@ struct CatTable {
     root: Entity,
     /// The virtualized viewport (carries [`VirtualList`]).
     viewport: Entity,
+    /// The paging row's count read-out (carries [`SearchCount`]).
+    count: Entity,
     /// The last selection revision the detail sync acted on.
     last_selection: u64,
     /// The last page revision the row rebind acted on.
@@ -1082,29 +1086,35 @@ pub fn register_settings(settings: &mut ViewerSettings) {
     );
     // Per-tab maturity: General / Moderate on by default, Adult off (the
     // reference keeps a separate maturity filter per category).
+    let [general_on, moderate_on, adult_on] = MATURITY_DEFAULTS;
     for category in CATEGORY_ORDER {
         if let Some([general, moderate, adult]) = maturity_settings(category) {
             settings.register_in(
                 SEARCH_SECTION,
                 general,
-                SettingValue::Bool(true),
+                SettingValue::Bool(general_on),
                 "setting-desc-search-include-general",
             );
             settings.register_in(
                 SEARCH_SECTION,
                 moderate,
-                SettingValue::Bool(true),
+                SettingValue::Bool(moderate_on),
                 "setting-desc-search-include-moderate",
             );
             settings.register_in(
                 SEARCH_SECTION,
                 adult,
-                SettingValue::Bool(false),
+                SettingValue::Bool(adult_on),
                 "setting-desc-search-include-adult",
             );
         }
     }
 }
+
+/// Each maturity setting's default, in [`maturity_settings`] order
+/// `[General, Moderate, Adult]`: what the settings register, what a missing
+/// store reads as, and what a checkbox shows before its binding first syncs.
+const MATURITY_DEFAULTS: [bool; 3] = [true, true, false];
 
 /// The per-category maturity settings `[General, Moderate, Adult]`, or `None` for
 /// People (which the reference gives no maturity filter).
@@ -1141,14 +1151,15 @@ fn maturity_flags(category: SearchCategory, settings: Option<&ViewerSettings>) -
     let Some([general, moderate, adult]) = maturity_settings(category) else {
         return DirFindFlags::NONE;
     };
+    let [general_on, moderate_on, adult_on] = MATURITY_DEFAULTS;
     let mut flags = DirFindFlags::NONE;
-    if setting_bool(settings, general, true) {
+    if setting_bool(settings, general, general_on) {
         flags = flags.union(DirFindFlags::INC_PG);
     }
-    if setting_bool(settings, moderate, true) {
+    if setting_bool(settings, moderate, moderate_on) {
         flags = flags.union(DirFindFlags::INC_MATURE);
     }
-    if setting_bool(settings, adult, false) {
+    if setting_bool(settings, adult, adult_on) {
         flags = flags.union(DirFindFlags::INC_ADULT);
     }
     flags
@@ -1206,7 +1217,9 @@ pub fn search_floater_spec() -> FloaterSpec {
         id: SEARCH_FLOATER_ID,
         title: "Search".to_owned(),
         position: Vec2::new(200.0, 80.0),
-        default_size: Some(Vec2::new(720.0, 460.0)),
+        // Wide enough for the whole seven-tab strip beside the details pane,
+        // rather than a strip that scrolls.
+        default_size: Some(Vec2::new(930.0, 460.0)),
         min_size: Some(Vec2::new(560.0, 340.0)),
         dock_host: None,
         caps: FloaterCaps {
@@ -1237,12 +1250,39 @@ fn spawn_search_floater(mut commands: Commands, root: Res<UiRoot>) {
 /// category tabs, the filter panels and the details pane, ending with the
 /// [`SearchUi`] insert whose appearance wakes the `Option<Res<SearchUi>>`
 /// consumers.
+fn build_search_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
+    let parts = spawn_search_content(&mut commands, handle.content, FONT, 0);
+    commands.insert_resource(parts.ui);
+}
+
+/// What [`spawn_search_content`] built: the handles the live systems keep as
+/// [`SearchUi`], plus the details pane's value and action nodes, which the
+/// live pane finds by their markers and the gallery specimen fills directly.
+struct SearchParts {
+    /// The retained handles.
+    ui: SearchUi,
+    /// The details pane's value nodes, by field.
+    detail_values: Vec<(DetailField, Entity)>,
+    /// The details pane's action buttons, by action.
+    detail_actions: Vec<(DetailAction, Entity)>,
+}
+
+/// Build the floater's content into `content` at `font_size`, with the tab at
+/// `active_tab` shown: the split, the category tabs, the filter panels and the
+/// details pane. Shared by the live window (on the Web tab) and its gallery
+/// specimen. The result tables keep their static specs' size: [`spawn_table`]
+/// takes a `'static` [`TableSpec`].
 #[expect(
     clippy::too_many_lines,
     reason = "one floater built once: the seven tab panels and the shared detail pane are laid \
               out inline so every retained handle is gathered in one place"
 )]
-fn build_search_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
+fn spawn_search_content(
+    commands: &mut Commands,
+    content: Entity,
+    font_size: f32,
+    active_tab: usize,
+) -> SearchParts {
     // The content splits into the left column and the details pane.
     let split = commands
         .spawn((
@@ -1252,7 +1292,7 @@ fn build_search_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
                 min_height: Val::Px(0.0),
                 ..row(Val::Px(8.0))
             },
-            ChildOf(handle.content),
+            ChildOf(content),
         ))
         .id();
     let left = commands
@@ -1277,19 +1317,25 @@ fn build_search_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
             ChildOf(left),
         ))
         .id();
-    spawn_label(&mut commands, query_row, "search-query-label", LABEL_COLOR);
+    spawn_label(
+        commands,
+        query_row,
+        "search-query-label",
+        LABEL_COLOR,
+        font_size,
+    );
     let search_field = spawn_text_input(
-        &mut commands,
+        commands,
         query_row,
         &TextInputSpec {
-            font_size: FONT,
+            font_size,
             width_glyphs: 20.0,
             tab_index: 2,
             fill: true,
             ..TextInputSpec::new("search-query", TextInputKind::Line)
         },
     );
-    let search_button = spawn_text_button(&mut commands, query_row, "search-button", 3);
+    let search_button = spawn_text_button(commands, query_row, "search-button", 3, font_size);
     commands.entity(search_button).observe(on_search_press);
 
     // Maturity is per-tab (spawned into each category's filter row), matching the
@@ -1309,26 +1355,26 @@ fn build_search_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
     .map(str::to_owned)
     .collect();
     let tabs: TabContainerHandle = spawn_tab_container(
-        &mut commands,
+        commands,
         left,
         &TabSpec {
             element: "search-tabs",
             placement: TabPlacement::BlockStart,
             labels: &labels,
-            active: 0,
+            active: active_tab,
             tab_index: 1,
-            font_size: FONT,
+            font_size,
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
         },
     );
-    fill_tab_container(&mut commands, TabPlacement::BlockStart, &tabs);
+    fill_tab_container(commands, TabPlacement::BlockStart, &tabs);
 
     // The Web panel: an embedded browser.
     let web_panel = tabs.panels.first().copied().unwrap_or(Entity::PLACEHOLDER);
     let web_view = spawn_browser_view(
-        &mut commands,
+        commands,
         web_panel,
         &BrowserViewSpec {
             initial_url: search_site_url(SL_SEARCH_URL),
@@ -1339,12 +1385,12 @@ fn build_search_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
     );
 
     // The six directory panels.
-    let filters = spawn_category_panels(&mut commands, &tabs);
+    let filters = spawn_category_panels(commands, &tabs, font_size);
 
     // The details pane.
-    let detail = spawn_detail_pane(&mut commands, split);
+    let detail = spawn_detail_pane(commands, split, font_size);
 
-    commands.insert_resource(SearchUi {
+    let ui = SearchUi {
         search_field,
         tab_strip: tabs.strip,
         web_view,
@@ -1365,7 +1411,115 @@ fn build_search_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
         land: filters.land,
         events: filters.events,
         classifieds: filters.classifieds,
-    });
+    };
+    SearchParts {
+        ui,
+        detail_values: detail.values,
+        detail_actions: detail.actions,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Gallery specimen.
+// ---------------------------------------------------------------------------
+
+/// The Search floater's gallery / `ui_test` specimen: the live content, built
+/// by the same `spawn_search_content` the viewer's window is, at the cell's
+/// font size (the result tables keep their static specs'), opened on the
+/// **Groups** tab rather than the live default Web tab — an embedded browser
+/// has nothing a specimen can show, and a result table and the details pane
+/// are what a skin has to style. Every other tab's panel is built too, hidden.
+///
+/// A sample page of group results is drawn with the live projections: the cells
+/// `result_cells` gives the row bind, pooled into the real table by the table
+/// widget's specimen helper, and the count line `count_label` gives the count
+/// pass. The first row is selected, and the details pane shows the subject
+/// `subject_request` builds for it, through the same `detail_field_value` /
+/// `detail_action_visible` the live pane repaints with. The group's profile
+/// reply (charter, enrollment, insignia) is a grid round trip, so those lines
+/// stay as the live pane shows them before it lands.
+pub fn spawn_search_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: crate::ui_element::ElementCx,
+) -> Entity {
+    let category = SearchCategory::Groups;
+    let tab = TAB_ORDER
+        .iter()
+        .position(|tab| tab.category() == Some(category))
+        .unwrap_or(0);
+    let parts = spawn_search_content(commands, parent, cx.font_size, tab);
+    let mut state = SearchState::default();
+    state.groups.results = [
+        ("Example Group", 1520),
+        ("Sample Builders Guild", 348),
+        ("Test Region Residents", 57),
+        ("Another Sample Group", 12),
+    ]
+    .into_iter()
+    .zip(1_u128..)
+    .map(|((name, members), id)| DirGroupResult {
+        group_id: GroupKey::from(Uuid::from_u128(id)),
+        group_name: cx.text(name),
+        members,
+        search_order: 0.0,
+    })
+    .collect();
+
+    let table = parts.ui.groups;
+    let rows: Vec<Vec<(String, Color)>> = (0..state.result_count(category))
+        .map(|index| result_cells(category, index, &state))
+        .collect();
+    let bound = spawn_specimen_table_rows(
+        commands,
+        SpecimenTable {
+            root: table.root,
+            viewport: table.viewport,
+        },
+        table_spec(category),
+        &rows,
+    );
+    commands
+        .entity(table.root)
+        .entry::<TableState>()
+        .and_modify(|mut selection| selection.set_selection(vec![0], Some(0)));
+    // The selection's look is the row class the table widget paints from its
+    // state; a specimen host runs no table plugin to paint it.
+    if let Some((first, _cells)) = bound.first() {
+        commands
+            .entity(*first)
+            .entry::<ClassList>()
+            .and_modify(|mut classes| set_state_class(&mut classes, SELECTED_CLASS, true));
+    }
+    commands
+        .entity(table.count)
+        .insert(Text::new(count_label(&state, category)));
+
+    let subject = subject_request(category, 0, &state)
+        .map_or(DetailSubject::None, |(subject, _request)| subject);
+    for (field, entity) in parts.detail_values {
+        commands
+            .entity(entity)
+            .insert(Text::new(detail_field_value(field, &subject)));
+    }
+    for (action, entity) in parts.detail_actions {
+        let display = shown_display(detail_action_visible(action, &subject));
+        commands
+            .entity(entity)
+            .entry::<Node>()
+            .and_modify(move |mut node| node.display = display);
+    }
+    let pane = shown_display(!matches!(subject, DetailSubject::None));
+    commands
+        .entity(parts.ui.detail_panel)
+        .entry::<Node>()
+        .and_modify(move |mut node| node.display = pane);
+    parent
+}
+
+/// The `display` a shown / hidden node takes.
+const fn shown_display(shown: bool) -> Display {
+    if shown { Display::Flex } else { Display::None }
 }
 
 /// The filter / table handles gathered while building the category panels.
@@ -1403,7 +1557,11 @@ struct PanelHandles {
 }
 
 /// Build each directory panel (filters + table + paging), returning the handles.
-fn spawn_category_panels(commands: &mut Commands, tabs: &TabContainerHandle) -> PanelHandles {
+fn spawn_category_panels(
+    commands: &mut Commands,
+    tabs: &TabContainerHandle,
+    font_size: f32,
+) -> PanelHandles {
     let mut places_combo = Entity::PLACEHOLDER;
     let mut classified_combo = Entity::PLACEHOLDER;
     let mut land_sale_combo = Entity::PLACEHOLDER;
@@ -1423,55 +1581,108 @@ fn spawn_category_panels(commands: &mut Commands, tabs: &TabContainerHandle) -> 
         match category {
             SearchCategory::People => {
                 let filters = spawn_filter_row(commands, panel);
-                spawn_search_checkbox(commands, filters, SETTING_ONLINE_ONLY, "search-online-only");
+                spawn_search_checkbox(
+                    commands,
+                    filters,
+                    (SETTING_ONLINE_ONLY, false),
+                    "search-online-only",
+                    font_size,
+                );
             }
             SearchCategory::Places => {
                 let filters = spawn_filter_row(commands, panel);
-                spawn_label(commands, filters, "search-label-category", SECONDARY_COLOR);
+                spawn_label(
+                    commands,
+                    filters,
+                    "search-label-category",
+                    SECONDARY_COLOR,
+                    font_size,
+                );
                 places_combo = spawn_category_combo(
                     commands,
                     filters,
                     "search-places-category",
                     &PLACES_CATEGORY_LABELS,
+                    font_size,
                 );
             }
             SearchCategory::Classifieds => {
                 let filters = spawn_filter_row(commands, panel);
-                spawn_label(commands, filters, "search-label-category", SECONDARY_COLOR);
+                spawn_label(
+                    commands,
+                    filters,
+                    "search-label-category",
+                    SECONDARY_COLOR,
+                    font_size,
+                );
                 classified_combo = spawn_category_combo(
                     commands,
                     filters,
                     "search-classified-category",
                     &CLASSIFIED_CATEGORY_LABELS,
+                    font_size,
                 );
             }
             SearchCategory::Land => {
                 let filters = spawn_filter_row(commands, panel);
-                spawn_label(commands, filters, "search-label-saletype", SECONDARY_COLOR);
+                spawn_label(
+                    commands,
+                    filters,
+                    "search-label-saletype",
+                    SECONDARY_COLOR,
+                    font_size,
+                );
                 land_sale_combo = spawn_category_combo(
                     commands,
                     filters,
                     "search-land-saletype",
                     &LAND_SALE_LABELS,
+                    font_size,
                 );
-                spawn_label(commands, filters, "search-label-sort", SECONDARY_COLOR);
-                land_sort_combo =
-                    spawn_category_combo(commands, filters, "search-land-sort", &LAND_SORT_LABELS);
+                spawn_label(
+                    commands,
+                    filters,
+                    "search-label-sort",
+                    SECONDARY_COLOR,
+                    font_size,
+                );
+                land_sort_combo = spawn_category_combo(
+                    commands,
+                    filters,
+                    "search-land-sort",
+                    &LAND_SORT_LABELS,
+                    font_size,
+                );
                 spawn_search_checkbox(
                     commands,
                     filters,
-                    SETTING_LAND_ASCENDING,
+                    (SETTING_LAND_ASCENDING, false),
                     "search-land-ascending",
+                    font_size,
                 );
                 // A second row for the numeric price / area limits.
                 let limits = spawn_filter_row(commands, panel);
-                spawn_label(commands, limits, "search-label-price-max", SECONDARY_COLOR);
-                land_price_field = spawn_limit_field(commands, limits, "search-land-price");
-                spawn_label(commands, limits, "search-label-area-min", SECONDARY_COLOR);
-                land_area_field = spawn_limit_field(commands, limits, "search-land-area");
+                spawn_label(
+                    commands,
+                    limits,
+                    "search-label-price-max",
+                    SECONDARY_COLOR,
+                    font_size,
+                );
+                land_price_field =
+                    spawn_limit_field(commands, limits, "search-land-price", font_size);
+                spawn_label(
+                    commands,
+                    limits,
+                    "search-label-area-min",
+                    SECONDARY_COLOR,
+                    font_size,
+                );
+                land_area_field =
+                    spawn_limit_field(commands, limits, "search-land-area", font_size);
             }
             SearchCategory::Events => {
-                let events = spawn_events_filters(commands, panel);
+                let events = spawn_events_filters(commands, panel, font_size);
                 events_mode_radio = events.0;
                 events_category_combo = events.1;
                 events_day_label = events.2;
@@ -1481,15 +1692,22 @@ fn spawn_category_panels(commands: &mut Commands, tabs: &TabContainerHandle) -> 
         // Per-tab maturity row (every category but People has one).
         if maturity_settings(category).is_some() {
             let maturity = spawn_filter_row(commands, panel);
-            spawn_label(commands, maturity, "search-maturity-label", SECONDARY_COLOR);
-            spawn_maturity_checkboxes(commands, maturity, category);
+            spawn_label(
+                commands,
+                maturity,
+                "search-maturity-label",
+                SECONDARY_COLOR,
+                font_size,
+            );
+            spawn_maturity_checkboxes(commands, maturity, category, font_size);
         }
-        spawn_paging_row(commands, panel, category);
+        let count = spawn_paging_row(commands, panel, category, font_size);
         let handle = spawn_table(commands, panel, table_spec(category));
         if let Some(slot) = tables.get_mut(order_index) {
             *slot = Some(CatTable {
                 root: handle.root,
                 viewport: handle.viewport,
+                count,
                 last_selection: 0,
                 last_page: 0,
             });
@@ -1503,6 +1721,7 @@ fn spawn_category_panels(commands: &mut Commands, tabs: &TabContainerHandle) -> 
             .unwrap_or(CatTable {
                 root: Entity::PLACEHOLDER,
                 viewport: Entity::PLACEHOLDER,
+                count: Entity::PLACEHOLDER,
                 last_selection: 0,
                 last_page: 0,
             })
@@ -1533,14 +1752,24 @@ struct DetailHandles {
     panel: Entity,
     /// The snapshot image box.
     snapshot: Entity,
+    /// The value nodes, by field.
+    values: Vec<(DetailField, Entity)>,
+    /// The action buttons, by action.
+    actions: Vec<(DetailAction, Entity)>,
 }
 
-/// The details pane's snapshot image box width, in logical pixels.
-const SNAPSHOT_EDGE: f32 = DETAIL_WIDTH - 16.0;
+/// The details pane's title size, in logical pixels, at the live body size.
+const DETAIL_TITLE_FONT: f32 = 15.0;
+
+/// The details pane's title size for a body text size: the live pane's step
+/// above it, kept as a step so a specimen at another size keeps the hierarchy.
+const fn detail_title_size(font_size: f32) -> f32 {
+    font_size + (DETAIL_TITLE_FONT - FONT)
+}
 
 /// Build the shared details pane (title, aux lines, location, description, action
 /// buttons), returning its root. Hidden until a subject is selected.
-fn spawn_detail_pane(commands: &mut Commands, parent: Entity) -> DetailHandles {
+fn spawn_detail_pane(commands: &mut Commands, parent: Entity, font_size: f32) -> DetailHandles {
     // The pane is a row of [scrolling column, scrollbar]; the row is what the
     // selection shows and hides, so the bar goes with it.
     let pane = commands
@@ -1578,12 +1807,14 @@ fn spawn_detail_pane(commands: &mut Commands, parent: Entity) -> DetailHandles {
         Node::default(),
         "search-detail-scrollbar",
     );
-    // The snapshot box: a fixed 4:3 image the poll system fills once decoded.
+    // The snapshot box: a 4:3 image the poll system fills once decoded. As wide
+    // as the column's content box — what the pane leaves beside its scrollbar,
+    // less the column's padding — so it never runs under the bar.
     let snapshot = commands
         .spawn((
             Node {
-                width: Val::Px(SNAPSHOT_EDGE),
-                height: Val::Px(SNAPSHOT_EDGE * 0.75),
+                width: Val::Percent(100.0),
+                aspect_ratio: Some(4.0 / 3.0),
                 flex_shrink: 0.0,
                 ..default()
             },
@@ -1591,19 +1822,27 @@ fn spawn_detail_pane(commands: &mut Commands, parent: Entity) -> DetailHandles {
             ChildOf(panel),
         ))
         .id();
-    spawn_detail_value(commands, panel, DetailField::Title, LABEL_COLOR, 15.0);
-    spawn_detail_value(commands, panel, DetailField::Aux1, SECONDARY_COLOR, FONT);
-    spawn_detail_value(commands, panel, DetailField::Aux2, SECONDARY_COLOR, FONT);
-    spawn_detail_value(
-        commands,
-        panel,
-        DetailField::Location,
-        SECONDARY_COLOR,
-        FONT,
-    );
-    spawn_detail_value(commands, panel, DetailField::Description, LABEL_COLOR, FONT);
+    let values: Vec<(DetailField, Entity)> = [
+        (
+            DetailField::Title,
+            LABEL_COLOR,
+            detail_title_size(font_size),
+        ),
+        (DetailField::Aux1, SECONDARY_COLOR, font_size),
+        (DetailField::Aux2, SECONDARY_COLOR, font_size),
+        (DetailField::Location, SECONDARY_COLOR, font_size),
+        (DetailField::Description, LABEL_COLOR, font_size),
+    ]
+    .into_iter()
+    .map(|(field, color, size)| {
+        (
+            field,
+            spawn_detail_value(commands, panel, field, color, size),
+        )
+    })
+    .collect();
     // The action buttons row.
-    let actions = commands
+    let actions_row = commands
         .spawn((
             Node {
                 flex_wrap: FlexWrap::Wrap,
@@ -1612,7 +1851,7 @@ fn spawn_detail_pane(commands: &mut Commands, parent: Entity) -> DetailHandles {
             ChildOf(panel),
         ))
         .id();
-    for (action, key) in [
+    let actions: Vec<(DetailAction, Entity)> = [
         (DetailAction::Profile, "search-detail-profile"),
         (DetailAction::Message, "search-detail-message"),
         (DetailAction::AddFriend, "search-detail-friend"),
@@ -1621,40 +1860,52 @@ fn spawn_detail_pane(commands: &mut Commands, parent: Entity) -> DetailHandles {
         (DetailAction::Teleport, "search-detail-teleport"),
         (DetailAction::ShowMap, "search-detail-map"),
         (DetailAction::Remind, "search-detail-remind"),
-    ] {
-        let button = spawn_action_button(commands, actions, key, action);
+    ]
+    .into_iter()
+    .map(|(action, key)| {
+        let button = spawn_action_button(commands, actions_row, key, action, font_size);
         commands.entity(button).observe(on_detail_action);
-    }
+        (action, button)
+    })
+    .collect();
     DetailHandles {
         panel: pane,
         snapshot,
+        values,
+        actions,
     }
 }
 
-/// Spawn a details-pane value node with the given field marker.
+/// Spawn a details-pane value node with the given field marker, returning it.
 fn spawn_detail_value(
     commands: &mut Commands,
     parent: Entity,
     field: DetailField,
     color: Color,
     size: f32,
-) {
-    commands.spawn((
-        Text::new(String::new()),
-        UiFont::Sans.at(size),
-        text_role(color),
-        Node {
-            max_width: Val::Px(DETAIL_WIDTH - 16.0),
-            ..default()
-        },
-        field,
-        ChildOf(parent),
-    ));
+) -> Entity {
+    commands
+        .spawn((
+            Text::new(String::new()),
+            UiFont::Sans.at(size),
+            text_role(color),
+            Node {
+                max_width: Val::Percent(100.0),
+                ..default()
+            },
+            field,
+            ChildOf(parent),
+        ))
+        .id()
 }
 
 /// The Events filter row: a mode radio, day buttons + label, and a category combo.
 /// Returns `(mode radio, category combo, day label)`.
-fn spawn_events_filters(commands: &mut Commands, panel: Entity) -> (Entity, Entity, Entity) {
+fn spawn_events_filters(
+    commands: &mut Commands,
+    panel: Entity,
+    font_size: f32,
+) -> (Entity, Entity, Entity) {
     let filters = spawn_filter_row(commands, panel);
     let mode_labels = [
         "search-events-current".to_owned(),
@@ -1668,30 +1919,36 @@ fn spawn_events_filters(commands: &mut Commands, panel: Entity) -> (Entity, Enti
             labels: &mode_labels,
             active: 0,
             tab_index: 0,
-            font_size: FONT,
+            font_size,
             layout: RadioLayout::Row,
             translate_labels: true,
         },
     );
     // Day stepper: ‹ label ›.
-    spawn_events_day_button(commands, filters, false);
+    spawn_events_day_button(commands, filters, false, font_size);
     let day_label = commands
         .spawn((
             Text::new(String::new()),
-            UiFont::Sans.at(FONT),
+            UiFont::Sans.at(font_size),
             text_role(LABEL_COLOR),
             ChildOf(filters),
         ))
         .id();
-    spawn_events_day_button(commands, filters, true);
-    spawn_label(commands, filters, "search-label-category", SECONDARY_COLOR);
-    let category_combo = spawn_events_category_combo(commands, filters);
+    spawn_events_day_button(commands, filters, true, font_size);
+    spawn_label(
+        commands,
+        filters,
+        "search-label-category",
+        SECONDARY_COLOR,
+        font_size,
+    );
+    let category_combo = spawn_events_category_combo(commands, filters, font_size);
     (mode_radio, category_combo, day_label)
 }
 
 /// Spawn an Events day-stepper button — the skin's previous / next marks
 /// (`‹` / `›` in the shipped skins, mirrored under right-to-left).
-fn spawn_events_day_button(commands: &mut Commands, parent: Entity, forward: bool) {
+fn spawn_events_day_button(commands: &mut Commands, parent: Entity, forward: bool, font_size: f32) {
     let button = ui_spawn::spawn_button(
         commands,
         parent,
@@ -1709,7 +1966,7 @@ fn spawn_events_day_button(commands: &mut Commands, parent: Entity, forward: boo
         .compact()
         .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
         .label_color(LABEL_COLOR)
-        .font_size(FONT),
+        .font_size(font_size),
     )
     .button;
     commands
@@ -1719,7 +1976,7 @@ fn spawn_events_day_button(commands: &mut Commands, parent: Entity, forward: boo
 }
 
 /// Spawn the Events category combo over the [`EVENT_CATEGORIES`] labels.
-fn spawn_events_category_combo(commands: &mut Commands, parent: Entity) -> Entity {
+fn spawn_events_category_combo(commands: &mut Commands, parent: Entity, font_size: f32) -> Entity {
     let labels: Vec<String> = EVENT_CATEGORIES
         .iter()
         .map(|(_number, label)| (*label).to_owned())
@@ -1732,7 +1989,7 @@ fn spawn_events_category_combo(commands: &mut Commands, parent: Entity) -> Entit
             labels: &labels,
             active: 0,
             tab_index: 0,
-            font_size: FONT,
+            font_size,
             translate_labels: false,
         },
     )
@@ -1760,7 +2017,13 @@ fn spawn_filter_row(commands: &mut Commands, panel: Entity) -> Entity {
 }
 
 /// Spawn a category panel's paging row: Prev, a count read-out, and Next.
-fn spawn_paging_row(commands: &mut Commands, panel: Entity, category: SearchCategory) {
+/// Returns the count read-out.
+fn spawn_paging_row(
+    commands: &mut Commands,
+    panel: Entity,
+    category: SearchCategory,
+    font_size: f32,
+) -> Entity {
     let paging = commands
         .spawn((
             Node {
@@ -1770,15 +2033,18 @@ fn spawn_paging_row(commands: &mut Commands, panel: Entity, category: SearchCate
             ChildOf(panel),
         ))
         .id();
-    spawn_paging_button(commands, paging, category, false);
-    commands.spawn((
-        Text::new(String::new()),
-        UiFont::Sans.at(FONT),
-        text_role(SECONDARY_COLOR),
-        SearchCount(category),
-        ChildOf(paging),
-    ));
-    spawn_paging_button(commands, paging, category, true);
+    spawn_paging_button(commands, paging, category, false, font_size);
+    let count = commands
+        .spawn((
+            Text::new(String::new()),
+            UiFont::Sans.at(font_size),
+            text_role(SECONDARY_COLOR),
+            SearchCount(category),
+            ChildOf(paging),
+        ))
+        .id();
+    spawn_paging_button(commands, paging, category, true, font_size);
+    count
 }
 
 /// Spawn one Prev / Next paging button.
@@ -1787,6 +2053,7 @@ fn spawn_paging_button(
     parent: Entity,
     category: SearchCategory,
     forward: bool,
+    font_size: f32,
 ) {
     let key = if forward {
         "search-next"
@@ -1801,7 +2068,7 @@ fn spawn_paging_button(
             .padding(8.0, 2.0)
             .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
             .label_color(LABEL_COLOR)
-            .font_size(FONT),
+            .font_size(font_size),
     )
     .button;
     commands
@@ -1811,8 +2078,14 @@ fn spawn_paging_button(
 }
 
 /// Spawn a translated static label.
-fn spawn_label(commands: &mut Commands, parent: Entity, key: &'static str, color: Color) {
-    ui_spawn::spawn_label(commands, parent, UiLabel::key(key), color, FONT);
+fn spawn_label(
+    commands: &mut Commands,
+    parent: Entity,
+    key: &'static str,
+    color: Color,
+    font_size: f32,
+) {
+    ui_spawn::spawn_label(commands, parent, UiLabel::key(key), color, font_size);
 }
 
 /// Spawn a bordered translated push button; the caller attaches the observer.
@@ -1821,6 +2094,7 @@ fn spawn_text_button(
     parent: Entity,
     key: &'static str,
     tab_index: i32,
+    font_size: f32,
 ) -> Entity {
     ui_spawn::spawn_button(
         commands,
@@ -1831,7 +2105,7 @@ fn spawn_text_button(
             .padding(12.0, 3.0)
             .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
             .label_color(LABEL_COLOR)
-            .font_size(FONT),
+            .font_size(font_size),
     )
     .button
 }
@@ -1842,6 +2116,7 @@ fn spawn_action_button(
     parent: Entity,
     key: &'static str,
     action: DetailAction,
+    font_size: f32,
 ) -> Entity {
     let button = ui_spawn::spawn_button(
         commands,
@@ -1851,7 +2126,7 @@ fn spawn_action_button(
             .padding(10.0, 3.0)
             .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
             .label_color(LABEL_COLOR)
-            .font_size(FONT),
+            .font_size(font_size),
     )
     .button;
     commands.entity(button).insert(action);
@@ -1859,20 +2134,39 @@ fn spawn_action_button(
 }
 
 /// Spawn a category's three maturity checkboxes (General / Moderate / Adult).
-fn spawn_maturity_checkboxes(commands: &mut Commands, parent: Entity, category: SearchCategory) {
-    if let Some([general, moderate, adult]) = maturity_settings(category) {
-        spawn_search_checkbox(commands, parent, general, "search-maturity-general");
-        spawn_search_checkbox(commands, parent, moderate, "search-maturity-moderate");
-        spawn_search_checkbox(commands, parent, adult, "search-maturity-adult");
+fn spawn_maturity_checkboxes(
+    commands: &mut Commands,
+    parent: Entity,
+    category: SearchCategory,
+    font_size: f32,
+) {
+    if let Some(settings) = maturity_settings(category) {
+        let labels = [
+            "search-maturity-general",
+            "search-maturity-moderate",
+            "search-maturity-adult",
+        ];
+        for ((setting, label_key), default) in
+            settings.into_iter().zip(labels).zip(MATURITY_DEFAULTS)
+        {
+            spawn_search_checkbox(commands, parent, (setting, default), label_key, font_size);
+        }
     }
 }
 
-/// Spawn a settings-bound checkbox — the shared widget, caption and all.
+/// Spawn a settings-bound checkbox — the shared widget, caption and all —
+/// bound to `setting`, the pair's name and its registered default.
+///
+/// The box starts at that default. The binding's sync pass puts it on the
+/// stored value from its first frame, so live this is only ever the first
+/// frame's look; but a host without the settings store (the gallery) runs no
+/// sync, and there the default is the only truthful thing the box can show.
 fn spawn_search_checkbox(
     commands: &mut Commands,
     parent: Entity,
-    setting: &'static str,
+    (setting, default): (&'static str, bool),
     label_key: &'static str,
+    font_size: f32,
 ) {
     let checkbox = spawn_checkbox(
         commands,
@@ -1881,22 +2175,30 @@ fn spawn_search_checkbox(
             element: label_key,
             label: label_key.to_owned(),
             tab_index: 0,
-            font_size: FONT,
+            font_size,
             translate_label: true,
         },
     );
     commands
         .entity(checkbox.checkbox)
         .insert(bound_checkbox(SettingBinding::global(setting)));
+    if default {
+        commands.entity(checkbox.checkbox).insert(Checked);
+    }
 }
 
 /// Spawn a small non-negative-integer limit field (empty = no limit).
-fn spawn_limit_field(commands: &mut Commands, parent: Entity, element: &'static str) -> Entity {
+fn spawn_limit_field(
+    commands: &mut Commands,
+    parent: Entity,
+    element: &'static str,
+    font_size: f32,
+) -> Entity {
     spawn_text_input(
         commands,
         parent,
         &TextInputSpec {
-            font_size: FONT,
+            font_size,
             width_glyphs: 6.0,
             tab_index: 0,
             ..TextInputSpec::new(element, TextInputKind::NonNegativeInteger)
@@ -1910,6 +2212,7 @@ fn spawn_category_combo(
     parent: Entity,
     element: &'static str,
     labels: &[&str],
+    font_size: f32,
 ) -> Entity {
     let owned: Vec<String> = labels.iter().map(|label| (*label).to_owned()).collect();
     spawn_combo(
@@ -1920,7 +2223,7 @@ fn spawn_category_combo(
             labels: &owned,
             active: 0,
             tab_index: 0,
-            font_size: FONT,
+            font_size,
             translate_labels: false,
         },
     )
@@ -2548,54 +2851,87 @@ fn bind_row(
     state: &SearchState,
     texts: &mut Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
 ) {
-    let mut set = |column: usize, value: String, color: Color| {
+    for (column, (value, color)) in result_cells(category, index, state).into_iter().enumerate() {
         if let Some(cell) = cells.cell(column) {
             set_table_cell(texts, cell, &value, color);
         }
-    };
+    }
+}
+
+/// The cells of `results[index]` of a category, in column order, each with its
+/// colour — empty when there is no such result. What a bound row shows, and the
+/// specimen's rows with it.
+fn result_cells(
+    category: SearchCategory,
+    index: usize,
+    state: &SearchState,
+) -> Vec<(String, Color)> {
     match category {
-        SearchCategory::People => {
-            if let Some(result) = state.people.results.get(index) {
-                set(
-                    0,
+        SearchCategory::People => state
+            .people
+            .results
+            .get(index)
+            .map_or_else(Vec::new, |result| {
+                vec![(
                     format!("{} {}", result.first_name, result.last_name),
                     LINK_COLOR,
-                );
-            }
-        }
-        SearchCategory::Groups => {
-            if let Some(result) = state.groups.results.get(index) {
-                set(0, result.group_name.clone(), LINK_COLOR);
-                set(1, result.members.to_string(), SECONDARY_COLOR);
-            }
-        }
-        SearchCategory::Places => {
-            if let Some(result) = state.places.results.get(index) {
-                set(0, result.name.clone(), LABEL_COLOR);
-                set(1, format!("{:.0}", result.dwell), SECONDARY_COLOR);
-            }
-        }
-        SearchCategory::Land => {
-            if let Some(result) = state.land.results.get(index) {
-                set(0, result.name.clone(), LABEL_COLOR);
-                set(1, land_price(result), SECONDARY_COLOR);
-                set(2, format!("{}", result.actual_area), SECONDARY_COLOR);
-                set(3, land_ppm(result), SECONDARY_COLOR);
+                )]
+            }),
+        SearchCategory::Groups => state
+            .groups
+            .results
+            .get(index)
+            .map_or_else(Vec::new, |result| {
+                vec![
+                    (result.group_name.clone(), LINK_COLOR),
+                    (result.members.to_string(), SECONDARY_COLOR),
+                ]
+            }),
+        SearchCategory::Places => state
+            .places
+            .results
+            .get(index)
+            .map_or_else(Vec::new, |result| {
+                vec![
+                    (result.name.clone(), LABEL_COLOR),
+                    (format!("{:.0}", result.dwell), SECONDARY_COLOR),
+                ]
+            }),
+        SearchCategory::Land => state
+            .land
+            .results
+            .get(index)
+            .map_or_else(Vec::new, |result| {
                 let land_type = if result.auction { "Auction" } else { "Sale" };
-                set(4, land_type.to_owned(), SECONDARY_COLOR);
-            }
-        }
-        SearchCategory::Events => {
-            if let Some(result) = state.events.results.get(index) {
-                set(0, result.name.clone(), LABEL_COLOR);
-                set(1, result.date.clone(), SECONDARY_COLOR);
-            }
-        }
+                vec![
+                    (result.name.clone(), LABEL_COLOR),
+                    (land_price(result), SECONDARY_COLOR),
+                    (format!("{}", result.actual_area), SECONDARY_COLOR),
+                    (land_ppm(result), SECONDARY_COLOR),
+                    (land_type.to_owned(), SECONDARY_COLOR),
+                ]
+            }),
+        SearchCategory::Events => state
+            .events
+            .results
+            .get(index)
+            .map_or_else(Vec::new, |result| {
+                vec![
+                    (result.name.clone(), LABEL_COLOR),
+                    (result.date.clone(), SECONDARY_COLOR),
+                ]
+            }),
         SearchCategory::Classifieds => {
-            if let Some(result) = state.classifieds.results.get(index) {
-                set(0, result.name.clone(), LABEL_COLOR);
-                set(1, format!("{}", result.price_for_listing), SECONDARY_COLOR);
-            }
+            state
+                .classifieds
+                .results
+                .get(index)
+                .map_or_else(Vec::new, |result| {
+                    vec![
+                        (result.name.clone(), LABEL_COLOR),
+                        (format!("{}", result.price_for_listing), SECONDARY_COLOR),
+                    ]
+                })
         }
     }
 }
@@ -2656,100 +2992,97 @@ fn subject_for(
     state: &SearchState,
     commands: &mut MessageWriter<SlCommand>,
 ) -> DetailSubject {
+    match subject_request(category, index, state) {
+        Some((subject, request)) => {
+            commands.write(SlCommand(request));
+            subject
+        }
+        None => DetailSubject::None,
+    }
+}
+
+/// The detail subject for `results[index]` of a category, and the secondary
+/// request that fills it in — `None` when there is no such result. The pure half
+/// of [`subject_for`], which the specimen draws its pane from.
+fn subject_request(
+    category: SearchCategory,
+    index: usize,
+    state: &SearchState,
+) -> Option<(DetailSubject, Command)> {
     match category {
-        SearchCategory::People => {
-            state
-                .people
-                .results
-                .get(index)
-                .map_or(DetailSubject::None, |result| {
-                    commands.write(SlCommand(Command::RequestAvatarProperties(result.agent_id)));
-                    DetailSubject::Person {
-                        agent: result.agent_id,
-                        name: format!("{} {}", result.first_name, result.last_name),
-                        props: None,
-                    }
-                })
-        }
-        SearchCategory::Groups => {
-            state
-                .groups
-                .results
-                .get(index)
-                .map_or(DetailSubject::None, |result| {
-                    commands.write(SlCommand(Command::RequestGroupProfile(result.group_id)));
-                    DetailSubject::Group {
-                        group: result.group_id,
-                        name: result.group_name.clone(),
-                        members: result.members,
-                        profile: None,
-                    }
-                })
-        }
-        SearchCategory::Places => {
-            state
-                .places
-                .results
-                .get(index)
-                .map_or(DetailSubject::None, |result| {
-                    commands.write(SlCommand(Command::RequestParcelInfo {
-                        parcel_id: result.parcel_id,
-                    }));
-                    DetailSubject::Parcel {
-                        parcel_id: result.parcel_id,
-                        name: result.name.clone(),
-                        details: None,
-                    }
-                })
-        }
-        SearchCategory::Land => {
-            state
-                .land
-                .results
-                .get(index)
-                .map_or(DetailSubject::None, |result| {
-                    commands.write(SlCommand(Command::RequestParcelInfo {
-                        parcel_id: result.parcel_id,
-                    }));
-                    DetailSubject::Parcel {
-                        parcel_id: result.parcel_id,
-                        name: result.name.clone(),
-                        details: None,
-                    }
-                })
-        }
-        SearchCategory::Events => {
-            state
-                .events
-                .results
-                .get(index)
-                .map_or(DetailSubject::None, |result| {
-                    commands.write(SlCommand(Command::EventInfoRequest {
-                        event_id: result.event_id,
-                    }));
-                    DetailSubject::Event {
-                        event_id: result.event_id,
-                        name: result.name.clone(),
-                        info: None,
-                    }
-                })
-        }
-        SearchCategory::Classifieds => {
-            state
-                .classifieds
-                .results
-                .get(index)
-                .map_or(DetailSubject::None, |result| {
-                    commands.write(SlCommand(Command::RequestClassifiedInfo(
-                        result.classified_id,
-                    )));
-                    DetailSubject::Classified {
-                        classified_id: result.classified_id,
-                        name: result.name.clone(),
-                        info: None,
-                    }
-                })
-        }
+        SearchCategory::People => state.people.results.get(index).map(|result| {
+            let request = Command::RequestAvatarProperties(result.agent_id);
+            (
+                DetailSubject::Person {
+                    agent: result.agent_id,
+                    name: format!("{} {}", result.first_name, result.last_name),
+                    props: None,
+                },
+                request,
+            )
+        }),
+        SearchCategory::Groups => state.groups.results.get(index).map(|result| {
+            let request = Command::RequestGroupProfile(result.group_id);
+            (
+                DetailSubject::Group {
+                    group: result.group_id,
+                    name: result.group_name.clone(),
+                    members: result.members,
+                    profile: None,
+                },
+                request,
+            )
+        }),
+        SearchCategory::Places => state.places.results.get(index).map(|result| {
+            let request = Command::RequestParcelInfo {
+                parcel_id: result.parcel_id,
+            };
+            (
+                DetailSubject::Parcel {
+                    parcel_id: result.parcel_id,
+                    name: result.name.clone(),
+                    details: None,
+                },
+                request,
+            )
+        }),
+        SearchCategory::Land => state.land.results.get(index).map(|result| {
+            let request = Command::RequestParcelInfo {
+                parcel_id: result.parcel_id,
+            };
+            (
+                DetailSubject::Parcel {
+                    parcel_id: result.parcel_id,
+                    name: result.name.clone(),
+                    details: None,
+                },
+                request,
+            )
+        }),
+        SearchCategory::Events => state.events.results.get(index).map(|result| {
+            let request = Command::EventInfoRequest {
+                event_id: result.event_id,
+            };
+            (
+                DetailSubject::Event {
+                    event_id: result.event_id,
+                    name: result.name.clone(),
+                    info: None,
+                },
+                request,
+            )
+        }),
+        SearchCategory::Classifieds => state.classifieds.results.get(index).map(|result| {
+            let request = Command::RequestClassifiedInfo(result.classified_id);
+            (
+                DetailSubject::Classified {
+                    classified_id: result.classified_id,
+                    name: result.name.clone(),
+                    info: None,
+                },
+                request,
+            )
+        }),
     }
 }
 
@@ -2843,13 +3176,12 @@ fn update_detail_pane(
         }
     }
     for (action, mut node) in &mut buttons {
-        let show = detail_action_visible(*action, &detail.subject);
-        node.display = if show { Display::Flex } else { Display::None };
+        node.display = shown_display(detail_action_visible(*action, &detail.subject));
     }
     if let Ok(mut node) = panels.get_mut(ui.detail_panel) {
         let show =
             !matches!(detail.subject, DetailSubject::None) && state.active.category().is_some();
-        node.display = if show { Display::Flex } else { Display::None };
+        node.display = shown_display(show);
     }
 }
 
@@ -3145,16 +3477,7 @@ fn update_search_counts(
         return;
     }
     for (count, mut text) in &mut counts {
-        let category = count.0;
-        let len = state.result_count(category);
-        let wanted = if len == 0 {
-            "No results".to_owned()
-        } else {
-            let start = usize::try_from(state.query_start(category)).unwrap_or(0);
-            let first = start.saturating_add(1);
-            let last = start.saturating_add(len);
-            format!("Showing {first}\u{2013}{last}")
-        };
+        let wanted = count_label(&state, count.0);
         if text.0 != wanted {
             text.0 = wanted;
         }
@@ -3166,6 +3489,19 @@ fn update_search_counts(
         if text.0 != wanted {
             text.0 = wanted;
         }
+    }
+}
+
+/// A category's count read-out: "No results", or the range of the page shown.
+fn count_label(state: &SearchState, category: SearchCategory) -> String {
+    let len = state.result_count(category);
+    if len == 0 {
+        "No results".to_owned()
+    } else {
+        let start = usize::try_from(state.query_start(category)).unwrap_or(0);
+        let first = start.saturating_add(1);
+        let last = start.saturating_add(len);
+        format!("Showing {first}\u{2013}{last}")
     }
 }
 

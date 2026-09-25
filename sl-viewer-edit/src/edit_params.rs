@@ -52,9 +52,10 @@ use bevy::text::{EditableText, FontCx, LayoutCx};
 use bevy_flair::style::components::ClassList;
 use bevy_fluent::Localization;
 use sl_client_bevy::{
-    AgentKey, Command, FlexibleData, GroupKey, HoleType, LightData, Material, ObjectExtraParams,
-    ObjectFlagSettings, OwnerKey, PathCurve, PermissionField, Permissions, Permissions5,
-    PrimShapeFloat, PrimShapeParams, ProfileCurve, ScopedObjectId, SlCommand, Uuid, Vector, pcode,
+    AgentKey, CircuitId, Command, FlexibleData, GroupKey, HoleType, LightData, Material,
+    ObjectExtraParams, ObjectFlagSettings, OwnerKey, PathCurve, PermissionField, Permissions,
+    Permissions5, PrimShapeFloat, PrimShapeParams, ProfileCurve, RegionLocalObjectId,
+    ScopedObjectId, SlCommand, Uuid, Vector, pcode,
 };
 
 use crate::edit_tool::{BuildTabPages, LABEL_CLASS, TOOL_FONT_SIZE, VALUE_CLASS, spawn_row_label};
@@ -904,6 +905,7 @@ fn spawn_param_field(
     element: &'static str,
     width_glyphs: f32,
     tab_index: &mut i32,
+    font_size: f32,
 ) -> Entity {
     let index = *tab_index;
     *tab_index = tab_index.saturating_add(1);
@@ -911,7 +913,7 @@ fn spawn_param_field(
         commands,
         parent,
         &TextInputSpec {
-            font_size: TOOL_FONT_SIZE,
+            font_size,
             width_glyphs,
             tab_index: index,
             max_characters: match field {
@@ -934,6 +936,7 @@ fn spawn_toggle_section(
     commands: &mut Commands,
     parent: Entity,
     label_key: &'static str,
+    font_size: f32,
 ) -> Entity {
     let section = commands
         .spawn((
@@ -943,7 +946,7 @@ fn spawn_toggle_section(
             ChildOf(parent),
         ))
         .id();
-    spawn_row_label(commands, section, label_key);
+    spawn_row_label(commands, section, label_key, font_size);
     commands
         .spawn((
             Node {
@@ -956,7 +959,12 @@ fn spawn_toggle_section(
 }
 
 /// Spawn a labelled row container under `parent` and return it.
-fn spawn_param_row(commands: &mut Commands, parent: Entity, label_key: &'static str) -> Entity {
+fn spawn_param_row(
+    commands: &mut Commands,
+    parent: Entity,
+    label_key: &'static str,
+    font_size: f32,
+) -> Entity {
     let row_entity = commands
         .spawn((
             Node {
@@ -968,7 +976,7 @@ fn spawn_param_row(commands: &mut Commands, parent: Entity, label_key: &'static 
             ChildOf(parent),
         ))
         .id();
-    spawn_row_label(commands, row_entity, label_key);
+    spawn_row_label(commands, row_entity, label_key, font_size);
     row_entity
 }
 
@@ -983,6 +991,7 @@ fn spawn_param_toggle(
     toggle: ParamToggle,
     label_key: &'static str,
     tab_index: &mut i32,
+    font_size: f32,
 ) {
     let index = *tab_index;
     *tab_index = tab_index.saturating_add(1);
@@ -993,7 +1002,7 @@ fn spawn_param_toggle(
             element: label_key,
             label: label_key.to_owned(),
             tab_index: index,
-            font_size: TOOL_FONT_SIZE,
+            font_size,
             translate_label: true,
         },
     );
@@ -1010,6 +1019,7 @@ fn spawn_param_cycle(
     parent: Entity,
     cycle: ParamCycle,
     tab_index: &mut i32,
+    font_size: f32,
 ) {
     let spawned = ui_spawn::spawn_button(
         commands,
@@ -1029,7 +1039,7 @@ fn spawn_param_cycle(
         // The colour `.sk-build-value` paints — see [`VALUE_CLASS`].
         .label_color(SkinPalette::FALLBACK.text_primary)
         .label_class(VALUE_CLASS)
-        .font_size(TOOL_FONT_SIZE),
+        .font_size(font_size),
     );
     commands
         .entity(spawned.button)
@@ -1047,6 +1057,7 @@ fn spawn_action_button(
     action: ParamAction,
     label_key: &'static str,
     tab_index: &mut i32,
+    font_size: f32,
 ) {
     let index = *tab_index;
     *tab_index = tab_index.saturating_add(1);
@@ -1065,7 +1076,7 @@ fn spawn_action_button(
             Color::srgba(0.4, 0.4, 0.45, 1.0),
         )
         .label_color(Color::WHITE)
-        .font_size(TOOL_FONT_SIZE)
+        .font_size(font_size)
         .label_class(VALUE_CLASS),
     )
     .button;
@@ -1088,18 +1099,19 @@ fn spawn_info_row(
     parent: Entity,
     info: InfoText,
     label_key: &'static str,
+    font_size: f32,
 ) {
-    let info_row = spawn_param_row(commands, parent, label_key);
-    spawn_info_value(commands, info_row, info);
+    let info_row = spawn_param_row(commands, parent, label_key, font_size);
+    spawn_info_value(commands, info_row, info, font_size);
 }
 
 /// Spawn just the value text of an info line, into a row a caller already
 /// built — the group row, which puts its **Set…** and Deed buttons beside the
 /// name rather than on a line of its own.
-fn spawn_info_value(commands: &mut Commands, parent: Entity, info: InfoText) {
+fn spawn_info_value(commands: &mut Commands, parent: Entity, info: InfoText, font_size: f32) {
     commands.spawn((
         Text::default(),
-        UiFont::Sans.at(TOOL_FONT_SIZE),
+        UiFont::Sans.at(font_size),
         // The colour `.sk-build-value` paints — see [`VALUE_CLASS`].
         TextColor(SkinPalette::FALLBACK.text_primary),
         ClassList::new_with_classes([VALUE_CLASS]),
@@ -1116,6 +1128,7 @@ fn spawn_swap_label(
     variant: SwapLabel,
     label_key: &'static str,
     shown: bool,
+    font_size: f32,
 ) {
     let holder = commands
         .spawn((
@@ -1131,20 +1144,32 @@ fn spawn_swap_label(
     commands.spawn((
         Text::default(),
         Translated::new(label_key),
-        UiFont::Sans.at(TOOL_FONT_SIZE),
+        UiFont::Sans.at(font_size),
         TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
         ClassList::new_with_classes([LABEL_CLASS]),
         ChildOf(holder),
     ));
 }
 
-/// Spawn the Object-tab parameter editors (below the shell's transform rows)
-/// and the Features-tab editors, into the pages published by
-/// [`crate::edit_tool::spawn_build_floater`].
+/// Spawn the General-, Object- and Features-tab parameter editors into the
+/// pages the Build Tools floater publishes ([`BuildTabPages`]), once they
+/// appear.
 pub(crate) fn spawn_param_tabs(mut commands: Commands, pages: Option<Res<BuildTabPages>>) {
     let Some(pages) = pages else {
         return;
     };
+    spawn_param_tabs_into(&mut commands, &pages, TOOL_FONT_SIZE);
+}
+
+/// Spawn the General-tab editors (name, description, the info lines, the group
+/// row and the permission toggles), the Object-tab editors below the shell's
+/// transform rows and the Features-tab editors into `pages`, at `font_size`.
+/// Shared by the live floater and its gallery specimen.
+pub(crate) fn spawn_param_tabs_into(
+    commands: &mut Commands,
+    pages: &BuildTabPages,
+    font_size: f32,
+) {
     let mut tab_index = PARAM_TAB_INDEX;
 
     // ---- General tab ------------------------------------------------------
@@ -1153,23 +1178,25 @@ pub(crate) fn spawn_param_tabs(mut commands: Commands, pages: Option<Res<BuildTa
     // tasks.
     let general = pages.general;
 
-    let name_row = spawn_param_row(&mut commands, general, "build-object-name-label");
+    let name_row = spawn_param_row(commands, general, "build-object-name-label", font_size);
     spawn_param_field(
-        &mut commands,
+        commands,
         name_row,
         ParamField::Name,
         "build-name",
         18.0,
         &mut tab_index,
+        font_size,
     );
-    let desc_row = spawn_param_row(&mut commands, general, "build-object-desc-label");
+    let desc_row = spawn_param_row(commands, general, "build-object-desc-label", font_size);
     spawn_param_field(
-        &mut commands,
+        commands,
         desc_row,
         ParamField::Description,
         "build-desc",
         18.0,
         &mut tab_index,
+        font_size,
     );
 
     // The read-only info lines (creator / owner / what the agent may do).
@@ -1179,33 +1206,36 @@ pub(crate) fn spawn_param_tabs(mut commands: Commands, pages: Option<Res<BuildTa
         (InfoText::LandImpact, "build-info-land-impact"),
         (InfoText::YouCan, "build-info-you-can"),
     ] {
-        spawn_info_row(&mut commands, general, info, key);
+        spawn_info_row(commands, general, info, key, font_size);
     }
 
     // The group row: the group's name, the Set… button that opens the picker,
     // and Deed — the reference's `llpanelpermissions` group line.
-    let group_row = spawn_param_row(&mut commands, general, "build-group-label");
-    spawn_info_value(&mut commands, group_row, InfoText::Group);
+    let group_row = spawn_param_row(commands, general, "build-group-label", font_size);
+    spawn_info_value(commands, group_row, InfoText::Group, font_size);
     spawn_action_button(
-        &mut commands,
+        commands,
         group_row,
         ParamAction::SetGroup,
         "build-set-group",
         &mut tab_index,
+        font_size,
     );
     spawn_action_button(
-        &mut commands,
+        commands,
         group_row,
         ParamAction::Deed,
         "build-deed",
         &mut tab_index,
+        font_size,
     );
     spawn_param_toggle(
-        &mut commands,
+        commands,
         general,
         ParamToggle::ShareGroup,
         "build-share-group",
         &mut tab_index,
+        font_size,
     );
 
     // Next owner can: modify / copy / transfer. The label sits on its own
@@ -1213,22 +1243,30 @@ pub(crate) fn spawn_param_tabs(mut commands: Commands, pages: Option<Res<BuildTa
     // wraps mid-row overlaps its second line (the ui-text measure quirk), so
     // these sections avoid wrapping altogether — the toggles alone fit the
     // floater's minimum width.
-    let next_owner_row = spawn_toggle_section(&mut commands, general, "build-next-owner-label");
+    let next_owner_row =
+        spawn_toggle_section(commands, general, "build-next-owner-label", font_size);
     for (toggle, key) in [
         (ParamToggle::NextModify, "build-perm-modify"),
         (ParamToggle::NextCopy, "build-perm-copy"),
         (ParamToggle::NextTransfer, "build-perm-transfer"),
     ] {
-        spawn_param_toggle(&mut commands, next_owner_row, toggle, key, &mut tab_index);
+        spawn_param_toggle(
+            commands,
+            next_owner_row,
+            toggle,
+            key,
+            &mut tab_index,
+            font_size,
+        );
     }
 
     // Anyone can: move / copy.
-    let anyone_row = spawn_toggle_section(&mut commands, general, "build-anyone-label");
+    let anyone_row = spawn_toggle_section(commands, general, "build-anyone-label", font_size);
     for (toggle, key) in [
         (ParamToggle::AnyoneMove, "build-perm-move"),
         (ParamToggle::AnyoneCopy, "build-perm-copy"),
     ] {
-        spawn_param_toggle(&mut commands, anyone_row, toggle, key, &mut tab_index);
+        spawn_param_toggle(commands, anyone_row, toggle, key, &mut tab_index, font_size);
     }
 
     // ---- Object tab -------------------------------------------------------
@@ -1251,81 +1289,88 @@ pub(crate) fn spawn_param_tabs(mut commands: Commands, pages: Option<Res<BuildTa
         (ParamToggle::Temporary, "build-flag-temporary"),
         (ParamToggle::Phantom, "build-flag-phantom"),
     ] {
-        spawn_param_toggle(&mut commands, flags_row, toggle, key, &mut tab_index);
+        spawn_param_toggle(commands, flags_row, toggle, key, &mut tab_index, font_size);
     }
 
     // The prim-type row.
-    let kind_row = spawn_param_row(&mut commands, object, "build-type-label");
+    let kind_row = spawn_param_row(commands, object, "build-type-label", font_size);
     commands
         .entity(kind_row)
         .insert((ShapeRow::Kind, UiPanelShown(true)));
     spawn_param_cycle(
-        &mut commands,
+        commands,
         kind_row,
         ParamCycle::PrimType,
         &mut tab_index,
+        font_size,
     );
 
     // The shape rows.
-    let cut_row = spawn_param_row(&mut commands, object, "build-cut-label");
+    let cut_row = spawn_param_row(commands, object, "build-cut-label", font_size);
     commands
         .entity(cut_row)
         .insert((ShapeRow::Cut, UiPanelShown(true)));
     spawn_param_field(
-        &mut commands,
+        commands,
         cut_row,
         ParamField::CutBegin,
         "build-cut-begin",
         7.0,
         &mut tab_index,
+        font_size,
     );
     spawn_param_field(
-        &mut commands,
+        commands,
         cut_row,
         ParamField::CutEnd,
         "build-cut-end",
         7.0,
         &mut tab_index,
+        font_size,
     );
 
-    let hollow_row = spawn_param_row(&mut commands, object, "build-hollow-label");
+    let hollow_row = spawn_param_row(commands, object, "build-hollow-label", font_size);
     commands
         .entity(hollow_row)
         .insert((ShapeRow::Hollow, UiPanelShown(true)));
     spawn_param_field(
-        &mut commands,
+        commands,
         hollow_row,
         ParamField::Hollow,
         "build-hollow",
         6.0,
         &mut tab_index,
+        font_size,
     );
     spawn_param_cycle(
-        &mut commands,
+        commands,
         hollow_row,
         ParamCycle::HoleType,
         &mut tab_index,
+        font_size,
     );
 
-    let twist_row = spawn_param_row(&mut commands, object, "build-twist-label");
+    let twist_row = spawn_param_row(commands, object, "build-twist-label", font_size);
     commands
         .entity(twist_row)
         .insert((ShapeRow::Twist, UiPanelShown(true)));
     spawn_param_field(
-        &mut commands,
+        commands,
         twist_row,
         ParamField::TwistBegin,
         "build-twist-begin",
         6.0,
         &mut tab_index,
+        font_size,
     );
     spawn_param_field(
-        &mut commands,
+        commands,
         twist_row,
         ParamField::TwistEnd,
         "build-twist-end",
         6.0,
         &mut tab_index,
+        font_size,
     );
 
     // The taper / hole-size row carries both swappable labels.
@@ -1343,55 +1388,61 @@ pub(crate) fn spawn_param_tabs(mut commands: Commands, pages: Option<Res<BuildTa
         ))
         .id();
     spawn_swap_label(
-        &mut commands,
+        commands,
         scale_row,
         SwapLabel::ScaleTaper,
         "build-taper-label",
         true,
+        font_size,
     );
     spawn_swap_label(
-        &mut commands,
+        commands,
         scale_row,
         SwapLabel::ScaleHole,
         "build-hole-size-label",
         false,
+        font_size,
     );
     spawn_param_field(
-        &mut commands,
+        commands,
         scale_row,
         ParamField::ScaleX,
         "build-scale-x",
         7.0,
         &mut tab_index,
+        font_size,
     );
     spawn_param_field(
-        &mut commands,
+        commands,
         scale_row,
         ParamField::ScaleY,
         "build-scale-y",
         7.0,
         &mut tab_index,
+        font_size,
     );
 
-    let shear_row = spawn_param_row(&mut commands, object, "build-shear-label");
+    let shear_row = spawn_param_row(commands, object, "build-shear-label", font_size);
     commands
         .entity(shear_row)
         .insert((ShapeRow::Shear, UiPanelShown(true)));
     spawn_param_field(
-        &mut commands,
+        commands,
         shear_row,
         ParamField::ShearX,
         "build-shear-x",
         7.0,
         &mut tab_index,
+        font_size,
     );
     spawn_param_field(
-        &mut commands,
+        commands,
         shear_row,
         ParamField::ShearY,
         "build-shear-y",
         7.0,
         &mut tab_index,
+        font_size,
     );
 
     // The advanced-cut row carries its three swappable labels.
@@ -1409,62 +1460,69 @@ pub(crate) fn spawn_param_tabs(mut commands: Commands, pages: Option<Res<BuildTa
         ))
         .id();
     spawn_swap_label(
-        &mut commands,
+        commands,
         adv_row,
         SwapLabel::AdvProfileCut,
         "build-adv-profile-cut-label",
         false,
+        font_size,
     );
     spawn_swap_label(
-        &mut commands,
+        commands,
         adv_row,
         SwapLabel::AdvDimple,
         "build-adv-dimple-label",
         false,
+        font_size,
     );
     spawn_swap_label(
-        &mut commands,
+        commands,
         adv_row,
         SwapLabel::AdvSlice,
         "build-adv-slice-label",
         true,
+        font_size,
     );
     spawn_param_field(
-        &mut commands,
+        commands,
         adv_row,
         ParamField::AdvBegin,
         "build-adv-begin",
         7.0,
         &mut tab_index,
+        font_size,
     );
     spawn_param_field(
-        &mut commands,
+        commands,
         adv_row,
         ParamField::AdvEnd,
         "build-adv-end",
         7.0,
         &mut tab_index,
+        font_size,
     );
 
-    let taper_row = spawn_param_row(&mut commands, object, "build-taper2-label");
+    let taper_row = spawn_param_row(commands, object, "build-taper2-label", font_size);
     commands
         .entity(taper_row)
         .insert((ShapeRow::Taper, UiPanelShown(true)));
     spawn_param_field(
-        &mut commands,
+        commands,
         taper_row,
         ParamField::TaperX,
         "build-taper-x",
         7.0,
         &mut tab_index,
+        font_size,
     );
     spawn_param_field(
-        &mut commands,
+        commands,
         taper_row,
         ParamField::TaperY,
         "build-taper-y",
         7.0,
         &mut tab_index,
+        font_size,
     );
 
     // Radius offset / revolutions / skew, one wrapping row of labelled pairs.
@@ -1503,27 +1561,37 @@ pub(crate) fn spawn_param_tabs(mut commands: Commands, pages: Option<Res<BuildTa
                 ChildOf(circular_row),
             ))
             .id();
-        spawn_row_label(&mut commands, pair, key);
-        spawn_param_field(&mut commands, pair, field, element, 6.0, &mut tab_index);
+        spawn_row_label(commands, pair, key, font_size);
+        spawn_param_field(
+            commands,
+            pair,
+            field,
+            element,
+            6.0,
+            &mut tab_index,
+            font_size,
+        );
     }
 
     // ---- Features tab ------------------------------------------------------
     let features = pages.features;
 
-    let material_row = spawn_param_row(&mut commands, features, "build-material-label");
+    let material_row = spawn_param_row(commands, features, "build-material-label", font_size);
     spawn_param_cycle(
-        &mut commands,
+        commands,
         material_row,
         ParamCycle::Material,
         &mut tab_index,
+        font_size,
     );
 
     spawn_param_toggle(
-        &mut commands,
+        commands,
         features,
         ParamToggle::Flexi,
         "build-feature-flexi",
         &mut tab_index,
+        font_size,
     );
     let flexi_rows = commands
         .spawn((
@@ -1563,38 +1631,41 @@ pub(crate) fn spawn_param_tabs(mut commands: Commands, pages: Option<Res<BuildTa
             "build-flex-tension",
         ),
     ] {
-        let field_row = spawn_param_row(&mut commands, flexi_rows, key);
+        let field_row = spawn_param_row(commands, flexi_rows, key, font_size);
         spawn_param_field(
-            &mut commands,
+            commands,
             field_row,
             field,
             element,
             6.0,
             &mut tab_index,
+            font_size,
         );
     }
-    let force_row = spawn_param_row(&mut commands, flexi_rows, "build-flex-force-label");
+    let force_row = spawn_param_row(commands, flexi_rows, "build-flex-force-label", font_size);
     for (field, element) in [
         (ParamField::FlexForceX, "build-flex-force-x"),
         (ParamField::FlexForceY, "build-flex-force-y"),
         (ParamField::FlexForceZ, "build-flex-force-z"),
     ] {
         spawn_param_field(
-            &mut commands,
+            commands,
             force_row,
             field,
             element,
             6.0,
             &mut tab_index,
+            font_size,
         );
     }
 
     spawn_param_toggle(
-        &mut commands,
+        commands,
         features,
         ParamToggle::Light,
         "build-feature-light",
         &mut tab_index,
+        font_size,
     );
     let light_rows = commands
         .spawn((
@@ -1607,19 +1678,20 @@ pub(crate) fn spawn_param_tabs(mut commands: Commands, pages: Option<Res<BuildTa
             ChildOf(features),
         ))
         .id();
-    let color_row = spawn_param_row(&mut commands, light_rows, "build-light-color-label");
+    let color_row = spawn_param_row(commands, light_rows, "build-light-color-label", font_size);
     for (field, element) in [
         (ParamField::LightRed, "build-light-red"),
         (ParamField::LightGreen, "build-light-green"),
         (ParamField::LightBlue, "build-light-blue"),
     ] {
         spawn_param_field(
-            &mut commands,
+            commands,
             color_row,
             field,
             element,
             5.0,
             &mut tab_index,
+            font_size,
         );
     }
     for (field, key, element) in [
@@ -1639,17 +1711,18 @@ pub(crate) fn spawn_param_tabs(mut commands: Commands, pages: Option<Res<BuildTa
             "build-light-falloff",
         ),
     ] {
-        let field_row = spawn_param_row(&mut commands, light_rows, key);
+        let field_row = spawn_param_row(commands, light_rows, key, font_size);
         spawn_param_field(
-            &mut commands,
+            commands,
             field_row,
             field,
             element,
             6.0,
             &mut tab_index,
+            font_size,
         );
     }
-    let spot_row = spawn_param_row(&mut commands, light_rows, "build-spot-label");
+    let spot_row = spawn_param_row(commands, light_rows, "build-spot-label", font_size);
     commands
         .entity(spot_row)
         .insert((FeatureRows::Spot, UiPanelShown(true)));
@@ -1658,7 +1731,15 @@ pub(crate) fn spawn_param_tabs(mut commands: Commands, pages: Option<Res<BuildTa
         (ParamField::SpotFocus, "build-spot-focus"),
         (ParamField::SpotAmbiance, "build-spot-ambiance"),
     ] {
-        spawn_param_field(&mut commands, spot_row, field, element, 6.0, &mut tab_index);
+        spawn_param_field(
+            commands,
+            spot_row,
+            field,
+            element,
+            6.0,
+            &mut tab_index,
+            font_size,
+        );
     }
 }
 
@@ -2334,9 +2415,26 @@ fn sync_param_widgets(
     {
         return;
     }
-    let translator = &text.translator;
+    show_param_snapshot(
+        current.as_ref(),
+        &text.translator,
+        &mut widgets,
+        &mut commands,
+    );
+    snapshot.shown = current;
+}
 
-    let data = current.as_ref();
+/// Draw `data` (the primary selection's snapshot, or `None` for nothing
+/// selected) into every parameter widget: field texts, toggle ticks, cycle
+/// labels, info lines, the per-type row visibility, and the gated enabled /
+/// greyed-out state. The drawing half of [`sync_param_widgets`], which the
+/// gallery specimen calls with a sample snapshot.
+fn show_param_snapshot(
+    data: Option<&SnapshotData>,
+    translator: &Translator<'_>,
+    widgets: &mut ParamWidgets<'_, '_>,
+    commands: &mut Commands<'_, '_>,
+) {
     let has_selection = data.is_some();
     // Every parameter edit (shape, flags, name / description, light, flexi, …)
     // is a **modify**, so the whole Object / Features tab greys when the agent
@@ -2588,8 +2686,69 @@ fn sync_param_widgets(
             shown.0 = true;
         }
     }
+}
 
-    snapshot.shown = current;
+// ---------------------------------------------------------------------------
+// Gallery specimen
+// ---------------------------------------------------------------------------
+
+/// Fill the parameter tabs of a Build Tools specimen with a sample prim — a
+/// modifiable wooden box the agent owns, named and described through `cx` —
+/// drawn by the same [`show_param_snapshot`] the live sync uses. Queued, so it
+/// runs once the tabs [`spawn_param_tabs_into`] spawned exist.
+pub(crate) fn fill_param_tabs_specimen(commands: &mut Commands, cx: crate::ui_element::ElementCx) {
+    let owner = cx.text("Sample Resident");
+    let full = Permissions5 {
+        base: Permissions::ALL,
+        owner: Permissions::ALL,
+        group: Permissions::empty(),
+        everyone: Permissions::empty(),
+        next_owner: Permissions::MODIFY | Permissions::COPY,
+    };
+    let sample = SnapshotData {
+        scoped: ScopedObjectId::new(CircuitId::new(1), RegionLocalObjectId(1)),
+        name: cx.text("Sample Box"),
+        description: cx.text("A plain box to try the build tools on"),
+        update_flags: 0,
+        agent_flags: FLAGS_OBJECT_MODIFY
+            | FLAGS_OBJECT_COPY
+            | FLAGS_OBJECT_TRANSFER
+            | FLAGS_OBJECT_MOVE,
+        can_modify: true,
+        material: Material::Wood.to_code(),
+        pcode: pcode::PRIMITIVE,
+        shape: PrimShapeParams {
+            // LL_PCODE_PATH_LINE / LL_PCODE_PROFILE_SQUARE: a plain box.
+            path_curve: 0x10,
+            profile_curve: 0x01,
+            path_scale_x: 100,
+            path_scale_y: 100,
+            ..PrimShapeParams::default()
+        },
+        extra: ObjectExtraParams::default(),
+        creator_label: owner.clone(),
+        owner_label: owner,
+        group: None,
+        group_label: String::new(),
+        permissions: Some(full),
+        land_impact: crate::object_cost::LandImpact::Known(1.0),
+    };
+    commands.queue(move |world: &mut World| {
+        if let Err(error) = world.run_system_cached_with(show_param_specimen, sample) {
+            warn!("build tools specimen: the sample prim's parameters were not drawn: {error}");
+        }
+    });
+}
+
+/// The specimen's one-shot: draw `sample` into the parameter widgets, as
+/// [`sync_param_widgets`] does for the primary selection.
+fn show_param_specimen(
+    In(sample): In<SnapshotData>,
+    translator: Translator,
+    mut widgets: ParamWidgets,
+    mut commands: Commands,
+) {
+    show_param_snapshot(Some(&sample), &translator, &mut widgets, &mut commands);
 }
 
 /// Parse a committed numeric field's value.
@@ -2839,20 +2998,43 @@ fn collect_shape_ui(values: &dyn Fn(ParamField) -> Option<f32>) -> Option<ShapeU
 // The toggle / cycle observers.
 // ---------------------------------------------------------------------------
 
+/// What a parameter edit reads and writes: the selection it applies to, the
+/// object mirror it echoes into, the shown snapshot it invalidates and the
+/// outbox. Bundled as one [`SystemParam`](bevy::ecs::system::SystemParam) so
+/// the observers can take it as an `Option`: absent only in the gallery / the
+/// `ui_test` hosts, whose specimen has no session behind it.
+#[derive(bevy::ecs::system::SystemParam)]
+struct ParamEdit<'w> {
+    /// The selection whose primary is edited.
+    selection: ResMut<'w, SelectionSet>,
+    /// The object mirror, for the edited data and the local echo.
+    objects: ResMut<'w, ObjectState>,
+    /// The shown snapshot, invalidated so the echo redraws.
+    snapshot: ResMut<'w, ShownSnapshot>,
+    /// Where the edit goes.
+    commands: MessageWriter<'w, SlCommand>,
+}
+
 /// The observer every [`ParamToggle`] row runs on press: flip the toggle's
 /// wire state for the primary selection and send the corresponding message
 /// (the toggle is read off the pressed row's component).
 fn handle_toggle_press(
     change: On<ValueChange<bool>>,
     toggles: Query<&ParamToggle>,
-    mut selection: ResMut<SelectionSet>,
-    mut objects: ResMut<ObjectState>,
-    mut snapshot: ResMut<ShownSnapshot>,
-    mut commands: MessageWriter<SlCommand>,
+    edit: Option<ParamEdit>,
 ) {
     // The widget has already moved its own tick; the object is the truth, and
     // the sync pass puts the tick back where the reply says on the next frame.
     let Ok(&toggle) = toggles.get(change.source) else {
+        return;
+    };
+    let Some(ParamEdit {
+        mut selection,
+        mut objects,
+        mut snapshot,
+        mut commands,
+    }) = edit
+    else {
         return;
     };
     let Some(primary_scoped) = selection.primary().map(|primary| primary.scoped) else {
@@ -2995,16 +3177,22 @@ fn handle_toggle_press(
 fn handle_cycle_press(
     press: On<Pointer<Press>>,
     cycles: Query<&ParamCycle>,
-    selection: Res<SelectionSet>,
-    mut objects: ResMut<ObjectState>,
-    mut snapshot: ResMut<ShownSnapshot>,
     fields: Query<(&ParamField, &EditableText)>,
-    mut commands: MessageWriter<SlCommand>,
+    edit: Option<ParamEdit>,
 ) {
     if press.button != PointerButton::Primary {
         return;
     }
     let Ok(&cycle) = cycles.get(press.entity) else {
+        return;
+    };
+    let Some(ParamEdit {
+        selection,
+        mut objects,
+        mut snapshot,
+        mut commands,
+    }) = edit
+    else {
         return;
     };
     let Some(primary_scoped) = selection.primary().map(|primary| primary.scoped) else {
@@ -3071,17 +3259,25 @@ fn handle_cycle_press(
 }
 
 /// The observer every [`ParamAction`] button runs on press.
+///
+/// Its session half is read optionally, as the toggles' is: absent only in the
+/// gallery / `ui_test` hosts.
 fn handle_action_press(
     press: On<Pointer<Press>>,
     actions: Query<&ParamAction>,
-    selection: Res<SelectionSet>,
-    mut commands: MessageWriter<SlCommand>,
-    mut group_pickers: MessageWriter<OpenGroupPicker>,
+    session: Option<(
+        Res<SelectionSet>,
+        MessageWriter<SlCommand>,
+        MessageWriter<OpenGroupPicker>,
+    )>,
 ) {
     if press.button != PointerButton::Primary {
         return;
     }
     let Ok(&action) = actions.get(press.entity) else {
+        return;
+    };
+    let Some((selection, mut commands, mut group_pickers)) = session else {
         return;
     };
     match action {

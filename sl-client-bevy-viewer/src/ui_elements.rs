@@ -90,8 +90,10 @@ pub const ELEMENTS: &[UiElement] = &[
     },
     UiElement {
         id: "build-tools",
-        summary: "The Build Tools panel shape (viewer-object-edit-floater-shell): the tool-mode \
-                  radio group, a snap toggle row, and a numeric transform row of float fields.",
+        summary: "The Build Tools window's live content (viewer-object-edit-floater-shell): the \
+                  tool-mode radio group, the toggle rows, the grid unit and selection summary, \
+                  and the General / Object / Features / Texture / Content tabs, filled for a \
+                  sample prim selected under the Move tool.",
         spawn: crate::edit_tool::spawn_build_tools_specimen,
     },
     UiElement {
@@ -189,33 +191,32 @@ pub const ELEMENTS: &[UiElement] = &[
     },
     UiElement {
         id: "preferences",
-        summary: "The preferences shell: a search box, a leading (RTL-mirroring) tab strip, \
-                  labelled setting rows and an OK / Cancel footer. Static — the live shell \
-                  (`crate::preferences`) adds the store binding, filter and snapshot/revert.",
+        summary: "The Preferences floater's real content: the search box, the leading \
+                  (RTL-mirroring) strip over every tab the viewer builds with General active, \
+                  and the OK / Cancel footer. No store: the bound controls rest at their spawn \
+                  state.",
         spawn: crate::preferences::spawn_preferences_specimen,
     },
     UiElement {
         id: "debug-settings",
-        summary: "The raw debug-settings editor: a search box over a changed-marker settings \
-                  list beside the detail column — per-layer value read-outs, a scope combo, a \
-                  numeric editor and the copy / reset buttons. Static — the live floater \
-                  (`crate::debug_settings`) adds the store, the table and the commit paths.",
+        summary: "The raw debug-settings editor's real content over a small sample store: \
+                  the search box over the changed-marker settings table beside the detail \
+                  column, one setting selected — its per-layer read-outs, the scope combo, its \
+                  editor and the copy / reset buttons.",
         spawn: crate::debug_settings::spawn_debug_settings_specimen,
     },
     UiElement {
         id: "quick-preferences",
-        summary: "The Quick Preferences panel: the environment preset / time-of-day combos over \
-                  a divider and the curated setting slider rows (draw distance, particle cap). \
-                  Static — the live panel (`crate::quick_preferences`) adds the store binding and \
-                  the environment wiring.",
+        summary: "The Quick Preferences panel's real content: the environment group / time and \
+                  settings-asset combos, the quality combo and the default curated setting \
+                  rows, the sliders at sample values.",
         spawn: crate::quick_preferences::spawn_quick_prefs_specimen,
     },
     UiElement {
         id: "phototools",
-        summary: "The Phototools window: the tab strip over the environment tab — the preset \
-                  library combo, the four times of day and the door to Personal Lighting — and \
-                  two of the render rows beneath. Static — the live window \
-                  (`crate::phototools`) adds the store binding and the environment wiring.",
+        summary: "The Phototools window's real content: the tab strip over the environment \
+                  tab — the preset library, a lit time of day, the settings-asset combos and the \
+                  sun-and-moon scrubber — and every render tab's rows, at sample values.",
         spawn: crate::phototools::spawn_phototools_specimen,
     },
     UiElement {
@@ -290,6 +291,14 @@ pub const ELEMENTS: &[UiElement] = &[
         spawn: crate::notification_host::spawn_notification_specimen,
     },
     UiElement {
+        id: "notification-overflow",
+        summary: "A full toast channel: the visible toast with the \"N more ▸\" overflow control \
+                  beneath it, as the live channel shows it once more toasts are up than fit. The \
+                  control is the live one, so its trailing ▸ is the skin's cycle glyph — the \
+                  viewer's only ::after glyph slot.",
+        spawn: crate::notification_host::spawn_notification_overflow_specimen,
+    },
+    UiElement {
         id: "group-notice-toast",
         summary: "A group-notice card (viewer-group-notice-display): the group image, a \"Group \
                   Notice\" header, the \"Sent by …\" title, the subject / SLT date / body, an \
@@ -362,10 +371,11 @@ pub const ELEMENTS: &[UiElement] = &[
     },
     UiElement {
         id: "experiences-floater",
-        summary: "The Experiences manage surface (viewer-experiences-floater): the tab labels \
-                  over one list's name / rating rows and its Profile / Forget actions. The live \
-                  floater (`crate::experiences_floater`) fills seven virtualized tables from the \
-                  experience capabilities; here it is static so the layout is swept.",
+        summary: "The Experiences manage surface (viewer-experiences-floater): the Refresh row \
+                  over the seven-tab strip, on the Allowed tab with a sample list and its \
+                  Profile / Forget actions -- the live builder \
+                  (`crate::experiences_floater`), its table filled through the live row \
+                  rendering.",
         spawn: crate::experiences_floater::spawn_experiences_specimen,
     },
     UiElement {
@@ -403,26 +413,28 @@ pub const ELEMENTS: &[UiElement] = &[
     },
     UiElement {
         id: "minimap",
-        summary: "The minimap surface (`crate::minimap`): terrain-ish backdrop, a parcel line, \
-                  avatar dots and the compass labels. The live floater composites a CPU image \
-                  from the world mirror; here it is static so its layout is swept.",
-        spawn: crate::minimap::spawn_minimap_specimen,
+        summary: "The minimap surface (`crate::minimap`), built by the live floater's content \
+                  builder at its default size: the live compositor's frame of a sample \
+                  terrain backdrop, parcel lines, objects, avatar dots, the camera wedge and a \
+                  tracking beacon, under the compass labels.",
+        spawn: crate::minimap::spawn_minimap_element,
     },
     UiElement {
         id: "radar",
-        summary: "The avatar radar's content (`crate::radar`): the counts line, the nearby-avatar \
-                  table with its status glyphs and band-coloured ranges, and the action buttons. \
-                  The live floater binds a virtualized table off the radar model; here it is \
-                  static so its layout is swept.",
+        summary: "The avatar radar's content (`crate::radar`): the filter / range-limit row, \
+                  the counts line, the nearby-avatar table with its status glyphs and \
+                  band-coloured ranges, and the action buttons -- the live builder, its table \
+                  filled with sample avatars through the live row projection.",
         spawn: crate::radar::spawn_radar_specimen,
     },
     UiElement {
         id: "worldmap",
-        summary: "The world-map floater's layout (`crate::world_map`): a tile-ish map surface \
-                  with region fills and markers beside the search side panel with result rows. \
-                  The live floater composites grid tiles and live markers into a CPU image; \
-                  here it is static so its layout is swept.",
-        spawn: crate::world_map::spawn_world_map_specimen,
+        summary: "The world-map floater's content (`crate::world_map`), built by the live \
+                  builder at its default size: the live compositor's frame of sample markers, \
+                  region grid and labels (no tiles — those need the grid's tile service, so \
+                  the backdrop is the void shown until they arrive), beside the search side \
+                  panel with a query and its result rows.",
+        spawn: crate::world_map::spawn_world_map_element,
     },
     UiElement {
         id: "parcel-audio-bar",
@@ -434,10 +446,10 @@ pub const ELEMENTS: &[UiElement] = &[
     },
     UiElement {
         id: "emoji-picker",
-        summary: "The emoji-picker floater's novel layout (`crate::emoji_picker`): a couple of grid \
-                  rows of glyphs, the skin-tone swatch row and the preview line. The live floater \
-                  (`Ctrl+E`) filters, groups and inserts a chosen glyph into the focused field; \
-                  here it is static so its layout is swept.",
+        summary: "The emoji-picker floater's live content (`crate::emoji_picker`): the search \
+                  field, the category strip, the virtualized grid showing the first group, the \
+                  skin-tone swatch row and the preview line. The live floater (`Ctrl+E`) filters, \
+                  groups and inserts a chosen glyph into the focused field.",
         spawn: crate::emoji_picker::spawn_emoji_picker_specimen,
     },
     UiElement {

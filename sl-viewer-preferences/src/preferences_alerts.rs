@@ -52,7 +52,7 @@ use crate::ui_table::{
     set_table_cell, spawn_table, spawn_table_row,
 };
 use crate::ui_text_input::TextInputKind;
-use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
+use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists, spawn_specimen_row};
 use sl_settings::SettingValue;
 
 /// The stable id of this tab in `PREF_TABS`.
@@ -64,8 +64,15 @@ const ROW_HEIGHT: f32 = 24.0;
 /// The list's header / cell font size, in logical pixels.
 const FONT: f32 = 13.0;
 
-/// The fixed width of the "Show" checkbox column, in logical pixels.
-const SHOW_COL_WIDTH: f32 = 48.0;
+/// The fixed width of the "Show" checkbox column, in logical pixels: the
+/// checkbox, and room for a short heading over it in any script (the column is
+/// custom, so its heading does not clip like a text column's).
+const SHOW_COL_WIDTH: f32 = 84.0;
+
+/// The popup list's least height, in rows: the tab's rows above it fill a
+/// scrolling panel, and a table left to flex would be squeezed to nothing
+/// beneath them.
+const MIN_VISIBLE_ROWS: f32 = 10.0;
 
 /// The alert table's column header — the heading role.
 const HEADER_COLOR: Color = SkinPalette::FALLBACK.text_heading;
@@ -246,6 +253,10 @@ pub(crate) fn build_alerts_tab(commands: &mut Commands, panel: Entity) {
 
     spawn_pref_section(commands, panel, "preferences-section-alert-popups");
     let table = spawn_table(commands, panel, &ALERTS_TABLE);
+    commands
+        .entity(table.root)
+        .entry::<Node>()
+        .and_modify(|mut node| node.min_height = Val::Px(ROW_HEIGHT * MIN_VISIBLE_ROWS));
     // The custom checkbox column renders no built-in header — give it the
     // translated "Show" label the reference column carries.
     if let Some(header_cell) = table.header_cell(0) {
@@ -308,20 +319,7 @@ fn refresh_alerts_view(
         return;
     }
     if relabel {
-        model.entries = NOTIFICATIONS
-            .iter()
-            .filter(|entry| entry.ignore.is_suppressible())
-            .filter_map(|entry| entry.ignore_key.map(|ignore_key| (entry, ignore_key)))
-            .map(|(entry, ignore_key)| {
-                let label = translator.get(ignore_key);
-                let label_lower = label.to_lowercase();
-                AlertEntry {
-                    template: entry.name,
-                    label,
-                    label_lower,
-                }
-            })
-            .collect();
+        model.entries = alert_entries(&translator);
     }
     let term = state.filter();
     let filtering = !term.is_empty();
@@ -343,6 +341,26 @@ fn refresh_alerts_view(
     {
         extra_hits.0.insert(tab_index, hits);
     }
+}
+
+/// Every suppressible catalogue template with an ignore text, its label
+/// resolved through the active locale — the list's unsorted, unfiltered
+/// entries.
+fn alert_entries(translator: &Translator) -> Vec<AlertEntry> {
+    NOTIFICATIONS
+        .iter()
+        .filter(|entry| entry.ignore.is_suppressible())
+        .filter_map(|entry| entry.ignore_key.map(|ignore_key| (entry, ignore_key)))
+        .map(|(entry, ignore_key)| {
+            let label = translator.get(ignore_key);
+            let label_lower = label.to_lowercase();
+            AlertEntry {
+                template: entry.name,
+                label,
+                label_lower,
+            }
+        })
+        .collect()
 }
 
 /// The view over `entries` for a lowercased filter `term`: the indices of the
@@ -378,34 +396,47 @@ fn populate_alerts_rows(
         if child_of.parent() != ui.viewport {
             continue;
         }
-        let cells = spawn_table_row(&mut commands, row_entity, ui.table, &ALERTS_TABLE);
-        let (Some(show_cell), Some(label_cell)) = (cells.cell(0), cells.cell(1)) else {
-            continue;
-        };
-        // An unbound checkbox: the bind pass points it at its row's setting by
-        // inserting the SettingBinding, and the binding layer does the rest
-        // (sync, write, the shell's account guard). Its *look*, including the
-        // greyed one, is the skin's through `.sk-checkbox`.
-        //
-        // No caption — the alert's text is the row's own next cell, so this one
-        // is the widget's box alone.
-        let checkbox = spawn_checkbox(
-            &mut commands,
-            show_cell,
-            &CheckboxSpec {
-                element: "preferences-alerts",
-                label: String::new(),
-                tab_index: 0,
-                font_size: FONT,
-                translate_label: false,
-            },
-        )
-        .checkbox;
-        commands.entity(row_entity).insert(AlertRowParts {
-            checkbox,
-            label_cell,
-        });
+        dress_alert_row(&mut commands, row_entity, ui.table);
     }
+}
+
+/// Give one pooled row of the list under `table` its cells: the table's text
+/// cells, the checkbox in the custom column, and the [`AlertRowParts`] wiring
+/// (also returned). `None` when the table spec yields no such cells.
+fn dress_alert_row(
+    commands: &mut Commands,
+    row_entity: Entity,
+    table: Entity,
+) -> Option<AlertRowParts> {
+    let cells = spawn_table_row(commands, row_entity, table, &ALERTS_TABLE);
+    let (Some(show_cell), Some(label_cell)) = (cells.cell(0), cells.cell(1)) else {
+        return None;
+    };
+    // An unbound checkbox: the bind pass points it at its row's setting by
+    // inserting the SettingBinding, and the binding layer does the rest
+    // (sync, write, the shell's account guard). Its *look*, including the
+    // greyed one, is the skin's through `.sk-checkbox`.
+    //
+    // No caption — the alert's text is the row's own next cell, so this one
+    // is the widget's box alone.
+    let checkbox = spawn_checkbox(
+        commands,
+        show_cell,
+        &CheckboxSpec {
+            element: "preferences-alerts",
+            label: String::new(),
+            tab_index: 0,
+            font_size: FONT,
+            translate_label: false,
+        },
+    )
+    .checkbox;
+    let parts = AlertRowParts {
+        checkbox,
+        label_cell,
+    };
+    commands.entity(row_entity).insert(parts);
+    Some(parts)
 }
 
 /// Project the view into the pooled rows: on a model rebuild or a row-window
@@ -440,10 +471,93 @@ fn bind_alerts_rows(
         else {
             continue;
         };
-        set_table_cell(&mut texts, parts.label_cell, &entry.label, CELL_COLOR);
-        commands
-            .entity(parts.checkbox)
-            .insert(SettingBinding::account(entry.template));
+        bind_alert_row(&mut texts, &mut commands, parts, entry);
+    }
+}
+
+/// Show `entry` in one dressed row: its label in the label cell, and its
+/// checkbox pointed at the entry's show/suppress setting.
+fn bind_alert_row(
+    texts: &mut Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
+    commands: &mut Commands,
+    parts: &AlertRowParts,
+    entry: &AlertEntry,
+) {
+    set_table_cell(texts, parts.label_cell, &entry.label, CELL_COLOR);
+    commands
+        .entity(parts.checkbox)
+        .insert(SettingBinding::account(entry.template));
+}
+
+// ---------------------------------------------------------------------------
+// Gallery specimen
+// ---------------------------------------------------------------------------
+
+/// How many of the list's rows the specimen pools: enough to fill the table's
+/// viewport at the floater's default size, which is all a live pool holds.
+const SPECIMEN_ROWS: usize = 20;
+
+/// What this tab's runtime adds to the preferences specimen once its content
+/// exists: the popup list, filled the way [`refresh_alerts_view`],
+/// [`populate_alerts_rows`] and [`bind_alerts_rows`] fill it — every
+/// suppressible template, label-sorted and unfiltered, the top of the list in
+/// pooled rows ([`spawn_specimen_row`]) dressed and bound by the live helpers.
+///
+/// Reads the [`AlertsTabUi`] the specimen's own tab build just inserted; the
+/// specimen's host runs none of this module's systems, so nothing else reads
+/// it.
+pub(crate) fn compose_alerts_specimen(commands: &mut Commands) {
+    commands.queue(|world: &mut World| {
+        let dressed = match world.run_system_cached(dress_alerts_specimen) {
+            Ok(dressed) => dressed,
+            Err(error) => {
+                warn!("preferences specimen: the alerts list was not pooled: {error}");
+                return;
+            }
+        };
+        if let Err(error) = world.run_system_cached_with(bind_alerts_specimen, dressed) {
+            warn!("preferences specimen: the alerts list was not bound: {error}");
+        }
+    });
+}
+
+/// The specimen's first pass: resolve the list, size the viewport to it, and
+/// pool and dress its top rows. Returns each dressed row with the entry it
+/// shows, for [`bind_alerts_specimen`] once the cells exist.
+fn dress_alerts_specimen(
+    ui: Option<Res<AlertsTabUi>>,
+    translator: Translator,
+    mut lists: Query<&mut VirtualList>,
+    mut commands: Commands,
+) -> Vec<(AlertRowParts, AlertEntry)> {
+    let Some(ui) = ui else {
+        return Vec::new();
+    };
+    let entries = alert_entries(&translator);
+    let view = build_view(&entries, "");
+    if let Ok(mut list) = lists.get_mut(ui.viewport) {
+        list.item_count = view.len();
+    }
+    view.iter()
+        .take(SPECIMEN_ROWS)
+        .enumerate()
+        .filter_map(|(index, entry_index)| {
+            let entry = entries.get(*entry_index)?.clone();
+            let row = spawn_specimen_row(&mut commands, ui.viewport, index, ROW_HEIGHT);
+            let parts = dress_alert_row(&mut commands, row, ui.table)?;
+            Some((parts, entry))
+        })
+        .collect()
+}
+
+/// The specimen's second pass: bind each dressed row to its entry.
+fn bind_alerts_specimen(
+    In(rows): In<Vec<(AlertRowParts, AlertEntry)>>,
+    mut texts: Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
+    mut commands: Commands,
+) {
+    for (parts, entry) in &rows {
+        bind_alert_row(&mut texts, &mut commands, parts, entry);
     }
 }
 

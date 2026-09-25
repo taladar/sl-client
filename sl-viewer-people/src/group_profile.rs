@@ -64,8 +64,8 @@ use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use sl_client_bevy::{
     AgentKey, Command, GroupKey, GroupMember, GroupNotice, GroupNoticeKey, GroupProfile, GroupRole,
     GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember, GroupRoleMemberChange,
-    GroupRoleUpdateType, GroupTitle, ImDialog, LindenAmount, SlCommand, SlEvent, SlSessionEvent,
-    TextureKey, UpdateGroupInfoParams, Uuid, group_powers,
+    GroupRoleUpdateType, GroupTitle, ImDialog, LandArea, LindenAmount, SlCommand, SlEvent,
+    SlSessionEvent, TextureKey, UpdateGroupInfoParams, Uuid, group_powers,
 };
 
 use crate::floater::{
@@ -85,9 +85,10 @@ use crate::ui_tab::{
     spawn_tab_container,
 };
 use crate::ui_table::{
-    TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells, TableSelectionMode,
-    TableSortDefault, TableSpec, TableState, order_by_sort_keys, register_table_settings,
-    set_table_cell, spawn_table, spawn_table_row,
+    SpecimenTable, TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells,
+    TableSelectionMode, TableSortDefault, TableSpec, TableState, order_by_sort_keys,
+    register_table_settings, set_table_cell, spawn_specimen_table_rows, spawn_table,
+    spawn_table_row,
 };
 use crate::ui_text::set_text;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
@@ -681,6 +682,19 @@ struct GeneralSig {
     join_shown: bool,
 }
 
+impl GeneralSig {
+    /// The structure `profile` calls for, for an agent who is (`is_member`) or
+    /// is not a member of the group.
+    const fn for_profile(profile: &GroupProfile, is_member: bool) -> Self {
+        Self {
+            is_member,
+            can_edit_identity: has_power(profile.powers, group_powers::GROUP_CHANGE_IDENTITY),
+            can_edit_options: has_power(profile.powers, group_powers::MEMBER_OPTIONS),
+            join_shown: !is_member && profile.open_enrollment,
+        }
+    }
+}
+
 /// Retained handles to the General tab's value nodes, so a reply updates values in
 /// place ([`update_general_values`]) instead of respawning the tab. `None` for a
 /// node this structure variant does not show.
@@ -954,45 +968,7 @@ fn build_group_profile_content(
     target: GroupKey,
     accept_notices: bool,
 ) {
-    let labels: Vec<String> = [
-        "group-profile-tab-general",
-        "group-profile-tab-members",
-        "group-profile-tab-notices",
-    ]
-    .into_iter()
-    .map(str::to_owned)
-    .collect();
-    let tabs: TabContainerHandle = spawn_tab_container(
-        commands,
-        handle.content,
-        &TabSpec {
-            element: "group-profile-tabs",
-            placement: TabPlacement::BlockStart,
-            labels: &labels,
-            active: 0,
-            tab_index: 1,
-            font_size: FONT_SIZE,
-            strip_width: None,
-            ellipsis: DEFAULT_ELLIPSIS,
-            translate_labels: true,
-        },
-    );
-    fill_tab_container(commands, TabPlacement::BlockStart, &tabs);
-    let general_panel = tabs.panels.first().copied().unwrap_or(handle.content);
-    let members_panel = tabs.panels.get(1).copied().unwrap_or(handle.content);
-    let notices_panel = tabs.panels.get(2).copied().unwrap_or(handle.content);
-
-    let (
-        members_table,
-        members_viewport,
-        members_count_text,
-        roles_table,
-        roles_viewport,
-        roles_new_container,
-        details_area,
-    ) = build_members_scaffold(commands, members_panel);
-    let (notices_table, notices_viewport, notice_body_area, compose_area) =
-        build_notices_scaffold(commands, notices_panel);
+    let scaffold = spawn_group_profile_scaffold(commands, handle.content, FONT_SIZE);
 
     // This window's whole model, on the window. Every sub-panel starts dirty —
     // nothing has been drawn yet — and the membership toggle is seeded from the
@@ -1011,24 +987,62 @@ fn build_group_profile_content(
         MembersView::default(),
         NoticesView::default(),
         RolesView::default(),
-        GroupProfileUi {
-            title_text: handle.title_text,
-            general_panel,
-            members_table,
-            members_viewport,
-            members_count_text,
-            roles_table,
-            roles_viewport,
-            roles_new_container,
+        GroupProfileUi::new(handle.title_text, scaffold),
+    ));
+}
+
+/// The persistent skeleton of one group-profile window's content: the General
+/// tab's panel, and the tables and rebuild-target containers of the other two.
+#[derive(Debug, Clone, Copy)]
+struct GroupProfileScaffold {
+    /// The General tab panel.
+    general_panel: Entity,
+    /// The members table root.
+    members_table: Entity,
+    /// The virtualized members list viewport.
+    members_viewport: Entity,
+    /// The members header line.
+    members_count_text: Entity,
+    /// The roles table root.
+    roles_table: Entity,
+    /// The virtualized roles list viewport.
+    roles_viewport: Entity,
+    /// The container below the roles table holding the New Role button.
+    roles_new_container: Entity,
+    /// The Members & Roles lower details area.
+    details_area: Entity,
+    /// The notices table root.
+    notices_table: Entity,
+    /// The virtualized notices list viewport.
+    notices_viewport: Entity,
+    /// The notice body view container.
+    notice_body_area: Entity,
+    /// The notice compose area.
+    compose_area: Entity,
+}
+
+impl GroupProfileUi {
+    /// The handles of a window freshly built on `scaffold`, whose title node is
+    /// `title_text`: nothing rebuilt yet, so every per-rebuild field is empty.
+    fn new(title_text: Entity, scaffold: GroupProfileScaffold) -> Self {
+        Self {
+            title_text,
+            general_panel: scaffold.general_panel,
+            members_table: scaffold.members_table,
+            members_viewport: scaffold.members_viewport,
+            members_count_text: scaffold.members_count_text,
+            roles_table: scaffold.roles_table,
+            roles_viewport: scaffold.roles_viewport,
+            roles_new_container: scaffold.roles_new_container,
             roles_new_built: false,
-            details_area,
+            details_area: scaffold.details_area,
             details_built: None,
             compose_can_send: None,
             notice_body_built: None,
-            notices_table,
-            notices_viewport,
-            notice_body_area,
-            compose_area,
+            notices_table: scaffold.notices_table,
+            notices_viewport: scaffold.notices_viewport,
+            notice_body_area: scaffold.notice_body_area,
+            compose_area: scaffold.compose_area,
             general_sig: None,
             general_handles: GeneralHandles::default(),
             charter_field: None,
@@ -1038,8 +1052,308 @@ fn build_group_profile_content(
             role_desc_field: None,
             notice_subject_field: None,
             notice_message_field: None,
+        }
+    }
+}
+
+/// Build a group-profile window's persistent content into `content` at
+/// `font_size`: the General / Members & Roles / Notices tab container and the
+/// latter two tabs' list scaffolds. Shared by the live window and its specimen.
+fn spawn_group_profile_scaffold(
+    commands: &mut Commands,
+    content: Entity,
+    font_size: f32,
+) -> GroupProfileScaffold {
+    let labels: Vec<String> = [
+        "group-profile-tab-general",
+        "group-profile-tab-members",
+        "group-profile-tab-notices",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect();
+    let tabs: TabContainerHandle = spawn_tab_container(
+        commands,
+        content,
+        &TabSpec {
+            element: "group-profile-tabs",
+            placement: TabPlacement::BlockStart,
+            labels: &labels,
+            active: 0,
+            tab_index: 1,
+            font_size,
+            strip_width: None,
+            ellipsis: DEFAULT_ELLIPSIS,
+            translate_labels: true,
         },
-    ));
+    );
+    fill_tab_container(commands, TabPlacement::BlockStart, &tabs);
+    let general_panel = tabs.panels.first().copied().unwrap_or(content);
+    let members_panel = tabs.panels.get(1).copied().unwrap_or(content);
+    let notices_panel = tabs.panels.get(2).copied().unwrap_or(content);
+
+    let (
+        members_table,
+        members_viewport,
+        members_count_text,
+        roles_table,
+        roles_viewport,
+        roles_new_container,
+        details_area,
+    ) = build_members_scaffold(commands, members_panel, font_size);
+    let (notices_table, notices_viewport, notice_body_area, compose_area) =
+        build_notices_scaffold(commands, notices_panel);
+    GroupProfileScaffold {
+        general_panel,
+        members_table,
+        members_viewport,
+        members_count_text,
+        roles_table,
+        roles_viewport,
+        roles_new_container,
+        details_area,
+        notices_table,
+        notices_viewport,
+        notice_body_area,
+        compose_area,
+    }
+}
+
+/// The group-profile floater's gallery / `ui_test` specimen: the live content,
+/// built by the same `spawn_group_profile_scaffold` at the cell's font size,
+/// with the General tab — the one a window opens on — built by
+/// `build_general_structure` for a sample group as its owner sees it (the
+/// charter and fee editable, every flag live, a title to cycle) and filled
+/// through `general_value_texts`.
+///
+/// The Members & Roles and Notices tabs are built too, as the live window builds
+/// them eagerly: their tables are given sample rows through the same
+/// projections and cell lists the live bind systems draw
+/// (`member_row_cells`, `role_row_cells`, `notice_row_cells`), in each
+/// table's default order, by the table widget's shared specimen path; and the
+/// parts the per-window rebuild systems draw are drawn by the builders those
+/// systems call — the New Role button (`spawn_new_role_button`), the details
+/// area (`spawn_details_area`), the notice body (`spawn_notice_body`) and
+/// the compose area (`spawn_compose_area`).
+pub fn spawn_group_profile_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: crate::ui_element::ElementCx,
+) -> Entity {
+    let scaffold = spawn_group_profile_scaffold(commands, parent, cx.font_size);
+    // Only the build below reads these handles, and nothing inserts them: a
+    // specimen is not a window, so it has no title node of its own either.
+    let mut ui = GroupProfileUi::new(Entity::PLACEHOLDER, scaffold);
+    let target = GroupKey::from(Uuid::from_u128(0x5a11_e000_0000_4000_8000_0000_0000_0010));
+    let founder = AgentKey::from(Uuid::from_u128(0x5a11_e000_0000_4000_8000_0000_0000_0011));
+    let profile = GroupProfile {
+        group_id: target,
+        name: cx.text("Example Group"),
+        charter: cx.text(
+            "A friendly group for builders and scripters. Ask questions, share what you \
+             made, and keep the sandbox tidy.",
+        ),
+        show_in_list: true,
+        member_title: cx.text("Owner"),
+        // Its owner's powers as far as the window reads them: the identity and
+        // options edits of the General tab, and the role and notice powers
+        // that put a New Role button and the notice compose area in the other
+        // two.
+        powers: group_powers::GROUP_CHANGE_IDENTITY
+            | group_powers::MEMBER_OPTIONS
+            | group_powers::ROLE_CREATE
+            | group_powers::NOTICES_SEND,
+        insignia_id: None,
+        founder_id: founder,
+        membership_fee: LindenAmount(10),
+        open_enrollment: true,
+        money: 0,
+        member_count: 128,
+        role_count: 4,
+        allow_publish: true,
+        mature_publish: false,
+        owner_role: GroupRoleKey::from(Uuid::nil()),
+    };
+    let mut avatars = AvatarState::default();
+    avatars.note_legacy_name(founder, &cx.text("Sample Resident"));
+    let mut roster = MemberRoster::default();
+    let members = [
+        (founder, "Owner", 2048, "Online", true),
+        (
+            AgentKey::from(Uuid::from_u128(0x5a11_e000_0000_4000_8000_0000_0000_0012)),
+            "Builder",
+            512,
+            "Yesterday",
+            false,
+        ),
+        (
+            AgentKey::from(Uuid::from_u128(0x5a11_e000_0000_4000_8000_0000_0000_0013)),
+            "Member",
+            0,
+            "Online",
+            false,
+        ),
+    ];
+    for ((agent, _title, _land, _status, _owner), name) in
+        members
+            .iter()
+            .zip(["Sample Resident", "Example Neighbour", "Test Visitor"])
+    {
+        avatars.note_legacy_name(*agent, &cx.text(name));
+    }
+    let chunk: Vec<GroupMember> = members
+        .iter()
+        .map(|(agent, title, land, status, owner)| GroupMember {
+            agent_id: *agent,
+            contribution: LandArea(*land),
+            online_status: cx.text(status),
+            agent_powers: 0,
+            title: cx.text(title),
+            is_owner: *owner,
+        })
+        .collect();
+    roster.apply(128, &chunk);
+    // The "Everyone" role has no id of its own (`None`); the others do.
+    let roles = [
+        (None, "Everyone", "Member", 128),
+        (
+            Some(0x5a11_e000_0000_4000_8000_0000_0000_0031),
+            "Owners",
+            "Owner",
+            1,
+        ),
+        (
+            Some(0x5a11_e000_0000_4000_8000_0000_0000_0032),
+            "Builders",
+            "Builder",
+            12,
+        ),
+    ]
+    .into_iter()
+    .map(|(id, name, title, members)| GroupRole {
+        role_id: id.map(|id| GroupRoleKey::from(Uuid::from_u128(id))),
+        name: cx.text(name),
+        title: cx.text(title),
+        description: String::new(),
+        powers: 0,
+        members,
+    })
+    .collect();
+    let notices = [
+        (
+            0x5a11_e000_0000_4000_8000_0000_0000_0040,
+            "Build meeting on Sunday",
+            1_758_000_000,
+            true,
+        ),
+        (
+            0x5a11_e000_0000_4000_8000_0000_0000_0041,
+            "Sandbox cleanup this week",
+            1_757_400_000,
+            false,
+        ),
+    ]
+    .into_iter()
+    .map(|(id, subject, timestamp, has_attachment)| GroupNotice {
+        notice_id: GroupNoticeKey::from(Uuid::from_u128(id)),
+        timestamp,
+        from_name: cx.text("Sample Resident"),
+        subject: cx.text(subject),
+        has_attachment,
+        asset_type: 0,
+    })
+    .collect();
+    let state = GroupProfileState {
+        target: Some(target),
+        profile: Some(profile.clone()),
+        roster,
+        roles,
+        notices,
+        general_draft: GeneralDraft::from_profile(&profile),
+        titles: vec![GroupTitle {
+            title: cx.text("Owner"),
+            role_id: None,
+            selected: true,
+        }],
+        accept_notices: true,
+        list_in_profile: true,
+        ..GroupProfileState::default()
+    };
+    build_general_structure(
+        commands,
+        scaffold.general_panel,
+        target,
+        &profile,
+        GeneralSig::for_profile(&profile, true),
+        &state,
+        &mut ui,
+    );
+    for (node, value) in general_value_texts(&ui.general_handles, &profile, &state, &avatars) {
+        if let Some(node) = node {
+            commands.entity(node).insert(Text::new(value));
+        }
+    }
+
+    let mut members = member_rows(&state);
+    order_members(&mut members, &default_sort_keys(&MEMBERS_TABLE), &avatars);
+    spawn_specimen_rows(
+        commands,
+        SpecimenTable {
+            root: scaffold.members_table,
+            viewport: scaffold.members_viewport,
+        },
+        &MEMBERS_TABLE,
+        members
+            .iter()
+            .map(|row| member_row_cells(row, avatars.label_text(row.agent)))
+            .collect(),
+    );
+    // The live line is `group-members-count` formatted with the two counts; a
+    // specimen has no translator, so it writes the English sentence that key
+    // produces.
+    commands
+        .entity(scaffold.members_count_text)
+        .insert(Text::new(cx.text(&format!(
+            "{} of {} loaded",
+            state.roster.loaded(),
+            state.roster.total
+        ))));
+    let mut roles = role_rows(&state);
+    order_roles(&mut roles, &default_sort_keys(&ROLES_TABLE));
+    spawn_specimen_rows(
+        commands,
+        SpecimenTable {
+            root: scaffold.roles_table,
+            viewport: scaffold.roles_viewport,
+        },
+        &ROLES_TABLE,
+        roles.iter().map(|row| role_row_cells(row, false)).collect(),
+    );
+    let mut notices = notice_rows(&state);
+    order_notices(&mut notices, &default_sort_keys(&NOTICES_TABLE));
+    spawn_specimen_rows(
+        commands,
+        SpecimenTable {
+            root: scaffold.notices_table,
+            viewport: scaffold.notices_viewport,
+        },
+        &NOTICES_TABLE,
+        notices.iter().map(notice_row_cells).collect(),
+    );
+    // What the per-window rebuild systems draw into the rest of a window that
+    // has just opened, run here as the builders they call: the New Role button,
+    // the details area's hint, the notice body's hint and the compose area.
+    if state.has_power(group_powers::ROLE_CREATE) {
+        spawn_new_role_button(commands, &mut ui);
+    }
+    spawn_details_area(commands, &state, &avatars, &mut ui);
+    spawn_notice_body(commands, ui.notice_body_area, &state);
+    spawn_compose_area(
+        commands,
+        state.has_power(group_powers::NOTICES_SEND),
+        &mut ui,
+    );
+    parent
 }
 
 /// Build the persistent Members & Roles tab skeleton: a members column (the table
@@ -1049,6 +1363,7 @@ fn build_group_profile_content(
 fn build_members_scaffold(
     commands: &mut Commands,
     panel: Entity,
+    font_size: f32,
 ) -> (Entity, Entity, Entity, Entity, Entity, Entity, Entity) {
     // Vertical stack: members list (grows) over the roles list over the details
     // area — the reference lays the roles list below the members, not beside.
@@ -1081,7 +1396,7 @@ fn build_members_scaffold(
     let members_count_text = commands
         .spawn((
             Text::new(String::new()),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             TextColor(DIM_LABEL_COLOR),
             Node {
                 flex_grow: 1.0,
@@ -1126,7 +1441,7 @@ fn build_members_scaffold(
     commands.spawn((
         Text::default(),
         Translated::new("group-roles-header"),
-        UiFont::Sans.at(FONT_SIZE),
+        UiFont::Sans.at(font_size),
         TextColor(DIM_LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(roles_column),
@@ -1410,18 +1725,7 @@ fn sync_members_view(
         }
         view.built_revision = state.members_revision;
         view.built_sort_revision = sort_revision;
-        view.rows = state
-            .roster
-            .members
-            .iter()
-            .map(|member| MemberRow {
-                agent: member.agent_id,
-                title: member.title.clone(),
-                contribution: member.contribution.to_string(),
-                status: member.online_status.clone(),
-                is_owner: member.is_owner,
-            })
-            .collect();
+        view.rows = member_rows(state);
         order_members(&mut view.rows, &keys, &avatars);
         if let Ok(mut list) = lists.get_mut(ui.members_viewport) {
             list.item_count = view.rows.len();
@@ -1439,6 +1743,35 @@ fn sync_members_view(
             text.0 = label;
         }
     }
+}
+
+/// The roster as unordered member rows — the projection the members table
+/// binds, before [`order_members`] sorts it.
+fn member_rows(state: &GroupProfileState) -> Vec<MemberRow> {
+    state
+        .roster
+        .members
+        .iter()
+        .map(|member| MemberRow {
+            agent: member.agent_id,
+            title: member.title.clone(),
+            contribution: member.contribution.to_string(),
+            status: member.online_status.clone(),
+            is_owner: member.is_owner,
+        })
+        .collect()
+}
+
+/// A member row's cells, in column order, as `(value, accented)`: the name the
+/// row shows (accented for an owner), the title, the land contribution and the
+/// online status.
+fn member_row_cells(row: &MemberRow, name: String) -> [(String, bool); 4] {
+    [
+        (name, row.is_owner),
+        (row.title.clone(), false),
+        (row.contribution.clone(), false),
+        (row.status.clone(), false),
+    ]
 }
 
 /// Order member rows by the table's sort keys, breaking ties by resolved name
@@ -1501,19 +1834,7 @@ fn sync_notices_view(
         }
         view.built_revision = state.notices_revision;
         view.built_sort_revision = sort_revision;
-        let mut rows: Vec<NoticeRow> = state
-            .notices
-            .iter()
-            .enumerate()
-            .map(|(index, notice)| NoticeRow {
-                index,
-                subject: notice.subject.clone(),
-                from_name: notice.from_name.clone(),
-                date: format_unix_date(i64::from(notice.timestamp)),
-                timestamp: notice.timestamp,
-                has_attachment: notice.has_attachment,
-            })
-            .collect();
+        let mut rows = notice_rows(state);
         order_notices(&mut rows, &keys);
         view.rows = rows;
         if let Ok(mut list) = lists.get_mut(ui.notices_viewport) {
@@ -1521,6 +1842,39 @@ fn sync_notices_view(
             list.scroll_to_top();
         }
     }
+}
+
+/// The notice headers as unordered notice rows — the projection the notices
+/// table binds, before [`order_notices`] sorts it.
+fn notice_rows(state: &GroupProfileState) -> Vec<NoticeRow> {
+    state
+        .notices
+        .iter()
+        .enumerate()
+        .map(|(index, notice)| NoticeRow {
+            index,
+            subject: notice.subject.clone(),
+            from_name: notice.from_name.clone(),
+            date: format_unix_date(i64::from(notice.timestamp)),
+            timestamp: notice.timestamp,
+            has_attachment: notice.has_attachment,
+        })
+        .collect()
+}
+
+/// A notice row's cells, in column order, as `(value, accented)`: the subject
+/// (marked when the notice carries an attachment), the sender and the date.
+fn notice_row_cells(row: &NoticeRow) -> [(String, bool); 3] {
+    let subject = if row.has_attachment {
+        format!("\u{1F4CE} {}", row.subject)
+    } else {
+        row.subject.clone()
+    };
+    [
+        (subject, false),
+        (row.from_name.clone(), false),
+        (row.date.clone(), false),
+    ]
 }
 
 /// Order notice rows by the table's sort keys, breaking ties by the timestamp
@@ -1597,13 +1951,7 @@ fn build_general_tab(
             }
             continue;
         };
-        let is_member = groups.is_member(target);
-        let sig = GeneralSig {
-            is_member,
-            can_edit_identity: has_power(profile.powers, group_powers::GROUP_CHANGE_IDENTITY),
-            can_edit_options: has_power(profile.powers, group_powers::MEMBER_OPTIONS),
-            join_shown: !is_member && profile.open_enrollment,
-        };
+        let sig = GeneralSig::for_profile(&profile, groups.is_member(target));
         // (Re)build the structure only when the layout could differ — first profile,
         // or a powers/membership change on a re-fetch (both rare and user-paced).
         if ui.general_sig != Some(sig) {
@@ -1807,21 +2155,9 @@ fn update_general_values(
     checks: &mut GeneralChecks<'_, '_>,
 ) {
     let handles = &ui.general_handles;
-    set_value_node(
-        texts,
-        handles.founder,
-        &avatars.label_text(profile.founder_id),
-    );
-    set_value_node(
-        texts,
-        handles.counts,
-        &format!("{} / {}", profile.member_count, profile.role_count),
-    );
-    set_value_node(
-        texts,
-        handles.fee_display,
-        &format!("L$ {}", profile.membership_fee.0),
-    );
+    for (node, value) in general_value_texts(handles, profile, state, avatars) {
+        set_value_node(texts, node, &value);
+    }
     for (checkbox, on) in [
         (
             handles.open_enrollment_glyph,
@@ -1836,11 +2172,35 @@ fn update_general_values(
             set_toggle_marker(&mut checks.commands, &checks.ticked, checkbox, on);
         }
     }
+}
+
+/// The General tab's in-place value texts, each paired with the node that shows
+/// it (`None` for a node this structure variant does not have): the founder's
+/// name, the member / role counts, the join fee and the active title. What
+/// [`update_general_values`] writes on every value change, and what the specimen
+/// fills its freshly built tab with.
+fn general_value_texts(
+    handles: &GeneralHandles,
+    profile: &GroupProfile,
+    state: &GroupProfileState,
+    avatars: &AvatarState,
+) -> [(Option<Entity>, String); 4] {
     let title = state
         .titles
         .get(state.title_index)
         .map_or("", |title| title.title.as_str());
-    set_value_node(texts, handles.title_text, title);
+    [
+        (handles.founder, avatars.label_text(profile.founder_id)),
+        (
+            handles.counts,
+            format!("{} / {}", profile.member_count, profile.role_count),
+        ),
+        (
+            handles.fee_display,
+            format!("L$ {}", profile.membership_fee.0),
+        ),
+        (handles.title_text, title.to_owned()),
+    ]
 }
 
 // ---------------------------------------------------------------------------
@@ -1866,22 +2226,38 @@ fn sync_roles_view(
         }
         view.built_revision = state.roles_revision;
         view.built_sort_revision = sort_revision;
-        view.rows = state
-            .roles
-            .iter()
-            .map(|role| RoleRowData {
-                role_id: role.role_id,
-                name: role.name.clone(),
-                title: role.title.clone(),
-                members: role.members,
-            })
-            .collect();
+        view.rows = role_rows(state);
         order_roles(&mut view.rows, &keys);
         if let Ok(mut list) = lists.get_mut(ui.roles_viewport) {
             list.item_count = view.rows.len();
             list.scroll_to_top();
         }
     }
+}
+
+/// The roles as unordered role rows — the projection the roles table binds,
+/// before [`order_roles`] sorts it.
+fn role_rows(state: &GroupProfileState) -> Vec<RoleRowData> {
+    state
+        .roles
+        .iter()
+        .map(|role| RoleRowData {
+            role_id: role.role_id,
+            name: role.name.clone(),
+            title: role.title.clone(),
+            members: role.members,
+        })
+        .collect()
+}
+
+/// A role row's cells, in column order, as `(value, accented)`: the name
+/// (accented while `selected`), the title and the member count.
+fn role_row_cells(row: &RoleRowData, selected: bool) -> [(String, bool); 3] {
+    [
+        (row.name.clone(), selected),
+        (row.title.clone(), false),
+        (row.members.to_string(), false),
+    ]
 }
 
 /// Order role rows by the table's sort keys, breaking ties by name (case-folded)
@@ -1909,17 +2285,23 @@ fn build_roles_new_button(
         if ui.roles_new_built || !state.has_power(group_powers::ROLE_CREATE) {
             continue;
         }
-        let new_container = ui.roles_new_container;
-        let row = spawn_button_row(&mut commands, new_container);
-        spawn_action_button(
-            &mut commands,
-            row,
-            "group-role-new",
-            GroupProfileAction::NewRole,
-            0,
-        );
-        ui.roles_new_built = true;
+        spawn_new_role_button(&mut commands, &mut ui);
     }
+}
+
+/// Build the New Role button into its container below the roles table — the
+/// build [`build_roles_new_button`] runs once the create power is known, and the
+/// specimen runs for its owner's-eye sample group.
+fn spawn_new_role_button(commands: &mut Commands, ui: &mut GroupProfileUi) {
+    let row = spawn_button_row(commands, ui.roles_new_container);
+    spawn_action_button(
+        commands,
+        row,
+        "group-role-new",
+        GroupProfileAction::NewRole,
+        0,
+    );
+    ui.roles_new_built = true;
 }
 
 /// The role a pooled row currently presents (its id, `None` = the "Everyone"
@@ -1986,9 +2368,9 @@ fn bind_role_rows(
             };
             *bound = BoundRole::Bound(role_row.role_id);
             let selected = state.focus == DetailsFocus::Role(role_row.role_id);
-            set_row_cell(&mut texts, cells, 0, &role_row.name, selected);
-            set_row_cell(&mut texts, cells, 1, &role_row.title, false);
-            set_row_cell(&mut texts, cells, 2, &role_row.members.to_string(), false);
+            for (column, (value, accent)) in role_row_cells(role_row, selected).iter().enumerate() {
+                set_row_cell(&mut texts, cells, column, value, *accent);
+            }
             if let Ok(mut classes) = classes.get_mut(row_entity) {
                 set_state_class(&mut classes, SELECTED_CLASS, selected);
             }
@@ -2059,24 +2441,39 @@ fn rebuild_details_area(
         if state.focus == DetailsFocus::None && ui.details_built == Some(DetailsFocus::None) {
             continue;
         }
-        ui.details_built = Some(state.focus);
-        let area = ui.details_area;
-        commands.entity(area).despawn_related::<Children>();
-        ui.role_name_field = None;
-        ui.role_title_field = None;
-        ui.role_desc_field = None;
-        match state.focus {
-            DetailsFocus::None => {
-                spawn_key_label(&mut commands, area, "group-details-hint", DIM_LABEL_COLOR);
-            }
-            DetailsFocus::Member(member) => {
-                spawn_details_header(&mut commands, area);
-                build_member_details(&mut commands, area, member, state, &avatars);
-            }
-            DetailsFocus::Role(role_id) => {
-                spawn_details_header(&mut commands, area);
-                build_role_details(&mut commands, area, role_id, state, &mut ui);
-            }
+        commands
+            .entity(ui.details_area)
+            .despawn_related::<Children>();
+        spawn_details_area(&mut commands, state, &avatars, &mut ui);
+    }
+}
+
+/// Build the Members & Roles details area for the current selection focus into
+/// its (empty) container: the hint for nothing selected, else the member's or
+/// the role's details under a Close header. The build [`rebuild_details_area`]
+/// runs, and the specimen runs for a window that has just opened.
+fn spawn_details_area(
+    commands: &mut Commands,
+    state: &GroupProfileState,
+    avatars: &AvatarState,
+    ui: &mut GroupProfileUi,
+) {
+    ui.details_built = Some(state.focus);
+    let area = ui.details_area;
+    ui.role_name_field = None;
+    ui.role_title_field = None;
+    ui.role_desc_field = None;
+    match state.focus {
+        DetailsFocus::None => {
+            spawn_key_label(commands, area, "group-details-hint", DIM_LABEL_COLOR);
+        }
+        DetailsFocus::Member(member) => {
+            spawn_details_header(commands, area);
+            build_member_details(commands, area, member, state, avatars);
+        }
+        DetailsFocus::Role(role_id) => {
+            spawn_details_header(commands, area);
+            build_role_details(commands, area, role_id, state, ui);
         }
     }
 }
@@ -2268,47 +2665,57 @@ fn rebuild_compose_area(
         if ui.compose_can_send == Some(can_send) {
             continue;
         }
-        ui.compose_can_send = Some(can_send);
-        let area = ui.compose_area;
-        commands.entity(area).despawn_related::<Children>();
-        ui.notice_subject_field = None;
-        ui.notice_message_field = None;
-        if !can_send {
-            continue;
-        }
-        spawn_section_label(&mut commands, area, "group-notice-compose");
-        let subject_row = spawn_labeled_row(&mut commands, area, "group-notice-subject");
-        ui.notice_subject_field = Some(spawn_text_input(
-            &mut commands,
-            subject_row,
-            &TextInputSpec {
-                font_size: FONT_SIZE,
-                width_glyphs: 24.0,
-                tab_index: 0,
-                max_characters: Some(63),
-                ..TextInputSpec::new("group-notice-subject", TextInputKind::Line)
-            },
-        ));
-        ui.notice_message_field = Some(spawn_text_input(
-            &mut commands,
-            area,
-            &TextInputSpec {
-                font_size: FONT_SIZE,
-                visible_lines: 3.0,
-                tab_index: 0,
-                max_characters: Some(511),
-                ..TextInputSpec::new("group-notice-message", TextInputKind::Multiline)
-            },
-        ));
-        let row = spawn_button_row(&mut commands, area);
-        spawn_action_button(
-            &mut commands,
-            row,
-            "group-notice-send",
-            GroupProfileAction::SendNotice,
-            0,
-        );
+        commands
+            .entity(ui.compose_area)
+            .despawn_related::<Children>();
+        spawn_compose_area(&mut commands, can_send, &mut ui);
     }
+}
+
+/// Build the notice compose area into its (empty) container: the subject and
+/// message editors and the Send button when the member `can_send`, else
+/// nothing. The build [`rebuild_compose_area`] runs once the send power is
+/// known, and the specimen runs for its owner's-eye sample group.
+fn spawn_compose_area(commands: &mut Commands, can_send: bool, ui: &mut GroupProfileUi) {
+    ui.compose_can_send = Some(can_send);
+    let area = ui.compose_area;
+    ui.notice_subject_field = None;
+    ui.notice_message_field = None;
+    if !can_send {
+        return;
+    }
+    spawn_section_label(commands, area, "group-notice-compose");
+    let subject_row = spawn_labeled_row(commands, area, "group-notice-subject");
+    ui.notice_subject_field = Some(spawn_text_input(
+        commands,
+        subject_row,
+        &TextInputSpec {
+            font_size: FONT_SIZE,
+            width_glyphs: 24.0,
+            tab_index: 0,
+            max_characters: Some(63),
+            ..TextInputSpec::new("group-notice-subject", TextInputKind::Line)
+        },
+    ));
+    ui.notice_message_field = Some(spawn_text_input(
+        commands,
+        area,
+        &TextInputSpec {
+            font_size: FONT_SIZE,
+            visible_lines: 3.0,
+            tab_index: 0,
+            max_characters: Some(511),
+            ..TextInputSpec::new("group-notice-message", TextInputKind::Multiline)
+        },
+    ));
+    let row = spawn_button_row(commands, area);
+    spawn_action_button(
+        commands,
+        row,
+        "group-notice-send",
+        GroupProfileAction::SendNotice,
+        0,
+    );
 }
 
 /// Rebuild the notice body view when dirty: the selected notice's subject and full
@@ -2339,37 +2746,35 @@ fn rebuild_notice_body(
         ui.notice_body_built = Some(sig);
         let area = ui.notice_body_area;
         commands.entity(area).despawn_related::<Children>();
-        let Some(index) = state.selected_notice else {
-            spawn_key_label(&mut commands, area, "group-notice-hint", DIM_LABEL_COLOR);
-            continue;
-        };
-        let Some(notice) = state.notices.get(index) else {
-            continue;
-        };
-        let subject_row = spawn_labeled_row(&mut commands, area, "group-notice-subject");
-        spawn_value_label(
-            &mut commands,
-            subject_row,
-            notice.subject.clone(),
-            LABEL_COLOR,
+        spawn_notice_body(&mut commands, area, state);
+    }
+}
+
+/// Build the notice body view into its (empty) container `area`: the hint while
+/// no notice is selected, else the selected notice's subject and body (or the
+/// loading line) and its attachment note. The build [`rebuild_notice_body`]
+/// runs, and the specimen runs for a window that has just opened.
+fn spawn_notice_body(commands: &mut Commands, area: Entity, state: &GroupProfileState) {
+    let Some(index) = state.selected_notice else {
+        spawn_key_label(commands, area, "group-notice-hint", DIM_LABEL_COLOR);
+        return;
+    };
+    let Some(notice) = state.notices.get(index) else {
+        return;
+    };
+    let subject_row = spawn_labeled_row(commands, area, "group-notice-subject");
+    spawn_value_label(commands, subject_row, notice.subject.clone(), LABEL_COLOR);
+    match state.notice_bodies.get(&notice.notice_id) {
+        Some(body) => spawn_text_block(commands, area, body.clone()),
+        None => spawn_key_label(commands, area, "group-profile-loading", DIM_LABEL_COLOR),
+    }
+    if notice.has_attachment {
+        spawn_key_label(
+            commands,
+            area,
+            "group-notice-has-attachment",
+            DIM_LABEL_COLOR,
         );
-        match state.notice_bodies.get(&notice.notice_id) {
-            Some(body) => spawn_text_block(&mut commands, area, body.clone()),
-            None => spawn_key_label(
-                &mut commands,
-                area,
-                "group-profile-loading",
-                DIM_LABEL_COLOR,
-            ),
-        }
-        if notice.has_attachment {
-            spawn_key_label(
-                &mut commands,
-                area,
-                "group-notice-has-attachment",
-                DIM_LABEL_COLOR,
-            );
-        }
     }
 }
 
@@ -2437,10 +2842,9 @@ fn bind_member_rows(
             bound.0 = Some(member_row.agent);
             let selected = state.focus == DetailsFocus::Member(member_row.agent);
             let name = avatars.label_text(member_row.agent);
-            set_row_cell(&mut texts, cells, 0, &name, member_row.is_owner);
-            set_row_cell(&mut texts, cells, 1, &member_row.title, false);
-            set_row_cell(&mut texts, cells, 2, &member_row.contribution, false);
-            set_row_cell(&mut texts, cells, 3, &member_row.status, false);
+            for (column, (value, accent)) in member_row_cells(member_row, name).iter().enumerate() {
+                set_row_cell(&mut texts, cells, column, value, *accent);
+            }
             if let Ok(mut classes) = classes.get_mut(row_entity) {
                 set_state_class(&mut classes, SELECTED_CLASS, selected);
             }
@@ -2459,9 +2863,48 @@ fn set_row_cell(
     accent: bool,
 ) {
     if let Some(cell) = cells.cell(column) {
-        let color = if accent { ACCENT_COLOR } else { LABEL_COLOR };
-        set_table_cell(texts, cell, value, color);
+        set_table_cell(texts, cell, value, cell_color(accent));
     }
+}
+
+/// A table cell's colour: the accent for an owner / selection, else the label.
+const fn cell_color(accent: bool) -> Color {
+    if accent { ACCENT_COLOR } else { LABEL_COLOR }
+}
+
+/// A table's default sort as the `(token, ascending)` keys its order functions
+/// take — what a table sorts by before any stored or clicked sort.
+fn default_sort_keys(spec: &TableSpec) -> Vec<(&'static str, bool)> {
+    spec.default_sort
+        .iter()
+        .filter_map(|key| {
+            spec.columns
+                .get(key.column)
+                .map(|column| (column.token, key.ascending))
+        })
+        .collect()
+}
+
+/// Draw `cells` (as the `…_row_cells` projections give them) into specimen rows
+/// of `table`, through the widget's shared specimen path, returning each row.
+fn spawn_specimen_rows<const N: usize>(
+    commands: &mut Commands,
+    table: SpecimenTable,
+    spec: &'static TableSpec,
+    cells: Vec<[(String, bool); N]>,
+) -> Vec<Entity> {
+    let values: Vec<Vec<(String, Color)>> = cells
+        .into_iter()
+        .map(|row| {
+            row.into_iter()
+                .map(|(value, accent)| (value, cell_color(accent)))
+                .collect()
+        })
+        .collect();
+    spawn_specimen_table_rows(commands, table, spec, &values)
+        .into_iter()
+        .map(|(row, _cells)| row)
+        .collect()
 }
 
 /// Select a member on press, showing its details.
@@ -2554,14 +2997,9 @@ fn bind_notice_rows(
                 continue;
             };
             bound.0 = Some(notice_row.index);
-            let subject = if notice_row.has_attachment {
-                format!("\u{1F4CE} {}", notice_row.subject)
-            } else {
-                notice_row.subject.clone()
-            };
-            set_row_cell(&mut texts, cells, 0, &subject, false);
-            set_row_cell(&mut texts, cells, 1, &notice_row.from_name, false);
-            set_row_cell(&mut texts, cells, 2, &notice_row.date, false);
+            for (column, (value, accent)) in notice_row_cells(notice_row).iter().enumerate() {
+                set_row_cell(&mut texts, cells, column, value, *accent);
+            }
             let selected = state.selected_notice == Some(notice_row.index);
             if let Ok(mut classes) = classes.get_mut(row_entity) {
                 set_state_class(&mut classes, SELECTED_CLASS, selected);
@@ -3584,6 +4022,48 @@ mod tests {
         fn the_manager_is_wired() {
             let app = group_app();
             assert!(app.world().contains_resource::<FloaterZTop>());
+        }
+    }
+
+    /// The gallery specimen is the live content, its General tab filled by the
+    /// values path the live window's update uses and its tables by the cell
+    /// lists the live binds draw.
+    mod specimen {
+        use super::super::spawn_group_profile_specimen;
+        use crate::ui_element::ElementCx;
+        use bevy::prelude::*;
+
+        /// The founder's name, the counts and the fee reach their value nodes —
+        /// through `general_value_texts`, the list the live update writes — and
+        /// the sample members, roles and notices reach their table rows.
+        #[test]
+        fn the_specimen_is_filled() {
+            let mut world = World::new();
+            let parent = world.spawn(Node::default()).id();
+            spawn_group_profile_specimen(&mut world.commands(), parent, ElementCx::new());
+            world.flush();
+            let texts: Vec<String> = world
+                .query::<&Text>()
+                .iter(&world)
+                .map(|text| text.0.clone())
+                .collect();
+            for value in [
+                // The General tab's value nodes.
+                "Sample Resident",
+                "128 / 4",
+                "L$ 10",
+                "Owner",
+                // The three tables' rows and the members count line.
+                "Example Neighbour",
+                "3 of 128 loaded",
+                "Builders",
+                "Sandbox cleanup this week",
+            ] {
+                assert!(
+                    texts.iter().any(|text| text == value),
+                    "no node shows {value:?}"
+                );
+            }
         }
     }
 }

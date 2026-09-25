@@ -567,8 +567,10 @@ pub fn avatar_profile_floater_spec() -> FloaterSpec {
         // floater has a default rect and `can_resize="true"` (485×510,
         // min 480×510; ours differs because the tab panels bound their
         // content width). Roomy enough that the 2nd Life tab fits without
-        // scrolling; smaller sizes scroll with a trailing scrollbar.
-        default_size: Some(Vec2::new(420.0, 600.0)),
+        // scrolling, and wide enough that the six tab labels fit their strip
+        // at the default 15 px font rather than scrolling it (they want about
+        // 460 px of strip); smaller sizes scroll with a trailing scrollbar.
+        default_size: Some(Vec2::new(550.0, 600.0)),
         min_size: Some(Vec2::new(370.0, 420.0)),
         dock_host: None,
         caps: FloaterCaps {
@@ -590,6 +592,23 @@ pub fn avatar_profile_floater_spec() -> FloaterSpec {
 /// to keep three dozen never-opened windows out of the per-frame UI walk; a
 /// window that exists only while it is open costs nothing when it does not).
 fn build_profile_content(commands: &mut Commands, handle: FloaterHandle, target: AgentKey) {
+    let tabs = spawn_profile_tabs(commands, handle.content, PROFILE_FONT_SIZE);
+    // This window's whole model, on the window: the subject, what has yet to be
+    // repainted, and where the fields are. Every tab starts dirty — nothing has
+    // been drawn yet.
+    let mut initial = ProfileDirty::default();
+    initial.mark_all();
+    commands.entity(handle.root).insert((
+        ProfileState::new(target),
+        initial,
+        ProfileUi::new(handle.title_text, tabs),
+    ));
+}
+
+/// Build a profile window's six-tab container into `content` at `font_size`,
+/// returning the tab panels in tab order. Shared by the live window and its
+/// specimen; the tabs' contents are built into the panels afterwards.
+fn spawn_profile_tabs(commands: &mut Commands, content: Entity, font_size: f32) -> Vec<Entity> {
     let labels: Vec<String> = [
         "profile-tab-second-life",
         "profile-tab-web",
@@ -603,14 +622,14 @@ fn build_profile_content(commands: &mut Commands, handle: FloaterHandle, target:
     .collect();
     let tabs: TabContainerHandle = spawn_tab_container(
         commands,
-        handle.content,
+        content,
         &TabSpec {
             element: "profile-tabs",
             placement: TabPlacement::BlockStart,
             labels: &labels,
             active: 0,
             tab_index: 1,
-            font_size: PROFILE_FONT_SIZE,
+            font_size,
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
@@ -619,17 +638,16 @@ fn build_profile_content(commands: &mut Commands, handle: FloaterHandle, target:
     // The floater is resizable (a definite content area), so the widget must
     // track it rather than content-size — panels grow and scroll.
     fill_tab_container(commands, TabPlacement::BlockStart, &tabs);
-    // This window's whole model, on the window: the subject, what has yet to be
-    // repainted, and where the fields are. Every tab starts dirty — nothing has
-    // been drawn yet.
-    let mut initial = ProfileDirty::default();
-    initial.mark_all();
-    commands.entity(handle.root).insert((
-        ProfileState::new(target),
-        initial,
-        ProfileUi {
-            title_text: handle.title_text,
-            tabs: tabs.panels,
+    tabs.panels
+}
+
+impl ProfileUi {
+    /// The handles of a window freshly built on the tab `panels`, whose title
+    /// node is `title_text`: nothing drawn into the tabs yet.
+    fn new(title_text: Entity, panels: Vec<Entity>) -> Self {
+        Self {
+            title_text,
+            tabs: panels,
             about_field: None,
             url_field: None,
             web_view: None,
@@ -646,8 +664,105 @@ fn build_profile_content(commands: &mut Commands, handle: FloaterHandle, target:
             sl_handles: SecondLifeHandles::default(),
             sl_group_rows: Vec::new(),
             tab_sig: [None; 6],
-        },
-    ));
+        }
+    }
+}
+
+/// The avatar-profile floater's gallery / `ui_test` specimen: the live content,
+/// built by the same `spawn_profile_tabs` at the cell's font size, with every
+/// tab built by the live tab builders from a sample `ProfileState` — another
+/// resident's profile, so the 2nd Life tab (the one a window opens on) shows
+/// the name, the facts, a partner, two groups, the About text and the
+/// IM / teleport / friend / block / pay row.
+///
+/// The Picks and Classifieds tabs show their "none" lines: a sample pick or
+/// listing would need a parcel location the specimen has no grid to name.
+pub fn spawn_avatar_profile_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: crate::ui_element::ElementCx,
+) -> Entity {
+    let tabs = spawn_profile_tabs(commands, parent, cx.font_size);
+    // Only the builders below read these handles, and nothing inserts them: a
+    // specimen is not a window, so it has no title node of its own either.
+    let mut ui = ProfileUi::new(Entity::PLACEHOLDER, tabs);
+    let target = AgentKey::from(Uuid::from_u128(0x5a11_e000_0000_4000_8000_0000_0000_0020));
+    let partner = AgentKey::from(Uuid::from_u128(0x5a11_e000_0000_4000_8000_0000_0000_0021));
+    let mut avatars = AvatarState::default();
+    avatars.note_legacy_name(target, &cx.text("Sample Resident"));
+    avatars.note_legacy_name(partner, &cx.text("Example Partner"));
+    let mut state = ProfileState::new(target);
+    state.properties = Some(AvatarProperties {
+        avatar_id: target,
+        image_id: TextureKey::from(Uuid::nil()),
+        fl_image_id: TextureKey::from(Uuid::nil()),
+        partner_id: Some(partner),
+        about_text: cx.text(
+            "Builder and occasional DJ. Ask me about the sandbox on Test Parcel, or \
+             drop by the Sunday sessions.",
+        ),
+        fl_about_text: cx.text("Coffee first, then mesh."),
+        born_on: "2012-05-14".to_owned(),
+        profile_url: String::new(),
+        charter_member: String::new(),
+        flags: FLAG_ALLOW_PUBLISH | FLAG_IDENTIFIED | FLAG_ONLINE,
+    });
+    state.groups = Some(
+        [
+            (0x5a11_e000_0000_4000_8000_0000_0000_0022, "Example Group"),
+            (0x5a11_e000_0000_4000_8000_0000_0000_0023, "Sample Builders"),
+        ]
+        .into_iter()
+        .map(|(id, name)| AvatarGroupMembership {
+            group_id: GroupKey::from(Uuid::from_u128(id)),
+            group_name: cx.text(name),
+            group_title: cx.text("Member"),
+            group_powers: 0,
+            accept_notices: true,
+            group_insignia_id: TextureKey::from(Uuid::nil()),
+        })
+        .collect(),
+    );
+    state.picks = Some(Vec::new());
+    state.classifieds = Some(Vec::new());
+    state.notes = Some(cx.text("Met at the Sunday build meeting."));
+    state.show_in_search = true;
+
+    let friends = FriendsModel::default();
+    let build = BuildContext {
+        target,
+        own: false,
+        avatars: &avatars,
+        friends: &friends,
+    };
+    for tab in ProfileTab::ALL {
+        let Some(panel) = ui.tabs.get(tab.index()).copied() else {
+            continue;
+        };
+        match tab {
+            ProfileTab::SecondLife => {
+                build_second_life_structure(commands, panel, &build, &mut ui);
+                if let Some(name) = ui.sl_handles.name {
+                    commands
+                        .entity(name)
+                        .insert(Text::new(avatars.label_text(target)));
+                }
+                fill_second_life_from_properties(commands, &build, &state, &mut ui);
+                let groups = shown_profile_groups(build.own, &state, &GroupsModel::default());
+                reconcile_profile_groups(commands, groups.as_deref(), &mut ui);
+            }
+            ProfileTab::Web => build_web_tab(commands, panel, &build, &state, &mut ui),
+            ProfileTab::Picks => build_picks_tab(commands, panel, &build, &state, &mut ui),
+            ProfileTab::Classifieds => {
+                build_classifieds_tab(commands, panel, &build, &mut state, &mut ui);
+            }
+            ProfileTab::FirstLife => {
+                build_first_life_tab(commands, panel, &build, &state, &mut ui);
+            }
+            ProfileTab::Notes => build_notes_tab(commands, panel, &state, &mut ui),
+        }
+    }
+    parent
 }
 
 // ---------------------------------------------------------------------------
@@ -1394,12 +1509,23 @@ fn update_second_life(
         ui.sl_handles.show_in_search_check,
         state.show_in_search,
     );
-    // The **own** profile lists the full membership set (the reference shows your
-    // groups even when none are flagged "show in my profile"); **another** avatar's
-    // profile shows only the groups they list, from `AvatarGroupsReply`. Either way
-    // skip the nil-group-id padding entry the grid sends for a group-less avatar.
+    let list = shown_profile_groups(build.own, state, groups_model);
+    reconcile_profile_groups(commands, list.as_deref(), ui);
+}
+
+/// The `(id, name)` groups the 2nd Life tab lists (`None` = not loaded yet).
+///
+/// The **own** profile lists the full membership set (the reference shows your
+/// groups even when none are flagged "show in my profile"); **another** avatar's
+/// profile shows only the groups they list, from `AvatarGroupsReply`. Either way
+/// skip the nil-group-id padding entry the grid sends for a group-less avatar.
+fn shown_profile_groups(
+    own: bool,
+    state: &ProfileState,
+    groups_model: &GroupsModel,
+) -> Option<Vec<(GroupKey, String)>> {
     let nil_group = GroupKey::from(Uuid::nil());
-    let list: Option<Vec<(GroupKey, String)>> = if build.own {
+    if own {
         Some(
             groups_model
                 .group_ids()
@@ -1420,8 +1546,7 @@ fn update_second_life(
                 .map(|group| (group.group_id, group.group_name.clone()))
                 .collect()
         })
-    };
-    reconcile_profile_groups(commands, list.as_deref(), ui);
+    }
 }
 
 /// Reconcile the 2nd Life group rows in place from the resolved `(id, name)` list

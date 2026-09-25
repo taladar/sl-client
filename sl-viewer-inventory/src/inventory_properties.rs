@@ -89,9 +89,7 @@ const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 /// A dimmer secondary label.
 const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
-/// A **read-only** check's glyph colour — the live check's green, muted, so the
-/// "You can" row reads as a statement of fact rather than a control that will
-/// A button's background / border.
+/// A button's background colour.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
 /// A button's border colour.
 const BUTTON_BORDER: Color = Color::srgb(0.34, 0.40, 0.52);
@@ -470,69 +468,15 @@ fn build_properties_content(
 ) -> PropertiesFields {
     let own = identity.agent_id;
     let owned = matches!(item.owner, sl_client_bevy::OwnerKey::Agent(agent) if Some(agent) == own);
-    let gates = PermissionGates::of(item, owned);
-    // The item's own text follows the modify bit, as everything below follows
-    // the bit it is about.
-    let editable = gates.modifiable;
-
-    // Name / description rows.
-    let name_row = spawn_labeled_row(commands, content, "item-properties-name");
-    let name_field = editable.then(|| {
-        crate::ui_text_input::spawn_text_input(
-            commands,
-            name_row,
-            &crate::ui_text_input::TextInputSpec {
-                initial: item.name.clone(),
-                font_size: PROPS_FONT_SIZE,
-                width_glyphs: 24.0,
-                tab_index: 1,
-                max_characters: Some(63),
-                ..crate::ui_text_input::TextInputSpec::new(
-                    "item-properties-name",
-                    crate::ui_text_input::TextInputKind::Line,
-                )
-            },
-        )
-    });
-    if !editable {
-        spawn_value_label(commands, name_row, item.name.clone(), LABEL_COLOR);
-    }
-    let desc_row = spawn_labeled_row(commands, content, "item-properties-description");
-    let desc_field = editable.then(|| {
-        crate::ui_text_input::spawn_text_input(
-            commands,
-            desc_row,
-            &crate::ui_text_input::TextInputSpec {
-                initial: item.description.clone(),
-                font_size: PROPS_FONT_SIZE,
-                width_glyphs: 24.0,
-                tab_index: 2,
-                max_characters: Some(127),
-                ..crate::ui_text_input::TextInputSpec::new(
-                    "item-properties-description",
-                    crate::ui_text_input::TextInputKind::Line,
-                )
-            },
-        )
-    });
-    if !editable {
-        spawn_value_label(commands, desc_row, item.description.clone(), LABEL_COLOR);
-    }
-
-    // Creator / owner / acquired.
-    let creator_row = spawn_labeled_row(commands, content, "item-properties-creator");
-    spawn_value_label(
-        commands,
-        creator_row,
-        avatars.label_text(item.creator_id),
-        DIM_LABEL_COLOR,
-    );
-    let owner_row = spawn_labeled_row(commands, content, "item-properties-owner");
-    let owner_label = match item.owner {
+    let owner = match item.owner {
         sl_client_bevy::OwnerKey::Agent(agent) => avatars.label_text(agent),
         sl_client_bevy::OwnerKey::Group(group) => format!("(group {group})"),
     };
-    spawn_value_label(commands, owner_row, owner_label, DIM_LABEL_COLOR);
+    let people = PropertiesPeople {
+        owned,
+        creator: avatars.label_text(item.creator_id),
+        owner,
+    };
     // Ask for any unresolved names; the next open shows them.
     let mut wanted = vec![item.creator_id];
     if let sl_client_bevy::OwnerKey::Agent(agent) = item.owner {
@@ -545,27 +489,138 @@ fn build_properties_content(
     if !unresolved.is_empty() {
         sl_commands.write(SlCommand(Command::RequestAvatarNames(unresolved)));
     }
-    let acquired_row = spawn_labeled_row(commands, content, "item-properties-acquired");
+    spawn_properties_content(commands, content, item, &people, PROPS_FONT_SIZE)
+}
+
+/// Who a properties window is about, resolved by the caller: whether the item is
+/// the viewing agent's own, and the creator / owner lines as display text.
+#[derive(Debug, Clone)]
+struct PropertiesPeople {
+    /// Whether the viewing agent owns the item — which gates every control.
+    owned: bool,
+    /// The creator line.
+    creator: String,
+    /// The owner line.
+    owner: String,
+}
+
+/// Spawn one properties window's rows under `content` at `font_size`, from the
+/// item and the already-resolved [`PropertiesPeople`]. Shared by the live
+/// window ([`build_properties_content`]) and its gallery specimen, so the two
+/// cannot lay out differently.
+fn spawn_properties_content(
+    commands: &mut Commands,
+    content: Entity,
+    item: &ItemInfo,
+    people: &PropertiesPeople,
+    font_size: f32,
+) -> PropertiesFields {
+    let gates = PermissionGates::of(item, people.owned);
+    // The item's own text follows the modify bit, as everything below follows
+    // the bit it is about.
+    let editable = gates.modifiable;
+
+    // Name / description rows.
+    let name_row = spawn_labeled_row(commands, content, "item-properties-name", font_size);
+    let name_field = editable.then(|| {
+        crate::ui_text_input::spawn_text_input(
+            commands,
+            name_row,
+            &crate::ui_text_input::TextInputSpec {
+                initial: item.name.clone(),
+                font_size,
+                width_glyphs: 24.0,
+                tab_index: 1,
+                max_characters: Some(63),
+                ..crate::ui_text_input::TextInputSpec::new(
+                    "item-properties-name",
+                    crate::ui_text_input::TextInputKind::Line,
+                )
+            },
+        )
+    });
+    if !editable {
+        spawn_value_label(
+            commands,
+            name_row,
+            item.name.clone(),
+            LABEL_COLOR,
+            font_size,
+        );
+    }
+    let desc_row = spawn_labeled_row(commands, content, "item-properties-description", font_size);
+    let desc_field = editable.then(|| {
+        crate::ui_text_input::spawn_text_input(
+            commands,
+            desc_row,
+            &crate::ui_text_input::TextInputSpec {
+                initial: item.description.clone(),
+                font_size,
+                width_glyphs: 24.0,
+                tab_index: 2,
+                max_characters: Some(127),
+                ..crate::ui_text_input::TextInputSpec::new(
+                    "item-properties-description",
+                    crate::ui_text_input::TextInputKind::Line,
+                )
+            },
+        )
+    });
+    if !editable {
+        spawn_value_label(
+            commands,
+            desc_row,
+            item.description.clone(),
+            LABEL_COLOR,
+            font_size,
+        );
+    }
+
+    // Creator / owner / acquired.
+    let creator_row = spawn_labeled_row(commands, content, "item-properties-creator", font_size);
+    spawn_value_label(
+        commands,
+        creator_row,
+        people.creator.clone(),
+        DIM_LABEL_COLOR,
+        font_size,
+    );
+    let owner_row = spawn_labeled_row(commands, content, "item-properties-owner", font_size);
+    spawn_value_label(
+        commands,
+        owner_row,
+        people.owner.clone(),
+        DIM_LABEL_COLOR,
+        font_size,
+    );
+    let acquired_row = spawn_labeled_row(commands, content, "item-properties-acquired", font_size);
     spawn_value_label(
         commands,
         acquired_row,
         format_unix_date(i64::from(item.creation_date)),
         DIM_LABEL_COLOR,
+        font_size,
     );
 
     // "You can:" — the owner mask, read-only.
-    let you_row = spawn_labeled_row(commands, content, "item-properties-you-can");
+    let you_row = spawn_labeled_row(commands, content, "item-properties-you-can", font_size);
     let owner_mask = item.permissions.owner;
     for (label, bit) in [
         ("item-properties-modify", Permissions::MODIFY),
         ("item-properties-copy", Permissions::COPY),
         ("item-properties-transfer", Permissions::TRANSFER),
     ] {
-        spawn_static_check(commands, you_row, label, owner_mask.contains(bit));
+        spawn_static_check(
+            commands,
+            you_row,
+            label,
+            owner_mask.contains(bit),
+            font_size,
+        );
     }
 
     // Group share / everyone copy toggles.
-    let share_row = spawn_labeled_row(commands, content, "item-properties-group");
+    let share_row = spawn_labeled_row(commands, content, "item-properties-group", font_size);
     spawn_props_toggle(
         commands,
         share_row,
@@ -573,8 +628,9 @@ fn build_properties_content(
         PropsToggle::ShareWithGroup,
         item.permissions.group.contains(Permissions::COPY),
         gates.share_with_group,
+        font_size,
     );
-    let anyone_row = spawn_labeled_row(commands, content, "item-properties-anyone");
+    let anyone_row = spawn_labeled_row(commands, content, "item-properties-anyone", font_size);
     spawn_props_toggle(
         commands,
         anyone_row,
@@ -582,10 +638,11 @@ fn build_properties_content(
         PropsToggle::EveryoneCopy,
         item.permissions.everyone.contains(Permissions::COPY),
         gates.everyone_copy,
+        font_size,
     );
 
     // Next owner toggles.
-    let next_row = spawn_labeled_row(commands, content, "item-properties-next-owner");
+    let next_row = spawn_labeled_row(commands, content, "item-properties-next-owner", font_size);
     let next = item.permissions.next_owner;
     for (label, toggle, bit, enabled) in [
         (
@@ -614,11 +671,12 @@ fn build_properties_content(
             toggle,
             next.contains(bit),
             enabled,
+            font_size,
         );
     }
 
     // For sale + type + price.
-    let sale_row = spawn_labeled_row(commands, content, "item-properties-for-sale");
+    let sale_row = spawn_labeled_row(commands, content, "item-properties-for-sale", font_size);
     // The type and the price are separate facts, and the price survives an
     // unticked sale (`SaleInfo`) — so unticking For Sale keeps the number the
     // owner set rather than falling back to a made-up default.
@@ -630,9 +688,16 @@ fn build_properties_content(
         PropsToggle::ForSale,
         sale_type != SaleType::NotForSale,
         gates.sale,
+        font_size,
     );
-    let type_button =
-        spawn_text_button(commands, sale_row, sale_type_key(sale_type), 3, gates.sale);
+    let type_button = spawn_text_button(
+        commands,
+        sale_row,
+        sale_type_key(sale_type),
+        3,
+        gates.sale,
+        font_size,
+    );
     commands.entity(type_button).insert(PropsToggle::SaleType);
     let price_field = gates.sale.then(|| {
         let field = crate::ui_text_input::spawn_text_input(
@@ -640,7 +705,7 @@ fn build_properties_content(
             sale_row,
             &crate::ui_text_input::TextInputSpec {
                 initial: sale_price.0.to_string(),
-                font_size: PROPS_FONT_SIZE,
+                font_size,
                 width_glyphs: 8.0,
                 tab_index: 4,
                 ..crate::ui_text_input::TextInputSpec::new(
@@ -686,30 +751,47 @@ const fn sale_type_key(sale_type: SaleType) -> &'static str {
 }
 
 /// A labelled row: the translated label leading, the caller's content after.
-fn spawn_labeled_row(commands: &mut Commands, parent: Entity, label_key: &'static str) -> Entity {
+fn spawn_labeled_row(
+    commands: &mut Commands,
+    parent: Entity,
+    label_key: &'static str,
+    font_size: f32,
+) -> Entity {
     ui_spawn::spawn_labeled_row(
         commands,
         parent,
         LabeledRowSpec::new(UiLabel::key(label_key))
             .label_color(DIM_LABEL_COLOR)
-            .font_size(PROPS_FONT_SIZE)
+            .font_size(font_size)
             .label_min_width(Val::Px(90.0)),
     )
     .row
 }
 
 /// A plain value label.
-fn spawn_value_label(commands: &mut Commands, parent: Entity, value: String, color: Color) {
+fn spawn_value_label(
+    commands: &mut Commands,
+    parent: Entity,
+    value: String,
+    color: Color,
+    font_size: f32,
+) {
     commands.spawn((
         Text::new(value),
-        UiFont::Sans.at(PROPS_FONT_SIZE),
+        UiFont::Sans.at(font_size),
         text_role(color),
         ChildOf(parent),
     ));
 }
 
 /// A read-only check + label pair (the "You can" row).
-fn spawn_static_check(commands: &mut Commands, parent: Entity, label_key: &'static str, on: bool) {
+fn spawn_static_check(
+    commands: &mut Commands,
+    parent: Entity,
+    label_key: &'static str,
+    on: bool,
+    font_size: f32,
+) {
     // Read-only, and it must **look** it: the "You can" row states what the
     // owner mask already says, and nothing here can change it (only the item's
     // creator or a next-owner setting can). `InteractionDisabled` is what says
@@ -723,7 +805,7 @@ fn spawn_static_check(commands: &mut Commands, parent: Entity, label_key: &'stat
             element: label_key,
             label: label_key.to_owned(),
             tab_index: 0,
-            font_size: PROPS_FONT_SIZE,
+            font_size,
             translate_label: true,
         },
     );
@@ -744,6 +826,7 @@ fn spawn_props_toggle(
     toggle: PropsToggle,
     on: bool,
     editable: bool,
+    font_size: f32,
 ) {
     let checkbox = spawn_checkbox(
         commands,
@@ -752,7 +835,7 @@ fn spawn_props_toggle(
             element: label_key,
             label: label_key.to_owned(),
             tab_index: 0,
-            font_size: PROPS_FONT_SIZE,
+            font_size,
             translate_label: true,
         },
     );
@@ -1007,6 +1090,96 @@ const fn civil_from_days(days: i64) -> (i64, u8, u8) {
 }
 
 // ---------------------------------------------------------------------------
+// Gallery specimens.
+// ---------------------------------------------------------------------------
+
+/// The Item Properties floater's gallery / `ui_test` specimen: the live rows,
+/// built by the same `spawn_properties_content` the viewer's window is, at the
+/// cell's font size, for a sample item the viewing agent owns — full owner
+/// rights, so every toggle is live; next owner may modify and copy; shared with
+/// the group; for sale as a copy at L$250.
+///
+/// The toggles' observer re-opens the window through `OpenItemProperties`,
+/// a message only the live plugin registers; it is registered here too, so a
+/// click in the gallery finds no window state and does nothing rather than
+/// failing on the missing message queue.
+pub fn spawn_item_properties_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: crate::ui_element::ElementCx,
+) -> Entity {
+    commands.init_resource::<Messages<OpenItemProperties>>();
+    let owner = sl_client_bevy::AgentKey::from(Uuid::from_u128(0x5A));
+    let full = Permissions::MODIFY | Permissions::COPY | Permissions::TRANSFER | Permissions::MOVE;
+    let item = ItemInfo {
+        item_id: InventoryKey::from(Uuid::from_u128(0x1001)),
+        folder_id: sl_client_bevy::InventoryFolderKey::from(Uuid::from_u128(0x1002)),
+        name: cx.text("Sample Denim Jacket"),
+        description: cx.text("A plain jacket with rolled sleeves"),
+        asset_id: Uuid::from_u128(0x1003),
+        asset_type: sl_client_bevy::AssetType::Clothing,
+        inv_type: InventoryType::Wearable,
+        flags: 0,
+        sale: SaleInfo {
+            sale_type: SaleType::Copy,
+            price: LindenAmount(250),
+        },
+        // 2024-03-14 09:26 UTC.
+        creation_date: 1_710_408_360,
+        owner: sl_client_bevy::OwnerKey::Agent(owner),
+        last_owner_id: Uuid::nil(),
+        creator_id: sl_client_bevy::AgentKey::from(Uuid::from_u128(0x5B)),
+        group: None,
+        permissions: sl_client_bevy::Permissions5 {
+            base: full,
+            owner: full,
+            group: Permissions::MODIFY | Permissions::COPY | Permissions::MOVE,
+            everyone: Permissions::empty(),
+            next_owner: Permissions::MODIFY | Permissions::COPY | Permissions::MOVE,
+        },
+    };
+    let people = PropertiesPeople {
+        owned: true,
+        creator: cx.text("Example Creator"),
+        owner: cx.text("Sample Resident"),
+    };
+    spawn_properties_content(commands, parent, &item, &people, cx.font_size);
+    parent
+}
+
+/// The texture preview's gallery / `ui_test` specimen: the live
+/// `spawn_texture_preview_content` at the cell's font size, pointed at a
+/// sample texture the way `open_previews` points the live box. It stays on
+/// its "(loading)" line — a decoded texture needs the texture pipeline and a
+/// grid, and the box it would fill is the layout either way.
+pub fn spawn_texture_preview_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: crate::ui_element::ElementCx,
+) -> Entity {
+    let placeholder = spawn_texture_preview_content(commands, parent, cx.font_size);
+    commands
+        .entity(placeholder)
+        .insert(PendingUiTexture::over_placeholder(TextureKey::from(
+            Uuid::from_u128(0x1004),
+        )));
+    parent
+}
+
+/// The animation preview's gallery / `ui_test` specimen: the live
+/// `spawn_animation_preview_content` at the cell's font size. It needs no
+/// sample data — the window is its two transport buttons, and outside a real
+/// preview window they find no animation to play.
+pub fn spawn_animation_preview_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: crate::ui_element::ElementCx,
+) -> Entity {
+    spawn_animation_preview_content(commands, parent, cx.font_size);
+    parent
+}
+
+// ---------------------------------------------------------------------------
 // Previews.
 // ---------------------------------------------------------------------------
 
@@ -1088,24 +1261,8 @@ fn open_previews(
                 commands
                     .entity(handle.title_text)
                     .insert(Text::new(item.name.clone()));
-                let placeholder = commands
-                    .spawn((
-                        Node {
-                            width: Val::Px(TEXTURE_PREVIEW_EDGE),
-                            height: Val::Px(TEXTURE_PREVIEW_EDGE),
-                            align_items: AlignItems::Center,
-                            justify_content: JustifyContent::Center,
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.35)),
-                        ChildOf(handle.content),
-                    ))
-                    .with_child((
-                        Text::new("(loading)"),
-                        UiFont::Sans.at(PROPS_FONT_SIZE),
-                        text_role(DIM_LABEL_COLOR),
-                    ))
-                    .id();
+                let placeholder =
+                    spawn_texture_preview_content(&mut commands, handle.content, PROPS_FONT_SIZE);
                 commands
                     .entity(placeholder)
                     .insert(PendingUiTexture::over_placeholder(key));
@@ -1149,19 +1306,7 @@ fn open_previews(
                 commands
                     .entity(handle.title_text)
                     .insert(Text::new(item.name.clone()));
-                let buttons = commands
-                    .spawn((
-                        Node {
-                            ..row(Val::Px(8.0))
-                        },
-                        ChildOf(handle.content),
-                    ))
-                    .id();
-                let play =
-                    spawn_text_button(&mut commands, buttons, "animation-play-inworld", 1, true);
-                commands.entity(play).observe(play_pressed);
-                let stop = spawn_text_button(&mut commands, buttons, "animation-stop", 2, true);
-                commands.entity(stop).observe(stop_pressed);
+                spawn_animation_preview_content(&mut commands, handle.content, PROPS_FONT_SIZE);
                 commands
                     .entity(handle.root)
                     .insert(AnimationPreviewState { animation });
@@ -1169,6 +1314,60 @@ fn open_previews(
             _other => {}
         }
     }
+}
+
+/// Build the texture preview's content into `content` at `font_size`: the
+/// preview-sized box with its "(loading)" line, which the caller points at a
+/// texture ([`PendingUiTexture`]). Returns the box. Shared by the live window and
+/// its gallery specimen.
+fn spawn_texture_preview_content(
+    commands: &mut Commands,
+    content: Entity,
+    font_size: f32,
+) -> Entity {
+    commands
+        .spawn((
+            Node {
+                width: Val::Px(TEXTURE_PREVIEW_EDGE),
+                height: Val::Px(TEXTURE_PREVIEW_EDGE),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.35)),
+            ChildOf(content),
+        ))
+        .with_child((
+            Text::new("(loading)"),
+            UiFont::Sans.at(font_size),
+            text_role(DIM_LABEL_COLOR),
+        ))
+        .id()
+}
+
+/// Build the animation preview's content into `content` at `font_size`: the
+/// Play in world / Stop row, each button resolving its animation from the
+/// window it sits in. Shared by the live window and its gallery specimen.
+fn spawn_animation_preview_content(commands: &mut Commands, content: Entity, font_size: f32) {
+    let buttons = commands
+        .spawn((
+            Node {
+                ..row(Val::Px(8.0))
+            },
+            ChildOf(content),
+        ))
+        .id();
+    let play = spawn_text_button(
+        commands,
+        buttons,
+        "animation-play-inworld",
+        1,
+        true,
+        font_size,
+    );
+    commands.entity(play).observe(play_pressed);
+    let stop = spawn_text_button(commands, buttons, "animation-stop", 2, true, font_size);
+    commands.entity(stop).observe(stop_pressed);
 }
 
 /// Play **this window's** animation on the agent.
@@ -1231,6 +1430,7 @@ fn spawn_text_button(
     label_key: &'static str,
     tab_index: i32,
     enabled: bool,
+    font_size: f32,
 ) -> Entity {
     ui_spawn::spawn_button(
         commands,
@@ -1243,7 +1443,7 @@ fn spawn_text_button(
         .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
         .label_color(LABEL_COLOR)
         .disabled(!enabled)
-        .font_size(PROPS_FONT_SIZE),
+        .font_size(font_size),
     )
     .button
 }

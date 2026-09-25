@@ -495,30 +495,59 @@ impl Plugin for EditTexturePlugin {
     }
 }
 
-/// Spawn the Texture-tab editors into the build floater's Texture page.
+/// Spawn the Texture-tab editors into the build floater's Texture page once
+/// its pages appear, and publish their handles.
 fn spawn_texture_tab(mut commands: Commands, pages: Option<Res<BuildTabPages>>) {
     let Some(pages) = pages else {
         return;
     };
-    let page = pages.texture;
+    let parts = spawn_texture_tab_into(&mut commands, pages.texture, TOOL_FONT_SIZE);
+    commands.insert_resource(parts.texture);
+    commands.insert_resource(parts.material);
+}
+
+/// The Texture tab's handles, what [`spawn_texture_tab_into`] hands back.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TextureTabParts {
+    /// The texture half's widgets.
+    pub(crate) texture: BuildTextureUi,
+    /// The material channels' widgets ([`crate::edit_material`]).
+    pub(crate) material: crate::edit_material::BuildMaterialUi,
+}
+
+/// Spawn the Texture-tab editors into `page` at `font_size`: the face summary,
+/// the mode selectors, the diffuse swatches and rows, the full-bright toggle,
+/// the bump / shiny / mapping combos, the align button and the material
+/// channels. Shared by the live floater and its gallery specimen.
+pub(crate) fn spawn_texture_tab_into(
+    commands: &mut Commands,
+    page: Entity,
+    font_size: f32,
+) -> TextureTabParts {
     let mut tab_index = TEX_TAB_INDEX;
 
     // The selected-face summary.
-    spawn_info_row(&mut commands, page, TexInfo::Faces, "build-tex-faces-all");
+    spawn_info_row(
+        commands,
+        page,
+        TexInfo::Faces,
+        "build-tex-faces-all",
+        font_size,
+    );
 
     // The material-mode / channel selectors (the reference's `combobox matmedia`
     // + `radio_material_type` + `radio_pbr_type`): which of the legacy diffuse /
     // normal / specular maps or the PBR render material the tab edits.
-    let selectors = spawn_mode_selectors(&mut commands, page, &mut tab_index);
+    let selectors = spawn_mode_selectors(commands, page, &mut tab_index, font_size);
 
     // The diffuse texture swatch (opens the texture picker) and the colour swatch
     // (opens the colour picker) — the Material / Texture channel.
-    let texture_row = spawn_row(&mut commands, page, "build-tex-texture-id-label");
+    let texture_row = spawn_row(commands, page, "build-tex-texture-id-label", font_size);
     commands
         .entity(texture_row)
         .insert(ShowWhen::MaterialDiffuse);
     let texture_swatch = spawn_texture_swatch(
-        &mut commands,
+        commands,
         texture_row,
         "build-tex-texture",
         tab_index,
@@ -527,10 +556,10 @@ fn spawn_texture_tab(mut commands: Commands, pages: Option<Res<BuildTabPages>>) 
     commands.entity(texture_swatch).insert(TexControl);
     tab_index = tab_index.saturating_add(1);
 
-    let color_row = spawn_row(&mut commands, page, "build-tex-color-label");
+    let color_row = spawn_row(commands, page, "build-tex-color-label", font_size);
     commands.entity(color_row).insert(ShowWhen::MaterialDiffuse);
     let color_swatch = spawn_color_swatch(
-        &mut commands,
+        commands,
         color_row,
         "build-tex-color",
         tab_index,
@@ -542,23 +571,25 @@ fn spawn_texture_tab(mut commands: Commands, pages: Option<Res<BuildTabPages>>) 
     // Transparency / glow / repeats / offset / rotation numeric rows.
     for (label_key, fields, show_when) in TEX_FIELD_ROWS {
         spawn_tex_field_row(
-            &mut commands,
+            commands,
             page,
             label_key,
             fields,
             *show_when,
             &mut tab_index,
+            font_size,
         );
     }
 
     // Full-bright toggle (a `TextureEntry`-level attribute, shown across the
     // Material channels).
     let fullbright = spawn_tex_toggle(
-        &mut commands,
+        commands,
         page,
         TexToggle::Fullbright,
         "build-tex-fullbright",
         &mut tab_index,
+        font_size,
     );
     commands.entity(fullbright).insert(ShowWhen::MaterialAny);
 
@@ -582,28 +613,32 @@ fn spawn_texture_tab(mut commands: Commands, pages: Option<Res<BuildTabPages>>) 
             ShowWhen::MaterialAny,
         ),
     ] {
-        let row_entity = spawn_row(&mut commands, page, label_key);
+        let row_entity = spawn_row(commands, page, label_key, font_size);
         commands.entity(row_entity).insert(show_when);
-        spawn_tex_combo(&mut commands, row_entity, cycle, &mut tab_index);
+        spawn_tex_combo(commands, row_entity, cycle, &mut tab_index, font_size);
     }
 
     // Align planar faces (the reference's `checkbox planar align`, offered as a
     // one-shot action button that aligns the selected faces to the primary face).
-    let align = spawn_align_button(&mut commands, page, &mut tab_index);
+    let align = spawn_align_button(commands, page, &mut tab_index, font_size);
     commands.entity(align).insert(ShowWhen::MaterialAny);
 
     // The Blinn-Phong normal / specular channels and the PBR channels
     // ([`crate::edit_material`]) share this page and the mode selectors.
-    crate::edit_material::spawn_material_channels(&mut commands, page, &mut tab_index);
+    let material =
+        crate::edit_material::spawn_material_channels(commands, page, &mut tab_index, font_size);
 
-    commands.insert_resource(BuildTextureUi {
-        page,
-        color_swatch,
-        texture_swatch,
-        matmedia_strip: selectors.matmedia_strip,
-        mat_type_radio: selectors.mat_type_radio,
-        pbr_type_radio: selectors.pbr_type_radio,
-    });
+    TextureTabParts {
+        texture: BuildTextureUi {
+            page,
+            color_swatch,
+            texture_swatch,
+            matmedia_strip: selectors.matmedia_strip,
+            mat_type_radio: selectors.mat_type_radio,
+            pbr_type_radio: selectors.pbr_type_radio,
+        },
+        material,
+    }
 }
 
 /// The three material-mode selector entities the mode systems read / write.
@@ -625,6 +660,7 @@ fn spawn_mode_selectors(
     commands: &mut Commands,
     page: Entity,
     tab_index: &mut i32,
+    font_size: f32,
 ) -> ModeSelectors {
     // matmedia mode switch (Material / PBR). The reference presents the material
     // type as a select box, but here it reads as a tab strip
@@ -647,7 +683,7 @@ fn spawn_mode_selectors(
             labels: &matmedia_labels,
             active: MatMedia::Material.radio_index(),
             tab_index: *tab_index,
-            font_size: TOOL_FONT_SIZE,
+            font_size,
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
@@ -656,7 +692,7 @@ fn spawn_mode_selectors(
     *tab_index = tab_index.saturating_add(1);
 
     // material-type radio (Texture / Bumpiness / Shininess).
-    let mat_type_row = spawn_row(commands, page, "build-tex-mattype-label");
+    let mat_type_row = spawn_row(commands, page, "build-tex-mattype-label", font_size);
     commands.entity(mat_type_row).insert(ShowWhen::MaterialAny);
     let mat_type_labels = [
         "build-tex-mattype-diffuse".to_owned(),
@@ -671,7 +707,7 @@ fn spawn_mode_selectors(
             labels: &mat_type_labels,
             active: MatChannel::Diffuse.radio_index(),
             tab_index: *tab_index,
-            font_size: TOOL_FONT_SIZE,
+            font_size,
             layout: RadioLayout::Row,
             translate_labels: true,
         },
@@ -680,7 +716,7 @@ fn spawn_mode_selectors(
     *tab_index = tab_index.saturating_add(1);
 
     // pbr-type radio (Material / Base / Metallic / Emissive / Normal).
-    let pbr_type_row = spawn_row(commands, page, "build-tex-pbrtype-label");
+    let pbr_type_row = spawn_row(commands, page, "build-tex-pbrtype-label", font_size);
     commands.entity(pbr_type_row).insert(ShowWhen::PbrAny);
     let pbr_type_labels = [
         "build-tex-pbrtype-material".to_owned(),
@@ -697,7 +733,7 @@ fn spawn_mode_selectors(
             labels: &pbr_type_labels,
             active: PbrChannel::Material.radio_index(),
             tab_index: *tab_index,
-            font_size: TOOL_FONT_SIZE,
+            font_size,
             layout: RadioLayout::Row,
             translate_labels: true,
         },
@@ -720,11 +756,12 @@ fn spawn_tex_field_row(
     fields: &[TexField],
     show_when: ShowWhen,
     tab_index: &mut i32,
+    font_size: f32,
 ) {
-    let row_entity = spawn_row(commands, page, label_key);
+    let row_entity = spawn_row(commands, page, label_key, font_size);
     commands.entity(row_entity).insert(show_when);
     for &field in fields {
-        spawn_tex_field(commands, row_entity, field, tab_index);
+        spawn_tex_field(commands, row_entity, field, tab_index, font_size);
     }
 }
 
@@ -836,8 +873,15 @@ fn apply_material_mode_visibility(
     if !mode.is_changed() {
         return;
     }
-    for (show_when, mut node) in &mut controls {
-        let display = if show_when.matches(*mode) {
+    show_material_mode(*mode, &mut controls);
+}
+
+/// Show each mode-tagged control that `mode` shows and hide the rest — the
+/// body of [`apply_material_mode_visibility`], which the gallery specimen runs
+/// for the mode a fresh window opens in.
+fn show_material_mode(mode: MatModeState, controls: &mut Query<(&ShowWhen, &mut Node)>) {
+    for (show_when, mut node) in controls {
+        let display = if show_when.matches(mode) {
             Display::Flex
         } else {
             Display::None
@@ -867,11 +911,12 @@ pub(crate) struct BuildTextureUi {
     pub(crate) pbr_type_radio: Entity,
 }
 
-/// Spawn a labelled row container and return it.
+/// Spawn a labelled row container, its label at `font_size`, and return it.
 pub(crate) fn spawn_row(
     commands: &mut Commands,
     parent: Entity,
     label_key: &'static str,
+    font_size: f32,
 ) -> Entity {
     let row_entity = commands
         .spawn((
@@ -884,19 +929,25 @@ pub(crate) fn spawn_row(
             ChildOf(parent),
         ))
         .id();
-    spawn_row_label(commands, row_entity, label_key);
+    spawn_row_label(commands, row_entity, label_key, font_size);
     row_entity
 }
 
 /// Spawn one numeric Texture-tab field.
-fn spawn_tex_field(commands: &mut Commands, parent: Entity, field: TexField, tab_index: &mut i32) {
+fn spawn_tex_field(
+    commands: &mut Commands,
+    parent: Entity,
+    field: TexField,
+    tab_index: &mut i32,
+    font_size: f32,
+) {
     let index = *tab_index;
     *tab_index = tab_index.saturating_add(1);
     let entity = spawn_text_input(
         commands,
         parent,
         &TextInputSpec {
-            font_size: TOOL_FONT_SIZE,
+            font_size,
             width_glyphs: TEX_FIELD_GLYPHS,
             tab_index: index,
             ..TextInputSpec::new(field.element(), field.input_kind())
@@ -913,6 +964,7 @@ fn spawn_tex_toggle(
     toggle: TexToggle,
     label_key: &'static str,
     tab_index: &mut i32,
+    font_size: f32,
 ) -> Entity {
     let index = *tab_index;
     *tab_index = tab_index.saturating_add(1);
@@ -923,7 +975,7 @@ fn spawn_tex_toggle(
             element: label_key,
             label: label_key.to_owned(),
             tab_index: index,
-            font_size: TOOL_FONT_SIZE,
+            font_size,
             translate_label: true,
         },
     );
@@ -936,7 +988,13 @@ fn spawn_tex_toggle(
 
 /// Spawn one Texture-tab combo box for `cycle`, its options the cycle's value
 /// labels, tagged [`TexCombo`] so the sync and change handler map it back.
-fn spawn_tex_combo(commands: &mut Commands, parent: Entity, cycle: TexCycle, tab_index: &mut i32) {
+fn spawn_tex_combo(
+    commands: &mut Commands,
+    parent: Entity,
+    cycle: TexCycle,
+    tab_index: &mut i32,
+    font_size: f32,
+) {
     let index = *tab_index;
     *tab_index = tab_index.saturating_add(1);
     let labels: Vec<String> = (0..cycle.count())
@@ -950,7 +1008,7 @@ fn spawn_tex_combo(commands: &mut Commands, parent: Entity, cycle: TexCycle, tab
             labels: &labels,
             active: 0,
             tab_index: index,
-            font_size: TOOL_FONT_SIZE,
+            font_size,
             translate_labels: true,
         },
     );
@@ -959,7 +1017,12 @@ fn spawn_tex_combo(commands: &mut Commands, parent: Entity, cycle: TexCycle, tab
 
 /// Spawn the Align-planar-faces action button; returns the button entity so the
 /// caller can tag it (e.g. with a `ShowWhen`).
-fn spawn_align_button(commands: &mut Commands, parent: Entity, tab_index: &mut i32) -> Entity {
+fn spawn_align_button(
+    commands: &mut Commands,
+    parent: Entity,
+    tab_index: &mut i32,
+    font_size: f32,
+) -> Entity {
     let button = ui_spawn::spawn_button(
         commands,
         parent,
@@ -974,7 +1037,7 @@ fn spawn_align_button(commands: &mut Commands, parent: Entity, tab_index: &mut i
             // The colour `.sk-build-value` paints — see [`VALUE_CLASS`].
             .label_color(SkinPalette::FALLBACK.text_primary)
             .label_class(VALUE_CLASS)
-            .font_size(TOOL_FONT_SIZE),
+            .font_size(font_size),
     )
     .button;
     commands
@@ -985,11 +1048,17 @@ fn spawn_align_button(commands: &mut Commands, parent: Entity, tab_index: &mut i
 }
 
 /// Spawn one read-only info row.
-fn spawn_info_row(commands: &mut Commands, parent: Entity, info: TexInfo, label_key: &'static str) {
-    let info_row = spawn_row(commands, parent, label_key);
+fn spawn_info_row(
+    commands: &mut Commands,
+    parent: Entity,
+    info: TexInfo,
+    label_key: &'static str,
+    font_size: f32,
+) {
+    let info_row = spawn_row(commands, parent, label_key, font_size);
     commands.spawn((
         Text::default(),
-        UiFont::Sans.at(TOOL_FONT_SIZE),
+        UiFont::Sans.at(font_size),
         // The colour `.sk-build-value` paints — see [`VALUE_CLASS`].
         TextColor(SkinPalette::FALLBACK.text_primary),
         ClassList::new_with_classes([VALUE_CLASS]),
@@ -1262,11 +1331,30 @@ fn sync_texture_widgets(
         return;
     };
 
+    show_texture_face(
+        &face,
+        &faces_summary(&selection, &translator),
+        ui.as_deref(),
+        &mut widgets,
+    );
+}
+
+/// Draw one representative `face` into the Texture tab: the numeric fields
+/// (skipping the focused one), the toggle ticks, the combos, the face-summary
+/// line (`faces_line`) and the colour / texture swatches. The drawing half of
+/// [`sync_texture_widgets`], which the gallery specimen calls with a sample
+/// face.
+fn show_texture_face(
+    face: &TextureFace,
+    faces_line: &str,
+    ui: Option<&BuildTextureUi>,
+    widgets: &mut TexWidgets<'_, '_>,
+) {
     for (entity, field, mut editor) in &mut widgets.fields {
         if widgets.focus.get() == Some(entity) {
             continue;
         }
-        let want = format_tex_value(*field, field.display_value(&face));
+        let want = format_tex_value(*field, field.display_value(face));
         if editor.value().to_string() != want {
             set_editor_text(
                 &mut editor,
@@ -1279,7 +1367,7 @@ fn sync_texture_widgets(
     let ticks: Vec<(Entity, bool, bool)> = widgets
         .toggles
         .iter()
-        .map(|(entity, toggle, ticked)| (entity, toggle.get(&face), ticked))
+        .map(|(entity, toggle, ticked)| (entity, toggle.get(face), ticked))
         .collect();
     for (entity, on, ticked) in ticks {
         if on && !ticked {
@@ -1289,17 +1377,17 @@ fn sync_texture_widgets(
         }
     }
     for (combo, mut selection) in &mut widgets.combos {
-        let want = combo.0.index(&face);
+        let want = combo.0.index(face);
         if selection.active != want {
             selection.active = want;
         }
     }
     for (info, mut text) in &mut widgets.infos {
         let want = match info {
-            TexInfo::Faces => faces_summary(&selection, &translator),
+            TexInfo::Faces => faces_line,
         };
         if text.0 != want {
-            text.0 = want;
+            want.clone_into(&mut text.0);
         }
     }
     // The colour / texture swatches follow the representative face.
@@ -1320,6 +1408,48 @@ fn sync_texture_widgets(
             swatch.0 = face.texture_id;
         }
     }
+}
+
+/// The texture a new prim is rezzed with (the reference's default plywood),
+/// which the gallery specimen's sample face shows.
+const PLYWOOD_TEXTURE: u128 = 0x8955_6747_24cb_43ed_920b_47ca_ed15_465f;
+
+/// Fill the Texture tab of a Build Tools specimen with a sample face — the
+/// plywood texture under a warm tint with a little glow, repeated twice across
+/// — and open it on the mode a fresh window shows, both drawn by the same
+/// [`show_material_mode`] and [`show_texture_face`] the live systems use.
+/// Queued, so it runs once the widgets [`spawn_texture_tab_into`] spawned
+/// exist.
+pub(crate) fn fill_texture_tab_specimen(commands: &mut Commands, parts: TextureTabParts) {
+    commands.queue(move |world: &mut World| {
+        if let Err(error) = world.run_system_cached_with(show_texture_specimen, parts.texture) {
+            warn!("build tools specimen: the sample face was not drawn: {error}");
+        }
+    });
+}
+
+/// The specimen's one-shot: show the default mode's controls and draw the
+/// sample face into them.
+fn show_texture_specimen(
+    In(ui): In<BuildTextureUi>,
+    translator: Translator,
+    mut widgets: TexWidgets,
+    mut controls: Query<(&ShowWhen, &mut Node)>,
+) {
+    show_material_mode(MatModeState::default(), &mut controls);
+    let face = TextureFace {
+        color: [255, 232, 200, 255],
+        scale_s: 2.0,
+        scale_t: 2.0,
+        glow: 0.05,
+        ..TextureFace::new(TextureKey::from(Uuid::from_u128(PLYWOOD_TEXTURE)))
+    };
+    show_texture_face(
+        &face,
+        &translator.get("build-tex-faces-all"),
+        Some(&ui),
+        &mut widgets,
+    );
 }
 
 /// The selected-face summary line: "all faces" for a whole-object selection, else
@@ -1390,8 +1520,13 @@ fn commit_texture_fields(
 fn handle_tex_toggle_press(
     change: On<ValueChange<bool>>,
     toggles: Query<&TexToggle>,
-    mut tex: TexFaceEdit,
+    tex: Option<TexFaceEdit>,
 ) {
+    // Absent only in the gallery / `ui_test` hosts, whose specimen has no
+    // session behind it.
+    let Some(mut tex) = tex else {
+        return;
+    };
     // The faces decide, not the box: the widget has moved its own tick already
     // and the sync pass puts it back where the selection says.
     let Ok(&toggle) = toggles.get(change.source) else {
@@ -1845,13 +1980,19 @@ fn apply_edit_to_faces(
 fn handle_tex_align_press(
     press: On<Pointer<Press>>,
     _buttons: Query<&TexAlignButton>,
-    legacy: Res<crate::legacy_materials::LegacyMaterialManager>,
     globals: Query<&GlobalTransform>,
-    mut tex: TexFaceEdit,
+    session: Option<(
+        Res<crate::legacy_materials::LegacyMaterialManager>,
+        TexFaceEdit,
+    )>,
 ) {
     if press.button != PointerButton::Primary {
         return;
     }
+    // Absent only in the gallery / `ui_test` hosts.
+    let Some((legacy, mut tex)) = session else {
+        return;
+    };
     crate::edit_texture_align::align_planar_faces(
         &tex.selection,
         &tex.objects,

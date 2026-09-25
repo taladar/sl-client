@@ -703,6 +703,92 @@ mod tests {
         app
     }
 
+    /// Frames in which a field's `EditableText` or its `ContentSize` was
+    /// flagged as changed, counted per field after the first frame (on its first
+    /// run a new system sees every component as changed).
+    #[derive(Resource, Default)]
+    struct FieldChanges {
+        /// Whether the counting system has had its first run.
+        primed: bool,
+        /// Per field: how many frames flagged it.
+        frames: bevy::platform::collections::HashMap<Entity, usize>,
+    }
+
+    /// Count this frame's change flags on every editable field.
+    fn count_field_changes(
+        mut changes: ResMut<FieldChanges>,
+        fields: Query<(
+            Entity,
+            Ref<bevy::text::EditableText>,
+            Ref<bevy::ui::ContentSize>,
+        )>,
+    ) {
+        if !changes.primed {
+            changes.primed = true;
+            return;
+        }
+        for (entity, text, content) in &fields {
+            if text.is_changed() || content.is_changed() {
+                let frames = changes.frames.entry(entity).or_default();
+                *frames = frames.saturating_add(1);
+            }
+        }
+    }
+
+    /// **An idle text field changes nothing from one frame to the next.**
+    ///
+    /// Bevy 0.19's `update_editable_text_layout` refreshed every field's editor
+    /// every frame through `DerefMut`, flagging `EditableText` as changed with
+    /// nothing having happened; `update_editable_text_content_size` then re-set
+    /// every field's `ContentSize`, which dirties the field and every ancestor
+    /// in taffy. So the whole UI was laid out, and its text re-measured, on
+    /// every frame — in proportion to how many fields exist, hidden ones
+    /// included (the gallery, with every window's real content built, spent
+    /// ~380 ms a frame on it). Fixed in our Bevy fork; this is what keeps a
+    /// Bevy bump from bringing it back unnoticed.
+    ///
+    /// With teeth: an edit to one field must still flag that field, and only
+    /// that one.
+    #[test]
+    fn an_idle_text_field_is_not_flagged_changed_every_frame() -> Result<(), String> {
+        let mut app = InteractionTest::new().build();
+        let fields: Vec<Entity> = ["one", "two", "three"]
+            .into_iter()
+            .map(|text| {
+                let mut editable = bevy::text::EditableText::new(text);
+                editable.visible_width = Some(12.0);
+                editable.visible_lines = Some(1.0);
+                crate::spawn_under_root(&mut app, (Node::default(), editable))
+            })
+            .collect();
+        settle(&mut app);
+        app.init_resource::<FieldChanges>()
+            .add_systems(Last, count_field_changes);
+        for _ in 0..10 {
+            app.update();
+        }
+        let idle = app.world().resource::<FieldChanges>().frames.clone();
+        assert!(
+            idle.is_empty(),
+            "idle fields were flagged changed on these many frames: {idle:?}"
+        );
+
+        let edited = *fields.first().ok_or("no field spawned")?;
+        app.world_mut()
+            .get_mut::<bevy::text::EditableText>(edited)
+            .ok_or("the field has no EditableText")?
+            .editor
+            .set_text("edited");
+        app.update();
+        let after = app.world().resource::<FieldChanges>().frames.clone();
+        assert_eq!(
+            after.keys().copied().collect::<Vec<_>>(),
+            vec![edited],
+            "an edit must flag the edited field, and only it"
+        );
+        Ok(())
+    }
+
     /// **A click lands on the node under the pointer, and nowhere else.**
     #[test]
     fn a_click_lands_on_the_node_under_the_pointer() {

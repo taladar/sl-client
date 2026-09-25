@@ -83,6 +83,89 @@ pub(crate) mod style {
     pub(crate) const ACTION_BACKGROUND: Color = Color::srgb(0.24, 0.29, 0.38);
 }
 
+/// The fixed restriction set the RLVa windows' gallery specimens draw — one
+/// state, so the Restrictions and Locks specimens show the same two objects'
+/// commands from their two angles, as the live windows would.
+pub(crate) mod specimen {
+    use sl_client_bevy::Uuid;
+    use sl_rlv::{RlvAttachmentPoint, RlvObjectAttachment, RlvState, parse_chat_line};
+
+    /// A sample collar: worn (so its bare `@detach` is an attachment lock),
+    /// restricting IMs with one exception, and locking a point, a layer and a
+    /// folder.
+    const COLLAR: Uuid = Uuid::from_u128(0x3f2a_91c4_5d7e_4b10_8a6f_2c94_e1d0_7b35);
+
+    /// A sample pair of cuffs, not reported as worn — so its restrictions are
+    /// named by key alone, the way an object out of range is.
+    const CUFFS: Uuid = Uuid::from_u128(0x8c41_07e2_b93a_4f5d_9e12_6a7b_c3d8_0f64);
+
+    /// The resident the collar's IM exception lets through.
+    const FRIEND: Uuid = Uuid::from_u128(0x5d90_2b7e_1c4a_4e83_b6f1_09a2_d7c5_e318);
+
+    /// The sample state: both objects' commands applied, the collar placed.
+    ///
+    /// A line that fails to parse is skipped rather than reported: the lines are
+    /// fixed here, and `the_sample_state_holds_every_line` pins that each one
+    /// parses and lands.
+    pub(crate) fn sample_state() -> RlvState {
+        let mut state = RlvState::new();
+        for (object, line) in sample_lines() {
+            for command in parse_chat_line(&line).into_iter().flatten().flatten() {
+                state.apply(object, &command);
+            }
+        }
+        if let Some(point) = RlvAttachmentPoint::from_name("neck") {
+            state.set_object_attachment(COLLAR, Some(RlvObjectAttachment::new(COLLAR, point)));
+        }
+        state
+    }
+
+    /// The chat lines the two sample objects say, in order.
+    fn sample_lines() -> [(Uuid, String); 2] {
+        [
+            (
+                COLLAR,
+                format!(
+                    "@detach=n,sendim=n,sendim:{FRIEND}=add,tplure=n,fartouch:1.5=n,\
+                     remattach:chest=n,remoutfit:gloves=n,detachallthis:Outfits/Locked=n"
+                ),
+            ),
+            (
+                CUFFS,
+                "@fly=n,recvchat=n,sittp:2.5=n,addattach=n".to_owned(),
+            ),
+        ]
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::{sample_lines, sample_state};
+        use pretty_assertions::assert_eq;
+        use sl_rlv::parse_chat_line;
+
+        /// Every sample line parses cleanly, and every command in it is held —
+        /// so a specimen never silently shows fewer rows than its lines say.
+        #[test]
+        fn the_sample_state_holds_every_line() {
+            let mut commands = 0_usize;
+            for (_, line) in sample_lines() {
+                let parsed = parse_chat_line(&line).unwrap_or_default();
+                assert!(!parsed.is_empty(), "{line} is not an RLV line");
+                for command in parsed {
+                    assert!(command.is_ok(), "{line}: {command:?}");
+                    commands = commands.saturating_add(1);
+                }
+            }
+            let state = sample_state();
+            let held: usize = state
+                .restricting_objects()
+                .map(|object| state.restrictions_of(object).len())
+                .sum();
+            assert_eq!(held, commands);
+        }
+    }
+}
+
 /// Every RLVa window at once, for a host that wants the whole family.
 ///
 /// The viewer adds the four plugins individually alongside its other floaters;

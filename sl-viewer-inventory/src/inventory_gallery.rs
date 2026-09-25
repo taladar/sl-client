@@ -200,8 +200,28 @@ fn spawn_gallery_floater(mut commands: Commands, root: Res<UiRoot>) {
     commands
         .entity(handle.title_text)
         .insert(Translated::new("inventory-gallery-title"));
-    let content = handle.content;
+    let parts = spawn_gallery_content(&mut commands, handle.content, CHROME_FONT_SIZE);
+    commands.insert_resource(GalleryUi {
+        panel: handle.root,
+        title_label: parts.title_label,
+        grid: parts.grid,
+    });
+}
 
+/// The entities of the gallery's content the window keeps: the folder-name label
+/// and the tile grid.
+#[derive(Debug, Clone, Copy)]
+struct GalleryParts {
+    /// The current-folder name label.
+    title_label: Entity,
+    /// The scrollable tile grid.
+    grid: Entity,
+}
+
+/// Build the gallery's content into `content` at `font_size`: the back /
+/// forward / up row with the folder name, and the scrollable grid with its
+/// scrollbar. Shared by the live floater and its gallery specimen.
+fn spawn_gallery_content(commands: &mut Commands, content: Entity, font_size: f32) -> GalleryParts {
     // Navigation: back / forward / up + the folder name.
     let nav = commands
         .spawn((
@@ -212,7 +232,7 @@ fn spawn_gallery_floater(mut commands: Commands, root: Res<UiRoot>) {
             ChildOf(content),
         ))
         .id();
-    let back = spawn_nav_button(&mut commands, nav, glyph::BACK, "back", 1);
+    let back = spawn_nav_button(commands, nav, glyph::BACK, "back", 1, font_size);
     commands.entity(back).observe(
         |press: On<Pointer<Press>>, mut state: ResMut<GalleryState>| {
             if press.button == PointerButton::Primary {
@@ -220,7 +240,7 @@ fn spawn_gallery_floater(mut commands: Commands, root: Res<UiRoot>) {
             }
         },
     );
-    let forward = spawn_nav_button(&mut commands, nav, glyph::FORWARD, "forward", 2);
+    let forward = spawn_nav_button(commands, nav, glyph::FORWARD, "forward", 2, font_size);
     commands.entity(forward).observe(
         |press: On<Pointer<Press>>, mut state: ResMut<GalleryState>| {
             if press.button == PointerButton::Primary {
@@ -228,7 +248,7 @@ fn spawn_gallery_floater(mut commands: Commands, root: Res<UiRoot>) {
             }
         },
     );
-    let up = spawn_nav_button(&mut commands, nav, glyph::UP, "up", 3);
+    let up = spawn_nav_button(commands, nav, glyph::UP, "up", 3, font_size);
     commands.entity(up).observe(
         |press: On<Pointer<Press>>, model: Res<InventoryModel>, mut state: ResMut<GalleryState>| {
             if press.button != PointerButton::Primary {
@@ -246,7 +266,7 @@ fn spawn_gallery_floater(mut commands: Commands, root: Res<UiRoot>) {
     let title_label = commands
         .spawn((
             Text::new(""),
-            UiFont::Sans.at(CHROME_FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(LABEL_COLOR),
             ChildOf(nav),
         ))
@@ -287,18 +307,47 @@ fn spawn_gallery_floater(mut commands: Commands, root: Res<UiRoot>) {
         ))
         .id();
     spawn_scrollbar(
-        &mut commands,
+        commands,
         grid_row,
         ScrollTarget::Container(grid),
         Node::default(),
         "inventory-gallery-scrollbar",
     );
 
-    commands.insert_resource(GalleryUi {
-        panel: handle.root,
-        title_label,
-        grid,
-    });
+    GalleryParts { title_label, grid }
+}
+
+// ---------------------------------------------------------------------------
+// Gallery specimen.
+// ---------------------------------------------------------------------------
+
+/// The gallery view's gallery / `ui_test` specimen: the live content, built by
+/// the same `spawn_gallery_content` the viewer's floater is, at the cell's
+/// font size, showing the sample inventory's Clothing folder — a sub-folder and
+/// three wearables, the worn jacket selected — through the live
+/// `folder_title` and `spawn_folder_tiles`. Tile names keep the live ratio
+/// to the chrome font.
+pub fn spawn_inventory_gallery_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: crate::ui_element::ElementCx,
+) -> Entity {
+    let parts = spawn_gallery_content(commands, parent, cx.font_size);
+    let sample = crate::inventory::sample_inventory(cx);
+    let mut selection = InventorySelection::default();
+    selection.select_single(sample.selected, 0);
+    commands
+        .entity(parts.title_label)
+        .insert(Text::new(folder_title(&sample.model, sample.clothing)));
+    spawn_folder_tiles(
+        commands,
+        parts.grid,
+        &sample.model,
+        sample.clothing,
+        &selection,
+        cx.font_size * (TILE_FONT_SIZE / CHROME_FONT_SIZE),
+    );
+    parent
 }
 
 /// Spawn one square navigation button with a glyph label.
@@ -308,6 +357,7 @@ fn spawn_nav_button(
     slot: &'static str,
     name: &str,
     tab_index: i32,
+    font_size: f32,
 ) -> Entity {
     ui_spawn::spawn_button(
         commands,
@@ -319,7 +369,7 @@ fn spawn_nav_button(
         .tab_index(tab_index)
         .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
         .label_color(LABEL_COLOR)
-        .font_size(CHROME_FONT_SIZE),
+        .font_size(font_size),
     )
     .button
 }
@@ -416,9 +466,7 @@ fn rebuild_gallery(
     };
     // The folder name label.
     if let Ok(mut text) = texts.get_mut(ui.title_label) {
-        let name = model
-            .folder_info(current)
-            .map_or_else(|| "(folder)".to_owned(), |info| info.name.clone());
+        let name = folder_title(&model, current);
         if text.0 != name {
             text.0 = name;
         }
@@ -429,19 +477,51 @@ fn rebuild_gallery(
             commands.entity(child).despawn();
         }
     }
-    // Sub-folder tiles first, then items — name order from the model.
+    spawn_folder_tiles(
+        &mut commands,
+        ui.grid,
+        &model,
+        current,
+        &selection,
+        TILE_FONT_SIZE,
+    );
+    // An unfetched folder fetches on arrival; harmless if already held.
+    query_folder_page(current, &mut sl_commands);
+}
+
+/// The name the gallery's title label shows for `folder`.
+fn folder_title(model: &InventoryModel, folder: InventoryFolderKey) -> String {
+    model
+        .folder_info(folder)
+        .map_or_else(|| "(folder)".to_owned(), |info| info.name.clone())
+}
+
+/// Spawn `current`'s tiles into `grid`, tile names at `font_size`: sub-folder
+/// tiles first, then items — name order from the model — each highlighted when
+/// `selection` holds it. Shared by [`rebuild_gallery`] and the specimen.
+fn spawn_folder_tiles(
+    commands: &mut Commands,
+    grid: Entity,
+    model: &InventoryModel,
+    current: InventoryFolderKey,
+    selection: &InventorySelection,
+    font_size: f32,
+) {
     for &child in model.child_folders_of(current) {
         let info = model.folder_info(child);
         let name = info.map_or_else(|| "(folder)".to_owned(), |folder| folder.name.clone());
         let folder_type = info.map_or(FolderType::None, |folder| folder.folder_type);
         spawn_tile(
-            &mut commands,
-            ui.grid,
-            RowKey::Folder(child),
-            &name,
-            folder_icon(folder_type, false),
-            selection.contains(RowKey::Folder(child)),
-            None,
+            commands,
+            grid,
+            &Tile {
+                key: RowKey::Folder(child),
+                name: &name,
+                icon: folder_icon(folder_type, false),
+                selected: selection.contains(RowKey::Folder(child)),
+                thumbnail: None,
+            },
+            font_size,
         );
     }
     for item in model.loaded_items_of(current) {
@@ -451,30 +531,45 @@ fn rebuild_gallery(
         )
         .then(|| TextureKey::from(item.asset_id));
         spawn_tile(
-            &mut commands,
-            ui.grid,
-            RowKey::Item(item.item_id),
-            &item.name,
-            item_icon(item.inv_type),
-            selection.contains(RowKey::Item(item.item_id)),
-            thumbnail,
+            commands,
+            grid,
+            &Tile {
+                key: RowKey::Item(item.item_id),
+                name: &item.name,
+                icon: item_icon(item.inv_type),
+                selected: selection.contains(RowKey::Item(item.item_id)),
+                thumbnail,
+            },
+            font_size,
         );
     }
-    // An unfetched folder fetches on arrival; harmless if already held.
-    query_folder_page(current, &mut sl_commands);
+}
+
+/// What one gallery tile shows.
+#[derive(Debug, Clone, Copy)]
+struct Tile<'a> {
+    /// The folder / item the tile stands for.
+    key: RowKey,
+    /// The name under the thumbnail.
+    name: &'a str,
+    /// The type glyph drawn until (or instead of) a thumbnail.
+    icon: &'static str,
+    /// Whether the tile is part of the selection.
+    selected: bool,
+    /// The texture drawn as the thumbnail, for a texture or snapshot.
+    thumbnail: Option<TextureKey>,
 }
 
 /// Spawn one gallery tile: a thumbnail area (type glyph, or the texture once
-/// decoded) over the wrapped name.
-fn spawn_tile(
-    commands: &mut Commands,
-    grid: Entity,
-    key: RowKey,
-    name: &str,
-    icon: &'static str,
-    selected: bool,
-    thumbnail: Option<TextureKey>,
-) {
+/// decoded) over the wrapped name, the name at `font_size`.
+fn spawn_tile(commands: &mut Commands, grid: Entity, tile_spec: &Tile<'_>, font_size: f32) {
+    let Tile {
+        key,
+        name,
+        icon,
+        selected,
+        thumbnail,
+    } = *tile_spec;
     let tile = commands
         .spawn((
             Button,
@@ -521,7 +616,7 @@ fn spawn_tile(
     }
     commands.spawn((
         Text::new(name.to_owned()),
-        UiFont::Sans.at(TILE_FONT_SIZE),
+        UiFont::Sans.at(font_size),
         text_role(DIM_LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(tile),

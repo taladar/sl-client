@@ -19,6 +19,7 @@ mod tests {
     };
     use crate::floater::{FloaterElement, register_floater_layout};
     use crate::floaters::FLOATERS;
+    use crate::i18n::Translated;
     use crate::ui::{UiDirection, UiRoot, UiScaffoldSystems};
     use crate::ui_element::{ElementCx, SCRIPTS, SampleText, UiAction};
     use crate::ui_elements::ELEMENTS;
@@ -565,6 +566,8 @@ mod tests {
         let mut app = test.build();
         enable_action_recording(&mut app);
         register_floater_layout(&mut app);
+        crate::ui_contract::install_list_widgets(&mut app);
+        install_cell_strings(&mut app, cx);
         let spawn = *floater;
         app.add_systems(
             Startup,
@@ -575,6 +578,41 @@ mod tests {
         );
         settle(&mut app);
         app
+    }
+
+    /// Resolve every [`Translated`] label a floater's content spawns to the
+    /// **real English** string, then run it through the cell's [`SampleText`].
+    ///
+    /// A floater specimen is the live window's own content builder, and that
+    /// builder labels through [`Translated`] keys rather than through
+    /// [`ElementCx::text`]. Without a string table every such label would stay
+    /// the empty [`Text`] it spawned with, and the sweep would measure a window
+    /// of blank labels — one that ships in no locale. With the English table
+    /// alone every script cell would measure the same English window. So the
+    /// English is the input and the cell's transform is applied on top, exactly
+    /// as it is to the strings a hand-written specimen passes through
+    /// `cx.text`: a label is pseudolocalised, or swapped for the cell's script.
+    ///
+    /// Only a label whose [`Text`] just changed is transformed — the resolve
+    /// writes it once, and this writes it once more — so a pseudolocalised
+    /// string is never pseudolocalised twice.
+    fn install_cell_strings(app: &mut App, cx: ElementCx) {
+        crate::i18n_keys::install_english_strings(app);
+        app.add_systems(
+            PostUpdate,
+            (move |mut labels: Query<&mut Text, (With<Translated>, Changed<Text>)>| {
+                for mut text in &mut labels {
+                    if text.0.is_empty() {
+                        continue;
+                    }
+                    let sample = cx.text(&text.0);
+                    if sample != text.0 {
+                        text.0 = sample;
+                    }
+                }
+            })
+            .before(bevy::ui::UiSystems::Prepare),
+        );
     }
 
     /// **Every floater × every script.**
@@ -759,6 +797,117 @@ mod tests {
             }
         }
         assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    /// Every floater's **default size shows its content**, unless the window
+    /// is already close to the size of the screen or its content is genuinely
+    /// long.
+    ///
+    /// The layout checks above ask whether anything overflows, escapes or is
+    /// sliced, and content scrolled out of view inside the window is none of
+    /// those — so a default rect that shows four fifths of a window's content,
+    /// behind a scrollbar nobody needed, passes every one of them. That is a
+    /// window opened too small, not a window with a lot in it.
+    ///
+    /// So: open each floater at its default size in the resting cell (native
+    /// strings, 15 px), and look at every scroll area in
+    /// it — an `Overflow::Scroll` axis, or a virtual list's rows against its
+    /// viewport. One that hides **some but no more than half** of what it
+    /// holds, in a window **well short of the screen** on that axis, means the
+    /// default size should grow by what is hidden. A scroll area hiding more
+    /// than half really has more than fits; a window already near the screen's
+    /// size has nowhere to grow; both are fine.
+    ///
+    /// "The screen" is the **1280×800 laptop** of
+    /// [`every_floater_fits_a_laptop_window`], not a desktop monitor: a default
+    /// rect has to fit that one anyway, so growing a window past 80% of it is
+    /// growing it into the check that would then fail.
+    #[test]
+    fn every_floater_default_size_shows_its_content() -> Result<(), TestError> {
+        /// The screen the default sizes are judged against — the laptop.
+        const SCREEN: Vec2 = Vec2::new(1280.0, 800.0);
+        /// A window at or above this fraction of the screen on an axis is
+        /// "close to the full size" there, and may scroll whatever it hides.
+        const NEAR_FULL: f32 = 0.8;
+        /// Hiding more than this fraction of a scroll area's content is the
+        /// content genuinely being long.
+        const MOSTLY_HIDDEN: f32 = 0.5;
+        /// Less than this many logical pixels hidden is rounding, not a
+        /// scrollbar anyone will notice.
+        const NEGLIGIBLE: f32 = 2.0;
+
+        let mut failures = Vec::new();
+        for floater in FLOATERS {
+            let test = LayoutTest::new().with_viewport(1280, 800);
+            let mut app = spawn_registered_floater(test, floater, ElementCx::new());
+            let root_name = format!("floater:{}", floater.id);
+            let root = find_by_name(&mut app, &root_name)
+                .ok_or_else(|| format!("floater `{}` spawned no `{root_name}` node", floater.id))?;
+            let window = app
+                .world()
+                .entity(root)
+                .get::<ComputedNode>()
+                .map(|computed| computed.size * computed.inverse_scale_factor)
+                .ok_or_else(|| format!("floater `{}` has no laid-out root", floater.id))?;
+
+            let mut query = app.world_mut().query::<(
+                Entity,
+                &ComputedNode,
+                &Node,
+                Option<&crate::virtual_list::VirtualList>,
+                Option<&Name>,
+            )>();
+            for (entity, computed, node, list, name) in query.iter(app.world()) {
+                if computed.size.cmple(Vec2::ZERO).any() {
+                    continue;
+                }
+                let scale = computed.inverse_scale_factor;
+                let size = computed.size * scale;
+                let content = computed.content_size * scale;
+                let scrollbar = computed.scrollbar_size * scale;
+                // (axis, content length, visible length, window length, screen length)
+                let mut areas = Vec::new();
+                if let Some(list) = list {
+                    let rows = crate::virtual_list::index_to_f32(list.item_count) * list.row_height;
+                    areas.push(("block", rows, size.y, window.y, SCREEN.y));
+                }
+                if node.overflow.y == OverflowAxis::Scroll {
+                    areas.push(("block", content.y, size.y - scrollbar.y, window.y, SCREEN.y));
+                }
+                if node.overflow.x == OverflowAxis::Scroll {
+                    areas.push((
+                        "inline",
+                        content.x,
+                        size.x - scrollbar.x,
+                        window.x,
+                        SCREEN.x,
+                    ));
+                }
+                for (axis, held, shown, window_length, screen_length) in areas {
+                    let hidden = held - shown;
+                    if hidden <= NEGLIGIBLE || held <= 0.0 {
+                        continue;
+                    }
+                    let fraction = hidden / held;
+                    if fraction > MOSTLY_HIDDEN || window_length >= screen_length * NEAR_FULL {
+                        continue;
+                    }
+                    let label =
+                        name.map_or_else(|| format!("{entity}"), |name| format!("`{name}`"));
+                    failures.push(format!(
+                        "floater `{}` ({}×{} at its default size): {label} hides {hidden:.0} of \
+                         {held:.0} px ({:.0}%) on the {axis} axis — grow the default size by \
+                         about {hidden:.0} px",
+                        floater.id,
+                        window.x.round(),
+                        window.y.round(),
+                        fraction * 100.0,
+                    ));
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{failures:#?}");
+        Ok(())
     }
 
     /// The floater sweep covers the whole registry, and the registry is not a

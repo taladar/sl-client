@@ -551,6 +551,31 @@ fn build_water_editor_content(In(handle): In<FloaterHandle>, mut commands: Comma
 
 /// Both windows' content build, which differs only in what goes on the tabs.
 fn build_editor_content(editor: EditorKind, handle: FloaterHandle, commands: &mut Commands) {
+    let (_content, status) = spawn_editor_content(commands, handle.content, editor, FONT_SIZE);
+
+    commands.queue(move |world: &mut World| {
+        if let Some(mut editors) = world.get_resource_mut::<SettingsEditors>() {
+            let state = editors.get_mut(editor);
+            state.ui.status = Some(status);
+            // The content is built on the window's first open, a frame after
+            // the session that asked for it was installed — so the widgets that
+            // have just appeared have never been seeded. Ask for it now.
+            if let Some(session) = state.session.as_mut() {
+                session.reseed = true;
+            }
+        }
+    });
+}
+
+/// Build one editor window's content into `slot` with its text at `font_size`:
+/// the name row, the knob tabs and the button row. Returns the content root and
+/// the status line. Shared by the live windows and their specimens.
+fn spawn_editor_content(
+    commands: &mut Commands,
+    slot: Entity,
+    editor: EditorKind,
+    font_size: f32,
+) -> (Entity, Entity) {
     let element = editor.element();
     let content = commands
         .spawn((
@@ -562,12 +587,12 @@ fn build_editor_content(editor: EditorKind, handle: FloaterHandle, commands: &mu
                 ..column(Val::Px(6.0))
             },
             Name::new(format!("{element}:content")),
-            ChildOf(handle.content),
+            ChildOf(slot),
         ))
         .id();
     let mut tab = 0_i32;
 
-    spawn_name_row(commands, content, editor, &mut tab);
+    spawn_name_row(commands, content, editor, font_size, &mut tab);
 
     let pages = editor.tabs();
     let labels: Vec<String> = pages.iter().map(|page| page.label.to_owned()).collect();
@@ -580,7 +605,7 @@ fn build_editor_content(editor: EditorKind, handle: FloaterHandle, commands: &mu
             labels: &labels,
             active: 0,
             tab_index: tab,
-            font_size: FONT_SIZE,
+            font_size,
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
@@ -653,20 +678,8 @@ fn build_editor_content(editor: EditorKind, handle: FloaterHandle, commands: &mu
         }
     }
 
-    let status = spawn_button_row(commands, content, editor, &mut tab);
-
-    commands.queue(move |world: &mut World| {
-        if let Some(mut editors) = world.get_resource_mut::<SettingsEditors>() {
-            let state = editors.get_mut(editor);
-            state.ui.status = Some(status);
-            // The content is built on the window's first open, a frame after
-            // the session that asked for it was installed — so the widgets that
-            // have just appeared have never been seeded. Ask for it now.
-            if let Some(session) = state.session.as_mut() {
-                session.reseed = true;
-            }
-        }
-    });
+    let status = spawn_button_row(commands, content, editor, font_size, &mut tab);
+    (content, status)
 }
 
 /// Three columns inside a tab panel: the swatches, then two of sliders.
@@ -680,7 +693,10 @@ fn spawn_columns(
         .spawn((
             Node {
                 width: Val::Percent(100.0),
-                min_height: Val::Px(0.0),
+                // The panel scrolls, so the strip keeps its full height and
+                // overflows into that scroll rather than being squeezed to
+                // the panel and spilling its columns past its own box.
+                flex_shrink: 0.0,
                 ..row(Val::Px(10.0))
             },
             Name::new(format!("{element}-{tab_name}:columns")),
@@ -754,12 +770,19 @@ fn spawn_texture_knob(
         .insert(EditorTextureSwatch { editor, knob });
 }
 
-/// The name row: a label and the field the asset's name is edited in.
+/// The name row: a label and the field the asset's name is edited in, at
+/// `font_size`.
 ///
 /// The field is not stashed anywhere: it carries an [`EditorNameField`], which
 /// is what the read-back and the re-seed find it by — a stored handle would be
 /// a second way to reach the same widget and one more thing to keep in step.
-fn spawn_name_row(commands: &mut Commands, parent: Entity, editor: EditorKind, tab: &mut i32) {
+fn spawn_name_row(
+    commands: &mut Commands,
+    parent: Entity,
+    editor: EditorKind,
+    font_size: f32,
+    tab: &mut i32,
+) {
     let row_entity = commands
         .spawn((
             Node {
@@ -773,7 +796,7 @@ fn spawn_name_row(commands: &mut Commands, parent: Entity, editor: EditorKind, t
         .id();
     commands.spawn((
         Text::new(String::new()),
-        UiFont::Sans.at(FONT_SIZE),
+        UiFont::Sans.at(font_size),
         text_role(LABEL_COLOR),
         Translated::new("settings-editor-name"),
         ChildOf(row_entity),
@@ -783,7 +806,7 @@ fn spawn_name_row(commands: &mut Commands, parent: Entity, editor: EditorKind, t
         row_entity,
         &TextInputSpec {
             tab_index: *tab,
-            font_size: FONT_SIZE,
+            font_size,
             fill: true,
             max_characters: Some(63),
             ..TextInputSpec::new(
@@ -799,12 +822,13 @@ fn spawn_name_row(commands: &mut Commands, parent: Entity, editor: EditorKind, t
     *tab = tab.saturating_add(1);
 }
 
-/// The Import / Save / Save As / Revert row and the status line under it.
-/// Returns the status text entity.
+/// The Import / Save / Save As / Revert row and the status line under it, the
+/// status at `font_size`. Returns the status text entity.
 fn spawn_button_row(
     commands: &mut Commands,
     parent: Entity,
     editor: EditorKind,
+    font_size: f32,
     tab: &mut i32,
 ) -> Entity {
     let row_entity = commands
@@ -842,7 +866,7 @@ fn spawn_button_row(
     commands
         .spawn((
             Text::new(String::new()),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(DIM_LABEL_COLOR),
             Name::new(format!("{}-status", editor.element())),
             ChildOf(parent),
@@ -2038,6 +2062,81 @@ fn set_status(texts: &mut Query<&mut Text>, status: Option<Entity>, message: &st
     {
         message.clone_into(&mut text.0);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Gallery specimens.
+// ---------------------------------------------------------------------------
+
+/// The sky editor's gallery / `ui_test` specimen — see
+/// `spawn_settings_editor_specimen`.
+pub fn spawn_sky_settings_editor_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: sl_viewer_ui_core::ui_element::ElementCx,
+) -> Entity {
+    spawn_settings_editor_specimen(EditorKind::Sky, commands, parent, cx)
+}
+
+/// The water editor's gallery / `ui_test` specimen — see
+/// `spawn_settings_editor_specimen`.
+pub fn spawn_water_settings_editor_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: sl_viewer_ui_core::ui_element::ElementCx,
+) -> Entity {
+    spawn_settings_editor_specimen(EditorKind::Water, commands, parent, cx)
+}
+
+/// One editor window's specimen: the live content, built by the same
+/// [`spawn_editor_content`] the viewer's window is at the cell's font size, then
+/// seeded by the live [`reseed_editor_widgets`] from a sample session — the
+/// legacy WindLight default sky (or water) under a sample name, as if it had
+/// just been opened — and its slider readouts drawn by the shared rows sync
+/// that writes them live. The session has no inventory item behind it, which is what
+/// an imported preset looks like; nothing here saves.
+///
+/// The sample session stays installed as the window's state, so a drag on a
+/// specimen slider edits it as it would live.
+fn spawn_settings_editor_specimen(
+    editor: EditorKind,
+    commands: &mut Commands,
+    parent: Entity,
+    cx: sl_viewer_ui_core::ui_element::ElementCx,
+) -> Entity {
+    let (content, status) = spawn_editor_content(commands, parent, editor, cx.font_size);
+    let (name, asset) = match editor {
+        EditorKind::Sky => {
+            let name = cx.text("Sample Sky");
+            let sky = SkySettings::legacy_windlight_default(&name);
+            (name, EnvironmentAsset::Sky(Box::new(sky)))
+        }
+        EditorKind::Water => {
+            let name = cx.text("Sample Water");
+            let water = WaterSettings::legacy_default(&name);
+            (name, EnvironmentAsset::Water(water))
+        }
+    };
+    commands.queue(move |world: &mut World| {
+        {
+            let mut editors = world.get_resource_or_init::<SettingsEditors>();
+            let state = editors.get_mut(editor);
+            state.ui.status = Some(status);
+            state.session = Some(EditSession {
+                item: None,
+                name,
+                original: asset.clone(),
+                edited: asset,
+                dirty: false,
+                modified: false,
+                reseed: true,
+                saving: false,
+            });
+        }
+        crate::specimen::run_once(world, editor.element(), reseed_editor_widgets);
+        crate::specimen::draw_slider_readouts(world, editor.element());
+    });
+    content
 }
 
 #[cfg(test)]

@@ -46,11 +46,12 @@
 //!
 //! # Constructible without its wiring
 //!
-//! Per the registry rule ([`crate::ui_element`]) the picker's novel layout — the
-//! emoji cell, the tone-swatch row and the preview line — is registered as a
-//! static specimen ([`spawn_emoji_picker_specimen`]) the gallery / harness sweep
-//! across every script, size and direction, with the live toggling, filtering and
-//! insertion left to [`EmojiPickerPlugin`].
+//! Per the registry rule ([`crate::ui_element`]) the picker's live content —
+//! built by the same function the floater is, its first group's rows dressed by
+//! the live row code — is registered as a specimen
+//! ([`spawn_emoji_picker_specimen`]) the gallery / harness sweep across every
+//! script, size and direction, with the live toggling, filtering and insertion
+//! left to [`EmojiPickerPlugin`].
 //!
 //! Reference (Firestorm, read-only): `llfloateremojipicker`, `llemojidictionary`.
 
@@ -63,22 +64,20 @@ use bevy::window::PrimaryWindow;
 use bevy_flair::style::components::ClassList;
 use sl_emoji::{Emoji, Group, SkinTone, search};
 
-use crate::floater::{
-    Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterOp, FloaterSpec, spawn_floater,
-};
+use crate::floater::{Floater, FloaterCaps, FloaterCommand, FloaterOp, FloaterSpec, spawn_floater};
 use crate::i18n::Translated;
 use crate::skin::LIST_SURFACE_CLASS;
 use crate::skin::TILE_CLASS;
 use crate::skin::text_role;
 use crate::skin_palette::SkinPalette;
-use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, row};
 use crate::ui_element::{ElementCx, TextMayClip};
 use crate::ui_font::UiFont;
 use crate::ui_search::{SearchFieldSpec, spawn_search_field};
 use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab_strip};
 use crate::virtual_list::{
     VirtualList, VirtualRow, VirtualViewport, amend_row_node, layout_virtual_lists,
-    spawn_virtual_scrollbar,
+    spawn_specimen_row, spawn_virtual_scrollbar,
 };
 use sl_viewer_ui_core::scrollbar::SCROLLBAR_THICKNESS;
 
@@ -112,6 +111,10 @@ const VIEWPORT_WIDTH: f32 = CELL_SIZE * 9.0 + SCROLLBAR_THICKNESS;
 /// (a scroll viewport is the case the content-sizing convention carves out, like
 /// the inventory list): eight cells tall, scrolling past that.
 const VIEWPORT_HEIGHT: f32 = CELL_SIZE * 8.0;
+
+/// How many grid rows the viewport shows whole — [`VIEWPORT_HEIGHT`] over
+/// [`CELL_SIZE`], pinned beside it by a unit test.
+const VIEWPORT_ROWS: usize = 8;
 
 /// The emoji glyph's font size inside a cell, in logical pixels — large enough to
 /// read, small enough to sit inside a [`CELL_SIZE`] tile.
@@ -487,29 +490,51 @@ fn populate_new_emoji_rows(
         if child_of.parent() != ui.viewport {
             continue;
         }
-        // Amended, not inserted: `top` and `display` are the virtual list's.
-        amend_row_node(&mut commands, row_entity, |node| {
-            node.position_type = PositionType::Absolute;
-            node.left = Val::Px(0.0);
-            node.right = Val::Px(0.0);
-            node.height = Val::Px(CELL_SIZE);
-            node.align_items = AlignItems::Center;
-        });
-        commands.entity(row_entity).insert(Pickable::IGNORE);
-        let mut cells = Vec::with_capacity(GRID_COLUMNS);
-        for _column in 0..GRID_COLUMNS {
-            cells.push(spawn_live_emoji_cell(&mut commands, row_entity));
-        }
-        commands.entity(row_entity).insert(EmojiRowCells { cells });
+        // A fresh row is blank until `bind_emoji_rows` fills it.
+        dress_emoji_row(&mut commands, row_entity, &[], SkinTone::Default);
     }
 }
 
-/// Spawn one live grid cell under `row_entity`: a fixed-size tile with a centred
-/// glyph node and the press / hover observers that make it insert and preview.
-fn spawn_live_emoji_cell(commands: &mut Commands, row_entity: Entity) -> Entity {
+/// Dress a pooled grid row as a line of [`GRID_COLUMNS`] cells, the first
+/// `emoji.len()` of them showing those glyphs at `tone` and the rest blank.
+/// The live populate passes no emoji (the bind fills the row); the gallery
+/// specimen, whose host runs no bind, passes the row's slice of the view.
+fn dress_emoji_row(commands: &mut Commands, row_entity: Entity, emoji: &[Emoji], tone: SkinTone) {
+    // Amended, not inserted: `top` and `display` are the virtual list's.
+    amend_row_node(commands, row_entity, |node| {
+        node.position_type = PositionType::Absolute;
+        node.left = Val::Px(0.0);
+        node.right = Val::Px(0.0);
+        node.height = Val::Px(CELL_SIZE);
+        node.align_items = AlignItems::Center;
+    });
+    commands.entity(row_entity).insert(Pickable::IGNORE);
+    let mut cells = Vec::with_capacity(GRID_COLUMNS);
+    for column in 0..GRID_COLUMNS {
+        let shown = emoji.get(column).copied();
+        cells.push(spawn_live_emoji_cell(commands, row_entity, shown, tone));
+    }
+    commands.entity(row_entity).insert(EmojiRowCells { cells });
+}
+
+/// The glyph a cell draws for the emoji it is bound to at `tone`: its toned
+/// glyph, or nothing for a trailing blank.
+fn cell_glyph(emoji: Option<Emoji>, tone: SkinTone) -> &'static str {
+    emoji.map_or("", |emoji| toned_glyph(emoji, tone))
+}
+
+/// Spawn one live grid cell under `row_entity`, bound to `emoji` at `tone`: a
+/// fixed-size tile with a centred glyph node and the press / hover observers
+/// that make it insert and preview.
+fn spawn_live_emoji_cell(
+    commands: &mut Commands,
+    row_entity: Entity,
+    emoji: Option<Emoji>,
+    tone: SkinTone,
+) -> Entity {
     let glyph = commands
         .spawn((
-            Text::new(""),
+            Text::new(cell_glyph(emoji, tone)),
             UiFont::Sans.at(CELL_FONT_SIZE),
             // White is "do not tint", not a role: a colour emoji carries its
             // own colours and any text role would wash over them.
@@ -541,7 +566,7 @@ fn spawn_live_emoji_cell(commands: &mut Commands, row_entity: Entity) -> Entity 
             BackgroundColor(Color::NONE),
             ClassList::new_with_classes([TILE_CLASS]),
             Pickable::default(),
-            EmojiCell { emoji: None, glyph },
+            EmojiCell { emoji, glyph },
             ChildOf(row_entity),
         ))
         .add_child(glyph)
@@ -551,13 +576,17 @@ fn spawn_live_emoji_cell(commands: &mut Commands, row_entity: Entity) -> Entity 
     // `cell` so it reads the cell's *current* bound emoji — which recycling keeps
     // up to date — rather than a snapshot. The hover *highlight* is no longer
     // one of them: `.sk-tile:hover` reaches it with no code at all.
+    //
+    // The picker's state is read optionally: [`EmojiPickerPlugin`] always has
+    // it, but the gallery specimen's cells are the live ones in a host that
+    // runs no picker, where there is no field to insert into or state to
+    // preview from.
     commands
         .entity(cell)
         .observe(
             move |mut press: On<Pointer<Press>>,
                   cells: Query<&EmojiCell>,
-                  target: Res<EmojiTarget>,
-                  state: Res<EmojiPickerState>,
+                  picker: Option<(Res<EmojiTarget>, Res<EmojiPickerState>)>,
                   mut fields: Query<&mut EditableText>,
                   mut font_cx: ResMut<FontCx>,
                   mut layout_cx: ResMut<LayoutCx>| {
@@ -567,6 +596,9 @@ fn spawn_live_emoji_cell(commands: &mut Commands, row_entity: Entity) -> Entity 
                 if press.button != PointerButton::Primary {
                     return;
                 }
+                let Some((target, state)) = picker else {
+                    return;
+                };
                 let Ok(&EmojiCell {
                     emoji: Some(emoji), ..
                 }) = cells.get(cell)
@@ -588,9 +620,12 @@ fn spawn_live_emoji_cell(commands: &mut Commands, row_entity: Entity) -> Entity 
         .observe(
             move |_over: On<Pointer<Over>>,
                   cells: Query<&EmojiCell>,
-                  state: Res<EmojiPickerState>,
+                  state: Option<Res<EmojiPickerState>>,
                   ui: Option<Res<EmojiPickerUi>>,
                   mut texts: Query<&mut Text>| {
+                let Some(state) = state else {
+                    return;
+                };
                 let Ok(&EmojiCell { emoji, .. }) = cells.get(cell) else {
                     return;
                 };
@@ -687,7 +722,7 @@ fn bind_emoji_rows(
                 cell.emoji = emoji;
             }
             if let Ok(mut text) = texts.get_mut(cell.glyph) {
-                let glyph = emoji.map_or("", |emoji| toned_glyph(emoji, state.tone));
+                let glyph = cell_glyph(emoji, state.tone);
                 if text.0 != glyph {
                     glyph.clone_into(&mut text.0);
                 }
@@ -871,25 +906,39 @@ fn spawn_emoji_picker(mut commands: Commands, root: Res<UiRoot>) {
         .entity(handle.title_text)
         .insert(Translated::new("emoji-picker-title"));
 
-    let (viewport, search, tab_strip, preview) = build_emoji_picker_content(&mut commands, handle);
+    let parts = build_emoji_picker_content(&mut commands, handle.content, CHROME_FONT_SIZE);
 
     commands.insert_resource(EmojiPickerUi {
         panel: handle.root,
-        viewport,
-        search,
-        tab_strip,
-        preview,
+        viewport: parts.viewport,
+        search: parts.search,
+        tab_strip: parts.tab_strip,
+        preview: parts.preview,
     });
 }
 
-/// Build the picker's content into the floater's content slot, returning the
-/// viewport, search field, category strip and preview line the plugin needs.
+/// The parts of the picker's content the plugin (and the specimen) reach.
+#[derive(Debug, Clone, Copy)]
+struct EmojiPickerParts {
+    /// The scrolling grid viewport (the [`VirtualList`]).
+    viewport: Entity,
+    /// The search field's [`EditableText`].
+    search: Entity,
+    /// The category [`TabStrip`].
+    tab_strip: Entity,
+    /// The preview line.
+    preview: Entity,
+}
+
+/// Build the picker's content into `content` (the floater's content slot) with
+/// its chrome at `font_size`, returning the viewport, search field, category
+/// strip and preview line the plugin needs. Shared by the live floater and its
+/// gallery specimen.
 fn build_emoji_picker_content(
     commands: &mut Commands,
-    handle: FloaterHandle,
-) -> (Entity, Entity, Entity, Entity) {
-    let content = handle.content;
-
+    content: Entity,
+    font_size: f32,
+) -> EmojiPickerParts {
     // Search field — the reusable widget (`crate::ui_search`), the same box the
     // menu bar and inventory use. Its term drives the grid via `read_emoji_search`.
     let search = spawn_search_field(
@@ -897,7 +946,7 @@ fn build_emoji_picker_content(
         content,
         &SearchFieldSpec {
             tab_index: 1,
-            font_size: CHROME_FONT_SIZE,
+            font_size,
             placeholder: "Search emoji".to_owned(),
             search_glyph: true,
             ..SearchFieldSpec::new("emoji-picker")
@@ -921,7 +970,7 @@ fn build_emoji_picker_content(
             labels: &labels,
             active: 0,
             tab_index: 2,
-            font_size: CHROME_FONT_SIZE,
+            font_size,
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: false,
@@ -971,7 +1020,7 @@ fn build_emoji_picker_content(
     let preview = commands
         .spawn((
             Text::new(""),
-            UiFont::Sans.at(CHROME_FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(PREVIEW_COLOR),
             TextMayClip {
                 reason: "the emoji preview line is a status hint, cut to the window width like a \
@@ -987,7 +1036,12 @@ fn build_emoji_picker_content(
         ))
         .id();
 
-    (viewport, search, tab_strip, preview)
+    EmojiPickerParts {
+        viewport,
+        search,
+        tab_strip,
+        preview,
+    }
 }
 
 /// Build the six-swatch skin-tone row under `parent`, each swatch a live button
@@ -1006,12 +1060,17 @@ fn build_tone_row(commands: &mut Commands, parent: Entity) {
         .id();
     for tone in SkinTone::ALL {
         let swatch = spawn_tone_swatch(commands, row_entity, base, tone);
+        // The state is read optionally, as the cells' is: the gallery
+        // specimen's swatches are the live ones in a host with no picker.
         commands.entity(swatch).observe(
-            move |mut press: On<Pointer<Press>>, mut state: ResMut<EmojiPickerState>| {
+            move |mut press: On<Pointer<Press>>, state: Option<ResMut<EmojiPickerState>>| {
                 press.propagate(false);
                 if press.button != PointerButton::Primary {
                     return;
                 }
+                let Some(mut state) = state else {
+                    return;
+                };
                 if state.tone != tone {
                     state.tone = tone;
                 }
@@ -1067,108 +1126,49 @@ fn spawn_tone_swatch(
 // Registry specimen
 // ---------------------------------------------------------------------------
 
-/// Spawn a **static** emoji-picker specimen for the gallery / harness: the
-/// picker's novel layout — a couple of grid rows of real glyphs, the tone-swatch
-/// row and the preview line — laid out in flow with no live behaviour, so its
-/// layout is swept across every script, size and direction.
+/// The emoji picker's gallery / `ui_test` specimen: the live content — search
+/// field, category strip, the virtualized grid with its scrollbar, the tone
+/// row and the preview line — built by the same `build_emoji_picker_content`
+/// the viewer's floater is, with its chrome at the cell's font size.
 ///
-/// The search field and the category strip are swept by their own specimens, so
-/// they are not duplicated here. The grid cells are content-sized (padded around
-/// the glyph) rather than the live grid's fixed tiles, so a large font grows them
-/// rather than being clipped by the containment check.
+/// The grid shows the first group, as the live picker opens: the list's row
+/// count is the view's, and the rows the viewport shows are pooled and dressed
+/// with that group's glyphs through `dress_emoji_row`, since neither
+/// specimen host runs this plugin's populate / bind. The preview line shows
+/// what hovering the first glyph writes into it.
 pub fn spawn_emoji_picker_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: ElementCx,
 ) -> Entity {
-    let panel = commands
-        .spawn((
-            Node {
-                ..column(Val::Px(6.0))
-            },
-            Name::new("emoji-picker-sample"),
-            ChildOf(parent),
-        ))
-        .id();
-
-    // Two sample rows of the first glyphs, content-sized so the sweep grows them.
-    let sample: Vec<Emoji> = Group::SmileysAndEmotion
-        .emojis()
-        .take(GRID_COLUMNS.saturating_mul(2))
-        .collect();
-    for chunk in sample.chunks(GRID_COLUMNS) {
-        let grid_row = commands
-            .spawn((
-                Node {
-                    align_items: AlignItems::Center,
-                    ..row(Val::Px(2.0))
-                },
-                ChildOf(panel),
-            ))
-            .id();
-        for emoji in chunk {
-            commands
-                .spawn((
-                    Node {
-                        min_width: Val::Px(CELL_SIZE),
-                        align_items: AlignItems::Center,
-                        justify_content: JustifyContent::Center,
-                        padding: UiRect::all(Val::Px(2.0)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::NONE),
-                    // The real cell's class and pickability, so the card shows
-                    // the real look: a specimen cell used to carry neither, so
-                    // `.sk-tile:hover` could not reach it and the element a
-                    // skin author checks a grid against was the one thing in
-                    // the gallery that could not be skinned.
-                    ClassList::new_with_classes([TILE_CLASS]),
-                    Pickable::default(),
-                    Name::new("emoji-picker-sample-cell"),
-                    ChildOf(grid_row),
-                ))
-                .with_child((
-                    Text::new(emoji.glyph().to_owned()),
-                    cx.font(UiFont::Sans),
-                    // Untinted: a colour emoji paints itself.
-                    TextColor(Color::WHITE),
-                ));
-        }
+    let parts = build_emoji_picker_content(commands, parent, cx.font_size);
+    let state = EmojiPickerState::default();
+    let view = build_view(state.group, &state.query);
+    let rows = row_count(view.len());
+    commands
+        .entity(parts.viewport)
+        .entry::<VirtualList>()
+        .and_modify(move |mut list| list.item_count = rows);
+    for (index, chunk) in view.chunks(GRID_COLUMNS).take(VIEWPORT_ROWS).enumerate() {
+        let row = spawn_specimen_row(commands, parts.viewport, index, CELL_SIZE);
+        dress_emoji_row(commands, row, chunk, state.tone);
     }
-
-    // The tone-swatch row (static — no press observers), and a preview line whose
-    // prose comes from the sweep sample.
-    let base = sl_emoji::by_shortcode(SWATCH_SAMPLE_SHORTCODE);
-    let tone_row = commands
-        .spawn((
-            Node {
-                align_items: AlignItems::Center,
-                ..row(Val::Px(3.0))
-            },
-            ChildOf(panel),
-        ))
-        .id();
-    for tone in SkinTone::ALL {
-        spawn_tone_swatch(commands, tone_row, base, tone);
+    if let Some(&first) = view.first() {
+        commands
+            .entity(parts.preview)
+            .insert(Text::new(preview_text(first, state.tone)));
     }
-
-    commands.spawn((
-        Text::new(cx.text("Hover an emoji to preview it")),
-        cx.font(UiFont::Sans),
-        text_role(PREVIEW_COLOR),
-        Name::new("emoji-picker-sample-preview"),
-        ChildOf(panel),
-    ));
-
-    panel
+    parent
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        CELL_SIZE, EmojiPickerState, GRID_COLUMNS, SWATCH_SAMPLE_SHORTCODE, VIEWPORT_WIDTH,
-        anchor_top, build_view, insert_glyph_into_editable, preview_text, row_count, toned_glyph,
+        CELL_SIZE, EmojiPickerState, GRID_COLUMNS, SWATCH_SAMPLE_SHORTCODE, VIEWPORT_HEIGHT,
+        VIEWPORT_ROWS, VIEWPORT_WIDTH, anchor_top, build_view, insert_glyph_into_editable,
+        preview_text, row_count, toned_glyph,
     };
+    use crate::virtual_list::index_to_f32;
     use bevy::text::{EditableText, FontCx, LayoutCx};
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_emoji::{Group, SkinTone, by_glyph, by_shortcode};
@@ -1190,6 +1190,7 @@ mod tests {
         assert_eq!(CELL_SIZE, 30.0);
         assert_eq!(GRID_COLUMNS, 9);
         assert_eq!(VIEWPORT_WIDTH, 280.0);
+        assert_eq!(VIEWPORT_HEIGHT, index_to_f32(VIEWPORT_ROWS) * CELL_SIZE);
     }
 
     /// A blank query shows the active group's own list; a non-blank query shows

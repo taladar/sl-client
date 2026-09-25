@@ -57,15 +57,18 @@ use sl_rlv::{
 use sl_viewer_ui_core::i18n::Translated;
 use sl_viewer_ui_core::ui::UiPanelShown;
 use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems, column, row};
+use sl_viewer_ui_core::ui_element::{ContentMayOverflow, TextMayClip};
+use sl_viewer_ui_core::ui_ellipsis::{RevealEllipsis, spawn_ellipsis_marker};
 use sl_viewer_ui_core::ui_font::UiFont;
 use sl_viewer_ui_core::virtual_list::{
     VirtualList, VirtualRow, VirtualViewport, amend_row_node, layout_virtual_lists,
-    spawn_virtual_scrollbar,
+    spawn_specimen_row, spawn_virtual_scrollbar,
 };
 use sl_viewer_ui_widgets::floater::{
     DeferredFloaterContent, Floater, FloaterCaps, FloaterHandle, FloaterSpec, floater_panel,
     floater_shown, spawn_floater,
 };
+use sl_viewer_ui_widgets::ui_tab::DEFAULT_ELLIPSIS;
 use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use sl_viewer_world_api::rlv::{
     RlvConsoleKind, RlvSession, SETTING_DEBUG_HIDE_UNSET_DUPLICATE, ViewerRlvExt, rlv_flag,
@@ -76,7 +79,7 @@ use uuid::Uuid;
 use crate::style::{ACTION_BACKGROUND, DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, ROW_HEIGHT};
 use sl_viewer_ui_core::skin::{
     CONSOLE_ERROR_CLASS, CONSOLE_INFO_CLASS, CONSOLE_REPLY_CLASS, LIST_SURFACE_CLASS, TEXT_CLASS,
-    set_state_class_on,
+    set_state_class, set_state_class_on,
 };
 
 /// The floater's stable id.
@@ -85,6 +88,21 @@ pub const CONSOLE_FLOATER_ID: &str = "rlv-console";
 /// The width of the input field, in `"0"` advances. It fills its row, so this
 /// is only the intrinsic width the fill overrides.
 const INPUT_WIDTH_GLYPHS: f32 = 48.0;
+
+/// Why a transcript line's clip may slice the line it holds: a virtualized
+/// list's rows are one uniform height, so a line longer than the window is
+/// drawn on its one row and cut behind a revealed `…` rather than wrapped into
+/// the rows below it.
+const LINE_CLIP_REASON: &str =
+    "a console line is one uniform-height row, cut at the row's end behind its revealed `…` marker";
+
+/// The height of a transcript row whose line is drawn at `font_size`:
+/// [`ROW_HEIGHT`] at [`FONT_SIZE`], and in proportion above it, so a larger
+/// font's line stays inside its row instead of spilling into its neighbours.
+/// Never less than [`ROW_HEIGHT`].
+fn console_row_height(font_size: f32) -> f32 {
+    ROW_HEIGHT.max((font_size * ROW_HEIGHT / FONT_SIZE).ceil())
+}
 
 // --- Pure command handling ------------------------------------------------
 
@@ -441,6 +459,14 @@ fn spawn_console_floater(mut commands: Commands, root: Res<UiRoot>) {
 
 /// First-open content build: the transcript above, the input and Clear below.
 fn build_console_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
+    let ui = spawn_console_content(&mut commands, handle.content, FONT_SIZE);
+    commands.insert_resource(ui);
+}
+
+/// Build the console's content into `parent` at `font_size`: the transcript
+/// viewport, the prompt, the input and the Clear button. Shared by the live
+/// floater's first-open build and its specimen.
+fn spawn_console_content(commands: &mut Commands, parent: Entity, font_size: f32) -> ConsoleUi {
     let content = commands
         .spawn((
             Node {
@@ -450,7 +476,7 @@ fn build_console_content(In(handle): In<FloaterHandle>, mut commands: Commands) 
                 ..column(Val::Px(4.0))
             },
             Name::new("rlv-console-content"),
-            ChildOf(handle.content),
+            ChildOf(parent),
         ))
         .id();
 
@@ -468,7 +494,7 @@ fn build_console_content(In(handle): In<FloaterHandle>, mut commands: Commands) 
             // used to paint by hand, plus the field-family text roles the
             // class re-roots for a light list. See `LIST_SURFACE_CLASS`.
             ClassList::new_with_classes([LIST_SURFACE_CLASS]),
-            VirtualList::new(ROW_HEIGHT),
+            VirtualList::new(console_row_height(font_size)),
             VirtualViewport,
             TabIndex(1),
             Pickable::default(),
@@ -476,7 +502,7 @@ fn build_console_content(In(handle): In<FloaterHandle>, mut commands: Commands) 
             ChildOf(content),
         ))
         .id();
-    spawn_virtual_scrollbar(&mut commands, viewport);
+    spawn_virtual_scrollbar(commands, viewport);
 
     let input_row = commands
         .spawn((
@@ -492,30 +518,33 @@ fn build_console_content(In(handle): In<FloaterHandle>, mut commands: Commands) 
         .id();
     commands.spawn((
         Text::new(RlvConsoleKind::Input.prefix().to_owned()),
-        UiFont::Mono.at(FONT_SIZE),
+        UiFont::Mono.at(font_size),
         TextColor(DIM_LABEL_COLOR),
         Pickable::IGNORE,
         Name::new("rlv-console-prompt"),
         ChildOf(input_row),
     ));
     let input = spawn_text_input(
-        &mut commands,
+        commands,
         input_row,
         &TextInputSpec {
             tab_index: 0,
-            font_size: FONT_SIZE,
+            font_size,
             width_glyphs: INPUT_WIDTH_GLYPHS,
             fill: true,
             ..TextInputSpec::new("rlv-console-input", TextInputKind::Line)
         },
     );
-    spawn_clear_button(&mut commands, input_row);
+    spawn_clear_button(commands, input_row, font_size);
 
-    commands.insert_resource(ConsoleUi { viewport, input });
+    ConsoleUi { viewport, input }
 }
 
 /// The Clear button: empty the transcript.
-fn spawn_clear_button(commands: &mut Commands, parent: Entity) {
+///
+/// The session is optional so a press in a host that has none (the gallery's
+/// specimen) is a no-op rather than a failed observer.
+fn spawn_clear_button(commands: &mut Commands, parent: Entity, font_size: f32) {
     commands
         .spawn((
             Node {
@@ -536,20 +565,97 @@ fn spawn_clear_button(commands: &mut Commands, parent: Entity) {
         ))
         .with_child((
             Text::new(String::new()),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             TextColor(LABEL_COLOR),
             Translated::new("rlv-console-clear"),
             Pickable::IGNORE,
         ))
         .observe(
-            move |mut press: On<Pointer<Press>>, mut session: ResMut<RlvSession>| {
+            move |mut press: On<Pointer<Press>>, session: Option<ResMut<RlvSession>>| {
                 press.propagate(false);
                 if press.button != PointerButton::Primary {
                     return;
                 }
-                session.clear_console();
+                if let Some(mut session) = session {
+                    session.clear_console();
+                }
             },
         );
+}
+
+// --- Gallery specimen -----------------------------------------------------
+
+/// The lines the console specimen types, in order: a restriction pair that
+/// lands, an unknown keyword that is refused, an extension read that is
+/// answered, and a query that is accepted but unanswered — one of each thing a
+/// transcript line can be.
+const SPECIMEN_LINES: [&str; 4] = [
+    "@detach=n,fly=n",
+    "@notacommand=n",
+    "@getdebug_avatarsex=2222",
+    "@getoutfit=2222",
+];
+
+/// The RLVa console's gallery / `ui_test` specimen: the live content, built by
+/// the same `spawn_console_content` the floater is, with a transcript made by
+/// running `SPECIMEN_LINES` through the live [`run_line`] against a fresh
+/// state and drawn by the live row builder and binder.
+pub fn spawn_rlv_console_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: sl_viewer_ui_core::ui_element::ElementCx,
+) -> Entity {
+    let ui = spawn_console_content(commands, parent, cx.font_size);
+    let mut state = RlvState::new();
+    let mut ext = ViewerRlvExt {
+        settings: None,
+        facts: sl_viewer_world_api::rlv::RlvExtFacts {
+            aspect_ratio: Some(1.5),
+            avatar_is_male: Some(false),
+        },
+    };
+    let mut environment = sl_viewer_world_api::rlv::RlvEnvironmentSlot::default();
+    let mut transcript = Vec::new();
+    for line in SPECIMEN_LINES {
+        // Echoed first, the way `submit_console_line` logs what was typed.
+        transcript.push((RlvConsoleKind::Input, line.to_owned()));
+        let _run = run_line(
+            &mut state,
+            Uuid::nil(),
+            line,
+            false,
+            &mut ext,
+            &mut environment,
+            &mut transcript,
+        );
+    }
+    for (index, (kind, text)) in transcript.iter().enumerate() {
+        let row = spawn_specimen_row(
+            commands,
+            ui.viewport,
+            index,
+            console_row_height(cx.font_size),
+        );
+        let holder = spawn_console_row(commands, row, cx.font_size);
+        commands
+            .entity(holder)
+            .insert(Text::new(cx.text(&console_line_text(*kind, text))));
+        let kind = *kind;
+        commands
+            .entity(holder)
+            .entry::<ClassList>()
+            .and_modify(move |mut classes| {
+                for (class, of) in CONSOLE_KIND_CLASSES {
+                    set_state_class(&mut classes, class, kind == of);
+                }
+            });
+    }
+    let count = transcript.len();
+    commands
+        .entity(ui.viewport)
+        .entry::<VirtualList>()
+        .and_modify(move |mut list| list.item_count = count);
+    parent
 }
 
 // --- Systems --------------------------------------------------------------
@@ -693,21 +799,7 @@ fn bind_console_rows(
         if child_of.parent() != ui.viewport {
             continue;
         }
-        amend_row_node(&mut commands, row_entity, |node| {
-            node.align_items = AlignItems::Center;
-            node.padding = UiRect::horizontal(Val::Px(4.0));
-        });
-        let text = commands
-            .spawn((
-                Text::new(String::new()),
-                UiFont::Mono.at(FONT_SIZE),
-                ClassList::new_with_classes([TEXT_CLASS]),
-                Pickable::IGNORE,
-                Name::new("rlv-console-line"),
-                ChildOf(row_entity),
-            ))
-            .id();
-        commands.entity(row_entity).insert(ConsoleRowText(text));
+        spawn_console_row(&mut commands, row_entity, FONT_SIZE);
     }
 
     let refresh_all = session.is_changed();
@@ -719,9 +811,7 @@ fn bind_console_rows(
             continue;
         }
         let line = row.index.and_then(|index| session.console().get(index));
-        let value = line.map_or_else(String::new, |line| {
-            format!("{}{}", line.kind.prefix(), line.text)
-        });
+        let value = line.map_or_else(String::new, |line| console_line_text(line.kind, &line.text));
         if let Ok((mut text, _color)) = texts.get_mut(holder.0)
             && text.0 != value
         {
@@ -731,14 +821,84 @@ fn bind_console_rows(
         // said as a class. A typed command carries none and reads as plain
         // text, which is what the parked (empty) row also wants.
         let kind = line.map(|line| line.kind);
-        for (class, wanted) in [
-            (CONSOLE_REPLY_CLASS, kind == Some(RlvConsoleKind::Reply)),
-            (CONSOLE_INFO_CLASS, kind == Some(RlvConsoleKind::Info)),
-            (CONSOLE_ERROR_CLASS, kind == Some(RlvConsoleKind::Error)),
-        ] {
-            set_state_class_on(&mut classes, holder.0, class, wanted);
+        for (class, of) in CONSOLE_KIND_CLASSES {
+            set_state_class_on(&mut classes, holder.0, class, kind == Some(of));
         }
     }
+}
+
+/// The class each kind of transcript line carries. A typed command
+/// ([`RlvConsoleKind::Input`]) is not listed: it carries none and reads as
+/// plain text.
+const CONSOLE_KIND_CLASSES: [(&str, RlvConsoleKind); 3] = [
+    (CONSOLE_REPLY_CLASS, RlvConsoleKind::Reply),
+    (CONSOLE_INFO_CLASS, RlvConsoleKind::Info),
+    (CONSOLE_ERROR_CLASS, RlvConsoleKind::Error),
+];
+
+/// How a transcript line is written: its stream's prefix, then its text.
+fn console_line_text(kind: RlvConsoleKind, text: &str) -> String {
+    format!("{}{text}", kind.prefix())
+}
+
+/// Dress a pooled transcript row: its alignment and padding, and the one text
+/// node the binder writes the line into. Returns that text node, which is also
+/// recorded on the row as [`ConsoleRowText`].
+///
+/// The line is one row high, whatever its length (the list's rows are
+/// uniform), so it does not wrap: it sits in a shrinking clip container and a
+/// line longer than the window loses its tail behind the shared `…` marker —
+/// the inventory row's and the table cell's arrangement.
+fn spawn_console_row(commands: &mut Commands, row_entity: Entity, font_size: f32) -> Entity {
+    amend_row_node(commands, row_entity, |node| {
+        node.align_items = AlignItems::Center;
+        node.padding = UiRect::horizontal(Val::Px(4.0));
+    });
+    let clip = commands
+        .spawn((
+            Node {
+                min_width: Val::Px(0.0),
+                overflow: Overflow::clip(),
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            ContentMayOverflow {
+                reason: LINE_CLIP_REASON,
+            },
+            TextMayClip {
+                reason: LINE_CLIP_REASON,
+            },
+            Pickable::IGNORE,
+            ChildOf(row_entity),
+        ))
+        .id();
+    let text = commands
+        .spawn((
+            Text::new(String::new()),
+            TextLayout::no_wrap(),
+            UiFont::Mono.at(font_size),
+            ClassList::new_with_classes([TEXT_CLASS]),
+            // The line keeps its full width; the clip is what shrinks, so an
+            // over-long line overflows it and reveals the marker.
+            Node {
+                flex_shrink: 0.0,
+                ..default()
+            },
+            Pickable::IGNORE,
+            Name::new("rlv-console-line"),
+            ChildOf(clip),
+        ))
+        .id();
+    let marker = spawn_ellipsis_marker(
+        commands,
+        row_entity,
+        font_size,
+        LABEL_COLOR,
+        DEFAULT_ELLIPSIS,
+    );
+    commands.entity(clip).insert(RevealEllipsis { marker });
+    commands.entity(row_entity).insert(ConsoleRowText(text));
+    text
 }
 
 /// Lift everything the console put in force when the window closes.

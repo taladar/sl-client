@@ -19,7 +19,7 @@ use sl_client_bevy::TextureKey;
 use sl_viewer_pickers::ui_texture_picker::spawn_texture_swatch;
 use sl_viewer_ui_core::i18n::Translated;
 use sl_viewer_ui_core::skin::{ACTION_BUTTON_CLASS, TEXT_CLASS, text_role};
-use sl_viewer_ui_core::ui::{column, row};
+use sl_viewer_ui_core::ui::{LogicalMargin, LogicalRect, column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
 use sl_viewer_ui_core::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use sl_viewer_ui_widgets::ui_color_picker::spawn_color_swatch;
@@ -93,17 +93,34 @@ pub fn spawn_labelled_block(
         .spawn((
             Node {
                 width: Val::Percent(100.0),
-                align_items: AlignItems::Center,
+                // The top, not the centre: a caption that wrapped keeps its
+                // readout on its first line.
+                align_items: AlignItems::FlexStart,
                 justify_content: JustifyContent::SpaceBetween,
+                // A readout that cannot share a line with the caption's
+                // longest word drops under it instead of pushing both past
+                // the column: a density knob reads at eight decimals, and
+                // beside a long unbreakable word that is wider than a track.
+                flex_wrap: FlexWrap::Wrap,
                 ..row(Val::Px(4.0))
             },
             ChildOf(block),
         ))
         .id();
+    // The caption wraps rather than running on: the column is a track wide,
+    // and a long translation (or the readout sharing its line) would otherwise
+    // push the caption past the column's edge and over the next column. It
+    // takes what the readout leaves (a zero basis, growing), so it wraps to
+    // share the line — down to its longest word, where the row wraps instead.
     commands.spawn((
         Text::new(String::new()),
         TextLayout {
-            linebreak: LineBreak::NoWrap,
+            linebreak: LineBreak::WordBoundary,
+            ..Default::default()
+        },
+        Node {
+            flex_grow: 1.0,
+            flex_basis: Val::Px(0.0),
             ..Default::default()
         },
         UiFont::Sans.at(FONT_SIZE),
@@ -139,8 +156,16 @@ pub fn spawn_slider_row(
             Node {
                 min_width: Val::Px(READOUT_WIDTH),
                 justify_content: JustifyContent::End,
+                // The number keeps its width; the caption beside it wraps.
+                flex_shrink: 0.0,
                 ..Default::default()
             },
+            // Pushed to the trailing edge, where it stays when the caption
+            // row wraps it onto a line of its own.
+            LogicalMargin(LogicalRect {
+                inline_start: Val::Auto,
+                ..LogicalRect::ZERO
+            }),
             ChildOf(caption),
         ))
         .id();

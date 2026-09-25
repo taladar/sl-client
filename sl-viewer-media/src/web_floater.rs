@@ -20,6 +20,7 @@ use crate::browser_widget::{
     BrowserView, BrowserViewSpec, SurfaceTrust, ValidatedMediaUrl, spawn_browser_view,
 };
 use crate::media_engine::{MediaEngineSystems, MediaSurfaces};
+use sl_cef::SurfaceStatus;
 use sl_viewer_intents::OpenWebBrowser;
 use sl_viewer_platform::system_browser::{ExternalUrl, normalize_web_url, open_in_system_browser};
 use sl_viewer_ui_core::glyph;
@@ -57,6 +58,15 @@ pub struct WebFloaterUi {
     root: Entity,
     /// The title-bar text (bound to the page title).
     title_text: Entity,
+    /// The content the status is drawn into.
+    parts: WebContentParts,
+}
+
+/// The web floater's content entities: what [`spawn_web_content`] returns
+/// and [`draw_web_status`] draws a status snapshot into. Shared by the live
+/// floater and its gallery specimen.
+#[derive(Debug, Clone, Copy)]
+struct WebContentParts {
     /// The embedded browser view.
     view: Entity,
     /// The address field.
@@ -119,14 +129,85 @@ fn spawn_web_floater(mut commands: Commands, root: Res<UiRoot>) {
     commands
         .entity(handle.title_text)
         .insert(Translated::new("web-floater-title"));
+    let parts = spawn_web_content(
+        &mut commands,
+        handle.content,
+        WEB_FONT_SIZE,
+        validated_web_url(DEFAULT_HOME_URL).unwrap_or_else(|_refused| ValidatedMediaUrl::blank()),
+    );
+    commands.insert_resource(WebFloaterUi {
+        root: handle.root,
+        title_text: handle.title_text,
+        parts,
+    });
+}
 
+// ---------------------------------------------------------------------------
+// Gallery specimen
+// ---------------------------------------------------------------------------
+
+/// The web floater's gallery / `ui_test` specimen: the live content, built by
+/// the same `spawn_web_content` at the cell's font size, with a sample page
+/// status drawn into the chrome by the same `draw_web_status` the live sync
+/// uses — a secure page mid-load, with history behind it and none ahead, so
+/// the lock, the loading mark, a greyed Forward and the status row all show.
+///
+/// The view opens an offline `data:` page rather than the live home page, so
+/// neither the gallery nor the sweep touches the network; without the media
+/// engine it stays the dark placeholder.
+pub fn spawn_web_floater_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: sl_viewer_ui_core::ui_element::ElementCx,
+) -> Entity {
+    let parts = spawn_web_content(
+        commands,
+        parent,
+        cx.font_size,
+        crate::browser_widget::specimen_page_url(&cx.text("Sample Page")),
+    );
+    let status = SurfaceStatus {
+        url: String::from("https://example.com/sample/page.html"),
+        title: cx.text("Sample Page"),
+        loading: true,
+        can_go_back: true,
+        can_go_forward: false,
+        progress: 0.42,
+        ..SurfaceStatus::default()
+    };
+    commands.queue(move |world: &mut World| {
+        if let Err(error) = world.run_system_cached_with(draw_web_status_system, (parts, status)) {
+            warn!("web floater specimen: the sample status was not drawn: {error}");
+        }
+    });
+    parent
+}
+
+/// [`draw_web_status`] as a one-shot system, for the specimen (which holds
+/// only [`Commands`]). Nothing is being edited in a specimen.
+fn draw_web_status_system(
+    In((parts, status)): In<(WebContentParts, SurfaceStatus)>,
+    mut chrome: WebChrome,
+) {
+    draw_web_status(&parts, &status, false, &mut chrome);
+}
+
+/// Build the web floater's content into `content` at `font_size`: the
+/// toolbar, the browser view opening `initial_url`, and the status row.
+/// Shared by the live floater and its specimen.
+fn spawn_web_content(
+    commands: &mut Commands,
+    content: Entity,
+    font_size: f32,
+    initial_url: ValidatedMediaUrl,
+) -> WebContentParts {
     let content = commands
         .spawn((
             Node {
                 flex_grow: 1.0,
                 ..column(Val::Px(4.0))
             },
-            ChildOf(handle.content),
+            ChildOf(content),
         ))
         .id();
 
@@ -140,15 +221,22 @@ fn spawn_web_floater(mut commands: Commands, root: Res<UiRoot>) {
             ChildOf(content),
         ))
         .id();
-    let back_label = spawn_toolbar_button(&mut commands, toolbar, glyph::BACK, "back", 1);
-    let forward_label = spawn_toolbar_button(&mut commands, toolbar, glyph::FORWARD, "forward", 2);
-    let reload_label =
-        spawn_toolbar_button(&mut commands, toolbar, glyph::RELOAD, "reload-or-stop", 3);
+    let back_label = spawn_toolbar_button(commands, toolbar, glyph::BACK, "back", 1, font_size);
+    let forward_label =
+        spawn_toolbar_button(commands, toolbar, glyph::FORWARD, "forward", 2, font_size);
+    let reload_label = spawn_toolbar_button(
+        commands,
+        toolbar,
+        glyph::RELOAD,
+        "reload-or-stop",
+        3,
+        font_size,
+    );
     let lock = commands
         .spawn((
             glyph::glyph_host(
                 glyph::SECURE,
-                UiFont::Sans.at(WEB_FONT_SIZE),
+                UiFont::Sans.at(font_size),
                 role_class(STATUS_COLOR),
             ),
             TextColor(STATUS_COLOR),
@@ -157,11 +245,11 @@ fn spawn_web_floater(mut commands: Commands, root: Res<UiRoot>) {
         ))
         .id();
     let address = spawn_text_input(
-        &mut commands,
+        commands,
         toolbar,
         &TextInputSpec {
             initial: String::new(),
-            font_size: WEB_FONT_SIZE,
+            font_size,
             width_glyphs: 40.0,
             tab_index: 4,
             max_characters: Some(1024),
@@ -170,16 +258,21 @@ fn spawn_web_floater(mut commands: Commands, root: Res<UiRoot>) {
         },
     );
     commands.entity(address).observe(on_address_key);
-    let _external =
-        spawn_toolbar_button(&mut commands, toolbar, glyph::EXTERNAL, "open-external", 5);
+    let _external = spawn_toolbar_button(
+        commands,
+        toolbar,
+        glyph::EXTERNAL,
+        "open-external",
+        5,
+        font_size,
+    );
 
     // The page itself.
     let view = spawn_browser_view(
-        &mut commands,
+        commands,
         content,
         &BrowserViewSpec {
-            initial_url: validated_web_url(DEFAULT_HOME_URL)
-                .unwrap_or_else(|_refused| ValidatedMediaUrl::blank()),
+            initial_url,
             trust: SurfaceTrust::Viewer,
             tab_index: 6,
             fixed_height: None,
@@ -190,15 +283,13 @@ fn spawn_web_floater(mut commands: Commands, root: Res<UiRoot>) {
     let status_text = commands
         .spawn((
             Text::default(),
-            UiFont::Sans.at(WEB_FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(STATUS_COLOR),
             ChildOf(content),
         ))
         .id();
 
-    commands.insert_resource(WebFloaterUi {
-        root: handle.root,
-        title_text: handle.title_text,
+    WebContentParts {
         view,
         address,
         back_label,
@@ -206,17 +297,18 @@ fn spawn_web_floater(mut commands: Commands, root: Res<UiRoot>) {
         reload_label,
         lock,
         status_text,
-    });
+    }
 }
 
 /// One glyph toolbar button emitting a [`UiAction`]; returns the label entity
-/// (recoloured for enablement).
+/// (recoloured for enablement), at `font_size`.
 fn spawn_toolbar_button(
     commands: &mut Commands,
     parent: Entity,
     slot: &'static str,
     action: &'static str,
     tab_index: i32,
+    font_size: f32,
 ) -> Entity {
     let spawned = ui_spawn::spawn_button(
         commands,
@@ -227,7 +319,7 @@ fn spawn_toolbar_button(
             .padding(7.0, 3.0)
             .colors(Color::srgb(0.16, 0.17, 0.2), Color::srgb(0.35, 0.35, 0.4))
             .label_color(SkinPalette::FALLBACK.text_primary)
-            .font_size(WEB_FONT_SIZE),
+            .font_size(font_size),
     );
     commands.entity(spawned.button).observe(
         move |_activate: On<Activate>, mut actions: MessageWriter<UiAction>| {
@@ -254,7 +346,7 @@ fn on_address_key(
     let Some(ui) = ui else {
         return;
     };
-    let Ok(editor) = editors.get(ui.address) else {
+    let Ok(editor) = editors.get(ui.parts.address) else {
         return;
     };
     let Some(url) = normalize_web_url(&editor.value().to_string()) else {
@@ -263,7 +355,7 @@ fn on_address_key(
     let Ok(url) = validated_web_url(&url) else {
         return;
     };
-    if let Ok(view) = views.get(ui.view)
+    if let Ok(view) = views.get(ui.parts.view)
         && let Some(slot) = view.surface.and_then(|id| surfaces.get(id))
     {
         slot.surface.navigate(&url);
@@ -299,7 +391,7 @@ fn open_web_browser(
         }
         if let Some(url) = &request.url
             && let Ok(url) = validated_web_url(url)
-            && let Ok(view) = views.get(ui.view)
+            && let Ok(view) = views.get(ui.parts.view)
             && let Some(slot) = view.surface.and_then(|id| surfaces.get(id))
         {
             slot.surface.navigate(&url);
@@ -321,7 +413,7 @@ fn handle_web_actions(
         if action.element != WEB_BROWSER_ELEMENT {
             continue;
         }
-        let Ok(view) = views.get(ui.view) else {
+        let Ok(view) = views.get(ui.parts.view) else {
             continue;
         };
         let Some(slot) = view.surface.and_then(|id| surfaces.get(id)) else {
@@ -350,6 +442,7 @@ fn handle_web_actions(
         }
     }
 }
+
 /// The floater's chrome, bundled as one
 /// [`SystemParam`](bevy::ecs::system::SystemParam) — one query per piece
 /// updated, plus the shown flag that says whether to update any of it and the
@@ -381,24 +474,15 @@ fn sync_web_floater(
     views: Query<&BrowserView>,
     surfaces: NonSend<MediaSurfaces>,
     focus: Res<InputFocus>,
-    chrome: WebChrome,
+    mut chrome: WebChrome,
 ) {
-    let WebChrome {
-        mut texts,
-        mut classes,
-        mut editors,
-        mut visibilities,
-        panels,
-        mut font_cx,
-        mut layout_cx,
-    } = chrome;
     let Some(ui) = ui else {
         return;
     };
-    if !panels.get(ui.root).is_ok_and(|shown| shown.0) {
+    if !chrome.panels.get(ui.root).is_ok_and(|shown| shown.0) {
         return;
     }
-    let Ok(view) = views.get(ui.view) else {
+    let Ok(view) = views.get(ui.parts.view) else {
         return;
     };
     let Some(slot) = view.surface.and_then(|id| surfaces.get(id)) else {
@@ -412,7 +496,7 @@ fn sync_web_floater(
     }
     let status = &slot.status;
 
-    if let Ok(mut title) = texts.get_mut(ui.title_text) {
+    if let Ok(mut title) = chrome.texts.get_mut(ui.title_text) {
         let want = if status.title.is_empty() {
             &status.url
         } else {
@@ -422,36 +506,54 @@ fn sync_web_floater(
             title.0.clone_from(want);
         }
     }
+    let editing_address = focus.get() == Some(ui.parts.address);
+    draw_web_status(&ui.parts, status, editing_address, &mut chrome);
+}
+
+/// Draw one status snapshot into the content's chrome: the address (unless
+/// `editing_address`), back/forward enablement, stop-vs-reload glyph, the
+/// secure lock and the status row. The pure half of [`sync_web_floater`],
+/// which the specimen calls with a sample status.
+fn draw_web_status(
+    parts: &WebContentParts,
+    status: &SurfaceStatus,
+    editing_address: bool,
+    chrome: &mut WebChrome,
+) {
+    let WebChrome {
+        texts,
+        classes,
+        editors,
+        visibilities,
+        font_cx,
+        layout_cx,
+        ..
+    } = chrome;
     // The address mirrors the page unless the user is editing it. Set through
     // the parley editor + a layout refresh (the `ui_text_input` revert idiom)
     // — a queued edit against a cleared buffer can apply at a stale selection
     // offset and panic on a char boundary.
-    if focus.get() != Some(ui.address)
-        && let Ok(mut editor) = editors.get_mut(ui.address)
+    if !editing_address
+        && let Ok(mut editor) = editors.get_mut(parts.address)
         && editor.value().to_string() != status.url
     {
-        set_editor_text(&mut editor, &status.url, &mut font_cx, &mut layout_cx);
+        set_editor_text(&mut editor, &status.url, font_cx, layout_cx);
     }
     set_state_class_on(
-        &mut classes,
-        ui.back_label,
+        classes,
+        parts.back_label,
         DISABLED_TEXT_CLASS,
         !status.can_go_back,
     );
     set_state_class_on(
-        &mut classes,
-        ui.forward_label,
+        classes,
+        parts.forward_label,
         DISABLED_TEXT_CLASS,
         !status.can_go_forward,
     );
     // Reload or stop: the state is ours, the mark the skin's.
-    set_state_class_on(
-        &mut classes,
-        ui.reload_label,
-        glyph::LOADING,
-        status.loading,
-    );
-    if let Ok(mut lock) = visibilities.get_mut(ui.lock) {
+    set_state_class_on(classes, parts.reload_label, glyph::LOADING, status.loading);
+    if let Ok(mut lock) = visibilities.get_mut(parts.lock) {
         let want = if status.url.starts_with("https://") {
             Visibility::Inherited
         } else {
@@ -461,7 +563,7 @@ fn sync_web_floater(
             *lock = want;
         }
     }
-    if let Ok(mut text) = texts.get_mut(ui.status_text) {
+    if let Ok(mut text) = texts.get_mut(parts.status_text) {
         let want = if let Some(error) = &status.load_error {
             error.clone()
         } else if status.loading {

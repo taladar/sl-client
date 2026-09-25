@@ -61,9 +61,9 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
-    Command, FolderType, InventoryKey, InventoryType, ObjectKey, Permissions, RestoreItem,
-    RezScriptParams, ScopedObjectId, SlCommand, SlEvent, SlIdentity, SlSessionEvent,
-    TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, Uuid,
+    CircuitId, Command, FolderType, InventoryKey, InventoryType, ObjectKey, Permissions,
+    RegionLocalObjectId, RestoreItem, RezScriptParams, ScopedObjectId, SlCommand, SlEvent,
+    SlIdentity, SlSessionEvent, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, Uuid,
 };
 
 use crate::edit_tool::{BuildTabPages, LABEL_CLASS, TOOL_FONT_SIZE, VALUE_CLASS};
@@ -71,14 +71,16 @@ use crate::floater::{FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater};
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::intents::ContentsMutated;
 use crate::intents::LocalChatNotice;
-use crate::inventory::{InventoryModel, item_icon};
+use crate::inventory::{InventoryModel, item_icon, label_clip_node};
 use crate::ui::focus_within;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use crate::ui_element::{ContentMayOverflow, TextMayClip};
 use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{
-    VirtualList, VirtualRow, VirtualViewport, amend_row_node, spawn_virtual_scrollbar,
+    VirtualList, VirtualRow, VirtualViewport, amend_row_node, spawn_specimen_row,
+    spawn_virtual_scrollbar,
 };
 use crate::world_api::EditToolState;
 use crate::world_api::InputContext;
@@ -86,6 +88,7 @@ use crate::world_api::ObjectState;
 use crate::world_api::SelectionSet;
 use sl_viewer_ui_core::skin::LIST_SURFACE_CLASS;
 use sl_viewer_ui_core::skin_palette::SkinPalette;
+use sl_viewer_ui_core::ui_ellipsis::{RevealEllipsis, spawn_ellipsis_marker};
 
 /// The uniform height of a contents row, in logical pixels (matches the
 /// inventory list's row metric so the two read the same).
@@ -93,6 +96,22 @@ const ROW_HEIGHT: f32 = 22.0;
 
 /// The contents row font size, in logical pixels.
 const ROW_FONT_SIZE: f32 = 13.0;
+
+/// The height of a contents row whose parts are drawn at `font_size`:
+/// [`ROW_HEIGHT`] at [`ROW_FONT_SIZE`], and in proportion above it, so a larger
+/// font's line stays inside its fixed-height row instead of spilling into the
+/// rows above and below. Never less than [`ROW_HEIGHT`].
+fn row_height(font_size: f32) -> f32 {
+    ROW_HEIGHT.max((font_size * ROW_HEIGHT / ROW_FONT_SIZE).ceil())
+}
+
+/// Why a row's label clip may slice the name it holds: it is the row's
+/// ellipsis cell, and the `…` marker beside it says the tail is hidden.
+const LABEL_CLIP_REASON: &str =
+    "a contents row's name clips at the row's end behind its revealed `…` marker";
+
+/// The row's `…` marker glyph until `i18n` sets the locale's own.
+const FALLBACK_ELLIPSIS: &str = "\u{2026}";
 
 /// The minimum icon-column width, in logical pixels.
 const ICON_COL_WIDTH: f32 = 18.0;
@@ -477,8 +496,8 @@ impl PendingMutations {
 // ---------------------------------------------------------------------------
 
 /// The Content-tab widget entities.
-#[derive(Resource, Debug)]
-struct ContentsTabUi {
+#[derive(Resource, Debug, Clone, Copy)]
+pub(crate) struct ContentsTabUi {
     /// The virtualized list viewport (carries [`VirtualList`]).
     viewport: Entity,
     /// The "N items" summary line.
@@ -619,18 +638,30 @@ impl Plugin for EditContentsPlugin {
 // Spawning the two surfaces
 // ---------------------------------------------------------------------------
 
-/// Spawn the Content-tab UI into the Build floater's Content page.
+/// Spawn the Content-tab UI into the Build floater's Content page once its
+/// pages appear, and publish its handles.
 fn spawn_contents_tab(mut commands: Commands, pages: Option<Res<BuildTabPages>>) {
     let Some(pages) = pages else {
         return;
     };
-    let page = pages.content;
+    let ui = spawn_contents_tab_into(&mut commands, pages.content, TOOL_FONT_SIZE, ROW_FONT_SIZE);
+    commands.insert_resource(ui);
+}
 
+/// Spawn the Content-tab UI into `page` at `font_size`: the count line, the
+/// action buttons and the (empty) contents list, whose rows are drawn at
+/// `row_font_size`. Shared by the live floater and its gallery specimen.
+pub(crate) fn spawn_contents_tab_into(
+    commands: &mut Commands,
+    page: Entity,
+    font_size: f32,
+    row_font_size: f32,
+) -> ContentsTabUi {
     // Summary line: how many items (and a loading hint).
     let count_text = commands
         .spawn((
             Text::default(),
-            UiFont::Sans.at(TOOL_FONT_SIZE),
+            UiFont::Sans.at(font_size),
             TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
             ClassList::new_with_classes([LABEL_CLASS]),
             Name::new("contents:count"),
@@ -651,52 +682,57 @@ fn spawn_contents_tab(mut commands: Commands, pages: Option<Res<BuildTabPages>>)
         ))
         .id();
     let new_script = spawn_contents_button(
-        &mut commands,
+        commands,
         button_row,
         "build-content-new-script",
         ContentsSurface::BuildTab,
         ContentsAction::NewScript,
         CONTENTS_TAB_INDEX,
+        font_size,
     );
     let rename = spawn_contents_button(
-        &mut commands,
+        commands,
         button_row,
         "build-content-rename",
         ContentsSurface::BuildTab,
         ContentsAction::Rename,
         CONTENTS_TAB_INDEX + 1,
+        font_size,
     );
     let remove = spawn_contents_button(
-        &mut commands,
+        commands,
         button_row,
         "build-content-remove",
         ContentsSurface::BuildTab,
         ContentsAction::Remove,
         CONTENTS_TAB_INDEX + 2,
+        font_size,
     );
     spawn_contents_button(
-        &mut commands,
+        commands,
         button_row,
         "build-content-refresh",
         ContentsSurface::BuildTab,
         ContentsAction::Refresh,
         CONTENTS_TAB_INDEX + 3,
+        font_size,
     );
 
     let viewport = spawn_contents_viewport(
-        &mut commands,
+        commands,
         page,
         ContentsSurface::BuildTab,
         CONTENTS_TAB_INDEX + 4,
+        row_font_size,
     );
 
-    commands.insert_resource(ContentsTabUi {
+    ContentsTabUi {
         viewport,
         count_text,
         new_script,
         rename,
         remove,
-    });
+    }
 }
 
 /// The object contents floater's [`FloaterSpec`] — shared with the `FLOATERS`
@@ -728,7 +764,35 @@ fn spawn_open_object_floater(mut commands: Commands, root: Option<Res<UiRoot>>) 
     commands
         .entity(handle.title_text)
         .insert(Translated::new("object-contents-floater-title"));
+    let parts =
+        spawn_open_object_content(&mut commands, handle.content, TOOL_FONT_SIZE, ROW_FONT_SIZE);
+    commands.insert_resource(OpenObjectFloaterUi {
+        panel: handle.root,
+        viewport: parts.viewport,
+        name_text: parts.name_text,
+    });
+}
 
+/// The Object Contents floater's content entities, what
+/// [`spawn_open_object_content`] returns.
+#[derive(Debug, Clone, Copy)]
+struct OpenObjectParts {
+    /// The virtualized list viewport.
+    viewport: Entity,
+    /// The object-name line.
+    name_text: Entity,
+}
+
+/// Build the Object Contents floater's content into `slot` at `font_size`:
+/// the object-name line, the copy buttons and the (empty) contents list, whose
+/// rows are drawn at `row_font_size`. Shared by the live floater and its
+/// specimen.
+fn spawn_open_object_content(
+    commands: &mut Commands,
+    slot: Entity,
+    font_size: f32,
+    row_font_size: f32,
+) -> OpenObjectParts {
     let content = commands
         .spawn((
             Node {
@@ -738,7 +802,7 @@ fn spawn_open_object_floater(mut commands: Commands, root: Option<Res<UiRoot>>) 
                 min_height: Val::Px(0.0),
                 ..column(Val::Px(6.0))
             },
-            ChildOf(handle.content),
+            ChildOf(slot),
         ))
         .id();
 
@@ -746,7 +810,7 @@ fn spawn_open_object_floater(mut commands: Commands, root: Option<Res<UiRoot>>) 
     let name_text = commands
         .spawn((
             Text::default(),
-            UiFont::Sans.at(TOOL_FONT_SIZE),
+            UiFont::Sans.at(font_size),
             TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
             ClassList::new_with_classes([LABEL_CLASS]),
             Name::new("object-contents:name"),
@@ -767,39 +831,287 @@ fn spawn_open_object_floater(mut commands: Commands, root: Option<Res<UiRoot>>) 
         ))
         .id();
     spawn_contents_button(
-        &mut commands,
+        commands,
         button_row,
         "object-contents-copy",
         ContentsSurface::OpenFloater,
         ContentsAction::CopyToInventory,
         10,
+        font_size,
     );
     spawn_contents_button(
-        &mut commands,
+        commands,
         button_row,
         "object-contents-copy-wear",
         ContentsSurface::OpenFloater,
         ContentsAction::CopyAndWear,
         11,
+        font_size,
     );
 
-    let viewport =
-        spawn_contents_viewport(&mut commands, content, ContentsSurface::OpenFloater, 12);
+    let viewport = spawn_contents_viewport(
+        commands,
+        content,
+        ContentsSurface::OpenFloater,
+        12,
+        row_font_size,
+    );
 
-    commands.insert_resource(OpenObjectFloaterUi {
-        panel: handle.root,
+    OpenObjectParts {
         viewport,
         name_text,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Gallery specimen
+// ---------------------------------------------------------------------------
+
+/// The Object Contents floater's gallery / `ui_test` specimen: the live
+/// content, built by the same `spawn_open_object_content` at the cell's font
+/// size, holding a sample prim's listing. Each row is the list's own pooled
+/// row ([`spawn_specimen_row`]), dressed by the same `dress_contents_row`
+/// the row pool uses and bound by the same `bind_contents_row`, one selected
+/// and one mid-delete; the name line is the same `open_floater_name_line`.
+///
+/// It inserts no `OpenObjectFloaterUi`, so the live systems leave it alone.
+pub fn spawn_object_contents_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: crate::ui_element::ElementCx,
+) -> Entity {
+    let parts = spawn_open_object_content(commands, parent, cx.font_size, cx.font_size);
+    let rows = sample_contents_rows(cx);
+    let row_entities = (0..rows.len())
+        .map(|index| {
+            let row = spawn_specimen_row(commands, parts.viewport, index, row_height(cx.font_size));
+            dress_contents_row(commands, row, ContentsSurface::OpenFloater, cx.font_size);
+            row
+        })
+        .collect::<Vec<_>>();
+    let view = ContentsSurfaceView {
+        target: Some((
+            ScopedObjectId::new(CircuitId::new(1), RegionLocalObjectId(1)),
+            ObjectKey::from(Uuid::from_u128(0x5eed)),
+        )),
+        name: cx.text("Sample Door"),
+        rows,
+        perms: ContentsPerms::default(),
+        loading: false,
+    };
+    let specimen = ContentsSpecimen {
+        parts,
+        row_entities,
+        view,
+        selected: 1,
+    };
+    commands.queue(move |world: &mut World| {
+        if let Err(error) = world.run_system_cached_with(bind_contents_specimen, specimen) {
+            warn!("object contents specimen: the sample listing was not bound: {error}");
+        }
+    });
+    parent
+}
+
+/// A sample prim's listing, the specimens' rows: a notecard, a script, a sound,
+/// a texture mid-delete and an object, named through `cx`.
+fn sample_contents_rows(cx: crate::ui_element::ElementCx) -> Vec<ContentsRow> {
+    [
+        (InventoryType::Notecard, "Read Me", RowState::Normal),
+        (InventoryType::Script, "Door Script", RowState::Normal),
+        (InventoryType::Sound, "Door Chime", RowState::Normal),
+        (InventoryType::Texture, "Oak Planks", RowState::Deleting),
+        (InventoryType::Object, "Spare Handle", RowState::Normal),
+    ]
+    .into_iter()
+    .zip(1_u128..)
+    .map(|((inv_type, name, state), id)| ContentsRow {
+        item_id: InventoryKey::from(Uuid::from_u128(id)),
+        name: cx.text(name),
+        icon: item_icon(inv_type),
+        state,
+    })
+    .collect()
+}
+
+/// Fill the Content tab of a Build Tools specimen with a sample prim's
+/// listing, as the live systems fill it for the selected prim: each row is the
+/// list's own pooled row ([`spawn_specimen_row`]) dressed by
+/// [`dress_contents_row`] at `row_font_size` and bound by
+/// [`bind_contents_row`], one selected; the count line is
+/// [`contents_summary`]'s and the buttons are gated as a modifiable prim the
+/// agent owns gates them.
+pub(crate) fn fill_contents_tab_specimen(
+    commands: &mut Commands,
+    ui: ContentsTabUi,
+    cx: crate::ui_element::ElementCx,
+    row_font_size: f32,
+) {
+    let rows = sample_contents_rows(cx);
+    let row_entities = (0..rows.len())
+        .map(|index| {
+            let row = spawn_specimen_row(commands, ui.viewport, index, row_height(row_font_size));
+            dress_contents_row(commands, row, ContentsSurface::BuildTab, row_font_size);
+            row
+        })
+        .collect::<Vec<_>>();
+    let view = ContentsSurfaceView {
+        target: Some((
+            ScopedObjectId::new(CircuitId::new(1), RegionLocalObjectId(1)),
+            ObjectKey::from(Uuid::from_u128(0x5eed)),
+        )),
+        name: cx.text("Sample Box"),
+        rows,
+        perms: ContentsPerms {
+            can_modify: true,
+            owns: true,
+            allows_drop: false,
+        },
+        loading: false,
+    };
+    let specimen = ContentsTabSpecimen {
+        ui,
+        row_entities,
+        view,
+        selected: 1,
+    };
+    commands.queue(move |world: &mut World| {
+        if let Err(error) = world.run_system_cached_with(bind_contents_tab_specimen, specimen) {
+            warn!("build tools specimen: the sample contents were not bound: {error}");
+        }
     });
 }
 
+/// What the Content-tab specimen's one-shot binds: the tab, its pooled rows,
+/// the sample view they show and which row is selected.
+#[derive(Debug)]
+struct ContentsTabSpecimen {
+    /// The tab's widgets.
+    ui: ContentsTabUi,
+    /// The pooled rows, in item order.
+    row_entities: Vec<Entity>,
+    /// The sample listing.
+    view: ContentsSurfaceView,
+    /// The selected row's index.
+    selected: usize,
+}
+
+/// The Content-tab specimen's one-shot: bind each pooled row, paint the
+/// selection, size the list, write the count line and gate the buttons — what
+/// the live bind, paint, rebuild and gate systems do for the selected prim.
+fn bind_contents_tab_specimen(
+    In(specimen): In<ContentsTabSpecimen>,
+    translator: Translator,
+    mut rows: Query<(&ContentsRowParts, &mut BackgroundColor)>,
+    mut texts: Query<(&mut Text, &mut TextColor)>,
+    mut nodes: Query<&mut Node>,
+    mut lists: Query<&mut VirtualList>,
+    mut commands: Commands,
+) {
+    let ContentsTabSpecimen {
+        ui,
+        row_entities,
+        view,
+        selected,
+    } = specimen;
+    for (index, row) in row_entities.iter().copied().enumerate() {
+        if let Ok((row_parts, mut background)) = rows.get_mut(row) {
+            bind_contents_row(
+                row_parts,
+                view.rows.get(index),
+                &translator,
+                &mut texts,
+                &mut nodes,
+            );
+            background.0 = selection_background(index == selected);
+        }
+    }
+    if let Ok(mut list) = lists.get_mut(ui.viewport) {
+        list.item_count = view.rows.len();
+    }
+    if let Ok((mut text, _color)) = texts.get_mut(ui.count_text) {
+        text.0 = contents_summary(&view, &translator);
+    }
+    let selection_pending = view
+        .rows
+        .get(selected)
+        .is_some_and(|row| row.state.is_pending());
+    set_button_enabled(&mut commands, ui.new_script, view.perms.can_add());
+    set_button_enabled(
+        &mut commands,
+        ui.rename,
+        !selection_pending && view.perms.can_rename_menu(),
+    );
+    set_button_enabled(
+        &mut commands,
+        ui.remove,
+        !selection_pending && view.perms.can_remove_menu(),
+    );
+}
+
+/// What the specimen's one-shot binds: the content, its pooled rows, the
+/// sample view they show and which row is selected.
+#[derive(Debug)]
+struct ContentsSpecimen {
+    /// The floater content.
+    parts: OpenObjectParts,
+    /// The pooled rows, in item order.
+    row_entities: Vec<Entity>,
+    /// The sample listing.
+    view: ContentsSurfaceView,
+    /// The selected row's index.
+    selected: usize,
+}
+
+/// The specimen's one-shot: bind each pooled row, paint the selection, size
+/// the list and write the name line — what the live bind, paint, rebuild and
+/// gate systems do for the real view.
+fn bind_contents_specimen(
+    In(specimen): In<ContentsSpecimen>,
+    translator: Translator,
+    row_parts: Query<&ContentsRowParts>,
+    mut texts: Query<(&mut Text, &mut TextColor)>,
+    mut nodes: Query<&mut Node>,
+    mut backgrounds: Query<&mut BackgroundColor>,
+    mut lists: Query<&mut VirtualList>,
+) {
+    let ContentsSpecimen {
+        parts,
+        row_entities,
+        view,
+        selected,
+    } = specimen;
+    for (index, row) in row_entities.iter().copied().enumerate() {
+        if let Ok(row_parts) = row_parts.get(row) {
+            bind_contents_row(
+                row_parts,
+                view.rows.get(index),
+                &translator,
+                &mut texts,
+                &mut nodes,
+            );
+        }
+        if let Ok(mut background) = backgrounds.get_mut(row) {
+            background.0 = selection_background(index == selected);
+        }
+    }
+    if let Ok(mut list) = lists.get_mut(parts.viewport) {
+        list.item_count = view.rows.len();
+    }
+    if let Ok((mut text, _color)) = texts.get_mut(parts.name_text) {
+        text.0 = open_floater_name_line(&view, &translator);
+    }
+}
+
 /// Spawn a contents-list viewport (the clipped, focusable virtual-list host)
-/// under `parent` for `surface`, and return it.
+/// under `parent` for `surface`, windowing rows drawn at `row_font_size`, and
+/// return it.
 fn spawn_contents_viewport(
     commands: &mut Commands,
     parent: Entity,
     surface: ContentsSurface,
     tab_index: i32,
+    row_font_size: f32,
 ) -> Entity {
     let viewport = commands
         .spawn((
@@ -814,7 +1126,7 @@ fn spawn_contents_viewport(
             // used to paint by hand, plus the field-family text roles the
             // class re-roots for a light list. See `LIST_SURFACE_CLASS`.
             ClassList::new_with_classes([LIST_SURFACE_CLASS]),
-            VirtualList::new(ROW_HEIGHT),
+            VirtualList::new(row_height(row_font_size)),
             VirtualViewport,
             ContentsViewport(surface),
             crate::inventory_drag::ContentsDropTarget::default(),
@@ -832,7 +1144,8 @@ fn spawn_contents_viewport(
     viewport
 }
 
-/// Spawn one contents action button (a focusable, clickable labelled box).
+/// Spawn one contents action button (a focusable, clickable labelled box) at
+/// `font_size`.
 fn spawn_contents_button(
     commands: &mut Commands,
     parent: Entity,
@@ -840,6 +1153,7 @@ fn spawn_contents_button(
     surface: ContentsSurface,
     action: ContentsAction,
     tab_index: i32,
+    font_size: f32,
 ) -> Entity {
     let button = ui_spawn::spawn_button(
         commands,
@@ -857,12 +1171,15 @@ fn spawn_contents_button(
         // The colour `.sk-build-value` paints — see [`VALUE_CLASS`].
         .label_color(SkinPalette::FALLBACK.text_primary)
         .label_class(VALUE_CLASS)
-        .font_size(TOOL_FONT_SIZE),
+        .font_size(font_size),
     )
     .button;
     commands.entity(button).observe(
-        move |press: On<Pointer<Press>>, mut requests: MessageWriter<ContentsActionRequest>| {
-            if press.button == PointerButton::Primary {
+        move |press: On<Pointer<Press>>, requests: Option<MessageWriter<ContentsActionRequest>>| {
+            // Absent only in the gallery, whose specimen has no contents to act on.
+            if press.button == PointerButton::Primary
+                && let Some(mut requests) = requests
+            {
                 requests.write(ContentsActionRequest { surface, action });
             }
         },
@@ -1272,82 +1589,157 @@ fn populate_new_contents_rows(
         let Ok(&ContentsViewport(surface)) = viewports.get(child_of.parent()) else {
             continue;
         };
-        // Amended, not inserted: `top` and `display` are the virtual list's.
-        amend_row_node(&mut commands, row_entity, |node| {
-            node.position_type = PositionType::Absolute;
-            node.left = Val::Px(0.0);
-            node.right = Val::Px(0.0);
-            node.height = Val::Px(ROW_HEIGHT);
-            node.align_items = AlignItems::Center;
-            node.column_gap = Val::Px(4.0);
-        });
-        commands
-            .entity(row_entity)
-            .insert((Pickable::default(), BackgroundColor(Color::NONE)));
-        let icon = commands
-            .spawn((
-                Text::new(""),
-                UiFont::Sans.at(ROW_FONT_SIZE),
-                TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
-                Node {
-                    min_width: Val::Px(ICON_COL_WIDTH),
-                    ..Default::default()
-                },
-                Pickable::IGNORE,
-                ChildOf(row_entity),
-            ))
-            .id();
-        let label = commands
-            .spawn((
-                Text::new(""),
-                UiFont::Sans.at(ROW_FONT_SIZE),
-                TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
-                Pickable::IGNORE,
-                ChildOf(row_entity),
-            ))
-            .id();
-        commands
-            .entity(row_entity)
-            .insert(ContentsRowParts { icon, label })
-            .observe(
-                move |press: On<Pointer<Press>>,
-                      rows: Query<&VirtualRow>,
-                      views: Res<ContentsViews>,
-                      time: Res<Time>,
-                      mut selection: ResMut<ContentsSelection>,
-                      mut last_click: ResMut<ContentsLastClick>,
-                      mut requests: MessageWriter<ContentsActionRequest>,
-                      mut focus: ResMut<InputFocus>| {
-                    if press.button != PointerButton::Primary {
-                        return;
-                    }
-                    if let Ok(row) = rows.get(press.entity)
-                        && let Some(index) = row.index
-                        && let Some(display) = views.view(surface).rows.get(index)
-                    {
-                        let item = display.item_id;
-                        selection.set(surface, Some(item));
-                        // Clicking the list focuses it so the wheel scrolls it.
-                        focus.set(press.entity, FocusCause::Navigated);
-                        // A second primary click on the same item within the
-                        // double-click window opens it (the reference's openItem).
-                        let now = time.elapsed_secs();
-                        let double = last_click.last.is_some_and(|(prev, at)| {
-                            prev == item && now - at < DOUBLE_CLICK_SECONDS
-                        });
-                        if double {
-                            last_click.last = None;
-                            requests.write(ContentsActionRequest {
-                                surface,
-                                action: ContentsAction::Open,
-                            });
-                        } else {
-                            last_click.last = Some((item, now));
-                        }
-                    }
-                },
-            );
+        dress_contents_row(&mut commands, row_entity, surface, ROW_FONT_SIZE);
     }
+}
+
+/// The resources a contents row's click reads and writes, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam) so the row observer can take
+/// it as an `Option`: absent only in the gallery, whose specimen rows have no
+/// contents model behind them.
+#[derive(bevy::ecs::system::SystemParam)]
+struct ContentsRowClick<'w> {
+    /// What each surface shows, to resolve the clicked row's item.
+    views: Res<'w, ContentsViews>,
+    /// The clock the double-click window is measured on.
+    time: Res<'w, Time>,
+    /// Each surface's selected item.
+    selection: ResMut<'w, ContentsSelection>,
+    /// The previous click, for the double-click Open.
+    last_click: ResMut<'w, ContentsLastClick>,
+    /// Where a double-click's Open goes.
+    requests: MessageWriter<'w, ContentsActionRequest>,
+    /// Focused on a click, so the wheel scrolls the list.
+    focus: ResMut<'w, InputFocus>,
+}
+
+/// Build the inner structure of one pooled contents row of `surface` at
+/// `font_size` — the icon and name labels — and wire its click-to-select
+/// observer. Shared by the live row pool and the specimen's rows.
+fn dress_contents_row(
+    commands: &mut Commands,
+    row_entity: Entity,
+    surface: ContentsSurface,
+    font_size: f32,
+) {
+    // Amended, not inserted: `top` and `display` are the virtual list's.
+    let height = row_height(font_size);
+    amend_row_node(commands, row_entity, move |node| {
+        node.position_type = PositionType::Absolute;
+        node.left = Val::Px(0.0);
+        node.right = Val::Px(0.0);
+        node.height = Val::Px(height);
+        node.align_items = AlignItems::Center;
+        node.column_gap = Val::Px(4.0);
+    });
+    commands
+        .entity(row_entity)
+        .insert((Pickable::default(), BackgroundColor(Color::NONE)));
+    let icon = commands
+        .spawn((
+            Text::new(""),
+            UiFont::Sans.at(font_size),
+            TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
+            // Never given back under a long name: a shrunk column slices
+            // its glyph.
+            Node {
+                min_width: Val::Px(ICON_COL_WIDTH),
+                flex_shrink: 0.0,
+                ..Default::default()
+            },
+            Pickable::IGNORE,
+            ChildOf(row_entity),
+        ))
+        .id();
+    // The name sits in a shrink-and-clip container with a no-wrap `Text`
+    // child, so a name wider than the row draws on one line with its tail
+    // hidden behind the `…` marker rather than wrapping out of its
+    // fixed-height row — the inventory row's own ellipsis cell.
+    let label_clip = commands
+        .spawn((
+            label_clip_node(),
+            ContentMayOverflow {
+                reason: LABEL_CLIP_REASON,
+            },
+            TextMayClip {
+                reason: LABEL_CLIP_REASON,
+            },
+            Pickable::IGNORE,
+            ChildOf(row_entity),
+        ))
+        .id();
+    let label = commands
+        .spawn((
+            Text::new(""),
+            TextLayout::no_wrap(),
+            UiFont::Sans.at(font_size),
+            TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
+            // The text keeps its full width; the clip is what shrinks.
+            Node {
+                flex_shrink: 0.0,
+                ..Default::default()
+            },
+            Pickable::IGNORE,
+            ChildOf(label_clip),
+        ))
+        .id();
+    let ellipsis = spawn_ellipsis_marker(
+        commands,
+        row_entity,
+        font_size,
+        Color::srgba(0.85, 0.85, 0.85, 1.0),
+        FALLBACK_ELLIPSIS,
+    );
+    commands
+        .entity(label_clip)
+        .insert(RevealEllipsis { marker: ellipsis });
+    commands
+        .entity(row_entity)
+        .insert(ContentsRowParts { icon, label })
+        .observe(
+            move |press: On<Pointer<Press>>,
+                  rows: Query<&VirtualRow>,
+                  click: Option<ContentsRowClick>| {
+                if press.button != PointerButton::Primary {
+                    return;
+                }
+                let Some(ContentsRowClick {
+                    views,
+                    time,
+                    mut selection,
+                    mut last_click,
+                    mut requests,
+                    mut focus,
+                }) = click
+                else {
+                    return;
+                };
+                if let Ok(row) = rows.get(press.entity)
+                    && let Some(index) = row.index
+                    && let Some(display) = views.view(surface).rows.get(index)
+                {
+                    let item = display.item_id;
+                    selection.set(surface, Some(item));
+                    // Clicking the list focuses it so the wheel scrolls it.
+                    focus.set(press.entity, FocusCause::Navigated);
+                    // A second primary click on the same item within the
+                    // double-click window opens it (the reference's openItem).
+                    let now = time.elapsed_secs();
+                    let double = last_click
+                        .last
+                        .is_some_and(|(prev, at)| prev == item && now - at < DOUBLE_CLICK_SECONDS);
+                    if double {
+                        last_click.last = None;
+                        requests.write(ContentsActionRequest {
+                            surface,
+                            action: ContentsAction::Open,
+                        });
+                    } else {
+                        last_click.last = Some((item, now));
+                    }
+                }
+            },
+        );
 }
 
 /// Bind each pooled contents row to the item it now points at, appending its
@@ -1371,42 +1763,55 @@ fn bind_contents_rows(
         }
         let view = views.view(surface);
         let bound = row.index.and_then(|index| view.rows.get(index));
-        // Show the label only when the row is bound to an item.
-        if let Ok(mut label_node) = nodes.get_mut(parts.label) {
-            let display = if bound.is_some() {
-                Display::Flex
-            } else {
-                Display::None
-            };
-            if label_node.display != display {
-                label_node.display = display;
-            }
-        }
-        let Some(display) = bound else {
-            if let Ok((mut text, _color)) = texts.get_mut(parts.icon) {
-                set_row_text(&mut text, "");
-            }
-            continue;
-        };
-        // A pending (in-flight) item draws dimmer until the server confirms it.
-        let color = if display.state.is_pending() {
-            TextColor(Color::srgba(0.55, 0.55, 0.55, 1.0))
+        bind_contents_row(parts, bound, &translator, &mut texts, &mut nodes);
+    }
+}
+
+/// Bind one pooled row's parts to `bound` (or blank it when unbound): its
+/// icon, its name with any pending-state suffix, and the pending grey. The
+/// per-row half of [`bind_contents_rows`], which the specimen calls too.
+fn bind_contents_row(
+    parts: &ContentsRowParts,
+    bound: Option<&ContentsRow>,
+    translator: &Translator,
+    texts: &mut Query<(&mut Text, &mut TextColor)>,
+    nodes: &mut Query<&mut Node>,
+) {
+    // Show the label only when the row is bound to an item.
+    if let Ok(mut label_node) = nodes.get_mut(parts.label) {
+        let display = if bound.is_some() {
+            Display::Flex
         } else {
-            TextColor(Color::srgba(0.92, 0.92, 0.92, 1.0))
+            Display::None
         };
-        if let Ok((mut text, mut text_color)) = texts.get_mut(parts.icon) {
-            set_row_text(&mut text, display.icon);
-            *text_color = color;
+        if label_node.display != display {
+            label_node.display = display;
         }
-        if let Ok((mut text, mut text_color)) = texts.get_mut(parts.label) {
-            // Append the pending-state suffix, e.g. "Read me   …deleting".
-            let label = match display.state.suffix_key() {
-                Some(key) => format!("{}   {}", display.name, translator.get(key)),
-                None => display.name.clone(),
-            };
-            set_row_text(&mut text, &label);
-            *text_color = color;
+    }
+    let Some(display) = bound else {
+        if let Ok((mut text, _color)) = texts.get_mut(parts.icon) {
+            set_row_text(&mut text, "");
         }
+        return;
+    };
+    // A pending (in-flight) item draws dimmer until the server confirms it.
+    let color = if display.state.is_pending() {
+        TextColor(Color::srgba(0.55, 0.55, 0.55, 1.0))
+    } else {
+        TextColor(Color::srgba(0.92, 0.92, 0.92, 1.0))
+    };
+    if let Ok((mut text, mut text_color)) = texts.get_mut(parts.icon) {
+        set_row_text(&mut text, display.icon);
+        *text_color = color;
+    }
+    if let Ok((mut text, mut text_color)) = texts.get_mut(parts.label) {
+        // Append the pending-state suffix, e.g. "Read me   …deleting".
+        let label = match display.state.suffix_key() {
+            Some(key) => format!("{}   {}", display.name, translator.get(key)),
+            None => display.name.clone(),
+        };
+        set_row_text(&mut text, &label);
+        *text_color = color;
     }
 }
 
@@ -1425,14 +1830,19 @@ fn paint_contents_selection(
             .index
             .and_then(|index| views.view(surface).rows.get(index))
             .is_some_and(|display| selection.get(surface) == Some(display.item_id));
-        let want = if selected {
-            Color::srgba(0.25, 0.4, 0.65, 0.6)
-        } else {
-            Color::NONE
-        };
+        let want = selection_background(selected);
         if background.0 != want {
             background.0 = want;
         }
+    }
+}
+
+/// A contents row's background: the selection tint, or none.
+const fn selection_background(selected: bool) -> Color {
+    if selected {
+        Color::srgba(0.25, 0.4, 0.65, 0.6)
+    } else {
+        Color::NONE
     }
 }
 
@@ -1487,17 +1897,23 @@ fn gate_contents_buttons(
     if let Some(ui) = &surfaces.open_ui {
         let view = &model.views.open;
         if let Ok(mut text) = texts.get_mut(ui.name_text) {
-            let want = if view.target.is_none() {
-                translator.get("object-contents-none")
-            } else if view.name.is_empty() {
-                contents_summary(view, &translator)
-            } else {
-                format!("{} — {}", view.name, contents_summary(view, &translator))
-            };
+            let want = open_floater_name_line(view, &translator);
             if text.0 != want {
                 text.0 = want;
             }
         }
+    }
+}
+
+/// The Object Contents floater's name line for `view`: "none" without a
+/// target, else the object's name (when known) and the count summary.
+fn open_floater_name_line(view: &ContentsSurfaceView, translator: &Translator) -> String {
+    if view.target.is_none() {
+        translator.get("object-contents-none")
+    } else if view.name.is_empty() {
+        contents_summary(view, translator)
+    } else {
+        format!("{} — {}", view.name, contents_summary(view, translator))
     }
 }
 

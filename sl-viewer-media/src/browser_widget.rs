@@ -503,6 +503,26 @@ fn close_removed_browser_views(
     }
 }
 
+/// The offline page a specimen's browser view shows: a `data:` URL headed by
+/// `heading`, so a gallery / sweep run never touches the network. Shared by
+/// this widget's specimen and the web floater's.
+#[must_use]
+pub fn specimen_page_url(heading: &str) -> ValidatedMediaUrl {
+    let url = format!(
+        "data:text/html,<body style='background:%23202430;color:%23e8e8f0;\
+         font-family:sans-serif'><h2>{}</h2><p>offline specimen page</p></body>",
+        heading.replace(' ', "%20")
+    );
+    // The one `data:` URL in the viewer, and the reason
+    // `ValidatedMediaUrl::viewer_authored` exists: the page is composed right
+    // here from a translated label, never from grid data. An unparsable one
+    // (impossible for this literal) falls back to the empty page.
+    ValidatedMediaUrl::viewer_authored(&url).unwrap_or_else(|error| {
+        warn!("specimen page URL rejected ({error}); showing the empty page");
+        ValidatedMediaUrl::blank()
+    })
+}
+
 /// The offline gallery / test specimen: a bordered, fixed-size browser view
 /// on a data URL (no network), or the dark placeholder when the media engine
 /// is not running.
@@ -524,25 +544,11 @@ pub fn spawn_browser_specimen(
             ChildOf(parent),
         ))
         .id();
-    let sample = cx.text("sl-client embedded browser");
-    let url = format!(
-        "data:text/html,<body style='background:%23202430;color:%23e8e8f0;\
-         font-family:sans-serif'><h2>{}</h2><p>offline specimen page</p></body>",
-        sample.replace(' ', "%20")
-    );
-    // The one `data:` URL in the viewer, and the reason
-    // `ValidatedMediaUrl::viewer_authored` exists: the page is composed right
-    // here from a translated label, never from grid data. An unparsable one
-    // (impossible for this literal) falls back to the empty page.
-    let url = ValidatedMediaUrl::viewer_authored(&url).unwrap_or_else(|error| {
-        warn!("specimen page URL rejected ({error}); showing the empty page");
-        ValidatedMediaUrl::blank()
-    });
     spawn_browser_view(
         commands,
         frame,
         &BrowserViewSpec {
-            initial_url: url,
+            initial_url: specimen_page_url(&cx.text("sl-client embedded browser")),
             trust: SurfaceTrust::InWorld,
             tab_index: 1,
             fixed_height: None,

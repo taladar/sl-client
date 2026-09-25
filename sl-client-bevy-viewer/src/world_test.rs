@@ -493,7 +493,7 @@ pub(crate) fn world_app_with_build_tools() -> Result<App, Box<dyn core::error::E
 /// fill their pages a frame later still (they run on `BuildTabPages` appearing),
 /// so nothing inside the window exists until this has settled.
 ///
-/// It is also **parked to fit**: the shipped window is 420 × 640 logical pixels
+/// It is also **parked to fit**: the shipped window is 510 × 640 logical pixels
 /// and the fixture viewport is 800 × 600, so at its own opening position its
 /// lower third — the whole tab shell, which is where the per-aspect editors are
 /// — hangs off the bottom of the screen. A control laid out past the viewport

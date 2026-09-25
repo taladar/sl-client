@@ -38,7 +38,7 @@
 use crate::skin_palette::SkinPalette;
 use bevy::prelude::*;
 use bevy::ui::InteractionDisabled;
-use bevy::ui_widgets::{Activate, SliderRange, SliderStep};
+use bevy::ui_widgets::{Activate, Slider, SliderRange, SliderStep, SliderValue};
 use bevy::window::PrimaryWindow;
 use serde::{Deserialize, Serialize};
 use sl_settings::{Scope, SettingKind};
@@ -663,14 +663,41 @@ fn spawn_quick_prefs_floater(mut commands: Commands, root: Res<UiRoot>) {
         .insert(FloaterOpenExempt);
 }
 
-/// First-open content build: the environment section, a divider, then one row per
-/// entry (loaded from the per-avatar file or the defaults).
+/// First-open content build: the panel's content ([`spawn_quick_prefs_body`])
+/// over the entries loaded from the per-avatar file or the defaults, and the
+/// [`QuickPrefEnvCombos`] insert.
 fn build_quick_prefs_content(
     In(handle): In<FloaterHandle>,
     mut commands: Commands,
     settings: Option<Res<ViewerSettings>>,
     translator: crate::i18n::Translator,
 ) {
+    let entries = settings
+        .as_deref()
+        .map_or_else(default_entries, load_entries);
+    let rows: Vec<(QuickPrefEntry, QuickPrefKind)> = entries
+        .into_iter()
+        .filter_map(|entry| binding_kind(settings.as_deref(), &entry).map(|kind| (entry, kind)))
+        .collect();
+    let combos = spawn_quick_prefs_body(
+        &mut commands,
+        handle.content,
+        &translator.get(crate::quick_prefs_environment::KEY_REGION_DEFAULT),
+        &rows,
+    );
+    commands.insert_resource(combos);
+}
+
+/// Build the panel's content into `slot`: the environment section, a divider,
+/// the quality row, then one row per admitted `(entry, kind)`. `region_default`
+/// is the preset combos' seed label. Returns the environment combos. Shared by
+/// the live floater and its specimen.
+fn spawn_quick_prefs_body(
+    commands: &mut Commands,
+    slot: Entity,
+    region_default: &str,
+    rows: &[(QuickPrefEntry, QuickPrefKind)],
+) -> QuickPrefEnvCombos {
     let content = commands
         .spawn((
             Node {
@@ -681,36 +708,30 @@ fn build_quick_prefs_content(
                 ..column(Val::Px(ROW_GAP))
             },
             Name::new("quick-prefs:content"),
-            ChildOf(handle.content),
+            ChildOf(slot),
         ))
         .id();
 
-    spawn_section(&mut commands, content, "quick-prefs-environment");
-    let (group, time) = spawn_env_rows(&mut commands, content);
-    commands.insert_resource(QuickPrefEnvCombos { group, time });
+    spawn_section(commands, content, "quick-prefs-environment");
+    let (group, time) = spawn_env_rows(commands, content);
     // The three settings-asset tracks, below the group / time pair that works
     // before inventory has loaded — see `crate::quick_prefs_environment`.
     crate::quick_prefs_environment::spawn_preset_rows(
-        &mut commands,
+        commands,
         content,
         &crate::quick_prefs_environment::QUICK_PREFS_HOST,
         3,
-        &translator.get(crate::quick_prefs_environment::KEY_REGION_DEFAULT),
+        region_default,
     );
 
-    spawn_divider(&mut commands, content);
+    spawn_divider(commands, content);
 
-    spawn_quality_row(&mut commands, content);
+    spawn_quality_row(commands, content);
 
-    let entries = settings
-        .as_deref()
-        .map_or_else(default_entries, load_entries);
-    for entry in &entries {
-        let Some(kind) = binding_kind(settings.as_deref(), entry) else {
-            continue;
-        };
-        spawn_entry_row(&mut commands, content, entry, kind);
+    for (entry, kind) in rows {
+        spawn_entry_row(commands, content, entry, *kind);
     }
+    QuickPrefEnvCombos { group, time }
 }
 
 /// The setting kind a row would bind, or `None` when the setting is unregistered
@@ -1228,6 +1249,25 @@ fn sync_env_combos(
     let Some(environment) = environment else {
         return;
     };
+    show_environment(
+        &combos,
+        &environment,
+        &mut selections,
+        &time_disabled,
+        &mut commands,
+    );
+}
+
+/// Show `environment` in the pair of combos: select its group and time, and
+/// disable the time combo when the group gives a time no meaning. The drawing
+/// half of [`sync_env_combos`], shared with the specimen.
+fn show_environment(
+    combos: &QuickPrefEnvCombos,
+    environment: &EnvironmentState,
+    selections: &mut Query<&mut ComboSelection>,
+    time_disabled: &Query<Has<InteractionDisabled>>,
+    commands: &mut Commands,
+) {
     let (group_index, time_index) =
         combo_indices(environment.fixed(), !environment.local().is_empty());
     if let Ok(mut group) = selections.get_mut(combos.group)
@@ -1273,14 +1313,20 @@ fn update_quick_pref_values(
         else {
             continue;
         };
-        let wanted = if label.integer {
-            format!("{}", value.round())
-        } else {
-            format!("{value:.2}")
-        };
-        if text.0 != wanted {
-            text.0 = wanted;
-        }
+        show_value(&mut text, label, value);
+    }
+}
+
+/// Write `value` into one slider's readout, formatted as its label asks. The
+/// drawing half of [`update_quick_pref_values`], shared with the specimen.
+fn show_value(text: &mut Text, label: &QuickPrefValueLabel, value: f32) {
+    let wanted = if label.integer {
+        format!("{}", value.round())
+    } else {
+        format!("{value:.2}")
+    };
+    if text.0 != wanted {
+        text.0 = wanted;
     }
 }
 
@@ -1319,124 +1365,95 @@ const fn u32_to_f32(value: u32) -> f32 {
 // The gallery specimen.
 // ---------------------------------------------------------------------------
 
-/// The static quick-prefs specimen for the gallery / headless harness: the
-/// environment section over a divider and two setting slider rows — the layout,
-/// with none of the live behaviour (per the element registry's rule: no plugin,
-/// no store, no observers).
+/// The Quick Preferences panel's gallery / `ui_test` specimen: the live content,
+/// built by the same `spawn_quick_prefs_body` over the built-in default
+/// entries, then what the panel's runtime adds once it exists — the preset
+/// combos' row lists for an inventory holding no settings assets
+/// ([`crate::quick_prefs_environment`]), the environment pair showing the
+/// region's shared environment (so the time combo is disabled, as it is after
+/// login) and each slider's readout and thumb at a sample value.
+///
+/// The preset combos open showing a sample *Region default* seed, which the
+/// row lists then replace where the host runs the combo widget. It inserts no
+/// `QuickPrefEnvCombos`, so the live systems leave it alone.
 pub fn spawn_quick_prefs_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: ElementCx,
 ) -> Entity {
-    let card = commands
-        .spawn((
-            Node {
-                padding: UiRect::all(Val::Px(10.0)),
-                min_width: Val::Px(280.0),
-                ..column(Val::Px(ROW_GAP))
-            },
-            Name::new("quick-prefs-specimen"),
-            ChildOf(parent),
-        ))
-        .id();
-    commands.spawn((
-        Text::new(cx.text("Environment")),
-        cx.font(UiFont::Sans),
-        text_role(SECTION_COLOR),
-        ChildOf(card),
-    ));
-    spawn_specimen_combo_row(commands, card, &cx, "Preset", "Legacy WindLight");
-    spawn_specimen_combo_row(commands, card, &cx, "Time of day", "Midday");
-    // The three settings-asset tracks. Stand-ins like the two above — the
-    // specimen carries no live combo — but present, so the sweep measures the
-    // panel at the height it actually opens at.
-    spawn_specimen_combo_row(commands, card, &cx, "Sky", "Region default");
-    spawn_specimen_combo_row(commands, card, &cx, "Water", "Region default");
-    spawn_specimen_combo_row(commands, card, &cx, "Day cycle", "No day cycle");
-    spawn_divider(commands, card);
-    spawn_specimen_slider_row(commands, card, &cx, "Draw distance", "512", 0.5);
-    spawn_specimen_slider_row(commands, card, &cx, "Max particles", "4096", 0.5);
-    card
+    let rows: Vec<(QuickPrefEntry, QuickPrefKind)> = default_entries()
+        .into_iter()
+        .filter_map(|entry| binding_kind(None, &entry).map(|kind| (entry, kind)))
+        .collect();
+    let combos = spawn_quick_prefs_body(commands, parent, &cx.text("Region default"), &rows);
+    crate::quick_prefs_environment::compose_preset_rows_specimen(
+        commands,
+        crate::quick_prefs_environment::QUICK_PREFS_HOST.scope,
+    );
+    commands.run_system_cached_with(compose_quick_prefs_specimen, (combos, parent));
+    parent
 }
 
-/// A content-sized specimen row (unlike the live [`row_node`], which fills the
-/// floater with `width: 100%` + space-between): the card grows to the widest row,
-/// so no fixed-width child can overflow its box across scripts / scales.
-fn specimen_row() -> Node {
-    Node {
-        align_items: AlignItems::Center,
-        ..row(Val::Px(ROW_GAP))
+/// A slider's sample value for a specimen: the middle of its `range`, snapped
+/// to its `step` — a plausible setting for any slider, where the binding
+/// layer's sync would put a stored one. Shared with the Phototools specimen.
+pub(crate) fn sample_slider_value(range: &SliderRange, step: f32) -> f32 {
+    let middle = f32::midpoint(range.start(), range.end());
+    let snapped = if step > 0.0 {
+        range.start() + ((middle - range.start()) / step).round() * step
+    } else {
+        middle
+    };
+    range.clamp(snapped)
+}
+
+/// The specimen's composing pass: the environment pair through
+/// [`show_environment`] (the region's shared environment), and each slider at
+/// its [`sample_slider_value`], where the binding layer's sync would put a
+/// stored one, with its readout through [`show_value`]. Only the sliders and
+/// readouts under `slot` are touched: another window's slider may bind the
+/// same setting.
+fn compose_quick_prefs_specimen(
+    In((combos, slot)): In<(QuickPrefEnvCombos, Entity)>,
+    mut selections: Query<&mut ComboSelection>,
+    time_disabled: Query<Has<InteractionDisabled>>,
+    mut labels: Query<(Entity, &mut Text, &QuickPrefValueLabel)>,
+    sliders: Query<(Entity, &SettingBinding, &SliderRange, &SliderStep), With<Slider>>,
+    parents: Query<&ChildOf>,
+    mut commands: Commands,
+) {
+    let under_slot = |entity: Entity| {
+        parents
+            .iter_ancestors(entity)
+            .any(|ancestor| ancestor == slot)
+    };
+    show_environment(
+        &combos,
+        &EnvironmentState::default(),
+        &mut selections,
+        &time_disabled,
+        &mut commands,
+    );
+    let mut values: Vec<(&str, f32)> = Vec::new();
+    for (slider, binding, range, step) in &sliders {
+        if !under_slot(slider) {
+            continue;
+        }
+        let value = sample_slider_value(range, step.0);
+        commands.entity(slider).insert(SliderValue(value));
+        values.push((binding.name(), value));
     }
-}
-
-/// A static combo-looking row for the specimen: a label and a bordered value box.
-fn spawn_specimen_combo_row(
-    commands: &mut Commands,
-    parent: Entity,
-    cx: &ElementCx,
-    label: &str,
-    value: &str,
-) {
-    let row_entity = commands.spawn((specimen_row(), ChildOf(parent))).id();
-    commands.spawn((
-        Text::new(cx.text(label)),
-        cx.font(UiFont::Sans),
-        text_role(LABEL_COLOR),
-        ChildOf(row_entity),
-    ));
-    commands
-        .spawn((
-            Node {
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(CONTROL_BORDER),
-            BackgroundColor(TRACK_FILL),
-            ChildOf(row_entity),
-        ))
-        .with_child((
-            Text::new(cx.text(value)),
-            cx.font(UiFont::Sans),
-            text_role(VALUE_COLOR),
-        ));
-}
-
-/// A static slider row for the specimen: a label, a track with a thumb at
-/// `fraction`, and a value readout.
-fn spawn_specimen_slider_row(
-    commands: &mut Commands,
-    parent: Entity,
-    cx: &ElementCx,
-    label: &str,
-    value: &str,
-    fraction: f32,
-) {
-    let row_entity = commands.spawn((specimen_row(), ChildOf(parent))).id();
-    commands.spawn((
-        Text::new(cx.text(label)),
-        cx.font(UiFont::Sans),
-        text_role(LABEL_COLOR),
-        ChildOf(row_entity),
-    ));
-    let group = commands
-        .spawn((
-            Node {
-                align_items: AlignItems::Center,
-                ..row(Val::Px(6.0))
-            },
-            ChildOf(row_entity),
-        ))
-        .id();
-    // Static: no `Slider`, so the thumb is drawn at the specimen's fraction and
-    // stays there.
-    spawn_slider(commands, group, SLIDER, 0, fraction, ());
-    commands.spawn((
-        Text::new(cx.text(value)),
-        cx.font(UiFont::Sans),
-        text_role(VALUE_COLOR),
-        ChildOf(group),
-    ));
+    for (entity, mut text, label) in &mut labels {
+        if !under_slot(entity) {
+            continue;
+        }
+        if let Some((_name, value)) = values
+            .iter()
+            .find(|(name, _value)| *name == label.control_name)
+        {
+            show_value(&mut text, label, *value);
+        }
+    }
 }
 
 #[cfg(test)]

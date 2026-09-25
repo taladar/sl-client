@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 118 |
-| ready | 300 |
+| ready | 305 |
 | blocked | 62 |
 | in-progress | 25 |
-| bugs | 12 |
-| done | 1233 |
+| bugs | 13 |
+| done | 1234 |
 | deferred | 30 |
 | wont-do | 16 |
-| **total** | **1796** |
+| **total** | **1803** |
 
 ## ideas (118)
 
@@ -294,7 +294,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (300)
+## ready (305)
 
 ### protocol
 
@@ -509,8 +509,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   floater + reminders (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-experience-profile-extended-metadata`](ready/viewer-experience-profile-extended-metadata.md)
   — Experience profile — the marketplace link, the logo, and the owning group
+- [`viewer-floater-font-size-threading`](ready/viewer-floater-font-size-threading.md)
+  — Part of several floaters is drawn at a fixed size whatever font size they
+  are built at
 - [`viewer-floater-update-in-place`](ready/viewer-floater-update-in-place.md) —
   Detail/property floaters — update values in place, don't rebuild structure
+- [`viewer-floaters-decoupled-from-the-session`](ready/viewer-floaters-decoupled-from-the-session.md)
+  — Floater UI behaviour is welded to the session, so it runs nowhere else — not
+  the gallery, not a unit test
 - [`viewer-flycam-avatar-movement-keys`](ready/viewer-flycam-avatar-movement-keys.md)
   — Avatar movement keys do nothing in flycam mode
 - [`viewer-fs-bridge-lifecycle`](ready/viewer-fs-bridge-lifecycle.md) —
@@ -552,6 +558,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-i18n-chat-translation`](ready/viewer-i18n-chat-translation.md) —
   Machine translation of chat / IM (blocked by `viewer-i18n-fluent-scaffold`
   (done), `viewer-chat-history-panel` (done))
+- [`viewer-i18n-floater-literal-english`](ready/viewer-i18n-floater-literal-english.md)
+  — Several floaters still draw literal English instead of translation keys
 - [`viewer-i18n-locale-selection`](ready/viewer-i18n-locale-selection.md) —
   Locale detection, override & runtime switch (blocked by
   `viewer-i18n-fluent-scaffold` (done), `viewer-ui-settings-store` (done))
@@ -843,6 +851,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   the blocked-object list for an unapproved experience's attachment (blocked by
   `viewer-experience-event-stream` (done), `viewer-rlv-temp-attachment-gate`
   (done))
+- [`viewer-rlv-console-lines-wrap`](ready/viewer-rlv-console-lines-wrap.md) —
+  The RLVa console cuts a long line behind an ellipsis where the reference wraps
+  it
 - [`viewer-rlv-enforce-camera`](ready/viewer-rlv-enforce-camera.md) — RLV —
   camera restrictions and vision overlay (blocked by
   `viewer-rlv-restriction-state` (done), `viewer-camera-third-person-orbit`
@@ -871,6 +882,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Seamless seated region crossing (keep sit-implied permissions)
 - [`viewer-settings-backup`](ready/viewer-settings-backup.md) — Settings backup
   — export / import (blocked by `viewer-preferences-floater` (done))
+- [`viewer-skin-floater-controls-outside-the-skin`](ready/viewer-skin-floater-controls-outside-the-skin.md)
+  — A dozen floaters build their buttons, labels and marks with inline colours
+  no skin reaches
 - [`viewer-skin-icon-set`](ready/viewer-skin-icon-set.md) — A skin should be
   able to carry an icon set, not just colours
 - [`viewer-snapshot-composition-guides`](ready/viewer-snapshot-composition-guides.md)
@@ -1270,7 +1284,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (12)
+## bugs (13)
 
 ### protocol
 
@@ -1279,16 +1293,19 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`viewer-day-cycle-strip-click-mirrored-rtl`](bugs/viewer-day-cycle-strip-click-mirrored-rtl.md)
+  — In a right-to-left layout a click on the day-cycle timeline lands mirrored
+  from the markers
 - [`viewer-emoji-picker-hover-preview-inert`](bugs/viewer-emoji-picker-hover-preview-inert.md)
   — Hovering an emoji never fills the picker's preview line
+- [`viewer-floater-buttons-ignore-keyboard-activate`](bugs/viewer-floater-buttons-ignore-keyboard-activate.md)
+  — The material editor, wearable editor and object contents buttons act on a
+  mouse press only
 - [`viewer-floater-minimize-caps-follow-no-pattern`](bugs/viewer-floater-minimize-caps-follow-no-pattern.md)
   — Which floaters have a minimize button follows no pattern, and most that lack
   one should have it
 - [`viewer-friends-list-shows-a-sixth-rights-column`](bugs/viewer-friends-list-shows-a-sixth-rights-column.md)
   — The Friends list shows six rights columns; the reference shows five
-- [`viewer-gallery-floaters-are-mostly-stubs`](bugs/viewer-gallery-floaters-are-mostly-stubs.md)
-  — 43 of the gallery's 56 floaters show a line of prose instead of their
-  content
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
   Some worn mesh hair does not render (visible in Firestorm)
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
@@ -1308,7 +1325,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1233)
+## done (1234)
 
 ### protocol
 
@@ -2013,6 +2030,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — "Stop flycam" button overlaps the "Chat" button in the bottom bar
 - [`viewer-fps-label-intermittent`](done/viewer-fps-label-intermittent.md) — FPS
   status readout intermittently drops its "fps" label
+- [`viewer-gallery-floaters-are-mostly-stubs`](done/viewer-gallery-floaters-are-mostly-stubs.md)
+  — 43 of the gallery's 56 floaters show a line of prose instead of their
+  content
 - [`viewer-gallery-scrollbar-and-page-keys`](done/viewer-gallery-scrollbar-and-page-keys.md)
   — The gallery can only be crossed by mouse wheel
 - [`viewer-glow-bloom`](done/viewer-glow-bloom.md) — Full-screen glow / bloom

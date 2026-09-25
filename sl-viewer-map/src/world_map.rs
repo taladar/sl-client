@@ -33,7 +33,7 @@
 
 use std::collections::HashMap;
 
-use bevy::asset::RenderAssetUsages;
+use bevy::asset::{RenderAssetUsages, uuid_handle};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
@@ -42,10 +42,11 @@ use bevy::ui::RelativeCursorPosition;
 use bevy::ui_widgets::Activate;
 use bevy::window::PrimaryWindow;
 use sl_client_bevy::{
-    Command, MapItem, MapItemType, MapRegionInfo, Maturity, RegionCoordinates, RegionHandle,
-    SlCommand, SlEvent, SlIdentity, SlSessionEvent, Vector,
+    Command, GlobalCoordinates, GridCoordinates, MapItem, MapItemType, MapRegionInfo, Maturity,
+    RegionCoordinates, RegionHandle, SlCommand, SlEvent, SlIdentity, SlSessionEvent, Vector,
 };
 use sl_settings::{Scope, SettingValue};
+use sl_types::map::RegionName;
 
 use crate::clipboard::{ViewerClipboard, copy_to_clipboard};
 use crate::floater::{
@@ -413,7 +414,7 @@ impl Plugin for WorldMapPlugin {
 }
 
 /// The floater's default content size, in logical pixels.
-const DEFAULT_SIZE: Vec2 = Vec2::new(620.0, 440.0);
+const DEFAULT_SIZE: Vec2 = Vec2::new(620.0, 600.0);
 
 /// The smallest content size the resize grip allows.
 const MIN_SIZE: Vec2 = Vec2::new(360.0, 260.0);
@@ -491,6 +492,64 @@ fn build_world_map_content(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
 ) {
+    let image = images.add(blank_surface(64, 64));
+    let parts = spawn_world_map_content(
+        &mut commands,
+        handle.content,
+        image.clone(),
+        PANEL_FONT_SIZE,
+    );
+    commands.insert_resource(WorldMapUi {
+        root: handle.root,
+        surface: parts.surface,
+        image,
+        tooltip: parts.tooltip,
+        tooltip_text: parts.tooltip_text,
+        search_field: parts.search_field,
+        results: parts.results,
+        location_text: parts.location_text,
+        field_x: parts.field_x,
+        field_y: parts.field_y,
+        field_z: parts.field_z,
+        labels: Vec::new(),
+    });
+}
+
+/// The world-map content's entities, as [`spawn_world_map_content`] built them.
+#[derive(Debug, Clone)]
+struct WorldMapParts {
+    /// The map surface node (the [`ImageNode`], the input target).
+    surface: Entity,
+    /// The hover tooltip panel.
+    tooltip: Entity,
+    /// The hover tooltip's text node.
+    tooltip_text: Entity,
+    /// The search field (carries [`EditableText`]).
+    search_field: Entity,
+    /// The search-result rows' parent column.
+    results: Entity,
+    /// The selected-location readout line.
+    location_text: Entity,
+    /// The selected location's region-local X input field.
+    field_x: Entity,
+    /// The selected location's region-local Y input field.
+    field_y: Entity,
+    /// The selected location's altitude (Z) input field.
+    field_z: Entity,
+    /// Each layer checkbox's fill node, with its setting's default.
+    checkboxes: Vec<(Entity, bool)>,
+}
+
+/// Build the world map's content into `content`: the map surface showing
+/// `image` with its input observers and tooltip, and the side panel — the
+/// search field and result list, the selected-location block and the layer
+/// filters. Shared by the live floater and its gallery specimen.
+fn spawn_world_map_content(
+    commands: &mut Commands,
+    content: Entity,
+    image: Handle<Image>,
+    font_size: f32,
+) -> WorldMapParts {
     // The content row: the map surface (grows) and the search side panel.
     let content_row = commands
         .spawn((
@@ -502,11 +561,10 @@ fn build_world_map_content(
                 ..default()
             },
             Name::new("worldmap-content"),
-            ChildOf(handle.content),
+            ChildOf(content),
         ))
         .id();
 
-    let image = images.add(blank_surface(64, 64));
     let surface = commands
         .spawn((
             Node {
@@ -515,7 +573,7 @@ fn build_world_map_content(
                 min_height: Val::Px(64.0),
                 ..default()
             },
-            ImageNode::new(image.clone()),
+            ImageNode::new(image),
             RelativeCursorPosition::default(),
             Pickable {
                 should_block_lower: true,
@@ -544,7 +602,7 @@ fn build_world_map_content(
     let tooltip_text = commands
         .spawn((
             Text::default(),
-            UiFont::Sans.at(PANEL_FONT_SIZE),
+            UiFont::Sans.at(font_size),
             skin::tooltip_text(),
             Pickable::IGNORE,
             ChildOf(tooltip),
@@ -564,10 +622,10 @@ fn build_world_map_content(
         ))
         .id();
     let search = spawn_search_field(
-        &mut commands,
+        commands,
         side,
         &SearchFieldSpec {
-            font_size: PANEL_FONT_SIZE,
+            font_size,
             min_width: SIDE_WIDTH - 12.0,
             placeholder: String::from("Search regions"),
             ..SearchFieldSpec::new(WORLD_MAP_ELEMENT)
@@ -604,7 +662,7 @@ fn build_world_map_content(
         .observe(on_results_scroll)
         .id();
     spawn_scrollbar(
-        &mut commands,
+        commands,
         results_row,
         ScrollTarget::Container(results),
         Node::default(),
@@ -615,7 +673,7 @@ fn build_world_map_content(
     let location_text = commands
         .spawn((
             Text::default(),
-            UiFont::Sans.at(PANEL_FONT_SIZE),
+            UiFont::Sans.at(font_size),
             TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
             Name::new("worldmap-location"),
             ChildOf(side),
@@ -626,7 +684,11 @@ fn build_world_map_content(
             Node {
                 width: Val::Percent(100.0),
                 column_gap: Val::Px(4.0),
+                row_gap: Val::Px(2.0),
                 align_items: AlignItems::Center,
+                // Three label + field pairs outgrow the side panel at a large
+                // font: the pairs wrap onto a second line rather than spill.
+                flex_wrap: FlexWrap::Wrap,
                 ..default()
             },
             Name::new("worldmap-coords"),
@@ -635,18 +697,30 @@ fn build_world_map_content(
         .id();
     let mut coord_fields: Vec<Entity> = Vec::new();
     for (label, initial) in [("X", "128"), ("Y", "128"), ("Z", "0")] {
+        // A pair wraps as one, so a label never ends a line its field starts.
+        let pair = commands
+            .spawn((
+                Node {
+                    column_gap: Val::Px(4.0),
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                Name::new("worldmap-coord"),
+                ChildOf(coords_row),
+            ))
+            .id();
         commands.spawn((
             Text::new(label),
-            UiFont::Sans.at(PANEL_FONT_SIZE),
+            UiFont::Sans.at(font_size),
             TextColor(Color::srgba(0.7, 0.7, 0.7, 1.0)),
             Pickable::IGNORE,
-            ChildOf(coords_row),
+            ChildOf(pair),
         ));
         let field = spawn_text_input(
-            &mut commands,
-            coords_row,
+            commands,
+            pair,
             &TextInputSpec {
-                font_size: PANEL_FONT_SIZE,
+                font_size,
                 width_glyphs: 4.0,
                 initial: initial.to_owned(),
                 max_characters: Some(4),
@@ -668,6 +742,10 @@ fn build_world_map_content(
             Node {
                 width: Val::Percent(100.0),
                 column_gap: Val::Px(4.0),
+                row_gap: Val::Px(4.0),
+                // Two long translations outgrow the side panel side by side:
+                // the second button wraps under the first rather than spill.
+                flex_wrap: FlexWrap::Wrap,
                 ..default()
             },
             Name::new("worldmap-buttons"),
@@ -675,16 +753,18 @@ fn build_world_map_content(
         ))
         .id();
     spawn_panel_button(
-        &mut commands,
+        commands,
         buttons_row,
         "worldmap-button-teleport",
         "teleport-selected",
+        font_size,
     );
     spawn_panel_button(
-        &mut commands,
+        commands,
         buttons_row,
         "worldmap-button-copy-slurl",
         "copy-slurl",
+        font_size,
     );
 
     // The layer-filter checkboxes (the reference's info-display toggles).
@@ -698,6 +778,7 @@ fn build_world_map_content(
             ChildOf(side),
         ))
         .id();
+    let mut checkboxes = Vec::new();
     for (label_key, action, setting, default) in [
         (
             "worldmap-layer-people",
@@ -742,13 +823,14 @@ fn build_world_map_content(
             true,
         ),
     ] {
-        spawn_layer_toggle(&mut commands, filters, label_key, action, setting, default);
+        let fill = spawn_layer_toggle(
+            commands, filters, label_key, action, setting, default, font_size,
+        );
+        checkboxes.push((fill, default));
     }
 
-    commands.insert_resource(WorldMapUi {
-        root: handle.root,
+    WorldMapParts {
         surface,
-        image,
         tooltip,
         tooltip_text,
         search_field: search.field,
@@ -757,8 +839,8 @@ fn build_world_map_content(
         field_x,
         field_y,
         field_z,
-        labels: Vec::new(),
-    });
+        checkboxes,
+    }
 }
 
 /// One labelled side-panel button emitting a [`UiAction`].
@@ -767,6 +849,7 @@ fn spawn_panel_button(
     parent: Entity,
     label_key: &'static str,
     action: &'static str,
+    font_size: f32,
 ) {
     let button = ui_spawn::spawn_button(
         commands,
@@ -777,7 +860,7 @@ fn spawn_panel_button(
             .padding(7.0, 3.0)
             .colors(Color::srgb(0.16, 0.17, 0.2), Color::srgb(0.35, 0.35, 0.4))
             .label_color(SkinPalette::FALLBACK.text_primary)
-            .font_size(PANEL_FONT_SIZE)
+            .font_size(font_size)
             .layout(|node| {
                 node.justify_content = JustifyContent::Center;
                 node.flex_grow = 1.0;
@@ -795,7 +878,8 @@ fn spawn_panel_button(
 }
 
 /// One layer-filter checkbox row: a mirrored check square plus a label,
-/// toggling its setting through the shared [`UiAction`] dispatch.
+/// toggling its setting through the shared [`UiAction`] dispatch. Returns the
+/// check square's fill node.
 fn spawn_layer_toggle(
     commands: &mut Commands,
     parent: Entity,
@@ -803,7 +887,8 @@ fn spawn_layer_toggle(
     action: &'static str,
     setting: &'static str,
     default_on: bool,
-) {
+    font_size: f32,
+) -> Entity {
     let row = commands
         .spawn((
             Node {
@@ -846,27 +931,30 @@ fn spawn_layer_toggle(
             ChildOf(row),
         ))
         .id();
-    commands.spawn((
-        Node {
-            flex_grow: 1.0,
-            ..default()
-        },
-        BackgroundColor(Color::NONE),
-        WorldMapCheckbox {
-            setting,
-            default: default_on,
-        },
-        Pickable::IGNORE,
-        ChildOf(box_outer),
-    ));
+    let fill = commands
+        .spawn((
+            Node {
+                flex_grow: 1.0,
+                ..default()
+            },
+            BackgroundColor(Color::NONE),
+            WorldMapCheckbox {
+                setting,
+                default: default_on,
+            },
+            Pickable::IGNORE,
+            ChildOf(box_outer),
+        ))
+        .id();
     commands.spawn((
         Text::default(),
         Translated::new(label_key),
-        UiFont::Sans.at(PANEL_FONT_SIZE),
+        UiFont::Sans.at(font_size),
         TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
         Pickable::IGNORE,
         ChildOf(row),
     ));
+    fill
 }
 
 /// Paint each layer checkbox's fill from its setting.
@@ -876,15 +964,19 @@ fn refresh_world_map_checkboxes(
 ) {
     let store = settings.store();
     for (checkbox, mut background) in &mut boxes {
-        let checked = store.get_bool(checkbox.setting).unwrap_or(checkbox.default);
-        let wanted = if checked {
-            Color::srgb(0.55, 0.75, 1.0)
-        } else {
-            Color::NONE
-        };
+        let wanted = checkbox_fill(store.get_bool(checkbox.setting).unwrap_or(checkbox.default));
         if background.0 != wanted {
             background.0 = wanted;
         }
+    }
+}
+
+/// A layer checkbox's fill colour for its checked state.
+const fn checkbox_fill(checked: bool) -> Color {
+    if checked {
+        Color::srgb(0.55, 0.75, 1.0)
+    } else {
+        Color::NONE
     }
 }
 
@@ -1312,20 +1404,26 @@ fn drive_world_map_location(
     // The readout: region name once its map block arrived, else coordinates.
     let line = state.selected.map_or_else(
         || translator.get("worldmap-location-none"),
-        |(grid_x, grid_y)| {
-            let name = model
-                .regions
-                .get(&(grid_x, grid_y))
-                .and_then(|info| info.name.as_ref())
-                .map_or_else(|| format!("({grid_x}, {grid_y})"), ToString::to_string);
-            format!("{name} ({x}, {y}, {z})")
-        },
+        |selected| location_readout(&model, selected, (x, y, z)),
     );
     if let Ok(mut text) = texts.get_mut(ui.location_text)
         && text.0 != line
     {
         text.0 = line;
     }
+}
+
+/// The selected-location readout: the region's name once its map block
+/// arrived (else its grid coordinates), then the region-local position.
+fn location_readout(model: &WorldMapModel, selected: (u32, u32), local: (u8, u8, u16)) -> String {
+    let (grid_x, grid_y) = selected;
+    let (x, y, z) = local;
+    let name = model
+        .regions
+        .get(&(grid_x, grid_y))
+        .and_then(|info| info.name.as_ref())
+        .map_or_else(|| format!("({grid_x}, {grid_y})"), ToString::to_string);
+    format!("{name} ({x}, {y}, {z})")
 }
 
 // ---------------------------------------------------------------------------
@@ -2056,7 +2154,6 @@ fn layout_world_map_labels(
     let mut used = 0_usize;
     if shown && names_on {
         let (min_x, max_x, min_y, max_y) = state.view.visible_grid_rect();
-        let region_width = f64::from(REGION_WIDTH_METRES);
         for ((grid_x, grid_y), info) in &model.regions {
             if used >= MAX_LABELS {
                 break;
@@ -2067,11 +2164,7 @@ fn layout_world_map_labels(
             let Some(name) = &info.name else {
                 continue;
             };
-            // Anchor at the region's north-west corner, inset a little.
-            let anchor = state.view.view_from_global(
-                f64::from(*grid_x) * region_width,
-                f64::from(grid_y.saturating_add(1)) * region_width,
-            );
+            let anchor = region_label_anchor(&state.view, *grid_x, *grid_y);
             let position = Vec2::new(anchor.x * to_logical.x + 3.0, anchor.y * to_logical.y + 2.0);
             if position.x < -80.0
                 || position.y < -20.0
@@ -2082,29 +2175,8 @@ fn layout_world_map_labels(
             }
             // Grow the pool on demand.
             if ui.labels.len() <= used {
-                let wrapper = commands
-                    .spawn((
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: Val::Px(0.0),
-                            top: Val::Px(0.0),
-                            ..default()
-                        },
-                        Pickable::IGNORE,
-                        Name::new("worldmap-region-label"),
-                        ChildOf(ui.surface),
-                    ))
-                    .id();
-                let text = commands
-                    .spawn((
-                        Text::default(),
-                        UiFont::Sans.at(LABEL_FONT_SIZE),
-                        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.85)),
-                        Pickable::IGNORE,
-                        ChildOf(wrapper),
-                    ))
-                    .id();
-                ui.labels.push((wrapper, text));
+                let label = spawn_region_label(&mut commands, ui.surface);
+                ui.labels.push(label);
             }
             let Some((wrapper, text)) = ui.labels.get(used).copied() else {
                 break;
@@ -2130,6 +2202,44 @@ fn layout_world_map_labels(
             *visibility = Visibility::Hidden;
         }
     }
+}
+
+/// A region-name label's anchor on the surface, in image pixels: the region's
+/// north-west corner (the label is inset a little from it).
+fn region_label_anchor(view: &WorldMapView, grid_x: u32, grid_y: u32) -> Vec2 {
+    let region_width = f64::from(REGION_WIDTH_METRES);
+    view.view_from_global(
+        f64::from(grid_x) * region_width,
+        f64::from(grid_y.saturating_add(1)) * region_width,
+    )
+}
+
+/// One pooled region-name label over `surface`: its positioned wrapper and
+/// its (empty) text node.
+fn spawn_region_label(commands: &mut Commands, surface: Entity) -> (Entity, Entity) {
+    let wrapper = commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                top: Val::Px(0.0),
+                ..default()
+            },
+            Pickable::IGNORE,
+            Name::new("worldmap-region-label"),
+            ChildOf(surface),
+        ))
+        .id();
+    let text = commands
+        .spawn((
+            Text::default(),
+            UiFont::Sans.at(LABEL_FONT_SIZE),
+            TextColor(Color::srgba(1.0, 1.0, 1.0, 0.85)),
+            Pickable::IGNORE,
+            ChildOf(wrapper),
+        ))
+        .id();
+    (wrapper, text)
 }
 
 // ---------------------------------------------------------------------------
@@ -2268,8 +2378,14 @@ fn region_tooltip_lines(translator: &Translator, info: &MapRegionInfo, lines: &m
 
 /// A primary press records the cursor, so a later click can tell a genuine
 /// click from the release of a pan drag.
-fn on_world_map_press(press: On<Pointer<Press>>, mut state: ResMut<WorldMapState>) {
-    if press.button == PointerButton::Primary {
+///
+/// Its state is optional so a gallery specimen's surface, pressed in an app
+/// without the map's session state, is inert rather than a failed observer —
+/// as are the other surface and result-row observers.
+fn on_world_map_press(press: On<Pointer<Press>>, state: Option<ResMut<WorldMapState>>) {
+    if press.button == PointerButton::Primary
+        && let Some(mut state) = state
+    {
         state.press_cursor = state.cursor;
     }
 }
@@ -2296,13 +2412,24 @@ const WORLD_MAP_DOUBLE_CLICK_SLOP: f32 = 6.0;
 /// (the reference's map click driving the location spinners).
 fn on_world_map_click(
     click: On<Pointer<Click>>,
-    time: Res<Time>,
-    mut state: ResMut<WorldMapState>,
-    model: Res<WorldMapModel>,
-    mut tracking: ResMut<MapTracking>,
-    mut commands: MessageWriter<SlCommand>,
-    mut begin: MessageWriter<BeginTeleportFlow>,
+    time: Option<Res<Time>>,
+    state: Option<ResMut<WorldMapState>>,
+    model: Option<Res<WorldMapModel>>,
+    tracking: Option<ResMut<MapTracking>>,
+    commands: Option<MessageWriter<SlCommand>>,
+    begin: Option<MessageWriter<BeginTeleportFlow>>,
 ) {
+    let (
+        Some(time),
+        Some(mut state),
+        Some(model),
+        Some(mut tracking),
+        Some(mut commands),
+        Some(mut begin),
+    ) = (time, state, model, tracking, commands, begin)
+    else {
+        return;
+    };
     if click.button != PointerButton::Primary {
         return;
     }
@@ -2405,7 +2532,10 @@ fn map_look_at(agent: Option<(f64, f64)>, target_east: f64, target_north: f64) -
 
 /// A primary drag pans the map (the world map has no auto-centre; plain drag,
 /// no modifier, as in the reference).
-fn on_world_map_drag(drag: On<Pointer<Drag>>, mut state: ResMut<WorldMapState>) {
+fn on_world_map_drag(drag: On<Pointer<Drag>>, state: Option<ResMut<WorldMapState>>) {
+    let Some(mut state) = state else {
+        return;
+    };
     if drag.button != PointerButton::Primary {
         return;
     }
@@ -2418,7 +2548,10 @@ fn on_world_map_drag(drag: On<Pointer<Drag>>, mut state: ResMut<WorldMapState>) 
 }
 
 /// A scroll wheel over the surface zooms toward the cursor.
-fn on_world_map_scroll(mut event: On<Pointer<Scroll>>, mut state: ResMut<WorldMapState>) {
+fn on_world_map_scroll(mut event: On<Pointer<Scroll>>, state: Option<ResMut<WorldMapState>>) {
+    let Some(mut state) = state else {
+        return;
+    };
     let old_scale = state.scale;
     let new_scale = world_map_math::wheel_world_scale(old_scale, event.y);
     if (new_scale - old_scale).abs() < f32::EPSILON {
@@ -2439,11 +2572,14 @@ fn on_world_map_scroll(mut event: On<Pointer<Scroll>>, mut state: ResMut<WorldMa
 /// toggles and zoom presets.
 fn on_world_map_context(
     mut press: On<Pointer<Press>>,
-    settings: Res<ViewerSettings>,
-    state: Res<WorldMapState>,
+    settings: Option<Res<ViewerSettings>>,
+    state: Option<Res<WorldMapState>>,
     ui: Option<Res<WorldMapUi>>,
-    mut menus: MessageWriter<OpenContextMenu>,
+    menus: Option<MessageWriter<OpenContextMenu>>,
 ) {
+    let (Some(settings), Some(state), Some(mut menus)) = (settings, state, menus) else {
+        return;
+    };
     if press.button != PointerButton::Secondary {
         return;
     }
@@ -2557,35 +2693,52 @@ fn drive_world_map_search(
         commands.entity(row).despawn();
     }
     for (name, grid_x, grid_y) in &state.results {
-        let row = commands
-            .spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),
-                    ..default()
-                },
-                BackgroundColor(Color::NONE),
-                Pickable {
-                    should_block_lower: true,
-                    is_hoverable: true,
-                },
-                WorldMapResultRow {
-                    grid_x: *grid_x,
-                    grid_y: *grid_y,
-                },
-                Name::new("worldmap-result"),
-                ChildOf(ui.results),
-            ))
-            .observe(on_result_click)
-            .id();
-        commands.spawn((
-            Text::new(name.clone()),
-            UiFont::Sans.at(PANEL_FONT_SIZE),
-            TextColor(Color::srgba(0.9, 0.9, 0.9, 1.0)),
-            Pickable::IGNORE,
-            ChildOf(row),
-        ));
+        spawn_result_row(
+            &mut commands,
+            ui.results,
+            name,
+            (*grid_x, *grid_y),
+            PANEL_FONT_SIZE,
+        );
     }
+}
+
+/// One search-result row under `results`: the region's name at `font_size`,
+/// recentring the map on the region at `grid` when clicked. Returns the row.
+fn spawn_result_row(
+    commands: &mut Commands,
+    results: Entity,
+    name: &str,
+    grid: (u32, u32),
+    font_size: f32,
+) -> Entity {
+    let (grid_x, grid_y) = grid;
+    let row = commands
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),
+                ..default()
+            },
+            BackgroundColor(Color::NONE),
+            Pickable {
+                should_block_lower: true,
+                is_hoverable: true,
+            },
+            WorldMapResultRow { grid_x, grid_y },
+            Name::new("worldmap-result"),
+            ChildOf(results),
+        ))
+        .observe(on_result_click)
+        .id();
+    commands.spawn((
+        Text::new(name.to_owned()),
+        UiFont::Sans.at(font_size),
+        TextColor(Color::srgba(0.9, 0.9, 0.9, 1.0)),
+        Pickable::IGNORE,
+        ChildOf(row),
+    ));
+    row
 }
 
 /// The regions matching a query, prefix matches first then alphabetical,
@@ -2640,8 +2793,11 @@ fn on_results_scroll(mut event: On<Pointer<Scroll>>, mut positions: Query<&mut S
 fn on_result_click(
     click: On<Pointer<Click>>,
     rows: Query<&WorldMapResultRow>,
-    mut state: ResMut<WorldMapState>,
+    state: Option<ResMut<WorldMapState>>,
 ) {
+    let Some(mut state) = state else {
+        return;
+    };
     if click.button != PointerButton::Primary {
         return;
     }
@@ -2668,15 +2824,19 @@ fn refresh_world_map_result_selection(
     mut rows: Query<(&WorldMapResultRow, &mut BackgroundColor)>,
 ) {
     for (row, mut background) in &mut rows {
-        let selected = state.selected == Some((row.grid_x, row.grid_y));
-        let wanted = if selected {
-            Color::srgba(0.25, 0.42, 0.62, 0.9)
-        } else {
-            Color::NONE
-        };
+        let wanted = result_row_background(state.selected == Some((row.grid_x, row.grid_y)));
         if background.0 != wanted {
             background.0 = wanted;
         }
+    }
+}
+
+/// A search-result row's background: highlighted when its region is selected.
+const fn result_row_background(selected: bool) -> Color {
+    if selected {
+        Color::srgba(0.25, 0.42, 0.62, 0.9)
+    } else {
+        Color::NONE
     }
 }
 
@@ -2889,99 +3049,282 @@ fn selection_slurl(state: &WorldMapState, model: &WorldMapModel) -> Option<Strin
 // Gallery specimen.
 // ---------------------------------------------------------------------------
 
-/// A static world-map look for the gallery / harness: a tile-ish backdrop with
-/// grid lines, a few markers, and a search side panel — no live session.
-pub fn spawn_world_map_specimen(commands: &mut Commands, parent: Entity, _cx: ElementCx) -> Entity {
-    let root = commands
+/// The specimen's surface image. A fixed handle, so the content builder can
+/// show it before the composite lands: the specimen holds only [`Commands`],
+/// and installs the pixels from a queued command.
+const SPECIMEN_SURFACE: Handle<Image> = uuid_handle!("0af65954-42d6-4c4a-9894-13ef59b5d147");
+
+/// The specimen's centre region, in grid coordinates.
+const SPECIMEN_GRID: (u32, u32) = (1000, 1000);
+
+/// The specimen's sample regions: a name and a grid offset from
+/// [`SPECIMEN_GRID`], a 3×3 block around it.
+const SPECIMEN_REGIONS: [(&str, i32, i32); 9] = [
+    ("Sample Bay", 0, 0),
+    ("Sample Cove", 1, 0),
+    ("Sample Heights", 0, 1),
+    ("Example Point", -1, 0),
+    ("Test Downs", 0, -1),
+    ("Demo Harbour", 1, 1),
+    ("Mock Meadow", -1, 1),
+    ("Placeholder", 1, -1),
+    ("Specimen Ridge", -1, -1),
+];
+
+/// The world map for the gallery / harness, built by the live content builder
+/// and filled through the live helpers: a sample region block's names as the
+/// region-name labels, the search field holding a query with its result rows
+/// (the selected region's row highlighted), the selected-location readout,
+/// and the layer checkboxes at their defaults. The surface is composited by
+/// the live renderer (`run_world_map_compose`) from the sample markers
+/// (avatars, a telehub, land for sale, an event), the tracking beacon, the
+/// selection and the own-avatar marker, over the region grid. Its tile
+/// imagery needs the grid's map-tile service, so the backdrop is the void the
+/// live map shows until tiles arrive.
+pub fn spawn_world_map_specimen(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
+    let parts = spawn_world_map_content(commands, parent, SPECIMEN_SURFACE, cx.font_size);
+    let model = sample_world_map_model(cx);
+    let view = specimen_view();
+
+    for (fill, default) in &parts.checkboxes {
+        commands
+            .entity(*fill)
+            .insert(BackgroundColor(checkbox_fill(*default)));
+    }
+
+    // The search: a query every sample name shares a prefix with, and the
+    // rows the live search builds for it.
+    let query: String = model
+        .regions
+        .get(&SPECIMEN_GRID)
+        .and_then(|info| info.name.as_ref())
+        .map(|name| name.to_string().chars().take(3).collect())
+        .unwrap_or_default();
+    let selected = SPECIMEN_GRID;
+    for (name, grid_x, grid_y) in search_results(&query, model.regions.values()) {
+        let row = spawn_result_row(
+            commands,
+            parts.results,
+            &name,
+            (grid_x, grid_y),
+            cx.font_size,
+        );
+        commands
+            .entity(row)
+            .insert(BackgroundColor(result_row_background(
+                (grid_x, grid_y) == selected,
+            )));
+    }
+    let readout = location_readout(&model, selected, (128, 128, 0));
+    commands
+        .entity(parts.location_text)
+        .insert(Text::new(readout));
+
+    // The region-name labels, at their live anchors — as percentages of the
+    // surface, so a resized specimen keeps them on their regions.
+    let size = view.size;
+    let (min_x, max_x, min_y, max_y) = view.visible_grid_rect();
+    for ((grid_x, grid_y), info) in model.regions.iter().take(MAX_LABELS) {
+        if *grid_x < min_x || *grid_x > max_x || *grid_y < min_y || *grid_y > max_y {
+            continue;
+        }
+        let Some(name) = &info.name else {
+            continue;
+        };
+        let anchor = region_label_anchor(&view, *grid_x, *grid_y);
+        let position = Vec2::new(anchor.x + 3.0, anchor.y + 2.0);
+        if position.x < 0.0 || position.y < 0.0 || position.x > size.x || position.y > size.y {
+            continue;
+        }
+        let (wrapper, text) = spawn_region_label(commands, parts.surface);
+        commands.entity(wrapper).insert(Node {
+            position_type: PositionType::Absolute,
+            left: Val::Percent(position.x / size.x * 100.0),
+            top: Val::Percent(position.y / size.y * 100.0),
+            ..default()
+        });
+        commands.entity(text).insert(Text::new(name.to_string()));
+    }
+
+    let search_field = parts.search_field;
+    commands.queue(move |world: &mut World| {
+        if let Some(mut field) = world.get_mut::<EditableText>(search_field) {
+            field.editor.set_text(&query);
+        }
+        // The headless layout harness has no image store and draws nothing, so
+        // there is nothing to composite for.
+        let Some(mut images) = world.get_resource_mut::<Assets<Image>>() else {
+            return;
+        };
+        let mut image = blank_surface(view_px(&view).x, view_px(&view).y);
+        image.data = Some(sample_world_map_surface(&view, &model, selected));
+        if let Err(error) = images.insert(SPECIMEN_SURFACE.id(), image) {
+            warn!("world map specimen: the sample surface was not installed: {error}");
+        }
+    });
+    parent
+}
+
+/// The world map as a gallery **element**: [`spawn_world_map_specimen`] in a
+/// box the size of the floater's default content, which is what the map
+/// surface grows into in the viewer — an element card is a column of auto
+/// height, where the surface would shrink to its least height.
+pub fn spawn_world_map_element(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
+    let host = commands
         .spawn((
             Node {
-                width: Val::Px(300.0),
-                height: Val::Px(180.0),
-                column_gap: Val::Px(6.0),
+                width: Val::Px(DEFAULT_SIZE.x),
+                height: Val::Px(DEFAULT_SIZE.y),
+                flex_direction: FlexDirection::Column,
                 ..default()
             },
-            Name::new("worldmap-specimen"),
+            Name::new("worldmap-element"),
             ChildOf(parent),
         ))
         .id();
-    let map = commands
-        .spawn((
-            Node {
-                width: Val::Px(190.0),
-                height: Val::Percent(100.0),
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.06, 0.11, 0.17)),
-            ChildOf(root),
-        ))
-        .id();
-    for (left, top, size, color) in [
-        (0.0, 0.0, 90.0, Color::srgb(0.22, 0.34, 0.24)),
-        (95.0, 0.0, 90.0, Color::srgb(0.28, 0.30, 0.20)),
-        (0.0, 95.0, 90.0, Color::srgb(0.16, 0.26, 0.33)),
-    ] {
-        commands.spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(left),
-                top: Val::Px(top),
-                width: Val::Px(size),
-                height: Val::Px(size.min(180.0 - top)),
-                ..default()
-            },
-            BackgroundColor(color),
-            ChildOf(map),
-        ));
+    spawn_world_map_specimen(commands, host, cx);
+    host
+}
+
+/// The specimen's view: centred on the middle of [`SPECIMEN_GRID`] at the
+/// default scale, sized like the surface of the floater at its default size.
+fn specimen_view() -> WorldMapView {
+    let region_width = f64::from(REGION_WIDTH_METRES);
+    let width = surface_dimension(DEFAULT_SIZE.x - SIDE_WIDTH - 6.0);
+    let height = surface_dimension(DEFAULT_SIZE.y);
+    WorldMapView {
+        center_east: (f64::from(SPECIMEN_GRID.0) + 0.5) * region_width,
+        center_north: (f64::from(SPECIMEN_GRID.1) + 0.5) * region_width,
+        scale: world_map_math::WORLD_MAP_SCALE_DEFAULT,
+        size: Vec2::new(
+            minimap_math::u32_to_f32(width),
+            minimap_math::u32_to_f32(height),
+        ),
     }
-    for (x, y, color) in [
-        (40.0, 50.0, Color::srgb(0.0, 0.9, 0.0)),
-        (120.0, 30.0, Color::srgb(1.0, 0.9, 0.4)),
-        (70.0, 120.0, Color::srgb(1.0, 1.0, 0.0)),
-    ] {
-        commands.spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(x),
-                top: Val::Px(y),
-                width: Val::Px(6.0),
-                height: Val::Px(6.0),
-                border_radius: BorderRadius::all(Val::Px(3.0)),
-                ..default()
-            },
-            BackgroundColor(color),
-            ChildOf(map),
-        ));
+}
+
+/// A view's surface size, in whole pixels.
+fn view_px(view: &WorldMapView) -> UVec2 {
+    UVec2::new(
+        surface_dimension(view.size.x),
+        surface_dimension(view.size.y),
+    )
+}
+
+/// The specimen's region records and item layers, as the map-block and
+/// map-item replies would have folded them in.
+fn sample_world_map_model(cx: ElementCx) -> WorldMapModel {
+    let mut model = WorldMapModel::default();
+    for (name, dx, dy) in SPECIMEN_REGIONS {
+        let grid_x = SPECIMEN_GRID.0.saturating_add_signed(dx);
+        let grid_y = SPECIMEN_GRID.1.saturating_add_signed(dy);
+        let grid_coordinates = GridCoordinates::new(grid_x, grid_y);
+        let info = MapRegionInfo {
+            name: RegionName::try_new(cx.text(name))
+                .or_else(|_transformed| RegionName::try_new(name))
+                .ok(),
+            grid_coordinates,
+            region_handle: RegionHandle::from(grid_coordinates),
+            maturity: Maturity::Pg,
+            region_flags: 0,
+            size_x: 256,
+            size_y: 256,
+            agents: 0,
+            water_height: 20,
+            map_image_id: sl_types::key::TextureKey::from(sl_client_bevy::Uuid::nil()),
+        };
+        model.regions.insert((grid_x, grid_y), info);
     }
-    let side = commands
-        .spawn((
-            Node {
-                width: Val::Px(100.0),
-                ..column(Val::Px(4.0))
-            },
-            ChildOf(root),
-        ))
-        .id();
-    commands.spawn((
-        Text::new("Search regions"),
-        UiFont::Sans.at(PANEL_FONT_SIZE),
-        TextColor(Color::srgba(0.7, 0.7, 0.7, 1.0)),
-        Node {
-            padding: UiRect::all(Val::Px(3.0)),
-            border: UiRect::all(Val::Px(1.0)),
-            ..default()
-        },
-        BorderColor::all(Color::srgba(0.5, 0.5, 0.5, 0.6)),
-        ChildOf(side),
-    ));
-    for name in ["Da Boom", "Dore", "Dublin"] {
-        commands.spawn((
-            Text::new(name),
-            UiFont::Sans.at(PANEL_FONT_SIZE),
-            TextColor(Color::srgba(0.9, 0.9, 0.9, 1.0)),
-            ChildOf(side),
-        ));
+    let items = [
+        (MapItemType::AgentLocations, (0, 0), (60.0, 80.0), 3, 0, ""),
+        (MapItemType::AgentLocations, (1, 0), (120.0, 40.0), 1, 0, ""),
+        (
+            MapItemType::AgentLocations,
+            (-1, 1),
+            (200.0, 30.0),
+            5,
+            0,
+            "",
+        ),
+        (
+            MapItemType::Telehub,
+            (0, 0),
+            (128.0, 128.0),
+            0,
+            0,
+            "Sample Telehub",
+        ),
+        (
+            MapItemType::LandForSale,
+            (0, -1),
+            (64.0, 190.0),
+            1024,
+            500,
+            "Test Parcel",
+        ),
+        (
+            MapItemType::PgEvent,
+            (1, 1),
+            (100.0, 100.0),
+            0,
+            0,
+            "Sample Event",
+        ),
+    ];
+    let region_width = f64::from(REGION_WIDTH_METRES);
+    for (kind, (dx, dy), (local_x, local_y), extra, extra2, name) in items {
+        let grid_x = SPECIMEN_GRID.0.saturating_add_signed(dx);
+        let grid_y = SPECIMEN_GRID.1.saturating_add_signed(dy);
+        let handle = RegionHandle::from_grid(grid_x, grid_y);
+        model
+            .items
+            .entry((handle.0, kind.to_u32()))
+            .or_default()
+            .push(MapItem {
+                position: GlobalCoordinates::new(
+                    f64::from(grid_x) * region_width + local_x,
+                    f64::from(grid_y) * region_width + local_y,
+                    0.0,
+                ),
+                id: None,
+                extra,
+                extra2,
+                name: cx.text(name),
+            });
     }
-    root
+    model
+}
+
+/// Composite the specimen's surface through the live pipeline: the markers
+/// [`gather_markers`] picks at the default layer toggles, and the frame through
+/// [`run_world_map_compose`] — with no tiles, since those need the grid.
+fn sample_world_map_surface(
+    view: &WorldMapView,
+    model: &WorldMapModel,
+    selected: (u32, u32),
+) -> Vec<u8> {
+    let region_width = f64::from(REGION_WIDTH_METRES);
+    let corner = |dx: i32, dy: i32, local: (f64, f64)| {
+        (
+            f64::from(SPECIMEN_GRID.0.saturating_add_signed(dx)) * region_width + local.0,
+            f64::from(SPECIMEN_GRID.1.saturating_add_signed(dy)) * region_width + local.1,
+        )
+    };
+    let job = WorldMapComposeJob {
+        view: *view,
+        surface_px: view_px(view),
+        detail_grid: world_map_math::detail_regime(view.scale),
+        markers: gather_markers(view, model, &sl_settings::SettingsStore::new()),
+        tracked: Some(corner(-1, -1, (180.0, 60.0))),
+        selected: Some((
+            f64::from(selected.0) * region_width + 128.0,
+            f64::from(selected.1) * region_width + 128.0,
+        )),
+        agent: Some(corner(0, 0, (140.0, 100.0))),
+        tiles: Vec::new(),
+        track_color: crate::minimap::track_color(None),
+    };
+    run_world_map_compose(&job)
 }
 
 #[cfg(test)]
@@ -3107,5 +3450,30 @@ mod tests {
         assert_eq!(names, vec!["Dublin", "Sandy Dune"]);
         // Too-short queries yield nothing.
         assert_eq!(search_results("d", regions.iter()).len(), 0);
+    }
+
+    /// Every sample marker passes the live marker filter at the default layer
+    /// toggles and lands on the specimen's surface, and the specimen's query
+    /// finds the selected region among its results.
+    #[test]
+    fn the_specimen_sample_reaches_the_live_helpers() {
+        let cx = sl_viewer_ui_core::ui_element::ElementCx::new();
+        let model = super::sample_world_map_model(cx);
+        let view = super::specimen_view();
+        let markers = super::gather_markers(&view, &model, &sl_settings::SettingsStore::new());
+        assert_eq!(markers.len(), 6);
+        let results = search_results("Sam", model.regions.values());
+        assert!(
+            results
+                .iter()
+                .any(|(_name, x, y)| (*x, *y) == super::SPECIMEN_GRID),
+            "the selected region is not a result: {results:?}"
+        );
+        let pixels = super::sample_world_map_surface(&view, &model, super::SPECIMEN_GRID);
+        let px = super::view_px(&view);
+        assert_eq!(
+            pixels.len(),
+            usize::try_from(px.x.saturating_mul(px.y).saturating_mul(4)).unwrap_or(0)
+        );
     }
 }

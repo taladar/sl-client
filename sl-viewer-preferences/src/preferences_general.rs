@@ -371,17 +371,37 @@ fn update_ui_scale_readout(
     let Ok(value) = settings.store().get_f32(SETTING_UI_SCALE) else {
         return;
     };
+    show_ui_scale(&mut readouts, value);
+}
+
+/// Write `value` (a UI-scale factor) into every UI-scale readout as a
+/// percentage — the drawing half of [`update_ui_scale_readout`], shared with
+/// the preferences specimen.
+fn show_ui_scale(readouts: &mut Query<&mut Text, With<UiScaleReadout>>, value: f32) {
     let percent = value * 100.0;
     let wanted = if (percent - percent.round()).abs() < 0.05 {
         format!("{percent:.0}%")
     } else {
         format!("{percent:.1}%")
     };
-    for mut text in &mut readouts {
+    for mut text in readouts.iter_mut() {
         if text.0 != wanted {
             wanted.clone_into(&mut text.0);
         }
     }
+}
+
+/// One-shot for the preferences specimen: show `value` in the UI-scale
+/// readouts, as [`update_ui_scale_readout`] does for the stored factor.
+fn show_sample_ui_scale(In(value): In<f32>, mut readouts: Query<&mut Text, With<UiScaleReadout>>) {
+    show_ui_scale(&mut readouts, value);
+}
+
+/// What this tab's runtime adds to the preferences specimen once its content
+/// exists: the UI-scale readout at the default 100 %, the value a store would
+/// hand [`update_ui_scale_readout`] on a fresh install.
+pub(crate) fn compose_general_specimen(commands: &mut Commands) {
+    commands.run_system_cached_with(show_sample_ui_scale, 1.0);
 }
 
 /// Drive Bevy's [`UiScale`] from the stored factor, live. Idempotent — only

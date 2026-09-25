@@ -67,6 +67,7 @@ use crate::scrollbar::{
 use crate::skin::{SCROLLBAR_THUMB_CLASS, STRIPE_CLASS, set_state_class};
 use crate::skin_palette::SkinPalette;
 use crate::ui::{LogicalInset, LogicalRect, UiDirection};
+use crate::ui_element::{ContentMayOverflow, TextMayClip};
 
 /// How many extra rows to keep live just past each edge of the viewport, so a
 /// fast scroll does not flash blank rows before the pool catches up. Small on
@@ -426,8 +427,31 @@ pub struct VirtualRow {
 /// alongside [`VirtualList`] would be ideal, but the consumer spawns the
 /// viewport, so the layout system tolerates its absence and treats any
 /// [`VirtualList`] entity as the pool parent.
+///
+/// A viewport **clips what does not fit on purpose** — that is what it is — so
+/// it brings the layout harness's two declarations with it, once, rather than
+/// each list stating them: the rows below the fold, and a pooled row placed
+/// past the edge, are the list working ([`ContentMayOverflow`]), and so is the
+/// row the edge cuts in half ([`TextMayClip`]). A viewport scrolls by moving
+/// its rows under an `Overflow::clip()`, not with `Overflow::Scroll`, so the
+/// harness cannot read this from the tree the way it reads a scroll area.
 #[derive(Component, Debug, Clone, Copy)]
+#[require(ContentMayOverflow = VIEWPORT_OVERFLOW, TextMayClip = VIEWPORT_TEXT_CLIP)]
 pub struct VirtualViewport;
+
+/// Why a [`VirtualViewport`] may hold more than it shows.
+const VIEWPORT_CLIP_REASON: &str =
+    "a virtual list's viewport clips the rows that do not fit; they are reached by scrolling";
+
+/// The overflow declaration every [`VirtualViewport`] carries.
+const VIEWPORT_OVERFLOW: ContentMayOverflow = ContentMayOverflow {
+    reason: VIEWPORT_CLIP_REASON,
+};
+
+/// The text-clip declaration every [`VirtualViewport`] carries.
+const VIEWPORT_TEXT_CLIP: TextMayClip = TextMayClip {
+    reason: VIEWPORT_CLIP_REASON,
+};
 
 /// The contiguous window of item indices that must have a live row entity: the
 /// rows on screen, plus `OVERSCAN_ROWS` beyond each edge, clamped to the item
@@ -600,6 +624,38 @@ pub fn amend_row_node(
         .entry::<Node>()
         .or_default()
         .and_modify(move |mut node| amend(&mut node));
+}
+
+/// Spawn a pooled row under `list` already bound to item `index` and placed
+/// where [`layout_virtual_lists`] would place it at the top of an unscrolled
+/// list — for a gallery or layout-sweep **specimen** of a live list, whose host
+/// runs neither the pool nor the consumer's populate / bind systems.
+///
+/// The row is the pool's own (same [`VirtualRow`], same node), so the consumer
+/// dresses it with the functions its live populate system calls. A host that
+/// does run [`layout_virtual_lists`] adopts it as slot `index` rather than
+/// growing a second one, provided the list's item count covers it.
+pub fn spawn_specimen_row(
+    commands: &mut Commands,
+    list: Entity,
+    index: usize,
+    row_height: f32,
+) -> Entity {
+    commands
+        .spawn((
+            VirtualRow {
+                slot: index,
+                index: Some(index),
+            },
+            row_node(
+                Some(index),
+                row_height,
+                0.0,
+                RowInset::new(0.0, UiDirection::Ltr),
+            ),
+            ChildOf(list),
+        ))
+        .id()
 }
 
 /// Route the wheel to the virtual list under the pointer. The world camera

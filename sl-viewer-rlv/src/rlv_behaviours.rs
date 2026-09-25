@@ -50,8 +50,9 @@ use sl_viewer_ui_widgets::ui_tab::{
     TabPlacement, TabSpec, fill_tab_container, spawn_tab_container,
 };
 use sl_viewer_ui_widgets::ui_table::{
-    TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells, TableSelectionMode,
-    TableSpec, set_table_cell, spawn_table, spawn_table_row,
+    TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableHandle, TableRowCells,
+    TableSelectionMode, TableSpec, set_table_cell, spawn_specimen_table_rows, spawn_table,
+    spawn_table_row,
 };
 use sl_viewer_world_api::rlv::RlvSession;
 
@@ -493,6 +494,35 @@ fn spawn_behaviours_floater(mut commands: Commands, root: Res<UiRoot>) {
 /// First-open content build: the three tabs, their tables, the summary line and
 /// the Copy button.
 fn build_behaviours_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
+    let parts = spawn_behaviours_content(&mut commands, handle.content, FONT_SIZE);
+    // Three viewports were just spawned in that order; anything else is a
+    // spawn that failed, and the floater is better empty than half-bound.
+    if let [(_, restrictions), (_, exceptions), (_, modifiers)] = parts.tables.as_slice() {
+        commands.insert_resource(BehavioursUi {
+            restriction_viewport: restrictions.viewport,
+            exception_viewport: exceptions.viewport,
+            modifier_viewport: modifiers.viewport,
+            count_text: parts.count_text,
+        });
+    }
+}
+
+/// What [`spawn_behaviours_content`] built that its callers bind data into.
+struct BehavioursParts {
+    /// Each tab's table, in tab order, with the list it presents.
+    tables: Vec<(BehavioursList, TableHandle)>,
+    /// The summary line under the tabs.
+    count_text: Entity,
+}
+
+/// Build the floater's content into `parent` at `font_size`: the three tabs,
+/// their tables, the summary line and the Copy button. Shared by the live
+/// floater's first-open build and its specimen.
+fn spawn_behaviours_content(
+    commands: &mut Commands,
+    parent: Entity,
+    font_size: f32,
+) -> BehavioursParts {
     let content = commands
         .spawn((
             Node {
@@ -502,7 +532,7 @@ fn build_behaviours_content(In(handle): In<FloaterHandle>, mut commands: Command
                 ..column(Val::Px(4.0))
             },
             Name::new("rlv-behaviours-content"),
-            ChildOf(handle.content),
+            ChildOf(parent),
         ))
         .id();
 
@@ -512,7 +542,7 @@ fn build_behaviours_content(In(handle): In<FloaterHandle>, mut commands: Command
         "rlv-behaviours-tab-modifiers".to_owned(),
     ];
     let tabs = spawn_tab_container(
-        &mut commands,
+        commands,
         content,
         &TabSpec {
             element: "rlv-behaviours",
@@ -520,15 +550,15 @@ fn build_behaviours_content(In(handle): In<FloaterHandle>, mut commands: Command
             labels: &labels,
             active: 0,
             tab_index: 0,
-            font_size: FONT_SIZE,
+            font_size,
             strip_width: None,
             ellipsis: sl_viewer_ui_widgets::ui_tab::DEFAULT_ELLIPSIS,
             translate_labels: true,
         },
     );
-    fill_tab_container(&mut commands, TabPlacement::BlockStart, &tabs);
+    fill_tab_container(commands, TabPlacement::BlockStart, &tabs);
 
-    let mut viewports = Vec::with_capacity(3);
+    let mut tables = Vec::with_capacity(3);
     for (index, list) in [
         BehavioursList::Restrictions,
         BehavioursList::Exceptions,
@@ -540,9 +570,9 @@ fn build_behaviours_content(In(handle): In<FloaterHandle>, mut commands: Command
         let Some(panel) = tabs.panels.get(index).copied() else {
             continue;
         };
-        let table = spawn_table(&mut commands, panel, list.spec());
+        let table = spawn_table(commands, panel, list.spec());
         commands.entity(table.viewport).insert((TabIndex(1), list));
-        viewports.push(table.viewport);
+        tables.push((list, table));
     }
 
     let footer = commands
@@ -561,7 +591,7 @@ fn build_behaviours_content(In(handle): In<FloaterHandle>, mut commands: Command
     let count_text = commands
         .spawn((
             Text::default(),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(DIM_LABEL_COLOR),
             Node {
                 flex_shrink: 1.0,
@@ -573,23 +603,17 @@ fn build_behaviours_content(In(handle): In<FloaterHandle>, mut commands: Command
             ChildOf(footer),
         ))
         .id();
-    spawn_copy_button(&mut commands, footer);
+    spawn_copy_button(commands, footer, font_size);
 
-    // Three viewports were just spawned in that order; anything else is a
-    // spawn that failed, and the floater is better empty than half-bound.
-    if let [restriction_viewport, exception_viewport, modifier_viewport] = viewports[..] {
-        commands.insert_resource(BehavioursUi {
-            restriction_viewport,
-            exception_viewport,
-            modifier_viewport,
-            count_text,
-        });
-    }
+    BehavioursParts { tables, count_text }
 }
 
 /// The Copy button and its press observer: the whole restriction set onto the
 /// OS clipboard, as the reference's `copy_btn` offers it.
-fn spawn_copy_button(commands: &mut Commands, parent: Entity) {
+///
+/// The session and the clipboard are optional so a press in a host that has
+/// neither (the gallery's specimen) is a no-op rather than a failed observer.
+fn spawn_copy_button(commands: &mut Commands, parent: Entity, font_size: f32) {
     commands
         .spawn((
             Node {
@@ -609,22 +633,72 @@ fn spawn_copy_button(commands: &mut Commands, parent: Entity) {
         ))
         .with_child((
             Text::new(String::new()),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(LABEL_COLOR),
             Translated::new("rlv-behaviours-copy"),
             Pickable::IGNORE,
         ))
         .observe(
             move |mut press: On<Pointer<Press>>,
-                  session: Res<RlvSession>,
-                  clipboard: Res<ViewerClipboard>| {
+                  session: Option<Res<RlvSession>>,
+                  clipboard: Option<Res<ViewerClipboard>>| {
                 press.propagate(false);
                 if press.button != PointerButton::Primary {
                     return;
                 }
+                let (Some(session), Some(clipboard)) = (session, clipboard) else {
+                    return;
+                };
                 copy_to_clipboard(&clipboard, &formatted_restrictions(session.state()));
             },
         );
+}
+
+// --- Gallery specimen -----------------------------------------------------
+
+/// The Restrictions floater's gallery / `ui_test` specimen: the live content,
+/// built by the same `spawn_behaviours_content` the floater is, with the
+/// three tables filled from a sample [`RlvState`] through the live projection
+/// ([`project`]) and row mapping (`row_cells`).
+pub fn spawn_rlv_behaviours_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: sl_viewer_ui_core::ui_element::ElementCx,
+) -> Entity {
+    let parts = spawn_behaviours_content(commands, parent, cx.font_size);
+    let state = crate::specimen::sample_state();
+    let (restrictions, exceptions, modifiers) = project(&state);
+    let view = BehavioursView {
+        restrictions,
+        exceptions,
+        modifiers,
+        built_revision: 0,
+        built: true,
+    };
+    for (list, table) in &parts.tables {
+        let rows: Vec<Vec<(String, Color)>> = (0..)
+            .map_while(|index| row_cells(&view, *list, index))
+            .map(|cells| {
+                cells
+                    .into_iter()
+                    .map(|(value, color)| (cx.text(&value), color))
+                    .collect()
+            })
+            .collect();
+        spawn_specimen_table_rows(commands, table.into(), list.spec(), &rows);
+    }
+    // The live line is `rlv-behaviours-count` formatted with the counts; the
+    // specimen has no translator to format with, so it writes the English
+    // sentence that key produces for these counts.
+    let objects = state.restricting_objects().count();
+    commands
+        .entity(parts.count_text)
+        .insert(Text::new(cx.text(&format!(
+            "{} restrictions, {} exceptions, from {objects} objects",
+            view.restrictions.len(),
+            view.exceptions.len(),
+        ))));
+    parent
 }
 
 // --- View systems ---------------------------------------------------------
@@ -689,14 +763,22 @@ fn rebuild_behaviours_view(
 /// it was pooled under.
 fn populate_behaviours_rows(
     mut commands: Commands,
-    lists: Query<&BehavioursList>,
+    lists: Query<(&BehavioursList, &ChildOf)>,
     new_rows: Query<(Entity, &ChildOf), Added<VirtualRow>>,
 ) {
     for (row_entity, child_of) in &new_rows {
-        let Ok(list) = lists.get(child_of.parent()) else {
+        // The list sits on the viewport; the table root is the viewport's
+        // parent, and it — not the viewport — is what a row's cells name as
+        // their table (it carries the `TableState` the width sync reads).
+        let Ok((list, viewport_parent)) = lists.get(child_of.parent()) else {
             continue;
         };
-        spawn_table_row(&mut commands, row_entity, child_of.parent(), list.spec());
+        spawn_table_row(
+            &mut commands,
+            row_entity,
+            viewport_parent.parent(),
+            list.spec(),
+        );
     }
 }
 

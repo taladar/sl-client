@@ -391,7 +391,149 @@ fn fill_landmark_content(
     }
     let editable = matches!(item.owner, OwnerKey::Agent(agent) if Some(agent) == identity.agent_id);
     let loading = translator.get("about-landmark-loading");
+    // Every destination row reads "(loading)" until its resolve step lands.
+    let seed = LandmarkSeed {
+        name: item.name.clone(),
+        notes: item.description.clone(),
+        snapshot: loading.clone(),
+        region: loading.clone(),
+        parcel: loading.clone(),
+        description: String::new(),
+        maturity: loading.clone(),
+        owner: loading.clone(),
+        traffic: loading.clone(),
+        area: loading.clone(),
+        creator: avatars.label_text(item.creator_id),
+        acquired: format_unix_date(i64::from(item.creation_date)),
+        slurl: loading,
+    };
+    let nodes = spawn_landmark_content(
+        commands,
+        content,
+        ABOUT_FONT_SIZE,
+        item.asset_id,
+        editable,
+        seed,
+    );
+    if avatars.name_of(item.creator_id).is_none() {
+        sl_commands.write(SlCommand(Command::RequestAvatarNames(vec![
+            item.creator_id,
+        ])));
+    }
 
+    // The window's state starts fresh for this landmark, and the chain starts
+    // with the asset fetch.
+    let state = AboutLandmarkState {
+        item: Some(item.clone()),
+        pending_asset: Some(item.asset_id),
+        ..AboutLandmarkState::default()
+    };
+    sl_commands.write(SlCommand(Command::FetchAsset {
+        asset_id: AssetKey::from(item.asset_id),
+        asset_type: AssetType::Landmark,
+        byte_range: None,
+    }));
+
+    (
+        state,
+        AboutLandmarkUi {
+            content,
+            title_text,
+            snapshot_box: Some(nodes.snapshot_box),
+            snapshot_label: Some(nodes.snapshot_label),
+            region_text: Some(nodes.region_text),
+            parcel_text: Some(nodes.parcel_text),
+            description_text: Some(nodes.description_text),
+            maturity_text: Some(nodes.maturity_text),
+            owner_text: Some(nodes.owner_text),
+            traffic_text: Some(nodes.traffic_text),
+            area_text: Some(nodes.area_text),
+            creator_text: Some(nodes.creator_text),
+            slurl_text: Some(nodes.slurl_text),
+            name_field: nodes.name_field,
+            notes_field: nodes.notes_field,
+        },
+    )
+}
+
+/// The text each value row of a landmark window is spawned showing — the live
+/// open seeds "(loading)" placeholders, the gallery specimen a resolved parcel.
+#[derive(Debug)]
+struct LandmarkSeed {
+    /// The item's name (the title row, or its editor's initial text).
+    name: String,
+    /// The item's description (the notes row, or its editor's initial text).
+    notes: String,
+    /// The snapshot box's placeholder label.
+    snapshot: String,
+    /// The region line.
+    region: String,
+    /// The parcel name.
+    parcel: String,
+    /// The parcel description.
+    description: String,
+    /// The maturity rating.
+    maturity: String,
+    /// The parcel owner.
+    owner: String,
+    /// The traffic (dwell).
+    traffic: String,
+    /// The area.
+    area: String,
+    /// The item's creator.
+    creator: String,
+    /// The item's acquired date.
+    acquired: String,
+    /// The SLURL.
+    slurl: String,
+}
+
+/// The nodes [`spawn_landmark_content`] built that the async updates write
+/// into.
+#[derive(Debug)]
+struct LandmarkNodes {
+    /// The parcel snapshot's image box.
+    snapshot_box: Entity,
+    /// The snapshot box's placeholder label.
+    snapshot_label: Entity,
+    /// The region line's value node.
+    region_text: Entity,
+    /// The parcel name's value node.
+    parcel_text: Entity,
+    /// The parcel description's text node.
+    description_text: Entity,
+    /// The maturity rating's value node.
+    maturity_text: Entity,
+    /// The parcel owner's value node.
+    owner_text: Entity,
+    /// The traffic (dwell) value node.
+    traffic_text: Entity,
+    /// The area value node.
+    area_text: Entity,
+    /// The item creator's value node.
+    creator_text: Entity,
+    /// The SLURL value node.
+    slurl_text: Entity,
+    /// The item title editor (`None` when the item is not editable).
+    name_field: Option<Entity>,
+    /// The item notes editor (`None` when the item is not editable).
+    notes_field: Option<Entity>,
+}
+
+/// Spawn a landmark window's rows under `content` at `font_size`, each value
+/// showing its `seed` text, the Teleport button aimed at the landmark asset
+/// `asset_id`: the snapshot box, the title / notes (editors when
+/// `editable`), the destination rows, the item-side rows, the SLURL and the
+/// Teleport / Show on Map / Copy SLURL row. Shared by the live window and its
+/// specimen.
+fn spawn_landmark_content(
+    commands: &mut Commands,
+    content: Entity,
+    font_size: f32,
+    asset_id: Uuid,
+    editable: bool,
+    seed: LandmarkSeed,
+) -> LandmarkNodes {
     // Snapshot box.
     let snapshot_box = commands
         .spawn((
@@ -409,22 +551,22 @@ fn fill_landmark_content(
         .id();
     let snapshot_label = commands
         .spawn((
-            Text::new(loading.clone()),
-            UiFont::Sans.at(ABOUT_FONT_SIZE),
+            Text::new(seed.snapshot),
+            UiFont::Sans.at(font_size),
             text_role(DIM_LABEL_COLOR),
             ChildOf(snapshot_box),
         ))
         .id();
 
     // Title / notes: editable for the item's owner, plain values otherwise.
-    let name_row = spawn_labeled_row(commands, content, "about-landmark-name");
+    let name_row = spawn_labeled_row(commands, content, "about-landmark-name", font_size);
     let name_field = editable.then(|| {
         crate::ui_text_input::spawn_text_input(
             commands,
             name_row,
             &crate::ui_text_input::TextInputSpec {
-                initial: item.name.clone(),
-                font_size: ABOUT_FONT_SIZE,
+                initial: seed.name.clone(),
+                font_size,
                 width_glyphs: 24.0,
                 tab_index: 1,
                 max_characters: Some(63),
@@ -436,16 +578,16 @@ fn fill_landmark_content(
         )
     });
     if !editable {
-        spawn_value(commands, name_row, item.name.clone(), LABEL_COLOR);
+        spawn_value(commands, name_row, seed.name, LABEL_COLOR, font_size);
     }
-    let notes_row = spawn_labeled_row(commands, content, "about-landmark-notes");
+    let notes_row = spawn_labeled_row(commands, content, "about-landmark-notes", font_size);
     let notes_field = editable.then(|| {
         crate::ui_text_input::spawn_text_input(
             commands,
             notes_row,
             &crate::ui_text_input::TextInputSpec {
-                initial: item.description.clone(),
-                font_size: ABOUT_FONT_SIZE,
+                initial: seed.notes.clone(),
+                font_size,
                 width_glyphs: 24.0,
                 tab_index: 2,
                 max_characters: Some(127),
@@ -457,15 +599,15 @@ fn fill_landmark_content(
         )
     });
     if !editable {
-        spawn_value(commands, notes_row, item.description.clone(), LABEL_COLOR);
+        spawn_value(commands, notes_row, seed.notes, LABEL_COLOR, font_size);
     }
 
-    // The destination rows, all "(loading)" until their resolve step lands.
-    let region_row = spawn_labeled_row(commands, content, "about-landmark-region");
-    let region_text = spawn_value(commands, region_row, loading.clone(), LABEL_COLOR);
-    let parcel_row = spawn_labeled_row(commands, content, "about-landmark-parcel");
-    let parcel_text = spawn_value(commands, parcel_row, loading.clone(), LABEL_COLOR);
-    let description_text = commands
+    // The destination rows.
+    let region_row = spawn_labeled_row(commands, content, "about-landmark-region", font_size);
+    let region_text = spawn_value(commands, region_row, seed.region, LABEL_COLOR, font_size);
+    let parcel_row = spawn_labeled_row(commands, content, "about-landmark-parcel", font_size);
+    let parcel_text = spawn_value(commands, parcel_row, seed.parcel, LABEL_COLOR, font_size);
+    let description_column = commands
         .spawn((
             Node {
                 max_width: Val::Px(DESCRIPTION_WIDTH),
@@ -473,45 +615,53 @@ fn fill_landmark_content(
             },
             ChildOf(content),
         ))
-        .with_child((
-            Text::new(String::new()),
-            UiFont::Sans.at(ABOUT_FONT_SIZE),
+        .id();
+    // The text node itself, not its column: the column has no `Text`, so a
+    // repaint addressed to it would land nowhere.
+    let description_text = commands
+        .spawn((
+            Text::new(seed.description),
+            UiFont::Sans.at(font_size),
             text_role(DIM_LABEL_COLOR),
+            ChildOf(description_column),
         ))
         .id();
-    let maturity_row = spawn_labeled_row(commands, content, "about-landmark-maturity");
-    let maturity_text = spawn_value(commands, maturity_row, loading.clone(), LABEL_COLOR);
-    let owner_row = spawn_labeled_row(commands, content, "about-landmark-owner");
-    let owner_text = spawn_value(commands, owner_row, loading.clone(), LABEL_COLOR);
-    let traffic_row = spawn_labeled_row(commands, content, "about-landmark-traffic");
-    let traffic_text = spawn_value(commands, traffic_row, loading.clone(), LABEL_COLOR);
-    let area_row = spawn_labeled_row(commands, content, "about-landmark-area");
-    let area_text = spawn_value(commands, area_row, loading.clone(), LABEL_COLOR);
+    let maturity_row = spawn_labeled_row(commands, content, "about-landmark-maturity", font_size);
+    let maturity_text = spawn_value(
+        commands,
+        maturity_row,
+        seed.maturity,
+        LABEL_COLOR,
+        font_size,
+    );
+    let owner_row = spawn_labeled_row(commands, content, "about-landmark-owner", font_size);
+    let owner_text = spawn_value(commands, owner_row, seed.owner, LABEL_COLOR, font_size);
+    let traffic_row = spawn_labeled_row(commands, content, "about-landmark-traffic", font_size);
+    let traffic_text = spawn_value(commands, traffic_row, seed.traffic, LABEL_COLOR, font_size);
+    let area_row = spawn_labeled_row(commands, content, "about-landmark-area", font_size);
+    let area_text = spawn_value(commands, area_row, seed.area, LABEL_COLOR, font_size);
 
     // Item-side rows: creator and acquired date.
-    let creator_row = spawn_labeled_row(commands, content, "about-landmark-creator");
+    let creator_row = spawn_labeled_row(commands, content, "about-landmark-creator", font_size);
     let creator_text = spawn_value(
         commands,
         creator_row,
-        avatars.label_text(item.creator_id),
+        seed.creator,
         DIM_LABEL_COLOR,
+        font_size,
     );
-    if avatars.name_of(item.creator_id).is_none() {
-        sl_commands.write(SlCommand(Command::RequestAvatarNames(vec![
-            item.creator_id,
-        ])));
-    }
-    let acquired_row = spawn_labeled_row(commands, content, "about-landmark-acquired");
+    let acquired_row = spawn_labeled_row(commands, content, "about-landmark-acquired", font_size);
     spawn_value(
         commands,
         acquired_row,
-        format_unix_date(i64::from(item.creation_date)),
+        seed.acquired,
         DIM_LABEL_COLOR,
+        font_size,
     );
 
     // SLURL row: fills once the region name resolves.
-    let slurl_row = spawn_labeled_row(commands, content, "about-landmark-slurl");
-    let slurl_text = spawn_value(commands, slurl_row, loading, DIM_LABEL_COLOR);
+    let slurl_row = spawn_labeled_row(commands, content, "about-landmark-slurl", font_size);
+    let slurl_text = spawn_value(commands, slurl_row, seed.slurl, DIM_LABEL_COLOR, font_size);
 
     // Buttons: Teleport (works off the asset id alone) and Copy SLURL (a
     // no-op until the SLURL resolves — the row above shows the state).
@@ -523,8 +673,7 @@ fn fill_landmark_content(
             ChildOf(content),
         ))
         .id();
-    let asset_id = item.asset_id;
-    let teleport = spawn_button(commands, buttons, "landmark-teleport", 3);
+    let teleport = spawn_button(commands, buttons, "landmark-teleport", 3, font_size);
     commands.entity(teleport).observe(
         move |press: On<Pointer<Press>>, mut commands: MessageWriter<SlCommand>| {
             if press.button == PointerButton::Primary {
@@ -537,7 +686,13 @@ fn fill_landmark_content(
     // Show on Map: the parcel's anchor in global metres, which only the
     // resolved details carry — so the button waits on the same chain the SLURL
     // row shows the state of.
-    let show_on_map = spawn_button(commands, buttons, "about-landmark-show-on-map", 4);
+    let show_on_map = spawn_button(
+        commands,
+        buttons,
+        "about-landmark-show-on-map",
+        4,
+        font_size,
+    );
     commands.entity(show_on_map).observe(
         |press: On<Pointer<Press>>,
          parents: Query<&ChildOf>,
@@ -562,7 +717,7 @@ fn fill_landmark_content(
             }
         },
     );
-    let copy = spawn_button(commands, buttons, "about-landmark-copy-slurl", 5);
+    let copy = spawn_button(commands, buttons, "about-landmark-copy-slurl", 5, font_size);
     commands.entity(copy).observe(
         |press: On<Pointer<Press>>,
          parents: Query<&ChildOf>,
@@ -585,39 +740,74 @@ fn fill_landmark_content(
         },
     );
 
-    // The window's state starts fresh for this landmark, and the chain starts
-    // with the asset fetch.
-    let state = AboutLandmarkState {
-        item: Some(item.clone()),
-        pending_asset: Some(item.asset_id),
-        ..AboutLandmarkState::default()
-    };
-    sl_commands.write(SlCommand(Command::FetchAsset {
-        asset_id: AssetKey::from(item.asset_id),
-        asset_type: AssetType::Landmark,
-        byte_range: None,
-    }));
+    LandmarkNodes {
+        snapshot_box,
+        snapshot_label,
+        region_text,
+        parcel_text,
+        description_text,
+        maturity_text,
+        owner_text,
+        traffic_text,
+        area_text,
+        creator_text,
+        slurl_text,
+        name_field,
+        notes_field,
+    }
+}
 
-    (
-        state,
-        AboutLandmarkUi {
-            content,
-            title_text,
-            snapshot_box: Some(snapshot_box),
-            snapshot_label: Some(snapshot_label),
-            region_text: Some(region_text),
-            parcel_text: Some(parcel_text),
-            description_text: Some(description_text),
-            maturity_text: Some(maturity_text),
-            owner_text: Some(owner_text),
-            traffic_text: Some(traffic_text),
-            area_text: Some(area_text),
-            creator_text: Some(creator_text),
-            slurl_text: Some(slurl_text),
-            name_field,
-            notes_field,
-        },
-    )
+// ---------------------------------------------------------------------------
+// Gallery specimen.
+// ---------------------------------------------------------------------------
+
+/// The About Landmark window's gallery / `ui_test` specimen: the live content,
+/// built by the same `spawn_landmark_content` the viewer's window is, for a
+/// landmark the agent owns (so the title / notes are the editors) whose parcel
+/// has resolved. The values are written with the live `region_line`,
+/// `landmark_slurl`, `maturity_key` and [`format_unix_date`], the way
+/// `apply_details` paints a reply.
+pub fn spawn_about_landmark_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: crate::ui_element::ElementCx,
+) -> Entity {
+    // The Show on Map / Copy SLURL observers name these; a host without the
+    // viewer's plugins (the gallery) would fail their parameter validation on
+    // a click. With them present the press finds no landmark state and does
+    // nothing, which is what a specimen's button should do.
+    commands.init_resource::<ViewerClipboard>();
+    commands.init_resource::<Messages<OpenWorldMap>>();
+    // A transformed sample may not be a valid region name; the region line
+    // then shows its id fallback, and the SLURL stays blank, as live.
+    let region = RegionName::try_new(cx.text("Sample Region")).ok();
+    let position = (128.0, 96.0, 23.0);
+    let seed = LandmarkSeed {
+        name: cx.text("Sample Beach House"),
+        notes: cx.text("Sunset view, rez zone by the pier"),
+        snapshot: String::new(),
+        region: region_line(region.as_ref(), Uuid::nil(), position),
+        parcel: cx.text("Test Parcel"),
+        description: cx.text("A quiet beach parcel with a public sandbox by the water."),
+        maturity: String::new(),
+        owner: cx.text("Sample Resident"),
+        traffic: format!("{:.0}", 1234.0_f32),
+        area: 4096.to_string(),
+        creator: cx.text("Example Creator"),
+        acquired: format_unix_date(1_700_000_000),
+        slurl: region
+            .as_ref()
+            .map(|name| landmark_slurl(name, position))
+            .unwrap_or_default(),
+    };
+    let nodes = spawn_landmark_content(commands, parent, cx.font_size, Uuid::nil(), true, seed);
+    commands
+        .entity(nodes.maturity_text)
+        .insert(Translated::new(maturity_key(0x1)));
+    commands
+        .entity(nodes.snapshot_label)
+        .insert(Translated::new("about-landmark-no-image"));
+    parent
 }
 
 // ---------------------------------------------------------------------------
@@ -963,24 +1153,35 @@ fn expire_resolve(
 // ---------------------------------------------------------------------------
 
 /// A labelled row: the translated label leading, the caller's value after.
-fn spawn_labeled_row(commands: &mut Commands, parent: Entity, label_key: &'static str) -> Entity {
+fn spawn_labeled_row(
+    commands: &mut Commands,
+    parent: Entity,
+    label_key: &'static str,
+    font_size: f32,
+) -> Entity {
     ui_spawn::spawn_labeled_row(
         commands,
         parent,
         LabeledRowSpec::new(UiLabel::key(label_key))
             .label_color(DIM_LABEL_COLOR)
-            .font_size(ABOUT_FONT_SIZE)
+            .font_size(font_size)
             .label_min_width(Val::Px(90.0)),
     )
     .row
 }
 
 /// A plain value label, returning its text entity for in-place updates.
-fn spawn_value(commands: &mut Commands, parent: Entity, value: String, color: Color) -> Entity {
+fn spawn_value(
+    commands: &mut Commands,
+    parent: Entity,
+    value: String,
+    color: Color,
+    font_size: f32,
+) -> Entity {
     commands
         .spawn((
             Text::new(value),
-            UiFont::Sans.at(ABOUT_FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(color),
             ChildOf(parent),
         ))
@@ -993,6 +1194,7 @@ fn spawn_button(
     parent: Entity,
     label_key: &'static str,
     tab_index: i32,
+    font_size: f32,
 ) -> Entity {
     ui_spawn::spawn_button(
         commands,
@@ -1003,7 +1205,7 @@ fn spawn_button(
         )
         .tab_index(tab_index)
         .label_color(LABEL_COLOR)
-        .font_size(ABOUT_FONT_SIZE),
+        .font_size(font_size),
     )
     .button
 }

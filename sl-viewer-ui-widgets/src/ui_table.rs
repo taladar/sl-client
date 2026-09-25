@@ -65,9 +65,12 @@ use sl_viewer_ui_core::skin::{
 };
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 use sl_viewer_ui_core::ui::UiDirection;
+use sl_viewer_ui_core::ui_element::{ContentMayOverflow, TextMayClip};
 use sl_viewer_ui_core::ui_ellipsis::{RevealEllipsis, spawn_ellipsis_marker};
 use sl_viewer_ui_core::ui_font::UiFont;
-use sl_viewer_ui_core::virtual_list::{VirtualList, VirtualRow, VirtualViewport, amend_row_node};
+use sl_viewer_ui_core::virtual_list::{
+    VirtualList, VirtualRow, VirtualViewport, amend_row_node, spawn_specimen_row,
+};
 
 /// The smallest a resizable column may be dragged, in logical pixels — enough to
 /// keep its header legible.
@@ -996,6 +999,14 @@ fn border_draggable(spec: &TableSpec, left: usize) -> bool {
     }
 }
 
+/// Why a cell's clip container may hold more than it shows: a value (or a
+/// heading) wider than its column is cut at the column edge on purpose, and the
+/// trailing locale ellipsis says so. The table's declaration for both harness
+/// checks it would otherwise trip — the content outgrowing its box, and the
+/// text sliced at that box's edge.
+const CELL_CLIP_REASON: &str =
+    "a value wider than its column is cut at the column edge, behind the locale ellipsis";
+
 /// Spawn one header cell (returning it): a sized container carrying (for a text
 /// column) a clipped label + optional sort arrow, or (for a custom column) nothing
 /// — plus, for a fixed column, a drag-to-resize handle on its trailing edge.
@@ -1056,6 +1067,12 @@ fn spawn_header_cell(
                 align_items: AlignItems::Center,
                 ..default()
             },
+            ContentMayOverflow {
+                reason: CELL_CLIP_REASON,
+            },
+            TextMayClip {
+                reason: CELL_CLIP_REASON,
+            },
             Pickable::IGNORE,
             ChildOf(cell),
         ))
@@ -1108,6 +1125,12 @@ fn spawn_border_resizer(
     spec: &'static TableSpec,
     left: usize,
 ) {
+    // The grip hangs half its width past the cell's trailing edge, and taffy
+    // folds an absolute child's box into its parent's content size.
+    commands.entity(cell).insert(ContentMayOverflow {
+        reason: "the column-resize grip straddles the border, so half of it lies past this cell \
+                 on purpose",
+    });
     commands
         .spawn((
             Node {
@@ -1289,6 +1312,12 @@ fn spawn_body_cell(
                 align_items: AlignItems::Center,
                 ..default()
             },
+            ContentMayOverflow {
+                reason: CELL_CLIP_REASON,
+            },
+            TextMayClip {
+                reason: CELL_CLIP_REASON,
+            },
             Pickable::IGNORE,
             ChildOf(cell),
         ))
@@ -1346,6 +1375,83 @@ pub fn set_table_cell(
             set_role_class(&mut classes, color);
         }
     }
+}
+
+/// The two entities of a spawned table that [`spawn_specimen_table_rows`]
+/// needs — what a consumer's `…Ui` resource usually keeps of a
+/// [`TableHandle`], so a specimen can pass either.
+#[derive(Debug, Clone, Copy)]
+pub struct SpecimenTable {
+    /// The table root (carries [`TableState`]).
+    pub root: Entity,
+    /// The virtualized viewport (carries [`VirtualList`]).
+    pub viewport: Entity,
+}
+
+impl From<&TableHandle> for SpecimenTable {
+    /// The handle's root and viewport.
+    fn from(handle: &TableHandle) -> Self {
+        Self {
+            root: handle.root,
+            viewport: handle.viewport,
+        }
+    }
+}
+
+/// Pool and bind fixed rows into a freshly-spawned table, for a gallery or
+/// layout-sweep **specimen** of a window whose live rows come from a session.
+///
+/// A live table's rows are pooled by `virtual_list::layout_virtual_lists` and
+/// built by the consumer's own populate / bind systems, none of which a
+/// specimen host runs. So this does what those do, once, with the widget's own
+/// pieces: each row is the pool's row
+/// ([`spawn_specimen_row`]),
+/// built by [`spawn_table_row`] (so it carries the row class, the cell clips
+/// and the ellipsis markers the live row does), striped the way
+/// `stripe_virtual_rows` stripes it, and given its cell values and colours with
+/// the same role class [`set_table_cell`] writes. The list's item count is set
+/// to match, so a host that *does* run the pool adopts these rows rather than
+/// growing a second set.
+///
+/// `rows` holds each row's `(value, colour)` per column, in column order — the
+/// shape a consumer's own `row_cells` projection already produces. Returns each
+/// row's entity and cells, for the caller to dress as its live populate / bind
+/// does (a selection class, a glyph cell, a translated label); a
+/// [`TableColumnKind::Custom`] column's entry is ignored, and its empty
+/// container is in the cells for the caller to fill.
+pub fn spawn_specimen_table_rows(
+    commands: &mut Commands,
+    table: SpecimenTable,
+    spec: &'static TableSpec,
+    rows: &[Vec<(String, Color)>],
+) -> Vec<(Entity, TableRowCells)> {
+    let mut bound = Vec::with_capacity(rows.len());
+    for (index, values) in rows.iter().enumerate() {
+        let row = spawn_specimen_row(commands, table.viewport, index, spec.row_height);
+        let cells = spawn_table_row(commands, row, table.root, spec);
+        commands.entity(row).insert(ClassList::new_with_classes(
+            core::iter::once(ROW_CLASS).chain((index % 2 == 0).then_some(STRIPE_CLASS)),
+        ));
+        for ((column, cell), (value, color)) in spec
+            .columns
+            .iter()
+            .zip(cells.cells.iter().copied())
+            .zip(values.iter().cloned())
+        {
+            if column.kind == TableColumnKind::Text {
+                commands
+                    .entity(cell)
+                    .insert((Text::new(value), text_role(color)));
+            }
+        }
+        bound.push((row, cells));
+    }
+    let count = rows.len();
+    commands
+        .entity(table.viewport)
+        .entry::<VirtualList>()
+        .and_modify(move |mut list| list.item_count = count);
+    bound
 }
 
 // ---------------------------------------------------------------------------

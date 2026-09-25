@@ -482,6 +482,29 @@ fn describe(name: Option<&Name>, entity: Entity) -> String {
     name.map_or_else(|| format!("{entity}"), |name| format!("`{name}`"))
 }
 
+/// [`describe`], and for a node with no [`Name`] of its own, the nearest named
+/// ancestor as well.
+///
+/// A bare entity id says nothing about *where* a failure is: most of a real
+/// window's nodes are anonymous (a table cell's clip, a row's label), and
+/// `113v0: content width … exceeds …` sends the reader to a debugger rather
+/// than to a file. The same line naming the row it sits in sends them to the
+/// widget.
+fn describe_in(world: &World, name: Option<&Name>, entity: Entity) -> String {
+    if name.is_some() {
+        return describe(name, entity);
+    }
+    let named = core::iter::successors(
+        world.get::<ChildOf>(entity).map(ChildOf::parent),
+        |current| world.get::<ChildOf>(*current).map(ChildOf::parent),
+    )
+    .find_map(|ancestor| world.get::<Name>(ancestor));
+    named.map_or_else(
+        || format!("{entity}"),
+        |ancestor| format!("{entity} in `{ancestor}`"),
+    )
+}
+
 /// The [`Popover`] nodes that are actually **up** — laid out with a box, rather
 /// than merely resident in the tree.
 ///
@@ -614,7 +637,7 @@ pub fn overflow_violations(app: &mut App) -> Vec<String> {
                 violations.push(format!(
                     "{}: content {axis} {content} exceeds its own box {available} by \
                      {overshoot} logical px",
-                    describe(name, entity),
+                    describe_in(app.world(), name, entity),
                 ));
             }
         }
@@ -628,18 +651,34 @@ pub fn overflow_violations(app: &mut App) -> Vec<String> {
 /// other way a translation that runs long fails: not by overflowing its own box
 /// but by pushing the box it is in past the window. Zero-sized nodes are skipped
 /// — a closed panel (`Display::None`) is legitimately nowhere.
+///
+/// What is measured is the part of the node that **reaches the screen**: its
+/// box cut by its [`CalculatedClip`], when an ancestor clips or scrolls. The
+/// fourteenth page of a license text lies far below the window, and is meant
+/// to — it is inside a scroll area, which is itself held to the viewport here,
+/// and which is the thing a person scrolls to reach it. A node clipped away
+/// entirely is skipped for the same reason [`clipping_violations`] skips it:
+/// hidden is a state, not a place.
 pub fn viewport_violations(app: &mut App, viewport: UVec2) -> Vec<String> {
-    let mut query = app
-        .world_mut()
-        .query::<(Entity, &ComputedNode, &UiGlobalTransform, Option<&Name>)>();
+    let mut query = app.world_mut().query::<(
+        Entity,
+        &ComputedNode,
+        &UiGlobalTransform,
+        Option<&CalculatedClip>,
+        Option<&Name>,
+    )>();
     let mut violations = Vec::new();
     let bounds = viewport.as_vec2();
-    for (entity, computed, transform, name) in query.iter(app.world()) {
+    for (entity, computed, transform, clip, name) in query.iter(app.world()) {
         if computed.size.cmple(Vec2::ZERO).any() {
             continue;
         }
         let node_box = border_box(computed, transform);
-        let (min, max) = (node_box.min, node_box.max);
+        let shown = clip.map_or(node_box, |clip| node_box.intersect(clip.clip));
+        if shown.is_empty() || shown.size().cmple(Vec2::ZERO).any() {
+            continue;
+        }
+        let (min, max) = (shown.min, shown.max);
         if min.x < -OVERFLOW_EPSILON
             || min.y < -OVERFLOW_EPSILON
             || max.x > bounds.x + OVERFLOW_EPSILON
@@ -647,7 +686,7 @@ pub fn viewport_violations(app: &mut App, viewport: UVec2) -> Vec<String> {
         {
             violations.push(format!(
                 "{}: laid out at {min}..{max}, outside the {bounds} viewport",
-                describe(name, entity),
+                describe_in(app.world(), name, entity),
             ));
         }
     }
@@ -706,7 +745,7 @@ fn may_be_clipped(world: &World, node: Entity) -> bool {
 ///
 /// A parent that clips or scrolls the axis is skipped: escaping is that widget's
 /// purpose there, and [`clipping_violations`] takes over the question of whether
-/// the result is *readable*.
+/// the result is *readable*. So is a parent declaring [`ContentMayOverflow`].
 pub fn containment_violations(app: &mut App) -> Vec<String> {
     let popovers = open_popovers(app);
     let world = app.world_mut();
@@ -728,7 +767,12 @@ pub fn containment_violations(app: &mut App) -> Vec<String> {
             )
         })
         .collect();
-    let mut parent_boxes = world.query::<(&ComputedNode, &UiGlobalTransform, &Node)>();
+    let mut parent_boxes = world.query::<(
+        &ComputedNode,
+        &UiGlobalTransform,
+        &Node,
+        Option<&ContentMayOverflow>,
+    )>();
 
     let mut violations = Vec::new();
     for (entity, child_box, parent, name) in boxes {
@@ -736,12 +780,19 @@ pub fn containment_violations(app: &mut App) -> Vec<String> {
             // A floating layer, by its own declaration — see `popover_ancestors`.
             continue;
         }
-        let Ok((parent_computed, parent_transform, parent_node)) = parent_boxes.get(world, parent)
+        let Ok((parent_computed, parent_transform, parent_node, declared)) =
+            parent_boxes.get(world, parent)
         else {
             // No parent node: the `UiRoot` itself, which `viewport_violations`
             // measures against the window instead.
             continue;
         };
+        if declared.is_some() {
+            // The parent has said its content may exceed its box — the same
+            // statement as "a child may lie outside me", made once for both
+            // checks rather than twice. See `ContentMayOverflow`.
+            continue;
+        }
         if child_box.size().cmple(Vec2::ZERO).any() {
             continue;
         }
@@ -773,7 +824,7 @@ pub fn containment_violations(app: &mut App) -> Vec<String> {
                 violations.push(format!(
                     "{}: {axis} extent {child_min}..{child_max} escapes its parent's \
                      {parent_min}..{parent_max}",
-                    name.unwrap_or_else(|| format!("{entity}")),
+                    name.unwrap_or_else(|| describe_in(world, None, entity)),
                 ));
                 break;
             }
@@ -839,7 +890,7 @@ pub fn clipping_violations(app: &mut App) -> Vec<String> {
         violations.push(format!(
             "{}: text {text_box:?} is sliced by the clip rect {clip:?} — it is neither fully \
              visible nor fully hidden, so it renders as a cut-off label",
-            name.unwrap_or_else(|| format!("{entity}")),
+            name.unwrap_or_else(|| describe_in(world, None, entity)),
         ));
     }
     violations

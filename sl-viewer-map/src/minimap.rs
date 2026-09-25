@@ -29,7 +29,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use bevy::asset::RenderAssetUsages;
+use bevy::asset::{RenderAssetUsages, uuid_handle};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
@@ -38,7 +38,7 @@ use bevy::window::PrimaryWindow;
 use sl_client_bevy::{
     AgentKey, Command, MuteType, OwnerKey, ParcelOverlayGrid, ParcelOwnership, RegionCoordinates,
     RegionHandle, SlCommand, SlCurrentRegion, SlEvent, SlIdentity, SlParcel, SlParcelOverlay,
-    SlRegion, SlRegionIdentity, SlSessionEvent, TerrainPatch, Vector,
+    SlRegion, SlRegionIdentity, SlSessionEvent, TerrainLayerType, TerrainPatch, Vector,
 };
 use sl_settings::{Scope, SettingValue};
 use sl_terrain::TerrainComposition;
@@ -151,7 +151,7 @@ pub fn register_settings(settings: &mut ViewerSettings) {
     settings.register_in(
         MINIMAP_SECTION,
         SETTING_OPACITY,
-        SettingValue::F32(0.66),
+        SettingValue::F32(DEFAULT_OPACITY),
         "setting-desc-MiniMapOpacity",
     );
     settings.register_in(
@@ -831,7 +831,39 @@ fn spawn_minimap(
         .insert(Translated::new("minimap-floater-title"));
 
     let image = images.add(blank_surface(64, 64));
+    let parts = spawn_minimap_content(&mut commands, handle.content, image.clone());
 
+    commands.insert_resource(MinimapUi {
+        root: handle.root,
+        surface: parts.surface,
+        image,
+        compass: parts.compass,
+        tooltip: parts.tooltip,
+        tooltip_text: parts.tooltip_text,
+    });
+}
+
+/// The minimap content's entities, as [`spawn_minimap_content`] built them.
+#[derive(Debug, Clone, Copy)]
+struct MinimapParts {
+    /// The map surface node (the [`ImageNode`], the input target).
+    surface: Entity,
+    /// The eight compass label wrapper nodes, in [`COMPASS_POINTS`] order.
+    compass: [Entity; 8],
+    /// The hover tooltip panel.
+    tooltip: Entity,
+    /// The hover tooltip's text node.
+    tooltip_text: Entity,
+}
+
+/// Build the minimap's content into `content`: the surface image node showing
+/// `image` with its input observers, the eight compass labels riding it, and
+/// the hover tooltip. Shared by the live floater and its gallery specimen.
+fn spawn_minimap_content(
+    commands: &mut Commands,
+    content: Entity,
+    image: Handle<Image>,
+) -> MinimapParts {
     let surface = commands
         .spawn((
             Node {
@@ -841,14 +873,14 @@ fn spawn_minimap(
                 min_height: Val::Px(MIN_SIZE),
                 ..default()
             },
-            ImageNode::new(image.clone()),
+            ImageNode::new(image),
             RelativeCursorPosition::default(),
             Pickable {
                 should_block_lower: true,
                 is_hoverable: true,
             },
             Name::new("minimap-surface"),
-            ChildOf(handle.content),
+            ChildOf(content),
         ))
         .observe(on_minimap_click)
         .observe(on_minimap_drag)
@@ -902,14 +934,12 @@ fn spawn_minimap(
         ))
         .id();
 
-    commands.insert_resource(MinimapUi {
-        root: handle.root,
+    MinimapParts {
         surface,
-        image,
         compass,
         tooltip,
         tooltip_text,
-    });
+    }
 }
 
 /// A transparent RGBA surface image of the given size.
@@ -1333,9 +1363,12 @@ fn drive_minimap_view(
     }
 
     // Surface opacity.
-    let opacity = settings.store().get_f32(SETTING_OPACITY).unwrap_or(0.66);
+    let opacity = settings
+        .store()
+        .get_f32(SETTING_OPACITY)
+        .unwrap_or(DEFAULT_OPACITY);
     if let Ok(mut node) = image_nodes.get_mut(ui.surface) {
-        let tint = Color::srgba(1.0, 1.0, 1.0, opacity.clamp(0.05, 1.0));
+        let tint = surface_tint(opacity);
         if node.color != tint {
             node.color = tint;
         }
@@ -1380,6 +1413,15 @@ fn drive_minimap_view(
 
     state.object_elapsed += time.delta_secs();
     state.terrain_elapsed += time.delta_secs();
+}
+
+/// The surface's opacity when `MiniMapOpacity` is unset.
+const DEFAULT_OPACITY: f32 = 0.66;
+
+/// The surface image tint for a `MiniMapOpacity` value: white, at that alpha
+/// (floored so the map never vanishes entirely).
+const fn surface_tint(opacity: f32) -> Color {
+    Color::srgba(1.0, 1.0, 1.0, opacity.clamp(0.05, 1.0))
 }
 
 /// A laid-out node dimension as a surface pixel count, capped.
@@ -2546,37 +2588,28 @@ fn layout_minimap_compass(
     if surface_logical.x < 1.0 || surface_logical.y < 1.0 {
         return;
     }
-    let half = vec2_scale(surface_logical, 0.5);
     for (index, wrapper) in ui.compass.iter().enumerate() {
-        let Some((_key, base_angle)) = COMPASS_POINTS.get(index) else {
-            continue;
-        };
         let label_logical = computed
             .get(*wrapper)
             .map_or(Vec2::new(12.0, 12.0), |node| {
                 vec2_scale(node.size(), node.inverse_scale_factor())
             });
+        let Some(placement) =
+            compass_label_placement(index, surface_logical, label_logical, state.view.rotation)
+        else {
+            continue;
+        };
         let minor = COMPASS_MINOR.get(index).copied().unwrap_or(false);
         if minor && let Ok(mut visibility) = visibilities.get_mut(*wrapper) {
-            *visibility =
-                if minimap_math::minor_directions_visible(label_logical.y, surface_logical) {
-                    Visibility::Inherited
-                } else {
-                    Visibility::Hidden
-                };
+            *visibility = if placement.shown {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            };
         }
-        // The label direction is the world direction turned by the map
-        // rotation (labels ride the rotating map).
-        let angle = base_angle + state.view.rotation;
-        let padding = label_logical.x / 2.0;
-        let offset = minimap_math::compass_label_offset(
-            angle,
-            (half.x - label_logical.x / 2.0 - padding).max(4.0),
-            (half.y - label_logical.y / 2.0 - padding).max(4.0),
-        );
         if let Ok(mut node) = nodes.get_mut(*wrapper) {
-            let left = Val::Px(half.x + offset.x - label_logical.x / 2.0);
-            let top = Val::Px(half.y + offset.y - label_logical.y / 2.0);
+            let left = Val::Px(placement.top_left.x);
+            let top = Val::Px(placement.top_left.y);
             // Write through change detection only on a real move: this system
             // runs every frame, but the offsets change only when the map
             // rotates or resizes. An unconditional write would mark `Node`
@@ -2590,6 +2623,44 @@ fn layout_minimap_compass(
             }
         }
     }
+}
+
+/// Where one compass label sits on the surface.
+#[derive(Debug, Clone, Copy)]
+struct CompassPlacement {
+    /// The label wrapper's top-left corner, in the surface's logical pixels.
+    top_left: Vec2,
+    /// Whether a diagonal label has room to show (the cardinals always do).
+    shown: bool,
+}
+
+/// Place compass label `index` (in [`COMPASS_POINTS`] order) of `label` logical
+/// size on the edge of a `surface` of that logical size, for a map turned by
+/// `rotation` — the labels ride the rotating map. `None` for an index past the
+/// eight points.
+fn compass_label_placement(
+    index: usize,
+    surface: Vec2,
+    label: Vec2,
+    rotation: f32,
+) -> Option<CompassPlacement> {
+    let (_key, base_angle) = COMPASS_POINTS.get(index)?;
+    let half = vec2_scale(surface, 0.5);
+    // The label direction is the world direction turned by the map rotation.
+    let angle = base_angle + rotation;
+    let padding = label.x / 2.0;
+    let offset = minimap_math::compass_label_offset(
+        angle,
+        (half.x - label.x / 2.0 - padding).max(4.0),
+        (half.y - label.y / 2.0 - padding).max(4.0),
+    );
+    Some(CompassPlacement {
+        top_left: Vec2::new(
+            half.x + offset.x - label.x / 2.0,
+            half.y + offset.y - label.y / 2.0,
+        ),
+        shown: minimap_math::minor_directions_visible(label.y, surface),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -2815,14 +2886,22 @@ const DOUBLE_CLICK_SLOP: f32 = 6.0;
 
 /// A primary click on the surface: track double-clicks and run the configured
 /// double-click action (teleport / beacon).
+///
+/// Every parameter is optional so a gallery specimen's surface, clicked in an
+/// app without the map's session state, is inert rather than a failed observer.
 fn on_minimap_click(
     click: On<Pointer<Click>>,
-    time: Res<Time>,
-    mut state: ResMut<MinimapState>,
-    settings: Res<ViewerSettings>,
-    world: ClickWorld,
-    out: ClickOut,
+    time: Option<Res<Time>>,
+    state: Option<ResMut<MinimapState>>,
+    settings: Option<Res<ViewerSettings>>,
+    world: Option<ClickWorld>,
+    out: Option<ClickOut>,
 ) {
+    let (Some(time), Some(mut state), Some(settings), Some(world), Some(out)) =
+        (time, state, settings, world, out)
+    else {
+        return;
+    };
     let ClickWorld {
         terrain,
         identity,
@@ -2917,11 +2996,16 @@ fn on_minimap_click(
 
 /// A SHIFT-drag on the surface pans the map (2 px slop via the drag
 /// threshold), suspending auto-centring while the button is held.
+///
+/// Optional parameters: inert on a specimen (see [`on_minimap_click`]).
 fn on_minimap_drag(
     drag: On<Pointer<Drag>>,
-    keys: Res<ButtonInput<KeyCode>>,
-    mut state: ResMut<MinimapState>,
+    keys: Option<Res<ButtonInput<KeyCode>>>,
+    state: Option<ResMut<MinimapState>>,
 ) {
+    let (Some(keys), Some(mut state)) = (keys, state) else {
+        return;
+    };
     if drag.button != PointerButton::Primary {
         return;
     }
@@ -2935,20 +3019,28 @@ fn on_minimap_drag(
     state.pan.y -= drag.delta.y;
 }
 
-/// The end of a drag re-enables auto-centring.
-fn on_minimap_drag_end(drag: On<Pointer<DragEnd>>, mut state: ResMut<MinimapState>) {
-    if drag.button == PointerButton::Primary {
+/// The end of a drag re-enables auto-centring. Inert on a specimen (see
+/// [`on_minimap_click`]).
+fn on_minimap_drag_end(drag: On<Pointer<DragEnd>>, state: Option<ResMut<MinimapState>>) {
+    if drag.button == PointerButton::Primary
+        && let Some(mut state) = state
+    {
         state.dragging = false;
     }
 }
 
 /// A scroll wheel over the surface zooms (4 % per notch), toward the cursor
 /// when auto-centring is off.
+///
+/// Optional parameters: inert on a specimen (see [`on_minimap_click`]).
 fn on_minimap_scroll(
     mut event: On<Pointer<Scroll>>,
-    mut state: ResMut<MinimapState>,
-    settings: Res<ViewerSettings>,
+    state: Option<ResMut<MinimapState>>,
+    settings: Option<Res<ViewerSettings>>,
 ) {
+    let (Some(mut state), Some(settings)) = (state, settings) else {
+        return;
+    };
     let old_scale = state.scale;
     // Wheel up (positive y) zooms in: the reference's reversed "clicks".
     let new_scale = minimap_math::wheel_scale(old_scale, -event.y);
@@ -2985,15 +3077,22 @@ fn on_minimap_scroll(
 /// Profiles* list takes their place, one line per avatar, labelled with whatever
 /// name is known now and re-labelled as the rest arrive
 /// (`refresh_minimap_menu_names`).
+///
+/// Optional parameters: inert on a specimen (see [`on_minimap_click`]).
 fn on_minimap_context(
     mut press: On<Pointer<Press>>,
-    mut state: ResMut<MinimapState>,
-    settings: Res<ViewerSettings>,
-    tracking: Res<MapTracking>,
-    names: MinimapNames,
+    state: Option<ResMut<MinimapState>>,
+    settings: Option<Res<ViewerSettings>>,
+    tracking: Option<Res<MapTracking>>,
+    names: Option<MinimapNames>,
     ui: Option<Res<MinimapUi>>,
-    out: MinimapMenuOut,
+    out: Option<MinimapMenuOut>,
 ) {
+    let (Some(mut state), Some(settings), Some(tracking), Some(names), Some(out)) =
+        (state, settings, tracking, names, out)
+    else {
+        return;
+    };
     let MinimapNames {
         mut avatars,
         translator,
@@ -3649,91 +3748,357 @@ fn apply_minimap_mouselook(
 // Gallery specimen.
 // ---------------------------------------------------------------------------
 
-/// A static minimap look for the gallery / harness: the surface panel with a
-/// terrain-ish background, a few avatar dots, the self marker and the compass
-/// labels — no live session, no image compositing.
+/// The specimen's surface image. A fixed handle, so the content builder can
+/// show it before the composite lands: the specimen holds only [`Commands`],
+/// and installs the pixels from a queued command.
+const SPECIMEN_SURFACE: Handle<Image> = uuid_handle!("9d6e9b72-6a7f-4788-932b-7835c9b24114");
+
+/// The specimen's surface side, in pixels — the floater's default content size.
+const SPECIMEN_SURFACE_PX: u32 = 200;
+
+/// The specimen's current region, in grid coordinates.
+const SPECIMEN_GRID: (u32, u32) = (1000, 1000);
+
+/// The specimen map's rotation: rotate-on, with the camera heading due north
+/// (the compass labels then sit on the edge midpoints they are anchored to).
+const SPECIMEN_ROTATION: f32 = 0.0;
+
+/// The minimap for the gallery / harness, built by the live content builder:
+/// its surface is composited by the live renderer (`render_minimap_surface`)
+/// from sample layers rasterised by the live layer builders — a hill-shaded
+/// terrain backdrop from sample height patches (the current region and two
+/// tinted neighbours beside the void), parcel lines with a for-sale parcel, a
+/// few objects, one avatar dot per classification, the camera wedge, the self
+/// marker and a tracking beacon — under the compass labels at their live
+/// placement. The hover tooltip stays hidden, as it does until a hover.
 pub fn spawn_minimap_specimen(commands: &mut Commands, parent: Entity, _cx: ElementCx) -> Entity {
-    let root = commands
-        .spawn((
+    let parts = spawn_minimap_content(commands, parent, SPECIMEN_SURFACE);
+    commands.entity(parts.surface).insert(ImageNode {
+        color: surface_tint(DEFAULT_OPACITY),
+        ..ImageNode::new(SPECIMEN_SURFACE)
+    });
+
+    // The compass labels: the live placement, at an estimated label size,
+    // anchored to the surface edge each label sits against (or centred on the
+    // axis it straddles), in percentages — so a label longer than the estimate
+    // grows inward rather than off the map, as the live placement's measured
+    // size keeps it inside. The live system re-places them every frame.
+    let surface = Vec2::splat(minimap_math::u32_to_f32(SPECIMEN_SURFACE_PX));
+    let label = Vec2::new(COMPASS_FONT_SIZE, COMPASS_FONT_SIZE * 1.25);
+    for (index, wrapper) in parts.compass.iter().enumerate() {
+        let Some(placement) = compass_label_placement(index, surface, label, SPECIMEN_ROTATION)
+        else {
+            continue;
+        };
+        let minor = COMPASS_MINOR.get(index).copied().unwrap_or(false);
+        let (left, right, justify_content) = specimen_compass_axis(
+            placement.top_left.x,
+            label.x,
+            surface.x,
+            JustifyContent::Center,
+        );
+        let (top, bottom, align_items) =
+            specimen_compass_axis(placement.top_left.y, label.y, surface.y, AlignItems::Center);
+        commands.entity(*wrapper).insert((
             Node {
-                width: Val::Px(180.0),
-                height: Val::Px(180.0),
+                position_type: PositionType::Absolute,
+                left,
+                right,
+                top,
+                bottom,
+                justify_content: justify_content.unwrap_or_default(),
+                align_items: align_items.unwrap_or_default(),
                 ..default()
             },
-            BackgroundColor(Color::srgb(0.24, 0.33, 0.19)),
-            Name::new("minimap-specimen"),
+            if minor && !placement.shown {
+                Visibility::Hidden
+            } else {
+                Visibility::Inherited
+            },
+        ));
+    }
+
+    commands.queue(move |world: &mut World| {
+        // The headless layout harness has no image store and draws nothing, so
+        // there is nothing to composite for.
+        let Some(mut images) = world.get_resource_mut::<Assets<Image>>() else {
+            return;
+        };
+        let mut image = blank_surface(SPECIMEN_SURFACE_PX, SPECIMEN_SURFACE_PX);
+        image.data = Some(sample_minimap_surface(UVec2::splat(SPECIMEN_SURFACE_PX)));
+        if let Err(error) = images.insert(SPECIMEN_SURFACE.id(), image) {
+            warn!("minimap specimen: the sample surface was not installed: {error}");
+        }
+    });
+    parent
+}
+
+/// One axis of a specimen compass label's anchoring: the (start, end) insets
+/// of a label placed at `start` with `extent` on a surface `length` long, as
+/// percentages of it — pinned to the nearer edge, or stretched across the axis
+/// with `centre` when it straddles the middle.
+fn specimen_compass_axis<T>(
+    start: f32,
+    extent: f32,
+    length: f32,
+    centre: T,
+) -> (Val, Val, Option<T>) {
+    let middle = start + extent / 2.0;
+    let half = length / 2.0;
+    if middle > half + 1.0 {
+        (
+            Val::Auto,
+            Val::Percent((length - start - extent) / length * 100.0),
+            None,
+        )
+    } else if middle < half - 1.0 {
+        (Val::Percent(start / length * 100.0), Val::Auto, None)
+    } else {
+        (Val::Px(0.0), Val::Px(0.0), Some(centre))
+    }
+}
+
+/// The minimap as a gallery **element**: [`spawn_minimap_specimen`] in a box
+/// the size of the floater's default content, which is what the surface fills
+/// in the viewer — an element card is a column of auto height, where the
+/// surface would shrink to its least height and stretch across the card.
+pub fn spawn_minimap_element(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
+    let host = commands
+        .spawn((
+            Node {
+                width: Val::Px(DEFAULT_SIZE),
+                height: Val::Px(DEFAULT_SIZE),
+                flex_direction: FlexDirection::Column,
+                ..default()
+            },
+            Name::new("minimap-element"),
             ChildOf(parent),
         ))
         .id();
-    // A "water" corner, a parcel line, some dots.
-    commands.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(0.0),
-            top: Val::Px(110.0),
-            width: Val::Px(70.0),
-            height: Val::Px(70.0),
-            ..default()
+    spawn_minimap_specimen(commands, host, cx);
+    host
+}
+
+/// Composite the specimen's surface through the live pipeline: the sample
+/// layers go through [`build_terrain_maps`], [`build_object_layer`] and
+/// [`build_parcel_layer`], and the frame through [`render_minimap_surface`].
+fn sample_minimap_surface(surface_px: UVec2) -> Vec<u8> {
+    let current = RegionHandle::from_grid(SPECIMEN_GRID.0, SPECIMEN_GRID.1);
+    let (region_east, region_north) = current.global_coordinates();
+    let camera = (
+        f64::from(region_east) + 120.0,
+        f64::from(region_north) + 110.0,
+    );
+    let view = MapView {
+        scale: minimap_math::MAP_SCALE_MEDIUM,
+        rotation: SPECIMEN_ROTATION,
+        pan: Vec2::ZERO,
+        size: Vec2::new(
+            minimap_math::u32_to_f32(surface_px.x),
+            minimap_math::u32_to_f32(surface_px.y),
+        ),
+    };
+    let ppm = view.pixels_per_metre();
+    let raster_size = minimap_math::layer_raster_size(view.size);
+    let tpm = minimap_math::layer_texels_per_metre(raster_size, view.size, view.scale);
+
+    // The current region and its east and north neighbours; the rest is void.
+    let regions = [
+        current,
+        RegionHandle::from_grid(SPECIMEN_GRID.0.saturating_add(1), SPECIMEN_GRID.1),
+        RegionHandle::from_grid(SPECIMEN_GRID.0, SPECIMEN_GRID.1.saturating_add(1)),
+    ];
+    let terrain: Vec<TerrainRegionSample> = regions
+        .iter()
+        .map(|handle| TerrainRegionSample {
+            handle: *handle,
+            patches: sample_terrain_patches(*handle),
+            composition: None,
+            water_height: DEFAULT_WATER_HEIGHT,
+        })
+        .collect();
+
+    let objects = [
+        (-18.0, 24.0, [12.0, 10.0, 6.0]),
+        (-30.0, 30.0, [6.0, 6.0, 3.0]),
+        (40.0, -12.0, [16.0, 4.0, 8.0]),
+        (22.0, 58.0, [8.0, 8.0, 10.0]),
+        (-62.0, -40.0, [20.0, 14.0, 5.0]),
+    ]
+    .into_iter()
+    .map(|(rel_east, rel_north, scale)| ObjectSample {
+        rel_east,
+        rel_north,
+        up: 26.0,
+        flags: 0,
+        scale,
+        water_height: DEFAULT_WATER_HEIGHT,
+    })
+    .collect();
+    let object_layer = build_object_layer(&ObjectLayerInput {
+        raster_size,
+        tpm,
+        accents: ObjectAccents {
+            physical: false,
+            scripted: false,
+            temp_on_rez: false,
+            phantom_alpha: phantom_alpha(100),
         },
-        BackgroundColor(Color::srgb(0.10, 0.22, 0.35)),
-        ChildOf(root),
-    ));
-    commands.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(90.0),
-            top: Val::Px(0.0),
-            width: Val::Px(1.0),
-            height: Val::Px(180.0),
-            ..default()
-        },
-        BackgroundColor(Color::WHITE),
-        ChildOf(root),
-    ));
-    for (x, y, color) in [
-        (40.0, 60.0, Color::srgb(1.0, 0.0, 0.0)),
-        (120.0, 40.0, Color::srgb(0.0, 1.0, 0.0)),
-        (88.0, 88.0, Color::srgb(1.0, 1.0, 0.0)),
-    ] {
-        commands.spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(x),
-                top: Val::Px(y),
-                width: Val::Px(7.0),
-                height: Val::Px(7.0),
-                border_radius: BorderRadius::all(Val::Px(4.0)),
-                ..default()
-            },
-            BackgroundColor(color),
-            ChildOf(root),
-        ));
+        max_radius: 16.0,
+        objects,
+    });
+
+    let parcel_layer = build_parcel_layer(&ParcelLayerInput {
+        raster_size,
+        tpm,
+        show_sale: true,
+        regions: regions
+            .iter()
+            .map(|handle| {
+                let (east, north) = handle.global_coordinates();
+                ParcelRegionSample {
+                    origin_east: narrow(f64::from(east) - camera.0),
+                    origin_north: narrow(f64::from(north) - camera.1),
+                    // The current region's overlay arrived; the neighbours'
+                    // did not, so they draw their full outline.
+                    grid: (*handle == current).then(sample_parcel_overlay),
+                }
+            })
+            .collect(),
+    });
+
+    let palette = DotPalette::default();
+    let camera_z = 30.0;
+    let dots = [
+        (30.0, 20.0, 29.0, palette.base),
+        (-40.0, 35.0, 55.0, palette.friend),
+        (15.0, -50.0, 12.0, palette.linden),
+        (70.0, 45.0, 30.0, palette.base),
+    ]
+    .into_iter()
+    .map(|(east, north, up, color)| ResolvedDot {
+        view: view.view_from_rel(east, north),
+        color,
+        glyph: minimap_math::height_glyph(up - camera_z, false, camera_z),
+    })
+    .collect();
+
+    let side = surface_px.x.max(surface_px.y);
+    let job = CompositeJob {
+        surface_px,
+        view,
+        camera,
+        terrain_maps: Arc::new(build_terrain_maps(&terrain)),
+        current_region: Some(current),
+        object_layer: Arc::new(object_layer),
+        object_center: camera,
+        object_tpm: tpm,
+        parcel_layer: Arc::new(parcel_layer),
+        parcel_center: camera,
+        parcel_tpm: tpm,
+        show_objects: true,
+        show_lines: true,
+        wedge_centre: view.view_from_rel(0.0, 0.0),
+        wedge_radius: (4096.0 * ppm).min(minimap_math::u32_to_f32(side) * 1.5),
+        wedge_direction: 0.0,
+        fov_width: 1.3,
+        self_view: Some(view.view_from_rel(1.5, 4.0)),
+        chat_rings: Vec::new(),
+        cursor_ring: None,
+        dot_radius: minimap_math::dot_radius(ppm),
+        dots,
+        tracking_view: Some(view.view_from_rel(-70.0, -60.0)),
+        palette,
+    };
+    render_minimap_surface(&job)
+}
+
+/// A region's sample land patches: 16×16 patches of 16×16 cells over rolling
+/// hills dipping below the water line, continuous across region borders.
+fn sample_terrain_patches(handle: RegionHandle) -> Vec<TerrainPatch> {
+    /// The patch edge, in cells.
+    const PATCH: u32 = 16;
+    // Metres from the south-west corner of the block the specimen draws (one
+    // region beyond its current one), small enough for exact `f32` maths.
+    let (region_east, region_north) = handle.global_coordinates();
+    let block_east = SPECIMEN_GRID
+        .0
+        .saturating_sub(1)
+        .saturating_mul(PATCH * PATCH);
+    let block_north = SPECIMEN_GRID
+        .1
+        .saturating_sub(1)
+        .saturating_mul(PATCH * PATCH);
+    let origin_east = region_east.saturating_sub(block_east);
+    let origin_north = region_north.saturating_sub(block_north);
+    let mut patches = Vec::new();
+    for patch_y in 0..PATCH {
+        for patch_x in 0..PATCH {
+            let mut values = Vec::new();
+            for y in 0..PATCH {
+                for x in 0..PATCH {
+                    let east = minimap_math::u32_to_f32(
+                        origin_east.saturating_add(patch_x.saturating_mul(PATCH).saturating_add(x)),
+                    );
+                    let north = minimap_math::u32_to_f32(
+                        origin_north
+                            .saturating_add(patch_y.saturating_mul(PATCH).saturating_add(y)),
+                    );
+                    values.push(
+                        20.0 + 12.0 * (east / 23.0).sin() * (north / 31.0).cos()
+                            + 5.0 * ((east + north) / 61.0).sin(),
+                    );
+                }
+            }
+            patches.push(TerrainPatch {
+                region_handle: handle,
+                layer: TerrainLayerType::Land,
+                patch_x,
+                patch_y,
+                size: PATCH,
+                values,
+            });
+        }
     }
-    for (label, left, top) in [
-        ("N", 84.0, 2.0),
-        ("E", 166.0, 84.0),
-        ("S", 84.0, 160.0),
-        ("W", 4.0, 84.0),
-    ] {
-        let wrapper = commands
-            .spawn((
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(left),
-                    top: Val::Px(top),
-                    ..default()
-                },
-                ChildOf(root),
-            ))
-            .id();
-        commands.spawn((
-            Text::new(label),
-            UiFont::Sans.at(COMPASS_FONT_SIZE),
-            TextColor(Color::srgba(1.0, 1.0, 1.0, 0.7)),
-            ChildOf(wrapper),
-        ));
+    patches
+}
+
+/// The current region's sample parcel overlay: owned parcels split by property
+/// lines, and a for-sale parcel in the south-east.
+fn sample_parcel_overlay() -> ParcelOverlayGrid {
+    /// The overlay squares per region edge.
+    const EDGE: usize = 64;
+    /// `PARCEL_OWNED`.
+    const OWNED: u8 = 1;
+    /// `PARCEL_FOR_SALE`.
+    const FOR_SALE: u8 = 4;
+    /// `PARCEL_WEST_LINE`.
+    const WEST_LINE: u8 = 0x40;
+    /// `PARCEL_SOUTH_LINE`.
+    const SOUTH_LINE: u8 = 0x80;
+    let mut bytes = Vec::new();
+    for row in 0..EDGE {
+        for col in 0..EDGE {
+            let east_half = col >= 24;
+            let mut byte = if east_half && row < 30 {
+                FOR_SALE
+            } else {
+                OWNED
+            };
+            if col == 0 || col == 24 {
+                byte |= WEST_LINE;
+            }
+            if row == 0 || (row == 40 && !east_half) || (row == 30 && east_half) {
+                byte |= SOUTH_LINE;
+            }
+            bytes.push(byte);
+        }
     }
-    root
+    let mut grid = ParcelOverlayGrid::new(EDGE);
+    if let Err(error) = grid.ingest_chunk(0, &bytes) {
+        warn!("minimap specimen: the sample parcel overlay did not fit: {error}");
+    }
+    grid
 }
 
 #[cfg(test)]
@@ -4147,5 +4512,58 @@ mod tests {
         };
         let raster = super::build_object_layer(&input);
         assert!(raster.data.iter().all(|&byte| byte == 0));
+    }
+
+    /// The specimen's surface is a full frame from the live compositor: sized
+    /// for its surface, with the terrain backdrop drawn rather than left void
+    /// (the sample patches reach the live rasteriser) and the self marker in
+    /// the own-avatar colour.
+    #[test]
+    fn the_specimen_surface_is_a_composited_frame() {
+        let side = super::SPECIMEN_SURFACE_PX;
+        let pixels = super::sample_minimap_surface(UVec2::splat(side));
+        let expected = usize::try_from(side)
+            .unwrap_or(0)
+            .saturating_mul(usize::try_from(side).unwrap_or(0))
+            .saturating_mul(4);
+        assert_eq!(pixels.len(), expected);
+        let texels = pixels.as_chunks::<4>().0;
+        let void = texels
+            .iter()
+            .filter(|texel| **texel == super::VOID_COLOR)
+            .count();
+        assert!(
+            void < texels.len() / 2,
+            "{void} of {} texels are void: the sample terrain was not drawn",
+            texels.len()
+        );
+        let own = DotPalette::default().own;
+        assert!(
+            texels.contains(&own),
+            "the self marker is missing from the frame"
+        );
+    }
+
+    /// The compass placement keeps every label inside the surface.
+    #[test]
+    fn compass_labels_sit_inside_the_surface() {
+        let surface = Vec2::splat(200.0);
+        let label = Vec2::new(12.0, 15.0);
+        for index in 0..COMPASS_POINTS.len() {
+            let placement = super::compass_label_placement(index, surface, label, 0.3);
+            assert!(placement.is_some(), "compass point {index} was not placed");
+            let Some(placement) = placement else {
+                continue;
+            };
+            let bottom_right = placement.top_left + label;
+            assert!(
+                placement.top_left.cmpge(Vec2::ZERO).all() && bottom_right.cmple(surface).all(),
+                "compass point {index} at {:?} leaves the surface",
+                placement.top_left
+            );
+        }
+        assert!(
+            super::compass_label_placement(COMPASS_POINTS.len(), surface, label, 0.3).is_none()
+        );
     }
 }

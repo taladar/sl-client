@@ -55,6 +55,7 @@
 use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::input_focus::tab_navigation::{TabIndex, TabNavigationPlugin};
 use bevy::log::LogPlugin;
+use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui_widgets::{Activate, Button};
@@ -78,6 +79,7 @@ use sl_viewer_ui_core::scrollbar::{
     ScrollTarget, scrollbar_corner, spawn_horizontal_scrollbar, spawn_scrollbar,
 };
 use sl_viewer_ui_core::skin_palette::SkinPalette;
+use sl_viewer_ui_core::virtual_list::VirtualList;
 
 /// The key that flips the layout direction.
 const DIRECTION_KEY: KeyCode = KeyCode::KeyD;
@@ -234,6 +236,22 @@ pub fn run(assets: AssetPlugin, registry: GalleryRegistry) -> AppExit {
          script/pseudoloc, S cycles font size"
     );
     App::new()
+        // **Errors are logged, not fatal, in the gallery.** Every floater here
+        // shows its real content, built by the live window's own builder — and
+        // with it the live window's observers, whose parameters name the
+        // resources and message queues a *session* provides. The gallery has
+        // no session, so a click on (say) a group profile's Join button fails
+        // the observer's parameter validation, and Bevy's default fallback
+        // handler panics on that. A specimen is meant to be looked at and
+        // clicked through; one click must not take the whole gallery down. The
+        // failure is still reported, at `error!`, naming the system and the
+        // missing parameter.
+        //
+        // Inserted first: an observer captures the fallback handler when it is
+        // spawned, so a later insert would miss every window built at startup.
+        .insert_resource(bevy::ecs::error::FallbackErrorHandler(
+            bevy::ecs::error::error,
+        ))
         .add_plugins(
             DefaultPlugins
                 .set(WindowPlugin {
@@ -287,6 +305,24 @@ pub fn run(assets: AssetPlugin, registry: GalleryRegistry) -> AppExit {
         // also brings the scrollbar's runtime half, which hides the page's own
         // bars while there is nothing to scroll.
         .add_plugins(crate::ui_tab::TabWidgetPlugin)
+        // The virtual list and the table widget: the floater specimens hold
+        // real tables and lists, which lay their rows out, size and hide their
+        // scrollbar, scroll under the wheel and sync their column widths only
+        // with these. Without them a table is its spawn-time shell.
+        .add_plugins((
+            sl_viewer_ui_core::virtual_list::VirtualListPlugin,
+            sl_viewer_ui_widgets::ui_table::TableWidgetPlugin,
+        ))
+        // The offscreen material spheres: the Build window's PBR swatch, the
+        // material editor and the texture picker's material pane each render a
+        // `MaterialPreview` through this, onto the face material the world
+        // draws with. A specimen's material is inline, so nothing is fetched;
+        // the two managers exist because the studio's systems read them, and
+        // stay idle with no grid behind them.
+        .add_plugins(crate::face_material::SlFaceMaterialPlugin)
+        .init_resource::<sl_viewer_world_objects::textures::TextureManager>()
+        .init_resource::<sl_viewer_world_objects::materials::MaterialManager>()
+        .add_plugins(sl_viewer_world_objects::material_preview::MaterialPreviewPlugin)
         // The radio widget's runtime half: reconciles each option's indicator and
         // `Checked` marker so the radio specimens respond to clicks in the gallery.
         .add_plugins(crate::ui_radio::RadioWidgetPlugin)
@@ -483,11 +519,30 @@ fn spawn_gallery_camera(mut commands: Commands) {
 /// app owns the wheel. Mirrors [`sl_viewer_ui_core::virtual_list::scroll_virtual_lists`]:
 /// same per-notch step, same `Line` / `Pixel` unit handling. The offset floors at
 /// zero; `bevy_ui` clamps the far end to the scrollable range at layout time.
+///
+/// **A list under the pointer owns the wheel**, as it does in the viewer: the
+/// floater specimens hold real virtual lists, which `scroll_virtual_lists`
+/// scrolls, and one notch must not move the list and the page behind it.
 fn scroll_gallery(
     wheel: Res<AccumulatedMouseScroll>,
+    hover_map: Res<HoverMap>,
+    child_of: Query<&ChildOf>,
+    lists: Query<(), With<VirtualList>>,
     mut pages: Query<&mut ScrollPosition, With<GalleryPage>>,
 ) {
     if wheel.delta.y.abs() < f32::EPSILON {
+        return;
+    }
+    let over_a_list = hover_map
+        .values()
+        .flat_map(|hits| hits.keys())
+        .any(|hovered| {
+            core::iter::successors(Some(*hovered), |node| {
+                child_of.get(*node).ok().map(ChildOf::parent)
+            })
+            .any(|node| lists.contains(node))
+        });
+    if over_a_list {
         return;
     }
     let delta = match wheel.unit {

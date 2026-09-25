@@ -371,8 +371,38 @@ fn spawn_groups_panel(
     let Some(people) = people else {
         return;
     };
-    let content = people.groups_content();
+    let list = spawn_groups_list(&mut commands, people.groups_content(), CHROME_FONT_SIZE);
+    let (confirm_overlay, confirm_text) = spawn_leave_confirm_modal(&mut commands, root.0);
 
+    commands.insert_resource(GroupsUi {
+        viewport: list.viewport,
+        count_text: list.count_text,
+        action_buttons: list.action_buttons,
+        confirm_overlay,
+        confirm_text,
+    });
+}
+
+/// The group list as built into the People pane's Groups slot: what
+/// [`GroupsUi`] keeps of it.
+pub(crate) struct GroupsListParts {
+    /// The virtualized group-list viewport.
+    viewport: Entity,
+    /// The group-count line under the list.
+    count_text: Entity,
+    /// The action column's buttons.
+    action_buttons: Vec<ActionButton>,
+}
+
+/// Build the group list into `content` (the People pane's Groups slot) at
+/// `font_size`: the header, the virtualized list, the count line and the
+/// trailing action column. Shared by the live deferred spawn and the
+/// Conversations floater's specimen, which composes the whole People pane.
+pub(crate) fn spawn_groups_list(
+    commands: &mut Commands,
+    content: Entity,
+    font_size: f32,
+) -> GroupsListParts {
     // The body row: the list column takes the width, the action column sits at its
     // trailing edge (mirroring the Friends content layout).
     let body = commands
@@ -401,7 +431,7 @@ fn spawn_groups_panel(
             ChildOf(body),
         ))
         .id();
-    spawn_groups_header(&mut commands, list_column);
+    spawn_groups_header(commands, list_column, font_size);
 
     // The virtualized list viewport fills the remaining height and clips + owns its
     // own scroll, exactly like the friends viewport.
@@ -435,13 +465,13 @@ fn spawn_groups_panel(
         )
         .id();
     // The list's own scrollbar: the rows stop clear of it while it shows.
-    spawn_virtual_scrollbar(&mut commands, viewport);
+    spawn_virtual_scrollbar(commands, viewport);
 
     // The count line under the list.
     let count_text = commands
         .spawn((
             Text::new(String::new()),
-            UiFont::Sans.at(CHROME_FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(HEADER_TEXT_COLOR),
             Node {
                 flex_shrink: 0.0,
@@ -470,24 +500,20 @@ fn spawn_groups_panel(
         .id();
     let action_buttons = ACTIONS
         .into_iter()
-        .map(|action| spawn_action_button(&mut commands, actions, action))
+        .map(|action| spawn_action_button(commands, actions, action, font_size))
         .collect();
 
-    let (confirm_overlay, confirm_text) = spawn_leave_confirm_modal(&mut commands, root.0);
-
-    commands.insert_resource(GroupsUi {
+    GroupsListParts {
         viewport,
         count_text,
         action_buttons,
-        confirm_overlay,
-        confirm_text,
-    });
+    }
 }
 
 /// Spawn the group-list table header: a "Name" column over the row labels and a
 /// fixed "Active" column over the active markers. Static labels — unlike the
 /// friends table, the group list is not column-sortable in this task.
-fn spawn_groups_header(commands: &mut Commands, list_column: Entity) {
+fn spawn_groups_header(commands: &mut Commands, list_column: Entity, font_size: f32) {
     let header = commands
         .spawn((
             Node {
@@ -505,7 +531,7 @@ fn spawn_groups_header(commands: &mut Commands, list_column: Entity) {
         .id();
     commands.spawn((
         Text::new(String::new()),
-        UiFont::Sans.at(ROW_FONT_SIZE),
+        UiFont::Sans.at(font_size),
         text_role(HEADER_TEXT_COLOR),
         Translated::new(HEADER_NAME_KEY),
         Node {
@@ -518,7 +544,7 @@ fn spawn_groups_header(commands: &mut Commands, list_column: Entity) {
     ));
     commands.spawn((
         Text::new(String::new()),
-        UiFont::Sans.at(ROW_FONT_SIZE),
+        UiFont::Sans.at(font_size),
         text_role(HEADER_TEXT_COLOR),
         Translated::new(HEADER_ACTIVE_KEY),
         Node {
@@ -539,6 +565,7 @@ fn spawn_action_button(
     commands: &mut Commands,
     actions: Entity,
     action: GroupAction,
+    font_size: f32,
 ) -> ActionButton {
     let spawned = ui_spawn::spawn_button(
         commands,
@@ -548,7 +575,7 @@ fn spawn_action_button(
             .label_color(LABEL_COLOR)
             .class(ACTION_BUTTON_CLASS)
             .label_class(TEXT_CLASS)
-            .font_size(CHROME_FONT_SIZE),
+            .font_size(font_size),
     );
     let button = spawned.button;
     commands.entity(button).observe(

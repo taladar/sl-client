@@ -524,9 +524,10 @@ fn sync_rich_text_sections(mut fields: SectionFields, mut commands: Commands) {
 /// computed are against the buffer parley is about to lay out) and before the
 /// editable-text layout, so a box added this frame is in this frame's text.
 ///
-/// Both setters compare before they invalidate, so handing over an unchanged
-/// model costs two comparisons and no relayout — which is what lets the
-/// consumer rewrite the model on every keystroke without thinking about it.
+/// Both halves are compared with what the editor holds first, so handing over
+/// an unchanged model costs two comparisons, no relayout and no change flag —
+/// which is what lets the consumer rewrite the model on every keystroke without
+/// thinking about it.
 fn sync_rich_text_model(
     mut fields: Query<(
         &RichTextField,
@@ -537,9 +538,12 @@ fn sync_rich_text_model(
     objects: Query<&ComputedNode>,
 ) {
     for (config, content, font, mut editable) in &mut fields {
-        // The editor tracks its own layout invalidation, and nothing gates on
-        // this component having changed, so the model is handed over without
-        // marking the field changed every frame.
+        // The model is handed over without marking the field changed every
+        // frame, and flagged changed only when it actually differs from what
+        // the editor holds: the editable-text layout pass visits a field only
+        // when it (or its box, or focus) changed, so a new inline box or style
+        // that did not flag the field would never be laid out.
+        let mut model_changed = false;
         let editor = &mut editable.bypass_change_detection().editor;
         let font_size = editor.get_font_size();
         let mut boxes = Vec::with_capacity(content.objects.len());
@@ -565,7 +569,10 @@ fn sync_rich_text_model(
                 height: size.y,
             });
         }
-        editor.set_inline_boxes(boxes);
+        if editor.inline_boxes() != boxes.as_slice() {
+            model_changed = true;
+            editor.set_inline_boxes(boxes);
+        }
 
         let smoothing = font.font_smoothing;
         let styles = content
@@ -600,8 +607,14 @@ fn sync_rich_text_model(
                     )],
                 }
             })
-            .collect();
-        editor.set_range_styles(styles);
+            .collect::<Vec<_>>();
+        if editor.range_styles() != styles.as_slice() {
+            model_changed = true;
+            editor.set_range_styles(styles);
+        }
+        if model_changed {
+            editable.set_changed();
+        }
     }
 }
 

@@ -22,20 +22,23 @@
 //! `every_floater_spec_in_the_workspace_is_registered` below for the guard that
 //! notices a constructor nobody registered.
 //!
-//! # Specimen or stub
+//! # Every window shows its real content
 //!
-//! A floater's chrome is always constructible; its *content* is often a live
-//! view of a session — an inventory tree, a profile, a parcel. Where the module
-//! has already written the static specimen of that content for [`ELEMENTS`],
-//! the entry reuses it and the sweep measures the window around the real
-//! layout. The rest carry a [`FloaterContent::Stub`] line: the chrome is still
-//! held to account — a title that runs long in Arabic, a glyph clipped at 22 px,
-//! a default rect that does not fit — and the stub is the obvious, greppable
-//! place for the specimen when somebody writes one.
+//! A floater's chrome is always constructible; its *content* is usually a live
+//! view of a session — an inventory tree, a profile, a parcel. Each entry's
+//! `content` is that content built by the **module's own
+//! content builder** — the one the live window's spawn calls — and filled with
+//! fixed sample data through the same helpers the live window shows data with.
+//! So the gallery shows a skin author the window as it ships, and the sweep
+//! measures the real layout rather than a description of it.
+//!
+//! There is no stand-in to reach for: the registry once allowed a line of prose
+//! in place of content, and 43 of 56 windows were left that way. A new floater
+//! writes its specimen when it registers.
 //!
 //! [`ELEMENTS`]: crate::ui_elements::ELEMENTS
 
-use crate::floater::{FloaterContent, FloaterElement};
+use crate::floater::FloaterElement;
 
 /// **The registry.** Every floater the viewer opens, swept by
 /// the `ui_test` sweep and rendered by `sl-viewer-gallery`.
@@ -48,99 +51,78 @@ pub const FLOATERS: &[FloaterElement] = &[
         summary: "About: viewer version, the connected grid and region, system information as one \
                   copyable support block, credits and the third-party licenses.",
         spec: crate::about_floater::about_floater_spec,
-        content: FloaterContent::Stub(
-            "The Info / Credits / Licenses tabs, filled from the build info and the live session.",
-        ),
+        content: crate::about_floater::spawn_about_specimen,
     },
     FloaterElement {
         id: "about-land",
         summary: "About Land: the parcel's General / Covenant / Objects / Options / Media / Access \
                   tabs — the parcel the agent is standing in, or one picked on the map.",
         spec: crate::about_land::about_land_floater_spec,
-        content: FloaterContent::Stub(
-            "The parcel's tabs, filled from the ParcelProperties reply for the parcel under the \
-             agent.",
-        ),
+        content: crate::about_land::spawn_about_land_specimen,
     },
     FloaterElement {
         id: "about-landmark",
         summary: "About Landmark: a landmark item's name, its resolved region and position, and \
                   the Teleport / Show on Map actions.",
         spec: crate::about_landmark::about_landmark_floater_spec,
-        content: FloaterContent::Stub(
-            "The landmark's name, its resolved region and position, and the teleport actions.",
-        ),
+        content: crate::about_landmark::spawn_about_landmark_specimen,
     },
     FloaterElement {
         id: "about-region",
         summary: "Region / Estate: the region's Region / Debug / Terrain / Estate / Covenant tabs \
                   — the estate-owner surface behind the region the agent is in.",
         spec: crate::about_region::about_region_floater_spec,
-        content: FloaterContent::Stub(
-            "The region and estate tabs, filled from the RegionInfo and EstateOwner replies.",
-        ),
+        content: crate::about_region::spawn_about_region_specimen,
     },
     FloaterElement {
         id: "add-to-contact-set",
         summary: "Add to Contact Set: the prompt, the set combo and the Add / New Set… / Cancel \
                   row — opened on a chosen resident.",
         spec: crate::contact_sets_panel::add_to_set_floater_spec,
-        content: FloaterContent::Stub(
-            "The prompt naming the resident, the set combo, and the Add / New Set… / Cancel row.",
-        ),
+        content: crate::contact_sets_panel::spawn_add_to_set_specimen,
     },
     FloaterElement {
         id: "asset-blacklist",
         summary: "Asset Blacklist: the filter row over the sortable table of blacklisted assets, \
                   with its count line and the remove actions.",
         spec: crate::asset_blacklist::blacklist_floater_spec,
-        content: FloaterContent::Stub(
-            "The filter row, the sortable blacklist table with its count line, and the remove \
-             actions.",
-        ),
+        content: crate::asset_blacklist::spawn_blacklist_specimen,
     },
     FloaterElement {
         id: "avatar-picker",
         summary: "Choose Resident: the name search field over its result list, and the OK / Cancel \
                   reply row every consumer is written against.",
         spec: crate::avatar_picker::avatar_picker_floater_spec,
-        content: FloaterContent::Stub(
-            "The name search field, the result list filled from the directory reply, and the \
-             OK / Cancel row.",
-        ),
+        content: crate::avatar_picker::spawn_avatar_picker_specimen,
     },
     FloaterElement {
         id: "avatar-profile",
         summary: "Profile: a resident's Second Life / Web / Interests / Picks / Classifieds / \
                   Notes tabs. One window per resident, so its geometry is not persisted.",
         spec: crate::avatar_profile::avatar_profile_floater_spec,
-        content: FloaterContent::Stub(
-            "The six profile tabs, rebuilt per open from the subject's profile replies.",
-        ),
+        content: crate::avatar_profile::spawn_avatar_profile_specimen,
     },
     FloaterElement {
         id: "avatar-render-settings",
         summary: "Avatar Render Settings: the filter row over the per-avatar render-override \
                   table, with its count line and the trailing actions.",
         spec: crate::avatar_render_floater::render_settings_floater_spec,
-        content: FloaterContent::Stub(
-            "The filter row, the per-avatar render-override table with its count line, and the \
-             trailing actions.",
-        ),
+        content: crate::avatar_render_floater::spawn_render_settings_specimen,
     },
     FloaterElement {
         id: "block-by-name",
         summary: "Block Object by Name: the name field and the Block / Cancel row — the by-name \
                   half of the mute list, which has no picker to open.",
         spec: crate::blocked::block_by_name_floater_spec,
-        content: FloaterContent::Stub("The object-name field and the Block / Cancel row."),
+        content: crate::blocked::spawn_block_by_name_specimen,
     },
     FloaterElement {
         id: "build-tools",
-        summary: "Build Tools: the tool-mode radio group, the snap toggles and the numeric \
-                  transform rows — the object-edit surface, swept here inside its own window.",
+        summary: "Build Tools: the tool-mode radio group, the toggle rows, the grid unit and \
+                  selection summary over the General / Object / Features / Texture / Content \
+                  tabs — the object-edit window with a sample prim selected.",
         spec: crate::edit_tool::build_tools_floater_spec,
-        content: FloaterContent::Specimen(crate::edit_tool::spawn_build_tools_specimen),
+        content: crate::edit_tool::spawn_build_tools_specimen,
     },
     FloaterElement {
         id: "color-picker",
@@ -148,50 +130,45 @@ pub const FLOATERS: &[FloaterElement] = &[
                   luminance strip, the R/G/B and H/S/L sliders, the hex field, the saved palette \
                   and the reply row. Subject-bound to whatever swatch opened it.",
         spec: crate::ui_color_picker::color_picker_floater_spec,
-        content: FloaterContent::Specimen(crate::ui_color_picker::spawn_color_picker_specimen),
+        content: crate::ui_color_picker::spawn_color_picker_specimen,
     },
     FloaterElement {
         id: "contact-set-config",
         summary: "Contact Set Settings: the set's name field with its Rename button, the colour \
                   swatch, and Close.",
         spec: crate::contact_sets_panel::contact_set_config_floater_spec,
-        content: FloaterContent::Stub(
-            "The set's name field with its Rename button, the colour swatch, and Close.",
-        ),
+        content: crate::contact_sets_panel::spawn_contact_set_config_specimen,
     },
     FloaterElement {
         id: "conversations",
-        summary: "Conversations: the conversation strip beside the transcript pane, split by a \
-                  draggable divider. Docks into its own host beside the nearby-chat bar.",
+        summary: "Conversations: the conversation strip -- the pinned People tab (Friends / \
+                  Groups / Blocked / Contact Sets) above the chat tabs -- beside the transcript \
+                  pane, split by a draggable divider. Docks into its own host beside the \
+                  nearby-chat bar.",
         spec: crate::conversations::conversations_floater_spec,
-        content: FloaterContent::Stub(
-            "The conversation strip, the divider and the transcript pane, seeded with the Nearby \
-             view.",
-        ),
+        content: crate::conversations::spawn_conversations_specimen,
     },
     FloaterElement {
         id: "day-cycle-editor",
         summary: "Day Cycle: the track picker beside the keyframe timeline and its scrubber, over \
                   the knob tabs of the selected keyframe, with Save, Save As and Revert.",
         spec: crate::day_cycle_editor::day_cycle_editor_floater_spec,
-        content: FloaterContent::Stub(
-            "The five track buttons, the timeline and its transport, the knob tabs of the \
-             selected keyframe, and the save row.",
-        ),
+        content: crate::day_cycle_editor::spawn_day_cycle_editor_specimen,
     },
     FloaterElement {
         id: "debug_settings",
         summary: "Debug settings: the raw settings editor — a search box over the changed-marker \
                   list beside the per-layer detail column.",
         spec: crate::debug_settings::debug_settings_floater_spec,
-        content: FloaterContent::Specimen(crate::debug_settings::spawn_debug_settings_specimen),
+        content: crate::debug_settings::spawn_debug_settings_specimen,
     },
     FloaterElement {
         id: "emoji-picker",
-        summary: "Emoji: the grouped glyph grid, the skin-tone swatch row and the preview line, \
-                  opened by `Ctrl+E` for the focused field.",
+        summary: "Emoji: the search field and category strip over the grouped glyph grid, the \
+                  skin-tone swatch row and the preview line, opened by `Ctrl+E` for the focused \
+                  field.",
         spec: crate::emoji_picker::emoji_picker_floater_spec,
-        content: FloaterContent::Specimen(crate::emoji_picker::spawn_emoji_picker_specimen),
+        content: crate::emoji_picker::spawn_emoji_picker_specimen,
     },
     FloaterElement {
         id: "experience-profile",
@@ -199,10 +176,7 @@ pub const FLOATERS: &[FloaterElement] = &[
                   location, its allow / forget / block actions, and an administrator's editable \
                   fields. One window per experience, so its geometry is not persisted.",
         spec: crate::experience_profile::experience_profile_floater_spec,
-        content: FloaterContent::Stub(
-            "The read-only field column over the permission actions, with the edit column in its \
-             place while editing.",
-        ),
+        content: crate::experience_profile::spawn_experience_profile_specimen,
     },
     FloaterElement {
         id: "experience-picker",
@@ -210,10 +184,7 @@ pub const FLOATERS: &[FloaterElement] = &[
                   table, and the Select / Cancel / View Profile reply row every estate \
                   experience list adds through.",
         spec: crate::experience_picker::experience_picker_floater_spec,
-        content: FloaterContent::Stub(
-            "The query row, the rating filter, the search-result table and the Select / \
-             Cancel / View Profile row.",
-        ),
+        content: crate::experience_picker::spawn_experience_picker_specimen,
     },
     FloaterElement {
         id: "experiences",
@@ -221,90 +192,70 @@ pub const FLOATERS: &[FloaterElement] = &[
                   Contributor / Owned lists and the event log -- each a sortable, virtualized \
                   table over its capability's reply.",
         spec: crate::experiences_floater::experiences_floater_spec,
-        content: FloaterContent::Specimen(crate::experiences_floater::spawn_experiences_specimen),
+        content: crate::experiences_floater::spawn_experiences_specimen,
     },
     FloaterElement {
         id: "group-picker",
         summary: "Choose Group: the agent's own groups over an optional \"none\" row, and the \
                   OK / Cancel reply row every set-group control is written against.",
         spec: crate::group_picker::group_picker_floater_spec,
-        content: FloaterContent::Stub(
-            "The group list filled from the agent's memberships, and the OK / Cancel row.",
-        ),
+        content: crate::group_picker::spawn_group_picker_specimen,
     },
     FloaterElement {
         id: "group-profile",
         summary: "Group: a group's General / Roles / Members / Notices / Land tabs. \
                   One window per group, so its geometry is not persisted.",
         spec: crate::group_profile::group_profile_floater_spec,
-        content: FloaterContent::Stub(
-            "The group's tabs, rebuilt per open from the group profile and role replies.",
-        ),
+        content: crate::group_profile::spawn_group_profile_specimen,
     },
     FloaterElement {
         id: "inventory",
         summary: "Inventory: the tab / expand / collapse toolbar, the search field and the \
                   virtualized folder tree — the viewer's largest window.",
         spec: crate::inventory::inventory_floater_spec,
-        content: FloaterContent::Stub(
-            "The tab / expand / collapse toolbar, the search field and the virtualized folder \
-             tree, filled from the inventory skeleton.",
-        ),
+        content: crate::inventory::spawn_inventory_specimen,
     },
     FloaterElement {
         id: "inventory-filters",
         summary: "Inventory Filters: the type checkboxes, the date-range and permission filters, \
                   and the reset row that drives the inventory window's view.",
         spec: crate::inventory_filters::inventory_filters_floater_spec,
-        content: FloaterContent::Stub(
-            "The type checkboxes, the date-range and permission filters, and the reset row.",
-        ),
+        content: crate::inventory_filters::spawn_inventory_filters_specimen,
     },
     FloaterElement {
         id: "inventory-gallery",
         summary: "Inventory Gallery: the thumbnail grid view of a folder, the alternative to the \
                   tree.",
         spec: crate::inventory_gallery::inventory_gallery_floater_spec,
-        content: FloaterContent::Stub(
-            "The thumbnail grid of the selected folder, filled from the inventory model and the \
-             texture cache.",
-        ),
+        content: crate::inventory_gallery::spawn_inventory_gallery_specimen,
     },
     FloaterElement {
         id: "item-properties",
         summary: "Item Properties: an inventory item's name, description and sale fields with its \
                   permission checkboxes. One window per item, so its geometry is not persisted.",
         spec: crate::inventory_properties::item_properties_floater_spec,
-        content: FloaterContent::Stub(
-            "The item's name, description and sale fields with its permission checkboxes.",
-        ),
+        content: crate::inventory_properties::spawn_item_properties_specimen,
     },
     FloaterElement {
         id: "material-editor",
         summary: "Edit Material: the GLTF material asset editor — the base-colour, metallic / \
                   roughness, normal and emissive channels with their texture swatches.",
         spec: crate::edit_material_asset::material_editor_floater_spec,
-        content: FloaterContent::Stub(
-            "The base-colour, metallic / roughness, normal and emissive channels with their \
-             texture swatches, loaded from the material asset.",
-        ),
+        content: crate::edit_material_asset::spawn_material_editor_specimen,
     },
     FloaterElement {
         id: "minimap",
         summary: "Mini-map: the composited local map surface with its parcel lines, avatar dots \
                   and compass labels.",
         spec: crate::minimap::minimap_floater_spec,
-        content: FloaterContent::Specimen(crate::minimap::spawn_minimap_specimen),
+        content: crate::minimap::spawn_minimap_specimen,
     },
     FloaterElement {
         id: "my-environments",
         summary: "My Environments: every settings asset in inventory over the three kind \
                   checkboxes and the name filter, with the creators and the trash under it.",
         spec: crate::my_environments::my_environments_floater_spec,
-        content: FloaterContent::Stub(
-            "The kind checkboxes and name filter over the settings-asset list, the rename row \
-             and the New Sky / New Water / Delete actions.",
-        ),
+        content: crate::my_environments::spawn_my_environments_specimen,
     },
     FloaterElement {
         id: "notecard-editor",
@@ -312,27 +263,21 @@ pub const FLOATERS: &[FloaterElement] = &[
                   notecard asset editor. One window per notecard, so a second one cannot \
                   discard the first's unsaved text.",
         spec: crate::edit_notecard::notecard_editor_floater_spec,
-        content: FloaterContent::Specimen(crate::edit_notecard::spawn_notecard_editor_specimen),
+        content: crate::edit_notecard::spawn_notecard_editor_specimen,
     },
     FloaterElement {
         id: "object-contents",
         summary: "Object Contents: the selected prim's task-inventory list with its drop target \
                   and the open / remove actions.",
         spec: crate::edit_contents::object_contents_floater_spec,
-        content: FloaterContent::Stub(
-            "The selected prim's task-inventory list with its drop target and the open / remove \
-             actions.",
-        ),
+        content: crate::edit_contents::spawn_object_contents_specimen,
     },
     FloaterElement {
         id: "panorama",
         summary: "360° Snapshot: the panorama capture — the cube-face and panorama size pickers, \
                   the output format, and the Capture / Save row over a 2:1 preview.",
         spec: crate::panorama::panorama_floater_spec,
-        content: FloaterContent::Stub(
-            "The 2:1 preview frame, the cube-face / panorama / format pickers, and the Capture \
-             and Save to Disk buttons over the status line.",
-        ),
+        content: crate::panorama::spawn_panorama_specimen,
     },
     FloaterElement {
         id: "personal-lighting",
@@ -340,10 +285,7 @@ pub const FLOATERS: &[FloaterElement] = &[
                   and water images, the atmosphere sliders, where the sun and moon sit, the \
                   water knobs, and Reset.",
         spec: crate::personal_lighting::personal_lighting_floater_spec,
-        content: FloaterContent::Stub(
-            "Four columns of live controls over the captured sky and water, applied to the \
-             local environment layer.",
-        ),
+        content: crate::personal_lighting::spawn_personal_lighting_specimen,
     },
     FloaterElement {
         id: "phototools",
@@ -351,23 +293,21 @@ pub const FLOATERS: &[FloaterElement] = &[
                   the four times of day and the way back to the region's sky, over the render \
                   knobs that change the look (reflections, shadows, tone mapping, glow, quality).",
         spec: crate::phototools::phototools_floater_spec,
-        content: FloaterContent::Specimen(crate::phototools::spawn_phototools_specimen),
+        content: crate::phototools::spawn_phototools_specimen,
     },
     FloaterElement {
         id: "preferences",
         summary: "Preferences: the search box over a leading tab strip, the labelled setting rows \
                   and the OK / Cancel footer.",
         spec: crate::preferences::preferences_floater_spec,
-        content: FloaterContent::Specimen(crate::preferences::spawn_preferences_specimen),
+        content: crate::preferences::spawn_preferences_specimen,
     },
     FloaterElement {
         id: "preview-animation",
         summary: "Animation preview: an animation item's play / stop controls and its metadata. \
                   One window per animation asset, so its geometry is not persisted.",
         spec: crate::inventory_properties::animation_preview_floater_spec,
-        content: FloaterContent::Stub(
-            "The animation's play / stop controls and its priority / duration metadata.",
-        ),
+        content: crate::inventory_properties::spawn_animation_preview_specimen,
     },
     FloaterElement {
         id: "preview-texture",
@@ -375,60 +315,49 @@ pub const FLOATERS: &[FloaterElement] = &[
                   aspect. One window per texture, so two can be compared side by side and \
                   neither persists its geometry.",
         spec: crate::inventory_properties::texture_preview_floater_spec,
-        content: FloaterContent::Stub(
-            "The decoded texture as an image node at its own aspect ratio, with its dimensions.",
-        ),
+        content: crate::inventory_properties::spawn_texture_preview_specimen,
     },
     FloaterElement {
         id: "quick-preferences",
         summary: "Quick Preferences: the environment preset and time-of-day combos over the \
                   curated setting sliders.",
         spec: crate::quick_preferences::quick_prefs_floater_spec,
-        content: FloaterContent::Specimen(crate::quick_preferences::spawn_quick_prefs_specimen),
+        content: crate::quick_preferences::spawn_quick_prefs_specimen,
     },
     FloaterElement {
         id: "radar",
-        summary: "Radar: the counts line, the nearby-avatar table with its status glyphs and \
-                  band-coloured ranges, and the action buttons.",
+        summary: "Radar: the filter / range-limit row, the counts line, the nearby-avatar \
+                  table with its status glyphs and band-coloured ranges, and the action buttons.",
         spec: crate::radar::radar_floater_spec,
-        content: FloaterContent::Specimen(crate::radar::spawn_radar_specimen),
+        content: crate::radar::spawn_radar_specimen,
     },
     FloaterElement {
         id: "rlv-behaviours",
         summary: "RLVa Restrictions: the restrictions in force grouped by the object holding \
                   each, the exceptions poked in them, and the modifier slots.",
         spec: crate::rlv_behaviours::rlv_behaviours_floater_spec,
-        content: FloaterContent::Stub(
-            "The Restrictions / Exceptions / Modifiers tabs, filled from the live RLV state \
-             machine.",
-        ),
+        content: crate::rlv_behaviours::spawn_rlv_behaviours_specimen,
     },
     FloaterElement {
         id: "rlv-console",
         summary: "RLVa Console: type @-commands at your own viewer and watch the transcript of \
                   what each one did.",
         spec: crate::rlv_console::rlv_console_floater_spec,
-        content: FloaterContent::Stub(
-            "The command transcript over the input line, filled by what is typed into it.",
-        ),
+        content: crate::rlv_console::spawn_rlv_console_specimen,
     },
     FloaterElement {
         id: "rlv-locks",
         summary: "RLVa Locks: the lock model's four registries — which attachment, point, layer \
                   or folder may not be worn on or taken off, and which object decided.",
         spec: crate::rlv_locks::rlv_locks_floater_spec,
-        content: FloaterContent::Stub(
-            "The lock list, derived from the restrictions the live RLV state machine holds.",
-        ),
+        content: crate::rlv_locks::spawn_rlv_locks_specimen,
     },
     FloaterElement {
         id: "rlv-strings",
         summary: "RLVa Strings: the customisable canned texts RLVa emits, with the description \
                   of when each is sent and the editor for rewriting it.",
         spec: crate::rlv_strings::rlv_strings_floater_spec,
-        content: FloaterContent::Stub(
-            "The string picker, its description line, the value editor and Restore default.",
-        ),
+        content: crate::rlv_strings::spawn_rlv_strings_specimen,
     },
     FloaterElement {
         id: "script-editor",
@@ -436,37 +365,28 @@ pub const FLOATERS: &[FloaterElement] = &[
                   compile-diagnostic rows. One window per script, as the reference opens \
                   several at once.",
         spec: crate::edit_script::script_editor_floater_spec,
-        content: FloaterContent::Specimen(crate::edit_script::spawn_script_editor_specimen),
+        content: crate::edit_script::spawn_script_editor_specimen,
     },
     FloaterElement {
         id: "search",
         summary: "Search: the query field over the category tabs and the result list — the \
                   directory surface.",
         spec: crate::search::search_floater_spec,
-        content: FloaterContent::Stub(
-            "The query field, the category tabs and the result list, filled from the directory \
-             replies.",
-        ),
+        content: crate::search::spawn_search_specimen,
     },
     FloaterElement {
         id: "settings-editor-sky",
         summary: "Sky Settings: the name field over the atmosphere / clouds / sun & moon tabs of \
                   an inventory sky asset, with Save, Save As and Revert.",
         spec: crate::settings_editor::sky_settings_editor_floater_spec,
-        content: FloaterContent::Stub(
-            "The knobs of a sky settings asset on three tabs, previewing live in the \
-             environment's edit layer.",
-        ),
+        content: crate::settings_editor::spawn_sky_settings_editor_specimen,
     },
     FloaterElement {
         id: "settings-editor-water",
         summary: "Water Settings: the name field over the water knobs of an inventory water \
                   asset, with Save, Save As and Revert.",
         spec: crate::settings_editor::water_settings_editor_floater_spec,
-        content: FloaterContent::Stub(
-            "The knobs of a water settings asset, previewing live in the environment's edit \
-             layer.",
-        ),
+        content: crate::settings_editor::spawn_water_settings_editor_specimen,
     },
     FloaterElement {
         id: "settings-picker",
@@ -474,20 +394,14 @@ pub const FLOATERS: &[FloaterElement] = &[
                   filter, and the OK / Cancel reply protocol an environment panel is written \
                   against.",
         spec: crate::settings_picker::settings_picker_floater_spec,
-        content: FloaterContent::Stub(
-            "The field line, the name filter, the one-kind settings list and the OK / Cancel \
-             reply row.",
-        ),
+        content: crate::settings_picker::spawn_settings_picker_specimen,
     },
     FloaterElement {
         id: "snapshot",
         summary: "Snapshot: the preview frame, the include toggles, Refresh, the format picker and \
                   the destination tabs.",
         spec: crate::snapshot_floater::snapshot_floater_spec,
-        content: FloaterContent::Stub(
-            "The preview frame, the include toggles, the Refresh button, the format picker and \
-             the destination tabs.",
-        ),
+        content: crate::snapshot_floater::spawn_snapshot_specimen,
     },
     FloaterElement {
         id: "telehub",
@@ -495,10 +409,7 @@ pub const FLOATERS: &[FloaterElement] = &[
                   Disconnect over the current selection, and the spawn-point list with Add / \
                   Remove Spawn.",
         spec: crate::telehub::telehub_floater_spec,
-        content: FloaterContent::Stub(
-            "The status and help lines, the Connect / Disconnect row, the spawn-point list and \
-             its Add / Remove Spawn row.",
-        ),
+        content: crate::telehub::spawn_telehub_specimen,
     },
     FloaterElement {
         id: "texture-picker",
@@ -506,9 +417,7 @@ pub const FLOATERS: &[FloaterElement] = &[
                   OK / Cancel reply protocol every texture swatch is written against. One \
                   window per field, each remembering its own geometry.",
         spec: crate::ui_texture_picker::texture_picker_floater_spec,
-        content: FloaterContent::Stub(
-            "The inventory swatch grid, the quick-choice row and the OK / Cancel reply row.",
-        ),
+        content: crate::ui_texture_picker::spawn_texture_picker_specimen,
     },
     FloaterElement {
         id: "top-colliders",
@@ -516,46 +425,35 @@ pub const FLOATERS: &[FloaterElement] = &[
                   sortable report, the three region-side filters, and the return / disable / \
                   beacon actions over what it lists. One window per region.",
         spec: crate::top_objects::top_colliders_floater_spec,
-        content: FloaterContent::Stub(
-            "The summary line, the score / name / owner / location / parcel / date list, the \
-             selected object's id, the three filter rows and the action row.",
-        ),
+        content: crate::top_objects::spawn_top_colliders_specimen,
     },
     FloaterElement {
         id: "top-scripts",
         summary: "Top Scripts: the objects a region spends the most script time on — the same \
                   report with the script memory and public-URL columns. One window per region.",
         spec: crate::top_objects::top_scripts_floater_spec,
-        content: FloaterContent::Stub(
-            "The summary line, the time / name / owner / location / parcel / date / memory / \
-             URLs list, the selected object's id, the three filter rows and the action row.",
-        ),
+        content: crate::top_objects::spawn_top_scripts_specimen,
     },
     FloaterElement {
         id: "wearable-editor",
         summary: "Edit Wearable: a worn item's visual-param sliders and its texture swatches, with \
                   the Save / Save As row.",
         spec: crate::edit_wearable::wearable_editor_floater_spec,
-        content: FloaterContent::Stub(
-            "The worn item's visual-param sliders and texture swatches, with the Save / Save As \
-             row.",
-        ),
+        content: crate::edit_wearable::spawn_wearable_editor_specimen,
     },
     FloaterElement {
         id: "web-browser",
         summary: "Web Browser: the navigation toolbar, the embedded browser view and the status \
                   row — where a script's `llLoadURL` and a profile's web tab land.",
         spec: crate::web_floater::web_floater_spec,
-        content: FloaterContent::Stub(
-            "The navigation toolbar, the embedded browser view and the status row.",
-        ),
+        content: crate::web_floater::spawn_web_floater_specimen,
     },
     FloaterElement {
         id: "worldmap",
         summary: "World Map: the composited grid-tile surface with its region fills and markers, \
                   beside the search side panel.",
         spec: crate::world_map::world_map_floater_spec,
-        content: FloaterContent::Specimen(crate::world_map::spawn_world_map_specimen),
+        content: crate::world_map::spawn_world_map_specimen,
     },
 ];
 

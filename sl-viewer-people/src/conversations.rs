@@ -79,7 +79,7 @@ use sl_client_bevy::{
 
 use crate::chat_input::{ChatInputSpec, ChatInputSubmit, spawn_chat_input};
 use crate::floater::{
-    DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater,
+    DeferredFloaterContent, Floater, FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater,
 };
 use crate::i18n::{TransArgs, Translator};
 use crate::intents::{
@@ -88,7 +88,7 @@ use crate::intents::{
 use crate::linkified_text::{LinkTextStyle, spawn_linkified_text};
 use crate::local_chat_input::{LocalChatSubmit, spawn_local_chat_input};
 use crate::skin::SkinChatBands;
-use crate::skin::{ATTENTION_CLASS, set_state_class_on};
+use crate::skin::{ATTENTION_CLASS, set_state_class, set_state_class_on};
 use crate::skin::{role_class, text_role};
 use crate::social::{MuteModel, short_id};
 use crate::ui::BOTTOM_BAR_Z;
@@ -1186,9 +1186,11 @@ fn spawn_conversations_floater(mut commands: Commands, root: Res<UiRoot>) {
         .insert(crate::i18n::Translated::new("conversations-title"));
     // The skin class the `.sk-conversations` CSS rule matches — it lands the
     // transcript band colours on this root as a `SkinChatBands` component.
+    // Added beside the floater's own `.sk-floater`, never in its place.
     commands
         .entity(handle.root)
-        .insert(ClassList::new_with_classes([CONVERSATIONS_CLASS]));
+        .entry::<ClassList>()
+        .and_modify(|mut classes| add_conversations_class(&mut classes));
     let builder = commands.register_system(build_conversations_content);
     commands
         .entity(handle.root)
@@ -1201,6 +1203,50 @@ fn spawn_conversations_floater(mut commands: Commands, root: Res<UiRoot>) {
 /// `Option<Res<ConversationsUi>>` consumers, including the People/Groups pane
 /// builders that poll for it ([`crate::people`]).
 fn build_conversations_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
+    let ConversationsParts {
+        strip,
+        panel_area,
+        nearby,
+    } = spawn_conversations_content(&mut commands, handle.content, CHROME_FONT_SIZE);
+    let nearby_field = nearby.input_field;
+    let mut views = BTreeMap::new();
+    views.insert(ConversationKey::Nearby, nearby);
+
+    commands.insert_resource(ConversationsUi {
+        floater_root: handle.root,
+        strip,
+        panel_area,
+        nearby_field,
+        views,
+    });
+}
+
+/// The Conversations floater's content, as built: the strip, the panel area
+/// and the seeded Nearby view.
+struct ConversationsParts {
+    /// The vertical tab strip.
+    strip: DynamicTabStrip,
+    /// The panel area the panes stack in.
+    panel_area: Entity,
+    /// The Nearby tab's view, seeded with the content.
+    nearby: ConversationView,
+}
+
+/// Add the [`CONVERSATIONS_CLASS`] skin class to the floater root's classes —
+/// the one thing this window puts on its root, shared by the live spawn and the
+/// specimen's [`mark_conversations_root`].
+fn add_conversations_class(classes: &mut Mut<'_, ClassList>) {
+    set_state_class(classes, CONVERSATIONS_CLASS, true);
+}
+
+/// Build the Conversations floater's content into `content` at `font_size`:
+/// the `[strip | divider | panel area]` split and the Nearby tab's view. Shared
+/// by the live first-open build and the gallery specimen.
+fn spawn_conversations_content(
+    commands: &mut Commands,
+    content: Entity,
+    font_size: f32,
+) -> ConversationsParts {
     // The content slot is a column; fill it with one row: [strip | divider | pane].
     let split = commands
         .spawn((
@@ -1211,7 +1257,7 @@ fn build_conversations_content(In(handle): In<FloaterHandle>, mut commands: Comm
                 ..row(Val::ZERO)
             },
             Name::new("conversations-split"),
-            ChildOf(handle.content),
+            ChildOf(content),
         ))
         .id();
 
@@ -1221,7 +1267,7 @@ fn build_conversations_content(In(handle): In<FloaterHandle>, mut commands: Comm
     // ellipsis; filled, so it runs the floater's full height rather than
     // stopping at the widget's own bound.
     let strip = spawn_dynamic_tab_strip(
-        &mut commands,
+        commands,
         split,
         &TabSpec {
             element: STRIP_ELEMENT,
@@ -1229,15 +1275,15 @@ fn build_conversations_content(In(handle): In<FloaterHandle>, mut commands: Comm
             labels: &[],
             active: 0,
             tab_index: 0,
-            font_size: CHROME_FONT_SIZE,
+            font_size,
             strip_width: Some(STRIP_WIDTH),
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: false,
         },
     );
-    strip.fill_parent(&mut commands, Some(STRIP_WIDTH));
+    strip.fill_parent(commands, Some(STRIP_WIDTH));
     spawn_tab_divider(
-        &mut commands,
+        commands,
         split,
         STRIP_ELEMENT,
         TabPlacement::InlineStart,
@@ -1261,18 +1307,18 @@ fn build_conversations_content(In(handle): In<FloaterHandle>, mut commands: Comm
         .id();
 
     // Seed the Nearby tab's view directly (its input is the local-chat widget).
-    let mut views = BTreeMap::new();
-    let view = spawn_conversation_view(&mut commands, strip, panel_area, ConversationKey::Nearby);
-    let nearby_field = view.input_field;
-    views.insert(ConversationKey::Nearby, view);
-
-    commands.insert_resource(ConversationsUi {
-        floater_root: handle.root,
+    let nearby = spawn_conversation_view(
+        commands,
         strip,
         panel_area,
-        nearby_field,
-        views,
-    });
+        ConversationKey::Nearby,
+        font_size,
+    );
+    ConversationsParts {
+        strip,
+        panel_area,
+        nearby,
+    }
 }
 
 /// Spawn one conversation's tab button and pane, returning the view. The Nearby
@@ -1283,6 +1329,7 @@ fn spawn_conversation_view(
     strip: DynamicTabStrip,
     panel_area: Entity,
     key: ConversationKey,
+    font_size: f32,
 ) -> ConversationView {
     let nearby = key.is_nearby();
     // The tab: the widget's, captioned by `refresh_conversations` (which knows
@@ -1312,7 +1359,7 @@ fn spawn_conversation_view(
             ChildOf(panel_area),
         ))
         .id();
-    let invite_bar = spawn_invite_bar(commands, panel, key);
+    let invite_bar = spawn_invite_bar(commands, panel, key, font_size);
     // The transcript and its scrollbar share a row that takes the pane's
     // spare height.
     let transcript_row = commands
@@ -1335,6 +1382,11 @@ fn spawn_conversation_view(
                 min_height: Val::Px(0.0),
                 padding: UiRect::all(Val::Px(6.0)),
                 overflow: Overflow::scroll_y(),
+                // A column, so the transcript below is laid out along the
+                // scrolled axis: in the default row it is stretched to this
+                // box's height and its lines spill out of it instead of
+                // growing it into the scrolled extent.
+                flex_direction: FlexDirection::Column,
                 ..default()
             },
             ScrollPosition::default(),
@@ -1360,6 +1412,8 @@ fn spawn_conversation_view(
         .spawn((
             Node {
                 width: Val::Percent(100.0),
+                // Its full height, however long: the scroll box above clips it.
+                flex_shrink: 0.0,
                 ..column(Val::ZERO)
             },
             Pickable::IGNORE,
@@ -1370,7 +1424,7 @@ fn spawn_conversation_view(
     let typing_text = commands
         .spawn((
             Text::new(String::new()),
-            UiFont::Sans.at(CHROME_FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(TYPING_COLOR),
             Node {
                 display: Display::None,
@@ -1387,7 +1441,7 @@ fn spawn_conversation_view(
             commands,
             panel,
             &ChatInputSpec {
-                font_size: CHROME_FONT_SIZE,
+                font_size,
                 width: Some(Val::Percent(100.0)),
                 ..ChatInputSpec::new("conversations-nearby-input")
             },
@@ -1398,7 +1452,7 @@ fn spawn_conversation_view(
             commands,
             panel,
             &ChatInputSpec {
-                font_size: CHROME_FONT_SIZE,
+                font_size,
                 width: Some(Val::Percent(100.0)),
                 ..ChatInputSpec::new("conversations-im-input")
             },
@@ -1410,14 +1464,14 @@ fn spawn_conversation_view(
     // corner of its pane** — spawned last so it paints over the transcript, and
     // RTL-aware via `LogicalInset`. Nearby Chat cannot be closed, so it gets none.
     if !nearby {
-        spawn_pane_close_button(commands, panel, key);
+        spawn_pane_close_button(commands, panel, key, font_size);
         // A 1:1 IM and an ad-hoc conference can both grow into a (larger)
         // conference; a group session cannot (its roster is the group).
         if matches!(
             key,
             ConversationKey::Direct(_) | ConversationKey::Conference(_)
         ) {
-            spawn_add_participants_button(commands, panel, key);
+            spawn_add_participants_button(commands, panel, key, font_size);
         }
     }
 
@@ -1439,7 +1493,12 @@ fn spawn_conversation_view(
 /// panel background so it cleanly occludes the transcript line behind it, and is
 /// spawned as the pane's last child so it paints on top. The reference viewer puts
 /// the session-close control on the conversation content, not the tab.
-fn spawn_pane_close_button(commands: &mut Commands, panel: Entity, key: ConversationKey) {
+fn spawn_pane_close_button(
+    commands: &mut Commands,
+    panel: Entity,
+    key: ConversationKey,
+    font_size: f32,
+) {
     commands
         .spawn((
             Node {
@@ -1467,7 +1526,7 @@ fn spawn_pane_close_button(commands: &mut Commands, panel: Entity, key: Conversa
             // The skin's `glyph::CLOSE` mark, on every non-Nearby tab.
             glyph::glyph_host(
                 glyph::CLOSE,
-                UiFont::Sans.at(CHROME_FONT_SIZE),
+                UiFont::Sans.at(font_size),
                 role_class(CLOSE_GLYPH_COLOR),
             ),
             TextColor(CLOSE_GLYPH_COLOR),
@@ -1491,7 +1550,12 @@ fn spawn_pane_close_button(commands: &mut Commands, panel: Entity, key: Conversa
 /// It opens the shared avatar picker in its multi mode; the answer becomes a
 /// conference with everyone picked, either a new one (from a 1:1, whose peer
 /// joins the list) or more people invited into this one.
-fn spawn_add_participants_button(commands: &mut Commands, panel: Entity, key: ConversationKey) {
+fn spawn_add_participants_button(
+    commands: &mut Commands,
+    panel: Entity,
+    key: ConversationKey,
+    font_size: f32,
+) {
     commands
         .spawn((
             Node {
@@ -1520,7 +1584,7 @@ fn spawn_add_participants_button(commands: &mut Commands, panel: Entity, key: Co
             // The skin's `glyph::ADD` mark, on a one-to-one or conference pane.
             glyph::glyph_host(
                 glyph::ADD,
-                UiFont::Sans.at(CHROME_FONT_SIZE),
+                UiFont::Sans.at(font_size),
                 role_class(CLOSE_GLYPH_COLOR),
             ),
             TextColor(CLOSE_GLYPH_COLOR),
@@ -1543,7 +1607,12 @@ fn spawn_add_participants_button(commands: &mut Commands, panel: Entity, key: Co
 
 /// Spawn a pane's pending-invite bar (a prompt plus Accept / Decline), hidden
 /// until the conversation is a pending invite.
-fn spawn_invite_bar(commands: &mut Commands, panel: Entity, key: ConversationKey) -> Entity {
+fn spawn_invite_bar(
+    commands: &mut Commands,
+    panel: Entity,
+    key: ConversationKey,
+    font_size: f32,
+) -> Entity {
     let bar = commands
         .spawn((
             Node {
@@ -1560,7 +1629,7 @@ fn spawn_invite_bar(commands: &mut Commands, panel: Entity, key: ConversationKey
         .id();
     commands.spawn((
         Text::new(String::new()),
-        UiFont::Sans.at(CHROME_FONT_SIZE),
+        UiFont::Sans.at(font_size),
         text_role(INVITE_TEXT_COLOR),
         crate::i18n::Translated::new(INVITE_PROMPT_KEY),
         Node {
@@ -1578,6 +1647,7 @@ fn spawn_invite_bar(commands: &mut Commands, panel: Entity, key: ConversationKey
         true,
         INVITE_ACCEPT_KEY,
         ACCEPT_BACKGROUND,
+        font_size,
     );
     spawn_invite_button(
         commands,
@@ -1586,6 +1656,7 @@ fn spawn_invite_bar(commands: &mut Commands, panel: Entity, key: ConversationKey
         false,
         INVITE_DECLINE_KEY,
         DECLINE_BACKGROUND,
+        font_size,
     );
     bar
 }
@@ -1598,6 +1669,7 @@ fn spawn_invite_button(
     accept: bool,
     label_key: &'static str,
     background: Color,
+    font_size: f32,
 ) {
     commands
         .spawn((
@@ -1618,7 +1690,7 @@ fn spawn_invite_button(
         ))
         .with_child((
             Text::new(String::new()),
-            UiFont::Sans.at(CHROME_FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(INVITE_TEXT_COLOR),
             crate::i18n::Translated::new(label_key),
             Pickable::IGNORE,
@@ -1631,6 +1703,141 @@ fn spawn_invite_button(
                 }
             },
         );
+}
+
+// ---------------------------------------------------------------------------
+// Gallery specimen
+// ---------------------------------------------------------------------------
+
+/// The Conversations floater's gallery / `ui_test` specimen: the window as the
+/// viewer composes it. The live content, built by the same
+/// `spawn_conversations_content` at the cell's font size, with a second,
+/// one-to-one tab beside Nearby, captions drawn through `tab_label` and a
+/// Nearby transcript drawn through `spawn_transcript_line` — a recalled line
+/// in the grey band, then live lines from another resident, from us and from an
+/// object. Then what other code adds to the live window once it exists: the
+/// `.sk-conversations` class on the floater root (`mark_conversations_root`),
+/// and the pinned People tab with its (hidden) pane and the Friends / Groups /
+/// Blocked / Contact Sets lists (`crate::people::spawn_people_specimen`).
+///
+/// The transcript bands are drawn in the reference defaults: live they are read
+/// off the root's `SkinChatBands`, which the skin's style pass lands only after
+/// this has run. The captions, which the live refresh resolves through the
+/// translator, are English strings carried through the cell's transform.
+pub fn spawn_conversations_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: crate::ui_element::ElementCx,
+) -> Entity {
+    let parts = spawn_conversations_content(commands, parent, cx.font_size);
+    commands.queue(move |world: &mut World| mark_conversations_root(world, parent));
+    crate::people::spawn_people_specimen(commands, parts.strip, parts.panel_area, cx.font_size);
+    let peer = AgentKey::from(Uuid::from_u128(0x5a11_e000_0000_4000_8000_0000_0000_0001));
+    let greeter = ObjectKey::from(Uuid::from_u128(0x5a11_e000_0000_4000_8000_0000_0000_0002));
+    let direct = spawn_conversation_view(
+        commands,
+        parts.strip,
+        parts.panel_area,
+        ConversationKey::Direct(peer),
+        cx.font_size,
+    );
+    // Nearby is the active tab; the one-to-one has unread lines, so it carries
+    // the badge the live refresh gives an inactive tab.
+    let resident = cx.text("Sample Resident");
+    for (view, title, unread, active) in [
+        (&parts.nearby, cx.text("Nearby Chat"), 0, true),
+        (&direct, resident.clone(), 2, false),
+    ] {
+        commands
+            .entity(view.tab.label)
+            .insert(Text::new(tab_label(&title, unread, active)));
+    }
+    commands
+        .entity(parts.nearby.panel)
+        .entry::<Node>()
+        .and_modify(|mut node| node.display = Display::Flex);
+
+    let you = cx.text("You");
+    let render = TranscriptRender {
+        key: ConversationKey::Nearby,
+        font_size: cx.font_size,
+        settings: None,
+        you: &you,
+    };
+    let line =
+        |own: bool, speaker: String, speaker_link: SpeakerLink, body: String| TranscriptLine {
+            own,
+            speaker,
+            speaker_link,
+            body,
+        };
+    let bands = SkinChatBands::default();
+    let lines = [
+        (
+            line(
+                false,
+                resident.clone(),
+                SpeakerLink::Agent(peer),
+                cx.text("See you at the build meeting tomorrow."),
+            ),
+            Some(bands.recall),
+        ),
+        (
+            line(
+                false,
+                resident,
+                SpeakerLink::Agent(peer),
+                cx.text("Hello! The sandbox on Test Parcel is open again."),
+            ),
+            None,
+        ),
+        (
+            line(
+                true,
+                String::new(),
+                SpeakerLink::Own,
+                cx.text("On my way over now."),
+            ),
+            None,
+        ),
+        (
+            line(
+                false,
+                cx.text("Test Greeter"),
+                SpeakerLink::Object(greeter),
+                cx.text("Welcome to Test Parcel."),
+            ),
+            None,
+        ),
+    ];
+    for (transcript_line, band) in &lines {
+        spawn_transcript_line(
+            commands,
+            parts.nearby.transcript_column,
+            &render,
+            transcript_line,
+            *band,
+            None,
+        );
+    }
+    parent
+}
+
+/// Give a specimen's floater root the class the live spawn gives the real one.
+/// A specimen is handed only its content slot, so the root is found as the
+/// slot's nearest [`Floater`] ancestor; a slot outside any floater (a bare
+/// gallery card) has no root to mark and is left alone.
+fn mark_conversations_root(world: &mut World, content: Entity) {
+    let mut entity = content;
+    while world.get::<Floater>(entity).is_none() {
+        let Some(parent) = world.get::<ChildOf>(entity).map(ChildOf::parent) else {
+            return;
+        };
+        entity = parent;
+    }
+    if let Some(mut classes) = world.get_mut::<ClassList>(entity) {
+        add_conversations_class(&mut classes);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2476,7 +2683,13 @@ fn spawn_conversation_tabs(
         if ui.views.contains_key(&entry.key) {
             continue;
         }
-        let view = spawn_conversation_view(&mut commands, strip, panel_area, entry.key);
+        let view = spawn_conversation_view(
+            &mut commands,
+            strip,
+            panel_area,
+            entry.key,
+            CHROME_FONT_SIZE,
+        );
         ui.views.insert(entry.key, view);
     }
 }
@@ -2663,13 +2876,13 @@ fn refresh_conversations(
                         .map(|line| (line, Some(bands.server_history))),
                 )
                 .chain(entry.lines.iter().map(|line| (line, None)));
+            let render = TranscriptRender {
+                key: entry.key,
+                font_size: transcript_font_size_for_step(transcript_font_step(settings.as_deref())),
+                settings: settings.as_deref(),
+                you: &you,
+            };
             for (line, band) in banded_lines {
-                let mut style = LinkTextStyle::at(transcript_font_size_for_step(
-                    transcript_font_step(settings.as_deref()),
-                ));
-                style.plain_color = band.unwrap_or_else(|| {
-                    transcript_line_color(entry.key, line.speaker_link, settings.as_deref())
-                });
                 // The user's own name for the speaker, if they gave one — read
                 // at render, so an alias given now renames the backlog too.
                 let alias = match line.speaker_link {
@@ -2678,11 +2891,13 @@ fn refresh_conversations(
                     }
                     SpeakerLink::Own | SpeakerLink::Object(_) | SpeakerLink::None => None,
                 };
-                spawn_linkified_text(
+                spawn_transcript_line(
                     &mut chrome.commands,
                     view.transcript_column,
-                    &line_text(line, &you, alias.as_deref()),
-                    style,
+                    &render,
+                    line,
+                    band,
+                    alias.as_deref(),
                 );
             }
             // Pin the scroll to the newest line.
@@ -2691,6 +2906,38 @@ fn refresh_conversations(
             }
         }
     }
+}
+
+/// What one transcript's lines are drawn with: whose transcript it is (the
+/// palette differs between Nearby and the IM tabs), the size, the colour
+/// source and the localized label for our own lines.
+struct TranscriptRender<'render> {
+    /// The conversation the transcript belongs to.
+    key: ConversationKey,
+    /// The transcript font size, in logical pixels.
+    font_size: f32,
+    /// The palette / preference source the live lines' colours read.
+    settings: Option<&'render crate::settings::ViewerSettings>,
+    /// The localized "You" our own lines are labelled with.
+    you: &'render str,
+}
+
+/// Spawn one transcript line into `column`: a linkified row (speaker name and
+/// any URLs clickable), in its history `band` colour, or — a live line, `None`
+/// — the speaker's palette colour. `alias` is the user's own name for the
+/// speaker, when they gave one.
+fn spawn_transcript_line(
+    commands: &mut Commands,
+    column: Entity,
+    render: &TranscriptRender,
+    line: &TranscriptLine,
+    band: Option<Color>,
+    alias: Option<&str>,
+) {
+    let mut style = LinkTextStyle::at(render.font_size);
+    style.plain_color = band
+        .unwrap_or_else(|| transcript_line_color(render.key, line.speaker_link, render.settings));
+    spawn_linkified_text(commands, column, &line_text(line, render.you, alias), style);
 }
 
 /// The server-history lines to render: `server` minus any line whose

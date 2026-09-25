@@ -167,6 +167,14 @@ fn spawn_strings_floater(mut commands: Commands, root: Res<UiRoot>) {
 /// First-open content build: the picker, the description, the editor and the
 /// Restore default button.
 fn build_strings_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
+    let ui = spawn_strings_content(&mut commands, handle.content, FONT_SIZE);
+    commands.insert_resource(ui);
+}
+
+/// Build the floater's content into `parent` at `font_size`: the picker, the
+/// description, the editor and the Restore default button. Shared by the live
+/// floater's first-open build and its specimen.
+fn spawn_strings_content(commands: &mut Commands, parent: Entity, font_size: f32) -> StringsUi {
     let content = commands
         .spawn((
             Node {
@@ -176,20 +184,20 @@ fn build_strings_content(In(handle): In<FloaterHandle>, mut commands: Commands) 
                 ..column(Val::Px(6.0))
             },
             Name::new("rlv-strings-content"),
-            ChildOf(handle.content),
+            ChildOf(parent),
         ))
         .id();
 
     let labels = picker_labels();
     let picker = spawn_combo(
-        &mut commands,
+        commands,
         content,
         &ComboSpec {
             element: "rlv-strings-picker",
             labels: &labels,
             active: 0,
             tab_index: 0,
-            font_size: FONT_SIZE,
+            font_size,
             // The labels are the reference's own English wording, carried
             // verbatim from `rlva_strings.xml`; they are data, not UI chrome,
             // and translating them would mean re-translating the reference's
@@ -201,7 +209,7 @@ fn build_strings_content(In(handle): In<FloaterHandle>, mut commands: Commands) 
     let description = commands
         .spawn((
             Text::default(),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(DIM_LABEL_COLOR),
             Node {
                 flex_shrink: 0.0,
@@ -215,11 +223,11 @@ fn build_strings_content(In(handle): In<FloaterHandle>, mut commands: Commands) 
         .id();
 
     let value_field = spawn_text_input(
-        &mut commands,
+        commands,
         content,
         &TextInputSpec {
             tab_index: 1,
-            font_size: FONT_SIZE,
+            font_size,
             visible_lines: VALUE_LINES,
             ..TextInputSpec::new("rlv-strings-value", TextInputKind::Multiline)
         },
@@ -238,18 +246,22 @@ fn build_strings_content(In(handle): In<FloaterHandle>, mut commands: Commands) 
             ChildOf(content),
         ))
         .id();
-    spawn_restore_button(&mut commands, actions);
+    spawn_restore_button(commands, actions, font_size);
 
-    commands.insert_resource(StringsUi {
+    StringsUi {
         picker,
         description,
         value_field,
-    });
+    }
 }
 
 /// The Restore-default button: drop the override so the reference's own wording
 /// comes back, and let [`fill_strings_editor`] put it in the editor.
-fn spawn_restore_button(commands: &mut Commands, parent: Entity) {
+///
+/// The selection and the settings store are optional so a press in a host that
+/// has neither (the gallery's specimen) is a no-op rather than a failed
+/// observer.
+fn spawn_restore_button(commands: &mut Commands, parent: Entity, font_size: f32) {
     commands
         .spawn((
             Node {
@@ -270,19 +282,22 @@ fn spawn_restore_button(commands: &mut Commands, parent: Entity) {
         ))
         .with_child((
             Text::new(String::new()),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(LABEL_COLOR),
             Translated::new("rlv-strings-restore"),
             Pickable::IGNORE,
         ))
         .observe(
             move |mut press: On<Pointer<Press>>,
-                  mut selection: ResMut<StringsSelection>,
-                  mut settings: ResMut<ViewerSettings>| {
+                  selection: Option<ResMut<StringsSelection>>,
+                  settings: Option<ResMut<ViewerSettings>>| {
                 press.propagate(false);
                 if press.button != PointerButton::Primary {
                     return;
                 }
+                let (Some(mut selection), Some(mut settings)) = (selection, settings) else {
+                    return;
+                };
                 let Some(entry) = string_at(selection.index) else {
                     return;
                 };
@@ -339,15 +354,47 @@ fn fill_strings_editor(
     if let Ok(mut field) = fields.get_mut(ui.value_field) {
         field.editor_mut().set_text(&value);
     }
-    // Rebound rather than written: the sentence is a Fluent key now, and
-    // `i18n::apply_translations` re-resolves a `Translated` whose key changed —
-    // so the selection moves the description and a locale switch relocalises it,
-    // with neither path writing English here.
-    commands
-        .entity(ui.description)
-        .insert(Translated::new(entry.description_key));
+    show_string_description(&mut commands, ui.description, entry);
     selection.shown = value;
     selection.filled = true;
+}
+
+/// Point the description line at `entry`'s sentence.
+///
+/// Rebound rather than written: the sentence is a Fluent key now, and
+/// `i18n::apply_translations` re-resolves a `Translated` whose key changed — so
+/// the selection moves the description and a locale switch relocalises it, with
+/// neither path writing English here.
+fn show_string_description(commands: &mut Commands, description: Entity, entry: &RlvStringDef) {
+    commands
+        .entity(description)
+        .insert(Translated::new(entry.description_key));
+}
+
+// --- Gallery specimen -----------------------------------------------------
+
+/// The Strings floater's gallery / `ui_test` specimen: the live content, built
+/// by the same `spawn_strings_content` the floater is, showing the first
+/// string — the picker's own initial selection — as a fresh viewer does: its
+/// description, and its default wording (read through the live
+/// [`rlv_string`] with no settings store) in the editor.
+pub fn spawn_rlv_strings_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: sl_viewer_ui_core::ui_element::ElementCx,
+) -> Entity {
+    let ui = spawn_strings_content(commands, parent, cx.font_size);
+    if let Some(entry) = string_at(0) {
+        let value = cx.text(&rlv_string(None, entry.key));
+        // What `fill_strings_editor` does through its query, deferred behind
+        // the spawn that creates the field.
+        commands
+            .entity(ui.value_field)
+            .entry::<EditableText>()
+            .and_modify(move |mut field| field.editor_mut().set_text(&value));
+        show_string_description(commands, ui.description, entry);
+    }
+    parent
 }
 
 /// Mirror an edit back into the settings store: an override where the text

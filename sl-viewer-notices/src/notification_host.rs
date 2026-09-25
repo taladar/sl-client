@@ -575,20 +575,39 @@ fn spawn_notification_channel(mut commands: Commands, root: Res<UiRoot>) {
             ChildOf(root.0),
         ))
         .id();
-    // The overflow control: a "N more ▸" cycle button that hugs the trailing edge
-    // below the visible stack, hidden until there are queued toasts. Its Text and
-    // display are driven by [`apply_toast_overflow`]; a click cycles the queue.
-    //
-    // The `▸` is not in that text: it is the skin's `glyph::CYCLE` mark, drawn
-    // as the control's `::after` so it trails the count. The text class is what
-    // colours the label, and so the mark that inherits from it.
-    let overflow = commands
+    let overflow = spawn_overflow_control(&mut commands, channel, TOAST_FONT_SIZE, Display::None);
+    commands.entity(overflow).observe(
+        move |_activate: On<Activate>, mut cycle: MessageWriter<CycleToasts>| {
+            cycle.write(CycleToasts);
+        },
+    );
+    commands.insert_resource(NotificationChannelRoot { channel, overflow });
+}
+
+/// Spawn the channel's overflow control under `channel` at `font_size`,
+/// initially at `display`: a "N more ▸" cycle button that hugs the trailing
+/// edge below the visible stack. Live, it starts hidden and its `Text` and
+/// display are driven by [`update_overflow_control`]. Shared by the live
+/// channel and [`spawn_notification_overflow_specimen`], each of which wires
+/// its own press: the live one cycles the queue, the specimen's reports an
+/// inert [`UiAction`].
+///
+/// The `▸` is not in that text: it is the skin's `glyph::CYCLE` mark, drawn as
+/// the control's `::after` so it trails the count. The text class is what
+/// colours the label, and so the mark that inherits from it.
+fn spawn_overflow_control(
+    commands: &mut Commands,
+    channel: Entity,
+    font_size: f32,
+    display: Display,
+) -> Entity {
+    commands
         .spawn((
             Button,
             OverflowControl,
             TabIndex(0),
             Node {
-                display: Display::None,
+                display,
                 align_self: AlignSelf::End,
                 padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
                 border: UiRect::all(Val::Px(1.0)),
@@ -596,7 +615,7 @@ fn spawn_notification_channel(mut commands: Commands, root: Res<UiRoot>) {
             },
             Text::default(),
             PseudoElementsSupport,
-            UiFont::Sans.at(TOAST_FONT_SIZE),
+            UiFont::Sans.at(font_size),
             TextColor(TEXT_COLOR),
             BackgroundColor(CARD_BACKGROUND),
             BorderColor::all(BUTTON_BORDER),
@@ -604,13 +623,7 @@ fn spawn_notification_channel(mut commands: Commands, root: Res<UiRoot>) {
             Name::new("notification-overflow"),
             ChildOf(channel),
         ))
-        .observe(
-            move |_activate: On<Activate>, mut cycle: MessageWriter<CycleToasts>| {
-                cycle.write(CycleToasts);
-            },
-        )
-        .id();
-    commands.insert_resource(NotificationChannelRoot { channel, overflow });
+        .id()
 }
 
 /// The already-resolved content of one toast, ready to render: the live path
@@ -2286,6 +2299,47 @@ pub fn spawn_notification_specimen(
             );
     }
     card.root
+}
+
+/// How many toasts the overflow specimen says are queued behind the visible one.
+const SPECIMEN_QUEUED: usize = 3;
+
+/// The gallery / test-harness specimen of a **full** toast channel: the
+/// visible toast ([`spawn_notification_specimen`]'s card) with the "N more ▸"
+/// overflow control beneath it, as the live channel draws it once more than
+/// `MAX_VISIBLE_TOASTS` toasts are up. The control is the live one
+/// (`spawn_overflow_control`) — and with it the skin's `glyph::CYCLE` mark,
+/// the only `::after` glyph slot in the viewer, which no other specimen shows.
+/// Its press reports an inert [`UiAction`].
+pub fn spawn_notification_overflow_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: ElementCx,
+) -> Entity {
+    let channel = commands
+        .spawn((
+            column(Val::Px(TOAST_GAP)),
+            Name::new("notification-overflow-specimen"),
+            ChildOf(parent),
+        ))
+        .id();
+    spawn_notification_specimen(commands, channel, cx);
+    let overflow = spawn_overflow_control(commands, channel, cx.font_size, Display::Flex);
+    // The English the live control's `notification-overflow` message formats
+    // to: a plural selector with a placeable, which a harness without Fluent
+    // cannot resolve.
+    commands
+        .entity(overflow)
+        .insert(Text::new(cx.text(&format!("{SPECIMEN_QUEUED} more"))))
+        .observe(
+            move |_activate: On<Activate>, mut actions: MessageWriter<UiAction>| {
+                actions.write(UiAction {
+                    element: NOTIFICATION_ELEMENT,
+                    action: "overflow",
+                });
+            },
+        );
+    channel
 }
 
 /// The specimen's body prose — a paragraph long enough to force the wrap the

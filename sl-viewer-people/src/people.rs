@@ -78,7 +78,8 @@ use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonSpec, UiLabel};
 use crate::ui_tab::{
-    DEFAULT_ELLIPSIS, TabButton, TabCaption, TabPlacement, TabSpec, TabStrip, spawn_tab_strip,
+    DEFAULT_ELLIPSIS, DynamicTabStrip, TabButton, TabCaption, TabPlacement, TabSpec, TabStrip,
+    spawn_tab_strip,
 };
 use crate::ui_table::{
     MultiSort, TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableSelectionMode,
@@ -350,6 +351,18 @@ struct PeopleIcons {
 }
 
 impl PeopleIcons {
+    /// Handles to no image at all, for a specimen host with no image store:
+    /// the icons' boxes are sized by their nodes, so the layout is the same.
+    fn unloaded() -> Self {
+        Self {
+            online: Handle::default(),
+            map: Handle::default(),
+            edit: Handle::default(),
+            check_on: Handle::default(),
+            check_off: Handle::default(),
+        }
+    }
+
     /// Generate every icon and register it in the image assets.
     fn generate(images: &mut Assets<Image>) -> Self {
         Self {
@@ -1167,16 +1180,82 @@ fn spawn_people_tab(
     let Some(conversations) = conversations else {
         return;
     };
-    let strip = conversations.strip();
-    let panel_area = conversations.panel_area();
     let icons = PeopleIcons::generate(&mut images);
+    let parts = spawn_people_pane(
+        &mut commands,
+        conversations.strip(),
+        conversations.panel_area(),
+        &icons,
+        CHROME_FONT_SIZE,
+    );
+    let (confirm_overlay, confirm_text) = spawn_grant_confirm_modal(&mut commands, root.0);
 
+    commands.insert_resource(PeopleUi {
+        tab_button: parts.tab_button,
+        pane: parts.pane,
+        sub_strip: parts.sub_strip,
+        friends_content: parts.friends_content,
+        friends_table: parts.friends_table,
+        friends_viewport: parts.friends_viewport,
+        friend_actions: parts.friend_actions,
+        groups_content: parts.groups_content,
+        blocked_content: parts.blocked_content,
+        contact_sets_content: parts.contact_sets_content,
+        name_arrow: parts.name_arrow,
+        status_arrow: parts.status_arrow,
+        icons,
+        confirm_overlay,
+        confirm_text,
+    });
+}
+
+/// The People tab and pane as built into the conversations strip: everything
+/// [`PeopleUi`] keeps of them bar the icons and the confirm modal, which live
+/// outside the window.
+struct PeoplePaneParts {
+    /// The People tab's button on the conversations strip.
+    tab_button: Entity,
+    /// The People pane.
+    pane: Entity,
+    /// The Friends / Groups / Blocked / Contact Sets sub-tab strip.
+    sub_strip: Entity,
+    /// The Friends content column.
+    friends_content: Entity,
+    /// The friends table root.
+    friends_table: Entity,
+    /// The virtualized friends-list viewport.
+    friends_viewport: Entity,
+    /// The Friends action column's buttons.
+    friend_actions: Vec<FriendActionButton>,
+    /// The Groups sub-tab's (empty) content slot.
+    groups_content: Entity,
+    /// The Blocked sub-tab's (empty) content slot.
+    blocked_content: Entity,
+    /// The Contact Sets sub-tab's (empty) content slot.
+    contact_sets_content: Entity,
+    /// The Name header's sort-direction arrow.
+    name_arrow: Entity,
+    /// The Status header's sort-direction arrow.
+    status_arrow: Entity,
+}
+
+/// Build the People tab into `strip` (pinned first) and its pane into
+/// `panel_area` at `font_size`: the sub-tab strip, the Friends content and the
+/// three sub-tabs' empty slots. Shared by the live deferred spawn and the
+/// Conversations floater's specimen ([`spawn_people_specimen`]).
+fn spawn_people_pane(
+    commands: &mut Commands,
+    strip: DynamicTabStrip,
+    panel_area: Entity,
+    icons: &PeopleIcons,
+    font_size: f32,
+) -> PeoplePaneParts {
     // The pinned People tab — the strip's own widget tab, un-closable like
     // Nearby Chat, and **first**, above it, so every chat tab (nearby + IMs +
     // groups) stays grouped below. Its marker is what tells the conversations
     // strip that selecting it fronts this pane rather than a conversation.
     let tab_button = strip
-        .add_tab(&mut commands, TabCaption::Key(PEOPLE_TAB_KEY), Some(0))
+        .add_tab(commands, TabCaption::Key(PEOPLE_TAB_KEY), Some(0))
         .button;
     commands.entity(tab_button).insert(ExternalStripTab);
 
@@ -1198,7 +1277,7 @@ fn spawn_people_tab(
 
     // The horizontal Friends / Groups / Blocked sub-tab strip.
     let sub_strip = spawn_tab_strip(
-        &mut commands,
+        commands,
         pane,
         &TabSpec {
             element: SUB_STRIP_ELEMENT,
@@ -1211,7 +1290,7 @@ fn spawn_people_tab(
             ],
             active: FRIENDS_TAB_INDEX,
             tab_index: 1,
-            font_size: CHROME_FONT_SIZE,
+            font_size,
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
@@ -1225,13 +1304,12 @@ fn spawn_people_tab(
         name_arrow,
         status_arrow,
         friend_actions,
-    ) = spawn_friends_content(&mut commands, pane, &icons);
-    let groups_content = spawn_groups_content(&mut commands, pane);
-    let blocked_content = spawn_blocked_content(&mut commands, pane);
-    let contact_sets_content = spawn_contact_sets_content(&mut commands, pane);
-    let (confirm_overlay, confirm_text) = spawn_grant_confirm_modal(&mut commands, root.0);
+    ) = spawn_friends_content(commands, pane, icons, font_size);
+    let groups_content = spawn_groups_content(commands, pane);
+    let blocked_content = spawn_blocked_content(commands, pane);
+    let contact_sets_content = spawn_contact_sets_content(commands, pane);
 
-    commands.insert_resource(PeopleUi {
+    PeoplePaneParts {
         tab_button,
         pane,
         sub_strip,
@@ -1244,10 +1322,60 @@ fn spawn_people_tab(
         contact_sets_content,
         name_arrow,
         status_arrow,
-        icons,
-        confirm_overlay,
-        confirm_text,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Gallery specimen (composed into the Conversations floater's)
+// ---------------------------------------------------------------------------
+
+/// Compose the People surface into a Conversations floater **specimen**'s strip
+/// and panel area, as the live viewer composes it into the real window: the
+/// pinned People tab and its pane ([`spawn_people_pane`]), then the three
+/// sub-tabs' contents each module fills its slot with — the group list
+/// ([`crate::groups::spawn_groups_list`]), the block list
+/// ([`crate::blocked::spawn_blocked_list`]) and the contact-set panel
+/// ([`crate::contact_sets_panel::spawn_contact_sets_list`]).
+///
+/// Live, those are four deferred systems that each wait for the one before to
+/// insert its resource; a specimen host runs none of them, so this runs their
+/// builders in one queued step. It is queued because the table icons are image
+/// assets, which only a world can add: a host without an image store (the
+/// layout sweep) gets unloaded icon handles, whose boxes are sized all the same.
+/// The pane stays hidden, as it is live until the People tab is picked.
+pub(crate) fn spawn_people_specimen(
+    commands: &mut Commands,
+    strip: DynamicTabStrip,
+    panel_area: Entity,
+    font_size: f32,
+) {
+    commands.queue(move |world: &mut World| {
+        if let Err(error) =
+            world.run_system_cached_with(compose_people_specimen, (strip, panel_area, font_size))
+        {
+            warn!("conversations specimen: the People pane was not composed: {error}");
+        }
     });
+}
+
+/// The queued half of [`spawn_people_specimen`]: generate the icons where an
+/// image store exists, then build the pane and fill its sub-tab slots.
+fn compose_people_specimen(
+    In((strip, panel_area, font_size)): In<(DynamicTabStrip, Entity, f32)>,
+    mut commands: Commands,
+    images: Option<ResMut<Assets<Image>>>,
+) {
+    let icons = images.map_or_else(PeopleIcons::unloaded, |mut images| {
+        PeopleIcons::generate(&mut images)
+    });
+    let parts = spawn_people_pane(&mut commands, strip, panel_area, &icons, font_size);
+    crate::groups::spawn_groups_list(&mut commands, parts.groups_content, font_size);
+    crate::blocked::spawn_blocked_list(&mut commands, parts.blocked_content, font_size);
+    crate::contact_sets_panel::spawn_contact_sets_list(
+        &mut commands,
+        parts.contact_sets_content,
+        font_size,
+    );
 }
 
 /// Spawn the edit-objects grant-confirm modal: a full-window scrim (blocking
@@ -1394,6 +1522,7 @@ fn spawn_friends_content(
     commands: &mut Commands,
     pane: Entity,
     icons: &PeopleIcons,
+    font_size: f32,
 ) -> (
     Entity,
     Entity,
@@ -1466,7 +1595,7 @@ fn spawn_friends_content(
         .id();
     let friend_actions = FRIEND_ACTIONS
         .into_iter()
-        .map(|action| spawn_action_button(commands, actions, action))
+        .map(|action| spawn_action_button(commands, actions, action, font_size))
         .collect();
 
     (
@@ -1601,6 +1730,7 @@ fn spawn_action_button(
     commands: &mut Commands,
     actions: Entity,
     action: FriendAction,
+    font_size: f32,
 ) -> FriendActionButton {
     let spawned = ui_spawn::spawn_button(
         commands,
@@ -1610,7 +1740,7 @@ fn spawn_action_button(
             .label_color(LABEL_COLOR)
             .class(ACTION_BUTTON_CLASS)
             .label_class(TEXT_CLASS)
-            .font_size(CHROME_FONT_SIZE),
+            .font_size(font_size),
     );
     let button = spawned.button;
     commands.entity(button).observe(

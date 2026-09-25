@@ -104,6 +104,14 @@ pub(crate) mod style {
     /// A section heading's font size, logical px.
     pub(crate) const HEADING_SIZE: f32 = 14.0;
 
+    /// The heading size that goes with body text at `font_size`: the same step
+    /// above it that [`HEADING_SIZE`] is above [`FONT_SIZE`], so a specimen swept
+    /// at a larger UI font keeps its headings a step over the rows under them
+    /// (and the live window, at [`FONT_SIZE`], gets [`HEADING_SIZE`] exactly).
+    pub(crate) fn heading_size(font_size: f32) -> f32 {
+        font_size + (HEADING_SIZE - FONT_SIZE)
+    }
+
     /// The default label colour.
     pub(crate) const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
@@ -124,6 +132,58 @@ pub(crate) mod style {
 
     /// A list row's height, logical px.
     pub(crate) const ROW_HEIGHT: f32 = 20.0;
+}
+
+/// Shared plumbing for this crate's gallery / `ui_test` floater specimens.
+///
+/// A specimen is built by its window's own content builder, and then shown some
+/// sample data **by the window's own systems**: the specimen installs the state
+/// those systems read (a sample session, a sample list) and runs them once over
+/// the freshly built widgets. Neither the gallery nor the layout sweep adds this
+/// crate's plugins, so nothing else would ever draw a value into them — and a
+/// hand-written copy of "what the reseed would have done" is exactly the
+/// look-alike a specimen must not be.
+pub(crate) mod specimen {
+    use bevy::ecs::system::{RunSystemError, RunSystemOnce as _};
+    use bevy::prelude::*;
+
+    /// Run `system` once over `world`, reporting — not swallowing — a failure.
+    ///
+    /// A failure here means a host stood the specimen up without a seam the
+    /// system reads (a locale, a message channel), so its sample data is not
+    /// drawn; the window's layout is still the real one, which is why it is an
+    /// error to report rather than a reason to panic the gallery.
+    pub(crate) fn run_once<Marker>(
+        world: &mut World,
+        window: &str,
+        system: impl IntoSystem<(), (), Marker>,
+    ) {
+        report(window, world.run_system_once(system));
+    }
+
+    /// Register message channel `M` if the host has not — the same idempotent
+    /// registration this crate's plugins make, for a specimen whose plugin was
+    /// never added. Without it a live system that writes `M` fails validation
+    /// and draws nothing.
+    pub(crate) fn ensure_message<M: Message>(world: &mut World) {
+        world.init_resource::<Messages<M>>();
+    }
+
+    /// Write every slider's value readout, as the shared rows plugin's
+    /// [`sync_slider_rows`](crate::rows::sync_slider_rows) does each frame in
+    /// the viewer — it composes every environment window's sliders, and no
+    /// specimen host adds it. Run after the window's reseed has put its
+    /// sliders on the sample values, or the readouts beside them stay blank.
+    pub(crate) fn draw_slider_readouts(world: &mut World, window: &str) {
+        run_once(world, window, crate::rows::sync_slider_rows);
+    }
+
+    /// Log a specimen system's failure, naming the window it was drawing.
+    pub(crate) fn report(window: &str, result: Result<(), RunSystemError>) {
+        if let Err(error) = result {
+            error!("{window} specimen: its sample data could not be drawn: {error}");
+        }
+    }
 }
 
 /// Every environment editor at once, for a host that wants the whole family.
@@ -150,11 +210,22 @@ impl Plugin for EnvironmentUiPlugins {
 
 #[cfg(test)]
 mod tests {
-    use super::EnvironmentUiPlugins;
+    use super::{
+        EnvironmentUiPlugins, day_cycle_editor, my_environments, personal_lighting,
+        settings_editor, settings_picker,
+    };
+    use crate::knobs::SkyKnob;
     use bevy::prelude::*;
+    use bevy::text::EditableText;
+    use bevy::ui_widgets::SliderValue;
+    use bevy_flair::style::components::ClassList;
+    use pretty_assertions::assert_eq;
+    use sl_client_bevy::SkySettings;
     use sl_viewer_intents::TexturePicked;
     use sl_viewer_ui_core::i18n::install_untranslated;
     use sl_viewer_ui_core::ui::UiRoot;
+    use sl_viewer_ui_core::ui_element::ElementCx;
+    use sl_viewer_ui_core::virtual_list::VirtualRow;
     use sl_viewer_ui_widgets::floater::FloaterPlugin;
     use sl_viewer_ui_widgets::ui_color_picker::ColorPicked;
 
@@ -208,5 +279,170 @@ mod tests {
         // frame than the one that spawned the chrome.
         app.update();
         app.update();
+    }
+
+    /// A specimen spawner's signature, as the viewer's floater registry holds it.
+    type SpecimenFn = fn(&mut Commands, Entity, ElementCx) -> Entity;
+
+    /// An app standing one specimen up the way the gallery and the layout sweep
+    /// do: **none** of this crate's plugins, only a locale — so whatever sample
+    /// data shows up was drawn by the specimen itself, through the window's own
+    /// systems.
+    fn specimen_app(spawn: SpecimenFn) -> App {
+        let mut app = App::new();
+        app.init_resource::<UiScale>()
+            .init_resource::<bevy::input_focus::InputFocus>();
+        install_untranslated(&mut app);
+        let slot = app.world_mut().spawn(Node::default()).id();
+        {
+            let world = app.world_mut();
+            let mut commands = world.commands();
+            spawn(&mut commands, slot, ElementCx::new());
+            world.flush();
+        }
+        app.update();
+        app
+    }
+
+    /// The value of every `EditableText` in the app.
+    fn field_values(app: &mut App) -> Vec<String> {
+        app.world_mut()
+            .query::<&EditableText>()
+            .iter(app.world())
+            .map(|field| field.value().to_string())
+            .collect()
+    }
+
+    /// The text of the node named `name`, if there is one.
+    fn text_named(app: &mut App, name: &str) -> Option<String> {
+        app.world_mut()
+            .query::<(&Name, &Text)>()
+            .iter(app.world())
+            .find(|(node, _text)| node.as_str() == name)
+            .map(|(_node, text)| text.0.clone())
+    }
+
+    /// The value of the slider named `name`, if there is one.
+    fn slider_named(app: &mut App, name: &str) -> Option<f32> {
+        app.world_mut()
+            .query::<(&Name, &SliderValue)>()
+            .iter(app.world())
+            .find(|(node, _value)| node.as_str() == name)
+            .map(|(_node, value)| value.0)
+    }
+
+    /// The text of the value readout beside the slider named `name`, if there
+    /// is one.
+    fn readout_named(app: &mut App, name: &str) -> Option<String> {
+        let readout = app
+            .world_mut()
+            .query::<(&Name, &crate::rows::SliderRow)>()
+            .iter(app.world())
+            .find(|(node, _row)| node.as_str() == name)
+            .map(|(_node, row)| row.readout)?;
+        app.world().get::<Text>(readout).map(|text| text.0.clone())
+    }
+
+    /// How many pooled list rows the app holds.
+    fn row_count(app: &mut App) -> usize {
+        app.world_mut()
+            .query::<&VirtualRow>()
+            .iter(app.world())
+            .count()
+    }
+
+    /// **The knob windows' specimens are seeded by the live reseed.** A sun
+    /// elevation slider still at its range's bottom would mean the sample
+    /// session never reached the widgets — the layout would be real and every
+    /// number in it a lie.
+    #[test]
+    fn the_knob_specimens_show_their_sample_frame() {
+        let sky = SkySettings::legacy_windlight_default("sample");
+        let wanted = SkyKnob::SunElevation.read(&sky);
+        let knob_windows: [(SpecimenFn, &str); 2] = [
+            (
+                personal_lighting::spawn_personal_lighting_specimen,
+                "personal-lighting-sun-elevation:slider",
+            ),
+            (
+                settings_editor::spawn_sky_settings_editor_specimen,
+                "settings-editor-sky-sun-elevation:slider",
+            ),
+        ];
+        for (spawn, slider) in knob_windows {
+            let mut app = specimen_app(spawn);
+            assert_eq!(slider_named(&mut app, slider), Some(wanted), "{slider}");
+            // The readout is the shared rows plugin's to write, not the
+            // window's: a blank one means the specimen skipped that half.
+            let shown = readout_named(&mut app, slider).unwrap_or_default();
+            assert!(!shown.is_empty(), "{slider}: its readout was never written");
+        }
+        let mut sky_editor = specimen_app(settings_editor::spawn_sky_settings_editor_specimen);
+        assert!(field_values(&mut sky_editor).contains(&"Sample Sky".to_owned()));
+        let mut water_editor = specimen_app(settings_editor::spawn_water_settings_editor_specimen);
+        assert!(field_values(&mut water_editor).contains(&"Sample Water".to_owned()));
+    }
+
+    /// **The day-cycle specimen is drawn by all four of the live systems it
+    /// runs**: the name field (the reseed), the readout (the chrome sync), the
+    /// keyframe markers (the marker rebuild — the default keyframe, the three
+    /// sample ones and the scrubber) and every slider's value (the shared rows
+    /// sync).
+    #[test]
+    fn the_day_cycle_specimen_shows_its_sample_cycle() {
+        let mut app = specimen_app(day_cycle_editor::spawn_day_cycle_editor_specimen);
+        assert!(field_values(&mut app).contains(&"Sample Day".to_owned()));
+        let readout = text_named(&mut app, "day-cycle-editor-time").unwrap_or_default();
+        assert!(!readout.is_empty(), "the readout was never written");
+        let blank_sliders = app
+            .world_mut()
+            .query::<(&Name, &crate::rows::SliderRow)>()
+            .iter(app.world())
+            .filter(|(_name, row)| {
+                app.world()
+                    .get::<Text>(row.readout)
+                    .is_none_or(|text| text.0.is_empty())
+            })
+            .map(|(name, _row)| name.to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            blank_sliders,
+            Vec::<String>::new(),
+            "sliders with no readout"
+        );
+        let shown = app
+            .world_mut()
+            .query::<(&ClassList, &Node)>()
+            .iter(app.world())
+            .filter(|(classes, node)| {
+                classes.contains("sk-day-marker") && node.display != Display::None
+            })
+            .count();
+        assert_eq!(shown, 5);
+    }
+
+    /// **The list specimens pool their sample rows and write their lines**: six
+    /// rows in the library, the two skies in a picker aimed at a sky field.
+    #[test]
+    fn the_list_specimens_show_their_sample_rows() {
+        let mut library = specimen_app(my_environments::spawn_my_environments_specimen);
+        assert_eq!(row_count(&mut library), 6);
+        assert!(
+            !text_named(&mut library, "my-environments-status")
+                .unwrap_or_default()
+                .is_empty(),
+            "the count line was never written"
+        );
+        // Name order, and the selection's name in the rename field.
+        assert!(field_values(&mut library).contains(&"Example Deep Water".to_owned()));
+
+        let mut picker = specimen_app(settings_picker::spawn_settings_picker_specimen);
+        assert_eq!(row_count(&mut picker), 2);
+        assert!(
+            !text_named(&mut picker, "settings-picker-count")
+                .unwrap_or_default()
+                .is_empty(),
+            "the count line was never written"
+        );
     }
 }

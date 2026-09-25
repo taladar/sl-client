@@ -138,8 +138,8 @@ use sl_client_bevy::{
 
 use crate::about_region::region_key;
 use crate::floater::{
-    FloaterCaps, FloaterHandle, FloaterHost, FloaterKey, FloaterSpec, FloaterSystems,
-    KeyedFloaterOpen, KeyedFloaters,
+    FloaterCaps, FloaterHost, FloaterKey, FloaterSpec, FloaterSystems, KeyedFloaterOpen,
+    KeyedFloaters,
 };
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::inventory_properties::format_unix_date;
@@ -149,6 +149,7 @@ use crate::ui::{column, row};
 use crate::ui_font::UiFont;
 use crate::ui_format::format_duration_units;
 use crate::ui_spawn::{ButtonSpec, UiLabel, spawn_button};
+use crate::ui_tab::TabViewport;
 use crate::ui_table::{
     TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells, TableSelectionMode,
     TableSortDefault, TableSpec, TableState, keep_order, order_by_sort_keys, set_table_cell,
@@ -156,7 +157,9 @@ use crate::ui_table::{
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
-use sl_viewer_ui_core::scrollbar::SCROLLBAR_THICKNESS;
+use sl_viewer_ui_core::scrollbar::{
+    SCROLLBAR_THICKNESS, ScrollTarget, ensure_scrollbar_widget, spawn_scrollbar,
+};
 
 /// The Top Scripts window's stable [`Floater::id`](crate::floater::Floater::id).
 pub const TOP_SCRIPTS_FLOATER_ID: &str = "top-scripts";
@@ -209,6 +212,12 @@ const BUTTON_BORDER: Color = Color::srgb(0.34, 0.40, 0.52);
 
 /// One list row's height, in logical pixels.
 const ROW_HEIGHT: f32 = 20.0;
+
+/// The least block space the list keeps, in logical pixels: its header and five
+/// rows. The list takes the window's slack, and without a floor a long
+/// translation or a large font wraps the rows under it until there is no slack
+/// left and the list is a header over a sliver.
+const LIST_MIN_HEIGHT: f32 = ROW_HEIGHT * 6.0;
 
 /// Seconds within which a second press on the same row is a double-click (the
 /// radar's value, so the two lists feel the same).
@@ -745,6 +754,9 @@ pub struct TopObjectsPlugin;
 
 impl Plugin for TopObjectsPlugin {
     fn build(&self, app: &mut App) {
+        // The content column's scrollbar hides itself while there is nothing to
+        // scroll only with the widget's runtime half present.
+        ensure_scrollbar_widget(app);
         app.add_message::<OpenTopObjects>()
             // The confirmation round-trip the two destructive actions ask over.
             // Their owner is the notification host; declaring them here too
@@ -811,7 +823,7 @@ fn open_top_objects(
         let key = region_key(&request.region);
         match windows.open(kind.spec(), key.clone()) {
             KeyedFloaterOpen::Spawned(handle) => {
-                let ui = build_top_objects_content(&mut spawner, handle, kind);
+                let ui = build_top_objects_content(&mut spawner, handle.content, kind, FONT_SIZE);
                 spawner
                     .entity(handle.title_text)
                     .insert(Translated::new(kind.title_key()));
@@ -884,28 +896,69 @@ fn follow_current_region(
 // Content.
 // ---------------------------------------------------------------------------
 
-/// A window's content, built as it is spawned: the summary line, the list, the
-/// id line, the three filter rows and the action row.
+/// A window's content, built into `parent` at `font_size` as it is spawned: the
+/// summary line, the list, the id line, the three filter rows and the action
+/// row. Shared by the live window and its specimen.
 fn build_top_objects_content(
     commands: &mut Commands,
-    handle: FloaterHandle,
+    parent: Entity,
     kind: TopObjectsKind,
+    font_size: f32,
 ) -> TopObjectsUi {
+    let element = kind.table().element;
+    // A one-cell grid holding the scrolling column and, over its trailing edge,
+    // the column's scrollbar — the tab panels' arrangement, so the bar (shown
+    // only while the column overflows) never takes width from the content.
+    let frame = commands
+        .spawn((
+            Node {
+                display: Display::Grid,
+                grid_template_columns: vec![GridTrack::flex(1.0)],
+                grid_template_rows: vec![GridTrack::flex(1.0)],
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                min_width: Val::Px(0.0),
+                min_height: Val::Px(0.0),
+                ..default()
+            },
+            Name::new(format!("{element}:frame")),
+            ChildOf(parent),
+        ))
+        .id();
+    // The column fills the window and the list takes its slack; only when the
+    // rows under the list (wrapped by a long translation or a large font) leave
+    // it less than [`LIST_MIN_HEIGHT`] does the column scroll instead.
     let content = commands
         .spawn((
             Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
+                grid_column: GridPlacement::start(1),
+                grid_row: GridPlacement::start(1),
+                min_width: Val::Px(0.0),
                 min_height: Val::Px(0.0),
                 padding: UiRect::all(Val::Px(8.0)),
+                overflow: Overflow::scroll_y(),
                 ..column(Val::Px(6.0))
             },
-            Name::new(format!("{}:content", kind.table().element)),
-            ChildOf(handle.content),
+            ScrollPosition::default(),
+            TabViewport { vertical: true },
+            Name::new(format!("{element}:content")),
+            ChildOf(frame),
         ))
         .id();
+    spawn_scrollbar(
+        commands,
+        frame,
+        ScrollTarget::Container(content),
+        Node {
+            grid_column: GridPlacement::start(1),
+            grid_row: GridPlacement::start(1),
+            justify_self: JustifySelf::End,
+            ..default()
+        },
+        &format!("{element}:scrollbar"),
+    );
 
-    let summary = spawn_line(commands, content, LABEL_COLOR);
+    let summary = spawn_line(commands, content, LABEL_COLOR, font_size);
 
     // The list takes the window's slack; everything under it keeps its height.
     let wrapper = commands
@@ -913,7 +966,7 @@ fn build_top_objects_content(
             Node {
                 width: Val::Percent(100.0),
                 flex_grow: 1.0,
-                min_height: Val::Px(0.0),
+                min_height: Val::Px(LIST_MIN_HEIGHT),
                 ..default()
             },
             ChildOf(content),
@@ -921,44 +974,61 @@ fn build_top_objects_content(
         .id();
     let table = spawn_table(commands, wrapper, kind.table());
 
-    let id_row = spawn_labelled_row(commands, content, "top-objects-object-id");
-    let id_line = spawn_line(commands, id_row, DIM_LABEL_COLOR);
+    let id_row = spawn_labelled_row(commands, content, "top-objects-object-id", font_size);
+    let id_line = spawn_line(commands, id_row, DIM_LABEL_COLOR, font_size);
     spawn_action_button(
         commands,
         id_row,
         "top-objects-show-beacon",
         TopObjectsAction::ShowBeacon,
         0,
+        font_size,
     );
 
-    let object_row = spawn_labelled_row(commands, content, "top-objects-object-name");
-    let object_field = spawn_filter_field(commands, object_row, "top-objects-object-field", 1);
+    let object_row = spawn_labelled_row(commands, content, "top-objects-object-name", font_size);
+    let object_field = spawn_filter_field(
+        commands,
+        object_row,
+        "top-objects-object-field",
+        1,
+        font_size,
+    );
     spawn_action_button(
         commands,
         object_row,
         "top-objects-filter",
         TopObjectsAction::FilterByObject,
         2,
+        font_size,
     );
 
-    let owner_row = spawn_labelled_row(commands, content, "top-objects-owner");
-    let owner_field = spawn_filter_field(commands, owner_row, "top-objects-owner-field", 3);
+    let owner_row = spawn_labelled_row(commands, content, "top-objects-owner", font_size);
+    let owner_field =
+        spawn_filter_field(commands, owner_row, "top-objects-owner-field", 3, font_size);
     spawn_action_button(
         commands,
         owner_row,
         "top-objects-filter",
         TopObjectsAction::FilterByOwner,
         4,
+        font_size,
     );
 
-    let parcel_row = spawn_labelled_row(commands, content, "top-objects-parcel");
-    let parcel_field = spawn_filter_field(commands, parcel_row, "top-objects-parcel-field", 5);
+    let parcel_row = spawn_labelled_row(commands, content, "top-objects-parcel", font_size);
+    let parcel_field = spawn_filter_field(
+        commands,
+        parcel_row,
+        "top-objects-parcel-field",
+        5,
+        font_size,
+    );
     spawn_action_button(
         commands,
         parcel_row,
         "top-objects-filter",
         TopObjectsAction::FilterByParcel,
         6,
+        font_size,
     );
 
     let actions = spawn_row(commands, content);
@@ -968,6 +1038,7 @@ fn build_top_objects_content(
         "top-objects-return-selected",
         TopObjectsAction::ReturnSelected,
         7,
+        font_size,
     );
     spawn_action_button(
         commands,
@@ -975,6 +1046,7 @@ fn build_top_objects_content(
         "top-objects-return-all",
         TopObjectsAction::ReturnAll,
         8,
+        font_size,
     );
     spawn_action_button(
         commands,
@@ -982,6 +1054,7 @@ fn build_top_objects_content(
         "top-objects-disable-selected",
         TopObjectsAction::DisableSelected,
         9,
+        font_size,
     );
     spawn_action_button(
         commands,
@@ -989,6 +1062,7 @@ fn build_top_objects_content(
         "top-objects-disable-all",
         TopObjectsAction::DisableAll,
         10,
+        font_size,
     );
     spawn_action_button(
         commands,
@@ -996,6 +1070,7 @@ fn build_top_objects_content(
         "top-objects-refresh",
         TopObjectsAction::Refresh,
         11,
+        font_size,
     );
 
     TopObjectsUi {
@@ -1006,6 +1081,257 @@ fn build_top_objects_content(
         object_field,
         owner_field,
         parcel_field,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Gallery specimens.
+// ---------------------------------------------------------------------------
+
+/// The Top Scripts window's gallery / `ui_test` specimen — see
+/// `spawn_top_objects_specimen`.
+pub fn spawn_top_scripts_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: crate::ui_element::ElementCx,
+) -> Entity {
+    spawn_top_objects_specimen(commands, parent, cx, TopObjectsKind::Scripts)
+}
+
+/// The Top Colliders window's gallery / `ui_test` specimen — see
+/// `spawn_top_objects_specimen`.
+pub fn spawn_top_colliders_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: crate::ui_element::ElementCx,
+) -> Entity {
+    spawn_top_objects_specimen(commands, parent, cx, TopObjectsKind::Colliders)
+}
+
+/// A report window's specimen: the live content, built by the same
+/// [`build_top_objects_content`] the viewer's window is, showing a four-row
+/// report sorted score-first with the top row selected — its cells written by
+/// the live [`row_cells`], and its id line and object / owner fields filled the
+/// way `mirror_selections` fills them for a primary row.
+fn spawn_top_objects_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: crate::ui_element::ElementCx,
+    kind: TopObjectsKind,
+) -> Entity {
+    // The action buttons' and rows' live observers name these; a host without
+    // the plugin (the gallery) would fail their parameter validation on a
+    // click. With them present a press finds no window state and does nothing,
+    // which is what a specimen's control should do.
+    commands.init_resource::<SlIdentity>();
+    commands.init_resource::<MapTracking>();
+    commands.init_resource::<TopObjectsConfirm>();
+    commands.init_resource::<Messages<ShowNotification>>();
+
+    let ui = build_top_objects_content(commands, parent, kind, cx.font_size);
+    let spec = kind.table();
+    let items: Vec<LandStatItem> = sample_rows(kind)
+        .iter()
+        .zip(1_u32..)
+        .map(|(sample, id)| LandStatItem {
+            task_local_id: sl_client_bevy::RegionLocalObjectId(id),
+            task_id: ObjectKey::from(sl_client_bevy::Uuid::from_u128(u128::from(id))),
+            location: sl_client_bevy::RegionCoordinates::new(
+                sample.location.x,
+                sample.location.y,
+                sample.location.z,
+            ),
+            score: LandStatScore::from_wire(kind.report(), sample.score),
+            task_name: cx.text(sample.name),
+            owner_name: cx.text(sample.owner),
+            extended: Some(LandStatExtended {
+                mono_score: 0.0,
+                owner_id: None,
+                parcel_name: cx.text(sample.parcel),
+                public_urls: sample.urls,
+                script_size_bytes: sample.memory,
+                timestamp: 1_700_000_000,
+            }),
+        })
+        .collect();
+    let rows: Vec<Vec<String>> = items
+        .iter()
+        .map(|item| {
+            let mut values = vec![String::new(); spec.columns.len()];
+            for (column, value) in row_cells(item, kind) {
+                if let Some(slot) = values.get_mut(column) {
+                    *slot = value;
+                }
+            }
+            values
+        })
+        .collect();
+    let pooled = crate::specimen::spawn_sample_table_rows(
+        commands,
+        crate::ui_table::SpecimenTable {
+            root: ui.table,
+            viewport: ui.viewport,
+        },
+        spec,
+        &rows,
+        &[0],
+    );
+    for (row_entity, _cells) in pooled {
+        commands
+            .entity(row_entity)
+            .observe(on_top_objects_row_press);
+    }
+
+    let total_score: f32 = sample_rows(kind).iter().map(|sample| sample.score).sum();
+    let count = items.len();
+    let summary = match kind {
+        TopObjectsKind::Scripts => format!(
+            "{count} scripts taking a total of {}",
+            format_score(LandStatScore::from_wire(
+                LandStatReportType::TopScripts,
+                total_score,
+            ))
+        ),
+        TopObjectsKind::Colliders => {
+            format!("Top {count} objects experiencing many potential collisions")
+        }
+    };
+    commands
+        .entity(ui.summary)
+        .insert(Text::new(cx.text(&summary)));
+    if let Some(primary) = items.first() {
+        commands
+            .entity(ui.id_line)
+            .insert(Text::new(primary.task_id.uuid().to_string()));
+        for (field, value) in [
+            (ui.object_field, primary.task_name.trim().to_owned()),
+            (ui.owner_field, primary.owner_name.trim().to_owned()),
+        ] {
+            crate::edit_fields::seed_field_deferred(commands, Some(field), value);
+        }
+    }
+    parent
+}
+
+/// One specimen report row, before it becomes a [`LandStatItem`].
+#[derive(Debug, Clone, Copy)]
+struct SampleRow {
+    /// The score, in the report's wire unit.
+    score: f32,
+    /// The object's name.
+    name: &'static str,
+    /// The owner's name.
+    owner: &'static str,
+    /// The object's region position.
+    location: Vec3,
+    /// The parcel it stands on.
+    parcel: &'static str,
+    /// Its script memory, in bytes.
+    memory: f32,
+    /// Its public URL count.
+    urls: i32,
+}
+
+/// The four specimen rows of a `kind` report, highest score first (the list's
+/// default sort).
+const fn sample_rows(kind: TopObjectsKind) -> [SampleRow; 4] {
+    /// A row at `score` with the rest of its fields.
+    const fn sample(
+        score: f32,
+        name: &'static str,
+        owner: &'static str,
+        location: Vec3,
+        parcel: &'static str,
+        memory: f32,
+        urls: i32,
+    ) -> SampleRow {
+        SampleRow {
+            score,
+            name,
+            owner,
+            location,
+            parcel,
+            memory,
+            urls,
+        }
+    }
+    match kind {
+        TopObjectsKind::Scripts => [
+            sample(
+                12.5,
+                "Sample Vendor",
+                "Sample Resident",
+                Vec3::new(128.0, 64.0, 22.0),
+                "Test Parcel",
+                262_144.0,
+                1,
+            ),
+            sample(
+                4.25,
+                "Example Door",
+                "Example Owner",
+                Vec3::new(40.0, 200.0, 31.0),
+                "Sample Plaza",
+                65_536.0,
+                0,
+            ),
+            sample(
+                1.1,
+                "Radar Relay",
+                "Sample Resident",
+                Vec3::new(131.0, 70.0, 22.5),
+                "Test Parcel",
+                32_768.0,
+                0,
+            ),
+            sample(
+                0.3,
+                "Welcome Board",
+                "Example Group",
+                Vec3::new(12.0, 12.0, 25.0),
+                "Sample Plaza",
+                16_384.0,
+                2,
+            ),
+        ],
+        TopObjectsKind::Colliders => [
+            sample(
+                348.0,
+                "Bumper Car",
+                "Sample Resident",
+                Vec3::new(128.0, 64.0, 22.0),
+                "Test Parcel",
+                0.0,
+                0,
+            ),
+            sample(
+                120.0,
+                "Rolling Ball",
+                "Example Owner",
+                Vec3::new(40.0, 200.0, 31.0),
+                "Sample Plaza",
+                0.0,
+                0,
+            ),
+            sample(
+                45.0,
+                "Physics Crate",
+                "Sample Resident",
+                Vec3::new(131.0, 70.0, 22.5),
+                "Test Parcel",
+                0.0,
+                0,
+            ),
+            sample(
+                7.0,
+                "Swinging Gate",
+                "Example Group",
+                Vec3::new(12.0, 12.0, 25.0),
+                "Sample Plaza",
+                0.0,
+                0,
+            ),
+        ],
     }
 }
 
@@ -1024,12 +1350,17 @@ fn spawn_row(commands: &mut Commands, parent: Entity) -> Entity {
 }
 
 /// A row opening with a translated label.
-fn spawn_labelled_row(commands: &mut Commands, parent: Entity, key: &'static str) -> Entity {
+fn spawn_labelled_row(
+    commands: &mut Commands,
+    parent: Entity,
+    key: &'static str,
+    font_size: f32,
+) -> Entity {
     let row_entity = spawn_row(commands, parent);
     commands.spawn((
         Text::default(),
         Translated::new(key),
-        UiFont::Sans.at(FONT_SIZE),
+        UiFont::Sans.at(font_size),
         text_role(DIM_LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(row_entity),
@@ -1038,11 +1369,11 @@ fn spawn_labelled_row(commands: &mut Commands, parent: Entity, key: &'static str
 }
 
 /// An empty text line the caller updates in place.
-fn spawn_line(commands: &mut Commands, parent: Entity, color: Color) -> Entity {
+fn spawn_line(commands: &mut Commands, parent: Entity, color: Color, font_size: f32) -> Entity {
     commands
         .spawn((
             Text::new(String::new()),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(color),
             Pickable::IGNORE,
             ChildOf(parent),
@@ -1056,12 +1387,13 @@ fn spawn_filter_field(
     parent: Entity,
     element: &'static str,
     tab_index: i32,
+    font_size: f32,
 ) -> Entity {
     spawn_text_input(
         commands,
         parent,
         &TextInputSpec {
-            font_size: FONT_SIZE,
+            font_size,
             width_glyphs: 24.0,
             tab_index,
             max_characters: Some(63),
@@ -1077,6 +1409,7 @@ fn spawn_action_button(
     label_key: &'static str,
     action: TopObjectsAction,
     tab_index: i32,
+    font_size: f32,
 ) {
     let button = spawn_button(
         commands,
@@ -1088,7 +1421,7 @@ fn spawn_action_button(
         .tab_index(tab_index)
         .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
         .label_color(LABEL_COLOR)
-        .font_size(FONT_SIZE)
+        .font_size(font_size)
         // Both ends of `.sk-button:disabled .sk-text`, which greys a refused
         // action now that nothing here repaints its caption.
         .label_class(TEXT_CLASS),
@@ -2404,6 +2737,68 @@ mod tests {
                     .then_some((floater.id, shown.0))
                 })
                 .collect()
+        }
+
+        /// The gallery specimen is the live window's content with its report
+        /// drawn into the table's own pooled rows: one row per sample, in score
+        /// order, each cell written by the live `row_cells`, the list's item
+        /// count following, and the top row selected.
+        #[test]
+        fn the_specimen_draws_its_report_into_the_live_table() -> Result<(), TestError> {
+            let mut app = top_objects_app();
+            let parent = app.world_mut().spawn(Node::default()).id();
+            let mut commands = app.world_mut().commands();
+            super::super::spawn_top_scripts_specimen(
+                &mut commands,
+                parent,
+                crate::ui_element::ElementCx::new(),
+            );
+            app.world_mut().flush();
+            app.update();
+
+            let mut rows: Vec<(usize, Entity)> = app
+                .world_mut()
+                .query::<(
+                    &crate::virtual_list::VirtualRow,
+                    &crate::ui_table::TableRowCells,
+                )>()
+                .iter(app.world())
+                .filter_map(|(row, cells)| Some((row.index?, cells.cell(super::super::COL_NAME)?)))
+                .collect();
+            rows.sort_unstable_by_key(|(index, _cell)| *index);
+            let names: Vec<String> = rows
+                .iter()
+                .map(|(_index, cell)| {
+                    app.world()
+                        .get::<Text>(*cell)
+                        .map(|text| text.0.clone())
+                        .unwrap_or_default()
+                })
+                .collect();
+            assert_eq!(
+                names,
+                vec![
+                    "Sample Vendor",
+                    "Example Door",
+                    "Radar Relay",
+                    "Welcome Board"
+                ]
+            );
+            let counts: Vec<usize> = app
+                .world_mut()
+                .query::<&VirtualList>()
+                .iter(app.world())
+                .map(|list| list.item_count)
+                .collect();
+            assert_eq!(counts, vec![4]);
+            let selected: Vec<Vec<usize>> = app
+                .world_mut()
+                .query::<&crate::ui_table::TableState>()
+                .iter(app.world())
+                .map(|table| table.selected().to_vec())
+                .collect();
+            assert_eq!(selected, vec![vec![0]]);
+            Ok(())
         }
 
         /// Opening asks the region for the report the button named, over the

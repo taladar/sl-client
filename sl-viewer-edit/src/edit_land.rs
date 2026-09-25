@@ -69,7 +69,7 @@ use sl_viewer_world_scene::parcel_borders::SETTING_SHOW_PARCEL_OWNERS;
 
 use crate::coords::{bevy_to_sl_vec, sl_to_bevy_vec};
 use crate::edit_params::set_disabled_class;
-use crate::edit_tool::{LABEL_CLASS, TOOL_FONT_SIZE, VALUE_CLASS, spawn_row_label};
+use crate::edit_tool::{LABEL_CLASS, VALUE_CLASS, spawn_row_label};
 use crate::gizmos::{GizmoInteraction, on_gizmo_layer};
 use crate::i18n::{TransArgs, Translator};
 use crate::intents::{AboutLandSubject, OpenAboutLand};
@@ -484,7 +484,7 @@ struct LandActionRadio;
 /// the greyed-out state is a skin class on the caption
 /// ([`set_disabled_class`]), which is where the build tools carry it.
 #[derive(Resource, Debug)]
-struct LandPanelUi {
+pub(crate) struct LandPanelUi {
     /// The panel root, shown only while the Land tool is active.
     panel: Entity,
     /// The parcel / area read-out line.
@@ -1104,10 +1104,15 @@ fn draped_point(terrain: &TerrainState, region: RegionHandle, point: Vec2) -> Ve
 // The panel.
 // ---------------------------------------------------------------------------
 
-/// Spawn the Land panel under the Build Tools floater's content column, hidden
-/// until the Land tool is active — the sibling of
-/// [`crate::edit_create::spawn_create_panel`].
-pub(crate) fn spawn_land_panel(commands: &mut Commands, parent: Entity) {
+/// Spawn the Land panel under the Build Tools floater's content column at
+/// `font_size`, hidden until the Land tool is active — the sibling of
+/// [`crate::edit_create::spawn_create_panel`]. Returns the [`LandPanelUi`] the
+/// live floater publishes.
+pub(crate) fn spawn_land_panel(
+    commands: &mut Commands,
+    parent: Entity,
+    font_size: f32,
+) -> LandPanelUi {
     let panel = commands
         .spawn((
             Node {
@@ -1135,7 +1140,7 @@ pub(crate) fn spawn_land_panel(commands: &mut Commands, parent: Entity) {
             labels: &labels,
             active: 0,
             tab_index: 40,
-            font_size: TOOL_FONT_SIZE,
+            font_size,
             layout: RadioLayout::Column,
             translate_labels: true,
         },
@@ -1148,29 +1153,36 @@ pub(crate) fn spawn_land_panel(commands: &mut Commands, parent: Entity) {
         panel,
         "build-land-size-label",
         SETTING_LAND_BRUSH_SIZE,
-        LandBrushRadius::MIN_METRES,
-        LandBrushRadius::MAX_METRES,
+        (LandBrushRadius::MIN_METRES, LandBrushRadius::MAX_METRES),
         41,
+        font_size,
     );
     spawn_land_slider(
         commands,
         panel,
         "build-land-strength-label",
         SETTING_LAND_BRUSH_FORCE,
-        FORCE_MIN,
-        FORCE_MAX,
+        (FORCE_MIN, FORCE_MAX),
         42,
+        font_size,
     );
 
     // Apply: run the picked brush over the whole selection in one stroke.
-    let apply = spawn_land_button(commands, panel, LandButton::Apply, "build-land-apply", 43);
+    let apply = spawn_land_button(
+        commands,
+        panel,
+        LandButton::Apply,
+        "build-land-apply",
+        43,
+        font_size,
+    );
 
     // The parcel read-out and the parcel actions (the reference's
     // `land info panel`).
     let summary = commands
         .spawn((
             Text::default(),
-            UiFont::Sans.at(TOOL_FONT_SIZE),
+            UiFont::Sans.at(font_size),
             // A skinless fallback; the skin recolours via the class token.
             TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
             ClassList::new_with_classes([LABEL_CLASS]),
@@ -1184,6 +1196,7 @@ pub(crate) fn spawn_land_panel(commands: &mut Commands, parent: Entity) {
         LandButton::AboutLand,
         "build-land-about",
         44,
+        font_size,
     );
     let subdivide = spawn_land_button(
         commands,
@@ -1191,32 +1204,41 @@ pub(crate) fn spawn_land_panel(commands: &mut Commands, parent: Entity) {
         LandButton::Subdivide,
         "build-land-subdivide",
         45,
+        font_size,
     );
-    let join = spawn_land_button(commands, panel, LandButton::Join, "build-land-join", 46);
+    let join = spawn_land_button(
+        commands,
+        panel,
+        LandButton::Join,
+        "build-land-join",
+        46,
+        font_size,
+    );
 
     // Show owners: the in-world ownership tint, bound to the setting the terrain
     // overlay reads.
-    spawn_owners_checkbox(commands, panel, 47);
+    spawn_owners_checkbox(commands, panel, 47, font_size);
 
-    commands.insert_resource(LandPanelUi {
+    LandPanelUi {
         panel,
         summary,
         apply,
         about_land,
         subdivide,
         join,
-    });
+    }
 }
 
-/// Spawn one labelled slider bound to a persisted land setting.
+/// Spawn one labelled slider bound to a persisted land setting, travelling
+/// `(min, max)`, its label at `font_size`.
 fn spawn_land_slider(
     commands: &mut Commands,
     parent: Entity,
     label_key: &'static str,
     setting: &'static str,
-    min: f32,
-    max: f32,
+    (min, max): (f32, f32),
     tab_index: i32,
+    font_size: f32,
 ) {
     let row_entity = commands
         .spawn((
@@ -1228,7 +1250,7 @@ fn spawn_land_slider(
             ChildOf(parent),
         ))
         .id();
-    spawn_row_label(commands, row_entity, label_key);
+    spawn_row_label(commands, row_entity, label_key, font_size);
     // A hundred steps across the travel: fine enough that the thumb reads as
     // continuous, coarse enough that a drag does not write the setting (and so
     // re-seed the state) on every sub-pixel move.
@@ -1250,14 +1272,15 @@ fn spawn_land_slider(
         .insert(Name::new(format!("build-land:{setting}")));
 }
 
-/// Spawn one Land-panel action button, returning its **caption** — the node the
-/// greyed-out skin class goes on.
+/// Spawn one Land-panel action button at `font_size`, returning its
+/// **caption** — the node the greyed-out skin class goes on.
 fn spawn_land_button(
     commands: &mut Commands,
     parent: Entity,
     action: LandButton,
     label_key: &'static str,
     tab_index: i32,
+    font_size: f32,
 ) -> Entity {
     let spawned = spawn_button(
         commands,
@@ -1275,7 +1298,7 @@ fn spawn_land_button(
         )
         // A skinless fallback; the skin recolours via the class token.
         .label_color(Color::WHITE)
-        .font_size(TOOL_FONT_SIZE)
+        .font_size(font_size)
         .label_class(VALUE_CLASS),
     );
     commands
@@ -1292,7 +1315,7 @@ fn spawn_land_button(
 /// widget's `Checked` from the store and back, and `.sk-checkbox:checked` draws
 /// the tick — so a setting changed in Preferences reaches this box with no code
 /// in this panel at all.
-fn spawn_owners_checkbox(commands: &mut Commands, parent: Entity, tab_index: i32) {
+fn spawn_owners_checkbox(commands: &mut Commands, parent: Entity, tab_index: i32, font_size: f32) {
     let checkbox = spawn_checkbox(
         commands,
         parent,
@@ -1300,7 +1323,7 @@ fn spawn_owners_checkbox(commands: &mut Commands, parent: Entity, tab_index: i32
             element: "build-land-show-owners",
             label: "build-land-show-owners".to_owned(),
             tab_index,
-            font_size: TOOL_FONT_SIZE,
+            font_size,
             translate_label: true,
         },
     );
@@ -1459,20 +1482,32 @@ struct LandActionSinks<'w> {
     commands: MessageWriter<'w, SlCommand>,
 }
 
+/// What a Land-panel button acts on and where it reports: the brush, the
+/// selected land, the region, the terrain and the outboxes — optional in
+/// [`handle_land_action_press`], absent only in the gallery / `ui_test` hosts.
+type LandActionSession<'w> = (
+    Res<'w, LandToolState>,
+    Res<'w, LandSelection>,
+    LandRegion<'w>,
+    Res<'w, TerrainState>,
+    LandActionSinks<'w>,
+);
+
 /// The observer every Land-panel button runs on press.
 fn handle_land_action_press(
     press: On<Pointer<Press>>,
     buttons: Query<&LandButton>,
-    land: Res<LandToolState>,
-    selection: Res<LandSelection>,
-    region: LandRegion,
-    terrain: Res<TerrainState>,
-    mut sinks: LandActionSinks,
+    session: Option<LandActionSession<'_>>,
 ) {
     if press.button != PointerButton::Primary {
         return;
     }
     let Ok(&button) = buttons.get(press.entity) else {
+        return;
+    };
+    // Absent only in the gallery / `ui_test` hosts, whose specimen has no
+    // session behind it.
+    let Some((land, selection, region, terrain, mut sinks)) = session else {
         return;
     };
     match button {

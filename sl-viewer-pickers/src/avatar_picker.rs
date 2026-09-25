@@ -68,8 +68,8 @@ use sl_client_bevy::{
 use sl_viewer_ui_core::skin::{LIST_ROW_CLASS, LIST_SURFACE_CLASS, SELECTED_CLASS, text_role};
 
 use crate::floater::{
-    Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterHost, FloaterOp, FloaterOwner,
-    FloaterSpec, FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater, picker_identity,
+    Floater, FloaterCaps, FloaterCommand, FloaterHost, FloaterOp, FloaterOwner, FloaterSpec,
+    FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater, picker_identity,
 };
 use crate::i18n::Translated;
 use crate::intents::{AvatarPicked, OpenAvatarPicker, PickedAvatar};
@@ -305,14 +305,14 @@ pub fn avatar_picker_floater_spec() -> FloaterSpec {
     }
 }
 
-/// Build one picker window's content: the source tabs, the search row, the
-/// result list, and the OK / Cancel row.
-fn build_picker_content(commands: &mut Commands, handle: &FloaterHandle) -> AvatarPickerUi {
-    commands
-        .entity(handle.title_text)
-        .insert(Translated::new("avatar-picker-title"));
-    let content = handle.content;
-
+/// Build one picker window's content into `content` at `font_size`: the
+/// source tabs, the search row, the result list, and the OK / Cancel row.
+/// Shared by the live window and its gallery specimen.
+fn build_picker_content(
+    commands: &mut Commands,
+    content: Entity,
+    font_size: f32,
+) -> AvatarPickerUi {
     let tab_labels: [String; 3] = [
         "avatar-picker-tab-search".to_owned(),
         "avatar-picker-tab-friends".to_owned(),
@@ -327,7 +327,7 @@ fn build_picker_content(commands: &mut Commands, handle: &FloaterHandle) -> Avat
             labels: &tab_labels,
             active: 0,
             tab_index: 1,
-            font_size: PICKER_FONT_SIZE,
+            font_size,
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
@@ -348,7 +348,7 @@ fn build_picker_content(commands: &mut Commands, handle: &FloaterHandle) -> Avat
         commands,
         search_row,
         &crate::ui_text_input::TextInputSpec {
-            font_size: PICKER_FONT_SIZE,
+            font_size,
             width_glyphs: 18.0,
             tab_index: 2,
             ..crate::ui_text_input::TextInputSpec::new(
@@ -363,6 +363,7 @@ fn build_picker_content(commands: &mut Commands, handle: &FloaterHandle) -> Avat
         "avatar-picker-go",
         PickerButton::Go,
         3,
+        font_size,
     );
 
     // The result list: a fixed-height clipped column the rebuild fills.
@@ -390,13 +391,21 @@ fn build_picker_content(commands: &mut Commands, handle: &FloaterHandle) -> Avat
             ChildOf(content),
         ))
         .id();
-    let _ok = spawn_picker_button(commands, buttons, "avatar-picker-ok", PickerButton::Ok, 4);
+    let _ok = spawn_picker_button(
+        commands,
+        buttons,
+        "avatar-picker-ok",
+        PickerButton::Ok,
+        4,
+        font_size,
+    );
     let _cancel = spawn_picker_button(
         commands,
         buttons,
         "avatar-picker-cancel",
         PickerButton::Cancel,
         5,
+        font_size,
     );
 
     AvatarPickerUi {
@@ -405,6 +414,50 @@ fn build_picker_content(commands: &mut Commands, handle: &FloaterHandle) -> Avat
         search_row,
         list,
     }
+}
+
+// --- Gallery specimen -------------------------------------------------------
+
+/// The avatar picker's gallery / `ui_test` specimen: the live content, built by
+/// the same `build_picker_content` the viewer's window is, at the cell's font
+/// size, with the Search tab (the one `bridge_picker_tabs` shows the search
+/// row on, which the builder leaves shown) holding a sample reply: set into an
+/// `AvatarPickerState` the way a reply is, one row selected through the live
+/// selection, and drawn by the rebuild's own `draw_picker_list` — rows with
+/// and without a username column. The state is not inserted on the window, so
+/// the live systems leave the specimen alone.
+pub fn spawn_avatar_picker_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: crate::ui_element::ElementCx,
+) -> Entity {
+    let ui = build_picker_content(commands, parent, cx.font_size);
+    let rows: Vec<PickerRow> = [
+        ("Sample Resident", "sample.resident"),
+        ("Example Person", "example.person"),
+        ("Test Avatar", ""),
+        ("Another Resident", "another.resident"),
+    ]
+    .into_iter()
+    .zip(1_u128..)
+    .map(|((label, username), id)| PickerRow {
+        agent: AgentKey::from(Uuid::from_u128(id)),
+        label: cx.text(label),
+        // An absent username stays absent: a script cell would otherwise turn
+        // the empty string into a sample one and hide the one-column row.
+        username: if username.is_empty() {
+            String::new()
+        } else {
+            cx.text(username)
+        },
+    })
+    .collect();
+    let mut state = AvatarPickerState::default();
+    state.set_rows(rows);
+    state.searched = true;
+    state.select(1, false, false);
+    draw_picker_list(commands, ui.list, &state, cx.font_size);
+    parent
 }
 
 /// Which of a window's buttons a node is — a component rather than a closure
@@ -496,6 +549,7 @@ fn spawn_picker_button(
     label_key: &'static str,
     action: PickerButton,
     tab_index: i32,
+    font_size: f32,
 ) -> Entity {
     let button = ui_spawn::spawn_button(
         commands,
@@ -508,7 +562,7 @@ fn spawn_picker_button(
         .padding(10.0, 3.0)
         .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
         .label_color(LABEL_COLOR)
-        .font_size(PICKER_FONT_SIZE),
+        .font_size(font_size),
     )
     .button;
     commands
@@ -575,7 +629,10 @@ fn handle_open_requests(
         let opened = floaters.open(avatar_picker_floater_spec(), key);
         match opened {
             KeyedFloaterOpen::Spawned(handle) => {
-                let ui = build_picker_content(&mut commands, &handle);
+                commands
+                    .entity(handle.title_text)
+                    .insert(Translated::new("avatar-picker-title"));
+                let ui = build_picker_content(&mut commands, handle.content, PICKER_FONT_SIZE);
                 let state = AvatarPickerState {
                     requester: Some(open.requester),
                     allow_multiple: open.allow_multiple,
@@ -810,83 +867,117 @@ fn rebuild_picker_list(
                 commands.entity(*child).despawn();
             }
         }
-        // A search that answered nobody says so. An empty list is otherwise
-        // indistinguishable from a search that never ran — the reference shows a
-        // "not found" row for exactly this reason.
-        if state.rows.is_empty() && state.searched && state.tab == PickerTab::Search {
-            commands.spawn((
-                Text::default(),
-                Translated::new(NOT_FOUND_KEY),
-                UiFont::Sans.at(PICKER_FONT_SIZE),
-                text_role(USERNAME_COLOR),
+        draw_picker_list(&mut commands, ui.list, &state, PICKER_FONT_SIZE);
+    }
+}
+
+/// Draw `state`'s rows into the (emptied) `list` at `font_size`: the rows, the
+/// selection, and the "not found" row for a search that answered nobody. What
+/// the rebuild draws, and the specimen with it.
+fn draw_picker_list(
+    commands: &mut Commands,
+    list: Entity,
+    state: &AvatarPickerState,
+    font_size: f32,
+) {
+    // A search that answered nobody says so. An empty list is otherwise
+    // indistinguishable from a search that never ran — the reference shows a
+    // "not found" row for exactly this reason.
+    let not_found = state.rows.is_empty() && state.searched && state.tab == PickerTab::Search;
+    spawn_picker_rows(
+        commands,
+        list,
+        &state.rows,
+        &state.selected,
+        not_found,
+        font_size,
+    );
+}
+
+/// Spawn one clickable row per entry of `rows` into `list` at `font_size`
+/// (`selected` rows carry the selection class), preceded by the "not found"
+/// row when `not_found`. What the rebuild draws, and the specimen with it.
+fn spawn_picker_rows(
+    commands: &mut Commands,
+    list: Entity,
+    rows: &[PickerRow],
+    selected: &[usize],
+    not_found: bool,
+    font_size: f32,
+) {
+    if not_found {
+        commands.spawn((
+            Text::default(),
+            Translated::new(NOT_FOUND_KEY),
+            UiFont::Sans.at(font_size),
+            text_role(USERNAME_COLOR),
+            Node {
+                padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
+                ..default()
+            },
+            Pickable::IGNORE,
+            Name::new("avatar-picker-not-found"),
+            ChildOf(list),
+        ));
+    }
+    for (index, row_data) in rows.iter().enumerate() {
+        let is_selected = selected.contains(&index);
+        commands
+            .spawn((
+                Button,
                 Node {
                     padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
-                    ..default()
+                    align_items: AlignItems::Center,
+                    ..row(Val::Px(8.0))
                 },
-                Pickable::IGNORE,
-                Name::new("avatar-picker-not-found"),
-                ChildOf(ui.list),
-            ));
-        }
-        for (index, row_data) in state.rows.iter().enumerate() {
-            let selected = state.selected.contains(&index);
-            commands
-                .spawn((
-                    Button,
-                    Node {
-                        padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
-                        align_items: AlignItems::Center,
-                        ..row(Val::Px(8.0))
-                    },
-                    ClassList::new_with_classes(
-                        core::iter::once(LIST_ROW_CLASS).chain(selected.then_some(SELECTED_CLASS)),
-                    ),
-                    Pickable::default(),
-                    Name::new("avatar-picker-row"),
-                    ChildOf(ui.list),
-                ))
-                .observe(
-                    move |press: On<Pointer<Press>>,
-                          keyboard: Res<ButtonInput<KeyCode>>,
-                          mut windows: Query<&mut AvatarPickerState>,
-                          parents: Query<&ChildOf>,
-                          floaters: Query<(Entity, &Floater)>| {
-                        if press.button != PointerButton::Primary {
-                            return;
-                        }
-                        // The row's own window, not "the" picker: two are up when
-                        // two instanced windows are each picking a resident.
-                        let Some(window) = host_floater(press.entity, &parents, &floaters) else {
-                            return;
-                        };
-                        let Ok(mut state) = windows.get_mut(window) else {
-                            return;
-                        };
-                        let ctrl = keyboard.pressed(KeyCode::ControlLeft)
-                            || keyboard.pressed(KeyCode::ControlRight);
-                        let shift = keyboard.pressed(KeyCode::ShiftLeft)
-                            || keyboard.pressed(KeyCode::ShiftRight);
-                        state.select(index, ctrl, shift);
-                    },
-                )
-                .with_children(|row| {
+                ClassList::new_with_classes(
+                    core::iter::once(LIST_ROW_CLASS).chain(is_selected.then_some(SELECTED_CLASS)),
+                ),
+                Pickable::default(),
+                Name::new("avatar-picker-row"),
+                ChildOf(list),
+            ))
+            .observe(
+                move |press: On<Pointer<Press>>,
+                      keyboard: Res<ButtonInput<KeyCode>>,
+                      mut windows: Query<&mut AvatarPickerState>,
+                      parents: Query<&ChildOf>,
+                      floaters: Query<(Entity, &Floater)>| {
+                    if press.button != PointerButton::Primary {
+                        return;
+                    }
+                    // The row's own window, not "the" picker: two are up when
+                    // two instanced windows are each picking a resident.
+                    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+                        return;
+                    };
+                    let Ok(mut state) = windows.get_mut(window) else {
+                        return;
+                    };
+                    let ctrl = keyboard.pressed(KeyCode::ControlLeft)
+                        || keyboard.pressed(KeyCode::ControlRight);
+                    let shift = keyboard.pressed(KeyCode::ShiftLeft)
+                        || keyboard.pressed(KeyCode::ShiftRight);
+                    state.select(index, ctrl, shift);
+                },
+            )
+            .with_children(|row| {
+                row.spawn((
+                    Text::new(row_data.label.clone()),
+                    UiFont::Sans.at(font_size),
+                    text_role(LABEL_COLOR),
+                    Pickable::IGNORE,
+                ));
+                // The username column, only where the source knows one.
+                if !row_data.username.is_empty() {
                     row.spawn((
-                        Text::new(row_data.label.clone()),
-                        UiFont::Sans.at(PICKER_FONT_SIZE),
-                        text_role(LABEL_COLOR),
+                        Text::new(row_data.username.clone()),
+                        UiFont::Sans.at(font_size),
+                        text_role(USERNAME_COLOR),
                         Pickable::IGNORE,
                     ));
-                    // The username column, only where the source knows one.
-                    if !row_data.username.is_empty() {
-                        row.spawn((
-                            Text::new(row_data.username.clone()),
-                            UiFont::Sans.at(PICKER_FONT_SIZE),
-                            text_role(USERNAME_COLOR),
-                            Pickable::IGNORE,
-                        ));
-                    }
-                });
-        }
+                }
+            });
     }
 }
 

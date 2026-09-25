@@ -86,6 +86,7 @@
 //! `llpanelexperiences`, `llpanelexperiencepicker`, `llpanelexperiencelog`,
 //! `panel_experience_search.xml`, `panel_experience_log.xml`.
 
+use bevy::ecs::system::RunSystemOnce as _;
 use bevy::input_focus::InputFocus;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
@@ -93,15 +94,12 @@ use bevy::text::EditableText;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
 use sl_viewer_ui_core::skin::BUTTON_CLASS;
-use sl_viewer_ui_core::skin::{
-    DISABLED_TEXT_CLASS, EXPERIENCE_TEXT_CLASS, TEXT_CLASS, set_state_class, text_meaning,
-    text_role,
-};
+use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class, text_role};
 use std::collections::BTreeSet;
 
 use sl_client_bevy::{
-    Command, ExperienceInfo, ExperienceKey, ExperiencePermission, SlCommand, SlEvent,
-    SlSessionEvent,
+    Command, ExperienceInfo, ExperienceKey, ExperiencePermission, GroupKey, OwnerKey, SlCommand,
+    SlEvent, SlSessionEvent, Uuid,
 };
 use sl_l10n::{DateTimeLength, DateTimeStyle};
 use sl_settings::{Scope, SettingValue};
@@ -110,7 +108,8 @@ use crate::experience_log::{
     ExperienceLog, LoggedExperienceEvent, SETTING_NOTIFY_ALL, permission_short,
 };
 use crate::experience_profile::{
-    MATURITY_GENERAL, MATURITY_KEYS, OpenExperienceProfile, maturity_from_index, maturity_index,
+    MATURITY_ADULT, MATURITY_GENERAL, MATURITY_KEYS, MATURITY_MODERATE, OpenExperienceProfile,
+    maturity_from_index, maturity_index,
 };
 use crate::experience_search::{
     COL_SEARCH_NAME, COL_SEARCH_OWNER, COL_SEARCH_RATING, ExperienceInfos, ExperienceRow,
@@ -126,25 +125,23 @@ use crate::social::GroupsModel;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
-use crate::ui_element::{ElementCx, UiAction};
+use crate::ui_element::ElementCx;
 use crate::ui_font::UiFont;
 use crate::ui_search::{SearchFieldSpec, spawn_search_field};
 use crate::ui_tab::{
     DEFAULT_ELLIPSIS, TabPlacement, TabSpec, fill_tab_container, spawn_tab_container,
 };
 use crate::ui_table::{
-    TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells, TableSelectionMode,
-    TableSortDefault, TableSpec, TableState, keep_order, order_by_sort_keys,
-    register_table_settings, set_table_cell, spawn_table, spawn_table_row,
+    SpecimenTable, TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells,
+    TableSelectionMode, TableSortDefault, TableSpec, TableState, keep_order, order_by_sort_keys,
+    register_table_settings, set_table_cell, spawn_specimen_table_rows, spawn_table,
+    spawn_table_row,
 };
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 use crate::world_api::AvatarState;
 
 /// The floater's id (its geometry-persistence key and menu target).
 pub const EXPERIENCES_FLOATER_ID: &str = "experiences";
-
-/// The element id the gallery specimen and its inert actions report under.
-const EXPERIENCES_ELEMENT: &str = "experiences-floater";
 
 /// The persisted-settings section this window's knobs live under — the same one
 /// [`crate::experience_log`] uses, because they are one feature's settings.
@@ -175,23 +172,11 @@ const MIN_CONTENT_SIZE: Vec2 = Vec2::new(440.0, 280.0);
 /// vertical (see [`spawn_experiences_floater`]).
 const STRIP_WIDTH: f32 = 124.0;
 
-/// The gallery specimen's width, in logical pixels.
-///
-/// Deliberately **narrower** than [`CONTENT_SIZE`]: the floater sweep spawns a
-/// specimen into the window's content *slot*, whose 8 px of padding leave less
-/// room than the declared content size. A specimen as wide as the window it
-/// stands for overflows that slot by exactly the padding, at every scale.
-const SPECIMEN_WIDTH: f32 = 560.0;
-
 /// The primary body text colour.
 const TEXT_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A dimmer secondary text colour (table headers, the short-id fallback).
 const DIM_TEXT_COLOR: Color = SkinPalette::FALLBACK.text_muted;
-
-/// The heading accent — the same emerald the experience toast wears, so the
-/// experience surfaces read as one family.
-const HEADING_COLOR: Color = Color::srgb(0.42, 0.82, 0.60);
 
 /// A button's fallback background — the skin's `.sk-button` overrides it.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.16, 0.19, 0.25);
@@ -678,6 +663,22 @@ enum ExperiencesButton {
     ClearEvents,
 }
 
+impl ExperiencesButton {
+    /// The button's name suffix: what it does, not which pane it sits in — a
+    /// window shows one pane at a time.
+    const fn slug(self) -> &'static str {
+        match self {
+            Self::Refresh => "refresh",
+            Self::Profile(_) => "profile",
+            Self::Forget(_) => "forget",
+            Self::Find => "find",
+            Self::Page(true) => "next",
+            Self::Page(false) => "previous",
+            Self::ClearEvents => "clear-events",
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Plugin.
 // ---------------------------------------------------------------------------
@@ -804,12 +805,44 @@ fn spawn_experiences_floater(mut commands: Commands, root: Res<UiRoot>) {
     commands
         .entity(handle.title_text)
         .insert(Translated::new("experiences-title"));
+    let content = spawn_experiences_content(&mut commands, handle.content, FONT_SIZE);
+    commands.insert_resource(ExperiencesUi {
+        panel: handle.root,
+        panes: content.panes,
+        search_field: content.search_field,
+        search_status: content.search_status,
+        maturity_combo: content.maturity_combo,
+    });
+}
+
+/// The window's content as built: everything [`ExperiencesUi`] keeps of it bar
+/// the floater root.
+struct ExperiencesContent {
+    /// Each pane's table root and viewport, in [`pane_index`] order.
+    panes: [PaneHandles; 7],
+    /// The search field.
+    search_field: Entity,
+    /// The search status / paging line.
+    search_status: Entity,
+    /// The search tab's rating filter combo.
+    maturity_combo: Entity,
+}
+
+/// Build the window's content into its content slot at `font_size` (the tables
+/// keep their static specs' font): the Refresh row over the seven-tab
+/// container, each tab holding its table and its actions. Shared by the live
+/// floater and the gallery specimen.
+fn spawn_experiences_content(
+    commands: &mut Commands,
+    slot: Entity,
+    font_size: f32,
+) -> ExperiencesContent {
     // Straight into the floater's own content slot, with no wrapper of its own:
     // the slot is already a gapped column, and a child given `width: 100%`
     // there resolves that percentage against the slot's *border* box while
     // sitting inside its *content* box — so it overflows by exactly the slot's
     // padding, every time. Stretch and `flex_grow` are what fill a slot.
-    let content = handle.content;
+    let content = slot;
 
     // The Refresh row above the tabs: the reference refreshes every list at
     // once (`refreshContents`), so the control belongs to the window, not to a
@@ -825,11 +858,11 @@ fn spawn_experiences_floater(mut commands: Commands, root: Res<UiRoot>) {
         ))
         .id();
     let _refresh = spawn_action(
-        &mut commands,
+        commands,
         refresh_row,
-        "experiences-refresh",
-        ExperiencesButton::Refresh,
+        ("experiences-refresh", ExperiencesButton::Refresh),
         1,
+        font_size,
     );
 
     let mut labels: Vec<String> = vec!["experiences-tab-search".to_owned()];
@@ -846,7 +879,7 @@ fn spawn_experiences_floater(mut commands: Commands, root: Res<UiRoot>) {
     // strip be widened by hand — the same answer Preferences already uses for
     // the same reason.
     let tabs = spawn_tab_container(
-        &mut commands,
+        commands,
         content,
         &TabSpec {
             element: "experiences-tabs",
@@ -854,41 +887,39 @@ fn spawn_experiences_floater(mut commands: Commands, root: Res<UiRoot>) {
             labels: &labels,
             active: 1,
             tab_index: 2,
-            font_size: FONT_SIZE,
+            font_size,
             strip_width: Some(STRIP_WIDTH),
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
         },
     );
-    fill_tab_container(&mut commands, TabPlacement::InlineStart, &tabs);
+    fill_tab_container(commands, TabPlacement::InlineStart, &tabs);
 
     let mut panels = tabs.panels.iter().copied();
     let search_panel = panels.next().unwrap_or(content);
-    let search = build_search_tab(&mut commands, search_panel);
+    let search = build_search_tab(commands, search_panel, font_size);
     let mut list_handles: Vec<PaneHandles> = Vec::with_capacity(ListTab::ALL.len());
     for tab in ListTab::ALL {
         let panel = panels.next().unwrap_or(content);
-        list_handles.push(build_list_tab(&mut commands, panel, tab));
+        list_handles.push(build_list_tab(commands, panel, tab, font_size));
     }
     let events_panel = panels.next().unwrap_or(content);
-    let events = build_events_tab(&mut commands, events_panel);
+    let events = build_events_tab(commands, events_panel, font_size);
 
-    let panes = [
-        pane_at(&list_handles, 0),
-        pane_at(&list_handles, 1),
-        pane_at(&list_handles, 2),
-        pane_at(&list_handles, 3),
-        pane_at(&list_handles, 4),
-        search.handles,
-        events,
-    ];
-    commands.insert_resource(ExperiencesUi {
-        panel: handle.root,
-        panes,
+    ExperiencesContent {
+        panes: [
+            pane_at(&list_handles, 0),
+            pane_at(&list_handles, 1),
+            pane_at(&list_handles, 2),
+            pane_at(&list_handles, 3),
+            pane_at(&list_handles, 4),
+            search.handles,
+            events,
+        ],
         search_field: search.field,
         search_status: search.status,
         maturity_combo: search.maturity_combo,
-    });
+    }
 }
 
 /// One built list tab's handles, or a duplicate of the first when the tab
@@ -902,7 +933,12 @@ fn pane_at(handles: &[PaneHandles], index: usize) -> PaneHandles {
 }
 
 /// Build one id-list tab: the table over its action row.
-fn build_list_tab(commands: &mut Commands, panel: Entity, tab: ListTab) -> PaneHandles {
+fn build_list_tab(
+    commands: &mut Commands,
+    panel: Entity,
+    tab: ListTab,
+    font_size: f32,
+) -> PaneHandles {
     let pane = Pane::List(tab);
     let handles = spawn_pane_table(commands, panel, pane);
     let actions = commands
@@ -917,17 +953,17 @@ fn build_list_tab(commands: &mut Commands, panel: Entity, tab: ListTab) -> PaneH
     let _profile = spawn_action(
         commands,
         actions,
-        "experiences-profile",
-        ExperiencesButton::Profile(pane),
+        ("experiences-profile", ExperiencesButton::Profile(pane)),
         3,
+        font_size,
     );
     if tab.forgettable() {
         let _forget = spawn_action(
             commands,
             actions,
-            "experiences-forget",
-            ExperiencesButton::Forget(tab),
+            ("experiences-forget", ExperiencesButton::Forget(tab)),
             4,
+            font_size,
         );
     }
     handles
@@ -946,7 +982,7 @@ struct SearchTab {
 }
 
 /// Build the search tab: the query row, the results table, and the action row.
-fn build_search_tab(commands: &mut Commands, panel: Entity) -> SearchTab {
+fn build_search_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> SearchTab {
     let query_row = commands
         .spawn((
             Node {
@@ -962,7 +998,7 @@ fn build_search_tab(commands: &mut Commands, panel: Entity) -> SearchTab {
         query_row,
         &SearchFieldSpec {
             tab_index: 3,
-            font_size: FONT_SIZE,
+            font_size,
             min_width: 160.0,
             placeholder: String::new(),
             search_glyph: true,
@@ -977,9 +1013,9 @@ fn build_search_tab(commands: &mut Commands, panel: Entity) -> SearchTab {
     let _find = spawn_action(
         commands,
         query_row,
-        "experiences-find",
-        ExperiencesButton::Find,
+        ("experiences-find", ExperiencesButton::Find),
         4,
+        font_size,
     );
 
     let filter_row = commands
@@ -995,7 +1031,7 @@ fn build_search_tab(commands: &mut Commands, panel: Entity) -> SearchTab {
     commands.spawn((
         Text::default(),
         Translated::new("experiences-search-rating"),
-        UiFont::Sans.at(FONT_SIZE),
+        UiFont::Sans.at(font_size),
         text_role(DIM_TEXT_COLOR),
         Pickable::IGNORE,
         ChildOf(filter_row),
@@ -1009,7 +1045,7 @@ fn build_search_tab(commands: &mut Commands, panel: Entity) -> SearchTab {
             labels: &labels,
             active: 0,
             tab_index: 5,
-            font_size: FONT_SIZE,
+            font_size,
             translate_labels: true,
         },
     );
@@ -1023,7 +1059,7 @@ fn build_search_tab(commands: &mut Commands, panel: Entity) -> SearchTab {
                 flex_shrink: 0.0,
                 // Three buttons and a status line do not fit one line at every
                 // width, scale and language; wrapping moves whole buttons down
-                // rather than squeezing each label (see `spawn_button_shell`).
+                // rather than squeezing each label (see `spawn_action`).
                 flex_wrap: FlexWrap::Wrap,
                 row_gap: Val::Px(4.0),
                 ..row(Val::Px(6.0))
@@ -1034,28 +1070,31 @@ fn build_search_tab(commands: &mut Commands, panel: Entity) -> SearchTab {
     let _profile = spawn_action(
         commands,
         actions,
-        "experiences-profile",
-        ExperiencesButton::Profile(Pane::Search),
+        (
+            "experiences-profile",
+            ExperiencesButton::Profile(Pane::Search),
+        ),
         6,
+        font_size,
     );
     let _prev = spawn_action(
         commands,
         actions,
-        "experiences-page-previous",
-        ExperiencesButton::Page(false),
+        ("experiences-page-previous", ExperiencesButton::Page(false)),
         7,
+        font_size,
     );
     let _next = spawn_action(
         commands,
         actions,
-        "experiences-page-next",
-        ExperiencesButton::Page(true),
+        ("experiences-page-next", ExperiencesButton::Page(true)),
         8,
+        font_size,
     );
     let status = commands
         .spawn((
             Text::default(),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(DIM_TEXT_COLOR),
             Pickable::IGNORE,
             Name::new("experiences-search-status"),
@@ -1072,7 +1111,7 @@ fn build_search_tab(commands: &mut Commands, panel: Entity) -> SearchTab {
 }
 
 /// Build the events tab: the log table over its Notify / Clear controls.
-fn build_events_tab(commands: &mut Commands, panel: Entity) -> PaneHandles {
+fn build_events_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> PaneHandles {
     let handles = spawn_pane_table(commands, panel, Pane::Events);
     let controls = commands
         .spawn((
@@ -1085,13 +1124,13 @@ fn build_events_tab(commands: &mut Commands, panel: Entity) -> PaneHandles {
             ChildOf(panel),
         ))
         .id();
-    spawn_notify_checkbox(commands, controls);
+    spawn_notify_checkbox(commands, controls, font_size);
     let _clear = spawn_action(
         commands,
         controls,
-        "experiences-events-clear",
-        ExperiencesButton::ClearEvents,
+        ("experiences-events-clear", ExperiencesButton::ClearEvents),
         9,
+        font_size,
     );
     handles
 }
@@ -1129,7 +1168,7 @@ fn spawn_pane_table(commands: &mut Commands, panel: Entity, pane: Pane) -> PaneH
 /// The settings-bound "notify on every event" checkbox and its label — the
 /// reference's `notify_all`, which decides whether a recorded event also raises
 /// a toast.
-fn spawn_notify_checkbox(commands: &mut Commands, parent: Entity) {
+fn spawn_notify_checkbox(commands: &mut Commands, parent: Entity, font_size: f32) {
     let checkbox = spawn_checkbox(
         commands,
         parent,
@@ -1137,7 +1176,7 @@ fn spawn_notify_checkbox(commands: &mut Commands, parent: Entity) {
             element: "experiences-events-notify",
             label: "experiences-events-notify".to_owned(),
             tab_index: 9,
-            font_size: FONT_SIZE,
+            font_size,
             translate_label: true,
         },
     );
@@ -1146,33 +1185,16 @@ fn spawn_notify_checkbox(commands: &mut Commands, parent: Entity) {
         .insert(bound_checkbox(SettingBinding::account(SETTING_NOTIFY_ALL)));
 }
 
-/// Spawn one of the window's action buttons, wired to the shared observer.
+/// Spawn one of the window's action buttons — its label key and what it does —
+/// wired to the shared observer.
 fn spawn_action(
     commands: &mut Commands,
     parent: Entity,
-    label_key: &'static str,
-    button: ExperiencesButton,
+    (label_key, button): (&'static str, ExperiencesButton),
     tab: i32,
+    font_size: f32,
 ) -> Entity {
-    let entity = spawn_button_shell(commands, parent, tab);
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(FONT_SIZE),
-        ClassList::new_with_classes([TEXT_CLASS]),
-        Pickable::IGNORE,
-        ChildOf(entity),
-    ));
-    commands
-        .entity(entity)
-        .insert(button)
-        .observe(on_experiences_button);
-    entity
-}
-
-/// Spawn a button shell (the bordered, skinnable box) with no label yet.
-fn spawn_button_shell(commands: &mut Commands, parent: Entity, tab: i32) -> Entity {
-    commands
+    let entity = commands
         .spawn((
             Button,
             TabIndex(tab),
@@ -1188,10 +1210,25 @@ fn spawn_button_shell(commands: &mut Commands, parent: Entity, tab: i32) -> Enti
             BackgroundColor(BUTTON_BACKGROUND),
             BorderColor::all(BUTTON_BORDER),
             ClassList::new_with_classes([BUTTON_CLASS]),
-            Name::new("experiences-button"),
+            // Named per action, so a harness (and an entity dump) can tell the
+            // window's buttons apart.
+            Name::new(format!("experiences-action:{}", button.slug())),
             ChildOf(parent),
         ))
-        .id()
+        .id();
+    commands.spawn((
+        Text::default(),
+        Translated::new(label_key),
+        UiFont::Sans.at(font_size),
+        ClassList::new_with_classes([TEXT_CLASS]),
+        Pickable::IGNORE,
+        ChildOf(entity),
+    ));
+    commands
+        .entity(entity)
+        .insert(button)
+        .observe(on_experiences_button);
+    entity
 }
 
 // ---------------------------------------------------------------------------
@@ -1665,11 +1702,16 @@ fn on_experiences_button(
     activate: On<Activate>,
     buttons: Query<&ExperiencesButton>,
     ui: Option<Res<ExperiencesUi>>,
-    view: Res<ExperiencesView>,
+    view: Option<Res<ExperiencesView>>,
     pick: ExperiencesPick,
-    books: ExperiencesButtonState,
-    out: ExperiencesOut,
+    books: Option<ExperiencesButtonState>,
+    out: Option<ExperiencesOut>,
 ) {
+    // Each optional so a press in a host that has none of the window's state
+    // (the gallery's specimen) is a no-op rather than a failed observer.
+    let (Some(ui), Some(view), Some(books), Some(out)) = (ui, view, books, out) else {
+        return;
+    };
     let ExperiencesPick { tables, fields } = pick;
     let ExperiencesButtonState { mut log, mut state } = books;
     let ExperiencesOut {
@@ -1677,9 +1719,6 @@ fn on_experiences_button(
         mut sl,
     } = out;
     let Ok(button) = buttons.get(activate.entity) else {
-        return;
-    };
-    let Some(ui) = ui else {
         return;
     };
     match *button {
@@ -1806,170 +1845,82 @@ pub(crate) fn search_ceiling(settings: Option<&ViewerSettings>) -> i32 {
 // Gallery specimen.
 // ---------------------------------------------------------------------------
 
-/// The gallery / `ui_test` specimen: a static approximation of one list tab —
-/// the tab labels, a two-column list with a few rows, and the action row — so
-/// the layout is swept login-free (the live floater needs a session).
-/// Registered in `crate::ui_element::ELEMENTS`; its buttons report an inert
-/// [`UiAction`].
+/// The Experiences floater's gallery / `ui_test` specimen, also the
+/// `experiences-floater` gallery element: the live content, built by the same
+/// `spawn_experiences_content` at the cell's font size, on its default tab
+/// (Allowed) with a sample list.
+///
+/// The rows are what the live view draws: rendered by the same `render_rows`
+/// (the rating through the translator, the owner through the group-name cache,
+/// here a local one holding the sample group), sorted in the table's default
+/// order by `sort_experience_rows`, and pooled / bound into the real table by
+/// the table widget's specimen helper with the cells `bind_experience_rows`
+/// writes. The first row is selected. That needs the translator, so it runs as
+/// a one-shot once the content exists. The other six tabs are built, empty, as
+/// the live window builds them.
 pub fn spawn_experiences_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: ElementCx,
 ) -> Entity {
-    let root = commands
-        .spawn((
-            Node {
-                width: Val::Px(SPECIMEN_WIDTH),
-                min_width: Val::Px(0.0),
-                ..row(Val::Px(8.0))
-            },
-            ChildOf(parent),
-        ))
-        .id();
-    // The tab strip, as plain labels in a fixed-width column: the live strip is
-    // the shared tab widget, which the gallery sweeps under its own element.
-    // Fixed-width because that is what the live one is, and because a specimen
-    // whose labels grow with the script is a specimen that overflows in
-    // Devanagari and tells you nothing about this window.
-    let strip = commands
-        .spawn((
-            Node {
-                width: Val::Px(STRIP_WIDTH),
-                flex_shrink: 0.0,
-                overflow: Overflow::clip(),
-                ..column(Val::Px(4.0))
-            },
-            ChildOf(root),
-        ))
-        .id();
-    for label in [
-        cx.text("Search"),
-        cx.text("Allowed"),
-        cx.text("Blocked"),
-        cx.text("Admin"),
-        cx.text("Contributor"),
-        cx.text("Owned"),
-        cx.text("Recent events"),
-    ] {
-        commands.spawn((
-            Text::new(label),
-            TextLayout {
-                linebreak: LineBreak::NoWrap,
-                ..default()
-            },
-            UiFont::Sans.at(FONT_SIZE),
-            text_meaning(HEADING_COLOR, EXPERIENCE_TEXT_CLASS),
-            Pickable::IGNORE,
-            ChildOf(strip),
-        ));
-    }
-    let panel = commands
-        .spawn((
-            Node {
-                flex_grow: 1.0,
-                min_width: Val::Px(0.0),
-                overflow: Overflow::clip(),
-                ..column(Val::Px(6.0))
-            },
-            ChildOf(root),
-        ))
-        .id();
-    // The list: a header row over a few value rows, laid out like the table's.
-    spawn_specimen_row(
-        commands,
-        panel,
-        &cx.text("Experience"),
-        &cx.text("Rating"),
-        DIM_TEXT_COLOR,
-    );
-    for (name, rating) in [
-        (cx.text("Neon Speedway"), cx.text("Moderate")),
-        (cx.text("Beachside Games"), cx.text("General")),
-        (cx.text("Spam Kiosk"), cx.text("General")),
-    ] {
-        spawn_specimen_row(commands, panel, &name, &rating, TEXT_COLOR);
-    }
-    // The action row, with the Forget button the element contract drives.
-    let actions = commands
-        .spawn((
-            Node {
-                ..row(Val::Px(6.0))
-            },
-            ChildOf(panel),
-        ))
-        .id();
-    spawn_specimen_button(commands, actions, &cx.text("Profile\u{2026}"), "profile");
-    spawn_specimen_button(commands, actions, &cx.text("Forget"), "forget");
-    root
-}
-
-/// One specimen list row: a name and a rating.
-fn spawn_specimen_row(
-    commands: &mut Commands,
-    parent: Entity,
-    name: &str,
-    rating: &str,
-    color: Color,
-) {
-    let row_entity = commands
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                min_width: Val::Px(0.0),
-                justify_content: JustifyContent::SpaceBetween,
-                padding: UiRect::axes(Val::Px(4.0), Val::Px(1.0)),
-                overflow: Overflow::clip(),
-                ..row(Val::Px(6.0))
-            },
-            Name::new("experiences-row"),
-            ChildOf(parent),
-        ))
-        .id();
-    for value in [name, rating] {
-        commands.spawn((
-            Text::new(value.to_owned()),
-            TextLayout {
-                linebreak: LineBreak::NoWrap,
-                ..default()
-            },
-            UiFont::Sans.at(FONT_SIZE),
-            text_role(color),
-            Pickable::IGNORE,
-            ChildOf(row_entity),
-        ));
-    }
-}
-
-/// One specimen action button, reporting an inert [`UiAction`] (the registry
-/// rule: a specimen reaches no session).
-fn spawn_specimen_button(
-    commands: &mut Commands,
-    parent: Entity,
-    label: &str,
-    action: &'static str,
-) {
-    let button = spawn_button_shell(commands, parent, 0);
-    commands.spawn((
-        Text::new(label.to_owned()),
-        UiFont::Sans.at(FONT_SIZE),
-        text_role(TEXT_COLOR),
-        Pickable::IGNORE,
-        ChildOf(button),
-    ));
-    // Named per action, unlike the live buttons: the element contract addresses
-    // a node by name and a sweep would otherwise pick whichever of the two
-    // identically-named buttons the query reached first.
-    commands
-        .entity(button)
-        .insert(Name::new(format!("experiences-action:{action}")));
-    commands.entity(button).observe(
-        move |_activate: On<Activate>, mut actions: MessageWriter<UiAction>| {
-            actions.write(UiAction {
-                element: EXPERIENCES_ELEMENT,
-                action,
-            });
-        },
-    );
+    let content = spawn_experiences_content(commands, parent, cx.font_size);
+    let tab = ListTab::Allowed;
+    let pane = pane_at(&content.panes, list_index(tab));
+    let group = GroupKey::from(Uuid::from_u128(0x6c));
+    let group_name = cx.text("Example Group");
+    let infos: ExperienceInfos = [
+        ("Sample Race Course", MATURITY_GENERAL),
+        ("Test Adventure", MATURITY_MODERATE),
+        ("Example Arena", MATURITY_ADULT),
+    ]
+    .into_iter()
+    .zip(0x71_u128..)
+    .map(|((name, maturity), id)| {
+        let key = ExperienceKey::from(Uuid::from_u128(id));
+        let info = ExperienceInfo {
+            public_id: key,
+            name: cx.text(name),
+            owner: Some(OwnerKey::Group(group)),
+            maturity,
+            ..ExperienceInfo::default()
+        };
+        (key, info)
+    })
+    .collect();
+    let ids: Vec<ExperienceKey> = infos.keys().copied().collect();
+    let table = SpecimenTable {
+        root: pane.table,
+        viewport: pane.viewport,
+    };
+    let keys: Vec<(&'static str, bool)> = LIST_SORT
+        .iter()
+        .filter_map(|key| {
+            LIST_COLUMNS
+                .get(key.column)
+                .map(|column| (column.token, key.ascending))
+        })
+        .collect();
+    commands.queue(move |world: &mut World| {
+        let drawn = world.run_system_once(move |mut commands: Commands, translator: Translator| {
+            let mut groups = GroupsModel::default();
+            groups.note_resolved_name(group, &group_name);
+            let mut rows = render_rows(&infos, &ids, &AvatarState::default(), &groups, &translator);
+            sort_experience_rows(&mut rows, &keys);
+            let cells: Vec<Vec<(String, Color)>> = rows
+                .into_iter()
+                .map(|row| vec![(row.name, TEXT_COLOR), (row.rating, TEXT_COLOR)])
+                .collect();
+            let _bound = spawn_specimen_table_rows(&mut commands, table, tab.spec(), &cells);
+            commands
+                .entity(table.root)
+                .entry::<TableState>()
+                .and_modify(|mut state| state.set_selection(vec![0], Some(0)));
+        });
+        if let Err(error) = drawn {
+            error!("experiences specimen: its sample list could not be drawn: {error}");
+        }
+    });
+    parent
 }
 
 #[cfg(test)]

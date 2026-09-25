@@ -123,10 +123,12 @@ use sl_client_bevy::{
 };
 use sl_viewer_notices::experience_profile::{OpenExperienceProfile, maturity_key};
 
-use crate::edit_fields::{FieldSeed, seed_one_field, set_combo};
+use crate::edit_fields::{
+    FieldSeed, seed_field_deferred, seed_one_field, set_combo, set_combo_deferred,
+};
 use crate::floater::{
-    Floater, FloaterCaps, FloaterHandle, FloaterHost, FloaterKey, FloaterSpec, FloaterSystems,
-    KeyedFloaterOpen, KeyedFloaters, host_floater,
+    Floater, FloaterCaps, FloaterHost, FloaterKey, FloaterSpec, FloaterSystems, KeyedFloaterOpen,
+    KeyedFloaters, host_floater,
 };
 use crate::i18n::{Translated, Translator};
 use crate::intents::TexturePicked;
@@ -136,7 +138,7 @@ use crate::intents::{GroupPicked, OpenGroupPicker};
 use crate::inventory_properties::format_unix_date;
 use crate::land_environment::{
     AllowEnvironmentOverrideRequested, LandEnvironmentPlugin, LandEnvironmentSubject,
-    LandPanelKind, spawn_land_environment_panel,
+    LandPanelKind, show_sample_land_environment, spawn_land_environment_panel,
 };
 use crate::name_revisions::{NameRevisions, ViewBuilt};
 use crate::social::GroupsModel;
@@ -219,8 +221,9 @@ const PICK_EXPERIENCE_BLOCKED: &str = "about-region-experience-blocked";
 const MAX_ESTATE_EXPERIENCES: usize = 8;
 
 /// The bounded height of each estate experience list, in logical pixels. Lower
-/// than [`LIST_HEIGHT`] because this tab stacks **three** of them over their
-/// captions, and a list bounded to eight rows has a known ceiling anyway.
+/// than [`LIST_HEIGHT`] because a list bounded to eight rows has a known
+/// ceiling, and where the tab's grid wraps it stacks the three over their
+/// captions.
 const EXPERIENCE_LIST_HEIGHT: f32 = 96.0;
 
 /// The Key (trusted) experiences table.
@@ -1427,7 +1430,11 @@ pub fn about_region_floater_spec() -> FloaterSpec {
         id: ABOUT_REGION_FLOATER_ID,
         title: "Region / Estate".to_owned(),
         position: Vec2::new(400.0, 80.0),
-        default_size: Some(Vec2::new(500.0, 500.0)),
+        // Wide enough that the whole eight-tab strip shows rather than
+        // scrolling, and tall enough for the tallest tab (Terrain) without a
+        // scrollbar — at the default font, in English. The Access and
+        // Experiences tabs lay their lists out side by side to fit it.
+        default_size: Some(Vec2::new(800.0, 600.0)),
         min_size: Some(Vec2::new(430.0, 340.0)),
         dock_host: None,
         caps: FloaterCaps {
@@ -1439,13 +1446,63 @@ pub fn about_region_floater_spec() -> FloaterSpec {
     }
 }
 
-/// Build one window's content: the tab container and every tab, returning the
-/// handles the update passes write through.
+/// Every tab's retained handles, as [`build_region_content`] returns them — the
+/// window's [`AboutRegionUi`] less its title, which the content does not own.
+#[derive(Debug)]
+struct RegionTabs {
+    /// The Region tab's handles.
+    region: RegionHandles,
+    /// The Debug tab's handles.
+    debug: DebugHandles,
+    /// The Terrain tab's handles.
+    terrain: TerrainHandles,
+    /// The Estate tab's handles.
+    estate: EstateHandles,
+    /// The Covenant tab's handles.
+    covenant: CovenantHandles,
+    /// The Access tab's handles.
+    access: AccessHandles,
+    /// The Environment tab's shared land-environment panel.
+    environment: Entity,
+    /// The Experiences tab's handles.
+    experiences: ExperienceHandles,
+}
+
+impl AboutRegionUi {
+    /// A window's handles: its title text node and the tabs built into it.
+    const fn new(title_text: Entity, tabs: RegionTabs) -> Self {
+        let RegionTabs {
+            region,
+            debug,
+            terrain,
+            estate,
+            covenant,
+            access,
+            environment,
+            experiences,
+        } = tabs;
+        Self {
+            title_text,
+            region,
+            debug,
+            terrain,
+            estate,
+            covenant,
+            access,
+            environment,
+            experiences,
+        }
+    }
+}
+
+/// Build one window's content into `content` at `font_size`: the tab container
+/// and every tab, returning the handles the update passes write through.
+/// Shared by the live window and its specimen.
 ///
 /// Called once per window, as it is spawned — a keyed instance's content is
 /// built into the window it belongs to, not deferred to a first open that no
 /// longer exists ([`KeyedFloaters`]).
-fn build_region_content(commands: &mut Commands, handle: FloaterHandle) -> AboutRegionUi {
+fn build_region_content(commands: &mut Commands, content: Entity, font_size: f32) -> RegionTabs {
     let labels: Vec<String> = [
         "about-region-tab-region",
         "about-region-tab-debug",
@@ -1461,34 +1518,33 @@ fn build_region_content(commands: &mut Commands, handle: FloaterHandle) -> About
     .collect();
     let tabs: TabContainerHandle = spawn_tab_container(
         commands,
-        handle.content,
+        content,
         &TabSpec {
             element: "about-region-tabs",
             placement: TabPlacement::BlockStart,
             labels: &labels,
             active: 0,
             tab_index: 1,
-            font_size: FONT_SIZE,
+            font_size,
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
         },
     );
     fill_tab_container(commands, TabPlacement::BlockStart, &tabs);
-    let panel = |index: usize| tabs.panels.get(index).copied().unwrap_or(handle.content);
+    let panel = |index: usize| tabs.panels.get(index).copied().unwrap_or(content);
 
-    let region = build_region_tab(commands, panel(0));
-    let debug = build_debug_tab(commands, panel(1));
-    let terrain = build_terrain_tab(commands, panel(2));
-    let estate = build_estate_tab(commands, panel(3));
-    let covenant = build_covenant_tab(commands, panel(4));
-    let access = build_access_tab(commands, panel(5));
+    let region = build_region_tab(commands, panel(0), font_size);
+    let debug = build_debug_tab(commands, panel(1), font_size);
+    let terrain = build_terrain_tab(commands, panel(2), font_size);
+    let estate = build_estate_tab(commands, panel(3), font_size);
+    let covenant = build_covenant_tab(commands, panel(4), font_size);
+    let access = build_access_tab(commands, panel(5), font_size);
     let environment =
         spawn_land_environment_panel(commands, panel(6), LandPanelKind::Region, ENV_TAB_INDEX);
-    let experiences = build_experiences_tab(commands, panel(7));
+    let experiences = build_experiences_tab(commands, panel(7), font_size);
 
-    AboutRegionUi {
-        title_text: handle.title_text,
+    RegionTabs {
         region,
         debug,
         terrain,
@@ -1501,87 +1557,176 @@ fn build_region_content(commands: &mut Commands, handle: FloaterHandle) -> About
 }
 
 // ---------------------------------------------------------------------------
+// Gallery specimen.
+// ---------------------------------------------------------------------------
+
+/// The Region / Estate window's gallery / `ui_test` specimen: the live
+/// content, built by the same `build_region_content` the viewer's window is
+/// (every tab, as the live window builds them all), with the Region tab — the
+/// one it opens on — showing a sample region. Its fields and maturity combo
+/// are seeded from a region draft through the live `RegionFieldText` and
+/// `maturity_index`, as `seed_edit_fields` seeds them, and its values are the
+/// renderings `update_region_tab` writes.
+pub fn spawn_about_region_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: crate::ui_element::ElementCx,
+) -> Entity {
+    // The buttons' live press observer writes these; a host without the
+    // plugin (the gallery) would fail its parameter validation on a click.
+    // With them present the press finds no window state and does nothing,
+    // which is what a specimen's button should do.
+    commands.init_resource::<Messages<OpenAvatarPicker>>();
+    commands.init_resource::<Messages<OpenGroupPicker>>();
+    commands.init_resource::<Messages<OpenExperiencePicker>>();
+    commands.init_resource::<Messages<OpenTelehub>>();
+    commands.init_resource::<Messages<OpenTopObjects>>();
+
+    let tabs = build_region_content(commands, parent, cx.font_size);
+    let region = &tabs.region;
+    let draft = RegionInfoUpdate {
+        maturity: Maturity::Mature,
+        ..RegionInfoUpdate::default()
+    };
+    let fields = RegionFieldText::from_drafts(&draft, &RegionTerrainUpdate::default());
+    seed_field_deferred(commands, region.agent_limit_field, fields.agent_limit);
+    seed_field_deferred(commands, region.object_bonus_field, fields.object_bonus);
+    set_combo_deferred(
+        commands,
+        region.maturity_combo,
+        maturity_index(draft.maturity),
+    );
+    let values = [
+        (region.name, cx.text("Sample Region")),
+        (region.grid_position, format!("{}, {}", 1000, 1002)),
+        // The owner is a name link, which resolves through the name caches a
+        // specimen host does not run; the sample name is written where it
+        // would land.
+        (region.owner, cx.text("Sample Resident")),
+    ];
+    for (node, value) in values {
+        if let Some(node) = node {
+            commands.entity(node).insert(Text::new(value));
+        }
+    }
+    if let Some(node) = region.region_type {
+        commands
+            .entity(node)
+            .insert(Translated::new(product_key(Some(ProductType::FullRegion))));
+    }
+    // The Environment tab is the shared land-environment panel, whose own
+    // plugin composes its state into this window live and is added by no
+    // specimen host: aim it as `aim_environment_panel` aims it at a region the
+    // agent stands in with estate rights, and let the panel's systems draw it.
+    let panel = tabs.environment;
+    let subject = LandEnvironmentSubject {
+        parcel_id: None,
+        live: true,
+        editable: true,
+        allow_override: true,
+        area: LandArea::ZERO,
+    };
+    commands.queue(move |world: &mut World| {
+        let settings = sl_client_bevy::EnvironmentSettings::legacy_windlight_default();
+        show_sample_land_environment(world, panel, subject, &settings);
+    });
+    parent
+}
+
+// ---------------------------------------------------------------------------
 // Structure builders.
 // ---------------------------------------------------------------------------
 
 /// Build the Region tab: the read-only identity, the editable settings, and the
 /// estate-manager actions.
-fn build_region_tab(commands: &mut Commands, panel: Entity) -> RegionHandles {
+fn build_region_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> RegionHandles {
     let mut handles = RegionHandles::default();
-    let name_row = spawn_labeled_row(commands, panel, "about-region-region");
-    handles.name = Some(spawn_value_node(commands, name_row));
-    let type_row = spawn_labeled_row(commands, panel, "about-region-type");
-    handles.region_type = Some(spawn_value_node(commands, type_row));
-    let owner_row = spawn_labeled_row(commands, panel, "about-region-owner");
+    let name_row = spawn_labeled_row(commands, panel, "about-region-region", font_size);
+    handles.name = Some(spawn_value_node(commands, name_row, font_size));
+    let type_row = spawn_labeled_row(commands, panel, "about-region-type", font_size);
+    handles.region_type = Some(spawn_value_node(commands, type_row, font_size));
+    let owner_row = spawn_labeled_row(commands, panel, "about-region-owner", font_size);
     handles.owner = Some(spawn_name_link(
         commands,
         owner_row,
         NameLinkSpec::new("about-region-loading", "about-region-none"),
     ));
-    let grid_row = spawn_labeled_row(commands, panel, "about-region-grid-position");
-    handles.grid_position = Some(spawn_value_node(commands, grid_row));
+    let grid_row = spawn_labeled_row(commands, panel, "about-region-grid-position", font_size);
+    handles.grid_position = Some(spawn_value_node(commands, grid_row, font_size));
 
     spawn_check(
         commands,
         panel,
         "about-region-block-terraform",
         CheckKind::BlockTerraform,
+        font_size,
     );
     spawn_check(
         commands,
         panel,
         "about-region-block-fly",
         CheckKind::BlockFly,
+        font_size,
     );
     spawn_check(
         commands,
         panel,
         "about-region-allow-damage",
         CheckKind::AllowDamage,
+        font_size,
     );
     spawn_check(
         commands,
         panel,
         "about-region-restrict-push",
         CheckKind::RestrictPush,
+        font_size,
     );
     spawn_check(
         commands,
         panel,
         "about-region-allow-resell",
         CheckKind::AllowLandResell,
+        font_size,
     );
     spawn_check(
         commands,
         panel,
         "about-region-allow-join-divide",
         CheckKind::AllowLandJoinDivide,
+        font_size,
     );
 
-    let limit_row = spawn_labeled_row(commands, panel, "about-region-agent-limit");
+    let limit_row = spawn_labeled_row(commands, panel, "about-region-agent-limit", font_size);
     handles.agent_limit_field = Some(spawn_edit_field(
         commands,
         limit_row,
-        "about-region-agent-limit-field",
-        TextInputKind::NonNegativeInteger,
-        6.0,
-        2,
-        5,
+        EditFieldShape {
+            element: "about-region-agent-limit-field",
+            kind: TextInputKind::NonNegativeInteger,
+            width_glyphs: 6.0,
+            tab_index: 2,
+            max_characters: 5,
+        },
+        font_size,
     ));
-    let bonus_row = spawn_labeled_row(commands, panel, "about-region-object-bonus");
+    let bonus_row = spawn_labeled_row(commands, panel, "about-region-object-bonus", font_size);
     handles.object_bonus_field = Some(spawn_edit_field(
         commands,
         bonus_row,
-        "about-region-object-bonus-field",
-        TextInputKind::Float,
-        6.0,
-        3,
-        6,
+        EditFieldShape {
+            element: "about-region-object-bonus-field",
+            kind: TextInputKind::Float,
+            width_glyphs: 6.0,
+            tab_index: 3,
+            max_characters: 6,
+        },
+        font_size,
     ));
-    let maturity_row = spawn_labeled_row(commands, panel, "about-region-maturity");
-    handles.maturity_combo = Some(spawn_maturity_combo(commands, maturity_row, 4));
+    let maturity_row = spawn_labeled_row(commands, panel, "about-region-maturity", font_size);
+    handles.maturity_combo = Some(spawn_maturity_combo(commands, maturity_row, 4, font_size));
 
-    spawn_apply_button(commands, panel, 5);
+    spawn_apply_button(commands, panel, 5, font_size);
     let actions = spawn_row(commands, panel);
     spawn_action_button(
         commands,
@@ -1590,6 +1735,7 @@ fn build_region_tab(commands: &mut Commands, panel: Entity) -> RegionHandles {
         AboutRegionAction::TeleportHomeOne,
         6,
         true,
+        font_size,
     );
     spawn_action_button(
         commands,
@@ -1598,6 +1744,7 @@ fn build_region_tab(commands: &mut Commands, panel: Entity) -> RegionHandles {
         AboutRegionAction::TeleportHomeAll,
         7,
         true,
+        font_size,
     );
     spawn_action_button(
         commands,
@@ -1606,33 +1753,37 @@ fn build_region_tab(commands: &mut Commands, panel: Entity) -> RegionHandles {
         AboutRegionAction::ManageTelehub,
         8,
         true,
+        font_size,
     );
     handles
 }
 
 /// Build the Debug tab: the editable script/collision/physics toggles and the
 /// region-restart controls.
-fn build_debug_tab(commands: &mut Commands, panel: Entity) -> DebugHandles {
+fn build_debug_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> DebugHandles {
     let mut handles = DebugHandles::default();
-    let name_row = spawn_labeled_row(commands, panel, "about-region-region");
-    handles.name = Some(spawn_value_node(commands, name_row));
+    let name_row = spawn_labeled_row(commands, panel, "about-region-region", font_size);
+    handles.name = Some(spawn_value_node(commands, name_row, font_size));
     spawn_check(
         commands,
         panel,
         "about-region-disable-scripts",
         CheckKind::DisableScripts,
+        font_size,
     );
     spawn_check(
         commands,
         panel,
         "about-region-disable-collisions",
         CheckKind::DisableCollisions,
+        font_size,
     );
     spawn_check(
         commands,
         panel,
         "about-region-disable-physics",
         CheckKind::DisablePhysics,
+        font_size,
     );
     spawn_row_action_button(
         commands,
@@ -1640,6 +1791,7 @@ fn build_debug_tab(commands: &mut Commands, panel: Entity) -> DebugHandles {
         "about-region-apply",
         AboutRegionAction::ApplyDebug,
         1,
+        font_size,
     );
 
     // The two report buttons, where the reference puts them — above the restart
@@ -1653,6 +1805,7 @@ fn build_debug_tab(commands: &mut Commands, panel: Entity) -> DebugHandles {
         AboutRegionAction::TopColliders,
         2,
         true,
+        font_size,
     );
     spawn_action_button(
         commands,
@@ -1661,17 +1814,21 @@ fn build_debug_tab(commands: &mut Commands, panel: Entity) -> DebugHandles {
         AboutRegionAction::TopScripts,
         3,
         true,
+        font_size,
     );
 
-    let restart_row = spawn_labeled_row(commands, panel, "about-region-restart-delay");
+    let restart_row = spawn_labeled_row(commands, panel, "about-region-restart-delay", font_size);
     handles.restart_field = Some(spawn_edit_field(
         commands,
         restart_row,
-        "about-region-restart-field",
-        TextInputKind::NonNegativeInteger,
-        6.0,
-        4,
-        5,
+        EditFieldShape {
+            element: "about-region-restart-field",
+            kind: TextInputKind::NonNegativeInteger,
+            width_glyphs: 6.0,
+            tab_index: 4,
+            max_characters: 5,
+        },
+        font_size,
     ));
     let actions = spawn_row(commands, panel);
     spawn_action_button(
@@ -1681,6 +1838,7 @@ fn build_debug_tab(commands: &mut Commands, panel: Entity) -> DebugHandles {
         AboutRegionAction::Restart,
         5,
         true,
+        font_size,
     );
     spawn_action_button(
         commands,
@@ -1689,39 +1847,43 @@ fn build_debug_tab(commands: &mut Commands, panel: Entity) -> DebugHandles {
         AboutRegionAction::CancelRestart,
         6,
         true,
+        font_size,
     );
     handles
 }
 
 /// Build the Terrain tab: the editable water/limit fields, the four detail
 /// texture swatches, and the per-corner elevation fields.
-fn build_terrain_tab(commands: &mut Commands, panel: Entity) -> TerrainHandles {
+fn build_terrain_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> TerrainHandles {
     let mut handles = TerrainHandles::default();
-    let name_row = spawn_labeled_row(commands, panel, "about-region-region");
-    handles.name = Some(spawn_value_node(commands, name_row));
-    let water_row = spawn_labeled_row(commands, panel, "about-region-water-height");
+    let name_row = spawn_labeled_row(commands, panel, "about-region-region", font_size);
+    handles.name = Some(spawn_value_node(commands, name_row, font_size));
+    let water_row = spawn_labeled_row(commands, panel, "about-region-water-height", font_size);
     handles.water_field = Some(spawn_terrain_field(
         commands,
         water_row,
         "about-region-water-field",
         2,
+        font_size,
     ));
-    let raise_row = spawn_labeled_row(commands, panel, "about-region-terrain-raise");
+    let raise_row = spawn_labeled_row(commands, panel, "about-region-terrain-raise", font_size);
     handles.raise_field = Some(spawn_terrain_field(
         commands,
         raise_row,
         "about-region-raise-field",
         3,
+        font_size,
     ));
-    let lower_row = spawn_labeled_row(commands, panel, "about-region-terrain-lower");
+    let lower_row = spawn_labeled_row(commands, panel, "about-region-terrain-lower", font_size);
     handles.lower_field = Some(spawn_terrain_field(
         commands,
         lower_row,
         "about-region-lower-field",
         4,
+        font_size,
     ));
 
-    spawn_section_label(commands, panel, "about-region-terrain-textures");
+    spawn_section_label(commands, panel, "about-region-terrain-textures", font_size);
     for (index, key) in [
         "about-region-terrain-tex-1",
         "about-region-terrain-tex-2",
@@ -1731,13 +1893,13 @@ fn build_terrain_tab(commands: &mut Commands, panel: Entity) -> TerrainHandles {
     .into_iter()
     .enumerate()
     {
-        let row_entity = spawn_labeled_row(commands, panel, key);
+        let row_entity = spawn_labeled_row(commands, panel, key, font_size);
         if let Some(slot) = handles.textures.get_mut(index) {
             *slot = Some(spawn_detail_swatch(commands, row_entity, index));
         }
     }
 
-    spawn_section_label(commands, panel, "about-region-terrain-elevation");
+    spawn_section_label(commands, panel, "about-region-terrain-elevation", font_size);
     for (index, keys) in [
         ("about-region-corner-sw-low", "about-region-corner-sw-high"),
         ("about-region-corner-se-low", "about-region-corner-se-high"),
@@ -1749,10 +1911,22 @@ fn build_terrain_tab(commands: &mut Commands, panel: Entity) -> TerrainHandles {
     {
         let (low_key, high_key) = keys;
         let row_entity = spawn_row(commands, panel);
-        spawn_key_label(commands, row_entity, low_key, DIM_LABEL_COLOR);
-        let low = spawn_terrain_field(commands, row_entity, "about-region-corner-low", 6);
-        spawn_key_label(commands, row_entity, high_key, DIM_LABEL_COLOR);
-        let high = spawn_terrain_field(commands, row_entity, "about-region-corner-high", 6);
+        spawn_key_label(commands, row_entity, low_key, DIM_LABEL_COLOR, font_size);
+        let low = spawn_terrain_field(
+            commands,
+            row_entity,
+            "about-region-corner-low",
+            6,
+            font_size,
+        );
+        spawn_key_label(commands, row_entity, high_key, DIM_LABEL_COLOR, font_size);
+        let high = spawn_terrain_field(
+            commands,
+            row_entity,
+            "about-region-corner-high",
+            6,
+            font_size,
+        );
         if let Some(slot) = handles.start_fields.get_mut(index) {
             *slot = Some(low);
         }
@@ -1766,6 +1940,7 @@ fn build_terrain_tab(commands: &mut Commands, panel: Entity) -> TerrainHandles {
         "about-region-apply",
         AboutRegionAction::ApplyTerrain,
         7,
+        font_size,
     );
     // Bake: the current heightmap becomes the region's revert baseline, which
     // is what the Land tool's Revert brush restores to. It commits nothing from
@@ -1776,67 +1951,75 @@ fn build_terrain_tab(commands: &mut Commands, panel: Entity) -> TerrainHandles {
         "about-region-terrain-bake",
         AboutRegionAction::BakeTerrain,
         8,
+        font_size,
     );
     handles
 }
 
 /// Build the Estate tab: the read-only estate identity plus the estate-message
 /// and kick actions.
-fn build_estate_tab(commands: &mut Commands, panel: Entity) -> EstateHandles {
+fn build_estate_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> EstateHandles {
     let mut handles = EstateHandles::default();
-    let name_row = spawn_labeled_row(commands, panel, "about-region-estate");
-    handles.name = Some(spawn_value_node(commands, name_row));
-    let owner_row = spawn_labeled_row(commands, panel, "about-region-estate-owner");
+    let name_row = spawn_labeled_row(commands, panel, "about-region-estate", font_size);
+    handles.name = Some(spawn_value_node(commands, name_row, font_size));
+    let owner_row = spawn_labeled_row(commands, panel, "about-region-estate-owner", font_size);
     handles.owner = Some(spawn_name_link(
         commands,
         owner_row,
         NameLinkSpec::new("about-region-loading", "about-region-none"),
     ));
-    let email_row = spawn_labeled_row(commands, panel, "about-region-abuse-email");
-    handles.abuse_email = Some(spawn_value_node(commands, email_row));
-    spawn_note(commands, panel, "about-region-estate-note");
+    let email_row = spawn_labeled_row(commands, panel, "about-region-abuse-email", font_size);
+    handles.abuse_email = Some(spawn_value_node(commands, email_row, font_size));
+    spawn_note(commands, panel, "about-region-estate-note", font_size);
 
     spawn_check(
         commands,
         panel,
         "about-region-estate-public",
         CheckKind::EstatePublicAccess,
+        font_size,
     );
     spawn_check(
         commands,
         panel,
         "about-region-estate-direct-tp",
         CheckKind::EstateAllowDirectTeleport,
+        font_size,
     );
     spawn_check(
         commands,
         panel,
         "about-region-estate-payment",
         CheckKind::EstateRequirePayment,
+        font_size,
     );
     spawn_check(
         commands,
         panel,
         "about-region-estate-age",
         CheckKind::EstateRequireAgeVerified,
+        font_size,
     );
     spawn_check(
         commands,
         panel,
         "about-region-estate-bots",
         CheckKind::EstateDenyBots,
+        font_size,
     );
     spawn_check(
         commands,
         panel,
         "about-region-estate-voice",
         CheckKind::EstateAllowVoice,
+        font_size,
     );
     spawn_check(
         commands,
         panel,
         "about-region-estate-override",
         CheckKind::EstateParcelOverride,
+        font_size,
     );
     spawn_row_action_button(
         commands,
@@ -1844,17 +2027,21 @@ fn build_estate_tab(commands: &mut Commands, panel: Entity) -> EstateHandles {
         "about-region-apply-estate",
         AboutRegionAction::ApplyEstate,
         2,
+        font_size,
     );
 
-    spawn_section_label(commands, panel, "about-region-estate-message");
+    spawn_section_label(commands, panel, "about-region-estate-message", font_size);
     handles.message_field = Some(spawn_edit_field(
         commands,
         panel,
-        "about-region-estate-message-field",
-        TextInputKind::Line,
-        36.0,
-        2,
-        255,
+        EditFieldShape {
+            element: "about-region-estate-message-field",
+            kind: TextInputKind::Line,
+            width_glyphs: 36.0,
+            tab_index: 2,
+            max_characters: 255,
+        },
+        font_size,
     ));
     let actions = spawn_row(commands, panel);
     spawn_action_button(
@@ -1864,6 +2051,7 @@ fn build_estate_tab(commands: &mut Commands, panel: Entity) -> EstateHandles {
         AboutRegionAction::SendEstateMessage,
         3,
         true,
+        font_size,
     );
     spawn_action_button(
         commands,
@@ -1872,108 +2060,189 @@ fn build_estate_tab(commands: &mut Commands, panel: Entity) -> EstateHandles {
         AboutRegionAction::KickEstate,
         4,
         true,
+        font_size,
     );
     handles
 }
 
 /// Build the Covenant tab (read-only).
-fn build_covenant_tab(commands: &mut Commands, panel: Entity) -> CovenantHandles {
+fn build_covenant_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> CovenantHandles {
     let mut handles = CovenantHandles::default();
-    let estate_row = spawn_labeled_row(commands, panel, "about-region-estate");
-    handles.estate = Some(spawn_value_node(commands, estate_row));
-    let owner_row = spawn_labeled_row(commands, panel, "about-region-estate-owner");
+    let estate_row = spawn_labeled_row(commands, panel, "about-region-estate", font_size);
+    handles.estate = Some(spawn_value_node(commands, estate_row, font_size));
+    let owner_row = spawn_labeled_row(commands, panel, "about-region-estate-owner", font_size);
     handles.estate_owner = Some(spawn_name_link(
         commands,
         owner_row,
         NameLinkSpec::new("about-region-loading", "about-region-none"),
     ));
-    handles.text = Some(spawn_value_block(commands, panel));
-    let ts_row = spawn_labeled_row(commands, panel, "about-region-last-modified");
-    handles.timestamp = Some(spawn_value_node(commands, ts_row));
-    let region_row = spawn_labeled_row(commands, panel, "about-region-region");
-    handles.region = Some(spawn_value_node(commands, region_row));
-    let type_row = spawn_labeled_row(commands, panel, "about-region-type");
-    handles.region_type = Some(spawn_value_node(commands, type_row));
-    let rating_row = spawn_labeled_row(commands, panel, "about-region-maturity");
-    handles.region_rating = Some(spawn_value_node(commands, rating_row));
-    let resale_row = spawn_labeled_row(commands, panel, "about-region-resale");
-    handles.resale = Some(spawn_value_node(commands, resale_row));
-    let subdivide_row = spawn_labeled_row(commands, panel, "about-region-subdivide");
-    handles.subdivide = Some(spawn_value_node(commands, subdivide_row));
+    handles.text = Some(spawn_value_block(commands, panel, font_size));
+    let ts_row = spawn_labeled_row(commands, panel, "about-region-last-modified", font_size);
+    handles.timestamp = Some(spawn_value_node(commands, ts_row, font_size));
+    let region_row = spawn_labeled_row(commands, panel, "about-region-region", font_size);
+    handles.region = Some(spawn_value_node(commands, region_row, font_size));
+    let type_row = spawn_labeled_row(commands, panel, "about-region-type", font_size);
+    handles.region_type = Some(spawn_value_node(commands, type_row, font_size));
+    let rating_row = spawn_labeled_row(commands, panel, "about-region-maturity", font_size);
+    handles.region_rating = Some(spawn_value_node(commands, rating_row, font_size));
+    let resale_row = spawn_labeled_row(commands, panel, "about-region-resale", font_size);
+    handles.resale = Some(spawn_value_node(commands, resale_row, font_size));
+    let subdivide_row = spawn_labeled_row(commands, panel, "about-region-subdivide", font_size);
+    handles.subdivide = Some(spawn_value_node(commands, subdivide_row, font_size));
     handles
 }
 
-/// Build the Access tab: the four estate access-list tables with add / remove.
-fn build_access_tab(commands: &mut Commands, panel: Entity) -> AccessHandles {
+/// Build the Access tab: the four estate lists — Estate Managers, Allowed
+/// Residents, Allowed Groups, Banned Residents, in the reference's order
+/// (`panel_region_access.xml`) — each a caption, a bounded table and its Add
+/// button, laid out **two to a row**.
+///
+/// The reference gives each list a sub-tab of its own; stacked in one column,
+/// four lists made this the one tab of the window taller than the window. Two
+/// columns halve that, and the grid wraps to one column where two would not
+/// fit (a narrow window, a large font), so a column is never squeezed below
+/// a usable list.
+fn build_access_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> AccessHandles {
     let mut handles = AccessHandles::default();
+    let grid = spawn_list_grid(commands, panel, "about-region-access:grid");
 
-    spawn_section_label(commands, panel, "about-region-managers");
-    let managers = spawn_bounded_table(commands, panel, &MANAGERS_TABLE);
+    let cell = spawn_list_cell(commands, grid, ACCESS_COLUMN_BASIS);
+    spawn_section_label(commands, cell, "about-region-managers", font_size);
+    let managers = spawn_bounded_table(commands, cell, &MANAGERS_TABLE);
     handles.managers_viewport = Some(managers.viewport);
     handles.managers_table = Some(managers.root);
     spawn_row_action_button(
         commands,
-        panel,
+        cell,
         "about-region-add-manager",
         AboutRegionAction::AddManager,
         2,
+        font_size,
     );
 
-    spawn_section_label(commands, panel, "about-region-allowed");
-    let allowed = spawn_bounded_table(commands, panel, &ALLOWED_TABLE);
+    let cell = spawn_list_cell(commands, grid, ACCESS_COLUMN_BASIS);
+    spawn_section_label(commands, cell, "about-region-allowed", font_size);
+    let allowed = spawn_bounded_table(commands, cell, &ALLOWED_TABLE);
     handles.allowed_viewport = Some(allowed.viewport);
     handles.allowed_table = Some(allowed.root);
     spawn_row_action_button(
         commands,
-        panel,
+        cell,
         "about-region-add-allowed",
         AboutRegionAction::AddAllowed,
         3,
+        font_size,
     );
 
-    spawn_section_label(commands, panel, "about-region-allowed-groups");
-    let groups = spawn_bounded_table(commands, panel, &ALLOWED_GROUPS_TABLE);
+    let cell = spawn_list_cell(commands, grid, ACCESS_COLUMN_BASIS);
+    spawn_section_label(commands, cell, "about-region-allowed-groups", font_size);
+    let groups = spawn_bounded_table(commands, cell, &ALLOWED_GROUPS_TABLE);
     handles.allowed_groups_viewport = Some(groups.viewport);
     handles.allowed_groups_table = Some(groups.root);
     spawn_row_action_button(
         commands,
-        panel,
+        cell,
         "about-region-add-allowed-group",
         AboutRegionAction::AddAllowedGroup,
         4,
+        font_size,
     );
 
-    spawn_section_label(commands, panel, "about-region-banned");
-    let banned = spawn_bounded_table(commands, panel, &BANNED_TABLE);
+    let cell = spawn_list_cell(commands, grid, ACCESS_COLUMN_BASIS);
+    spawn_section_label(commands, cell, "about-region-banned", font_size);
+    let banned = spawn_bounded_table(commands, cell, &BANNED_TABLE);
     handles.banned_viewport = Some(banned.viewport);
     handles.banned_table = Some(banned.root);
     spawn_row_action_button(
         commands,
-        panel,
+        cell,
         "about-region-add-banned",
         AboutRegionAction::AddBanned,
         5,
+        font_size,
     );
 
     handles
 }
 
+/// The narrowest a list's column in an Access or Experiences grid may get
+/// before the grid wraps it to a row of its own, logical px — room for a name
+/// and the list's scrollbar.
+const LIST_COLUMN_MIN_WIDTH: f32 = 180.0;
+
+/// The Access tab's lists sit two to a row: each column's basis, as a share of
+/// the row, leaving room for the gap between two and none for a third.
+const ACCESS_COLUMN_BASIS: f32 = 40.0;
+
+/// The Experiences tab's lists sit three to a row, likewise.
+const EXPERIENCE_COLUMN_BASIS: f32 = 30.0;
+
+/// A tab's wrapping grid of lists, under `panel`, named `name`.
+fn spawn_list_grid(commands: &mut Commands, panel: Entity, name: &'static str) -> Entity {
+    commands
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                flex_wrap: FlexWrap::Wrap,
+                row_gap: Val::Px(10.0),
+                // Its lists keep their height, as each list does in its cell:
+                // the panel scrolls rather than squeezing the grid.
+                flex_shrink: 0.0,
+                ..row(Val::Px(12.0))
+            },
+            Name::new(name),
+            ChildOf(panel),
+        ))
+        .id()
+}
+
+/// One list's column in a list grid: `basis` percent of the row, growing into
+/// what is left, and never narrower than [`LIST_COLUMN_MIN_WIDTH`] — below
+/// which it takes the row alone.
+fn spawn_list_cell(commands: &mut Commands, grid: Entity, basis: f32) -> Entity {
+    commands
+        .spawn((
+            Node {
+                flex_grow: 1.0,
+                flex_basis: Val::Percent(basis),
+                min_width: Val::Px(LIST_COLUMN_MIN_WIDTH),
+                ..column(Val::Px(6.0))
+            },
+            ChildOf(grid),
+        ))
+        .id()
+}
+
 /// Build the Experiences tab: the estate-wide caption, then the three lists —
-/// Key, Allowed, Blocked — each a caption, a bounded table and an Add button.
-fn build_experiences_tab(commands: &mut Commands, panel: Entity) -> ExperienceHandles {
+/// Key, Allowed, Blocked — each a caption, its help, a bounded table and an Add
+/// button, **side by side** in a grid that wraps a column onto a row of its
+/// own where three would not fit. Stacked, the three lists and their wrapped
+/// help made this the tallest tab in the window.
+fn build_experiences_tab(
+    commands: &mut Commands,
+    panel: Entity,
+    font_size: f32,
+) -> ExperienceHandles {
     let mut handles = ExperienceHandles::default();
-    spawn_note(commands, panel, "about-region-experiences-caption");
+    spawn_note(
+        commands,
+        panel,
+        "about-region-experiences-caption",
+        font_size,
+    );
+    let grid = spawn_list_grid(commands, panel, "about-region-experiences:grid");
     for (offset, list) in ExperienceList::ALL.into_iter().enumerate() {
-        spawn_section_label(commands, panel, list.label_key());
-        spawn_note(commands, panel, list.help_key());
-        let table = spawn_experience_table(commands, panel, list);
+        let cell = spawn_list_cell(commands, grid, EXPERIENCE_COLUMN_BASIS);
+        spawn_section_label(commands, cell, list.label_key(), font_size);
+        spawn_note(commands, cell, list.help_key(), font_size);
+        let table = spawn_experience_table(commands, cell, list);
         if let Some(slot) = handles.viewports.get_mut(list.index()) {
             *slot = Some(table.viewport);
         }
         if let Some(slot) = handles.tables.get_mut(list.index()) {
             *slot = Some(table.root);
         }
-        let button_row = spawn_row(commands, panel);
+        let button_row = spawn_row(commands, cell);
         let _add = spawn_action_button(
             commands,
             button_row,
@@ -1984,6 +2253,7 @@ fn build_experiences_tab(commands: &mut Commands, panel: Entity) -> ExperienceHa
             // it.
             6_i32.saturating_add(i32::try_from(offset).unwrap_or(0)),
             true,
+            font_size,
         );
     }
     handles
@@ -2001,9 +2271,10 @@ fn spawn_experience_table(
             Node {
                 width: Val::Percent(100.0),
                 height: Val::Px(EXPERIENCE_LIST_HEIGHT),
-                // **A height, not a suggestion.** This tab stacks three lists
-                // over three wrapped captions in a scrolling column, which asks
-                // for more block space than the panel has — and a flex item's
+                // **A height, not a suggestion.** Where the grid wraps, this
+                // tab stacks three lists over three wrapped captions in a
+                // scrolling column, which can ask for more block space than
+                // the panel has — and a flex item's
                 // default `flex_shrink: 1` answers that by squeezing whatever
                 // has a fixed height. The tables lost almost all of theirs: a
                 // header and half a row each. Refusing to shrink puts the
@@ -2040,6 +2311,13 @@ fn spawn_bounded_table(
             Node {
                 width: Val::Percent(100.0),
                 height: Val::Px(LIST_HEIGHT),
+                // A height, not a suggestion: the tab panel scrolls when its
+                // column runs out of room, but a flex item's default
+                // `flex_shrink: 1` squeezes whatever has a fixed height first —
+                // at a large font the lists lost every row to the labels above
+                // them. Refusing to shrink puts the overflow on the panel's
+                // scrollbar instead.
+                flex_shrink: 0.0,
                 ..default()
             },
             ChildOf(parent),
@@ -2101,7 +2379,10 @@ fn open_about_region(
     commands.write(SlCommand(Command::RequestEstateCovenant));
     match opened {
         KeyedFloaterOpen::Spawned(handle) => {
-            let ui = build_region_content(&mut spawner, handle);
+            let ui = AboutRegionUi::new(
+                handle.title_text,
+                build_region_content(&mut spawner, handle.content, FONT_SIZE),
+            );
             spawner
                 .entity(handle.title_text)
                 .insert(Translated::new("about-region-title"));
@@ -4206,14 +4487,18 @@ fn region_name(region: Option<&sl_client_bevy::RegionIdentity>, translator: &Tra
 
 /// The product-type label.
 fn product_text(product: Option<ProductType>, translator: &Translator) -> String {
-    let key = match product {
+    translator.get(product_key(product))
+}
+
+/// The Fluent key naming a product type.
+const fn product_key(product: Option<ProductType>) -> &'static str {
+    match product {
         Some(ProductType::FullRegion) => "about-region-product-full",
         Some(ProductType::Homestead) => "about-region-product-homestead",
         Some(ProductType::Openspace) => "about-region-product-openspace",
         // `Unknown`, `None`, or a future variant.
         _other => "about-region-product-unknown",
-    };
-    translator.get(key)
+    }
 }
 
 /// The maturity-rating label.
@@ -4422,13 +4707,18 @@ fn spawn_row(commands: &mut Commands, parent: Entity) -> Entity {
 }
 
 /// A wrapping row leading with a translated dim label.
-fn spawn_labeled_row(commands: &mut Commands, parent: Entity, label_key: &'static str) -> Entity {
+fn spawn_labeled_row(
+    commands: &mut Commands,
+    parent: Entity,
+    label_key: &'static str,
+    font_size: f32,
+) -> Entity {
     ui_spawn::spawn_labeled_row(
         commands,
         parent,
         LabeledRowSpec::new(UiLabel::key(label_key))
             .label_color(DIM_LABEL_COLOR)
-            .font_size(FONT_SIZE)
+            .font_size(font_size)
             .gap(Val::Px(8.0))
             .wrap(),
     )
@@ -4436,11 +4726,16 @@ fn spawn_labeled_row(commands: &mut Commands, parent: Entity, label_key: &'stati
 }
 
 /// A translated section label on its own line.
-fn spawn_section_label(commands: &mut Commands, parent: Entity, label_key: &'static str) {
+fn spawn_section_label(
+    commands: &mut Commands,
+    parent: Entity,
+    label_key: &'static str,
+    font_size: f32,
+) {
     commands.spawn((
         Text::default(),
         Translated::new(label_key),
-        UiFont::Sans.at(FONT_SIZE),
+        UiFont::Sans.at(font_size),
         TextColor(DIM_LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(parent),
@@ -4448,7 +4743,7 @@ fn spawn_section_label(commands: &mut Commands, parent: Entity, label_key: &'sta
 }
 
 /// A wrapped translated note paragraph.
-fn spawn_note(commands: &mut Commands, parent: Entity, key: &'static str) {
+fn spawn_note(commands: &mut Commands, parent: Entity, key: &'static str, font_size: f32) {
     commands
         .spawn((
             Node {
@@ -4460,18 +4755,18 @@ fn spawn_note(commands: &mut Commands, parent: Entity, key: &'static str) {
         .with_child((
             Text::default(),
             Translated::new(key),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             TextColor(DIM_LABEL_COLOR),
             Pickable::IGNORE,
         ));
 }
 
 /// An empty value node the caller updates in place.
-fn spawn_value_node(commands: &mut Commands, parent: Entity) -> Entity {
+fn spawn_value_node(commands: &mut Commands, parent: Entity, font_size: f32) -> Entity {
     commands
         .spawn((
             Text::new(String::new()),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             TextColor(LABEL_COLOR),
             Pickable::IGNORE,
             ChildOf(parent),
@@ -4480,7 +4775,7 @@ fn spawn_value_node(commands: &mut Commands, parent: Entity) -> Entity {
 }
 
 /// A wrapped, clipped read-only text value node (covenant body).
-fn spawn_value_block(commands: &mut Commands, parent: Entity) -> Entity {
+fn spawn_value_block(commands: &mut Commands, parent: Entity, font_size: f32) -> Entity {
     let block = commands
         .spawn((
             Node {
@@ -4495,7 +4790,7 @@ fn spawn_value_block(commands: &mut Commands, parent: Entity) -> Entity {
     commands
         .spawn((
             Text::new(String::new()),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             TextColor(LABEL_COLOR),
             Pickable::IGNORE,
             ChildOf(block),
@@ -4503,21 +4798,42 @@ fn spawn_value_block(commands: &mut Commands, parent: Entity) -> Entity {
         .id()
 }
 
+/// What a single-line / numeric edit field is: its element id, what it
+/// accepts, how wide it is, where it sits in the tab order and how much it
+/// holds.
+#[derive(Debug, Clone, Copy)]
+struct EditFieldShape {
+    /// The field's element id.
+    element: &'static str,
+    /// What the field accepts.
+    kind: TextInputKind,
+    /// Its width, in glyphs.
+    width_glyphs: f32,
+    /// Its place in the tab order.
+    tab_index: i32,
+    /// The most characters it holds.
+    max_characters: usize,
+}
+
 /// A single-line / numeric edit field, gated on estate rights.
 fn spawn_edit_field(
     commands: &mut Commands,
     parent: Entity,
-    element: &'static str,
-    kind: TextInputKind,
-    width_glyphs: f32,
-    tab_index: i32,
-    max_characters: usize,
+    shape: EditFieldShape,
+    font_size: f32,
 ) -> Entity {
+    let EditFieldShape {
+        element,
+        kind,
+        width_glyphs,
+        tab_index,
+        max_characters,
+    } = shape;
     let field = spawn_text_input(
         commands,
         parent,
         &TextInputSpec {
-            font_size: FONT_SIZE,
+            font_size,
             width_glyphs,
             tab_index,
             max_characters: Some(max_characters),
@@ -4537,6 +4853,7 @@ fn spawn_action_button(
     action: AboutRegionAction,
     tab_index: i32,
     write: bool,
+    font_size: f32,
 ) -> Entity {
     let button = spawn_button(
         commands,
@@ -4548,7 +4865,7 @@ fn spawn_action_button(
         .tab_index(tab_index)
         .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
         .label_color(LABEL_COLOR)
-        .font_size(FONT_SIZE)
+        .font_size(font_size)
         // Both ends of `.sk-button:disabled .sk-text`, which greys a refused
         // action now that nothing repaints its caption.
         .label_class(TEXT_CLASS),
@@ -4563,7 +4880,7 @@ fn spawn_action_button(
 }
 
 /// The shared Apply button for the region-settings tab.
-fn spawn_apply_button(commands: &mut Commands, parent: Entity, tab_index: i32) {
+fn spawn_apply_button(commands: &mut Commands, parent: Entity, tab_index: i32, font_size: f32) {
     let row_entity = spawn_row(commands, parent);
     spawn_action_button(
         commands,
@@ -4572,6 +4889,7 @@ fn spawn_apply_button(commands: &mut Commands, parent: Entity, tab_index: i32) {
         AboutRegionAction::Apply,
         tab_index,
         true,
+        font_size,
     );
 }
 
@@ -4582,14 +4900,23 @@ fn spawn_row_action_button(
     label_key: &'static str,
     action: AboutRegionAction,
     tab_index: i32,
+    font_size: f32,
 ) {
     let row_entity = spawn_row(commands, parent);
-    spawn_action_button(commands, row_entity, label_key, action, tab_index, true);
+    spawn_action_button(
+        commands, row_entity, label_key, action, tab_index, true, font_size,
+    );
 }
 
 /// A translated label in `color` on `parent`.
-fn spawn_key_label(commands: &mut Commands, parent: Entity, key: &'static str, color: Color) {
-    ui_spawn::spawn_label(commands, parent, UiLabel::key(key), color, FONT_SIZE);
+fn spawn_key_label(
+    commands: &mut Commands,
+    parent: Entity,
+    key: &'static str,
+    color: Color,
+    font_size: f32,
+) {
+    ui_spawn::spawn_label(commands, parent, UiLabel::key(key), color, font_size);
 }
 
 /// A small float edit field for a terrain value, gated on estate rights.
@@ -4598,15 +4925,19 @@ fn spawn_terrain_field(
     parent: Entity,
     element: &'static str,
     tab_index: i32,
+    font_size: f32,
 ) -> Entity {
     spawn_edit_field(
         commands,
         parent,
-        element,
-        TextInputKind::Float,
-        6.0,
-        tab_index,
-        10,
+        EditFieldShape {
+            element,
+            kind: TextInputKind::Float,
+            width_glyphs: 6.0,
+            tab_index,
+            max_characters: 10,
+        },
+        font_size,
     )
 }
 
@@ -4634,7 +4965,13 @@ fn spawn_detail_swatch(commands: &mut Commands, parent: Entity, slot: usize) -> 
 /// The Fluent key doubles as the widget's element id, so each box is
 /// addressable by its own name rather than every one of them sharing a single
 /// one.
-fn spawn_check(commands: &mut Commands, parent: Entity, label_key: &'static str, kind: CheckKind) {
+fn spawn_check(
+    commands: &mut Commands,
+    parent: Entity,
+    label_key: &'static str,
+    kind: CheckKind,
+    font_size: f32,
+) {
     let row_entity = spawn_row(commands, parent);
     let checkbox = spawn_checkbox(
         commands,
@@ -4643,7 +4980,7 @@ fn spawn_check(commands: &mut Commands, parent: Entity, label_key: &'static str,
             element: label_key,
             label: label_key.to_owned(),
             tab_index: 0,
-            font_size: FONT_SIZE,
+            font_size,
             translate_label: true,
         },
     );
@@ -4654,7 +4991,12 @@ fn spawn_check(commands: &mut Commands, parent: Entity, label_key: &'static str,
 }
 
 /// A maturity combo on `parent`, gated on estate rights.
-fn spawn_maturity_combo(commands: &mut Commands, parent: Entity, tab_index: i32) -> Entity {
+fn spawn_maturity_combo(
+    commands: &mut Commands,
+    parent: Entity,
+    tab_index: i32,
+    font_size: f32,
+) -> Entity {
     let labels: Vec<String> = MATURITY_KEYS.iter().map(|key| (*key).to_owned()).collect();
     let combo = spawn_combo(
         commands,
@@ -4664,7 +5006,7 @@ fn spawn_maturity_combo(commands: &mut Commands, parent: Entity, tab_index: i32)
             labels: &labels,
             active: 0,
             tab_index,
-            font_size: FONT_SIZE,
+            font_size,
             translate_labels: true,
         },
     );

@@ -67,7 +67,7 @@
 //! `llfloaterscriptdebug`.
 
 use bevy::prelude::*;
-use bevy::ui::{Checked, InteractionDisabled};
+use bevy::ui::Checked;
 use bevy::ui_widgets::ValueChange;
 
 use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
@@ -344,7 +344,6 @@ fn ingest_script_asset(
                     source,
                     running,
                     font_size: FONT_SIZE,
-                    live: true,
                 },
             );
             state.body_field = built.body_field;
@@ -378,11 +377,11 @@ struct BuiltEditor {
 
 /// What an editor's content is built from: the script itself, whether it may be
 /// edited at all, what a save writes back to, whether the task script is
-/// running, the type size, and whether this is the real floater or a specimen.
+/// running, and the type size.
 ///
-/// Named rather than passed positionally because four of the six are bare
-/// `bool`s — at a call site `true, source, true, font, false` says nothing
-/// about which switch is which.
+/// Named rather than passed positionally because two of the five are bare
+/// `bool`s — at a call site `true, source, true, font` says nothing about which
+/// switch is which.
 #[derive(Debug, Clone, Copy)]
 struct EditorShape<'a> {
     /// The script text the body starts at.
@@ -396,11 +395,6 @@ struct EditorShape<'a> {
     running: bool,
     /// The type size the body and chrome are laid out at.
     font_size: f32,
-    /// `true` for the real floater (the Running toggle is wired to the session)
-    /// and `false` for a specimen (it is shown for layout but does nothing).
-    /// The Save button needs no such flag: it names the floater it sits in, and
-    /// a specimen sits in none.
-    live: bool,
 }
 
 /// Build the editor's content under `content`: the body (editable field or
@@ -417,7 +411,6 @@ fn populate_editor(
         source,
         running,
         font_size,
-        live,
     } = shape;
     if !editable {
         spawn_note(commands, content, "script-readonly-note", font_size);
@@ -438,7 +431,7 @@ fn populate_editor(
     };
 
     let running_check = (editable && source.is_task())
-        .then(|| spawn_running_toggle(commands, content, running, font_size, live));
+        .then(|| spawn_running_toggle(commands, content, running, font_size));
 
     let (status, errors) = if editable {
         let bar = commands
@@ -659,8 +652,7 @@ fn report_script_save(
                             spawn_error_row(
                                 &mut commands,
                                 container,
-                                &translator,
-                                error,
+                                error_line(&translator, error),
                                 FONT_SIZE,
                             );
                         }
@@ -712,17 +704,14 @@ fn spawn_readonly_body(commands: &mut Commands, parent: Entity, text: &str, font
 }
 
 /// Spawn the Running toggle for a task script — the shared checkbox widget.
-/// When `live`, toggling it flips the run state carried into the next Save.
-/// Returns the checkbox, whose `Checked` the run-state query moves.
-///
-/// A read-only editor gets `InteractionDisabled` instead of an observer, so the
-/// box greys and refuses the pointer rather than looking live and doing nothing.
+/// Toggling it flips the run state carried into the next Save of the window it
+/// sits in (a specimen sits in none, so there it only ticks). Returns the
+/// checkbox, whose `Checked` the run-state query moves.
 fn spawn_running_toggle(
     commands: &mut Commands,
     parent: Entity,
     running: bool,
     font_size: f32,
-    live: bool,
 ) -> Entity {
     let checkbox = spawn_checkbox(
         commands,
@@ -739,11 +728,7 @@ fn spawn_running_toggle(
     if running {
         commands.entity(entity).insert(Checked);
     }
-    if live {
-        commands.entity(entity).observe(on_running_toggle);
-    } else {
-        commands.entity(entity).insert(InteractionDisabled);
-    }
+    commands.entity(entity).observe(on_running_toggle);
     entity
 }
 
@@ -780,16 +765,10 @@ fn set_running_tick(commands: &mut Commands, checkbox: Option<Entity>, running: 
     }
 }
 
-/// Spawn one compile-diagnostic row: the position (when the grid gave one) plus
+/// One compile diagnostic's line: the position (when the grid gave one) plus
 /// the message, formatted for the active locale.
-fn spawn_error_row(
-    commands: &mut Commands,
-    parent: Entity,
-    translator: &Translator,
-    error: &ScriptCompileError,
-    font_size: f32,
-) {
-    let line = match (error.line, error.column) {
+fn error_line(translator: &Translator, error: &ScriptCompileError) -> String {
+    match (error.line, error.column) {
         (Some(line), Some(column)) => translator.format(
             "script-error-at",
             &TransArgs::new()
@@ -801,7 +780,12 @@ fn spawn_error_row(
             "script-error-nopos",
             &TransArgs::new().text("message", &error.message),
         ),
-    };
+    }
+}
+
+/// Spawn one compile-diagnostic row showing `line` (see [`error_line`]) under
+/// the diagnostics list `parent`.
+fn spawn_error_row(commands: &mut Commands, parent: Entity, line: String, font_size: f32) {
     commands.spawn((
         Text::new(line),
         UiFont::Mono.at(font_size),
@@ -832,10 +816,14 @@ fn on_diagnostics_scroll(
 const SPECIMEN_TEXT: &str = "default\n{\n    state_entry()\n    {\n        \
                              llSay(0, \"Hello, Avatar!\");\n    }\n}\n";
 
-/// Spawn the script editor's content specimen: an editable body, a Running
-/// toggle, a Save & Compile button and one sample compile-error row, built with
-/// no floater / session so `crate::ui_test` sweeps its layout across every
-/// script, scale and font.
+/// Spawn the script editor's content specimen: the live `populate_editor` for
+/// an editable task script — its body, its (live) Running toggle, its Save &
+/// Compile button — with one sample compile-error row drawn by the live
+/// `spawn_error_row`, built with no floater / session so `crate::ui_test`
+/// sweeps its layout across every script, scale and font.
+///
+/// The row's line is sample data rather than `error_line`'s output: that
+/// formats through the `Translator`, which the element sweep does not stand up.
 pub fn spawn_script_editor_specimen(
     commands: &mut Commands,
     parent: Entity,
@@ -863,17 +851,16 @@ pub fn spawn_script_editor_specimen(
             source,
             running: true,
             font_size: cx.font_size,
-            live: false,
         },
     );
     // A representative diagnostic so the error-list layout is swept too.
     if let Some(errors) = built.errors {
-        commands.spawn((
-            Text::new(cx.text("Line 5, column 9: syntax error")),
-            UiFont::Mono.at(cx.font_size),
-            text_meaning(ERROR_COLOR, ERROR_TEXT_CLASS),
-            ChildOf(errors),
-        ));
+        spawn_error_row(
+            commands,
+            errors,
+            cx.text("Line 5, column 9: syntax error"),
+            cx.font_size,
+        );
     }
     col
 }

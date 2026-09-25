@@ -73,15 +73,15 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
-    Command, DirFindFlags, DirGroupResult, GroupKey, QueryId, SlCommand, SlEvent, SlSessionEvent,
-    Uuid,
+    Command, DirFindFlags, DirGroupResult, GroupKey, GroupMembership, LandArea, QueryId, SlCommand,
+    SlEvent, SlSessionEvent, TextureKey, Uuid,
 };
 use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
 use sl_viewer_ui_core::skin::{LIST_ROW_CLASS, LIST_SURFACE_CLASS, SELECTED_CLASS, text_role};
 
 use crate::floater::{
-    Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterHost, FloaterOp, FloaterOwner,
-    FloaterSpec, FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater, picker_identity,
+    Floater, FloaterCaps, FloaterCommand, FloaterHost, FloaterOp, FloaterOwner, FloaterSpec,
+    FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater, picker_identity,
 };
 use crate::i18n::Translated;
 use crate::intents::{GroupPicked, GroupPickerScope, OpenGroupPicker};
@@ -340,12 +340,10 @@ pub fn group_picker_floater_spec() -> FloaterSpec {
 /// what one open asked for would leave the window wrong if the same control
 /// ever opened it the other way, and a keyed window outlives the open that
 /// spawned it.
-fn build_picker_content(commands: &mut Commands, handle: &FloaterHandle) -> GroupPickerUi {
-    commands
-        .entity(handle.title_text)
-        .insert(Translated::new("group-picker-title"));
-    let content = handle.content;
-
+///
+/// Built into `content` at `font_size`; shared by the live window and its
+/// gallery specimen.
+fn build_picker_content(commands: &mut Commands, content: Entity, font_size: f32) -> GroupPickerUi {
     let tab_labels: [String; 2] = [
         "group-picker-tab-mine".to_owned(),
         "group-picker-tab-search".to_owned(),
@@ -359,7 +357,7 @@ fn build_picker_content(commands: &mut Commands, handle: &FloaterHandle) -> Grou
             labels: &tab_labels,
             active: 0,
             tab_index: 1,
-            font_size: PICKER_FONT_SIZE,
+            font_size,
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
@@ -380,7 +378,7 @@ fn build_picker_content(commands: &mut Commands, handle: &FloaterHandle) -> Grou
         commands,
         search_row,
         &crate::ui_text_input::TextInputSpec {
-            font_size: PICKER_FONT_SIZE,
+            font_size,
             width_glyphs: 18.0,
             tab_index: 2,
             ..crate::ui_text_input::TextInputSpec::new(
@@ -389,7 +387,14 @@ fn build_picker_content(commands: &mut Commands, handle: &FloaterHandle) -> Grou
             )
         },
     );
-    let _go = spawn_picker_button(commands, search_row, "group-picker-go", PickerButton::Go, 3);
+    let _go = spawn_picker_button(
+        commands,
+        search_row,
+        "group-picker-go",
+        PickerButton::Go,
+        3,
+        font_size,
+    );
 
     let list_row = commands
         .spawn((
@@ -433,13 +438,21 @@ fn build_picker_content(commands: &mut Commands, handle: &FloaterHandle) -> Grou
             ChildOf(content),
         ))
         .id();
-    let _ok = spawn_picker_button(commands, buttons, "group-picker-ok", PickerButton::Ok, 4);
+    let _ok = spawn_picker_button(
+        commands,
+        buttons,
+        "group-picker-ok",
+        PickerButton::Ok,
+        4,
+        font_size,
+    );
     let _cancel = spawn_picker_button(
         commands,
         buttons,
         "group-picker-cancel",
         PickerButton::Cancel,
         5,
+        font_size,
     );
 
     GroupPickerUi {
@@ -448,6 +461,79 @@ fn build_picker_content(commands: &mut Commands, handle: &FloaterHandle) -> Grou
         search_row,
         list,
     }
+}
+
+// --- Gallery specimen -------------------------------------------------------
+
+/// The group picker's gallery / `ui_test` specimen: the live content, built by
+/// the same `build_picker_content` the viewer's window is, at the cell's font
+/// size, composed the way the live window is for the common open
+/// ([`OpenGroupPicker::new`]: the agent's own groups, **none** allowed).
+///
+/// The rows come from a sample [`GroupsModel`] through the live
+/// `GroupPickerState::membership_rows` (the "none" row, then the groups in
+/// name order with the worn one bold) with one row selected, drawn by the
+/// rebuild's own `draw_picker_list`; the member-only scope hides the tab
+/// strip and the search row exactly as `bridge_picker_tabs` does, through the
+/// shared `picker_chrome_shown`. The state is not inserted on the window, so
+/// the live systems leave the specimen alone.
+pub fn spawn_group_picker_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: crate::ui_element::ElementCx,
+) -> Entity {
+    let ui = build_picker_content(commands, parent, cx.font_size);
+    let group = |id: u128| GroupKey::from(Uuid::from_u128(id));
+    let memberships: Vec<GroupMembership> = [
+        "Example Group",
+        "Sample Builders Guild",
+        "Test Region Residents",
+    ]
+    .into_iter()
+    .zip(1_u128..)
+    .map(|(name, id)| GroupMembership {
+        group_id: group(id),
+        group_powers: 0,
+        accept_notices: true,
+        group_insignia_id: TextureKey::from(Uuid::nil()),
+        contribution: LandArea::ZERO,
+        group_name: cx.text(name),
+    })
+    .collect();
+    let mut groups = GroupsModel::default();
+    groups.apply_memberships(&memberships);
+    groups.set_active(Some(group(1)), "");
+    let mut state = GroupPickerState {
+        allow_none: true,
+        scope: GroupPickerScope::MemberGroups,
+        ..GroupPickerState::default()
+    };
+    let rows = state.membership_rows(&groups);
+    state.set_rows(rows);
+    state.select(2);
+    draw_picker_list(commands, ui.list, &state, cx.font_size);
+    let (strip_shown, search_shown) = picker_chrome_shown(state.scope, state.tab);
+    for (entity, shown) in [(ui.tab_strip, strip_shown), (ui.search_row, search_shown)] {
+        commands
+            .entity(entity)
+            .entry::<Node>()
+            .and_modify(move |mut node| node.display = shown_display(shown));
+    }
+    parent
+}
+
+/// Which of a window's chrome its scope and tab show, as `(tab strip, search
+/// row)`: a member-only picker has no second source, so neither; a searchable
+/// one always has the strip, and the search row on the Search tab alone.
+/// Shared by [`bridge_picker_tabs`] and the specimen.
+fn picker_chrome_shown(scope: GroupPickerScope, tab: PickerTab) -> (bool, bool) {
+    let searchable = scope == GroupPickerScope::AnyGroup;
+    (searchable, searchable && tab == PickerTab::Search)
+}
+
+/// The [`Display`] a shown / hidden piece of chrome takes.
+const fn shown_display(shown: bool) -> Display {
+    if shown { Display::Flex } else { Display::None }
 }
 
 /// Which of a window's buttons a node is — a component rather than a closure
@@ -544,6 +630,7 @@ fn spawn_picker_button(
     label_key: &'static str,
     action: PickerButton,
     tab_index: i32,
+    font_size: f32,
 ) -> Entity {
     let button = ui_spawn::spawn_button(
         commands,
@@ -553,7 +640,7 @@ fn spawn_picker_button(
             .padding(10.0, 3.0)
             .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
             .label_color(LABEL_COLOR)
-            .font_size(PICKER_FONT_SIZE),
+            .font_size(font_size),
     )
     .button;
     commands
@@ -616,7 +703,10 @@ fn handle_open_requests(
         let opened = floaters.open(group_picker_floater_spec(), key);
         match opened {
             KeyedFloaterOpen::Spawned(handle) => {
-                let ui = build_picker_content(&mut commands, &handle);
+                commands
+                    .entity(handle.title_text)
+                    .insert(Translated::new("group-picker-title"));
+                let ui = build_picker_content(&mut commands, handle.content, PICKER_FONT_SIZE);
                 let state = GroupPickerState {
                     requester: Some(open.requester),
                     allow_none: open.allow_none,
@@ -672,18 +762,15 @@ fn bridge_picker_tabs(
         }
         let show = |entity: Entity, shown: bool, nodes: &mut Query<&mut Node>| {
             if let Ok(mut node) = nodes.get_mut(entity) {
-                let wanted = if shown { Display::Flex } else { Display::None };
+                let wanted = shown_display(shown);
                 if node.display != wanted {
                     node.display = wanted;
                 }
             }
         };
-        show(ui.tab_strip, searchable, &mut nodes);
-        show(
-            ui.search_row,
-            searchable && state.tab == PickerTab::Search,
-            &mut nodes,
-        );
+        let (strip_shown, search_shown) = picker_chrome_shown(state.scope, state.tab);
+        show(ui.tab_strip, strip_shown, &mut nodes);
+        show(ui.search_row, search_shown, &mut nodes);
     }
 }
 
@@ -767,101 +854,137 @@ fn rebuild_picker_list(
                 commands.entity(*child).despawn();
             }
         }
-        // An empty list says why it is empty: a search that matched nothing is
-        // otherwise indistinguishable from one that was never run, and an agent
-        // in no groups from a membership list that has not arrived.
-        if state.rows.is_empty() {
-            let key = match state.tab {
-                PickerTab::MyGroups => Some(NO_GROUPS_KEY),
-                PickerTab::Search => state.searched.then_some(NOT_FOUND_KEY),
-            };
-            if let Some(key) = key {
-                commands.spawn((
-                    Text::default(),
-                    Translated::new(key),
-                    UiFont::Sans.at(PICKER_FONT_SIZE),
-                    text_role(DETAIL_COLOR),
-                    Node {
-                        padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
-                        ..default()
-                    },
-                    Pickable::IGNORE,
-                    Name::new("group-picker-empty"),
-                    ChildOf(ui.list),
-                ));
-            }
+        draw_picker_list(&mut commands, ui.list, &state, PICKER_FONT_SIZE);
+    }
+}
+
+/// Draw `state`'s rows into the (emptied) `list` at `font_size`: the rows, the
+/// selection, and the row saying why an empty list is empty. What the rebuild
+/// draws, and the specimen with it.
+fn draw_picker_list(
+    commands: &mut Commands,
+    list: Entity,
+    state: &GroupPickerState,
+    font_size: f32,
+) {
+    // An empty list says why it is empty: a search that matched nothing is
+    // otherwise indistinguishable from one that was never run, and an agent
+    // in no groups from a membership list that has not arrived.
+    let empty_key = if state.rows.is_empty() {
+        match state.tab {
+            PickerTab::MyGroups => Some(NO_GROUPS_KEY),
+            PickerTab::Search => state.searched.then_some(NOT_FOUND_KEY),
         }
-        for (index, row_data) in state.rows.iter().enumerate() {
-            let selected = state.selected == Some(index);
-            // The active (worn) group is drawn bold, as the reference draws it.
-            let font = if row_data.active {
-                UiFont::Sans
-                    .at(PICKER_FONT_SIZE)
-                    .with_font_weight(FontWeight::BOLD)
-            } else {
-                UiFont::Sans.at(PICKER_FONT_SIZE)
-            };
-            let label = row_data.name.clone();
-            let detail = row_data.detail.clone();
-            let is_none_row = row_data.group.is_none();
-            commands
-                .spawn((
-                    Button,
-                    Node {
-                        padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
-                        align_items: AlignItems::Center,
-                        ..row(Val::Px(8.0))
-                    },
-                    ClassList::new_with_classes(
-                        core::iter::once(LIST_ROW_CLASS).chain(selected.then_some(SELECTED_CLASS)),
-                    ),
-                    Pickable::default(),
-                    // Numbered, so a test (and a person reading the entity
-                    // tree) can tell one row from another.
-                    Name::new(format!("group-picker-row:{index}")),
-                    ChildOf(ui.list),
-                ))
-                .observe(
-                    move |press: On<Pointer<Press>>,
-                          mut windows: Query<&mut GroupPickerState>,
-                          parents: Query<&ChildOf>,
-                          floaters: Query<(Entity, &Floater)>| {
-                        if press.button != PointerButton::Primary {
-                            return;
-                        }
-                        // The row's own window, not "the" picker: two are up
-                        // when two instanced windows are each picking a group.
-                        let Some(window) = host_floater(press.entity, &parents, &floaters) else {
-                            return;
-                        };
-                        let Ok(mut state) = windows.get_mut(window) else {
-                            return;
-                        };
-                        state.select(index);
-                    },
-                )
-                .with_children(|entry| {
-                    let mut text = entry.spawn((
-                        Text::new(label),
-                        font,
-                        text_role(LABEL_COLOR),
+    } else {
+        None
+    };
+    spawn_group_picker_rows(
+        commands,
+        list,
+        &state.rows,
+        state.selected,
+        empty_key,
+        font_size,
+    );
+}
+
+/// Spawn one clickable row per entry of `rows` into `list` at `font_size` (the
+/// `selected` row carries the selection class), preceded by the explanatory
+/// `empty_key` row when there is one. What the rebuild draws, and the specimen
+/// with it.
+fn spawn_group_picker_rows(
+    commands: &mut Commands,
+    list: Entity,
+    rows: &[GroupPickerRow],
+    selected: Option<usize>,
+    empty_key: Option<&'static str>,
+    font_size: f32,
+) {
+    if let Some(key) = empty_key {
+        commands.spawn((
+            Text::default(),
+            Translated::new(key),
+            UiFont::Sans.at(font_size),
+            text_role(DETAIL_COLOR),
+            Node {
+                padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
+                ..default()
+            },
+            Pickable::IGNORE,
+            Name::new("group-picker-empty"),
+            ChildOf(list),
+        ));
+    }
+    for (index, row_data) in rows.iter().enumerate() {
+        let is_selected = selected == Some(index);
+        // The active (worn) group is drawn bold, as the reference draws it.
+        let font = if row_data.active {
+            UiFont::Sans
+                .at(font_size)
+                .with_font_weight(FontWeight::BOLD)
+        } else {
+            UiFont::Sans.at(font_size)
+        };
+        let label = row_data.name.clone();
+        let detail = row_data.detail.clone();
+        let is_none_row = row_data.group.is_none();
+        commands
+            .spawn((
+                Button,
+                Node {
+                    padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
+                    align_items: AlignItems::Center,
+                    ..row(Val::Px(8.0))
+                },
+                ClassList::new_with_classes(
+                    core::iter::once(LIST_ROW_CLASS).chain(is_selected.then_some(SELECTED_CLASS)),
+                ),
+                Pickable::default(),
+                // Numbered, so a test (and a person reading the entity
+                // tree) can tell one row from another.
+                Name::new(format!("group-picker-row:{index}")),
+                ChildOf(list),
+            ))
+            .observe(
+                move |press: On<Pointer<Press>>,
+                      mut windows: Query<&mut GroupPickerState>,
+                      parents: Query<&ChildOf>,
+                      floaters: Query<(Entity, &Floater)>| {
+                    if press.button != PointerButton::Primary {
+                        return;
+                    }
+                    // The row's own window, not "the" picker: two are up
+                    // when two instanced windows are each picking a group.
+                    let Some(window) = host_floater(press.entity, &parents, &floaters) else {
+                        return;
+                    };
+                    let Ok(mut state) = windows.get_mut(window) else {
+                        return;
+                    };
+                    state.select(index);
+                },
+            )
+            .with_children(|entry| {
+                let mut text = entry.spawn((
+                    Text::new(label),
+                    font,
+                    text_role(LABEL_COLOR),
+                    Pickable::IGNORE,
+                ));
+                // The "none" row carries no group name, so it is labelled
+                // from the catalogue instead and follows the UI language.
+                if is_none_row {
+                    text.insert(Translated::new(NONE_ROW_KEY));
+                }
+                if !detail.is_empty() {
+                    entry.spawn((
+                        Text::new(detail),
+                        UiFont::Sans.at(font_size),
+                        text_role(DETAIL_COLOR),
                         Pickable::IGNORE,
                     ));
-                    // The "none" row carries no group name, so it is labelled
-                    // from the catalogue instead and follows the UI language.
-                    if is_none_row {
-                        text.insert(Translated::new(NONE_ROW_KEY));
-                    }
-                    if !detail.is_empty() {
-                        entry.spawn((
-                            Text::new(detail),
-                            UiFont::Sans.at(PICKER_FONT_SIZE),
-                            text_role(DETAIL_COLOR),
-                            Pickable::IGNORE,
-                        ));
-                    }
-                });
-        }
+                }
+            });
     }
 }
 
@@ -1149,11 +1272,14 @@ mod tests {
         use crate::intents::{GroupPicked, OpenGroupPicker};
         use crate::social::GroupsModel;
         use crate::ui::{UiRoot, UiScaffoldSystems};
+        use bevy::ecs::system::RunSystemOnce as _;
         use bevy::prelude::*;
+        use bevy_flair::style::components::ClassList;
         use pretty_assertions::assert_eq;
         use sl_client_bevy::{SlCommand, SlEvent};
         use sl_viewer_testkit::interact::{self, InteractionTest};
         use sl_viewer_testkit::{drain, record, settle};
+        use sl_viewer_ui_core::skin::SELECTED_CLASS;
 
         /// A boxed error so the tests use `?` rather than the disallowed
         /// `unwrap` / `expect`.
@@ -1226,6 +1352,47 @@ mod tests {
                 .query_filtered::<Entity, With<GroupPickerState>>()
                 .iter(app.world())
                 .collect()
+        }
+
+        /// The gallery specimen is the live content filled through the live
+        /// row helper: the none row and three groups, the second group
+        /// selected — and no picker state, so the live systems leave it be.
+        #[test]
+        fn the_specimen_draws_the_live_rows() -> Result<(), TestError> {
+            let mut app = picker_app();
+            let root = app.world().get_resource::<UiRoot>().ok_or("no UI root")?.0;
+            app.world_mut()
+                .run_system_once(move |mut commands: Commands| {
+                    super::super::spawn_group_picker_specimen(
+                        &mut commands,
+                        root,
+                        crate::ui_element::ElementCx::new(),
+                    );
+                })
+                .map_err(|error| format!("{error:?}"))?;
+            settle(&mut app);
+            let mut rows: Vec<(String, bool)> = app
+                .world_mut()
+                .query::<(&Name, &ClassList)>()
+                .iter(app.world())
+                .filter(|(name, _classes)| name.as_str().starts_with("group-picker-row:"))
+                .map(|(name, classes)| (name.as_str().to_owned(), classes.contains(SELECTED_CLASS)))
+                .collect();
+            rows.sort();
+            assert_eq!(
+                rows,
+                vec![
+                    ("group-picker-row:0".to_owned(), false),
+                    ("group-picker-row:1".to_owned(), false),
+                    ("group-picker-row:2".to_owned(), true),
+                    ("group-picker-row:3".to_owned(), false),
+                ],
+            );
+            assert!(
+                picker_windows(&mut app).is_empty(),
+                "the specimen carries no picker state"
+            );
+            Ok(())
         }
 
         /// A press opens a picker listing the agent's groups; clicking a row

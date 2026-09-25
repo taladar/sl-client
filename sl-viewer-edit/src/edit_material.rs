@@ -52,7 +52,7 @@ use crate::edit_texture::{
     PrimFaceLookup, ShowWhen, node_face_indices, parse_tex_value, primary_face_index,
     representative_face, spawn_row,
 };
-use crate::edit_tool::{TOOL_FONT_SIZE, VALUE_CLASS};
+use crate::edit_tool::VALUE_CLASS;
 use crate::face_material::{FaceMaterial, MAP_FLAG_NORMAL, MAP_FLAG_SPEC};
 use crate::gizmos::{EditPerm, perm_notice};
 use crate::intents::LocalChatNotice;
@@ -505,7 +505,7 @@ struct MatControl;
 
 /// The material-channel widget handles the sync / reply systems address.
 #[derive(Resource, Debug, Clone, Copy)]
-struct BuildMaterialUi {
+pub(crate) struct BuildMaterialUi {
     /// The normal-map texture swatch (the texture picker's requester).
     normal_swatch: Entity,
     /// The specular-map texture swatch.
@@ -611,13 +611,19 @@ impl Plugin for EditMaterialPlugin {
     }
 }
 
-/// Spawn the material-channel editors under the Texture page (called from
-/// [`crate::edit_texture`]'s tab spawn so they share the page and the mode
-/// selectors). Advances `tab_index` past the widgets it spawns.
-pub(crate) fn spawn_material_channels(commands: &mut Commands, page: Entity, tab_index: &mut i32) {
+/// Spawn the material-channel editors under the Texture page at `font_size`
+/// (called from [`crate::edit_texture`]'s tab spawn so they share the page and
+/// the mode selectors), returning the [`BuildMaterialUi`] the live floater
+/// publishes. Advances `tab_index` past the widgets it spawns.
+pub(crate) fn spawn_material_channels(
+    commands: &mut Commands,
+    page: Entity,
+    tab_index: &mut i32,
+    font_size: f32,
+) -> BuildMaterialUi {
     // Diffuse alpha mode (a legacy-material attribute shown in the Texture
     // channel, the reference's `combobox alphamode`).
-    let alpha_row = spawn_row(commands, page, "build-tex-alpha-mode-label");
+    let alpha_row = spawn_row(commands, page, "build-tex-alpha-mode-label", font_size);
     commands.entity(alpha_row).insert(ShowWhen::MaterialDiffuse);
     let alpha_labels: Vec<String> = ALPHA_MODE_LABELS
         .iter()
@@ -631,7 +637,7 @@ pub(crate) fn spawn_material_channels(commands: &mut Commands, page: Entity, tab
             labels: &alpha_labels,
             active: usize::from(ALPHA_MODE_NONE),
             tab_index: *tab_index,
-            font_size: TOOL_FONT_SIZE,
+            font_size,
             translate_labels: true,
         },
     );
@@ -641,7 +647,7 @@ pub(crate) fn spawn_material_channels(commands: &mut Commands, page: Entity, tab
     *tab_index = tab_index.saturating_add(1);
 
     // Normal-map swatch (the reference's `bumpytexture`).
-    let normal_row = spawn_row(commands, page, "build-tex-normal-label");
+    let normal_row = spawn_row(commands, page, "build-tex-normal-label", font_size);
     commands.entity(normal_row).insert(ShowWhen::MaterialNormal);
     let normal_swatch = spawn_texture_swatch(
         commands,
@@ -654,7 +660,7 @@ pub(crate) fn spawn_material_channels(commands: &mut Commands, page: Entity, tab
     *tab_index = tab_index.saturating_add(1);
 
     // Specular-map swatch (the reference's `shinytexture`).
-    let specular_row = spawn_row(commands, page, "build-tex-specular-label");
+    let specular_row = spawn_row(commands, page, "build-tex-specular-label", font_size);
     commands
         .entity(specular_row)
         .insert(ShowWhen::MaterialSpecular);
@@ -669,7 +675,7 @@ pub(crate) fn spawn_material_channels(commands: &mut Commands, page: Entity, tab
     *tab_index = tab_index.saturating_add(1);
 
     // Specular-highlight colour (the reference's `shinycolorswatch`).
-    let spec_color_row = spawn_row(commands, page, "build-tex-shiny-color-label");
+    let spec_color_row = spawn_row(commands, page, "build-tex-shiny-color-label", font_size);
     commands
         .entity(spec_color_row)
         .insert(ShowWhen::MaterialSpecular);
@@ -685,14 +691,16 @@ pub(crate) fn spawn_material_channels(commands: &mut Commands, page: Entity, tab
 
     // The legacy normal / specular transform + scalar rows.
     for (label_key, fields, show_when) in LEGACY_FIELD_ROWS {
-        spawn_legacy_field_row(commands, page, label_key, fields, *show_when, tab_index);
+        spawn_legacy_field_row(
+            commands, page, label_key, fields, *show_when, tab_index, font_size,
+        );
     }
 
     // --- PBR (render-material) channel controls ---
 
     // The render-material swatch (assign / clear a stored material asset) + the
     // New / Save buttons (the reference's material picker + Edit/Save).
-    let pbr_row = spawn_row(commands, page, "build-tex-pbr-material-label");
+    let pbr_row = spawn_row(commands, page, "build-tex-pbr-material-label", font_size);
     commands.entity(pbr_row).insert(ShowWhen::PbrMaterialId);
     // A material swatch: it opens the *material* picker (not the texture picker)
     // seeded with the current render-material id, while still painting the
@@ -712,17 +720,18 @@ pub(crate) fn spawn_material_channels(commands: &mut Commands, page: Entity, tab
         .entity(pbr_swatch)
         .insert((MaterialPreview::Empty, MatControl));
     *tab_index = tab_index.saturating_add(1);
-    let new_button = spawn_action_button(commands, pbr_row, "build-pbr-new", *tab_index);
+    let new_button = spawn_action_button(commands, pbr_row, "build-pbr-new", *tab_index, font_size);
     commands.entity(new_button).insert(PbrNewButton);
     commands.entity(new_button).observe(handle_pbr_new_press);
     *tab_index = tab_index.saturating_add(1);
-    let save_button = spawn_action_button(commands, pbr_row, "build-pbr-save", *tab_index);
+    let save_button =
+        spawn_action_button(commands, pbr_row, "build-pbr-save", *tab_index, font_size);
     commands.entity(save_button).insert(PbrSaveButton);
     commands.entity(save_button).observe(handle_pbr_save_press);
     *tab_index = tab_index.saturating_add(1);
 
     // Material-level alpha mode + cutoff + double-sided (render-material channel).
-    let pbr_alpha_row = spawn_row(commands, page, "build-tex-alpha-mode-label");
+    let pbr_alpha_row = spawn_row(commands, page, "build-tex-alpha-mode-label", font_size);
     commands
         .entity(pbr_alpha_row)
         .insert(ShowWhen::PbrMaterialId);
@@ -738,7 +747,7 @@ pub(crate) fn spawn_material_channels(commands: &mut Commands, page: Entity, tab
             labels: &pbr_alpha_labels,
             active: 0,
             tab_index: *tab_index,
-            font_size: TOOL_FONT_SIZE,
+            font_size,
             translate_labels: true,
         },
     );
@@ -753,9 +762,15 @@ pub(crate) fn spawn_material_channels(commands: &mut Commands, page: Entity, tab
         PbrScalarField::AlphaCutoff,
         ShowWhen::PbrMaterialId,
         tab_index,
+        font_size,
     );
-    let double_sided_check =
-        spawn_double_sided_toggle(commands, page, "build-pbr-double-sided", tab_index);
+    let double_sided_check = spawn_double_sided_toggle(
+        commands,
+        page,
+        "build-pbr-double-sided",
+        tab_index,
+        font_size,
+    );
 
     // --- PBR base-colour channel ---
     let pbr_base_swatch = spawn_pbr_swatch_row(
@@ -765,6 +780,7 @@ pub(crate) fn spawn_material_channels(commands: &mut Commands, page: Entity, tab
         "build-pbr-base-texture",
         ShowWhen::PbrBaseColor,
         tab_index,
+        font_size,
     );
     let pbr_base_tint = spawn_pbr_tint_row(
         commands,
@@ -773,6 +789,7 @@ pub(crate) fn spawn_material_channels(commands: &mut Commands, page: Entity, tab
         "build-pbr-base-tint",
         ShowWhen::PbrBaseColor,
         tab_index,
+        font_size,
     );
 
     // --- PBR metallic-roughness channel ---
@@ -783,6 +800,7 @@ pub(crate) fn spawn_material_channels(commands: &mut Commands, page: Entity, tab
         "build-pbr-metallic-texture",
         ShowWhen::PbrMetallic,
         tab_index,
+        font_size,
     );
     spawn_pbr_scalar_row(
         commands,
@@ -791,6 +809,7 @@ pub(crate) fn spawn_material_channels(commands: &mut Commands, page: Entity, tab
         PbrScalarField::Metallic,
         ShowWhen::PbrMetallic,
         tab_index,
+        font_size,
     );
     spawn_pbr_scalar_row(
         commands,
@@ -799,6 +818,7 @@ pub(crate) fn spawn_material_channels(commands: &mut Commands, page: Entity, tab
         PbrScalarField::Roughness,
         ShowWhen::PbrMetallic,
         tab_index,
+        font_size,
     );
 
     // --- PBR emissive channel ---
@@ -809,6 +829,7 @@ pub(crate) fn spawn_material_channels(commands: &mut Commands, page: Entity, tab
         "build-pbr-emissive-texture",
         ShowWhen::PbrEmissive,
         tab_index,
+        font_size,
     );
     let pbr_emissive_tint = spawn_pbr_tint_row(
         commands,
@@ -817,6 +838,7 @@ pub(crate) fn spawn_material_channels(commands: &mut Commands, page: Entity, tab
         "build-pbr-emissive-tint",
         ShowWhen::PbrEmissive,
         tab_index,
+        font_size,
     );
 
     // --- PBR normal channel ---
@@ -827,15 +849,16 @@ pub(crate) fn spawn_material_channels(commands: &mut Commands, page: Entity, tab
         "build-pbr-normal-texture",
         ShowWhen::PbrNormal,
         tab_index,
+        font_size,
     );
 
     // The PBR per-channel transform display / edit rows (shown in every PBR
     // channel).
     for (label_key, fields) in PBR_FIELD_ROWS {
-        spawn_pbr_field_row(commands, page, label_key, fields, tab_index);
+        spawn_pbr_field_row(commands, page, label_key, fields, tab_index, font_size);
     }
 
-    commands.insert_resource(BuildMaterialUi {
+    BuildMaterialUi {
         normal_swatch,
         specular_swatch,
         spec_color_swatch,
@@ -849,7 +872,7 @@ pub(crate) fn spawn_material_channels(commands: &mut Commands, page: Entity, tab
         pbr_normal_swatch,
         pbr_alpha_combo,
         double_sided_check,
-    });
+    }
 }
 
 /// Spawn a PBR channel texture-swatch row, returning the swatch entity.
@@ -860,8 +883,9 @@ fn spawn_pbr_swatch_row(
     element: &'static str,
     show_when: ShowWhen,
     tab_index: &mut i32,
+    font_size: f32,
 ) -> Entity {
-    let row = spawn_row(commands, page, label_key);
+    let row = spawn_row(commands, page, label_key, font_size);
     commands.entity(row).insert(show_when);
     let swatch = spawn_texture_swatch(
         commands,
@@ -883,8 +907,9 @@ fn spawn_pbr_tint_row(
     element: &'static str,
     show_when: ShowWhen,
     tab_index: &mut i32,
+    font_size: f32,
 ) -> Entity {
-    let row = spawn_row(commands, page, label_key);
+    let row = spawn_row(commands, page, label_key, font_size);
     commands.entity(row).insert(show_when);
     let swatch = spawn_color_swatch(commands, row, element, *tab_index, Color::WHITE);
     commands.entity(swatch).insert(MatControl);
@@ -900,8 +925,9 @@ fn spawn_pbr_scalar_row(
     field: PbrScalarField,
     show_when: ShowWhen,
     tab_index: &mut i32,
+    font_size: f32,
 ) {
-    let row = spawn_row(commands, page, label_key);
+    let row = spawn_row(commands, page, label_key, font_size);
     commands.entity(row).insert(show_when);
     let index = *tab_index;
     *tab_index = tab_index.saturating_add(1);
@@ -909,7 +935,7 @@ fn spawn_pbr_scalar_row(
         commands,
         row,
         &TextInputSpec {
-            font_size: TOOL_FONT_SIZE,
+            font_size,
             width_glyphs: MAT_FIELD_GLYPHS,
             tab_index: index,
             ..TextInputSpec::new(field.element(), TextInputKind::Float)
@@ -927,6 +953,7 @@ fn spawn_double_sided_toggle(
     page: Entity,
     label_key: &'static str,
     tab_index: &mut i32,
+    font_size: f32,
 ) -> Entity {
     let index = *tab_index;
     *tab_index = tab_index.saturating_add(1);
@@ -937,7 +964,7 @@ fn spawn_double_sided_toggle(
             element: label_key,
             label: label_key.to_owned(),
             tab_index: index,
-            font_size: TOOL_FONT_SIZE,
+            font_size,
             translate_label: true,
         },
     );
@@ -959,6 +986,7 @@ fn spawn_action_button(
     parent: Entity,
     label_key: &'static str,
     tab_index: i32,
+    font_size: f32,
 ) -> Entity {
     let button = ui_spawn::spawn_button(
         commands,
@@ -973,7 +1001,7 @@ fn spawn_action_button(
             )
             // A skinless fallback; the skin recolours via the class token.
             .label_color(Color::WHITE)
-            .font_size(TOOL_FONT_SIZE)
+            .font_size(font_size)
             .label_class(VALUE_CLASS),
     )
     .button;
@@ -989,8 +1017,9 @@ fn spawn_legacy_field_row(
     fields: &[LegacyField],
     show_when: ShowWhen,
     tab_index: &mut i32,
+    font_size: f32,
 ) {
-    let row_entity = spawn_row(commands, page, label_key);
+    let row_entity = spawn_row(commands, page, label_key, font_size);
     commands.entity(row_entity).insert(show_when);
     for &field in fields {
         let index = *tab_index;
@@ -999,7 +1028,7 @@ fn spawn_legacy_field_row(
             commands,
             row_entity,
             &TextInputSpec {
-                font_size: TOOL_FONT_SIZE,
+                font_size,
                 width_glyphs: MAT_FIELD_GLYPHS,
                 tab_index: index,
                 ..TextInputSpec::new(field.element(), field.input_kind())
@@ -1016,8 +1045,9 @@ fn spawn_pbr_field_row(
     label_key: &'static str,
     fields: &[PbrField],
     tab_index: &mut i32,
+    font_size: f32,
 ) {
-    let row_entity = spawn_row(commands, page, label_key);
+    let row_entity = spawn_row(commands, page, label_key, font_size);
     commands.entity(row_entity).insert(ShowWhen::PbrAny);
     for &field in fields {
         let index = *tab_index;
@@ -1026,7 +1056,7 @@ fn spawn_pbr_field_row(
             commands,
             row_entity,
             &TextInputSpec {
-                font_size: TOOL_FONT_SIZE,
+                font_size,
                 width_glyphs: MAT_FIELD_GLYPHS,
                 tab_index: index,
                 ..TextInputSpec::new(field.element(), TextInputKind::Float)
@@ -2631,11 +2661,15 @@ fn commit_pbr_scalars(
 fn handle_double_sided_press(
     change: On<ValueChange<bool>>,
     buttons: Query<(), With<DoubleSidedButton>>,
-    mut pbr: PbrFaceEdit,
+    pbr: Option<PbrFaceEdit>,
 ) {
     if !buttons.contains(change.source) {
         return;
     }
+    // Absent only in the gallery / `ui_test` hosts.
+    let Some(mut pbr) = pbr else {
+        return;
+    };
     if !pbr.allowed() {
         return;
     }
@@ -2646,20 +2680,39 @@ fn handle_double_sided_press(
     pbr.apply_override(|over| over.double_sided = Some(!current));
 }
 
+/// What the New button reads and where it reports — optional in
+/// [`handle_pbr_new_press`], absent only in the gallery / `ui_test` hosts.
+type PbrNewSession<'w> = (
+    Res<'w, SelectionSet>,
+    Res<'w, ObjectState>,
+    MessageWriter<'w, LocalChatNotice>,
+    MessageWriter<'w, SlCommand>,
+);
+
+/// What the Save button reads and where it sends — optional in
+/// [`handle_pbr_save_press`], absent only in the gallery / `ui_test` hosts.
+type PbrSaveSession<'w> = (
+    Res<'w, SelectionSet>,
+    Res<'w, MaterialManager>,
+    Res<'w, crate::inventory::InventoryModel>,
+    MessageWriter<'w, SlCommand>,
+);
+
 /// Assign the blank GLTF material to the selected faces — the "New material"
 /// action (the reference's `BLANK_MATERIAL_ASSET_ID`). Applies to every selected
 /// face regardless of whether it already has a material.
 fn handle_pbr_new_press(
     press: On<Pointer<Press>>,
     buttons: Query<(), With<PbrNewButton>>,
-    selection: Res<SelectionSet>,
-    objects: Res<ObjectState>,
-    mut notices: MessageWriter<LocalChatNotice>,
-    mut commands: MessageWriter<SlCommand>,
+    session: Option<PbrNewSession<'_>>,
 ) {
     if press.button != PointerButton::Primary || !buttons.contains(press.entity) {
         return;
     }
+    // Absent only in the gallery / `ui_test` hosts.
+    let Some((selection, objects, mut notices, mut commands)) = session else {
+        return;
+    };
     if !material_edit_allowed(&selection, &objects, &mut notices) {
         return;
     }
@@ -2680,15 +2733,16 @@ fn handle_pbr_new_press(
 fn handle_pbr_save_press(
     press: On<Pointer<Press>>,
     buttons: Query<(), With<PbrSaveButton>>,
-    selection: Res<SelectionSet>,
-    material_manager: Res<MaterialManager>,
-    inventory: Res<crate::inventory::InventoryModel>,
     faces: RenderFaceLookup,
-    mut commands: MessageWriter<SlCommand>,
+    session: Option<PbrSaveSession<'_>>,
 ) {
     if press.button != PointerButton::Primary || !buttons.contains(press.entity) {
         return;
     }
+    // Absent only in the gallery / `ui_test` hosts.
+    let Some((selection, material_manager, inventory, mut commands)) = session else {
+        return;
+    };
     let (material_id, base, over) = representative_pbr(&selection, &material_manager, &faces);
     if material_id.is_none() {
         // No PBR material on the face to save.

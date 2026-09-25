@@ -464,7 +464,7 @@ enum RequestPanoramaCapture {
 }
 
 /// The floater's live entity handles.
-#[derive(Resource, Debug)]
+#[derive(Resource, Debug, Clone, Copy)]
 struct PanoramaUi {
     /// The preview [`ImageNode`].
     preview: Entity,
@@ -524,44 +524,143 @@ fn build_panorama_content(
     mut commands: Commands,
     state: Res<PanoramaState>,
 ) {
+    let ui = spawn_panorama_content(&mut commands, handle.content, FONT_SIZE, &state);
+    commands.insert_resource(ui);
+}
+
+// ---------------------------------------------------------------------------
+// Gallery specimen.
+// ---------------------------------------------------------------------------
+
+/// The panorama floater's gallery / `ui_test` specimen: the live content,
+/// built by the same `spawn_panorama_content` at the cell's font size on the
+/// default picks, with a finished sample panorama put in the preview by the
+/// same `show_preview` a capture ends in and the status line drawn by the
+/// same `status_line` — the window as it looks after a capture.
+///
+/// The sample panorama is a synthetic sky-over-ground gradient: a specimen has
+/// no camera to shoot six faces with.
+pub fn spawn_panorama_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: sl_viewer_ui_core::ui_element::ElementCx,
+) -> Entity {
+    let ui = spawn_panorama_content(commands, parent, cx.font_size, &PanoramaState::default());
+    commands.queue(move |world: &mut World| {
+        if let Err(error) = world.run_system_cached_with(show_sample_capture, ui) {
+            warn!("panorama specimen: the sample capture was not drawn: {error}");
+        }
+    });
+    parent
+}
+
+/// The specimen's one-shot: show [`sample_panorama`] in the preview and the
+/// "captured" status line, through the live helpers.
+fn show_sample_capture(
+    In(ui): In<PanoramaUi>,
+    mut widgets: PreviewWidgets,
+    translator: Translator,
+    mut texts: Query<&mut Text>,
+) {
+    show_preview(&ui, &sample_panorama(), &mut widgets);
+    let status = StatusKind::Message(translator.get("panorama-captured"));
+    set_status_text(&ui, &status_line(&status, &translator), &mut texts);
+}
+
+/// A synthetic 2:1 panorama for the specimen: a sky that pales towards the
+/// horizon over a ground that darkens away from it, at the preview's size.
+fn sample_panorama() -> RgbImage {
+    let width = preview_dimension(PREVIEW_WIDTH);
+    let height = preview_dimension(PREVIEW_HEIGHT);
+    let horizon = height / 2;
+    RgbImage::from_fn(width, height, |_x, y| {
+        let (distance, span) = if y < horizon {
+            (horizon.saturating_sub(y), horizon)
+        } else {
+            (y.saturating_sub(horizon), height.saturating_sub(horizon))
+        };
+        // 0 at the horizon, 255 at the zenith / nadir.
+        let depth = distance
+            .saturating_mul(255)
+            .checked_div(span.max(1))
+            .and_then(|depth| u8::try_from(depth).ok())
+            .unwrap_or(u8::MAX);
+        if y < horizon {
+            image::Rgb([
+                200_u8.saturating_sub(depth / 2),
+                220_u8.saturating_sub(depth / 3),
+                250,
+            ])
+        } else {
+            image::Rgb([
+                110_u8.saturating_sub(depth / 3),
+                130_u8.saturating_sub(depth / 3),
+                80_u8.saturating_sub(depth / 4),
+            ])
+        }
+    })
+}
+
+/// Build the floater's content into `parent` at `font_size`, the pickers on
+/// `state`'s choices: the 2:1 preview, the three pickers, the two buttons,
+/// the status line and the hint. Returns the entities the systems update.
+/// Shared by the live floater and its specimen.
+fn spawn_panorama_content(
+    commands: &mut Commands,
+    parent: Entity,
+    font_size: f32,
+    state: &PanoramaState,
+) -> PanoramaUi {
     let content = commands
         .spawn((
             Node {
                 width: Val::Px(PREVIEW_WIDTH),
                 ..column(Val::Px(8.0))
             },
-            ChildOf(handle.content),
+            ChildOf(parent),
         ))
         .id();
 
-    let (preview, preview_hint) = spawn_preview(&mut commands, content);
+    let (preview, preview_hint) = spawn_preview(commands, content, font_size);
 
     let quality_combo = spawn_picker_row(
-        &mut commands,
+        commands,
         content,
         "panorama-quality-label",
-        "panorama-quality",
-        &pixel_labels(FACE_SIZES),
-        state.face_size,
-        1,
+        &ComboSpec {
+            element: "panorama-quality",
+            labels: &pixel_labels(FACE_SIZES),
+            active: state.face_size,
+            tab_index: 1,
+            font_size,
+            translate_labels: false,
+        },
     );
     let width_combo = spawn_picker_row(
-        &mut commands,
+        commands,
         content,
         "panorama-width-label",
-        "panorama-width",
-        &panorama_labels(),
-        state.output_width,
-        2,
+        &ComboSpec {
+            element: "panorama-width",
+            labels: &panorama_labels(),
+            active: state.output_width,
+            tab_index: 2,
+            font_size,
+            translate_labels: false,
+        },
     );
     let format_combo = spawn_picker_row(
-        &mut commands,
+        commands,
         content,
         "panorama-format-label",
-        "panorama-format",
-        &format_labels(),
-        state.format,
-        3,
+        &ComboSpec {
+            element: "panorama-format",
+            labels: &format_labels(),
+            active: state.format,
+            tab_index: 3,
+            font_size,
+            translate_labels: false,
+        },
     );
 
     let buttons = commands
@@ -573,23 +672,29 @@ fn build_panorama_content(
             ChildOf(content),
         ))
         .id();
-    let shoot = spawn_text_button(&mut commands, buttons, "panorama-capture", 4);
+    let shoot = spawn_text_button(commands, buttons, "panorama-capture", 4, font_size);
     commands.entity(shoot).observe(
-        |_activate: On<Activate>, mut requests: MessageWriter<RequestPanoramaCapture>| {
-            requests.write(RequestPanoramaCapture::Shoot);
+        |_activate: On<Activate>, requests: Option<MessageWriter<RequestPanoramaCapture>>| {
+            // Absent only in the gallery, whose specimen has nothing to shoot.
+            if let Some(mut requests) = requests {
+                requests.write(RequestPanoramaCapture::Shoot);
+            }
         },
     );
-    let save = spawn_text_button(&mut commands, buttons, "panorama-save-disk", 5);
+    let save = spawn_text_button(commands, buttons, "panorama-save-disk", 5, font_size);
     commands.entity(save).observe(
-        |_activate: On<Activate>, mut requests: MessageWriter<RequestPanoramaCapture>| {
-            requests.write(RequestPanoramaCapture::Save);
+        |_activate: On<Activate>, requests: Option<MessageWriter<RequestPanoramaCapture>>| {
+            // Absent only in the gallery, whose specimen has nothing to shoot.
+            if let Some(mut requests) = requests {
+                requests.write(RequestPanoramaCapture::Save);
+            }
         },
     );
 
     let status = commands
         .spawn((
             Text::default(),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(HINT_COLOR),
             Name::new("panorama-status"),
             ChildOf(content),
@@ -599,7 +704,7 @@ fn build_panorama_content(
     commands.spawn((
         Text::default(),
         Translated::new("panorama-hint"),
-        UiFont::Sans.at(FONT_SIZE),
+        UiFont::Sans.at(font_size),
         text_role(HINT_COLOR),
         Node {
             max_width: Val::Px(PREVIEW_WIDTH),
@@ -608,19 +713,19 @@ fn build_panorama_content(
         ChildOf(content),
     ));
 
-    commands.insert_resource(PanoramaUi {
+    PanoramaUi {
         preview,
         preview_hint,
         quality_combo,
         width_combo,
         format_combo,
         status,
-    });
+    }
 }
 
 /// Spawn the fixed 2:1 preview frame, returning the image node and the hint
-/// shown until something has been captured into it.
-fn spawn_preview(commands: &mut Commands, parent: Entity) -> (Entity, Entity) {
+/// shown until something has been captured into it (at `font_size`).
+fn spawn_preview(commands: &mut Commands, parent: Entity, font_size: f32) -> (Entity, Entity) {
     let frame = commands
         .spawn((
             Node {
@@ -654,7 +759,7 @@ fn spawn_preview(commands: &mut Commands, parent: Entity) -> (Entity, Entity) {
         .spawn((
             Text::default(),
             Translated::new("panorama-preview-empty"),
-            UiFont::Sans.at(FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(HINT_COLOR),
             ChildOf(frame),
         ))
@@ -662,15 +767,13 @@ fn spawn_preview(commands: &mut Commands, parent: Entity) -> (Entity, Entity) {
     (preview, preview_hint)
 }
 
-/// Spawn one `label: [combo]` row, returning the combo anchor.
+/// Spawn one `label: [combo]` row, the label at the combo's font size,
+/// returning the combo anchor.
 fn spawn_picker_row(
     commands: &mut Commands,
     parent: Entity,
     label_key: &'static str,
-    element: &'static str,
-    labels: &[String],
-    active: usize,
-    tab: i32,
+    combo: &ComboSpec,
 ) -> Entity {
     let row_entity = commands
         .spawn((
@@ -685,30 +788,21 @@ fn spawn_picker_row(
     commands.spawn((
         Text::default(),
         Translated::new(label_key),
-        UiFont::Sans.at(FONT_SIZE),
+        UiFont::Sans.at(combo.font_size),
         text_role(LABEL_COLOR),
         ChildOf(row_entity),
     ));
-    spawn_combo(
-        commands,
-        row_entity,
-        &ComboSpec {
-            element,
-            labels,
-            active,
-            tab_index: tab,
-            font_size: FONT_SIZE,
-            translate_labels: false,
-        },
-    )
+    spawn_combo(commands, row_entity, combo)
 }
 
-/// Spawn a translated-label push button, returning its clickable box.
+/// Spawn a translated-label push button at `font_size`, returning its
+/// clickable box.
 fn spawn_text_button(
     commands: &mut Commands,
     parent: Entity,
     label_key: &'static str,
     tab: i32,
+    font_size: f32,
 ) -> Entity {
     ui_spawn::spawn_button(
         commands,
@@ -720,7 +814,7 @@ fn spawn_text_button(
             .border(2.0)
             .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
             .label_color(LABEL_COLOR)
-            .font_size(FONT_SIZE)
+            .font_size(font_size)
             .layout(|node| node.align_self = AlignSelf::Start),
     )
     .button
@@ -839,7 +933,12 @@ fn update_status_text(
     let Some(ui) = ui else {
         return;
     };
-    let wanted = match &state.status {
+    set_status_text(&ui, &status_line(&state.status, &translator), &mut texts);
+}
+
+/// The status line's text for `status`.
+fn status_line(status: &StatusKind, translator: &Translator) -> String {
+    match status {
         StatusKind::Ready => translator.get("panorama-status-ready"),
         StatusKind::Settling => translator.get("panorama-status-settling"),
         StatusKind::Shooting { face } => translator.format(
@@ -850,11 +949,15 @@ fn update_status_text(
         ),
         StatusKind::Stitching => translator.get("panorama-status-stitching"),
         StatusKind::Message(message) => message.clone(),
-    };
+    }
+}
+
+/// Write `wanted` into the status line, touching it only on a change.
+fn set_status_text(ui: &PanoramaUi, wanted: &str, texts: &mut Query<&mut Text>) {
     if let Ok(mut text) = texts.get_mut(ui.status)
         && text.0 != wanted
     {
-        text.0 = wanted;
+        wanted.clone_into(&mut text.0);
     }
 }
 
@@ -1500,9 +1603,9 @@ fn preview_dimension(value: f32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        CUBE_FACES, FACE_SIZES, FORMATS, OUTPUT_WIDTHS, PanoramaState, capture_basis, clamp_index,
-        clamp_to_u8, clamp_to_u16, cube_face_projection, heading_degrees, panorama_labels,
-        pixel_labels,
+        CUBE_FACES, FACE_SIZES, FORMATS, OUTPUT_WIDTHS, PREVIEW_HEIGHT, PREVIEW_WIDTH,
+        PanoramaState, capture_basis, clamp_index, clamp_to_u8, clamp_to_u16, cube_face_projection,
+        heading_degrees, panorama_labels, pixel_labels, preview_dimension, sample_panorama,
     };
     use bevy::camera::{PerspectiveProjection, Projection};
     use bevy::math::{Quat, Vec3};
@@ -1513,6 +1616,27 @@ mod tests {
 
     /// How far a lens number may differ and still be the same one.
     const LENS_EPSILON: f32 = 1.0e-4;
+
+    /// The specimen's sample panorama is exactly the preview's size, so
+    /// `show_preview` draws it unscaled, and reads as sky over ground: the
+    /// zenith row is bluer than the nadir row.
+    #[test]
+    fn sample_panorama_fills_the_preview_sky_over_ground() {
+        let panorama = sample_panorama();
+        assert_eq!(
+            panorama.dimensions(),
+            (
+                preview_dimension(PREVIEW_WIDTH),
+                preview_dimension(PREVIEW_HEIGHT)
+            )
+        );
+        let zenith = panorama.get_pixel(0, 0).0;
+        let nadir = panorama.get_pixel(0, panorama.height().saturating_sub(1)).0;
+        assert!(
+            zenith.get(2) > nadir.get(2),
+            "the sky must be bluer than the ground: {zenith:?} over {nadir:?}"
+        );
+    }
 
     /// Every offered output width is even, so its 2:1 height is a whole number
     /// of pixels — an odd one would make an equirectangular image that is not

@@ -60,6 +60,7 @@ use sl_viewer_ui_widgets::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater,
 };
 use sl_viewer_ui_widgets::ui_color_picker::{ColorPicked, ColorSwatchValue};
+use sl_viewer_ui_widgets::ui_tab::TabViewport;
 use sl_viewer_ui_widgets::ui_trackball::TrackballAim;
 use sl_viewer_world_scene::environment::EnvironmentState;
 use sl_viewer_world_scene::sky::day_position;
@@ -69,7 +70,7 @@ use crate::rows::{
     AimTrackball, spawn_action_button, spawn_color_row, spawn_slider_row, spawn_texture_row,
     spawn_trackball_row, tag_aim_slider,
 };
-use crate::style::{DIM_LABEL_COLOR, HEADING_SIZE};
+use crate::style::{DIM_LABEL_COLOR, FONT_SIZE, heading_size};
 use sl_viewer_ui_core::skin::text_role;
 
 /// The element-id prefix every control in this window is named by — the window
@@ -190,13 +191,18 @@ pub fn personal_lighting_floater_spec() -> FloaterSpec {
     FloaterSpec {
         id: PERSONAL_LIGHTING_FLOATER_ID,
         title: "Personal Lighting".to_owned(),
-        position: Vec2::new(120.0, 120.0),
+        // Higher than its siblings open, so its full height still clears the
+        // bottom of a 1280×800 laptop screen.
+        position: Vec2::new(120.0, 70.0),
         // Four columns side by side, as the reference lays it out — a tall
         // single column would need a scroll view for a window whose whole point
         // is that every knob is under the hand at once. The sun-and-moon column
         // is the long one now that it opens each body with a trackball, and it
-        // sets the height; the water column's fourteen knobs are shorter.
-        default_size: Some(Vec2::new(660.0, 620.0)),
+        // sets the height; the water column's fourteen knobs are shorter. The
+        // captions wrap beside their readouts, which is what the extra height
+        // is for; anything taller still (a large font, a long translation)
+        // scrolls.
+        default_size: Some(Vec2::new(660.0, 690.0)),
         min_size: Some(Vec2::new(320.0, 240.0)),
         dock_host: None,
         caps: FloaterCaps {
@@ -283,6 +289,17 @@ const TEXTURE_KNOBS: &[TextureKnob] = &[TextureKnob::CloudImage, TextureKnob::Wa
 /// First-open content build: four columns — colours and images, the atmosphere,
 /// the sun and moon, and the water.
 fn build_personal_lighting_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
+    spawn_personal_lighting_content(&mut commands, handle.content, FONT_SIZE);
+}
+
+/// Build the window's four columns into `slot` with their headings sized for
+/// body text at `font_size`. Returns the content root. Shared by the live
+/// floater and its specimen.
+fn spawn_personal_lighting_content(
+    commands: &mut Commands,
+    slot: Entity,
+    font_size: f32,
+) -> Entity {
     let content = commands
         .spawn((
             Node {
@@ -290,53 +307,74 @@ fn build_personal_lighting_content(In(handle): In<FloaterHandle>, mut commands: 
                 height: Val::Percent(100.0),
                 min_height: Val::Px(0.0),
                 padding: UiRect::all(Val::Px(6.0)),
+                // Side by side while they fit; a narrow window, a large font or
+                // long captions (which wrap, and so lengthen a column) put the
+                // columns that no longer fit under the others, and the content
+                // scrolls rather than running out of the window.
+                flex_wrap: FlexWrap::Wrap,
+                align_content: AlignContent::FlexStart,
+                align_items: AlignItems::FlexStart,
+                row_gap: Val::Px(10.0),
+                overflow: Overflow::scroll_y(),
                 ..row(Val::Px(10.0))
             },
+            ScrollPosition::default(),
+            TabViewport { vertical: true },
             Name::new("personal-lighting:content"),
-            ChildOf(handle.content),
+            ChildOf(slot),
         ))
         .id();
     let mut tab = 0_i32;
+    let heading = heading_size(font_size);
 
-    let swatches = spawn_column(&mut commands, content, "personal-lighting-colours");
+    let swatches = spawn_column(commands, content, "personal-lighting-colours", heading);
     for knob in COLOR_KNOBS {
-        spawn_color_swatch_row(&mut commands, swatches, *knob, &mut tab);
+        spawn_color_swatch_row(commands, swatches, *knob, &mut tab);
     }
     for knob in TEXTURE_KNOBS {
-        spawn_texture_swatch_row(&mut commands, swatches, *knob, &mut tab);
+        spawn_texture_swatch_row(commands, swatches, *knob, &mut tab);
     }
-    spawn_reset_button(&mut commands, swatches, &mut tab);
+    spawn_reset_button(commands, swatches, &mut tab);
 
-    let atmosphere = spawn_column(&mut commands, content, "personal-lighting-atmosphere");
+    let atmosphere = spawn_column(commands, content, "personal-lighting-atmosphere", heading);
     for knob in ATMOSPHERE_KNOBS {
-        spawn_sky_slider(&mut commands, atmosphere, *knob, &mut tab);
+        spawn_sky_slider(commands, atmosphere, *knob, &mut tab);
     }
 
     // Each body opens with its trackball and is followed by the sliders that
     // say the same thing in numbers — the reference's arrangement, and the one
     // that makes it obvious the two drive each other.
-    let bodies = spawn_column(&mut commands, content, "personal-lighting-sun-moon");
-    spawn_aim_trackball(&mut commands, bodies, AimKnobs::SUN, &mut tab);
+    let bodies = spawn_column(commands, content, "personal-lighting-sun-moon", heading);
+    spawn_aim_trackball(commands, bodies, AimKnobs::SUN, &mut tab);
     for knob in SUN_KNOBS {
-        spawn_sky_slider(&mut commands, bodies, *knob, &mut tab);
+        spawn_sky_slider(commands, bodies, *knob, &mut tab);
     }
-    spawn_aim_trackball(&mut commands, bodies, AimKnobs::MOON, &mut tab);
+    spawn_aim_trackball(commands, bodies, AimKnobs::MOON, &mut tab);
     for knob in MOON_KNOBS {
-        spawn_sky_slider(&mut commands, bodies, *knob, &mut tab);
+        spawn_sky_slider(commands, bodies, *knob, &mut tab);
     }
 
-    let water = spawn_column(&mut commands, content, "personal-lighting-water");
+    let water = spawn_column(commands, content, "personal-lighting-water", heading);
     for knob in WATER_KNOBS {
-        spawn_water_slider(&mut commands, water, *knob, &mut tab);
+        spawn_water_slider(commands, water, *knob, &mut tab);
     }
+    content
 }
 
-/// One titled column of the floater; returns the node rows are parented into.
-fn spawn_column(commands: &mut Commands, parent: Entity, heading_key: &'static str) -> Entity {
+/// One titled column of the floater, its heading at `heading` px; returns the
+/// node rows are parented into.
+fn spawn_column(
+    commands: &mut Commands,
+    parent: Entity,
+    heading_key: &'static str,
+    heading: f32,
+) -> Entity {
     let column_entity = commands
         .spawn((
             Node {
-                min_width: Val::Px(0.0),
+                // Never narrower than its rows: a column that no longer fits
+                // wraps onto the next band instead.
+                flex_shrink: 0.0,
                 ..column(Val::Px(3.0))
             },
             Name::new(format!("{heading_key}:column")),
@@ -345,7 +383,7 @@ fn spawn_column(commands: &mut Commands, parent: Entity, heading_key: &'static s
         .id();
     commands.spawn((
         Text::new(String::new()),
-        UiFont::Sans.at(HEADING_SIZE),
+        UiFont::Sans.at(heading),
         text_role(DIM_LABEL_COLOR),
         Translated::new(heading_key),
         ChildOf(column_entity),
@@ -715,4 +753,44 @@ fn handle_reset_confirmation(
     {
         shown.0 = false;
     }
+}
+
+// ---------------------------------------------------------------------------
+// Gallery specimen.
+// ---------------------------------------------------------------------------
+
+/// The Personal Lighting floater's gallery / `ui_test` specimen: the live
+/// content, built by the same `spawn_personal_lighting_content` the viewer's
+/// floater is, with its headings at the cell's font size — then seeded by the
+/// live `reseed_personal_widgets` from a sample capture (the legacy WindLight
+/// default sky and water), exactly as an open seeds the real window, and its
+/// slider readouts drawn by the shared rows sync that writes them live.
+///
+/// The sample buffers stay installed as the window's edit state, so a drag on
+/// a specimen slider lands in them as it would live; nothing pushes them to an
+/// environment, since no host of a specimen runs this window's plugin.
+pub fn spawn_personal_lighting_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: sl_viewer_ui_core::ui_element::ElementCx,
+) -> Entity {
+    let content = spawn_personal_lighting_content(commands, parent, cx.font_size);
+    let sky = SkySettings::legacy_windlight_default(&cx.text("Sample Sky"));
+    let water = WaterSettings::legacy_default(&cx.text("Sample Water"));
+    commands.queue(move |world: &mut World| {
+        {
+            let mut edit = world.get_resource_or_init::<PersonalLightingEdit>();
+            edit.sky = Some(Box::new(sky));
+            edit.water = Some(water);
+            edit.dirty = false;
+            edit.reseed = true;
+        }
+        crate::specimen::run_once(world, ELEMENT, reseed_personal_widgets);
+        crate::specimen::draw_slider_readouts(world, ELEMENT);
+        // The channel the Reset button's observer raises its confirmation on,
+        // so a press on the specimen's Reset is inert rather than a failed
+        // observer.
+        crate::specimen::ensure_message::<ShowNotification>(world);
+    });
+    content
 }

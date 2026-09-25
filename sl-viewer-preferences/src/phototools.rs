@@ -51,7 +51,9 @@ use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui::{Checked, InteractionDisabled};
-use bevy::ui_widgets::{Activate, Button, SliderRange, SliderStep, SliderValue, ValueChange};
+use bevy::ui_widgets::{
+    Activate, Button, Slider, SliderRange, SliderStep, SliderValue, ValueChange,
+};
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{EnvironmentAsset, SkySettings};
 use sl_settings::{Scope, SettingKind, SettingValue};
@@ -125,9 +127,6 @@ const THUMB_FILL: Color = Color::srgb(0.62, 0.72, 0.86);
 const BUTTON_BORDER: Color = Color::srgb(0.3, 0.34, 0.42);
 /// A button's fill.
 const BUTTON_FILL: Color = Color::srgb(0.16, 0.17, 0.2);
-/// The fill of the time button whose environment is the one in force — the
-/// gallery specimen's, which draws a static strip rather than a live one.
-const BUTTON_ACTIVE_FILL: Color = Color::srgb(0.24, 0.32, 0.45);
 
 // ---------------------------------------------------------------------------
 // The table.
@@ -852,7 +851,30 @@ fn sync_environment_controls(
     let allowed = rlv
         .as_deref()
         .is_none_or(|session| can_change_environment(session.state()));
-    for (entity, disabled) in &gated {
+    let fixed = environment.as_deref().and_then(EnvironmentState::fixed);
+    show_environment_controls(
+        allowed,
+        fixed,
+        groups.single_mut().ok(),
+        times.iter(),
+        gated.iter(),
+        &mut commands,
+    );
+}
+
+/// Show the environment in force in the controls: grey and refuse every
+/// `gated` control unless `allowed`, select `fixed`'s library in the `group`
+/// combo, and light the `times` button it is frozen at. The drawing half of
+/// [`sync_environment_controls`], shared with the specimen.
+fn show_environment_controls<'a>(
+    allowed: bool,
+    fixed: Option<FixedEnvironment>,
+    group: Option<Mut<ComboSelection>>,
+    times: impl Iterator<Item = (Entity, &'a PhotoTimeButton, bool)>,
+    gated: impl Iterator<Item = (Entity, bool)>,
+    commands: &mut Commands,
+) {
+    for (entity, disabled) in gated {
         if disabled == allowed {
             if allowed {
                 commands.entity(entity).remove::<InteractionDisabled>();
@@ -862,17 +884,17 @@ fn sync_environment_controls(
         }
     }
 
-    let fixed = environment.as_deref().and_then(EnvironmentState::fixed);
-    if let Some(fixed) = fixed
-        && let Ok(mut group) = groups.single_mut()
-    {
-        let index = group_index_of(fixed);
-        if group.active != index {
-            group.active = index;
+    let mut group_shown = None;
+    if let Some(mut group) = group {
+        if let Some(fixed) = fixed {
+            let index = group_index_of(fixed);
+            if group.active != index {
+                group.active = index;
+            }
         }
+        group_shown = Some(group.active);
     }
-    let group_shown = groups.single().ok().map(|selection| selection.active);
-    for (entity, button, lit) in &times {
+    for (entity, button, lit) in times {
         let active = fixed.is_some_and(|fixed| time_of(fixed) == button.0)
             && fixed.map(group_index_of) == group_shown;
         // Only the lit half is written here: the preset in force is a toggle
@@ -936,7 +958,7 @@ fn capture_photo_aim(
 fn on_photo_aim_slider(
     change: On<ValueChange<f32>>,
     sliders: Query<(&PhotoAimSliderRow, &SliderRange, Has<InteractionDisabled>)>,
-    mut edit: ResMut<PhotoAimEdit>,
+    edit: Option<ResMut<PhotoAimEdit>>,
     mut commands: Commands,
 ) {
     let Ok((row_info, range, disabled)) = sliders.get(change.source) else {
@@ -947,6 +969,11 @@ fn on_photo_aim_slider(
     }
     let clamped = range.clamp(change.value);
     commands.entity(change.source).insert(SliderValue(clamped));
+    // No buffer outside the window's own plugin (a gallery specimen): the
+    // slider still moves, and there is no sky to write it into.
+    let Some(mut edit) = edit else {
+        return;
+    };
     if let Some(sky) = edit.sky.as_deref_mut() {
         row_info.0.write(sky, clamped);
         edit.dirty = true;
@@ -961,9 +988,13 @@ fn on_photo_aim_slider(
 fn on_photo_trackball_aim(
     change: On<ValueChange<Vec2>>,
     trackballs: Query<(&AimTrackball, Has<InteractionDisabled>)>,
-    mut edit: ResMut<PhotoAimEdit>,
+    edit: Option<ResMut<PhotoAimEdit>>,
 ) {
     let Ok((trackball, disabled)) = trackballs.get(change.source) else {
+        return;
+    };
+    // No buffer outside the window's own plugin (a gallery specimen).
+    let Some(mut edit) = edit else {
         return;
     };
     if disabled {
@@ -1000,11 +1031,29 @@ fn reseed_photo_aim(
     let Some(sky) = edit.sky.as_deref() else {
         return;
     };
+    seed_aim(sky, sliders.iter(), trackballs.iter_mut(), &mut commands);
+}
+
+/// Seed the angle `sliders` and the `trackballs` from `sky`. The drawing half
+/// of [`reseed_photo_aim`], shared with the specimen.
+fn seed_aim<'a>(
+    sky: &SkySettings,
+    sliders: impl Iterator<
+        Item = (
+            Entity,
+            &'a PhotoAimSliderRow,
+            &'a SliderRange,
+            &'a SliderValue,
+        ),
+    >,
+    trackballs: impl Iterator<Item = (&'a AimTrackball, Mut<'a, TrackballAim>)>,
+    commands: &mut Commands,
+) {
     // `SliderValue` is immutable, so a new value is *inserted*, and only when it
     // differs — an insert marks the component changed whether or not it carries
     // a new number, and a spurious change would reach the pairing systems as a
     // drag that never happened.
-    for (entity, row_info, range, value) in &sliders {
+    for (entity, row_info, range, value) in sliders {
         let wanted = range.clamp(row_info.0.read(sky));
         if value.0.to_bits() != wanted.to_bits() {
             commands.entity(entity).insert(SliderValue(wanted));
@@ -1013,7 +1062,7 @@ fn reseed_photo_aim(
     // Seeded here rather than left to the pairing systems: those only reach a
     // trackball when a slider *changes*, and a sky whose sun happens to sit at
     // the sliders' current values would leave the marker where it was spawned.
-    for (trackball, mut aim) in &mut trackballs {
+    for (trackball, mut aim) in trackballs {
         if trackball.scope != AIM_ELEMENT {
             continue;
         }
@@ -1095,13 +1144,15 @@ pub fn phototools_floater_spec() -> FloaterSpec {
     FloaterSpec {
         id: PHOTOTOOLS_FLOATER_ID,
         title: "Phototools".to_owned(),
-        position: Vec2::new(80.0, 80.0),
+        position: Vec2::new(80.0, 40.0),
         // A definite rect, the scroll-list carve-out from the content-driven
         // convention: each tab's panel scrolls, and a panel can only scroll
         // inside a box with a height of its own. Narrow and tall on purpose —
         // this window lives down one side of the screen while the shot is
-        // composed in the rest of it.
-        default_size: Some(Vec2::new(400.0, 620.0)),
+        // composed in the rest of it. Tall enough that the Environment tab
+        // shows whole, and placed high enough that it still fits a 1280×800
+        // laptop.
+        default_size: Some(Vec2::new(400.0, 680.0)),
         min_size: Some(Vec2::new(300.0, 320.0)),
         dock_host: None,
         caps: FloaterCaps {
@@ -1134,6 +1185,19 @@ fn build_phototools_content(
     translator: crate::i18n::Translator,
 ) {
     let seed = translator.get(crate::quick_prefs_environment::KEY_REGION_DEFAULT);
+    spawn_phototools_body(&mut commands, handle.content, settings.as_deref(), &seed);
+}
+
+/// Build the window's content into `slot`: the tab container, one panel per
+/// [`PHOTO_TABS`] entry, each filled from the table with the rows `settings`
+/// can bind (every row, with no store). `seed` is the preset combos' opening
+/// label. Shared by the live floater and its specimen.
+fn spawn_phototools_body(
+    commands: &mut Commands,
+    slot: Entity,
+    settings: Option<&ViewerSettings>,
+    seed: &str,
+) {
     let content = commands
         .spawn((
             Node {
@@ -1143,13 +1207,13 @@ fn build_phototools_content(
                 ..column(Val::Px(ROW_GAP))
             },
             Name::new("phototools:content"),
-            ChildOf(handle.content),
+            ChildOf(slot),
         ))
         .id();
 
     let labels: Vec<String> = PHOTO_TABS.iter().map(|tab| tab.label.to_owned()).collect();
     let tabs = spawn_tab_container(
-        &mut commands,
+        commands,
         content,
         &TabSpec {
             element: "phototools-tabs",
@@ -1163,19 +1227,19 @@ fn build_phototools_content(
             translate_labels: true,
         },
     );
-    fill_tab_container(&mut commands, TabPlacement::BlockStart, &tabs);
+    fill_tab_container(commands, TabPlacement::BlockStart, &tabs);
     for (tab, panel) in PHOTO_TABS.iter().zip(tabs.panels.iter().copied()) {
         commands
             .entity(panel)
             .insert(Name::new(format!("phototools:tab:{}", tab.slug)));
         if let Some(prologue) = tab.prologue {
-            prologue(&mut commands, panel, &seed);
+            prologue(commands, panel, seed);
         }
         for section in tab.sections {
-            spawn_section(&mut commands, panel, section.heading);
+            spawn_section(commands, panel, section.heading);
             for row_def in section.rows {
-                if bindable(settings.as_deref(), row_def) {
-                    spawn_row(&mut commands, panel, row_def);
+                if bindable(settings, row_def) {
+                    spawn_row(commands, panel, row_def);
                 }
             }
         }
@@ -1478,14 +1542,20 @@ fn update_photo_values(
         else {
             continue;
         };
-        let wanted = if label.integer {
-            format!("{}", value.round())
-        } else {
-            format!("{value:.2}")
-        };
-        if text.0 != wanted {
-            text.0 = wanted;
-        }
+        show_value(&mut text, label, value);
+    }
+}
+
+/// Write `value` into one slider's readout, formatted as its label asks. The
+/// drawing half of [`update_photo_values`], shared with the specimen.
+fn show_value(text: &mut Text, label: &PhotoValueLabel, value: f32) {
+    let wanted = if label.integer {
+        format!("{}", value.round())
+    } else {
+        format!("{value:.2}")
+    };
+    if text.0 != wanted {
+        text.0 = wanted;
     }
 }
 
@@ -1526,204 +1596,134 @@ const fn u32_to_f32(value: u32) -> f32 {
 // The gallery specimen.
 // ---------------------------------------------------------------------------
 
-/// The static Phototools specimen for the gallery / headless harness: the tab
-/// strip over the environment tab's controls and two setting rows — the layout,
-/// with none of the live behaviour (per the element registry's rule: no plugin,
-/// no store, no observers).
+/// The Phototools window's gallery / `ui_test` specimen: the live content,
+/// built by the same `spawn_phototools_body` (every tab, every row, the
+/// Environment tab active), then what the window's runtime adds once it exists
+/// — the preset combos' row lists for an inventory holding no settings assets
+/// ([`crate::quick_prefs_environment`]), the environment controls showing a
+/// sample pin (Legacy WindLight at midday, so its time button is lit), the
+/// sun-and-moon scrubber seeded from that sky, and each setting slider's thumb
+/// and readout at a sample value.
+///
+/// The preset combos open showing a sample *Region default* seed, which the
+/// row lists then replace where the host runs the combo widget. Only nodes
+/// under the specimen's own slot are composed: a second Phototools specimen in
+/// the same world keeps its own state.
 pub fn spawn_phototools_specimen(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
-    let card = commands
-        .spawn((
-            Node {
-                padding: UiRect::all(Val::Px(10.0)),
-                min_width: Val::Px(300.0),
-                ..column(Val::Px(ROW_GAP))
-            },
-            Name::new("phototools-specimen"),
-            ChildOf(parent),
-        ))
-        .id();
-    let strip = commands
-        .spawn((
-            Node {
-                flex_wrap: FlexWrap::Wrap,
-                ..row(Val::Px(4.0))
-            },
-            ChildOf(card),
-        ))
-        .id();
-    for (index, label) in ["Environment", "Shadows", "Look", "General"]
-        .into_iter()
-        .enumerate()
-    {
-        commands
-            .spawn((
-                Node {
-                    padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
-                    border: UiRect::all(Val::Px(1.0)),
-                    ..default()
-                },
-                BorderColor::all(CONTROL_BORDER),
-                BackgroundColor(if index == 0 {
-                    BUTTON_ACTIVE_FILL
-                } else {
-                    BUTTON_FILL
-                }),
-                ChildOf(strip),
-            ))
-            .with_child((
-                Text::new(cx.text(label)),
-                cx.font(UiFont::Sans),
-                text_role(LABEL_COLOR),
-            ));
-    }
-    commands.spawn((
-        Text::new(cx.text("Fixed sky")),
-        cx.font(UiFont::Sans),
-        text_role(SECTION_COLOR),
-        ChildOf(card),
-    ));
-    spawn_specimen_combo_row(commands, card, &cx, "Preset library", "Legacy WindLight");
-    let times = commands
-        .spawn((
-            Node {
-                flex_wrap: FlexWrap::Wrap,
-                ..row(Val::Px(6.0))
-            },
-            ChildOf(card),
-        ))
-        .id();
-    for label in [
-        "Sunrise",
-        "Midday",
-        "Sunset",
-        "Midnight",
-        "Personal Lighting…",
-    ] {
-        commands
-            .spawn((
-                Node {
-                    padding: UiRect::axes(Val::Px(9.0), Val::Px(4.0)),
-                    border: UiRect::all(Val::Px(1.0)),
-                    ..default()
-                },
-                BorderColor::all(BUTTON_BORDER),
-                BackgroundColor(BUTTON_FILL),
-                ChildOf(times),
-            ))
-            .with_child((
-                Text::new(cx.text(label)),
-                cx.font(UiFont::Sans),
-                text_role(LABEL_COLOR),
-            ));
-    }
-    commands.spawn((
-        Text::new(cx.text("Reflections")),
-        cx.font(UiFont::Sans),
-        text_role(SECTION_COLOR),
-        ChildOf(card),
-    ));
-    spawn_specimen_check_row(commands, card, &cx, "Avatars in reflections", true);
-    spawn_specimen_slider_row(commands, card, &cx, "Exposure", "1.00", 0.25);
-    card
-}
-
-/// A content-sized specimen row (unlike the live row node, which fills the
-/// window): the card grows to the widest row, so no fixed-width child overflows
-/// its box across scripts and scales.
-fn specimen_row() -> Node {
-    Node {
-        align_items: AlignItems::Center,
-        ..row(Val::Px(ROW_GAP))
-    }
-}
-
-/// A static combo-looking specimen row.
-fn spawn_specimen_combo_row(
-    commands: &mut Commands,
-    parent: Entity,
-    cx: &ElementCx,
-    label: &str,
-    value: &str,
-) {
-    let row_entity = commands.spawn((specimen_row(), ChildOf(parent))).id();
-    commands.spawn((
-        Text::new(cx.text(label)),
-        cx.font(UiFont::Sans),
-        text_role(LABEL_COLOR),
-        ChildOf(row_entity),
-    ));
-    commands
-        .spawn((
-            Node {
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(CONTROL_BORDER),
-            BackgroundColor(TRACK_FILL),
-            ChildOf(row_entity),
-        ))
-        .with_child((
-            Text::new(cx.text(value)),
-            cx.font(UiFont::Sans),
-            text_role(VALUE_COLOR),
-        ));
-}
-
-/// A static checkbox-looking specimen row.
-fn spawn_specimen_check_row(
-    commands: &mut Commands,
-    parent: Entity,
-    cx: &ElementCx,
-    label: &str,
-    checked: bool,
-) {
-    let row_entity = commands.spawn((specimen_row(), ChildOf(parent))).id();
-    // The real widget, caption and all, so the specimen shows what a skin's
-    // rules do — and shows the shape the live rows have, box leading its own
-    // clickable caption, rather than a box beside a label that is not part of
-    // it.
-    let specimen = spawn_checkbox(
+    spawn_phototools_body(commands, parent, None, &cx.text("Region default"));
+    crate::quick_prefs_environment::compose_preset_rows_specimen(
         commands,
-        row_entity,
-        &CheckboxSpec {
-            element: "phototools-specimen",
-            label: cx.text(label),
-            tab_index: 0,
-            font_size: FONT,
-            translate_label: false,
-        },
+        crate::quick_prefs_environment::PHOTOTOOLS_HOST.scope,
     );
-    if checked {
-        commands.entity(specimen.checkbox).insert(Checked);
-    }
+    commands.run_system_cached_with(compose_environment_specimen, parent);
+    commands.run_system_cached_with(compose_aim_specimen, parent);
+    commands.run_system_cached_with(compose_values_specimen, parent);
+    // After the thumbs above have moved: the environment rows' readouts follow
+    // their sliders' values.
+    commands.run_system_cached(sl_viewer_environment::rows::sync_slider_rows);
+    parent
 }
 
-/// A static slider-looking specimen row.
-fn spawn_specimen_slider_row(
-    commands: &mut Commands,
-    parent: Entity,
-    cx: &ElementCx,
-    label: &str,
-    value: &str,
-    fraction: f32,
+/// The environment the specimen shows: the region's, with a Legacy WindLight
+/// midday sky pinned over it — what the World ▸ Environment menu leaves.
+fn sample_environment() -> EnvironmentState {
+    let mut environment = EnvironmentState::default();
+    environment.set_fixed(Some(FixedEnvironment::Legacy(FixedSky::Midday)));
+    environment
+}
+
+/// The specimen's environment pass: [`show_environment_controls`] over the
+/// [`sample_environment`], with no `@setenv` restriction.
+fn compose_environment_specimen(
+    In(slot): In<Entity>,
+    mut groups: Query<(Entity, &mut ComboSelection), With<PhotoEnvGroupCombo>>,
+    times: Query<(Entity, &PhotoTimeButton, Has<Checked>)>,
+    gated: Query<(Entity, Has<InteractionDisabled>), With<PhotoEnvGated>>,
+    parents: Query<&ChildOf>,
+    mut commands: Commands,
 ) {
-    let row_entity = commands.spawn((specimen_row(), ChildOf(parent))).id();
-    commands.spawn((
-        Text::new(cx.text(label)),
-        cx.font(UiFont::Sans),
-        text_role(LABEL_COLOR),
-        ChildOf(row_entity),
-    ));
-    // Static: no `Slider`, so the thumb is drawn at the specimen's fraction and
-    // stays there.
-    spawn_slider(commands, row_entity, SLIDER, 0, fraction, ());
-    commands.spawn((
-        Text::new(cx.text(value)),
-        cx.font(UiFont::Sans),
-        text_role(VALUE_COLOR),
-        ChildOf(row_entity),
-    ));
+    let under_slot = |entity: Entity| {
+        parents
+            .iter_ancestors(entity)
+            .any(|ancestor| ancestor == slot)
+    };
+    let group = groups
+        .iter_mut()
+        .find(|(entity, _selection)| under_slot(*entity))
+        .map(|(_entity, selection)| selection);
+    show_environment_controls(
+        true,
+        sample_environment().fixed(),
+        group,
+        times.iter().filter(|(entity, _, _)| under_slot(*entity)),
+        gated.iter().filter(|(entity, _)| under_slot(*entity)),
+        &mut commands,
+    );
+}
+
+/// The specimen's scrubber pass: the sun-and-moon sliders and trackballs under
+/// `slot` seeded through [`seed_aim`] from the [`sample_environment`]'s sky, the
+/// sky [`capture_photo_aim`] would capture.
+fn compose_aim_specimen(
+    In(slot): In<Entity>,
+    sliders: Query<(Entity, &PhotoAimSliderRow, &SliderRange, &SliderValue)>,
+    mut trackballs: Query<(Entity, &AimTrackball, &mut TrackballAim)>,
+    parents: Query<&ChildOf>,
+    mut commands: Commands,
+) {
+    let under_slot = |entity: Entity| {
+        parents
+            .iter_ancestors(entity)
+            .any(|ancestor| ancestor == slot)
+    };
+    let environment = sample_environment();
+    let Some(sky) = environment.sky_at(0.0, day_position(&environment)) else {
+        return;
+    };
+    seed_aim(
+        &sky,
+        sliders.iter().filter(|(entity, ..)| under_slot(*entity)),
+        trackballs
+            .iter_mut()
+            .filter(|(entity, ..)| under_slot(*entity))
+            .map(|(_entity, trackball, aim)| (trackball, aim)),
+        &mut commands,
+    );
+}
+
+/// The specimen's values pass: each setting slider under `slot` at a sample
+/// value ([`crate::quick_preferences::sample_slider_value`]), where the
+/// binding layer's sync would put a stored one, and its readout through
+/// [`show_value`].
+fn compose_values_specimen(
+    In(slot): In<Entity>,
+    sliders: Query<(Entity, &SettingBinding, &SliderRange, &SliderStep), With<Slider>>,
+    mut labels: Query<(Entity, &mut Text, &PhotoValueLabel)>,
+    parents: Query<&ChildOf>,
+    mut commands: Commands,
+) {
+    let under_slot = |entity: Entity| {
+        parents
+            .iter_ancestors(entity)
+            .any(|ancestor| ancestor == slot)
+    };
+    let mut values: Vec<(&str, f32)> = Vec::new();
+    for (slider, binding, range, step) in &sliders {
+        if !under_slot(slider) {
+            continue;
+        }
+        let value = crate::quick_preferences::sample_slider_value(range, step.0);
+        commands.entity(slider).insert(SliderValue(value));
+        values.push((binding.name(), value));
+    }
+    for (entity, mut text, label) in &mut labels {
+        if !under_slot(entity) {
+            continue;
+        }
+        if let Some((_name, value)) = values.iter().find(|(name, _value)| *name == label.setting) {
+            show_value(&mut text, label, *value);
+        }
+    }
 }
 
 #[cfg(test)]

@@ -60,7 +60,7 @@ use sl_viewer_ui_core::skin::{
 };
 use sl_viewer_ui_core::skin_palette::{SkinColors, SkinPalette};
 use sl_viewer_ui_core::ui::row;
-use sl_viewer_ui_core::ui_element::TextMayClip;
+use sl_viewer_ui_core::ui_element::{ContentMayOverflow, TextMayClip};
 use sl_viewer_ui_core::ui_font::UiFont;
 
 /// The skin class on the search box (the bordered container), so a skin can give
@@ -256,6 +256,14 @@ pub fn spawn_search_field(
                 position_type: PositionType::Relative,
                 overflow: Overflow::clip(),
                 ..default()
+            },
+            // The clip is the slot's job, as said above — and taffy still
+            // counts the absolute placeholder in the slot's content size, so
+            // the harness is told in words what the `Overflow::clip` says in
+            // layout.
+            ContentMayOverflow {
+                reason: "the search slot clips its scrolling field and an over-long placeholder \
+                         on purpose",
             },
             Name::new(format!("{}:search-slot", spec.element)),
             ChildOf(container),

@@ -46,7 +46,7 @@ use crate::skin_palette::SkinPalette;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::EditableText;
-use bevy::ui::{Checked, InteractionDisabled};
+use bevy::ui::InteractionDisabled;
 use bevy::ui_widgets::{Activate, Button, SliderRange, SliderStep};
 use bevy_flair::style::components::ClassList;
 use sl_settings::{Scope, SettingValue, SettingsStore};
@@ -367,7 +367,9 @@ pub(crate) fn spawn_pref_checkbox(
         commands,
         row,
         &CheckboxSpec {
-            element: "preferences",
+            // The row's own key, as a combo row's is: one element id for every
+            // row would give every checkbox in the window the same name.
+            element: label_key,
             label: label_key.to_owned(),
             tab_index: 0,
             font_size: FONT,
@@ -671,7 +673,9 @@ pub fn preferences_floater_spec() -> FloaterSpec {
         id: PREFERENCES_FLOATER_ID,
         title: "Preferences".to_owned(),
         position: Vec2::new(160.0, 80.0),
-        default_size: Some(Vec2::new(760.0, 520.0)),
+        // Tall enough for most tabs to show whole; the General tab (and the
+        // Audio one) runs longer than a laptop screen and scrolls.
+        default_size: Some(Vec2::new(760.0, 620.0)),
         min_size: Some(Vec2::new(560.0, 380.0)),
         dock_host: None,
         caps: FloaterCaps {
@@ -696,10 +700,38 @@ fn spawn_preferences_floater(mut commands: Commands, root: Res<UiRoot>) {
         .insert(DeferredFloaterContent { builder, handle });
 }
 
-/// First-open content build: the search row, the leading tab container (one
-/// panel per `PREF_TABS` entry, each filled by its tab's builder), and the
-/// OK / Cancel footer — ending with the [`PreferencesUi`] insert.
+/// First-open content build: the shell's content ([`spawn_preferences_body`]),
+/// the OK / Cancel behaviour, and the [`PreferencesUi`] insert.
 fn build_preferences_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
+    let parts = spawn_preferences_body(&mut commands, handle.content);
+    commands.entity(parts.ok).observe(on_preferences_ok);
+    commands.entity(parts.cancel).observe(on_preferences_cancel);
+    commands.insert_resource(PreferencesUi {
+        root: handle.root,
+        tab_strip: parts.tab_strip,
+        search_field: parts.search_field,
+    });
+}
+
+/// The entities of a built preferences shell, what [`spawn_preferences_body`]
+/// returns.
+#[derive(Debug, Clone, Copy)]
+struct PreferencesParts {
+    /// The tab strip; its [`TabStrip::active`] is the current tab.
+    tab_strip: Entity,
+    /// The filter field's [`EditableText`] entity.
+    search_field: Entity,
+    /// The OK button.
+    ok: Entity,
+    /// The Cancel button.
+    cancel: Entity,
+}
+
+/// Build the shell's content into `slot`: the search row, the leading tab
+/// container (one panel per `PREF_TABS` entry, each filled by its tab's
+/// builder), and the OK / Cancel footer. Shared by the live floater and its
+/// specimen; the caller attaches the footer's behaviour.
+fn spawn_preferences_body(commands: &mut Commands, slot: Entity) -> PreferencesParts {
     // The content column: search on top, tabs filling the middle, footer last.
     let content = commands
         .spawn((
@@ -710,14 +742,14 @@ fn build_preferences_content(In(handle): In<FloaterHandle>, mut commands: Comman
                 ..column(Val::Px(8.0))
             },
             Name::new("preferences:content"),
-            ChildOf(handle.content),
+            ChildOf(slot),
         ))
         .id();
 
     // The filter box. The placeholder string must be non-empty for the node to
     // exist; the `Translated` then keeps it locale-resolved.
     let search = spawn_search_field(
-        &mut commands,
+        commands,
         content,
         &SearchFieldSpec {
             tab_index: 0,
@@ -740,7 +772,7 @@ fn build_preferences_content(In(handle): In<FloaterHandle>, mut commands: Comman
         .map(|tab| tab.label_key.to_owned())
         .collect();
     let tabs = spawn_tab_container(
-        &mut commands,
+        commands,
         content,
         &TabSpec {
             element: "preferences-tabs",
@@ -754,12 +786,12 @@ fn build_preferences_content(In(handle): In<FloaterHandle>, mut commands: Comman
             translate_labels: true,
         },
     );
-    fill_tab_container(&mut commands, TabPlacement::InlineStart, &tabs);
+    fill_tab_container(commands, TabPlacement::InlineStart, &tabs);
     for (tab, panel) in PREF_TABS.iter().zip(tabs.panels.iter().copied()) {
         commands
             .entity(panel)
             .insert(Name::new(format!("preferences:tab:{}", tab.id)));
-        (tab.build)(&mut commands, panel);
+        (tab.build)(commands, panel);
     }
 
     // The footer: OK, then Cancel, trailing-aligned (the reference's order).
@@ -773,16 +805,15 @@ fn build_preferences_content(In(handle): In<FloaterHandle>, mut commands: Comman
             ChildOf(content),
         ))
         .id();
-    let ok = spawn_footer_button(&mut commands, footer, "preferences-ok", 2);
-    commands.entity(ok).observe(on_preferences_ok);
-    let cancel = spawn_footer_button(&mut commands, footer, "preferences-cancel", 3);
-    commands.entity(cancel).observe(on_preferences_cancel);
+    let ok = spawn_footer_button(commands, footer, "preferences-ok", 2);
+    let cancel = spawn_footer_button(commands, footer, "preferences-cancel", 3);
 
-    commands.insert_resource(PreferencesUi {
-        root: handle.root,
+    PreferencesParts {
         tab_strip: tabs.strip,
         search_field: search.field,
-    });
+        ok,
+        cancel,
+    }
 }
 
 /// Spawn a translated-label footer button, returning its clickable box.
@@ -1419,186 +1450,35 @@ fn build_world_ui_tab(commands: &mut Commands, panel: Entity) {
 // The gallery specimen.
 // ---------------------------------------------------------------------------
 
-/// The static preferences-shell specimen for the gallery / headless harness: a
-/// search box, a leading two-tab container, two stand-in setting rows and
-/// the OK / Cancel footer — the layout, with none of the live behaviour (per
-/// the element registry's rule: no plugin, no store, no observers).
+/// The Preferences floater's gallery / `ui_test` specimen: the live shell,
+/// built by the same `spawn_preferences_body` the viewer's first open runs —
+/// the search box, every `PREF_TABS` tab built by its own builder with the
+/// first one (General) active, and the OK / Cancel footer — then what the tabs'
+/// own runtime systems add to it once it exists: the UI-scale readout
+/// (General), sample output devices (Audio), the default skin's themes
+/// (Colors & Skins) and the popup list's rows (Alerts).
+///
+/// The bound controls show the widgets' spawn state, not stored values: the
+/// specimen's host has no settings store, and the binding layer's sync passes
+/// are what would move them. The footer carries no behaviour and no
+/// `PreferencesUi` is inserted, so the shell's live systems leave it alone.
 pub fn spawn_preferences_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: ElementCx,
 ) -> Entity {
-    let card = commands
-        .spawn((
-            Node {
-                padding: UiRect::all(Val::Px(10.0)),
-                ..column(Val::Px(8.0))
-            },
-            Name::new("preferences-specimen"),
-            ChildOf(parent),
-        ))
-        .id();
-
-    spawn_search_field(
+    spawn_preferences_body(commands, parent);
+    crate::preferences_general::compose_general_specimen(commands);
+    crate::preferences_audio::compose_audio_specimen(
         commands,
-        card,
-        &SearchFieldSpec {
-            font_size: cx.font_size,
-            search_glyph: true,
-            ..SearchFieldSpec::new("preferences-specimen")
-        },
+        vec![
+            cx.text("Speakers (Built-in Audio)"),
+            cx.text("Headphones (USB Audio)"),
+        ],
     );
-
-    let labels = [cx.text("General"), cx.text("Alerts")];
-    let tabs = spawn_tab_container(
-        commands,
-        card,
-        &TabSpec {
-            element: "preferences-specimen-tabs",
-            placement: TabPlacement::InlineStart,
-            labels: &labels,
-            active: 0,
-            tab_index: 0,
-            font_size: cx.font_size,
-            strip_width: None,
-            ellipsis: DEFAULT_ELLIPSIS,
-            translate_labels: false,
-        },
-    );
-    if let Some(panel) = tabs.panels.first().copied() {
-        // A checkbox row and a slider row, as static stand-ins.
-        let check_row = commands.spawn((pref_row_node(), ChildOf(panel))).id();
-        // A real checkbox, ticked: the specimen is what a skin author
-        // sees, so it has to be the widget rather than a box painted to
-        // look like one.
-        //
-        // Its own element id, not the card's: a node is addressed by `Name`,
-        // both by the contract table and by the layout harness, and five
-        // specimens sharing one name would leave four of them unaddressable.
-        let specimen = spawn_checkbox(
-            commands,
-            check_row,
-            &CheckboxSpec {
-                element: "preferences-specimen-lines",
-                label: cx.text("Show property lines"),
-                tab_index: 0,
-                font_size: FONT,
-                translate_label: false,
-            },
-        );
-        commands.entity(specimen.checkbox).insert(Checked);
-        let slider_row = commands.spawn((pref_row_node(), ChildOf(panel))).id();
-        commands.spawn((
-            Text::new(cx.text("Mini-map opacity")),
-            cx.font(UiFont::Sans),
-            text_role(LABEL_COLOR),
-            ChildOf(slider_row),
-        ));
-        // Static: no `Slider`, so nothing drives it — the thumb is drawn at
-        // the fraction the specimen wants and stays there.
-        spawn_slider(commands, slider_row, SLIDER, 0, 0.6, ());
-    }
-    if let Some(panel) = tabs.panels.get(1).copied() {
-        // The alerts tab stand-in: a headline toggle row over a static
-        // two-column popup list (checkbox column | ignoretext label), the
-        // live layout's shape without the virtualized table.
-        let headline_row = commands.spawn((pref_row_node(), ChildOf(panel))).id();
-        let headline = spawn_checkbox(
-            commands,
-            headline_row,
-            &CheckboxSpec {
-                element: "preferences-specimen-friends",
-                label: cx.text("Notify me when my friends log in or out"),
-                tab_index: 0,
-                font_size: FONT,
-                translate_label: false,
-            },
-        );
-        commands.entity(headline.checkbox).insert(Checked);
-        // Each row carries its own element id for the same reason the two above
-        // do: the name is the address.
-        let list_rows: [(&str, bool, &'static str); 3] = [
-            (
-                "About Land: unsaved changes",
-                true,
-                "preferences-specimen-land",
-            ),
-            (
-                "Confirm before I pay an object",
-                false,
-                "preferences-specimen-pay",
-            ),
-            (
-                "Warn about script permissions",
-                true,
-                "preferences-specimen-scripts",
-            ),
-        ];
-        let header_row = commands.spawn((pref_row_node(), ChildOf(panel))).id();
-        commands.spawn((
-            Text::new(cx.text("Show")),
-            cx.font(UiFont::Sans),
-            text_role(SECTION_COLOR),
-            ChildOf(header_row),
-        ));
-        commands.spawn((
-            Text::new(cx.text("Alert")),
-            cx.font(UiFont::Sans),
-            text_role(SECTION_COLOR),
-            ChildOf(header_row),
-        ));
-        for (label, shown, element) in list_rows {
-            let list_row = commands.spawn((pref_row_node(), ChildOf(panel))).id();
-            // Ticked and unticked side by side, which is the pair a skin
-            // author most needs to see at a glance.
-            let entry = spawn_checkbox(
-                commands,
-                list_row,
-                &CheckboxSpec {
-                    element,
-                    label: cx.text(label),
-                    tab_index: 0,
-                    font_size: FONT,
-                    translate_label: false,
-                },
-            );
-            if shown {
-                commands.entity(entry.checkbox).insert(Checked);
-            }
-        }
-    }
-
-    let footer = commands
-        .spawn((
-            Node {
-                justify_content: JustifyContent::FlexEnd,
-                ..row(Val::Px(8.0))
-            },
-            ChildOf(card),
-        ))
-        .id();
-    for label in ["OK", "Cancel"] {
-        let button = commands
-            .spawn((
-                Node {
-                    padding: UiRect::axes(Val::Px(14.0), Val::Px(5.0)),
-                    border: UiRect::all(Val::Px(2.0)),
-                    ..default()
-                },
-                BorderColor::all(CONTROL_BORDER),
-                BackgroundColor(BUTTON_BACKGROUND),
-                ChildOf(footer),
-            ))
-            .id();
-        commands.spawn((
-            Text::new(cx.text(label)),
-            cx.font(UiFont::Sans),
-            text_role(LABEL_COLOR),
-            ChildOf(button),
-        ));
-    }
-
-    card
+    crate::preferences_colors_skins::compose_colors_skins_specimen(commands);
+    crate::preferences_alerts::compose_alerts_specimen(commands);
+    parent
 }
 
 #[cfg(test)]

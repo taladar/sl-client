@@ -33,12 +33,14 @@ use crate::i18n::{Translated, UiLocale};
 use crate::preferences::{CONTROL_BORDER, FONT, LABEL_COLOR};
 use crate::skin::{SELECTED_CLASS, set_state_class_on, text_role};
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
+use crate::ui_element::{ContentMayOverflow, TextMayClip};
 use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonSpec, UiLabel};
 use crate::ui_tab::{
     DEFAULT_ELLIPSIS, TabPlacement, TabSpec, fill_tab_container, spawn_tab_container,
 };
 use sl_client_bevy::{SlCurrentRegion, SlEvent, SlRegionIdentity, SlSessionEvent};
+use sl_viewer_ui_core::ui_ellipsis::{RevealEllipsis, spawn_ellipsis_marker};
 
 /// The floater's stable id (menu toggle, geometry persistence, tests).
 pub(crate) const ABOUT_FLOATER_ID: &str = "about";
@@ -70,6 +72,12 @@ const LICENSE_LIST_WIDTH: f32 = 230.0;
 /// both `.sk-list-row`'s, the same pair every hand-rolled list in the viewer
 /// takes.
 const LICENSE_ROW_CLASS: &str = "sk-list-row";
+
+/// Why a license row's label may be cut: the row is one line, and an SPDX id
+/// beside a crate name is wider than the list at a large font or in a long
+/// translation. The trailing locale ellipsis marks the cut.
+const LICENSE_ROW_CLIP_REASON: &str =
+    "a license row is one line, cut at the list's edge behind the locale ellipsis";
 
 /// The monospace font size of the support block and license texts.
 const MONO_FONT: f32 = 12.0;
@@ -442,49 +450,153 @@ fn build_about_content(
     mut commands: Commands,
     mut state: ResMut<AboutState>,
 ) {
+    state.licenses = all_license_sections();
+    state.selected_license = 0;
+    state.rendered_license = None;
+    state.rendered_block = String::new();
+    if let Some(ui) = spawn_about_tabs(&mut commands, handle.content, FONT, &state.licenses) {
+        commands.insert_resource(ui);
+    }
+}
+
+/// Build the Info / Credits / Licenses tab container into `content` at
+/// `font_size`, with one license row per entry of `licenses`. Returns the
+/// entities the refresh systems write into, or `None` if the tab container
+/// came back short of its three panels. Shared by the live floater and its
+/// specimen.
+fn spawn_about_tabs(
+    commands: &mut Commands,
+    content: Entity,
+    font_size: f32,
+    licenses: &[LicenseSection],
+) -> Option<AboutUi> {
     let labels: Vec<String> = ["about-tab-info", "about-tab-credits", "about-tab-licenses"]
         .into_iter()
         .map(str::to_owned)
         .collect();
     let tabs = spawn_tab_container(
-        &mut commands,
-        handle.content,
+        commands,
+        content,
         &TabSpec {
             element: "about-tabs",
             placement: TabPlacement::BlockStart,
             labels: &labels,
             active: 0,
             tab_index: 1,
-            font_size: FONT,
+            font_size,
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
         },
     );
-    fill_tab_container(&mut commands, TabPlacement::BlockStart, &tabs);
-
-    state.licenses = all_license_sections();
-    state.selected_license = 0;
-    state.rendered_license = None;
-    state.rendered_block = String::new();
+    fill_tab_container(commands, TabPlacement::BlockStart, &tabs);
 
     let mut panels = tabs.panels.iter().copied();
     let support_text = panels
         .next()
-        .map(|panel| build_info_tab(&mut commands, panel));
+        .map(|panel| build_info_tab(commands, panel, font_size));
     if let Some(panel) = panels.next() {
-        build_credits_tab(&mut commands, panel);
+        build_credits_tab(commands, panel, font_size);
     }
     let license_ui = panels
         .next()
-        .map(|panel| build_licenses_tab(&mut commands, panel, &state.licenses));
+        .map(|panel| build_licenses_tab(commands, panel, licenses, font_size));
 
-    if let (Some(support_text), Some((license_text, license_rows))) = (support_text, license_ui) {
-        commands.insert_resource(AboutUi {
-            support_text,
-            license_text,
-            license_rows,
+    let (Some(support_text), Some((license_text, license_rows))) = (support_text, license_ui)
+    else {
+        return None;
+    };
+    Some(AboutUi {
+        support_text,
+        license_text,
+        license_rows,
+    })
+}
+
+/// How many license sections the specimen lists: enough rows to show the list
+/// as a list, few enough that the sweep does not lay out every crate in the
+/// dependency tree once per cell.
+const SPECIMEN_LICENSE_COUNT: usize = 8;
+
+/// The About floater's gallery / `ui_test` specimen: the live tabs, built by
+/// the same [`spawn_about_tabs`] the viewer's floater is, with a fixed support
+/// block (a sample session on the local grid, so the block does not vary with
+/// the machine the gallery runs on) and the first few real license sections,
+/// the first one selected and shown.
+pub(crate) fn spawn_about_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: crate::ui_element::ElementCx,
+) -> Entity {
+    let licenses: Vec<LicenseSection> = all_license_sections()
+        .into_iter()
+        .take(SPECIMEN_LICENSE_COUNT)
+        .collect();
+    let Some(ui) = spawn_about_tabs(commands, parent, cx.font_size, &licenses) else {
+        return parent;
+    };
+    commands
+        .entity(ui.support_text)
+        .insert(Text::new(support_block(&specimen_support_info())));
+    if let Some(section) = licenses.into_iter().next() {
+        let input = (ui.license_text, ui.license_rows, section);
+        commands.queue(move |world: &mut World| {
+            if let Err(error) = world.run_system_cached_with(draw_sample_license, input) {
+                warn!("about specimen: the sample license was not drawn: {error}");
+            }
         });
+    }
+    parent
+}
+
+/// The specimen's support-block inputs: this build's own version lines, and a
+/// fixed sample session, region and machine in place of the live ones.
+fn specimen_support_info() -> SupportInfo {
+    SupportInfo {
+        viewer_name: build_info::VIEWER_NAME.to_owned(),
+        viewer_version: build_info::full_version(),
+        build_profile: build_info::BUILD_PROFILE.to_owned(),
+        bevy_version: build_info::BEVY_VERSION.map(str::to_owned),
+        wgpu_version: build_info::WGPU_VERSION.map(str::to_owned),
+        session: Some(SessionFacts {
+            grid: "localhost".to_owned(),
+            login_uri: "http://127.0.0.1:9000/".to_owned(),
+            channel: "sl-client 0.1.0".to_owned(),
+        }),
+        region: Some(RegionFacts {
+            name: Some("Sample Region".to_owned()),
+            coordinates: (1000, 1000),
+            product_name: String::new(),
+            product_sku: String::new(),
+        }),
+        sim_host: Some("127.0.0.1:9000".to_owned()),
+        simulator_version: Some("OpenSim 0.9.3 Sample".to_owned()),
+        system: Some(SystemFacts {
+            os: "Linux (Sample)".to_owned(),
+            kernel: "6.0.0".to_owned(),
+            cpu: "Sample CPU".to_owned(),
+            core_count: "8".to_owned(),
+            memory: "16 GiB".to_owned(),
+        }),
+        gpu: Some(GpuFacts {
+            name: "Sample GPU".to_owned(),
+            device_type: "DiscreteGpu".to_owned(),
+            backend: "Vulkan".to_owned(),
+            driver: "sample".to_owned(),
+            driver_info: "1.0".to_owned(),
+        }),
+        window_size: Some((1920, 1080)),
+        ui_language: Some("en-US".to_owned()),
+    }
+}
+
+/// The text the license pane shows for `section`: its using crates, when it
+/// names any, above the verbatim license text.
+fn license_pane_text(section: &LicenseSection) -> String {
+    if section.used_by.is_empty() {
+        section.text.clone()
+    } else {
+        format!("Used by: {}\n\n{}", section.used_by, section.text)
     }
 }
 
@@ -532,7 +644,7 @@ fn spawn_scroll_column(commands: &mut Commands, parent: Entity, name: &'static s
 
 /// Build the Info tab (intro, the support block, Copy to Clipboard), returning
 /// the support block's `Text` entity.
-fn build_info_tab(commands: &mut Commands, panel: Entity) -> Entity {
+fn build_info_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> Entity {
     let tab = commands
         .spawn((
             Node {
@@ -548,7 +660,7 @@ fn build_info_tab(commands: &mut Commands, panel: Entity) -> Entity {
     commands.spawn((
         Text::default(),
         Translated::new("about-intro"),
-        UiFont::Sans.at(FONT),
+        UiFont::Sans.at(font_size),
         text_role(LABEL_COLOR),
         Name::new("about:info:intro"),
         ChildOf(tab),
@@ -574,12 +686,19 @@ fn build_info_tab(commands: &mut Commands, panel: Entity) -> Entity {
             ChildOf(tab),
         ))
         .id();
-    spawn_about_button(commands, footer, "about-copy", AboutAction::CopyInfo, 2);
+    spawn_about_button(
+        commands,
+        footer,
+        "about-copy",
+        AboutAction::CopyInfo,
+        2,
+        font_size,
+    );
     support_text
 }
 
 /// Build the Credits tab: translated acknowledgement paragraphs.
-fn build_credits_tab(commands: &mut Commands, panel: Entity) {
+fn build_credits_tab(commands: &mut Commands, panel: Entity, font_size: f32) {
     let tab = commands
         .spawn((
             Node {
@@ -602,7 +721,7 @@ fn build_credits_tab(commands: &mut Commands, panel: Entity) {
         commands.spawn((
             Text::default(),
             Translated::new(key),
-            UiFont::Sans.at(FONT),
+            UiFont::Sans.at(font_size),
             text_role(LABEL_COLOR),
             Name::new(format!("about:credits:{key}")),
             ChildOf(scroll),
@@ -617,6 +736,7 @@ fn build_licenses_tab(
     commands: &mut Commands,
     panel: Entity,
     licenses: &[LicenseSection],
+    font_size: f32,
 ) -> (Entity, Vec<Entity>) {
     let tab = commands
         .spawn((
@@ -673,13 +793,43 @@ fn build_licenses_tab(
             }
             _ => format!("{} ({})", section.id, section.name),
         };
+        // One line per row, cut at the list's edge behind the locale ellipsis:
+        // a crate name is one unbreakable word, so wrapping cannot save a long
+        // one, and a list of two-line rows reads as a list of two things each.
+        let clip = commands
+            .spawn((
+                Node {
+                    flex_grow: 1.0,
+                    min_width: Val::Px(0.0),
+                    overflow: Overflow::clip(),
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                ContentMayOverflow {
+                    reason: LICENSE_ROW_CLIP_REASON,
+                },
+                TextMayClip {
+                    reason: LICENSE_ROW_CLIP_REASON,
+                },
+                Pickable::IGNORE,
+                ChildOf(row_entity),
+            ))
+            .id();
         commands.spawn((
             Text::new(label),
-            UiFont::Sans.at(FONT),
+            TextLayout::no_wrap(),
+            UiFont::Sans.at(font_size),
             text_role(LABEL_COLOR),
+            Node {
+                flex_shrink: 0.0,
+                ..default()
+            },
             Pickable::IGNORE,
-            ChildOf(row_entity),
+            ChildOf(clip),
         ));
+        let marker =
+            spawn_ellipsis_marker(commands, row_entity, font_size, LABEL_COLOR, "\u{2026}");
+        commands.entity(clip).insert(RevealEllipsis { marker });
         rows.push(row_entity);
     }
 
@@ -715,6 +865,7 @@ fn spawn_about_button(
     label_key: &'static str,
     action: AboutAction,
     tab_index: i32,
+    font_size: f32,
 ) -> Entity {
     let button = ui_spawn::spawn_button(
         commands,
@@ -725,7 +876,7 @@ fn spawn_about_button(
             .border(2.0)
             .colors(BUTTON_BACKGROUND, CONTROL_BORDER)
             .label_color(LABEL_COLOR)
-            .font_size(FONT),
+            .font_size(font_size),
     )
     .button;
     commands
@@ -871,18 +1022,51 @@ fn refresh_license_pane(
     let Some(section) = state.licenses.get(selected) else {
         return;
     };
-    let content = if section.used_by.is_empty() {
-        section.text.clone()
-    } else {
-        format!("Used by: {}\n\n{}", section.used_by, section.text)
-    };
-    if let Ok(mut text) = texts.get_mut(ui.license_text) {
-        *text = Text::new(content);
-    }
-    for (index, row_entity) in ui.license_rows.iter().enumerate() {
-        set_state_class_on(&mut classes, *row_entity, SELECTED_CLASS, index == selected);
-    }
+    draw_license_selection(
+        ui.license_text,
+        &ui.license_rows,
+        section,
+        selected,
+        &mut texts,
+        &mut classes,
+    );
     state.rendered_license = Some(selected);
+}
+
+/// Show `section` (the entry at `selected`) in the license pane and move the
+/// row highlight to it. The drawing half of [`refresh_license_pane`], which
+/// the specimen calls with its first sample section.
+fn draw_license_selection(
+    license_text: Entity,
+    license_rows: &[Entity],
+    section: &LicenseSection,
+    selected: usize,
+    texts: &mut Query<&mut Text>,
+    classes: &mut Query<&mut ClassList>,
+) {
+    if let Ok(mut text) = texts.get_mut(license_text) {
+        *text = Text::new(license_pane_text(section));
+    }
+    for (index, row_entity) in license_rows.iter().enumerate() {
+        set_state_class_on(classes, *row_entity, SELECTED_CLASS, index == selected);
+    }
+}
+
+/// [`draw_license_selection`] as a one-shot system, for the specimen (which
+/// holds only [`Commands`]): the pane, the rows and the section to select.
+fn draw_sample_license(
+    In((license_text, license_rows, section)): In<(Entity, Vec<Entity>, LicenseSection)>,
+    mut texts: Query<&mut Text>,
+    mut classes: Query<&mut ClassList>,
+) {
+    draw_license_selection(
+        license_text,
+        &license_rows,
+        &section,
+        0,
+        &mut texts,
+        &mut classes,
+    );
 }
 
 /// The shared press observer of this floater's actions: Copy puts the current

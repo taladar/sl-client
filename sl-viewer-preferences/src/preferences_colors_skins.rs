@@ -338,6 +338,15 @@ fn repopulate_theme_combo(
     if memo.as_ref() == Some(&skin) {
         return;
     }
+    set_options.write(offer_themes(anchor, &mut values, &skin));
+    *memo = Some(skin);
+}
+
+/// Point the theme combo at `anchor` / `values` to `skin`'s themes: the base
+/// entry plus one per [`THEMES`] overlay that skin ships. Writes the bound
+/// values and returns the [`SetComboOptions`] carrying the labels — the drawing
+/// half of [`repopulate_theme_combo`], shared with the preferences specimen.
+fn offer_themes(anchor: Entity, values: &mut ComboBindingValues, skin: &str) -> SetComboOptions {
     let mut labels = vec![THEME_BASE_KEY.to_owned()];
     let mut mapped = vec![SettingValue::String(String::new())];
     for (theme_skin, theme) in THEMES {
@@ -346,9 +355,30 @@ fn repopulate_theme_combo(
             mapped.push(SettingValue::String((*theme).to_owned()));
         }
     }
-    set_options.write(SetComboOptions::new(anchor, labels));
     values.0 = mapped;
-    *memo = Some(skin);
+    SetComboOptions::new(anchor, labels)
+}
+
+/// One-shot for the preferences specimen: give every theme combo the default
+/// skin's themes, what [`repopulate_theme_combo`] does on a fresh install. A
+/// host without the combo widget's runtime has no [`SetComboOptions`] channel
+/// and could not apply new options anyway; its combo keeps the base entry.
+fn offer_default_skin_themes(
+    mut anchors: Query<(Entity, &mut ComboBindingValues), With<ThemeComboAnchor>>,
+    messages: Option<ResMut<Messages<SetComboOptions>>>,
+) {
+    let Some(mut messages) = messages else {
+        return;
+    };
+    for (anchor, mut values) in &mut anchors {
+        messages.write(offer_themes(anchor, &mut values, DEFAULT_SKIN));
+    }
+}
+
+/// What this tab's runtime adds to the preferences specimen once its content
+/// exists: the theme combo's options for the default skin.
+pub(crate) fn compose_colors_skins_specimen(commands: &mut Commands) {
+    commands.run_system_cached(offer_default_skin_themes);
 }
 
 /// This tab's runtime systems; the tab content itself is built by the
