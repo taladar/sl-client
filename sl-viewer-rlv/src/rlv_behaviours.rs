@@ -32,6 +32,7 @@
 
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
+use bevy::ui_widgets::Activate;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::Uuid;
 use sl_rlv::{
@@ -56,7 +57,7 @@ use sl_viewer_ui_widgets::ui_table::{
 };
 use sl_viewer_world_api::rlv::RlvSession;
 
-use crate::style::{ACTION_BACKGROUND, DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, ROW_HEIGHT};
+use crate::style::{DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, ROW_HEIGHT, spawn_action_button};
 
 /// The floater's stable id (persistence, the menu's check mark,
 /// `SL_VIEWER_OPEN_FLOATER`).
@@ -614,44 +615,18 @@ fn spawn_behaviours_content(
 /// The session and the clipboard are optional so a press in a host that has
 /// neither (the gallery's specimen) is a no-op rather than a failed observer.
 fn spawn_copy_button(commands: &mut Commands, parent: Entity, font_size: f32) {
-    commands
-        .spawn((
-            Node {
-                flex_shrink: 0.0,
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            BackgroundColor(ACTION_BACKGROUND),
-            Pickable {
-                should_block_lower: true,
-                is_hoverable: true,
-            },
-            Name::new("rlv-behaviours-copy"),
-            ChildOf(parent),
-        ))
-        .with_child((
-            Text::new(String::new()),
-            UiFont::Sans.at(font_size),
-            text_role(LABEL_COLOR),
-            Translated::new("rlv-behaviours-copy"),
-            Pickable::IGNORE,
-        ))
-        .observe(
-            move |mut press: On<Pointer<Press>>,
-                  session: Option<Res<RlvSession>>,
-                  clipboard: Option<Res<ViewerClipboard>>| {
-                press.propagate(false);
-                if press.button != PointerButton::Primary {
-                    return;
-                }
-                let (Some(session), Some(clipboard)) = (session, clipboard) else {
-                    return;
-                };
-                copy_to_clipboard(&clipboard, &formatted_restrictions(session.state()));
-            },
-        );
+    // Behind the filter (0) and the tables (1) in the tab cycle.
+    let button = spawn_action_button(commands, parent, "rlv-behaviours-copy", 2, font_size);
+    commands.entity(button).observe(
+        move |_activate: On<Activate>,
+              session: Option<Res<RlvSession>>,
+              clipboard: Option<Res<ViewerClipboard>>| {
+            let (Some(session), Some(clipboard)) = (session, clipboard) else {
+                return;
+            };
+            copy_to_clipboard(&clipboard, &formatted_restrictions(session.state()));
+        },
+    );
 }
 
 // --- Gallery specimen -----------------------------------------------------

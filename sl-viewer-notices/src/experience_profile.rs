@@ -65,16 +65,16 @@
 //! Reference (Firestorm, read-only): `llfloaterexperienceprofile`,
 //! `floater_experienceprofile.xml`.
 
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
+
+use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use bevy::ui::Checked;
 use bevy::ui_widgets::ValueChange;
 
 use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use bevy::text::EditableText;
-use bevy::ui_widgets::{Activate, Button};
+use bevy::ui_widgets::Activate;
 use bevy_flair::style::components::ClassList;
-use sl_viewer_ui_core::skin::BUTTON_CLASS;
 use sl_viewer_ui_core::skin::{
     DISABLED_TEXT_CLASS, EXPERIENCE_TEXT_CLASS, TEXT_CLASS, set_state_class, text_meaning,
     text_role,
@@ -1063,34 +1063,22 @@ fn spawn_action(
     tab: i32,
     font_size: f32,
 ) -> ActionHandle {
-    let entity = commands
-        .spawn((
-            Button,
-            TabIndex(tab),
-            Node {
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
-                border: UiRect::all(Val::Px(2.0)),
-                ..default()
-            },
-            BackgroundColor(BUTTON_BACKGROUND),
-            BorderColor::all(BUTTON_BORDER),
-            ClassList::new_with_classes([BUTTON_CLASS]),
-            button,
-            Name::new("experience-profile-button"),
-            ChildOf(parent),
-        ))
-        .id();
-    let label = commands
-        .spawn((
-            Text::default(),
-            Translated::new(label_key),
-            UiFont::Sans.at(font_size),
-            ClassList::new_with_classes([TEXT_CLASS]),
-            Pickable::IGNORE,
-            ChildOf(entity),
-        ))
-        .id();
-    commands.entity(entity).observe(on_profile_button);
+    let spawned = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(UiLabel::key(label_key), "experience-profile-button")
+            .kind(ButtonKind::Headless)
+            .tab_index(tab)
+            .border(2.0)
+            .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
+            .label_class(TEXT_CLASS)
+            .font_size(font_size),
+    );
+    let (entity, label) = (spawned.button, spawned.label);
+    commands
+        .entity(entity)
+        .insert(button)
+        .observe(on_profile_button);
     ActionHandle {
         button: entity,
         label,

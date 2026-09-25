@@ -100,7 +100,7 @@ use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_te
 
 use crate::rows::{SliderRow, spawn_action_button};
 use crate::style::{DIM_LABEL_COLOR, FONT_SIZE, HEADING_SIZE, LABEL_COLOR};
-use sl_viewer_ui_core::skin::{DisabledButtons, set_action_button_enabled};
+use sl_viewer_ui_core::skin::{DisabledButtons, set_action_button_enabled, text_role};
 
 /// The element-id prefix every control in a land-environment panel is named by.
 const ELEMENT: &str = "land-environment";
@@ -594,7 +594,7 @@ pub fn spawn_land_environment_panel(
         .with_child((
             Text::new(String::new()),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(DIM_LABEL_COLOR),
+            text_role(DIM_LABEL_COLOR),
             Pickable::IGNORE,
         ))
         .id();
@@ -755,7 +755,7 @@ fn spawn_labelled_row(commands: &mut Commands, parent: Entity, label_key: &'stat
         Text::default(),
         Translated::new(label_key),
         UiFont::Sans.at(FONT_SIZE),
-        TextColor(DIM_LABEL_COLOR),
+        text_role(DIM_LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(row_entity),
     ));
@@ -768,7 +768,7 @@ fn spawn_heading(commands: &mut Commands, parent: Entity, key: &'static str) {
         Text::default(),
         Translated::new(key),
         UiFont::Sans.at(HEADING_SIZE),
-        TextColor(DIM_LABEL_COLOR),
+        text_role(DIM_LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(parent),
     ));
@@ -780,7 +780,7 @@ fn spawn_value_node(commands: &mut Commands, parent: Entity) -> Entity {
         .spawn((
             Text::new(String::new()),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Pickable::IGNORE,
             ChildOf(parent),
         ))
@@ -896,7 +896,7 @@ fn spawn_day_slider(
         .spawn((
             Text::new(String::new()),
             UiFont::Sans.at(FONT_SIZE),
-            TextColor(DIM_LABEL_COLOR),
+            text_role(DIM_LABEL_COLOR),
             Pickable::IGNORE,
             ChildOf(row_entity),
         ))

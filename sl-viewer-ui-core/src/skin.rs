@@ -666,17 +666,20 @@ pub const TOOLBAR_BUTTON_CLASS: &str = "sk-toolbar-button";
 /// [`TOOLBAR_BUTTON_CLASS`].
 pub const FLOATER_BUTTON_CLASS: &str = "sk-floater-button";
 
-/// The CSS class on a control whose action does not apply right now — greyed
+/// The CSS class on text whose action does not apply right now — greyed
 /// rather than removed, so a row of actions keeps its shape as the selection
-/// moves. [`DISABLED_TEXT_CLASS`] greys its label.
+/// moves, and without claiming the control refuses input. A control that does
+/// refuse is `:disabled` (`InteractionDisabled`), which greys its caption
+/// through the button rules instead.
 ///
-/// Named here rather than in the one panel that first needed it: it is the
-/// oldest member of the state vocabulary below, and the pair proved the shape
-/// the rest follow.
-pub const DISABLED_SURFACE_CLASS: &str = "sk-disabled-surface";
-
-/// The label half of [`DISABLED_SURFACE_CLASS`].
+/// The oldest member of the state vocabulary below; the shape the rest follow.
 pub const DISABLED_TEXT_CLASS: &str = "sk-disabled-text";
+
+/// The CSS class on an **image well** — the box a snapshot or thumbnail is
+/// shown in, and what shows while it has none: a scrim (`--tile-bg`, the one a
+/// gallery tile's backing takes) rather than transparent, so a picture reads
+/// against whatever is behind the panel.
+pub const IMAGE_WELL_CLASS: &str = "sk-image-well";
 
 /// The CSS class on one row of a list a panel builds itself, rather than
 /// through the table widget — the pickers, the inventory tree, the About box's
@@ -2571,7 +2574,7 @@ mod tests {
     #[test]
     fn no_class_is_named_after_a_pseudo_class() {
         // The pseudo-classes whose *meaning* a class could be mistaken for.
-        // A longer name that merely starts with one (`.sk-disabled-surface`,
+        // A longer name that merely starts with one (`.sk-disabled-text`,
         // `.sk-focus-within`) says what it is and is not a clash.
         const PSEUDO_CLASSES: &[&str] = &[
             "active", "hover", "focus", "checked", "enabled", "visited", "target",

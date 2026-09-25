@@ -459,18 +459,14 @@ fn spawn_reset_button(commands: &mut Commands, parent: Entity, tab: &mut i32) {
         "personal-lighting-reset".to_owned(),
         tab,
     );
+    // Only the gap above it is this button's own: the helper's layout — its
+    // padding, its alignment, its refusal to shrink — is kept, not replaced.
     commands
         .entity(button)
-        .insert((
-            ResetButton,
-            Node {
-                padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
-                margin: UiRect::top(Val::Px(6.0)),
-                align_self: AlignSelf::FlexStart,
-                ..Default::default()
-            },
-        ))
-        .observe(on_reset_pressed);
+        .insert(ResetButton)
+        .observe(on_reset_pressed)
+        .entry::<Node>()
+        .and_modify(|mut node| node.margin.top = Val::Px(6.0));
 }
 
 // ---------------------------------------------------------------------------

@@ -59,7 +59,7 @@
 //! Reference (Firestorm, read-only): `llfloaterland`, `llpanelland*`; the
 //! `ParcelPropertiesUpdate`, `ParcelAccessListUpdate` messages.
 
-use sl_viewer_ui_core::skin::TEXT_CLASS;
+use sl_viewer_ui_core::skin::{TEXT_CLASS, text_role};
 
 use crate::skin_palette::SkinPalette;
 use bevy::prelude::*;
@@ -4172,7 +4172,7 @@ fn spawn_section_label(
         Text::default(),
         Translated::new(label_key),
         UiFont::Sans.at(font_size),
-        TextColor(DIM_LABEL_COLOR),
+        text_role(DIM_LABEL_COLOR),
         Pickable::IGNORE,
         ChildOf(parent),
     ));
@@ -4192,7 +4192,7 @@ fn spawn_note(commands: &mut Commands, parent: Entity, key: &'static str, font_s
             Text::default(),
             Translated::new(key),
             UiFont::Sans.at(font_size),
-            TextColor(DIM_LABEL_COLOR),
+            text_role(DIM_LABEL_COLOR),
             Pickable::IGNORE,
         ));
 }
@@ -4209,7 +4209,7 @@ fn spawn_key_label(
         Text::default(),
         Translated::new(key),
         UiFont::Sans.at(font_size),
-        TextColor(color),
+        text_role(color),
         Pickable::IGNORE,
         ChildOf(parent),
     ));
@@ -4221,7 +4221,7 @@ fn spawn_value_node(commands: &mut Commands, parent: Entity, font_size: f32) -> 
         .spawn((
             Text::new(String::new()),
             UiFont::Sans.at(font_size),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Pickable::IGNORE,
             ChildOf(parent),
         ))
@@ -4234,7 +4234,7 @@ fn spawn_disabled_value(commands: &mut Commands, parent: Entity, font_size: f32)
         .spawn((
             Text::new(String::new()),
             UiFont::Sans.at(font_size),
-            TextColor(DISABLED_COLOR),
+            text_role(DISABLED_COLOR),
             Pickable::IGNORE,
             ChildOf(parent),
         ))
@@ -4258,7 +4258,7 @@ fn spawn_value_block(commands: &mut Commands, parent: Entity, font_size: f32) ->
         .spawn((
             Text::new(String::new()),
             UiFont::Sans.at(font_size),
-            TextColor(LABEL_COLOR),
+            text_role(LABEL_COLOR),
             Pickable::IGNORE,
             ChildOf(block),
         ))

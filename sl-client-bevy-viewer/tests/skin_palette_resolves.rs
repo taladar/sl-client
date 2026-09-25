@@ -2162,6 +2162,79 @@ mod test {
         Ok(())
     }
 
+    /// **A skinned slider's thumb still follows its value.**
+    ///
+    /// The slider widget gained `.sk-slider` / `.sk-slider-thumb` so a skin
+    /// can paint it; the thumb's place is a `LogicalInset` the widget writes
+    /// every time the value moves. Styling the thumb must not pin it.
+    #[test]
+    fn a_skinned_slider_thumb_follows_its_value() -> Result<(), TestError> {
+        use bevy::ui_widgets::{Slider, SliderRange, SliderThumb, SliderValue};
+        use sl_viewer_ui_core::ui::{UiDirection, resolve_logical_boxes};
+        use sl_viewer_ui_widgets::ui_slider::{SliderStyle, place_slider_thumbs, spawn_slider};
+
+        const STYLE: SliderStyle = SliderStyle {
+            track_width: 110.0,
+            track_height: 12.0,
+            border: 1.0,
+            border_color: Color::WHITE,
+            track_fill: Color::BLACK,
+            thumb_width: 10.0,
+            thumb_fill: Color::WHITE,
+        };
+        let mut app = app();
+        app.init_resource::<UiDirection>();
+        // The widget plugin's one system, added directly: the harness has
+        // already finished its plugins.
+        app.add_systems(
+            PostUpdate,
+            (place_slider_thumbs, resolve_logical_boxes).chain(),
+        );
+        let handle: Handle<StyleSheet> = app
+            .world()
+            .resource::<AssetServer>()
+            .load("skins/graphite/skin.css");
+        let root = app
+            .world_mut()
+            .spawn((Node::default(), Styled::new(handle.clone())))
+            .id();
+        let track = {
+            let mut commands = app.world_mut().commands();
+            spawn_slider(
+                &mut commands,
+                root,
+                STYLE,
+                0,
+                0.0,
+                (
+                    Slider::default(),
+                    SliderValue(0.0),
+                    SliderRange::new(0.0, 100.0),
+                ),
+            )
+        };
+        app.world_mut().flush();
+        load(&mut app, &handle)?;
+        app.update();
+        let thumb = app
+            .world()
+            .get::<Children>(track)
+            .and_then(|children| children.first().copied())
+            .ok_or("the track has no thumb")?;
+        assert!(app.world().get::<SliderThumb>(thumb).is_some());
+        for value in [50.0, 100.0, 25.0] {
+            app.world_mut().entity_mut(track).insert(SliderValue(value));
+            app.update();
+            app.update();
+            assert_eq!(
+                app.world().get::<Node>(thumb).map(|node| node.left),
+                Some(Val::Px(value / 100.0 * STYLE.travel())),
+                "the thumb did not follow the value {value}"
+            );
+        }
+        Ok(())
+    }
+
     /// What a piece of text should get from `--text-shadow`.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum ShadowRole {

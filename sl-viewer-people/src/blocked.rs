@@ -59,6 +59,7 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::text::EditableText;
+use bevy::ui_widgets::Activate;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{AgentKey, Command, MuteEntry, MuteFlags, MuteType, SlCommand, Uuid};
 
@@ -76,6 +77,7 @@ use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::UiAction;
 use crate::ui_font::UiFont;
 use crate::ui_search::{SearchFieldSpec, spawn_search_field};
+use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use crate::ui_table::{
     TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells, TableSelectionMode,
     TableSortDefault, TableSpec, TableState, order_by_sort_keys, register_table_settings,
@@ -564,12 +566,12 @@ pub(crate) fn spawn_blocked_list(
             ChildOf(body),
         ))
         .id();
-    for button in [
+    for (tab_index, button) in (3..).zip([
         BlockedButton::Unblock,
         BlockedButton::BlockResident,
         BlockedButton::BlockObject,
-    ] {
-        spawn_blocked_button(commands, actions, button, font_size);
+    ]) {
+        spawn_blocked_button(commands, actions, button, tab_index, font_size);
     }
 
     BlockedUi {
@@ -580,43 +582,31 @@ pub(crate) fn spawn_blocked_list(
     }
 }
 
-/// Spawn one trailing action button.
+/// Spawn one trailing action button: the flat action-column shape the People
+/// and Groups columns are built from, so the skin paints it as it paints
+/// theirs. A headless button, so `Tab` reaches it and `Enter` / `Space` act.
 fn spawn_blocked_button(
     commands: &mut Commands,
     parent: Entity,
     button: BlockedButton,
+    tab_index: i32,
     font_size: f32,
 ) {
+    let spawned = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::flat(UiLabel::key(button.label_key()), "blocked-action")
+            .kind(ButtonKind::Headless)
+            .tab_index(tab_index)
+            .colors(ACTION_BACKGROUND, ACTION_BACKGROUND)
+            .label_color(LABEL_COLOR)
+            .font_size(font_size)
+            .no_wrap(),
+    );
     commands
-        .spawn((
-            Node {
-                flex_shrink: 0.0,
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            BackgroundColor(ACTION_BACKGROUND),
-            Pickable {
-                should_block_lower: true,
-                is_hoverable: true,
-            },
-            button,
-            Name::new("blocked-action"),
-            ChildOf(parent),
-        ))
-        .with_child((
-            Text::default(),
-            Translated::new(button.label_key()),
-            TextLayout {
-                linebreak: LineBreak::NoWrap,
-                ..default()
-            },
-            UiFont::Sans.at(font_size),
-            text_role(LABEL_COLOR),
-            Pickable::IGNORE,
-        ))
-        .observe(on_blocked_button_press);
+        .entity(spawned.button)
+        .insert(button)
+        .observe(on_blocked_button_activate);
 }
 
 /// The block by name floater's [`FloaterSpec`] — shared with the `FLOATERS`
@@ -674,7 +664,7 @@ fn spawn_block_by_name_content(commands: &mut Commands, content: Entity, font_si
             Text::default(),
             Translated::new(key),
             UiFont::Sans.at(font_size),
-            TextColor(if key == "block-by-name-note" {
+            text_role(if key == "block-by-name-note" {
                 DIM_LABEL_COLOR
             } else {
                 LABEL_COLOR
@@ -701,35 +691,32 @@ fn spawn_block_by_name_content(commands: &mut Commands, content: Entity, font_si
             ChildOf(content),
         ))
         .id();
-    for confirm in [true, false] {
-        commands
-            .spawn((
-                Node {
-                    padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::Center,
-                    ..default()
-                },
-                BackgroundColor(ACTION_BACKGROUND),
-                Pickable {
-                    should_block_lower: true,
-                    is_hoverable: true,
-                },
-                BlockByNameButton { confirm },
-                ChildOf(buttons),
-            ))
-            .with_child((
-                Text::default(),
-                Translated::new(if confirm {
+    for (tab_index, confirm) in (2..).zip([true, false]) {
+        let spawned = ui_spawn::spawn_button(
+            commands,
+            buttons,
+            ButtonSpec::bordered(
+                UiLabel::key(if confirm {
                     "block-by-name-ok"
                 } else {
                     "block-by-name-cancel"
                 }),
-                UiFont::Sans.at(font_size),
-                text_role(LABEL_COLOR),
-                Pickable::IGNORE,
-            ))
-            .observe(on_block_by_name_press);
+                if confirm {
+                    "block-by-name-button:ok"
+                } else {
+                    "block-by-name-button:cancel"
+                },
+            )
+            .kind(ButtonKind::Headless)
+            .tab_index(tab_index)
+            .padding(10.0, 4.0)
+            .label_color(LABEL_COLOR)
+            .font_size(font_size),
+        );
+        commands
+            .entity(spawned.button)
+            .insert(BlockByNameButton { confirm })
+            .observe(on_block_by_name_activate);
     }
     field
 }
@@ -974,9 +961,9 @@ fn on_blocked_row_press(
     });
 }
 
-/// A press on one of the trailing action buttons.
-fn on_blocked_button_press(
-    mut press: On<Pointer<Press>>,
+/// One of the trailing action buttons, clicked or activated from the keyboard.
+fn on_blocked_button_activate(
+    activate: On<Activate>,
     buttons: Query<&BlockedButton>,
     model: Res<MuteModel>,
     selected: Res<SelectedBlocked>,
@@ -984,13 +971,9 @@ fn on_blocked_button_press(
     by_name: Option<Res<BlockByNameUi>>,
     mut out: BlockedOut,
 ) {
-    if press.button != PointerButton::Primary {
-        return;
-    }
-    let Ok(button) = buttons.get(press.entity).copied() else {
+    let Ok(button) = buttons.get(activate.entity).copied() else {
         return;
     };
-    press.propagate(false);
     match button {
         BlockedButton::Unblock => {
             let Some(key) = selected.0.clone() else {
@@ -1008,7 +991,7 @@ fn on_blocked_button_press(
             // Single, as the reference's is (`allow_multiple = false`); blocking
             // several at once belongs with the multi-select block *list*.
             out.pickers
-                .write(OpenAvatarPicker::one(press.entity, PICKER_REQUESTER));
+                .write(OpenAvatarPicker::one(activate.entity, PICKER_REQUESTER));
         }
         BlockedButton::BlockObject => {
             if let Some(by_name) = by_name
@@ -1020,28 +1003,24 @@ fn on_blocked_button_press(
     }
 }
 
-/// A press on the by-name floater's OK / Cancel: OK asks for the by-name block
+/// The by-name floater's OK / Cancel, clicked or activated from the keyboard: OK asks for the by-name block
 /// (the guards run in [`crate::mutes::apply_block_requests`], which raises the
 /// refusal notification if one fires), Cancel just closes. Either way the
 /// floater shuts, as the reference's does.
-fn on_block_by_name_press(
-    mut press: On<Pointer<Press>>,
+fn on_block_by_name_activate(
+    activate: On<Activate>,
     buttons: Query<&BlockByNameButton>,
     ui: Option<Res<BlockByNameUi>>,
     fields: Query<&EditableText>,
     mut panels: Query<&mut UiPanelShown>,
     mut blocks: MessageWriter<RequestBlock>,
 ) {
-    if press.button != PointerButton::Primary {
-        return;
-    }
-    let Ok(button) = buttons.get(press.entity).copied() else {
+    let Ok(button) = buttons.get(activate.entity).copied() else {
         return;
     };
     let Some(ui) = ui else {
         return;
     };
-    press.propagate(false);
     if button.confirm {
         let name = fields
             .get(ui.field)
@@ -1264,5 +1243,84 @@ mod tests {
             toggle_outcome(&nearly, MuteFlags::ALLOW_TEXT_CHAT),
             ToggleOutcome::Unblock
         ));
+    }
+
+    /// **Block Object by Name's OK acts from the keyboard as from the mouse.**
+    ///
+    /// OK and Cancel used to be hand-rolled boxes observing `Pointer<Press>`:
+    /// no tab stop, and nothing for `Enter` / `Space` to reach. On the button
+    /// widget each gesture, in a fresh app driven through the real input and
+    /// focus stack, must ask for the one by-name block the field names.
+    #[test]
+    fn block_by_name_ok_acts_on_enter_space_and_a_click() -> Result<(), String> {
+        use super::{BlockByNameUi, spawn_block_by_name_content};
+        use crate::intents::RequestBlock;
+        use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems};
+        use bevy::input::keyboard::Key;
+        use bevy::prelude::*;
+        use sl_viewer_testkit::interact::{self, InteractionTest};
+        use sl_viewer_testkit::{drain, find_by_name, record, settle};
+
+        /// The OK button's node name, per `spawn_block_by_name_content`.
+        const OK: &str = "block-by-name-button:ok";
+
+        /// The by-name blocks one gesture on OK asked for, the field holding
+        /// `Spammy Sign`.
+        fn requests_after(
+            gesture: fn(&mut App, Entity) -> Result<(), String>,
+        ) -> Result<Vec<(String, MuteType)>, String> {
+            let mut app = InteractionTest::new().build();
+            record::<RequestBlock>(&mut app);
+            app.add_systems(
+                Startup,
+                (|mut commands: Commands, root: Res<UiRoot>| {
+                    let panel = commands
+                        .spawn((Node::default(), UiPanelShown(true), ChildOf(root.0)))
+                        .id();
+                    let field = spawn_block_by_name_content(&mut commands, panel, 13.0);
+                    commands.insert_resource(BlockByNameUi { panel, field });
+                })
+                .after(UiScaffoldSystems::SpawnRoot),
+            );
+            settle(&mut app);
+            let field = app.world().resource::<BlockByNameUi>().field;
+            interact::focus(&mut app, field);
+            interact::type_str(&mut app, "Spammy Sign");
+            settle(&mut app);
+            let button = find_by_name(&mut app, OK).ok_or("no OK button")?;
+            let _spawned = drain::<RequestBlock>(&mut app);
+            gesture(&mut app, button)?;
+            settle(&mut app);
+            Ok(drain::<RequestBlock>(&mut app)
+                .into_iter()
+                .map(|request| (request.name, request.mute_type))
+                .collect())
+        }
+
+        let want = vec![("Spammy Sign".to_owned(), MuteType::ByName)];
+        assert_eq!(
+            requests_after(|app, _button| interact::click_node(app, OK))?,
+            want,
+            "a primary click"
+        );
+        assert_eq!(
+            requests_after(|app, button| {
+                interact::focus(app, button);
+                interact::tap(app, KeyCode::Enter, Key::Enter);
+                Ok(())
+            })?,
+            want,
+            "Enter on the focused button"
+        );
+        assert_eq!(
+            requests_after(|app, button| {
+                interact::focus(app, button);
+                interact::tap(app, KeyCode::Space, Key::Space);
+                Ok(())
+            })?,
+            want,
+            "Space on the focused button"
+        );
+        Ok(())
     }
 }

@@ -64,8 +64,9 @@ use sl_client_bevy::{
     InventoryKey, InventoryType, ItemInfo, OwnerKey, Permissions, Permissions5, SaleInfo,
     TextureKey, Uuid,
 };
+use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
-use sl_viewer_ui_core::skin::{SELECTED_CLASS, set_state_class, text_role};
+use sl_viewer_ui_core::skin::{SELECTED_CLASS, TEXT_CLASS, set_state_class, text_role};
 use std::hash::{Hash, Hasher as _};
 
 use crate::floater::{
@@ -142,9 +143,6 @@ const BUTTON_BACKGROUND: Color = Color::srgba(0.18, 0.18, 0.2, 1.0);
 
 /// The text colour.
 const TEXT_COLOR: Color = SkinPalette::FALLBACK.text_primary;
-
-/// A folder row's label colour.
-const FOLDER_COLOR: Color = Color::srgb(0.82, 0.86, 0.95);
 
 /// The skin class for value text.
 const VALUE_CLASS: &str = "sk-build-value";
@@ -1206,27 +1204,24 @@ fn spawn_tree_row(
         PickerKind::Texture => InventoryType::Texture,
         PickerKind::Material => InventoryType::Material,
     };
-    let (depth, glyph, label, colour) = match row_data {
+    // A folder leads with its disclosure arrow — a glyph slot, so which
+    // triangle it is (and which way it points under RTL) is the skin's — and
+    // then the same folder icon the inventory draws; an item with its type's.
+    let (depth, arrow, icon, label) = match row_data {
         TreeRow::Folder {
             depth,
             expanded,
             name,
             ..
-        } => {
-            let arrow = if *expanded { "\u{25be}" } else { "\u{25b8}" };
-            (
-                *depth,
-                format!("{arrow} \u{1f4c1}"),
-                name.clone(),
-                FOLDER_COLOR,
-            )
-        }
-        TreeRow::Item { depth, name, .. } => (
+        } => (
             *depth,
-            String::from(item_icon(item_icon_type)),
+            Some(*expanded),
+            item_icon(InventoryType::Category),
             name.clone(),
-            TEXT_COLOR,
         ),
+        TreeRow::Item { depth, name, .. } => {
+            (*depth, None, item_icon(item_icon_type), name.clone())
+        }
     };
     let row_entity = commands
         .spawn((
@@ -1265,17 +1260,31 @@ fn spawn_tree_row(
             commands.entity(row_entity).observe(on_item_row_press);
         }
     }
+    if let Some(expanded) = arrow {
+        commands.spawn((
+            glyph::glyph_host(
+                glyph::DISCLOSURE,
+                UiFont::Sans.at(font_size),
+                // The text role colours the host, and the mark inherits it.
+                [TEXT_CLASS]
+                    .into_iter()
+                    .chain(expanded.then_some(glyph::EXPANDED)),
+            ),
+            TextColor(TEXT_COLOR),
+            ChildOf(row_entity),
+        ));
+    }
     commands.spawn((
-        Text::new(glyph),
+        Text::new(icon),
         UiFont::Sans.at(font_size),
-        text_role(colour),
+        text_role(TEXT_COLOR),
         Pickable::IGNORE,
         ChildOf(row_entity),
     ));
     commands.spawn((
         Text::new(label),
         UiFont::Sans.at(font_size),
-        text_role(colour),
+        text_role(TEXT_COLOR),
         Pickable::IGNORE,
         ChildOf(row_entity),
     ));

@@ -72,6 +72,7 @@ use crate::skin_palette::SkinPalette;
 use bevy::ecs::system::SystemParam;
 use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
+use bevy::ui_widgets::Activate;
 use sl_client_bevy::{
     AgentKey, ChatSource, ChatType, Command, GroupKey, ImDialog, ImSessionId, MessageCursor,
     ObjectKey, SlCommand, SlEvent, SlIdentity, SlSessionEvent, Uuid, chat_text_muted,
@@ -88,8 +89,8 @@ use crate::intents::{
 use crate::linkified_text::{LinkTextStyle, spawn_linkified_text};
 use crate::local_chat_input::{LocalChatSubmit, spawn_local_chat_input};
 use crate::skin::SkinChatBands;
+use crate::skin::text_role;
 use crate::skin::{ATTENTION_CLASS, set_state_class, set_state_class_on};
-use crate::skin::{role_class, text_role};
 use crate::social::{MuteModel, short_id};
 use crate::ui::BOTTOM_BAR_Z;
 use crate::ui::BottomArea;
@@ -97,6 +98,7 @@ use crate::ui::{
     LogicalInset, LogicalPadding, LogicalRect, UiRoot, UiScaffoldSystems, column, row,
 };
 use crate::ui_font::UiFont;
+use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use crate::ui_tab::{
     DEFAULT_ELLIPSIS, DynamicTabStrip, TAB_PANEL_CLASS, TabButton, TabCaption, TabHandle,
     TabPlacement, TabSpec, TabStrip, spawn_dynamic_tab_strip, spawn_tab_divider,
@@ -1489,57 +1491,69 @@ fn spawn_conversation_view(
 
 /// Spawn a conversation pane's close button — a small ✕ pinned to the pane's
 /// **top-trailing corner** (`LogicalInset` so it is top-right under LTR and
-/// top-left under RTL), wired to a [`CloseConversation`] press. It carries the
-/// panel background so it cleanly occludes the transcript line behind it, and is
-/// spawned as the pane's last child so it paints on top. The reference viewer puts
-/// the session-close control on the conversation content, not the tab.
+/// top-left under RTL), wired to a [`CloseConversation`]. It is the button
+/// widget at row scale, so the skin paints it an opaque control that cleanly
+/// occludes the transcript line behind it; spawned as the pane's last child so
+/// it paints on top. The reference viewer puts the session-close control on the
+/// conversation content, not the tab.
 fn spawn_pane_close_button(
     commands: &mut Commands,
     panel: Entity,
     key: ConversationKey,
     font_size: f32,
 ) {
-    commands
-        .spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            LogicalInset(LogicalRect {
-                block_start: Val::Px(2.0),
-                inline_end: Val::Px(2.0),
-                ..LogicalRect::AUTO
+    // The skin's `glyph::CLOSE` mark, on every non-Nearby tab.
+    let button = spawn_pane_glyph_button(
+        commands,
+        panel,
+        glyph::CLOSE,
+        "conversations-pane-close",
+        2.0,
+        font_size,
+    );
+    commands.entity(button).observe(
+        move |_activate: On<Activate>, mut close: MessageWriter<CloseConversation>| {
+            close.write(CloseConversation { key });
+        },
+    );
+}
+
+/// Spawn one of a pane's corner glyph buttons: the button widget at row scale
+/// wearing a glyph slot for its caption, pinned `inline_end` from the pane's
+/// top-trailing corner. A headless button, so a click raises `Activate` and
+/// the skin paints its hover and press.
+fn spawn_pane_glyph_button(
+    commands: &mut Commands,
+    panel: Entity,
+    slot: &'static str,
+    name: &'static str,
+    inline_end: f32,
+    font_size: f32,
+) -> Entity {
+    let button = ui_spawn::spawn_button(
+        commands,
+        panel,
+        ButtonSpec::bordered(UiLabel::Glyph(slot), name)
+            .kind(ButtonKind::Headless)
+            .compact()
+            .padding(6.0, 2.0)
+            .border(0.0)
+            .colors(PANEL_BACKGROUND, PANEL_BACKGROUND)
+            .label_color(CLOSE_GLYPH_COLOR)
+            .font_size(font_size)
+            .layout(|node| {
+                node.position_type = PositionType::Absolute;
+                node.align_items = AlignItems::Center;
+                node.justify_content = JustifyContent::Center;
             }),
-            BackgroundColor(PANEL_BACKGROUND),
-            ClassList::new_with_classes([TAB_PANEL_CLASS]),
-            Pickable {
-                should_block_lower: true,
-                is_hoverable: true,
-            },
-            Name::new("conversations-pane-close"),
-            ChildOf(panel),
-        ))
-        .with_child((
-            // The skin's `glyph::CLOSE` mark, on every non-Nearby tab.
-            glyph::glyph_host(
-                glyph::CLOSE,
-                UiFont::Sans.at(font_size),
-                role_class(CLOSE_GLYPH_COLOR),
-            ),
-            TextColor(CLOSE_GLYPH_COLOR),
-        ))
-        .observe(
-            move |mut press: On<Pointer<Press>>, mut close: MessageWriter<CloseConversation>| {
-                // Don't let the press bubble to the transcript / pane behind it.
-                press.propagate(false);
-                if press.button == PointerButton::Primary {
-                    close.write(CloseConversation { key });
-                }
-            },
-        );
+    )
+    .button;
+    commands.entity(button).insert(LogicalInset(LogicalRect {
+        block_start: Val::Px(2.0),
+        inline_end: Val::Px(inline_end),
+        ..LogicalRect::AUTO
+    }));
+    button
 }
 
 /// Spawn a conversation pane's **add-participants** button — a small ✚ beside
@@ -1556,49 +1570,24 @@ fn spawn_add_participants_button(
     key: ConversationKey,
     font_size: f32,
 ) {
+    // The skin's `glyph::ADD` mark, on a one-to-one or conference pane.
+    let button = spawn_pane_glyph_button(
+        commands,
+        panel,
+        glyph::ADD,
+        "conversations-pane-add-participants",
+        26.0,
+        font_size,
+    );
     commands
-        .spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            LogicalInset(LogicalRect {
-                block_start: Val::Px(2.0),
-                inline_end: Val::Px(26.0),
-                ..LogicalRect::AUTO
-            }),
-            BackgroundColor(PANEL_BACKGROUND),
-            ClassList::new_with_classes([TAB_PANEL_CLASS]),
-            Pickable {
-                should_block_lower: true,
-                is_hoverable: true,
-            },
-            AddParticipantsButton(key),
-            Name::new("conversations-pane-add-participants"),
-            ChildOf(panel),
-        ))
-        .with_child((
-            // The skin's `glyph::ADD` mark, on a one-to-one or conference pane.
-            glyph::glyph_host(
-                glyph::ADD,
-                UiFont::Sans.at(font_size),
-                role_class(CLOSE_GLYPH_COLOR),
-            ),
-            TextColor(CLOSE_GLYPH_COLOR),
-        ))
+        .entity(button)
+        .insert(AddParticipantsButton(key))
         .observe(
-            move |mut press: On<Pointer<Press>>, mut pickers: MessageWriter<OpenAvatarPicker>| {
-                press.propagate(false);
-                if press.button != PointerButton::Primary {
-                    return;
-                }
+            move |activate: On<Activate>, mut pickers: MessageWriter<OpenAvatarPicker>| {
                 // One picker per pane: the field carries the conversation, so
                 // two panes each waiting on a resident are two windows.
                 pickers.write(OpenAvatarPicker::many(
-                    press.entity,
+                    activate.entity,
                     format!("{ADD_PARTICIPANTS_REQUESTER}/{key:?}"),
                 ));
             },
@@ -1661,7 +1650,9 @@ fn spawn_invite_bar(
     bar
 }
 
-/// Spawn one Accept / Decline invite button.
+/// Spawn one Accept / Decline invite button: the button widget, Accept the
+/// call to act (`.sk-button-primary`), so what sets the two apart is a class a
+/// skin can see rather than a green and a red only the pre-load frame shows.
 fn spawn_invite_button(
     commands: &mut Commands,
     bar: Entity,
@@ -1671,38 +1662,20 @@ fn spawn_invite_button(
     background: Color,
     font_size: f32,
 ) {
-    commands
-        .spawn((
-            Node {
-                flex_shrink: 0.0,
-                padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            BackgroundColor(background),
-            Pickable {
-                should_block_lower: true,
-                is_hoverable: true,
-            },
-            Name::new("conversations-invite-button"),
-            ChildOf(bar),
-        ))
-        .with_child((
-            Text::new(String::new()),
-            UiFont::Sans.at(font_size),
-            text_role(INVITE_TEXT_COLOR),
-            crate::i18n::Translated::new(label_key),
-            Pickable::IGNORE,
-        ))
-        .observe(
-            move |mut press: On<Pointer<Press>>, mut respond: MessageWriter<RespondToInvite>| {
-                press.propagate(false);
-                if press.button == PointerButton::Primary {
-                    respond.write(RespondToInvite { key, accept });
-                }
-            },
-        );
+    let spec = ButtonSpec::bordered(UiLabel::key(label_key), "conversations-invite-button")
+        .kind(ButtonKind::Headless)
+        .padding(10.0, 4.0)
+        .colors(background, background)
+        .label_color(INVITE_TEXT_COLOR)
+        .font_size(font_size)
+        .layout(|node| node.flex_shrink = 0.0);
+    let button =
+        ui_spawn::spawn_button(commands, bar, if accept { spec.primary() } else { spec }).button;
+    commands.entity(button).observe(
+        move |_activate: On<Activate>, mut respond: MessageWriter<RespondToInvite>| {
+            respond.write(RespondToInvite { key, accept });
+        },
+    );
 }
 
 // ---------------------------------------------------------------------------

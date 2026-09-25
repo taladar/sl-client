@@ -46,10 +46,10 @@
 //! what the panel is showing — *Configure…* with a pseudo-set chosen (there is
 //! no *All Sets* to configure), *Rem Alias…* with nobody selected or nobody
 //! aliased, and so on (`ContactSetsButton::is_enabled`, the one predicate both
-//! `sync_panel_button_states` and `on_panel_button_press` read, so the look
-//! and the behaviour cannot drift). The greying is the **skin's**: each button
-//! and label carries a base class and gains `.sk-disabled-surface` /
-//! `.sk-disabled-text` on top, so a skin decides what greyed looks like.
+//! `sync_panel_button_states` and `on_panel_button_activate` read, so the look
+//! and the behaviour cannot drift). The greying is the **skin's**: a refused
+//! button carries `InteractionDisabled`, and `.sk-button:disabled` greys it
+//! and its caption, so a skin decides what greyed looks like.
 //!
 //! # One way in
 //!
@@ -63,8 +63,7 @@
 
 use crate::skin::BUTTON_CLASS;
 use crate::skin::{
-    DISABLED_SURFACE_CLASS, DISABLED_TEXT_CLASS, SELECTED_CLASS, TEXT_CLASS, set_state_class,
-    set_state_class_on, text_role,
+    DisabledButtons, SELECTED_CLASS, set_action_button_enabled, set_state_class, text_role,
 };
 use crate::skin_palette::SkinPalette;
 use bevy::ecs::system::RunSystemOnce as _;
@@ -72,8 +71,8 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx};
-use bevy::ui::{Checked, InteractionDisabled};
-use bevy::ui_widgets::ValueChange;
+use bevy::ui::Checked;
+use bevy::ui_widgets::{Activate, ValueChange};
 use bevy_flair::style::components::ClassList;
 
 use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
@@ -104,6 +103,7 @@ use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, SetComboOptions, spawn_combo};
 use crate::ui_font::UiFont;
 use crate::ui_search::{SearchFieldSpec, spawn_search_field};
+use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use crate::ui_table::{
     TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells, TableSelectionMode,
     TableSortDefault, TableSpec, TableState, compare_by_sort_keys, register_table_settings,
@@ -507,12 +507,6 @@ enum ContactSetsButton {
     RemoveDisplayName,
 }
 
-/// An action button's label node, so `sync_panel_button_states` can grey the
-/// two nodes together (bevy_ui has no style inheritance, so the label carries
-/// its own colour).
-#[derive(Component, Debug, Clone, Copy)]
-struct PanelButtonLabel(Entity);
-
 impl ContactSetsButton {
     /// The Fluent key for this button's label.
     const fn label_key(self) -> &'static str {
@@ -732,12 +726,15 @@ pub(crate) fn spawn_contact_sets_list(
             translate_labels: false,
         },
     );
+    // The chooser's buttons follow the chooser (1) in the tab cycle; the
+    // filter (2) and the table (3) come after them in reading order, then the
+    // action column.
     for button in [
         ContactSetsButton::NewSet,
         ContactSetsButton::Configure,
         ContactSetsButton::DeleteSet,
     ] {
-        spawn_panel_button(commands, chooser_row, button, font_size);
+        spawn_panel_button(commands, chooser_row, button, 1, font_size);
     }
 
     // The filter row.
@@ -840,7 +837,7 @@ pub(crate) fn spawn_contact_sets_list(
         ContactSetsButton::ClearAlias,
         ContactSetsButton::RemoveDisplayName,
     ] {
-        spawn_panel_button(commands, actions, button, font_size);
+        spawn_panel_button(commands, actions, button, 4, font_size);
     }
 
     ContactSetsUi {
@@ -852,51 +849,32 @@ pub(crate) fn spawn_contact_sets_list(
     }
 }
 
-/// Spawn one panel button.
+/// Spawn one panel button: the button widget in the action-column shape, a
+/// headless button so `Tab` reaches it and `Enter` / `Space` act, greyed by the
+/// skin's `.sk-button:disabled` once `sync_panel_button_states` refuses it.
 fn spawn_panel_button(
     commands: &mut Commands,
     parent: Entity,
     button: ContactSetsButton,
+    tab_index: i32,
     font_size: f32,
 ) {
-    let label = commands
-        .spawn((
-            Text::default(),
-            Translated::new(button.label_key()),
-            TextLayout {
-                linebreak: LineBreak::NoWrap,
-                ..default()
-            },
-            UiFont::Sans.at(font_size),
-            TextColor(LABEL_COLOR),
-            ClassList::new_with_classes([TEXT_CLASS]),
-            Pickable::IGNORE,
-        ))
-        .id();
+    let spawned = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::flat(UiLabel::key(button.label_key()), "contact-sets-action")
+            .class(BUTTON_CLASS)
+            .kind(ButtonKind::Headless)
+            .tab_index(tab_index)
+            .colors(ACTION_BACKGROUND, ACTION_BACKGROUND)
+            .label_color(LABEL_COLOR)
+            .font_size(font_size)
+            .no_wrap(),
+    );
     commands
-        .spawn((
-            Node {
-                flex_shrink: 0.0,
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            BackgroundColor(ACTION_BACKGROUND),
-            ClassList::new_with_classes([BUTTON_CLASS]),
-            Pickable {
-                should_block_lower: true,
-                is_hoverable: true,
-            },
-            button,
-            // The label is held on the button so the greying pass reaches it
-            // without walking children (and cannot grey the wrong node).
-            PanelButtonLabel(label),
-            Name::new("contact-sets-action"),
-            ChildOf(parent),
-        ))
-        .add_child(label)
-        .observe(on_panel_button_press);
+        .entity(spawned.button)
+        .insert(button)
+        .observe(on_panel_button_activate);
 }
 
 /// The add to set floater's [`FloaterSpec`] — shared with the `FLOATERS`
@@ -985,42 +963,33 @@ fn spawn_add_to_set_content(
             ChildOf(content),
         ))
         .id();
-    for button in [
+    for (tab_index, button) in (2..).zip([
         AddToSetButton::Add,
         AddToSetButton::NewSet,
         AddToSetButton::Cancel,
-    ] {
-        commands
-            .spawn((
-                Node {
-                    padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::Center,
-                    ..default()
-                },
-                BackgroundColor(ACTION_BACKGROUND),
-                ClassList::new_with_classes([BUTTON_CLASS]),
-                Pickable {
-                    should_block_lower: true,
-                    is_hoverable: true,
-                },
-                button,
-                Name::new("add-to-contact-set-button"),
-                ChildOf(buttons),
-            ))
-            .with_child((
-                Text::default(),
-                Translated::new(match button {
+    ]) {
+        let spawned = ui_spawn::spawn_button(
+            commands,
+            buttons,
+            ButtonSpec::bordered(
+                UiLabel::key(match button {
                     AddToSetButton::Add => "add-to-contact-set-add",
                     AddToSetButton::NewSet => "add-to-contact-set-new",
                     AddToSetButton::Cancel => "add-to-contact-set-cancel",
                 }),
-                UiFont::Sans.at(font_size),
-                TextColor(LABEL_COLOR),
-                ClassList::new_with_classes([TEXT_CLASS]),
-                Pickable::IGNORE,
-            ))
-            .observe(on_add_to_set_press);
+                "add-to-contact-set-button",
+            )
+            .kind(ButtonKind::Headless)
+            .tab_index(tab_index)
+            .padding(10.0, 4.0)
+            .colors(ACTION_BACKGROUND, ACTION_BACKGROUND)
+            .label_color(LABEL_COLOR)
+            .font_size(font_size),
+        );
+        commands
+            .entity(spawned.button)
+            .insert(button)
+            .observe(on_add_to_set_activate);
     }
     AddToSetParts { prompt, chooser }
 }
@@ -1108,7 +1077,7 @@ fn spawn_config_content(
             ..TextInputSpec::new("contact-set-config-name-field", TextInputKind::Line)
         },
     );
-    spawn_config_button(commands, name_row, ConfigButton::Rename, font_size);
+    spawn_config_button(commands, name_row, ConfigButton::Rename, 1, font_size);
 
     let color_row = commands
         .spawn((
@@ -1185,7 +1154,8 @@ fn spawn_config_content(
         font_size,
         reply(SetAutoresponseMode::NonFriends),
     );
-    spawn_config_button(commands, content, ConfigButton::Close, font_size);
+    // After the last reply field (9, 10).
+    spawn_config_button(commands, content, ConfigButton::Close, 11, font_size);
 
     let parts = ConfigParts {
         name_field,
@@ -1286,40 +1256,34 @@ fn spawn_config_button(
     commands: &mut Commands,
     parent: Entity,
     button: ConfigButton,
+    tab_index: i32,
     font_size: f32,
 ) {
-    commands
-        .spawn((
-            Node {
-                flex_shrink: 0.0,
-                align_self: AlignSelf::Start,
-                padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            BackgroundColor(ACTION_BACKGROUND),
-            ClassList::new_with_classes([BUTTON_CLASS]),
-            Pickable {
-                should_block_lower: true,
-                is_hoverable: true,
-            },
-            button,
-            Name::new("contact-set-config-button"),
-            ChildOf(parent),
-        ))
-        .with_child((
-            Text::default(),
-            Translated::new(match button {
+    let spawned = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(
+            UiLabel::key(match button {
                 ConfigButton::Rename => "contact-set-config-rename",
                 ConfigButton::Close => "contact-set-config-close",
             }),
-            UiFont::Sans.at(font_size),
-            TextColor(LABEL_COLOR),
-            ClassList::new_with_classes([TEXT_CLASS]),
-            Pickable::IGNORE,
-        ))
-        .observe(on_config_button_press);
+            "contact-set-config-button",
+        )
+        .kind(ButtonKind::Headless)
+        .tab_index(tab_index)
+        .padding(10.0, 4.0)
+        .colors(ACTION_BACKGROUND, ACTION_BACKGROUND)
+        .label_color(LABEL_COLOR)
+        .font_size(font_size)
+        .layout(|node| {
+            node.flex_shrink = 0.0;
+            node.align_self = AlignSelf::Start;
+        }),
+    );
+    commands
+        .entity(spawned.button)
+        .insert(button)
+        .observe(on_config_button_activate);
 }
 
 // --- Gallery specimens ------------------------------------------------------
@@ -1813,24 +1777,21 @@ fn on_member_row_press(
     selected.0 = Some(agent);
 }
 
-/// A press on one of the panel's buttons.
-fn on_panel_button_press(
-    mut press: On<Pointer<Press>>,
+/// One of the panel's buttons, clicked or activated from the keyboard.
+fn on_panel_button_activate(
+    activate: On<Activate>,
     buttons: Query<&ContactSetsButton>,
     sets: Res<ContactSets>,
     mut state: ContactSetsPanelState,
     mut intents: ContactSetsIntents,
 ) {
-    if press.button != PointerButton::Primary {
-        return;
-    }
-    let Ok(button) = buttons.get(press.entity).copied() else {
+    let Ok(button) = buttons.get(activate.entity).copied() else {
         return;
     };
-    press.propagate(false);
-    // The greyed buttons are inert. `InteractionDisabled` is advisory for a
-    // hand-rolled button, so the same predicate that greys them decides here —
-    // one source of truth, and no way for the look and the behaviour to drift.
+    // The greyed buttons are inert: the widget raises no `Activate` for one
+    // carrying `InteractionDisabled`, and the same predicate that refuses them
+    // is asked again here, so a frame between the model moving and the sync
+    // pass catching up cannot act on a stale enable.
     if !button.is_enabled(&sets, &state.view.choice, state.selected.0) {
         return;
     }
@@ -1866,7 +1827,7 @@ fn on_panel_button_press(
                 // once.
                 intents
                     .pickers
-                    .write(OpenAvatarPicker::many(press.entity, PICKER_REQUESTER));
+                    .write(OpenAvatarPicker::many(activate.entity, PICKER_REQUESTER));
             }
         }
         ContactSetsButton::MoveMember => {
@@ -2089,25 +2050,21 @@ fn handle_open_set_pseudonym(
     }
 }
 
-/// A press on the add-to-set floater's buttons: **Add** files the target (and,
+/// The add-to-set floater's buttons, clicked or activated from the keyboard: **Add** files the target (and,
 /// in move mode, unfiles them from where they were), **New Set…** prompts for a
 /// set to file them under, **Cancel** just closes.
-fn on_add_to_set_press(
-    mut press: On<Pointer<Press>>,
+fn on_add_to_set_activate(
+    activate: On<Activate>,
     buttons: Query<&AddToSetButton>,
     ui: Option<Res<AddToSetUi>>,
     mut floater: AddToSetFloater,
 ) {
-    if press.button != PointerButton::Primary {
-        return;
-    }
-    let Ok(button) = buttons.get(press.entity).copied() else {
+    let Ok(button) = buttons.get(activate.entity).copied() else {
         return;
     };
     let Some(ui) = ui else {
         return;
     };
-    press.propagate(false);
     if floater.target.agents.is_empty() {
         return;
     }
@@ -2166,11 +2123,11 @@ fn add_success_notification(target: &AddToSetTarget) -> ShowNotification {
     }
 }
 
-/// A press on the settings floater's buttons: **Rename** asks for the rename
+/// The settings floater's buttons, clicked or activated from the keyboard: **Rename** asks for the rename
 /// (the model refuses a name that is taken, and says so through the reference's
 /// notification), **Close** shuts the floater.
-fn on_config_button_press(
-    mut press: On<Pointer<Press>>,
+fn on_config_button_activate(
+    activate: On<Activate>,
     buttons: Query<&ConfigButton>,
     ui: Option<Res<ConfigUi>>,
     mut target: ResMut<ConfigTarget>,
@@ -2178,16 +2135,12 @@ fn on_config_button_press(
     mut requests: MessageWriter<RequestContactSet>,
     mut widgets: ConfigWidgets,
 ) {
-    if press.button != PointerButton::Primary {
-        return;
-    }
-    let Ok(button) = buttons.get(press.entity).copied() else {
+    let Ok(button) = buttons.get(activate.entity).copied() else {
         return;
     };
     let Some(ui) = ui else {
         return;
     };
-    press.propagate(false);
     match button {
         ConfigButton::Rename => {
             let Some(from) = target.0.clone() else {
@@ -2214,37 +2167,21 @@ fn on_config_button_press(
     }
 }
 
-/// Grey every action button whose action does not apply to what the panel is
-/// showing, and mark it [`InteractionDisabled`].
-///
-/// The greying is the skin's, not ours: each button and label carries a base
-/// class (`.sk-button` / `.sk-text`) and gains a disabled one on top, so a skin
-/// decides what "greyed" looks like and dropping the class falls back to the
-/// base rule. `InteractionDisabled` is the state marker beside it — advisory for
-/// our hand-rolled buttons, which is why `on_panel_button_press` asks
-/// `ContactSetsButton::is_enabled` itself rather than trusting the marker.
+/// Refuse every action button whose action does not apply to what the panel is
+/// showing: it takes [`InteractionDisabled`](bevy::ui::InteractionDisabled),
+/// the skin greys it and its caption through `.sk-button:disabled`, and the
+/// widget stops raising `Activate` for it.
 fn sync_panel_button_states(
     sets: Res<ContactSets>,
     view: Res<ContactSetsView>,
     selected: Res<SelectedMember>,
-    buttons: Query<(
-        Entity,
-        &ContactSetsButton,
-        &PanelButtonLabel,
-        Has<InteractionDisabled>,
-    )>,
-    mut classes: Query<&mut ClassList>,
+    buttons: Query<(Entity, &ContactSetsButton)>,
+    disabled: DisabledButtons,
     mut commands: Commands,
 ) {
-    for (entity, button, label, was_disabled) in &buttons {
+    for (entity, button) in &buttons {
         let enabled = button.is_enabled(&sets, &view.choice, selected.0);
-        set_state_class_on(&mut classes, entity, DISABLED_SURFACE_CLASS, !enabled);
-        set_state_class_on(&mut classes, label.0, DISABLED_TEXT_CLASS, !enabled);
-        if enabled && was_disabled {
-            commands.entity(entity).remove::<InteractionDisabled>();
-        } else if !enabled && !was_disabled {
-            commands.entity(entity).insert(InteractionDisabled);
-        }
+        set_action_button_enabled(&mut commands, &disabled, entity, enabled);
     }
 }
 

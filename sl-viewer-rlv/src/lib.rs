@@ -63,9 +63,10 @@ use bevy::prelude::*;
 /// values the sibling list floaters (the block list, the radar, the asset
 /// blacklist) already use, kept in one place so the family reads as one.
 pub(crate) mod style {
-    use bevy::prelude::Color;
+    use bevy::prelude::{Color, Commands, Entity};
 
     use sl_viewer_ui_core::skin_palette::SkinPalette;
+    use sl_viewer_ui_core::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 
     /// Header / cell font size, logical px.
     pub(crate) const FONT_SIZE: f32 = 13.0;
@@ -79,8 +80,34 @@ pub(crate) mod style {
     /// The dimmed header / secondary colour.
     pub(crate) const DIM_LABEL_COLOR: Color = SkinPalette::FALLBACK.text_muted;
 
-    /// An action button's background.
+    /// An action button's background — the pre-load fallback only, since the
+    /// button widget carries the skin's class.
     pub(crate) const ACTION_BACKGROUND: Color = Color::srgb(0.24, 0.29, 0.38);
+
+    /// Spawn one of the windows' action buttons (Copy, Clear, Restore default)
+    /// under `parent` and return it: the button widget in the flat
+    /// action-column shape, a headless button at `tab_index`, so the caller
+    /// observes `Activate` — raised alike by a primary click and by `Enter` /
+    /// `Space` on the focused button.
+    pub(crate) fn spawn_action_button(
+        commands: &mut Commands<'_, '_>,
+        parent: Entity,
+        label_key: &'static str,
+        tab_index: i32,
+        font_size: f32,
+    ) -> Entity {
+        ui_spawn::spawn_button(
+            commands,
+            parent,
+            ButtonSpec::flat(UiLabel::key(label_key), label_key)
+                .kind(ButtonKind::Headless)
+                .tab_index(tab_index)
+                .colors(ACTION_BACKGROUND, ACTION_BACKGROUND)
+                .label_color(LABEL_COLOR)
+                .font_size(font_size),
+        )
+        .button
+    }
 }
 
 /// The fixed restriction set the RLVa windows' gallery specimens draw — one

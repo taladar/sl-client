@@ -37,6 +37,7 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::text::EditableText;
+use bevy::ui_widgets::Activate;
 use bevy_flair::style::components::{ClassList, PseudoElementsSupport};
 use sl_client_bevy::Uuid;
 use sl_viewer_ui_core::glyph;
@@ -49,6 +50,7 @@ use sl_viewer_settings::ViewerSettings;
 use sl_viewer_ui_core::i18n::{TransArgs, Translated, Translator};
 use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems, column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
+use sl_viewer_ui_core::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use sl_viewer_ui_core::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 use sl_viewer_ui_widgets::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, floater_shown, spawn_floater,
@@ -461,9 +463,11 @@ fn spawn_blacklist_content(commands: &mut Commands, parent: Entity, font_size: f
     }
 }
 
-/// Spawn one trailing action button and its press observer.
+/// Spawn one trailing action button — the button widget in the flat
+/// action-column shape — and its `Activate` observer, which a primary click and
+/// `Enter` / `Space` on the focused button raise alike.
 ///
-/// The selection and the request queue are optional so a press in a host that
+/// The selection and the request queue are optional so an activation in a host that
 /// has neither (the gallery's specimen) is a no-op rather than a failed
 /// observer.
 fn spawn_blacklist_action(
@@ -472,55 +476,38 @@ fn spawn_blacklist_action(
     button: BlacklistButton,
     font_size: f32,
 ) {
-    commands
-        .spawn((
-            button,
-            Node {
-                flex_shrink: 0.0,
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            BackgroundColor(ACTION_BACKGROUND),
-            Pickable {
-                should_block_lower: true,
-                is_hoverable: true,
-            },
-            Name::new("blacklist-action"),
-            ChildOf(parent),
-        ))
-        .with_child((
-            Text::new(String::new()),
-            UiFont::Sans.at(font_size),
-            text_role(LABEL_COLOR),
-            Translated::new(button.label_key()),
-            Pickable::IGNORE,
-        ))
-        .observe(
-            move |mut press: On<Pointer<Press>>,
-                  selected: Option<ResMut<SelectedBlacklistEntry>>,
-                  requests: Option<MessageWriter<UnDerender>>| {
-                press.propagate(false);
-                if press.button != PointerButton::Primary {
-                    return;
-                }
-                let (Some(mut selected), Some(mut requests)) = (selected, requests) else {
-                    return;
-                };
-                match button {
-                    BlacklistButton::ReRender => {
-                        if let Some(id) = selected.0.take() {
-                            requests.write(UnDerender { id });
-                        }
-                    }
-                    // A nil id is the model's "every temporary entry" request.
-                    BlacklistButton::ClearTemporary => {
-                        requests.write(UnDerender { id: Uuid::nil() });
+    let entity = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::flat(UiLabel::key(button.label_key()), "blacklist-action")
+            .kind(ButtonKind::Headless)
+            // Behind the filter (0) and the table (1) in the tab cycle.
+            .tab_index(2)
+            .colors(ACTION_BACKGROUND, ACTION_BACKGROUND)
+            .label_color(LABEL_COLOR)
+            .font_size(font_size),
+    )
+    .button;
+    commands.entity(entity).insert(button).observe(
+        move |_activate: On<Activate>,
+              selected: Option<ResMut<SelectedBlacklistEntry>>,
+              requests: Option<MessageWriter<UnDerender>>| {
+            let (Some(mut selected), Some(mut requests)) = (selected, requests) else {
+                return;
+            };
+            match button {
+                BlacklistButton::ReRender => {
+                    if let Some(id) = selected.0.take() {
+                        requests.write(UnDerender { id });
                     }
                 }
-            },
-        );
+                // A nil id is the model's "every temporary entry" request.
+                BlacklistButton::ClearTemporary => {
+                    requests.write(UnDerender { id: Uuid::nil() });
+                }
+            }
+        },
+    );
 }
 
 // --- View systems (floater open) ------------------------------------------
@@ -997,5 +984,82 @@ mod tests {
             "expected YYYY-MM-DD hh:mm, got {rendered}"
         );
         assert!(format_date(i64::MAX, None).is_empty());
+    }
+
+    /// **A blacklist action button acts from the keyboard as from the mouse.**
+    ///
+    /// The action column used to be hand-rolled boxes observing
+    /// `Pointer<Press>`: no tab stop, and nothing for `Enter` / `Space` to
+    /// reach. On the button widget each gesture, in a fresh app driven through
+    /// the real input and focus stack, must raise the same one request.
+    #[test]
+    fn a_blacklist_action_acts_on_enter_space_and_a_click() -> Result<(), String> {
+        use super::{BlacklistButton, SelectedBlacklistEntry, spawn_blacklist_action};
+        use crate::derender::UnDerender;
+        use bevy::input::keyboard::Key;
+        use bevy::prelude::*;
+        use sl_viewer_testkit::interact::{self, InteractionTest};
+        use sl_viewer_testkit::{drain, find_by_name, record, settle};
+        use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems};
+
+        /// The Clear-temporary button's node name, per `spawn_blacklist_action`.
+        const CLEAR: &str = "blacklist-action";
+
+        /// The ids one gesture on the Clear-temporary button asked to drop.
+        fn requests_after(
+            gesture: fn(&mut App, Entity) -> Result<(), String>,
+        ) -> Result<Vec<Uuid>, String> {
+            let mut app = InteractionTest::new().build();
+            record::<UnDerender>(&mut app);
+            app.init_resource::<SelectedBlacklistEntry>();
+            app.add_systems(
+                Startup,
+                (|mut commands: Commands, root: Res<UiRoot>| {
+                    spawn_blacklist_action(
+                        &mut commands,
+                        root.0,
+                        BlacklistButton::ClearTemporary,
+                        13.0,
+                    );
+                })
+                .after(UiScaffoldSystems::SpawnRoot),
+            );
+            settle(&mut app);
+            let button = find_by_name(&mut app, CLEAR).ok_or("no Clear-temporary button")?;
+            let _spawned = drain::<UnDerender>(&mut app);
+            gesture(&mut app, button)?;
+            settle(&mut app);
+            Ok(drain::<UnDerender>(&mut app)
+                .into_iter()
+                .map(|request| request.id)
+                .collect())
+        }
+
+        // A nil id is the model's "every temporary entry".
+        let want = vec![Uuid::nil()];
+        assert_eq!(
+            requests_after(|app, _button| interact::click_node(app, CLEAR))?,
+            want,
+            "a primary click"
+        );
+        assert_eq!(
+            requests_after(|app, button| {
+                interact::focus(app, button);
+                interact::tap(app, KeyCode::Enter, Key::Enter);
+                Ok(())
+            })?,
+            want,
+            "Enter on the focused button"
+        );
+        assert_eq!(
+            requests_after(|app, button| {
+                interact::focus(app, button);
+                interact::tap(app, KeyCode::Space, Key::Space);
+                Ok(())
+            })?,
+            want,
+            "Space on the focused button"
+        );
+        Ok(())
     }
 }

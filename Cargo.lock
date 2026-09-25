@@ -9347,6 +9347,7 @@ name = "sl-viewer-map"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_flair",
  "crossbeam-channel",
  "fs-err",
  "pretty_assertions",
@@ -9455,6 +9456,7 @@ dependencies = [
  "sl-viewer-platform",
  "sl-viewer-settings",
  "sl-viewer-social",
+ "sl-viewer-testkit",
  "sl-viewer-ui-core",
  "sl-viewer-ui-sounds",
  "sl-viewer-ui-widgets",

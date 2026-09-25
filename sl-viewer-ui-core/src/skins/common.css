@@ -227,6 +227,29 @@
   color: var(--text-disabled);
 }
 
+/* A slider: the trough its handle runs in, and the handle. Both are the
+ * slider widget's own nodes (sl-viewer-ui-widgets/src/ui_slider.rs), so every
+ * slider in the viewer takes these rather than the colours its panel picked,
+ * which remain only the pre-load fallback. The track carries the value, the tab
+ * stop and a refusal's `InteractionDisabled`, so `:disabled` is selected there
+ * and reaches the handle as a descendant — bevy_ui has no style inheritance. */
+.sk-slider {
+  background-color: var(--track-bg);
+  border-color: var(--control-border);
+}
+
+.sk-slider-thumb {
+  background-color: var(--slider-thumb);
+}
+
+.sk-slider:disabled {
+  border-color: var(--control-border-disabled);
+}
+
+.sk-slider:disabled .sk-slider-thumb {
+  background-color: var(--text-disabled);
+}
+
 /* A sun / moon trackball's disc. Its *fill* is still the widget's, because
  * which side of the horizon the aim is on decides it and that is the control's
  * data rather than a UI state; its rim is chrome, and dims from the
@@ -727,6 +750,14 @@
 
 .sk-day-marker.sk-selected {
   background-color: var(--marker-selected);
+}
+
+/* An image well: the box a landmark's snapshot (or any thumbnail a panel
+ * shows) sits in, and what shows while it has none. The same scrim as a
+ * gallery tile's backing, so a picture reads against whatever is behind the
+ * panel. */
+.sk-image-well {
+  background-color: var(--tile-bg);
 }
 
 /* An inventory gallery tile. Its resting backing is a scrim rather than
@@ -1819,18 +1850,13 @@
   }
 }
 
-/* A control whose action does not apply to what its panel is showing right now
- * — greyed rather than removed, so a row of actions keeps its shape as the
- * selection moves (Contact Sets' Configure… with a pseudo-set chosen, its
- * Rem Alias… with nobody selected, …). Two rules because bevy_ui has no style
- * inheritance: the surface and its label are separate nodes, so each carries
- * the class that greys it. Both come later in the cascade than .sk-button /
- * .sk-text so they win while both apply, and dropping the disabled class falls
- * back to the base rule rather than to nothing. */
-.sk-disabled-surface {
-  background-color: var(--control-bg-disabled);
-}
-
+/* Text whose action does not apply to what its panel is showing right now —
+ * greyed rather than removed, so a row of actions keeps its shape as the
+ * selection moves (an Experiences window's Profile with nothing selected, …).
+ * It comes later in the cascade than .sk-text so it wins while both apply, and
+ * dropping the class falls back to the base rule rather than to nothing. A
+ * button that REFUSES its action is `:disabled` instead, which greys its
+ * caption through `.sk-button:disabled .sk-text`. */
 .sk-disabled-text {
   color: var(--text-disabled);
 }

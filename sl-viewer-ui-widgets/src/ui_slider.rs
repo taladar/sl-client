@@ -28,6 +28,17 @@
 //! observer, and what the value *means*. [`spawn_slider`] returns the track, so
 //! anything else goes on with an ordinary `insert` / `observe`.
 //!
+//! # The skin paints it
+//!
+//! The track wears [`SLIDER_CLASS`] and the thumb [`SLIDER_THUMB_CLASS`], so
+//! `common.css` paints both from the `--track-bg`, `--control-border` and
+//! `--slider-thumb` tokens and greys a refused one from `:disabled`. The colours
+//! in [`SliderStyle`] are the **pre-load fallback** — what a headless harness,
+//! which resolves no stylesheet, and the frame before the sheet lands measure —
+//! the same arrangement as a `ButtonSpec`'s. Before the classes, every slider in
+//! the viewer painted whatever colours its panel had picked, and no skin could
+//! reach one.
+//!
 //! A **static** slider — a gallery specimen, a screenshot fixture — needs no
 //! plugin: [`slider_thumb`] takes the fraction to draw at, so the thumb is in the
 //! right place the moment it is spawned. [`SliderWidgetPlugin`] is what keeps a
@@ -36,10 +47,22 @@
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui_widgets::{SliderRange, SliderThumb, SliderValue};
+use bevy_flair::style::components::ClassList;
 
 use sl_viewer_ui_core::ui::{LogicalInset, LogicalRect, resolve_logical_boxes};
 
+/// The skin class on a slider's **track** — the node that carries the value,
+/// the tab stop and, when refused, `InteractionDisabled`, so `:disabled` is
+/// selected here and reaches the thumb as a descendant.
+pub const SLIDER_CLASS: &str = "sk-slider";
+
+/// The skin class on a slider's **thumb**.
+pub const SLIDER_THUMB_CLASS: &str = "sk-slider-thumb";
+
 /// How a slider is drawn: its geometry in **logical** pixels, and its colours.
+///
+/// The colours are the pre-load fallback: the skin paints the track and thumb
+/// through [`SLIDER_CLASS`] and [`SLIDER_THUMB_CLASS`] (see the module docs).
 ///
 /// A plain data struct rather than a builder: every field is load-bearing, a
 /// slider with a default width would be a slider nobody sized, and the call
@@ -96,8 +119,8 @@ pub fn slider_fraction(value: &SliderValue, range: &SliderRange) -> f32 {
     }
 }
 
-/// The track's own bundle: the bordered box, its colours, its tab stop, and the
-/// travel its thumb will need.
+/// The track's own bundle: the bordered box, its fallback colours and skin
+/// class, its tab stop, and the travel its thumb will need.
 ///
 /// `flex_shrink: 0.0` deliberately. The thumb is placed from `style`'s widths,
 /// so a track squeezed by a crowded row would put its thumb somewhere the value
@@ -114,6 +137,7 @@ pub fn slider_track(style: SliderStyle, tab_index: i32) -> impl Bundle {
         },
         BorderColor::all(style.border_color),
         BackgroundColor(style.track_fill),
+        ClassList::new_with_classes([SLIDER_CLASS]),
         TabIndex(tab_index),
         Pickable::default(),
         SliderTravel(style.travel()),
@@ -141,6 +165,7 @@ pub fn slider_thumb(style: SliderStyle, fraction: f32) -> impl Bundle {
             ..LogicalRect::ZERO
         }),
         BackgroundColor(style.thumb_fill),
+        ClassList::new_with_classes([SLIDER_THUMB_CLASS]),
         // The press that starts a drag belongs to the track: it is what carries
         // the `Slider`, and it is what turns a pointer position into a value.
         Pickable::IGNORE,
@@ -216,9 +241,10 @@ mod tests {
     //! a stretch that failed to stretch would be a zero-height node, invisible
     //! and passing every overflow check in the harness by being nothing.
 
-    use super::{SliderStyle, SliderWidgetPlugin, spawn_slider};
+    use super::{SLIDER_CLASS, SLIDER_THUMB_CLASS, SliderStyle, SliderWidgetPlugin, spawn_slider};
     use bevy::prelude::*;
     use bevy::ui_widgets::{Slider, SliderRange, SliderValue};
+    use bevy_flair::style::components::ClassList;
     use pretty_assertions::assert_eq;
     use sl_viewer_testkit::{LayoutTest, TestError, settle, spawn_under_root};
 
@@ -322,6 +348,65 @@ mod tests {
             node.left,
             Val::Px(0.25 * STYLE.travel()),
             "a quarter of the way along a 0…100 range is a quarter of the travel",
+        );
+        Ok(())
+    }
+
+    /// **The skin can reach a slider.** The track and the thumb each carry
+    /// their class, so `common.css` paints them from tokens; before this every
+    /// slider painted the colours its panel picked, and no skin could restyle
+    /// one.
+    #[test]
+    fn a_slider_carries_the_classes_the_skin_paints() -> Result<(), TestError> {
+        let mut app = LayoutTest::new().build();
+        let (track, thumb) = laid_out(&mut app, 0.0, false)?;
+        for (node, class) in [(track, SLIDER_CLASS), (thumb, SLIDER_THUMB_CLASS)] {
+            assert!(
+                app.world()
+                    .entity(node)
+                    .get::<ClassList>()
+                    .is_some_and(|classes| classes.contains(class)),
+                "a slider node without `{class}` is one no skin can paint"
+            );
+        }
+        Ok(())
+    }
+
+    /// **A live slider moves under the pointer.** A drag from the thumb at the
+    /// start of the track to three quarters along it carries the value there,
+    /// through the real input and picking stack.
+    #[test]
+    fn a_drag_along_the_track_moves_the_value() -> Result<(), TestError> {
+        use sl_viewer_testkit::interact::{self, InteractionTest};
+        let mut app = InteractionTest::new().build();
+        let (track, _thumb) = laid_out(&mut app, 0.0, true)?;
+        // The headless slider only announces a move; its owner writes the
+        // value back, as `settings_binding`'s observer does.
+        app.world_mut()
+            .entity_mut(track)
+            .insert(Name::new("slider-under-test"))
+            .observe(
+                |change: On<bevy::ui_widgets::ValueChange<f32>>, mut commands: Commands| {
+                    commands
+                        .entity(change.source)
+                        .insert(SliderValue(change.value));
+                },
+            );
+        settle(&mut app);
+        let centre = interact::centre_of(&mut app, "slider-under-test")
+            .ok_or("the track has no position")?;
+        let from = centre - Vec2::new(STYLE.track_width / 2.0 - STYLE.thumb_width / 2.0, 0.0);
+        let to = centre + Vec2::new(STYLE.track_width / 4.0, 0.0);
+        interact::drag(&mut app, from, to, 8, MouseButton::Left);
+        settle(&mut app);
+        let value = app
+            .world()
+            .get::<SliderValue>(track)
+            .map(|value| value.0)
+            .ok_or("no value")?;
+        assert!(
+            value > 50.0,
+            "a drag three quarters along the track left the value at {value}"
         );
         Ok(())
     }

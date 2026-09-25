@@ -758,28 +758,24 @@ pub fn spawn_parcel_audio_specimen(
         text_role(BAR_LABEL_DIM),
         ChildOf(title_clip),
     ));
-    for glyph in ["▶", "🔊"] {
-        let button = commands
-            .spawn((
-                Node {
-                    padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
-                    border: UiRect::all(Val::Px(1.0)),
-                    ..default()
-                },
-                BorderColor::all(BUTTON_BORDER),
-                BackgroundColor(BUTTON_FILL),
-                ChildOf(cluster),
-            ))
-            .id();
-        commands.spawn((
-            Text::new(glyph),
-            cx.font(UiFont::Sans),
-            text_role(BAR_LABEL),
-            ChildOf(button),
-        ));
-    }
-    // Static: no `Slider`, so the thumb stays at the half the specimen draws.
-    spawn_slider(commands, cluster, SLIDER, 0, 0.5, ());
+    // The live bar's own buttons and slider, so the specimen answers a click
+    // and a drag the way the bar does. The buttons' actions go nowhere in the
+    // gallery; the slider is bound to the music bus the live one is, and
+    // moves under the gallery's settings binding.
+    let _play = spawn_glyph_button(commands, cluster, glyph::PLAY_STOP, "play-stop", 20);
+    let _mute = spawn_glyph_button(commands, cluster, glyph::SPEAKER, "mute-toggle", 21);
+    spawn_slider(
+        commands,
+        cluster,
+        SLIDER,
+        22,
+        0.5,
+        bound_slider(
+            SettingBinding::global(bus_volume_setting(Bus::Music)),
+            SliderRange::new(0.0, 1.0),
+            SliderStep(0.05),
+        ),
+    );
     cluster
 }
 

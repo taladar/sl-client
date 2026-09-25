@@ -59,6 +59,7 @@ use sl_viewer_ui_core::i18n::{TransArgs, Translated, Translator};
 use sl_viewer_ui_core::skin::{SELECTED_CLASS, set_state_class, set_state_class_on, text_role};
 use sl_viewer_ui_core::ui::{UiScaffoldSystems, column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
+use sl_viewer_ui_core::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use sl_viewer_ui_core::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 use sl_viewer_ui_widgets::floater::{
     Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterOp, FloaterOwner, FloaterSpec,
@@ -454,7 +455,8 @@ fn spawn_settings_picker_content(
     }
 }
 
-/// One reply button, its caption at `font_size`.
+/// One reply button, its caption at `font_size`: the button widget in the flat
+/// action shape every environment window's buttons share.
 fn spawn_picker_button(
     commands: &mut Commands,
     parent: Entity,
@@ -462,36 +464,24 @@ fn spawn_picker_button(
     tab: i32,
     font_size: f32,
 ) -> Entity {
+    let spawned = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::flat(
+            UiLabel::key(button.label_key()),
+            format!("settings-picker-{}:button", button.slug()),
+        )
+        .kind(ButtonKind::Interaction)
+        .tab_index(tab)
+        .padding(12.0, 4.0)
+        .colors(ACTION_BACKGROUND, ACTION_BACKGROUND)
+        .label_color(LABEL_COLOR)
+        .font_size(font_size)
+        .no_wrap(),
+    );
     commands
-        .spawn((
-            Node {
-                flex_shrink: 0.0,
-                padding: UiRect::axes(Val::Px(12.0), Val::Px(4.0)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            BackgroundColor(ACTION_BACKGROUND),
-            TabIndex(tab),
-            Pickable {
-                should_block_lower: true,
-                is_hoverable: true,
-            },
-            button,
-            Name::new(format!("settings-picker-{}:button", button.slug())),
-            ChildOf(parent),
-        ))
-        .with_child((
-            Text::default(),
-            Translated::new(button.label_key()),
-            TextLayout {
-                linebreak: LineBreak::NoWrap,
-                ..default()
-            },
-            UiFont::Sans.at(font_size),
-            text_role(LABEL_COLOR),
-            Pickable::IGNORE,
-        ))
+        .entity(spawned.button)
+        .insert(button)
         .observe(on_picker_button)
         .id()
 }

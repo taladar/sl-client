@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 118 |
-| ready | 305 |
+| ready | 304 |
 | blocked | 62 |
 | in-progress | 25 |
 | bugs | 12 |
-| done | 1235 |
+| done | 1236 |
 | deferred | 30 |
 | wont-do | 16 |
 | **total** | **1803** |
@@ -294,7 +294,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (305)
+## ready (304)
 
 ### protocol
 
@@ -882,9 +882,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Seamless seated region crossing (keep sit-implied permissions)
 - [`viewer-settings-backup`](ready/viewer-settings-backup.md) — Settings backup
   — export / import (blocked by `viewer-preferences-floater` (done))
-- [`viewer-skin-floater-controls-outside-the-skin`](ready/viewer-skin-floater-controls-outside-the-skin.md)
-  — A dozen floaters build their buttons, labels and marks with inline colours
-  no skin reaches
 - [`viewer-skin-icon-set`](ready/viewer-skin-icon-set.md) — A skin should be
   able to carry an icon set, not just colours
 - [`viewer-snapshot-composition-guides`](ready/viewer-snapshot-composition-guides.md)
@@ -1322,7 +1319,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1235)
+## done (1236)
 
 ### protocol
 
@@ -2990,6 +2987,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The skin chapter's token table is four tasks behind the vocabulary
 - [`viewer-skin-checkbox-radio-shape`](done/viewer-skin-checkbox-radio-shape.md)
   — Checkboxes are hand-rolled per panel, so no skin can shape one
+- [`viewer-skin-floater-controls-outside-the-skin`](done/viewer-skin-floater-controls-outside-the-skin.md)
+  — A dozen floaters build their buttons, labels and marks with inline colours
+  no skin reaches
 - [`viewer-skin-focus-ring-geometry-tokens`](done/viewer-skin-focus-ring-geometry-tokens.md)
   — The focus ring's shape becomes a value, not three repeated literals
 - [`viewer-skin-glyphs-from-content`](done/viewer-skin-glyphs-from-content.md) —

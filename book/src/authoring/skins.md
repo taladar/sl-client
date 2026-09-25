@@ -156,7 +156,7 @@ Defined by every skin's `skin.css`, consumed by `common.css`:
 | `--list-row-selected-text` | a selected row's text, which a light list moves off the field family |
 | `--drop-target` | the row a drag is over — drawn over the selection, so dropping onto the selected folder still shows where it lands |
 | `--match-highlight` | the glyphs of a filter match inside an ordinary label |
-| `--tile-bg` | an inventory gallery tile's backing, a scrim so a thumbnail reads against any panel |
+| `--tile-bg` | an inventory gallery tile's backing and an image well's, a scrim so a thumbnail reads against any panel |
 | `--tile-hover` | the wash under the pointer on a dense grid's tile (an emoji cell) |
 | `--inline-item-bg` / `--inline-item-bg-hover` | an item embedded in notecard prose, at rest and under the pointer |
 | `--marker-selected` | the selected keyframe on the day-cycle timeline (a colour of its own because it sits on a sky gradient) |
@@ -306,12 +306,14 @@ the stock look rather than to black.
 | `.sk-combo` / `.sk-combo-list` / `.sk-combo-option` | a combo's anchor box (`:disabled`), its open drop-down, one option row (`:hover`, `:disabled`) |
 | `.sk-swatch` | a colour swatch's rim (its fill is the colour it carries); `:disabled` dims it |
 | `.sk-tone-swatch` | an emoji skin-tone tile; `:checked` outlines the chosen one |
+| `.sk-slider` / `.sk-slider-thumb` | a slider's trough (`:disabled` when refused) and its handle — every slider the widget spawns |
 | `.sk-trackball` / `.sk-trackball-disc` | a sun / moon trackball (`:disabled`) and its disc's rim |
 | `.sk-trackball-sun` / `.sk-trackball-moon` | on the trackball, which body it aims — picks its marker's colour |
 | `.sk-trackball-marker` / `.sk-below-horizon` | the marker, and the class that says its aim is below the horizon (drawn hollow) |
 | `.sk-rights-cell` | a Friends-list permission icon: dim, `:checked` (a right you grant) or `:checked:disabled` (one granted to you) |
 | `.sk-tile` | one tile of a dense grid (an emoji cell), with its `:hover` wash |
 | `.sk-gallery-tile` | an inventory gallery tile's backing |
+| `.sk-image-well` | the box a snapshot or thumbnail sits in (About Landmark's), shown as a scrim while it has none |
 | `.sk-inline-item` | an item embedded in notecard prose, with its `:hover` |
 | `.sk-day-marker` | a keyframe marker on the day-cycle timeline; `.sk-selected` when selected |
 | `.sk-teleport-title` / `.sk-teleport-arrived` / `.sk-teleport-failed` | the teleport-progress title, and the two outcomes it ends in |
@@ -320,7 +322,7 @@ the stock look rather than to black.
 | `.sk-overlay` / `.sk-overlay-text` | an overlay over the rendered world and its text |
 | `.sk-tooltip` / `.sk-tooltip-text` | a tooltip's box and its text; spawned by `skin::tooltip_box`, which also keeps it unpickable and topmost — two things no skin can change |
 | `.sk-inspector` | an inspector card's plate |
-| `.sk-disabled-surface` / `.sk-disabled-text` | the greyed state of either |
+| `.sk-disabled-text` | text whose action does not apply right now, greyed without refusing input (a refused button is `:disabled` instead) |
 | `.sk-focusable` | the keyboard focus ring (stamped automatically onto every `TabIndex`) |
 | `.sk-accent` | a leading accent bar + hanging indent (logical box demo) |
 | `.sk-tab` / `.sk-tab-label` | a tab button with asymmetric top corners (`:checked` when selected, `:disabled` when refused) and its caption |

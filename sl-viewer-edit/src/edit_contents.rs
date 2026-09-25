@@ -87,8 +87,18 @@ use crate::world_api::EditToolState;
 use crate::world_api::InputContext;
 use crate::world_api::ObjectState;
 use crate::world_api::SelectionSet;
-use sl_viewer_ui_core::skin::LIST_SURFACE_CLASS;
+use sl_viewer_ui_core::skin::{
+    LIST_ROW_CLASS, LIST_SURFACE_CLASS, SELECTED_CLASS, set_role_class, set_state_class, text_role,
+};
 use sl_viewer_ui_core::skin_palette::SkinPalette;
+
+/// A contents row's text, at rest — the primary role, which a list's face
+/// re-roots to its field text.
+const ROW_TEXT: Color = SkinPalette::FALLBACK.text_primary;
+
+/// A contents row's text while its item has a change in flight — the greyed
+/// role, until the server confirms it.
+const PENDING_ROW_TEXT: Color = SkinPalette::FALLBACK.text_disabled;
 use sl_viewer_ui_core::ui_ellipsis::{RevealEllipsis, spawn_ellipsis_marker};
 
 /// The uniform height of a contents row, in logical pixels (matches the
@@ -663,7 +673,7 @@ pub(crate) fn spawn_contents_tab_into(
         .spawn((
             Text::default(),
             UiFont::Sans.at(font_size),
-            TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
+            TextColor(SkinPalette::FALLBACK.text_primary),
             ClassList::new_with_classes([LABEL_CLASS]),
             Name::new("contents:count"),
             ChildOf(page),
@@ -812,7 +822,7 @@ fn spawn_open_object_content(
         .spawn((
             Text::default(),
             UiFont::Sans.at(font_size),
-            TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
+            TextColor(SkinPalette::FALLBACK.text_primary),
             ClassList::new_with_classes([LABEL_CLASS]),
             Name::new("object-contents:name"),
             ChildOf(content),
@@ -1003,8 +1013,8 @@ struct ContentsTabSpecimen {
 fn bind_contents_tab_specimen(
     In(specimen): In<ContentsTabSpecimen>,
     translator: Translator,
-    mut rows: Query<(&ContentsRowParts, &mut BackgroundColor)>,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
+    mut rows: Query<(&ContentsRowParts, &mut ClassList), Without<Text>>,
+    mut texts: Query<RowText>,
     mut nodes: Query<&mut Node>,
     mut lists: Query<&mut VirtualList>,
     mut commands: Commands,
@@ -1016,7 +1026,7 @@ fn bind_contents_tab_specimen(
         selected,
     } = specimen;
     for (index, row) in row_entities.iter().copied().enumerate() {
-        if let Ok((row_parts, mut background)) = rows.get_mut(row) {
+        if let Ok((row_parts, mut classes)) = rows.get_mut(row) {
             bind_contents_row(
                 row_parts,
                 view.rows.get(index),
@@ -1024,13 +1034,13 @@ fn bind_contents_tab_specimen(
                 &mut texts,
                 &mut nodes,
             );
-            background.0 = selection_background(index == selected);
+            set_state_class(&mut classes, SELECTED_CLASS, index == selected);
         }
     }
     if let Ok(mut list) = lists.get_mut(ui.viewport) {
         list.item_count = view.rows.len();
     }
-    if let Ok((mut text, _color)) = texts.get_mut(ui.count_text) {
+    if let Ok((mut text, _color, _classes)) = texts.get_mut(ui.count_text) {
         text.0 = contents_summary(&view, &translator);
     }
     let selection_pending = view
@@ -1071,9 +1081,9 @@ fn bind_contents_specimen(
     In(specimen): In<ContentsSpecimen>,
     translator: Translator,
     row_parts: Query<&ContentsRowParts>,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
+    mut texts: Query<RowText>,
     mut nodes: Query<&mut Node>,
-    mut backgrounds: Query<&mut BackgroundColor>,
+    mut row_classes: Query<&mut ClassList, Without<Text>>,
     mut lists: Query<&mut VirtualList>,
 ) {
     let ContentsSpecimen {
@@ -1092,14 +1102,14 @@ fn bind_contents_specimen(
                 &mut nodes,
             );
         }
-        if let Ok(mut background) = backgrounds.get_mut(row) {
-            background.0 = selection_background(index == selected);
+        if let Ok(mut classes) = row_classes.get_mut(row) {
+            set_state_class(&mut classes, SELECTED_CLASS, index == selected);
         }
     }
     if let Ok(mut list) = lists.get_mut(parts.viewport) {
         list.item_count = view.rows.len();
     }
-    if let Ok((mut text, _color)) = texts.get_mut(parts.name_text) {
+    if let Ok((mut text, _color, _classes)) = texts.get_mut(parts.name_text) {
         text.0 = open_floater_name_line(&view, &translator);
     }
 }
@@ -1165,10 +1175,6 @@ fn spawn_contents_button(
         )
         .kind(ButtonKind::Headless)
         .tab_index(tab_index)
-        .colors(
-            Color::srgba(0.2, 0.2, 0.2, 1.0),
-            Color::srgba(0.4, 0.4, 0.4, 1.0),
-        )
         // The colour `.sk-build-value` paints — see [`VALUE_CLASS`].
         .label_color(SkinPalette::FALLBACK.text_primary)
         .label_class(VALUE_CLASS)
@@ -1633,14 +1639,18 @@ fn dress_contents_row(
         node.align_items = AlignItems::Center;
         node.column_gap = Val::Px(4.0);
     });
-    commands
-        .entity(row_entity)
-        .insert((Pickable::default(), BackgroundColor(Color::NONE)));
+    // A list row the skin paints — its resting face, its hover and, through
+    // `paint_contents_selection`, its selection.
+    commands.entity(row_entity).insert((
+        Pickable::default(),
+        BackgroundColor(Color::NONE),
+        ClassList::new_with_classes([LIST_ROW_CLASS]),
+    ));
     let icon = commands
         .spawn((
             Text::new(""),
             UiFont::Sans.at(font_size),
-            TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
+            text_role(ROW_TEXT),
             // Never given back under a long name: a shrunk column slices
             // its glyph.
             Node {
@@ -1674,7 +1684,7 @@ fn dress_contents_row(
             Text::new(""),
             TextLayout::no_wrap(),
             UiFont::Sans.at(font_size),
-            TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
+            text_role(ROW_TEXT),
             // The text keeps its full width; the clip is what shrinks.
             Node {
                 flex_shrink: 0.0,
@@ -1684,13 +1694,8 @@ fn dress_contents_row(
             ChildOf(label_clip),
         ))
         .id();
-    let ellipsis = spawn_ellipsis_marker(
-        commands,
-        row_entity,
-        font_size,
-        Color::srgba(0.85, 0.85, 0.85, 1.0),
-        FALLBACK_ELLIPSIS,
-    );
+    let ellipsis =
+        spawn_ellipsis_marker(commands, row_entity, font_size, ROW_TEXT, FALLBACK_ELLIPSIS);
     commands
         .entity(label_clip)
         .insert(RevealEllipsis { marker: ellipsis });
@@ -1751,7 +1756,7 @@ fn bind_contents_rows(
     rows: Query<(Ref<VirtualRow>, &ChildOf, &ContentsRowParts)>,
     viewports: Query<&ContentsViewport>,
     translator: Translator,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
+    mut texts: Query<RowText>,
     mut nodes: Query<&mut Node>,
 ) {
     let rebuild_all = views.is_changed();
@@ -1775,7 +1780,7 @@ fn bind_contents_row(
     parts: &ContentsRowParts,
     bound: Option<&ContentsRow>,
     translator: &Translator,
-    texts: &mut Query<(&mut Text, &mut TextColor)>,
+    texts: &mut Query<RowText>,
     nodes: &mut Query<&mut Node>,
 ) {
     // Show the label only when the row is bound to an item.
@@ -1790,40 +1795,43 @@ fn bind_contents_row(
         }
     }
     let Some(display) = bound else {
-        if let Ok((mut text, _color)) = texts.get_mut(parts.icon) {
+        if let Ok((mut text, _color, _classes)) = texts.get_mut(parts.icon) {
             set_row_text(&mut text, "");
         }
         return;
     };
-    // A pending (in-flight) item draws dimmer until the server confirms it.
+    // A pending (in-flight) item draws greyed until the server confirms it —
+    // the role, so the skin decides what greyed is on a list's face.
     let color = if display.state.is_pending() {
-        TextColor(Color::srgba(0.55, 0.55, 0.55, 1.0))
+        PENDING_ROW_TEXT
     } else {
-        TextColor(Color::srgba(0.92, 0.92, 0.92, 1.0))
+        ROW_TEXT
     };
-    if let Ok((mut text, mut text_color)) = texts.get_mut(parts.icon) {
+    if let Ok((mut text, mut text_color, classes)) = texts.get_mut(parts.icon) {
         set_row_text(&mut text, display.icon);
-        *text_color = color;
+        set_row_role(&mut text_color, classes, color);
     }
-    if let Ok((mut text, mut text_color)) = texts.get_mut(parts.label) {
+    if let Ok((mut text, mut text_color, classes)) = texts.get_mut(parts.label) {
         // Append the pending-state suffix, e.g. "Read me   …deleting".
         let label = match display.state.suffix_key() {
             Some(key) => format!("{}   {}", display.name, translator.get(key)),
             None => display.name.clone(),
         };
         set_row_text(&mut text, &label);
-        *text_color = color;
+        set_row_role(&mut text_color, classes, color);
     }
 }
 
-/// Paint each pooled row's selection background.
+/// Mark each pooled row selected or not: [`SELECTED_CLASS`] beside its
+/// [`LIST_ROW_CLASS`], so the skin paints the selection as it paints every
+/// other list's.
 fn paint_contents_selection(
     selection: Res<ContentsSelection>,
     views: Res<ContentsViews>,
     viewports: Query<&ContentsViewport>,
-    mut rows: Query<(&VirtualRow, &ChildOf, &mut BackgroundColor)>,
+    mut rows: Query<(&VirtualRow, &ChildOf, &mut ClassList)>,
 ) {
-    for (row, child_of, mut background) in &mut rows {
+    for (row, child_of, mut classes) in &mut rows {
         let Ok(&ContentsViewport(surface)) = viewports.get(child_of.parent()) else {
             continue;
         };
@@ -1831,19 +1839,32 @@ fn paint_contents_selection(
             .index
             .and_then(|index| views.view(surface).rows.get(index))
             .is_some_and(|display| selection.get(surface) == Some(display.item_id));
-        let want = selection_background(selected);
-        if background.0 != want {
-            background.0 = want;
-        }
+        set_state_class(&mut classes, SELECTED_CLASS, selected);
     }
 }
 
-/// A contents row's background: the selection tint, or none.
-const fn selection_background(selected: bool) -> Color {
-    if selected {
-        Color::srgba(0.25, 0.4, 0.65, 0.6)
-    } else {
-        Color::NONE
+/// What a contents row's icon and name are bound through: the text, its
+/// fallback colour, and the class list its role is kept on (absent on the
+/// count and name lines, which share the query).
+type RowText = (
+    &'static mut Text,
+    &'static mut TextColor,
+    Option<&'static mut ClassList>,
+);
+
+/// Put a row text on `color`'s role: the class the skin paints it by, and the
+/// fallback colour beside it. Each written only when it moves, so a row that
+/// rebinds to the same state does not wake the style engine.
+fn set_row_role(
+    text_color: &mut Mut<'_, TextColor>,
+    classes: Option<Mut<'_, ClassList>>,
+    color: Color,
+) {
+    if text_color.0 != color {
+        text_color.0 = color;
+    }
+    if let Some(mut classes) = classes {
+        set_role_class(&mut classes, color);
     }
 }
 

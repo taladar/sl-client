@@ -33,6 +33,7 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::text::EditableText;
+use bevy::ui_widgets::Activate;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::AgentKey;
 use sl_viewer_ui_core::skin::{SELECTED_CLASS, set_state_class, text_role};
@@ -48,6 +49,7 @@ use sl_viewer_settings::ViewerSettings;
 use sl_viewer_ui_core::i18n::{TransArgs, Translated, Translator};
 use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems, column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
+use sl_viewer_ui_core::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use sl_viewer_ui_core::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 use sl_viewer_ui_widgets::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, floater_shown, spawn_floater,
@@ -506,10 +508,12 @@ fn spawn_render_settings_content(
     }
 }
 
-/// Spawn one trailing action button and its press observer.
+/// Spawn one trailing action button — the button widget in the flat
+/// action-column shape — and its `Activate` observer, which a primary click and
+/// `Enter` / `Space` on the focused button raise alike.
 ///
-/// The selection, the store and the two message queues are optional so a
-/// press in a host that has none of them (the gallery's specimen) is a no-op
+/// The selection, the store and the two message queues are optional so an
+/// activation in a host that has none of them (the gallery's specimen) is a no-op
 /// rather than a failed observer.
 fn spawn_render_settings_action(
     commands: &mut Commands,
@@ -517,70 +521,53 @@ fn spawn_render_settings_action(
     button: RenderSettingsButton,
     font_size: f32,
 ) {
-    commands
-        .spawn((
-            button,
-            Node {
-                flex_shrink: 0.0,
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            BackgroundColor(ACTION_BACKGROUND),
-            Pickable {
-                should_block_lower: true,
-                is_hoverable: true,
-            },
-            Name::new("avatar-render-action"),
-            ChildOf(parent),
-        ))
-        .with_child((
-            Text::new(String::new()),
-            UiFont::Sans.at(font_size),
-            text_role(LABEL_COLOR),
-            Translated::new(button.label_key()),
-            Pickable::IGNORE,
-        ))
-        .observe(
-            move |mut press: On<Pointer<Press>>,
-                  selected: Option<Res<SelectedRenderException>>,
-                  store: Option<Res<AvatarRenderSettings>>,
-                  requests: Option<MessageWriter<RequestRenderException>>,
-                  pickers: Option<MessageWriter<OpenAvatarPicker>>| {
-                press.propagate(false);
-                if press.button != PointerButton::Primary {
-                    return;
-                }
-                let (Some(selected), Some(store), Some(mut requests), Some(mut pickers)) =
-                    (selected, store, requests, pickers)
-                else {
-                    return;
-                };
-                if let Some(field) = button.picker_tag() {
-                    // The reference's Add buttons open a multi-picker: one
-                    // decision, however many residents it is about.
-                    pickers.write(OpenAvatarPicker::many(press.entity, field));
-                    return;
-                }
-                let (Some(setting), Some(agent)) = (button.setting(), selected.0) else {
-                    return;
-                };
-                // The name the entry already carries rides along, so a
-                // re-decision never blanks a resolved name back to an id.
-                let name = store
-                    .entries()
-                    .iter()
-                    .find(|entry| entry.agent == agent.uuid())
-                    .map(|entry| entry.name.clone())
-                    .unwrap_or_default();
-                requests.write(RequestRenderException {
-                    agent,
-                    name,
-                    setting,
-                });
-            },
-        );
+    let entity = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::flat(UiLabel::key(button.label_key()), "avatar-render-action")
+            .kind(ButtonKind::Headless)
+            // Behind the filter (0) and the table (1) in the tab cycle.
+            .tab_index(2)
+            .colors(ACTION_BACKGROUND, ACTION_BACKGROUND)
+            .label_color(LABEL_COLOR)
+            .font_size(font_size),
+    )
+    .button;
+    commands.entity(entity).insert(button).observe(
+        move |activate: On<Activate>,
+              selected: Option<Res<SelectedRenderException>>,
+              store: Option<Res<AvatarRenderSettings>>,
+              requests: Option<MessageWriter<RequestRenderException>>,
+              pickers: Option<MessageWriter<OpenAvatarPicker>>| {
+            let (Some(selected), Some(store), Some(mut requests), Some(mut pickers)) =
+                (selected, store, requests, pickers)
+            else {
+                return;
+            };
+            if let Some(field) = button.picker_tag() {
+                // The reference's Add buttons open a multi-picker: one
+                // decision, however many residents it is about.
+                pickers.write(OpenAvatarPicker::many(activate.entity, field));
+                return;
+            }
+            let (Some(setting), Some(agent)) = (button.setting(), selected.0) else {
+                return;
+            };
+            // The name the entry already carries rides along, so a
+            // re-decision never blanks a resolved name back to an id.
+            let name = store
+                .entries()
+                .iter()
+                .find(|entry| entry.agent == agent.uuid())
+                .map(|entry| entry.name.clone())
+                .unwrap_or_default();
+            requests.write(RequestRenderException {
+                agent,
+                name,
+                setting,
+            });
+        },
+    );
 }
 
 /// Record an exception for everyone chosen in the shared avatar picker — the

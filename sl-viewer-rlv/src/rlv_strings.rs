@@ -25,9 +25,9 @@
 //! Reference (Firestorm, read-only): `rlvfloaters.cpp` (`RlvFloaterStrings`),
 //! `floater_rlv_strings.xml`, `rlva_strings.xml`.
 
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::EditableText;
+use bevy::ui_widgets::Activate;
 use sl_settings::{Scope, SettingValue};
 use sl_viewer_settings::ViewerSettings;
 use sl_viewer_ui_core::i18n::Translated;
@@ -40,7 +40,7 @@ use sl_viewer_ui_widgets::ui_combo::{ComboChanged, ComboSpec, spawn_combo};
 use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use sl_viewer_world_api::rlv::{RLV_STRINGS, RlvStringDef, rlv_string};
 
-use crate::style::{ACTION_BACKGROUND, DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR};
+use crate::style::{DIM_LABEL_COLOR, FONT_SIZE, spawn_action_button};
 use sl_viewer_ui_core::skin::text_role;
 
 /// The floater's stable id.
@@ -262,52 +262,24 @@ fn spawn_strings_content(commands: &mut Commands, parent: Entity, font_size: f32
 /// has neither (the gallery's specimen) is a no-op rather than a failed
 /// observer.
 fn spawn_restore_button(commands: &mut Commands, parent: Entity, font_size: f32) {
-    commands
-        .spawn((
-            Node {
-                flex_shrink: 0.0,
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            BackgroundColor(ACTION_BACKGROUND),
-            TabIndex(2),
-            Pickable {
-                should_block_lower: true,
-                is_hoverable: true,
-            },
-            Name::new("rlv-strings-restore"),
-            ChildOf(parent),
-        ))
-        .with_child((
-            Text::new(String::new()),
-            UiFont::Sans.at(font_size),
-            text_role(LABEL_COLOR),
-            Translated::new("rlv-strings-restore"),
-            Pickable::IGNORE,
-        ))
-        .observe(
-            move |mut press: On<Pointer<Press>>,
-                  selection: Option<ResMut<StringsSelection>>,
-                  settings: Option<ResMut<ViewerSettings>>| {
-                press.propagate(false);
-                if press.button != PointerButton::Primary {
-                    return;
-                }
-                let (Some(mut selection), Some(mut settings)) = (selection, settings) else {
-                    return;
-                };
-                let Some(entry) = string_at(selection.index) else {
-                    return;
-                };
-                settings.reset(Scope::Global, entry.key);
-                settings.save_async();
-                // Make the next fill unconditional: the stored value changed
-                // under the editor, which nothing else would notice.
-                selection.filled = false;
-            },
-        );
+    let button = spawn_action_button(commands, parent, "rlv-strings-restore", 2, font_size);
+    commands.entity(button).observe(
+        move |_activate: On<Activate>,
+              selection: Option<ResMut<StringsSelection>>,
+              settings: Option<ResMut<ViewerSettings>>| {
+            let (Some(mut selection), Some(mut settings)) = (selection, settings) else {
+                return;
+            };
+            let Some(entry) = string_at(selection.index) else {
+                return;
+            };
+            settings.reset(Scope::Global, entry.key);
+            settings.save_async();
+            // Make the next fill unconditional: the stored value changed
+            // under the editor, which nothing else would notice.
+            selection.filled = false;
+        },
+    );
 }
 
 // --- View systems ---------------------------------------------------------

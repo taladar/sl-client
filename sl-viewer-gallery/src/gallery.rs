@@ -344,6 +344,12 @@ pub fn run(assets: AssetPlugin, registry: GalleryRegistry) -> AppExit {
         // the picker's field is a flat grey box and pressing Cancel kills the
         // gallery on an unregistered message.
         .add_plugins(crate::ui_color_picker::ColorPickerPlugin)
+        // The settings binding's write half: bevy's headless slider only
+        // *announces* a drag, and a bound slider's observer here is what writes
+        // the value back — so without it every preferences, quick-preferences
+        // and audio slider in the gallery stayed where it was drawn. Every
+        // system tolerates the gallery's missing settings store.
+        .add_plugins(sl_viewer_ui_widgets::settings_binding::SettingsBindingPlugin)
         // The text-input widget's runtime half: the numeric fields' whole-string
         // validator, so a bad arrangement reverts in the gallery too.
         .add_plugins(crate::ui_text_input::TextInputPlugin)

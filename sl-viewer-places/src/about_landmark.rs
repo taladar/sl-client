@@ -59,7 +59,8 @@ use crate::ui_text::set_node_text;
 use crate::world_api::AvatarState;
 use crate::world_api::ui_texture::{PendingUiTexture, UiTexturePlugin};
 use crate::world_map::OpenWorldMap;
-use sl_viewer_ui_core::skin::text_role;
+use bevy_flair::style::components::ClassList;
+use sl_viewer_ui_core::skin::{IMAGE_WELL_CLASS, text_role};
 
 /// The floater's font size, in logical pixels.
 const ABOUT_FONT_SIZE: f32 = 14.0;
@@ -546,6 +547,7 @@ fn spawn_landmark_content(
                 ..default()
             },
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.35)),
+            ClassList::new_with_classes([IMAGE_WELL_CLASS]),
             ChildOf(content),
         ))
         .id();

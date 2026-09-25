@@ -317,8 +317,6 @@ fn spawn_toolbar_button(
             .kind(ButtonKind::Headless)
             .tab_index(tab_index)
             .padding(7.0, 3.0)
-            .colors(Color::srgb(0.16, 0.17, 0.2), Color::srgb(0.35, 0.35, 0.4))
-            .label_color(SkinPalette::FALLBACK.text_primary)
             .font_size(font_size),
     );
     commands.entity(spawned.button).observe(

@@ -105,7 +105,6 @@ use crate::settings_list::{
 };
 use crate::style::{ACTION_BACKGROUND, DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, ROW_HEIGHT};
 use bevy_flair::style::components::ClassList;
-use sl_viewer_ui_core::skin::BUTTON_CLASS;
 use sl_viewer_ui_core::skin::{
     DisabledButtons, SELECTED_CLASS, TEXT_CLASS, set_action_button_enabled, set_state_class,
     set_state_class_on, text_role,
@@ -702,10 +701,11 @@ fn spawn_action_button(
         .colors(ACTION_BACKGROUND, ACTION_BACKGROUND)
         .label_color(LABEL_COLOR)
         .font_size(font_size)
-        // Both ends of `.sk-button:disabled .sk-text`. The marker itself goes
-        // on below when the button is born refused, so it reads right on its
-        // first frame rather than waiting for the first sync.
-        .class(BUTTON_CLASS)
+        // The action-button class every environment window's buttons wear, and
+        // the caption half of `.sk-action-button:disabled .sk-text`. The
+        // marker itself goes on below when the button is born refused, so it
+        // reads right on its first frame rather than waiting for the first
+        // sync.
         .label_class(TEXT_CLASS)
         .no_wrap(),
     );

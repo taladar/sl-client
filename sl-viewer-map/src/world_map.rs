@@ -38,9 +38,11 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
 use bevy::text::{EditableText, FontCx, LayoutCx};
+use bevy::ui::Checked;
 use bevy::ui::RelativeCursorPosition;
-use bevy::ui_widgets::Activate;
+use bevy::ui_widgets::{Activate, ValueChange};
 use bevy::window::PrimaryWindow;
+use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
     Command, GlobalCoordinates, GridCoordinates, MapItem, MapItemType, MapRegionInfo, Maturity,
     RegionCoordinates, RegionHandle, SlCommand, SlEvent, SlIdentity, SlSessionEvent, Vector,
@@ -59,6 +61,7 @@ use crate::minimap_math::{self, REGION_WIDTH_METRES, Rgba, Surface};
 use crate::settings::{AccountContext, ViewerSettings};
 use crate::social::{MapTracking, TrackTarget};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column};
+use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::ui_search::{SearchFieldSpec, spawn_search_field};
@@ -71,7 +74,7 @@ use crate::world_map_math::{
 };
 use crate::world_map_tiles::{TileKey, TileState, WorldMapTiles};
 use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
-use sl_viewer_ui_core::skin;
+use sl_viewer_ui_core::skin::{self, LIST_ROW_CLASS, SELECTED_CLASS, text_role};
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 /// The `element` tag the world map attributes its [`UiAction`]s to.
@@ -197,9 +200,12 @@ pub struct OpenWorldMap {
     pub north: f64,
 }
 
-/// A layer-filter checkbox's fill node: which setting it mirrors.
+/// A layer-filter checkbox: which setting it mirrors, and the [`UiAction`] a
+/// toggle raises (the one the window's menu raises too).
 #[derive(Component)]
 struct WorldMapCheckbox {
+    /// The action that flips the setting.
+    action: &'static str,
     /// The `[worldmap]` setting the box shows.
     setting: &'static str,
     /// The setting's declared default.
@@ -536,8 +542,6 @@ struct WorldMapParts {
     field_y: Entity,
     /// The selected location's altitude (Z) input field.
     field_z: Entity,
-    /// Each layer checkbox's fill node, with its setting's default.
-    checkboxes: Vec<(Entity, bool)>,
 }
 
 /// Build the world map's content into `content`: the map surface showing
@@ -674,7 +678,7 @@ fn spawn_world_map_content(
         .spawn((
             Text::default(),
             UiFont::Sans.at(font_size),
-            TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
+            text_role(SkinPalette::FALLBACK.text_primary),
             Name::new("worldmap-location"),
             ChildOf(side),
         ))
@@ -712,7 +716,7 @@ fn spawn_world_map_content(
         commands.spawn((
             Text::new(label),
             UiFont::Sans.at(font_size),
-            TextColor(Color::srgba(0.7, 0.7, 0.7, 1.0)),
+            text_role(SkinPalette::FALLBACK.text_muted),
             Pickable::IGNORE,
             ChildOf(pair),
         ));
@@ -778,7 +782,6 @@ fn spawn_world_map_content(
             ChildOf(side),
         ))
         .id();
-    let mut checkboxes = Vec::new();
     for (label_key, action, setting, default) in [
         (
             "worldmap-layer-people",
@@ -823,10 +826,9 @@ fn spawn_world_map_content(
             true,
         ),
     ] {
-        let fill = spawn_layer_toggle(
+        spawn_layer_toggle(
             commands, filters, label_key, action, setting, default, font_size,
         );
-        checkboxes.push((fill, default));
     }
 
     WorldMapParts {
@@ -839,7 +841,6 @@ fn spawn_world_map_content(
         field_x,
         field_y,
         field_z,
-        checkboxes,
     }
 }
 
@@ -858,8 +859,6 @@ fn spawn_panel_button(
             .kind(ButtonKind::Headless)
             .tab_index(0)
             .padding(7.0, 3.0)
-            .colors(Color::srgb(0.16, 0.17, 0.2), Color::srgb(0.35, 0.35, 0.4))
-            .label_color(SkinPalette::FALLBACK.text_primary)
             .font_size(font_size)
             .layout(|node| {
                 node.justify_content = JustifyContent::Center;
@@ -877,9 +876,13 @@ fn spawn_panel_button(
     );
 }
 
-/// One layer-filter checkbox row: a mirrored check square plus a label,
-/// toggling its setting through the shared [`UiAction`] dispatch. Returns the
-/// check square's fill node.
+/// One layer filter: the shared checkbox widget, captioned `label_key`, whose
+/// toggle raises `action` through the shared [`UiAction`] dispatch — the path
+/// the window's menu takes — and whose tick [`refresh_world_map_checkboxes`]
+/// keeps on the setting. Returns the checkbox.
+///
+/// Named `worldmap-filter:<action>` like the menu's rows, so a harness finds
+/// the filter by what it does.
 fn spawn_layer_toggle(
     commands: &mut Commands,
     parent: Entity,
@@ -889,94 +892,65 @@ fn spawn_layer_toggle(
     default_on: bool,
     font_size: f32,
 ) -> Entity {
-    let row = commands
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                column_gap: Val::Px(6.0),
-                align_items: AlignItems::Center,
-                padding: UiRect::axes(Val::Px(2.0), Val::Px(1.0)),
-                ..default()
-            },
-            Pickable {
-                should_block_lower: true,
-                is_hoverable: true,
-            },
+    let checkbox = spawn_checkbox(
+        commands,
+        parent,
+        &CheckboxSpec {
+            element: WORLD_MAP_ELEMENT,
+            label: label_key.to_owned(),
+            tab_index: 0,
+            font_size,
+            translate_label: true,
+        },
+    )
+    .checkbox;
+    commands
+        .entity(checkbox)
+        .insert((
             Name::new(format!("worldmap-filter:{action}")),
-            ChildOf(parent),
-        ))
-        .observe(
-            move |click: On<Pointer<Click>>, mut actions: MessageWriter<UiAction>| {
-                if click.button == PointerButton::Primary {
-                    actions.write(UiAction {
-                        element: WORLD_MAP_ELEMENT,
-                        action,
-                    });
-                }
-            },
-        )
-        .id();
-    let box_outer = commands
-        .spawn((
-            Node {
-                width: Val::Px(12.0),
-                height: Val::Px(12.0),
-                border: UiRect::all(Val::Px(1.0)),
-                padding: UiRect::all(Val::Px(2.0)),
-                flex_shrink: 0.0,
-                ..default()
-            },
-            BorderColor::all(Color::srgb(0.5, 0.5, 0.55)),
-            Pickable::IGNORE,
-            ChildOf(row),
-        ))
-        .id();
-    let fill = commands
-        .spawn((
-            Node {
-                flex_grow: 1.0,
-                ..default()
-            },
-            BackgroundColor(Color::NONE),
             WorldMapCheckbox {
+                action,
                 setting,
                 default: default_on,
             },
-            Pickable::IGNORE,
-            ChildOf(box_outer),
         ))
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(font_size),
-        TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
-        Pickable::IGNORE,
-        ChildOf(row),
-    ));
-    fill
+        .observe(on_layer_toggle);
+    if default_on {
+        commands.entity(checkbox).insert(Checked);
+    }
+    checkbox
 }
 
-/// Paint each layer checkbox's fill from its setting.
-fn refresh_world_map_checkboxes(
-    settings: Res<ViewerSettings>,
-    mut boxes: Query<(&WorldMapCheckbox, &mut BackgroundColor)>,
+/// A layer filter was toggled — clicked, or `Space` on the focused box: flip
+/// its setting through the same action the menu raises.
+fn on_layer_toggle(
+    change: On<ValueChange<bool>>,
+    checkboxes: Query<&WorldMapCheckbox>,
+    mut actions: MessageWriter<UiAction>,
 ) {
-    let store = settings.store();
-    for (checkbox, mut background) in &mut boxes {
-        let wanted = checkbox_fill(store.get_bool(checkbox.setting).unwrap_or(checkbox.default));
-        if background.0 != wanted {
-            background.0 = wanted;
-        }
+    if let Ok(checkbox) = checkboxes.get(change.source) {
+        actions.write(UiAction {
+            element: WORLD_MAP_ELEMENT,
+            action: checkbox.action,
+        });
     }
 }
 
-/// A layer checkbox's fill colour for its checked state.
-const fn checkbox_fill(checked: bool) -> Color {
-    if checked {
-        Color::srgb(0.55, 0.75, 1.0)
-    } else {
-        Color::NONE
+/// Keep each layer checkbox's tick on its setting — which the menu and the
+/// checkbox itself both flip, so the store is the one truth.
+fn refresh_world_map_checkboxes(
+    settings: Res<ViewerSettings>,
+    boxes: Query<(Entity, &WorldMapCheckbox, Has<Checked>)>,
+    mut commands: Commands,
+) {
+    let store = settings.store();
+    for (entity, checkbox, checked) in &boxes {
+        let wanted = store.get_bool(checkbox.setting).unwrap_or(checkbox.default);
+        if wanted && !checked {
+            commands.entity(entity).insert(Checked);
+        } else if !wanted && checked {
+            commands.entity(entity).remove::<Checked>();
+        }
     }
 }
 
@@ -2721,6 +2695,9 @@ fn spawn_result_row(
                 ..default()
             },
             BackgroundColor(Color::NONE),
+            // A list row the skin paints: its face, its hover and — through
+            // `refresh_world_map_result_selection` — the selected region's.
+            ClassList::new_with_classes([LIST_ROW_CLASS]),
             Pickable {
                 should_block_lower: true,
                 is_hoverable: true,
@@ -2734,7 +2711,7 @@ fn spawn_result_row(
     commands.spawn((
         Text::new(name.to_owned()),
         UiFont::Sans.at(font_size),
-        TextColor(Color::srgba(0.9, 0.9, 0.9, 1.0)),
+        text_role(SkinPalette::FALLBACK.text_primary),
         Pickable::IGNORE,
         ChildOf(row),
     ));
@@ -2821,22 +2798,11 @@ fn on_result_click(
 /// SLURL target sits in).
 fn refresh_world_map_result_selection(
     state: Res<WorldMapState>,
-    mut rows: Query<(&WorldMapResultRow, &mut BackgroundColor)>,
+    mut rows: Query<(&WorldMapResultRow, &mut ClassList)>,
 ) {
-    for (row, mut background) in &mut rows {
-        let wanted = result_row_background(state.selected == Some((row.grid_x, row.grid_y)));
-        if background.0 != wanted {
-            background.0 = wanted;
-        }
-    }
-}
-
-/// A search-result row's background: highlighted when its region is selected.
-const fn result_row_background(selected: bool) -> Color {
-    if selected {
-        Color::srgba(0.25, 0.42, 0.62, 0.9)
-    } else {
-        Color::NONE
+    for (row, mut classes) in &mut rows {
+        let selected = state.selected == Some((row.grid_x, row.grid_y));
+        skin::set_state_class(&mut classes, SELECTED_CLASS, selected);
     }
 }
 
@@ -3086,11 +3052,8 @@ pub fn spawn_world_map_specimen(commands: &mut Commands, parent: Entity, cx: Ele
     let model = sample_world_map_model(cx);
     let view = specimen_view();
 
-    for (fill, default) in &parts.checkboxes {
-        commands
-            .entity(*fill)
-            .insert(BackgroundColor(checkbox_fill(*default)));
-    }
+    // Each filter already ticks at its default: what the specimen shows is
+    // what the live window opens with before the store says otherwise.
 
     // The search: a query every sample name shares a prefix with, and the
     // rows the live search builds for it.
@@ -3109,11 +3072,12 @@ pub fn spawn_world_map_specimen(commands: &mut Commands, parent: Entity, cx: Ele
             (grid_x, grid_y),
             cx.font_size,
         );
-        commands
-            .entity(row)
-            .insert(BackgroundColor(result_row_background(
-                (grid_x, grid_y) == selected,
-            )));
+        if (grid_x, grid_y) == selected {
+            commands.entity(row).insert(ClassList::new_with_classes([
+                LIST_ROW_CLASS,
+                SELECTED_CLASS,
+            ]));
+        }
     }
     let readout = location_readout(&model, selected, (128, 128, 0));
     commands

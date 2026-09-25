@@ -48,6 +48,7 @@ use bevy::input_focus::InputFocus;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx};
+use bevy::ui_widgets::Activate;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::SlIdentity;
 use sl_rlv::{
@@ -76,10 +77,10 @@ use sl_viewer_world_api::rlv::{
 };
 use uuid::Uuid;
 
-use crate::style::{ACTION_BACKGROUND, DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, ROW_HEIGHT};
+use crate::style::{DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, ROW_HEIGHT, spawn_action_button};
 use sl_viewer_ui_core::skin::{
     CONSOLE_ERROR_CLASS, CONSOLE_INFO_CLASS, CONSOLE_REPLY_CLASS, LIST_SURFACE_CLASS, TEXT_CLASS,
-    set_state_class, set_state_class_on,
+    set_state_class, set_state_class_on, text_role,
 };
 
 /// The floater's stable id.
@@ -519,7 +520,7 @@ fn spawn_console_content(commands: &mut Commands, parent: Entity, font_size: f32
     commands.spawn((
         Text::new(RlvConsoleKind::Input.prefix().to_owned()),
         UiFont::Mono.at(font_size),
-        TextColor(DIM_LABEL_COLOR),
+        text_role(DIM_LABEL_COLOR),
         Pickable::IGNORE,
         Name::new("rlv-console-prompt"),
         ChildOf(input_row),
@@ -545,42 +546,14 @@ fn spawn_console_content(commands: &mut Commands, parent: Entity, font_size: f32
 /// The session is optional so a press in a host that has none (the gallery's
 /// specimen) is a no-op rather than a failed observer.
 fn spawn_clear_button(commands: &mut Commands, parent: Entity, font_size: f32) {
-    commands
-        .spawn((
-            Node {
-                flex_shrink: 0.0,
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            BackgroundColor(ACTION_BACKGROUND),
-            TabIndex(2),
-            Pickable {
-                should_block_lower: true,
-                is_hoverable: true,
-            },
-            Name::new("rlv-console-clear"),
-            ChildOf(parent),
-        ))
-        .with_child((
-            Text::new(String::new()),
-            UiFont::Sans.at(font_size),
-            TextColor(LABEL_COLOR),
-            Translated::new("rlv-console-clear"),
-            Pickable::IGNORE,
-        ))
-        .observe(
-            move |mut press: On<Pointer<Press>>, session: Option<ResMut<RlvSession>>| {
-                press.propagate(false);
-                if press.button != PointerButton::Primary {
-                    return;
-                }
-                if let Some(mut session) = session {
-                    session.clear_console();
-                }
-            },
-        );
+    let button = spawn_action_button(commands, parent, "rlv-console-clear", 2, font_size);
+    commands.entity(button).observe(
+        move |_activate: On<Activate>, session: Option<ResMut<RlvSession>>| {
+            if let Some(mut session) = session {
+                session.clear_console();
+            }
+        },
+    );
 }
 
 // --- Gallery specimen -----------------------------------------------------

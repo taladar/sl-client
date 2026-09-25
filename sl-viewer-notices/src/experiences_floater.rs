@@ -88,12 +88,12 @@
 
 use bevy::ecs::system::RunSystemOnce as _;
 use bevy::input_focus::InputFocus;
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
+
+use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use bevy::text::EditableText;
-use bevy::ui_widgets::{Activate, Button};
+use bevy::ui_widgets::Activate;
 use bevy_flair::style::components::ClassList;
-use sl_viewer_ui_core::skin::BUTTON_CLASS;
 use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class, text_role};
 use std::collections::BTreeSet;
 
@@ -1194,36 +1194,27 @@ fn spawn_action(
     tab: i32,
     font_size: f32,
 ) -> Entity {
-    let entity = commands
-        .spawn((
-            Button,
-            TabIndex(tab),
-            Node {
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
-                border: UiRect::all(Val::Px(2.0)),
-                // A button yields by moving to the action row's next line, not
-                // by squeezing its label: left to shrink, "◀ Previous" comes
-                // out as two lines with the arrow alone on the first.
-                flex_shrink: 0.0,
-                ..default()
-            },
-            BackgroundColor(BUTTON_BACKGROUND),
-            BorderColor::all(BUTTON_BORDER),
-            ClassList::new_with_classes([BUTTON_CLASS]),
-            // Named per action, so a harness (and an entity dump) can tell the
-            // window's buttons apart.
-            Name::new(format!("experiences-action:{}", button.slug())),
-            ChildOf(parent),
-        ))
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(font_size),
-        ClassList::new_with_classes([TEXT_CLASS]),
-        Pickable::IGNORE,
-        ChildOf(entity),
-    ));
+    // Named per action, so a harness (and an entity dump) can tell the
+    // window's buttons apart.
+    let entity = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(
+            UiLabel::key(label_key),
+            format!("experiences-action:{}", button.slug()),
+        )
+        .kind(ButtonKind::Headless)
+        .tab_index(tab)
+        .border(2.0)
+        .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
+        .label_class(TEXT_CLASS)
+        .font_size(font_size)
+        // A button yields by moving to the action row's next line, not by
+        // squeezing its label: left to shrink, "◀ Previous" comes out as two
+        // lines with the arrow alone on the first.
+        .layout(|node| node.flex_shrink = 0.0),
+    )
+    .button;
     commands
         .entity(entity)
         .insert(button)

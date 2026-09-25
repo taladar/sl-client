@@ -929,6 +929,31 @@ pub(crate) const CONTRACTS: &[ElementContract] = &[
             ),
         ],
     },
+    // The parcel audio bar: the live bar's own glyph buttons, each raising its
+    // action however it is pressed.
+    ElementContract {
+        element: "parcel-audio-bar",
+        nodes: &[
+            NodeContract::new(
+                "parcel-audio-button:mute-toggle",
+                &[
+                    Row::emits(Gesture::PrimaryClick, &["mute-toggle"]),
+                    Row::emits(Gesture::DoubleClick, &["mute-toggle", "mute-toggle"]),
+                    Row::emits(Gesture::Enter, &["mute-toggle"]),
+                    Row::emits(Gesture::Space, &["mute-toggle"]),
+                ],
+            ),
+            NodeContract::new(
+                "parcel-audio-button:play-stop",
+                &[
+                    Row::emits(Gesture::PrimaryClick, &["play-stop"]),
+                    Row::emits(Gesture::DoubleClick, &["play-stop", "play-stop"]),
+                    Row::emits(Gesture::Enter, &["play-stop"]),
+                    Row::emits(Gesture::Space, &["play-stop"]),
+                ],
+            ),
+        ],
+    },
     ElementContract {
         element: "phototools",
         nodes: &[
@@ -1441,11 +1466,14 @@ pub(crate) const CONTRACTS: &[ElementContract] = &[
                     Row::emits(Gesture::Space, &["teleport-selected"]),
                 ],
             ),
-            // The layer filters: a primary click on the row flips its layer.
+            // The layer filters: a primary click on the checkbox, or `Enter` /
+            // `Space` on the focused one, flips its layer.
             NodeContract::new(
                 "worldmap-filter:toggle-adult-events",
                 &[
                     Row::emits(Gesture::PrimaryClick, &["toggle-adult-events"]),
+                    Row::emits(Gesture::Enter, &["toggle-adult-events"]),
+                    Row::emits(Gesture::Space, &["toggle-adult-events"]),
                     Row::emits(
                         Gesture::DoubleClick,
                         &["toggle-adult-events", "toggle-adult-events"],
@@ -1456,6 +1484,8 @@ pub(crate) const CONTRACTS: &[ElementContract] = &[
                 "worldmap-filter:toggle-events",
                 &[
                     Row::emits(Gesture::PrimaryClick, &["toggle-events"]),
+                    Row::emits(Gesture::Enter, &["toggle-events"]),
+                    Row::emits(Gesture::Space, &["toggle-events"]),
                     Row::emits(Gesture::DoubleClick, &["toggle-events", "toggle-events"]),
                 ],
             ),
@@ -1463,6 +1493,8 @@ pub(crate) const CONTRACTS: &[ElementContract] = &[
                 "worldmap-filter:toggle-infohubs",
                 &[
                     Row::emits(Gesture::PrimaryClick, &["toggle-infohubs"]),
+                    Row::emits(Gesture::Enter, &["toggle-infohubs"]),
+                    Row::emits(Gesture::Space, &["toggle-infohubs"]),
                     Row::emits(
                         Gesture::DoubleClick,
                         &["toggle-infohubs", "toggle-infohubs"],
@@ -1473,6 +1505,8 @@ pub(crate) const CONTRACTS: &[ElementContract] = &[
                 "worldmap-filter:toggle-land-sale",
                 &[
                     Row::emits(Gesture::PrimaryClick, &["toggle-land-sale"]),
+                    Row::emits(Gesture::Enter, &["toggle-land-sale"]),
+                    Row::emits(Gesture::Space, &["toggle-land-sale"]),
                     Row::emits(
                         Gesture::DoubleClick,
                         &["toggle-land-sale", "toggle-land-sale"],
@@ -1483,6 +1517,8 @@ pub(crate) const CONTRACTS: &[ElementContract] = &[
                 "worldmap-filter:toggle-mature-events",
                 &[
                     Row::emits(Gesture::PrimaryClick, &["toggle-mature-events"]),
+                    Row::emits(Gesture::Enter, &["toggle-mature-events"]),
+                    Row::emits(Gesture::Space, &["toggle-mature-events"]),
                     Row::emits(
                         Gesture::DoubleClick,
                         &["toggle-mature-events", "toggle-mature-events"],
@@ -1493,6 +1529,8 @@ pub(crate) const CONTRACTS: &[ElementContract] = &[
                 "worldmap-filter:toggle-people",
                 &[
                     Row::emits(Gesture::PrimaryClick, &["toggle-people"]),
+                    Row::emits(Gesture::Enter, &["toggle-people"]),
+                    Row::emits(Gesture::Space, &["toggle-people"]),
                     Row::emits(Gesture::DoubleClick, &["toggle-people", "toggle-people"]),
                 ],
             ),
@@ -1500,6 +1538,8 @@ pub(crate) const CONTRACTS: &[ElementContract] = &[
                 "worldmap-filter:toggle-region-names",
                 &[
                     Row::emits(Gesture::PrimaryClick, &["toggle-region-names"]),
+                    Row::emits(Gesture::Enter, &["toggle-region-names"]),
+                    Row::emits(Gesture::Space, &["toggle-region-names"]),
                     Row::emits(
                         Gesture::DoubleClick,
                         &["toggle-region-names", "toggle-region-names"],
