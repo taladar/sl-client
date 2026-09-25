@@ -2,7 +2,7 @@
 id: viewer-sliced-art-seam-at-fractional-ui-scale
 title: A nine-sliced button's frame changes thickness along the quad's diagonal at a fractional UI scale
 topic: viewer
-status: bugs
+status: done
 origin: live look during viewer-skin-text-shadow-role (2026-09-24)
 refs: [viewer-skin-image-backed-widgets, viewer-vintage-skin]
 ---
@@ -67,3 +67,30 @@ what the reference does at a fractional `UIScaleFactor` before settling.
 At a UI scale of 1.5 the Relief button's frame and bevel are the same
 thickness along each whole edge, and a test pins the slice geometry at a
 fractional scale.
+
+## Resolution (2026-09-25)
+
+**Option 1**, in the bevy fork (`bevy_ui_render`, rev `1b3d5dbd`):
+`compute_texture_slices` now takes the node's inverse scale factor and
+`whole_pixel_corner_scale` snaps the corner scale to a whole number of
+**physical** pixels per texel whenever a corner texel covers at least one pixel.
+It rounds to the nearest whole number, and rounds down again if the corners
+would no longer fit the node. At 1.5 the Relief button's 8-texel corners are
+16 px (2 px a texel), so every texel edge falls between pixel centres and the
+two triangles cannot disagree. A corner already shrunk below a pixel a texel
+(node smaller than the art) and a whole scale are left exactly as they were.
+
+The reference draws each of the nine regions as its own quad at unrounded
+positions and samples **bilinearly** (`gl_draw_scaled_image_with_border` in
+`llrender2dutils.cpp`), so a fractional `UIScaleFactor` blurs its bevels there
+rather than stepping them. We sample the art nearest on purpose, so a crisp
+whole-pixel bevel is the closer match to what the art intends. The cost is that
+at 1.5 a bevel is drawn at 2x rather than 1.5x.
+
+Pinned by five unit tests in the fork (`ui_texture_slice_pipeline::tests`):
+fractional scales snap (1.25 → 1 px a texel, 1.5 and 1.75 → 2), whole scales
+are unchanged, a snapped corner still fits a small node, a shrunk corner is
+left alone, and tiling ignores the scale factor.
+
+Visually confirmed by the user in the gallery at a UI scale of 1.5, including a
+zoomed-in screenshot.

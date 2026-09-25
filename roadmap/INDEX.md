@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 62 |
 | in-progress | 25 |
 | bugs | 12 |
-| done | 1232 |
+| done | 1233 |
 | deferred | 30 |
 | wont-do | 16 |
-| **total** | **1795** |
+| **total** | **1796** |
 
 ## ideas (118)
 
@@ -1297,9 +1297,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Own avatar looks broken after a teleport
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
-- [`viewer-sliced-art-seam-at-fractional-ui-scale`](bugs/viewer-sliced-art-seam-at-fractional-ui-scale.md)
-  — A nine-sliced button's frame changes thickness along the quad's diagonal at
-  a fractional UI scale
 - [`viewer-sliders-show-no-value`](bugs/viewer-sliders-show-no-value.md) — A
   slider shows no value, and no bounds or step either
 
@@ -1307,8 +1304,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
+- [`test-full-stack-sigsegv-at-exit-under-load`](bugs/test-full-stack-sigsegv-at-exit-under-load.md)
+  — A full-stack test passed and then its process died of SIGSEGV, once, in the
+  full parallel suite
 
-## done (1232)
+## done (1233)
 
 ### protocol
 
@@ -3003,6 +3003,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   the viewer
 - [`viewer-sky-sunset-preset-glow-divergence`](done/viewer-sky-sunset-preset-glow-divergence.md)
   — The legacy sunset sky is far brighter, with a much larger glow, than
+- [`viewer-sliced-art-seam-at-fractional-ui-scale`](done/viewer-sliced-art-seam-at-fractional-ui-scale.md)
+  — A nine-sliced button's frame changes thickness along the quad's diagonal at
+  a fractional UI scale
 - [`viewer-slurl-parse-dispatch`](done/viewer-slurl-parse-dispatch.md) — SLURL
   parsing & action dispatch
 - [`viewer-snapshot-chat-overlay-not-hidden`](done/viewer-snapshot-chat-overlay-not-hidden.md)
