@@ -2,7 +2,7 @@
 id: viewer-emoji-picker-hover-preview-inert
 title: Hovering an emoji never fills the picker's preview line
 topic: viewer
-status: bugs
+status: done
 origin: relief-theme live look in the gallery (2026-09-23)
 refs: [viewer-emoji-picker-floater]
 ---
@@ -88,3 +88,46 @@ half for the cost of opening the floater.
 A contract/interaction test that hovers a cell and asserts the preview line's
 `Text` changed. The press path has coverage; the hover path evidently has
 none, which is how a silent `return` chain stayed inert.
+
+## Cause and fix (2026-09-26)
+
+None of the three leads. The live viewer's picker previewed all along; a
+headless test with `EmojiPickerPlugin` hovering a real cell passes before and
+after the fix. The dead preview was the **gallery's**: on 2026-09-23 its
+"floater" was a static specimen (the "Hover an emoji…" prose), and since
+`viewer-gallery-floaters-are-mostly-stubs` it is the live content built by
+`spawn_emoji_picker_specimen` in a host that runs no picker plugin. The hover
+observer read `EmojiPickerState` and `EmojiPickerUi` as optional resources and
+returned silently without them. So did the tone swatches, and the gallery grid
+never filled a row past the ones the specimen drew.
+
+The fix makes each grid its own picker and the gallery a host for it:
+
+- `EmojiPickerState` / `EmojiPickerView` are components on the grid's
+  viewport, beside a new `EmojiGrid` naming its search field, category strip
+  and preview line (was: global resources, and `EmojiPickerUi` carrying the
+  parts). Cells and tone swatches capture their grid; every system iterates
+  grids.
+- The grid systems (search, tabs, view rebuild, row populate / bind, tone
+  highlight) are a new `EmojiGridPlugin`; `EmojiPickerPlugin` keeps the
+  floater, toggle, anchoring and insert target, and adds the grid plugin.
+- The gallery adds `EmojiGridPlugin`, so its Emoji floater searches, switches
+  groups, takes a tone, previews and scrolls. Only inserting stays out: the
+  gallery has no target field. Populate leaves alone a row that already has its
+  cells, so the specimen's pre-drawn rows are adopted, not dressed twice.
+
+Tests (synthetic pointer, `sl_viewer_testkit::interact`):
+`hovering_a_cell_in_the_floater_previews_it` (full plugin),
+`hovering_a_cell_in_the_specimen_previews_it` (no plugin, the sweep host; aims
+at a glyph other than the pre-filled first one; failed before the fix) and
+`the_specimen_under_the_grid_plugin_searches_and_takes_a_tone` (the gallery's
+host: type `wave`, click the dark swatch, assert the checked swatch, the
+re-cast cell and the toned preview).
+
+## Closed (2026-09-26)
+
+The user checked the gallery's Emoji floater: the preview follows the pointer,
+and a tone swatch re-casts the waving hand. Only People & Body carries
+tone-bearing emoji (330 of 388; every other group has none), so a swatch on
+the opening Smileys tab changes nothing visible but the checked swatch — that
+is the data, not a fault.

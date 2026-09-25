@@ -50,8 +50,14 @@
 //! built by the same function the floater is, its first group's rows dressed by
 //! the live row code — is registered as a specimen
 //! ([`spawn_emoji_picker_specimen`]) the gallery / harness sweep across every
-//! script, size and direction, with the live toggling, filtering and insertion
-//! left to [`EmojiPickerPlugin`].
+//! script, size and direction.
+//!
+//! The runtime is split the same way. Each grid carries its own state (group,
+//! search term, tone) on its viewport, and [`EmojiGridPlugin`] drives every
+//! grid, wherever it was built: filtering, group tabs, tone swatches, hover
+//! preview, row recycling. [`EmojiPickerPlugin`] adds the floater around one:
+//! its toggle, its anchoring and the insertion target. The gallery runs only
+//! the former, and its picker is live but for inserting.
 //!
 //! Reference (Firestorm, read-only): `llfloateremojipicker`, `llemojidictionary`.
 
@@ -163,21 +169,20 @@ const fn group_icon(group: Group) -> &'static str {
 }
 
 /// The plugin that owns the emoji-picker floater: its resources, its one-time
-/// spawn (after the scaffold root exists), and the systems that toggle it, track
-/// the target field, mirror the search / group selection into the view, recycle
-/// the grid rows, and apply the chosen tone.
+/// spawn (after the scaffold root exists), and the systems that toggle it and
+/// track the target field. The grid inside it is [`EmojiGridPlugin`]'s, which
+/// this adds.
 #[derive(Debug)]
 pub struct EmojiPickerPlugin;
 
 impl Plugin for EmojiPickerPlugin {
-    /// Wire the picker up. The model half (target tracking, search / tab reads,
-    /// view rebuild) runs before the generic list recycles its pool; the row
-    /// populate and bind run after, so freshly-recycled rows exist to fill this
-    /// frame.
+    /// Wire the picker up: the floater's own half here, the grid's through
+    /// [`EmojiGridPlugin`].
     fn build(&self, app: &mut App) {
-        app.init_resource::<EmojiPickerState>()
-            .init_resource::<EmojiPickerView>()
-            .init_resource::<EmojiTarget>()
+        if !app.is_plugin_added::<EmojiGridPlugin>() {
+            app.add_plugins(EmojiGridPlugin);
+        }
+        app.init_resource::<EmojiTarget>()
             .init_resource::<PendingEmojiAnchor>()
             .add_message::<OpenEmojiPicker>()
             .add_systems(
@@ -202,23 +207,43 @@ impl Plugin for EmojiPickerPlugin {
             .add_systems(
                 Update,
                 track_emoji_target.after(InputFocusSystems::Dispatch),
-            )
-            .add_systems(
-                Update,
-                (read_emoji_search, bridge_group_tab, rebuild_emoji_view)
-                    .chain()
-                    .before(layout_virtual_lists),
-            )
-            .add_systems(
-                Update,
-                (
-                    populate_new_emoji_rows,
-                    bind_emoji_rows,
-                    apply_tone_highlight,
-                )
-                    .chain()
-                    .after(layout_virtual_lists),
             );
+    }
+}
+
+/// The runtime half of an emoji **grid** — the picker's content wherever it is
+/// built: it mirrors each grid's search / group selection into its view,
+/// dresses and recycles the pooled rows, and applies the chosen tone.
+///
+/// Every system here works per grid, from the components the picker's content
+/// builder puts on the grid's viewport, and needs no floater. So the gallery,
+/// which builds that content through [`spawn_emoji_picker_specimen`] and runs
+/// no [`EmojiPickerPlugin`], adds this and gets a live picker: search, group
+/// tabs, tone swatches, hover preview and scrolling.
+#[derive(Debug)]
+pub struct EmojiGridPlugin;
+
+impl Plugin for EmojiGridPlugin {
+    /// The model half (search / tab reads, view rebuild) runs before the
+    /// generic list recycles its pool; the row populate and bind run after, so
+    /// freshly-recycled rows exist to fill this frame.
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            (read_emoji_search, bridge_group_tab, rebuild_emoji_view)
+                .chain()
+                .before(layout_virtual_lists),
+        )
+        .add_systems(
+            Update,
+            (
+                populate_new_emoji_rows,
+                bind_emoji_rows,
+                apply_tone_highlight,
+            )
+                .chain()
+                .after(layout_virtual_lists),
+        );
     }
 }
 
@@ -226,9 +251,10 @@ impl Plugin for EmojiPickerPlugin {
 // State
 // ---------------------------------------------------------------------------
 
-/// The picker's selection state: which group tab is active, the search term, and
-/// the chosen skin tone. The single source of truth the grid is rebuilt from.
-#[derive(Resource, Debug, Clone)]
+/// A grid's selection state: which group tab is active, the search term, and
+/// the chosen skin tone. The single source of truth the grid is rebuilt from,
+/// on the grid's viewport beside [`EmojiGrid`].
+#[derive(Component, Debug, Clone)]
 pub(crate) struct EmojiPickerState {
     /// The active group, as an index into [`Group::ALL`]. Ignored while
     /// [`query`](Self::query) is non-blank (search spans every group).
@@ -252,9 +278,10 @@ impl Default for EmojiPickerState {
     }
 }
 
-/// The flattened list the grid currently draws, plus the content signature it was
-/// built for so a tone-only change does not needlessly rebuild it.
-#[derive(Resource, Debug, Clone)]
+/// The flattened list a grid currently draws, plus the content signature it was
+/// built for so a tone-only change does not needlessly rebuild it. On the
+/// grid's viewport beside [`EmojiGrid`].
+#[derive(Component, Debug, Clone)]
 pub(crate) struct EmojiPickerView {
     /// Every emoji to show, in order, at their **default** tone — the swatch tone
     /// is applied when a cell is rendered, not stored here.
@@ -305,14 +332,22 @@ pub struct OpenEmojiPicker {
     pub(crate) near: Vec2,
 }
 
-/// The picker's live entities, published so the systems reach each part without a
-/// marker query per part.
+/// The viewer's picker floater, published so the floater systems reach it
+/// without a marker query per part.
 #[derive(Resource, Debug, Clone, Copy)]
 pub(crate) struct EmojiPickerUi {
     /// The floater root — its [`UiPanelShown`] opens / closes the window.
     panel: Entity,
-    /// The scrolling grid viewport (the [`VirtualList`]).
-    viewport: Entity,
+    /// The search field's [`EditableText`], never itself an insert target.
+    search: Entity,
+}
+
+/// An emoji grid's viewport (the [`VirtualList`]), naming the parts of the
+/// picker content it reads and writes. Beside it on the same entity sit the
+/// grid's [`EmojiPickerState`] and [`EmojiPickerView`], so each grid — the
+/// viewer's floater, the gallery's — is its own picker.
+#[derive(Component, Debug, Clone, Copy)]
+pub(crate) struct EmojiGrid {
     /// The search field's [`EditableText`], whose value is the search term.
     search: Entity,
     /// The category [`TabStrip`], whose active tab is the shown group.
@@ -341,12 +376,15 @@ pub(crate) struct EmojiRowCells {
     cells: Vec<Entity>,
 }
 
-/// A skin-tone swatch, naming the tone it selects, so its press observer sets that
-/// tone and [`apply_tone_highlight`] can outline the selected one.
+/// A skin-tone swatch, naming the tone it selects and the grid it selects it
+/// for, so its press observer sets that tone and [`apply_tone_highlight`] can
+/// outline the selected one.
 #[derive(Component, Debug, Clone, Copy)]
 pub(crate) struct EmojiToneSwatch {
     /// The tone this swatch selects.
     tone: SkinTone,
+    /// The [`EmojiGrid`] viewport whose tone it sets.
+    grid: Entity,
 }
 
 // ---------------------------------------------------------------------------
@@ -411,61 +449,52 @@ fn track_emoji_target(
     }
 }
 
-/// Mirror the picker's search-field value into [`EmojiPickerState::query`].
+/// Mirror each grid's search-field value into its [`EmojiPickerState::query`].
 fn read_emoji_search(
-    ui: Option<Res<EmojiPickerUi>>,
     fields: Query<&EditableText>,
-    mut state: ResMut<EmojiPickerState>,
+    mut grids: Query<(&EmojiGrid, &mut EmojiPickerState)>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    let Ok(field) = fields.get(ui.search) else {
-        return;
-    };
-    let text = field.value().to_string();
-    if text != state.query {
-        state.query = text;
+    for (grid, mut state) in &mut grids {
+        let Ok(field) = fields.get(grid.search) else {
+            continue;
+        };
+        let text = field.value().to_string();
+        if text != state.query {
+            state.query = text;
+        }
     }
 }
 
-/// Mirror the category strip's active tab into [`EmojiPickerState::group`].
+/// Mirror each grid's category strip's active tab into its
+/// [`EmojiPickerState::group`].
 fn bridge_group_tab(
-    ui: Option<Res<EmojiPickerUi>>,
     strips: Query<&TabStrip, Changed<TabStrip>>,
-    mut state: ResMut<EmojiPickerState>,
+    mut grids: Query<(&EmojiGrid, &mut EmojiPickerState)>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    let Ok(strip) = strips.get(ui.tab_strip) else {
-        return;
-    };
-    if strip.active != state.group {
-        state.group = strip.active;
+    for (grid, mut state) in &mut grids {
+        let Ok(strip) = strips.get(grid.tab_strip) else {
+            continue;
+        };
+        if strip.active != state.group {
+            state.group = strip.active;
+        }
     }
 }
 
-/// Recompute the grid's flattened list when the **content** (group or query)
+/// Recompute a grid's flattened list when its **content** (group or query)
 /// changes, and keep the list's row count in step, resetting the scroll so a
 /// shorter new list is not left scrolled past its end. A tone-only change does not
 /// reach here — [`bind_emoji_rows`] re-renders the visible cells for that.
 fn rebuild_emoji_view(
-    state: Res<EmojiPickerState>,
-    ui: Option<Res<EmojiPickerUi>>,
-    mut view: ResMut<EmojiPickerView>,
-    mut lists: Query<&mut VirtualList>,
+    mut grids: Query<(&EmojiPickerState, &mut EmojiPickerView, &mut VirtualList)>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    if view.built_group == state.group && view.built_query == state.query {
-        return;
-    }
-    view.emoji = build_view(state.group, &state.query);
-    view.built_group = state.group;
-    view.built_query.clone_from(&state.query);
-    if let Ok(mut list) = lists.get_mut(ui.viewport) {
+    for (state, mut view, mut list) in &mut grids {
+        if view.built_group == state.group && view.built_query == state.query {
+            continue;
+        }
+        view.emoji = build_view(state.group, &state.query);
+        view.built_group = state.group;
+        view.built_query.clone_from(&state.query);
         list.item_count = row_count(view.emoji.len());
         list.scroll_to_top();
     }
@@ -475,31 +504,44 @@ fn rebuild_emoji_view(
 // Systems — the recycled grid rows
 // ---------------------------------------------------------------------------
 
+/// A pooled row that still needs its cells: newly added to a list, and not
+/// already dressed by the specimen.
+type UndressedRow = (Added<VirtualRow>, Without<EmojiRowCells>);
+
 /// Build a newly-pooled grid row's cells: a horizontal line of [`GRID_COLUMNS`]
 /// fixed-size cells, each with its own press (insert) and hover (preview /
 /// highlight) observers, stored on the row for [`bind_emoji_rows`] to fill.
+///
+/// A row that already has its cells is left alone: the specimen dresses the
+/// rows it shows itself, for a host that runs no populate, and in a host that
+/// does (the gallery) the list adopts those rows into its pool.
 fn populate_new_emoji_rows(
     mut commands: Commands,
-    ui: Option<Res<EmojiPickerUi>>,
-    new_rows: Query<(Entity, &ChildOf), Added<VirtualRow>>,
+    grids: Query<(), With<EmojiGrid>>,
+    new_rows: Query<(Entity, &ChildOf), UndressedRow>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
     for (row_entity, child_of) in &new_rows {
-        if child_of.parent() != ui.viewport {
+        let grid = child_of.parent();
+        if !grids.contains(grid) {
             continue;
         }
         // A fresh row is blank until `bind_emoji_rows` fills it.
-        dress_emoji_row(&mut commands, row_entity, &[], SkinTone::Default);
+        dress_emoji_row(&mut commands, row_entity, &[], SkinTone::Default, grid);
     }
 }
 
-/// Dress a pooled grid row as a line of [`GRID_COLUMNS`] cells, the first
-/// `emoji.len()` of them showing those glyphs at `tone` and the rest blank.
-/// The live populate passes no emoji (the bind fills the row); the gallery
-/// specimen, whose host runs no bind, passes the row's slice of the view.
-fn dress_emoji_row(commands: &mut Commands, row_entity: Entity, emoji: &[Emoji], tone: SkinTone) {
+/// Dress a pooled row of the `grid` viewport as a line of [`GRID_COLUMNS`]
+/// cells, the first `emoji.len()` of them showing those glyphs at `tone` and
+/// the rest blank.
+/// The live populate passes no emoji (the bind fills the row); the specimen,
+/// whose sweep host runs no bind, passes the row's slice of the view.
+fn dress_emoji_row(
+    commands: &mut Commands,
+    row_entity: Entity,
+    emoji: &[Emoji],
+    tone: SkinTone,
+    grid: Entity,
+) {
     // Amended, not inserted: `top` and `display` are the virtual list's.
     amend_row_node(commands, row_entity, |node| {
         node.position_type = PositionType::Absolute;
@@ -512,7 +554,9 @@ fn dress_emoji_row(commands: &mut Commands, row_entity: Entity, emoji: &[Emoji],
     let mut cells = Vec::with_capacity(GRID_COLUMNS);
     for column in 0..GRID_COLUMNS {
         let shown = emoji.get(column).copied();
-        cells.push(spawn_live_emoji_cell(commands, row_entity, shown, tone));
+        cells.push(spawn_live_emoji_cell(
+            commands, row_entity, shown, tone, grid,
+        ));
     }
     commands.entity(row_entity).insert(EmojiRowCells { cells });
 }
@@ -523,14 +567,15 @@ fn cell_glyph(emoji: Option<Emoji>, tone: SkinTone) -> &'static str {
     emoji.map_or("", |emoji| toned_glyph(emoji, tone))
 }
 
-/// Spawn one live grid cell under `row_entity`, bound to `emoji` at `tone`: a
-/// fixed-size tile with a centred glyph node and the press / hover observers
-/// that make it insert and preview.
+/// Spawn one live cell of the `grid` viewport under `row_entity`, bound to
+/// `emoji` at `tone`: a fixed-size tile with a centred glyph node and the
+/// press / hover observers that make it insert and preview.
 fn spawn_live_emoji_cell(
     commands: &mut Commands,
     row_entity: Entity,
     emoji: Option<Emoji>,
     tone: SkinTone,
+    grid: Entity,
 ) -> Entity {
     let glyph = commands
         .spawn((
@@ -574,19 +619,21 @@ fn spawn_live_emoji_cell(
 
     // The press (insert) and hover (preview) observers, each capturing this
     // `cell` so it reads the cell's *current* bound emoji — which recycling keeps
-    // up to date — rather than a snapshot. The hover *highlight* is no longer
-    // one of them: `.sk-tile:hover` reaches it with no code at all.
+    // up to date — rather than a snapshot — and its `grid`, whose tone and
+    // preview line they use. The hover *highlight* is not one of them:
+    // `.sk-tile:hover` reaches it with no code at all.
     //
-    // The picker's state is read optionally: [`EmojiPickerPlugin`] always has
-    // it, but the gallery specimen's cells are the live ones in a host that
-    // runs no picker, where there is no field to insert into or state to
-    // preview from.
+    // The insert target is read optionally: [`EmojiPickerPlugin`] tracks it,
+    // but the gallery's picker is a grid with no floater, where there is no
+    // field to insert into. Everything else is the grid's own, so the preview
+    // is live in either host.
     commands
         .entity(cell)
         .observe(
             move |mut press: On<Pointer<Press>>,
                   cells: Query<&EmojiCell>,
-                  picker: Option<(Res<EmojiTarget>, Res<EmojiPickerState>)>,
+                  target: Option<Res<EmojiTarget>>,
+                  grids: Query<&EmojiPickerState>,
                   mut fields: Query<&mut EditableText>,
                   mut font_cx: ResMut<FontCx>,
                   mut layout_cx: ResMut<LayoutCx>| {
@@ -596,7 +643,7 @@ fn spawn_live_emoji_cell(
                 if press.button != PointerButton::Primary {
                     return;
                 }
-                let Some((target, state)) = picker else {
+                let (Some(target), Ok(state)) = (target, grids.get(grid)) else {
                     return;
                 };
                 let Ok(&EmojiCell {
@@ -620,21 +667,18 @@ fn spawn_live_emoji_cell(
         .observe(
             move |_over: On<Pointer<Over>>,
                   cells: Query<&EmojiCell>,
-                  state: Option<Res<EmojiPickerState>>,
-                  ui: Option<Res<EmojiPickerUi>>,
+                  grids: Query<(&EmojiGrid, &EmojiPickerState)>,
                   mut texts: Query<&mut Text>| {
-                let Some(state) = state else {
+                let Ok(&EmojiCell {
+                    emoji: Some(emoji), ..
+                }) = cells.get(cell)
+                else {
                     return;
                 };
-                let Ok(&EmojiCell { emoji, .. }) = cells.get(cell) else {
+                let Ok((parts, state)) = grids.get(grid) else {
                     return;
                 };
-                let Some(emoji) = emoji else {
-                    return;
-                };
-                if let Some(ui) = ui
-                    && let Ok(mut text) = texts.get_mut(ui.preview)
-                {
+                if let Ok(mut text) = texts.get_mut(parts.preview) {
                     let shown = preview_text(emoji, state.tone);
                     if text.0 != shown {
                         text.0 = shown;
@@ -692,21 +736,16 @@ fn insert_glyph_into_editable(
 /// view changed (a new group / query) or the state changed (a new tone) or the row
 /// was just recycled to a different window index.
 fn bind_emoji_rows(
-    view: Res<EmojiPickerView>,
-    state: Res<EmojiPickerState>,
-    ui: Option<Res<EmojiPickerUi>>,
+    grids: Query<(Ref<EmojiPickerState>, Ref<EmojiPickerView>)>,
     rows: Query<(Ref<VirtualRow>, &ChildOf, &EmojiRowCells)>,
     mut cells: Query<&mut EmojiCell>,
     mut texts: Query<&mut Text>,
 ) {
-    let Some(ui) = ui else {
-        return;
-    };
-    let rebuild_all = view.is_changed() || state.is_changed();
     for (row, child_of, parts) in &rows {
-        if child_of.parent() != ui.viewport {
+        let Ok((state, view)) = grids.get(child_of.parent()) else {
             continue;
-        }
+        };
+        let rebuild_all = view.is_changed() || state.is_changed();
         if !rebuild_all && !row.is_changed() {
             continue;
         }
@@ -735,17 +774,21 @@ fn bind_emoji_rows(
 // Systems — skin tone
 // ---------------------------------------------------------------------------
 
-/// Mark the swatch of the currently-selected tone, and only that one. What that
-/// looks like is `.sk-tone-swatch:checked`'s; this says only which one it is.
+/// Mark each grid's swatch of its currently-selected tone, and only that one.
+/// What that looks like is `.sk-tone-swatch:checked`'s; this says only which
+/// one it is.
 fn apply_tone_highlight(
-    state: Res<EmojiPickerState>,
+    grids: Query<Ref<EmojiPickerState>>,
     swatches: Query<(Entity, &EmojiToneSwatch, Has<Checked>)>,
     mut commands: Commands,
 ) {
-    if !state.is_changed() {
-        return;
-    }
     for (entity, swatch, checked) in &swatches {
+        let Ok(state) = grids.get(swatch.grid) else {
+            continue;
+        };
+        if !state.is_changed() {
+            continue;
+        }
         let wanted = swatch.tone == state.tone;
         if checked == wanted {
             continue;
@@ -910,30 +953,26 @@ fn spawn_emoji_picker(mut commands: Commands, root: Res<UiRoot>) {
 
     commands.insert_resource(EmojiPickerUi {
         panel: handle.root,
-        viewport: parts.viewport,
         search: parts.search,
-        tab_strip: parts.tab_strip,
-        preview: parts.preview,
     });
 }
 
-/// The parts of the picker's content the plugin (and the specimen) reach.
+/// The parts of the picker's content the floater (and the specimen) reach.
 #[derive(Debug, Clone, Copy)]
 struct EmojiPickerParts {
-    /// The scrolling grid viewport (the [`VirtualList`]).
+    /// The scrolling grid viewport (the [`VirtualList`] and [`EmojiGrid`]).
     viewport: Entity,
     /// The search field's [`EditableText`].
     search: Entity,
-    /// The category [`TabStrip`].
-    tab_strip: Entity,
     /// The preview line.
     preview: Entity,
 }
 
 /// Build the picker's content into `content` (the floater's content slot) with
-/// its chrome at `font_size`, returning the viewport, search field, category
-/// strip and preview line the plugin needs. Shared by the live floater and its
-/// gallery specimen.
+/// its chrome at `font_size`, returning the viewport, search field and preview
+/// line. The viewport carries the grid's [`EmojiGrid`], state and view, so the
+/// content is a whole picker for [`EmojiGridPlugin`] wherever it is built.
+/// Shared by the live floater and its gallery specimen.
 fn build_emoji_picker_content(
     commands: &mut Commands,
     content: Entity,
@@ -1014,7 +1053,7 @@ fn build_emoji_picker_content(
     spawn_virtual_scrollbar(commands, viewport);
 
     // The skin-tone swatch row.
-    build_tone_row(commands, content);
+    build_tone_row(commands, content, viewport);
 
     // The preview line — the hovered glyph's name and short-code.
     let preview = commands
@@ -1036,17 +1075,26 @@ fn build_emoji_picker_content(
         ))
         .id();
 
+    commands.entity(viewport).insert((
+        EmojiGrid {
+            search,
+            tab_strip,
+            preview,
+        },
+        EmojiPickerState::default(),
+        EmojiPickerView::default(),
+    ));
+
     EmojiPickerParts {
         viewport,
         search,
-        tab_strip,
         preview,
     }
 }
 
 /// Build the six-swatch skin-tone row under `parent`, each swatch a live button
-/// that selects its tone.
-fn build_tone_row(commands: &mut Commands, parent: Entity) {
+/// that selects its tone for the `grid` viewport.
+fn build_tone_row(commands: &mut Commands, parent: Entity, grid: Entity) {
     let base = sl_emoji::by_shortcode(SWATCH_SAMPLE_SHORTCODE);
     let row_entity = commands
         .spawn((
@@ -1059,16 +1107,14 @@ fn build_tone_row(commands: &mut Commands, parent: Entity) {
         ))
         .id();
     for tone in SkinTone::ALL {
-        let swatch = spawn_tone_swatch(commands, row_entity, base, tone);
-        // The state is read optionally, as the cells' is: the gallery
-        // specimen's swatches are the live ones in a host with no picker.
+        let swatch = spawn_tone_swatch(commands, row_entity, base, tone, grid);
         commands.entity(swatch).observe(
-            move |mut press: On<Pointer<Press>>, state: Option<ResMut<EmojiPickerState>>| {
+            move |mut press: On<Pointer<Press>>, mut grids: Query<&mut EmojiPickerState>| {
                 press.propagate(false);
                 if press.button != PointerButton::Primary {
                     return;
                 }
-                let Some(mut state) = state else {
+                let Ok(mut state) = grids.get_mut(grid) else {
                     return;
                 };
                 if state.tone != tone {
@@ -1080,13 +1126,15 @@ fn build_tone_row(commands: &mut Commands, parent: Entity) {
 }
 
 /// Spawn one tone swatch under `parent`: a bordered tile showing the sample glyph
-/// at `tone`, tagged with the tone it selects. `base` is the tone-sample emoji, or
-/// `None` if it could not be resolved (the swatch then shows a bare box).
+/// at `tone`, tagged with the tone it selects for `grid`. `base` is the
+/// tone-sample emoji, or `None` if it could not be resolved (the swatch then
+/// shows a bare box).
 fn spawn_tone_swatch(
     commands: &mut Commands,
     parent: Entity,
     base: Option<Emoji>,
     tone: SkinTone,
+    grid: Entity,
 ) -> Entity {
     let glyph = base.map_or("", |emoji| toned_glyph(emoji, tone));
     let swatch = commands
@@ -1102,7 +1150,7 @@ fn spawn_tone_swatch(
             BackgroundColor(Color::NONE),
             ClassList::new_with_classes([SWATCH_CLASS, TILE_CLASS]),
             Pickable::default(),
-            EmojiToneSwatch { tone },
+            EmojiToneSwatch { tone, grid },
             Name::new("emoji-picker-tone"),
             ChildOf(parent),
         ))
@@ -1133,9 +1181,10 @@ fn spawn_tone_swatch(
 ///
 /// The grid shows the first group, as the live picker opens: the list's row
 /// count is the view's, and the rows the viewport shows are pooled and dressed
-/// with that group's glyphs through `dress_emoji_row`, since neither
-/// specimen host runs this plugin's populate / bind. The preview line shows
-/// what hovering the first glyph writes into it.
+/// with that group's glyphs through `dress_emoji_row`, since the `ui_test`
+/// sweep host runs no populate / bind. The gallery does run them
+/// ([`EmojiGridPlugin`]), and there the list adopts these rows and the grid is
+/// live. The preview line shows what hovering the first glyph writes into it.
 pub fn spawn_emoji_picker_specimen(
     commands: &mut Commands,
     parent: Entity,
@@ -1151,7 +1200,7 @@ pub fn spawn_emoji_picker_specimen(
         .and_modify(move |mut list| list.item_count = rows);
     for (index, chunk) in view.chunks(GRID_COLUMNS).take(VIEWPORT_ROWS).enumerate() {
         let row = spawn_specimen_row(commands, parts.viewport, index, CELL_SIZE);
-        dress_emoji_row(commands, row, chunk, state.tone);
+        dress_emoji_row(commands, row, chunk, state.tone, parts.viewport);
     }
     if let Some(&first) = view.first() {
         commands
@@ -1323,5 +1372,202 @@ mod tests {
         }
         insert_glyph_into_editable(&mut editable, "🚀", &mut font_cx, &mut layout_cx);
         assert_eq!(editable.value().to_string(), "ab🚀");
+    }
+
+    /// Hovering a grid cell under the real pointer stack
+    /// (`viewer-emoji-picker-hover-preview-inert`).
+    mod hover {
+        use super::super::{
+            EmojiCell, EmojiGrid, EmojiGridPlugin, EmojiPickerPlugin, EmojiPickerUi,
+            EmojiToneSwatch, preview_text, spawn_emoji_picker_specimen, toned_glyph,
+        };
+        use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems};
+        use crate::ui_element::ElementCx;
+        use bevy::prelude::*;
+        use bevy::ui::Checked;
+        use pretty_assertions::assert_eq;
+        use sl_emoji::SkinTone;
+        use sl_viewer_testkit::interact::{self, InteractionTest};
+        use sl_viewer_testkit::{TestError, find_by_name, settle};
+
+        /// The preview line's node name, per `build_emoji_picker_content`.
+        const PREVIEW: &str = "emoji-picker-preview";
+
+        /// The widget plugins the picker's content is built from — the list
+        /// the rows are pooled by, the search field and the category strip.
+        fn widget_app() -> App {
+            let mut app = InteractionTest::new().build();
+            app.add_plugins((
+                crate::floater::FloaterPlugin,
+                crate::virtual_list::VirtualListPlugin,
+                crate::ui_search::SearchFieldPlugin,
+                crate::ui_tab::TabWidgetPlugin,
+            ));
+            app
+        }
+
+        /// A laid-out grid cell bound to an emoji other than `except`, with the
+        /// emoji it shows.
+        fn a_cell_showing_other_than(
+            app: &mut App,
+            except: Option<sl_emoji::Emoji>,
+        ) -> Result<(Entity, sl_emoji::Emoji), TestError> {
+            let mut cells = app
+                .world_mut()
+                .query::<(Entity, &EmojiCell, &ComputedNode)>();
+            cells
+                .iter(app.world())
+                .filter(|(_, _, node)| node.size().x > 0.0 && node.size().y > 0.0)
+                .find_map(|(entity, cell, _)| {
+                    cell.emoji
+                        .filter(|emoji| Some(*emoji) != except)
+                        .map(|emoji| (entity, emoji))
+                })
+                .ok_or_else(|| "no laid-out cell shows an emoji".into())
+        }
+
+        /// The preview line's current text.
+        fn preview(app: &mut App) -> Result<String, TestError> {
+            let line = find_by_name(app, PREVIEW).ok_or("no preview line")?;
+            Ok(app
+                .world()
+                .get::<Text>(line)
+                .map(|text| text.0.clone())
+                .ok_or("the preview line has no text")?)
+        }
+
+        /// Point at `cell` and let the hover land.
+        fn hover(app: &mut App, cell: Entity) -> Result<(), TestError> {
+            let at = interact::centre_of_entity(app, cell).ok_or("the cell has no box")?;
+            interact::hover(app, at);
+            settle(app);
+            Ok(())
+        }
+
+        /// **The live floater's preview follows the pointer.**
+        #[test]
+        fn hovering_a_cell_in_the_floater_previews_it() -> Result<(), TestError> {
+            let mut app = widget_app();
+            app.add_plugins(EmojiPickerPlugin);
+            settle(&mut app);
+            let panel = app
+                .world()
+                .get_resource::<EmojiPickerUi>()
+                .map(|ui| ui.panel)
+                .ok_or("the picker was not spawned")?;
+            app.world_mut()
+                .get_mut::<UiPanelShown>(panel)
+                .ok_or("the picker has no panel state")?
+                .0 = true;
+            settle(&mut app);
+            settle(&mut app);
+
+            let (cell, emoji) = a_cell_showing_other_than(&mut app, None)?;
+            hover(&mut app, cell)?;
+            assert_eq!(preview(&mut app)?, preview_text(emoji, SkinTone::Default));
+            Ok(())
+        }
+
+        /// **The gallery's picker previews too.** The gallery builds the
+        /// window's content through the specimen, in a host that runs no
+        /// [`EmojiPickerPlugin`] — which is where the user found the preview
+        /// dead: the hover observer reached for the plugin's resources and
+        /// returned without them.
+        #[test]
+        fn hovering_a_cell_in_the_specimen_previews_it() -> Result<(), TestError> {
+            let mut app = widget_app();
+            app.add_systems(
+                Startup,
+                (|mut commands: Commands, root: Res<UiRoot>| {
+                    spawn_emoji_picker_specimen(&mut commands, root.0, ElementCx::new());
+                })
+                .after(UiScaffoldSystems::SpawnRoot),
+            );
+            settle(&mut app);
+            settle(&mut app);
+
+            // The specimen opens showing the first glyph's preview, so aim at
+            // a different one or a dead observer would pass.
+            let first = sl_emoji::Group::ALL
+                .first()
+                .and_then(|group| group.emojis().next());
+            let (cell, emoji) = a_cell_showing_other_than(&mut app, first)?;
+            hover(&mut app, cell)?;
+            assert_eq!(preview(&mut app)?, preview_text(emoji, SkinTone::Default));
+            Ok(())
+        }
+
+        /// **The gallery's picker is a whole picker**: the specimen under
+        /// [`EmojiGridPlugin`], as the gallery hosts it, searches, takes a
+        /// tone from its swatches, re-casts its cells and previews in that
+        /// tone — with no floater and no [`EmojiPickerPlugin`] anywhere.
+        #[test]
+        fn the_specimen_under_the_grid_plugin_searches_and_takes_a_tone() -> Result<(), TestError> {
+            let mut app = widget_app();
+            app.add_plugins(EmojiGridPlugin);
+            app.add_systems(
+                Startup,
+                (|mut commands: Commands, root: Res<UiRoot>| {
+                    spawn_emoji_picker_specimen(&mut commands, root.0, ElementCx::new());
+                })
+                .after(UiScaffoldSystems::SpawnRoot),
+            );
+            settle(&mut app);
+            settle(&mut app);
+
+            // Search: the grid narrows to the term's hits.
+            let search = app
+                .world_mut()
+                .query::<&EmojiGrid>()
+                .iter(app.world())
+                .next()
+                .map(|grid| grid.search)
+                .ok_or("the specimen built no grid")?;
+            interact::focus(&mut app, search);
+            interact::type_str(&mut app, "wave");
+            settle(&mut app);
+            settle(&mut app);
+            let wave = sl_emoji::by_shortcode("wave").ok_or("no :wave:")?;
+            let wave_cell = app
+                .world_mut()
+                .query::<(Entity, &EmojiCell)>()
+                .iter(app.world())
+                .find(|(_, cell)| cell.emoji == Some(wave))
+                .map(|(entity, _)| entity)
+                .ok_or("searching `wave` did not bring 👋 into the grid")?;
+
+            // A swatch: it becomes the checked one, and the grid re-casts.
+            let dark = app
+                .world_mut()
+                .query::<(Entity, &EmojiToneSwatch)>()
+                .iter(app.world())
+                .find(|(_, swatch)| swatch.tone == SkinTone::Dark)
+                .map(|(entity, _)| entity)
+                .ok_or("no dark swatch")?;
+            let at = interact::centre_of_entity(&app, dark).ok_or("the swatch has no box")?;
+            interact::click(&mut app, at, MouseButton::Left);
+            settle(&mut app);
+            let checked: Vec<SkinTone> = app
+                .world_mut()
+                .query_filtered::<&EmojiToneSwatch, With<Checked>>()
+                .iter(app.world())
+                .map(|swatch| swatch.tone)
+                .collect();
+            assert_eq!(checked, vec![SkinTone::Dark], "the checked swatch");
+            let glyph = app
+                .world()
+                .get::<EmojiCell>(wave_cell)
+                .map(|cell| cell.glyph)
+                .ok_or("the 👋 cell went away")?;
+            assert_eq!(
+                app.world().get::<Text>(glyph).map(|text| text.0.clone()),
+                Some(toned_glyph(wave, SkinTone::Dark).to_owned()),
+                "the grid re-casts its cells in the chosen tone"
+            );
+
+            hover(&mut app, wave_cell)?;
+            assert_eq!(preview(&mut app)?, preview_text(wave, SkinTone::Dark));
+            Ok(())
+        }
     }
 }

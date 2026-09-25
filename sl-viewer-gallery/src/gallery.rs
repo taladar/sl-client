@@ -359,12 +359,17 @@ pub fn run(assets: AssetPlugin, registry: GalleryRegistry) -> AppExit {
         // The chat-input widgets' runtime halves, so the chat-input and
         // local-chat-input specimens are live in the gallery — the `:`-completer,
         // Enter-to-send and volume select box all work. The emoji button's
-        // `OpenEmojiPicker` message is declared here (the picker floater itself is
-        // not in the gallery), so the button is inert rather than a panic.
+        // `OpenEmojiPicker` message is declared here (the gallery's picker is
+        // its content, not the viewer's floater), so the button is inert rather
+        // than a panic.
         .add_plugins(crate::emoji_complete::ColonCompletePlugin)
         .add_plugins(crate::chat_input::ChatInputPlugin)
         .add_plugins(crate::local_chat_input::LocalChatInputPlugin)
         .add_message::<crate::emoji_picker::OpenEmojiPicker>()
+        // The emoji grid's runtime half, so the Emoji floater's search, group
+        // tabs, tone swatches, hover preview and scrolling are live. It needs no
+        // floater: each grid carries its own state.
+        .add_plugins(crate::emoji_picker::EmojiGridPlugin)
         // The skin / design-token system, so the gallery is dressed in a real
         // skin and the switcher below can flip skins and theme overlays live.
         .insert_resource(crate::skin::SkinSelection::resolve(None, None, None, None))
