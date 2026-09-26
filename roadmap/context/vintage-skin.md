@@ -45,7 +45,9 @@ is flat dark grey (`#3e3e3e`) with a hard 1 px black frame. **Data surfaces**
 text. Selection is periwinkle (`#8d90c2`). Push buttons are raised bevels with
 a blue-violet face (`#6473bd`) and a **warm gold** frame when pressed or
 toggled. Static labels are steel blue (`#93a9d5`), not white. All text carries
-a soft drop shadow. Every corner is square.
+a soft drop shadow. Surfaces and fields are square, but a push button is
+**not**: its art is a stadium, rounded on about half its height, which is what
+makes the bottom bar a row of pills (see *Corner rounding* below).
 
 Our two skins (`graphite`, `azure`) are dark-on-dark throughout, rounded, and
 shadowless. Nothing about that is wrong — but it means a Vintage skin is not
@@ -184,6 +186,22 @@ textures are what `colors.xml` *tints*. Sampled from the PNG/TGA files
 | `ListItem_Select` | 280×24 | `#8c90c2` | flat |
 | `SliderThumb_Off` | 14×14 | `#726c76` | bevelled |
 | `SliderTrack_Horiz` | 104×6 | `#646e9d` | sunken |
+
+### Corner rounding
+
+Read off the art's alpha, not its colour (corrected 2026-09-26 — this file
+used to say every corner was square, and the first Vintage skin shipped
+square buttons on the strength of it):
+
+| Texture | Corners |
+| --- | --- |
+| `PushButton_*` (and so every toolbar button) | a **stadium**: each end rounded on about half the height (the art is 32x23 with 12/18 px side insets) |
+| `TabTop_*` | ~2 px, top two only |
+| `SliderThumb_*` | a disc |
+| `ScrollThumb_*` | a stadium |
+| `SliderTrack_*` | ~2 px |
+| `Checkbox_*` | ~2 px |
+| `TextField_*`, `Tooltip`, `ScrollArrow_*`, `floater_background*` | square |
 
 Two things to read out of that table. First, **the bevel is inverted from the
 Windows convention** — the dark edge is at the top-left and the light edge at

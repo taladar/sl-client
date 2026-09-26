@@ -44,6 +44,18 @@ mod test {
     /// The slice insets the art is drawn to: 24x24 files with 8 px corners.
     const INSET: f32 = 8.0;
 
+    /// The Vintage skin's insets: 12x12 files with 4 px corners (a one-pixel
+    /// frame, a one-pixel bevel, two pixels of face).
+    const VINTAGE_INSET: f32 = 4.0;
+
+    /// The Vintage push button's insets: 28x28 stadium art with 13 px corners,
+    /// which hold its 12 px rounding.
+    const VINTAGE_BUTTON_INSET: f32 = 13.0;
+
+    /// The Vintage tab's and round handles' insets: 6 px corners, which hold a
+    /// tab's 5 px trailing corner and a handle's 5 px curve.
+    const VINTAGE_ROUND_INSET: f32 = 6.0;
+
     /// An app with the CSS engine over the shipped `assets/`, ready for more
     /// plugins — [`app`] is this plus the finish, and a caller that wants the
     /// layout stack on top needs to add it *before* that.
@@ -236,30 +248,74 @@ mod test {
     ///   ignored in silence.
     #[test]
     fn every_file_the_theme_names_decodes_and_is_sampled_nearest() -> Result<(), TestError> {
-        let assets = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
-        let theme = fs_err::read_to_string(
-            assets
-                .join("skins")
-                .join("graphite")
-                .join("themes")
-                .join("relief.css"),
-        )?;
-        // Only what a `url()` names: the prose above the rules mentions the
-        // generator script, which is not art and has no `.png` to find.
-        let named: Vec<String> = theme
-            .split("widgets/")
-            .skip(1)
-            .filter_map(|tail| tail.split_once(".png").map(|(name, _rest)| name))
-            .filter(|name| !name.contains(char::is_whitespace))
-            .map(|name| format!("skins/graphite/widgets/{name}.png"))
-            .collect();
+        let named = art_named_by(&["graphite", "themes", "relief.css"], "graphite")?;
         assert_eq!(
             named.len(),
             4,
             "the theme names {} files, not the four states",
             named.len()
         );
+        every_file_decodes_nearest(named, INSET)
+    }
 
+    /// **The same three checks for every file the Vintage skin names**, and
+    /// the other direction too: every PNG in its `widgets/` is named by the
+    /// sheet, so a state the generator draws but no rule wears is caught
+    /// rather than shipped as dead weight.
+    #[test]
+    fn every_file_the_vintage_skin_names_decodes_and_is_sampled_nearest() -> Result<(), TestError> {
+        let named = art_named_by(&["vintage", "skin.css"], "vintage")?;
+        let widgets = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("skins")
+            .join("vintage")
+            .join("widgets");
+        let mut on_disk: Vec<String> = fs_err::read_dir(&widgets)?
+            .filter_map(Result::ok)
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .filter(|name| {
+                std::path::Path::new(name)
+                    .extension()
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("png"))
+            })
+            .map(|name| format!("skins/vintage/widgets/{name}"))
+            .collect();
+        on_disk.sort_unstable();
+        assert_eq!(
+            named, on_disk,
+            "the Vintage sheet and its widgets/ directory disagree about which \
+             art exists"
+        );
+        every_file_decodes_nearest(named, VINTAGE_INSET)
+    }
+
+    /// The art files a sheet's `url()`s name under `skins/<skin>/widgets/`,
+    /// sorted and without repeats. Only what a `url()` names: the prose above
+    /// the rules mentions the directory too, and that is not art.
+    fn art_named_by(sheet: &[&str], skin: &str) -> Result<Vec<String>, TestError> {
+        let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("skins");
+        for part in sheet {
+            path.push(part);
+        }
+        let css = fs_err::read_to_string(path)?;
+        let mut named: Vec<String> = css
+            .split("widgets/")
+            .skip(1)
+            .filter_map(|tail| tail.split_once(".png").map(|(name, _rest)| name))
+            .filter(|name| !name.contains(char::is_whitespace))
+            .map(|name| format!("skins/{skin}/widgets/{name}.png"))
+            .collect();
+        named.sort_unstable();
+        named.dedup();
+        Ok(named)
+    }
+
+    /// Load every one of `named` off the disk and assert it decodes, is at
+    /// least twice `inset` on each side, and carries a nearest sampler.
+    fn every_file_decodes_nearest(named: Vec<String>, inset: f32) -> Result<(), TestError> {
+        let assets = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
@@ -309,8 +365,8 @@ mod test {
                 .get(handle)
                 .ok_or_else(|| format!("`{path}` loaded but is not in the collection"))?;
             assert!(
-                f64::from(image.width()) >= f64::from(INSET) * 2.0
-                    && f64::from(image.height()) >= f64::from(INSET) * 2.0,
+                f64::from(image.width()) >= f64::from(inset) * 2.0
+                    && f64::from(image.height()) >= f64::from(inset) * 2.0,
                 "`{path}` is {}x{}, smaller than its own slice insets",
                 image.width(),
                 image.height()
@@ -522,6 +578,609 @@ mod test {
                 background.map(|alpha| alpha > 0.0),
                 Some(true),
                 "`{sheet}` left the button's surface transparent with no image to replace it"
+            );
+        }
+        Ok(())
+    }
+
+    /// One specimen of a shaped widget: a name for the failure message, the
+    /// classes on the widget, the classes and state its parent carries (for a
+    /// rule that reaches down from an ancestor), and whether the widget itself
+    /// is checked, pressed or refused.
+    struct Specimen {
+        /// What the failure message calls it.
+        name: &'static str,
+        /// The widget's own classes.
+        classes: &'static str,
+        /// The parent's classes; empty for a widget hung straight off the root.
+        parent_classes: &'static str,
+        /// Whether the parent is refused (`InteractionDisabled`).
+        parent_disabled: bool,
+        /// The widget's own engine state.
+        state: State,
+        /// The file the Vintage skin must dress it in.
+        file: &'static str,
+    }
+
+    /// The engine state a specimen is spawned in.
+    #[derive(Clone, Copy)]
+    enum State {
+        /// None: at rest.
+        Resting,
+        /// `Hovered(true)` — `:hover`.
+        Hover,
+        /// `Pressed` — `:active`.
+        Held,
+        /// `Checked` — `:checked`.
+        On,
+        /// `Checked` and `Hovered(true)` — a lit button under the pointer.
+        OnHover,
+        /// `Checked` and `Pressed` — a lit button held down.
+        OnHeld,
+        /// `InteractionDisabled` — `:disabled`.
+        Refused,
+    }
+
+    /// Every shaped widget the Vintage skin dresses, in every state it has art
+    /// for.
+    const VINTAGE_SPECIMENS: &[Specimen] = &[
+        Specimen {
+            name: "button",
+            classes: "sk-button",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::Resting,
+            file: "push-button",
+        },
+        Specimen {
+            name: "button:hover",
+            classes: "sk-button",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::Hover,
+            file: "push-button-hover",
+        },
+        Specimen {
+            name: "button:active",
+            classes: "sk-button",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::Held,
+            file: "push-button-pressed",
+        },
+        Specimen {
+            name: "button:checked",
+            classes: "sk-button",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::On,
+            file: "push-button-pressed",
+        },
+        Specimen {
+            name: "button lit, under the pointer",
+            classes: "sk-button",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::OnHover,
+            file: "push-button-selected-hover",
+        },
+        Specimen {
+            name: "button lit, held down",
+            classes: "sk-button",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::OnHeld,
+            file: "push-button-pressed",
+        },
+        Specimen {
+            name: "button:disabled",
+            classes: "sk-button",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::Refused,
+            file: "push-button-disabled",
+        },
+        Specimen {
+            name: "toolbar button",
+            classes: "sk-toolbar-button",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::Resting,
+            file: "push-button",
+        },
+        Specimen {
+            name: "toolbar button:hover",
+            classes: "sk-toolbar-button",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::Hover,
+            file: "push-button-hover",
+        },
+        Specimen {
+            name: "toolbar button lit, under the pointer",
+            classes: "sk-toolbar-button",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::OnHover,
+            file: "push-button-selected-hover",
+        },
+        Specimen {
+            name: "toolbar button lit, held down",
+            classes: "sk-toolbar-button",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::OnHeld,
+            file: "push-button-pressed",
+        },
+        Specimen {
+            name: "toolbar button lit",
+            classes: "sk-toolbar-button",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::On,
+            file: "push-button-pressed",
+        },
+        Specimen {
+            name: "toolbar button:disabled",
+            classes: "sk-toolbar-button",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::Refused,
+            file: "push-button-disabled",
+        },
+        Specimen {
+            name: "action button",
+            classes: "sk-action-button",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::Resting,
+            file: "push-button",
+        },
+        Specimen {
+            name: "action button:hover",
+            classes: "sk-action-button",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::Hover,
+            file: "push-button-hover",
+        },
+        Specimen {
+            name: "action button lit",
+            classes: "sk-action-button",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::On,
+            file: "push-button-pressed",
+        },
+        Specimen {
+            name: "action button:disabled",
+            classes: "sk-action-button",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::Refused,
+            file: "push-button-disabled",
+        },
+        Specimen {
+            name: "tab overflow button",
+            classes: "sk-tab-scroll-button",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::Resting,
+            file: "scroll-arrow",
+        },
+        Specimen {
+            name: "tab overflow button:active",
+            classes: "sk-tab-scroll-button",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::Held,
+            file: "scroll-arrow-pressed",
+        },
+        Specimen {
+            name: "scroll thumb",
+            classes: "sk-scrollbar-thumb",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::Resting,
+            file: "scroll-thumb",
+        },
+        Specimen {
+            name: "scroll thumb:hover",
+            classes: "sk-scrollbar-thumb",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::Hover,
+            file: "scroll-thumb-hover",
+        },
+        Specimen {
+            name: "field",
+            classes: "sk-field sk-text-field",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::Resting,
+            file: "field",
+        },
+        Specimen {
+            name: "field read-only",
+            classes: "sk-field sk-text-field sk-read-only",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::Resting,
+            file: "field-readonly",
+        },
+        Specimen {
+            name: "field:disabled",
+            classes: "sk-field sk-text-field",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::Refused,
+            file: "field-disabled",
+        },
+        Specimen {
+            name: "search box",
+            classes: "sk-search-field",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::Resting,
+            file: "field",
+        },
+        Specimen {
+            name: "search box focused",
+            classes: "sk-search-field sk-focus-within",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::Resting,
+            file: "field-focused",
+        },
+        Specimen {
+            name: "tab",
+            classes: "sk-tab",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::Resting,
+            file: "tab",
+        },
+        Specimen {
+            name: "tab:checked",
+            classes: "sk-tab",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::On,
+            file: "tab-selected",
+        },
+        Specimen {
+            name: "scroll arrow",
+            classes: "sk-scrollbar-arrow",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::Resting,
+            file: "scroll-arrow",
+        },
+        Specimen {
+            name: "scroll arrow:hover",
+            classes: "sk-scrollbar-arrow",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::Hover,
+            file: "scroll-arrow-hover",
+        },
+        Specimen {
+            name: "scroll arrow:active",
+            classes: "sk-scrollbar-arrow",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::Held,
+            file: "scroll-arrow-pressed",
+        },
+        Specimen {
+            name: "slider track",
+            classes: "sk-slider",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::Resting,
+            file: "slider-track",
+        },
+        Specimen {
+            name: "slider thumb",
+            classes: "sk-slider-thumb",
+            parent_classes: "sk-slider",
+            parent_disabled: false,
+            state: State::Resting,
+            file: "slider-thumb",
+        },
+        Specimen {
+            name: "slider thumb on a refused slider",
+            classes: "sk-slider-thumb",
+            parent_classes: "sk-slider",
+            parent_disabled: true,
+            state: State::Resting,
+            file: "slider-thumb-disabled",
+        },
+        Specimen {
+            name: "floater",
+            classes: "sk-floater",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::Resting,
+            file: "floater",
+        },
+        Specimen {
+            name: "front-most title bar",
+            classes: "sk-floater-title-bar sk-frontmost",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::Resting,
+            file: "floater-header",
+        },
+        Specimen {
+            name: "tooltip",
+            classes: "sk-tooltip",
+            parent_classes: "",
+            parent_disabled: false,
+            state: State::Resting,
+            file: "tooltip",
+        },
+    ];
+
+    /// Hang every specimen under `root`, each with its parent if it has one,
+    /// and return the widget entities in order.
+    fn spawn_specimens(app: &mut App, root: Entity, specimens: &[Specimen]) -> Vec<Entity> {
+        specimens
+            .iter()
+            .map(|specimen| {
+                let parent = if specimen.parent_classes.is_empty() {
+                    root
+                } else {
+                    let mut parent = app.world_mut().spawn((
+                        Node::default(),
+                        ClassList::new(specimen.parent_classes),
+                        ChildOf(root),
+                    ));
+                    if specimen.parent_disabled {
+                        parent.insert(InteractionDisabled);
+                    }
+                    parent.id()
+                };
+                let mut widget = app.world_mut().spawn((
+                    Node::default(),
+                    ClassList::new(specimen.classes),
+                    ChildOf(parent),
+                ));
+                match specimen.state {
+                    State::Resting => {}
+                    State::Hover => {
+                        widget.insert(Hovered(true));
+                    }
+                    State::Held => {
+                        widget.insert(Pressed);
+                    }
+                    State::On => {
+                        widget.insert(bevy::ui::Checked);
+                    }
+                    State::OnHover => {
+                        widget.insert((bevy::ui::Checked, Hovered(true)));
+                    }
+                    State::OnHeld => {
+                        widget.insert((bevy::ui::Checked, Hovered(true), Pressed));
+                    }
+                    State::Refused => {
+                        widget.insert(InteractionDisabled);
+                    }
+                }
+                widget.id()
+            })
+            .collect()
+    }
+
+    /// **Every shaped widget wears its Vintage art, in every state, sliced to
+    /// the art's geometry and painted over its whole box.**
+    ///
+    /// One table for the whole skin, because each of these fails the same
+    /// silent way: a rule whose selector never matches, or whose `url()` names
+    /// the wrong file, leaves a widget flat or in another state's art, and
+    /// nothing but a screenshot would say so.
+    #[test]
+    fn the_vintage_skin_dresses_every_shaped_widget() -> Result<(), TestError> {
+        let mut app = app();
+        let handle: Handle<StyleSheet> = app
+            .world()
+            .resource::<AssetServer>()
+            .load("skins/vintage/skin.css");
+        let root = app
+            .world_mut()
+            .spawn((Node::default(), Styled::new(handle.clone())))
+            .id();
+        let widgets = spawn_specimens(&mut app, root, VINTAGE_SPECIMENS);
+        load(&mut app, &handle)?;
+        app.update();
+        app.update();
+
+        for (specimen, &widget) in VINTAGE_SPECIMENS.iter().zip(&widgets) {
+            let name = specimen.name;
+            let inset = if specimen.file.starts_with("push-button") {
+                VINTAGE_BUTTON_INSET
+            } else if specimen.file.starts_with("tab")
+                || specimen.file.starts_with("scroll-thumb")
+                || specimen.file.starts_with("slider-thumb")
+            {
+                VINTAGE_ROUND_INSET
+            } else {
+                VINTAGE_INSET
+            };
+            assert_eq!(
+                image_path(&app, widget),
+                Some(format!("skins/vintage/widgets/{}.png", specimen.file)),
+                "{name} wears the wrong art"
+            );
+            let node = app
+                .world()
+                .get::<ImageNode>(widget)
+                .ok_or_else(|| format!("{name}: no ImageNode"))?;
+            match node.image_mode {
+                NodeImageMode::Sliced(ref slicer) => assert_eq!(
+                    (
+                        slicer.border.min_inset.x,
+                        slicer.border.min_inset.y,
+                        slicer.border.max_inset.x,
+                        slicer.border.max_inset.y
+                    ),
+                    (inset, inset, inset, inset),
+                    "{name}: the slice insets are not the art's"
+                ),
+                ref other => {
+                    return Err(format!("{name}: the image is {other:?}, not sliced").into());
+                }
+            }
+            assert_eq!(
+                node.visual_box,
+                VisualBox::BorderBox,
+                "{name}: the art is painted into {:?}, not the whole widget",
+                node.visual_box
+            );
+            assert!(
+                app.world().get::<ImageNodeSize>(widget).is_some(),
+                "{name}: no `ImageNodeSize`, so the art is never extracted"
+            );
+            assert_eq!(
+                app.world()
+                    .get::<BackgroundColor>(widget)
+                    .map(|colour| colour.0.to_srgba().alpha),
+                Some(0.0),
+                "{name}: a flat paint is left under the art"
+            );
+        }
+        Ok(())
+    }
+
+    /// **A header loses its art when its window stops being the front one.**
+    ///
+    /// The one Vintage surface that exists in a single state only: the title
+    /// bar is art while its window is front-most and bare otherwise, so the
+    /// image has to be *taken away* when the class goes — which `bevy_flair`
+    /// does for a component it auto-inserted, and does not for a property.
+    #[test]
+    fn a_title_bar_loses_its_header_when_its_window_goes_behind() -> Result<(), TestError> {
+        let mut app = app();
+        let handle: Handle<StyleSheet> = app
+            .world()
+            .resource::<AssetServer>()
+            .load("skins/vintage/skin.css");
+        let root = app
+            .world_mut()
+            .spawn((Node::default(), Styled::new(handle.clone())))
+            .id();
+        let bar = app
+            .world_mut()
+            .spawn((
+                Node::default(),
+                ClassList::new("sk-floater-title-bar sk-frontmost"),
+                ChildOf(root),
+            ))
+            .id();
+        load(&mut app, &handle)?;
+        app.update();
+        assert!(
+            app.world().get::<ImageNode>(bar).is_some(),
+            "the front-most header has no art"
+        );
+        app.world_mut()
+            .get_mut::<ClassList>(bar)
+            .ok_or("the bar lost its classes")?
+            .remove("sk-frontmost");
+        app.update();
+        app.update();
+        assert!(
+            app.world().get::<ImageNode>(bar).is_none(),
+            "the header art stayed on a window that went behind"
+        );
+        Ok(())
+    }
+
+    /// **Switching from Vintage back to Graphite leaves nothing behind** —
+    /// the task's own "done when".
+    ///
+    /// `bevy_flair` reverts nothing a rule stops writing, so every property a
+    /// Vintage image rule sets has to be one Graphite writes again, and every
+    /// image has to go. Asserted against a second app dressed in Graphite
+    /// from the start: after the switch, every specimen's face, frame colours,
+    /// corner radii and image must be exactly what that one has.
+    #[test]
+    fn switching_from_vintage_to_graphite_leaves_nothing_behind() -> Result<(), TestError> {
+        /// What a skin paints on a node, read back for comparison.
+        #[derive(Debug, PartialEq)]
+        struct Paint {
+            /// The face.
+            background: Option<Srgba>,
+            /// The four frame colours.
+            border: Option<BorderColor>,
+            /// The four corners.
+            radius: Option<BorderRadius>,
+            /// Whether an image surface is on it.
+            image: bool,
+        }
+
+        /// Read a node's [`Paint`].
+        fn paint(app: &App, entity: Entity) -> Paint {
+            Paint {
+                background: app
+                    .world()
+                    .get::<BackgroundColor>(entity)
+                    .map(|colour| colour.0.to_srgba()),
+                border: app.world().get::<BorderColor>(entity).copied(),
+                radius: app
+                    .world()
+                    .get::<Node>(entity)
+                    .map(|node| node.border_radius),
+                image: app.world().get::<ImageNode>(entity).is_some(),
+            }
+        }
+
+        let graphite = |app: &mut App| -> Handle<StyleSheet> {
+            app.world()
+                .resource::<AssetServer>()
+                .load("skins/graphite/skin.css")
+        };
+
+        let mut switched = app();
+        let vintage: Handle<StyleSheet> = switched
+            .world()
+            .resource::<AssetServer>()
+            .load("skins/vintage/skin.css");
+        let root = switched
+            .world_mut()
+            .spawn((Node::default(), Styled::new(vintage.clone())))
+            .id();
+        let widgets = spawn_specimens(&mut switched, root, VINTAGE_SPECIMENS);
+        load(&mut switched, &vintage)?;
+        switched.update();
+        let back = graphite(&mut switched);
+        switched
+            .world_mut()
+            .entity_mut(root)
+            .insert(Styled::new(back.clone()));
+        load(&mut switched, &back)?;
+        switched.update();
+        switched.update();
+
+        let mut fresh = app();
+        let only = graphite(&mut fresh);
+        let fresh_root = fresh
+            .world_mut()
+            .spawn((Node::default(), Styled::new(only.clone())))
+            .id();
+        let fresh_widgets = spawn_specimens(&mut fresh, fresh_root, VINTAGE_SPECIMENS);
+        load(&mut fresh, &only)?;
+        fresh.update();
+        fresh.update();
+
+        for ((specimen, &widget), &reference) in
+            VINTAGE_SPECIMENS.iter().zip(&widgets).zip(&fresh_widgets)
+        {
+            assert_eq!(
+                paint(&switched, widget),
+                paint(&fresh, reference),
+                "{}: switching back to Graphite left Vintage's paint behind",
+                specimen.name
             );
         }
         Ok(())

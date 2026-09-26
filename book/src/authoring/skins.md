@@ -24,11 +24,21 @@ sl-client-bevy-viewer/assets/skins/
 ├── common.css              # structural rules: class → token. Shared by ALL skins.
 ├── graphite/
 │   ├── skin.css            # the Graphite skin: token VALUES only
-│   └── themes/
-│       └── dark.css        # a theme OVERLAY on Graphite
-└── azure/
-    └── skin.css            # the Azure skin: the same tokens, different values
+│   ├── themes/
+│   │   ├── dark.css        # a theme OVERLAY on Graphite
+│   │   └── relief.css      # an overlay that changes SHAPE: bevelled buttons
+│   └── widgets/            # relief's nine-sliced art (+ .meta per file)
+├── azure/
+│   └── skin.css            # the Azure skin: the same tokens, different values
+└── vintage/
+    ├── skin.css            # the Vintage skin: tokens AND image-surface rules
+    └── widgets/            # its nine-sliced art (+ .meta per file)
 ```
+
+The `widgets/` art is **drawn by a program**, `sl-viewer-skin-art` in this
+workspace, not by hand: the PNG files are generated from a state table (face,
+bevel, frame per state), each with a `.meta` asking for a nearest sampler.
+Change the table and re-run it rather than editing a PNG.
 
 - **`common.css`** maps widget classes (`.sk-button`, `.sk-card`, …) onto
   tokens (`var(--control-bg)`, …). It is **shared** and contains *no colour
@@ -45,7 +55,7 @@ The viewer binary takes three flags:
 
 | Flag | Meaning |
 | --- | --- |
-| `--skin <name>` | the skin directory to wear (`graphite`, `azure`) |
+| `--skin <name>` | the skin directory to wear (`graphite`, `azure`, `vintage`) |
 | `--theme <name>` | a theme overlay under that skin (e.g. `dark`); omit for the base |
 | `--watch-skins` | **hot-reload**: re-apply the `.css` live as you edit it |
 
@@ -115,7 +125,8 @@ Defined by every skin's `skin.css`, consumed by `common.css`:
 | `--tooltip-padding-block` / `--tooltip-padding-inline` / `--tooltip-max-width` | the tip's padding above-and-below and either side, and the width it wraps at |
 | `--inspector-bg` / `--inspector-border` | the inspector card an avatar or object click opens — its own plate, not the tooltip's, because it takes clicks |
 | `--menu-bg` | a dropped-down menu's face; a role of its own because a classic skin floats its menus in a colour the floater body does not share (the flat skins give it `--surface-bg`'s value) |
-| `--text-primary` | primary body text: a label, a table cell, a menu entry, a tab caption |
+| `--text-primary` | primary chrome text: a button's and a tab's caption, a menu entry, a floater title, a status read-out |
+| `--label-text` | a static label (`.sk-text`) — its own role because a classic skin colours every label apart from button and menu text (Vintage's `LabelTextColor` is steel blue); the flat skins give it `--text-primary`'s value |
 | `--text-muted` | secondary text: a caption, a hint, a column header, a resize grip |
 | `--text-disabled` | text of a control whose action does not apply right now |
 | `--text-heading` | a heading inside a page |
@@ -125,10 +136,13 @@ Defined by every skin's `skin.css`, consumed by `common.css`:
 | `--console-info` / `--console-error` | an RLVa console line that reports, or fails; a reply takes `--text-muted` |
 | `--control-bg` | a button's / combo's resting background |
 | `--control-bg-hover` | the background under the pointer (hovered button, highlighted menu entry) |
+| `--toolbar-button-bg-hover` | a bottom-toolbar button under the pointer — the resting face's value in the flat skins, which do not light the toolbar by hover |
+| `--button-text-selected` | a lit (toggled-on) toolbar button's caption — the reference's `ButtonLabelSelectedColor`; it changes with the toggle, never with a press |
 | `--control-bg-disabled` | a disabled control's background |
 | `--control-bg-pressed` / `--control-border-pressed` | a button **held down** (`:active`): its face, and its frame where it has a one-colour frame (a push button's bevel turns inside out instead) |
 | `--control-bg-pressed-selected` | a toggle that is on **and** held down — pressing a lit toolbar button is how its floater is closed, so the press has to read against the lit face (the reference's `image_pressed_selected`) |
 | `--action-button-bg` / `--action-button-border` | a flat action-column button's face, and its frame where it has one (the flat shape has none) |
+| `--action-button-bg-hover` | that button under the pointer — the resting face's value in the flat skins |
 | `--button-primary-bg` | the call-to-act button's background (`.sk-button-primary`: Retry, Stand Up) |
 | `--button-primary-bg-hover` | the same under the pointer |
 | `--control-border` | a control's resting border |
@@ -159,6 +173,7 @@ Defined by every skin's `skin.css`, consumed by `common.css`:
 | `--tile-bg` | an inventory gallery tile's backing and an image well's, a scrim so a thumbnail reads against any panel |
 | `--tile-hover` | the wash under the pointer on a dense grid's tile (an emoji cell) |
 | `--inline-item-bg` / `--inline-item-bg-hover` | an item embedded in notecard prose, at rest and under the pointer |
+| `--inline-item-text` / `--inline-item-text-readonly` | that item's icon and name, in a writable notecard and a read-only one (`.sk-inline-item-text`) |
 | `--marker-selected` | the selected keyframe on the day-cycle timeline (a colour of its own because it sits on a sky gradient) |
 | `--check-bg` / `--check-border` | a checkbox's box, unchecked |
 | `--check-bg-checked` / `--check-border-checked` | the same box, checked |
@@ -175,7 +190,7 @@ Defined by every skin's `skin.css`, consumed by `common.css`:
 | `--scrollbar-arrows` | **a `display` value**: `none` for the plain bar both shipped skins draw, `flex` for the classic bar with a step arrow at each end (press to step a row, hold to repeat); the ends take their length out of the groove, never out of the content |
 | `--scrollbar-arrow-bg` / `--scrollbar-arrow-bg-hover` / `--scrollbar-arrow-bg-pressed` | an arrow end's face, at rest, under the pointer and held down |
 | `--scrollbar-arrow` | the arrow glyph's colour (the glyph itself is `content` — see the pseudo-elements note below) |
-| `--tab-scroll-bg` / `--tab-scroll-bg-hover` / `--tab-scroll-bg-pressed` | a horizontal tab strip's overflow buttons' face, at rest (transparent in the shipped skins — they sit on the strip), under the pointer and held down |
+| `--tab-scroll-bg` / `--tab-scroll-bg-hover` / `--tab-scroll-bg-pressed` | a horizontal tab strip's overflow buttons' face, at rest, under the pointer and held down — opaque, a control's face, so the buttons look the same on whatever panel the strip sits on |
 | `--tab-scroll-arrow` | their glyphs' colour |
 | `--tab-jump-buttons` | **a `display` value**: `flex` shows the jump-to-first and jump-to-last buttons beside back and on, as the reference does; `none` leaves only the single steps |
 | `--slider-thumb` | a slider handle |
@@ -184,6 +199,7 @@ Defined by every skin's `skin.css`, consumed by `common.css`:
 | `--title-bar-active` | the front-most floater's title band (a translucent wash over its body) |
 | `--title-text-inactive` | the title text of every floater but the front-most |
 | `--glyph-button-bg` / `--glyph-button-bg-pressed` | a title-bar glyph button's fill, at rest and held down |
+| `--floater-glyph` / `--floater-grip` | a title-bar glyph (close, minimise, dock) and the corner resize grip — roles of their own because a classic skin draws its window icons in a colour none of its text is (Vintage's are orange) |
 | `--pie-bg` / `--pie-line` / `--pie-selected` | the pie menu's disc, spokes and hovered wedge |
 | `--pie-label-sub-pie` | a wedge caption that opens a sub-pie |
 | `--pie-label-disabled` | a wedge caption that is present but unavailable |
@@ -314,7 +330,8 @@ the stock look rather than to black.
 | `.sk-tile` | one tile of a dense grid (an emoji cell), with its `:hover` wash |
 | `.sk-gallery-tile` | an inventory gallery tile's backing |
 | `.sk-image-well` | the box a snapshot or thumbnail sits in (About Landmark's), shown as a scrim while it has none |
-| `.sk-inline-item` | an item embedded in notecard prose, with its `:hover` |
+| `.sk-inline-item` | an item embedded in notecard prose, with its `:hover`; wears `.sk-read-only` in a read-only notecard |
+| `.sk-inline-item-text` | that item's icon and name |
 | `.sk-day-marker` | a keyframe marker on the day-cycle timeline; `.sk-selected` when selected |
 | `.sk-teleport-title` / `.sk-teleport-arrived` / `.sk-teleport-failed` | the teleport-progress title, and the two outcomes it ends in |
 | `.sk-presence-online` / `.sk-presence-offline` | a friend's presence dot |
@@ -355,6 +372,7 @@ the stock look rather than to black.
 | `.sk-list-surface` | a scroll list's face — and the scope inside which the text roles re-root onto the field family (see *Chrome and data surfaces*) |
 | `.sk-text-field` | the caret / selection colours of **every** editor (stamped automatically) |
 | `.sk-search-field` / `.sk-search-clear` | the shared search box and its `×` button |
+| `.sk-field-box` | any other box around a bare editor — the chat bar and every chat input; the search box's well, focus face and ring, with `.sk-focus-within` stamped while its field has focus |
 | `.sk-toolbar-bar` / `.sk-toolbar-button` / `.sk-toolbar-label` | the bottom toolbar strip, its buttons — `:checked` while the floater a button toggles is open, `:active` held down, `:checked:active` both, `:disabled` for a target that has not landed — and their labels, which the button's states reach as descendant rules |
 | `.sk-toast` / `.sk-toast-text` | a notification toast card and its text |
 | `.sk-toast-tip` / `.sk-toast-notify` / `.sk-toast-alert` / `.sk-toast-modal` | worn with `.sk-toast`: its kind, which frames the card |
@@ -548,6 +566,16 @@ file-level suppression as its first line (`common.css` does):
 
 That is the whole job: a second skin is a second set of *values*, never a second
 layout.
+
+The one kind of rule a skin *may* add is an **image surface**: a
+`-bevy-image` rule on a widget class, per state, which changes the widget's
+shape and nothing about where it sits. `vintage/skin.css` is the worked
+example — every rule that brings an image clears the background and border
+*paints* in the same block (never the border *width*, which is layout), and
+names `-bevy-image-box: border-box` so the art covers the whole widget.
+Because `bevy_flair` reverts nothing, such a rule may only set properties
+`common.css` also sets on that class, so that switching to a flat skin writes
+every one of them back.
 
 ## Making a theme overlay — and the cascade-layer rule
 

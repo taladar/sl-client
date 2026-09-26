@@ -72,7 +72,7 @@ use sl_emoji::{Emoji, Group, SkinTone, search};
 
 use crate::floater::{Floater, FloaterCaps, FloaterCommand, FloaterOp, FloaterSpec, spawn_floater};
 use crate::i18n::Translated;
-use crate::skin::LIST_SURFACE_CLASS;
+use crate::skin::IMAGE_WELL_CLASS;
 use crate::skin::TILE_CLASS;
 use crate::skin::text_role;
 use crate::skin_palette::SkinPalette;
@@ -1028,10 +1028,12 @@ fn build_emoji_picker_content(
                 position_type: PositionType::Relative,
                 ..default()
             },
-            // The rows' face, from the skin (`--list-bg`): the scrim this
-            // used to paint by hand, plus the field-family text roles the
-            // class re-roots for a light list. See `LIST_SURFACE_CLASS`.
-            ClassList::new_with_classes([LIST_SURFACE_CLASS]),
+            // The grid's backing: an image well's scrim (`--tile-bg`), the
+            // class a gallery of thumbnails sits on — which is what this is.
+            // Not a list surface: a skin that makes its data lists light (the
+            // reference's classic skins) would put colour emoji on near-white,
+            // where the pale ones all but vanish.
+            ClassList::new_with_classes([IMAGE_WELL_CLASS]),
             VirtualList::new(CELL_SIZE),
             VirtualViewport,
             Pickable::default(),

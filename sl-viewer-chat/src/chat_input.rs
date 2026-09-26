@@ -47,24 +47,40 @@ use std::collections::VecDeque;
 
 use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx};
+use bevy_flair::style::components::ClassList;
 
 use crate::emoji_complete::{ColonCompleteSet, attach_colon_complete};
 use crate::emoji_picker::OpenEmojiPicker;
-use crate::skin::{role_class, text_role};
+use crate::skin::{FOCUS_WITHIN_CLASS, role_class, set_state_class};
 use crate::skin_palette::SkinPalette;
 use crate::ui::row;
 use crate::ui_font::UiFont;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use sl_viewer_ui_core::glyph;
 
-/// The box's border colour.
+/// The box's border colour — the unskinned fallback; [`FIELD_BOX_CLASS`]
+/// repaints it from the live skin.
 const BOX_BORDER: Color = Color::srgb(0.30, 0.36, 0.46);
 
-/// The box's background colour.
-const BOX_BACKGROUND: Color = Color::srgb(0.10, 0.12, 0.16);
+/// The box's background colour — the unskinned fallback, as [`BOX_BORDER`].
+const BOX_BACKGROUND: Color = SkinPalette::FALLBACK.field_bg;
 
-/// The typed-text colour.
+/// The emoji glyph's colour.
 const TEXT_COLOR: Color = SkinPalette::FALLBACK.text_primary;
+
+/// The skin class on the box: a field's well around a bare editor, dressed
+/// like the search box (`--field-bg`, the field bevel, and the focused face
+/// while the field inside holds focus). The editor is spawned undecorated, so
+/// without this the box is the one part of the chat bar no skin can reach —
+/// which is how a light-field skin came up with a dark chat bar.
+const FIELD_BOX_CLASS: &str = "sk-field-box";
+
+/// The chat box, and the field inside it whose focus it shows.
+#[derive(Component, Debug, Clone, Copy)]
+struct ChatInputBox {
+    /// The single-line field inside the box.
+    field: Entity,
+}
 
 /// The emoji button's background.
 const EMOJI_BUTTON_BACKGROUND: Color = Color::srgba(1.0, 1.0, 1.0, 0.06);
@@ -250,6 +266,7 @@ pub fn spawn_chat_input(
             },
             BorderColor::all(BOX_BORDER),
             BackgroundColor(BOX_BACKGROUND),
+            ClassList::new_with_classes([FIELD_BOX_CLASS]),
             Name::new(format!("{}:chat-input", spec.element)),
             ChildOf(parent),
         ))
@@ -280,11 +297,14 @@ pub fn spawn_chat_input(
             ..TextInputSpec::new(spec.element, TextInputKind::Line)
         },
     );
-    commands.entity(field).insert((
-        ChatInputField,
-        ChatInputHistory::default(),
-        text_role(TEXT_COLOR),
-    ));
+    // No text role here: the scaffold stamps `.sk-text-field` on every editor,
+    // which gives the typed text the field family's colour. A role class
+    // (`.sk-text`) is a LABEL's, and in a skin that colours labels apart from
+    // data it would paint what you type in the label colour.
+    commands
+        .entity(field)
+        .insert((ChatInputField, ChatInputHistory::default()));
+    commands.entity(container).insert(ChatInputBox { field });
 
     // The completer popup hangs above the whole box.
     attach_colon_complete(commands, field, container);
@@ -354,7 +374,29 @@ impl Plugin for ChatInputPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ChatInputSubmit>().add_systems(
             Update,
-            (send_chat_input, recall_chat_history).after(ColonCompleteSet),
+            (
+                (send_chat_input, recall_chat_history).after(ColonCompleteSet),
+                reflect_chat_box_focus,
+            ),
+        );
+    }
+}
+
+/// Put [`FOCUS_WITHIN_CLASS`] on a chat box while the field inside it holds
+/// keyboard focus, so the skin can give the box the focused face — the search
+/// box's answer to the same problem (`bevy_flair` has no `:focus-within`, and
+/// the field is a different node from the box that paints). Change-guarded by
+/// [`set_state_class`], so a settled box does not wake the style engine.
+fn reflect_chat_box_focus(
+    focus: Res<bevy::input_focus::InputFocus>,
+    mut boxes: Query<(&ChatInputBox, &mut ClassList)>,
+) {
+    let focused = focus.get();
+    for (chat_box, mut classes) in &mut boxes {
+        set_state_class(
+            &mut classes,
+            FOCUS_WITHIN_CLASS,
+            focused == Some(chat_box.field),
         );
     }
 }
@@ -561,6 +603,59 @@ mod tests {
             count += 1;
         }
         assert_eq!(count, HISTORY_CAP);
+    }
+
+    /// **The chat box carries its field's focus**, and is a skinned field
+    /// well at all.
+    ///
+    /// The box and the editor are different nodes, so no selector reaches up
+    /// from a focused field to the box that paints; `reflect_chat_box_focus`
+    /// mirrors it as `.sk-focus-within`, and this is the check that it goes on
+    /// and comes off.
+    #[test]
+    fn the_chat_box_carries_its_fields_focus() -> Result<(), TestError> {
+        use bevy_flair::style::components::ClassList;
+        use sl_viewer_ui_core::skin::FOCUS_WITHIN_CLASS;
+
+        let mut app = build_app();
+        let field = find_by_name(&mut app, "test-chat:field").ok_or("field did not spawn")?;
+        let container =
+            find_by_name(&mut app, "test-chat:chat-input").ok_or("the box did not spawn")?;
+        let classes = |app: &App, entity: Entity| {
+            app.world()
+                .entity(entity)
+                .get::<ClassList>()
+                .map(|classes| {
+                    (
+                        classes.contains(super::FIELD_BOX_CLASS),
+                        classes.contains(FOCUS_WITHIN_CLASS),
+                    )
+                })
+        };
+        assert_eq!(
+            classes(&app, container),
+            Some((true, false)),
+            "an untouched box is a field well and does not look focused"
+        );
+
+        app.world_mut()
+            .resource_mut::<InputFocus>()
+            .set(field, FocusCause::Navigated);
+        settle(&mut app);
+        assert_eq!(
+            classes(&app, container).map(|(_box, lit)| lit),
+            Some(true),
+            "focusing the field must light the box"
+        );
+
+        app.world_mut().resource_mut::<InputFocus>().clear();
+        settle(&mut app);
+        assert_eq!(
+            classes(&app, container).map(|(_box, lit)| lit),
+            Some(false),
+            "the box stayed lit after its field lost focus"
+        );
+        Ok(())
     }
 
     /// A new submission ends any active recall (cursor resets to the live draft).

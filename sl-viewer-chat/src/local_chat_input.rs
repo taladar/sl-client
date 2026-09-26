@@ -44,7 +44,7 @@ use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{ChatChannel, ChatType};
 
 use crate::chat_input::{ChatInputHandle, ChatInputSpec, ChatInputSubmit, spawn_chat_input};
-use crate::skin::{LIST_ROW_CLASS, SELECTED_CLASS, set_state_class, text_role};
+use crate::skin::{COMBO_OPTION_CLASS, LIST_ROW_CLASS, SELECTED_CLASS, set_state_class};
 use crate::skin_palette::SkinPalette;
 use crate::ui::column;
 use crate::ui_font::UiFont;
@@ -67,6 +67,21 @@ const OPTION_BACKGROUND: Color = Color::NONE;
 
 /// The dropdown panel background.
 const DROPDOWN_BACKGROUND: Color = Color::srgba(0.10, 0.12, 0.16, 0.98);
+
+/// The skin classes that make the volume select box a **combo**, which is what
+/// it is: an anchor showing the current choice (`.sk-combo`), its value text
+/// (`.sk-build-value`), and a drop-down list of options (`.sk-combo-list`,
+/// whose rows are `.sk-combo-option`). The inline colours above are only the
+/// unskinned fallback; without these the box was a hard-coded dark outline in
+/// every skin, including the ones whose controls are not dark.
+const COMBO_CLASS: &str = "sk-combo";
+
+/// The combo's value text, on the anchor and on each option — see
+/// [`COMBO_CLASS`].
+const VALUE_CLASS: &str = "sk-build-value";
+
+/// The combo's drop-down list — see [`COMBO_CLASS`].
+const COMBO_LIST_CLASS: &str = "sk-combo-list";
 
 /// How close to the window edge the volume dropdown may go, in logical pixels —
 /// the same margin [`sl_viewer_ui_widgets::ui_combo`]'s dropdown keeps.
@@ -349,6 +364,7 @@ fn build_volume_select(commands: &mut Commands, container: Entity, field: Entity
             },
             BorderColor::all(SELECT_BORDER),
             BackgroundColor(DROPDOWN_BACKGROUND),
+            ClassList::new_with_classes([COMBO_LIST_CLASS]),
             GlobalZIndex(10_000),
             Pickable {
                 should_block_lower: true,
@@ -368,7 +384,8 @@ fn build_volume_select(commands: &mut Commands, container: Entity, field: Entity
         .spawn((
             Text::new(ChatSayVolume::Say.label()),
             UiFont::Sans.at(SELECT_FONT_SIZE),
-            text_role(SELECT_TEXT_COLOR),
+            TextColor(SELECT_TEXT_COLOR),
+            ClassList::new_with_classes([VALUE_CLASS]),
             Pickable::IGNORE,
         ))
         .id();
@@ -385,6 +402,7 @@ fn build_volume_select(commands: &mut Commands, container: Entity, field: Entity
             },
             BorderColor::all(SELECT_BORDER),
             BackgroundColor(OPTION_BACKGROUND),
+            ClassList::new_with_classes([COMBO_CLASS]),
             Pickable::default(),
             VolumeButton { field, label },
             Name::new("local-chat-volume-button"),
@@ -424,7 +442,7 @@ fn spawn_volume_option(
                 padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
                 ..default()
             },
-            ClassList::new_with_classes([LIST_ROW_CLASS]),
+            ClassList::new_with_classes([COMBO_OPTION_CLASS, LIST_ROW_CLASS]),
             Pickable::default(),
             VolumeOption { field, volume },
             ChildOf(dropdown),
@@ -432,7 +450,8 @@ fn spawn_volume_option(
         .with_child((
             Text::new(volume.label()),
             UiFont::Sans.at(SELECT_FONT_SIZE),
-            text_role(SELECT_TEXT_COLOR),
+            TextColor(SELECT_TEXT_COLOR),
+            ClassList::new_with_classes([VALUE_CLASS]),
             Pickable::IGNORE,
         ))
         .id();

@@ -3,13 +3,13 @@
 //!
 //! Two concerns share the tab, as in the reference's Colors / Skins panels:
 //!
-//! - **Skin & theme choice.** The UI skin (`graphite` / `azure`) and its theme
-//!   overlay become persisted global settings (`SETTING_UI_SKIN` /
+//! - **Skin & theme choice.** The UI skin (`graphite` / `azure` / `vintage`)
+//!   and its theme overlay become persisted global settings (`SETTING_UI_SKIN` /
 //!   `SETTING_UI_SKIN_THEME`) instead of a CLI-only flag;
 //!   `apply_skin_setting` drives the live [`SkinSelection`] re-dress the
 //!   moment the setting changes — no restart, unlike the reference. The theme
 //!   combo repopulates per skin (`repopulate_theme_combo`), since overlays
-//!   are skin-specific (azure ships base-only today). The CLI / env override
+//!   are skin-specific (azure and vintage ship base-only today). The CLI / env override
 //!   still wins at startup for that run (`SkinSelection::resolve`); the memo
 //!   seeding below keeps it standing until the user actually edits the combo.
 //! - **The user-tunable colour palette.** Every [`crate::skin_colors`] token —

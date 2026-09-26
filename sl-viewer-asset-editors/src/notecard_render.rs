@@ -68,6 +68,17 @@ const CONFIRM_ITEM_COPY_BUTTON: &str = "OK";
 /// be a class that stamp does not know.
 const ITEM_CLASS: &str = sl_viewer_ui_core::skin::INLINE_ITEM_CLASS;
 
+/// The skin class on the item's icon and name — `--inline-item-text`, or its
+/// read-only twin when the box also wears [`READ_ONLY_CLASS`]. The link colour
+/// the notecard passes is only the unskinned fallback: a cornflower name is
+/// legible on a dark field and not on a light one, which is a skin's call.
+const ITEM_TEXT_CLASS: &str = "sk-inline-item-text";
+
+/// Stamped on the item box in a notecard that cannot be edited, because the
+/// box floats in the rich text's overlay rather than inside the field that
+/// carries the field's own `.sk-read-only`.
+const READ_ONLY_CLASS: &str = sl_viewer_ui_core::skin::READ_ONLY_CLASS;
+
 // ---------------------------------------------------------------------------
 // The embedded-item box.
 // ---------------------------------------------------------------------------
@@ -154,7 +165,8 @@ fn texture_item_info(item: &sl_notecard::InventoryItem) -> ItemInfo {
 }
 
 /// Spawn one inline embedded-item box (icon + name) under `parent`, returning
-/// it.
+/// it. `read_only` marks the box for a notecard that cannot be edited, whose
+/// items the skin draws in their own colour.
 ///
 /// `parent` is the object node the rich-text field positions
 /// ([`sl_viewer_ui_widgets::ui_rich_text::spawn_rich_text_object`]): the box is
@@ -166,8 +178,10 @@ pub(crate) fn spawn_embedded_item_box(
     item: &sl_notecard::InventoryItem,
     source: NotecardSource,
     style: LinkTextStyle,
+    read_only: bool,
 ) -> Entity {
     let action = resolve_action(item, source);
+    let classes = core::iter::once(ITEM_CLASS).chain(read_only.then_some(READ_ONLY_CLASS));
     let item_box = commands
         .spawn((
             Node {
@@ -177,7 +191,7 @@ pub(crate) fn spawn_embedded_item_box(
                 padding: UiRect::axes(Val::Px(4.0), Val::Px(0.0)),
                 ..default()
             },
-            ClassList::new_with_classes([ITEM_CLASS]),
+            ClassList::new_with_classes(classes),
             Button,
             TabIndex(0),
             Pickable::default(),
@@ -189,6 +203,7 @@ pub(crate) fn spawn_embedded_item_box(
         Text::new(embedded_icon(&item.asset_type).to_owned()),
         UiFont::Sans.at(style.font_size),
         TextColor(style.link_color),
+        ClassList::new_with_classes([ITEM_TEXT_CLASS]),
         Pickable::IGNORE,
         ChildOf(item_box),
     ));
@@ -196,6 +211,7 @@ pub(crate) fn spawn_embedded_item_box(
         Text::new(item.name.clone()),
         UiFont::Sans.at(style.font_size),
         TextColor(style.link_color),
+        ClassList::new_with_classes([ITEM_TEXT_CLASS]),
         Pickable::IGNORE,
         ChildOf(item_box),
     ));

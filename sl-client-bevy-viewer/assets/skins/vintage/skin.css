@@ -1,0 +1,554 @@
+/* biome-ignore-all lint/correctness/noUnknownProperty: bevy_flair defines
+   non-standard CSS properties (-bevy-image, -bevy-image-mode, -bevy-image-box)
+   that biome, a standard-CSS linter, does not know. */
+/* biome-ignore-all lint/correctness/noUnknownFunction: and a non-standard
+   value function, sliced(), which is how bevy_flair spells nine-slicing. */
+/*
+ * Vintage — the reference viewer's classic skin, in shape and colour
+ * (viewer-vintage-skin).
+ *
+ * The other two skins are dark-on-dark and rounded. This one inverts them the
+ * way the reference's Vintage does: CHROME — floaters, the menu bar, toolbars
+ * — is flat dark grey (#3e3e3e) in a hard black hairline; DATA SURFACES — every
+ * field, scroll list and drop-down — are light sage carrying black text.
+ * Selection is periwinkle. Push buttons are raised blue-violet bevels with
+ * round corners that turn gold when pressed — which is what makes the bottom
+ * bar a row of pills. Labels are steel blue and shadowed. Everything else is
+ * square, or nearly: a tab is rounded along its top and the slider slightly.
+ *
+ * Every value below is the MERGED reference resolution (Vintage's own
+ * colors.xml over the default skin's), recorded with its source name in
+ * roadmap/context/vintage-skin.md — not re-derived here.
+ *
+ * Unlike Graphite and Azure, this sheet carries RULES as well as tokens: the
+ * widgets whose Vintage look is a shape rather than a colour (the bevelled
+ * button, the sunken field, the gold-footed tab, the scroll arrows, the slider
+ * groove and handle, the floater frame and header, the tooltip plate) are
+ * dressed in nine-sliced art from ./widgets/, one file per state, exactly as
+ * graphite/themes/relief.css dresses its button. The art is OURS, drawn by the
+ * `sl-viewer-skin-art` binary in this workspace to the measured palette and
+ * banding; the reference's own textures are Firestorm / Linden Lab artwork and
+ * are not copied.
+ *
+ * DELIBERATE DEVIATIONS from the reference Vintage, each a choice:
+ *
+ * - We do not reproduce `UIControlBGSelectedCompensate`. The reference keeps a
+ *   pre-darkened twin of its selection colour (#7375be) only to compensate a
+ *   0.7 alpha it applies in code; we have no such multiplier, so one selection
+ *   colour (#8d90c2) does both jobs.
+ * - We do not fork floater layouts. Vintage ships whole-file XUI forks of
+ *   floater_tools.xml and friends; this viewer's skins change shape and colour
+ *   only (viewer-ui-skin-tokens), which is the reason a reference skin breaks
+ *   every release and ours does not.
+ * - The keyboard focus ring is the pressed button's gold, not the reference's
+ *   brown `FocusColor` (#8f5c40), which all but disappears on DkGray; keyboard
+ *   focus has to be findable.
+ * - The inspector card stays a dark plate. The reference's is the tooltip's
+ *   light grey, but ours carries chrome labels and buttons, which a light
+ *   plate would make illegible.
+ * - The scrollbar thumb and groove are flat colours, not art: the reference's
+ *   are flat too (#3c4c7c, #999999), and a flat image draws nothing a colour
+ *   does not.
+ *
+ * The cascade: the fallback (and through it common.css) is imported into a
+ * layer and everything here is un-layered, so every value and rule below beats
+ * the structural sheet — see graphite/skin.css for why that is not optional.
+ *
+ * Every image rule sets ONLY properties common.css also sets on that class
+ * (the background and border paints), because bevy_flair reverts nothing: a
+ * switch back to a flat skin must find a rule there to write each one back.
+ * The border WIDTH is never touched — it is layout, not paint (relief.css says
+ * why at length).
+ */
+@import "embedded://sl_viewer_ui_core/skins/fallback.css" layer(fallback);
+
+:root {
+  /* Surfaces: DkGray chrome in a black hairline, square. */
+  --surface-bg: #3e3e3e;
+  --surface-border: #000000;
+  --surface-radius: 0px;
+  /* A card inside a panel, and a tab page: a step off the chrome so a card
+   * still reads as one. */
+  --card-bg: #454545;
+  /* DkGray2 as a scrim: the dock host behind docked floaters. */
+  --overlay-bg: #2b2b2bd9;
+  --overlay-text: #ffffff;
+
+  /* Text. Chrome text is LtGray (MenuItemEnabledColor, ButtonLabelColor is a
+   * shade off it); a static LABEL is steel blue (LabelTextColor), which is
+   * the one reason `--label-text` exists. */
+  --text-primary: #e6e6e6;
+  --label-text: #93a9d5;
+  --text-muted: #b4b4b4;
+  --text-disabled: #8c90c2;
+  --text-heading: #c5d3f0;
+
+  /* Text editing: the caret is TextCursorColor, black on the light field. */
+  --caret: #000000;
+  --selection: #8d90c2b3;
+  --selection-unfocused: #8d90c266;
+
+  /* Conversation transcript bands — the reference values, shared by every
+   * skin: the class distinction is by hue. */
+  --chat-recall: #808080;
+  --chat-server-history: #5e8261;
+  --chat-live: #ffffff;
+
+  /* Controls that are not push buttons — above all the combo, which in
+   * Vintage is a dark grey box (DropDown_*) with a light arrow, not a blue
+   * button. The push button's blue-violet and gold are its art, below. */
+  --control-bg: #4a4d51;
+  /* A toolbar button under the pointer (its art below lifts it too), and a
+   * LIT button's caption: ButtonLabelSelectedColor, white — the toolbar's
+   * `label_color_selected="White"`. A press does not change a caption; only
+   * the toggle state does. */
+  --toolbar-button-bg-hover: #7282c8;
+  --button-text-selected: #ffffff;
+  --control-bg-hover: #55585d;
+  --control-bg-disabled: #414346;
+  --control-border: #2d2e2f;
+  --control-border-disabled: #3a3b3d;
+  --control-bg-pressed: #43464a;
+  --control-border-pressed: #ffd794;
+  --control-bg-pressed-selected: #414b7d;
+  --action-button-bg: #6473bd;
+  --action-button-bg-hover: #7282c8;
+  --action-button-border: #2b2420;
+  --control-radius: 0px;
+  /* The reference's inverted bevel: dark above and to the left, light below
+   * and to the right. The art carries it for the push button; these draw it
+   * wherever a button is still painted flat. */
+  --button-bevel-top-left: #2b2420;
+  --button-bevel-bottom-right: #8a8784;
+  --button-primary-bg: #6473bd;
+  --button-primary-bg-hover: #7282c8;
+  --field-bevel-top-left: #1f1f1f;
+  --field-bevel-bottom-right: #e6e8e3;
+
+  /* The DATA family — light sage, black text. The whole argument of the
+   * skin. */
+  --field-bg: #bac3be;
+  --field-bg-focused: #c8cfcc;
+  --field-bg-readonly: #3e3e3e;
+  --field-text: #000000;
+  --field-text-disabled: #00000040;
+  --field-text-readonly: #e6e6e6;
+  --field-placeholder: #666666;
+  --list-bg: #c8cfcc;
+  /* MenuDefaultBgColor: Vintage floats its menus in opaque black. */
+  --menu-bg: #000000;
+  /* ComboListBgColor. */
+  --combo-list-bg: #e6e6e6;
+  /* The list rows: the face shows through an ordinary row, every other row is
+   * ScrollBGStripeColor, the hover ScrollHoveredColor, the selection
+   * periwinkle with black text. */
+  --list-row-bg: #00000000;
+  --list-row-stripe: #b8bfbb;
+  --list-row-hover: #bec3c3;
+  --list-row-selected-bg: #8d90c2;
+  --list-row-selected-text: #000000;
+
+  /* Focus ring: a classic hairline, in the pressed button's gold (see the
+   * deviations above). */
+  --focus-ring: #ffd794;
+  --focus-ring-width: 1px;
+  --focus-ring-offset: 0px;
+
+  /* Every static label, caption and title carries a soft drop shadow
+   * (`font_shadow="soft"`). One offset copy stands in for the reference's
+   * five-pass halo — the same value Graphite's Relief theme uses. */
+  --text-shadow: 1px 1px #000000a6;
+
+  /* Accent: the periwinkle of the skin's selection — quiet enough for a drag
+   * grip and a sort arrow, which the tab gold was not. */
+  --accent: #8d90c2;
+  --accent-muted: #6b6e99;
+  --marker-selected: #fad159;
+  --tile-bg: #0000004d;
+  /* An item embedded in notecard prose: no box of its own, as the reference
+   * draws it — its label in TextEmbeddedItemColor, dark brown on the light
+   * field, or TextEmbeddedItemReadOnlyColor in a read-only one, which is
+   * chrome grey. The hover is a periwinkle wash that reads on both. */
+  --inline-item-bg: #00000000;
+  --inline-item-bg-hover: #8d90c259;
+  --inline-item-text: #702b00;
+  --inline-item-text-readonly: #c2947d;
+
+  /* Emphasis: a lit control is periwinkle (translucent, so a banded list
+   * still reads through it); a filter match is the menu highlight's warm
+   * tone, legible on the light lists and the black menus alike. */
+  --selection-bg: #8d90c2b3;
+  --match-highlight: #c2947d;
+
+  /* Structure. The groove is ScrollbarTrackColor, the thumb ScrollThumb's
+   * blue, the arrows the reference's pale-grey step buttons (drawn from art
+   * below), and the bar carries them — Vintage is a classic bar. */
+  --divider: #262626;
+  --track-bg: #646e9d;
+  --scrollbar-thumb: #3c4c7c;
+  --slider-thumb: #726c76;
+  --scrollbar-thickness: 14px;
+  --scrollbar-track: #999999;
+  --scrollbar-thumb-hover: #4c5e94;
+  --scrollbar-arrows: flex;
+  --scrollbar-arrow-bg: #686868;
+  --scrollbar-arrow-bg-hover: #747474;
+  --scrollbar-arrow-bg-pressed: #5a5a5a;
+  --scrollbar-arrow: #c1c1c1;
+  --tab-scroll-bg: #686868;
+  --tab-scroll-bg-hover: #555555;
+  --tab-scroll-bg-pressed: #2b2b2b;
+  --tab-scroll-arrow: #c1c1c1;
+  --tab-jump-buttons: flex;
+
+  /* Floater chrome: the focused header is TitleBarFocusColor (drawn from art
+   * below); the window icons are orange art in the reference, so they are
+   * orange here, on no plate of their own. */
+  --title-bar-active: #555555;
+  --title-text-inactive: #a0a0a0;
+  --glyph-button-bg: #00000000;
+  --glyph-button-bg-pressed: #00000040;
+  --floater-glyph: #ef9c00;
+  --floater-grip: #ef9c00;
+
+  --trackball-sun: #ffd959;
+  --trackball-moon: #d1dbf2;
+  --trackball-marker-outline: #10121a;
+
+  /* The pie menu: the reference's own values, which Vintage inherits. */
+  --pie-bg: #3d3d3dcc;
+  --pie-line: #00000080;
+  --pie-selected: #f2692c59;
+  --pie-label-sub-pie: #a6dbff;
+  --pie-label-disabled: #edf2fa38;
+
+  /* Meaning-bearing: kept at the values every skin shares, so a
+   * colour-blind overlay has one set to remap. (The reference's money
+   * tracker greens and reds are for its own light plate.) */
+  --gain: #3fa34d;
+  --loss: #c0392b;
+  --notice-tip: #5c9ee6;
+  --notice-notify: #8c99ad;
+  --notice-alert: #f2b84d;
+  --notice-modal: #e65c52;
+
+  --presence-online: #66cc6b;
+  --presence-offline: #6b7585;
+
+  --tile-hover: #ffffff24;
+
+  /* The row a drag would drop into — the selection, louder. */
+  --drop-target: #8d90c2bf;
+
+  --folder-label: #fadb8c;
+
+  /* The checkbox: a light box (#d8d8d8) in an ORANGE ring, a black tick. The
+   * radio: a white disc in an orange ring, a black pip. Checkbox_* and
+   * RadioButton_* in the reference's art. */
+  --check-bg: #d8d8d8;
+  --check-border: #ef9c00;
+  --check-bg-checked: #d8d8d8;
+  --check-border-checked: #ef9c00;
+  --check-tick: #000000;
+
+  --radio-bg: #ffffff;
+  --radio-border: #f5a000;
+  --radio-bg-checked: #ffffff;
+  --radio-border-checked: #f5a000;
+  --radio-pip: #000000;
+
+  --console-info: #99d1a8;
+  --console-error: #eb8f85;
+
+  --text-error: #eb8c80;
+  --text-warn: #f2c766;
+  --text-note: #fad166;
+  --experience-accent: #6bd199;
+
+  /* The tooltip: a light grey plate (Tooltip.png's face), black text
+   * (ToolTipTextColor), square, 4 px padded, wrapping at 200 px
+   * (`tool_tip.xml`). The plate itself is art below. */
+  --tooltip-bg: #b7b8bc;
+  --tooltip-border: #9d9ea2;
+  --tooltip-text: #000000;
+  --tooltip-border-width: 1px;
+  --tooltip-radius: 0px;
+  --tooltip-padding-block: 4px;
+  --tooltip-padding-inline: 4px;
+  --tooltip-max-width: 200px;
+
+  --inspector-bg: #3e3e3efa;
+  --inspector-border: #000000;
+
+  /* User-tunable palette — the skin-supplied defaults under any per-account
+   * override. Vintage's own chat colours: the user's lines YELLOW
+   * (UserChatColor), object chat pale green, IM and system LtGray. */
+  --chat-self: #ffff00;
+  --chat-others: #ffffff;
+  --chat-objects: #b2e5b2;
+  --chat-im: #e6e6e6;
+  --chat-system: #e6e6e6;
+
+  --keyword-alert: #ffc740;
+
+  /* Name tags. Vintage deliberately collapses NameTagMatch and
+   * NameTagMismatch onto ONE orange, so a display name that differs from the
+   * account name is not called out; the default (the matching case) is that
+   * orange too. */
+  --name-tag-default: #fab05c;
+  --name-tag-self: #ffffff;
+  --name-tag-friend: #bfeb7d;
+  --name-tag-muted: #666666;
+  --name-tag-linden: #0080ff;
+  --name-tag-mismatch: #fab05c;
+
+  --name-tag-distance-whisper: #00ff00;
+  --name-tag-distance-chat: #00ff00;
+  --name-tag-distance-shout: #ffff00;
+  --name-tag-distance-beyond: #ff0000;
+
+  /* Minimap dots and the tracking beacon — these are the reference Vintage
+   * values, which the other skins already took. */
+  --minimap-avatar: #00ff00;
+  --minimap-avatar-friend: #ffff00;
+  --minimap-avatar-muted: #666666;
+  --minimap-avatar-self: #ffff00;
+  --minimap-avatar-linden: #0000ff;
+  --minimap-track: #ba001f;
+}
+
+/*
+ * THE SURFACES.
+ *
+ * Every file below is 12x12 with 4 px slice insets — a one-pixel frame, a
+ * one-pixel bevel, and two pixels of face in each corner — except the push
+ * button's, which are 20x20 with 7 px insets because its corners are cut on a
+ * six-pixel radius and the whole curve has to sit in the part drawn 1:1. A
+ * widget of any size draws its corners 1:1 and stretches only the centre.
+ * Each rule that brings an image clears the background and border paints in
+ * the same block and paints the whole border box; outside a rounded corner the
+ * art is transparent, so the panel shows through, as it does in the
+ * reference.
+ */
+
+/* The push button: raised blue-violet in a groove; lifted under the pointer;
+ * gold-framed while held or toggled on; flat and dim when refused. */
+.sk-button {
+  background-color: #00000000;
+  border-color: #00000000;
+  -bevy-image: url("skins/vintage/widgets/push-button.png");
+  -bevy-image-mode: sliced(13px 13px 13px 13px);
+  -bevy-image-box: border-box;
+}
+
+.sk-button:hover {
+  -bevy-image: url("skins/vintage/widgets/push-button-hover.png");
+}
+
+/* Held, toggled on, and held while on are ONE look in Vintage — the reference
+ * maps PushButton_Press, _Selected and _Selected_Press to the same gold file.
+ * Hover lifts whatever the button wears, so a lit button under the pointer is
+ * gold and brighter; the (0,3,0) pair after it puts a press and a refusal
+ * back on top, since the pointer is always over a button being pressed. */
+.sk-button:checked,
+.sk-button:active {
+  -bevy-image: url("skins/vintage/widgets/push-button-pressed.png");
+}
+
+.sk-button:checked:hover {
+  -bevy-image: url("skins/vintage/widgets/push-button-selected-hover.png");
+}
+
+.sk-button:checked:active {
+  -bevy-image: url("skins/vintage/widgets/push-button-pressed.png");
+}
+
+.sk-button:disabled,
+.sk-button:checked:disabled {
+  -bevy-image: url("skins/vintage/widgets/push-button-disabled.png");
+}
+
+/* The bottom toolbar's buttons and the flat action columns' (People, Groups,
+ * the radar, the parcel audio bar) are push buttons too — the reference's
+ * toolbar and panels name the same PushButton_* art — with the same states:
+ * a lit one (its floater open, its toggle on) is the toggled gold, with a
+ * white caption. */
+.sk-toolbar-button,
+.sk-action-button {
+  background-color: #00000000;
+  border-color: #00000000;
+  -bevy-image: url("skins/vintage/widgets/push-button.png");
+  -bevy-image-mode: sliced(13px 13px 13px 13px);
+  -bevy-image-box: border-box;
+}
+
+.sk-toolbar-button:hover,
+.sk-action-button:hover {
+  -bevy-image: url("skins/vintage/widgets/push-button-hover.png");
+}
+
+.sk-toolbar-button:checked,
+.sk-toolbar-button:active,
+.sk-action-button:checked,
+.sk-action-button:active {
+  -bevy-image: url("skins/vintage/widgets/push-button-pressed.png");
+}
+
+.sk-toolbar-button:checked:hover,
+.sk-action-button:checked:hover {
+  -bevy-image: url("skins/vintage/widgets/push-button-selected-hover.png");
+}
+
+.sk-toolbar-button:checked:active,
+.sk-action-button:checked:active {
+  -bevy-image: url("skins/vintage/widgets/push-button-pressed.png");
+}
+
+.sk-toolbar-button:disabled,
+.sk-toolbar-button:checked:disabled,
+.sk-action-button:disabled,
+.sk-action-button:checked:disabled {
+  -bevy-image: url("skins/vintage/widgets/push-button-disabled.png");
+}
+
+/* A text field, the search box (a field with a glyph in it) and the chat box
+ * (a field with an emoji button in it): sunken light sage, lighter while you
+ * type in it, chrome grey when read-only, and flat chrome when refused. */
+.sk-field,
+.sk-search-field,
+.sk-field-box {
+  background-color: #00000000;
+  border-color: #00000000;
+  -bevy-image: url("skins/vintage/widgets/field.png");
+  -bevy-image-mode: sliced(4px 4px 4px 4px);
+  -bevy-image-box: border-box;
+}
+
+.sk-field:focus,
+.sk-search-field.sk-focus-within,
+.sk-field-box.sk-focus-within {
+  -bevy-image: url("skins/vintage/widgets/field-focused.png");
+}
+
+.sk-field.sk-read-only {
+  -bevy-image: url("skins/vintage/widgets/field-readonly.png");
+}
+
+.sk-field:disabled {
+  -bevy-image: url("skins/vintage/widgets/field-disabled.png");
+}
+
+/* A tab: shaded mauve on a gold baseline, dark violet framed in gold when it
+ * is the open one; barely cut at the leading top corner and rounded at the
+ * trailing one, the reference's shape. common.css shoulders a tab with a
+ * border radius of its own, which the art replaces, so it is cleared. */
+.sk-tab {
+  background-color: #00000000;
+  border-color: #00000000;
+  border-start-start-radius: 0px;
+  border-start-end-radius: 0px;
+  -bevy-image: url("skins/vintage/widgets/tab.png");
+  -bevy-image-mode: sliced(6px 6px 6px 6px);
+  -bevy-image-box: border-box;
+}
+
+.sk-tab:checked {
+  -bevy-image: url("skins/vintage/widgets/tab-selected.png");
+}
+
+/* The scrollbar's step arrows: square dark-grey buttons carrying a light
+ * arrow (the glyph is `--scrollbar-arrow`). */
+.sk-scrollbar-arrow {
+  background-color: #00000000;
+  -bevy-image: url("skins/vintage/widgets/scroll-arrow.png");
+  -bevy-image-mode: sliced(4px 4px 4px 4px);
+  -bevy-image-box: border-box;
+}
+
+.sk-scrollbar-arrow:hover {
+  -bevy-image: url("skins/vintage/widgets/scroll-arrow-hover.png");
+}
+
+.sk-scrollbar-arrow:active {
+  -bevy-image: url("skins/vintage/widgets/scroll-arrow-pressed.png");
+}
+
+/* A horizontal tab strip's overflow buttons: the same square grey step
+ * buttons (the reference names ScrollArrow_Left / _Right for them), so the
+ * light glyph `--tab-scroll-arrow` sits on a face rather than on the panel. */
+.sk-tab-scroll-button {
+  background-color: #00000000;
+  -bevy-image: url("skins/vintage/widgets/scroll-arrow.png");
+  -bevy-image-mode: sliced(4px 4px 4px 4px);
+  -bevy-image-box: border-box;
+}
+
+.sk-tab-scroll-button:hover {
+  -bevy-image: url("skins/vintage/widgets/scroll-arrow-hover.png");
+}
+
+.sk-tab-scroll-button:active {
+  -bevy-image: url("skins/vintage/widgets/scroll-arrow-pressed.png");
+}
+
+/* The scrollbar thumb: a stadium in the reference's flat blue, lifted under
+ * the pointer. The groove stays a colour — the reference's is flat grey. */
+.sk-scrollbar-thumb {
+  background-color: #00000000;
+  -bevy-image: url("skins/vintage/widgets/scroll-thumb.png");
+  -bevy-image-mode: sliced(6px 6px 6px 6px);
+  -bevy-image-box: border-box;
+}
+
+.sk-scrollbar-thumb:hover {
+  -bevy-image: url("skins/vintage/widgets/scroll-thumb-hover.png");
+}
+
+/* A slider: a sunken blue groove and a round, shaded handle, dimmed on a
+ * refused slider. */
+.sk-slider {
+  background-color: #00000000;
+  border-color: #00000000;
+  -bevy-image: url("skins/vintage/widgets/slider-track.png");
+  -bevy-image-mode: sliced(4px 4px 4px 4px);
+  -bevy-image-box: border-box;
+}
+
+.sk-slider-thumb {
+  background-color: #00000000;
+  -bevy-image: url("skins/vintage/widgets/slider-thumb.png");
+  -bevy-image-mode: sliced(6px 6px 6px 6px);
+  -bevy-image-box: border-box;
+}
+
+.sk-slider:disabled .sk-slider-thumb {
+  -bevy-image: url("skins/vintage/widgets/slider-thumb-disabled.png");
+}
+
+/* The floater: DkGray in a black hairline; the front-most window's header is
+ * the lighter TitleBarFocusColor strip with a black rule under it. A window
+ * behind shows its body through the header, as common.css already has it. */
+.sk-floater {
+  background-color: #00000000;
+  border-color: #00000000;
+  -bevy-image: url("skins/vintage/widgets/floater.png");
+  -bevy-image-mode: sliced(4px 4px 4px 4px);
+  -bevy-image-box: border-box;
+}
+
+.sk-floater-title-bar.sk-frontmost {
+  background-color: #00000000;
+  -bevy-image: url("skins/vintage/widgets/floater-header.png");
+  -bevy-image-mode: sliced(4px 4px 4px 4px);
+  -bevy-image-box: border-box;
+}
+
+/* The tooltip: a light grey plate, lit along the top and left, shadowed
+ * along the bottom and right. */
+.sk-tooltip {
+  background-color: #00000000;
+  border-color: #00000000;
+  -bevy-image: url("skins/vintage/widgets/tooltip.png");
+  -bevy-image-mode: sliced(4px 4px 4px 4px);
+  -bevy-image-box: border-box;
+}

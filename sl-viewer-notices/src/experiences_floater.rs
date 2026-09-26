@@ -109,7 +109,7 @@ use crate::experience_log::{
 };
 use crate::experience_profile::{
     MATURITY_ADULT, MATURITY_GENERAL, MATURITY_KEYS, MATURITY_MODERATE, OpenExperienceProfile,
-    maturity_from_index, maturity_index,
+    maturity_from_index, maturity_index, maturity_key,
 };
 use crate::experience_search::{
     COL_SEARCH_NAME, COL_SEARCH_OWNER, COL_SEARCH_RATING, ExperienceInfos, ExperienceRow,
@@ -1897,11 +1897,32 @@ pub fn spawn_experiences_specimen(
             groups.note_resolved_name(group, &group_name);
             let mut rows = render_rows(&infos, &ids, &AvatarState::default(), &groups, &translator);
             sort_experience_rows(&mut rows, &keys);
+            // Each row's rating KEY, beside its (possibly untranslated) text:
+            // this runs as the gallery spawns, before the locale bundle has
+            // loaded, so the translator hands back the bare key and a cell
+            // written from it would show `experience-rating-general` for good.
+            let rating_keys: Vec<&'static str> = rows
+                .iter()
+                .map(|row| {
+                    infos
+                        .get(&row.id)
+                        .map_or("experience-rating-general", |info| {
+                            maturity_key(info.maturity)
+                        })
+                })
+                .collect();
             let cells: Vec<Vec<(String, Color)>> = rows
                 .into_iter()
                 .map(|row| vec![(row.name, TEXT_COLOR), (row.rating, TEXT_COLOR)])
                 .collect();
-            let _bound = spawn_specimen_table_rows(&mut commands, table, tab.spec(), &cells);
+            let bound = spawn_specimen_table_rows(&mut commands, table, tab.spec(), &cells);
+            // So the rating cells resolve themselves once it has, and follow a
+            // later language switch, as every translated label does.
+            for ((_row, row_cells), key) in bound.iter().zip(rating_keys) {
+                if let Some(cell) = row_cells.cell(COL_LIST_RATING) {
+                    commands.entity(cell).insert(Translated::new(key));
+                }
+            }
             commands
                 .entity(table.root)
                 .entry::<TableState>()

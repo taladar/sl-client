@@ -1149,11 +1149,18 @@ fn spawn_scroll_tabs_cards(commands: &mut Commands, parent: Entity, cell: Galler
             ChildOf(card),
         ));
         // The two copies side by side so the presence / absence of the control is
-        // a direct comparison.
+        // a direct comparison — and **wrapping**, so the many-tabs copy drops to
+        // its own line rather than both being shrunk to share one. A card is at
+        // most 760 px and a horizontal strip may take 640 of that, so a row that
+        // could not wrap squeezed the few-tabs copy until its last tab clipped
+        // (showing the arrows it exists to show *not* showing) and still let the
+        // many-tabs copy spill past the card's edge.
         let row = commands
             .spawn((
                 Node {
                     align_items: AlignItems::Start,
+                    flex_wrap: FlexWrap::Wrap,
+                    row_gap: Val::Px(12.0),
                     ..row(Val::Px(16.0))
                 },
                 ChildOf(card),

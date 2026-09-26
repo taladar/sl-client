@@ -117,9 +117,13 @@
   text-shadow: var(--text-shadow);
 }
 
-/* Primary body text. */
+/* A label — primary body text on chrome. Its own role, `--label-text`, rather
+ * than `--text-primary`: the reference's classic skins colour every static
+ * label (`LabelTextColor`, steel blue in Vintage) apart from the text on a
+ * button, a menu or a tab, which stays light. The flat skins give the two one
+ * value. */
 .sk-text {
-  color: var(--text-primary);
+  color: var(--label-text);
   text-shadow: var(--text-shadow);
 }
 
@@ -152,6 +156,15 @@
 
 .sk-button:hover {
   background-color: var(--control-bg-hover);
+}
+
+/* A button's caption is not a label: it keeps `--text-primary` (the
+ * reference's `ButtonLabelColor`) wherever `--label-text` goes. Early in the
+ * sheet, so a meaning rule at the same specificity (`.sk-text.sk-error`)
+ * still wins on the rare caption that carries one. */
+.sk-button .sk-text,
+.sk-action-button .sk-text {
+  color: var(--text-primary);
 }
 
 /* The same button at ROW SCALE — in a table cell, a list row, or a dense strip
@@ -494,6 +507,14 @@
   border-color: var(--action-button-border);
 }
 
+/* Under the pointer — a role for the reason `.sk-toolbar-button:hover` has
+ * one: the flat skins leave an action button unlit by hover (the resting
+ * face's value), and a classic skin that dresses it in art has to be able to
+ * select the state at all. Before `:checked`, so a lit button stays lit. */
+.sk-action-button:hover {
+  background-color: var(--action-button-bg-hover);
+}
+
 .sk-action-button:checked {
   background-color: var(--selection-bg);
 }
@@ -779,6 +800,20 @@
   background-color: var(--inline-item-bg-hover);
 }
 
+/* The item's icon and name. The reference draws them in their own colour
+ * (`TextEmbeddedItemColor`), and a different one in a read-only notecard
+ * (`TextEmbeddedItemReadOnlyColor`) — which matters as soon as a skin makes
+ * the writable field light and the read-only one dark, as its classic skins
+ * do. The box is not inside the field's node (it floats in the rich text's
+ * overlay), so the notecard stamps `.sk-read-only` on the box itself. */
+.sk-inline-item-text {
+  color: var(--inline-item-text);
+}
+
+.sk-inline-item.sk-read-only .sk-inline-item-text {
+  color: var(--inline-item-text-readonly);
+}
+
 /* A pie slice's caption, in its three roles. The pie *disc* is a shader rather
  * than a node and keeps taking its three colours through the material's params
  * — the one piece of this widget a selector genuinely cannot reach. The
@@ -967,14 +1002,19 @@
   background-color: var(--glyph-button-bg-pressed);
 }
 
+/* The title-bar glyphs and the corner resize grip each take a role of their
+ * own (`--floater-glyph`, `--floater-grip`) rather than a text colour: the
+ * reference draws them as art tinted by `FloaterButtonImageColor`, and a
+ * classic skin's window icons are a colour none of its text is (Vintage's are
+ * orange). The flat skins give them `--text-primary`'s and `--text-muted`'s
+ * values — the grip brighter than the glyphs' surroundings, so the affordance
+ * is findable. */
 .sk-floater-glyph {
-  color: var(--text-primary);
+  color: var(--floater-glyph);
 }
 
-/* The corner resize grip — brighter than the glyphs, so the affordance is
- * findable. */
 .sk-floater-grip {
-  color: var(--text-muted);
+  color: var(--floater-grip);
 }
 
 /* The dock host: the strip docked floaters flow into. A scrim, so a docked
@@ -1347,8 +1387,14 @@
  *
  * It carries no `color`: the box is the container, and the bare editor inside
  * it is what holds the text, styled by `.sk-text-field` above. A `color` here
- * would only insert a `TextColor` on a node with no text in it. */
-.sk-search-field {
+ * would only insert a `TextColor` on a node with no text in it.
+ *
+ * `.sk-field-box` is the same box for every other container around a bare
+ * editor — the chat bar and every chat input built on it — with
+ * `chat_input.rs` `reflect_chat_box_focus` stamping `.sk-focus-within` the way
+ * the search box does. */
+.sk-search-field,
+.sk-field-box {
   background-color: var(--field-bg);
   /* A well, so a sunken bevel — the same pair `.sk-field` reads, since a
    * search box is one of those with a glyph in it. */
@@ -1377,7 +1423,8 @@
  * for: the brighter face of the field you are typing in, and the focus ring the
  * reference draws on the box's own border (`mBorder->setKeyboardFocusHighlight`)
  * rather than inside it. */
-.sk-search-field.sk-focus-within {
+.sk-search-field.sk-focus-within,
+.sk-field-box.sk-focus-within {
   background-color: var(--field-bg-focused);
   outline-color: var(--focus-ring);
   outline-width: var(--focus-ring-width);
@@ -1394,7 +1441,9 @@
  * `a_focused_search_box_rings_the_box_and_not_the_editor` pins that, because
  * specificity is not something the CSS text shows. */
 .sk-search-field .sk-text-field:focus,
-.sk-search-field .sk-focusable:focus-visible {
+.sk-search-field .sk-focusable:focus-visible,
+.sk-field-box .sk-text-field:focus,
+.sk-field-box .sk-focusable:focus-visible {
   outline-width: 0px;
 }
 
@@ -1435,6 +1484,15 @@
 .sk-field:disabled {
   background-color: var(--control-bg-disabled);
   border-color: var(--control-border-disabled);
+}
+
+/* Plain text inside a field's well — a read-out's number, a specimen's value
+ * — is data, like the editor's own text: the field family's colour, and no
+ * chrome shadow. Without it such text takes the LABEL role, which is fine on a
+ * dark well and illegible on the light one a classic skin draws. */
+.sk-field .sk-text {
+  color: var(--field-text);
+  text-shadow: none;
 }
 
 /* A field's prompt, shown while it is empty — the search box's placeholder and
@@ -1539,6 +1597,15 @@
   border-radius: var(--control-radius);
 }
 
+/* Under the pointer: its own role, because the flat skins deliberately leave a
+ * toolbar button unlit by hover (they give it the resting face's value) while
+ * the reference lights every button it hovers — which a classic skin that
+ * draws its toolbar in art has to be able to select. Before `:checked`, so a
+ * lit button stays lit under the pointer. */
+.sk-toolbar-button:hover {
+  background-color: var(--toolbar-button-bg-hover);
+}
+
 .sk-toolbar-button:checked {
   background-color: var(--selection-bg);
 }
@@ -1563,8 +1630,10 @@
   text-shadow: var(--text-shadow);
 }
 
+/* A lit button's caption — `ButtonLabelSelectedColor`, which the reference
+ * changes with the toggle state and never with a press. */
 .sk-toolbar-button:checked .sk-toolbar-label {
-  color: var(--accent);
+  color: var(--button-text-selected);
 }
 
 .sk-toolbar-button:disabled .sk-toolbar-label {

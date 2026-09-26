@@ -91,7 +91,7 @@ pub const DEFAULT_SKIN: &str = "graphite";
 
 /// The skin ids that ship with the viewer, in switcher-cycle order. Each is a
 /// directory under `assets/skins/` holding a `SKIN_BASE_FILE`.
-pub const SKINS: &[&str] = &["graphite", "azure"];
+pub const SKINS: &[&str] = &["graphite", "azure", "vintage"];
 
 /// The theme overlays that ship, keyed loosely by skin: a `(skin, theme)` pair
 /// names `assets/skins/<skin>/themes/<theme>.css`. `None` in the switcher cycle
@@ -709,6 +709,8 @@ pub const TABLE_ROW_CLASS: &str = "sk-table-row";
 /// the test says so, rather than the rule quietly painting nothing.
 const HOVER_CLASSES: &[&str] = &[
     BUTTON_CLASS,
+    TOOLBAR_BUTTON_CLASS,
+    ACTION_BUTTON_CLASS,
     // Always worn with `BUTTON_CLASS`, so never the only reason a node is
     // stamped — but a class with a `:hover` rule of its own is named here, or
     // the list stops being the one place that says which rules can fire.

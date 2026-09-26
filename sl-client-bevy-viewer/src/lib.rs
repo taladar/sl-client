@@ -698,7 +698,8 @@ struct Options {
     #[clap(long, env = "SL_VIEWER_CAPTURE_FOV", value_name = "DEGREES")]
     camera_fov: Option<f32>,
     /// The UI skin to wear — a directory under `assets/skins/` (`graphite`,
-    /// `azure`). Skins are colour / texture / font tokens only, never layout.
+    /// `azure`, `vintage`). Skins change colour, texture, font and a widget's
+    /// shape, never layout.
     /// Overrides the persisted preferences choice (the colors & skins tab) for
     /// this run, without rewriting it.
     #[clap(long)]

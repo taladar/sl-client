@@ -88,6 +88,11 @@ mod test {
         // nothing and every assertion below reads the built-in fallback.
         sl_viewer_ui_core::skin::embed_fallback_stylesheet(&mut app);
         register_palette_properties(&mut app);
+        // The image asset type, which `MinimalPlugins` does not bring: a skin
+        // with image surfaces (Vintage) asks for a `Handle<Image>` while its
+        // sheet parses, and an unregistered asset type panics the CSS loader,
+        // which reads as "the stylesheet failed to load".
+        app.init_asset::<Image>();
         // The caret / selection shim, for the same reason: `caret-color` is not
         // a property `bevy_flair` knows on its own, so without this the
         // `.sk-text-field` rule's caret silently parses to nothing.
@@ -1485,6 +1490,176 @@ mod test {
         Ok(())
     }
 
+    /// **The shipped Vintage skin reads as Vintage** (`viewer-vintage-skin`):
+    /// steel-blue shadowed labels on DkGray chrome, light captions on its
+    /// buttons, black text on light sage fields and lists, a periwinkle
+    /// selected row, orange window icons.
+    ///
+    /// The half of the look a colour carries; the shapes are
+    /// `image_backed_widgets`'. And the other direction for the flat skins:
+    /// the `--label-text` split must move nothing there, so a Graphite label
+    /// and a Graphite button caption still resolve to one colour.
+    #[test]
+    fn the_vintage_skin_reads_as_vintage() -> Result<(), TestError> {
+        let hex = |value: &str| -> Result<Srgba, TestError> {
+            Ok(Srgba::hex(value).map_err(|error| format!("{value}: {error:?}"))?)
+        };
+        for (sheet, label, caption) in [
+            ("skins/vintage/skin.css", "93a9d5", "e6e6e6"),
+            ("skins/graphite/skin.css", "e6ebf2", "e6ebf2"),
+            ("skins/azure/skin.css", "eaf3ff", "eaf3ff"),
+        ] {
+            let mut app = app();
+            let handle: Handle<StyleSheet> = app.world().resource::<AssetServer>().load(sheet);
+            let root = app
+                .world_mut()
+                .spawn((Node::default(), Styled::new(handle.clone())))
+                .id();
+            let floater = app
+                .world_mut()
+                .spawn((Node::default(), ClassList::new("sk-floater"), ChildOf(root)))
+                .id();
+            let label_node = app
+                .world_mut()
+                .spawn((
+                    Text::new("Name:"),
+                    ClassList::new("sk-text"),
+                    ChildOf(floater),
+                ))
+                .id();
+            let button = app
+                .world_mut()
+                .spawn((
+                    Node::default(),
+                    ClassList::new("sk-button"),
+                    ChildOf(floater),
+                ))
+                .id();
+            let caption_node = app
+                .world_mut()
+                .spawn((Text::new("OK"), ClassList::new("sk-text"), ChildOf(button)))
+                .id();
+            let action = app
+                .world_mut()
+                .spawn((
+                    Node::default(),
+                    ClassList::new("sk-action-button"),
+                    ChildOf(floater),
+                ))
+                .id();
+            let action_caption = app
+                .world_mut()
+                .spawn((Text::new("Pay"), ClassList::new("sk-text"), ChildOf(action)))
+                .id();
+            let list = app
+                .world_mut()
+                .spawn((
+                    Node::default(),
+                    ClassList::new("sk-list-surface"),
+                    ChildOf(floater),
+                ))
+                .id();
+            let row = app
+                .world_mut()
+                .spawn((
+                    Node::default(),
+                    ClassList::new("sk-list-row sk-selected"),
+                    ChildOf(list),
+                ))
+                .id();
+            let glyph = app
+                .world_mut()
+                .spawn((
+                    Text::new("x"),
+                    ClassList::new("sk-floater-glyph"),
+                    ChildOf(floater),
+                ))
+                .id();
+            let lit = app
+                .world_mut()
+                .spawn((
+                    Node::default(),
+                    ClassList::new("sk-toolbar-button"),
+                    bevy::ui::Checked,
+                    ChildOf(floater),
+                ))
+                .id();
+            let lit_label = app
+                .world_mut()
+                .spawn((
+                    Text::new("Chat"),
+                    ClassList::new("sk-toolbar-label"),
+                    ChildOf(lit),
+                ))
+                .id();
+            load(&mut app, &handle)?;
+            app.update();
+
+            assert_eq!(
+                text_of(&app, label_node),
+                Some(hex(label)?),
+                "{sheet}: a label"
+            );
+            assert_eq!(
+                text_of(&app, caption_node),
+                Some(hex(caption)?),
+                "{sheet}: a button caption is not a label"
+            );
+            assert_eq!(
+                text_of(&app, action_caption),
+                Some(hex(caption)?),
+                "{sheet}: an action button's caption is not a label either"
+            );
+            if sheet == "skins/vintage/skin.css" {
+                assert_eq!(
+                    background_of(&app, list),
+                    Some(hex("c8cfcc")?),
+                    "the list face"
+                );
+                assert_eq!(
+                    background_of(&app, row),
+                    Some(hex("8d90c2")?),
+                    "the selected row is periwinkle, the one selection colour"
+                );
+                assert_eq!(
+                    text_of(&app, glyph),
+                    Some(hex("ef9c00")?),
+                    "the window icons"
+                );
+                assert_eq!(
+                    text_of(&app, lit_label),
+                    Some(hex("ffffff")?),
+                    "a lit toolbar button's caption is ButtonLabelSelectedColor, \
+                     white — not the tab gold the accent is"
+                );
+                let shadow = app
+                    .world()
+                    .get::<bevy::ui::widget::TextShadow>(label_node)
+                    .copied()
+                    .ok_or("a Vintage label carries no shadow")?;
+                assert!(
+                    shadow.color.alpha() > 0.0,
+                    "a Vintage label's shadow is invisible"
+                );
+                let palette = app
+                    .world()
+                    .get::<SkinPalette>(root)
+                    .ok_or("the palette never reached the root")?;
+                assert_eq!(
+                    palette.surface_bg.to_srgba(),
+                    hex("3e3e3e")?,
+                    "the chrome is DkGray"
+                );
+                assert_eq!(
+                    palette.field_text.to_srgba(),
+                    hex("000000")?,
+                    "data text is black"
+                );
+            }
+        }
+        Ok(())
+    }
+
     /// **The search box you are typing in brightens, and is ringed once.**
     ///
     /// The other half of `viewer-skin-search-box-focused-fill`: the widget puts
@@ -2589,6 +2764,39 @@ mod test {
         Ok(())
     }
 
+    /// **A tab strip's overflow buttons have a face of their own** in every
+    /// flat skin — opaque, so they look the same whatever panel the strip
+    /// sits on. They used to be transparent, and read as a different control
+    /// in every window.
+    #[test]
+    fn tab_overflow_buttons_have_an_opaque_face() -> Result<(), TestError> {
+        for skin in ["skins/graphite/skin.css", "skins/azure/skin.css"] {
+            let mut app = app();
+            let handle: Handle<StyleSheet> = app.world().resource::<AssetServer>().load(skin);
+            let root = app
+                .world_mut()
+                .spawn((Node::default(), Styled::new(handle.clone())))
+                .id();
+            let button = app
+                .world_mut()
+                .spawn((
+                    Node::default(),
+                    ClassList::new("sk-tab-scroll-button"),
+                    ChildOf(root),
+                ))
+                .id();
+            load(&mut app, &handle)?;
+            app.update();
+            let alpha = background_of(&app, button).map(|colour| colour.alpha);
+            assert_eq!(
+                alpha,
+                Some(1.0),
+                "{skin}: a tab overflow button's face is not opaque"
+            );
+        }
+        Ok(())
+    }
+
     /// **A flat skin keeps the plain bar.** Both shipped skins leave the ends
     /// off and the bar at its old thickness, so wearing either changes
     /// nothing about a scrollbar but where its colours come from.
@@ -3282,7 +3490,11 @@ mod test {
             );
         }
         let assets = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
-        for sheet in ["skins/graphite/skin.css", "skins/azure/skin.css"] {
+        for sheet in [
+            "skins/graphite/skin.css",
+            "skins/azure/skin.css",
+            "skins/vintage/skin.css",
+        ] {
             let (app, _root, hosts) = glyph_app(&assets, sheet)?;
             for (case, host) in GLYPH_CASES.iter().zip(&hosts) {
                 assert_eq!(

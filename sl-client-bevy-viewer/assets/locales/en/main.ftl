@@ -3938,6 +3938,7 @@ preferences-row-skin = UI skin
 preferences-row-theme = Color scheme
 preferences-skin-graphite = Graphite
 preferences-skin-azure = Azure
+preferences-skin-vintage = Vintage
 preferences-theme-base = Skin default
 preferences-theme-dark = Dark
 preferences-theme-relief = Relief

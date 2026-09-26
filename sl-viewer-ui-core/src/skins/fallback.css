@@ -26,10 +26,13 @@
   --overlay-bg: #0f121ad9;
   --overlay-text: #ffffff;
   --text-primary: #e6ebf5;
+  --label-text: #e6ebf5;
   --text-muted: #9ea8bd;
   --text-disabled: #737885;
   --text-heading: #b3d1ff;
   --control-bg: #293040;
+  --toolbar-button-bg-hover: #293040;
+  --button-text-selected: #5cb8fa;
   --control-bg-hover: #475775;
   --control-bg-disabled: #1f1f24;
   --control-border: #66809e;
@@ -45,6 +48,7 @@
   /* A flat action-column button's face, and its frame where it has one (the
    * flat shape has none). The colour those buttons used to paint themselves. */
   --action-button-bg: #3d4a61;
+  --action-button-bg-hover: #3d4a61;
   --action-button-border: #4d576b;
   /* The two bevels (viewer-skin-bevel-border-policy): a button's and a field's
    * top-and-left edges, then their bottom-and-right. Physical names on
@@ -114,10 +118,12 @@
   --scrollbar-arrow-bg-hover: #475775;
   --scrollbar-arrow-bg-pressed: #1a1f2b;
   --scrollbar-arrow: #bfc7d9;
-  /* A horizontal tab strip's overflow buttons: their face (none — they sit
-   * on the strip), their face under the pointer, the glyph, and whether the
-   * two jump-to-end buttons show (a `display` value). */
-  --tab-scroll-bg: #00000000;
+  /* A horizontal tab strip's overflow buttons: their face, their face under
+   * the pointer, the glyph, and whether the two jump-to-end buttons show (a
+   * `display` value). The face is a control's, and OPAQUE: a transparent one
+   * made the buttons look like whatever panel they happened to sit on, so the
+   * same strip read differently in every window. */
+  --tab-scroll-bg: #293040;
   --tab-scroll-bg-hover: #475775;
   --tab-scroll-bg-pressed: #1a1f2b;
   --tab-scroll-arrow: #e6ebf5;
@@ -128,6 +134,8 @@
   /* Held down, a title-bar button darkens the body under it where the resting
    * one lightens it — translucent for the same reason. */
   --glyph-button-bg-pressed: #00000040;
+  --floater-glyph: #e6ebf5;
+  --floater-grip: #9ea8bd;
   --trackball-sun: #ffd959;
   --trackball-moon: #d1dbf2;
   --trackball-marker-outline: #10121a;
@@ -261,6 +269,8 @@
 
   /* The same, under the pointer. */
   --inline-item-bg-hover: #475c85d9;
+  --inline-item-text: #85adf2;
+  --inline-item-text-readonly: #85adf2;
   --surface-radius: 6px;
   --control-radius: 4px;
 }

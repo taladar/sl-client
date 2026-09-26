@@ -617,7 +617,7 @@ fn build_body_model(
         *ordinal = ordinal.saturating_add(1);
         let object = previous.remove(&key).unwrap_or_else(|| {
             let object = spawn_rich_text_object(commands, overlay);
-            spawn_embedded_item_box(commands, object, item, source, style);
+            spawn_embedded_item_box(commands, object, item, source, style, read_only);
             object
         });
         kept.insert(key, object);

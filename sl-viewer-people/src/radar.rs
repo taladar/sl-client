@@ -39,8 +39,9 @@
 //! are `viewer-avatar-moderation-actions`, and light up in the pie, here and
 //! the minimap at once when that shared layer lands.
 
-use crate::skin::{set_state_class, text_role};
+use crate::skin::{ACTION_BUTTON_CLASS, TEXT_CLASS, set_state_class, text_role};
 use crate::skin_palette::SkinPalette;
+use crate::ui_spawn::{self, ButtonSpec, UiLabel};
 use bevy::ecs::system::SystemParam;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
@@ -1186,30 +1187,27 @@ fn spawn_radar_action_button(
     font_size: f32,
     action: fn(AgentKey) -> RadarButtonAction,
 ) {
+    // The shared flat action button, as the People and Groups columns use: its
+    // `.sk-action-button` class is what lets a skin dress it — this used to be
+    // a hand-painted box no stylesheet could reach, and stayed a flat rectangle
+    // in a skin whose buttons are bevelled.
+    let spawned = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::flat(UiLabel::key(label_key), "radar-action")
+            .colors(ACTION_BACKGROUND, ACTION_BACKGROUND)
+            .label_color(LABEL_COLOR)
+            .class(ACTION_BUTTON_CLASS)
+            .label_class(TEXT_CLASS)
+            .font_size(font_size),
+    );
+    commands.entity(spawned.label).insert(Pickable::IGNORE);
     commands
-        .spawn((
-            Node {
-                flex_shrink: 0.0,
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            BackgroundColor(ACTION_BACKGROUND),
-            Pickable {
-                should_block_lower: true,
-                is_hoverable: true,
-            },
-            Name::new("radar-action"),
-            ChildOf(parent),
-        ))
-        .with_child((
-            Text::new(String::new()),
-            UiFont::Sans.at(font_size),
-            text_role(LABEL_COLOR),
-            Translated::new(label_key),
-            Pickable::IGNORE,
-        ))
+        .entity(spawned.button)
+        .insert(Pickable {
+            should_block_lower: true,
+            is_hoverable: true,
+        })
         .observe(
             // Each optional so a press in a host with no radar state (the
             // gallery's specimen) is a no-op rather than a failed observer.

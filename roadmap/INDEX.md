@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 118 |
-| ready | 303 |
+| ready | 302 |
 | blocked | 62 |
 | in-progress | 25 |
-| bugs | 11 |
-| done | 1238 |
+| bugs | 13 |
+| done | 1239 |
 | deferred | 30 |
 | wont-do | 16 |
-| **total** | **1803** |
+| **total** | **1805** |
 
 ## ideas (118)
 
@@ -294,7 +294,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (303)
+## ready (302)
 
 ### protocol
 
@@ -948,9 +948,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-world-map-floater` (done))
 - [`viewer-viewer-effect-render`](ready/viewer-viewer-effect-render.md) — Render
   inbound ViewerEffects (beams, spheres)
-- [`viewer-vintage-skin`](ready/viewer-vintage-skin.md) — Ship a Vintage-alike
-  skin (blocked by `viewer-skin-light-surface-roles` (done),
-  `viewer-skin-image-backed-widgets` (done))
 - [`viewer-vintage-ui-chrome-crosscheck`](ready/viewer-vintage-ui-chrome-crosscheck.md)
   — Measure skin fidelity instead of arguing about it
 - [`viewer-voice-audio`](ready/viewer-voice-audio.md) — Voice audio transport
@@ -1279,7 +1276,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (11)
+## bugs (13)
 
 ### protocol
 
@@ -1302,10 +1299,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A nearby avatar stays a coarse sphere even as the camera closes in
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
+- [`viewer-parcel-audio-bar-backing-unskinned`](bugs/viewer-parcel-audio-bar-backing-unskinned.md)
+  — The parcel audio bar's backing is a colour no skin can reach
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 - [`viewer-sliders-show-no-value`](bugs/viewer-sliders-show-no-value.md) — A
   slider shows no value, and no bounds or step either
+- [`viewer-vintage-radar-range-colours`](bugs/viewer-vintage-radar-range-colours.md)
+  — The radar's range column is unreadable on a light list
 
 ### test
 
@@ -1315,7 +1316,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1238)
+## done (1239)
 
 ### protocol
 
@@ -3253,6 +3254,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — An item the viewer just uploaded is not in its own inventory
 - [`viewer-url-linkification`](done/viewer-url-linkification.md) — URLs in chat
   & other text contexts (blocked by `viewer-ui-text-foundation` (done))
+- [`viewer-vintage-skin`](done/viewer-vintage-skin.md) — Ship a Vintage-alike
+  skin (blocked by `viewer-skin-light-surface-roles` (done),
+  `viewer-skin-image-backed-widgets` (done))
 - [`viewer-void-water-diagonal-takes-corner-height`](done/viewer-void-water-diagonal-takes-corner-height.md)
   — Void water on a block's diagonal takes the corner region's sea level
 - [`viewer-volume-panel`](done/viewer-volume-panel.md) — Volume panel (master +
