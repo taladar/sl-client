@@ -118,7 +118,8 @@ use bevy_flair::style::components::ClassList;
 
 use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::skin::{
-    FLOATER_BUTTON_CLASS, FRONTMOST_CLASS, FRONTMOST_TEXT_CLASS, set_state_class_on,
+    FLOATER_BUTTON_CLASS, FRONTMOST_CLASS, FRONTMOST_TEXT_CLASS, set_state_class,
+    set_state_class_on, text_role,
 };
 use sl_viewer_ui_core::skin_palette::{SkinColors, SkinPalette};
 use sl_viewer_ui_core::ui::{
@@ -2495,12 +2496,25 @@ pub fn spawn_floater_specimen(commands: &mut Commands, parent: Entity, cx: Eleme
             dockable: true,
         },
     );
+    // Dressed as the front-most window, the look a skin author most needs to
+    // see: `highlight_active_floater` gives it to the active floater only, and
+    // this specimen is no floater. Every other window in the gallery shows the
+    // resting look.
+    for (part, class) in [
+        (parts.title_bar, FRONTMOST_CLASS),
+        (parts.title_text, FRONTMOST_TEXT_CLASS),
+    ] {
+        commands
+            .entity(part)
+            .entry::<ClassList>()
+            .and_modify(move |mut classes| set_state_class(&mut classes, class, true));
+    }
     // A line of content in the slot, so the specimen shows the window around real
     // text rather than an empty frame.
     commands.spawn((
         Text::new(cx.text("A floating window, sized to its content.")),
         cx.font(UiFont::Sans),
-        TextColor(Color::srgb(0.86, 0.89, 0.95)),
+        text_role(SkinPalette::default().text_primary),
         Node {
             max_width: Val::Px(360.0),
             ..default()

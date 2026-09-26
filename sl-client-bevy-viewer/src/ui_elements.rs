@@ -148,13 +148,6 @@ pub const ELEMENTS: &[UiElement] = &[
         spawn: crate::pie_menu::spawn_radial_menu_target,
     },
     UiElement {
-        id: "inventory-row",
-        summary: "An inventory tree row: indent, expand arrow, type icon and label — an expanded \
-                  folder over an indented item. The live window (`crate::inventory`) recycles \
-                  this row through the virtualized list; here it is static so its layout is swept.",
-        spawn: crate::inventory::spawn_inventory_row_sample,
-    },
-    UiElement {
         id: "list-row-states",
         summary: "A scroll list's row states on the list's own face: an ordinary row, a striped \
                   one, and the selection over each. The widget paints none of them — \
@@ -166,8 +159,9 @@ pub const ELEMENTS: &[UiElement] = &[
     UiElement {
         id: "floater",
         summary: "A floating window's chrome: a title bar with dock / minimize / close buttons, a \
-                  content slot, and a resize grip. The live manager (`crate::floater`) makes it \
-                  draggable and dockable; here it is static so its layout is swept.",
+                  content slot, and a resize grip, dressed as the front-most window. The live \
+                  manager (`crate::floater`) makes it draggable and dockable; here it is static \
+                  so its layout is swept.",
         spawn: crate::floater::spawn_floater_specimen,
     },
     UiElement {
@@ -276,9 +270,10 @@ pub const ELEMENTS: &[UiElement] = &[
     UiElement {
         id: "bottom-toolbar",
         summary: "The persistent bottom toolbar (`crate::bottom_toolbar`): a row of floater-toggle \
-                  buttons in an enabled, an active (lit) and a disabled placeholder state. The live \
-                  bar (bottom-anchored, wrapping upward) toggles the main floaters; here it is \
-                  static so all three button states' layouts are swept.",
+                  buttons in an enabled, an active (lit) and a disabled placeholder state, and \
+                  Conversations pulsing for attention. The live bar (bottom-anchored, wrapping \
+                  upward) toggles the main floaters; here it is static so every button state's \
+                  layout is swept.",
         spawn: crate::bottom_toolbar::spawn_bottom_toolbar_specimen,
     },
     UiElement {

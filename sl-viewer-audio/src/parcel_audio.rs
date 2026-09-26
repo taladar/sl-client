@@ -60,7 +60,7 @@ use sl_client_bevy::SlAgentParcel;
 use sl_gst::{AudioStreamPlayer, AudioStreamState, ValidatedMediaUrl};
 use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::skin::{
-    ACTION_BUTTON_CLASS, DISABLED_TEXT_CLASS, TEXT_CLASS, role_class, set_state_class_on, text_role,
+    ACTION_BUTTON_CLASS, DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class_on, text_role,
 };
 
 use crate::media_audio::MixerStream;
@@ -107,8 +107,6 @@ const SLIDER: SliderStyle = SliderStyle {
 
 /// The cluster's backdrop (matches the toolbar's dark surface).
 const BAR_BACKGROUND: Color = Color::srgba(0.08, 0.09, 0.12, 0.92);
-/// The bar's label — the primary role.
-const BAR_LABEL: Color = SkinPalette::FALLBACK.text_primary;
 /// The bar's quieter second line — the muted role.
 const BAR_LABEL_DIM: Color = SkinPalette::FALLBACK.text_muted;
 /// Button borders.
@@ -361,6 +359,24 @@ pub(crate) fn spawn_parcel_audio_bar(
     let Some(area) = area else {
         return;
     };
+    let (_wrapper, ui) =
+        spawn_parcel_audio_cluster(&mut commands, area.upper_trailing, BAR_FONT_SIZE, 0.0);
+    commands.insert_resource(ui);
+    *spawned = true;
+}
+
+/// Build the cluster under `parent` at `font_size` — the ♫ marker, the clipped
+/// now-playing title, the play and mute buttons and the music-bus volume slider
+/// resting at `volume` — and return its outermost node and its [`ParcelAudioUi`].
+///
+/// The one builder both the live bar and the gallery specimen use, so the
+/// specimen cannot drift from what the viewer puts on screen.
+fn spawn_parcel_audio_cluster(
+    commands: &mut Commands,
+    parent: Entity,
+    font_size: f32,
+    volume: f32,
+) -> (Entity, ParcelAudioUi) {
     // Sit at the trailing edge of the upper row's trailing half (which already
     // right-aligns its children), content-width so it packs beside any sibling
     // cluster the slot hosts (the quick-prefs button) rather than spanning the
@@ -378,7 +394,7 @@ pub(crate) fn spawn_parcel_audio_bar(
                 is_hoverable: true,
             },
             Name::new("parcel-audio-bar"),
-            ChildOf(area.upper_trailing),
+            ChildOf(parent),
         ))
         .id();
     let cluster = commands
@@ -398,7 +414,7 @@ pub(crate) fn spawn_parcel_audio_bar(
         .id();
     let marker = commands
         .spawn((
-            glyph::glyph_host(glyph::MUSIC, UiFont::Sans.at(BAR_FONT_SIZE), [TEXT_CLASS]),
+            glyph::glyph_host(glyph::MUSIC, UiFont::Sans.at(font_size), [TEXT_CLASS]),
             ChildOf(cluster),
         ))
         .id();
@@ -409,28 +425,32 @@ pub(crate) fn spawn_parcel_audio_bar(
                 overflow: Overflow::clip(),
                 ..row(Val::ZERO)
             },
+            crate::ui_element::TextMayClip {
+                reason: "the now-playing title is unbounded stream metadata; the cluster caps \
+                         its width and clips the tail",
+            },
             ChildOf(cluster),
         ))
         .id();
     let title = commands
         .spawn((
             Text::default(),
-            UiFont::Sans.at(BAR_FONT_SIZE),
+            UiFont::Sans.at(font_size),
             text_role(BAR_LABEL_DIM),
             Pickable::IGNORE,
             ChildOf(title_clip),
         ))
         .id();
     let (play_button, play_label) =
-        spawn_glyph_button(&mut commands, cluster, glyph::PLAY_STOP, "play-stop", 20);
+        spawn_glyph_button(commands, cluster, glyph::PLAY_STOP, "play-stop", 20);
     let (mute_button, mute_label) =
-        spawn_glyph_button(&mut commands, cluster, glyph::SPEAKER, "mute-toggle", 21);
+        spawn_glyph_button(commands, cluster, glyph::SPEAKER, "mute-toggle", 21);
     spawn_slider(
-        &mut commands,
+        commands,
         cluster,
         SLIDER,
         22,
-        0.0,
+        volume,
         (
             bound_slider(
                 // The inline stream volume *is* the music bus (the volume
@@ -442,15 +462,17 @@ pub(crate) fn spawn_parcel_audio_bar(
             Name::new("parcel-audio-volume"),
         ),
     );
-    commands.insert_resource(ParcelAudioUi {
-        marker,
-        play_label,
-        play_button,
-        mute_label,
-        mute_button,
-        title,
-    });
-    *spawned = true;
+    (
+        wrapper,
+        ParcelAudioUi {
+            marker,
+            play_label,
+            play_button,
+            mute_label,
+            mute_button,
+            title,
+        },
+    )
 }
 
 /// One glyph button on the cluster; returns `(button, label)` entities.
@@ -712,71 +734,24 @@ fn sync_parcel_audio_ui(
     }
 }
 
-/// The gallery specimen: the cluster's resting layout — a sample now-playing
-/// title, the play and mute buttons and the volume slider at half — static,
-/// so the bar is swept across scripts / sizes / directions like every
-/// element ([`crate::ui_element`]).
+/// The gallery specimen: the live cluster, built by the same
+/// `spawn_parcel_audio_cluster` the bar is, with a sample now-playing title
+/// and the volume slider at half, so the bar is swept across scripts / sizes /
+/// directions like every element ([`crate::ui_element`]).
+///
+/// Its buttons answer a click and its slider a drag the way the bar's do. The
+/// buttons' actions go nowhere in the gallery; the slider is bound to the music
+/// bus the live one is, and moves under the gallery's settings binding.
 pub fn spawn_parcel_audio_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: ElementCx,
 ) -> Entity {
-    let cluster = commands
-        .spawn((
-            Node {
-                align_items: AlignItems::Center,
-                padding: UiRect::axes(Val::Px(6.0), Val::Px(3.0)),
-                ..row(Val::Px(6.0))
-            },
-            BackgroundColor(BAR_BACKGROUND),
-            Name::new("parcel-audio-bar"),
-            ChildOf(parent),
-        ))
-        .id();
-    commands.spawn((
-        glyph::glyph_host(glyph::MUSIC, cx.font(UiFont::Sans), role_class(BAR_LABEL)),
-        TextColor(BAR_LABEL),
-        ChildOf(cluster),
-    ));
-    let title_clip = commands
-        .spawn((
-            Node {
-                max_width: Val::Px(TITLE_MAX_WIDTH),
-                overflow: Overflow::clip(),
-                ..row(Val::ZERO)
-            },
-            crate::ui_element::TextMayClip {
-                reason: "the now-playing title is unbounded stream metadata; the cluster caps \
-                         its width and clips the tail",
-            },
-            ChildOf(cluster),
-        ))
-        .id();
-    commands.spawn((
-        Text::new(cx.text("Now playing: Synthwave FM")),
-        cx.font(UiFont::Sans),
-        text_role(BAR_LABEL_DIM),
-        ChildOf(title_clip),
-    ));
-    // The live bar's own buttons and slider, so the specimen answers a click
-    // and a drag the way the bar does. The buttons' actions go nowhere in the
-    // gallery; the slider is bound to the music bus the live one is, and
-    // moves under the gallery's settings binding.
-    let _play = spawn_glyph_button(commands, cluster, glyph::PLAY_STOP, "play-stop", 20);
-    let _mute = spawn_glyph_button(commands, cluster, glyph::SPEAKER, "mute-toggle", 21);
-    spawn_slider(
-        commands,
-        cluster,
-        SLIDER,
-        22,
-        0.5,
-        bound_slider(
-            SettingBinding::global(bus_volume_setting(Bus::Music)),
-            SliderRange::new(0.0, 1.0),
-            SliderStep(0.05),
-        ),
-    );
-    cluster
+    let (wrapper, ui) = spawn_parcel_audio_cluster(commands, parent, cx.font_size, 0.5);
+    commands
+        .entity(ui.title)
+        .insert(Text::new(cx.text("Now playing: Synthwave FM")));
+    wrapper
 }
 
 #[cfg(test)]

@@ -779,7 +779,9 @@ fn update_toolbar_button_states(
 
 /// Spawn a **static** bottom-toolbar specimen for the gallery / harness: the bar
 /// strip with an enabled, an active (lit) and a disabled button, so all three
-/// button states' layouts are swept across every script, size and direction.
+/// button states' layouts are swept across every script, size and direction, and
+/// a Conversations button asking for attention (`.sk-attention`, the pulse
+/// `update_toolbar_button_states` gives it while an unread session waits).
 ///
 /// In flow (not the live bar's absolute placement) so the harness measures it like
 /// any other card, and with its labels drawn from the swept sample rather than a
@@ -802,22 +804,39 @@ pub(crate) fn spawn_bottom_toolbar_specimen(
             },
             BackgroundColor(BAR_BACKGROUND),
             ClassList::new_with_classes([BAR_CLASS]),
+            Pickable {
+                should_block_lower: true,
+                is_hoverable: true,
+            },
             Name::new("bottom-toolbar"),
             ChildOf(parent),
         ))
         .id();
-    for (index, (label, action, visual)) in [
+    for (index, (label, action, visual, attention)) in [
         (
             "Inventory",
             "toggle-inventory",
             ToolbarButtonVisual::Enabled,
+            false,
         ),
         (
             "Appearance",
             "toggle-appearance",
             ToolbarButtonVisual::Active,
+            false,
         ),
-        ("Camera", "toggle-camera", ToolbarButtonVisual::Disabled),
+        (
+            "Camera",
+            "toggle-camera",
+            ToolbarButtonVisual::Disabled,
+            false,
+        ),
+        (
+            "Conversations",
+            "toggle-conversations",
+            ToolbarButtonVisual::Enabled,
+            true,
+        ),
     ]
     .into_iter()
     .enumerate()
@@ -826,6 +845,12 @@ pub(crate) fn spawn_bottom_toolbar_specimen(
         commands
             .entity(label_node)
             .insert(Text::new(cx.text(label)));
+        if attention {
+            commands
+                .entity(button)
+                .entry::<ClassList>()
+                .and_modify(|mut classes| set_state_class(&mut classes, ATTENTION_CLASS, true));
+        }
         // Only the interactive states carry the press wiring, mirroring the live
         // bar (a disabled placeholder is not a `Button`).
         if visual != ToolbarButtonVisual::Disabled {

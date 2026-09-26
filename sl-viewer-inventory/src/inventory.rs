@@ -57,7 +57,7 @@ use crate::floater::{
 };
 use crate::i18n::Translated;
 use crate::menu::{MenuCommand, MenuConditions, MenuDef, MenuItemDef};
-use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, row};
 use crate::ui_element::{ContentMayOverflow, ElementCx, TextMayClip, UiAction};
 use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonSpec, UiLabel};
@@ -3152,11 +3152,9 @@ fn amend_tree_row_node(commands: &mut Commands, row_entity: Entity, font_size: f
 /// of `row_entity`, and hand back the [`RowParts`] naming them.
 ///
 /// Split out of [`populate_new_rows`] so the row's **live** structure is
-/// reachable from a headless layout test: the registry sample
-/// ([`spawn_inventory_row_sample`]) deliberately differs from it (content-sized
-/// columns, a minimum rather than fixed height) to survive the element sweep's
-/// font and pseudolocale axes, so sweeping the sample says nothing about how a
-/// real row behaves as the panel narrows.
+/// reachable from a headless layout test and from the gallery specimen
+/// ([`spawn_inventory_specimen`]), which dresses its rows through
+/// [`dress_tree_row`] rather than a copy of it.
 ///
 /// # What may and may not shrink
 ///
@@ -4051,138 +4049,6 @@ fn spawn_toolbar_button(
         .font_size(font_size),
     )
     .button
-}
-
-// ---------------------------------------------------------------------------
-// Registry sample
-// ---------------------------------------------------------------------------
-
-/// Spawn a static sample of the inventory row layout for the UI harness /
-/// gallery: an expanded folder row and an indented item row, so the row's layout
-/// is swept across every script, size and direction like every other element.
-///
-/// Static by construction (no live model, no recycling), which is what lets the
-/// registry check it — the live window is driven by resources, like the `F`-key
-/// demos, and so is deliberately not registered.
-pub fn spawn_inventory_row_sample(
-    commands: &mut Commands,
-    parent: Entity,
-    cx: crate::ui_element::ElementCx,
-) -> Entity {
-    let list = commands
-        .spawn((
-            Node {
-                width: Val::Px(PANEL_WIDTH),
-                ..column(Val::Px(2.0))
-            },
-            Name::new("inventory-row"),
-            ChildOf(parent),
-        ))
-        .id();
-    spawn_sample_row(
-        commands,
-        list,
-        cx,
-        SampleRow {
-            depth: 0,
-            arrow: RowArrow::Expanded,
-            icon: folder_icon(FolderType::Clothing, true),
-            label: "Clothing",
-            suffix: "",
-        },
-    );
-    spawn_sample_row(
-        commands,
-        list,
-        cx,
-        SampleRow {
-            depth: 1,
-            arrow: RowArrow::Leaf,
-            icon: item_icon(InventoryType::Wearable),
-            label: "A shirt",
-            suffix: "(no copy) (worn)",
-        },
-    );
-    list
-}
-
-/// One static sample row's look — the live row's parts, minus the live data.
-#[derive(Debug, Clone, Copy)]
-struct SampleRow<'a> {
-    /// How far the row is indented.
-    depth: usize,
-    /// Its expand arrow (or none, for a leaf).
-    arrow: RowArrow,
-    /// Its type icon.
-    icon: &'a str,
-    /// Its label.
-    label: &'a str,
-    /// The decoration suffix, empty for none.
-    suffix: &'a str,
-}
-
-/// Spawn one static sample row (indent, arrow, icon, label, suffix) for the
-/// registry sample.
-fn spawn_sample_row(
-    commands: &mut Commands,
-    parent: Entity,
-    cx: crate::ui_element::ElementCx,
-    sample: SampleRow<'_>,
-) {
-    let SampleRow {
-        depth,
-        arrow,
-        icon,
-        label,
-        suffix,
-    } = sample;
-    let row_entity = commands
-        .spawn((
-            Node {
-                // A *minimum*, not the live rows' fixed height: the harness
-                // sweeps the sample across large fonts and long pseudolocale
-                // strings, where the wrapped label + suffix must be allowed to
-                // grow the row instead of escaping a fixed box.
-                min_height: Val::Px(ROW_HEIGHT),
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(4.0),
-                ..row(Val::Px(0.0))
-            },
-            ChildOf(parent),
-        ))
-        .id();
-    commands.spawn((
-        Node {
-            width: Val::Px(depth_indent(depth)),
-            ..default()
-        },
-        ChildOf(row_entity),
-    ));
-    // The sample sizes the arrow / icon to content (no fixed column) so it
-    // survives the harness's font-size sweep, where a fixed column narrower than
-    // a large emoji glyph would clip. The live rows (a fixed row font) keep the
-    // min-width columns that align the tree.
-    commands.spawn((arrow.host(cx.font(UiFont::Mono)), ChildOf(row_entity)));
-    commands.spawn((
-        Text::new(icon.to_owned()),
-        cx.font(UiFont::Sans),
-        text_role(LABEL_COLOR),
-        ChildOf(row_entity),
-    ));
-    commands.spawn((
-        Text::new(cx.text(label)),
-        cx.font(UiFont::Sans),
-        text_role(LABEL_COLOR),
-        ChildOf(row_entity),
-    ));
-    if !suffix.is_empty() {
-        commands.spawn((
-            Text::new(cx.text(suffix)),
-            cx.font(UiFont::Sans),
-            text_role(SUFFIX_COLOR),
-            ChildOf(row_entity),
-        ));
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -5729,14 +5595,13 @@ mod tests {
 mod row_layout_tests {
     //! How a **live** tree row behaves as the panel around it narrows.
     //!
-    //! The registry sample ([`super::spawn_inventory_row_sample`]) is swept by
-    //! the element matrix, but it is deliberately not the live row — it sizes
-    //! its columns to content and takes a minimum height rather than a fixed
-    //! one, so it survives the sweep's large-font and pseudolocale axes. That
-    //! is why both halves of `viewer-inventory-permission-suffix-layout` — a
-    //! row drifting left out of its own indentation, and a decoration flipping
+    //! The gallery's registry once swept a hand-made copy of this row rather
+    //! than the live one — content-sized columns, a minimum height — which is
+    //! why both halves of `viewer-inventory-permission-suffix-layout` — a row
+    //! drifting left out of its own indentation, and a decoration flipping
     //! between two states — went unseen: nothing measured the parts
-    //! [`super::spawn_row_parts`] actually spawns.
+    //! [`super::spawn_row_parts`] actually spawns. The window specimen now
+    //! dresses its rows through the live code, but at one width.
     //!
     //! These build that row directly, at the widths a user drags the inventory
     //! floater through.

@@ -39,7 +39,7 @@ use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{Command, PrimShape, SlCommand, Vector, pcode};
 
 use crate::coords::bevy_to_sl_vec;
-use crate::edit_tool::{LABEL_CLASS, VALUE_CLASS, spawn_row_label};
+use crate::edit_tool::{LABEL_CLASS, spawn_row_label};
 use crate::gizmos::{GizmoInteraction, on_gizmo_layer};
 use crate::i18n::Translated;
 use crate::objects::{ObjectCategory, ObjectSlMotion, SceneObject};
@@ -115,8 +115,6 @@ const REZ_MATCH_SLOP_Z: f32 = 5.0;
 struct PrimType {
     /// The Fluent key for the option's radio label.
     label_key: &'static str,
-    /// The literal name the gallery specimen shows (no Fluent bundle there).
-    gallery: &'static str,
     /// The `LL_PCODE_PATH_*` path curve byte.
     path_curve: u8,
     /// The `LL_PCODE_PROFILE_*` profile curve byte.
@@ -135,11 +133,10 @@ struct PrimType {
 
 /// The seven prim volume types, in the order they appear in the base radio (the
 /// reference's per-type create buttons). The one place the prim-type table
-/// lives, so the radio, the gallery specimen, and the placer agree.
+/// lives, so the radio and the placer agree.
 const PRIM_TYPES: [PrimType; 7] = [
     PrimType {
         label_key: "build-create-box",
-        gallery: "Box",
         path_curve: PATH_LINE,
         profile_curve: PROFILE_SQUARE,
         path_scale_x: TOP_FULL,
@@ -149,7 +146,6 @@ const PRIM_TYPES: [PrimType; 7] = [
     },
     PrimType {
         label_key: "build-create-cylinder",
-        gallery: "Cylinder",
         path_curve: PATH_LINE,
         profile_curve: PROFILE_CIRCLE,
         path_scale_x: TOP_FULL,
@@ -159,7 +155,6 @@ const PRIM_TYPES: [PrimType; 7] = [
     },
     PrimType {
         label_key: "build-create-prism",
-        gallery: "Prism",
         path_curve: PATH_LINE,
         profile_curve: PROFILE_SQUARE,
         // ratio(0, 1) + shear(-0.5, 0): the top collapses in X and leans over
@@ -171,7 +166,6 @@ const PRIM_TYPES: [PrimType; 7] = [
     },
     PrimType {
         label_key: "build-create-sphere",
-        gallery: "Sphere",
         path_curve: PATH_CIRCLE,
         profile_curve: PROFILE_CIRCLE_HALF,
         path_scale_x: TOP_FULL,
@@ -181,7 +175,6 @@ const PRIM_TYPES: [PrimType; 7] = [
     },
     PrimType {
         label_key: "build-create-torus",
-        gallery: "Torus",
         path_curve: PATH_CIRCLE,
         profile_curve: PROFILE_CIRCLE,
         path_scale_x: TOP_FULL,
@@ -191,7 +184,6 @@ const PRIM_TYPES: [PrimType; 7] = [
     },
     PrimType {
         label_key: "build-create-tube",
-        gallery: "Tube",
         path_curve: PATH_CIRCLE,
         profile_curve: PROFILE_SQUARE,
         path_scale_x: TOP_FULL,
@@ -201,7 +193,6 @@ const PRIM_TYPES: [PrimType; 7] = [
     },
     PrimType {
         label_key: "build-create-ring",
-        gallery: "Ring",
         path_curve: PATH_CIRCLE,
         profile_curve: PROFILE_EQUALTRI,
         path_scale_x: TOP_FULL,
@@ -1069,9 +1060,9 @@ fn near_build(position: &Vector, target: &Vector) -> bool {
         && (position.z - target.z).abs() < REZ_MATCH_SLOP_Z
 }
 
-/// Spawn the gallery specimen of the create panel: the base-type radio and a
-/// species combo, a static shape for the no-login gallery and the `ui_test`
-/// matrix.
+/// Spawn the gallery specimen of the create panel: the live panel, built by
+/// the same `spawn_create_panel` the Build window is, with the panel and the
+/// tree-species row shown as the Create tool with a tree picked shows them.
 pub fn spawn_create_panel_specimen(
     commands: &mut Commands,
     parent: Entity,
@@ -1087,67 +1078,9 @@ pub fn spawn_create_panel_specimen(
             ChildOf(parent),
         ))
         .id();
-    // The base-type radio, with literal (sampled) labels rather than Fluent keys.
-    let mut base_labels: Vec<String> = PRIM_TYPES
-        .iter()
-        .map(|prim| cx.text(prim.gallery))
-        .collect();
-    base_labels.push(cx.text("Tree"));
-    base_labels.push(cx.text("Grass"));
-    spawn_radio_group(
-        commands,
-        root,
-        &RadioSpec {
-            element: "build-create-base",
-            labels: &base_labels,
-            active: 0,
-            tab_index: 1,
-            font_size: cx.font_size,
-            layout: RadioLayout::Row,
-            translate_labels: false,
-        },
-    );
-    // A species row: a label and a combo of the tree species.
-    let species_row = commands
-        .spawn((
-            Node {
-                align_items: AlignItems::Center,
-                ..row(Val::Px(6.0))
-            },
-            ChildOf(root),
-        ))
-        .id();
-    commands.spawn((
-        Text::new(cx.text("Species")),
-        cx.font(UiFont::Sans),
-        TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
-        ClassList::new_with_classes([LABEL_CLASS]),
-        ChildOf(species_row),
-    ));
-    let labels: Vec<String> = TREE_SPECIES
-        .iter()
-        .map(|(_byte, name)| cx.text(name))
-        .collect();
-    spawn_combo(
-        commands,
-        species_row,
-        &ComboSpec {
-            element: "build-create-tree",
-            labels: &labels,
-            active: 0,
-            tab_index: 2,
-            font_size: cx.font_size,
-            translate_labels: false,
-        },
-    );
-    // A build hint line.
-    commands.spawn((
-        Text::new(cx.text("Click a surface to create.")),
-        cx.font(UiFont::Sans),
-        TextColor(Color::srgba(0.6, 0.6, 0.6, 1.0)),
-        ClassList::new_with_classes([VALUE_CLASS]),
-        ChildOf(root),
-    ));
+    let ui = spawn_create_panel(commands, root, cx.font_size);
+    commands.entity(ui.panel).insert(UiPanelShown(true));
+    commands.entity(ui.tree_row).insert(UiPanelShown(true));
     root
 }
 

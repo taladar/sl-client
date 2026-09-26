@@ -476,6 +476,33 @@ pub fn settle(app: &mut App) {
     app.update();
 }
 
+/// [`settle`], and then keep running while any box still moves — up to
+/// `max_frames` more frames.
+///
+/// For a tree whose after-layout passes **chain**: each reads the boxes layout
+/// just produced and writes what the next layout reads, so a chain of three
+/// needs a frame each. The one that exposed it: a list's scrollbar appears,
+/// which narrows its rows, which tips a cell's value into overflow, which
+/// reveals the cell's `…` — converged on the fourth frame from spawn, which
+/// [`stability_violations`] reported as a layout with no resting state.
+///
+/// Converging is what a panel does at open, invisibly; never converging is the
+/// bug [`stability_violations`] exists for, and this cannot hide one: a tree
+/// that is still moving after `max_frames` is handed back moving, and the check
+/// sees it move.
+pub fn settle_until_still(app: &mut App, max_frames: usize) {
+    settle(app);
+    let mut previous = laid_out_boxes(app);
+    for _frame in 0..max_frames {
+        app.update();
+        let current = laid_out_boxes(app);
+        if current == previous {
+            return;
+        }
+        previous = current;
+    }
+}
+
 /// How a node is named in a violation message: its [`Name`], if a fixture gave
 /// it one, else its entity id.
 fn describe(name: Option<&Name>, entity: Entity) -> String {

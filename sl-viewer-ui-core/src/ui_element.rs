@@ -64,6 +64,7 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui_widgets::Activate;
+use bevy_flair::style::components::ClassList;
 
 use crate::skin::text_role;
 use crate::skin_palette::SkinPalette;
@@ -447,6 +448,14 @@ const BUTTON_BACKGROUND: Color = Color::srgb(0.16, 0.19, 0.25);
 /// A panel's translucent backdrop.
 const PANEL_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.7);
 
+/// The text field's class (`ui_text_input`'s): the face every editable field in
+/// the viewer wears, so a specimen field wears it too.
+const FIELD_CLASS: &str = "sk-field";
+
+/// The build window's row-label class (`edit_tool`'s), which the field grid's
+/// labels stand in for.
+const BUILD_LABEL_CLASS: &str = "sk-build-label";
+
 /// A panel's widest allowed width, in logical pixels — a bound, never a size.
 const PANEL_MAX_WIDTH: f32 = 420.0;
 
@@ -639,7 +648,8 @@ pub fn spawn_field_grid(commands: &mut Commands, parent: Entity, cx: ElementCx) 
         commands.spawn((
             Text::new(cx.text(label)),
             cx.font(UiFont::Sans),
-            TextColor(Color::srgb(0.80, 0.85, 0.92)),
+            TextColor(Color::srgb(0.85, 0.85, 0.85)),
+            ClassList::new_with_classes([BUILD_LABEL_CLASS]),
             // The labels are a column too, and they must end flush against the
             // fields — the trailing edge, which under RTL is the left one. The
             // grid's single `auto` track is what makes that true in any language;
@@ -660,8 +670,9 @@ pub fn spawn_field_grid(commands: &mut Commands, parent: Entity, cx: ElementCx) 
                         border: UiRect::all(Val::Px(1.0)),
                         ..default()
                     },
-                    BorderColor::all(BUTTON_BORDER),
-                    BackgroundColor(Color::srgb(0.10, 0.12, 0.16)),
+                    BorderColor::all(SkinPalette::FALLBACK.control_border),
+                    BackgroundColor(SkinPalette::FALLBACK.field_bg),
+                    ClassList::new_with_classes([FIELD_CLASS]),
                     // The declaration: this column's fields share a leading edge,
                     // in every script, at every scale, however the row labels
                     // translate.
@@ -693,7 +704,9 @@ pub fn spawn_text_editor(commands: &mut Commands, parent: Entity, cx: ElementCx)
         .spawn((
             editor,
             cx.font(UiFont::Sans),
-            text_role(SkinPalette::FALLBACK.text_primary),
+            // No text role: like the live field's, the text colour is the
+            // field class's, which re-roots the field family's text.
+            TextColor(SkinPalette::FALLBACK.field_text),
             // The caret / selection style is installed by the shared
             // `install_caret_style` (R28) — no bare default here.
             // An editor showing three lines of a longer text clips the rest, and
@@ -714,8 +727,9 @@ pub fn spawn_text_editor(commands: &mut Commands, parent: Entity, cx: ElementCx)
                 padding: UiRect::all(Val::Px(6.0)),
                 ..default()
             },
-            BorderColor::all(BUTTON_BORDER),
-            BackgroundColor(Color::srgb(0.10, 0.12, 0.16)),
+            BorderColor::all(SkinPalette::FALLBACK.control_border),
+            BackgroundColor(SkinPalette::FALLBACK.field_bg),
+            ClassList::new_with_classes([FIELD_CLASS]),
             Name::new("text-editor"),
             ChildOf(parent),
         ))

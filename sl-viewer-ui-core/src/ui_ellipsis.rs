@@ -29,10 +29,20 @@
 //!
 //! It is also why the marker's leading gap is `padding` and not the `margin` the
 //! three copies used: padding is inside the border box that layout reports as
-//! the node's `size`, so "whatever the marker occupies" is one physical number
-//! to read rather than a physical size plus a logical margin to scale and add.
-//! As a [`LogicalPadding`] it mirrors under a right-to-left locale as well,
-//! which the physical `margin: left` never did.
+//! the node's `size`. As a [`LogicalPadding`] it mirrors under a right-to-left
+//! locale as well, which the physical `margin: left` never did.
+//!
+//! # "Whatever the marker occupies" is what the clip gave up
+//!
+//! Not the marker's own width. The container the two sit in may put a
+//! `column_gap` between them — a table cell does, and so does an inventory row
+//! — and showing the marker then costs the clip the marker **and** the gap.
+//! Counting the marker alone leaves a band as wide as the gap in which the
+//! value fits while the marker is hidden and overflows while it is shown — the
+//! latch above, back again, only narrower: whichever state such a value is
+//! first drawn in, it keeps. [`marker_occupies`] therefore reads the span the clip and the marker cover
+//! together, less the clip: the room the clip would get back were the marker
+//! hidden, gap, padding and all, on whichever side the direction puts it.
 
 use bevy::prelude::*;
 
@@ -78,6 +88,29 @@ pub struct RevealEllipsis {
 #[must_use]
 pub fn ellipsis_wanted(natural: f32, laid_out: f32, marker: f32) -> bool {
     natural > laid_out + marker + OVERFLOW_TOLERANCE
+}
+
+/// The width a shown marker takes from the clip beside it, in physical pixels:
+/// the inline span the clip and the marker cover together, less the clip's own
+/// width. Each is `(centre, width)` along the inline axis.
+///
+/// That is the marker's border box plus any gap its container puts between the
+/// two, on either side — so it is the room the clip gets back when the marker
+/// hides, which is what [`ellipsis_wanted`] needs. See the [module
+/// documentation](self).
+#[must_use]
+pub fn marker_occupies(clip: (f32, f32), marker: (f32, f32)) -> f32 {
+    let ((clip_centre, clip_width), (marker_centre, marker_width)) = (clip, marker);
+    let (clip_start, clip_end) = (
+        clip_centre - clip_width / 2.0,
+        clip_centre + clip_width / 2.0,
+    );
+    let (marker_start, marker_end) = (
+        marker_centre - marker_width / 2.0,
+        marker_centre + marker_width / 2.0,
+    );
+    let span = clip_end.max(marker_end) - clip_start.min(marker_start);
+    (span - clip_width).max(0.0)
 }
 
 /// Spawn a hidden trailing `…` marker as a child of `parent`, to be named by a
@@ -135,11 +168,13 @@ pub fn spawn_ellipsis_marker(
 /// RTL) both come from the container's flow, which `apply_ui_direction` mirrors,
 /// so this system is direction-agnostic.
 pub fn apply_reveal_ellipsis(
-    clipped: Query<(&ComputedNode, &RevealEllipsis)>,
-    mut markers: Query<(&ComputedNode, &mut Node), With<LocaleEllipsisMarker>>,
+    clipped: Query<(&ComputedNode, &UiGlobalTransform, &RevealEllipsis)>,
+    mut markers: Query<(&ComputedNode, &UiGlobalTransform, &mut Node), With<LocaleEllipsisMarker>>,
 ) {
-    for (computed, reveal) in &clipped {
-        let Ok((marker_computed, mut marker_node)) = markers.get_mut(reveal.marker) else {
+    for (computed, transform, reveal) in &clipped {
+        let Ok((marker_computed, marker_transform, mut marker_node)) =
+            markers.get_mut(reveal.marker)
+        else {
             continue;
         };
         // A hidden node has no layout, so its `size` is zero either way; read the
@@ -147,7 +182,10 @@ pub fn apply_reveal_ellipsis(
         let occupied = if marker_node.display == Display::None {
             0.0
         } else {
-            marker_computed.size.x
+            marker_occupies(
+                (transform.translation.x, computed.size.x),
+                (marker_transform.translation.x, marker_computed.size.x),
+            )
         };
         let wanted = if ellipsis_wanted(computed.content_size.x, computed.size.x, occupied) {
             Display::Flex
@@ -162,7 +200,37 @@ pub fn apply_reveal_ellipsis(
 
 #[cfg(test)]
 mod tests {
-    use super::{OVERFLOW_TOLERANCE, ellipsis_wanted};
+    use super::{OVERFLOW_TOLERANCE, ellipsis_wanted, marker_occupies};
+
+    /// A marker behind a container gap takes the gap from the clip as well as
+    /// its own width, and the answer does not depend on which side it sits.
+    #[test]
+    fn a_marker_occupies_its_width_and_the_gap_before_it() {
+        // A 100 px clip at 0..100, a 4 px gap, a 14 px marker at 104..118.
+        let (clip, marker) = ((50.0, 100.0), (111.0, 14.0));
+        assert!((marker_occupies(clip, marker) - 18.0).abs() < 1e-4);
+        // The same, mirrored: the marker leads, at -18..-4.
+        let mirrored = (-11.0, 14.0);
+        assert!((marker_occupies(clip, mirrored) - 18.0).abs() < 1e-4);
+    }
+
+    /// The band the gap used to leave: 375 px of value beside a 14 px marker
+    /// behind a 4 px gap, in a cell giving the clip 377 px. Hidden, it fits;
+    /// shown, counting the marker alone put it at 359 + 14 = 373 and called it
+    /// truncated, so a shown marker stayed shown. Counting what the clip gave
+    /// up answers "fits" in both states.
+    #[test]
+    fn a_value_in_the_gap_wide_band_fits_in_both_states() {
+        let natural = 375.0;
+        assert!(!ellipsis_wanted(natural, 377.0, 0.0), "hidden: it fits");
+        let shown_clip = (359.0 / 2.0, 359.0);
+        let marker = (359.0 + 4.0 + 7.0, 14.0);
+        let occupied = marker_occupies(shown_clip, marker);
+        assert!(
+            !ellipsis_wanted(natural, 359.0, occupied),
+            "shown: the clip would get {occupied} px back, so it fits"
+        );
+    }
 
     /// The band the old per-widget test latched in: a value that fits the box
     /// *without* the marker, but not with it. The answer must be the same

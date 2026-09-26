@@ -240,6 +240,7 @@ use bevy::window::{PrimaryWindow, WindowFocused};
 
 use bevy_flair::style::components::ClassList;
 use sl_viewer_ui_core::i18n::Translator;
+use sl_viewer_ui_core::skin::text_role;
 use sl_viewer_ui_core::skin_palette::{SkinColors, SkinPalette};
 use sl_viewer_ui_core::ui::{UiRoot, column};
 use sl_viewer_ui_core::ui_element::{ElementCx, RadialCentre, RadialPlacement, UiAction};
@@ -2209,7 +2210,7 @@ pub fn spawn_radial_menu_target(commands: &mut Commands, parent: Entity, cx: Ele
             target.spawn((
                 Text::new(cx.text(PIE_TARGET_LABEL)),
                 cx.font(UiFont::Sans),
-                TextColor(SkinPalette::default().text_primary),
+                text_role(SkinPalette::default().text_primary),
                 Name::new("radial-menu-target-text"),
             ));
             // The menu's **address table**, on screen: every function, and the
@@ -2228,7 +2229,10 @@ pub fn spawn_radial_menu_target(commands: &mut Commands, parent: Entity, cx: Ele
             target.spawn((
                 Text::new(address_table(&FIXTURE_PIE)),
                 cx.font(UiFont::Mono),
+                // The sub-pie caption's colour, and so its class: the skin
+                // that retunes the wheel's captions retunes the table too.
                 TextColor(SkinPalette::default().pie_label_sub_pie),
+                ClassList::new_with_classes([PieLabelRole::SubPie.class()]),
                 Name::new("radial-menu-target-addresses"),
             ));
         })

@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 118 |
-| ready | 304 |
+| ready | 303 |
 | blocked | 62 |
 | in-progress | 25 |
 | bugs | 11 |
-| done | 1237 |
+| done | 1238 |
 | deferred | 30 |
 | wont-do | 16 |
 | **total** | **1803** |
@@ -294,7 +294,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (304)
+## ready (303)
 
 ### protocol
 
@@ -362,8 +362,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — There is no restart-note idiom, so 'restart required' is baked into labels
 - [`viewer-audit-search-map-edge`](ready/viewer-audit-search-map-edge.md) —
   sl-viewer-search depends on sl-viewer-map for one two-field struct
-- [`viewer-audit-specimens-carry-widget-classes`](ready/viewer-audit-specimens-carry-widget-classes.md)
-  — A gallery specimen that hand-rolls its nodes shows none of the skin
 - [`viewer-audit-web-auth-preference`](ready/viewer-audit-web-auth-preference.md)
   — Whether the grid session cookie is injected into the browser is a CLI flag,
   not a preference
@@ -1317,7 +1315,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1237)
+## done (1238)
 
 ### protocol
 
@@ -1714,6 +1712,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   mouselook
 - [`viewer-audit-skin-token-coverage`](done/viewer-audit-skin-token-coverage.md)
   — The skin system covers two widgets
+- [`viewer-audit-specimens-carry-widget-classes`](done/viewer-audit-specimens-carry-widget-classes.md)
+  — A gallery specimen that hand-rolls its nodes shows none of the skin
 - [`viewer-audit-stale-globaltransform-readers`](done/viewer-audit-stale-globaltransform-readers.md)
   — Depth-reconstructing passes and the interest camera read a frame-old camera
   pose

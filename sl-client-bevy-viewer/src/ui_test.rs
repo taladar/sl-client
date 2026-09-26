@@ -15,8 +15,13 @@ pub(crate) use sl_viewer_testkit::*;
 mod tests {
     use super::{
         LayoutTest, TestError, activate, drain_actions, enable_action_recording, find_by_name,
-        layout_violations, overflow_violations, settle, spawn_element,
+        layout_violations, overflow_violations, settle, settle_until_still, spawn_element_into,
     };
+
+    /// How many frames past [`settle`] an element may take to come to rest —
+    /// a bound on a converging chain of after-layout passes, generous against
+    /// the one extra frame the deepest known one needs.
+    const ELEMENT_SETTLE_FRAMES: usize = 6;
     use crate::floater::{FloaterElement, register_floater_layout};
     use crate::floaters::FLOATERS;
     use crate::i18n::Translated;
@@ -27,6 +32,7 @@ mod tests {
     use bevy::input_focus::InputFocus;
     use bevy::input_focus::tab_navigation::NavAction;
     use bevy::prelude::*;
+    use bevy_flair::style::components::ClassList;
     use pretty_assertions::assert_eq;
 
     /// The UI font sizes the matrix sweeps.
@@ -451,6 +457,94 @@ mod tests {
         Ok(())
     }
 
+    /// The skin classes a specimen must carry because its live widget does:
+    /// `(element id, classes some node of its tree carries)`.
+    ///
+    /// A specimen that hand-rolls its nodes keeps the widget's geometry and
+    /// loses its classes, and then shows the skin author a shape in none of the
+    /// skin's colours — read as "the skin does not reach this widget", which is
+    /// a claim about the live one. Each row names what the live widget carries
+    /// at that place, including the *state* classes a runtime system adds (the
+    /// front-most title bar, the toolbar's attention pulse), which a static
+    /// specimen only shows if it dresses itself in them.
+    ///
+    /// Strings, not the crates' constants: the stylesheet names these classes by
+    /// their spelling, so the spelling is the contract. Classes the skin plugin
+    /// adds on its own (`.sk-text-field` on every `EditableText`, `.sk-focusable`
+    /// on every tab stop) are not listed: no specimen can drop them, and the
+    /// harness does not run the plugin that adds them.
+    const SPECIMEN_CLASSES: &[(&str, &[&str])] = &[
+        ("button", &["sk-button", "sk-text"]),
+        ("text-editor", &["sk-field"]),
+        ("text-input-line", &["sk-field"]),
+        ("field-grid", &["sk-field", "sk-build-label"]),
+        (
+            "build-create",
+            &["sk-radio-group", "sk-combo", "sk-build-label"],
+        ),
+        (
+            "list-row-states",
+            &["sk-list-surface", "sk-list-row", "sk-stripe", "sk-selected"],
+        ),
+        ("radial-menu-target", &["sk-text", "sk-pie-label-sub-pie"]),
+        (
+            "floater",
+            &[
+                "sk-floater",
+                "sk-floater-title-bar",
+                "sk-frontmost",
+                "sk-frontmost-text",
+            ],
+        ),
+        (
+            "bottom-toolbar",
+            &["sk-toolbar-bar", "sk-toolbar-button", "sk-attention"],
+        ),
+        ("checkbox-states", &["sk-checkbox", "sk-checkbox-box"]),
+        ("radio-group-row", &["sk-radio-group", "sk-radio"]),
+        ("combo-box", &["sk-combo"]),
+        ("notification-overflow", &["sk-button", "sk-glyph-cycle"]),
+        ("radar", &["sk-table-row"]),
+        ("worldmap", &["sk-list-row", "sk-selected"]),
+        ("experiences-floater", &["sk-table-row"]),
+        ("emoji-picker", &["sk-tile"]),
+        (
+            "parcel-audio-bar",
+            &["sk-action-button", "sk-glyph-music", "sk-text", "sk-slider"],
+        ),
+    ];
+
+    /// **Every specimen paints what its live widget paints**: each element in
+    /// [`SPECIMEN_CLASSES`] spawns a tree carrying every class listed for it.
+    ///
+    /// `viewer-audit-specimens-carry-widget-classes`: the emoji picker's cells,
+    /// the inventory row, the field grid and the text editor were all copies
+    /// that had dropped their class — the first found by someone looking at the
+    /// gallery and not at the viewer, the rest by an audit.
+    #[test]
+    fn every_specimen_carries_its_live_widgets_classes() -> Result<(), TestError> {
+        let mut findings = Vec::new();
+        for &(id, classes) in SPECIMEN_CLASSES {
+            let element = ELEMENTS
+                .iter()
+                .find(|element| element.id == id)
+                .ok_or_else(|| format!("`{id}` names no registered element"))?;
+            let mut app = spawn_element(LayoutTest::new(), element, ElementCx::new());
+            let mut query = app.world_mut().query::<&ClassList>();
+            let carried: Vec<&ClassList> = query.iter(app.world()).collect();
+            for &class in classes {
+                if !carried.iter().any(|list| list.contains(class)) {
+                    findings.push(format!("`{id}` carries no `.{class}`"));
+                }
+            }
+        }
+        assert!(
+            findings.is_empty(),
+            "a specimen has drifted from its live widget: {findings:#?}"
+        );
+        Ok(())
+    }
+
     // -----------------------------------------------------------------------
     // Behaviour. Not the resting state — what the element *does*.
     // -----------------------------------------------------------------------
@@ -541,6 +635,38 @@ mod tests {
     // -----------------------------------------------------------------------
     // The floater matrix. Every registered window, in every cell.
     // -----------------------------------------------------------------------
+
+    /// Build an app and spawn one registered **element** into it, settled — the
+    /// harness's `spawn_element`, with the two things a live widget's own
+    /// builder needs that a hand-written specimen did not.
+    ///
+    /// The **strings** ([`install_cell_strings`]): a specimen built by the live
+    /// builder labels through [`Translated`] keys, which without a table stay
+    /// the empty text they spawned with — and a builder that fills itself
+    /// through a `Translator` (the experiences list) fails parameter validation
+    /// and draws nothing at all. The sweep then measures a panel that ships in
+    /// no locale. And the **list widgets**
+    /// ([`crate::ui_contract::install_list_widgets`]), so a table specimen lays
+    /// its rows out as a live table does. Both are what
+    /// [`spawn_registered_floater`] already gives a window, since the same
+    /// builders stand behind both registries.
+    ///
+    /// Settled until still ([`settle_until_still`]) rather than for the bare two
+    /// frames, because a live table's passes chain: its scrollbar narrows its
+    /// rows, which reveals a cell's `…` a frame later (the Preferences alerts
+    /// list in a narrow window).
+    fn spawn_element(
+        test: LayoutTest,
+        element: &crate::ui_element::UiElement,
+        cx: ElementCx,
+    ) -> App {
+        let mut app = test.build();
+        crate::ui_contract::install_list_widgets(&mut app);
+        install_cell_strings(&mut app, cx);
+        spawn_element_into(&mut app, element, cx);
+        settle_until_still(&mut app, ELEMENT_SETTLE_FRAMES);
+        app
+    }
 
     /// Build an app and spawn one registered **floater** into it, settled.
     ///

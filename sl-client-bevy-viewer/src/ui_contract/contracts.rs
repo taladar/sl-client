@@ -393,6 +393,18 @@ pub(crate) const CONTRACTS: &[ElementContract] = &[
                 ],
             ),
             NodeContract::new(
+                "bottom-toolbar-button:toggle-conversations",
+                &[
+                    Row::emits(Gesture::PrimaryClick, &["toggle-conversations"]),
+                    Row::emits(
+                        Gesture::DoubleClick,
+                        &["toggle-conversations", "toggle-conversations"],
+                    ),
+                    Row::emits(Gesture::Enter, &["toggle-conversations"]),
+                    Row::emits(Gesture::Space, &["toggle-conversations"]),
+                ],
+            ),
+            NodeContract::new(
                 "bottom-toolbar-button:toggle-inventory",
                 &[
                     Row::emits(Gesture::PrimaryClick, &["toggle-inventory"]),
@@ -952,6 +964,7 @@ pub(crate) const CONTRACTS: &[ElementContract] = &[
                     Row::emits(Gesture::Space, &["play-stop"]),
                 ],
             ),
+            NodeContract::inert("parcel-audio-volume"),
         ],
     },
     ElementContract {
