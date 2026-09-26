@@ -8,9 +8,9 @@ how scripts share a tick, and what a library function looks like — and
 gives the reason for each, so that the lowering, the VM and the sixteen
 library tranches do not each decide them again.
 
-Nothing here is implemented yet. The crate this chapter describes is
-created by the first task that needs it (the value model), and its
-`README.md` points back here.
+The crate this chapter describes exists, and its `README.md` points back
+here; so far it holds the value model (below). The rest of the chapter is
+still design.
 
 ## 1. Where the code lives
 
@@ -50,13 +50,43 @@ LSL's rules come in two halves, and they belong in different crates.
   and what they produce, which implicit conversions exist, which casts are
   compile errors (`(key)integer`). This is needed by the semantic pass
   *and* by the lowering, so it lives in **`sl-lsl`** as a pure table over
-  `ast::TypeName`. Today the semantic pass's `expr_type` gives up on
-  arithmetic (`+ - * / %` are "operand-polymorphic … so it stays unknown")
-  precisely for want of this table; the lowering cannot give up, so it
-  needs the table complete.
+  `ast::TypeName` — `sl_lsl::types`, transcribed from tailslide's
+  `OPERATOR_RESULTS` and `LEGAL_CAST_TABLE`. The semantic pass's
+  `expr_type` used to give up on arithmetic for want of it; it now asks
+  the table whenever both operand types are known.
 - **What value** — `f32` rounding, 32-bit wrapping, the float and vector
   formatting, the cast matrix on actual values, list comparison by length.
   Only a running script needs this, so it lives in **`sl-lsl-runtime`**.
+
+A test in the runtime sweeps every operator and cast over one value of
+each type and checks the value half accepts exactly what the table accepts
+and produces the type the table states.
+
+The value half's oracle is LSL PyOptimizer — `lslbasefuncs.py` and the
+expected outputs of its `unit_tests/expr.suite`, which were measured
+against Second Life. Several of its answers correct what one would guess,
+and the first draft of the task guessed them:
+
+- **Float division by zero is a `Math Error`**, as integer division is (so
+  are `vector / 0.0` and a float quotient that is NaN, `inf / inf`).
+- **Every type is usable in a condition**: the zero vector,
+  `ZERO_ROTATION`, `""`, the empty list and a key that is `NULL_KEY` *or
+  not a UUID at all* are false.
+- **`(string)vector` prints five decimals**, `<1.00000, 2.00000,
+  3.00000>`; the same vector inside a list cast to a string prints six. A
+  float prints Mono's **seven significant digits** padded with zeros
+  (`(string)123456789.0` is `123456800.000000`).
+- **`list != list` is the length difference**, not a boolean; `string !=
+  string` is `0` or `1`.
+- **`a <= b` is `!(b < a)`**, so a NaN operand makes `<=` and `>=` true.
+- **`!`, `~`, `&&` and `||` take only integers**; `&&` and `||` evaluate
+  both operands (right to left, as every operator does).
+
+One known divergence remains, recorded in the test: Second Life composes
+`<3,5,7,17> * <.22,.26,.38,.86>` with a `y` of exactly `8.32`, while the
+formula PyOptimizer uses — each product rounded to `f32`, summed in
+double — gives `8.320001`, and no summation order tried reproduces
+Second Life's value.
 
 A rule is written once, in the half it belongs to. Operators on the
 `sl-types` vector and rotation are free functions in the runtime, never

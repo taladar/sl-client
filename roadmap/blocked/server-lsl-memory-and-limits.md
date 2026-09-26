@@ -5,7 +5,7 @@ topic: server
 status: blocked
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 5
-blocked_by: [server-lsl-vm-execution]
+blocked_by: [server-lsl-vm-execution, server-lsl-memory-sizes]
 refs: [server-lsl-runtime-errors, server-fake-grid-script-engine-wiring]
 ---
 
@@ -30,9 +30,11 @@ So the VM has to account memory even though it does not need to.
 - **What counts.** Globals, the call stack, and the heap — a string's
   bytes, a list's cells and its elements' bytes. The reference's exact
   per-value overheads are what make `llGetFreeMemory` return the number
-  content compares against; approximate them deliberately, document the
-  approximation, and pin it with a test rather than leaving it
-  accidental.
+  content compares against, so they must be **exact, not approximated**:
+  charge less than Second Life and a script runs out of memory later than
+  it would there; charge more and it runs out where it would not. The
+  costs are measured on aditi by [[server-lsl-memory-sizes]], which also
+  provides the cost function this task accounts with.
 - **Stack-heap collision** stops the script with the reference's
   message, and `llGetScriptState` then reports it.
 - **The region-level view.** `llGetObjectDetails`'s
@@ -46,8 +48,8 @@ So the VM has to account memory even though it does not need to.
   with no scripts. Keeping both is the point: a scenario may still state
   a cost for a prim it wants in the report.
 
-Acceptance: `llGetFreeMemory` falls as a list grows and rises when it is
-cleared; `llSetMemoryLimit` below current usage fails as the reference's
-does; a deliberate runaway allocation stops the script with a stack-heap
-collision rather than exhausting the host; and the top-scripts report
-lists a genuinely busy script above an idle one.
+Acceptance: `llGetFreeMemory` falls as a list grows, by exactly the
+aditi-measured amounts, and rises when it is cleared; `llSetMemoryLimit` below
+current usage fails as the reference's does; a deliberate runaway allocation
+stops the script with a stack-heap collision rather than exhausting the host;
+and the top-scripts report lists a genuinely busy script above an idle one.

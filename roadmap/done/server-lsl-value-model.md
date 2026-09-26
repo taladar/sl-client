@@ -2,7 +2,7 @@
 id: server-lsl-value-model
 title: The LSL value model — seven types and their exact coercions
 topic: server
-status: ready
+status: done
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 8
 refs: [server-lsl-compiler-ir, server-lsl-lib-strings-lists]
@@ -75,3 +75,42 @@ Acceptance: an `LslValue` type with the full cast matrix, the operator
 set, and boolean/comparison rules, each covered by a table-driven test
 whose expected values are quoted from one of the two oracles with the
 source named in a comment. No `Host`, no world, no I/O.
+
+## Done (2026-09-27)
+
+- **`sl-lsl::types`** — the compile-time table: `binary_result`,
+  `prefix_result`, `postfix_result`, `assign_result` (with the
+  `integer *= float` quirk), `cast_legal`, `implicitly_converts` and
+  `ALL_TYPES`. Transcribed from tailslide's `OPERATOR_RESULTS` /
+  `LEGAL_CAST_TABLE` / `COERCION_TABLE`, and the tests compare every
+  combination against that transcription. The semantic pass now types
+  arithmetic when both operand types are known, and its private
+  `compatible` became `implicitly_converts`. Two differential-corpus
+  scripts pin it (`valid/operator_result_types.lsl`,
+  `error/operator_result_mismatch.lsl`); the tailslide oracle agrees on
+  all 20 files with no false positives.
+- **`sl-lsl-runtime`** (new crate) — `Value` / flat `Element`,
+  `Value::is_true`, `cast`, `binary`, `prefix`, the `parse` and `format`
+  modules, `ValueError`. Every rule has a table-driven test quoting
+  PyOptimizer's `lslbasefuncs.py` or its `unit_tests/expr.suite`
+  (`casts`, `operators`, `operators-compare`, `math-error`,
+  `nan-fcast-vcast-minus0`), and a sweep checks the value half accepts
+  exactly what the table accepts and yields the type it states.
+
+Where the oracle corrected this task's text (SL wins, as the task says):
+
+- float division by zero **is** a run-time `Math Error` (as are
+  `vector / 0.0` and a NaN float quotient);
+- the zero vector and rotation **are** usable in a condition (they are
+  false), as is every other type;
+- `(string)vector` has **five** decimals (six only inside a list), and a
+  float prints seven significant digits, not plain `%.6f`;
+- `list != list` is the length difference, `string != string` is 0/1, and
+  `<=`/`>=` are `!(>)`/`!(<)`, so NaN makes them true.
+
+One divergence from Second Life is recorded, not fixed: SL composes
+`<3,5,7,17> * <.22,.26,.38,.86>` with `y == 8.32`, PyOptimizer's formula
+(followed here) gives `8.320001`, and no summation order tried reproduces
+SL. The short-circuit question is settled at the type level (`&&`/`||`
+are integer-only, both operands evaluated, right to left) and left to the
+lowering, which is where evaluation order lives.

@@ -23,6 +23,7 @@ members = [
   "sl-llsd",
   "sl-lsl",
   "sl-lsl-lsp",
+  "sl-lsl-runtime",
   "sl-marketplace",
   "sl-material",
   "sl-media",
@@ -128,6 +129,7 @@ sl-client-common = { path = "sl-client-common", version = "0.1.0" }
 sl-client-tokio = { path = "sl-client-tokio", version = "0.1.0" }
 sl-llsd = { path = "sl-llsd", version = "0.1.0" }
 sl-lsl = { path = "sl-lsl", version = "0.1.0" }
+sl-lsl-runtime = { path = "sl-lsl-runtime", version = "0.1.0" }
 sl-material = { path = "sl-material", version = "0.1.0" }
 sl-media = { path = "sl-media", version = "0.1.0" }
 sl-mesh = { path = "sl-mesh", version = "0.1.0" }

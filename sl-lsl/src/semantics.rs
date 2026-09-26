@@ -49,6 +49,7 @@ use crate::ast::{
     Block, Expr, FunctionDef, GlobalItem, Script, StateDef, StateName, Stmt, TypeName,
 };
 use crate::syntax::LslSyntax;
+use crate::types;
 
 /// How seriously to take a [`Diagnostic`]: a definite compile error the grid
 /// would reject, or a warning about dubious-but-legal code.
@@ -706,7 +707,7 @@ impl<'a> Analyzer<'a> {
             (Some(expected), Some(expr)) => {
                 self.analyze_expr(expr);
                 if let Some(found) = self.expr_type(expr)
-                    && !compatible(expected, found)
+                    && !types::implicitly_converts(found, expected)
                 {
                     self.report(
                         DiagnosticKind::ReturnTypeMismatch { expected, found },
@@ -844,7 +845,7 @@ impl<'a> Analyzer<'a> {
             let (Some(expected_ty), Some(found)) = (*expected_ty, self.expr_type(arg)) else {
                 continue;
             };
-            if !compatible(expected_ty, found) {
+            if !types::implicitly_converts(found, expected_ty) {
                 self.report(
                     DiagnosticKind::ArgTypeMismatch {
                         callee: callee.to_owned(),
@@ -883,11 +884,16 @@ impl<'a> Analyzer<'a> {
                 _ => self.expr_type(operand),
             },
             Expr::Postfix { operand, .. } => self.expr_type(operand),
-            // Only the operators whose result type is fixed regardless of
-            // operand types are inferred; arithmetic (`+ - * / %`) is
-            // operand-polymorphic in LSL (`%` is vector cross product too), so
-            // it stays unknown rather than risk a wrong guess.
-            Expr::Binary { op, .. } => binary_result_type(*op),
+            // With both operand types known the compile-time table answers
+            // (`None` for a combination the compiler rejects). With either
+            // unknown, only the operators whose result type is fixed regardless
+            // of operand types are inferred; arithmetic (`+ - * / %`) is
+            // operand-polymorphic (`vector * vector` is a float), so it stays
+            // unknown rather than risk a wrong guess.
+            Expr::Binary { op, lhs, rhs, .. } => match (self.expr_type(lhs), self.expr_type(rhs)) {
+                (Some(left), Some(right)) => types::binary_result(*op, left, right),
+                _ => binary_result_type(*op),
+            },
             // The grid's compiler types `print(x)` inconsistently (as a string
             // in some positions, with nothing on the stack), so it stays
             // unknown rather than feed a type check.
@@ -1037,22 +1043,6 @@ const fn binary_result_type(op: crate::ast::BinaryOp) -> Option<TypeName> {
         | BinaryOp::BitXor => Some(TypeName::Integer),
         BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => None,
     }
-}
-
-/// Whether a value of type `found` may fill a parameter (or return slot) of type
-/// `expected`, honouring LSL's two implicit conversions: `integer`→`float`
-/// (widening) and `string`↔`key` (freely interchangeable). Every other pairing
-/// needs an explicit cast, so this is deliberately narrow.
-fn compatible(expected: TypeName, found: TypeName) -> bool {
-    if expected == found {
-        return true;
-    }
-    matches!(
-        (expected, found),
-        (TypeName::Float, TypeName::Integer)
-            | (TypeName::Key, TypeName::String)
-            | (TypeName::String, TypeName::Key)
-    )
 }
 
 /// Collect every jump-label name defined anywhere in a body (labels are

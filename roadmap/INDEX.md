@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 118 |
-| ready | 302 |
-| blocked | 61 |
+| ready | 303 |
+| blocked | 60 |
 | in-progress | 25 |
 | bugs | 13 |
-| done | 1240 |
+| done | 1241 |
 | deferred | 30 |
 | wont-do | 16 |
-| **total** | **1805** |
+| **total** | **1806** |
 
 ## ideas (118)
 
@@ -294,7 +294,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (302)
+## ready (303)
 
 ### protocol
 
@@ -998,11 +998,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### server
 
+- [`server-lsl-compiler-ir`](ready/server-lsl-compiler-ir.md) — Lower the LSL
+  syntax tree to something executable (blocked by `server-lsl-architecture`
+  (done), `server-lsl-value-model` (done))
 - [`server-lsl-library-surface-table`](ready/server-lsl-library-surface-table.md)
   — One generated table for the library, and a coverage harness over it (blocked
   by `server-lsl-architecture` (done))
-- [`server-lsl-value-model`](ready/server-lsl-value-model.md) — The LSL value
-  model — seven types and their exact coercions
+- [`server-lsl-memory-sizes`](ready/server-lsl-memory-sizes.md) — Measure Second
+  Life's exact per-value script memory costs on aditi
 - [`server-world-chat-routing`](ready/server-world-chat-routing.md) — The fake
   grid hears local chat and drops it
 - [`server-world-ecs-store`](ready/server-world-ecs-store.md) — An ECS scene
@@ -1010,7 +1013,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-world-heartbeat`](ready/server-world-heartbeat.md) — A region
   heartbeat — the fake grid has no simulation loop at all
 
-## blocked (61)
+## blocked (60)
 
 ### protocol
 
@@ -1170,12 +1173,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-scripted-scenario`](blocked/server-fake-grid-scripted-scenario.md)
   — A scripts scenario — one prim per scripted behaviour (blocked by
   `server-fake-grid-script-engine-wiring`)
-- [`server-lsl-compiler-ir`](blocked/server-lsl-compiler-ir.md) — Lower the LSL
-  syntax tree to something executable (blocked by `server-lsl-architecture`
-  (done), `server-lsl-value-model`)
 - [`server-lsl-memory-and-limits`](blocked/server-lsl-memory-and-limits.md) —
   Script memory and limits, because scripts observe them (blocked by
-  `server-lsl-vm-execution`)
+  `server-lsl-vm-execution`, `server-lsl-memory-sizes`)
 - [`server-lsl-runtime-errors`](blocked/server-lsl-runtime-errors.md) — Run-time
   errors where a resident can see them (blocked by `server-lsl-vm-execution`)
 - [`server-lsl-state-and-events`](blocked/server-lsl-state-and-events.md) — The
@@ -1314,7 +1314,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1240)
+## done (1241)
 
 ### protocol
 
@@ -4040,6 +4040,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   them
 - [`server-lsl-architecture`](done/server-lsl-architecture.md) — LSL engine
   architecture — execution model, crate layout, scheduling
+- [`server-lsl-value-model`](done/server-lsl-value-model.md) — The LSL value
+  model — seven types and their exact coercions
 
 ## deferred (30)
 

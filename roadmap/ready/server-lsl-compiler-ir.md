@@ -2,7 +2,7 @@
 id: server-lsl-compiler-ir
 title: Lower the LSL syntax tree to something executable
 topic: server
-status: blocked
+status: ready
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 13
 blocked_by: [server-lsl-architecture, server-lsl-value-model]
@@ -38,7 +38,13 @@ owes, beyond the obvious walk:
   `&&` and `||` are evaluated. The order of evaluation within an
   expression and of arguments in a call is observable when a call has a
   side effect, and LSL's is not left-to-right everywhere — pin it against
-  tailslide and the local OpenSim before choosing.
+  tailslide and the local OpenSim before choosing. (PyOptimizer, measured
+  against SL, says operators evaluate **right to left** — `a - b + c`
+  evaluates `c`, `b`, `a` — see the `sl_lsl::types` module docs.)
+- **The type table is done.** `sl_lsl::types` gives every operator's,
+  assignment's and cast's result type (`integer *= float` included) and
+  `sl-lsl-runtime`'s `cast` / `binary` / `prefix` are the value half; the
+  lowering reads the one and emits the other.
 - **`jump` and labels**, including the LSL rules about jumping out of a
   block and a label's scope; `for` / `while` / `do`; `return` from a
   `void` function and the fall-off-the-end case (`E10019`, which
