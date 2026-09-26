@@ -2,7 +2,7 @@
 id: server-lsl-architecture
 title: LSL engine architecture — execution model, crate layout, scheduling
 topic: server
-status: ready
+status: done
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 5
 refs: [server-script-engine, server-lsl-value-model, server-lsl-compiler-ir,
@@ -44,7 +44,10 @@ one region on one tick. A tree walker can do this only with an explicit
 machine (a Rust `async` generator or a hand-rolled continuation); a
 bytecode VM gets it for free because its program counter is a number. The
 recommendation is **bytecode**, and the task is to confirm it against
-`YEngine/MMRScriptCodeGen.cs` and record why.
+`YEngine/MMRScriptCodeGen.cs` and record why. (Correction, on reading
+it: YEngine is not a bytecode VM — it emits CIL and suspends through
+code-generated stack capture/restore at every `CheckRun` call site. That
+is the argument *for* a bytecode, not an example of one.)
 
 **3. Scheduling.** One region, one tick ([[server-world-heartbeat]]),
 N scripts. Decide: a fixed **instruction budget per script per tick**
@@ -67,3 +70,32 @@ README) stating the four decisions and the reason for each, plus the
 `Host` trait sketched with the half-dozen methods the first tranche
 needs. No implementation — the point is that the tranches after it do not
 each re-litigate this.
+
+## Outcome (2026-09-26)
+
+Decided and recorded in the book chapter
+`book/src/simulator/lsl-engine.md` (new "Simulator" part). In short:
+
+1. **Crate**: new `sl-lsl-runtime` (values, lowering, VM, events,
+   library), I/O-free, depending on `sl-lsl` and optionally `sl-types`,
+   never on `sl-wire`/`sl-proto`. It is created by
+   [[server-lsl-value-model]], not here — an empty crate would be dead
+   code. The value model is **split**: the *type* table (legal
+   operator/operand combinations, result types, implicit conversions,
+   compile-error casts) goes in `sl-lsl`, shared by the semantic pass and
+   the lowering; the *value* rules go in the runtime.
+2. **Execution**: stack bytecode. Suspension makes the program counter
+   plain data; YEngine's per-call-site capture/restore codegen is the
+   cost of the alternative.
+3. **Scheduling**: per-script and per-region budgets in instructions,
+   round-robin in a stated order with a rotating start; sleep is a wake
+   tick; library calls carry a descriptor cost. Overload shows as slower
+   scripts and the percentage-of-scripts-run statistic, **not** as time
+   dilation.
+4. **Dispatch**: one generated descriptor table (`Builtin` + `BuiltinId`);
+   hand-written functions have real typed signatures and a generated shim
+   is the erased `fn(ctx, host, args)` entry, so arity/type drift is a
+   compile error. Library functions see a narrow `ScriptCtx`, not the VM.
+
+The `Host` trait is sketched there (chat, listens, identity, position,
+hover text, seeded random bits, injected unix time). No code.

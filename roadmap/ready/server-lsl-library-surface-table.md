@@ -2,7 +2,7 @@
 id: server-lsl-library-surface-table
 title: One generated table for the library, and a coverage harness over it
 topic: server
-status: blocked
+status: ready
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 5
 blocked_by: [server-lsl-architecture]

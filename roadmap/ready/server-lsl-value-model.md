@@ -8,7 +8,15 @@ points: 8
 refs: [server-lsl-compiler-ir, server-lsl-lib-strings-lists]
 ---
 
-Context: [context/lsl.md](../context/lsl.md).
+Context: [context/lsl.md](../context/lsl.md). Design:
+`book/src/simulator/lsl-engine.md` ([[server-lsl-architecture]]).
+
+This task **creates the `sl-lsl-runtime` crate** (its `README.md` points
+at that chapter) and puts the value half there. The compile-time half of
+the rules below — which casts and operator/operand combinations are
+errors, and each legal one's result type — belongs in `sl-lsl` as a pure
+table over `ast::TypeName`, where the semantic pass and the lowering both
+read it; write it there, and test the two halves against each other.
 
 Before anything can be executed there has to be a value. LSL's type
 system is small and almost entirely made of special cases, and every one

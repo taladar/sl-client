@@ -43,6 +43,10 @@
 - [Textures & the Asset Pipeline](content/textures.md)
 - [Meshes & the LLMesh Pipeline](content/meshes.md)
 
+## Simulator
+
+- [LSL engine architecture](simulator/lsl-engine.md)
+
 ## Authoring
 
 - [Writing Skins & Themes](authoring/skins.md)

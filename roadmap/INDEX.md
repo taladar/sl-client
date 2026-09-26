@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 118 |
 | ready | 302 |
-| blocked | 62 |
+| blocked | 61 |
 | in-progress | 25 |
 | bugs | 13 |
-| done | 1239 |
+| done | 1240 |
 | deferred | 30 |
 | wont-do | 16 |
 | **total** | **1805** |
@@ -998,8 +998,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### server
 
-- [`server-lsl-architecture`](ready/server-lsl-architecture.md) — LSL engine
-  architecture — execution model, crate layout, scheduling
+- [`server-lsl-library-surface-table`](ready/server-lsl-library-surface-table.md)
+  — One generated table for the library, and a coverage harness over it (blocked
+  by `server-lsl-architecture` (done))
 - [`server-lsl-value-model`](ready/server-lsl-value-model.md) — The LSL value
   model — seven types and their exact coercions
 - [`server-world-chat-routing`](ready/server-world-chat-routing.md) — The fake
@@ -1009,7 +1010,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-world-heartbeat`](ready/server-world-heartbeat.md) — A region
   heartbeat — the fake grid has no simulation loop at all
 
-## blocked (62)
+## blocked (61)
 
 ### protocol
 
@@ -1170,11 +1171,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A scripts scenario — one prim per scripted behaviour (blocked by
   `server-fake-grid-script-engine-wiring`)
 - [`server-lsl-compiler-ir`](blocked/server-lsl-compiler-ir.md) — Lower the LSL
-  syntax tree to something executable (blocked by `server-lsl-architecture`,
-  `server-lsl-value-model`)
-- [`server-lsl-library-surface-table`](blocked/server-lsl-library-surface-table.md)
-  — One generated table for the library, and a coverage harness over it (blocked
-  by `server-lsl-architecture`)
+  syntax tree to something executable (blocked by `server-lsl-architecture`
+  (done), `server-lsl-value-model`)
 - [`server-lsl-memory-and-limits`](blocked/server-lsl-memory-and-limits.md) —
   Script memory and limits, because scripts observe them (blocked by
   `server-lsl-vm-execution`)
@@ -1316,7 +1314,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1239)
+## done (1240)
 
 ### protocol
 
@@ -4040,6 +4038,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-top-objects-report`](done/server-fake-grid-top-objects-report.md)
   — Fake grid — a top-objects report with rows in it, and a return that finds
   them
+- [`server-lsl-architecture`](done/server-lsl-architecture.md) — LSL engine
+  architecture — execution model, crate layout, scheduling
 
 ## deferred (30)
 

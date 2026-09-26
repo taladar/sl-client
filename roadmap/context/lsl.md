@@ -80,6 +80,19 @@ What is missing is the middle:
 - The `LSLSyntax` capability serves whatever `SimSession::lsl_syntax()`
   holds, and the fake grid never sets it — an empty document.
 
+## The architecture, decided
+
+Where the code lives, the execution model, scheduling and the library's
+dispatch shape were settled by [[server-lsl-architecture]] and are
+recorded in the book, `book/src/simulator/lsl-engine.md`: a new
+`sl-lsl-runtime` crate behind a `Host` trait `sl-fake-grid` implements;
+a stack bytecode VM; a per-tick **instruction** budget, round-robin; and
+one generated library table with typed hand-written functions behind an
+erased dispatch. The type-level rules (which operator/operand
+combinations are legal, what they produce) go in `sl-lsl`; the
+value-level rules in the runtime. Read that chapter before any task
+below.
+
 ## The five layers
 
 1. **Values and semantics** — LSL's seven types with their exact

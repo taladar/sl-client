@@ -9,7 +9,12 @@ blocked_by: [server-lsl-architecture, server-lsl-value-model]
 refs: [server-lsl-vm-execution, viewer-lsl-oracle-misses]
 ---
 
-Context: [context/lsl.md](../context/lsl.md).
+Context: [context/lsl.md](../context/lsl.md). Design:
+`book/src/simulator/lsl-engine.md` — a stack bytecode, one span per
+instruction, library calls resolved to a `BuiltinId`. The semantic pass's
+`expr_type` deliberately leaves arithmetic unknown; the lowering needs a
+*complete* typing, built on the type table [[server-lsl-value-model]]
+puts in `sl-lsl`.
 
 `sl_lsl::parse` already produces a complete, fully-spanned `ast::Script`
 — globals, user functions, states, event handlers, every statement and
