@@ -1,10 +1,14 @@
-# Replacement-viewer gaps (drafted 2026-09-21)
+# Replacement-viewer gaps (drafted 2026-09-21, updated 2026-09-26)
 
 What is still **missing as a feature** — a whole floater, a whole
 subsystem, a thing a resident does every day — before this viewer can be
-somebody's only viewer, in the order it is worth building. Written over the
-548 open roadmap tasks (308 ready, 118 ideas, 64 blocked, 30 deferred, 22
-in-progress, 6 bugs).
+somebody's only viewer, in the order it is worth building. Drafted over the
+548 open roadmap tasks of 2026-09-21; as of 2026-09-26 there are 550 (302
+ready, 118 ideas, 62 blocked, 30 deferred, 25 in-progress, 13 bugs). The
+five days between were almost entirely skin work, which closed the skin
+system and shipped Vintage (see *The skin* below); no feature gap on this
+page closed or opened in them, and every task status quoted here was
+re-checked on the update.
 
 This is the *feature* axis. The companion document
 [`parallel-work-plan.md`](parallel-work-plan.md) is the *ownership* axis —
@@ -26,7 +30,9 @@ plus IM / group / conference conversations, the full ported notification
 catalogue, people / friends / groups / profiles, search, About Land and
 About Region, the build floater's create + transform + texture tabs, pie
 menus on every pick target, preferences, the snapshot floater, the audio
-backend with in-world sounds, and the RLV command engine.
+backend with in-world sounds, the RLV command engine, and three shipped
+skins (Graphite, Azure and the reference's classic Vintage) chosen by
+`--skin` or the preferences Colors & Skins tab.
 
 So the question is not "does it work" but "is anything a resident reaches
 for on an ordinary day simply *absent*".
@@ -42,7 +48,9 @@ excluded on purpose:
   feature usable, not a missing feature present. They rank on their own
   axis, against measurements, not against the reference's feature list.
 - **Skin / theming** (`viewer-skin-*`, `viewer-vintage-*`) — parity of
-  *look*, tracked by `vintage-skin.md`.
+  *look*, measured in [`vintage-skin.md`](vintage-skin.md). Largely done
+  now; the residue and why it still stays off this list are under *The
+  skin* below.
 - **Test and harness tiers** (`test-*`, `viewer-render-*` matrices,
   `viewer-ui-baseline-*`) — how we know something is right.
 - **The grid side** (`server-*`, the LSL engine tranches) — `sl-fake-grid`
@@ -50,11 +58,55 @@ excluded on purpose:
 - **Upstream work** (the four `viewer-ui-text-parley-*` items) — filed
   against `linebender/parley`; nothing of ours waits on them.
 
+## The skin
+
+When this list was drafted the skin was a set of colour tokens over widgets
+that still painted most of their own state from Rust, and Vintage was a
+blocked capstone. Between 2026-09-21 and 2026-09-26 that whole programme
+landed — eighteen `viewer-skin-*` tasks are done:
+
+- **State lives in the cascade.** Hover, press, focus, selection, toggle and
+  refusal are CSS pseudo-classes and `.sk-*` classes the skin sheet styles
+  (`:active` is a press, `.sk-selected` a selection, `:checked` a toggle); no
+  panel repaints its own greying or selection any more, and the last
+  per-frame colour writes left Rust.
+- **Every text node names a role**, including the ~430 hand-built labels
+  and table cells that used to take a literal colour, with a test holding
+  the role-from-colour map injective.
+- **One widget per control.** Button, checkbox, radio, tab strip,
+  scrollbar and tooltip are each a single skinned widget used everywhere,
+  and the floaters' controls are those widgets, so a skin reaches all of
+  them.
+- **A skin can change shape, not only colour**: nine-sliced art per widget
+  state (`sl-viewer-skin-art` draws it — the reference's art is not ours to
+  copy), light data surfaces distinct from the chrome, bevels, text shadow,
+  row striping, focus-ring geometry, and glyph slots for every decorative
+  mark.
+- **Vintage shipped** (`viewer-vintage-skin`, done 2026-09-26): the merged
+  reference palette, stadium push buttons with the gold press, sage fields
+  and lists with black text, steel-blue shadowed labels, and switching back
+  to Graphite leaves nothing behind (tested).
+
+What is left, and why it still is not a gap on this list — none of it stops
+anyone from using the viewer, it only makes Vintage more exact:
+
+| Task | Status | Residue |
+| --- | --- | --- |
+| `viewer-skin-icon-set` | ready | Inventory icons are emoji chosen in Rust; the legacy icon set is half of what makes Vintage recognisable, and no skin can reach it yet. |
+| `viewer-vintage-ui-chrome-crosscheck` | ready | Record a chrome-capture pair per skin. The harness side is done (both viewers wear the chosen skin, same size or a stated failure) and the pair was waiting only on Vintage existing, which it now does. Floaters stay out of a capture by design. |
+| `viewer-vintage-radar-range-colours` | bug | The radar's range column uses the name-tag colours, unreadable on a light list. |
+| `viewer-parcel-audio-bar-backing-unskinned` | bug | A hard-coded dark strip behind the parcel audio cluster. |
+| `viewer-vintage-bottom-bar` | blocked | Vintage's one *layout* difference. Blocked on `viewer-animation-overrider` (1.2) and `viewer-toolbar-customization` (tier 3), so it rides on those rather than being scheduled on its own. |
+
+One skin item does sit on the feature axis, under 1.6: reading the desktop's
+light / dark preference needs the Settings portal of
+`viewer-os-portals-linux`.
+
 ## Three tasks the code had partly overtaken
 
-Found while compiling this list, and verified 2026-09-24: each is partly
-done and now `in-progress`, its file rewritten down to the residue, so none of
-them should be scheduled as a gap:
+Found while compiling this list, and verified 2026-09-24 (still so on
+2026-09-26): each is partly done and now `in-progress`, its file rewritten
+down to the residue, so none of them should be scheduled as a gap:
 
 - `viewer-object-rezzing` (ready) — "drag an object from inventory into the
   world" is implemented: `sl-viewer-inventory/src/inventory_drag.rs` builds
@@ -111,6 +163,8 @@ wait steps and fires it from its `/`-trigger; it unblocks
 it, `viewer-animation-overrider` — the client-side AO, described in its own
 file as one of Firestorm's most-used features, and cheap here because the
 locomotion state machine that picks the default animations is already ours.
+The AO is also one of the two blockers of `viewer-vintage-bottom-bar`, whose
+utility cluster carries its button.
 
 The recovery verbs sit in the same place: `viewer-stop-all-animations`
 ("I'm stuck in a pose"), `viewer-resync-animations`, and the Rebake half of
@@ -257,6 +311,15 @@ conversation does not show who is in it), `viewer-url-context-menus`,
 `viewer-announce-incoming-im`, `viewer-window-title-unread-count`,
 `viewer-window-attention-flash`, `viewer-chat-omnifilter`.
 
+**Widgets and floaters** (filed 2026-09-24/25, while the skin work walked
+every floater). `viewer-sliders-show-no-value` (a bug, and the worst of
+these: no slider in the viewer shows the number it holds, nor its bounds or
+step), `viewer-multiline-editor-scrollbar` (multi-line fields scroll with no
+scrollbar, and no table scrolls sideways), `viewer-floater-font-size-threading`
+(parts of several floaters ignore the font-size setting),
+`viewer-i18n-floater-literal-english` (literal English left in floaters) and
+`viewer-minimized-floaters-move-to-a-shelf` (ideas).
+
 **Safety and moderation.** `viewer-report-abuse` (the protocol is done; the
 form is not — a viewer with no abuse report is not one to hand a stranger),
 `viewer-bumps-floater` (the harassment-evidence log), `viewer-anti-spam-filter`,
@@ -286,7 +349,8 @@ this club"), `viewer-debug-consoles`, `viewer-notification-history`,
 `viewer-menu-bar-fill-implemented-entries` and
 `viewer-pie-wire-ready-placeholders` (both are pure wiring of features that
 already exist — the cheapest visible parity on this page),
-`viewer-toolbar-customization`, `viewer-fullscreen-mode`.
+`viewer-toolbar-customization` (with the AO, the other blocker of
+`viewer-vintage-bottom-bar`), `viewer-fullscreen-mode`.
 
 **Land, estate, admin.** `viewer-region-options-estate` and
 `viewer-region-options-terrain` (both in progress, terrain's write path
@@ -320,7 +384,9 @@ everyone else, text chat already works.
 **RLV.** The engine is largely ours; the user-facing half is not:
 `viewer-rlva-floaters-toggles` (in progress), `viewer-rlv-enforce-camera`,
 `viewer-rlv-enforce-forced-actions`, `viewer-rlv-enforce-info-hiding`,
-`viewer-rlv-vision-render`, `viewer-rlv-blocked-objects`. For the segment
+`viewer-rlv-vision-render`, `viewer-rlv-blocked-objects`,
+`viewer-rlv-console-lines-wrap` (the console cuts a long line behind an
+ellipsis where the reference wraps it). For the segment
 that uses RLV this is a tier-1 subsystem; for everyone else it is invisible.
 
 **Render features a resident notices.** One of these reads as a defect
@@ -388,8 +454,9 @@ here cut across it, so a round can take one theme per agent:
   `viewer-realtime-mirrors`, `viewer-viewer-effect-render`, the land /
   parcel / region halves of the estate work.
 - **B (UI shell & social)** — tier 0 in full, 1.1 money, 1.3 outfits, 1.4
-  places, 1.6's `viewer-image-upload`, and tier 3's text / chat / people /
-  safety / diagnostics families.
+  places, 1.6's `viewer-image-upload`, tier 3's text / chat / people /
+  safety / diagnostics / widgets-and-floaters families, and the skin residue
+  (`viewer-skin-icon-set`, the two Vintage bugs, the chrome capture pair).
 - **C (tools, protocol & server)** — 1.2's gesture runtime, all of tier 2
   (scripting, mesh, build floater), `viewer-os-portals-linux`, the media /
   streaming-audio tasks already in flight, and tier 3's voice block when it
