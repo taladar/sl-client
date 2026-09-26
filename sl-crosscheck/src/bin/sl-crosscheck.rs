@@ -29,7 +29,7 @@ use clap::Parser;
 use sl_crosscheck::launch::{Launch, RunDirs, Viewer};
 use sl_crosscheck::plan::{
     CameraSpec, CaptureAudio, CaptureSpec, FirestormSkin, RegionPoint, RunPlan, SlClientSkin,
-    parse_region_point,
+    default_run_dir, parse_region_point,
 };
 use sl_crosscheck::process::{self, Ending};
 use sl_crosscheck::status::Artefacts;
@@ -75,8 +75,10 @@ struct Options {
     #[arg(long, default_value_t = 9100)]
     port: u16,
 
-    /// Where the run's artefacts go. Defaults to
-    /// `crosscheck-runs/<scenario>` beneath the current directory.
+    /// Where the run's artefacts go. Defaults to `crosscheck-runs/<scenario>`
+    /// beneath the current directory — or, for a `--capture-ui` run,
+    /// `crosscheck-runs/<scenario>-chrome-<ours>-vs-<theirs>`, so a chrome
+    /// pair is kept per pair of skins.
     #[arg(long)]
     run_dir: Option<PathBuf>,
 
@@ -601,12 +603,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err(format!("no Firestorm launcher at {}", firestorm.display()).into());
     }
 
-    let dirs = RunDirs::new(
-        options
-            .run_dir
-            .clone()
-            .unwrap_or_else(|| PathBuf::from("crosscheck-runs").join(&options.scenario)),
-    );
+    let dirs = RunDirs::new(options.run_dir.clone().unwrap_or_else(|| {
+        default_run_dir(
+            &options.scenario,
+            options.capture_ui,
+            &SlClientSkin {
+                skin: options.sl_client_skin.clone(),
+                theme: options.sl_client_theme.clone(),
+            },
+            &FirestormSkin {
+                skin: options.firestorm_skin.clone(),
+                theme: options.firestorm_theme.clone(),
+            },
+        )
+    }))?;
     dirs.create()?;
 
     // The grid lives on its own runtime while the main thread supervises the
@@ -776,6 +786,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if summary.ran_as_asked() {
         Ok(())
     } else {
-        Err("a viewer that was asked to run produced nothing usable".into())
+        Err(
+            "a viewer that was asked to run did not produce what the run asked for; the report \
+             above says which and why"
+                .into(),
+        )
     }
 }

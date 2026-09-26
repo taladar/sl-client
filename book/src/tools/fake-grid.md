@@ -297,6 +297,60 @@ directory of plausible frames of the wrong scene. So is a viewer that
 says nothing about the pin at all (`SUN NOT REPORTED`), which is what a
 build older than the field looks like.
 
+**Photographing the chrome.** `--capture-ui` puts each viewer's interface
+in the frames, and `--sl-client-skin` / `--firestorm-skin` (with
+`--sl-client-theme` / `--firestorm-theme`) dress each side — two options,
+not one, because the two skin namespaces are unrelated:
+
+```sh
+cargo run --release -p sl-crosscheck -- --scenario catalogue \
+  --capture-ui --sl-client-skin vintage --firestorm-skin vintage
+```
+
+Such a run lands in `crosscheck-runs/<scenario>-chrome-<ours>-vs-<theirs>`
+(`catalogue-chrome-vintage-vs-vintage` above) rather than in the
+scenario's own directory, so a pair is kept per pair of skins and the
+next run in another skin does not overwrite it.
+
+Two things bound what such a pair can say. It is **chrome only** — menu
+bar, toolbars, chat bar, status row — because both harnesses close every
+floater and keep them closed for the whole run; a notification popping
+up between two frames would otherwise make the sequence incomparable.
+And it is only a pair if both frames are the **capture size**. This
+viewer renders its interface into the off-screen capture target, so its
+window never enters the question; the reference's snapshot path cannot
+draw its UI at any size but its window's, so its harness asks the window
+system for the capture size and reports what it got:
+
+```json
+{
+  "window_size": {
+    "requested": "1920x1080",
+    "honoured": false,
+    "detail": "the window is 1024x738 and the run asked for 1920x1080; …"
+  }
+}
+```
+
+A refused window fails the run (`WINDOW NOT 1920x1080 — …`), and so does
+a Firestorm build that says nothing about its window
+(`WINDOW NOT REPORTED`). Independently of either status, the runner reads
+every frame's pixel size back from the file and fails a run with any
+frame that is not the capture size (`FRAMES NOT AT 1920x1080 — …`): the
+file is the evidence, a status is a claim.
+
+A tiling compositor usually refuses the resize. niri, for one, keeps a
+tiled window at its column's size. So on such a desktop the capture size of
+a chrome pair is the window's, not the 1920×1080 default: on a 4K output,
+pass `--capture-size 3840x2160`. World-only runs keep the default, because
+nothing in their frames depends on the window.
+
+Such a pair can still show the two interfaces at different **scales**.
+Firestorm runs through Xwayland and sees scale 1.0, while this viewer
+follows the output's scale (1.5 on the 4K output above), as it should.
+Pinning one scale for both is `test-crosscheck-pin-ui-scale`; until that
+lands, read shapes and colours off a pair, not sizes.
+
 **Two regions, and walking between them.** `--neighbour` stands the
 scene's *second* half one slot east of the first and lets the grid
 announce it, and `--cross-after <seconds>` walks the agent over that

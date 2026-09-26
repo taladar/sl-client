@@ -100,10 +100,39 @@ impl ViewerRun {
             .is_none_or(|artefacts| artefacts.status.lighting_as_asked(asked))
     }
 
-    /// The report's line for this viewer. `asked` is the run's requested day
-    /// position, so the line can say what became of it.
+    /// Whether this viewer's interface is drawn at its window's size — see
+    /// [`Viewer::ui_follows_window`]. An unknown name is assumed to, which
+    /// only ever asks more of it.
+    fn ui_follows_window(&self) -> bool {
+        Viewer::from_name(&self.viewer).is_none_or(Viewer::ui_follows_window)
+    }
+
+    /// Whether nothing this viewer reported contradicts the window size a UI
+    /// capture needs. See
+    /// [`Status::window_as_asked`](crate::status::Status::window_as_asked).
     #[must_use]
-    pub fn describe(&self, asked: Option<f32>) -> String {
+    pub fn window_as_asked(&self, capture_ui: bool) -> bool {
+        self.artefacts.as_ref().is_none_or(|artefacts| {
+            artefacts
+                .status
+                .window_as_asked(capture_ui, self.ui_follows_window())
+        })
+    }
+
+    /// Whether every frame this viewer wrote is `size` (`WIDTHxHEIGHT`), read
+    /// back from the files rather than taken on the viewer's word.
+    #[must_use]
+    pub fn frames_at(&self, size: &str) -> bool {
+        self.artefacts
+            .as_ref()
+            .is_none_or(|artefacts| artefacts.frame_sizes.all_at(size))
+    }
+
+    /// The report's line for this viewer: what its status said, what became of
+    /// the run's requested day position (`asked`) and — for a UI capture — of
+    /// its window, and whether its frames are the `size` that was asked for.
+    #[must_use]
+    pub fn describe(&self, asked: Option<f32>, capture_ui: bool, size: &str) -> String {
         let name = &self.viewer;
         let Some(artefacts) = &self.artefacts else {
             return match (&self.skipped, &self.ending) {
@@ -123,8 +152,16 @@ impl ViewerRun {
             .status
             .describe_day_position(asked)
             .map_or_else(String::new, |line| format!("\n    {line}"));
+        let window = artefacts
+            .status
+            .describe_window_size(capture_ui, self.ui_follows_window())
+            .map_or_else(String::new, |line| format!("\n    {line}"));
+        let sizes = artefacts
+            .frame_sizes
+            .describe_mismatch(size)
+            .map_or_else(String::new, |line| format!("\n    {line}"));
         format!(
-            "  {name}: {}\n    {} frame(s){}{}{}{sun}",
+            "  {name}: {}\n    {} frame(s){}{}{}{sun}{window}{sizes}",
             artefacts.status.describe(),
             artefacts.frames.len(),
             artefacts
@@ -204,6 +241,12 @@ impl RunSummary {
         }
     }
 
+    /// Whether the interface was one of the captured layers.
+    #[must_use]
+    pub fn captures_ui(&self) -> bool {
+        self.layers.iter().any(|layer| layer == "ui")
+    }
+
     /// Whether every viewer that was **asked** to run produced something, and at
     /// least one was. The runner's exit status follows this: it is a statement
     /// about the *run*, never about whether the two viewers agreed.
@@ -217,7 +260,9 @@ impl RunSummary {
     /// some other sky produced a capture of a scene nobody asked for, and it
     /// looks exactly like a successful one from the outside — a directory of
     /// plausible images. So an unhonoured (or unreported) day position fails the
-    /// run here, where somebody will notice.
+    /// run here, where somebody will notice — and so do frames of any size but
+    /// the one asked for, and a UI capture from a window the compositor would
+    /// not resize, which are the same mistake in pixels instead of light.
     #[must_use]
     pub fn ran_as_asked(&self) -> bool {
         let mut attempted = self
@@ -226,8 +271,12 @@ impl RunSummary {
             .filter(|viewer| viewer.attempted)
             .peekable();
         attempted.peek().is_some()
-            && attempted
-                .all(|viewer| viewer.usable() && viewer.lighting_as_asked(self.day_position))
+            && attempted.all(|viewer| {
+                viewer.usable()
+                    && viewer.lighting_as_asked(self.day_position)
+                    && viewer.window_as_asked(self.captures_ui())
+                    && viewer.frames_at(&self.capture_size)
+            })
     }
 
     /// Whether there are **two** sets of frames, which is the only case in which
@@ -257,8 +306,20 @@ impl RunSummary {
         if let Some(position) = self.day_position {
             lines.push(format!("sun pinned at day position {position}"));
         }
+        if self.captures_ui() {
+            // Said on every UI run, because it bounds what the pair can answer:
+            // both harnesses close every floater and hold them shut, so a
+            // notification cannot appear between two frames of one sequence —
+            // and so no floater appears in any of them either.
+            lines.push(
+                "the interface is chrome only — menu bar, toolbars, chat bar, status row: both \
+                 harnesses close every floater and keep them closed for the run"
+                    .to_owned(),
+            );
+        }
+        let ui = self.captures_ui();
         for viewer in &self.viewers {
-            lines.push(viewer.describe(self.day_position));
+            lines.push(viewer.describe(self.day_position, ui, &self.capture_size));
         }
         // Never "the viewers agree" or "the viewers differ": nothing here has
         // looked at a pixel. This says only whether there is a pair to look at,
@@ -279,6 +340,25 @@ impl RunSummary {
                 unlit.join(" and ")
             ));
         }
+        let misframed: Vec<&str> = self
+            .viewers
+            .iter()
+            .filter(|viewer| {
+                viewer.attempted
+                    && viewer.usable()
+                    && !(viewer.window_as_asked(ui) && viewer.frames_at(&self.capture_size))
+            })
+            .map(|viewer| viewer.viewer.as_str())
+            .collect();
+        if !misframed.is_empty() {
+            lines.push(format!(
+                "the frames of {} are not the {} capture the run asked for: a pair that differs \
+                 by a scale factor or a letterbox is not a comparison of anything the viewers \
+                 drew",
+                misframed.join(" and "),
+                self.capture_size
+            ));
+        }
         let failed: Vec<&str> = self
             .viewers
             .iter()
@@ -291,8 +371,15 @@ impl RunSummary {
                  conclude about what either viewer drew",
                 failed.join(" and ")
             )
-        } else if self.comparable() {
+        } else if self.comparable() && self.ran_as_asked() {
             "both viewers produced frames; they are ready to be compared".to_owned()
+        } else if self.comparable() {
+            // Two sets of frames, and a reason above why they are not the pair
+            // the run asked for. "Ready to be compared" here would undo that
+            // reason in the one line a person reads last.
+            "both viewers produced frames, but not the ones this run asked for — see above; \
+             compare them only knowing that"
+                .to_owned()
         } else {
             let skipped: Vec<&str> = self
                 .viewers
@@ -320,7 +407,9 @@ mod tests {
     use crate::launch::Viewer;
     use crate::plan::{CaptureSpec, FirestormSkin, RunPlan, SlClientSkin};
     use crate::process::Ending;
-    use crate::status::{Artefacts, DayPositionStatus, HarnessStatus, Status};
+    use crate::status::{
+        Artefacts, DayPositionStatus, FrameSizes, HarnessStatus, Status, WindowSizeStatus,
+    };
 
     /// The boxed error every test in this module reports through.
     type TestError = Box<dyn core::error::Error>;
@@ -348,6 +437,10 @@ mod tests {
             Duration::from_secs(42),
             Artefacts {
                 frames: vec!["frame_000.png".into(), "frame_001.png".into()],
+                frame_sizes: FrameSizes {
+                    by_size: [("1920x1080".to_owned(), 2)].into(),
+                    unreadable: 0,
+                },
                 scene_dump: Some("scene.json".into()),
                 status: Status::Reported {
                     status: HarnessStatus {
@@ -357,6 +450,7 @@ mod tests {
                         frames_expected: 2,
                         viewer: viewer.name().to_owned(),
                         day_position: None,
+                        window_size: None,
                     },
                 },
             },
@@ -414,6 +508,102 @@ mod tests {
         Ok(())
     }
 
+    /// `good`, but reporting what became of a UI capture's window.
+    fn good_with_window(viewer: Viewer, window: Option<WindowSizeStatus>) -> ViewerRun {
+        let mut run = good(viewer);
+        if let Some(artefacts) = run.artefacts.as_mut()
+            && let Status::Reported { status } = &mut artefacts.status
+        {
+            status.window_size = window;
+        }
+        run
+    }
+
+    /// A plan that captures the interface.
+    fn ui_plan() -> Result<RunPlan, TestError> {
+        let mut plan = plan()?;
+        plan.capture.ui = true;
+        Ok(plan)
+    }
+
+    /// A UI capture from a window the compositor would not resize is a pair of
+    /// plausible frames at different scales: it fails, the report says which
+    /// viewer and quotes why, and it says the interface is chrome only.
+    #[test]
+    fn a_refused_window_fails_a_ui_run() -> Result<(), TestError> {
+        let refused = Some(WindowSizeStatus {
+            requested: "1920x1080".to_owned(),
+            honoured: false,
+            detail: "the window is 1024x738".to_owned(),
+        });
+        let summary = RunSummary::new(
+            &ui_plan()?,
+            vec![
+                good(Viewer::SlClient),
+                good_with_window(Viewer::Firestorm, refused),
+            ],
+        );
+        assert!(summary.comparable());
+        assert!(!summary.ran_as_asked());
+        let report = summary.render();
+        assert!(report.contains("WINDOW NOT 1920x1080 — the window is 1024x738"));
+        assert!(report.contains("the frames of firestorm are not the 1920x1080 capture"));
+        assert!(report.contains("chrome only"));
+        assert!(
+            !report.contains("ready to be compared"),
+            "a pair the run did not ask for is not ready to be compared"
+        );
+        assert!(report.contains("not the ones this run asked for"));
+        Ok(())
+    }
+
+    /// Firestorm's silence about its window fails a UI run, as silence about a
+    /// pinned sun does; this viewer's does not, because its interface is laid
+    /// out at the capture size and no window is involved. A world-only run asks
+    /// neither.
+    #[test]
+    fn only_a_viewer_that_follows_its_window_must_report_one() -> Result<(), TestError> {
+        let honoured = Some(WindowSizeStatus {
+            requested: "1920x1080".to_owned(),
+            honoured: true,
+            detail: "the window was the size the run asked for".to_owned(),
+        });
+        let good_pair = RunSummary::new(
+            &ui_plan()?,
+            vec![
+                good(Viewer::SlClient),
+                good_with_window(Viewer::Firestorm, honoured),
+            ],
+        );
+        assert!(good_pair.ran_as_asked());
+        assert!(good_pair.render().contains("window 1920x1080 as asked"));
+
+        let silent = RunSummary::new(&ui_plan()?, vec![good(Viewer::Firestorm)]);
+        assert!(!silent.ran_as_asked());
+        assert!(silent.render().contains("WINDOW NOT REPORTED"));
+
+        let world_only = RunSummary::new(&plan()?, vec![good(Viewer::Firestorm)]);
+        assert!(world_only.ran_as_asked());
+        assert!(!world_only.render().contains("chrome only"));
+        Ok(())
+    }
+
+    /// Frames of another size than the run asked for fail it whatever the
+    /// status says — the file is the evidence, the status is a claim.
+    #[test]
+    fn frames_of_the_wrong_size_fail_the_run() -> Result<(), TestError> {
+        let mut shrunk = good(Viewer::SlClient);
+        if let Some(artefacts) = shrunk.artefacts.as_mut() {
+            artefacts.frame_sizes.by_size = [("1024x738".to_owned(), 2)].into();
+        }
+        let summary = RunSummary::new(&plan()?, vec![shrunk, good(Viewer::Firestorm)]);
+        assert!(!summary.ran_as_asked());
+        let report = summary.render();
+        assert!(report.contains("FRAMES NOT AT 1920x1080 — 2 at 1024x738"));
+        assert!(report.contains("the frames of sl-client are not the 1920x1080 capture"));
+        Ok(())
+    }
+
     /// A viewer that says nothing about the pin has not said it was fine: an old
     /// build cannot report a field it does not have, and a run that treated
     /// silence as success would quietly stop checking.
@@ -464,6 +654,7 @@ mod tests {
             Duration::from_secs(300),
             Artefacts {
                 frames: Vec::new(),
+                frame_sizes: FrameSizes::default(),
                 scene_dump: None,
                 status: Status::Missing,
             },

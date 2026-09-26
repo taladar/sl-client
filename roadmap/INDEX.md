@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 302 |
 | blocked | 62 |
 | in-progress | 25 |
-| bugs | 13 |
-| done | 1239 |
+| bugs | 14 |
+| done | 1240 |
 | deferred | 30 |
 | wont-do | 16 |
-| **total** | **1805** |
+| **total** | **1807** |
 
 ## ideas (118)
 
@@ -948,8 +948,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-world-map-floater` (done))
 - [`viewer-viewer-effect-render`](ready/viewer-viewer-effect-render.md) — Render
   inbound ViewerEffects (beams, spheres)
-- [`viewer-vintage-ui-chrome-crosscheck`](ready/viewer-vintage-ui-chrome-crosscheck.md)
-  — Measure skin fidelity instead of arguing about it
 - [`viewer-voice-audio`](ready/viewer-voice-audio.md) — Voice audio transport
   (WebRTC — no Vivox) (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-audio-backend` (done))
@@ -987,6 +985,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Factor the repeated session/id acquisition out of the conformance cases
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
+- [`test-crosscheck-pin-ui-scale`](ready/test-crosscheck-pin-ui-scale.md) — A
+  chrome pair pins one UI scale on both viewers
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
@@ -1276,7 +1276,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (13)
+## bugs (14)
 
 ### protocol
 
@@ -1312,11 +1312,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
+- [`test-firestorm-harness-refusal-hangs-on-crash-dialog`](bugs/test-firestorm-harness-refusal-hangs-on-crash-dialog.md)
+  — A Firestorm harness refusal hangs on a crash dialog until the deadline
 - [`test-full-stack-sigsegv-at-exit-under-load`](bugs/test-full-stack-sigsegv-at-exit-under-load.md)
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1239)
+## done (1240)
 
 ### protocol
 
@@ -3257,6 +3259,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-vintage-skin`](done/viewer-vintage-skin.md) — Ship a Vintage-alike
   skin (blocked by `viewer-skin-light-surface-roles` (done),
   `viewer-skin-image-backed-widgets` (done))
+- [`viewer-vintage-ui-chrome-crosscheck`](done/viewer-vintage-ui-chrome-crosscheck.md)
+  — Measure skin fidelity instead of arguing about it
 - [`viewer-void-water-diagonal-takes-corner-height`](done/viewer-void-water-diagonal-takes-corner-height.md)
   — Void water on a block's diagonal takes the corner region's sea level
 - [`viewer-volume-panel`](done/viewer-volume-panel.md) — Volume panel (master +
