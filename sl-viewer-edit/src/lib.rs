@@ -67,6 +67,8 @@ pub mod edit_link;
 pub mod edit_material;
 pub mod edit_material_asset;
 pub mod edit_math;
+pub mod edit_media;
+pub(crate) mod edit_media_model;
 pub mod edit_params;
 pub mod edit_selection;
 pub mod edit_texture;

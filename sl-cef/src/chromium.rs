@@ -30,12 +30,13 @@ use cef::{
     ImplAudioHandler, ImplBrowser, ImplBrowserHost, ImplClient, ImplCommandLine, ImplCookieManager,
     ImplDisplayHandler, ImplFrame, ImplLifeSpanHandler, ImplLoadHandler, ImplRenderHandler,
     KeyEvent, KeyEventType, LifeSpanHandler, LoadHandler, LogSeverity, MouseButtonType, MouseEvent,
-    PaintElementType, PopupFeatures, Rect, RenderHandler, RequestContext, RequestContextSettings,
-    ScreenInfo, Settings, State, WindowInfo, WindowOpenDisposition, WrapApp, WrapAudioHandler,
-    WrapClient, WrapDisplayHandler, WrapLifeSpanHandler, WrapLoadHandler, WrapRenderHandler,
-    browser_host_create_browser_sync, cookie_manager_get_global_manager,
-    request_context_create_context, wrap_app, wrap_audio_handler, wrap_client,
-    wrap_display_handler, wrap_life_span_handler, wrap_load_handler, wrap_render_handler,
+    PaintElementType, PopupFeatures, Range, Rect, RenderHandler, RequestContext,
+    RequestContextSettings, ScreenInfo, Settings, State, WindowInfo, WindowOpenDisposition,
+    WrapApp, WrapAudioHandler, WrapClient, WrapDisplayHandler, WrapLifeSpanHandler,
+    WrapLoadHandler, WrapRenderHandler, browser_host_create_browser_sync,
+    cookie_manager_get_global_manager, request_context_create_context, wrap_app,
+    wrap_audio_handler, wrap_client, wrap_display_handler, wrap_life_span_handler,
+    wrap_load_handler, wrap_render_handler,
 };
 
 use crate::{
@@ -480,6 +481,25 @@ wrap_app! {
                     Some(&CefString::from("autoplay-policy")),
                     Some(&CefString::from("no-user-gesture-required")),
                 );
+                // Keep Chromium off the desktop keyring. Its OSCrypt asks the
+                // Secret Service for a "Chromium Safe Storage" key to encrypt
+                // the cookie database at rest, which puts a keyring unlock
+                // prompt in front of the viewer on every start (the login page
+                // and any UI browser bring CEF up early). Nothing of ours is
+                // behind that prompt, and cancelling it is harmless — OSCrypt
+                // then falls back to a fixed key and cookies still persist — so
+                // it is a credential prompt that means nothing. As of Chromium
+                // 139 `--password-store=basic` is the only switch that stops
+                // it: the Secret Service key provider's auto-detection sends
+                // every non-KDE desktop to the Secret Service, so no
+                // environment avoids it. (The patched Firestorm harness needs
+                // a `cef_initialize` interposer for the same switch, because
+                // dullahan hands CEF an empty command line; we own the `App`,
+                // so this is the whole fix here.) A no-op off Linux.
+                command_line.append_switch_with_value(
+                    Some(&CefString::from("password-store")),
+                    Some(&CefString::from("basic")),
+                );
             }
         }
     }
@@ -601,6 +621,21 @@ impl std::fmt::Debug for CefMediaSurface {
             .field("closed", &shared.status.closed)
             .finish()
     }
+}
+
+/// CEF's "no range" (`CefRange::InvalidRange`): an IME composition or commit
+/// that replaces nothing but the composition itself.
+const NO_REPLACEMENT: Range = Range {
+    from: u32::MAX,
+    to: u32::MAX,
+};
+
+/// The UTF-16 offset of UTF-8 byte offset `byte` in `text` — winit reports an
+/// IME cursor in bytes, CEF takes it in UTF-16 code units. A byte offset past
+/// the end, or inside a character, counts as the end.
+fn utf16_offset(text: &str, byte: usize) -> u32 {
+    let prefix = text.get(..byte).unwrap_or(text);
+    u32::try_from(prefix.encode_utf16().count()).unwrap_or(u32::MAX)
 }
 
 impl CefMediaSurface {
@@ -754,6 +789,45 @@ impl MediaSurface for CefMediaSurface {
                 };
                 host.send_key_event(Some(&event));
             }
+        }
+    }
+
+    fn ime_set_composition(&self, text: &str, cursor: Option<(usize, usize)>) {
+        if text.is_empty() {
+            self.ime_cancel();
+            return;
+        }
+        if let Some(host) = self.host() {
+            let end = utf16_offset(text, text.len());
+            let selection = cursor.map_or(Range { from: end, to: end }, |(anchor, focus)| {
+                let anchor = utf16_offset(text, anchor);
+                let focus = utf16_offset(text, focus);
+                Range {
+                    from: anchor.min(focus),
+                    to: anchor.max(focus),
+                }
+            });
+            // No underline list: CEF then draws its own single underline under
+            // the whole composition, which is what winit's one cursor range can
+            // describe anyway.
+            host.ime_set_composition(
+                Some(&CefString::from(text)),
+                None,
+                Some(&NO_REPLACEMENT),
+                Some(&selection),
+            );
+        }
+    }
+
+    fn ime_commit(&self, text: &str) {
+        if let Some(host) = self.host() {
+            host.ime_commit_text(Some(&CefString::from(text)), Some(&NO_REPLACEMENT), 0);
+        }
+    }
+
+    fn ime_cancel(&self) {
+        if let Some(host) = self.host() {
+            host.ime_cancel_composition();
         }
     }
 
@@ -1109,8 +1183,23 @@ mod tests {
     use cef::State;
     use pretty_assertions::assert_eq;
 
-    use super::browser_settings;
+    use super::{browser_settings, utf16_offset};
     use crate::SurfaceTrust;
+
+    /// winit's byte offsets become CEF's UTF-16 ones: a CJK character is three
+    /// bytes and one unit, an astral emoji four bytes and two units, and an
+    /// offset past the end (or mid-character) is the end.
+    #[test]
+    fn ime_offsets_are_converted_to_utf16() {
+        let text = "日本😀x";
+        assert_eq!(utf16_offset(text, 0), 0);
+        assert_eq!(utf16_offset(text, 3), 1);
+        assert_eq!(utf16_offset(text, 6), 2);
+        assert_eq!(utf16_offset(text, 10), 4);
+        assert_eq!(utf16_offset(text, 11), 5);
+        assert_eq!(utf16_offset(text, 99), 5);
+        assert_eq!(utf16_offset(text, 1), 5);
+    }
 
     /// An in-world page reaches nothing outside itself: it cannot close the
     /// surface, touch the clipboard, or keep storage between navigations.

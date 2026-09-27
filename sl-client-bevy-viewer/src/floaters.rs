@@ -244,6 +244,21 @@ pub const FLOATERS: &[FloaterElement] = &[
         content: crate::edit_material_asset::spawn_material_editor_specimen,
     },
     FloaterElement {
+        id: "media-settings",
+        summary: "Media Settings: a prim face's media-on-a-prim — the General tab's home page, \
+                  preview, current page and playback switches, the Customize tab's control \
+                  bar and permissions, and the Security tab's white-list.",
+        spec: crate::edit_media::media_settings_floater_spec,
+        content: crate::edit_media::spawn_media_settings_specimen,
+    },
+    FloaterElement {
+        id: "media-whitelist-entry",
+        summary: "Whitelist Entry: the one-field window the Media Settings Security tab's \
+                  Add… opens for a URL pattern.",
+        spec: crate::edit_media::whitelist_entry_floater_spec,
+        content: crate::edit_media::spawn_whitelist_entry_specimen,
+    },
+    FloaterElement {
         id: "minimap",
         summary: "Mini-map: the composited local map surface with its parcel lines, avatar dots \
                   and compass labels.",

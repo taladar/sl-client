@@ -35,11 +35,16 @@ use sl_client_bevy::{
 };
 
 use crate::gpu_pick::{GpuPickResolved, GpuPicker, PICK_HZ, PickPurpose, PickResolution};
-use sl_cef::{KeyInput, MediaKind, SurfaceConfig, SurfaceTrust, ValidatedMediaUrl, classify_url};
+use bevy::window::{CursorIcon, PrimaryWindow, SystemCursorIcon};
+use sl_cef::{
+    CursorKind, KeyInput, MediaKind, SurfaceConfig, SurfaceTrust, ValidatedMediaUrl, classify_url,
+};
 use sl_viewer_kit::face_material::{FaceMaterial, inert_face_material};
+use sl_viewer_media::browser_widget::BrowserView;
 use sl_viewer_media::media_engine::{
     MediaEngine, MediaEngineKind, MediaEngineSystems, MediaSurfaceId, MediaSurfaces,
 };
+use sl_viewer_media::media_ime::{MediaIme, MediaImePlugin, MediaImeSystems};
 use sl_viewer_media::media_keys::{current_modifiers, is_printable_text, vk_for_key_code};
 use sl_viewer_world_api::InputContext;
 use sl_viewer_world_api::ObjectState;
@@ -104,6 +109,17 @@ impl MediaData {
             .get(target.face.as_usize())?
             .as_ref()
     }
+
+    /// Every face's media entry for `object`, one slot per face in order
+    /// (`None` = no media), as the `ObjectMedia` capability last reported them —
+    /// what an edit of some faces re-sends the rest of the object from, since
+    /// the capability's update names every face.
+    #[must_use]
+    pub fn faces(&self, object: ObjectKey) -> Option<&[Option<MediaEntry>]> {
+        self.objects
+            .get(&object)
+            .map(|media| media.faces.as_slice())
+    }
 }
 
 /// The runtime state of one face whose surface is live.
@@ -126,6 +142,10 @@ pub struct ActiveMedia {
     /// changed `MeshMaterial3d` is the one path guaranteed to rebind the new
     /// GPU texture (touching the material asset alone proved unreliable).
     applied_size: UVec2,
+    /// The texture placement (repeats / offset / rotation) the media material
+    /// was last built with. A texture-entry edit of the face changes it on the
+    /// same face entity, so the material is rebuilt to follow.
+    applied_uv: bevy::math::Affine2,
     /// Whether the user interacted (a user-started surface survives the
     /// auto-play gate).
     user_started: bool,
@@ -133,6 +153,32 @@ pub struct ActiveMedia {
     bounces: u8,
     /// The last URL a white-list check accepted (bounce-back destination).
     last_good_url: Option<ValidatedMediaUrl>,
+}
+
+/// Faces whose media the agent just set up and asked to see — the build tools'
+/// Media Settings OK / Apply, the reference's `navigateHomeSelectedFace`. The
+/// surface driver treats each as started by the user (so the world auto-play
+/// switch does not hold it back) once the grid's updated media for it has
+/// arrived, and forgets it when the surface is up. A click on the face could
+/// not do this: while the build tools are open a click selects.
+#[derive(Resource, Debug, Default)]
+pub struct MediaStartRequests {
+    /// The faces waiting to start.
+    pending: std::collections::HashSet<MediaTarget>,
+}
+
+impl MediaStartRequests {
+    /// Ask for `target`'s media to start as soon as it is there.
+    pub fn request(&mut self, target: MediaTarget) {
+        self.pending.insert(target);
+    }
+}
+
+impl WorldScoped for MediaStartRequests {
+    /// The faces belonged to the departed region's objects.
+    fn purge_world(&mut self, _purge: WorldPurge, _commands: &mut Commands) {
+        self.pending.clear();
+    }
 }
 
 /// All live in-world media surfaces by target.
@@ -178,10 +224,15 @@ fn register_media_settings(settings: Option<ResMut<sl_viewer_settings::ViewerSet
 
 impl Plugin for MediaPrimPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<MediaImePlugin>() {
+            app.add_plugins(MediaImePlugin);
+        }
         app.add_systems(Startup, register_media_settings)
             .init_world_scoped::<MediaData>()
+            .init_world_scoped::<MediaStartRequests>()
             .init_resource::<MediaFocus>()
             .init_resource::<MediaPrimState>()
+            .init_resource::<MediaHoverCursor>()
             .add_message::<MediaWorldClick>()
             .add_systems(
                 Update,
@@ -192,13 +243,15 @@ impl Plugin for MediaPrimPlugin {
                     hover_media_faces,
                     handle_media_clicks,
                     forward_media_release,
+                    route_media_ime,
                     route_media_keyboard,
                     release_media_focus_on_escape,
                     enforce_media_whitelists,
                 )
                     .chain()
                     .in_set(MediaPrimSystems::Drive)
-                    .after(MediaEngineSystems::Pump),
+                    .after(MediaEngineSystems::Pump)
+                    .before(MediaImeSystems),
             )
             // The wheel claim must run before the camera consumes the same
             // scroll accumulator for its orbit zoom, and after the hover pass in
@@ -208,12 +261,87 @@ impl Plugin for MediaPrimPlugin {
             // frame's hovered pixel a scroll lands on is scheduler-order-dependent
             // (and a scroll on the frame the cursor moves onto a media face can go
             // to the camera zoom instead).
+            // After the camera's own cursor pass, which writes only on its
+            // transitions, so a page's cursor is not overwritten by the arrow
+            // the camera last chose.
+            .add_systems(
+                Update,
+                adopt_media_cursor
+                    .after(MediaPrimSystems::Drive)
+                    .after(crate::camera::update_camera_cursor),
+            )
             .add_systems(
                 Update,
                 claim_media_wheel
                     .after(MediaPrimSystems::Drive)
                     .before(sl_viewer_world_api::WorldPhase::CameraOrbited),
             );
+    }
+}
+
+/// The window cursor a page's requested cursor maps to.
+const fn system_cursor_for(kind: CursorKind) -> SystemCursorIcon {
+    match kind {
+        CursorKind::Pointer | CursorKind::Other => SystemCursorIcon::Default,
+        CursorKind::Hand => SystemCursorIcon::Pointer,
+        CursorKind::IBeam => SystemCursorIcon::Text,
+    }
+}
+
+/// Show the cursor the page under the pointer asks for — a hand over a link,
+/// an I-beam over a text field — on a hovered UI browser view that takes the
+/// pointer, else on the in-world media face the hover forwards motion to
+/// ([`MediaHoverCursor`]); the reference's `LLMediaCtrl::handleHover` and
+/// `LLToolPie::handleMediaHover`.
+///
+/// Writes only on a transition, like the camera's and the Create tool's cursor
+/// passes, and hands the cursor back to the arrow when the pointer leaves the
+/// media — the camera's pass takes it from there. Holding **Alt** yields to the
+/// camera's zoom / orbit cursors, whose gesture then owns the click.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its data access"
+)]
+fn adopt_media_cursor(
+    hover: Res<MediaHoverCursor>,
+    hover_map: Res<HoverMap>,
+    views: Query<(Entity, &BrowserView), Without<bevy::ui::InteractionDisabled>>,
+    surfaces: NonSend<MediaSurfaces>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    windows: Query<Entity, With<PrimaryWindow>>,
+    mut owned: Local<Option<SystemCursorIcon>>,
+    mut commands: Commands,
+) {
+    let alt = keyboard.pressed(KeyCode::AltLeft) || keyboard.pressed(KeyCode::AltRight);
+    let ui = hover_map
+        .get(&bevy::picking::pointer::PointerId::Mouse)
+        .and_then(|hits| {
+            views
+                .iter()
+                .find(|(entity, _view)| hits.contains_key(entity))
+        })
+        .and_then(|(_entity, view)| view.surface)
+        .and_then(|id| surfaces.get(id))
+        .map(|slot| slot.status.cursor);
+    let desired = if alt {
+        None
+    } else {
+        ui.or(hover.0).map(system_cursor_for)
+    };
+    if *owned == desired {
+        return;
+    }
+    let released = owned.is_some() && desired.is_none();
+    *owned = desired;
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    if let Some(icon) = desired {
+        commands.entity(window).insert(CursorIcon::System(icon));
+    } else if released {
+        commands
+            .entity(window)
+            .insert(CursorIcon::System(SystemCursorIcon::Default));
     }
 }
 
@@ -347,10 +475,18 @@ fn ingest_media_events(
                         object: *object_id,
                         face: PrimFaceId::new(face),
                     };
-                    let previous = data.entry(target).and_then(|old| old.current_url.clone());
-                    if entry.current_url != previous
+                    let old = data.entry(target);
+                    let previous = old.and_then(|old| old.current_url.clone());
+                    // With no current page the face shows its home page, so a
+                    // new home page is a navigation too (the reference's
+                    // post-Apply `navigateHomeSelectedFace`).
+                    let shown = entry.current_url.as_ref().or(entry.home_url.as_ref());
+                    let previously_shown = previous
+                        .as_ref()
+                        .or_else(|| old.and_then(|old| old.home_url.as_ref()));
+                    if shown != previously_shown
                         && let Some(active) = state.active.get(&target)
-                        && let Some(url) = &entry.current_url
+                        && let Some(url) = shown
                         && let Some(url) = validated_media_url(url)
                     {
                         let wanted = match classify_url(&url) {
@@ -532,13 +668,13 @@ impl MediaInput<'_> {
 /// for the top auto-play / user-started entries within the cap, tier their
 /// paint rates, apply / restore face materials, and reap dead faces.
 fn drive_media_surfaces(
-    time: Res<Time>,
-    mut timer: Local<f32>,
+    (time, mut timer): (Res<Time>, Local<f32>),
     data: Res<MediaData>,
     mut focus: ResMut<MediaFocus>,
     mut stores: MediaStores,
     world: MediaWorld,
     settings: Option<Res<sl_viewer_settings::ViewerSettings>>,
+    mut requests: ResMut<MediaStartRequests>,
 ) {
     *timer += time.delta_secs();
     if *timer < 0.5 {
@@ -573,11 +709,22 @@ fn drive_media_surfaces(
                 object: *key,
                 face: PrimFaceId::new(face),
             };
+            // The face's texture entry is what says it carries media (the
+            // reference's `hasMedia()`); the capability's entry outlives a
+            // removal, which clears only that flag. Without this check a face
+            // whose media was just removed kept its surface — and its bar.
+            let unflagged = resolve_face_entity(&world.objects, target, &stores.faces)
+                .and_then(|entity| stores.faces.get(entity).ok())
+                .is_some_and(|(_face, FaceTextureDebug(tf))| !tf.media_enabled());
+            if unflagged {
+                continue;
+            }
             let user_started = stores
                 .state
                 .active
                 .get(&target)
-                .is_some_and(|active| active.user_started);
+                .is_some_and(|active| active.user_started)
+                || requests.pending.contains(&target);
             let startable = (entry.auto_play && auto_play_enabled) || user_started;
             let distance = world
                 .objects
@@ -639,6 +786,9 @@ fn drive_media_surfaces(
         {
             let (state, mut paint) = stores.split();
             if let Some(active) = state.active.get_mut(target) {
+                if requests.pending.remove(target) {
+                    active.user_started = true;
+                }
                 let fps = if focus.focused == Some(*target) {
                     FPS_TIERS[0]
                 } else {
@@ -650,11 +800,27 @@ fn drive_media_surfaces(
                     surface_size = slot.size;
                 }
                 // Re-apply the media material when the face entity was rebuilt (a
-                // shape change) or the surface image was re-allocated at a new
+                // shape change), the surface image was re-allocated at a new
                 // size (its first real paint, or a resize): a fresh material on a
-                // changed component is what rebinds the new GPU texture.
-                let unchanged =
-                    face_entity == Some(active.face_entity) && surface_size == active.applied_size;
+                // changed component is what rebinds the new GPU texture. Also
+                // when a texture-entry edit reached the *same* entity: the
+                // texture pipeline then puts the face's own (re-built) material
+                // back on it, and the edited repeats / offset / rotation are a
+                // placement the media material has to follow. Without this a
+                // face whose texture was edited while it played lost its media
+                // for good — the surface stayed "live", so nothing restarted it.
+                let wearing_media = face_entity
+                    .and_then(|entity| paint.mesh_materials.get(entity).ok())
+                    .is_some_and(|worn| worn.0 == active.material);
+                let placement_unchanged = face_entity
+                    .and_then(|entity| paint.faces.get(entity).ok())
+                    .is_none_or(|(_face, FaceTextureDebug(tf))| {
+                        texture_face_uv_transform(tf) == active.applied_uv
+                    });
+                let unchanged = face_entity == Some(active.face_entity)
+                    && surface_size == active.applied_size
+                    && wearing_media
+                    && placement_unchanged;
                 match face_entity {
                     Some(_entity) if unchanged => {}
                     Some(entity) => apply_media_material(entity, target, active, &mut paint),
@@ -666,7 +832,8 @@ fn drive_media_surfaces(
             }
         }
         let Some(entity) = face_entity else { continue };
-        start_media_surface(*target, &entry, entity, false, &mut stores);
+        let requested = requests.pending.remove(target);
+        start_media_surface(*target, &entry, entity, requested, &mut stores);
     }
 }
 
@@ -721,6 +888,7 @@ fn start_media_surface(
         restore: Handle::default(),
         material: Handle::default(),
         applied_size: UVec2::ONE,
+        applied_uv: bevy::math::Affine2::IDENTITY,
         user_started,
         bounces: 0,
         last_good_url: Some(url),
@@ -748,6 +916,7 @@ fn apply_media_material(
         .get(entity)
         .map(|(_face, FaceTextureDebug(tf))| texture_face_uv_transform(tf))
         .unwrap_or_default();
+    active.applied_uv = uv_transform;
     let material = paint.materials.add(inert_face_material(StandardMaterial {
         base_color: Color::WHITE,
         base_color_texture: Some(slot.image.clone()),
@@ -847,7 +1016,17 @@ struct MediaPickIo<'w, 's> {
     hovered: Local<'s, Option<Entity>>,
     /// Seconds since the last Media pick request, for the ~[`PICK_HZ`] throttle.
     since_pick: Local<'s, f32>,
+    /// The page cursor of the face motion is forwarded to, for
+    /// [`adopt_media_cursor`].
+    cursor: ResMut<'w, MediaHoverCursor>,
 }
+
+/// The cursor the page under the pointer asks for, while the hover forwards it
+/// motion — the reference's `handleMediaHover`, which shows the page's cursor
+/// (`getLastSetCursor`) on the focused or first-click-interact face and the
+/// plain arrow on any other media face. `None` while no motion is forwarded.
+#[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct MediaHoverCursor(pub Option<CursorKind>);
 
 /// The media state the hover reads, bundled as one
 /// [`SystemParam`](bevy::ecs::system::SystemParam): which faces are live, their
@@ -918,6 +1097,7 @@ fn hover_media_faces(
     let previous = focus.hover;
     focus.hover = None;
     focus.hover_pixel = None;
+    let mut forwarded_cursor = None;
     // hover_normal is deliberately kept: the controls bar's zoom wants the
     // last face normal even while the cursor is over the bar itself.
 
@@ -996,8 +1176,15 @@ fn hover_media_faces(
                     .is_some_and(|entry| entry.first_click_interact))
         {
             slot.surface.mouse_move(pixel.0, pixel.1, input.modifiers());
+            forwarded_cursor = Some(slot.status.cursor);
+        } else {
+            // A media face that takes no motion shows the plain arrow.
+            forwarded_cursor = Some(CursorKind::Pointer);
         }
     }
+    pick_io
+        .cursor
+        .set_if_neq(MediaHoverCursor(forwarded_cursor));
 
     if previous.is_some()
         && focus.hover != previous
@@ -1117,6 +1304,10 @@ fn forward_media_release(
 /// Route keyboard input to the focused media face while the media context
 /// holds (the world's movement keys are already suppressed by
 /// [`crate::input_context`]).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its data access"
+)]
 fn route_media_keyboard(
     context: Res<InputContext>,
     focus: Res<MediaFocus>,
@@ -1125,8 +1316,11 @@ fn route_media_keyboard(
     mut keys: MessageReader<KeyboardInput>,
     keyboard: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
+    ime: Res<MediaIme>,
 ) {
-    if *context != InputContext::Media {
+    // While the IME composes, the keys are the IME's
+    // (`sl_viewer_media::media_ime`).
+    if *context != InputContext::Media || ime.composing() {
         keys.clear();
         return;
     }
@@ -1158,6 +1352,33 @@ fn route_media_keyboard(
         {
             slot.surface.insert_text(text);
         }
+    }
+}
+
+/// Hand the window's IME messages to the focused web media face, and ask for
+/// the window's IME while one holds the keyboard
+/// (`sl_viewer_media::media_ime`).
+fn route_media_ime(
+    context: Res<InputContext>,
+    focus: Res<MediaFocus>,
+    state: Res<MediaPrimState>,
+    surfaces: NonSend<MediaSurfaces>,
+    mut events: MessageReader<bevy::window::Ime>,
+    mut ime: ResMut<MediaIme>,
+) {
+    let slot = (*context == InputContext::Media)
+        .then_some(focus.focused)
+        .flatten()
+        .and_then(|target| state.active.get(&target))
+        .filter(|active| active.kind == MediaEngineKind::Web)
+        .and_then(|active| surfaces.get(active.surface));
+    let Some(slot) = slot else {
+        events.clear();
+        return;
+    };
+    ime.request();
+    for event in events.read() {
+        ime.forward(slot.surface.as_ref(), event);
     }
 }
 

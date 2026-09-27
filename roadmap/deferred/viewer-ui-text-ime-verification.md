@@ -37,3 +37,20 @@ clause segments with standout flags — so a multi-clause Japanese conversion
 cannot be rendered with per-clause emphasis. [[viewer-ui-text-input-widget]]
 already budgets for this; record what the IME actually delivers so that task can
 size the work.
+
+## Also: composition inside a page (2026-09-27)
+
+[[viewer-media-prim-browser]] added the same path for a **web page** — an
+in-world media face or a UI browser view holding the keyboard — through
+`sl_viewer_media::media_ime`: `Ime::Preedit` becomes CEF's
+`ime_set_composition` (winit's byte cursor converted to UTF-16), `Ime::Commit`
+its `ime_commit_text`, and the window's IME is switched on while a page holds
+the focus (Bevy's own switch only follows an `EditableText`). It is unverified
+for the same reason. On the IME host, also:
+
+- Focus a text field on a media face (and on the Content ▸ Web Browser page),
+  compose CJK text, and confirm the page shows the composition underlined and
+  commits it once — not twice (the keys are withheld from the page while the
+  IME composes).
+- Note where the candidate window opens: at the pointer, by design, not at the
+  page's caret.

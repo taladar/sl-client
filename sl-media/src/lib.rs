@@ -535,6 +535,26 @@ pub trait MediaSurface {
     /// Inserts committed text (from the platform's text/IME pipeline) as
     /// character input.
     fn insert_text(&self, text: &str);
+    /// Shows `text` as the platform IME's in-progress composition (its
+    /// *preedit*), replacing any earlier one, with the caret or selection at
+    /// `cursor` — UTF-8 byte offsets into `text`, as the windowing layer
+    /// reports them. An empty `text` is the same as [`ime_cancel`].
+    ///
+    /// The default does nothing, which is right for a surface with nothing to
+    /// type into (a video): the composition is only shown by an engine that can
+    /// draw it inline.
+    ///
+    /// [`ime_cancel`]: Self::ime_cancel
+    fn ime_set_composition(&self, _text: &str, _cursor: Option<(usize, usize)>) {}
+    /// Commits `text` from the platform IME, ending any composition. The
+    /// default types it as plain character input ([`insert_text`]).
+    ///
+    /// [`insert_text`]: Self::insert_text
+    fn ime_commit(&self, text: &str) {
+        self.insert_text(text);
+    }
+    /// Drops the in-progress IME composition without committing it.
+    fn ime_cancel(&self) {}
     /// Sets the maximum paint rate in frames per second (1–60) — the
     /// interest-throttle knob.
     fn set_max_fps(&self, fps: u8);

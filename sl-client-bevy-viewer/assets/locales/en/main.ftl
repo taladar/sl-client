@@ -688,6 +688,52 @@ about-region-experiences-add-allowed = Add Allowed Experience…
 about-region-experiences-add-blocked = Add Blocked Experience…
 about-region-experiences-profile = Profile
 
+## The Media Settings window (viewer-media-prim-browser) — a prim face's
+## media-on-a-prim, opened from the build tools' Texture tab in Media mode.
+
+media-settings-title = Media Settings
+media-settings-multiple = Multiple Media
+media-settings-tab-general = General
+media-settings-tab-customize = Customize
+media-settings-tab-security = Security
+media-settings-home-label = Home Page:
+media-settings-home-fails-whitelist = (This page does not pass the specified whitelist)
+media-settings-preview = Preview
+media-settings-current-label = Current Page:
+media-settings-reset = Reset
+media-settings-auto-loop = Auto Loop
+media-settings-first-click-interact = First Click Interacts
+media-settings-auto-zoom = Auto Zoom
+media-settings-auto-play = Auto Play Media
+media-settings-auto-play-note = Note: Residents can override this setting
+media-settings-auto-scale = Auto Scale Media on Face of Object
+media-settings-size-label = Size:
+media-settings-size-by = ×
+media-settings-controls-label = Controls:
+media-settings-controls-standard = Standard
+media-settings-controls-mini = Mini
+media-settings-perms-owner = Owner
+media-settings-perms-group = Group:
+media-settings-perms-anyone = Anyone
+media-settings-perms-interact = Allow Navigation & Interactivity
+media-settings-perms-control = Show Control Bar
+media-settings-whitelist-enable = Only Allow Access to Specified URL patterns
+media-settings-whitelist-mark = { "" }
+media-settings-whitelist-entry = URL pattern
+media-settings-whitelist-note = Entries that the home page fails against are marked:
+media-settings-whitelist-add = Add…
+media-settings-whitelist-delete = Delete
+media-settings-whitelist-fails = Warning: the home page specified in the General tab fails to pass this whitelist. It has been disabled until a valid entry has been added.
+media-settings-ok = OK
+media-settings-cancel = Cancel
+media-settings-apply = Apply
+media-settings-error-home-url = The home page is not a web address.
+media-settings-error-size = The size must be a whole number from 0 to 2048.
+media-whitelist-entry-title = Whitelist Entry
+media-whitelist-entry-help = Enter a URL or URL pattern to add to the list of allowed domains
+media-whitelist-entry-ok = OK
+media-whitelist-entry-cancel = Cancel
+
 ## The Telehub window (viewer-region-telehub) — the region's telehub object and
 ## its spawn points, reached from the Region tab's Manage Telehub… button.
 
@@ -1386,6 +1432,7 @@ build-tex-faces-count = { $count ->
 build-tex-matmedia-label = Material type
 build-tex-matmedia-material = Materials (Blinn-Phong)
 build-tex-matmedia-pbr = PBR Metallic Roughness
+build-tex-matmedia-media = Media
 build-tex-mattype-label = Map
 build-tex-mattype-diffuse = Texture
 build-tex-mattype-normal = Bumpiness
@@ -1408,6 +1455,10 @@ build-tex-repeats-label = Repeats (U/V)
 build-tex-offset-label = Offset (U/V)
 build-tex-rotation-label = Rotation (°)
 build-tex-align = Align planar faces
+build-tex-media-label = Media
+build-tex-media-choose = Choose…
+build-tex-media-remove = Remove
+build-tex-media-align = Align
 build-tex-normal-label = Normal map
 build-tex-specular-label = Specular map
 build-tex-glossiness-label = Glossiness

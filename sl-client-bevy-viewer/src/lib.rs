@@ -148,6 +148,7 @@ pub(crate) use sl_viewer_edit::edit_land;
 pub(crate) use sl_viewer_edit::edit_link;
 pub(crate) use sl_viewer_edit::edit_material;
 pub(crate) use sl_viewer_edit::edit_material_asset;
+pub(crate) use sl_viewer_edit::edit_media;
 pub(crate) use sl_viewer_edit::edit_params;
 pub(crate) use sl_viewer_edit::edit_selection;
 pub(crate) use sl_viewer_edit::edit_texture;

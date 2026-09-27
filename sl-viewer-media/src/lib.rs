@@ -11,6 +11,7 @@
 //! - [`media_engine`] — backend selection and the frame pump.
 //! - [`media_audio`] — the audio side of a media stream.
 //! - [`media_keys`] — keyboard routing into a focused media surface.
+//! - [`media_ime`] — IME composition into a focused media surface.
 //! - [`media_diagnostics`] — what the F3 overlay reports about media.
 //! - [`browser_widget`] — a page as a UI element.
 //! - [`web_floater`] — that widget's own floater, the in-viewer web browser.
@@ -29,6 +30,7 @@ pub mod browser_widget;
 pub mod media_audio;
 pub mod media_diagnostics;
 pub mod media_engine;
+pub mod media_ime;
 pub mod media_keys;
 pub mod web_auth;
 pub mod web_floater;

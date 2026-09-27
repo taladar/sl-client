@@ -143,10 +143,10 @@ do at all. Ranked within the tier.
 
 ### 1.1 Money — you cannot spend the balance the status bar shows
 
-`viewer-money-economy-ui` (blocked on `viewer-media-prim-browser`, which is
-in progress) is the whole economy surface: pay a resident or object, buy an
-object, buy land, buy L$, transaction history. The wire side is done
-(`api-g6` object purchase / pay, `protocol-43` balance). Shopping is the
+`viewer-money-economy-ui` (ready since 2026-09-27, when
+`viewer-media-prim-browser` closed) is the whole economy surface: pay a resident
+or object, buy an object, buy land, buy L$, transaction history. The wire side
+is done (`api-g6` object purchase / pay, `protocol-43` balance). Shopping is the
 single most common thing residents do, and today none of it is reachable.
 
 Its satellites, each small once the core exists:
@@ -195,11 +195,14 @@ bar and favourites bar the default skin has and Vintage does without.
 
 ### 1.5 Reading and hearing what the world hands you
 
-Three of these are **already in progress** and should be finished before new
+Two of these are **already in progress** and should be finished before new
 fronts open: `viewer-notecard-editor` (notecards are how SL ships
-instructions, landmark packs and freebies), `viewer-streaming-audio` (parcel
-music — a club with no stream is not a club) and
-`viewer-media-prim-browser` (which also unblocks the money UI above).
+instructions, landmark packs and freebies) and `viewer-streaming-audio`
+(parcel music — a club with no stream is not a club). The third,
+`viewer-media-prim-browser`, closed on 2026-09-27 with the per-face media
+editor (the Texture tab's Media mode and the Media Settings window), the
+page's cursor and IME composition; its zero-copy headroom is the deferred
+`viewer-media-zero-copy-frames`.
 `viewer-media-playback-policies` is the domain allow/deny and first-click
 policy layer around them, and `viewer-video-playback` (in progress) is the
 second media engine for `video/*`.
@@ -435,7 +438,7 @@ first without the second.
 | Task | Tier | Unblocks |
 | --- | --- | --- |
 | `viewer-login-screen` | 0 | `viewer-login-tos`, and the viewer being installable at all |
-| `viewer-media-prim-browser` (in progress) | 1 | `viewer-money-economy-ui`, `viewer-destination-guide`, the L$ purchase and marketplace flows |
+| ~~`viewer-media-prim-browser`~~ (done 2026-09-27) | 1 | `viewer-money-economy-ui`, `viewer-destination-guide`, the L$ purchase and marketplace flows |
 | `viewer-image-upload` | 1 | `viewer-snapshot-to-inventory`, `viewer-profile-image-editing`, `viewer-group-insignia-editing`, `viewer-inventory-thumbnails` |
 | `viewer-gesture-runtime` | 1 | `viewer-gesture-management-ui`, `viewer-input-gesture-bindings` |
 | `viewer-os-portals-linux` | 1 | the **save** half of every disk-touching flow: snapshot save-as, script / notecard save-to-file, export, settings backup, access-list import — plus OpenURI and desktop notifications. Opening a file already works, so upload is not behind it |
@@ -462,8 +465,8 @@ here cut across it, so a round can take one theme per agent:
   streaming-audio tasks already in flight, and tier 3's voice block when it
   comes up.
 
-One caution: the four in-progress tier-1 items (`viewer-notecard-editor`,
-`viewer-streaming-audio`, `viewer-media-prim-browser`,
-`viewer-video-playback`) are worth finishing before any of them opens a new
-front, because the money UI sits behind one of them and three tier-1
-entries are those tasks themselves.
+One caution: the three in-progress tier-1 items (`viewer-notecard-editor`,
+`viewer-streaming-audio`, `viewer-video-playback`) are worth finishing before
+any of them opens a new front, because they are tier-1 entries themselves.
+The fourth, `viewer-media-prim-browser`, is done, and the money UI it held back
+is ready.

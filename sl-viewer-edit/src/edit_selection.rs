@@ -1699,7 +1699,13 @@ impl FromWorld for FaceCursorAssets {
 /// A per-face grid-cursor overlay child on a selected face (Select Face tool):
 /// the face's own mesh drawn with the white repeat grid.
 #[derive(Component, Debug)]
-struct FaceCursorOverlay;
+struct FaceCursorOverlay {
+    /// The face's texture placement the grid material was built with. A
+    /// texture-entry edit (repeats / offset / rotation) changes it on the
+    /// *same* face entity, so the reconciler compares and redraws — without it
+    /// the grid kept the placement of the moment it was spawned.
+    uv: bevy::math::Affine2,
+}
 
 /// The face-mesh data the cursor overlay reads: the shared mesh handle, the
 /// face's Linden index (to test membership in the selected-face set), and its
@@ -1743,7 +1749,7 @@ struct FaceCursorWorld<'w, 's> {
 fn apply_face_cursor_highlight(
     tool: Res<EditToolState>,
     selection: Res<SelectionSet>,
-    overlays: Query<(Entity, &ChildOf), With<FaceCursorOverlay>>,
+    overlays: Query<(Entity, &ChildOf, &FaceCursorOverlay)>,
     mut cursor: FaceCursorWorld,
 ) {
     // The desired cursor set: face entity → its texture placement.
@@ -1760,10 +1766,22 @@ fn apply_face_cursor_highlight(
             );
         }
     }
-    // Despawn cursors whose face left the set, keep the rest.
-    for (overlay, child_of) in overlays.iter() {
-        if desired.remove(&child_of.parent()).is_none() {
-            cursor.commands.entity(overlay).despawn();
+    // Despawn cursors whose face left the set or whose placement changed under
+    // them (they are respawned below with the new one), keep the rest.
+    for (overlay, child_of, drawn) in overlays.iter() {
+        let current = desired
+            .get(&child_of.parent())
+            .map(|FaceTextureDebug(face)| texture_face_uv_transform(face));
+        match current {
+            Some(uv) if uv == drawn.uv => {
+                desired.remove(&child_of.parent());
+            }
+            Some(_changed) => {
+                cursor.commands.entity(overlay).despawn();
+            }
+            None => {
+                cursor.commands.entity(overlay).despawn();
+            }
         }
     }
     // Spawn the missing cursors: the face's mesh, the grid material carrying the
@@ -1772,6 +1790,7 @@ fn apply_face_cursor_highlight(
         let Ok((mesh, _marker, _debug, skin)) = cursor.faces.get(face) else {
             continue;
         };
+        let uv_transform = texture_face_uv_transform(&texture_face);
         // An inert `FaceMaterial` (bit-identical to the bare `StandardMaterial`) so
         // `SlFaceExt`'s `specialize` keeps this translucent grid cursor's coverage out
         // of the glow mask — an editor overlay must not bloom under the glow pass.
@@ -1782,7 +1801,7 @@ fn apply_face_cursor_highlight(
             alpha_mode: AlphaMode::Blend,
             // The grid follows the face's texture placement (repeats / offset /
             // rotation), so its lines fall on each repeat's boundary.
-            uv_transform: texture_face_uv_transform(&texture_face),
+            uv_transform,
             // The face is single-sided; the cursor shows on either side so it is
             // visible however the face is wound.
             cull_mode: None,
@@ -1794,7 +1813,7 @@ fn apply_face_cursor_highlight(
             Mesh3d(mesh.0.clone()),
             MeshMaterial3d(material),
             NotShadowCaster,
-            FaceCursorOverlay,
+            FaceCursorOverlay { uv: uv_transform },
             EditorOverlay,
             ChildOf(face),
             OUTLINE_VISIBILITY,

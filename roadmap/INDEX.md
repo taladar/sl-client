@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 118 |
-| ready | 302 |
-| blocked | 61 |
-| in-progress | 25 |
-| bugs | 13 |
-| done | 1240 |
-| deferred | 30 |
+| ideas | 119 |
+| ready | 303 |
+| blocked | 60 |
+| in-progress | 24 |
+| bugs | 14 |
+| done | 1241 |
+| deferred | 31 |
 | wont-do | 16 |
-| **total** | **1805** |
+| **total** | **1808** |
 
-## ideas (118)
+## ideas (119)
 
 ### protocol
 
@@ -192,6 +192,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-window-attention-flash`](ideas/viewer-window-attention-flash.md) —
   Window urgency flash + in-UI unread-flash cues
 
+### idiomatic
+
+- [`idiomatic-audit-primitive-typed-patterns`](ideas/idiomatic-audit-primitive-typed-patterns.md)
+  — Audit for stringly / integer / boolean typed patterns copied from the
+  reference
+
 ### test
 
 - [`test-crosscheck-ui-scenes`](ideas/test-crosscheck-ui-scenes.md) — UI scenes
@@ -294,7 +300,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (302)
+## ready (303)
 
 ### protocol
 
@@ -661,6 +667,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-minimap-menu-land-items`](ready/viewer-minimap-menu-land-items.md) —
   Minimap context menu — About Land / Place Profile / World Map (blocked by
   `viewer-parcel-options-general` (done), `viewer-world-map-floater` (done))
+- [`viewer-money-economy-ui`](ready/viewer-money-economy-ui.md) — Money /
+  economy / L$ UI (blocked by `viewer-ui-widget-scaffold` (done),
+  `viewer-media-prim-browser` (done))
 - [`viewer-movement-controls-floater`](ready/viewer-movement-controls-floater.md)
   — Movement controls floater + stand / stop-flying buttons (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -1010,7 +1019,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-world-heartbeat`](ready/server-world-heartbeat.md) — A region
   heartbeat — the fake grid has no simulation loop at all
 
-## blocked (61)
+## blocked (60)
 
 ### protocol
 
@@ -1063,9 +1072,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Minimap context menu — remaining avatar actions (More Options) (blocked by
   `viewer-block-list` (done), `viewer-report-abuse`, `viewer-derender-blacklist`
   (done))
-- [`viewer-money-economy-ui`](blocked/viewer-money-economy-ui.md) — Money /
-  economy / L$ UI (blocked by `viewer-ui-widget-scaffold` (done),
-  `viewer-media-prim-browser`)
 - [`viewer-movement-quickjump-movelock`](blocked/viewer-movement-quickjump-movelock.md)
   — Movelock and Quickjump movement toggles (blocked by
   `viewer-fs-bridge-protocol`)
@@ -1206,7 +1212,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Batch world changes into per-tick update bursts (blocked by
   `server-world-heartbeat`, `server-world-ecs-store`)
 
-## in-progress (25)
+## in-progress (24)
 
 ### viewer
 
@@ -1225,8 +1231,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-keyed-floater-audit`](in-progress/viewer-keyed-floater-audit.md) —
   Audit the other per-subject singletons onto the keyed-floater scaffold
-- [`viewer-media-prim-browser`](in-progress/viewer-media-prim-browser.md) —
-  Media-on-a-prim & embedded web browser
 - [`viewer-menu-touch-object`](in-progress/viewer-menu-touch-object.md) — Touch
   an object from the object and attachment menus
 - [`viewer-notecard-editor`](in-progress/viewer-notecard-editor.md) — Notecard
@@ -1274,7 +1278,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (13)
+## bugs (14)
 
 ### protocol
 
@@ -1295,6 +1299,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Some worn mesh hair does not render (visible in Firestorm)
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
+- [`viewer-notification-button-ids-untyped`](bugs/viewer-notification-button-ids-untyped.md)
+  — Notification button ids are bare strings, so a wrong one fails silently
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
 - [`viewer-parcel-audio-bar-backing-unskinned`](bugs/viewer-parcel-audio-bar-backing-unskinned.md)
@@ -1314,7 +1320,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1240)
+## done (1241)
 
 ### protocol
 
@@ -2202,6 +2208,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-lsl-parser-tree` (done), `protocol-lsl-syntax` (done))
 - [`viewer-material-swatch-sphere-preview`](done/viewer-material-swatch-sphere-preview.md)
   — Render a material-on-a-sphere preview for the PBR material swatch
+- [`viewer-media-prim-browser`](done/viewer-media-prim-browser.md) —
+  Media-on-a-prim & embedded web browser
 - [`viewer-menu-accelerators-inert`](done/viewer-menu-accelerators-inert.md) —
   Menu accelerators are drawn but dead (Ctrl+P / Ctrl+T / Ctrl+F / Ctrl+U)
 - [`viewer-mesh-encoder`](done/viewer-mesh-encoder.md) — LLMesh encoder (inverse
@@ -4041,7 +4049,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-architecture`](done/server-lsl-architecture.md) — LSL engine
   architecture — execution model, crate layout, scheduling
 
-## deferred (30)
+## deferred (31)
 
 ### protocol
 
@@ -4069,7 +4077,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-combo-stops-opening`](deferred/viewer-combo-stops-opening.md) — A
   combo can stop dropping down (seen on the contact-sets chooser)
 - [`viewer-destination-guide`](deferred/viewer-destination-guide.md) —
-  Destination guide floater (blocked by `viewer-media-prim-browser`)
+  Destination guide floater (blocked by `viewer-media-prim-browser` (done))
 - [`viewer-hud-menu-reorder-when-implemented`](deferred/viewer-hud-menu-reorder-when-implemented.md)
   — Re-lay the HUD pie by meaning once most actions are implemented (blocked by
   `viewer-hud-context-menu` (done))
@@ -4082,6 +4090,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-legacy-material-exact-port`](deferred/viewer-legacy-material-exact-port.md)
   — Legacy Blinn-Phong material — exact port (lightFunc LUT + reflection-probe
   environment)
+- [`viewer-media-zero-copy-frames`](deferred/viewer-media-zero-copy-frames.md) —
+  Zero-copy media frames (DMA-BUF / shared-texture import)
 - [`viewer-navigation-favorites-bars`](deferred/viewer-navigation-favorites-bars.md)
   — Navigation / location bar + favorites bar
 - [`viewer-non-goals-deferred-candi`](deferred/viewer-non-goals-deferred-candi-non-goals-deferred-candidate-follow-up-roadmaps.md)

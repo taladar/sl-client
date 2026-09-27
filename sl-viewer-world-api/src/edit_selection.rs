@@ -445,6 +445,10 @@ pub enum MatMedia {
     Material,
     /// The **PBR** (GLTF) render-material mode.
     Pbr,
+    /// The **Media** (media-on-a-prim) mode — the face's media summary and its
+    /// Choose / Remove / Align actions, plus the texture-entry controls a media
+    /// face still wears (tint, glow, full-bright, the texture transforms).
+    Media,
 }
 
 /// The Material-mode map channel a Blinn-Phong edit applies to — the
@@ -480,7 +484,8 @@ pub enum PbrChannel {
 
 /// The `matmedia` combo options, in the order they appear in the strip. The one
 /// place the index↔mode mapping lives, like [`BUILD_TOOLS`].
-pub(crate) const MAT_MEDIA_MODES: [MatMedia; 2] = [MatMedia::Material, MatMedia::Pbr];
+pub(crate) const MAT_MEDIA_MODES: [MatMedia; 3] =
+    [MatMedia::Material, MatMedia::Pbr, MatMedia::Media];
 
 /// The `radio_material_type` options, in the order they appear in the radio row.
 pub(crate) const MATERIAL_CHANNELS: [MatChannel; 3] = [
@@ -563,6 +568,12 @@ impl MatModeState {
     #[must_use]
     pub const fn is_pbr(self) -> bool {
         matches!(self.matmedia, MatMedia::Pbr)
+    }
+
+    /// Whether the Media (media-on-a-prim) mode is active.
+    #[must_use]
+    pub const fn is_media(self) -> bool {
+        matches!(self.matmedia, MatMedia::Media)
     }
 }
 

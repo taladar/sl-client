@@ -97,9 +97,20 @@ pub(crate) enum ShowWhen {
     /// shininess combo, glossiness / environment / specular colour and the
     /// specular-map transforms.
     MaterialSpecular,
-    /// Material mode, any channel: the glow / full-bright / mapping / align
-    /// controls (`TextureEntry`-level, shared across the map channels).
+    /// Material mode, any channel: the material-type radio itself.
     MaterialAny,
+    /// Material mode's diffuse channel **or** Media mode: the tint,
+    /// transparency and the texture transforms — the reference's
+    /// `show_texture`, which a media face shares with a diffuse texture because
+    /// media is drawn in the diffuse slot.
+    SurfaceDiffuse,
+    /// Material or Media mode, any channel: the glow / full-bright / mapping /
+    /// align controls (`TextureEntry`-level, shared across the map channels and
+    /// a media face alike).
+    SurfaceAny,
+    /// Media mode: the face's media summary and its Choose / Remove / Align
+    /// actions ([`crate::edit_media`]).
+    Media,
     /// PBR mode, any channel: the per-channel PBR transforms.
     PbrAny,
     /// PBR mode, the Complete-material channel: the render-material swatch, the
@@ -131,6 +142,12 @@ impl ShowWhen {
                 state.is_material() && matches!(state.mat_type, MatChannel::Specular)
             }
             Self::MaterialAny => state.is_material(),
+            Self::SurfaceDiffuse => {
+                state.is_media()
+                    || (state.is_material() && matches!(state.mat_type, MatChannel::Diffuse))
+            }
+            Self::SurfaceAny => state.is_material() || state.is_media(),
+            Self::Media => state.is_media(),
             Self::PbrAny => state.is_pbr(),
             Self::PbrMaterialId => state.is_pbr() && matches!(state.pbr_type, PbrChannel::Material),
             Self::PbrBaseColor => state.is_pbr() && matches!(state.pbr_type, PbrChannel::BaseColor),
@@ -241,27 +258,27 @@ const TEX_FIELD_ROWS: &[(&str, &[TexField], ShowWhen)] = &[
     (
         "build-tex-transparency-label",
         &[TexField::Transparency],
-        ShowWhen::MaterialDiffuse,
+        ShowWhen::SurfaceDiffuse,
     ),
     (
         "build-tex-glow-label",
         &[TexField::Glow],
-        ShowWhen::MaterialAny,
+        ShowWhen::SurfaceAny,
     ),
     (
         "build-tex-repeats-label",
         &[TexField::RepeatU, TexField::RepeatV],
-        ShowWhen::MaterialDiffuse,
+        ShowWhen::SurfaceDiffuse,
     ),
     (
         "build-tex-offset-label",
         &[TexField::OffsetU, TexField::OffsetV],
-        ShowWhen::MaterialDiffuse,
+        ShowWhen::SurfaceDiffuse,
     ),
     (
         "build-tex-rotation-label",
         &[TexField::Rotation],
-        ShowWhen::MaterialDiffuse,
+        ShowWhen::SurfaceDiffuse,
     ),
 ];
 
@@ -456,6 +473,10 @@ impl Plugin for EditTexturePlugin {
     /// Spawn the Texture-tab widgets (after the build floater's tab pages exist)
     /// and run the sync + commit systems.
     fn build(&self, app: &mut App) {
+        // The Media mode's actions and the Media Settings window it opens.
+        if !app.is_plugin_added::<crate::edit_media::EditMediaPlugin>() {
+            app.add_plugins(crate::edit_media::EditMediaPlugin);
+        }
         app.init_resource::<TexShownSnapshot>()
             .init_resource::<TexFieldFocus>()
             .init_resource::<TexturePreview>()
@@ -504,6 +525,7 @@ fn spawn_texture_tab(mut commands: Commands, pages: Option<Res<BuildTabPages>>) 
     let parts = spawn_texture_tab_into(&mut commands, pages.texture, TOOL_FONT_SIZE);
     commands.insert_resource(parts.texture);
     commands.insert_resource(parts.material);
+    commands.insert_resource(parts.media);
 }
 
 /// The Texture tab's handles, what [`spawn_texture_tab_into`] hands back.
@@ -513,6 +535,8 @@ pub(crate) struct TextureTabParts {
     pub(crate) texture: BuildTextureUi,
     /// The material channels' widgets ([`crate::edit_material`]).
     pub(crate) material: crate::edit_material::BuildMaterialUi,
+    /// The Media mode's widgets ([`crate::edit_media`]).
+    pub(crate) media: crate::edit_media::MediaSectionUi,
 }
 
 /// Spawn the Texture-tab editors into `page` at `font_size`: the face summary,
@@ -540,6 +564,9 @@ pub(crate) fn spawn_texture_tab_into(
     // normal / specular maps or the PBR render material the tab edits.
     let selectors = spawn_mode_selectors(commands, page, &mut tab_index, font_size);
 
+    // The Media mode's line and its Choose… / Remove / Align buttons.
+    let media = crate::edit_media::spawn_media_section(commands, page, &mut tab_index, font_size);
+
     // The diffuse texture swatch (opens the texture picker) and the colour swatch
     // (opens the colour picker) — the Material / Texture channel.
     let texture_row = spawn_row(commands, page, "build-tex-texture-id-label", font_size);
@@ -557,7 +584,7 @@ pub(crate) fn spawn_texture_tab_into(
     tab_index = tab_index.saturating_add(1);
 
     let color_row = spawn_row(commands, page, "build-tex-color-label", font_size);
-    commands.entity(color_row).insert(ShowWhen::MaterialDiffuse);
+    commands.entity(color_row).insert(ShowWhen::SurfaceDiffuse);
     let color_swatch = spawn_color_swatch(
         commands,
         color_row,
@@ -591,7 +618,7 @@ pub(crate) fn spawn_texture_tab_into(
         &mut tab_index,
         font_size,
     );
-    commands.entity(fullbright).insert(ShowWhen::MaterialAny);
+    commands.entity(fullbright).insert(ShowWhen::SurfaceAny);
 
     // Bumpiness / shininess / mapping combo boxes (the reference's `combobox
     // bumpiness` (normal channel) / `combobox shininess` (specular channel) /
@@ -610,7 +637,7 @@ pub(crate) fn spawn_texture_tab_into(
         (
             TexCycle::TexGen,
             "build-tex-mapping-label",
-            ShowWhen::MaterialAny,
+            ShowWhen::SurfaceAny,
         ),
     ] {
         let row_entity = spawn_row(commands, page, label_key, font_size);
@@ -621,7 +648,7 @@ pub(crate) fn spawn_texture_tab_into(
     // Align planar faces (the reference's `checkbox planar align`, offered as a
     // one-shot action button that aligns the selected faces to the primary face).
     let align = spawn_align_button(commands, page, &mut tab_index, font_size);
-    commands.entity(align).insert(ShowWhen::MaterialAny);
+    commands.entity(align).insert(ShowWhen::SurfaceAny);
 
     // The Blinn-Phong normal / specular channels and the PBR channels
     // ([`crate::edit_material`]) share this page and the mode selectors.
@@ -638,12 +665,13 @@ pub(crate) fn spawn_texture_tab_into(
             pbr_type_radio: selectors.pbr_type_radio,
         },
         material,
+        media,
     }
 }
 
 /// The three material-mode selector entities the mode systems read / write.
 struct ModeSelectors {
-    /// The `matmedia` tab strip (Material / PBR).
+    /// The `matmedia` tab strip (Material / PBR / Media).
     matmedia_strip: Entity,
     /// The `radio_material_type` group (Texture / Bumpiness / Shininess).
     mat_type_radio: Entity,
@@ -662,7 +690,7 @@ fn spawn_mode_selectors(
     tab_index: &mut i32,
     font_size: f32,
 ) -> ModeSelectors {
-    // matmedia mode switch (Material / PBR). The reference presents the material
+    // matmedia mode switch (Material / PBR / Media). The reference presents the material
     // type as a select box, but here it reads as a tab strip
     // ([`crate::ui_tab`]) so it matches the build floater's tabbed shell; the
     // strip's [`TabStrip::active`] replaces the combo's selection index the mode
@@ -673,6 +701,7 @@ fn spawn_mode_selectors(
     let matmedia_labels = [
         "build-tex-matmedia-material".to_owned(),
         "build-tex-matmedia-pbr".to_owned(),
+        "build-tex-matmedia-media".to_owned(),
     ];
     let matmedia_strip = spawn_tab_strip(
         commands,
@@ -776,17 +805,19 @@ struct MatModeSelected {
 }
 
 /// Auto-select the material mode when the primary selection changes: choose the
-/// PBR matmedia entry for a face that carries a GLTF render material, otherwise
-/// the Material (Blinn-Phong) entry — the reference `LLPanelFace::updateUI`
-/// behaviour where a PBR'd object opens in PBR mode and everything else in
-/// Material mode. Only runs on an object change, so the user's later manual
-/// matmedia pick stands.
+/// PBR matmedia entry for a face that carries a GLTF render material, the Media
+/// entry for a face that carries media, otherwise the Material (Blinn-Phong)
+/// entry — the reference `LLPanelFace::updateUI` behaviour where a PBR'd object
+/// opens in PBR mode, a media face in Media mode and everything else in Material
+/// mode. Only runs on an object change, so the user's later manual matmedia pick
+/// stands.
 fn auto_select_material_mode(
     tool: Res<EditToolState>,
     selection: Res<SelectionSet>,
     ui: Option<Res<BuildTextureUi>>,
     mut selected: ResMut<MatModeSelected>,
     faces: crate::edit_material::RenderFaceLookup,
+    prim_faces: PrimFaceLookup,
     mut strips: Query<&mut TabStrip>,
 ) {
     if !tool.active {
@@ -806,16 +837,39 @@ fn auto_select_material_mode(
     selected.last_object = Some(primary.scoped);
     let face_id = primary_face_index(&selection);
     let has_pbr = faces.material_id(primary.entity, face_id).is_some();
-    let want = if has_pbr {
-        MatMedia::Pbr
-    } else {
-        MatMedia::Material
-    };
+    let has_media = prim_faces
+        .current_faces(primary.entity)
+        .get(usize::from(face_id))
+        .is_some_and(|face| face.media_enabled());
+    let current = strips
+        .get(ui.matmedia_strip)
+        .map_or(MatMedia::Material, |strip| {
+            MatMedia::from_radio_index(strip.active)
+        });
+    let want = auto_mode_for_face(has_pbr, has_media, current);
     // Write the strip's active index directly; the tab widget's
     // `apply_programmatic_tab_selection` reconciles its highlight (`crate::ui_tab`
     // owns the click / arrow path, this is the programmatic one).
     if let Ok(mut strip) = strips.get_mut(ui.matmedia_strip) {
         strip.active = want.radio_index();
+    }
+}
+
+/// The matmedia mode a newly selected face opens in — the reference's
+/// `updateUI` rule: a PBR face opens in PBR mode unless it also carries media
+/// and the tab is already showing Media; otherwise a media face opens in Media
+/// mode and everything else in Material mode.
+pub(crate) const fn auto_mode_for_face(
+    has_pbr: bool,
+    has_media: bool,
+    current: MatMedia,
+) -> MatMedia {
+    if has_pbr && !(matches!(current, MatMedia::Media) && has_media) {
+        MatMedia::Pbr
+    } else if has_media {
+        MatMedia::Media
+    } else {
+        MatMedia::Material
     }
 }
 
@@ -902,7 +956,7 @@ pub(crate) struct BuildTextureUi {
     color_swatch: Entity,
     /// The diffuse-texture swatch (the texture picker's requester).
     texture_swatch: Entity,
-    /// The `matmedia` tab strip (Material / PBR) — its [`TabStrip::active`] is
+    /// The `matmedia` tab strip (Material / PBR / Media) — its [`TabStrip::active`] is
     /// read for the mode and written by the per-object auto-select.
     pub(crate) matmedia_strip: Entity,
     /// The `radio_material_type` group (Texture / Bumpiness / Shininess).
@@ -1129,6 +1183,8 @@ struct TexWidgets<'w, 's> {
     controls: Query<'w, 's, Entity, With<TexControl>>,
     /// The child links, walked from the page to grey every label / value.
     children: Query<'w, 's, &'static Children>,
+    /// The subtrees that grey themselves, which the page walk skips.
+    own_gates: Query<'w, 's, (), With<OwnGate>>,
     /// The skin class lists on the tab's texts, greyed while nothing is selected.
     class_lists: Query<'w, 's, &'static mut ClassList>,
     /// Commands, to toggle the controls' `InteractionDisabled` / `Pickable`.
@@ -1199,6 +1255,11 @@ struct PreviewPaint<'w, 's> {
     materials: ResMut<'w, Assets<FaceMaterial>>,
 }
 
+/// Marks a Texture-tab subtree that gates (and greys) its own controls, so the
+/// panel-wide greying of [`grey_texture_tab`] leaves it alone.
+#[derive(Component, Debug, Clone, Copy)]
+pub(crate) struct OwnGate;
+
 /// Grey (or un-grey) every label / value text under the Texture page by toggling
 /// [`crate::edit_params::DISABLED_CLASS`] on each descendant that carries a build
 /// label / value class.
@@ -1208,10 +1269,16 @@ fn grey_texture_tab(
     page: Entity,
     disabled: bool,
     children: &Query<&Children>,
+    own_gates: &Query<(), With<OwnGate>>,
     class_lists: &mut Query<&mut ClassList>,
 ) {
     let mut stack = vec![page];
     while let Some(entity) = stack.pop() {
+        // A subtree with its own enable rule (the Media mode's buttons, live
+        // on a face without media) greys itself; the panel gate must not.
+        if own_gates.contains(entity) {
+            continue;
+        }
         if let Ok(kids) = children.get(entity) {
             stack.extend(kids.iter());
         }
@@ -1228,7 +1295,7 @@ fn grey_texture_tab(
 /// snapshot changes (so a just-committed edit is not clobbered before the
 /// simulator's confirming update lands).
 fn sync_texture_widgets(
-    tool: Res<EditToolState>,
+    (tool, mode): (Res<EditToolState>, Res<MatModeState>),
     selection: Res<SelectionSet>,
     objects: Res<ObjectState>,
     ui: Option<Res<BuildTextureUi>>,
@@ -1248,7 +1315,15 @@ fn sync_texture_widgets(
     let modify_ok = selection
         .primary()
         .is_some_and(|node| objects.agent_can_modify(&node.scoped));
-    let enabled = current.is_some() && modify_ok;
+    // In Media mode the texture-entry controls shown there (tint, glow, the
+    // transforms) place the *media*, so they are refused until the face carries
+    // some — Choose… (not a `TexControl`) is how it gets it, and the mode strip
+    // stays live to switch back to the material.
+    let media_placeable = !mode.is_media()
+        || current
+            .as_ref()
+            .is_some_and(|(_scoped, face, _signature)| face.media_enabled());
+    let enabled = current.is_some() && modify_ok && media_placeable;
     if snapshot.enabled != Some(enabled) {
         snapshot.enabled = Some(enabled);
         for control in &widgets.controls {
@@ -1270,6 +1345,7 @@ fn sync_texture_widgets(
                 ui.page,
                 !enabled,
                 &widgets.children,
+                &widgets.own_gates,
                 &mut widgets.class_lists,
             );
         }

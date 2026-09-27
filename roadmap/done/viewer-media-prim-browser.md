@@ -2,7 +2,7 @@
 id: viewer-media-prim-browser
 title: Media-on-a-prim & embedded web browser
 topic: viewer
-status: in-progress
+status: done
 origin: reference-viewer feature-cluster survey (2026-07)
 refs: [viewer-audio-backend, viewer-video-playback]
 ---
@@ -223,3 +223,79 @@ addendum to this same task — the two should land as one surface), and
 the **align media to face** button. The protocol side is already done
 (`SetObjectMedia` etc., protocol-24). Reference:
 `panel_tools_texture.xml` L167-179 and L671-692.
+
+## Done (2026-09-27): the write half, the cursor and the IME
+
+What was left above is in, and zero-copy — headroom by design — is its own
+deferred task, [[viewer-media-zero-copy-frames]].
+
+- **The Texture tab's Media mode** (`sl-viewer-edit/src/edit_media.rs`): the
+  third entry of the material-mode strip, opened on its own when the selected
+  face carries media. It shows the selection's media line (the one
+  configuration's home page, *Multiple Media*, or nothing) and **Choose…**
+  (asking `MultipleFacesSelected` first for several faces; dead while the
+  region serves no `ObjectMedia` cap), **Remove** (behind `DeleteMedia`) and
+  **Align** (live only while a selected face's surface runs). In Media mode the
+  tab keeps the texture-entry controls a media face still wears — tint,
+  transparency, glow, full-bright, mapping and the texture transforms.
+- **The Media Settings window** (`media-settings`), its three tabs as in
+  `floater_media_settings.xml`: General (home page with the white-list
+  warning, a muted watch-only preview, the current page with Reset, the
+  auto-loop / first-click-interacts / auto-zoom / auto-play / auto-scale
+  switches and the size, which auto-scale greys), Customize (the control-bar
+  style and the six permission boxes, with the object's group named) and
+  Security (the white-list switch, the list marking the entries the home page
+  fails, Add… through the small **Whitelist Entry** window, Delete, and the
+  reference's refusal to enforce a list the home page fails). OK / Apply write
+  the form to every selected face of every modifiable object: the texture
+  entry's media flag first (`ObjectImage`), then the object's whole media over
+  `ObjectMedia` — `selectionSetMedia`'s order. The window follows the selection
+  unless the form has been edited, and closes with the build tools. Both
+  windows are in the `FLOATERS` registry with specimens.
+- **The rules live in a pure model** (`edit_media_model.rs`, unit-tested): a
+  face with no media reads as the default entry, a mixed field is written only
+  when changed, a bare face gains media only from a home page, and — a
+  deliberate improvement on the reference, whose own comment calls its
+  behaviour "not quite the user expectation" — permissions merge **per bit**,
+  so an untouched mixed bit keeps each face's own value. Tests in
+  `edit_media.rs` pin what reaches the wire and in which order.
+- **The page's cursor**: a hand over a link, an I-beam over a field, on a
+  hovered UI browser view and on the in-world face the hover forwards motion to
+  (the plain arrow on any other media face) — the reference's
+  `handleMediaHover` / `LLMediaCtrl::handleHover`. Alt still yields to the
+  camera's cursors.
+- **IME composition inside a page** (`sl_viewer_media::media_ime`): the
+  preedit shows in the page through CEF's `ime_set_composition`, the commit
+  goes through `ime_commit_text`, the keys are withheld from the page while the
+  IME composes, and the window's IME is switched on while a page holds the
+  keyboard. Unverified live — this machine has no input method — so it joined
+  [[viewer-ui-text-ime-verification]].
+
+Found and fixed in the live check on the local grid (2026-09-27), all in the
+read half, which had never been driven by an editor before:
+
+- **A texture edit took the media off the face for good.** The surface driver
+  re-applied the media material only on a face rebuild or a resize, but a
+  texture-entry edit reaches the *same* face entity with its own material and
+  a new placement; the surface stayed "live", so nothing restarted it. It now
+  also re-applies when the face no longer wears the media material or its
+  repeats / offset / rotation changed.
+- **A removal left the surface (and its bar) running.** The driver took the
+  capability's last-reported entries as the truth, but a removal clears only
+  the texture entry's media flag; it now requires the flag, as the reference's
+  `hasMedia()` does.
+- **Apply started nothing.** A click on the face selects while the build tools
+  are open, so OK / Apply now ask for the edited faces to start
+  (`MediaStartRequests`, the reference's post-Apply `navigateHomeSelectedFace`),
+  and a running face with no current page follows a changed home page.
+- **The Select Face grid kept its first placement.** It was rebuilt only with
+  its face entity; it now redraws when the face's placement changes.
+- **CEF no longer asks for the desktop keyring** on start:
+  `--password-store=basic` (Chromium's OSCrypt wanted a Secret Service key for
+  its cookie store; cancelling the prompt was always harmless). The patched
+  Firestorm harness needed a `cef_initialize` interposer for the same switch;
+  here it is one line in `OsrApp::on_before_command_line_processing`.
+
+The `DeleteMedia` handler first waited for a button named `Yes` where the form
+names it `OK` — filed as [[viewer-notification-button-ids-untyped]], with the
+wider audit [[idiomatic-audit-primitive-typed-patterns]].

@@ -31,6 +31,7 @@ use bevy::prelude::*;
 use bevy::ui::RelativeCursorPosition;
 
 use crate::media_engine::{MediaEngine, MediaEngineSystems, MediaSurfaceId, MediaSurfaces};
+use crate::media_ime::{MediaIme, MediaImePlugin, MediaImeSystems};
 use crate::media_keys::{current_modifiers, is_printable_text, vk_for_key_code};
 use sl_cef::{KeyInput, MouseButton as MediaMouseButton, SurfaceConfig};
 // Re-exported: they are part of this widget's public API
@@ -90,6 +91,9 @@ pub struct BrowserWidgetPlugin;
 
 impl Plugin for BrowserWidgetPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<MediaImePlugin>() {
+            app.add_plugins(MediaImePlugin);
+        }
         app.init_resource::<BrowserViewIndex>()
             .init_resource::<FocusedBrowserView>()
             .add_systems(
@@ -102,6 +106,12 @@ impl Plugin for BrowserWidgetPlugin {
                 )
                     .chain()
                     .after(MediaEngineSystems::Pump),
+            )
+            .add_systems(
+                Update,
+                route_browser_ime
+                    .after(MediaEngineSystems::Pump)
+                    .before(MediaImeSystems),
             );
     }
 }
@@ -341,10 +351,15 @@ fn on_browser_key(
     surfaces: NonSend<MediaSurfaces>,
     keyboard: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
+    ime: Option<Res<MediaIme>>,
 ) {
     let Ok(view) = views.get(event.focused_entity) else {
         return;
     };
+    // While the IME composes, the keys are the IME's (see `crate::media_ime`).
+    if ime.is_some_and(|ime| ime.composing()) {
+        return;
+    }
     // A view disabled *while* it held focus keeps that focus until the next
     // navigation, so the keystrokes are refused here rather than only at the
     // click that would have granted it.
@@ -372,6 +387,31 @@ fn on_browser_key(
         && is_printable_text(text)
     {
         slot.surface.insert_text(text);
+    }
+}
+
+/// Hand the window's IME messages to the browser view holding the input focus,
+/// and ask for the window's IME while one does ([`crate::media_ime`]). A
+/// non-interactive view takes no text, so it neither asks nor receives.
+fn route_browser_ime(
+    focus: Res<InputFocus>,
+    views: Query<&BrowserView, Without<bevy::ui::InteractionDisabled>>,
+    surfaces: NonSend<MediaSurfaces>,
+    mut events: MessageReader<bevy::window::Ime>,
+    mut ime: ResMut<MediaIme>,
+) {
+    let slot = focus
+        .get()
+        .and_then(|entity| views.get(entity).ok())
+        .and_then(|view| view.surface)
+        .and_then(|id| surfaces.get(id));
+    let Some(slot) = slot else {
+        events.clear();
+        return;
+    };
+    ime.request();
+    for event in events.read() {
+        ime.forward(slot.surface.as_ref(), event);
     }
 }
 
