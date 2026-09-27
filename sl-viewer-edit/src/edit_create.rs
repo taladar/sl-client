@@ -19,6 +19,11 @@
 //!   placer active for repeat-rez; otherwise `select_new_object` drops into
 //!   edit on the new object (selects it and switches to the Move tool) once its
 //!   `ObjectAdded` arrives.
+//! - **Create-selected** (`select_create_selected`): any other object the
+//!   simulator hands back flagged `FLAGS_CREATE_SELECTED` while the build tools
+//!   are open — an inventory drag-rez asks for it then (`RezSelected`) — is
+//!   selected as it arrives, the reference's `LLViewerObjectList` rule ("if
+//!   we're just wandering around, don't create new objects selected").
 //!
 //! Reference (Firestorm, read-only): `lltoolplacer` (incl. its tree / grass
 //! placer variants), `lltoolcomp` (create); the `ObjectAdd` message. The prim
@@ -36,7 +41,9 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::window::{CursorIcon, CustomCursor, CustomCursorImage, PrimaryWindow, SystemCursorIcon};
 use bevy_flair::style::components::ClassList;
-use sl_client_bevy::{Command, PrimShape, SlCommand, Vector, pcode};
+use sl_client_bevy::{
+    Command, ObjectKey, PrimShape, SlCommand, SlEvent, SlSessionEvent, Vector, pcode,
+};
 
 use crate::coords::bevy_to_sl_vec;
 use crate::edit_tool::{LABEL_CLASS, spawn_row_label};
@@ -97,6 +104,11 @@ const SHEAR_NEG_HALF: u8 = 206;
 /// given up on — a generous window covering a slow round-trip, after which an
 /// un-matched rez (e.g. one the simulator refused) stops trying to auto-select.
 const PENDING_REZ_TTL: f32 = 10.0;
+
+/// The `FLAGS_CREATE_SELECTED` bit of an object's update flags
+/// (`object_flags.h`): the simulator created it for this agent asking that it
+/// arrive selected.
+const FLAGS_CREATE_SELECTED: u32 = 1 << 1;
 
 /// How near (metres) a streamed object's **horizontal** position must be to a
 /// pending rez point to count as that rez's object — the placement is exact in
@@ -385,6 +397,7 @@ impl Plugin for EditCreatePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CreateToolState>()
             .init_resource::<PendingRezzes>()
+            .init_resource::<PendingCreateSelected>()
             .init_resource::<CreateCursor>()
             // Gated on build mode: every create system already bailed unless the
             // Create tool was active. The settling window lets `sync_create_panel`
@@ -398,6 +411,8 @@ impl Plugin for EditCreatePlugin {
                     sync_create_panel,
                     handle_create_pointer.after(crate::gizmos::drive_gizmo_interaction),
                     select_new_object.after(crate::objects::update_objects),
+                    note_create_selected,
+                    select_create_selected.after(crate::objects::update_objects),
                 )
                     .chain()
                     .run_if(crate::edit_tool::edit_tool_active_or_settling),
@@ -1034,6 +1049,74 @@ fn select_new_object(
     }
 }
 
+/// Objects that arrived flagged [`FLAGS_CREATE_SELECTED`] while the build tools
+/// were open, waiting for their entity to exist so they can be selected, each
+/// with the time it stops being waited for.
+#[derive(Resource, Debug, Default)]
+struct PendingCreateSelected {
+    /// The objects, by grid-wide key, with their expiry (seconds of app time).
+    objects: Vec<(ObjectKey, f32)>,
+}
+
+/// Whether a newly arrived object asks to be selected: flagged
+/// [`FLAGS_CREATE_SELECTED`], a root (not a linkset child, not worn — an
+/// attachment's parent is its avatar), and the build tools open, since the
+/// reference selects only "if we're not just wandering around".
+const fn wants_create_selected(update_flags: u32, is_root: bool, edit_active: bool) -> bool {
+    edit_active && is_root && update_flags & FLAGS_CREATE_SELECTED != 0
+}
+
+/// Note every object that arrives asking to be selected.
+fn note_create_selected(
+    time: Res<Time>,
+    mut events: MessageReader<SlEvent>,
+    tool: Res<EditToolState>,
+    mut pending: ResMut<PendingCreateSelected>,
+) {
+    for event in events.read() {
+        if let SlSessionEvent::ObjectAdded(object) = &event.0
+            && wants_create_selected(object.update_flags, object.parent_id.0 == 0, tool.active)
+        {
+            pending
+                .objects
+                .push((object.full_id, time.elapsed_secs() + PENDING_REZ_TTL));
+        }
+    }
+}
+
+/// Select each noted object once the scene tracks it — its entity can lag its
+/// `ObjectAdded` by a frame — and forget the ones that never turn up.
+fn select_create_selected(
+    time: Res<Time>,
+    objects: Res<ObjectState>,
+    mut pending: ResMut<PendingCreateSelected>,
+    mut selection: ResMut<SelectionSet>,
+    mut tool: ResMut<EditToolState>,
+) {
+    if pending.objects.is_empty() {
+        return;
+    }
+    let now = time.elapsed_secs();
+    pending.objects.retain(|&(key, expires_at)| {
+        let tracked = objects.entity_of(key).and_then(|entity| {
+            objects
+                .scoped_by_full_id(key.uuid())
+                .first()
+                .map(|scoped| (*scoped, entity))
+        });
+        let Some((scoped, entity)) = tracked else {
+            return expires_at > now;
+        };
+        selection.select_only(scoped, key, entity);
+        // The Create tool has no manipulator for a selection to show.
+        if tool.tool == EditTool::Create {
+            tool.tool = EditTool::Move;
+        }
+        debug!("build: selected created-selected object {scoped:?}");
+        false
+    });
+}
+
 /// Whether the rezzed object's class ([`PendingRez::pcode`]) matches the
 /// scene-object category the placer should adopt: a prim rez adopts a
 /// prim / sculpt / mesh, a tree rez a tree, a grass rez grass.
@@ -1088,11 +1171,29 @@ pub fn spawn_create_panel_specimen(
 mod tests {
     use super::{
         BASE_COUNT, CreateToolState, GRASS_BASE, GRASS_SPECIES, PRIM_TYPES, TOP_TORUS, TREE_BASE,
-        TREE_SPECIES, base_shape, category_matches, near_build,
+        TREE_SPECIES, base_shape, category_matches, near_build, wants_create_selected,
     };
     use crate::objects::ObjectCategory;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{Vector, pcode};
+
+    /// Only a root object flagged create-selected, arriving while the build
+    /// tools are open, is selected — the reference's "if we're just wandering
+    /// around, don't create new objects selected".
+    #[test]
+    fn create_selected_needs_the_flag_a_root_and_the_build_tools() {
+        const CREATE_SELECTED: u32 = 1 << 1;
+        assert!(wants_create_selected(CREATE_SELECTED, true, true));
+        assert!(
+            !wants_create_selected(CREATE_SELECTED, true, false),
+            "wandering around"
+        );
+        assert!(
+            !wants_create_selected(CREATE_SELECTED, false, true),
+            "a child prim"
+        );
+        assert!(!wants_create_selected(0, true, true), "not flagged");
+    }
 
     /// The default create state is the box prim (square profile, straight path).
     #[test]

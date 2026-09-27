@@ -175,6 +175,11 @@ pub(crate) const CAN_CREATE: &str = "can-create";
 /// to `CAN_CREATE`, which is about the folder rather than the region.
 pub const CAN_CREATE_SETTINGS: &str = "can-create-settings";
 
+/// The target object may be put back in-world where it was last rezzed —
+/// Restore to Last Position (the reference offers it for an object that is not
+/// worn, not in the Trash, not a link and not in the Library).
+pub(crate) const CAN_RESTORE_TO_WORLD: &str = "can-restore-to-world";
+
 /// The target wearable / attachment is currently worn — enables Take Off /
 /// Detach.
 pub(crate) const WORN: &str = "worn";
@@ -681,6 +686,11 @@ pub(crate) static INVENTORY_ITEM_MENU: MenuDef = MenuDef {
         MenuItemDef::SubmenuWhen(&ATTACH_TO_MENU, IS_OBJECT),
         MenuItemDef::SubmenuWhen(&ATTACH_TO_HUD_MENU, IS_OBJECT),
         MenuItemDef::Command(
+            MenuCommand::new("menu-inv-restore-to-last-position", "restore-to-world")
+                .visible_when(IS_OBJECT)
+                .enabled_when(CAN_RESTORE_TO_WORLD),
+        ),
+        MenuItemDef::Command(
             MenuCommand::new("menu-inv-touch", "touch")
                 .visible_when(IS_OBJECT)
                 .enabled_when(UNIMPLEMENTED),
@@ -761,6 +771,32 @@ pub(crate) struct InventoryClipboard {
 pub(crate) struct WornAttachments {
     /// The inventory item ids of attachments known worn.
     pub(crate) items: HashSet<InventoryKey>,
+}
+
+/// Whether the current region is an OpenSim one — read from its simulator
+/// features, which only OpenSim fills `OpenSimExtras` in. Restore to Last
+/// Position refuses a no-copy item on Second Life only, where the restore can
+/// lose it (the reference's `CantRestoreToWorldNoCopy`, guarded by
+/// `isInSecondLife`); it defaults to Second Life, the safe answer.
+#[derive(Resource, Debug, Default)]
+pub(crate) struct RegionIsOpenSim(bool);
+
+/// Whether Restore to Last Position must refuse `item`: a no-copy item on
+/// Second Life, where the simulator can destroy it rather than rez it.
+pub(crate) const fn restore_refused(item: &ItemInfo, on_opensim: bool) -> bool {
+    !on_opensim && !item.permissions.owner.contains(Permissions::COPY)
+}
+
+/// Follow the region's simulator features into [`RegionIsOpenSim`].
+fn ingest_region_grid_kind(mut events: MessageReader<SlEvent>, mut grid: ResMut<RegionIsOpenSim>) {
+    for event in events.read() {
+        if let SlSessionEvent::SimulatorFeatures(features) = &event.0 {
+            let on_opensim = features.open_sim_extras.is_some();
+            if grid.0 != on_opensim {
+                grid.0 = on_opensim;
+            }
+        }
+    }
 }
 
 /// The gestures activated this session, by inventory item id. Viewer-tracked
@@ -963,6 +999,16 @@ pub(crate) fn item_conditions(item: &ItemInfo, facts: ItemMenuFacts) -> Vec<&'st
         held.push(CAN_PASTE_LINK);
     }
     held.push(if facts.worn { WORN } else { NOT_WORN });
+    if matches!(
+        item.inv_type,
+        InventoryType::Object | InventoryType::Attachment
+    ) && !facts.worn
+        && !facts.in_trash
+        && !facts.in_library
+        && !crate::inventory_drag::is_link(item)
+    {
+        held.push(CAN_RESTORE_TO_WORLD);
+    }
     if item.inv_type == InventoryType::Gesture {
         held.push(if facts.gesture_active {
             GESTURE_ACTIVE
@@ -1899,6 +1945,8 @@ struct InventoryMenuOut<'w> {
     settings: ResMut<'w, crate::settings::ViewerSettings>,
     /// The system clipboard a Copy UUID fills, absent on a headless host.
     system_clipboard: Option<ResMut<'w, bevy::clipboard::Clipboard>>,
+    /// Alerts from the notification catalogue.
+    notify: MessageWriter<'w, sl_viewer_notifications::ShowNotification>,
 }
 
 /// The read-only sources a menu action resolves against, bundled as one
@@ -1915,6 +1963,8 @@ struct MenuActionContext<'w> {
     library: Option<Res<'w, crate::avatar_assets::AvatarAssetLibrary>>,
     /// Which settings asset types this grid supports.
     settings_support: Res<'w, SettingsInventorySupport>,
+    /// Whether this region is OpenSim, for Restore to Last Position's guard.
+    region_grid: Res<'w, RegionIsOpenSim>,
 }
 
 /// Handle a picked inventory context-menu entry.
@@ -1931,6 +1981,7 @@ fn handle_inventory_menu_actions(
         identity,
         library,
         settings_support,
+        region_grid,
     } = context;
     let InventoryStashes {
         mut clipboard,
@@ -1955,6 +2006,7 @@ fn handle_inventory_menu_actions(
         mut landmark_opens,
         mut settings,
         mut system_clipboard,
+        mut notify,
     } = outputs;
     for action in actions.read() {
         if action.element != INVENTORY_MENU_ELEMENT {
@@ -2274,6 +2326,25 @@ fn handle_inventory_menu_actions(
                         rename: &mut rename,
                     },
                 );
+            }
+            "restore-to-world" => {
+                // The reference's `LLItemBridge::restoreToWorld`: the object
+                // goes back where it was last rezzed, the simulator deciding
+                // the rest (a no-copy one leaves the inventory).
+                for target_row in &targets {
+                    if let MenuTarget::Item(item) = target_row {
+                        if restore_refused(item, region_grid.0) {
+                            notify.write(sl_viewer_notifications::ShowNotification::new(
+                                "CantRestoreToWorldNoCopy",
+                            ));
+                            continue;
+                        }
+                        commands.write(SlCommand(Command::RezRestoreToWorld {
+                            item: crate::inventory_drag::restore_item(item),
+                        }));
+                        query_folder_page(item.folder_id, &mut commands);
+                    }
+                }
             }
             "teleport" => {
                 if let MenuTarget::Item(item) = &menu_target {
@@ -3377,9 +3448,12 @@ impl Plugin for InventoryActionsPlugin {
             .init_resource::<PendingItemCreations>()
             .add_message::<ItemCreationFinished>()
             .init_resource::<SettingsInventorySupport>()
+            .init_resource::<RegionIsOpenSim>()
+            .add_message::<sl_viewer_notifications::ShowNotification>()
             .add_systems(
                 Update,
                 (
+                    ingest_region_grid_kind,
                     // Ahead of the dispatchers: a create pressed on the same
                     // frame a region's caps arrive is answered against that
                     // region, not the one before it.
@@ -3759,6 +3833,7 @@ mod tests {
             ("menu-inv-bottom-left", "attach-point-36"),
             ("menu-inv-bottom", "attach-point-37"),
             ("menu-inv-bottom-right", "attach-point-38"),
+            ("menu-inv-restore-to-last-position", "restore-to-world"),
             ("menu-inv-touch", "touch"),
             ("menu-inv-detach-from-yourself", "detach"),
             ("menu-inv-edit", "edit-settings"),
@@ -4245,6 +4320,48 @@ mod tests {
         );
         let with_trashed = intersect_conditions(&[object_set, trashed]);
         assert!(!with_trashed.contains(&CAN_DELETE));
+    }
+
+    /// Restore to Last Position is offered for an object at rest in the tree —
+    /// not worn, not trashed, not a Library item, not a link — and on Second
+    /// Life refuses a no-copy one, which the restore can lose; OpenSim takes it.
+    #[test]
+    fn restore_to_world_is_offered_and_guarded_as_the_reference_does() {
+        use super::{CAN_RESTORE_TO_WORLD, restore_refused};
+        let copyable = item(
+            2,
+            InventoryType::Object,
+            AssetType::Object,
+            Permissions::COPY.bits(),
+        );
+        assert!(
+            item_conditions(&copyable, ItemMenuFacts::default()).contains(&CAN_RESTORE_TO_WORLD)
+        );
+        for facts in [
+            ItemMenuFacts {
+                worn: true,
+                ..ItemMenuFacts::default()
+            },
+            ItemMenuFacts {
+                in_trash: true,
+                ..ItemMenuFacts::default()
+            },
+            ItemMenuFacts {
+                in_library: true,
+                ..ItemMenuFacts::default()
+            },
+        ] {
+            assert!(!item_conditions(&copyable, facts).contains(&CAN_RESTORE_TO_WORLD));
+        }
+        let landmark = item(3, InventoryType::Landmark, AssetType::Landmark, 0);
+        assert!(
+            !item_conditions(&landmark, ItemMenuFacts::default()).contains(&CAN_RESTORE_TO_WORLD)
+        );
+
+        let no_copy = item(4, InventoryType::Object, AssetType::Object, 0);
+        assert!(restore_refused(&no_copy, false), "Second Life");
+        assert!(!restore_refused(&no_copy, true), "OpenSim");
+        assert!(!restore_refused(&copyable, false));
     }
 
     /// The attach-point action strings parse back to their wire points, and

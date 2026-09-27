@@ -267,11 +267,18 @@ pub(crate) fn give_command(
 /// drag-rez. `ray_start` is the camera; `ray_end` the struck point (region
 /// coordinates). A no-copy item is **moved** to the world (`remove_item`), a
 /// copyable one leaves the inventory copy behind — the reference's rule.
-pub(crate) fn rez_object_command(item: &ItemInfo, ray_start: Vector, ray_end: Vector) -> Command {
+///
+/// `rez_selected` asks the simulator to hand the new object back flagged
+/// `FLAGS_CREATE_SELECTED`, which the build tools answer by selecting it — the
+/// reference sets it exactly while a build tool is active
+/// (`LLToolMgr::inEdit`).
+pub(crate) fn rez_object_command(
+    item: &ItemInfo,
+    ray_start: Vector,
+    ray_end: Vector,
+    rez_selected: bool,
+) -> Command {
     let copyable = item.permissions.owner.contains(Permissions::COPY);
-    // A rez carries the item's sale terms as they stand; an unoffered item
-    // still has a price on record (`SaleInfo`), which the wire slot holds.
-    let (sale_type, sale_price) = (item.sale.sale_type, Some(item.sale.price.clone()));
     Command::RezObjectFromInventory {
         params: Box::new(RezObjectParams {
             group_id: None,
@@ -281,31 +288,40 @@ pub(crate) fn rez_object_command(item: &ItemInfo, ray_start: Vector, ray_end: Ve
             ray_end,
             ray_target_id: None,
             ray_end_is_intersection: true,
-            rez_selected: false,
+            rez_selected,
             remove_item: !copyable,
             item_flags: item.flags,
             group_mask: item.permissions.group.bits(),
             everyone_mask: item.permissions.everyone.bits(),
             next_owner_mask: item.permissions.next_owner.bits(),
-            item: RestoreItem {
-                item_id: item.item_id,
-                folder_id: item.folder_id,
-                creator_id: item.creator_id,
-                owner: item.owner,
-                group: item.group,
-                permissions: item.permissions,
-                transaction_id: Uuid::new_v4(),
-                asset_type: i8::try_from(item.asset_type.to_code()).unwrap_or(-1),
-                inv_type: i8::try_from(item.inv_type.to_code()).unwrap_or(-1),
-                flags: item.flags,
-                sale_type,
-                sale_price,
-                name: item.name.clone(),
-                description: item.description.clone(),
-                creation_date: item.creation_date,
-                crc: 0,
-            },
+            item: restore_item(item),
         }),
+    }
+}
+
+/// An inventory item as a rez message carries it (`InventoryData` —
+/// `LLViewerInventoryItem::packMessage`), for a drag-rez and for Restore to
+/// Last Position alike.
+pub(crate) fn restore_item(item: &ItemInfo) -> RestoreItem {
+    // A rez carries the item's sale terms as they stand; an unoffered item
+    // still has a price on record (`SaleInfo`), which the wire slot holds.
+    RestoreItem {
+        item_id: item.item_id,
+        folder_id: item.folder_id,
+        creator_id: item.creator_id,
+        owner: item.owner,
+        group: item.group,
+        permissions: item.permissions,
+        transaction_id: Uuid::new_v4(),
+        asset_type: i8::try_from(item.asset_type.to_code()).unwrap_or(-1),
+        inv_type: i8::try_from(item.inv_type.to_code()).unwrap_or(-1),
+        flags: item.flags,
+        sale_type: item.sale.sale_type,
+        sale_price: Some(item.sale.price.clone()),
+        name: item.name.clone(),
+        description: item.description.clone(),
+        creation_date: item.creation_date,
+        crc: 0,
     }
 }
 
@@ -356,7 +372,7 @@ pub(crate) fn resolve_drop_source(
 }
 
 /// Whether an item is an inventory link, to an item or to a folder.
-const fn is_link(item: &ItemInfo) -> bool {
+pub(crate) const fn is_link(item: &ItemInfo) -> bool {
     matches!(
         item.asset_type,
         AssetType::Other(ASSET_CODE_LINK | ASSET_CODE_LINK_FOLDER)
@@ -538,6 +554,8 @@ pub(crate) struct WorldDrop<'w, 's> {
     scene: Query<'w, 's, &'static crate::world_api::SceneObject>,
     /// The object model, for the permission check.
     objects: Res<'w, crate::world_api::ObjectState>,
+    /// The build tools, whose being open makes a rez come back selected.
+    edit: Option<Res<'w, crate::world_api::EditToolState>>,
 }
 
 /// Everything a resolved drop raises, bundled as one
@@ -871,6 +889,7 @@ pub(crate) fn on_row_drag_end(
         keyboard,
         scene,
         objects,
+        edit,
     } = world;
     let DragOutputs {
         mut actions,
@@ -1074,11 +1093,16 @@ pub(crate) fn on_row_drag_end(
                     name: item.name.clone(),
                     icon: crate::inventory::item_icon(item.inv_type),
                 });
-            } else if is_object && !from_library {
+            } else if is_object && !from_library && !worn.items.contains(&item.item_id) {
+                // A worn attachment does not rez: the reference refuses the
+                // drop (`isWearingAttachment` → `ACCEPT_NO`) rather than pull
+                // the object off the avatar into the world.
+                let rez_selected = edit.as_ref().is_some_and(|edit| edit.active);
                 commands.write(SlCommand(rez_object_command(
                     item,
                     start.clone(),
                     end.clone(),
+                    rez_selected,
                 )));
                 query_folder_page(item.folder_id, &mut commands);
             }
@@ -1387,6 +1411,7 @@ fn drive_drag_object_hover(
         keyboard,
         scene,
         objects,
+        edit: _edit,
     } = world;
     let PointerOcclusion {
         hover_map,
@@ -1625,19 +1650,21 @@ mod tests {
             &item(Permissions::COPY.bits()),
             vec3(1.0, 2.0, 3.0),
             vec3(4.0, 5.0, 6.0),
+            false,
         );
         assert!(matches!(
             &rezzed,
             Command::RezObjectFromInventory { params }
                 if !params.remove_item
+                    && !params.rez_selected
                     && params.bypass_raycast
                     && params.ray_end_is_intersection
                     && params.ray_end == vec3(4.0, 5.0, 6.0)
         ));
-        let moved = rez_object_command(&item(0), vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0));
+        let moved = rez_object_command(&item(0), vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0), true);
         assert!(matches!(
             &moved,
-            Command::RezObjectFromInventory { params } if params.remove_item
+            Command::RezObjectFromInventory { params } if params.remove_item && params.rez_selected
         ));
     }
 
@@ -1765,7 +1792,7 @@ mod tests {
             return;
         };
         let object_code = i8::try_from(AssetType::Object.to_code()).ok();
-        let rezzed = rez_object_command(&target, vec3(0.0, 0.0, 0.0), vec3(1.0, 1.0, 1.0));
+        let rezzed = rez_object_command(&target, vec3(0.0, 0.0, 0.0), vec3(1.0, 1.0, 1.0), false);
         assert!(
             matches!(
                 &rezzed,

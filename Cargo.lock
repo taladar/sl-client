@@ -9319,6 +9319,7 @@ dependencies = [
  "sl-settings",
  "sl-viewer-intents",
  "sl-viewer-kit",
+ "sl-viewer-notifications",
  "sl-viewer-settings",
  "sl-viewer-testkit",
  "sl-viewer-ui-core",

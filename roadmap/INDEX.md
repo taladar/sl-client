@@ -14,9 +14,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ideas | 119 |
 | ready | 304 |
 | blocked | 59 |
-| in-progress | 22 |
+| in-progress | 21 |
 | bugs | 14 |
-| done | 1244 |
+| done | 1245 |
 | deferred | 31 |
 | wont-do | 16 |
 | **total** | **1809** |
@@ -1213,7 +1213,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Batch world changes into per-tick update bursts (blocked by
   `server-world-heartbeat`, `server-world-ecs-store`)
 
-## in-progress (22)
+## in-progress (21)
 
 ### viewer
 
@@ -1234,9 +1234,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Audit the other per-subject singletons onto the keyed-floater scaffold
 - [`viewer-menu-touch-object`](in-progress/viewer-menu-touch-object.md) — Touch
   an object from the object and attachment menus
-- [`viewer-object-rezzing`](in-progress/viewer-object-rezzing.md) — Object
-  rezzing from inventory (blocked by `viewer-object-selection-core` (done),
-  `viewer-inventory-context-actions` (done))
 - [`viewer-perf-pbr-shadow-cluster-rez`](in-progress/viewer-perf-pbr-shadow-cluster-rez.md)
   — Tune main-view shadow specialization + clustered lighting during rez
 - [`viewer-realtime-mirrors`](in-progress/viewer-realtime-mirrors.md) —
@@ -1317,7 +1314,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1244)
+## done (1245)
 
 ### protocol
 
@@ -2382,6 +2379,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-object-face-entity-respawn-churn`](done/viewer-object-face-entity-respawn-churn.md)
   — Object face entities are despawned + respawned same-frame (despawn-race
   churn)
+- [`viewer-object-rezzing`](done/viewer-object-rezzing.md) — Object rezzing from
+  inventory (blocked by `viewer-object-selection-core` (done),
+  `viewer-inventory-context-actions` (done))
 - [`viewer-object-selection-core`](done/viewer-object-selection-core.md) —
   Object selection core (select set + protocol) (blocked by
   `viewer-ui-widget-scaffold` (done))

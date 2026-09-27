@@ -4678,6 +4678,7 @@ menu-inv-add = Add
 menu-inv-take-off = Take Off
 menu-inv-edit = Edit
 menu-inv-touch = Touch
+menu-inv-restore-to-last-position = Restore to Last Position
 menu-inv-detach-from-yourself = Detach From Yourself
 menu-inv-apply-only-to-myself = Apply Only To Myself
 menu-inv-apply-to-parcel = Apply To Parcel

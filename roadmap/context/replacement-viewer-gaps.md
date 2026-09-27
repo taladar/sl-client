@@ -108,11 +108,12 @@ Found while compiling this list, and verified 2026-09-24 (still so on
 2026-09-26): each is partly done and now `in-progress`, its file rewritten
 down to the residue, so none of them should be scheduled as a gap:
 
-- `viewer-object-rezzing` (ready) — "drag an object from inventory into the
-  world" is implemented: `sl-viewer-inventory/src/inventory_drag.rs` builds
-  `rez_object_command` from a drop, and the *link* case was separately fixed
-  (`viewer-inventory-link-drop-to-world-rezzes-nothing`, done). What may
-  remain is the parcel / permission pre-check.
+- `viewer-object-rezzing` — closed 2026-09-27. The drag-rez was already in
+  place (`inventory_drag.rs`, plus the separately fixed link case). The
+  residue was Restore to Last Position, a rez coming back selected while the
+  build tools are open, and refusing to rez a worn attachment. The parcel
+  pre-check was dropped: the reference has none, and lets the simulator
+  refuse.
 - `viewer-menu-touch-object` (ideas) — "Touch is greyed in the object menu"
   is no longer true: `object_menu.rs` maps the `touch` slice to
   `Command::TouchObject` behind `TARGET_TOUCHABLE`, and the attachment menu
