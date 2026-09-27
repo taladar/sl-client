@@ -135,8 +135,10 @@ fn skin_env(skin: Option<&str>, theme: Option<&str>) -> Vec<(String, String)> {
 ///
 /// A distinct type from [`FirestormSkin`], not one shared "skin spec" used
 /// twice, because the two namespaces are unrelated and a value valid in one is
-/// generally invalid in the other: `vintage` names a skin in the reference and
-/// (so far) nothing here, `graphite` the reverse. A single type would let a
+/// generally invalid in the other: `graphite` names a skin here and nothing in
+/// the reference, `Starlight` the reverse, and where a name is spelled the same
+/// on both sides (`vintage`) that is a choice made on ours, not a shared
+/// namespace — the reference also accepts `Vintage`. A single type would let a
 /// run hand one viewer the other's skin, and the mistake would surface as a
 /// capture of the wrong interface rather than as an error.
 ///
@@ -203,6 +205,55 @@ impl FirestormSkin {
     }
 }
 
+/// Where a run goes when `--run-dir` does not say: `crosscheck-runs/<scenario>`,
+/// and for a UI capture `crosscheck-runs/<scenario>-chrome-<ours>-vs-<theirs>`.
+///
+/// A chrome pair is a record of one skin against another, and the point of
+/// keeping it is to judge a skin against it later — so the skins are in the
+/// name, and the Vintage pair is not overwritten by the next run in the
+/// default skin. A world capture holds no interface, and a skin named for it
+/// changes nothing in its frames, so its directory does not mention one.
+#[must_use]
+pub fn default_run_dir(
+    scenario: &str,
+    capture_ui: bool,
+    ours: &SlClientSkin,
+    theirs: &FirestormSkin,
+) -> std::path::PathBuf {
+    let runs = std::path::Path::new("crosscheck-runs");
+    if !capture_ui {
+        return runs.join(scenario);
+    }
+    runs.join(format!(
+        "{scenario}-chrome-{}-vs-{}",
+        skin_label(ours.skin.as_deref(), ours.theme.as_deref()),
+        skin_label(theirs.skin.as_deref(), theirs.theme.as_deref())
+    ))
+}
+
+/// One viewer's skin as a directory-name component: `default` when unset,
+/// else the skin, then `-` and the theme when one is named, lower-cased with
+/// anything but letters, digits, `-` and `_` turned into `-` — a reference
+/// display name may hold a space, and neither may hold a path separator.
+fn skin_label(skin: Option<&str>, theme: Option<&str>) -> String {
+    let joined = match (skin, theme) {
+        (None, None) => return "default".to_owned(),
+        (Some(skin), None) => skin.to_owned(),
+        (None, Some(theme)) => format!("default-{theme}"),
+        (Some(skin), Some(theme)) => format!("{skin}-{theme}"),
+    };
+    joined
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '-' || character == '_' {
+                character.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
 /// The pixel grid, the layers, the shutter and the sun: everything that decides
 /// what a captured frame holds, and the only thing both viewers are configured
 /// with by **one** environment block.
@@ -246,7 +297,19 @@ pub struct CaptureSpec {
     /// states the premise instead of resting on two defaults agreeing, which is
     /// what let that go unnoticed.
     pub fov_degrees: Option<f32>,
+    /// The scale both interfaces are drawn at: `UIScaleFactor` in the
+    /// reference, `UiScale` here. `None` leaves each viewer its own.
+    ///
+    /// The runner pins it to [`DEFAULT_UI_SCALE`] on every UI run that names
+    /// none, because a chrome pair drawn at two scales is never what a
+    /// comparison wants — and the first recorded pair was read as exactly that
+    /// until both scene dumps said otherwise.
+    pub ui_scale: Option<f32>,
 }
+
+/// The interface scale a UI run pins when it names none: both viewers' own
+/// default, stated rather than assumed.
+pub const DEFAULT_UI_SCALE: f32 = 1.0;
 
 impl Default for CaptureSpec {
     /// 1080p, world only, thirty frames half a second apart, with the same
@@ -270,6 +333,7 @@ impl Default for CaptureSpec {
             login_timeout: 180.0,
             day_position: None,
             fov_degrees: None,
+            ui_scale: None,
         }
     }
 }
@@ -324,6 +388,9 @@ impl CaptureSpec {
         }
         if let Some(degrees) = self.fov_degrees {
             env.push(("SL_VIEWER_CAPTURE_FOV".to_owned(), degrees.to_string()));
+        }
+        if let Some(factor) = self.ui_scale {
+            env.push(("SL_VIEWER_CAPTURE_UI_SCALE".to_owned(), factor.to_string()));
         }
         env
     }
@@ -416,7 +483,7 @@ mod tests {
 
     use super::{
         CameraSpec, CaptureSpec, FirestormSkin, RegionPoint, RunPlan, SlClientSkin,
-        parse_region_point,
+        default_run_dir, parse_region_point,
     };
 
     /// The boxed error every test in this module reports through.
@@ -478,6 +545,25 @@ mod tests {
         );
     }
 
+    /// A pinned interface scale reaches both viewers under the one name they
+    /// both read, and an unpinned one stays out of the block.
+    #[test]
+    fn a_pinned_ui_scale_travels_with_the_capture_block() {
+        let mut capture = CaptureSpec::default();
+        assert!(
+            !capture
+                .env()
+                .iter()
+                .any(|(name, _value)| name == "SL_VIEWER_CAPTURE_UI_SCALE")
+        );
+        capture.ui_scale = Some(1.25);
+        assert!(
+            capture
+                .env()
+                .contains(&("SL_VIEWER_CAPTURE_UI_SCALE".to_owned(), "1.25".to_owned()))
+        );
+    }
+
     /// An unnamed skin is left out of the environment rather than stated as
     /// empty — the one setting where "unset" has no spelling, because no
     /// string names a viewer's own default.
@@ -487,6 +573,41 @@ mod tests {
         assert!(SlClientSkin::default().is_unset());
         assert!(FirestormSkin::default().env().is_empty());
         assert!(FirestormSkin::default().is_unset());
+    }
+
+    /// A chrome pair lands in a directory named for both skins, so a pair per
+    /// skin is kept rather than each run overwriting the last; a world run's
+    /// directory is the scenario alone, whatever skin was named.
+    #[test]
+    fn a_chrome_pair_is_kept_per_skin() {
+        let vintage = FirestormSkin {
+            skin: Some("Vintage".to_owned()),
+            theme: Some("Classic".to_owned()),
+        };
+        let ours = SlClientSkin {
+            skin: Some("vintage".to_owned()),
+            theme: None,
+        };
+        assert_eq!(
+            default_run_dir("catalogue", true, &ours, &vintage),
+            std::path::Path::new("crosscheck-runs/catalogue-chrome-vintage-vs-vintage-classic")
+        );
+        assert_eq!(
+            default_run_dir(
+                "catalogue",
+                true,
+                &SlClientSkin::default(),
+                &FirestormSkin {
+                    skin: Some("Star Light/x".to_owned()),
+                    theme: None,
+                }
+            ),
+            std::path::Path::new("crosscheck-runs/catalogue-chrome-default-vs-star-light-x")
+        );
+        assert_eq!(
+            default_run_dir("catalogue", false, &ours, &vintage),
+            std::path::Path::new("crosscheck-runs/catalogue")
+        );
     }
 
     /// A skin and its theme travel as the two variables both viewers read, and

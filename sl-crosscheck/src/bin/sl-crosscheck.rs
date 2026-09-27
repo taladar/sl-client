@@ -28,8 +28,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use clap::Parser;
 use sl_crosscheck::launch::{Launch, RunDirs, Viewer};
 use sl_crosscheck::plan::{
-    CameraSpec, CaptureAudio, CaptureSpec, FirestormSkin, RegionPoint, RunPlan, SlClientSkin,
-    parse_region_point,
+    CameraSpec, CaptureAudio, CaptureSpec, DEFAULT_UI_SCALE, FirestormSkin, RegionPoint, RunPlan,
+    SlClientSkin, default_run_dir, parse_region_point,
 };
 use sl_crosscheck::process::{self, Ending};
 use sl_crosscheck::status::Artefacts;
@@ -75,8 +75,10 @@ struct Options {
     #[arg(long, default_value_t = 9100)]
     port: u16,
 
-    /// Where the run's artefacts go. Defaults to
-    /// `crosscheck-runs/<scenario>` beneath the current directory.
+    /// Where the run's artefacts go. Defaults to `crosscheck-runs/<scenario>`
+    /// beneath the current directory — or, for a `--capture-ui` run,
+    /// `crosscheck-runs/<scenario>-chrome-<ours>-vs-<theirs>`, so a chrome
+    /// pair is kept per pair of skins.
     #[arg(long)]
     run_dir: Option<PathBuf>,
 
@@ -180,6 +182,17 @@ struct Options {
     /// than rely on it can.
     #[arg(long)]
     fov: Option<f32>,
+
+    /// Pin the scale both interfaces are drawn at — `UIScaleFactor` in
+    /// Firestorm, `UiScale` here — for the run, without touching either
+    /// viewer's saved preference.
+    ///
+    /// A `--capture-ui` run that names none pins 1, both viewers' default:
+    /// two interfaces at two scales cannot be compared, and a pair should
+    /// state its scale rather than rest on two defaults agreeing. Both scene
+    /// dumps report the scale each viewer actually drew at (`ui_scale`).
+    #[arg(long)]
+    ui_scale: Option<f32>,
 
     /// The skin this workspace's viewer wears — a directory under its
     /// `assets/skins/`. Unset leaves it in its own default.
@@ -601,12 +614,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err(format!("no Firestorm launcher at {}", firestorm.display()).into());
     }
 
-    let dirs = RunDirs::new(
-        options
-            .run_dir
-            .clone()
-            .unwrap_or_else(|| PathBuf::from("crosscheck-runs").join(&options.scenario)),
-    );
+    let dirs = RunDirs::new(options.run_dir.clone().unwrap_or_else(|| {
+        default_run_dir(
+            &options.scenario,
+            options.capture_ui,
+            &SlClientSkin {
+                skin: options.sl_client_skin.clone(),
+                theme: options.sl_client_theme.clone(),
+            },
+            &FirestormSkin {
+                skin: options.firestorm_skin.clone(),
+                theme: options.firestorm_theme.clone(),
+            },
+        )
+    }))?;
     dirs.create()?;
 
     // The grid lives on its own runtime while the main thread supervises the
@@ -681,6 +702,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             login_timeout: options.login_timeout,
             day_position: options.day_position,
             fov_degrees: options.fov,
+            ui_scale: options
+                .ui_scale
+                .or_else(|| options.capture_ui.then_some(DEFAULT_UI_SCALE)),
         },
         sl_client_skin: SlClientSkin {
             skin: options.sl_client_skin.clone(),
@@ -706,6 +730,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // its own checking.
     if want_ours {
         check_skin_is_shipped(&asset_root, &plan.sl_client_skin)?;
+    }
+    if options.ui_scale.is_some() && !plan.capture.ui {
+        // As for a skin below: honoured, but a world-only frame holds no
+        // interface for it to change.
+        tracing::warn!(
+            "a UI scale was named but the frames hold the world only; pass --capture-ui to see it"
+        );
     }
     if !(plan.sl_client_skin.is_unset() && plan.firestorm_skin.is_unset()) && !plan.capture.ui {
         // A warning rather than an error: the skin is still applied, and a run
@@ -776,6 +807,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if summary.ran_as_asked() {
         Ok(())
     } else {
-        Err("a viewer that was asked to run produced nothing usable".into())
+        Err(
+            "a viewer that was asked to run did not produce what the run asked for; the report \
+             above says which and why"
+                .into(),
+        )
     }
 }

@@ -447,6 +447,10 @@ fn settings(left: &SceneDump, right: &SceneDump, tolerances: Tolerances) -> Vec<
         left.camera.fov_radians.map(f64::to_degrees),
         right.camera.fov_radians.map(f64::to_degrees),
     );
+    // What an interface in the frame is drawn at. Only a UI capture holds one,
+    // but it is listed on every pair: a dump reports it either way, and the
+    // first chrome pair was misread for want of exactly this line.
+    number("ui_scale", left.render.ui_scale, right.render.ui_scale);
     number("near_clip", left.camera.near_clip, right.camera.near_clip);
     number("far_clip", left.camera.far_clip, right.camera.far_clip);
     settings.push(Setting {

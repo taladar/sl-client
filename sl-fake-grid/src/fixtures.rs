@@ -19,6 +19,7 @@
 pub mod arrival;
 pub mod border;
 pub mod catalogue;
+pub mod far_floor;
 pub mod npcs;
 pub mod prims;
 pub mod scenarios;
@@ -38,6 +39,7 @@ use crate::world::SceneFixtures;
 pub use arrival::arrival;
 pub use border::border;
 pub use catalogue::{CatalogueEntry, catalogue};
+pub use far_floor::far_floor;
 pub use npcs::{NpcAppearance, NpcBake, NpcFixture};
 pub use prims::{
     DEFAULT_FACE_COUNT, FaceStyle, PrimFixture, SculptKind, blank_texture, linkset, sculpt_shape,

@@ -2,7 +2,7 @@
 id: viewer-render-cpu-skinning-crosscheck
 title: CPU-skinning cross-check — make the R13 debug affordance a standing test
 topic: viewer
-status: ready
+status: done
 origin: the viewer-render-test-harness work (2026-07); the task's "cross-checks between paths", not built with the first tier
 blocked_by: [viewer-render-test-harness]
 refs: [viewer-render-test-harness, viewer-render-scene-coverage]
@@ -54,3 +54,41 @@ Depends in practice on [[viewer-render-scene-coverage]]'s real avatar scene: the
 synthesized two-joint strip the harness registers today has identity binds by
 design, so it cannot catch a bind-order bug. This check needs a rig where the
 bind matrices are not identity.
+
+## Outcome (2026-09-27)
+
+- **The maths is a pure function**: `sl_client_bevy::cpu_skin_vertex(rest,
+  weight, skin, joint_world) -> Option<Vec3>`, the reference's
+  `mix(palette[i], palette[i + 1], fract(weight))` with the partner clamped to
+  the last render-list entry, and `None` for a weight the render list cannot
+  resolve. Four unit tests beside it. `log_geometry_outliers` calls it and
+  keeps only the reporting.
+- **The scenes declare it**: `CpuSkinnedPositions` (in
+  `sl-viewer-render-fixtures`) is attached to every skinned part of
+  `avatar-base-part` and `avatar-morphed-body`, computed from the vertex
+  weights, the rebuilt render list and `deformed_world_matrices` — never from
+  the joint entities or the Bevy mesh.
+- **The harness holds the GPU to it**: `scene_geometry` gathers the palette
+  exactly as Bevy's `extract_skins` builds it (joint `GlobalTransform` · inverse
+  bind, a missing joint a NaN rather than a shift), and the declared-tier
+  `cpu_skinning_violations` skins every vertex through the mesh's
+  `JOINT_INDEX` / `JOINT_WEIGHT` attributes and that palette, within 0.1 mm of
+  the reference. It runs in every cell of the scene × LOD × sample sweep.
+  `every_skinned_avatar_part_declares_its_cpu_skin` keeps it from going
+  vacuous.
+- **It bites where it has to.** Swapping the two blend weights in
+  `build_base_mesh` — valid weights, wrong palette entries — is reported on
+  five parts of the shaped body, up to 15 cm off; the rest body stays green,
+  since at the bind pose every palette entry is the identity. That asymmetry
+  is the file's own prediction: the check needs non-identity binds, and
+  `avatar-morphed-body` supplies them.
+- **`world_matrices` is no longer the only detector.** It is still threaded
+  through `apply_avatar_appearance` for the log, which names an outlier vertex
+  on a live body; deleting it now loses a diagnostic, not the check.
+
+Found nothing wrong in the current pipeline. The one suspicion going in —
+`build_base_mesh` clamps the blend partner to the part's largest weight index
+where the reference clamps to the render list — is harmless on the Linden body
+as shipped: the shaped body agrees vertex for vertex, so no vertex at that
+index blends onto a partner the two clamps would resolve differently, and if one
+ever does, this check reports it.

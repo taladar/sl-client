@@ -320,6 +320,12 @@ pub struct Render {
     /// `RenderReflectionProbeDetail`.
     #[serde(default)]
     pub reflection_detail: Option<i64>,
+    /// The scale the interface was drawn at, as each viewer read it back: the
+    /// UI's layout scale here (render-target scale × `UiScale`), and
+    /// `UIScaleFactor` × the system UI size in the reference. Absent from a
+    /// dump that predates the field.
+    #[serde(default)]
+    pub ui_scale: Option<f64>,
 }
 
 /// One in-world object.

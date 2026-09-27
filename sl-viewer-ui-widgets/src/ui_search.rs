@@ -53,7 +53,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy_flair::style::components::ClassList;
 
-use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
+use crate::ui_text_input::{FieldDensity, TextInputKind, TextInputSpec, spawn_text_input};
 use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::skin::{
     FIELD_PLACEHOLDER_CLASS, FOCUS_WITHIN_CLASS, TEXT_CLASS, set_state_class,
@@ -88,6 +88,12 @@ const BOX_PADDING_Y: f32 = 3.0;
 
 /// The clear button's diameter, in logical pixels.
 const CLEAR_SIZE: f32 = 16.0;
+
+/// A [compact](FieldDensity::Compact) box's least height, in logical pixels:
+/// the reference's `search_menu_edit`, and exactly the clear button inside its
+/// 1 px border — so the box does not grow when the button appears with the
+/// first typed character.
+const COMPACT_BOX_HEIGHT: f32 = CLEAR_SIZE + 2.0;
 
 /// The clear button's glyph size, in logical pixels.
 const CLEAR_FONT: f32 = 12.0;
@@ -165,6 +171,11 @@ pub struct SearchFieldSpec {
     pub placeholder: String,
     /// Whether to draw the leading 🔍 glyph.
     pub search_glyph: bool,
+    /// How tall the box is around its text. [`FieldDensity::Compact`] drops the
+    /// block padding of both the box and the field inside it, for a box set into
+    /// a one-line row — the menu bar's search, which the reference draws 18 px
+    /// high in a 19 px bar (`panel_status_bar.xml`, `search_menu_edit`).
+    pub density: FieldDensity,
 }
 
 impl SearchFieldSpec {
@@ -180,6 +191,7 @@ impl SearchFieldSpec {
             min_width: DEFAULT_MIN_WIDTH,
             placeholder: String::new(),
             search_glyph: false,
+            density: FieldDensity::Regular,
         }
     }
 }
@@ -200,13 +212,20 @@ pub fn spawn_search_field(
     // A free function has no world access, so the box spawns in the skinless
     // fallback colours; `.sk-search-field` / `.sk-search-clear` repaint them.
     let fallback = SkinPalette::default();
+    let compact = spec.density == FieldDensity::Compact;
+    let block_padding = if compact { 0.0 } else { BOX_PADDING_Y };
     let container = commands
         .spawn((
             Node {
                 align_items: AlignItems::Center,
                 min_width: Val::Px(spec.min_width),
+                min_height: if compact {
+                    Val::Px(COMPACT_BOX_HEIGHT)
+                } else {
+                    Val::Auto
+                },
                 border: UiRect::all(Val::Px(1.0)),
-                padding: UiRect::axes(Val::Px(BOX_PADDING_X), Val::Px(BOX_PADDING_Y)),
+                padding: UiRect::axes(Val::Px(BOX_PADDING_X), Val::Px(block_padding)),
                 ..row(Val::Px(INNER_GAP))
             },
             BorderColor::all(fallback.control_border),
@@ -280,6 +299,7 @@ pub fn spawn_search_field(
             // the text, decides the field's).
             decorated: false,
             fill: true,
+            density: spec.density,
             ..TextInputSpec::new(spec.element, TextInputKind::Line)
         },
     );
@@ -311,7 +331,7 @@ pub fn spawn_search_field(
                 // Aligned with the field's text origin: both sit one field-text
                 // inset in from their box's top-left.
                 left: Val::Px(FIELD_TEXT_INSET),
-                top: Val::Px(FIELD_TEXT_INSET),
+                top: Val::Px(if compact { 0.0 } else { FIELD_TEXT_INSET }),
                 ..default()
             },
             // The placeholder is decorative and may be clipped by the slot when it

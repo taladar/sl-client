@@ -49,3 +49,7 @@ tracy-grab-*/
 # and NEVER committed — they contain other residents assets (content permissions).
 /avatar-dumps/
 *.avatardump/
+
+# sl-crosscheck run directories (frames, scene dumps, both viewers' state
+# dirs): local artefacts of one run, recorded per scenario / skin pair.
+/crosscheck-runs/

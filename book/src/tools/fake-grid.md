@@ -141,15 +141,25 @@ teleport between the regions from its map — see below.
 ### Named scenarios
 
 `--scenario <name>` picks the scene every region shows, from the registry
-in `fixtures::scenarios`. Four exist today: `stock` (the default — one
+in `fixtures::scenarios`. Five exist today: `stock` (the default — one
 region-wide parcel, one scripted box, an arrival greeting), `catalogue`
 (the named prim catalogue: one prim per rendering feature, plus two NPCs
 — one standing, one sitting on a bench — with every asset they reference
 served — see below), `catalogue-eep` (the same catalogue under an **EEP**
 sky, `sl_test_assets::environment::eep_sky`, with the sun fixed in the
-south-east), and `border` (one checkered marker pillar floating just
-inside the region's west edge, which with two adjacent `--region`s is a
-scene for looking across — and walking over — a border).
+south-east), `far-floor` (one 64 m fullbright black-and-white checker
+slab with quarter-metre cells, landmarks `floor-near-edge` and
+`floor-far-edge`, for looking along at a grazing angle) and `border` (one
+checkered marker pillar floating just inside the region's west edge, which
+with two adjacent `--region`s is a scene for looking across — and walking
+over — a border).
+
+`far-floor` exists for texture **minification**. Every other scene frames
+its subject square on from a few metres, where a texture's full-resolution
+level is the right one to sample and every viewer agrees. Looking along the
+slab from its near edge, the far half is many texels to a pixel: a viewer
+with a mip chain draws it settling to the checker's grey, one without draws
+it as shimmering noise and moiré.
 
 `catalogue-eep` exists because every other fixture sky is a *classic* one
 — the reference decides `classic_mode` by whether a sky carries a
@@ -296,6 +306,67 @@ chose is indistinguishable, from the outside, from a good one: it is a
 directory of plausible frames of the wrong scene. So is a viewer that
 says nothing about the pin at all (`SUN NOT REPORTED`), which is what a
 build older than the field looks like.
+
+**Photographing the chrome.** `--capture-ui` puts each viewer's interface
+in the frames, and `--sl-client-skin` / `--firestorm-skin` (with
+`--sl-client-theme` / `--firestorm-theme`) dress each side — two options,
+not one, because the two skin namespaces are unrelated:
+
+```sh
+cargo run --release -p sl-crosscheck -- --scenario catalogue \
+  --capture-ui --sl-client-skin vintage --firestorm-skin vintage
+```
+
+Such a run lands in `crosscheck-runs/<scenario>-chrome-<ours>-vs-<theirs>`
+(`catalogue-chrome-vintage-vs-vintage` above) rather than in the
+scenario's own directory, so a pair is kept per pair of skins and the
+next run in another skin does not overwrite it.
+
+Two things bound what such a pair can say. It is **chrome only** — menu
+bar, toolbars, chat bar, status row — because both harnesses close every
+floater and keep them closed for the whole run; a notification popping
+up between two frames would otherwise make the sequence incomparable.
+And it is only a pair if both frames are the **capture size**. This
+viewer renders its interface into the off-screen capture target, so its
+window never enters the question; the reference's snapshot path cannot
+draw its UI at any size but its window's, so its harness asks the window
+system for the capture size and reports what it got:
+
+```json
+{
+  "window_size": {
+    "requested": "1920x1080",
+    "honoured": false,
+    "detail": "the window is 1024x738 and the run asked for 1920x1080; …"
+  }
+}
+```
+
+A refused window fails the run (`WINDOW NOT 1920x1080 — …`), and so does
+a Firestorm build that says nothing about its window
+(`WINDOW NOT REPORTED`). Independently of either status, the runner reads
+every frame's pixel size back from the file and fails a run with any
+frame that is not the capture size (`FRAMES NOT AT 1920x1080 — …`): the
+file is the evidence, a status is a claim.
+
+A tiling compositor usually refuses the resize. niri, for one, keeps a
+tiled window at its column's size. So on such a desktop the capture size of
+a chrome pair is the window's, not the 1920×1080 default: on a 4K output,
+pass `--capture-size 3840x2160`. World-only runs keep the default, because
+nothing in their frames depends on the window.
+
+**The interface scale is pinned.** A `--capture-ui` run draws both
+interfaces at one stated scale: `--ui-scale <factor>` (0.75 to 2), and 1
+when the run names none. The runner passes it as
+`SL_VIEWER_CAPTURE_UI_SCALE`, which Firestorm's harness applies as its
+`UIScaleFactor` and this viewer as its `UiScale`, for the run only and
+without touching either saved preference. The window's output scale plays
+no part in a capture on this side: the interface is drawn into the
+off-screen capture image, whose own scale factor is 1. Both scene dumps
+report the scale each viewer actually drew at as `render.ui_scale`, and
+`sl-crosscheck-report` lists it beside the other render settings. So a
+difference in size in a pair is a difference in the viewers' layouts, not
+in their scales.
 
 **Two regions, and walking between them.** `--neighbour` stands the
 scene's *second* half one slot east of the first and lets the grid

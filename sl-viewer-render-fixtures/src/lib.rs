@@ -116,8 +116,8 @@ use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
 use bytes::Bytes;
 use sl_client_bevy::{
-    BaseMesh, BevySkeleton, ParticleSystem, ReflectionProbe, ReflectionProbeFlags, Skeleton,
-    Vector, VertexWeights,
+    AnimationPose, BaseMesh, BaseMeshSkin, BevySkeleton, ParticleSystem, ReflectionProbe,
+    ReflectionProbeFlags, Skeleton, Vector, VertexWeights, cpu_skin_vertex,
 };
 use sl_client_bevy::{
     CloudMaterial, DecodedMesh, DecodedTexture, DiscardLevel, FlexiChain, FlexibleData, HoleType,
@@ -1025,6 +1025,45 @@ pub struct UvsInUnitSquare {
     pub reason: &'static str,
 }
 
+/// **Declared.** Where each of this skinned part's vertices must land once
+/// skinned, worked out on the CPU from the Second Life data alone.
+///
+/// The universal skin checks count — weights sum to one, joints inside the render
+/// list — and cannot see whether the **palette** is right: a bind folded in the
+/// wrong order, a transposed matrix, a joint whose world transform is stale, a
+/// joint list shifted by one. All of those leave perfectly valid-looking weights
+/// on a body that bends wrong, which is the class (R1, R13) that has cost the
+/// most here. So the fixture skins every vertex with [`cpu_skin_vertex`] — from
+/// the vertex's own weight, the rebuilt render list, and the skeletal
+/// recurrence's [`BevySkeleton::deformed_world_matrices`] — and the harness holds
+/// what the GPU is handed (the mesh's joint attributes, the `SkinnedMesh`
+/// joints and inverse binds, the propagated joint transforms) to it.
+///
+/// Positions are in the frame of the entity's **parent**, the skeleton root the
+/// joints hang from: Second Life Z-up, before the scene root's basis change. A
+/// `None` is a vertex the reference itself could not skin.
+#[derive(Component, Debug, Clone)]
+pub struct CpuSkinnedPositions {
+    /// One entry per mesh vertex, in vertex order.
+    pub positions: Vec<Option<Vec3>>,
+}
+
+impl CpuSkinnedPositions {
+    /// Skin every vertex of `base`, standing at `rest`, against `joint_world`
+    /// (indexed by skeleton joint).
+    fn of(rest: &[[f32; 3]], base: &BaseMesh, skin: &BaseMeshSkin, joint_world: &[Mat4]) -> Self {
+        Self {
+            positions: rest
+                .iter()
+                .zip(base.weights())
+                .map(|(rest, &weight)| {
+                    cpu_skin_vertex(Vec3::from_array(*rest), weight, skin, joint_world)
+                })
+                .collect(),
+        }
+    }
+}
+
 /// **Declared exception.** This geometry legitimately reaches far beyond a
 /// region, so the universal distance rule is raised to `max_extent` for it.
 ///
@@ -1837,6 +1876,15 @@ fn spawn_base_part(
     let Some(skin) = skeleton.base_mesh_skin(base) else {
         return;
     };
+    // The rest skeleton, by the recurrence rather than by the local transforms the
+    // joints were spawned at — two paths to one pose, which is the point.
+    let rest_world = skeleton.deformed_world_matrices(
+        &SkeletalDeformations::default(),
+        &VolumeDeformations::default(),
+        &JointOverrides::default(),
+        &AnimationPose::default(),
+    );
+    let reference = CpuSkinnedPositions::of(base.positions(), base, &skin, &rest_world);
     let render_joints: Vec<Entity> = skin
         .joints
         .iter()
@@ -1850,6 +1898,7 @@ fn spawn_base_part(
             inverse_bindposes,
             joints: render_joints,
         },
+        reference,
         // Skinned geometry moves away from its mesh-local bounds, so Bevy's
         // frustum cull (which reads the un-skinned AABB) can drop it wrongly.
         NoFrustumCulling,
@@ -2020,6 +2069,16 @@ fn avatar_morphed_body(
     let locals =
         skeleton.deformed_local_transforms_with(&deform, &volumes, &JointOverrides::default());
     let joints = spawn_deformed_skeleton("avatar-morphed-body", skeleton, &locals, root, commands);
+    // The same pose as world matrices, straight from the recurrence: what the CPU
+    // reference skins against, while the GPU gets the locals above propagated
+    // down the joint hierarchy. These are not identity binds, so a palette
+    // assembled in the wrong order shows here where the rest body cannot see it.
+    let posed_world = skeleton.deformed_world_matrices(
+        &deform,
+        &volumes,
+        &JointOverrides::default(),
+        &AnimationPose::default(),
+    );
 
     for (index, part) in library.parts().iter().enumerate() {
         // The morph bake: the part's rest geometry blended by the resolved weights.
@@ -2057,6 +2116,8 @@ fn avatar_morphed_body(
         let Some(skin) = skeleton.base_mesh_skin(&part.mesh) else {
             continue;
         };
+        let reference =
+            CpuSkinnedPositions::of(morphed.positions(), &part.mesh, &skin, &posed_world);
         let render_joints: Vec<Entity> = skin
             .joints
             .iter()
@@ -2070,6 +2131,7 @@ fn avatar_morphed_body(
                 inverse_bindposes,
                 joints: render_joints,
             },
+            reference,
             NoFrustumCulling,
         ));
     }

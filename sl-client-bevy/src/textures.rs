@@ -16,7 +16,9 @@ use bytes::Bytes;
 use reqwest::StatusCode as ReqwestStatusCode;
 use reqwest::blocking::Client as ReqwestBlockingClient;
 use sl_proto::{TextureFace, TextureKey};
-use sl_texture::{DecodedImage, FetchChunk, FetchError, RemoteTextureSource, TextureFetcher};
+use sl_texture::{
+    DecodedImage, FetchChunk, FetchError, MipChain, RemoteTextureSource, TextureFetcher, mip_chain,
+};
 use wgpu_types::{Extent3d, TextureDimension, TextureFormat};
 
 use crate::async_http::{fetch_range_async, shared_async_client};
@@ -96,14 +98,23 @@ impl TextureUpload {
 /// The Bevy [`Image`] for an already-decoded texture, ready to insert into
 /// `Assets<Image>` — see [`upload_pixels`], which this is the [`DecodedImage`]
 /// front for.
+///
+/// The mip chain is the one the decode built off the frame thread
+/// ([`DecodedImage::mips`]) when it has one, and is built here otherwise.
 #[must_use]
 pub fn upload_decoded(decoded: &DecodedImage, upload: TextureUpload) -> Image {
-    upload_pixels(
-        decoded.width,
-        decoded.height,
-        decoded.pixels.to_vec(),
-        upload,
-    )
+    let built_here;
+    let chain = match &decoded.mips {
+        Some(chain) => Some(chain),
+        None => {
+            built_here = mip_chain(decoded.width, decoded.height, &decoded.pixels);
+            built_here.as_ref()
+        }
+    };
+    let below = chain.map_or(0, |chain| chain.below.len());
+    let mut data = Vec::with_capacity(decoded.pixels.len().saturating_add(below));
+    data.extend_from_slice(&decoded.pixels);
+    image_with_levels(decoded.width, decoded.height, data, chain, upload)
 }
 
 /// The Bevy [`Image`] for tightly packed RGBA8 `pixels` (`width * height * 4`
@@ -125,22 +136,48 @@ pub fn upload_decoded(decoded: &DecodedImage, upload: TextureUpload) -> Image {
 /// in place is wrong in a way that looks like a *texture* bug rather than a
 /// sampler one, which is why it is not a parameter: the exception belongs to the
 /// face that genuinely clamps, and is declared there.
+///
+/// **It carries a full mip chain**, down to 1×1. The reference builds one for
+/// every fetched texture (`LLViewerFetchedTexture` defaults to mipmaps, and
+/// `LLImageGL::setImage` calls `glGenerateMipmap` after the upload), and without
+/// one a face whose texels are smaller than a pixel is sampled from the full
+/// image alone: a distant or oblique texture aliases and shimmers instead of
+/// settling to its average, whatever the sampler's `mipmap_filter` says. The
+/// levels are 2×2 box averages of the stored bytes, as the reference's are
+/// ([`mip_chain`]).
 #[must_use]
 pub fn upload_pixels(width: u32, height: u32, pixels: Vec<u8>, upload: TextureUpload) -> Image {
-    let mut image = Image::new(
+    let chain = mip_chain(width, height, &pixels);
+    image_with_levels(width, height, pixels, chain.as_ref(), upload)
+}
+
+/// The [`Image`] for level 0 `pixels` and the `chain` below it, if any — the
+/// body both upload paths share once each has its chain in hand.
+fn image_with_levels(
+    width: u32,
+    height: u32,
+    mut pixels: Vec<u8>,
+    chain: Option<&MipChain>,
+    upload: TextureUpload,
+) -> Image {
+    let mut image = Image::new_uninit(
         Extent3d {
             width,
             height,
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
-        pixels,
         match upload.color_space {
             ColorSpace::Srgb => TextureFormat::Rgba8UnormSrgb,
             ColorSpace::Linear => TextureFormat::Rgba8Unorm,
         },
         RenderAssetUsages::default(),
     );
+    if let Some(chain) = chain {
+        pixels.extend_from_slice(&chain.below);
+        image.texture_descriptor.mip_level_count = chain.levels;
+    }
+    image.data = Some(pixels);
     let filtering = if upload.crisp {
         ImageSamplerDescriptor::nearest()
     } else {
@@ -664,5 +701,42 @@ mod tests {
             TextureFormat::Rgba8Unorm,
             "asking for hard texel edges must not change the colour space"
         );
+    }
+
+    /// An upload of a decode reuses the chain the decode built off the frame
+    /// thread, and builds the same one itself for a decode that has none.
+    #[test]
+    fn a_decode_upload_reuses_or_builds_the_same_chain() {
+        let pixels: Vec<u8> = (0..64_u8).collect();
+        let bare = DecodedImage::new(4, 4, 4, DiscardLevel::FULL, Bytes::from(pixels), None);
+        let chained = bare.clone().with_mips();
+        assert!(bare.mips.is_none() && chained.mips.is_some());
+        let built_here = upload_decoded(&bare, TextureUpload::COLOR);
+        let reused = upload_decoded(&chained, TextureUpload::COLOR);
+        assert_eq!(built_here.data, reused.data);
+        assert_eq!(
+            built_here.texture_descriptor.mip_level_count,
+            reused.texture_descriptor.mip_level_count
+        );
+        assert_eq!(reused.texture_descriptor.mip_level_count, 3);
+    }
+
+    /// An upload carries its whole mip chain, down to 1×1, and samples between
+    /// the levels — the reference's `glGenerateMipmap` + trilinear filtering.
+    /// The data is the chain the descriptor declares: level 0 first and
+    /// unchanged, then each smaller level.
+    #[test]
+    fn an_upload_carries_its_whole_mip_chain() {
+        let pixels: Vec<u8> = (0..8_u8 * 4 * 4).collect();
+        let image = upload_pixels(8, 4, pixels.clone(), TextureUpload::COLOR);
+        // 8×4, 4×2, 2×1, 1×1.
+        assert_eq!(image.texture_descriptor.mip_level_count, 4);
+        let data = image.data.unwrap_or_default();
+        assert_eq!(data.len(), (8 * 4 + 4 * 2 + 2 + 1) * 4);
+        assert_eq!(data.get(..pixels.len()), Some(pixels.as_slice()));
+        let ImageSampler::Descriptor(descriptor) = image.sampler else {
+            panic!("an upload must always set a sampler descriptor");
+        };
+        assert_eq!(descriptor.mipmap_filter, ImageFilterMode::Linear);
     }
 }

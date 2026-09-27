@@ -15,10 +15,23 @@
 //! from before the field existed and has told you nothing at all. Both are
 //! printed, and neither reads as success.
 //!
-//! Nothing here judges the frames. Whether the two viewers drew the same thing
+//! And again in `window_size`, which only a UI capture carries: the reference's
+//! snapshot path cannot draw its interface at any size but its window's, so a
+//! UI frame from a window the compositor would not resize holds the interface
+//! at the wrong scale — or the same grab stitched across the frame. Firestorm
+//! reports what the window system gave it; this viewer lays its interface out
+//! at the capture size and has no window in the question, so it says nothing,
+//! and only from Firestorm is silence a gap.
+//!
+//! Beside what the viewers *say*, [`FrameSizes`] is what they *wrote*: the
+//! pixel size of every frame, read back from the files. A frame of the wrong
+//! size is a run that did not do as it was told, whatever its status says.
+//!
+//! Nothing here judges the frames' contents. Whether the two viewers drew the same thing
 //! is a separate question with a separate answer; this module answers only
 //! "is there something to compare".
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -47,6 +60,92 @@ pub struct HarnessStatus {
     /// not, and absent from a viewer build that predates the field.
     #[serde(default)]
     pub day_position: Option<DayPositionStatus>,
+    /// What the window system made of a UI capture's size, when the viewer's
+    /// UI capture depends on its window — Firestorm's does, and writes this
+    /// block for every UI capture. Absent otherwise.
+    #[serde(default)]
+    pub window_size: Option<WindowSizeStatus>,
+}
+
+/// Whether a UI capture's window was the size the run asked for, as Firestorm
+/// reports it.
+#[expect(
+    clippy::module_name_repetitions,
+    reason = "named for the `window_size` key of the status file this module parses, as \
+              `DayPositionStatus` is named for `day_position`"
+)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WindowSizeStatus {
+    /// The size the run asked for, `WIDTHxHEIGHT`.
+    pub requested: String,
+    /// Whether the window was that size when the first frame was taken.
+    pub honoured: bool,
+    /// Prose saying what happened — on a refusal, the size the window was.
+    pub detail: String,
+}
+
+/// The pixel sizes of one viewer's frames, read back from the files.
+///
+/// Counted by size rather than listed per frame: the question is only ever
+/// "were they all the size the run asked for", and a run of thirty frames at
+/// one size is one entry.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FrameSizes {
+    /// How many frames were found at each `WIDTHxHEIGHT`.
+    pub by_size: BTreeMap<String, usize>,
+    /// How many frames could not be read as an image at all.
+    pub unreadable: usize,
+}
+
+impl FrameSizes {
+    /// Read the size of every frame in `frames`. Only the header is read, so
+    /// this costs nothing next to the run that wrote them.
+    #[must_use]
+    pub fn read(frames: &[PathBuf]) -> Self {
+        let mut sizes = Self::default();
+        for frame in frames {
+            match image::image_dimensions(frame) {
+                Ok((width, height)) => {
+                    let count = sizes
+                        .by_size
+                        .entry(format!("{width}x{height}"))
+                        .or_insert(0);
+                    *count = count.saturating_add(1);
+                }
+                Err(_unreadable) => sizes.unreadable = sizes.unreadable.saturating_add(1),
+            }
+        }
+        sizes
+    }
+
+    /// Whether every frame is readable and `size` (`WIDTHxHEIGHT`) — vacuously
+    /// true of no frames, which is a different failure reported elsewhere.
+    #[must_use]
+    pub fn all_at(&self, size: &str) -> bool {
+        self.unreadable == 0 && self.by_size.keys().all(|found| found == size)
+    }
+
+    /// The report's line when the frames are not all `size`, or `None` when
+    /// they are.
+    #[must_use]
+    pub fn describe_mismatch(&self, size: &str) -> Option<String> {
+        if self.all_at(size) {
+            return None;
+        }
+        let mut found: Vec<String> = self
+            .by_size
+            .iter()
+            .map(|(found, count)| format!("{count} at {found}"))
+            .collect();
+        if self.unreadable > 0 {
+            found.push(format!("{} unreadable", self.unreadable));
+        }
+        Some(format!(
+            "FRAMES NOT AT {size} — {}; the run asked for one capture size, so these cannot be \
+             paired with the other viewer's",
+            found.join(", ")
+        ))
+    }
 }
 
 /// What a run's pinned day position selected, as either viewer reports it.
@@ -149,6 +248,57 @@ impl Status {
         })
     }
 
+    /// Whether nothing in this status contradicts the window size a UI capture
+    /// needs. `capture_ui` is whether the run captured the interface at all;
+    /// `follows_window` is whether this viewer's interface is drawn at its
+    /// window's size, which is when silence about the window is a gap rather
+    /// than an answer.
+    ///
+    /// A status that never happened is `true` here, for the reason
+    /// [`lighting_as_asked`](Self::lighting_as_asked) gives.
+    #[must_use]
+    pub fn window_as_asked(&self, capture_ui: bool, follows_window: bool) -> bool {
+        if !capture_ui {
+            return true;
+        }
+        match self {
+            Self::Reported { status } => status
+                .window_size
+                .as_ref()
+                .map_or(!follows_window, |window| window.honoured),
+            Self::Missing | Self::Unreadable { .. } => true,
+        }
+    }
+
+    /// The report's line about a UI capture's window, or `None` when there is
+    /// nothing to say — no UI in the frames, no status, or a viewer whose
+    /// interface does not follow its window and did not mention one.
+    #[must_use]
+    pub fn describe_window_size(&self, capture_ui: bool, follows_window: bool) -> Option<String> {
+        if !capture_ui {
+            return None;
+        }
+        let Self::Reported { status } = self else {
+            return None;
+        };
+        match &status.window_size {
+            Some(window) if window.honoured => Some(format!(
+                "window {} as asked — {}",
+                window.requested, window.detail
+            )),
+            Some(window) => Some(format!(
+                "WINDOW NOT {} — {}",
+                window.requested, window.detail
+            )),
+            None if follows_window => Some(
+                "WINDOW NOT REPORTED — this viewer draws its interface at its window's size and \
+                 said nothing about the window; it predates the window_size field"
+                    .to_owned(),
+            ),
+            None => None,
+        }
+    }
+
     /// One line for the printed report.
     #[must_use]
     pub fn describe(&self) -> String {
@@ -178,6 +328,10 @@ pub struct Artefacts {
     /// The captured frames, in name order — which is capture order, the files
     /// being numbered.
     pub frames: Vec<PathBuf>,
+    /// The pixel sizes of those frames, as the files have them. Defaulted on
+    /// the way in so a `run.json` from before the field still reads.
+    #[serde(default)]
+    pub frame_sizes: FrameSizes,
     /// The structured scene dump, when the viewer wrote one.
     pub scene_dump: Option<PathBuf>,
     /// What the status file said, or that there was none.
@@ -192,8 +346,10 @@ impl Artefacts {
     /// the report should print, not a failure of the collection.
     #[must_use]
     pub fn collect(dir: &Path) -> Self {
+        let frames = frames_in(dir);
         Self {
-            frames: frames_in(dir),
+            frame_sizes: FrameSizes::read(&frames),
+            frames,
             scene_dump: exists(dir.join("scene.json")),
             status: read_status(dir),
         }
@@ -343,6 +499,78 @@ mod tests {
 
         fs_err::write(dir.join("scene.json"), b"{}")?;
         assert!(Artefacts::collect(&dir).scene_dump.is_some());
+        fs_err::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    /// Firestorm's `window_size` block, verbatim from a refused resize: it
+    /// parses, it is not a window as asked, and the report quotes its detail.
+    #[test]
+    fn firestorms_window_size_block_reads() -> Result<(), TestError> {
+        let dir = scratch("window")?;
+        fs_err::write(
+            dir.join("harness-status.json"),
+            br#"{"frames_expected":2,"frames_written":2,"ok":true,"reason":"complete","viewer":"firestorm","window_size":{"detail":"the window is 1024x738 and the run asked for 1920x1080","honoured":false,"requested":"1920x1080"}}"#,
+        )?;
+        let status = Artefacts::collect(&dir).status;
+        assert!(status.succeeded(), "the status itself says ok");
+        assert!(!status.window_as_asked(true, true));
+        assert!(
+            status.window_as_asked(false, true),
+            "a world-only run does not care"
+        );
+        let line = status
+            .describe_window_size(true, true)
+            .ok_or("a refused window must be reported")?;
+        assert!(line.contains("WINDOW NOT 1920x1080"), "{line}");
+        assert!(line.contains("1024x738"), "{line}");
+        fs_err::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    /// Silence about the window is a gap only from a viewer whose interface
+    /// follows its window; this one lays its interface out at the capture size.
+    #[test]
+    fn silence_about_the_window_depends_on_the_viewer() -> Result<(), TestError> {
+        let dir = scratch("window-silent")?;
+        fs_err::write(
+            dir.join("harness-status.json"),
+            br#"{"frames_expected":2,"frames_written":2,"ok":true,"reason":"complete","viewer":"sl-client"}"#,
+        )?;
+        let status = Artefacts::collect(&dir).status;
+        assert!(status.window_as_asked(true, false));
+        assert_eq!(status.describe_window_size(true, false), None);
+        assert!(!status.window_as_asked(true, true));
+        assert!(
+            status
+                .describe_window_size(true, true)
+                .is_some_and(|line| line.contains("WINDOW NOT REPORTED"))
+        );
+        fs_err::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    /// The frames' sizes come from the files, not from what the viewer says:
+    /// a frame of another size, or one that is not an image, is named.
+    #[test]
+    fn frame_sizes_are_read_from_the_files() -> Result<(), TestError> {
+        let dir = scratch("sizes")?;
+        image::RgbImage::new(8, 4).save(dir.join("frame_000.png"))?;
+        image::RgbImage::new(8, 4).save(dir.join("frame_001.png"))?;
+        let artefacts = Artefacts::collect(&dir);
+        assert!(artefacts.frame_sizes.all_at("8x4"));
+        assert_eq!(artefacts.frame_sizes.describe_mismatch("8x4"), None);
+
+        image::RgbImage::new(4, 4).save(dir.join("frame_002.png"))?;
+        fs_err::write(dir.join("frame_003.png"), b"not a png")?;
+        let sizes = Artefacts::collect(&dir).frame_sizes;
+        assert!(!sizes.all_at("8x4"));
+        let line = sizes
+            .describe_mismatch("8x4")
+            .ok_or("a mismatch must be described")?;
+        assert!(line.contains("2 at 8x4"), "{line}");
+        assert!(line.contains("1 at 4x4"), "{line}");
+        assert!(line.contains("1 unreadable"), "{line}");
         fs_err::remove_dir_all(&dir)?;
         Ok(())
     }

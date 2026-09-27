@@ -79,9 +79,9 @@ pub const SETTING_LOGIN_START_LOCATION: &str = "LoginStartLocation";
 pub(crate) const SETTING_UI_SCALE: &str = "UiScale";
 
 /// The UI-scale slider's bounds and step (the reference `UIScaleFactor` range).
-const UI_SCALE_MIN: f32 = 0.75;
+pub const UI_SCALE_MIN: f32 = 0.75;
 /// See [`UI_SCALE_MIN`].
-const UI_SCALE_MAX: f32 = 2.0;
+pub const UI_SCALE_MAX: f32 = 2.0;
 /// See [`UI_SCALE_MIN`].
 const UI_SCALE_STEP: f32 = 0.025;
 
@@ -404,15 +404,48 @@ pub(crate) fn compose_general_specimen(commands: &mut Commands) {
     commands.run_system_cached_with(show_sample_ui_scale, 1.0);
 }
 
-/// Drive Bevy's [`UiScale`] from the stored factor, live. Idempotent — only
-/// writes when the resource disagrees with the store, so nothing relayouts
-/// while the value is at rest.
-fn apply_ui_scale(settings: Option<Res<ViewerSettings>>, mut ui_scale: ResMut<UiScale>) {
-    let Some(settings) = settings else {
-        return;
-    };
-    let Ok(want) = settings.store().get_f32(SETTING_UI_SCALE) else {
-        return;
+/// A UI scale pinned for this run, overriding the persisted `UiScale`
+/// preference without rewriting it.
+///
+/// Inserted by the binary for `--capture-ui-scale` /
+/// `SL_VIEWER_CAPTURE_UI_SCALE`, which the Firestorm harness reads too, so a
+/// chrome pair states the scale both interfaces are drawn at rather than resting
+/// on two defaults agreeing. A capture draws its interface into an off-screen
+/// image whose own scale factor is 1, so on a capture this *is* the scale the
+/// frame holds; in the window it multiplies the output's scale as the
+/// preference does.
+///
+/// A resource rather than a store write for the reason
+/// `CameraFovOverride` gives: the store is the operator's preferences, and a
+/// run must be able to pin a value without editing them.
+#[derive(Debug, Clone, Copy, Resource)]
+pub struct UiScaleOverride {
+    /// The pinned factor, within [`UI_SCALE_MIN`]..=[`UI_SCALE_MAX`] (the
+    /// binary refuses anything outside it at the command line).
+    pub factor: f32,
+}
+
+/// Drive Bevy's [`UiScale`] from the stored factor, live — or from a
+/// [`UiScaleOverride`] when the run pinned one. Idempotent — only writes when
+/// the resource disagrees with the wanted value, so nothing relayouts while the
+/// value is at rest.
+fn apply_ui_scale(
+    settings: Option<Res<ViewerSettings>>,
+    pinned: Option<Res<UiScaleOverride>>,
+    mut ui_scale: ResMut<UiScale>,
+) {
+    let want = match pinned {
+        // A run that pinned a scale keeps it whatever the preference says.
+        Some(pinned) => pinned.factor,
+        None => {
+            let Some(settings) = settings else {
+                return;
+            };
+            let Ok(want) = settings.store().get_f32(SETTING_UI_SCALE) else {
+                return;
+            };
+            want
+        }
     };
     let clamped = want.clamp(UI_SCALE_MIN, UI_SCALE_MAX);
     if (ui_scale.0 - clamped).abs() > f32::EPSILON {
@@ -722,12 +755,52 @@ mod tests {
     use sl_settings::{SettingValue, SettingsStore};
 
     use super::{
-        AgentPreferences, MaturitySync, SETTING_PREFERRED_MATURITY, drive_maturity_setting,
-        ingest_maturity_events, maturity_rank, maturity_short, maturity_within_ceiling,
-        resolve_start_location,
+        AgentPreferences, MaturitySync, SETTING_PREFERRED_MATURITY, SETTING_UI_SCALE,
+        UiScaleOverride, apply_ui_scale, drive_maturity_setting, ingest_maturity_events,
+        maturity_rank, maturity_short, maturity_within_ceiling, resolve_start_location,
     };
     use crate::notifications::ShowNotification;
     use crate::settings::ViewerSettings;
+
+    /// A headless app running only [`apply_ui_scale`], over a store whose
+    /// `UiScale` preference is `stored`.
+    fn ui_scale_app(stored: f32) -> App {
+        let mut store = SettingsStore::new();
+        store
+            .register(SETTING_UI_SCALE, SettingValue::F32(stored), "scale")
+            .ok();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(ViewerSettings::from_store_for_test(store))
+            .init_resource::<bevy::ui::UiScale>()
+            .add_systems(Update, apply_ui_scale);
+        app
+    }
+
+    /// Without a pin, the interface is drawn at the stored preference.
+    #[test]
+    fn the_stored_ui_scale_drives_the_interface() {
+        let mut app = ui_scale_app(1.5);
+        app.update();
+        assert!((app.world().resource::<bevy::ui::UiScale>().0 - 1.5).abs() < f32::EPSILON);
+    }
+
+    /// A run that pins a scale is drawn at it whatever the preference says,
+    /// and the preference is left as the operator set it — the pin is for this
+    /// run, not an edit to their settings.
+    #[test]
+    fn a_pinned_ui_scale_beats_the_preference_without_rewriting_it() {
+        let mut app = ui_scale_app(1.5);
+        app.insert_resource(UiScaleOverride { factor: 1.0 });
+        app.update();
+        assert!((app.world().resource::<bevy::ui::UiScale>().0 - 1.0).abs() < f32::EPSILON);
+        let stored = app
+            .world()
+            .resource::<ViewerSettings>()
+            .store()
+            .get_f32(SETTING_UI_SCALE);
+        assert!(stored.is_ok_and(|stored| (stored - 1.5).abs() < f32::EPSILON));
+    }
 
     /// A headless app running the maturity conversation over a store with the
     /// account scope "loaded", plus the resources the [`crate::i18n::Translator`]

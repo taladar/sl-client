@@ -48,6 +48,29 @@ impl Viewer {
         }
     }
 
+    /// Whether this viewer draws its interface at its **window's** size, so
+    /// that a UI capture is only as good as the window the compositor gave it.
+    ///
+    /// Firestorm's snapshot path cannot scale the UI, so its harness resizes the
+    /// window and reports whether that worked. This viewer renders every camera
+    /// of a capture — the interface's included — into an off-screen target of
+    /// the capture size, and its window never enters the frame.
+    #[must_use]
+    pub const fn ui_follows_window(self) -> bool {
+        match self {
+            Self::SlClient => false,
+            Self::Firestorm => true,
+        }
+    }
+
+    /// The viewer whose [`name`](Self::name) this is.
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::both()
+            .into_iter()
+            .find(|viewer| viewer.name() == name)
+    }
+
     /// Both viewers, in the order a run drives them.
     #[must_use]
     pub const fn both() -> [Self; 2] {
@@ -66,10 +89,24 @@ pub struct RunDirs {
 }
 
 impl RunDirs {
-    /// A run rooted at `root`.
-    #[must_use]
-    pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+    /// A run rooted at `root`, made absolute against the current directory.
+    ///
+    /// Absolute because every path below it is handed to a viewer, and a viewer
+    /// does not start where this process stands: Firestorm's launcher script
+    /// changes into its own install tree first. A relative root therefore named
+    /// a credentials file that was not there — the harness refused it and the
+    /// viewer sat on a crash dialog until the deadline — and a
+    /// `FIRESTORM_X64_USER_DIR` the viewer resolved against its home directory,
+    /// outside the run.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error from reading the current directory, or the one for an
+    /// empty `root`.
+    pub fn new(root: impl Into<PathBuf>) -> Result<Self, std::io::Error> {
+        Ok(Self {
+            root: std::path::absolute(root.into())?,
+        })
     }
 
     /// Where the credentials and grid files go.
@@ -311,12 +348,28 @@ mod tests {
         launch.args.get(index.checked_add(1)?).map(String::as_str)
     }
 
+    /// A relative run directory is made absolute: a viewer resolves the paths
+    /// it is handed from wherever it starts, and Firestorm's launcher starts
+    /// somewhere else.
+    #[test]
+    fn a_relative_run_directory_is_made_absolute() -> Result<(), TestError> {
+        let dirs = RunDirs::new("crosscheck-runs/catalogue")?;
+        assert!(dirs.root.is_absolute());
+        assert_eq!(
+            dirs.root,
+            std::env::current_dir()?.join("crosscheck-runs/catalogue")
+        );
+        assert!(dirs.config().is_absolute());
+        assert!(dirs.state(Viewer::Firestorm).is_absolute());
+        Ok(())
+    }
+
     /// Both viewers are aimed at the same point from the same point, in the same
     /// units, with the same spelling. This is the whole comparison: two frames
     /// from two cameras are two pictures, not a cross-check.
     #[test]
     fn both_viewers_get_the_same_camera() -> Result<(), TestError> {
-        let dirs = RunDirs::new("/tmp/run");
+        let dirs = RunDirs::new("/tmp/run")?;
         let plan = plan()?;
         let files = files(&dirs);
         let ours = sl_client("viewer", &dirs, &plan, &files, None);
@@ -338,7 +391,7 @@ mod tests {
     /// size produces a pair that cannot be diffed at all.
     #[test]
     fn both_viewers_get_the_same_capture_block() -> Result<(), TestError> {
-        let dirs = RunDirs::new("/tmp/run");
+        let dirs = RunDirs::new("/tmp/run")?;
         let plan = plan()?;
         let files = files(&dirs);
         let ours = sl_client("viewer", &dirs, &plan, &files, None);
@@ -361,7 +414,7 @@ mod tests {
     /// here would silently log the run into whichever grid it used last.
     #[test]
     fn firestorm_is_pointed_at_the_grid_by_host_and_port() -> Result<(), TestError> {
-        let dirs = RunDirs::new("/tmp/run");
+        let dirs = RunDirs::new("/tmp/run")?;
         let launch = firestorm("firestorm", &dirs, &plan()?, &files(&dirs))?;
         assert_eq!(value_of(&launch, "--grid"), Some("127.0.0.1:9100"));
         assert!(!launch.args.iter().any(|arg| arg == "--loginuri"));
@@ -375,7 +428,7 @@ mod tests {
     /// run's textures, costs more than the run is worth.
     #[test]
     fn each_viewer_is_confined_to_the_run_directory() -> Result<(), TestError> {
-        let dirs = RunDirs::new("/tmp/run");
+        let dirs = RunDirs::new("/tmp/run")?;
         let plan = plan()?;
         let files = files(&dirs);
         let ours = sl_client("viewer", &dirs, &plan, &files, None);
@@ -412,7 +465,7 @@ mod tests {
     /// run captures the UI layer, and then baffling.
     #[test]
     fn the_bevy_asset_root_is_passed_when_known() -> Result<(), TestError> {
-        let dirs = RunDirs::new("/tmp/run");
+        let dirs = RunDirs::new("/tmp/run")?;
         let plan = plan()?;
         let launch = sl_client(
             "viewer",
@@ -433,7 +486,7 @@ mod tests {
     /// after being copied somewhere else.
     #[test]
     fn each_viewer_writes_into_its_own_named_directory() -> Result<(), TestError> {
-        let dirs = RunDirs::new("/tmp/run");
+        let dirs = RunDirs::new("/tmp/run")?;
         assert_eq!(
             dirs.artefacts(Viewer::SlClient),
             Path::new("/tmp/run/sl-client")

@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 119 |
-| ready | 307 |
+| ready | 304 |
 | blocked | 59 |
 | in-progress | 20 |
-| bugs | 15 |
-| done | 1247 |
+| bugs | 16 |
+| done | 1254 |
 | deferred | 31 |
 | wont-do | 16 |
-| **total** | **1814** |
+| **total** | **1819** |
 
 ## ideas (119)
 
@@ -300,7 +300,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (307)
+## ready (304)
 
 ### protocol
 
@@ -842,9 +842,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-render-closedness-check`](ready/viewer-render-closedness-check.md) —
   Closedness check — an object's faces must enclose a volume (blocked by
   `viewer-render-test-harness` (done))
-- [`viewer-render-cpu-skinning-crosscheck`](ready/viewer-render-cpu-skinning-crosscheck.md)
-  — CPU-skinning cross-check — make the R13 debug affordance a standing test
-  (blocked by `viewer-render-test-harness` (done))
 - [`viewer-render-metadata-overlays`](ready/viewer-render-metadata-overlays.md)
   — Render-metadata debug overlays
 - [`viewer-render-readback-tier`](ready/viewer-render-readback-tier.md) — Render
@@ -929,8 +926,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-texture-drag-drop`](ready/viewer-texture-drag-drop.md) — Drag & drop
   a texture onto the build Texture tab / an object face (blocked by
   `viewer-prim-texture-editing` (done), `viewer-ui-texture-picker` (done))
-- [`viewer-texture-mip-chain-missing`](ready/viewer-texture-mip-chain-missing.md)
-  — Face textures are uploaded without a mip chain
 - [`viewer-texture-preview-floater`](ready/viewer-texture-preview-floater.md) —
   Texture preview floater — full reference feature set
 - [`viewer-texture-vram-budget`](ready/viewer-texture-vram-budget.md) — Texture
@@ -964,8 +959,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-world-map-floater` (done))
 - [`viewer-viewer-effect-render`](ready/viewer-viewer-effect-render.md) — Render
   inbound ViewerEffects (beams, spheres)
-- [`viewer-vintage-ui-chrome-crosscheck`](ready/viewer-vintage-ui-chrome-crosscheck.md)
-  — Measure skin fidelity instead of arguing about it
 - [`viewer-voice-audio`](ready/viewer-voice-audio.md) — Voice audio transport
   (WebRTC — no Vivox) (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-audio-backend` (done))
@@ -1276,7 +1269,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (15)
+## bugs (16)
 
 ### protocol
 
@@ -1309,6 +1302,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 - [`viewer-sliders-show-no-value`](bugs/viewer-sliders-show-no-value.md) — A
   slider shows no value, and no bounds or step either
+- [`viewer-texture-filtering-in-linear-space`](bugs/viewer-texture-filtering-in-linear-space.md)
+  — Colour textures are filtered after sRGB decoding, the reference before
 - [`viewer-vintage-radar-range-colours`](bugs/viewer-vintage-radar-range-colours.md)
   — The radar's range column is unreadable on a light list
 
@@ -1320,7 +1315,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1247)
+## done (1254)
 
 ### protocol
 
@@ -2216,6 +2211,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Media-on-a-prim & embedded web browser
 - [`viewer-menu-accelerators-inert`](done/viewer-menu-accelerators-inert.md) —
   Menu accelerators are drawn but dead (Ctrl+P / Ctrl+T / Ctrl+F / Ctrl+U)
+- [`viewer-menu-bar-twice-reference-height`](done/viewer-menu-bar-twice-reference-height.md)
+  — Our menu bar is twice the reference's height at the same UI scale
+- [`viewer-menu-dropdown-rows-larger-than-reference`](done/viewer-menu-dropdown-rows-larger-than-reference.md)
+  — Drop-down menu rows are larger than the reference's at the same UI scale
 - [`viewer-menu-touch-object`](done/viewer-menu-touch-object.md) — Touch an
   object from the object and attachment menus
 - [`viewer-mesh-encoder`](done/viewer-mesh-encoder.md) — LLMesh encoder (inverse
@@ -2890,6 +2889,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A resolved parcel id names no question, so two askers cannot be told apart
 - [`viewer-remove-attachment-message-is-a-no-op`](done/viewer-remove-attachment-message-is-a-no-op.md)
   — '`Command::RemoveAttachment` sends a message no grid handles'
+- [`viewer-render-cpu-skinning-crosscheck`](done/viewer-render-cpu-skinning-crosscheck.md)
+  — CPU-skinning cross-check — make the R13 debug affordance a standing test
+  (blocked by `viewer-render-test-harness` (done))
 - [`viewer-render-fixtures-vendored-assets`](done/viewer-render-fixtures-vendored-assets.md)
   — Render-tier avatar fixtures default to the vendored character assets
 - [`viewer-render-friends-only`](done/viewer-render-friends-only.md) — Show
@@ -3124,6 +3126,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-texture-anisotropic-filtering-missing`](done/viewer-texture-anisotropic-filtering-missing.md)
   — A texture's level-of-detail change never reached the faces sampling it (seen
   as soft checker edges, blamed on anisotropy)
+- [`viewer-texture-mip-chain-missing`](done/viewer-texture-mip-chain-missing.md)
+  — Face textures are uploaded without a mip chain
 - [`viewer-texture-picker-inventory-tree`](done/viewer-texture-picker-inventory-tree.md)
   — Texture picker — inventory folder tree navigation (blocked by
   `viewer-ui-texture-picker` (done))
@@ -3276,6 +3280,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-vintage-skin`](done/viewer-vintage-skin.md) — Ship a Vintage-alike
   skin (blocked by `viewer-skin-light-surface-roles` (done),
   `viewer-skin-image-backed-widgets` (done))
+- [`viewer-vintage-ui-chrome-crosscheck`](done/viewer-vintage-ui-chrome-crosscheck.md)
+  — Measure skin fidelity instead of arguing about it
 - [`viewer-void-water-diagonal-takes-corner-height`](done/viewer-void-water-diagonal-takes-corner-height.md)
   — Void water on a block's diagonal takes the corner region's sea level
 - [`viewer-volume-panel`](done/viewer-volume-panel.md) — Volume panel (master +
@@ -3665,6 +3671,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Chat whisper/shout range — [aditi] variant
 - [`test-crosscheck-day-position-is-inert`](done/test-crosscheck-day-position-is-inert.md)
   — --day-position asks for a keyframe the stock cycle does not have
+- [`test-crosscheck-pin-ui-scale`](done/test-crosscheck-pin-ui-scale.md) — A
+  chrome pair pins one UI scale on both viewers
 - [`test-current-outfit-folder`](done/test-current-outfit-folder-read-the-current-outfit-folder-the-cof-ais3-way-to-know-what.md)
   — read the Current Outfit Folder (the COF / AIS3 way to know what the av
 - [`test-dir-find-people-groups-events`](done/test-dir-find-people-groups-events-dirfindquery-across-types.md)
@@ -3789,6 +3797,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `test-fake-grid-fixed-port-scenario` (done))
 - [`test-firestorm-fake-grid-crosscheck`](done/test-firestorm-fake-grid-crosscheck.md)
   — Point Firestorm at the fake grid to calibrate oracles
+- [`test-firestorm-harness-refusal-hangs-on-crash-dialog`](done/test-firestorm-harness-refusal-hangs-on-crash-dialog.md)
+  — A Firestorm harness refusal hangs on a crash dialog until the deadline
 - [`test-firestorm-harness-skin-selection`](done/test-firestorm-harness-skin-selection.md)
   — Firestorm harness — start a run in a named skin and theme
 - [`test-friendship-offer-accept`](done/test-friendship-offer-accept-offer-accept-confirm-both-friend-lists.md)

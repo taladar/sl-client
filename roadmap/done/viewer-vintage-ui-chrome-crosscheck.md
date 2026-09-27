@@ -2,7 +2,7 @@
 id: viewer-vintage-ui-chrome-crosscheck
 title: Measure skin fidelity instead of arguing about it
 topic: viewer
-status: ready
+status: done
 origin: Vintage skin fidelity audit (2026-09-20)
 points: 3
 refs: [viewer-vintage-skin, test-firestorm-crosscheck-runner,
@@ -68,25 +68,54 @@ Both fixed on the fork's `test-harness` branch: the harness asks
 settle-to-capture transition (a resize is a round trip, so asking and checking
 in one breath can only confirm what was asked). A mismatch now fails the run
 through a `window_size` block of requested / honoured / detail, on the same
-pattern as the day-position pin. The same run now produces two full
-1920×1080 frames with the whole interface in them.
+pattern as the day-position pin.
 
-The compositor honours the resize once it is actually asked, so no
-window-rule workaround is needed here — the `detail` field is for the
-machine where it is not.
+## Done, 2026-09-27
 
-## What to do
+**The size is the window's, not 1920×1080.** The claim that the compositor
+honours the resize once it is actually asked did not survive a paired run.
+niri opens the `firestorm-test` window **tiled** on the `sl-client` workspace,
+which is on the 4K output (3840×2160 at scale 1.5). It keeps the window at
+3840×2160 and ignores the 1920×1080 request. The fork's check caught it
+(`WINDOW NOT 1920x1080 — the window is 3840x2160 …`). **On this machine a
+chrome pair is captured at `--capture-size 3840x2160`**, the size the
+compositor gives the window. The world-only default stays 1920×1080, because
+nothing in a world frame depends on the window.
 
-Both of the original items are done (see above). What is left:
+What the runner does now (`sl-crosscheck`):
 
-- A recorded chrome-capture pair per skin under the cross-check's run
-  directory, the way the scene dumps are recorded.
-- The pair itself, which waits on there being a skin of ours worth comparing —
-  [[viewer-vintage-skin]].
+- Reads Firestorm's `window_size` block. A refused window fails the run, and
+  so does a Firestorm that says nothing about its window on a UI run
+  (`WINDOW NOT REPORTED`). Ours lays its interface out in the off-screen
+  capture target, so its silence is not a gap (`Viewer::ui_follows_window`).
+- Reads every frame's pixel size back from the file and fails any frame not at
+  the capture size (`FRAMES NOT AT …`). The file is the evidence; a status is
+  only a claim.
+- States on every UI run that the pair is **chrome only**, because floaters
+  are closed and blocked.
+- Keeps a pair per skin: a `--capture-ui` run defaults to
+  `crosscheck-runs/<scenario>-chrome-<ours>-vs-<theirs>`.
+- No longer ends a failed-but-two-sided run with "ready to be compared".
 
-## Done when
+Found on the way: the default run directory was **relative**, and Firestorm's
+launcher changes directory before it starts. Every default-directory run
+therefore handed Firestorm a `--credentials` path it could not open, and a
+`FIRESTORM_X64_USER_DIR` it resolved against `$HOME`, outside the run.
+`RunDirs::new` now makes the root absolute. That refusal then sat on a modal
+crash dialog until the deadline, which is filed as
+[[test-firestorm-harness-refusal-hangs-on-crash-dialog]].
 
-`sl-crosscheck --sl-client-skin <ours> --firestorm-skin vintage --capture-ui`
-produces a chrome pair from both viewers at the same size, or fails saying
-why, and the pair is what the Vintage-alike skin's fidelity is judged
-against.
+The recorded pair (local, git-ignored):
+
+```sh
+sl-crosscheck --scenario catalogue --capture-ui \
+  --capture-size 3840x2160 --sl-client-skin vintage --firestorm-skin vintage \
+  --run-dir crosscheck-runs/catalogue-chrome-vintage-vs-vintage-4k
+```
+
+Both halves: `ok — complete (3/3 frames)`, and Firestorm reported
+`window 3840x2160 as asked`. The first thing the pair shows is **scale**. Our
+menu bar is 38 px tall and the reference's is 19 px in the same frame, so our
+interface is drawn at twice the reference's size. Ours follows the output's
+1.5, which is intended, while Firestorm (Xwayland) sees 1.0. Pinning one scale
+for a pair is [[test-crosscheck-pin-ui-scale]].

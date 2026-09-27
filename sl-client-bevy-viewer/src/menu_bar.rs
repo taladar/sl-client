@@ -860,6 +860,23 @@ pub(crate) static TOP_MENU_BAR: MenuBarDef = MenuBarDef {
     ],
 };
 
+/// The font size of the top bar's text — menu names, the menu search and the
+/// status read-outs — in logical pixels: the reference's `SansSerifSmall`, 9 pt
+/// at its `FontScreenDPI` of 96, i.e. 12 px.
+///
+/// Logical, like every size here, so on a scaled output (a Wayland 4K screen at
+/// 1.5) the window draws it at 18 physical px. The reference, an X11 client
+/// under Xwayland, stays at 12 there; ours following the output is deliberate,
+/// and only a capture — which draws into an off-screen image at scale 1 — puts
+/// the two side by side pixel for pixel.
+pub(crate) const TOP_BAR_FONT: f32 = 12.0;
+
+/// The top bar's least height, in logical pixels: the reference's
+/// `menu_bar_holder` (`main_view.xml`), which is one 12 px line (15 px from
+/// ascender to descender) plus the menu item's 4 px padding. A floor, not a
+/// height, so a larger UI font still grows the bar.
+const TOP_BAR_MIN_HEIGHT: f32 = 19.0;
+
 /// A marker on the top menu bar's row, so [`update_top_menu_conditions`] writes
 /// the live conditions there — every button under it inherits them by ancestry
 /// ([`MenuConditions`]).
@@ -904,7 +921,10 @@ fn spawn_top_menu_bar(mut commands: Commands, root: Res<UiRoot>, asset_server: R
     let bar = spawn_menu_bar(
         &mut commands,
         root.0,
-        ElementCx::new(),
+        ElementCx {
+            font_size: TOP_BAR_FONT,
+            ..ElementCx::new()
+        },
         &TOP_MENU_BAR,
         TOP_MENU_ELEMENT,
     );
@@ -925,6 +945,7 @@ fn spawn_top_menu_bar(mut commands: Commands, root: Res<UiRoot>, asset_server: R
     // view menus share.
     commands.entity(bar).entry::<Node>().and_modify(|mut node| {
         node.width = Val::Percent(100.0);
+        node.min_height = Val::Px(TOP_BAR_MIN_HEIGHT);
     });
     // The menu-search field sits in the bar, immediately after the last menu
     // (viewer-ui-menu-search): its text drives `crate::menu`'s `MenuFilter`, so
@@ -2028,5 +2049,99 @@ mod tests {
              promise to the user's fingers, so gaining or losing one is a \
              deliberate edit here"
         );
+    }
+
+    /// The top bar lays out at the reference's height — 19 logical px, one 12 px
+    /// line plus the item padding — with every child inside it: the menu names,
+    /// the search box (18 px) and the status read-outs.
+    ///
+    /// At two window scale factors, because the height is **logical**: on a 1.5
+    /// Wayland output the window draws the bar 28.5 physical px tall, where the
+    /// X11-only reference stays at 19. Following the output is ours on purpose;
+    /// what must not move is the logical size.
+    #[test]
+    fn top_bar_is_the_reference_height_at_every_output_scale()
+    -> Result<(), crate::ui_test::TestError> {
+        use bevy::prelude::*;
+
+        use super::{TOP_BAR_MIN_HEIGHT, TopMenuBar, spawn_top_menu_bar};
+        use crate::i18n::Translated;
+        use crate::ui::UiScaffoldSystems;
+        use crate::ui_search::SearchFieldBox;
+        use crate::ui_test::{LayoutTest, settle};
+
+        /// Taffy rounds a box to whole physical pixels, which is up to one
+        /// physical pixel on either edge, and a physical pixel is under one
+        /// logical pixel at every scale tested.
+        const ROUNDING: f32 = 1.0;
+        /// The reference's menu-search box height (`search_menu_edit`).
+        const SEARCH_BOX_HEIGHT: f32 = 18.0;
+
+        for scale_factor in [1.0_f32, 1.5] {
+            let mut app = LayoutTest::new().with_scale_factor(scale_factor).build();
+            // The status area's parcel icons are images.
+            app.init_asset::<Image>();
+            app.add_systems(
+                Startup,
+                spawn_top_menu_bar.after(UiScaffoldSystems::SpawnRoot),
+            );
+            settle(&mut app);
+            // The menu names are bound to translation keys the harness does not
+            // resolve, and an empty label would lay the bar out at its padding
+            // alone. The longest English name stands in for all of them.
+            let mut labels = app
+                .world_mut()
+                .query_filtered::<&mut Text, With<Translated>>();
+            for mut label in labels.iter_mut(app.world_mut()) {
+                "Advanced".clone_into(&mut label.0);
+            }
+            settle(&mut app);
+
+            let logical_height = |app: &mut App, entity: Entity| -> f32 {
+                app.world()
+                    .entity(entity)
+                    .get::<ComputedNode>()
+                    .map(|computed| computed.size.y * computed.inverse_scale_factor)
+                    .unwrap_or_default()
+            };
+            let bar = app
+                .world_mut()
+                .query_filtered::<Entity, With<TopMenuBar>>()
+                .single(app.world())?;
+            let bar_height = logical_height(&mut app, bar);
+            assert!(
+                (bar_height - TOP_BAR_MIN_HEIGHT).abs() <= ROUNDING,
+                "at scale factor {scale_factor} the top bar is {bar_height} logical px tall, \
+                 not the reference's {TOP_BAR_MIN_HEIGHT}"
+            );
+            let search = app
+                .world_mut()
+                .query_filtered::<Entity, With<SearchFieldBox>>()
+                .single(app.world())?;
+            let search_height = logical_height(&mut app, search);
+            assert!(
+                (search_height - SEARCH_BOX_HEIGHT).abs() <= ROUNDING,
+                "at scale factor {scale_factor} the menu search is {search_height} logical px \
+                 tall, not the reference's {SEARCH_BOX_HEIGHT}"
+            );
+            let mut buttons = app
+                .world_mut()
+                .query_filtered::<(Entity, &Name), With<bevy::ui_widgets::Button>>();
+            let buttons: Vec<Entity> = buttons
+                .iter(app.world())
+                .filter(|(_, name)| name.as_str().starts_with("menu-button:"))
+                .map(|(entity, _)| entity)
+                .collect();
+            assert!(!buttons.is_empty(), "the top bar spawned no menu buttons");
+            for button in buttons {
+                let height = logical_height(&mut app, button);
+                assert!(
+                    height > 0.0 && height <= TOP_BAR_MIN_HEIGHT + ROUNDING,
+                    "at scale factor {scale_factor} a menu button is {height} logical px \
+                     tall, which the {TOP_BAR_MIN_HEIGHT} px bar cannot hold"
+                );
+            }
+        }
+        Ok(())
     }
 }
