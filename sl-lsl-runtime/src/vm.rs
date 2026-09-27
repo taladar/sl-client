@@ -36,7 +36,7 @@ mod instance;
 mod tests;
 
 #[cfg(test)]
-pub(crate) use context::ScriptData;
+pub(crate) use context::{Peers, ScriptData};
 pub use context::{ScriptCtx, Tick};
 pub use detected::{DETECTION_EVENTS, Detected, MAX_DETECTED, Touch, is_detection_event};
 pub use engine::{

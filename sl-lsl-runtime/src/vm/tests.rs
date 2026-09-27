@@ -30,6 +30,8 @@ struct Recorder {
     stubbed: Vec<(CallerId, BuiltinId)>,
     /// `(tick, caller)` per state left.
     left: Vec<(u64, CallerId)>,
+    /// The scripts `llGetScriptState` can name, all in one prim.
+    scripts: std::collections::BTreeMap<String, CallerId>,
 }
 
 impl Host for Recorder {
@@ -43,6 +45,10 @@ impl Host for Recorder {
 
     fn left_state(&mut self, caller: CallerId) {
         self.left.push((self.now, caller));
+    }
+
+    fn script_named(&self, _caller: CallerId, name: &str) -> Option<CallerId> {
+        self.scripts.get(name).copied()
     }
 }
 
@@ -303,6 +309,47 @@ default {
     let instance = engine.instance(A).ok_or("no instance")?;
     assert!(!instance.is_running());
     assert_eq!(instance.state(), StateId::DEFAULT);
+    Ok(())
+}
+
+#[test]
+fn get_script_state_reads_the_flag_a_fault_clears() -> Result<(), String> {
+    let mut engine = engine();
+    let mut host = Recorder {
+        scripts: [("Watcher", A), ("Divider", B)]
+            .into_iter()
+            .map(|(name, id)| (name.to_owned(), id))
+            .collect(),
+        ..Recorder::default()
+    };
+    let _none = engine.add(
+        A,
+        program(
+            r#"report() {
+                print((string)llGetScriptState("Watcher")
+                    + (string)llGetScriptState("Divider")
+                    + (string)llGetScriptState("Nobody"));
+            }
+            default {
+                state_entry() { report(); llSetTimerEvent(0.5); }
+                timer() { report(); llSetTimerEvent(0.0); }
+            }"#,
+        )?,
+    );
+    let _none = engine.add(
+        B,
+        program("integer zero; default { state_entry() { llSleep(0.2); zero = 1 / zero; } }")?,
+    );
+    let _reports = run(&mut engine, &mut host, 6);
+    assert_eq!(host.texts(A), vec!["110", "100"]);
+    // Restarted, it reads as running again: one flag, not a copy.
+    engine
+        .instance_mut(B)
+        .ok_or("no instance")?
+        .set_running(true);
+    engine.instance_mut(A).ok_or("no instance")?.reset();
+    let _reports = run(&mut engine, &mut host, 1);
+    assert_eq!(host.texts(A), vec!["110", "100", "110"]);
     Ok(())
 }
 

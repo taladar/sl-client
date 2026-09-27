@@ -37,4 +37,9 @@ pub trait Host {
     /// it took (`llTakeControls`). Called after the old state's `state_exit`
     /// and before the new one's `state_entry`.
     fn left_state(&mut self, caller: CallerId);
+
+    /// The script called `name` in the same prim as `caller` — the one
+    /// `llGetScriptState(name)` asks about — or [`None`] when the prim's
+    /// inventory has no script by that name.
+    fn script_named(&self, caller: CallerId, name: &str) -> Option<CallerId>;
 }

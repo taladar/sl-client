@@ -10,7 +10,7 @@ use core::time::Duration;
 use crate::bytecode::Program;
 use crate::library::{Event, event};
 use crate::value::Value;
-use crate::vm::context::Tick;
+use crate::vm::context::{Peers, Tick};
 use crate::vm::detected::Detected;
 use crate::vm::host::{CallerId, Host};
 use crate::vm::instance::{Arrival, Coalescing, Instance, Outcome, PostError, Posted, Slice};
@@ -280,26 +280,30 @@ impl Engine {
         }
         let mut region_left = self.config.region_budget;
         for id in order {
-            let Some(instance) = self.instances.get_mut(&id) else {
+            // Out of the map while it runs, so the others can be lent to it.
+            let Some(mut instance) = self.instances.remove(&id) else {
                 continue;
             };
             if !instance.is_runnable(now) {
+                let _none = self.instances.insert(id, instance);
                 continue;
             }
             report.runnable = report.runnable.saturating_add(1);
             if region_left == 0 {
+                let _none = self.instances.insert(id, instance);
                 continue;
             }
             report.served = report.served.saturating_add(1);
             self.last_served = Some(id);
             let mut script_left = self.config.script_budget;
             while script_left > 0 && region_left > 0 && instance.is_runnable(now) {
-                let slice = instance.run_slice(
+                let slice = instance.run_slice_among(
                     id,
                     now,
                     self.config.step,
                     script_left.min(region_left),
                     host,
+                    Peers::of(&self.instances),
                 );
                 script_left = script_left.saturating_sub(slice.used);
                 region_left = region_left.saturating_sub(slice.used);
@@ -312,6 +316,7 @@ impl Engine {
                     break;
                 }
             }
+            let _none = self.instances.insert(id, instance);
         }
         report
     }

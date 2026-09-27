@@ -29,6 +29,7 @@ crate::registry! {
         LlDetectedTouchNormal => detection::ll_detected_touch_normal,
         LlDetectedTouchBinormal => detection::ll_detected_touch_binormal,
         LlSleep => control::ll_sleep,
+        LlGetScriptState => control::ll_get_script_state,
     }
     stubbed {}
 }

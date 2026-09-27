@@ -347,6 +347,13 @@ scripts-run percentage.
   deeper than `MAX_CALL_DEPTH` is a stack-heap collision until the memory
   accounting of `server-lsl-memory-and-limits` stops it at the reference's
   exact depth; that task also bounds the heap, which nothing does yet.
+- **One run flag, read where it is kept.** `llGetScriptState(name)` asks the
+  host which instance of the caller's prim is called `name`
+  (`Host::script_named`) and reads that instance's run flag — the one the
+  engine schedules by, a fault clears and the Running checkbox shows — never a
+  copy. The engine lends a script the region's other instances while it runs
+  (`ScriptCtx` sees their flags and nothing else); the caller itself reads as
+  running, and a name that is no script, or has no instance, as stopped.
 - **`print`** goes to `Host::print`: Second Life writes it to the
   simulator's log, where no resident sees it, so a host logs it and never
   turns it into chat. It is also what the VM's own tests observe.

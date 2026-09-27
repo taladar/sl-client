@@ -1,5 +1,6 @@
 //! Library tranche: the calls that are the VM's own control flow — a script
-//! suspending or restarting itself, its timer, its start parameter. Each goes
+//! suspending or restarting itself, its timer, its start parameter, and
+//! whether a script beside it is running. Each goes
 //! through the [`ScriptCtx`]; a sleep or reset takes effect once the call has
 //! returned.
 
@@ -50,4 +51,16 @@ pub fn ll_set_timer_event(ctx: &mut ScriptCtx<'_>, seconds: f32) -> Result<(), C
 /// None; the signature is the library's.
 pub const fn ll_get_start_parameter(ctx: &mut ScriptCtx<'_>) -> Result<i32, CallError> {
     Ok(ctx.start_parameter())
+}
+
+/// `llGetScriptState`: whether the script called `name` in this prim is
+/// running — `TRUE` for the caller itself, `FALSE` for a script stopped by
+/// hand or by a run-time error, and `FALSE` for a name that is no script
+/// here.
+///
+/// # Errors
+///
+/// None; the signature is the library's.
+pub fn ll_get_script_state(ctx: &mut ScriptCtx<'_>, name: String) -> Result<i32, CallError> {
+    Ok(i32::from(ctx.script_running(&name)))
 }

@@ -12,9 +12,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 118 |
-| ready | 307 |
+| ready | 306 |
 | blocked | 55 |
-| in-progress | 25 |
+| in-progress | 26 |
 | bugs | 14 |
 | done | 1246 |
 | deferred | 30 |
@@ -294,7 +294,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (307)
+## ready (306)
 
 ### protocol
 
@@ -1013,9 +1013,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The vendored library document lacks 50 current functions
 - [`server-lsl-memory-sizes`](ready/server-lsl-memory-sizes.md) — Measure Second
   Life's per-value memory costs and rotation arithmetic on aditi
-- [`server-lsl-runtime-errors`](ready/server-lsl-runtime-errors.md) — Run-time
-  errors where a resident can see them (blocked by `server-lsl-vm-execution`
-  (done))
 - [`server-world-chat-routing`](ready/server-world-chat-routing.md) — The fake
   grid hears local chat and drops it
 - [`server-world-ecs-store`](ready/server-world-ecs-store.md) — An ECS scene
@@ -1200,7 +1197,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Batch world changes into per-tick update bursts (blocked by
   `server-world-heartbeat`, `server-world-ecs-store`)
 
-## in-progress (25)
+## in-progress (26)
 
 ### viewer
 
@@ -1267,6 +1264,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
+
+### server
+
+- [`server-lsl-runtime-errors`](in-progress/server-lsl-runtime-errors.md) —
+  Run-time errors where a resident can see them (blocked by
+  `server-lsl-vm-execution` (done))
 
 ## bugs (14)
 

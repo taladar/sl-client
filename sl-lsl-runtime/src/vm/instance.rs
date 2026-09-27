@@ -13,7 +13,7 @@ use crate::bytecode::{Body, CodeOffset, Component, FunctionId, Instr, Program, S
 use crate::library::{self, Event};
 use crate::num::ticks_for;
 use crate::value::{Element, Value};
-use crate::vm::context::{Request, ScriptCtx, ScriptData, Tick};
+use crate::vm::context::{Peers, Request, ScriptCtx, ScriptData, Tick};
 use crate::vm::detected::{Detected, MAX_DETECTED, is_detection_event};
 use crate::vm::fault::{Fault, RuntimeError};
 use crate::vm::host::{CallerId, Host};
@@ -492,6 +492,8 @@ struct Machine<'run> {
     host: &'run mut dyn Host,
     /// The library-visible state.
     data: &'run mut ScriptData,
+    /// The region's other scripts.
+    peers: Peers<'run>,
 }
 
 impl Machine<'_> {
@@ -610,6 +612,7 @@ impl Machine<'_> {
                     self.step,
                     &mut *self.host,
                     &mut *self.data,
+                    self.peers,
                 );
                 let called = library::call(id, &mut ctx, args)?;
                 let request = ctx.take_request();
@@ -1006,6 +1009,10 @@ impl Instance {
     /// Run at most `budget` instructions at tick `now`, stopping early at the
     /// end of a body, a sleep, a state change, a reset or an error. `step` is
     /// the length of a tick, which turns a sleep's seconds into ticks.
+    ///
+    /// Run this way, outside an [`Engine`](crate::vm::Engine), the script
+    /// sees no other scripts: `llGetScriptState` reports any but itself
+    /// stopped.
     pub fn run_slice(
         &mut self,
         caller: CallerId,
@@ -1013,6 +1020,19 @@ impl Instance {
         step: Duration,
         budget: u32,
         host: &mut dyn Host,
+    ) -> Slice {
+        self.run_slice_among(caller, now, step, budget, host, Peers::NONE)
+    }
+
+    /// [`Self::run_slice`], with the region's other scripts in view.
+    pub(crate) fn run_slice_among(
+        &mut self,
+        caller: CallerId,
+        now: Tick,
+        step: Duration,
+        budget: u32,
+        host: &mut dyn Host,
+        peers: Peers<'_>,
     ) -> Slice {
         let mut used = 0_u32;
         if !self.is_runnable(now) {
@@ -1044,6 +1064,7 @@ impl Instance {
                 step,
                 host: &mut *host,
                 data: &mut self.data,
+                peers,
             };
             let outcome = match machine.step(&mut used) {
                 Ok(Flow::Next) => continue,

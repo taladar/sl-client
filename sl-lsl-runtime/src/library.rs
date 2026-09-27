@@ -52,7 +52,7 @@ mod tests {
 
     use super::*;
     use crate::value::{Element, Value};
-    use crate::vm::{CallerId, Host, ScriptCtx, ScriptData, Tick};
+    use crate::vm::{CallerId, Host, Peers, ScriptCtx, ScriptData, Tick};
 
     /// A host for calls that never reach it: the dispatch reports stubs
     /// through `Called::stubbed`, and only the VM tells the host.
@@ -64,6 +64,10 @@ mod tests {
         fn stubbed(&mut self, _caller: CallerId, _id: BuiltinId) {}
 
         fn left_state(&mut self, _caller: CallerId) {}
+
+        fn script_named(&self, _caller: CallerId, _name: &str) -> Option<CallerId> {
+            None
+        }
     }
 
     #[test]
@@ -232,6 +236,7 @@ mod tests {
             core::time::Duration::from_millis(100),
             &mut host,
             &mut data,
+            Peers::NONE,
         );
         assert_eq!(
             call(BuiltinId::LlAbs, &mut ctx, vec![Value::Integer(-3)]),
@@ -297,6 +302,7 @@ mod tests {
             core::time::Duration::from_millis(100),
             &mut host,
             &mut data,
+            Peers::NONE,
         );
         assert_eq!(
             with_stubs::call(BuiltinId::LlGetPos, &mut ctx, vec![]),

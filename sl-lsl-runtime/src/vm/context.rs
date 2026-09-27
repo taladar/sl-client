@@ -1,10 +1,13 @@
 //! What a library function sees of the script calling it.
 
+use std::collections::BTreeMap;
+
 use core::time::Duration;
 
 use crate::num::ticks_for;
 use crate::vm::detected::Detected;
 use crate::vm::host::{CallerId, Host};
+use crate::vm::instance::Instance;
 
 /// A heartbeat tick of the region: the unit every script-visible time is
 /// counted in. A script's time is never read from a clock — sleeps, and later
@@ -53,6 +56,31 @@ pub(crate) enum Request {
     Reset,
 }
 
+/// The region's other scripts, as a library function may see them: their run
+/// flags, and nothing else (`llGetScriptState`).
+///
+/// The engine runs one instance at a time with the rest lent here, so a
+/// script reads the very flag the engine schedules by — the one a run-time
+/// error clears and the contents' Running checkbox shows — never a copy.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Peers<'run>(Option<&'run BTreeMap<CallerId, Instance>>);
+
+impl<'run> Peers<'run> {
+    /// No other scripts: an instance run on its own, outside an engine.
+    pub(crate) const NONE: Self = Self(None);
+
+    /// The instances of an engine, less the one running.
+    pub(crate) const fn of(instances: &'run BTreeMap<CallerId, Instance>) -> Self {
+        Self(Some(instances))
+    }
+
+    /// Whether the instance `id` names is running; [`None`] when there is no
+    /// such instance.
+    fn is_running(self, id: CallerId) -> Option<bool> {
+        self.0?.get(&id).map(Instance::is_running)
+    }
+}
+
 /// The calling script instance, as a library function sees it: which script
 /// is calling, the current tick, the host, the script's own detected block,
 /// timer and start parameter, and a way to ask the VM for a control-flow
@@ -73,6 +101,8 @@ pub struct ScriptCtx<'host> {
     host: &'host mut dyn Host,
     /// The instance's library-visible state.
     data: &'host mut ScriptData,
+    /// The region's other scripts.
+    peers: Peers<'host>,
     /// What the function asked the VM to do after it returns; the last
     /// request wins, except that a reset is never replaced by a sleep.
     request: Option<Request>,
@@ -86,6 +116,7 @@ impl<'host> ScriptCtx<'host> {
         step: Duration,
         host: &'host mut dyn Host,
         data: &'host mut ScriptData,
+        peers: Peers<'host>,
     ) -> Self {
         Self {
             caller,
@@ -93,6 +124,7 @@ impl<'host> ScriptCtx<'host> {
             step,
             host,
             data,
+            peers,
             request: None,
         }
     }
@@ -136,6 +168,18 @@ impl<'host> ScriptCtx<'host> {
     #[must_use]
     pub const fn start_parameter(&self) -> i32 {
         self.data.start_parameter
+    }
+
+    /// `llGetScriptState`: whether the script called `name` in the caller's
+    /// prim is running. The caller itself is, since it is running this; a
+    /// name the host does not know as a script, or a script with no instance
+    /// in the region, is not.
+    pub fn script_running(&mut self, name: &str) -> bool {
+        match self.host.script_named(self.caller, name) {
+            Some(id) if id == self.caller => true,
+            Some(id) => self.peers.is_running(id).unwrap_or(false),
+            None => false,
+        }
     }
 
     /// Suspend the script for `seconds` once the function returns. A

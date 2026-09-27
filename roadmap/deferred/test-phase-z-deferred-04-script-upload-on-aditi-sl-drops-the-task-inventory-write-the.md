@@ -37,4 +37,18 @@ both back to `[both]` (its `GetScriptRunning`/`SetScriptRunning`/ `ScriptReset`
 surface, including the CAPS `ScriptRunningReply` decode, is already
 grid-agnostic).
 
+**Ruled out 2026-09-27: the transaction id.** Firestorm's object-Contents
+"New Script" (`llpanelcontents.cpp` → `LLViewerObject::saveScript`) sends a
+**null** `TransactionID` in the inventory block, where `new_script` is given
+`Uuid::new_v4()`. A live aditi run of `script-upload` with `Uuid::nil()`
+failed exactly as before (the script never appeared). Remaining differences
+from the viewer's item, read from source, not yet tried: `next_owner` is
+`PERM_MOVE | NextOwnerPerms("Scripts")` there against `ALL` here;
+`CreationDate` is `time_corrected()` there against `0` here (it enters the
+CRC); the description is the generated `LLViewerAssetType` default there
+against empty here; and the `AgentData.GroupID` is the agent's active group
+there against nil here. A wire capture is not available, so the way forward is
+source reading, or outgoing-message logging built into the test-harness
+Firestorm branch.
+
 ---

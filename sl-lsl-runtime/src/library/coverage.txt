@@ -24,5 +24,6 @@ implemented llDetectedTouchST
 implemented llDetectedTouchUV
 implemented llDetectedType
 implemented llDetectedVel
+implemented llGetScriptState
 implemented llGetStartParameter
 implemented llSetTimerEvent
