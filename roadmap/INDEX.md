@@ -1005,7 +1005,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — One generated table for the library, and a coverage harness over it (blocked
   by `server-lsl-architecture` (done))
 - [`server-lsl-memory-sizes`](ready/server-lsl-memory-sizes.md) — Measure Second
-  Life's exact per-value script memory costs on aditi
+  Life's per-value memory costs and rotation arithmetic on aditi
 - [`server-world-chat-routing`](ready/server-world-chat-routing.md) — The fake
   grid hears local chat and drops it
 - [`server-world-ecs-store`](ready/server-world-ecs-store.md) — An ECS scene

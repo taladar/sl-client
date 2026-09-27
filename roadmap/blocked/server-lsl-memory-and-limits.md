@@ -31,8 +31,9 @@ So the VM has to account memory even though it does not need to.
   bytes, a list's cells and its elements' bytes. The reference's exact
   per-value overheads are what make `llGetFreeMemory` return the number
   content compares against, so they must be **exact, not approximated**:
-  charge less than Second Life and a script runs out of memory later than
-  it would there; charge more and it runs out where it would not. The
+  charge less than Second Life and a script hits its stack-heap collision
+  later than it would there; charge more and it collides where it would
+  not. The
   costs are measured on aditi by [[server-lsl-memory-sizes]], which also
   provides the cost function this task accounts with.
 - **Stack-heap collision** stops the script with the reference's
