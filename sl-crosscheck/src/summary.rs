@@ -199,6 +199,11 @@ pub struct RunSummary {
     /// asked for, and `run.json` has to carry the question as well as the
     /// answers.
     pub day_position: Option<f32>,
+    /// The interface scale the run pinned on both viewers, when it pinned one.
+    /// Defaulted on the way in so a `run.json` from before the field still
+    /// reads.
+    #[serde(default)]
+    pub ui_scale: Option<f32>,
     /// What each viewer was dressed in. Two entries, not one, because the two
     /// viewers' skin namespaces are unrelated — a run that names a skin names
     /// it per viewer, and `run.json` has to record which side wore what or a
@@ -235,6 +240,7 @@ impl RunSummary {
                 .and_then(|camera| camera.look_at)
                 .map(|point| point.to_string()),
             day_position: plan.capture.day_position,
+            ui_scale: plan.capture.ui_scale,
             sl_client_skin: plan.sl_client_skin.clone(),
             firestorm_skin: plan.firestorm_skin.clone(),
             viewers,
@@ -305,6 +311,11 @@ impl RunSummary {
         }
         if let Some(position) = self.day_position {
             lines.push(format!("sun pinned at day position {position}"));
+        }
+        if let Some(factor) = self.ui_scale {
+            lines.push(format!(
+                "interface drawn at UI scale {factor} in both viewers"
+            ));
         }
         if self.captures_ui() {
             // Said on every UI run, because it bounds what the pair can answer:

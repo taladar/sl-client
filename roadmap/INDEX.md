@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 118 |
-| ready | 302 |
+| ready | 301 |
 | blocked | 62 |
 | in-progress | 25 |
-| bugs | 13 |
-| done | 1241 |
+| bugs | 14 |
+| done | 1242 |
 | deferred | 30 |
 | wont-do | 16 |
-| **total** | **1807** |
+| **total** | **1808** |
 
 ## ideas (118)
 
@@ -294,7 +294,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (302)
+## ready (301)
 
 ### protocol
 
@@ -985,8 +985,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Factor the repeated session/id acquisition out of the conformance cases
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
-- [`test-crosscheck-pin-ui-scale`](ready/test-crosscheck-pin-ui-scale.md) — A
-  chrome pair pins one UI scale on both viewers
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
@@ -1276,7 +1274,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (13)
+## bugs (14)
 
 ### protocol
 
@@ -1293,6 +1291,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   one should have it
 - [`viewer-friends-list-shows-a-sixth-rights-column`](bugs/viewer-friends-list-shows-a-sixth-rights-column.md)
   — The Friends list shows six rights columns; the reference shows five
+- [`viewer-menu-bar-twice-reference-height`](bugs/viewer-menu-bar-twice-reference-height.md)
+  — Our menu bar is twice the reference's height at the same UI scale
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
   Some worn mesh hair does not render (visible in Firestorm)
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
@@ -1316,7 +1316,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1241)
+## done (1242)
 
 ### protocol
 
@@ -3648,6 +3648,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Chat whisper/shout range — [aditi] variant
 - [`test-crosscheck-day-position-is-inert`](done/test-crosscheck-day-position-is-inert.md)
   — --day-position asks for a keyframe the stock cycle does not have
+- [`test-crosscheck-pin-ui-scale`](done/test-crosscheck-pin-ui-scale.md) — A
+  chrome pair pins one UI scale on both viewers
 - [`test-current-outfit-folder`](done/test-current-outfit-folder-read-the-current-outfit-folder-the-cof-ais3-way-to-know-what.md)
   — read the Current Outfit Folder (the COF / AIS3 way to know what the av
 - [`test-dir-find-people-groups-events`](done/test-dir-find-people-groups-events-dirfindquery-across-types.md)

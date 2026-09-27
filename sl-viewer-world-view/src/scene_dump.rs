@@ -420,6 +420,16 @@ pub struct RenderDump {
     /// `RenderReflectionProbeDetail`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reflection_detail: Option<i32>,
+    /// The scale the interface was drawn at: interface pixels per logical
+    /// pixel, as `bevy_ui` laid it out. That is the UI camera's render target's
+    /// scale factor times [`UiScale`], read back from a UI
+    /// root rather than from the preference, so it says what was drawn. On a UI
+    /// capture the target is the off-screen image, whose scale factor is 1, so
+    /// the window's output scale plays no part. The reference reports
+    /// `UIScaleFactor` times the system's UI size under the same name. Absent
+    /// when there is no UI root to read it from.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ui_scale: Option<f32>,
 }
 
 /// One in-world object.
@@ -680,7 +690,15 @@ struct DumpSources<'w, 's> {
     bodies: Query<'w, 's, &'static AvatarBodyPart>,
     /// The scene identities of the tracked objects.
     scene_objects: Query<'w, 's, &'static SceneObject>,
+    /// The UI roots' layout scale, for the `render` section's `ui_scale`. The
+    /// HUD screen is left out: it is laid out for HUD attachments, not for the
+    /// interface.
+    ui_roots: Query<'w, 's, &'static bevy::ui::ComputedUiRenderTargetInfo, InterfaceRoot>,
 }
+
+/// The filter that picks the interface's root nodes: every root `bevy_ui` node
+/// except the HUD screen.
+type InterfaceRoot = (With<Node>, Without<ChildOf>, Without<crate::hud::HudScreen>);
 
 /// One avatar's entry as [`dump_avatar`] is handed it: its identity and the two
 /// flags that qualify it, whether a body was built, where the reference's
@@ -716,7 +734,14 @@ fn build(sources: &DumpSources) -> SceneDump {
         ),
         camera: build_camera(sources.cameras.iter().next(), offset, handle),
         environment: build_environment(&sources.environment),
-        render: build_render(&sources.settings),
+        render: build_render(
+            &sources.settings,
+            sources
+                .ui_roots
+                .iter()
+                .next()
+                .map(bevy::ui::ComputedUiRenderTargetInfo::scale_factor),
+        ),
         objects: build_objects(sources, offset),
         avatars: build_avatars(sources, offset),
     }
@@ -909,8 +934,10 @@ fn build_sky_params(sky: &sl_client_bevy::SkySettings) -> SkyParamsDump {
 }
 
 /// The `render` section, read from the settings store by the reference's own
-/// setting names.
-fn build_render(settings: &ViewerSettings) -> RenderDump {
+/// setting names, plus the scale the interface was laid out at (`ui_scale`,
+/// read back from a UI root by the caller — every root under the one UI camera
+/// carries the same value).
+fn build_render(settings: &ViewerSettings, ui_scale: Option<f32>) -> RenderDump {
     let store = settings.store();
     RenderDump {
         draw_distance: store.get_f32("RenderFarClip").ok(),
@@ -923,6 +950,7 @@ fn build_render(settings: &ViewerSettings) -> RenderDump {
         mesh_lod_boost: store.get_f32("RenderVolumeLODFactor").ok(),
         max_texture_res: level(store, "RenderMaxTextureResolution"),
         reflection_detail: level(store, "RenderReflectionProbeDetail"),
+        ui_scale,
     }
 }
 

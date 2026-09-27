@@ -2,7 +2,7 @@
 id: test-crosscheck-pin-ui-scale
 title: A chrome pair pins one UI scale on both viewers
 topic: test
-status: ready
+status: done
 origin: viewer-vintage-ui-chrome-crosscheck recorded pair (2026-09-27)
 refs: [viewer-vintage-ui-chrome-crosscheck, viewer-vintage-skin,
        test-crosscheck-ui-scenes, test-firestorm-harness-skin-selection]
@@ -52,3 +52,46 @@ sizes (font size, menu-bar padding) account for the rest.
 
 A chrome pair on this machine draws both menu bars at their skins' height for
 one stated scale, and the report shows that scale for both viewers.
+
+## Findings (2026-09-27): the premise was wrong
+
+Both viewers already drew the recorded pair at an effective scale of **1.0**.
+A UI capture routes our UI camera into the off-screen capture image, and an
+`ImageRenderTarget` made from a handle has `scale_factor` 1.0, so bevy_ui's
+scale is 1.0 × `UiScale` (1.0 in a fresh run directory). The output's 1.5
+never reaches a capture. Firestorm's is `UIScaleFactor` (1.0) ×
+`getSystemUISize()` (1.0 under Xwayland). The 38 px against 19 px is therefore
+our own layout, filed as [[viewer-menu-bar-twice-reference-height]]. It cannot
+be closed by pinning a scale.
+
+## Built
+
+- `SL_VIEWER_CAPTURE_UI_SCALE`, read by both viewers and refused outside
+  0.75–2 (our `UiScale` range):
+  - ours: `--capture-ui-scale`, a run-scoped `UiScaleOverride` resource that
+    `apply_ui_scale` prefers over the stored preference, which it leaves
+    alone;
+  - Firestorm (fork `test-harness`, `65df871d0a`): `UIScaleFactor` forced
+    non-persistently before the window exists, with `ResetUIScaleOnFirstRun`
+    forced off so a fresh user directory cannot reset it.
+- `sl-crosscheck --ui-scale`. A `--capture-ui` run that names none pins 1
+  (`DEFAULT_UI_SCALE`), which replaces the planned "warn when they differ".
+  The summary prints "interface drawn at UI scale N in both viewers", and
+  `run.json` records it.
+- Both scene dumps report `render.ui_scale`: ours read back from a UI root's
+  `ComputedUiRenderTargetInfo`, theirs from `LLUI::getScaleFactor()`.
+  `sl-crosscheck-report` lists it with the other render settings.
+
+## Verified live
+
+A Vintage chrome pair at 3840×2160:
+
+| `--ui-scale` | dumps' `ui_scale` | our bar | reference's bar |
+| --- | --- | --- | --- |
+| unset (pins 1) | 1.0 / 1.0 | 38 px | 19 px |
+| 1.5 | 1.5 / 1.5 | 57 px | 28 px |
+
+The report shows `ui_scale: 1.0000 vs 1.0000`.
+
+The original "done when" (both menu bars at their skins' height) now belongs
+to [[viewer-menu-bar-twice-reference-height]].

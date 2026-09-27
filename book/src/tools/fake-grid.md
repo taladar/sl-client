@@ -345,11 +345,18 @@ a chrome pair is the window's, not the 1920×1080 default: on a 4K output,
 pass `--capture-size 3840x2160`. World-only runs keep the default, because
 nothing in their frames depends on the window.
 
-Such a pair can still show the two interfaces at different **scales**.
-Firestorm runs through Xwayland and sees scale 1.0, while this viewer
-follows the output's scale (1.5 on the 4K output above), as it should.
-Pinning one scale for both is `test-crosscheck-pin-ui-scale`; until that
-lands, read shapes and colours off a pair, not sizes.
+**The interface scale is pinned.** A `--capture-ui` run draws both
+interfaces at one stated scale: `--ui-scale <factor>` (0.75 to 2), and 1
+when the run names none. The runner passes it as
+`SL_VIEWER_CAPTURE_UI_SCALE`, which Firestorm's harness applies as its
+`UIScaleFactor` and this viewer as its `UiScale`, for the run only and
+without touching either saved preference. The window's output scale plays
+no part in a capture on this side: the interface is drawn into the
+off-screen capture image, whose own scale factor is 1. Both scene dumps
+report the scale each viewer actually drew at as `render.ui_scale`, and
+`sl-crosscheck-report` lists it beside the other render settings. So a
+difference in size in a pair is a difference in the viewers' layouts, not
+in their scales.
 
 **Two regions, and walking between them.** `--neighbour` stands the
 scene's *second* half one slot east of the first and lets the grid

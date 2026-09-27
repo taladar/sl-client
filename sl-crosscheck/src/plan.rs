@@ -297,7 +297,19 @@ pub struct CaptureSpec {
     /// states the premise instead of resting on two defaults agreeing, which is
     /// what let that go unnoticed.
     pub fov_degrees: Option<f32>,
+    /// The scale both interfaces are drawn at: `UIScaleFactor` in the
+    /// reference, `UiScale` here. `None` leaves each viewer its own.
+    ///
+    /// The runner pins it to [`DEFAULT_UI_SCALE`] on every UI run that names
+    /// none, because a chrome pair drawn at two scales is never what a
+    /// comparison wants — and the first recorded pair was read as exactly that
+    /// until both scene dumps said otherwise.
+    pub ui_scale: Option<f32>,
 }
+
+/// The interface scale a UI run pins when it names none: both viewers' own
+/// default, stated rather than assumed.
+pub const DEFAULT_UI_SCALE: f32 = 1.0;
 
 impl Default for CaptureSpec {
     /// 1080p, world only, thirty frames half a second apart, with the same
@@ -321,6 +333,7 @@ impl Default for CaptureSpec {
             login_timeout: 180.0,
             day_position: None,
             fov_degrees: None,
+            ui_scale: None,
         }
     }
 }
@@ -375,6 +388,9 @@ impl CaptureSpec {
         }
         if let Some(degrees) = self.fov_degrees {
             env.push(("SL_VIEWER_CAPTURE_FOV".to_owned(), degrees.to_string()));
+        }
+        if let Some(factor) = self.ui_scale {
+            env.push(("SL_VIEWER_CAPTURE_UI_SCALE".to_owned(), factor.to_string()));
         }
         env
     }
@@ -526,6 +542,25 @@ mod tests {
             capture
                 .env()
                 .contains(&("SL_VIEWER_CAPTURE_FOV".to_owned(), "60".to_owned()))
+        );
+    }
+
+    /// A pinned interface scale reaches both viewers under the one name they
+    /// both read, and an unpinned one stays out of the block.
+    #[test]
+    fn a_pinned_ui_scale_travels_with_the_capture_block() {
+        let mut capture = CaptureSpec::default();
+        assert!(
+            !capture
+                .env()
+                .iter()
+                .any(|(name, _value)| name == "SL_VIEWER_CAPTURE_UI_SCALE")
+        );
+        capture.ui_scale = Some(1.25);
+        assert!(
+            capture
+                .env()
+                .contains(&("SL_VIEWER_CAPTURE_UI_SCALE".to_owned(), "1.25".to_owned()))
         );
     }
 

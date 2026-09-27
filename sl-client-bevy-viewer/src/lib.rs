@@ -697,6 +697,22 @@ struct Options {
     /// harness reads, so one env block aims both lenses.
     #[clap(long, env = "SL_VIEWER_CAPTURE_FOV", value_name = "DEGREES")]
     camera_fov: Option<f32>,
+    /// The scale the interface is drawn at, overriding the persisted `UiScale`
+    /// preference for this run without rewriting it.
+    ///
+    /// A capture draws its interface into an off-screen image whose own scale
+    /// factor is 1, so this is the scale a UI frame holds; the window's output
+    /// scale plays no part in it. The environment variable is the one the
+    /// Firestorm harness reads (as its `UIScaleFactor`), so one env block draws
+    /// both interfaces at one scale. Refused outside the preference's own
+    /// range, 0.75 to 2.
+    #[clap(
+        long,
+        env = "SL_VIEWER_CAPTURE_UI_SCALE",
+        value_name = "FACTOR",
+        value_parser = parse_ui_scale
+    )]
+    capture_ui_scale: Option<f32>,
     /// The UI skin to wear — a directory under `assets/skins/` (`graphite`,
     /// `azure`, `vintage`). Skins change colour, texture, font and a widget's
     /// shape, never layout.
@@ -755,6 +771,24 @@ struct Options {
     /// image-based-lighting materials have a probe to sample. Off by default.
     #[clap(long)]
     replay_reflection_probe: bool,
+}
+
+/// Parse a `--capture-ui-scale` argument: a factor within the `UiScale`
+/// preference's own range. Refused rather than clamped outside it, because a
+/// clamped pin would draw one viewer's interface at a scale the run did not
+/// ask for while the other drew the one it did.
+fn parse_ui_scale(value: &str) -> Result<f32, String> {
+    use crate::preferences_general::{UI_SCALE_MAX, UI_SCALE_MIN};
+    let factor: f32 = value
+        .trim()
+        .parse()
+        .map_err(|error| format!("expected a number, got {value:?}: {error}"))?;
+    if !(UI_SCALE_MIN..=UI_SCALE_MAX).contains(&factor) {
+        return Err(format!(
+            "a UI scale of {factor} is outside {UI_SCALE_MIN} to {UI_SCALE_MAX}"
+        ));
+    }
+    Ok(factor)
 }
 
 /// Parse a `--camera-position` / `--camera-look-at` argument: three
@@ -1003,6 +1037,10 @@ struct CaptureStartup<'a> {
     scene_dump: Option<&'a Path>,
     /// Whether the run may make sound (`--capture-audio`).
     audio: bool,
+    /// The interface scale pinned for this run (`--capture-ui-scale`), or
+    /// `None` to use the preference. Honoured with or without a screenshot
+    /// directory, as the pinned lens is.
+    ui_scale: Option<f32>,
 }
 
 /// The skin configuration for a viewer session: which skin / theme to wear and
@@ -1875,6 +1913,10 @@ fn run_session(
     if let Some(radians) = camera_fov {
         app.insert_resource(crate::preferences_camera_move::CameraFovOverride { radians });
     }
+    // Likewise an interface scale pinned for this run (`--capture-ui-scale`).
+    if let Some(factor) = capture.ui_scale {
+        app.insert_resource(crate::preferences_general::UiScaleOverride { factor });
+    }
     let exit = app.run();
     // Taken before the exit is judged, so the outcome is out of the world
     // either way — but reported only on a clean exit. An app that failed has
@@ -2006,6 +2048,7 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
                 content: capture_content(options),
                 scene_dump: options.scene_dump.as_deref(),
                 audio: options.capture_audio,
+                ui_scale: options.capture_ui_scale,
             },
             CameraStartup {
                 start: camera_start,
@@ -2141,6 +2184,7 @@ fn run_replay(options: &Options, bundle_dir: &Path) -> Result<(), Error> {
             content: capture_content(options),
             scene_dump: options.scene_dump.as_deref(),
             audio: options.capture_audio,
+            ui_scale: options.capture_ui_scale,
         },
         CameraStartup {
             start: camera_start,
@@ -2379,4 +2423,36 @@ pub fn run() -> Result<(), Error> {
         return run_replay(&options, &bundle_dir);
     }
     run_viewer(&options)
+}
+
+#[cfg(test)]
+mod ui_scale_option_tests {
+    use super::parse_ui_scale;
+
+    /// Whether `value` parses to `want`.
+    fn parses_to(value: &str, want: f32) -> bool {
+        parse_ui_scale(value).is_ok_and(|factor| (factor - want).abs() < f32::EPSILON)
+    }
+
+    /// A pin inside the preference's range is taken as written, the ends
+    /// included.
+    #[test]
+    fn a_ui_scale_in_range_is_taken() {
+        assert!(parses_to("1", 1.0));
+        assert!(parses_to("0.75", 0.75));
+        assert!(parses_to(" 2 ", 2.0));
+    }
+
+    /// Outside the range, or not a number, is refused rather than clamped: a
+    /// clamped pin draws one viewer at a scale the run did not ask for.
+    #[test]
+    fn a_ui_scale_out_of_range_or_malformed_is_refused() {
+        let refused = |value: &str, because: &str| {
+            parse_ui_scale(value).is_err_and(|error| error.contains(because))
+        };
+        assert!(refused("0.5", "outside"));
+        assert!(refused("2.5", "outside"));
+        assert!(refused("NaN", "outside"));
+        assert!(refused("big", "expected a number"));
+    }
 }
