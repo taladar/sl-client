@@ -50,3 +50,9 @@ walking into range and fires `no_sensor` when it leaves; a 16-result cap
 and distance ordering are covered by a test with 20 targets; touch UV
 and face on a clicked face match what the viewer picked; and
 `llCastRay` against a fixture wall returns the expected hit point.
+
+Already done by [[server-lsl-state-and-events]]: the detected block
+(`Detected`, posted with `Engine::post_detected`) and all sixteen
+`llDetected*` functions, with Second Life's out-of-range answers measured on
+aditi. What is left here is who fills the block — the sensor sweeps, and the
+touch and collision raisers' side of it.

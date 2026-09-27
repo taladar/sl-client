@@ -1,12 +1,12 @@
 ---
 id: viewer-lsl-oracle-misses
-title: Grid compile errors the LSL semantic pass does not report (20 oracle misses)
+title: Grid compile errors the LSL semantic pass does not report (19 oracle misses)
 topic: viewer
 status: ideas
 origin: scale oracle run while fixing
   [[viewer-lsl-semantic-false-positives]] (2026-09-15)
 refs: [viewer-lsl-semantic-false-positives, viewer-lsl-differential-testing,
-  viewer-lsl-semantic-pass]
+  viewer-lsl-semantic-pass, server-lsl-compiler-ir]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -51,3 +51,13 @@ Grouped by tailslide's error:
 Each fix must keep the scale run at zero false positives; add the reduced case
 to `sl-lsl/tests/corpus/error/`. Reproduce with `SL_LSL_TAILSLIDE_BIN` and
 `SL_LSL_DIFFTEST_CORPUS` as in [[viewer-lsl-differential-testing]].
+
+**2026-09-27:** the scale run lists **19** misses now. All of them — E10019
+included — are compile errors in `sl_lsl_runtime::compile`, whose lowering
+has to type and resolve everything anyway ([[server-lsl-compiler-ir]]); its
+`compiler/lower.rs` implements each rule after tailslide and is the reference
+for porting any of them back into the pass. E10019 is decided: it is an
+error on the grid (tailslide's `final_pass.cc`, PyOptimizer's
+`EParseCodePathWithoutRet`), by the rule "the last statement is a `return` or
+an `if`/`else` whose branches both end in one" — narrower than the pass's
+divergence walk, which treats a jump or an infinite loop as ending the path.

@@ -218,6 +218,35 @@ state running
     }
 
     #[test]
+    fn an_assignment_takes_the_name_before_it_as_its_target() -> Result<(), String> {
+        // The grid's grammar: an assignment's left side is an lvalue, so
+        // `c + e *= 4` is `c + (e *= 4)` and `!e = 0` is `!(e = 0)`.
+        let Expr::Binary { op, rhs, .. } = expr("c + e *= 4")? else {
+            return Err("expected a binary expression".to_owned());
+        };
+        assert_eq!(op, BinaryOp::Add);
+        assert!(matches!(
+            *rhs,
+            Expr::Assign {
+                op: AssignOp::MulAssign,
+                ..
+            }
+        ));
+        let Expr::Prefix { op, operand, .. } = expr("!e = 0")? else {
+            return Err("expected a prefix expression".to_owned());
+        };
+        assert_eq!(op, PrefixOp::Not);
+        assert!(matches!(*operand, Expr::Assign { .. }));
+        // A cast's operand is not such a name: the assignment's target is
+        // the cast, which the grid rejects.
+        let Expr::Assign { target, .. } = expr("(integer)x = 1")? else {
+            return Err("expected an assignment".to_owned());
+        };
+        assert!(matches!(*target, Expr::Cast { .. }));
+        Ok(())
+    }
+
+    #[test]
     fn compound_assignment_operators() -> Result<(), String> {
         let Expr::Assign { op, .. } = expr("a += 1")? else {
             return Err("expected an assignment".to_owned());

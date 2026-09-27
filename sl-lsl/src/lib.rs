@@ -44,6 +44,9 @@
 //!   errors) turned into `rustc`-grade output — a caret under the source line,
 //!   an edit-distance "did you mean…?" against the real library, and the grid's
 //!   own signature quoted back on a type error.
+//! - [`types`] — the **compile-time type table**: which operator/operand
+//!   combinations and casts are legal and what each produces, shared by the
+//!   semantic pass and the `sl-lsl-runtime` lowering.
 
 pub mod ast;
 pub mod lexer;
@@ -52,6 +55,7 @@ pub mod render;
 pub mod semantics;
 pub mod syntax;
 pub mod token;
+pub mod types;
 
 pub use lexer::{SpannedToken, Tokens, lex, tokens};
 pub use parser::{Parse, ParseError, parse};

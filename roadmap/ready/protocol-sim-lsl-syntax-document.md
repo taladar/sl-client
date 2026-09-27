@@ -2,7 +2,7 @@
 id: protocol-sim-lsl-syntax-document
 title: The fake grid serves an empty LSLSyntax document
 topic: protocol
-status: blocked
+status: ready
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 3
 blocked_by: [server-lsl-library-surface-table]

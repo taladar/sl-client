@@ -25,6 +25,9 @@ extend-exclude = [
   # Linden's own label), plus the LGPL licence text redistributed verbatim.
   "viewer-assets/character/",
   "viewer-assets/LGPL-license.txt",
+  # Linden's own LSLSyntax document, vendored byte-for-byte as the library
+  # table's source (sl-lsl-runtime/README.md): its tooltips are Linden's prose.
+  "sl-lsl-runtime/keywords_lsl_default.xml",
 ]
 
 [default]

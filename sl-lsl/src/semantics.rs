@@ -49,6 +49,7 @@ use crate::ast::{
     Block, Expr, FunctionDef, GlobalItem, Script, StateDef, StateName, Stmt, TypeName,
 };
 use crate::syntax::LslSyntax;
+use crate::types;
 
 /// How seriously to take a [`Diagnostic`]: a definite compile error the grid
 /// would reject, or a warning about dubious-but-legal code.
@@ -373,6 +374,9 @@ struct Analyzer<'a> {
     /// The declared return type of the function currently being walked, or
     /// [`None`] inside a `void` function or an event handler.
     current_ret: Option<TypeName>,
+    /// How many `if` statements and loops enclose the statement being walked
+    /// — a `return` of a void call is legal only when nested in one.
+    control_depth: u32,
     /// The accumulating findings.
     diagnostics: Vec<Diagnostic>,
 }
@@ -391,6 +395,7 @@ impl<'a> Analyzer<'a> {
             labels: HashSet::new(),
             seen_labels: HashSet::new(),
             current_ret: None,
+            control_depth: 0,
             diagnostics: Vec::new(),
         };
         analyzer.collect_symbols(script);
@@ -634,17 +639,17 @@ impl<'a> Analyzer<'a> {
                 ..
             } => {
                 self.analyze_expr(cond);
-                self.analyze_stmt(then_branch);
+                self.analyze_nested(then_branch);
                 if let Some(else_branch) = else_branch {
-                    self.analyze_stmt(else_branch);
+                    self.analyze_nested(else_branch);
                 }
             }
             Stmt::While { cond, body, .. } => {
                 self.analyze_expr(cond);
-                self.analyze_stmt(body);
+                self.analyze_nested(body);
             }
             Stmt::DoWhile { body, cond, .. } => {
-                self.analyze_stmt(body);
+                self.analyze_nested(body);
                 self.analyze_expr(cond);
             }
             Stmt::For {
@@ -663,7 +668,7 @@ impl<'a> Analyzer<'a> {
                 for expr in incr {
                     self.analyze_expr(expr);
                 }
-                self.analyze_stmt(body);
+                self.analyze_nested(body);
             }
             Stmt::Return { value, span } => self.analyze_return(value.as_ref(), span.clone()),
             Stmt::Jump { label, .. } => {
@@ -691,14 +696,28 @@ impl<'a> Analyzer<'a> {
         }
     }
 
+    /// Walk the body of an `if`, `else` or loop, one control level deeper.
+    fn analyze_nested(&mut self, stmt: &Stmt) {
+        self.control_depth = self.control_depth.saturating_add(1);
+        self.analyze_stmt(stmt);
+        self.control_depth = self.control_depth.saturating_sub(1);
+    }
+
     /// Check a `return` against the current return context: a value where none
     /// is wanted, a bare `return;` where a value is required, or a returned
     /// expression whose type is incompatible with the declared return type.
+    ///
+    /// Returning a *void call* from a void function or an event handler is
+    /// legal when the `return` is nested in an `if` or a loop (tailslide's
+    /// `void_return.lsl`), so nested, only a return whose value type is known
+    /// is reported.
     fn analyze_return(&mut self, value: Option<&Expr>, span: Range<usize>) {
         match (self.current_ret, value) {
             (None, Some(expr)) => {
                 self.analyze_expr(expr);
-                self.report(DiagnosticKind::ReturnValueInVoid, span);
+                if self.control_depth == 0 || self.expr_type(expr).is_some() {
+                    self.report(DiagnosticKind::ReturnValueInVoid, span);
+                }
             }
             (Some(expected), None) => {
                 self.report(DiagnosticKind::MissingReturnValue { expected }, span);
@@ -706,7 +725,7 @@ impl<'a> Analyzer<'a> {
             (Some(expected), Some(expr)) => {
                 self.analyze_expr(expr);
                 if let Some(found) = self.expr_type(expr)
-                    && !compatible(expected, found)
+                    && !types::implicitly_converts(found, expected)
                 {
                     self.report(
                         DiagnosticKind::ReturnTypeMismatch { expected, found },
@@ -844,7 +863,7 @@ impl<'a> Analyzer<'a> {
             let (Some(expected_ty), Some(found)) = (*expected_ty, self.expr_type(arg)) else {
                 continue;
             };
-            if !compatible(expected_ty, found) {
+            if !types::implicitly_converts(found, expected_ty) {
                 self.report(
                     DiagnosticKind::ArgTypeMismatch {
                         callee: callee.to_owned(),
@@ -883,11 +902,16 @@ impl<'a> Analyzer<'a> {
                 _ => self.expr_type(operand),
             },
             Expr::Postfix { operand, .. } => self.expr_type(operand),
-            // Only the operators whose result type is fixed regardless of
-            // operand types are inferred; arithmetic (`+ - * / %`) is
-            // operand-polymorphic in LSL (`%` is vector cross product too), so
-            // it stays unknown rather than risk a wrong guess.
-            Expr::Binary { op, .. } => binary_result_type(*op),
+            // With both operand types known the compile-time table answers
+            // (`None` for a combination the compiler rejects). With either
+            // unknown, only the operators whose result type is fixed regardless
+            // of operand types are inferred; arithmetic (`+ - * / %`) is
+            // operand-polymorphic (`vector * vector` is a float), so it stays
+            // unknown rather than risk a wrong guess.
+            Expr::Binary { op, lhs, rhs, .. } => match (self.expr_type(lhs), self.expr_type(rhs)) {
+                (Some(left), Some(right)) => types::binary_result(*op, left, right),
+                _ => binary_result_type(*op),
+            },
             // The grid's compiler types `print(x)` inconsistently (as a string
             // in some positions, with nothing on the stack), so it stays
             // unknown rather than feed a type check.
@@ -1037,22 +1061,6 @@ const fn binary_result_type(op: crate::ast::BinaryOp) -> Option<TypeName> {
         | BinaryOp::BitXor => Some(TypeName::Integer),
         BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => None,
     }
-}
-
-/// Whether a value of type `found` may fill a parameter (or return slot) of type
-/// `expected`, honouring LSL's two implicit conversions: `integer`→`float`
-/// (widening) and `string`↔`key` (freely interchangeable). Every other pairing
-/// needs an explicit cast, so this is deliberately narrow.
-fn compatible(expected: TypeName, found: TypeName) -> bool {
-    if expected == found {
-        return true;
-    }
-    matches!(
-        (expected, found),
-        (TypeName::Float, TypeName::Integer)
-            | (TypeName::Key, TypeName::String)
-            | (TypeName::String, TypeName::Key)
-    )
 }
 
 /// Collect every jump-label name defined anywhere in a body (labels are

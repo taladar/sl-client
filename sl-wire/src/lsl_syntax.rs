@@ -63,11 +63,13 @@ fn cost(map: &Llsd, key: &str) -> Option<f32> {
 
 /// Renders a constant's `value` member as text, preserving the grid's own
 /// formatting. Almost always already a string (`"0x1000"`, `"<0., 0., 0.>"`);
-/// a numeric encoding is rendered so callers need not special-case it. Absent
-/// decodes to [`None`].
+/// a numeric encoding is rendered so callers need not special-case it, and so
+/// is a `<uuid>` — how Linden's own document serves `NULL_KEY` and the
+/// `TEXTURE_*` ids. Absent decodes to [`None`].
 fn value_text(map: &Llsd) -> Option<String> {
     match map.get("value") {
         Some(Llsd::String(text)) => Some(text.clone()),
+        Some(Llsd::Uuid(uuid)) => Some(uuid.to_string()),
         Some(Llsd::Integer(number)) => Some(number.to_string()),
         Some(Llsd::Real(number)) => Some(number.to_string()),
         Some(Llsd::Boolean(boolean)) => Some(boolean.to_string()),
@@ -411,6 +413,26 @@ mod tests {
     use super::{build_lsl_syntax_document, parse_lsl_syntax};
     use crate::WireError;
     use crate::llsd::parse_llsd_xml;
+
+    /// A constant served as a `<uuid>` member — `NULL_KEY` and the `TEXTURE_*`
+    /// ids in Linden's document — keeps its value.
+    #[test]
+    fn a_uuid_constant_value_is_kept() -> Result<(), String> {
+        let document = parse_llsd_xml(
+            "<llsd><map><key>llsd-lsl-syntax-version</key><integer>2</integer>\
+             <key>constants</key><map><key>NULL_KEY</key><map>\
+             <key>type</key><string>string</string>\
+             <key>value</key><uuid>00000000-0000-0000-0000-000000000000</uuid>\
+             </map></map></map></llsd>",
+        )
+        .map_err(|error| error.to_string())?;
+        let syntax = parse_lsl_syntax(&document).map_err(|error| error.to_string())?;
+        assert_eq!(
+            syntax.constant("NULL_KEY").and_then(|c| c.value.clone()),
+            Some("00000000-0000-0000-0000-000000000000".to_owned())
+        );
+        Ok(())
+    }
 
     /// A representative hand-built table round-trips through the builder and the
     /// parser, preserving signatures, costs, values, flags and per-argument

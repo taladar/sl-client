@@ -1,10 +1,11 @@
 # sl-lsl
 
 Pure **Linden Scripting Language** (LSL) tooling for Second Life / OpenSim
-clients. Three pieces so far: a [`logos`](https://crates.io/crates/logos)
+clients. Four pieces so far: a [`logos`](https://crates.io/crates/logos)
 **lexer** that turns LSL source into a token stream, an **error-tolerant
-recursive-descent parser** that turns that stream into a syntax tree, and a
-**semantic pass** that checks the tree against the grid's library.
+recursive-descent parser** that turns that stream into a syntax tree, a
+**semantic pass** that checks the tree against the grid's library, and the
+**type table** both the semantic pass and the `sl-lsl-runtime` lowering read.
 
 Like its siblings `sl-prim` (prim tessellation), `sl-anim` (keyframe motion) and
 `sl-avatar` (skeleton / base body) the crate is deliberately **Bevy-free and
@@ -134,6 +135,23 @@ fn main() {
     assert!(diagnostics.is_empty());
 }
 ```
+
+## The type table
+
+`sl_lsl::types` is the compile-time half of LSL's type rules, as pure functions
+over `ast::TypeName`: `binary_result(op, left, right)` (which operator/operand
+combinations the compiler accepts, and the type each produces — `vector *
+vector` is a `float`, `list + anything` a `list`, every comparison an
+`integer`), `prefix_result` / `postfix_result`, `assign_result` (compound
+assignment, including the `integer *= float` quirk), `cast_legal` and
+`implicitly_converts`. It is transcribed from tailslide's `OPERATOR_RESULTS`
+and `LEGAL_CAST_TABLE`, and a test compares every combination against that
+transcription.
+
+The semantic pass uses it to type an arithmetic expression whose operand types
+it knows, so `llSetPos(v * v)` is now reported (the dot product is a float).
+The value half — what those operators *do* — lives in `sl-lsl-runtime`, whose
+tests run every combination through both halves.
 
 ## Rendering diagnostics
 

@@ -1,0 +1,33 @@
+[package]
+name = "sl-lsl-runtime"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+description = "Runtime for Linden Scripting Language (LSL) scripts on a Second Life / OpenSim test grid — the value model, the library table, a compiler to a stack bytecode, and the VM that runs it"
+readme = { workspace = true }
+license = { workspace = true }
+
+repository = { workspace = true }
+keywords = ["interpreter", "lsl", "opensim", "secondlife"]
+categories = ["game-development"]
+publish = { workspace = true }
+
+exclude = { workspace = true }
+
+[dependencies]
+sl-lsl = { workspace = true }
+sl-types = { workspace = true }
+thiserror = { workspace = true }
+
+[build-dependencies]
+fs-err = { workspace = true }
+sl-llsd = { workspace = true }
+
+[dev-dependencies]
+fs-err = { workspace = true }
+pretty_assertions = { workspace = true }
+sl-wire = { workspace = true }
+
+[lints]
+workspace = true

@@ -8815,6 +8815,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-lsl-runtime"
+version = "0.1.0"
+dependencies = [
+ "fs-err",
+ "pretty_assertions",
+ "sl-llsd",
+ "sl-lsl",
+ "sl-types",
+ "sl-wire",
+ "thiserror 2.0.19",
+]
+
+[[package]]
 name = "sl-map-apis"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

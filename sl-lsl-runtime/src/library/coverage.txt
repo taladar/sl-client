@@ -1,0 +1,29 @@
+# The library's coverage baseline, read by the coverage test in
+# `library.rs`. One line per function that is implemented or
+# stubbed; the test fails if any function listed here falls back to a
+# lower status (implemented > stubbed > missing). When a function is
+# added, the test passes and asks for it to be listed here.
+implemented llAbs
+implemented llFabs
+implemented llGetListLength
+implemented llResetScript
+implemented llSleep
+implemented llDetectedGrab
+implemented llDetectedGroup
+implemented llDetectedKey
+implemented llDetectedLinkNumber
+implemented llDetectedName
+implemented llDetectedOwner
+implemented llDetectedPos
+implemented llDetectedRot
+implemented llDetectedTouchBinormal
+implemented llDetectedTouchFace
+implemented llDetectedTouchNormal
+implemented llDetectedTouchPos
+implemented llDetectedTouchST
+implemented llDetectedTouchUV
+implemented llDetectedType
+implemented llDetectedVel
+implemented llGetScriptState
+implemented llGetStartParameter
+implemented llSetTimerEvent

@@ -735,7 +735,7 @@ impl<'src> Parser<'src> {
     /// guard lives here and not only in [`Parser::parse_prefix`]: a long
     /// `a = b = c = … = z` chain recurses through this method, not that one.
     fn parse_expr_bp_inner(&mut self, min_bp: u8, angle: Angle) -> Expr {
-        let mut lhs = self.parse_prefix(angle);
+        let mut lhs = self.parse_operand(angle);
         while let Some(tok) = self.peek_kind() {
             if angle == Angle::Closing && tok == Token::Greater && self.greater_closes(min_bp) {
                 break;
@@ -765,6 +765,35 @@ impl<'src> Parser<'src> {
             };
         }
         lhs
+    }
+
+    /// Parse an operand: a prefix chain, which — when it is a bare variable or
+    /// member and an assignment operator follows — becomes the target of that
+    /// assignment, whatever operator stands before it.
+    ///
+    /// That is the grid's grammar: an assignment's left side is an *lvalue*,
+    /// not an expression, so after a name nothing but the assignment can take
+    /// the `=`, and `a + b = c` is `a + (b = c)`, `0 < e = f()` is
+    /// `0 < (e = f())`. A cast's operand and a `++`/`--` target are not
+    /// operands in this sense (`(integer)x = 1` does not parse on the grid).
+    fn parse_operand(&mut self, angle: Angle) -> Expr {
+        let operand = self.parse_prefix(angle);
+        if !matches!(operand, Expr::Variable(_) | Expr::Member { .. }) {
+            return operand;
+        }
+        let Some((_, rbp, InfixOp::Assign(op))) = self.peek_kind().and_then(infix_binding_power)
+        else {
+            return operand;
+        };
+        self.bump(); // the assignment operator
+        let value = self.parse_expr_bp(rbp, angle);
+        let span = operand.span().start..value.span().end;
+        Expr::Assign {
+            op,
+            target: Box::new(operand),
+            value: Box::new(value),
+            span,
+        }
     }
 
     /// Parse a prefix-unary chain, a cast, or a primary followed by any postfix
@@ -799,7 +828,10 @@ impl<'src> Parser<'src> {
         let start = self.cur_start();
         if let Some(op) = self.peek_kind().and_then(prefix_op) {
             self.bump();
-            let operand = self.parse_prefix(angle);
+            let operand = match op {
+                PrefixOp::PreInc | PrefixOp::PreDec => self.parse_prefix(angle),
+                PrefixOp::Neg | PrefixOp::Not | PrefixOp::BitNot => self.parse_operand(angle),
+            };
             let span = start..operand.span().end;
             return Expr::Prefix {
                 op,
