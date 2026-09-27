@@ -94,6 +94,7 @@ use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::picking::hover::HoverMap;
+use bevy::picking::pointer::{PointerId, PointerLocation};
 use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
 use bevy::ui::{Checked, InteractionDisabled};
@@ -106,7 +107,7 @@ use sl_viewer_ui_core::i18n::{Translated, Translator};
 use sl_viewer_ui_core::skin::{HIGHLIGHTED_CLASS, set_state_class};
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 use sl_viewer_ui_core::ui::{
-    LogicalMargin, LogicalRect, UiDirection, UiRoot, UiScaffoldSystems, column,
+    LogicalMargin, LogicalPadding, LogicalRect, UiDirection, UiRoot, UiScaffoldSystems, column,
 };
 use sl_viewer_ui_core::ui_element::{ElementCx, UiAction};
 use sl_viewer_ui_core::ui_font::UiFont;
@@ -554,34 +555,73 @@ const ENTRY_LABEL_CLASS: &str = "sk-menu-item-label";
 /// font line plus `MENU_ITEM_PADDING` = 4 px tall.
 const BAR_BUTTON_PADDING: Vec2 = Vec2::new(12.5, 2.0);
 
-/// The inline / block padding around a drop-down entry's row, in logical px.
-const ENTRY_PADDING: Vec2 = Vec2::new(10.0, 5.0);
+/// The padding on a drop-down row's leading inline edge, before its check
+/// gutter, in logical px — the reference's `LEFT_PAD_PIXELS` (`llmenugl.cpp`).
+const ENTRY_PADDING_START: f32 = 3.0;
+
+/// The padding on a drop-down row's trailing inline edge, after its
+/// [trailing slot](ENTRY_TRAILING_SLOT_WIDTH), in logical px — the reference's
+/// `RIGHT_PAD_PIXELS`.
+const ENTRY_PADDING_END: f32 = 7.0;
+
+/// The padding above and below a drop-down row's line, in logical px: half the
+/// reference's `MENU_ITEM_PADDING` each, which it adds to one font line to get
+/// a row's height (`LLMenuItemGL::getNominalHeight`).
+const ENTRY_PADDING_BLOCK: f32 = 2.0;
+
+/// A drop-down row's least height, in logical px: the reference's 12 px text is
+/// a 15 px line, plus its 4 px `MENU_ITEM_PADDING`. A floor, not a height, so a
+/// larger UI font still grows the row — the same rule the top bar follows.
+const ENTRY_MIN_HEIGHT: f32 = 19.0;
 
 /// The width of the leading **check gutter** every entry reserves, in logical
-/// px, so labels line up whether or not an entry is checked (the reference's
-/// `LEFT_WIDTH`). Fixed because it holds a glyph, not text.
-const CHECK_GUTTER_WIDTH: f32 = 16.0;
+/// px, so labels line up whether or not an entry is checked — the reference's
+/// `LEFT_WIDTH_PIXELS`, which with [`ENTRY_PADDING_START`] puts every label
+/// 18 px in. Fixed because it holds a glyph, not text.
+const CHECK_GUTTER_WIDTH: f32 = 15.0;
 
-/// The minimum gap between an entry's label and its trailing accessory, so a
-/// long label pushes the accessory out rather than overlapping it.
-const ACCESSORY_GAP: f32 = 24.0;
+/// The gap between an entry's label and its accelerator, in logical px — the
+/// reference's menu `shortcut_pad` (`widgets/menu.xml`), so a long label pushes
+/// the accelerator out rather than overlapping it.
+const ACCESSORY_GAP: f32 = 15.0;
 
-/// A drop-down's inner padding, in logical pixels.
-const MENU_PADDING: f32 = 4.0;
+/// The width of the slot every row ends in, in logical px — the reference's
+/// `RIGHT_WIDTH_PIXELS`. A submenu row draws its arrow at the slot's trailing
+/// edge; any other row leaves it empty, so an accelerator ends
+/// `RIGHT_PLAIN_PIXELS` (22 px) short of the row's edge, as the reference's
+/// does.
+const ENTRY_TRAILING_SLOT_WIDTH: f32 = 15.0;
 
-/// A drop-down's least width, in logical pixels.
-const MENU_MIN_WIDTH: f32 = 140.0;
+/// A drop-down's padding below its last row, in logical pixels — the
+/// reference's `MENU_ITEM_PADDING`, which `LLMenuGL::arrange` starts a vertical
+/// menu's height at while stacking its rows from the top edge. It has no other
+/// padding: the rows run edge to edge, and the menu is as wide as its widest
+/// row.
+const MENU_PADDING_BOTTOM: f32 = 4.0;
 
-/// The font size a drop-down entry / bar button sets its text at, in logical px.
-const ENTRY_FONT: f32 = 15.0;
+/// A separator line's height, in logical px — the reference's
+/// `SEPARATOR_HEIGHT_PIXELS`.
+const SEPARATOR_HEIGHT: f32 = 8.0;
+
+/// The space above a separator's rule, in logical px: the reference draws it at
+/// half the separator's height, counted up from the bottom edge.
+const SEPARATOR_RULE_TOP: f32 = 3.0;
+
+/// How far a separator's rule stops short of each side of the menu, in logical
+/// px — the reference's `PAD` in `LLMenuItemSeparatorGL::draw`.
+const SEPARATOR_INSET: f32 = 6.0;
+
+/// The font size a drop-down entry sets its text at, in logical px: the
+/// reference's `SansSerifSmall` (`widgets/menu_item.xml`, `widgets/menu.xml`),
+/// 9 pt at its `FontScreenDPI` of 96 — the top bar's size, too.
+///
+/// Logical, so on a scaled output the rows scale with the window. Only a
+/// capture, drawn at scale 1, compares them with the reference pixel for pixel.
+const ENTRY_FONT: f32 = 12.0;
 
 /// The font size the check mark is drawn at, in logical pixels — smaller than
 /// the label so the mark sits quietly in its gutter.
 const CHECK_FONT: f32 = ENTRY_FONT - 3.0;
-
-/// The gap between the check gutter and the entry's label, in logical pixels —
-/// logical, so it stays on the label side of the gutter under RTL.
-const GUTTER_LABEL_GAP: f32 = 6.0;
 
 /// The z-index a menu popup renders at — above every floater and panel.
 const MENU_Z_INDEX: i32 = 10_000;
@@ -1360,9 +1400,8 @@ fn build_menu_popup(
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                padding: UiRect::all(Val::Px(MENU_PADDING)),
+                padding: UiRect::bottom(Val::Px(MENU_PADDING_BOTTOM)),
                 border: UiRect::all(Val::Px(1.0)),
-                min_width: Val::Px(MENU_MIN_WIDTH),
                 // Align children to the start, not the default stretch. An
                 // absolutely-positioned flex column that *stretches* its children
                 // on the cross axis is grown on the **main** (block) axis too by
@@ -1646,12 +1685,19 @@ fn spawn_command_line(
         commands.spawn((
             Text::new(accelerator),
             UiFont::Sans.at(ENTRY_FONT),
+            // The reference's `shortcut_pad`, on the label side so it stays
+            // there under RTL.
+            LogicalMargin(LogicalRect {
+                inline_start: Val::Px(ACCESSORY_GAP),
+                ..LogicalRect::ZERO
+            }),
             ClassList::new_with_classes([ENTRY_ACCESSORY_CLASS]),
             Pickable::IGNORE,
             Name::new("menu-item-accel"),
             ChildOf(row),
         ));
     }
+    spawn_trailing_slot(commands, row);
 }
 
 /// Attach the press half of a command row: run it (through the one `Activate`
@@ -1716,6 +1762,7 @@ fn spawn_dynamic_line(
     spawn_gutter(commands, row);
     let label_entity = spawn_entry_label(commands, row, label, None);
     commands.entity(label_entity).insert(MenuDynamicLabel);
+    spawn_trailing_slot(commands, row);
 }
 
 /// Spawn a submenu line: [gutter] [label] [arrow]. The child list opens lazily
@@ -1758,6 +1805,7 @@ fn spawn_submenu_line(
     }
     spawn_gutter(commands, row);
     spawn_entry_label(commands, row, draw.label, draw.jump.map(|(_, off)| off));
+    let slot = spawn_trailing_slot(commands, row);
     commands.spawn((
         // The skin's `glyph::SUBMENU` mark — the reference's `BRANCH_SUFFIX`,
         // U+25B6. Not mirrored: it means "there is more, toward the inline
@@ -1769,22 +1817,53 @@ fn spawn_submenu_line(
             [ENTRY_ACCESSORY_CLASS],
         ),
         Name::new("menu-submenu-arrow"),
-        ChildOf(row),
+        ChildOf(slot),
     ));
 }
 
-/// The shared row node of a command / submenu line.
-fn entry_row_node() -> Node {
-    Node {
-        align_items: AlignItems::Center,
-        // Fill the popup width by a percentage, not a cross-axis stretch — the
-        // popup aligns its children to the start to avoid a taffy height quirk
-        // (see `build_menu_popup`), so every row asks for the full width itself.
-        width: Val::Percent(100.0),
-        padding: UiRect::axes(Val::Px(ENTRY_PADDING.x), Val::Px(ENTRY_PADDING.y)),
-        column_gap: Val::Px(4.0),
-        ..default()
-    }
+/// The shared row node of a command / submenu line: one reference row tall,
+/// with the reference's leading and trailing pads — the logical ones resolved
+/// by the [`LogicalPadding`] beside it, so they swap sides under RTL.
+fn entry_row_node() -> (Node, LogicalPadding) {
+    (
+        Node {
+            align_items: AlignItems::Center,
+            // Fill the popup width by a percentage, not a cross-axis stretch —
+            // the popup aligns its children to the start to avoid a taffy
+            // height quirk (see `build_menu_popup`), so every row asks for the
+            // full width itself.
+            width: Val::Percent(100.0),
+            min_height: Val::Px(ENTRY_MIN_HEIGHT),
+            ..default()
+        },
+        LogicalPadding(LogicalRect {
+            inline_start: Val::Px(ENTRY_PADDING_START),
+            inline_end: Val::Px(ENTRY_PADDING_END),
+            block_start: Val::Px(ENTRY_PADDING_BLOCK),
+            block_end: Val::Px(ENTRY_PADDING_BLOCK),
+        }),
+    )
+}
+
+/// Spawn the slot every row ends in ([`ENTRY_TRAILING_SLOT_WIDTH`]) and return
+/// it: empty on a command row, the submenu arrow's home on a branch, which it
+/// holds against its trailing edge — `FlexEnd` is the inline end in either
+/// direction, because the layout's `direction` already mirrors a row's main
+/// axis.
+fn spawn_trailing_slot(commands: &mut Commands, row: Entity) -> Entity {
+    commands
+        .spawn((
+            Node {
+                width: Val::Px(ENTRY_TRAILING_SLOT_WIDTH),
+                flex_shrink: 0.0,
+                justify_content: JustifyContent::FlexEnd,
+                ..default()
+            },
+            Pickable::IGNORE,
+            Name::new("menu-item-trailing-slot"),
+            ChildOf(row),
+        ))
+        .id()
 }
 
 /// Spawn an entry's leading check gutter.
@@ -1805,12 +1884,6 @@ fn spawn_gutter(commands: &mut Commands, row: Entity) {
             flex_shrink: 0.0,
             ..default()
         },
-        // A logical gap on the label side of the gutter, so the check sits a
-        // little clear of the text (and stays clear of it under RTL).
-        LogicalMargin(LogicalRect {
-            inline_end: Val::Px(GUTTER_LABEL_GAP),
-            ..LogicalRect::ZERO
-        }),
         glyph::glyph_host(
             glyph::MENU_CHECK,
             UiFont::Sans.at(CHECK_FONT),
@@ -1821,7 +1894,8 @@ fn spawn_gutter(commands: &mut Commands, row: Entity) {
     ));
 }
 
-/// Spawn an entry's growing label, reserving a trailing gap for its accessory.
+/// Spawn an entry's growing label, which pushes the accelerator and the
+/// trailing slot to the row's inline end.
 ///
 /// With `mnemonic_offset` set (a jump key was assigned), the label is built as
 /// three text spans — before / the mnemonic character / after — so
@@ -1839,7 +1913,6 @@ fn spawn_entry_label(
 ) -> Entity {
     let node = Node {
         flex_grow: 1.0,
-        margin: UiRect::right(Val::Px(ACCESSORY_GAP)),
         ..default()
     };
     match mnemonic_offset.and_then(|offset| split_label_at(label, offset)) {
@@ -1884,25 +1957,44 @@ fn spawn_entry_label(
     }
 }
 
-/// Spawn a separator line — one faint rule, not pickable.
+/// Spawn a separator line — one faint rule, not pickable — in the reference's
+/// [`SEPARATOR_HEIGHT`] band, [`SEPARATOR_INSET`] short of either side.
 fn spawn_separator_line(commands: &mut Commands, popup: Entity) {
+    let band = commands
+        .spawn((
+            Node {
+                // Fill the popup width via a percentage, not a cross-axis
+                // stretch: the popup aligns its children to the start to dodge
+                // a taffy quirk (see `build_menu_popup`), so a band that relied
+                // on stretch would collapse to zero width. The rule inside grows
+                // along the band's own main axis instead, which trips nothing.
+                width: Val::Percent(100.0),
+                height: Val::Px(SEPARATOR_HEIGHT),
+                align_items: AlignItems::FlexStart,
+                padding: UiRect {
+                    left: Val::Px(SEPARATOR_INSET),
+                    right: Val::Px(SEPARATOR_INSET),
+                    top: Val::Px(SEPARATOR_RULE_TOP),
+                    bottom: Val::ZERO,
+                },
+                ..default()
+            },
+            Pickable::IGNORE,
+            Name::new("menu-separator-band"),
+            ChildOf(popup),
+        ))
+        .id();
     commands.spawn((
         Node {
             height: Val::Px(1.0),
-            // Fill the popup width via a percentage, not a cross-axis stretch:
-            // the popup aligns its children to the start to dodge a taffy quirk
-            // (see `build_menu_popup`), so a rule that relied on stretch would
-            // collapse to zero width. The horizontal inset comes from the popup's
-            // own padding rather than a margin that would overflow the 100%.
-            width: Val::Percent(100.0),
-            margin: UiRect::axes(Val::Px(0.0), Val::Px(4.0)),
+            flex_grow: 1.0,
             ..default()
         },
         BackgroundColor(SkinPalette::default().surface_border),
         ClassList::new_with_classes(["sk-menu-separator"]),
         Pickable::IGNORE,
         Name::new("menu-separator"),
-        ChildOf(popup),
+        ChildOf(band),
     ));
 }
 
@@ -1976,17 +2068,112 @@ fn apply_dynamic_labels(
 // Submenus — hover-driven.
 // ---------------------------------------------------------------------------
 
-/// Keep each submenu open exactly while its branch is under the pointer.
+/// The steepest pointer heading, as `|dy| / |dx|`, that still counts as aiming
+/// at an open submenu — the reference's `MAX_MOUSE_SLOPE_SUB_MENU`
+/// (`llmenugl.cpp`), a little under 42° off the horizontal.
+const MAX_MOUSE_SLOPE_SUB_MENU: f32 = 0.9;
+
+/// Where the mouse is heading, so a submenu survives the pointer cutting
+/// across its siblings on the way to it — the reference's
+/// `LLMenuGL::handleHover`.
+///
+/// A submenu is open while its branch row is under the pointer, and it sits
+/// beside that row. Moving to it diagonally, as a hand does, crosses the rows
+/// below or above the branch first, and without this the first of them would
+/// close the submenu before the pointer got there. The reference keeps its
+/// selection while the pointer's smoothed velocity points at the submenu's
+/// side with a slope of at most [`MAX_MOUSE_SLOPE_SUB_MENU`]; so does this.
+///
+/// Two departures, both deliberate. The side is read off where the submenu
+/// actually opened rather than assumed to be the right, so it holds under RTL
+/// and when a submenu flips to fit the window; and the velocity is kept in
+/// fractional logical px rather than rounded to whole pixels each step.
+#[derive(Debug, Default, Resource)]
+struct MenuAim {
+    /// The mouse's last position, in logical window px; `None` before the
+    /// first sample.
+    last: Option<Vec2>,
+    /// The smoothed per-move displacement, in logical px.
+    velocity: Vec2,
+    /// The branches whose submenu the aim is holding open this frame, although
+    /// the pointer is not over them — written by [`manage_submenus`], read by
+    /// [`highlight_menu_hover`] to keep them lit in place of the row under the
+    /// pointer.
+    held: HashSet<Entity>,
+}
+
+impl MenuAim {
+    /// Fold one mouse position into the velocity, as the reference does per
+    /// hover event: the new displacement is blended with the running velocity
+    /// by up to half, and by less the more the two disagree in direction, so a
+    /// steady sweep is smoothed and a turn takes effect at once.
+    ///
+    /// A position equal to the last one is not a move and changes nothing: the
+    /// reference only hears about the pointer when it moves, so a pointer at
+    /// rest keeps the heading it arrived with.
+    fn record(&mut self, position: Vec2) {
+        let Some(last) = self.last.replace(position) else {
+            return;
+        };
+        if position == last {
+            return;
+        }
+        let delta = Vec2::new(position.x - last.x, position.y - last.y);
+        let agreement = delta
+            .normalize_or_zero()
+            .dot(self.velocity.normalize_or_zero())
+            .clamp(0.0, 1.0);
+        let keep = 0.5 * agreement;
+        self.velocity = Vec2::new(
+            delta.x + (self.velocity.x - delta.x) * keep,
+            delta.y + (self.velocity.y - delta.y) * keep,
+        );
+    }
+
+    /// Whether the pointer is heading for a submenu that lies `side` of its
+    /// branch — a positive `side` to the right, a negative one to the left —
+    /// shallowly enough to be aiming at it.
+    fn aims_toward(&self, side: f32) -> bool {
+        let across = self.velocity.x * side.signum();
+        side != 0.0
+            && across > 0.0
+            && self.velocity.y.abs() <= MAX_MOUSE_SLOPE_SUB_MENU * self.velocity.x.abs()
+    }
+}
+
+/// Sample the mouse into [`MenuAim`] every frame.
+fn track_menu_aim(pointers: Query<(&PointerId, &PointerLocation)>, mut aim: ResMut<MenuAim>) {
+    let position = pointers
+        .iter()
+        .filter(|(id, _)| id.is_mouse())
+        .find_map(|(_, location)| location.location.as_ref())
+        .map(|location| location.position);
+    if let Some(position) = position {
+        aim.record(position);
+    }
+}
+
+/// Keep each submenu open while its branch is under the pointer, or while the
+/// pointer is [aiming](MenuAim) at it.
 ///
 /// "Under the pointer" means the branch **row or anything in its subtree** — and
 /// because a branch's open child list is spawned as a *child of the branch row*,
 /// the child list is part of that subtree. So the pointer moving from a branch
-/// into its submenu keeps the chain open; moving to a sibling drops it.
-fn manage_submenus(hover: Res<HoverMap>, keyboard: Res<MenuKeyboard>, mut nav: MenuNav) {
+/// into its submenu keeps the chain open; moving to a sibling drops it, unless
+/// the move is heading for the submenu. While an aim holds one, no sibling of
+/// it opens either: the reference freezes the whole menu's selection.
+fn manage_submenus(
+    hover: Res<HoverMap>,
+    keyboard: Res<MenuKeyboard>,
+    mut aim: ResMut<MenuAim>,
+    transforms: Query<&UiGlobalTransform>,
+    mut nav: MenuNav,
+) {
     // While keyboard navigation owns the stack, submenu open / close is driven
     // by the arrow keys (`menu_keyboard_nav`); hover must not fight it (it
     // would close a keyboard-opened submenu the pointer is not over).
     if keyboard.active {
+        aim.held.clear();
         return;
     }
     let mut hovered = HashSet::new();
@@ -1998,6 +2185,30 @@ fn manage_submenus(hover: Res<HoverMap>, keyboard: Res<MenuKeyboard>, mut nav: M
             }
         }
     }
+    // An open submenu the pointer has left, but is heading for: the side it
+    // opened on is where its popup's centre lies from its branch row's.
+    let side_of = |branch: Entity, popup: Entity| -> Option<f32> {
+        let branch = transforms.get(branch).ok()?.translation.x;
+        let popup = transforms.get(popup).ok()?.translation.x;
+        Some(popup - branch)
+    };
+    let held: HashSet<Entity> = nav
+        .branches
+        .iter()
+        .filter(|(branch_entity, branch)| {
+            !hovered.contains(branch_entity)
+                && branch
+                    .open
+                    .and_then(|popup| side_of(*branch_entity, popup))
+                    .is_some_and(|side| aim.aims_toward(side))
+        })
+        .map(|(branch_entity, _)| branch_entity)
+        .collect();
+    // The popups whose selection a hold freezes.
+    let frozen: HashSet<Entity> = held
+        .iter()
+        .filter_map(|branch| nav.child_of.get(*branch).ok().map(ChildOf::parent))
+        .collect();
     // The branches whose state the sweep changes, and the popup each already
     // has. Collected rather than applied in the loop because opening one goes
     // back through the whole bundle ([`MenuNav::open_submenu_popup`]); the list
@@ -2008,12 +2219,21 @@ fn manage_submenus(hover: Res<HoverMap>, keyboard: Res<MenuKeyboard>, mut nav: M
         .iter()
         .filter_map(|(branch_entity, branch)| {
             match (hovered.contains(&branch_entity), branch.open) {
-                (true, None) => Some((branch_entity, None)),
-                (false, Some(popup)) => Some((branch_entity, Some(popup))),
+                (true, None) => {
+                    let in_frozen = nav
+                        .child_of
+                        .get(branch_entity)
+                        .is_ok_and(|parent| frozen.contains(&parent.parent()));
+                    (!in_frozen).then_some((branch_entity, None))
+                }
+                (false, Some(popup)) => {
+                    (!held.contains(&branch_entity)).then_some((branch_entity, Some(popup)))
+                }
                 (true, Some(_)) | (false, None) => None,
             }
         })
         .collect();
+    aim.held = held;
     for (branch_entity, open) in changed {
         match open {
             None => nav.open_submenu_popup(branch_entity),
@@ -2198,6 +2418,7 @@ fn dismiss_all(
 fn highlight_menu_hover(
     hover: Res<HoverMap>,
     keyboard: Res<MenuKeyboard>,
+    aim: Res<MenuAim>,
     child_of: Query<&ChildOf>,
     mut rows: Query<
         (Entity, &mut ClassList, Has<InteractionDisabled>),
@@ -2231,6 +2452,22 @@ fn highlight_menu_hover(
                     set.insert(row);
                 }
             }
+        }
+        // A branch an aim holds open stays the lit row of its menu, as the
+        // reference keeps its selection: the sibling the pointer is crossing
+        // on the way to the submenu is not lit.
+        if !aim.held.is_empty() {
+            let frozen: HashSet<Entity> = aim
+                .held
+                .iter()
+                .filter_map(|branch| child_of.get(*branch).ok().map(ChildOf::parent))
+                .collect();
+            set.retain(|row| {
+                !child_of
+                    .get(*row)
+                    .is_ok_and(|parent| frozen.contains(&parent.parent()))
+            });
+            set.extend(aim.held.iter().copied());
         }
         set
     };
@@ -2753,6 +2990,7 @@ impl Plugin for MenuWidgetPlugin {
             .add_message::<SetMenuDynamicLabels>()
             .init_resource::<MenuFilter>()
             .init_resource::<MenuKeyboard>()
+            .init_resource::<MenuAim>()
             .init_resource::<MenuDynamicSlots>()
             .init_resource::<InputFocus>()
             .init_resource::<AccumulatedMouseMotion>()
@@ -2788,9 +3026,12 @@ impl Plugin for MenuWidgetPlugin {
                         .chain(),
                     (
                         switch_menu_on_hover,
+                        track_menu_aim.before(manage_submenus),
                         manage_submenus,
                         menu_focus_release,
-                        highlight_menu_hover,
+                        // Paints the branch a held aim keeps lit, so after the
+                        // system that decides the hold.
+                        highlight_menu_hover.after(manage_submenus),
                         toggle_menu_mnemonic_underline,
                     )
                         .after(menu_keyboard_nav),
@@ -2982,6 +3223,7 @@ mod tests {
             &[],
             MenuDynamicSlots::default(),
             LocaleChoice::Pseudo,
+            1.0,
         )?;
         let quit = action_entity(&mut app, "quit").ok_or("the Quit entry is missing")?;
         let drawn = row_label_text(&app, quit).ok_or("the Quit row drew no label")?;
@@ -3030,6 +3272,56 @@ mod tests {
         Some(drawn)
     }
 
+    /// The aim's heading, one sample at a time ([`super::MenuAim`]).
+    fn aim_after(positions: &[(f32, f32)]) -> super::MenuAim {
+        let mut aim = super::MenuAim::default();
+        for (x, y) in positions {
+            aim.record(Vec2::new(*x, *y));
+        }
+        aim
+    }
+
+    /// A shallow sweep aims at a submenu on the side it is heading for, and
+    /// only that side; a heading steeper than the reference's 0.9 slope aims at
+    /// neither.
+    #[test]
+    fn a_shallow_heading_aims_at_its_side_only() {
+        let shallow = aim_after(&[(0.0, 0.0), (10.0, 8.0)]);
+        assert!(shallow.aims_toward(1.0), "a 0.8 slope rightward aims right");
+        assert!(!shallow.aims_toward(-1.0), "and not left");
+        let leftward = aim_after(&[(0.0, 0.0), (-10.0, 8.0)]);
+        assert!(
+            leftward.aims_toward(-1.0),
+            "the same heading leftward aims left"
+        );
+        let steep = aim_after(&[(0.0, 0.0), (10.0, 10.0)]);
+        assert!(
+            !steep.aims_toward(1.0),
+            "a slope of 1 is past the reference's 0.9"
+        );
+        let still = aim_after(&[(5.0, 5.0)]);
+        assert!(!still.aims_toward(1.0), "one sample is no heading at all");
+        assert!(
+            !shallow.aims_toward(0.0),
+            "a submenu level with its branch is on neither side"
+        );
+    }
+
+    /// A pointer at rest keeps the heading it arrived with — the reference only
+    /// hears about a move — and a sharp turn takes effect at once, because the
+    /// blend with the old heading scales with how much the two agree.
+    #[test]
+    fn a_pause_keeps_the_heading_and_a_turn_replaces_it() {
+        let mut aim = aim_after(&[(0.0, 0.0), (10.0, 0.0), (20.0, 0.0)]);
+        aim.record(Vec2::new(20.0, 0.0));
+        assert!(aim.aims_toward(1.0), "a pause is not a move");
+        aim.record(Vec2::new(20.0, 10.0));
+        assert!(
+            !aim.aims_toward(1.0),
+            "a turn straight down is a new heading, not a smoothed diagonal"
+        );
+    }
+
     /// `MenuConditions::holds` — `None` always holds, a named key holds iff set.
     #[test]
     fn conditions_gate_named_keys() {
@@ -3051,10 +3343,11 @@ mod tests {
         conditions: &[&'static str],
         slots: MenuDynamicSlots,
     ) -> Result<App, TestError> {
-        localised_popup_app(menu, conditions, slots, LocaleChoice::English)
+        localised_popup_app(menu, conditions, slots, LocaleChoice::English, 1.0)
     }
 
-    /// [`slotted_popup_app`], in a chosen locale.
+    /// [`slotted_popup_app`], in a chosen locale and at a chosen window scale
+    /// factor.
     ///
     /// Only two of the five are reachable without a bundle folder, and both are
     /// worth having: `English` is the resting harness, where every key resolves
@@ -3066,8 +3359,9 @@ mod tests {
         conditions: &[&'static str],
         slots: MenuDynamicSlots,
         locale: LocaleChoice,
+        scale_factor: f32,
     ) -> Result<App, TestError> {
-        let mut app = LayoutTest::new().build();
+        let mut app = LayoutTest::new().with_scale_factor(scale_factor).build();
         // Every menu line resolves its `label_key`; with no bundles behind the
         // translator each one resolves to itself.
         sl_viewer_ui_core::i18n::install_untranslated(&mut app);
@@ -3771,14 +4065,153 @@ mod tests {
             .ok_or("no computed node on the row")?
             .size()
             .y;
-        // The popup is the row plus its own padding (4 px each side) and border
-        // (1 px each side): 10 px of chrome, no dead line below.
-        let expected = row_height + 10.0;
+        // The popup is the row plus its own padding (4 px below the last row)
+        // and border (1 px each side): 6 px of chrome, no dead line below.
+        let expected = row_height + 6.0;
         assert!(
             (popup_height - expected).abs() < 2.0,
             "the popup should hug its one row ({expected} px), but is {popup_height} px tall — \
              dead space below the entry has crept back",
         );
+        Ok(())
+    }
+
+    /// A drop-down lays out at the reference's sizes (`llmenugl.cpp`), in
+    /// **logical** px, at two window scale factors: every row one 12 px line
+    /// plus `MENU_ITEM_PADDING` (19 px) tall with its label 18 px in, an
+    /// accelerator ending 22 px short of the row's edge, a separator 8 px, and
+    /// the menu its rows plus 4 px below them and the border.
+    ///
+    /// Logical, because on a 1.5 Wayland output the live menu is drawn half as
+    /// big again, which the X11-only reference cannot do; only a capture (scale
+    /// 1) compares the two pixel for pixel.
+    #[test]
+    fn a_drop_down_is_the_reference_size_at_every_output_scale() -> Result<(), TestError> {
+        use bevy::ui::{ComputedNode, UiGlobalTransform};
+
+        /// Taffy rounds each edge to a whole physical pixel, which is under one
+        /// logical pixel at every scale tested; a width or an offset between
+        /// two rounded edges can be off by up to two of them.
+        const ROUNDING: f32 = 1.5;
+        /// The reference's row: a 15 px line (12 px text) + 4 px padding.
+        const ROW_HEIGHT: f32 = 19.0;
+        /// `LEFT_PAD_PIXELS + LEFT_WIDTH_PIXELS`.
+        const LABEL_INSET: f32 = 18.0;
+        /// `RIGHT_PAD_PIXELS + RIGHT_WIDTH_PIXELS`.
+        const ACCELERATOR_INSET: f32 = 22.0;
+        /// `SEPARATOR_HEIGHT_PIXELS`.
+        const SEPARATOR_HEIGHT: f32 = 8.0;
+        /// `MENU_ITEM_PADDING` below the rows, plus our 1 px border each side.
+        const MENU_CHROME: f32 = 4.0 + 2.0;
+
+        /// A laid-out box's logical left edge, right edge and height.
+        fn logical_box(app: &App, entity: Entity) -> Option<(f32, f32, f32)> {
+            let entity = app.world().entity(entity);
+            let computed = entity.get::<ComputedNode>()?;
+            let centre = entity.get::<UiGlobalTransform>()?.translation;
+            let scale = computed.inverse_scale_factor;
+            let half = computed.size.x * 0.5;
+            Some((
+                (centre.x - half) * scale,
+                (centre.x + half) * scale,
+                computed.size.y * scale,
+            ))
+        }
+
+        /// The child of `parent` carrying `name`.
+        fn named_child(app: &App, parent: Entity, name: &str) -> Option<Entity> {
+            app.world().get::<Children>(parent)?.iter().find(|child| {
+                app.world()
+                    .get::<Name>(*child)
+                    .is_some_and(|child_name| child_name.as_str() == name)
+            })
+        }
+
+        for scale_factor in [1.0_f32, 1.5] {
+            let mut app = localised_popup_app(
+                &FIXTURE_AVATAR,
+                &["can-sit"],
+                MenuDynamicSlots::default(),
+                LocaleChoice::English,
+                scale_factor,
+            )?;
+            let popup = find_by_name(&mut app, "menu-popup:menu-fixture-avatar")
+                .ok_or("the Avatar popup did not spawn")?;
+            let lines: Vec<Entity> = app
+                .world()
+                .get::<Children>(popup)
+                .map(|children| children.iter().collect())
+                .unwrap_or_default();
+            let mut stacked = 0.0;
+            let mut rows = 0_usize;
+            let mut accelerators = 0_usize;
+            let mut separators = 0_usize;
+            for line in lines {
+                let (row_left, row_right, height) =
+                    logical_box(&app, line).ok_or("a menu line was never laid out")?;
+                stacked += height;
+                if app.world().get::<MenuEntryAction>(line).is_none() {
+                    assert!(
+                        (height - SEPARATOR_HEIGHT).abs() <= ROUNDING,
+                        "at scale factor {scale_factor} a separator is {height} logical px \
+                         tall, not the reference's {SEPARATOR_HEIGHT}"
+                    );
+                    separators += 1;
+                    continue;
+                }
+                rows += 1;
+                assert!(
+                    (height - ROW_HEIGHT).abs() <= ROUNDING,
+                    "at scale factor {scale_factor} a row is {height} logical px tall, not \
+                     the reference's {ROW_HEIGHT}"
+                );
+                let label = named_child(&app, line, "menu-item-label")
+                    .ok_or("a command row has no label")?;
+                let font_size = app
+                    .world()
+                    .get::<TextFont>(label)
+                    .ok_or("a label has no font")?
+                    .font_size;
+                assert_eq!(
+                    font_size,
+                    bevy::text::FontSize::Px(12.0),
+                    "a row's text is not the reference's 12 px"
+                );
+                let (label_left, _, _) =
+                    logical_box(&app, label).ok_or("a label was never laid out")?;
+                let inset = label_left - row_left;
+                assert!(
+                    (inset - LABEL_INSET).abs() <= ROUNDING,
+                    "at scale factor {scale_factor} a label starts {inset} logical px into \
+                     its row, not the reference's {LABEL_INSET}"
+                );
+                if let Some(accelerator) = named_child(&app, line, "menu-item-accel") {
+                    accelerators += 1;
+                    let (_, accelerator_right, _) = logical_box(&app, accelerator)
+                        .ok_or("an accelerator was never laid out")?;
+                    let inset = row_right - accelerator_right;
+                    assert!(
+                        (inset - ACCELERATOR_INSET).abs() <= ROUNDING,
+                        "at scale factor {scale_factor} an accelerator ends {inset} logical \
+                         px short of its row's edge, not the reference's {ACCELERATOR_INSET}"
+                    );
+                }
+            }
+            assert_eq!(
+                (rows, accelerators, separators),
+                (5, 3, 2),
+                "the Avatar fixture's lines"
+            );
+            let (_, _, popup_height) =
+                logical_box(&app, popup).ok_or("the popup was never laid out")?;
+            let expected = stacked + MENU_CHROME;
+            assert!(
+                (popup_height - expected).abs() <= ROUNDING,
+                "at scale factor {scale_factor} the menu is {popup_height} logical px tall, \
+                 not its lines ({stacked}) plus the reference's padding and our border \
+                 ({expected})"
+            );
+        }
         Ok(())
     }
 
@@ -4186,6 +4619,9 @@ mod tests {
         use bevy::prelude::*;
         use pretty_assertions::assert_eq;
 
+        use bevy_flair::style::components::ClassList;
+        use sl_viewer_ui_core::skin::HIGHLIGHTED_CLASS;
+
         use super::{FIXTURE_MENU_BAR, MenuHost, MenuKeyboard, TestError};
         use crate::menu::{MenuWidgetPlugin, spawn_menu_bar};
         use crate::ui_test::interact::{self, InteractionTest};
@@ -4300,6 +4736,68 @@ mod tests {
                 !present(&mut app, "menu-popup:menu-fixture-environment"),
                 "sweeping onto a sibling line closes the submenu again"
             );
+            Ok(())
+        }
+
+        /// Whether the named row is lit.
+        fn lit(app: &mut App, name: &str) -> bool {
+            find_by_name(app, name)
+                .and_then(|row| app.world().get::<ClassList>(row))
+                .is_some_and(|classes| classes.contains(HIGHLIGHTED_CLASS))
+        }
+
+        /// **Cutting across a sibling on the way to an open submenu keeps it
+        /// open** — the reference's `MAX_MOUSE_SLOPE_SUB_MENU` hold — with the
+        /// branch still the lit row, and heading away again lets it go.
+        #[test]
+        fn a_diagonal_toward_an_open_submenu_keeps_it_open() -> Result<(), TestError> {
+            let mut app = bar_app();
+            interact::click_node(&mut app, "menu-button:menu-fixture-world")?;
+            settle(&mut app);
+            let branch = interact::hover_node(&mut app, "menu-submenu:menu-fixture-environment")?;
+            settle(&mut app);
+            let submenu = interact::centre_of(&mut app, "menu-popup:menu-fixture-environment")
+                .ok_or("the submenu did not open")?;
+            let sibling = interact::centre_of(&mut app, "menu-item:teleport-home")
+                .ok_or("the sibling line is missing")?;
+            // The side the submenu opened on, whichever that is.
+            let toward = (submenu.x - branch.x).signum();
+
+            // Along the branch line toward the submenu, so the heading does not
+            // depend on how the pointer arrived from the bar button.
+            for step in [-2.0_f32, -1.0, 0.0] {
+                interact::hover(
+                    &mut app,
+                    Vec2::new(branch.x + toward * step * 20.0, branch.y),
+                );
+            }
+            // Down onto the sibling line, three times as far across: a slope
+            // of a third, well under the reference's 0.9.
+            let drop = sibling.y - branch.y;
+            let crossing = Vec2::new(branch.x + toward * drop.abs() * 3.0, sibling.y);
+            interact::hover(&mut app, crossing);
+            settle(&mut app);
+            assert!(
+                present(&mut app, "menu-popup:menu-fixture-environment"),
+                "heading for the submenu across a sibling line keeps it open"
+            );
+            assert!(
+                lit(&mut app, "menu-submenu:menu-fixture-environment"),
+                "the branch stays the lit row while the aim holds"
+            );
+            assert!(
+                !lit(&mut app, "menu-item:teleport-home"),
+                "the sibling being crossed is not lit"
+            );
+
+            // Back toward the sibling's centre: away from the submenu.
+            interact::hover(&mut app, sibling);
+            settle(&mut app);
+            assert!(
+                !present(&mut app, "menu-popup:menu-fixture-environment"),
+                "heading away from the submenu lets it close"
+            );
+            assert!(lit(&mut app, "menu-item:teleport-home"));
             Ok(())
         }
 

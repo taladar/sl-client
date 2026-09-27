@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 300 |
 | blocked | 62 |
 | in-progress | 25 |
-| bugs | 14 |
-| done | 1244 |
+| bugs | 13 |
+| done | 1245 |
 | deferred | 30 |
 | wont-do | 16 |
 | **total** | **1809** |
@@ -1271,7 +1271,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (14)
+## bugs (13)
 
 ### protocol
 
@@ -1288,8 +1288,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   one should have it
 - [`viewer-friends-list-shows-a-sixth-rights-column`](bugs/viewer-friends-list-shows-a-sixth-rights-column.md)
   — The Friends list shows six rights columns; the reference shows five
-- [`viewer-menu-dropdown-rows-larger-than-reference`](bugs/viewer-menu-dropdown-rows-larger-than-reference.md)
-  — Drop-down menu rows are larger than the reference's at the same UI scale
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
   Some worn mesh hair does not render (visible in Firestorm)
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
@@ -1313,7 +1311,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1244)
+## done (1245)
 
 ### protocol
 
@@ -2205,6 +2203,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Menu accelerators are drawn but dead (Ctrl+P / Ctrl+T / Ctrl+F / Ctrl+U)
 - [`viewer-menu-bar-twice-reference-height`](done/viewer-menu-bar-twice-reference-height.md)
   — Our menu bar is twice the reference's height at the same UI scale
+- [`viewer-menu-dropdown-rows-larger-than-reference`](done/viewer-menu-dropdown-rows-larger-than-reference.md)
+  — Drop-down menu rows are larger than the reference's at the same UI scale
 - [`viewer-mesh-encoder`](done/viewer-mesh-encoder.md) — LLMesh encoder (inverse
   of the sl-mesh decoder)
 - [`viewer-mesh-lod-factor-preference`](done/viewer-mesh-lod-factor-preference.md)
