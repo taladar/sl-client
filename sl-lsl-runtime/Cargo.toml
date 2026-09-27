@@ -4,7 +4,7 @@ version = { workspace = true }
 authors = { workspace = true }
 edition = { workspace = true }
 rust-version = { workspace = true }
-description = "Runtime for Linden Scripting Language (LSL) scripts on a Second Life / OpenSim test grid — the value model, the library table, and a compiler to a stack bytecode"
+description = "Runtime for Linden Scripting Language (LSL) scripts on a Second Life / OpenSim test grid — the value model, the library table, a compiler to a stack bytecode, and the VM that runs it"
 readme = { workspace = true }
 license = { workspace = true }
 

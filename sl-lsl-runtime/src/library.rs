@@ -20,6 +20,7 @@
 //! [`status`], and a test prints the counts and fails if a function falls
 //! back from the committed baseline (`library/coverage.txt`).
 
+pub mod control;
 pub mod dispatch;
 mod generated;
 pub mod lists;
@@ -50,6 +51,17 @@ mod tests {
 
     use super::*;
     use crate::value::{Element, Value};
+    use crate::vm::{CallerId, Host, ScriptCtx, Tick};
+
+    /// A host for calls that never reach it: the dispatch reports stubs
+    /// through `Called::stubbed`, and only the VM tells the host.
+    struct Unreached;
+
+    impl Host for Unreached {
+        fn print(&mut self, _caller: CallerId, _text: &str) {}
+
+        fn stubbed(&mut self, _caller: CallerId, _id: BuiltinId) {}
+    }
 
     #[test]
     fn the_table_is_sorted_and_indexed_consistently() {
@@ -209,7 +221,8 @@ mod tests {
 
     #[test]
     fn calls_are_checked_against_the_table() {
-        let mut ctx = ();
+        let mut host = Unreached;
+        let mut ctx = ScriptCtx::new(CallerId(1), Tick(0), &mut host);
         assert_eq!(
             call(BuiltinId::LlAbs, &mut ctx, vec![Value::Integer(-3)]),
             Ok(Called {
@@ -266,7 +279,8 @@ mod tests {
 
     #[test]
     fn a_stub_checks_its_arguments_and_returns_the_default() {
-        let mut ctx = ();
+        let mut host = Unreached;
+        let mut ctx = ScriptCtx::new(CallerId(1), Tick(0), &mut host);
         assert_eq!(
             with_stubs::call(BuiltinId::LlGetPos, &mut ctx, vec![]),
             Ok(Called {

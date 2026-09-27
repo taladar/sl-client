@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 118 |
-| ready | 305 |
-| blocked | 57 |
+| ready | 308 |
+| blocked | 54 |
 | in-progress | 25 |
 | bugs | 14 |
-| done | 1244 |
+| done | 1245 |
 | deferred | 30 |
 | wont-do | 16 |
-| **total** | **1809** |
+| **total** | **1810** |
 
 ## ideas (118)
 
@@ -229,56 +229,55 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   server
 - [`server-lsl-lib-avatar-control`](ideas/server-lsl-lib-avatar-control.md) —
   Library tranche — avatars, animation, sitting, controls and camera (blocked by
-  `server-lsl-vm-execution`, `server-world-agent-movement`,
+  `server-lsl-vm-execution` (done), `server-world-agent-movement`,
   `server-world-sit-and-attach`)
 - [`server-lsl-lib-comms`](ideas/server-lsl-lib-comms.md) — Library tranche —
-  chat, listens, dialogs and link messages (blocked by
-  `server-lsl-vm-execution`, `server-world-chat-routing`,
-  `protocol-sim-script-messages`)
+  chat, listens, dialogs and link messages (blocked by `server-lsl-vm-execution`
+  (done), `server-world-chat-routing`, `protocol-sim-script-messages`)
 - [`server-lsl-lib-detection-sensors`](ideas/server-lsl-lib-detection-sensors.md)
   — Library tranche — the detected block, sensors and raycasts (blocked by
   `server-lsl-state-and-events`, `server-world-ecs-store`,
   `server-world-touch-and-grab`)
 - [`server-lsl-lib-experience`](ideas/server-lsl-lib-experience.md) — Library
   tranche — experiences and the experience key-value store (blocked by
-  `server-lsl-vm-execution`, `server-lsl-lib-money-permissions`)
+  `server-lsl-vm-execution` (done), `server-lsl-lib-money-permissions`)
 - [`server-lsl-lib-http-url`](ideas/server-lsl-lib-http-url.md) — Library
   tranche — outbound HTTP and in-world URLs (blocked by
-  `server-lsl-vm-execution`, `server-world-determinism-contract`)
+  `server-lsl-vm-execution` (done), `server-world-determinism-contract`)
 - [`server-lsl-lib-json-linkset-data`](ideas/server-lsl-lib-json-linkset-data.md)
   — Library tranche — llJson* and the linkset data store (blocked by
-  `server-lsl-vm-execution`, `server-lsl-library-surface-table` (done))
+  `server-lsl-vm-execution` (done), `server-lsl-library-surface-table` (done))
 - [`server-lsl-lib-land-region-env`](ideas/server-lsl-lib-land-region-env.md) —
   Library tranche — parcel, region, estate and environment queries (blocked by
-  `server-lsl-vm-execution`, `server-world-agent-movement`)
+  `server-lsl-vm-execution` (done), `server-world-agent-movement`)
 - [`server-lsl-lib-math-rotations`](ideas/server-lsl-lib-math-rotations.md) —
   Library tranche — maths, vectors and rotations (blocked by
-  `server-lsl-vm-execution`, `server-lsl-library-surface-table` (done))
+  `server-lsl-vm-execution` (done), `server-lsl-library-surface-table` (done))
 - [`server-lsl-lib-money-permissions`](ideas/server-lsl-lib-money-permissions.md)
   — Library tranche — script permissions, money and payment (blocked by
-  `server-lsl-vm-execution`, `protocol-sim-script-messages`)
+  `server-lsl-vm-execution` (done), `protocol-sim-script-messages`)
 - [`server-lsl-lib-ossl`](ideas/server-lsl-lib-ossl.md) — Scope the OSSL (os*)
   surface — how much, and why (blocked by `server-lsl-library-surface-table`
   (done))
 - [`server-lsl-lib-physics-vehicles`](ideas/server-lsl-lib-physics-vehicles.md)
   — Library tranche — status flags, forces, targets and vehicles (blocked by
-  `server-lsl-vm-execution`, `server-world-collision-and-physics`)
+  `server-lsl-vm-execution` (done), `server-world-collision-and-physics`)
 - [`server-lsl-lib-prim-state`](ideas/server-lsl-lib-prim-state.md) — Library
-  tranche — reading and writing the prim (blocked by `server-lsl-vm-execution`,
-  `server-world-ecs-store`, `server-world-link-sets`,
+  tranche — reading and writing the prim (blocked by `server-lsl-vm-execution`
+  (done), `server-world-ecs-store`, `server-world-link-sets`,
   `server-world-update-scheduling`)
 - [`server-lsl-lib-strings-lists`](ideas/server-lsl-lib-strings-lists.md) —
   Library tranche — strings, lists, encoding and hashing (blocked by
-  `server-lsl-vm-execution`, `server-lsl-library-surface-table` (done))
+  `server-lsl-vm-execution` (done), `server-lsl-library-surface-table` (done))
 - [`server-lsl-lib-task-inventory`](ideas/server-lsl-lib-task-inventory.md) —
   Library tranche — task inventory, giving, rezzing and notecards (blocked by
-  `server-lsl-vm-execution`, `server-fake-grid-script-engine-wiring`)
+  `server-lsl-vm-execution` (done), `server-fake-grid-script-engine-wiring`)
 - [`server-lsl-lib-time-timers`](ideas/server-lsl-lib-time-timers.md) — Library
   tranche — time, timers and sleeping, on a tick clock (blocked by
-  `server-lsl-vm-execution`, `server-world-determinism-contract`)
+  `server-lsl-vm-execution` (done), `server-world-determinism-contract`)
 - [`server-lsl-script-persistence`](ideas/server-lsl-script-persistence.md) —
   Script state that survives a take, a rez and a region restart (blocked by
-  `server-lsl-vm-execution`, `server-lsl-state-and-events`)
+  `server-lsl-vm-execution` (done), `server-lsl-state-and-events`)
 - [`server-map-service`](ideas/server-map-service.md) — Map service — tiles and
   map items
 - [`server-message-routing`](ideas/server-message-routing.md) — Global message
@@ -295,7 +294,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (305)
+## ready (308)
 
 ### protocol
 
@@ -994,6 +993,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
+- [`test-lsl-script-corpus`](ready/test-lsl-script-corpus.md) — An executable
+  LSL corpus that runs in cargo test with no grid (blocked by
+  `server-lsl-vm-execution` (done))
 
 ### repl
 
@@ -1005,13 +1007,18 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-script-compile-on-upload`](ready/server-fake-grid-script-compile-on-upload.md)
   — A script upload is accepted and never compiled (blocked by
   `server-lsl-compiler-ir` (done))
+- [`server-lsl-call-cost-sizes`](ready/server-lsl-call-cost-sizes.md) — Measure
+  size-proportional call costs and the region's script budget on aditi
 - [`server-lsl-library-table-refresh`](ready/server-lsl-library-table-refresh.md)
   — The vendored library document lacks 50 current functions
 - [`server-lsl-memory-sizes`](ready/server-lsl-memory-sizes.md) — Measure Second
   Life's per-value memory costs and rotation arithmetic on aditi
-- [`server-lsl-vm-execution`](ready/server-lsl-vm-execution.md) — The script VM
-  — suspendable execution in per-tick slices (blocked by
-  `server-lsl-compiler-ir` (done))
+- [`server-lsl-runtime-errors`](ready/server-lsl-runtime-errors.md) — Run-time
+  errors where a resident can see them (blocked by `server-lsl-vm-execution`
+  (done))
+- [`server-lsl-state-and-events`](ready/server-lsl-state-and-events.md) — The
+  event and state machine — 35 events and the rules around them (blocked by
+  `server-lsl-vm-execution` (done))
 - [`server-world-chat-routing`](ready/server-world-chat-routing.md) — The fake
   grid hears local chat and drops it
 - [`server-world-ecs-store`](ready/server-world-ecs-store.md) — An ECS scene
@@ -1019,7 +1026,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-world-heartbeat`](ready/server-world-heartbeat.md) — A region
   heartbeat — the fake grid has no simulation loop at all
 
-## blocked (57)
+## blocked (54)
 
 ### viewer
 
@@ -1145,9 +1152,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-lsl-differential-opensim`](blocked/test-lsl-differential-opensim.md) —
   Run one script on both grids and diff what it did (blocked by
   `server-fake-grid-script-engine-wiring`)
-- [`test-lsl-script-corpus`](blocked/test-lsl-script-corpus.md) — An executable
-  LSL corpus that runs in cargo test with no grid (blocked by
-  `server-lsl-vm-execution`)
 - [`test-voice-account`](blocked/test-voice-account-provision-a-voice-account.md)
   — provision a voice account (blocked by `viewer-voice-audio`)
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
@@ -1163,7 +1167,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`server-fake-grid-script-engine-wiring`](blocked/server-fake-grid-script-engine-wiring.md)
   — Wire the script engine into the fake grid (blocked by
-  `server-lsl-vm-execution`, `server-world-heartbeat`, `server-world-ecs-store`)
+  `server-lsl-vm-execution` (done), `server-world-heartbeat`,
+  `server-world-ecs-store`)
 - [`server-fake-grid-scripted-avatars`](blocked/server-fake-grid-scripted-avatars.md)
   — Scripted avatars — a client that grants, pays, sits and answers (blocked by
   `server-fake-grid-script-engine-wiring`)
@@ -1172,12 +1177,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `server-fake-grid-script-engine-wiring`)
 - [`server-lsl-memory-and-limits`](blocked/server-lsl-memory-and-limits.md) —
   Script memory and limits, because scripts observe them (blocked by
-  `server-lsl-vm-execution`, `server-lsl-memory-sizes`)
-- [`server-lsl-runtime-errors`](blocked/server-lsl-runtime-errors.md) — Run-time
-  errors where a resident can see them (blocked by `server-lsl-vm-execution`)
-- [`server-lsl-state-and-events`](blocked/server-lsl-state-and-events.md) — The
-  event and state machine — 35 events and the rules around them (blocked by
-  `server-lsl-vm-execution`)
+  `server-lsl-vm-execution` (done), `server-lsl-memory-sizes`)
 - [`server-world-agent-movement`](blocked/server-world-agent-movement.md) — The
   agent never moves — AgentUpdate is decoded and ignored (blocked by
   `server-world-heartbeat`)
@@ -1310,7 +1310,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1244)
+## done (1245)
 
 ### protocol
 
@@ -4046,6 +4046,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   by `server-lsl-architecture` (done))
 - [`server-lsl-value-model`](done/server-lsl-value-model.md) — The LSL value
   model — seven types and their exact coercions
+- [`server-lsl-vm-execution`](done/server-lsl-vm-execution.md) — The script VM —
+  suspendable execution in per-tick slices (blocked by `server-lsl-compiler-ir`
+  (done))
 
 ## deferred (30)
 
@@ -4132,7 +4135,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`server-lsl-lib-email-xmlrpc`](deferred/server-lsl-lib-email-xmlrpc.md) —
   Library tranche — email and XML-RPC, parked (blocked by
-  `server-lsl-vm-execution`)
+  `server-lsl-vm-execution` (done))
 
 ## wont-do (16)
 

@@ -25,6 +25,11 @@
 //! a stack bytecode with every name resolved and every implicit conversion
 //! explicit, or the [`CompileError`]s a grid would answer an upload with.
 //!
+//! And the **VM** — [`vm`]: an [`Engine`](vm::Engine) that runs a region's
+//! script [`Instance`](vm::Instance)s round-robin in per-tick slices counted
+//! in instructions, each suspendable between any two of them, with every
+//! library call going through the [`Host`](vm::Host) the grid implements.
+//!
 //! Every rule is pinned by a table-driven test quoting its oracle: LSL
 //! PyOptimizer's `lslbasefuncs.py` and its `unit_tests/expr.suite`
 //! expectations, which were measured against Second Life.
@@ -39,6 +44,7 @@ mod num;
 pub mod ops;
 pub mod parse;
 pub mod value;
+pub mod vm;
 
 pub use cast::cast;
 pub use compiler::{CompileError, CompileErrorKind, compile};

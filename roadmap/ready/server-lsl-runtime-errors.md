@@ -2,7 +2,7 @@
 id: server-lsl-runtime-errors
 title: Run-time errors where a resident can see them
 topic: server
-status: blocked
+status: ready
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 3
 blocked_by: [server-lsl-vm-execution]

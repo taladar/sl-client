@@ -11,8 +11,10 @@
 //! surprise. The erased side — popping arguments off the VM's stack as those
 //! types — is written once, here, over tuples.
 //!
-//! The context type `C` is whatever the caller passes; today the pure
-//! functions ignore it, and the VM task gives it its concrete shape.
+//! The context is the calling script's [`ScriptCtx`](crate::vm::ScriptCtx):
+//! `call` takes one, and each implementation either names it (the functions
+//! that touch the world or the script's control flow) or is generic over it
+//! (the pure functions, which ignore it and are tested with `&mut ()`).
 
 use sl_lsl::ast::TypeName;
 use sl_types::lsl::{Rotation, Vector};
@@ -318,16 +320,16 @@ macro_rules! registry {
         /// [`CallError::Missing`]($crate::library::CallError::Missing) for
         /// a function neither implemented nor stubbed, or whatever the
         /// argument conversion or the implementation reports.
-        pub fn call<C>(
+        pub fn call(
             id: $crate::library::BuiltinId,
-            ctx: &mut C,
+            ctx: &mut $crate::vm::ScriptCtx<'_>,
             args: ::std::vec::Vec<$crate::value::Value>,
         ) -> ::core::result::Result<$crate::library::Called, $crate::library::CallError> {
             match id {
                 $(
                     $crate::library::BuiltinId::$id => $crate::library::invoke::<
                         $crate::library::signatures::$id,
-                        C,
+                        $crate::vm::ScriptCtx<'_>,
                         _,
                     >(ctx, args, $function),
                 )*

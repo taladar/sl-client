@@ -6,3 +6,5 @@
 implemented llAbs
 implemented llFabs
 implemented llGetListLength
+implemented llResetScript
+implemented llSleep

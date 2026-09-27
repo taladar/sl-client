@@ -9,9 +9,10 @@ gives the reason for each, so that the lowering, the VM and the sixteen
 library tranches do not each decide them again.
 
 The crate this chapter describes exists, and its `README.md` points back
-here; so far it holds the value model, the library table and the compiler
-(below, each marked **as built**). The VM, the scheduler and the `Host`
-trait are still design.
+here; so far it holds the value model, the library table, the compiler and
+the VM with its scheduler (below, each marked **as built**). The `Host`
+trait exists with the methods the functions written so far need, and grows
+with the library.
 
 ## 1. Where the code lives
 
@@ -281,6 +282,75 @@ The two budget constants, and the tick step itself
 the VM task against the reference's observed throughput. What is decided
 here is their unit and their shape.
 
+### As built: the VM and the scheduler
+
+Module `vm` (`server-lsl-vm-execution`). An `Instance` is one script: an
+`Arc<Program>` shared by every copy, and its own globals, current state,
+event queue, run flag, the tick it sleeps until, and the body in progress
+— a call stack of frames (body, program counter, locals) over one operand
+stack. `Instance::run_slice(caller, now, step, budget, host)` runs at most
+`budget` instructions and stops early at every boundary, saying which
+(`Outcome`): a body finished, the budget ran out mid-body (`Yielded` — the
+next slice resumes at that instruction), a sleep until tick N, a state
+change, a reset, or a `Fault`. `Engine` holds a region's instances by
+`CallerId` and, per `tick(host)`, advances the tick by one and serves the
+runnable ones round-robin from just after the one served last, each up to
+its share while the region's lasts; its `TickReport` carries every slice,
+the instructions used, and the runnable and served counts behind the
+scripts-run percentage.
+
+- **Costs.** Every instruction is one; a library call adds `BUILTIN_CALL_COST`,
+  and a jump taken backwards — a loop going round — adds `BACKWARD_JUMP_COST`,
+  because on aditi Mono's time goes into the scheduler check at each loop
+  back-edge, not into the arithmetic between them — six more instructions in a
+  loop body cost it one per cent. So a back-edge is charged 513, a call 626, and
+  a script runs 260 million a second (`SCRIPT_INSTRUCTIONS_PER_SECOND`): an
+  empty loop at the 500 000 iterations a second aditi runs it at. The doc
+  comments carry the measurements. A slice may overshoot its budget by the one
+  instruction that crosses it and never more. Size-proportional charges wait for
+  the functions that need them and a measurement of each (roadmap
+  `server-lsl-call-cost-sizes`).
+- **Budgets.** `EngineConfig::for_step(step)` derives the per-script share
+  from `SCRIPT_INSTRUCTIONS_PER_SECOND` and the region's from
+  `REGION_SCRIPT_SHARES` shares, so the numbers hold whatever step the
+  heartbeat picks.
+- **Sleeping** (`llSleep`, and the table's forced delay after any call that
+  has one) is `wake = now + ceil(seconds / step)`, the seconds rounded to
+  whole microseconds first so `0.2` as an `f32` — a hair above a fifth — is
+  not taken for one more tick. Not positive is no sleep.
+- **Stopping is not resetting.** `set_running(false)` keeps the globals, the
+  state and a handler in progress, and empties the queue; a stopped script is
+  offered no events (`Posted::Stopped`), and a restarted one carries on
+  mid-handler. A sleep counts on while the script is stopped: restarted after
+  its wake tick it resumes at once, restarted before it waits out the rest. All
+  of it measured on aditi (2026-09-28), where it differs from OpenSim's YEngine
+  only in the last point.
+- **Reset** (`llResetScript`, or `Instance::reset` from outside) puts every
+  global back to its default for the initialisers to run again, drops the
+  stacks, the queue, a pending state change and any sleep, and returns to
+  `default`, whose `state_entry` follows the initialisers. The run flag is
+  left alone.
+- **State changes.** `state x;` records the target; when the event handler
+  ends, `state_exit` of the old state runs, the queue is discarded, and
+  `state_entry` of the new one runs. `state` to the current state is no
+  transition at all, and a `state` inside `state_exit` is not obeyed.
+- **Events.** `post(event, args)` checks the arguments against the event's
+  parameters (`PostError` is a host bug) and queues the event only if the
+  current state handles it (`Posted::NoHandler` otherwise). The queue's
+  bound and coalescing rules are `server-lsl-state-and-events`'.
+- **Errors never panic the region.** A `Math Error`, a body Mono refuses
+  (`InvalidProgram`), a call to a function nobody wrote
+  (`RuntimeError::Unimplemented`), or a broken compiler promise
+  (`RuntimeError::Internal` — a lowering bug, named) stops the one script:
+  it keeps its state and globals and is no longer running, and the `Fault`
+  carries the source position of the instruction that failed. Recursion
+  deeper than `MAX_CALL_DEPTH` is a stack-heap collision until the memory
+  accounting of `server-lsl-memory-and-limits` stops it at the reference's
+  exact depth; that task also bounds the heap, which nothing does yet.
+- **`print`** goes to `Host::print`: Second Life writes it to the
+  simulator's log, where no resident sees it, so a host logs it and never
+  turns it into chat. It is also what the VM's own tests observe.
+
 ## 4. The library: one table, typed functions, an erased dispatch
 
 About 425 `ll*` functions, written over many tasks. The failure mode is
@@ -354,9 +424,10 @@ from the sketch above:
   declaring 425 stubs before the first is written, and the coverage
   count's third column would be empty by construction. The coverage test
   fails instead when a function falls back from the committed baseline.
-- **The context is a type parameter** (`fn ll_abs<C>(_ctx: &mut C, …)`)
-  until the VM task gives `ScriptCtx` and `Host` their shape; the pure
-  functions ignore it.
+- **The pure functions are generic over the context**
+  (`fn ll_abs<C>(_ctx: &mut C, …)`) and ignore it, so their tests pass
+  `&mut ()`; `call` itself takes the concrete `ScriptCtx`, and a function
+  that needs it (`llSleep`, `llResetScript`) names it.
 
 **`ScriptCtx`, not `&mut Vm`.** A library function sees the calling
 instance through a narrow context — which script is calling, the current
@@ -376,9 +447,11 @@ runtime never learns what an entity is. Events travel the other way
 through the runtime's own API (`post(instance, event)`), not through this
 trait.
 
-The methods the first tranches need — chat and listens, identity,
-position, hover text, and the seeded randomness and clock the determinism
-rule requires — are enough to fix its shape:
+**As built**, the trait holds what the VM itself needs — `print`, and `stubbed`,
+the notice that a stubbed function answered with its type's default — and each
+library tranche adds its own methods. The methods the first tranches need — chat
+and listens, identity, position, hover text, and the seeded randomness and clock
+the determinism rule requires — are enough to fix its shape:
 
 ```rust,ignore
 pub trait Host {

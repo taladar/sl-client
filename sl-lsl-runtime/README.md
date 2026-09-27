@@ -45,6 +45,14 @@ name what is wrong. It is held to tailslide as an oracle by
 `tests/compile_corpus.rs`: set `SL_LSL_TAILSLIDE_BIN` to a built `tailslide`,
 and `SL_LSL_DIFFTEST_CORPUS` to its `tests/scripts/` for the scale run.
 
+And the **VM** (`vm`): a script `Instance` runs in slices of at most a budget of
+instructions and can stop between any two — for a sleep, an exhausted budget, a
+state change or a reset — and resume there on a later tick; an `Engine` serves a
+region's instances round-robin per tick under a per-script and a region-wide
+instruction budget. Time is counted in ticks and budgets in instructions, never
+read from a clock. A run-time error stops the one script and never panics the
+host. Library calls reach the world only through the `Host` trait.
+
 ## Vendored library definition
 
 `keywords_lsl_default.xml` is Linden Lab's own `LSLSyntax` document — the file

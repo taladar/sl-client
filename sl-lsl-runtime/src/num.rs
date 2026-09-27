@@ -40,11 +40,55 @@ pub(crate) fn float_to_int(value: f32) -> i32 {
     }
 }
 
+/// How many ticks of length `step` a suspension of `seconds` lasts: the
+/// duration rounded to whole microseconds first — so an `f32` argument such as
+/// `0.2`, which is a hair above a fifth, is not taken for the next tick —
+/// then rounded **up** to whole ticks, since a script must not wake before its
+/// time. Not positive, or NaN, is no suspension; a step of zero counts as one
+/// microsecond.
+#[expect(
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "the value is rounded, positive and clamped below 2^64 first"
+)]
+pub(crate) fn ticks_for(seconds: f64, step: core::time::Duration) -> u64 {
+    /// `2^64` as a float: the first microsecond count that does not fit.
+    const LIMIT: f64 = 18_446_744_073_709_551_616.0;
+    if seconds.is_nan() || seconds <= 0.0 {
+        return 0;
+    }
+    let micros = (seconds * 1_000_000.0).round();
+    let micros = if micros >= LIMIT {
+        u64::MAX
+    } else {
+        micros as u64
+    };
+    let step = u64::try_from(step.as_micros()).unwrap_or(u64::MAX).max(1);
+    micros.div_ceil(step)
+}
+
 #[cfg(test)]
 mod tests {
+    use core::time::Duration;
+
     use pretty_assertions::assert_eq;
 
     use super::*;
+
+    #[test]
+    fn a_suspension_rounds_up_to_whole_ticks_and_not_past_them() {
+        let step = Duration::from_millis(100);
+        assert_eq!(ticks_for(2.0, step), 20);
+        // `0.2_f32` is 0.20000000298…: still two ticks, not three.
+        assert_eq!(ticks_for(f64::from(0.2_f32), step), 2);
+        assert_eq!(ticks_for(0.25, step), 3);
+        assert_eq!(ticks_for(0.000_001, step), 1);
+        assert_eq!(ticks_for(0.0, step), 0);
+        assert_eq!(ticks_for(-1.0, step), 0);
+        assert_eq!(ticks_for(f64::NAN, step), 0);
+        assert_eq!(ticks_for(f64::INFINITY, step), u64::MAX.div_ceil(100_000));
+    }
 
     #[test]
     fn float_to_int_truncates_and_sends_the_out_of_range_to_min() {

@@ -26,7 +26,13 @@ careful.
   ([[server-lsl-library-surface-table]]), which is why they belong to
   the dispatch and not to each function.
 - `llGetTime`, `llResetTime`, `llGetAndResetTime` — script-local elapsed
-  time, counted in ticks.
+  time, counted in ticks. `llSleep` itself is done
+  ([[server-lsl-vm-execution]], with the table's forced delays), and so is
+  the finding that pins this one: on aditi `llGetTime` moves only in **whole
+  simulator frames** (1/45 s) — two scripts timing the same 50 000-iteration
+  loop both read exactly four frames, and one loop read four or five from run
+  to run — so a tick-counted `llGetTime` is the reference's shape, not an
+  approximation of it.
 - `llGetUnixTime`, `llGetTimestamp`, `llGetDate`, `llGetWallclock`,
   `llGetGMTclock`, `llGetTimeOfDay` — absolute time. **This is the
   determinism problem**: a real grid reads the wall clock, and a

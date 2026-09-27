@@ -2,7 +2,7 @@
 id: server-lsl-state-and-events
 title: The event and state machine — 35 events and the rules around them
 topic: server
-status: blocked
+status: ready
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 8
 blocked_by: [server-lsl-vm-execution]
