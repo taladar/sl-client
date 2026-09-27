@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 62 |
 | in-progress | 25 |
 | bugs | 14 |
-| done | 1242 |
+| done | 1243 |
 | deferred | 30 |
 | wont-do | 16 |
-| **total** | **1808** |
+| **total** | **1809** |
 
 ## ideas (118)
 
@@ -1291,8 +1291,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   one should have it
 - [`viewer-friends-list-shows-a-sixth-rights-column`](bugs/viewer-friends-list-shows-a-sixth-rights-column.md)
   — The Friends list shows six rights columns; the reference shows five
-- [`viewer-menu-bar-twice-reference-height`](bugs/viewer-menu-bar-twice-reference-height.md)
-  — Our menu bar is twice the reference's height at the same UI scale
+- [`viewer-menu-dropdown-rows-larger-than-reference`](bugs/viewer-menu-dropdown-rows-larger-than-reference.md)
+  — Drop-down menu rows are larger than the reference's at the same UI scale
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
   Some worn mesh hair does not render (visible in Firestorm)
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
@@ -1316,7 +1316,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1242)
+## done (1243)
 
 ### protocol
 
@@ -2206,6 +2206,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Render a material-on-a-sphere preview for the PBR material swatch
 - [`viewer-menu-accelerators-inert`](done/viewer-menu-accelerators-inert.md) —
   Menu accelerators are drawn but dead (Ctrl+P / Ctrl+T / Ctrl+F / Ctrl+U)
+- [`viewer-menu-bar-twice-reference-height`](done/viewer-menu-bar-twice-reference-height.md)
+  — Our menu bar is twice the reference's height at the same UI scale
 - [`viewer-mesh-encoder`](done/viewer-mesh-encoder.md) — LLMesh encoder (inverse
   of the sl-mesh decoder)
 - [`viewer-mesh-lod-factor-preference`](done/viewer-mesh-lod-factor-preference.md)

@@ -548,8 +548,11 @@ const ENTRY_ACCESSORY_CLASS: &str = "sk-menu-accessory";
 /// `bevy_ui` having no style inheritance to carry it down.
 const ENTRY_LABEL_CLASS: &str = "sk-menu-item-label";
 
-/// The inline / block padding around a menu-bar button's label, in logical px.
-const BAR_BUTTON_PADDING: Vec2 = Vec2::new(12.0, 6.0);
+/// The inline / block padding around a menu-bar button's label, in logical px —
+/// the reference's (`llmenugl.cpp`): a bar item is its label plus
+/// `LEFT_PAD + LEFT_WIDTH + RIGHT_PAD` = 25 px wide, split evenly here, and one
+/// font line plus `MENU_ITEM_PADDING` = 4 px tall.
+const BAR_BUTTON_PADDING: Vec2 = Vec2::new(12.5, 2.0);
 
 /// The inline / block padding around a drop-down entry's row, in logical px.
 const ENTRY_PADDING: Vec2 = Vec2::new(10.0, 5.0);

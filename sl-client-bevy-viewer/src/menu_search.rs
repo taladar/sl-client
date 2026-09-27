@@ -46,9 +46,7 @@ use bevy::text::EditableText;
 use crate::menu::MenuFilter;
 use crate::menu::TOP_MENU_ELEMENT;
 use crate::ui_search::{SearchFieldSpec, spawn_search_field};
-
-/// The field's font size, in logical pixels — matched to the menu bar's entries.
-const SEARCH_FONT: f32 = 15.0;
+use crate::ui_text_input::FieldDensity;
 
 /// The box's least width, in logical pixels, so an empty field is a real target
 /// rather than collapsing to its (empty) content.
@@ -88,7 +86,9 @@ pub(crate) fn spawn_menu_search_field(commands: &mut Commands, parent: Entity) -
         commands,
         parent,
         &SearchFieldSpec {
-            font_size: SEARCH_FONT,
+            // Matched to the menu names beside it, and one line tall: the bar is.
+            font_size: crate::menu_bar::TOP_BAR_FONT,
+            density: FieldDensity::Compact,
             min_width: FIELD_MIN_WIDTH,
             placeholder: PLACEHOLDER.to_owned(),
             ..SearchFieldSpec::new("menu")

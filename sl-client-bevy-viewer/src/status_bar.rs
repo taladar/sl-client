@@ -81,8 +81,9 @@ use crate::ui_perf::FixedSlotContentSize;
 use crate::world_api::{AgentRegionPosition, SHOW_COORDINATES_KEY};
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 
-/// The read-out font size, in logical pixels.
-const STATUS_FONT_SIZE: f32 = 14.0;
+/// The read-out font size, in logical pixels: the top bar's, which the
+/// reference sets its status read-outs in as well (`panel_status_bar.xml`).
+const STATUS_FONT_SIZE: f32 = crate::menu_bar::TOP_BAR_FONT;
 
 /// The gap between adjacent read-outs, in logical pixels.
 const STATUS_GAP: f32 = 12.0;

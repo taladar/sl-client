@@ -417,6 +417,23 @@ pub struct TextInputSpec {
     /// removes the marker itself, exactly as it would
     /// [`InteractionDisabled`](bevy::ui::InteractionDisabled).
     pub read_only: bool,
+    /// How much block padding the field carries — [`FieldDensity::Regular`] by
+    /// default.
+    pub density: FieldDensity,
+}
+
+/// How tall a field is around its text.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum FieldDensity {
+    /// The field's own padding on every side: breathing room above and below the
+    /// line as well as for the caret.
+    #[default]
+    Regular,
+    /// No **block** padding, so the field is one text line tall and nothing
+    /// more. For a field set into a row that is itself one line tall — the menu
+    /// bar's search box, which the reference draws 18 px high in a 19 px bar.
+    /// The inline padding stays: it is the caret's room, not the row's.
+    Compact,
 }
 
 impl TextInputSpec {
@@ -437,6 +454,7 @@ impl TextInputSpec {
             decorated: true,
             fill: false,
             read_only: false,
+            density: FieldDensity::Regular,
         }
     }
 
@@ -534,8 +552,12 @@ pub fn spawn_text_input(commands: &mut Commands, parent: Entity, spec: &TextInpu
 
     // Padding always (breathing room for the caret); the border only on a
     // decorated field, because a bare one is decorated by the container it sits in.
+    let block_padding = match spec.density {
+        FieldDensity::Regular => FIELD_PADDING,
+        FieldDensity::Compact => 0.0,
+    };
     let mut node = Node {
-        padding: UiRect::all(Val::Px(FIELD_PADDING)),
+        padding: UiRect::axes(Val::Px(FIELD_PADDING), Val::Px(block_padding)),
         ..default()
     };
     if spec.decorated {
