@@ -10,7 +10,7 @@ system and shipped Vintage (see *The skin* below); no feature gap on this
 page closed or opened in them, and every task status quoted here was
 re-checked on the update.
 
-## Where we are (updated 2026-09-27)
+## Where we are (updated 2026-09-28)
 
 Progress through the list below, section by section. The next section to
 work on is first. Update this table whenever a gap closes or opens.
@@ -26,7 +26,7 @@ work on is first. Update this table whenever a gap closes or opens.
 | 1.5 Reading and hearing | notecards, streaming audio, media on a prim | `viewer-video-playback` (in progress), `viewer-media-playback-policies` |
 | 1.6 Files in and out | the open-file dialog | upload, save dialogs, the other portals |
 | Tier 2, creators | nothing yet | all |
-| Tier 3, parity comfort | nothing yet | six in progress; see the families |
+| Tier 3, parity comfort | `viewer-texture-mip-chain-missing` (render) | six in progress; see the families |
 | Tier 4, after parity | nothing yet | all |
 
 Found on the way, not yet placed in a tier (2026-09-27, all while testing
