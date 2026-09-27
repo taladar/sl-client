@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 302 |
 | blocked | 62 |
 | in-progress | 25 |
-| bugs | 14 |
-| done | 1240 |
+| bugs | 13 |
+| done | 1241 |
 | deferred | 30 |
 | wont-do | 16 |
 | **total** | **1807** |
@@ -1276,7 +1276,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (14)
+## bugs (13)
 
 ### protocol
 
@@ -1312,13 +1312,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
-- [`test-firestorm-harness-refusal-hangs-on-crash-dialog`](bugs/test-firestorm-harness-refusal-hangs-on-crash-dialog.md)
-  — A Firestorm harness refusal hangs on a crash dialog until the deadline
 - [`test-full-stack-sigsegv-at-exit-under-load`](bugs/test-full-stack-sigsegv-at-exit-under-load.md)
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1240)
+## done (1241)
 
 ### protocol
 
@@ -3774,6 +3772,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `test-fake-grid-fixed-port-scenario` (done))
 - [`test-firestorm-fake-grid-crosscheck`](done/test-firestorm-fake-grid-crosscheck.md)
   — Point Firestorm at the fake grid to calibrate oracles
+- [`test-firestorm-harness-refusal-hangs-on-crash-dialog`](done/test-firestorm-harness-refusal-hangs-on-crash-dialog.md)
+  — A Firestorm harness refusal hangs on a crash dialog until the deadline
 - [`test-firestorm-harness-skin-selection`](done/test-firestorm-harness-skin-selection.md)
   — Firestorm harness — start a run in a named skin and theme
 - [`test-friendship-offer-accept`](done/test-friendship-offer-accept-offer-accept-confirm-both-friend-lists.md)

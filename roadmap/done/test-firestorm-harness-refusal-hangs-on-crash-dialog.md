@@ -2,7 +2,7 @@
 id: test-firestorm-harness-refusal-hangs-on-crash-dialog
 title: A Firestorm harness refusal hangs on a crash dialog until the deadline
 topic: test
-status: bugs
+status: done
 origin: viewer-vintage-ui-chrome-crosscheck live run (2026-09-27)
 refs: [test-firestorm-crosscheck-runner, test-firestorm-harness-skin-selection,
        viewer-vintage-ui-chrome-crosscheck]
@@ -46,3 +46,28 @@ Every harness refusal takes this path. `LL_ERRS` sites in `fstestharness.cpp`:
 A run with a deliberately bad `--credentials` path, bad skin name, or bad
 `SL_VIEWER_CAPTURE_SIZE` exits within seconds. The runner reports that refusal's
 own words as the Firestorm half's failure reason.
+
+## Done (2026-09-27)
+
+Fork branch `test-harness`: `FSTestHarness::refuse()` replaces all eight
+`LL_ERRS` sites. It logs the reason, records it as the failed result in
+`harness-status.json`, and returns false; `initFromCommandLine()` now returns
+that, and `initConfiguration()` returns false with it, the way a bad command
+line does but without `handleCommandLineError()`'s dialog. The process exits
+within a second. `--screenshot-dir` is read first, so every refusal has
+somewhere to report to. A refusal also reads `SL_VIEWER_CAPTURE_UI` and
+`SL_VIEWER_SKY_DAY_POSITION` itself, so a UI run or a pinned sun gets its
+status block saying the run was refused before that point, rather than a
+silence the runner reads as a viewer too old to write the field.
+
+Found on the way: `SL_VIEWER_CAPTURE_SIZE` with no `x` in it (`bogus`) was
+never refused at all. The default size was kept and the run went on. The parse
+is now strict (both numbers, all of each, nothing else), so `bogus`, `1920x`
+and `1920x1080junk` are all refused.
+
+Fork commit `7327266ac9`. Verified live: a missing `--credentials` file,
+`SL_VIEWER_SKIN=nosuchskin` and each bad size exit in about a second with the
+refusal as `reason`.
+Through `sl-crosscheck --only firestorm --firestorm-skin nosuchskin`, the run
+ends in a second with `firestorm: FAILED — no such skin 'nosuchskin';
+available: …` in place of the 271 s hang and "NO STATUS".
