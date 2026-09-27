@@ -5,6 +5,7 @@ topic: viewer
 status: ideas
 origin: raised during viewer-i18n-fluent-scaffold (2026-07)
 blocked_by: [viewer-ui-widget-scaffold]
+refs: [viewer-automation-accesskit-bridge]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -164,6 +165,10 @@ query key, and a learn/preview mode for every cue. Interacts with
 [[viewer-i18n-colorblind-accessibility]] — never a single sensory channel.
 
 ## Likely scope when promoted to ready
+
+Items 1–3 below are now taken by [[viewer-automation-accesskit-bridge]]
+(2026-09-28), which builds the tree from the automation semantic model so
+one name/role audit serves both tests and screen readers.
 
 1. Enable the Linux AT-SPI adapter (cfg-guarded stanza above; Windows and
    macOS adapters are always compiled in), emit the first nodes, and

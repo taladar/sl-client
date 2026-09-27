@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 119 |
-| ready | 308 |
-| blocked | 53 |
+| ideas | 122 |
+| ready | 312 |
+| blocked | 72 |
 | in-progress | 21 |
 | bugs | 17 |
 | done | 1260 |
 | deferred | 31 |
 | wont-do | 16 |
-| **total** | **1825** |
+| **total** | **1851** |
 
-## ideas (119)
+## ideas (122)
 
 ### protocol
 
@@ -35,6 +35,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-alpha-auto-mask`](ideas/viewer-alpha-auto-mask.md) — Automatic
   alpha-mask promotion (RenderAutoMaskAlphaDeferred)
+- [`viewer-automation-mcp-server`](ideas/viewer-automation-mcp-server.md) — The
+  automation verbs as an MCP server for agent sessions (blocked by
+  `viewer-automation-ctl-cli`)
 - [`viewer-avatar-client-collision-capsule`](ideas/viewer-avatar-client-collision-capsule.md)
   — Client-side avatar collision capsule (if client physics ever needs avatars)
 - [`viewer-avatar-welcome-pack`](ideas/viewer-avatar-welcome-pack.md) — Avatar
@@ -202,6 +205,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`test-crosscheck-ui-scenes`](ideas/test-crosscheck-ui-scenes.md) — UI scenes
   — putting two viewers into the same interaction state
+- [`test-e2e-live-verify-sweep`](ideas/test-e2e-live-verify-sweep.md) — Turn
+  pending live-verify checks into end-to-end tests (blocked by
+  `test-e2e-pilot-suite`)
+- [`test-firestorm-automation-endpoint`](ideas/test-firestorm-automation-endpoint.md)
+  — The patched Firestorm answers the same automation protocol (blocked by
+  `viewer-automation-protocol`, `viewer-automation-remote-transport`)
 - [`test-reference-cpp-oracles`](ideas/test-reference-cpp-oracles.md) —
   Reference-viewer C++ math and GLSL as test oracles (FFI / naga)
 
@@ -300,7 +309,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (308)
+## ready (312)
 
 ### protocol
 
@@ -376,6 +385,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   not a preference
 - [`viewer-audit-world-api-query-tests`](ready/viewer-audit-world-api-query-tests.md)
   — sl-viewer-world-api has 214 functions and 5 tests
+- [`viewer-automation-app-builder`](ready/viewer-automation-app-builder.md) — A
+  public ViewerAppBuilder — one assembly for the binary, the harness and tests
+- [`viewer-automation-offscreen-window-spike`](ready/viewer-automation-offscreen-window-spike.md)
+  — Spike — how a windowless viewer renders and picks at the same time
+- [`viewer-automation-protocol`](ready/viewer-automation-protocol.md) —
+  sl-automation-proto — the locator, request and snapshot vocabulary
 - [`viewer-autopilot-click-to-walk`](ready/viewer-autopilot-click-to-walk.md) —
   Autopilot core + click-to-walk (blocked by `viewer-input-action-map` (done))
 - [`viewer-avatar-alignment-tools`](ready/viewer-avatar-alignment-tools.md) —
@@ -1001,6 +1016,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Factor the repeated session/id acquisition out of the conformance cases
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
+- [`test-e2e-viewer-process-launch`](ready/test-e2e-viewer-process-launch.md) —
+  Extract viewer process launch and graceful stop from sl-crosscheck
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
@@ -1031,10 +1048,62 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-world-heartbeat`](ready/server-world-heartbeat.md) — A region
   heartbeat — the fake grid has no simulation loop at all
 
-## blocked (53)
+## blocked (72)
 
 ### viewer
 
+- [`viewer-automation-accesskit-bridge`](blocked/viewer-automation-accesskit-bridge.md)
+  — Feed AccessKit from the semantic UI model (blocked by
+  `viewer-automation-semantic-custom-widgets`)
+- [`viewer-automation-ctl-cli`](blocked/viewer-automation-ctl-cli.md) —
+  sl-viewer-ctl — drive a running viewer from the shell (blocked by
+  `viewer-automation-driver`)
+- [`viewer-automation-driver`](blocked/viewer-automation-driver.md) —
+  sl-viewer-driver — the async test API over both transports (blocked by
+  `viewer-automation-remote-transport`, `viewer-automation-inprocess-transport`)
+- [`viewer-automation-executor`](blocked/viewer-automation-executor.md) —
+  AutomationPlugin — the in-viewer request executor (blocked by
+  `viewer-automation-locator-engine`, `viewer-automation-synthetic-input`,
+  `viewer-automation-world-aim`, `viewer-automation-state-probes`)
+- [`viewer-automation-inprocess-transport`](blocked/viewer-automation-inprocess-transport.md)
+  — In-process transport — the same requests against Apps in the test process
+  (blocked by `viewer-automation-executor`, `viewer-automation-per-app-state`,
+  `viewer-automation-windowless-mode`)
+- [`viewer-automation-locator-engine`](blocked/viewer-automation-locator-engine.md)
+  — The locator engine — strict resolution and actionability (blocked by
+  `viewer-automation-semantic-ui-model`,
+  `viewer-automation-semantic-custom-widgets`)
+- [`viewer-automation-per-app-state`](blocked/viewer-automation-per-app-state.md)
+  — Per-App state — two logged-in viewers in one process (blocked by
+  `viewer-automation-app-builder`)
+- [`viewer-automation-remote-transport`](blocked/viewer-automation-remote-transport.md)
+  — Remote transport — automation over a private Unix socket (blocked by
+  `viewer-automation-executor`)
+- [`viewer-automation-semantic-custom-widgets`](blocked/viewer-automation-semantic-custom-widgets.md)
+  — Semantic roles for the custom widgets, and a completeness guard (blocked by
+  `viewer-automation-semantic-ui-model`)
+- [`viewer-automation-semantic-ui-model`](blocked/viewer-automation-semantic-ui-model.md)
+  — The semantic UI model — roles, names and states read from the ECS (blocked
+  by `viewer-automation-protocol`)
+- [`viewer-automation-state-probes`](blocked/viewer-automation-state-probes.md)
+  — State probes — chat, notifications, agent, logs and screenshots (blocked by
+  `viewer-automation-protocol`, `viewer-automation-windowless-mode`)
+- [`viewer-automation-synthetic-input`](blocked/viewer-automation-synthetic-input.md)
+  — Synthetic input for a live viewer — interact.rs as a frame-queued injector
+  (blocked by `viewer-automation-protocol`)
+- [`viewer-automation-testkit-locators`](blocked/viewer-automation-testkit-locators.md)
+  — The in-process tiers speak locators too (blocked by
+  `viewer-automation-locator-engine`, `viewer-automation-app-builder`)
+- [`viewer-automation-windowless-mode`](blocked/viewer-automation-windowless-mode.md)
+  — Windowless viewer — the whole app, UI included, with no OS window (blocked
+  by `viewer-automation-app-builder`,
+  `viewer-automation-offscreen-window-spike`)
+- [`viewer-automation-world-aim`](blocked/viewer-automation-world-aim.md) —
+  World actions — pick-verified aiming, reveal, click and pie (blocked by
+  `viewer-automation-world-model`, `viewer-automation-synthetic-input`)
+- [`viewer-automation-world-model`](blocked/viewer-automation-world-model.md) —
+  World locators — find and read objects and avatars (blocked by
+  `viewer-automation-protocol`)
 - [`viewer-avatar-moderation-actions`](blocked/viewer-avatar-moderation-actions.md)
   — Per-avatar parcel / estate moderation — the shared action layer (blocked by
   `viewer-region-options-estate`)
@@ -1143,6 +1212,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
+- [`test-e2e-live-grids`](blocked/test-e2e-live-grids.md) — Run end-to-end tests
+  against the local OpenSim and aditi (blocked by `test-e2e-stage`)
+- [`test-e2e-pilot-suite`](blocked/test-e2e-pilot-suite.md) — The first
+  end-to-end tests — one viewer, two viewers, two regions (blocked by
+  `test-e2e-stage`)
+- [`test-e2e-stage`](blocked/test-e2e-stage.md) — sl-e2e Stage — a fake grid,
+  several viewers and grid control in one test (blocked by
+  `viewer-automation-driver`, `test-e2e-viewer-process-launch`)
 - [`test-fake-grid-lsl-offline-cases`](blocked/test-fake-grid-lsl-offline-cases.md)
   — Move the script and chat conformance cases offline (blocked by
   `server-fake-grid-scripted-scenario`)

@@ -5,7 +5,8 @@ topic: test
 status: ideas
 origin: Vintage skin fidelity work (2026-09-20)
 points: 13
-refs: [viewer-vintage-ui-chrome-crosscheck, test-firestorm-crosscheck-runner,
+refs: [test-firestorm-automation-endpoint, viewer-automation-locator-engine,
+       viewer-vintage-ui-chrome-crosscheck, test-firestorm-crosscheck-runner,
        test-firestorm-harness-skin-selection, viewer-ui-floater-persist-geometry,
        viewer-ui-interaction-contracts, viewer-ui-interaction-harness,
        viewer-ui-widget-interaction-suite, viewer-vintage-skin]

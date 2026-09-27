@@ -7,7 +7,7 @@ origin: LSL-on-the-fake-grid audit (2026-09-20); raised by the user while
   scoping the scripts scenario
 points: 8
 blocked_by: [server-fake-grid-script-engine-wiring]
-refs: [server-fake-grid-scripted-scenario, server-lsl-lib-money-permissions,
+refs: [test-e2e-stage, server-fake-grid-scripted-scenario, server-lsl-lib-money-permissions,
   server-lsl-lib-avatar-control, test-fake-grid-npc-avatars]
 ---
 

@@ -7,6 +7,10 @@ the `test` topic (fake-grid fixtures, determinism, conformance). Read this
 before working any `viewer-render-*`, `viewer-*-interaction-*`,
 `viewer-world-test-*`, `viewer-fake-grid-*` or `test-fake-grid-*` task.
 
+Above tier F sits the **end-to-end automation** tier (the real viewer —
+binary or in-process App — driven by semantic locators, several viewers per
+test): see [context/automation.md](automation.md).
+
 ## The tier rule
 
 **A test lives in the lowest tier that can produce its failure.** This
