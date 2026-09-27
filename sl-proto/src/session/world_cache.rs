@@ -15,7 +15,7 @@ use crate::scoped_id::{CircuitId, ScopedObjectId};
 use crate::types::{Object, ParcelInfo, TerrainPatch};
 use sl_types::key::ObjectKey;
 use sl_wire::{RegionHandle, RegionLocalObjectId, RegionLocalParcelId};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
 /// One region's object cache, keyed by region-local id.
@@ -60,6 +60,19 @@ pub(crate) struct WorldCache {
     /// Which circuit an object's script request arrived on, so the reply goes
     /// back to the simulator that asked.
     script_request_circuits: BTreeMap<ObjectKey, CircuitId>,
+    /// Where each cached object lives, by its region-independent full id — the
+    /// reference's `LLViewerObjectList` is keyed by it. Maintained by
+    /// [`insert_object`](Self::insert_object) /
+    /// [`remove_object`](Self::remove_object) and the two lifecycle drops, so
+    /// an object arriving from a second region can be recognised as one that
+    /// **moved** there ([`copy_elsewhere`](Self::copy_elsewhere)).
+    by_full_id: BTreeMap<ObjectKey, ScopedObjectId>,
+    /// Copies dropped because the same object arrived on another circuit
+    /// ([`supersede`](Self::supersede)). The region they left may keep
+    /// mentioning them — a terse update, a child naming one as its parent —
+    /// until its own kill lands, and each mention would otherwise ask it to
+    /// re-send the object, which would supersede the live copy in turn.
+    superseded: BTreeSet<ScopedObjectId>,
 }
 
 impl WorldCache {
@@ -76,6 +89,8 @@ impl WorldCache {
             time_dilation: BTreeMap::new(),
             own_avatar: BTreeMap::new(),
             script_request_circuits: BTreeMap::new(),
+            by_full_id: BTreeMap::new(),
+            superseded: BTreeSet::new(),
         }
     }
 
@@ -108,6 +123,9 @@ impl WorldCache {
         // ids, so they go stale with it.
         self.requested_parents
             .retain(|parent, _request| parent.circuit != circuit);
+        self.by_full_id
+            .retain(|_full_id, scoped| scoped.circuit != circuit);
+        self.superseded.retain(|scoped| scoped.circuit != circuit);
         self.objects.remove(&circuit).unwrap_or_default()
     }
 
@@ -183,9 +201,82 @@ impl WorldCache {
         self.objects.get_mut(&circuit)
     }
 
-    /// `circuit`'s object cache, created empty if this is its first object.
-    pub(crate) fn objects_in_or_default(&mut self, circuit: CircuitId) -> &mut SimObjects {
-        self.objects.entry(circuit).or_default()
+    /// Cache `object` on `circuit` under its region-local id, returning what was
+    /// cached there before. The only way an object enters the cache, so the
+    /// full-id index stays exact.
+    ///
+    /// Modifying an object in place ([`objects_in_mut`](Self::objects_in_mut))
+    /// is fine — its full id does not change for the life of a local id.
+    pub(crate) fn insert_object(&mut self, circuit: CircuitId, object: Object) -> Option<Object> {
+        let scoped = ScopedObjectId::new(circuit, object.local_id);
+        let full_id = object.full_id;
+        // An object its region streams again unasked is live there again.
+        let _live_again = self.superseded.remove(&scoped);
+        let previous = self
+            .objects
+            .entry(circuit)
+            .or_default()
+            .insert(object.local_id, object);
+        if let Some(previous) = &previous {
+            self.unindex(previous.full_id, scoped);
+        }
+        if !full_id.uuid().is_nil() {
+            let _moved = self.by_full_id.insert(full_id, scoped);
+        }
+        previous
+    }
+
+    /// Drop the object `scoped` names from the cache, returning it — the
+    /// region's own kill, which also ends any supersession of that id.
+    pub(crate) fn remove_object(&mut self, scoped: ScopedObjectId) -> Option<Object> {
+        let _killed = self.superseded.remove(&scoped);
+        let removed = self.objects.get_mut(&scoped.circuit)?.remove(&scoped.id)?;
+        self.unindex(removed.full_id, scoped);
+        Some(removed)
+    }
+
+    /// Where an object with full id `full_id` is cached on a circuit **other**
+    /// than `circuit`, if it is — the copy an arrival on `circuit` supersedes.
+    ///
+    /// A simulator does not always kill what leaves it: OpenSim sends the
+    /// `KillObject` for an avatar and its attachments that move to a
+    /// neighbour only to viewers that cannot see that neighbour
+    /// (`ScenePresence.MakeChildAgent`), so a viewer that can — ours, of its own
+    /// avatar, every time — would otherwise keep the stale copy forever. The
+    /// reference never notices, because its object list is keyed by full id
+    /// and an update from the new region simply moves the object.
+    pub(crate) fn copy_elsewhere(
+        &self,
+        full_id: ObjectKey,
+        circuit: CircuitId,
+    ) -> Option<ScopedObjectId> {
+        self.by_full_id
+            .get(&full_id)
+            .copied()
+            .filter(|scoped| scoped.circuit != circuit)
+    }
+
+    /// Drop the copy at `stale` because the same object arrived on another
+    /// circuit, returning it, and stop asking `stale`'s region to re-send it
+    /// ([`is_superseded`](Self::is_superseded)).
+    pub(crate) fn supersede(&mut self, stale: ScopedObjectId) -> Option<Object> {
+        let removed = self.remove_object(stale)?;
+        let _noted = self.superseded.insert(stale);
+        Some(removed)
+    }
+
+    /// Whether `scoped` names a copy dropped by
+    /// [`supersede`](Self::supersede): its region is not to be asked for it.
+    pub(crate) fn is_superseded(&self, scoped: ScopedObjectId) -> bool {
+        self.superseded.contains(&scoped)
+    }
+
+    /// Drop `full_id`'s index entry if it still points at `scoped` (a newer
+    /// copy elsewhere has already taken it over otherwise).
+    fn unindex(&mut self, full_id: ObjectKey, scoped: ScopedObjectId) {
+        if self.by_full_id.get(&full_id) == Some(&scoped) {
+            let _dropped = self.by_full_id.remove(&full_id);
+        }
     }
 
     /// Every cached object, across every circuit.

@@ -877,12 +877,13 @@ impl InventoryModel {
         }
     }
 
-    /// Every currently worn item key — the COF links' targets, the legacy
-    /// wearables set, and the viewer-tracked attachments — the set the row
-    /// decorations (bold + `(worn)`) read.
+    /// Every currently worn item key — the COF links' targets (an attachment's
+    /// only while it is on our avatar), the legacy wearables fallback, and the
+    /// attachments on our avatar (`tracked`) — the set the row decorations
+    /// (bold + `(worn)`) read.
     pub(crate) fn worn_set(&self, tracked: &HashSet<InventoryKey>) -> HashSet<InventoryKey> {
         let mut set: HashSet<InventoryKey> = self
-            .worn_item_keys()
+            .worn_item_keys(tracked)
             .into_iter()
             .map(|(key, _name, _ty)| key)
             .collect();
@@ -1182,7 +1183,16 @@ impl InventoryModel {
     /// Keying off contents would flash the legacy system defaults on the Worn
     /// tab during either window; keying off existence shows an empty Worn tab
     /// for that instant instead, then the real outfit — never the phantoms.
-    fn worn_item_keys(&self) -> Vec<(InventoryKey, String, &'static str)> {
+    ///
+    /// An **attachment**'s COF link is not evidence on its own: the link can
+    /// outlive a detach the COF was never told about, or name an attach the
+    /// simulator refused. It counts only while the attachment is on our avatar
+    /// (`attachments`, [`crate::inventory_actions::WornAttachments`]) — the
+    /// reference's `isWearingAttachment`.
+    fn worn_item_keys(
+        &self,
+        attachments: &HashSet<InventoryKey>,
+    ) -> Vec<(InventoryKey, String, &'static str)> {
         let mut keys: Vec<(InventoryKey, String, &'static str)> = Vec::new();
         let mut seen: HashSet<InventoryKey> = HashSet::new();
         if let Some(cof) = self.cof {
@@ -1194,6 +1204,13 @@ impl InventoryModel {
                 } else {
                     entry.item_id
                 };
+                let is_attachment = matches!(
+                    entry.inv_type,
+                    InventoryType::Object | InventoryType::Attachment
+                );
+                if is_attachment && !attachments.contains(&target) {
+                    continue;
+                }
                 if seen.insert(target) {
                     // Prefer the target item's own flags for the wearable
                     // sub-type icon; fall back to the link entry's when the
@@ -1308,7 +1325,7 @@ impl InventoryModel {
         passes: &dyn Fn(&ItemInfo) -> bool,
     ) -> Vec<DisplayRow> {
         let matches = |name: &str| needle.is_empty() || name.to_lowercase().contains(needle);
-        let worn_keys = self.worn_item_keys();
+        let worn_keys = self.worn_item_keys(worn);
         // The hierarchy half: folders on the path to a loaded worn item.
         let mut keep = HashSet::new();
         for &root in &self.roots {
@@ -1409,7 +1426,7 @@ impl Default for SortSpec {
 pub(crate) struct ViewSpec<'a> {
     /// The search query (empty for none).
     pub(crate) query: &'a str,
-    /// The viewer-tracked worn attachments
+    /// The attachments on our avatar
     /// ([`crate::inventory_actions::WornAttachments`]).
     pub(crate) tracked_attachments: &'a HashSet<InventoryKey>,
     /// The sort order.
@@ -4684,6 +4701,44 @@ mod tests {
         assert!(
             !names(&rows).contains(&"Skin"),
             "the system-default Skin wearable must not appear as a folderless worn row"
+        );
+    }
+
+    /// An attachment's COF link is not worn on its own: a leftover link to an
+    /// object that is not on the avatar (a detach the COF never heard of, an
+    /// attach the simulator refused) neither bolds the row nor lists it on the
+    /// Worn tab. The same link counts once the object is on the avatar.
+    #[test]
+    fn an_attachment_cof_link_counts_only_while_the_object_is_worn() {
+        let mut model = sample_model();
+        model.merge_folders(
+            &[folder(
+                0xC0,
+                Some(1),
+                "Current Outfit",
+                FolderType::CurrentOutfit,
+            )],
+            false,
+        );
+        let hud = sl_client_bevy::InventoryKey::from(sl_client_bevy::Uuid::from_u128(0x17E));
+        let mut link = item(0x17F, 0xC0, "HUD", InventoryType::Object);
+        link.asset_type = sl_client_bevy::AssetType::Other(24);
+        link.asset_id = hud.uuid();
+        model.set_items(
+            sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::from_u128(0xC0)),
+            &[link],
+        );
+
+        assert!(!model.worn_set(&HashSet::new()).contains(&hud));
+        assert!(
+            !names(&build(&model, InventoryTab::Worn, "", &HashSet::new())).contains(&"HUD"),
+            "a stale attachment link is not a worn row"
+        );
+        let on_avatar = HashSet::from([hud]);
+        assert!(model.worn_set(&on_avatar).contains(&hud));
+        assert!(
+            names(&build(&model, InventoryTab::Worn, "", &on_avatar)).contains(&"HUD"),
+            "the attachment on the avatar is listed under its COF name"
         );
     }
 

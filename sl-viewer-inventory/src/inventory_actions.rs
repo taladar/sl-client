@@ -47,10 +47,11 @@ use bevy::prelude::*;
 use sl_client_bevy::{
     AgentKey, AssetKey, AssetType, AssetUpdateLocation, AttachmentMode, AttachmentPoint,
     CAP_UPDATE_SETTINGS_AGENT_INVENTORY, CAP_UPDATE_SETTINGS_TASK_INVENTORY, Command, DetachOrder,
-    FolderInfo, FolderType, GestureActivation, InventoryFolderKey, InventoryItemOrFolderKey,
-    InventoryKey, InventoryType, ItemInfo, NewInventoryItem, NewInventoryLink, Permissions,
-    RezAttachment, ScriptLanguage, SettingsKind, SlCapabilities, SlCommand, SlEvent, SlIdentity,
-    SlSessionEvent, TransactionId, UpdatableAssetType, Uuid, VisualParams, Wearable, WearableType,
+    FolderInfo, FolderState, FolderType, GestureActivation, InventoryFolderKey,
+    InventoryItemOrFolderKey, InventoryKey, InventoryType, ItemInfo, NewInventoryItem,
+    NewInventoryLink, Permissions, RezAttachment, ScopedObjectId, ScriptLanguage, SettingsKind,
+    SlCapabilities, SlCommand, SlEvent, SlIdentity, SlSessionEvent, TransactionId,
+    UpdatableAssetType, Uuid, VisualParams, Wearable, WearableType,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -186,6 +187,13 @@ pub(crate) const WORN: &str = "worn";
 
 /// The target wearable / attachment is not currently worn — enables Wear / Add.
 pub(crate) const NOT_WORN: &str = "not-worn";
+
+/// The target is a worn attachment whose object is in the scene and handles
+/// touch — enables Touch, the reference's `enable_attachment_touch` (the worn
+/// object found through its `AttachItemID`, and its `FLAGS_HANDLE_TOUCH` set).
+/// Withheld on a multi-selection, as the reference disables Touch on every row
+/// but the first.
+pub(crate) const ATTACHMENT_TOUCHABLE: &str = "attachment-touchable";
 
 /// The target gesture is active this session — enables Deactivate.
 pub(crate) const GESTURE_ACTIVE: &str = "gesture-active";
@@ -693,7 +701,7 @@ pub(crate) static INVENTORY_ITEM_MENU: MenuDef = MenuDef {
         MenuItemDef::Command(
             MenuCommand::new("menu-inv-touch", "touch")
                 .visible_when(IS_OBJECT)
-                .enabled_when(UNIMPLEMENTED),
+                .enabled_when(ATTACHMENT_TOUCHABLE),
         ),
         MenuItemDef::Command(
             MenuCommand::new("menu-inv-detach-from-yourself", "detach")
@@ -760,17 +768,194 @@ pub(crate) struct InventoryClipboard {
     pub(crate) entry: Option<(ClipboardMode, Vec<MenuTarget>)>,
 }
 
-/// The attachments this viewer session knows to be worn, by inventory item id.
+/// The attachments actually on our avatar, by inventory item id — the
+/// reference's `isWearingAttachment`, which asks the avatar and not what was
+/// requested of it.
 ///
-/// Best-effort, like [`crate::world_api::SelfGroundSit`]: seeded from the
-/// Current Outfit Folder's links when the grid maintains one, and tracked
-/// through the wear / detach commands this viewer itself sends. An attachment
-/// worn by another viewer mid-session is not observed; the worst case is a
-/// momentarily wrong Wear / Detach enable.
+/// Derived, never written by an action: [`sync_worn_attachments`] rebuilds it
+/// from the attachment objects hanging off our own avatar object
+/// ([`crate::world_api::ObjectState::inventory_attachments_worn_by`]). So an
+/// attach the simulator refuses never reads as worn, and a detach from
+/// anywhere — the attachment pie, a script, RLV, the simulator — stops reading
+/// as worn the moment the object leaves.
 #[derive(Resource, Debug, Default)]
 pub(crate) struct WornAttachments {
-    /// The inventory item ids of attachments known worn.
+    /// The inventory item ids of the attachments on our avatar.
     pub(crate) items: HashSet<InventoryKey>,
+}
+
+/// How long an attachment must stay gone before its Current Outfit Folder link
+/// is dropped, in seconds. A teleport or region crossing also takes the
+/// attachments away, together with the avatar object they hang off, and this
+/// is the window in which that avatar object's own removal must land for the
+/// departure to read as a move rather than a detach.
+const DETACH_SETTLE_SECS: f32 = 5.0;
+
+/// The Current Outfit Folder half of the reference's attachment bookkeeping
+/// (`LLAttachmentsMgr` / `LLAppearanceMgr::unregisterAttachment`): an
+/// attachment's COF link is written when its object **arrives** on our avatar,
+/// and removed when it **leaves** by a detach — never on the request, which the
+/// simulator may refuse.
+///
+/// A departure counts as a detach only when the avatar object it hung off is
+/// still ours [`DETACH_SETTLE_SECS`] later. A teleport, a region crossing or a
+/// logout removes that avatar object too, and must not unwear anything.
+#[derive(Resource, Debug, Default)]
+pub(crate) struct AttachmentCofSync {
+    /// The avatar object each worn attachment hangs off, as of the last step.
+    worn_on: HashMap<InventoryKey, ScopedObjectId>,
+    /// Attachments that left: the avatar object they hung off, and when.
+    departed: HashMap<InventoryKey, (ScopedObjectId, f32)>,
+    /// Attachments whose COF link has been asked for and not yet seen, so a
+    /// link is requested once rather than every frame until it lands.
+    linking: HashSet<InventoryKey>,
+}
+
+/// What one [`AttachmentCofSync::step`] asks of the Current Outfit Folder.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct CofSyncActions {
+    /// Attachments that arrived without a COF link: link them.
+    pub(crate) link: Vec<InventoryKey>,
+    /// Attachments that were detached: drop their COF links.
+    pub(crate) unlink: Vec<InventoryKey>,
+}
+
+impl AttachmentCofSync {
+    /// Advance by one observation of what is on our avatar (`current`, each
+    /// item with the avatar object it hangs off) at `now` seconds.
+    ///
+    /// `is_ours` says whether an avatar object is still our own avatar;
+    /// `is_linked` whether an item has a COF link. `cof_loaded` holds back
+    /// every COF write until the folder's contents are known, since a link
+    /// that is merely not fetched yet would otherwise be written twice.
+    pub(crate) fn step(
+        &mut self,
+        current: &HashMap<InventoryKey, ScopedObjectId>,
+        now: f32,
+        cof_loaded: bool,
+        is_ours: impl Fn(ScopedObjectId) -> bool,
+        is_linked: impl Fn(InventoryKey) -> bool,
+    ) -> CofSyncActions {
+        let mut actions = CofSyncActions::default();
+        for (item, avatar) in &self.worn_on {
+            if !current.contains_key(item) {
+                let _previous = self.departed.insert(*item, (*avatar, now));
+            }
+        }
+        for item in current.keys() {
+            let _returned = self.departed.remove(item);
+        }
+        self.worn_on.clone_from(current);
+        self.linking
+            .retain(|item| current.contains_key(item) && !is_linked(*item));
+        if !cof_loaded {
+            return actions;
+        }
+        for item in current.keys() {
+            if !is_linked(*item) && self.linking.insert(*item) {
+                actions.link.push(*item);
+            }
+        }
+        self.departed.retain(|item, (avatar, since)| {
+            if now - *since < DETACH_SETTLE_SECS {
+                return true;
+            }
+            if is_ours(*avatar) && is_linked(*item) {
+                actions.unlink.push(*item);
+            }
+            false
+        });
+        actions.link.sort_unstable_by_key(|item| item.uuid());
+        actions.unlink.sort_unstable_by_key(|item| item.uuid());
+        actions
+    }
+}
+
+/// Rebuild [`WornAttachments`] from the attachments on our avatar, and keep
+/// the Current Outfit Folder's attachment links in step with it
+/// ([`AttachmentCofSync`]).
+fn sync_worn_attachments(
+    context: AttachmentSyncContext,
+    time: Res<Time>,
+    mut worn: ResMut<WornAttachments>,
+    mut sync: ResMut<AttachmentCofSync>,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    let AttachmentSyncContext {
+        objects,
+        avatars,
+        identity,
+        model,
+    } = context;
+    let current: HashMap<InventoryKey, ScopedObjectId> = identity
+        .agent_id
+        .map(|agent| {
+            objects
+                .inventory_attachments_worn_by(&avatars, agent)
+                .map(|(item, avatar)| (InventoryKey::from(item), avatar))
+                .collect()
+        })
+        .unwrap_or_default();
+    let items: HashSet<InventoryKey> = current.keys().copied().collect();
+    // Written only on a real change: the inventory view rebuilds on this
+    // resource's change tick.
+    if worn.items != items {
+        worn.items = items;
+    }
+    let cof_loaded = model
+        .cof_key()
+        .and_then(|cof| model.folder_info(cof))
+        .is_some_and(|cof| matches!(cof.state, FolderState::Loaded { .. }));
+    let cof_links = cof_links_with_slots(&model);
+    let is_linked = |item: InventoryKey| {
+        cof_links
+            .iter()
+            .any(|(link, _slot)| link.asset_id == item.uuid())
+    };
+    let actions = sync.step(
+        &current,
+        time.elapsed_secs(),
+        cof_loaded,
+        |avatar| identity.agent_id.is_some() && avatars.agent_of(avatar) == identity.agent_id,
+        is_linked,
+    );
+    let mut batch = cof_remove_link_commands(&cof_links, &actions.unlink);
+    for item_id in actions.link {
+        if let Some(item) = model.find_item(item_id) {
+            batch.extend(cof_wear_link_commands(
+                model.cof_key(),
+                &cof_links,
+                item,
+                &[],
+            ));
+        }
+    }
+    write_cof_commands(&model, batch, &mut commands);
+}
+
+/// The read-only sources [`sync_worn_attachments`] observes, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the scene's objects and
+/// avatars, which avatar is ours, and the inventory whose COF it maintains.
+#[derive(bevy::ecs::system::SystemParam)]
+struct AttachmentSyncContext<'w> {
+    /// The scene's objects.
+    objects: Res<'w, crate::world_api::ObjectState>,
+    /// The avatars, which say whose avatar an attachment hangs off.
+    avatars: Res<'w, crate::world_api::AvatarState>,
+    /// Our own agent.
+    identity: Res<'w, SlIdentity>,
+    /// The inventory model and its Current Outfit Folder.
+    model: Res<'w, InventoryModel>,
+}
+
+/// Whether an item is worn on the body as an **attachment** (an object) rather
+/// than as a wearable layer — the items whose worn state and COF link follow
+/// the attachment objects ([`WornAttachments`]) instead of the request.
+pub(crate) const fn is_attachment_item(item: &ItemInfo) -> bool {
+    matches!(
+        item.inv_type,
+        InventoryType::Object | InventoryType::Attachment
+    )
 }
 
 /// Whether the current region is an OpenSim one — read from its simulator
@@ -819,21 +1004,68 @@ pub fn wearable_type_of(item: &ItemInfo) -> WearableType {
     WearableType::from_code(u8::try_from(item.flags & 0xFF).unwrap_or(0))
 }
 
-/// Whether `item` is currently worn: as a legacy wearable (the
-/// `AgentWearables` set), or as a Current Outfit Folder link (the modern worn
-/// set — a COF link's asset id names the linked item), or — for attachments —
-/// tracked by this viewer's own wear / detach commands.
+/// Whether `item` is currently worn. An attachment is worn exactly when its
+/// object is on our avatar ([`WornAttachments`]) — a COF link does not make it
+/// so, since the link can outlive a detach nobody told the COF about. A
+/// wearable is worn as a legacy wearable (the `AgentWearables` set) or as a
+/// Current Outfit Folder link (the modern worn set — a COF link's asset id
+/// names the linked item).
 pub(crate) fn is_worn(
     item: &ItemInfo,
     wearables: &[Wearable],
     cof_items: &[ItemInfo],
-    tracked_attachments: &HashSet<InventoryKey>,
+    worn_attachments: &HashSet<InventoryKey>,
 ) -> bool {
+    if is_attachment_item(item) {
+        return worn_attachments.contains(&item.item_id);
+    }
     wearables.iter().any(|worn| worn.item_id == item.item_id)
-        || tracked_attachments.contains(&item.item_id)
         || cof_items
             .iter()
             .any(|link| link.item_id == item.item_id || link.asset_id == item.item_id.uuid())
+}
+
+/// The object an inventory row put on our own body, when it is worn, streamed
+/// in and handles touch: the attachment **root**, which is what the reference
+/// touches from an inventory row (`handle_attachment_touch` →
+/// `getWornAttachment`). A link row stands for the item it links to, as the
+/// reference's `getLinkedItemID` has it.
+///
+/// Asked twice — once for the menu's enable gate and again when Touch is
+/// picked — so an attachment that went away while the menu was open is not
+/// touched.
+pub(crate) fn touchable_worn_attachment(
+    lookup: &AttachmentLookup,
+    item: &ItemInfo,
+) -> Option<ScopedObjectId> {
+    let (root, tracked) = lookup.objects.worn_attachment_of_item(
+        lookup.avatars,
+        lookup.agent?,
+        worn_item_id(item),
+    )?;
+    (tracked.update_flags & crate::world_api::FLAGS_HANDLE_TOUCH != 0).then_some(root)
+}
+
+/// What finding one of our own worn attachments takes: the scene's objects, the
+/// avatars they hang off, and which agent is us (`None` before login).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct AttachmentLookup<'a> {
+    /// The scene's objects.
+    pub(crate) objects: &'a crate::world_api::ObjectState,
+    /// The avatars, which say whose avatar object an attachment hangs off.
+    pub(crate) avatars: &'a crate::world_api::AvatarState,
+    /// Our own agent.
+    pub(crate) agent: Option<AgentKey>,
+}
+
+/// The item id an attachment worn from `item` carries as its `AttachItemID`:
+/// a link's target (its asset id names the linked item), else the item itself.
+pub(crate) const fn worn_item_id(item: &ItemInfo) -> Uuid {
+    if crate::inventory_drag::is_link(item) {
+        item.asset_id
+    } else {
+        item.item_id.uuid()
+    }
 }
 
 /// The facts about an item row the condition computation needs beyond the item
@@ -841,7 +1073,7 @@ pub(crate) fn is_worn(
 /// the computation is testable without a Bevy world.
 #[expect(
     clippy::struct_excessive_bools,
-    reason = "six independent yes/no facts about one row; they are consumed together by one \
+    reason = "seven independent yes/no facts about one row; they are consumed together by one \
               pure function and a state machine would invent couplings that do not exist"
 )]
 #[derive(Debug, Clone, Copy, Default)]
@@ -854,6 +1086,9 @@ pub(crate) struct ItemMenuFacts {
     pub(crate) clipboard_has_entry: bool,
     /// The item is currently worn (wearable or attachment).
     pub(crate) worn: bool,
+    /// The item's worn attachment is in the scene and handles touch
+    /// ([`touchable_worn_attachment`]).
+    pub(crate) touchable_attachment: bool,
     /// The gesture is active this session (meaningful only for gestures).
     pub(crate) gesture_active: bool,
     /// The row is shown on a flat membership tab (Worn / Recent) — offers the
@@ -999,6 +1234,9 @@ pub(crate) fn item_conditions(item: &ItemInfo, facts: ItemMenuFacts) -> Vec<&'st
         held.push(CAN_PASTE_LINK);
     }
     held.push(if facts.worn { WORN } else { NOT_WORN });
+    if facts.worn && facts.touchable_attachment {
+        held.push(ATTACHMENT_TOUCHABLE);
+    }
     if matches!(
         item.inv_type,
         InventoryType::Object | InventoryType::Attachment
@@ -1593,7 +1831,7 @@ pub(crate) fn intersect_conditions(sets: &[Vec<&'static str>]) -> Vec<&'static s
         .iter()
         .copied()
         .filter(|condition| sets.iter().all(|set| set.contains(condition)))
-        .filter(|condition| !(multi && *condition == CAN_RENAME))
+        .filter(|condition| !(multi && matches!(*condition, CAN_RENAME | ATTACHMENT_TOUCHABLE)))
         .collect()
 }
 
@@ -1606,6 +1844,7 @@ fn resolve_row_target(
     clipboard: &InventoryClipboard,
     worn: &WornAttachments,
     gestures: &ActiveGestures,
+    attachments: &AttachmentLookup,
     in_membership_tab: bool,
 ) -> Option<(MenuTarget, Vec<&'static str>)> {
     let clipboard_has_entry = clipboard.entry.is_some();
@@ -1639,6 +1878,7 @@ fn resolve_row_target(
                     model.cof_items(),
                     &worn.items,
                 ),
+                touchable_attachment: touchable_worn_attachment(attachments, &info).is_some(),
                 gesture_active: gestures.items.contains(&info.item_id),
                 in_membership_tab,
                 ..item_delete_facts(model, &info)
@@ -1651,8 +1891,9 @@ fn resolve_row_target(
 
 /// Every fact a context menu's conditions are drawn from, bundled as one
 /// [`SystemParam`](bevy::ecs::system::SystemParam): the model the rows resolve
-/// through, the cut / copy clipboard, the tracked worn set, and the gestures
-/// currently active.
+/// through, the cut / copy clipboard, the tracked worn set, the gestures
+/// currently active, and the scene objects plus our own agent that say whether
+/// a worn attachment can be touched.
 #[derive(Debug, bevy::ecs::system::SystemParam)]
 pub(crate) struct InventoryMenuFacts<'w> {
     /// The inventory model every row resolves through.
@@ -1663,6 +1904,12 @@ pub(crate) struct InventoryMenuFacts<'w> {
     pub(crate) worn: Res<'w, WornAttachments>,
     /// The gestures currently active, for Activate / Deactivate.
     pub(crate) gestures: Res<'w, ActiveGestures>,
+    /// The scene's objects, for Touch on a worn attachment.
+    pub(crate) objects: Res<'w, crate::world_api::ObjectState>,
+    /// The avatars, which say whose avatar an attachment hangs off.
+    pub(crate) avatars: Res<'w, crate::world_api::AvatarState>,
+    /// Our own agent, the wearer Touch looks the attachment up on.
+    pub(crate) identity: Res<'w, SlIdentity>,
 }
 
 /// What a right-click leaves behind, bundled as one
@@ -1698,6 +1945,11 @@ pub(crate) fn open_inventory_context_menu(
             &facts.clipboard,
             &facts.worn,
             &facts.gestures,
+            &AttachmentLookup {
+                objects: &facts.objects,
+                avatars: &facts.avatars,
+                agent: facts.identity.agent_id,
+            },
             in_membership_tab,
         ) {
             snapshots.push(snapshot);
@@ -1899,8 +2151,8 @@ fn write_cof_commands(
 struct InventoryStashes<'w> {
     /// The cut / copy clipboard.
     clipboard: ResMut<'w, InventoryClipboard>,
-    /// The tracked worn set.
-    worn: ResMut<'w, WornAttachments>,
+    /// The attachments on our avatar, which the outfit actions read.
+    worn: Res<'w, WornAttachments>,
     /// The active gestures.
     gestures: ResMut<'w, ActiveGestures>,
     /// The inline rename a freshly created item starts in.
@@ -1965,6 +2217,10 @@ struct MenuActionContext<'w> {
     settings_support: Res<'w, SettingsInventorySupport>,
     /// Whether this region is OpenSim, for Restore to Last Position's guard.
     region_grid: Res<'w, RegionIsOpenSim>,
+    /// The scene's objects, where Touch finds a worn attachment.
+    objects: Res<'w, crate::world_api::ObjectState>,
+    /// The avatars, which say whose avatar an attachment hangs off.
+    avatars: Res<'w, crate::world_api::AvatarState>,
 }
 
 /// Handle a picked inventory context-menu entry.
@@ -1982,10 +2238,12 @@ fn handle_inventory_menu_actions(
         library,
         settings_support,
         region_grid,
+        objects,
+        avatars,
     } = context;
     let InventoryStashes {
         mut clipboard,
-        mut worn,
+        worn,
         mut gestures,
         mut rename,
         mut pending_share,
@@ -2425,25 +2683,22 @@ fn handle_inventory_menu_actions(
                         {
                             commands.write(SlCommand(command));
                         }
-                        if matches!(
-                            item.inv_type,
-                            InventoryType::Object | InventoryType::Attachment
-                        ) {
-                            worn.items.insert(item.item_id);
-                        }
                         // Keep the COF authoritative: replace the slot's
-                        // links with this item's.
-                        let replaced = replaced_by_wear(model.worn_wearables(), item);
-                        write_cof_commands(
-                            &model,
-                            cof_wear_link_commands(
-                                model.cof_key(),
-                                &cof_links_with_slots(&model),
-                                item,
-                                &replaced,
-                            ),
-                            &mut commands,
-                        );
+                        // links with this item's. An attachment is linked when
+                        // its object arrives instead ([`AttachmentCofSync`]).
+                        if !is_attachment_item(item) {
+                            let replaced = replaced_by_wear(model.worn_wearables(), item);
+                            write_cof_commands(
+                                &model,
+                                cof_wear_link_commands(
+                                    model.cof_key(),
+                                    &cof_links_with_slots(&model),
+                                    item,
+                                    &replaced,
+                                ),
+                                &mut commands,
+                            );
+                        }
                     }
                 }
             }
@@ -2455,22 +2710,19 @@ fn handle_inventory_menu_actions(
                         {
                             commands.write(SlCommand(command));
                         }
-                        if matches!(
-                            item.inv_type,
-                            InventoryType::Object | InventoryType::Attachment
-                        ) {
-                            worn.items.insert(item.item_id);
+                        // An attachment is linked when its object arrives.
+                        if !is_attachment_item(item) {
+                            write_cof_commands(
+                                &model,
+                                cof_wear_link_commands(
+                                    model.cof_key(),
+                                    &cof_links_with_slots(&model),
+                                    item,
+                                    &[],
+                                ),
+                                &mut commands,
+                            );
                         }
-                        write_cof_commands(
-                            &model,
-                            cof_wear_link_commands(
-                                model.cof_key(),
-                                &cof_links_with_slots(&model),
-                                item,
-                                &[],
-                            ),
-                            &mut commands,
-                        );
                     }
                 }
             }
@@ -2495,6 +2747,26 @@ fn handle_inventory_menu_actions(
                     &mut commands,
                 );
             }
+            "touch" => {
+                // The reference's `handle_attachment_touch`: a touch aimed from
+                // a row has no surface under a cursor, so it goes without one
+                // (the object-centre form) to the attachment root.
+                if let MenuTarget::Item(item) = &menu_target
+                    && let Some(local_id) = touchable_worn_attachment(
+                        &AttachmentLookup {
+                            objects: &objects,
+                            avatars: &avatars,
+                            agent: identity.agent_id,
+                        },
+                        item,
+                    )
+                {
+                    commands.write(SlCommand(Command::TouchObject {
+                        local_id,
+                        surface: None,
+                    }));
+                }
+            }
             "detach" => {
                 let mut removed = Vec::new();
                 for target_row in &targets {
@@ -2502,7 +2774,6 @@ fn handle_inventory_menu_actions(
                         commands.write(SlCommand(Command::DetachAttachmentIntoInventory {
                             item_id: item.item_id,
                         }));
-                        worn.items.remove(&item.item_id);
                         removed.push(item.item_id);
                     }
                 }
@@ -2519,7 +2790,7 @@ fn handle_inventory_menu_actions(
                         .into_iter()
                         .cloned()
                         .collect();
-                    let (batch, now_worn, no_longer_worn) = outfit_replace_commands(
+                    let (batch, _now_worn, no_longer_worn) = outfit_replace_commands(
                         &items,
                         model.worn_wearables(),
                         model.cof_items(),
@@ -2529,15 +2800,15 @@ fn handle_inventory_menu_actions(
                     for command in batch {
                         commands.write(SlCommand(command));
                     }
-                    worn.items.extend(now_worn.iter().copied());
-                    for item_id in &no_longer_worn {
-                        worn.items.remove(item_id);
-                    }
                     // Rewrite the COF: removed links out, the folder's
-                    // outfit items linked in.
+                    // outfit wearables linked in (its attachments link as
+                    // their objects arrive).
                     let mut cof_batch =
                         cof_remove_link_commands(&cof_links_with_slots(&model), &no_longer_worn);
-                    for item in items.iter().filter(|item| is_outfit_item(item)) {
+                    for item in items
+                        .iter()
+                        .filter(|item| is_outfit_item(item) && !is_attachment_item(item))
+                    {
                         cof_batch.extend(cof_wear_link_commands(
                             model.cof_key(),
                             &cof_links_with_slots(&model),
@@ -2555,16 +2826,19 @@ fn handle_inventory_menu_actions(
                         .into_iter()
                         .cloned()
                         .collect();
-                    let (batch, now_worn) =
+                    let (batch, _now_worn) =
                         outfit_add_commands(&items, model.worn_wearables(), identity.agent_id);
                     for command in batch {
                         commands.write(SlCommand(command));
                     }
-                    worn.items.extend(now_worn);
                     // COF links: a replaced body part's link drops, every
-                    // added outfit item links in.
+                    // added outfit wearable links in (an attachment links as
+                    // its object arrives).
                     let mut cof_batch = Vec::new();
-                    for item in items.iter().filter(|item| is_outfit_item(item)) {
+                    for item in items
+                        .iter()
+                        .filter(|item| is_outfit_item(item) && !is_attachment_item(item))
+                    {
                         let replaced = replaced_by_wear(model.worn_wearables(), item);
                         cof_batch.extend(cof_wear_link_commands(
                             model.cof_key(),
@@ -2603,9 +2877,6 @@ fn handle_inventory_menu_actions(
                             removed.push(item.item_id);
                         }
                     }
-                    for item_id in no_longer_worn {
-                        worn.items.remove(&item_id);
-                    }
                     write_cof_commands(
                         &model,
                         cof_remove_link_commands(&cof_links_with_slots(&model), &removed),
@@ -2638,18 +2909,8 @@ fn handle_inventory_menu_actions(
                                 name: item.name.clone(),
                                 description: item.description.clone(),
                             })));
-                            worn.items.insert(item.item_id);
+                            // Linked into the COF when the object arrives.
                             first = false;
-                            write_cof_commands(
-                                &model,
-                                cof_wear_link_commands(
-                                    model.cof_key(),
-                                    &cof_links_with_slots(&model),
-                                    item,
-                                    &[],
-                                ),
-                                &mut commands,
-                            );
                         }
                     }
                 }
@@ -3410,24 +3671,6 @@ fn handle_share_picks(
     }
 }
 
-/// Seed [`WornAttachments`] from the Current Outfit Folder once its contents
-/// load: a COF **link** whose asset id names an object item marks that item
-/// worn. Cheap and idempotent — recomputed only when the model changes.
-fn seed_worn_from_cof(model: Res<InventoryModel>, mut worn: ResMut<WornAttachments>) {
-    if !model.is_changed() {
-        return;
-    }
-    for link in model.cof_items() {
-        if matches!(
-            link.inv_type,
-            InventoryType::Object | InventoryType::Attachment
-        ) {
-            let target = InventoryKey::from(link.asset_id);
-            worn.items.insert(target);
-        }
-    }
-}
-
 /// The plugin wiring the inventory context actions into the viewer.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct InventoryActionsPlugin;
@@ -3443,6 +3686,7 @@ impl Plugin for InventoryActionsPlugin {
             .init_resource::<PendingSettingsCreations>()
             .add_message::<SettingsItemCreated>()
             .init_resource::<WornAttachments>()
+            .init_resource::<AttachmentCofSync>()
             .init_resource::<ActiveGestures>()
             .init_resource::<PendingShare>()
             .init_resource::<PendingItemCreations>()
@@ -3453,6 +3697,9 @@ impl Plugin for InventoryActionsPlugin {
             .add_systems(
                 Update,
                 (
+                    // First: every menu and hotkey below reads the worn set as
+                    // of this frame's objects.
+                    sync_worn_attachments,
                     ingest_region_grid_kind,
                     // Ahead of the dispatchers: a create pressed on the same
                     // frame a region's caps arrive is answered against that
@@ -3464,7 +3711,6 @@ impl Plugin for InventoryActionsPlugin {
                     handle_share_picks,
                     handle_item_creations,
                     handle_settings_creations,
-                    seed_worn_from_cof,
                 )
                     .chain(),
             );
@@ -4364,6 +4610,56 @@ mod tests {
         assert!(!restore_refused(&copyable, false));
     }
 
+    /// Touch on a worn attachment is offered only while it is worn and its
+    /// object handles touch, and never on a multi-selection (the reference
+    /// disables it on every row but the first).
+    #[test]
+    fn touch_is_offered_for_one_worn_touchable_attachment() {
+        use super::{ATTACHMENT_TOUCHABLE, intersect_conditions};
+        let object = item(2, InventoryType::Object, AssetType::Object, 0);
+        let touchable = ItemMenuFacts {
+            worn: true,
+            touchable_attachment: true,
+            ..ItemMenuFacts::default()
+        };
+        let held = item_conditions(&object, touchable);
+        assert!(held.contains(&ATTACHMENT_TOUCHABLE));
+        for facts in [
+            ItemMenuFacts {
+                worn: true,
+                ..ItemMenuFacts::default()
+            },
+            ItemMenuFacts {
+                touchable_attachment: true,
+                ..ItemMenuFacts::default()
+            },
+        ] {
+            assert!(!item_conditions(&object, facts).contains(&ATTACHMENT_TOUCHABLE));
+        }
+        assert!(intersect_conditions(std::slice::from_ref(&held)).contains(&ATTACHMENT_TOUCHABLE));
+        assert!(
+            !intersect_conditions(&[held.clone(), held]).contains(&ATTACHMENT_TOUCHABLE),
+            "a multi-selection withholds Touch"
+        );
+    }
+
+    /// A link row (the Worn tab's, the COF's) touches the attachment of the
+    /// item it links to: its asset id is what the object's `AttachItemID` names.
+    #[test]
+    fn a_link_row_stands_for_the_item_it_links_to() {
+        use super::worn_item_id;
+        let object = item(2, InventoryType::Object, AssetType::Object, 0);
+        assert_eq!(worn_item_id(&object), object.item_id.uuid());
+        let mut link = item(
+            3,
+            InventoryType::Object,
+            AssetType::Other(sl_client_bevy::ASSET_CODE_LINK),
+            0,
+        );
+        link.asset_id = object.item_id.uuid();
+        assert_eq!(worn_item_id(&link), object.item_id.uuid());
+    }
+
     /// The attach-point action strings parse back to their wire points, and
     /// anything else parses to nothing.
     #[test]
@@ -4610,6 +4906,11 @@ mod tests {
                 &InventoryClipboard::default(),
                 &WornAttachments::default(),
                 &ActiveGestures::default(),
+                &super::AttachmentLookup {
+                    objects: &crate::world_api::ObjectState::default(),
+                    avatars: &crate::world_api::AvatarState::default(),
+                    agent: None,
+                },
                 false,
             )
             .is_some_and(|(_target, conditions)| conditions.contains(&CAN_DELETE));
@@ -4857,30 +5158,142 @@ mod tests {
         assert_eq!(stripped.len(), 1);
     }
 
-    /// Worn detection sees the legacy set, the COF links, and the tracked
-    /// attachments.
+    /// An attachment is worn exactly when its object is on our avatar: a COF
+    /// link alone does not make it so (it can outlive a detach), and neither
+    /// does the legacy wearables set. A wearable reads the legacy set and the
+    /// COF links.
     #[test]
-    fn worn_detection_reads_all_three_sources() {
+    fn worn_detection_follows_the_avatar_for_attachments_and_the_cof_for_wearables() {
         let object = item(0x30, InventoryType::Object, AssetType::Object, 0);
         let none: HashSet<InventoryKey> = HashSet::new();
         assert!(!is_worn(&object, &[], &[], &none));
 
-        // Tracked by our own wear command.
-        let mut tracked = HashSet::new();
-        tracked.insert(object.item_id);
-        assert!(is_worn(&object, &[], &[], &tracked));
+        // On the avatar.
+        let mut on_avatar = HashSet::new();
+        on_avatar.insert(object.item_id);
+        assert!(is_worn(&object, &[], &[], &on_avatar));
 
-        // A COF link whose asset id names the item.
-        let mut link = item(0x31, InventoryType::Object, AssetType::Object, 0);
-        link.asset_id = object.item_id.uuid();
-        assert!(is_worn(&object, &[], &[link], &none));
+        // A stale COF link whose asset id names the item is not enough.
+        let mut object_link = item(0x31, InventoryType::Object, AssetType::Object, 0);
+        object_link.asset_id = object.item_id.uuid();
+        assert!(!is_worn(&object, &[], &[object_link], &none));
 
-        // The legacy wearables set.
+        // A wearable: the COF link, or the legacy wearables set.
+        let shirt = item(0x32, InventoryType::Wearable, AssetType::Clothing, 0);
+        let mut shirt_link = item(0x33, InventoryType::Wearable, AssetType::Clothing, 0);
+        shirt_link.asset_id = shirt.item_id.uuid();
+        assert!(is_worn(&shirt, &[], &[shirt_link], &none));
         let worn = Wearable {
-            item_id: object.item_id,
+            item_id: shirt.item_id,
             asset_id: None,
-            wearable_type: WearableType::Shape,
+            wearable_type: WearableType::Shirt,
         };
-        assert!(is_worn(&object, &[worn], &[], &none));
+        assert!(is_worn(&shirt, &[worn], &[], &none));
+        assert!(!is_worn(&shirt, &[], &[], &none));
+    }
+
+    /// The scoped id of fixture avatar object `local`.
+    fn avatar_object(local: u32) -> sl_client_bevy::ScopedObjectId {
+        sl_client_bevy::ScopedObjectId::new(
+            sl_client_bevy::CircuitId::new(1),
+            sl_client_bevy::RegionLocalObjectId::new(local),
+        )
+    }
+
+    /// An attachment is linked into the COF when it arrives — once, however
+    /// many frames the link takes to land — and only once the COF has loaded.
+    #[test]
+    fn an_arriving_attachment_is_linked_once_the_cof_has_loaded() {
+        use super::{AttachmentCofSync, CofSyncActions};
+        let hud = InventoryKey::from(Uuid::from_u128(0x17E));
+        let current = HashMap::from([(hud, avatar_object(1))]);
+        let mut sync = AttachmentCofSync::default();
+        let unlinked = |_item: InventoryKey| false;
+        let ours = |_avatar| true;
+
+        assert_eq!(
+            sync.step(&current, 0.0, false, ours, unlinked),
+            CofSyncActions::default(),
+            "nothing is written before the COF's contents are known"
+        );
+        assert_eq!(
+            sync.step(&current, 0.1, true, ours, unlinked).link,
+            vec![hud]
+        );
+        assert_eq!(
+            sync.step(&current, 0.2, true, ours, unlinked),
+            CofSyncActions::default(),
+            "asked for once, not every frame until the link lands"
+        );
+        let linked = |_item: InventoryKey| true;
+        assert_eq!(
+            sync.step(&current, 0.3, true, ours, linked),
+            CofSyncActions::default()
+        );
+    }
+
+    /// A detach — the attachment leaves while our avatar stays — drops its COF
+    /// link once the departure has settled; an attachment back within the
+    /// window (a re-attach) keeps it.
+    #[test]
+    fn a_detach_drops_the_cof_link_once_it_settles() {
+        use super::{AttachmentCofSync, DETACH_SETTLE_SECS};
+        let hud = InventoryKey::from(Uuid::from_u128(0x17E));
+        let worn = HashMap::from([(hud, avatar_object(1))]);
+        let gone = HashMap::new();
+        let linked = |_item: InventoryKey| true;
+        let ours = |avatar| avatar == avatar_object(1);
+        let mut sync = AttachmentCofSync::default();
+        let _arrived = sync.step(&worn, 0.0, true, ours, linked);
+
+        assert!(sync.step(&gone, 1.0, true, ours, linked).unlink.is_empty());
+        assert!(
+            sync.step(&gone, 1.0 + DETACH_SETTLE_SECS - 0.1, true, ours, linked)
+                .unlink
+                .is_empty(),
+            "not before the departure settles"
+        );
+        assert_eq!(
+            sync.step(&gone, 1.0 + DETACH_SETTLE_SECS, true, ours, linked)
+                .unlink,
+            vec![hud]
+        );
+        assert!(
+            sync.step(&gone, 20.0, true, ours, linked).unlink.is_empty(),
+            "dropped once"
+        );
+
+        let mut sync = AttachmentCofSync::default();
+        let _arrived = sync.step(&worn, 0.0, true, ours, linked);
+        let _left = sync.step(&gone, 1.0, true, ours, linked);
+        let _back = sync.step(&worn, 2.0, true, ours, linked);
+        assert!(
+            sync.step(&worn, 10.0, true, ours, linked).unlink.is_empty(),
+            "an attachment back within the window was never detached"
+        );
+    }
+
+    /// A teleport, region crossing or logout takes the avatar object with the
+    /// attachments: that departure is a move, and the COF keeps its links.
+    #[test]
+    fn a_departure_with_the_avatar_is_not_a_detach() {
+        use super::{AttachmentCofSync, DETACH_SETTLE_SECS};
+        let hud = InventoryKey::from(Uuid::from_u128(0x17E));
+        let worn = HashMap::from([(hud, avatar_object(1))]);
+        let linked = |_item: InventoryKey| true;
+        let mut sync = AttachmentCofSync::default();
+        let _arrived = sync.step(&worn, 0.0, true, |_avatar| true, linked);
+        let _left = sync.step(&HashMap::new(), 1.0, true, |_avatar| false, linked);
+        assert!(
+            sync.step(
+                &HashMap::new(),
+                2.0 + DETACH_SETTLE_SECS,
+                true,
+                |_avatar| false,
+                linked
+            )
+            .unlink
+            .is_empty()
+        );
     }
 }

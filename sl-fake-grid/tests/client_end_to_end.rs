@@ -2405,10 +2405,12 @@ mod test {
     /// id and gives it the destination's own region-local one, so a rider's
     /// seat has to be re-found rather than merely kept.
     fn ridden_border_grid(ridden: bool) -> Vec<RegionConfig> {
-        use sl_fake_grid::fixtures::border::{BorderSide, border_with_vehicle};
+        use sl_fake_grid::fixtures::border::{BorderSide, border, border_with_vehicle};
+        // The vehicle (and its rider) start in the west only: the east region
+        // receives them at the handover, as a real destination does.
         vec![
             border_with_vehicle(BorderSide::Leaving, ridden).into_region(RegionConfig::default()),
-            border_with_vehicle(BorderSide::Arriving, ridden).into_region(adjacent_east_region()),
+            border().into_region(adjacent_east_region()),
         ]
     }
 
@@ -2442,22 +2444,31 @@ mod test {
         Ok(())
     }
 
-    /// Hands the vehicle over the border the way a simulator does: the region
-    /// being left kills it, and the agent is seated on the destination's own
-    /// copy — which carries the same full id under a different local id.
-    ///
-    /// The destination already streams its copy (it is in that region's
-    /// fixtures, and its child circuit burst it long ago), so the handover is
-    /// the *source* forgetting the object and the *destination* claiming the
-    /// rider.
+    /// Hands the vehicle over the border the way a simulator does: the
+    /// destination receives it — the same full id under its own local id,
+    /// with the other rider aboard when `ridden` — then the region being left
+    /// kills its copy, and the agent is seated on the destination's.
     async fn hand_the_vehicle_over(
         source: &FakeAgent,
         destination: &FakeAgent,
-        riders: &[sl_proto::RegionLocalObjectId],
+        ridden: bool,
     ) -> Result<(), TestError> {
         use sl_fake_grid::fixtures::border;
+        let arriving = border::BorderSide::Arriving;
+        destination
+            .receive_crossing(
+                vec![border::vehicle(arriving).build()],
+                if ridden {
+                    vec![border::rider(arriving)]
+                } else {
+                    Vec::new()
+                },
+            )
+            .await;
         let mut leaving = vec![border::BorderSide::Leaving.vehicle_local_id()];
-        leaving.extend_from_slice(riders);
+        if ridden {
+            leaving.push(border::BorderSide::Leaving.rider_local_id());
+        }
         source
             .with_world(|world, sim| {
                 world
@@ -2557,7 +2568,7 @@ mod test {
                 },
             )
             .await?;
-        hand_the_vehicle_over(&source, &destination, &[]).await?;
+        hand_the_vehicle_over(&source, &destination, false).await?;
 
         // The vehicle left one region and the rider is aboard the other's copy:
         // same object, the other region's local id.
@@ -2590,27 +2601,15 @@ mod test {
             ._grid
             .region_handle("Fake Region East")
             .ok_or("no east region")?;
-        // Both in one pass: the scripted rider's own update comes *inside* the
-        // child burst and the marker closes it, so waiting for the marker
-        // first would consume the rider's update on the way past.
-        let mut rider_aboard = false;
-        let mut burst_done = false;
+        // The other rider starts aboard the western vehicle; the east region
+        // only receives the two of them at the handover.
         running
-            .wait_until("the east region's scene, rider aboard", |event| {
-                match event {
-                    Event::ObjectAdded(object) | Event::ObjectUpdated(object) => {
-                        rider_aboard |= object.local_id
-                            == border::BorderSide::Arriving.rider_local_id()
-                            && object.region_handle == east
-                            && object.parent_id == border::BorderSide::Arriving.vehicle_local_id();
-                    }
-                    Event::GenericMessage(generic) => {
-                        burst_done |= sl_fake_grid::neighbour_marker_region(generic).as_deref()
-                            == Some("Fake Region East");
-                    }
-                    _other => {}
+            .wait_until("the east region's child circuit", |event| match event {
+                Event::GenericMessage(generic) => {
+                    sl_fake_grid::neighbour_marker_region(generic).as_deref()
+                        == Some("Fake Region East")
                 }
-                rider_aboard && burst_done
+                _ => false,
             })
             .await?;
         ride_the_vehicle(&mut running).await?;
@@ -2629,14 +2628,31 @@ mod test {
                 },
             )
             .await?;
-        hand_the_vehicle_over(
-            &source,
-            &destination,
-            &[border::BorderSide::Leaving.rider_local_id()],
-        )
-        .await?;
+        hand_the_vehicle_over(&source, &destination, true).await?;
 
-        wait_for_the_handover(&mut running, east).await?;
+        // Both riders arrive aboard the destination's copy of the vehicle.
+        let agent_id = running.agent.agent_id();
+        let mut left = false;
+        let mut arrived = false;
+        let mut rider_arrived = false;
+        running
+            .wait_until("both riders aboard the destination's vehicle", |event| {
+                match event {
+                    Event::ObjectRemoved { local_id, .. } => {
+                        left |= local_id.id() == border::BorderSide::Leaving.vehicle_local_id();
+                    }
+                    Event::ObjectAdded(object) | Event::ObjectUpdated(object) => {
+                        let aboard = object.region_handle == east
+                            && object.parent_id == border::BorderSide::Arriving.vehicle_local_id();
+                        arrived |= aboard && object.full_id.uuid() == agent_id.uuid();
+                        rider_arrived |= aboard
+                            && object.local_id == border::BorderSide::Arriving.rider_local_id();
+                    }
+                    _other => {}
+                }
+                left && arrived && rider_arrived
+            })
+            .await?;
         Ok(())
     }
 

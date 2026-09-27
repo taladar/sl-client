@@ -1952,17 +1952,17 @@ mod tests {
         harness.logout()
     }
 
-    /// The border grid with a rideable vehicle either side, numbered
-    /// differently in each — which is what makes a ridden crossing a handover
-    /// rather than two copies of one prim.
+    /// The border grid with a rideable vehicle in the west. The east region
+    /// receives it at the handover, numbered its own way — which is what makes
+    /// a ridden crossing a handover rather than two copies of one prim.
     fn ridden_border_grid() -> Vec<RegionConfig> {
-        use sl_fake_grid::fixtures::border::border_with_vehicle;
+        use sl_fake_grid::fixtures::border::{border, border_with_vehicle};
         vec![
             border_with_vehicle(BorderSide::Leaving, false).into_region(RegionConfig {
                 name: WEST_REGION.to_owned(),
                 ..RegionConfig::default()
             }),
-            border_with_vehicle(BorderSide::Arriving, false).into_region(RegionConfig {
+            border().into_region(RegionConfig {
                 name: EAST_REGION.to_owned(),
                 grid_x: RegionConfig::default().grid_x.saturating_add(1),
                 ..RegionConfig::default()
@@ -2035,6 +2035,12 @@ mod tests {
             sl_proto::RegionCoordinates::new(landing.x, landing.y, landing.z),
         )?;
         let destination = harness.agent()?;
+        // The destination receives the vehicle, then the region left kills its
+        // copy: an object is in one region at a time.
+        harness.grid(destination.receive_crossing(
+            vec![border::vehicle(BorderSide::Arriving).build()],
+            Vec::new(),
+        ));
         harness.grid(async {
             source
                 .with_world(|world, sim| {

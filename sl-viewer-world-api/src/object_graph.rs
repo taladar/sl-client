@@ -10,6 +10,7 @@ use crate::object_flags::{
     FLAGS_ALLOW_INVENTORY_DROP, FLAGS_OBJECT_COPY, FLAGS_OBJECT_MODIFY, FLAGS_OBJECT_MOVE,
     FLAGS_OBJECT_YOU_OWNER, FLAGS_PHANTOM, is_hud_point,
 };
+use crate::world_vocabulary::AvatarState;
 use std::collections::{HashMap, HashSet};
 
 use bevy::prelude::*;
@@ -137,9 +138,13 @@ pub struct TrackedObject {
     /// dropped the moment the object stops being an attachment — the reference
     /// re-reads it on attach and nulls it on detach, and never in between.
     pub attachment_item: Option<Uuid>,
-    /// The object's owner (`owner_id` from the object update). For a worn
-    /// attachment this is its wearer, so a stuck attachment can be attributed to
-    /// the avatar it belongs to (the `SL_VIEWER_LOG_ATTACHMENT_BIND` diagnostic).
+    /// The object's owner (`owner_id` from the object update), which the wire
+    /// carries only alongside an attached **sound** (`ObjectUpdate`'s `OwnerID`
+    /// is the sound's owner). Otherwise it is nil — observed on OpenSim for
+    /// every worn attachment — so it can never say whose attachment an object
+    /// is. The wearer is the avatar object the attachment root hangs off
+    /// ([`ObjectState::worn_attachment_of_item`]). Kept for the
+    /// `SL_VIEWER_LOG_ATTACHMENT_BIND` diagnostic's attribution line.
     pub owner_id: AgentKey,
     /// The object's last-seen `PrimFlags` bitfield (the update's `UpdateFlags`),
     /// kept for the object context menu's enable gates
@@ -1047,6 +1052,57 @@ impl ObjectState {
         None
     }
 
+    /// The attachment root `wearer` wears from inventory item `item` — the one
+    /// whose `AttachItemID` names the item — or `None` while that item is not
+    /// worn by them (or its object has not streamed in yet). The reference's
+    /// `LLVOAvatarSelf::getWornAttachment`, the bridge from an inventory row to
+    /// the object it put on the body.
+    ///
+    /// Matched on the wearer as well as the item: an item id is the owner's, but
+    /// nothing stops a simulator from echoing one on another avatar's attachment,
+    /// and an inventory action must only ever reach one's own. The wearer is
+    /// the avatar object the attachment root hangs off, resolved through
+    /// `avatars` — the test the HUD routing makes — and not the update's
+    /// [`owner_id`](TrackedObject::owner_id), which the wire leaves nil.
+    #[must_use]
+    pub fn worn_attachment_of_item(
+        &self,
+        avatars: &AvatarState,
+        wearer: AgentKey,
+        item: Uuid,
+    ) -> Option<(ScopedObjectId, &TrackedObject)> {
+        self.objects
+            .iter()
+            .find(|(_scoped, tracked)| {
+                tracked.attachment_point.is_some()
+                    && tracked.attachment_item == Some(item)
+                    && avatars.agent_of(tracked.parent) == Some(wearer)
+            })
+            .map(|(scoped, tracked)| (*scoped, tracked))
+    }
+
+    /// Every inventory-worn attachment on `wearer`'s avatar: each attachment
+    /// root's `AttachItemID`, with the avatar object it hangs off. What the
+    /// reference's `isWearingAttachment` reads — the objects actually on the
+    /// body, not what was asked for.
+    ///
+    /// A **temporary** attachment (one a script attached, whose `AttachItemID`
+    /// repeats its own id) names no inventory item and is left out, as is an
+    /// attachment whose simulator named no item at all.
+    pub fn inventory_attachments_worn_by<'state>(
+        &'state self,
+        avatars: &'state AvatarState,
+        wearer: AgentKey,
+    ) -> impl Iterator<Item = (Uuid, ScopedObjectId)> + 'state {
+        self.objects.values().filter_map(move |tracked| {
+            let item = tracked.attachment_item?;
+            (tracked.attachment_point.is_some()
+                && item != tracked.full_key.uuid()
+                && avatars.agent_of(tracked.parent) == Some(wearer))
+            .then_some((item, tracked.parent))
+        })
+    }
+
     /// The raw attachment-point id tracked object `scoped` is worn on — its own,
     /// or its attachment root's for a linked child prim — or `None` when it is
     /// not part of an attachment. HUD points included, unlike
@@ -1438,6 +1494,101 @@ mod tests {
             queue.apply(&mut self.world);
             outcome
         }
+    }
+
+    /// An inventory item finds the attachment root it put on its wearer — and
+    /// only that: not the same item id echoed on someone else's attachment, not
+    /// a rezzed (unworn) object naming it, and nothing for an item not worn.
+    #[test]
+    fn a_worn_item_finds_its_own_attachment_root_and_nothing_else() {
+        let me = AgentKey::from(Uuid::from_u128(0xA1));
+        let them = AgentKey::from(Uuid::from_u128(0xA2));
+        let item = Uuid::from_u128(0x17E);
+        let mut fixture = Fixture::new();
+        let my_avatar = fixture.track(1, 1, None);
+        let their_avatar = fixture.track(2, 2, None);
+        let theirs = fixture.track(11, 2, Some(6));
+        let rezzed = fixture.track(12, 12, None);
+        let mine = fixture.track(13, 1, Some(2));
+        let _mine_child = fixture.track(14, 13, None);
+        // The wire leaves `owner_id` nil on an attachment (it is the attached
+        // sound's owner); the fixture does too, so only the parent can match.
+        for scoped in [theirs, rezzed, mine] {
+            if let Some(mut tracked) = fixture.state.tracked_mut(&scoped) {
+                tracked.attachment_item = Some(item);
+            }
+        }
+        let mut avatars = super::AvatarState::default();
+        avatars.by_scoped.insert(my_avatar, me);
+        avatars.by_scoped.insert(their_avatar, them);
+
+        assert_eq!(
+            fixture
+                .state
+                .worn_attachment_of_item(&avatars, me, item)
+                .map(|(scoped, _tracked)| scoped),
+            Some(mine)
+        );
+        assert_eq!(
+            fixture
+                .state
+                .worn_attachment_of_item(&avatars, them, item)
+                .map(|(scoped, _tracked)| scoped),
+            Some(theirs),
+            "the wearer is the avatar object the root hangs off"
+        );
+        assert!(
+            fixture
+                .state
+                .worn_attachment_of_item(&avatars, me, Uuid::from_u128(0xBAD))
+                .is_none()
+        );
+        if let Some(mut tracked) = fixture.state.tracked_mut(&mine) {
+            tracked.attachment_item = None;
+        }
+        assert!(
+            fixture
+                .state
+                .worn_attachment_of_item(&avatars, me, item)
+                .is_none(),
+            "neither their attachment nor a rezzed copy is ours to reach"
+        );
+    }
+
+    /// The worn set is the inventory attachments on the wearer's own avatar:
+    /// not another avatar's, not a rezzed copy, and not a temporary attachment
+    /// (whose `AttachItemID` is its own id, naming no inventory item).
+    #[test]
+    fn the_worn_set_is_the_inventory_attachments_on_the_wearers_avatar() {
+        let me = AgentKey::from(Uuid::from_u128(0xA1));
+        let them = AgentKey::from(Uuid::from_u128(0xA2));
+        let mut fixture = Fixture::new();
+        let my_avatar = fixture.track(1, 1, None);
+        let their_avatar = fixture.track(2, 2, None);
+        let mine = fixture.track(13, 1, Some(2));
+        let theirs = fixture.track(11, 2, Some(6));
+        let rezzed = fixture.track(12, 12, None);
+        let temp = fixture.track(15, 1, Some(35));
+        for (scoped, item) in [
+            (mine, Uuid::from_u128(0x17E)),
+            (theirs, Uuid::from_u128(0x17F)),
+            (rezzed, Uuid::from_u128(0x180)),
+            // The fixture's full key is the local id, so this is "its own id".
+            (temp, Uuid::from_u128(15)),
+        ] {
+            if let Some(mut tracked) = fixture.state.tracked_mut(&scoped) {
+                tracked.attachment_item = Some(item);
+            }
+        }
+        let mut avatars = super::AvatarState::default();
+        avatars.by_scoped.insert(my_avatar, me);
+        avatars.by_scoped.insert(their_avatar, them);
+
+        let worn: Vec<(Uuid, ScopedObjectId)> = fixture
+            .state
+            .inventory_attachments_worn_by(&avatars, me)
+            .collect();
+        assert_eq!(worn, vec![(Uuid::from_u128(0x17E), my_avatar)]);
     }
 
     /// The root comes first and its children follow in region-local id order —

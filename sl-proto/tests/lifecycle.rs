@@ -17198,6 +17198,87 @@ mod test {
         AnyMessage::ObjectUpdate(update)
     }
 
+    /// An object the session already caches on one circuit that arrives on
+    /// another has **moved** there: the old copy is dropped and announced
+    /// removed, after the new copy's arrival. OpenSim never kills an avatar and
+    /// its attachments in the region they leave for a neighbour the viewer can
+    /// see (`ScenePresence.MakeChildAgent`), so without this every neighbour
+    /// teleport left a stale copy of our own attachments behind.
+    #[test]
+    fn an_object_arriving_on_another_circuit_supersedes_its_old_copy() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        let root = session.root_circuit_id().ok_or("no circuit")?;
+        drain(&mut session)?;
+        enable_neighbour_b(&mut session, 9, now)?;
+        drain(&mut session)?;
+        let avatar = avatar_update(500, 1);
+        let hud = attachment_update(501, 0x17E, 500);
+        session.handle_datagram(sim_addr(), &server_message(&avatar, 10, true)?, now)?;
+        session.handle_datagram(sim_addr(), &server_message(&hud, 11, true)?, now)?;
+        drain_events(&mut session);
+
+        // The same avatar and attachment, streamed by the neighbour under its
+        // own region-local ids.
+        let avatar_there = avatar_update(700, 1);
+        let hud_there = attachment_update(701, 0x17E, 700);
+        session.handle_datagram(sim_b(), &server_message(&avatar_there, 12, true)?, now)?;
+        session.handle_datagram(sim_b(), &server_message(&hud_there, 13, true)?, now)?;
+        let events = drain_events(&mut session);
+
+        let stale = |local: u32| ScopedObjectId::new(root, sl_proto::RegionLocalObjectId(local));
+        let order: Vec<String> = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::ObjectAdded(object) => Some(format!("add {}", object.local_id.0)),
+                Event::ObjectRemoved { local_id, .. } => Some(format!(
+                    "remove {}{}",
+                    local_id.id.0,
+                    if local_id.circuit == root {
+                        "@root"
+                    } else {
+                        ""
+                    }
+                )),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            order,
+            vec!["add 700", "remove 500@root", "add 701", "remove 501@root"],
+            "each arrival is announced before its stale copy's removal"
+        );
+        assert!(session.object(stale(500)).is_none());
+        assert!(session.object(stale(501)).is_none());
+
+        // The region left behind may still mention its superseded copy — here
+        // a late attachment naming the old avatar id as its parent. It is not
+        // asked to re-send that copy: re-sent, it would supersede the live one.
+        let late = attachment_update(502, 0x17F, 500);
+        session.handle_datagram(sim_addr(), &server_message(&late, 14, true)?, now)?;
+        while let Some(transmit) = session.poll_transmit() {
+            if transmit.destination == sim_addr()
+                && let Ok(AnyMessage::RequestMultipleObjects(request)) = decode(&transmit)
+            {
+                assert!(
+                    !request.object_data.iter().any(|block| block.id == 500),
+                    "the superseded avatar copy was asked for again"
+                );
+            }
+        }
+
+        // The copies that stay are the neighbour's.
+        let child = events
+            .iter()
+            .find_map(|event| match event {
+                Event::ObjectAdded(object) if object.local_id.0 == 701 => Some(object.circuit),
+                _ => None,
+            })
+            .ok_or("the neighbour's copy was added")?;
+        assert_ne!(child, root);
+        Ok(())
+    }
+
     #[test]
     fn own_avatar_id_learned_from_object_update() -> Result<(), TestError> {
         let now = Instant::now();

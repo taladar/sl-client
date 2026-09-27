@@ -121,6 +121,7 @@ use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, Pie
 use crate::ui_element::UiAction;
 use crate::world_api::DerenderKind;
 use crate::world_api::EditTool;
+pub use crate::world_api::FLAGS_HANDLE_TOUCH;
 use crate::world_api::ObjectState;
 use crate::world_api::SelfGroundSit;
 
@@ -157,9 +158,6 @@ const FLAGS_OBJECT_COPY: u32 = 1 << 3;
 
 /// The `FLAGS_OBJECT_YOU_OWNER` bit: the agent owns this object.
 const FLAGS_OBJECT_YOU_OWNER: u32 = 1 << 5;
-
-/// The `FLAGS_HANDLE_TOUCH` bit: the object's linkset has a touch handler.
-pub const FLAGS_HANDLE_TOUCH: u32 = 1 << 7;
 
 // ---------------------------------------------------------------------------
 // The take sub-pie (the reference's "Take Submenu", chained after Buy at the

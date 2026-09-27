@@ -490,8 +490,8 @@ pub(crate) struct DragSession<'w> {
     model: Res<'w, InventoryModel>,
     /// Our own agent, the giver of anything handed over.
     identity: Res<'w, SlIdentity>,
-    /// The tracked worn set, which a drag-onto-avatar updates.
-    worn: ResMut<'w, WornAttachments>,
+    /// The attachments on our avatar: a worn one does not rez.
+    worn: Res<'w, WornAttachments>,
 }
 
 /// The list geometry a drop is resolved against, bundled as one
@@ -866,7 +866,7 @@ pub(crate) fn on_row_drag_end(
         view,
         model,
         identity,
-        mut worn,
+        worn,
     } = session;
     let DragGeometry {
         viewports,
@@ -965,7 +965,7 @@ pub(crate) fn on_row_drag_end(
         .find_map(|hovered| agent_target_at(*hovered, &agent_targets, &pick_targets, &child_of));
     if let Some(agent) = ui_agent {
         report_broken_links(broken, &mut notices);
-        drop_onto_agent(sources, agent, &identity, &model, &mut worn, &mut commands);
+        drop_onto_agent(sources, agent, &identity, &model, &mut commands);
         return;
     }
 
@@ -1044,7 +1044,7 @@ pub(crate) fn on_row_drag_end(
     };
     report_broken_links(broken, &mut notices);
     if let DragPickHit::Avatar(agent) = world_hit {
-        drop_onto_agent(sources, agent, &identity, &model, &mut worn, &mut commands);
+        drop_onto_agent(sources, agent, &identity, &model, &mut commands);
         return;
     }
     let (face_entity, world_point) = match world_hit {
@@ -1300,7 +1300,6 @@ fn drop_onto_agent(
     agent: AgentKey,
     identity: &SlIdentity,
     model: &InventoryModel,
-    worn: &mut WornAttachments,
     commands: &mut MessageWriter<SlCommand>,
 ) {
     for (source, from_library) in sources {
@@ -1312,13 +1311,12 @@ fn drop_onto_agent(
                 {
                     commands.write(SlCommand(command));
                 }
-                if matches!(
-                    item.inv_type,
-                    InventoryType::Object | InventoryType::Attachment
-                ) {
-                    worn.items.insert(item.item_id);
+                // Keep the COF authoritative for a drag-wear too. An
+                // attachment is linked when its object arrives
+                // (`AttachmentCofSync`), not on the request.
+                if crate::inventory_actions::is_attachment_item(item) {
+                    continue;
                 }
-                // Keep the COF authoritative for a drag-wear too.
                 let replaced =
                     crate::inventory_actions::replaced_by_wear(model.worn_wearables(), item);
                 let batch = crate::inventory_actions::cof_wear_link_commands(

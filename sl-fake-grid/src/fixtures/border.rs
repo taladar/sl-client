@@ -311,14 +311,17 @@ pub fn border() -> RegionFixture {
     }
 }
 
-/// [`border`] plus the rideable vehicle, placed and numbered for one side of
-/// the shared border.
+/// [`border`] plus the rideable vehicle, placed and numbered for the side of
+/// the shared border it starts on.
 ///
-/// Give one region [`BorderSide::Leaving`] and the next [`BorderSide::Arriving`]
-/// and the pair is a crossing: one object, the same full id, a few metres and
-/// one renumbering apart. `ridden` decides whether the scripted rider is
-/// aboard, so the same scene serves both the alone case and the with-others
-/// case.
+/// Give the region the crossing starts in [`BorderSide::Leaving`] and the next
+/// a plain [`border`]: an object is in one region at a time, so the
+/// destination learns of the vehicle only when it arrives, as
+/// [`vehicle`]`(`[`BorderSide::Arriving`]`)` (and its [`rider`]) handed to
+/// `FakeAgent::receive_crossing`, while the region left behind kills its
+/// copy. One object, the same full id, a few metres and one renumbering
+/// apart. `ridden` decides whether the scripted rider is aboard, so the same
+/// scene serves both the alone case and the with-others case.
 #[must_use]
 #[expect(
     clippy::module_name_repetitions,

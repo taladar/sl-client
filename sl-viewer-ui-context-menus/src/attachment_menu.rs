@@ -113,6 +113,7 @@ use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, Pie
 use crate::ui_element::UiAction;
 use crate::world_api::AvatarState;
 use crate::world_api::DerenderKind;
+use crate::world_api::FLAGS_HANDLE_TOUCH;
 use crate::world_api::ObjectPickSummary;
 use crate::world_api::ObjectState;
 
@@ -827,11 +828,6 @@ fn open_attachment_menu(
         });
     }
 }
-
-/// The `FLAGS_HANDLE_TOUCH` bit of an object's update flags (`object_flags.h`):
-/// the linkset has a touch handler. (The object pie keeps its own copy; both
-/// mirror the wire constant.)
-const FLAGS_HANDLE_TOUCH: u32 = 1 << 7;
 
 /// Dispatch a picked attachment-menu slice to the command behind it.
 ///

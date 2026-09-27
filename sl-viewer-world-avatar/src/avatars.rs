@@ -1711,8 +1711,14 @@ fn apply_object(
         despawn_avatar(entities, commands);
     }
     state.coarse_region.remove(&agent);
-    if let Some(existing) = state.objects.get(&agent) {
-        let mut anchor = commands.entity(existing.anchor);
+    if let Some(anchor_entity) = state.objects.get(&agent).map(|existing| existing.anchor) {
+        // The avatar may be arriving under a **new** scoped id — the same agent
+        // streamed by the region it moved into (a neighbour teleport or a
+        // crossing). Its attachments there name that id as their parent, so the
+        // agent's mapping moves to it; the old id is the session's superseded
+        // copy, whose `ObjectRemoved` then finds nothing mapped.
+        state.rekey_avatar(agent, scoped);
+        let mut anchor = commands.entity(anchor_entity);
         anchor.insert(avatar_motion);
         if seated {
             // The seat owns the anchor's world pose; just tag it so

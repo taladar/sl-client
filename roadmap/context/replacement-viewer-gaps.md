@@ -1,4 +1,4 @@
-# Replacement-viewer gaps (drafted 2026-09-21, updated 2026-09-26)
+# Replacement-viewer gaps (drafted 2026-09-21, updated 2026-09-27)
 
 What is still **missing as a feature** — a whole floater, a whole
 subsystem, a thing a resident does every day — before this viewer can be
@@ -10,12 +10,38 @@ system and shipped Vintage (see *The skin* below); no feature gap on this
 page closed or opened in them, and every task status quoted here was
 re-checked on the update.
 
-This is the *feature* axis. The companion document
-[`parallel-work-plan.md`](parallel-work-plan.md) is the *ownership* axis —
-which crates an agent may touch at the same time as another agent. They
-answer different questions and are meant to be read together: this one says
-what to build next, that one says who can build it concurrently. The last
-section maps these tiers onto that split.
+## Where we are (updated 2026-09-27)
+
+Progress through the list below, section by section. The next section to
+work on is first. Update this table whenever a gap closes or opens.
+
+| Section | Closed | Open |
+| --- | --- | --- |
+| Partly overtaken | `viewer-object-rezzing`, `viewer-menu-touch-object` | `viewer-sit-stand-actions` residue: **next** |
+| Tier 0, session boundary | nothing yet | `viewer-login-screen` (then `viewer-login-tos`), `viewer-disconnect-screen`: **next tier** |
+| 1.1 Money | nothing yet | all |
+| 1.2 Gestures, AO | nothing yet | all |
+| 1.3 Outfits | the worn state (`viewer-inventory-worn-before-attach-confirmed`) | the outfit editor, favourites, hover height |
+| 1.4 Landmarks | nothing yet | all |
+| 1.5 Reading and hearing | notecards, streaming audio, media on a prim | `viewer-video-playback` (in progress), `viewer-media-playback-policies` |
+| 1.6 Files in and out | the open-file dialog | upload, save dialogs, the other portals |
+| Tier 2, creators | nothing yet | all |
+| Tier 3, parity comfort | nothing yet | six in progress; see the families |
+| Tier 4, after parity | nothing yet | all |
+
+Found on the way, not yet placed in a tier (2026-09-27, all while testing
+the worn-object Touch):
+
+- `parcel-properties-update-via-udp-poisons-opensim` (**bug**, under *Land*
+  in tier 3). Parcel edits go over UDP. On OpenSim one edit breaks every
+  later save in the region, rezzing and attaching included, so it goes
+  before any further live testing that rezzes on OpenSim.
+- `viewer-rlv-send-side-consumers` (under *RLV* in tier 3). Nothing in the
+  viewer asks the RLV façade.
+- `viewer-object-moved-region-reuse`. An object that changes region is
+  rebuilt rather than moved.
+- `fake-grid-own-attachments-and-region-moves`. The offline grid models none
+  of the attachment, COF or region-move behaviour behind these fixes.
 
 ## The baseline this measures against
 
@@ -114,10 +140,11 @@ down to the residue, so none of them should be scheduled as a gap:
   build tools are open, and refusing to rez a worn attachment. The parcel
   pre-check was dropped: the reference has none, and lets the simulator
   refuse.
-- `viewer-menu-touch-object` (ideas) — "Touch is greyed in the object menu"
-  is no longer true: `object_menu.rs` maps the `touch` slice to
-  `Command::TouchObject` behind `TARGET_TOUCHABLE`, and the attachment menu
-  carries it too.
+- `viewer-menu-touch-object` — closed 2026-09-27. The object and attachment
+  pies already sent `Command::TouchObject`. The residue was the inventory's
+  worn-object Touch, which now touches the attachment root in the
+  object-centre form. The reference's RLV gate on it went to the new
+  `viewer-rlv-send-side-consumers` (see *RLV* in tier 3).
 - `viewer-sit-stand-actions` (ready) — its own body says it was "largely
   completed" by `viewer-sit-target-and-stand-button`; audit and close or
   re-scope to the residue.
@@ -181,6 +208,19 @@ Save and Save As into My Outfits — and it unblocks
 jewellery box over the same machinery, and `viewer-hover-height` (plus its
 ingest half `viewer-agent-hover-height-ingest`) is the slider every mesh-body
 user reaches for within a minute of arriving.
+
+What those build on became trustworthy on 2026-09-27
+(`viewer-inventory-worn-before-attach-confirmed`). An attachment is worn now
+exactly when its object is on the avatar, as in the reference. Before, it
+was worn when a wear was requested, whether or not the simulator attached
+anything, and only the inventory's own Detach un-wore it. Attachment COF
+links follow the objects too: written on arrival, dropped on a real detach,
+and kept across a teleport. The same testing found and fixed a world-layer
+bug that affected every neighbour teleport on OpenSim. The old region never
+killed our own avatar and attachments, so their stale copies lingered on the
+HUD and in the worn state. The session now treats an object arriving from
+another region under a known full id as having moved there, which is the
+reference's full-id-keyed object list.
 
 ### 1.4 Landmarks and navigation
 
@@ -366,6 +406,12 @@ unverified on a live grid), `viewer-land-holdings`,
 `viewer-region-restart-schedule`, `viewer-god-tools`,
 `viewer-neighbor-region-parcels` (About Land cannot act on a neighbour
 region at all), `viewer-land-access-list-export-import`.
+`parcel-properties-update-via-udp-poisons-opensim` (a bug, filed
+2026-09-27) comes before any of the parcel-writing ones. Parcel edits go
+over UDP rather than the `ParcelPropertiesUpdate` capability. On OpenSim
+one edit left the region unable to save anything, rezzing and attaching
+included, until a restart. The capability's body is also what
+`viewer-parcel-config-missing-writes` is waiting on.
 
 **People and social.** `viewer-recent-people`,
 `viewer-people-lists-multi-select`, `viewer-display-name-set`,
@@ -388,7 +434,10 @@ self-contained subsystem to schedule as a block, not a gap that holds up
 anything above it. For a voice-centric resident it is of course tier 1; for
 everyone else, text chat already works.
 
-**RLV.** The engine is largely ours; the user-facing half is not:
+**RLV.** The engine is largely ours; the user-facing half is not.
+`viewer-rlv-send-side-consumers` (filed 2026-09-27) comes first: the
+`RlvActions` façade has no caller in the viewer, so no send-side restriction
+(touch, edit, chat, teleport, …) is honoured yet. After it:
 `viewer-rlva-floaters-toggles` (in progress), `viewer-rlv-enforce-camera`,
 `viewer-rlv-enforce-forced-actions`, `viewer-rlv-enforce-info-hiding`,
 `viewer-rlv-vision-render`, `viewer-rlv-blocked-objects`,

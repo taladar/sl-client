@@ -2589,10 +2589,10 @@ impl Session {
                     return Ok(true);
                 };
                 for block in &kill.object_data {
-                    let removed = self
-                        .world
-                        .objects_in_mut(circuit_id)
-                        .and_then(|sim| sim.remove(&RegionLocalObjectId(block.id)));
+                    let removed = self.world.remove_object(ScopedObjectId::new(
+                        circuit_id,
+                        RegionLocalObjectId(block.id),
+                    ));
                     let region_handle = removed
                         .as_ref()
                         .map_or(RegionHandle(0), |object| object.region_handle);
@@ -2804,21 +2804,40 @@ impl Session {
         // or dropped root update, which would otherwise strand every child of that
         // root (worn attachments never resolve their wearer and never render).
         let parent_local = object.parent_id;
-        let sim = self.world.objects_in_or_default(circuit_id);
-        let parent_missing =
-            parent_local != RegionLocalObjectId(0) && !sim.contains_key(&parent_local);
-        match sim.get(&object.local_id) {
+        let parent_missing = parent_local != RegionLocalObjectId(0)
+            && self
+                .world
+                .object(ScopedObjectId::new(circuit_id, parent_local))
+                .is_none();
+        match self.world.object(object.scoped_id()) {
             Some(existing) => {
                 if object.properties.is_none() {
                     object.properties.clone_from(&existing.properties);
                 }
-                sim.insert(object.local_id, object.clone());
+                let _previous = self.world.insert_object(circuit_id, object.clone());
                 self.events
                     .push_back(Event::ObjectUpdated(Box::new(object)));
             }
             None => {
-                sim.insert(object.local_id, object.clone());
+                // The same object cached on another circuit has **moved** here
+                // (an avatar and its attachments on a neighbour teleport or a
+                // crossing): the old copy is superseded — the reference's
+                // full-id-keyed object list just moves it. The arrival is
+                // announced before the stale copy's removal, so a consumer
+                // keyed by the object itself (an avatar, by its agent) sees it
+                // continue under the new id rather than vanish and respawn.
+                let stale = self
+                    .world
+                    .copy_elsewhere(object.full_id, circuit_id)
+                    .and_then(|stale| Some((stale, self.world.supersede(stale)?)));
+                let _previous = self.world.insert_object(circuit_id, object.clone());
                 self.events.push_back(Event::ObjectAdded(Box::new(object)));
+                if let Some((stale, removed)) = stale {
+                    self.events.push_back(Event::ObjectRemoved {
+                        region_handle: removed.region_handle,
+                        local_id: stale,
+                    });
+                }
             }
         }
         // Ask the simulator to (re)send the unknown parent so the child's linkset /
@@ -3050,11 +3069,25 @@ impl Session {
         local_ids: &[RegionLocalObjectId],
         now: Instant,
     ) {
+        // A copy superseded by the same object's arrival elsewhere is not asked
+        // for again: re-sent, it would supersede the live copy in turn.
+        let local_ids: Vec<RegionLocalObjectId> = match self.circuit_id_for(from) {
+            Some(circuit_id) => local_ids
+                .iter()
+                .copied()
+                .filter(|id| {
+                    !self
+                        .world
+                        .is_superseded(ScopedObjectId::new(circuit_id, *id))
+                })
+                .collect(),
+            None => local_ids.to_vec(),
+        };
         if local_ids.is_empty() {
             return;
         }
         if let Some(circuit) = self.circuit_mut(from) {
-            let _ignored = circuit.send_request_multiple_objects(local_ids, now);
+            let _ignored = circuit.send_request_multiple_objects(&local_ids, now);
         }
     }
 

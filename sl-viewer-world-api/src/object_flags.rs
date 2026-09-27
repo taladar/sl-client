@@ -33,6 +33,11 @@ pub const FLAGS_OBJECT_COPY: u32 = 1 << 3;
 /// The agent-relative `FLAGS_OBJECT_YOU_OWNER` bit: this agent owns the object.
 pub const FLAGS_OBJECT_YOU_OWNER: u32 = 1 << 5;
 
+/// The `FLAGS_HANDLE_TOUCH` bit of `PrimFlags` (`object_flags.h`): the object
+/// has a touch handler (a script with a `touch*` event), the reference viewer's
+/// `flagHandleTouch` — what every Touch entry is enabled on.
+pub const FLAGS_HANDLE_TOUCH: u32 = 1 << 7;
+
 /// The agent-relative `FLAGS_OBJECT_MOVE` bit: this agent may move (position /
 /// rotate) the object — set for the owner and for an "anyone can move" object.
 pub const FLAGS_OBJECT_MOVE: u32 = 1 << 8;

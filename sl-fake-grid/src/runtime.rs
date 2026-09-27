@@ -2182,6 +2182,35 @@ impl FakeAgent {
         self.shared.finish_flush(outcome).await;
     }
 
+    /// Brings `objects` and the avatars in `npcs` into this session's region
+    /// the way a simulator receives what crossed a border into it: they join
+    /// the region's world and are streamed to the client under the region-local
+    /// ids they carry here. Pair with a kill on the region they left.
+    pub async fn receive_crossing(
+        &self,
+        objects: Vec<sl_proto::Object>,
+        npcs: Vec<crate::fixtures::NpcFixture>,
+    ) {
+        let mut guard = self.shared.state.lock().await;
+        let now = self.shared.now();
+        {
+            let state = &mut *guard;
+            let mut world = state.world.lock();
+            crate::world::receive_crossing(
+                &mut world,
+                objects,
+                npcs,
+                state.bakes,
+                &mut state.sim,
+                now,
+            );
+            drop(world);
+        }
+        let outcome = self.shared.flush_locked(&mut guard);
+        drop(guard);
+        self.shared.finish_flush(outcome).await;
+    }
+
     /// Subscribes to the session's [`sl_proto::ServerEvent`] broadcast.
     #[must_use]
     pub fn events(&self) -> broadcast::Receiver<sl_proto::ServerEvent> {

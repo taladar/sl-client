@@ -1610,6 +1610,31 @@ fn push_npcs(
     }
 }
 
+/// Receives what crossed a border into this region: `objects` and the avatars
+/// in `npcs` join the region's world and are streamed to the client, objects
+/// first because a seated avatar names its seat as its parent.
+///
+/// An object is in one region at a time, so a destination learns of a vehicle
+/// (and anyone riding it) only when it arrives, and under its own region-local
+/// ids; the region left behind kills its copy.
+pub(crate) fn receive_crossing(
+    world: &mut SceneFixtures,
+    objects: Vec<Object>,
+    npcs: Vec<NpcFixture>,
+    bakes: crate::bakes::BakePolicy,
+    sim: &mut SimSession,
+    now: Instant,
+) {
+    if !objects.is_empty()
+        && let Err(error) = sim.send_object_update(&objects, REAL_TIME_DILATION, now)
+    {
+        tracing::warn!("streaming what crossed into the region failed: {error}");
+    }
+    push_npcs(&npcs, bakes, sim, now);
+    world.objects.extend(objects);
+    world.npcs.extend(npcs);
+}
+
 /// Streams the region's ground: the LAND layer as the spiral of patches a
 /// simulator sends on region entry, then the WIND and CLOUD layers the
 /// fixture carries (each one message). Send failures are logged.

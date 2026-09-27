@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 119 |
-| ready | 304 |
+| ready | 307 |
 | blocked | 59 |
-| in-progress | 21 |
-| bugs | 14 |
-| done | 1245 |
+| in-progress | 20 |
+| bugs | 15 |
+| done | 1247 |
 | deferred | 31 |
 | wont-do | 16 |
-| **total** | **1809** |
+| **total** | **1814** |
 
 ## ideas (119)
 
@@ -300,7 +300,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (304)
+## ready (307)
 
 ### protocol
 
@@ -696,6 +696,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   floater (linkset breakdown) (blocked by `viewer-object-selection-core` (done))
 - [`viewer-object-menu-custom-verbs`](ready/viewer-object-menu-custom-verbs.md)
   — Custom touch/sit text + click-action default verb
+- [`viewer-object-moved-region-reuse`](ready/viewer-object-moved-region-reuse.md)
+  — Reuse an object that arrives from another region under a new id
 - [`viewer-object-pie-buy-take-chain`](ready/viewer-object-pie-buy-take-chain.md)
   — Object pie Buy slices + the reference Buy/Take autohide chain
 - [`viewer-object-pie-enable-fidelity`](ready/viewer-object-pie-enable-fidelity.md)
@@ -865,6 +867,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   camera restrictions and vision overlay (blocked by
   `viewer-rlv-restriction-state` (done), `viewer-camera-third-person-orbit`
   (done))
+- [`viewer-rlv-send-side-consumers`](ready/viewer-rlv-send-side-consumers.md) —
+  RLV — make the viewer's send paths ask the RlvActions façade
 - [`viewer-rlv-vision-render`](ready/viewer-rlv-vision-render.md) — RLV
   vision-restriction rendering (blocked by `viewer-rlv-restriction-state`
   (done))
@@ -986,6 +990,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
+- [`fake-grid-own-attachments-and-region-moves`](ready/fake-grid-own-attachments-and-region-moves.md)
+  — Fake grid — the agent's own attachments, the COF, and region moves
 - [`test-asset-save-mutation-survey`](ready/test-asset-save-mutation-survey.md)
   — Does a grid hand back the asset you saved?
 - [`test-assets-gesture-codec`](ready/test-assets-gesture-codec.md) — Read and
@@ -1213,7 +1219,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Batch world changes into per-tick update bursts (blocked by
   `server-world-heartbeat`, `server-world-ecs-store`)
 
-## in-progress (21)
+## in-progress (20)
 
 ### viewer
 
@@ -1232,8 +1238,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-keyed-floater-audit`](in-progress/viewer-keyed-floater-audit.md) —
   Audit the other per-subject singletons onto the keyed-floater scaffold
-- [`viewer-menu-touch-object`](in-progress/viewer-menu-touch-object.md) — Touch
-  an object from the object and attachment menus
 - [`viewer-perf-pbr-shadow-cluster-rez`](in-progress/viewer-perf-pbr-shadow-cluster-rez.md)
   — Tune main-view shadow specialization + clustered lighting during rez
 - [`viewer-realtime-mirrors`](in-progress/viewer-realtime-mirrors.md) —
@@ -1272,10 +1276,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (14)
+## bugs (15)
 
 ### protocol
 
+- [`parcel-properties-update-via-udp-poisons-opensim`](bugs/parcel-properties-update-via-udp-poisons-opensim.md)
+  — Parcel updates go over UDP, not the ParcelPropertiesUpdate CAP
 - [`protocol-logout-reply-sometimes-missing-on-opensim`](bugs/protocol-logout-reply-sometimes-missing-on-opensim.md)
   — A logout on the local OpenSim sometimes gets no LogoutReply
 
@@ -1314,7 +1320,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1245)
+## done (1247)
 
 ### protocol
 
@@ -2157,6 +2163,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — '"Show in Main view" inventory menu action from the Worn / Recent tabs'
 - [`viewer-inventory-worn-actions`](done/viewer-inventory-worn-actions.md) —
   Worn-item detach / take-off actions
+- [`viewer-inventory-worn-before-attach-confirmed`](done/viewer-inventory-worn-before-attach-confirmed.md)
+  — Inventory's worn state for attachments follows requests, not the avatar
 - [`viewer-inventory-worn-markers-show-early`](done/viewer-inventory-worn-markers-show-early.md)
   — Show (worn) / bold inventory markers early, without opening Current Outfit
 - [`viewer-inventory-worn-tab-items-without-folders`](done/viewer-inventory-worn-tab-items-without-folders.md)
@@ -2208,6 +2216,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Media-on-a-prim & embedded web browser
 - [`viewer-menu-accelerators-inert`](done/viewer-menu-accelerators-inert.md) —
   Menu accelerators are drawn but dead (Ctrl+P / Ctrl+T / Ctrl+F / Ctrl+U)
+- [`viewer-menu-touch-object`](done/viewer-menu-touch-object.md) — Touch an
+  object from the object and attachment menus
 - [`viewer-mesh-encoder`](done/viewer-mesh-encoder.md) — LLMesh encoder (inverse
   of the sl-mesh decoder)
 - [`viewer-mesh-lod-factor-preference`](done/viewer-mesh-lod-factor-preference.md)

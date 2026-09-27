@@ -843,6 +843,17 @@ impl AvatarState {
         self.remove_object(scoped, commands);
     }
 
+    /// Track `agent`'s full-object avatar under `scoped` from now on, dropping
+    /// whatever id it was tracked under before. An avatar is one object with
+    /// one live id at a time; a new one means it **moved** to the region that
+    /// streams it (a neighbour teleport or a crossing), and the id it left
+    /// behind names a copy the session has superseded.
+    pub fn rekey_avatar(&mut self, agent: AgentKey, scoped: ScopedObjectId) {
+        self.by_scoped
+            .retain(|tracked, tracked_agent| *tracked_agent != agent || *tracked == scoped);
+        let _previous = self.by_scoped.insert(scoped, agent);
+    }
+
     /// Despawn the placeholder of the full-object avatar that left the scene under
     /// `scoped`, if one is tracked.
     pub fn remove_object(&mut self, scoped: ScopedObjectId, commands: &mut Commands) {
@@ -1359,6 +1370,58 @@ mod tests {
         AgentKey, RegionHandle, TextureEntry, TextureFace, TextureKey, Uuid, avatar_texture,
         encode_texture_entry,
     };
+
+    /// An avatar that moved regions is re-keyed to the id the new region
+    /// streams it by: the old id no longer resolves, so the superseded copy's
+    /// removal leaves the avatar alone, and removing the new id despawns it.
+    #[test]
+    fn a_moved_avatar_is_rekeyed_and_its_stale_id_removal_keeps_it() {
+        use super::AvatarEntities;
+        use bevy::ecs::world::CommandQueue;
+        use bevy::prelude::{Commands, World};
+        use sl_client_bevy::{CircuitId, RegionLocalObjectId, ScopedObjectId};
+        let agent = AgentKey::from(Uuid::from_u128(0xa1));
+        let other = AgentKey::from(Uuid::from_u128(0xa2));
+        let old = ScopedObjectId::new(CircuitId::new(1), RegionLocalObjectId::new(500));
+        let new = ScopedObjectId::new(CircuitId::new(2), RegionLocalObjectId::new(700));
+        let theirs = ScopedObjectId::new(CircuitId::new(1), RegionLocalObjectId::new(510));
+        let mut world = World::new();
+        let entities = AvatarEntities {
+            anchor: world.spawn_empty().id(),
+            label: world.spawn_empty().id(),
+        };
+        let mut avatars = AvatarState::default();
+        let _body = avatars.objects.insert(agent, entities);
+        let _old = avatars.by_scoped.insert(old, agent);
+        let _theirs = avatars.by_scoped.insert(theirs, other);
+
+        avatars.rekey_avatar(agent, new);
+        assert_eq!(avatars.agent_of(new), Some(agent));
+        assert_eq!(avatars.agent_of(old), None);
+        assert_eq!(
+            avatars.agent_of(theirs),
+            Some(other),
+            "only its own ids move"
+        );
+
+        let mut queue = CommandQueue::default();
+        avatars.remove_object(old, &mut Commands::new(&mut queue, &world));
+        queue.apply(&mut world);
+        assert!(avatars.objects.contains_key(&agent), "the avatar lives on");
+        assert!(
+            world.entities().contains(entities.anchor),
+            "the body is not despawned"
+        );
+
+        let mut queue = CommandQueue::default();
+        avatars.remove_object(new, &mut Commands::new(&mut queue, &world));
+        queue.apply(&mut world);
+        assert!(
+            !avatars.objects.contains_key(&agent),
+            "its live id takes it"
+        );
+        assert!(!world.entities().contains(entities.anchor));
+    }
 
     /// The provisional tag is the agent id's leading hex fragment, so two distinct
     /// avatars read differently before their names resolve.
