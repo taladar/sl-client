@@ -29,7 +29,12 @@ The stock `settings.xml` default is off, but the GPU feature table turns it on
 for every graphics level from Mid up, so a default Firestorm filters
 anisotropically.
 
-Anisotropy chooses among mip levels, and face textures have only one today:
-[[viewer-texture-mip-chain-missing]] comes first.
+Anisotropy chooses among mip levels, which face textures carry since
+[[viewer-texture-mip-chain-missing]] (2026-09-27). The `far-floor` fake-grid
+scene is the pose to judge it by: `sl-crosscheck --scenario far-floor
+--camera-position 128,96,28.7 --look-at floor-far-edge`. With mips alone our
+far half settles to a flat grey (standard deviation 0 across the band at rows
+548–560), where the reference's anisotropic sampling keeps the checker
+visible to the horizon (21).
 
 Builds on: the deferred pipeline's final resolve.

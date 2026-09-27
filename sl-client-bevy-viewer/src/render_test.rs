@@ -36,6 +36,8 @@
 //! - [`sampler_violations`] — **R22h**: Bevy's default sampler clamps where
 //!   Second Life repeats, smearing an edge texel across a face. Found as a
 //!   "white torso" over a bake that was itself correct.
+//! - [`mip_violations`] — a texture uploaded with no mip chain, so a far face
+//!   samples its full image and shimmers. Found by looking along a floor.
 //! - [`LogCapture`] — **R26**: a zero-particle cloud's empty mesh made Bevy's
 //!   allocator log every frame. A bug whose *only* symptom was a log line.
 //! - [`geometry_violations`] — NaN positions, non-unit normals, out-of-range
@@ -478,6 +480,10 @@ pub(crate) struct TextureSlot {
     pub(crate) slot: &'static str,
     /// Whether its sampler wraps on **both** U and V.
     pub(crate) repeats: bool,
+    /// How many mip levels the image carries.
+    pub(crate) mip_levels: u32,
+    /// How many a full chain for its size has, down to 1×1.
+    pub(crate) full_chain: u32,
 }
 
 /// Read a `Float32x3` vertex attribute, or an empty list if it is absent or
@@ -525,9 +531,16 @@ fn texture_slots(material: &StandardMaterial, images: &Assets<Image>) -> Vec<Tex
     .into_iter()
     .filter_map(|(slot, handle)| {
         let image = images.get(handle?)?;
+        let size = image.texture_descriptor.size;
         Some(TextureSlot {
             slot,
             repeats: sampler_repeats(&image.sampler),
+            mip_levels: image.texture_descriptor.mip_level_count,
+            full_chain: size
+                .width
+                .max(size.height)
+                .checked_ilog2()
+                .map_or(1, |log| log.saturating_add(1)),
         })
     })
     .collect()
@@ -975,6 +988,7 @@ pub(crate) fn geometry_violations(geometry: &[Geometry]) -> Vec<String> {
         violations.extend(skin_violations(object));
         violations.extend(unskinned_violations(object));
         violations.extend(sampler_violations(object));
+        violations.extend(mip_violations(object));
     }
     violations
 }
@@ -1154,6 +1168,31 @@ fn sampler_violations(object: &Geometry) -> Vec<String> {
                  default clamps, so every UV outside the unit square smears this texture's edge \
                  texel across the face (R22h) rather than tiling",
                 object.name, texture.slot
+            )
+        })
+        .collect()
+}
+
+/// **Universal.** Every texture a face samples carries a full mip chain, down
+/// to 1×1.
+///
+/// The reference builds one for every fetched texture (`glGenerateMipmap` after
+/// each upload). A texture without one is sampled from its full image alone
+/// however small the face is on screen, and a distant or oblique face aliases
+/// and shimmers instead of settling to its average — which nothing but a moving
+/// camera shows, and which the sampler's `mipmap_filter` cannot fix, having
+/// nothing to choose between. `sl_client_bevy::upload_pixels` builds the chain;
+/// this check exists for the texture path that goes round it.
+fn mip_violations(object: &Geometry) -> Vec<String> {
+    object
+        .textures
+        .iter()
+        .filter(|texture| texture.mip_levels < texture.full_chain)
+        .map(|texture| {
+            format!(
+                "{}: the `{}` texture carries {} mip level(s) of the {} its size has — a face \
+                 smaller on screen than the texture samples its full image and aliases",
+                object.name, texture.slot, texture.mip_levels, texture.full_chain
             )
         })
         .collect()
@@ -1715,10 +1754,36 @@ mod tests {
                 object.textures = vec![super::TextureSlot {
                     slot: "base_color_texture",
                     repeats: false,
+                    mip_levels: 1,
+                    full_chain: 1,
                 }];
             })
             .is_empty(),
             "Bevy's default sampler clamps where Second Life repeats (R22h) and must be reported"
+        );
+    }
+
+    /// **The mip check has teeth.** A texture with fewer levels than its size
+    /// has is reported, and one with its full chain is not.
+    #[test]
+    fn a_texture_without_its_mip_chain_is_reported() {
+        let with_levels = |mip_levels| {
+            broken(|object| {
+                object.textures = vec![super::TextureSlot {
+                    slot: "base_color_texture",
+                    repeats: true,
+                    mip_levels,
+                    full_chain: 10,
+                }];
+            })
+        };
+        assert!(
+            !with_levels(1).is_empty(),
+            "a 512² texture with only its full image aliases at a distance and must be reported"
+        );
+        assert!(
+            with_levels(10).is_empty(),
+            "a texture with its whole chain is what the reference draws"
         );
     }
 

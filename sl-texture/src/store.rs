@@ -143,7 +143,10 @@ impl TextureStore {
             };
             *bucket = bucket.saturating_add(1);
             let codestream = as_u64(entry.codestream.load().covered());
-            let pixels = entry.image().map_or(0, |image| as_u64(image.pixels.len()));
+            let pixels = entry.image().map_or(0, |image| {
+                let chain = image.mips.as_ref().map_or(0, |mips| mips.below.len());
+                as_u64(image.pixels.len().saturating_add(chain))
+            });
             stats.bytes = stats
                 .bytes
                 .saturating_add(codestream)

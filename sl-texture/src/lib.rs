@@ -18,6 +18,7 @@ pub mod disk;
 pub mod encode;
 pub mod entry;
 pub mod fetcher;
+pub mod mips;
 pub mod schedule;
 pub mod store;
 
@@ -29,6 +30,7 @@ pub use fetcher::{
     AssetFetcher, FetchChunk, FetchError, NotRemotelyFetchable, RemoteTextureSource,
     TextureFetchType, TextureFetcher,
 };
+pub use mips::{MipChain, mip_chain};
 pub use schedule::{Priority, TextureProgress, TextureRequest};
 pub use sl_asset_sched::{FULL_RESOLUTION_PIXEL_AREA, GateStats, ScreenMetrics, StoreStats};
 pub use store::{TextureError, TextureStore};

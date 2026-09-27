@@ -12,6 +12,8 @@
 use bytes::Bytes;
 use sl_proto::DiscardLevel;
 
+use crate::mips::{MipChain, mip_chain};
+
 /// A decoded texture: canonical 8-bit RGBA pixels plus geometry and the LOD the
 /// pixels were decoded (or downsampled) to.
 #[derive(Clone, Debug)]
@@ -50,6 +52,12 @@ pub struct DecodedImage {
     /// [`Self::min_alpha`]): `max_alpha < cutoff` ⇔ "every texel below
     /// cutoff". `0` for an empty image — test [`Self::min_alpha`] first.
     pub max_alpha: u8,
+    /// Every mip level below [`Self::pixels`], when it was built where the
+    /// pixels were made ([`Self::with_mips`]) — the store's decode and
+    /// downsample tasks, off the frame thread — so an upload need not build it
+    /// there. `None` otherwise, including for a 1×1 image, which has no level
+    /// below it.
+    pub mips: Option<MipChain>,
 }
 
 /// The `(min, max)` alpha byte over tightly packed RGBA8 `pixels` — the
@@ -91,7 +99,17 @@ impl DecodedImage {
             aux,
             min_alpha,
             max_alpha,
+            mips: None,
         }
+    }
+
+    /// This image with its [mip chain](Self::mips) built — for the code that
+    /// makes pixels off the frame thread, so the frame that uploads them does
+    /// not have to.
+    #[must_use]
+    pub fn with_mips(mut self) -> Self {
+        self.mips = mip_chain(self.width, self.height, &self.pixels);
+        self
     }
 
     /// The number of bytes [`Self::pixels`] should contain for this geometry
@@ -212,7 +230,9 @@ pub fn decode_j2c(
         aux: None,
         min_alpha,
         max_alpha,
-    })
+        mips: None,
+    }
+    .with_mips())
 }
 
 /// Decodes a J2C with more than four components — a Second Life server "Sunshine"
@@ -284,7 +304,9 @@ fn decode_multicomponent(
         aux,
         min_alpha,
         max_alpha,
-    })
+        mips: None,
+    }
+    .with_mips())
 }
 
 /// Stub used when the `decode` feature is disabled: always fails so the rest of
@@ -417,7 +439,9 @@ pub fn downsample(image: &DecodedImage, target: DiscardLevel) -> DecodedImage {
         aux: aux.map(Bytes::from),
         min_alpha,
         max_alpha,
+        mips: None,
     }
+    .with_mips()
 }
 
 /// Reads one channel byte at `base + channel` of an RGBA8 buffer, treating an

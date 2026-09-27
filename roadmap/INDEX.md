@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 118 |
-| ready | 300 |
+| ready | 299 |
 | blocked | 62 |
 | in-progress | 25 |
-| bugs | 13 |
-| done | 1245 |
+| bugs | 14 |
+| done | 1246 |
 | deferred | 30 |
 | wont-do | 16 |
-| **total** | **1809** |
+| **total** | **1810** |
 
 ## ideas (118)
 
@@ -294,7 +294,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (300)
+## ready (299)
 
 ### protocol
 
@@ -910,8 +910,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-texture-drag-drop`](ready/viewer-texture-drag-drop.md) — Drag & drop
   a texture onto the build Texture tab / an object face (blocked by
   `viewer-prim-texture-editing` (done), `viewer-ui-texture-picker` (done))
-- [`viewer-texture-mip-chain-missing`](ready/viewer-texture-mip-chain-missing.md)
-  — Face textures are uploaded without a mip chain
 - [`viewer-texture-preview-floater`](ready/viewer-texture-preview-floater.md) —
   Texture preview floater — full reference feature set
 - [`viewer-texture-vram-budget`](ready/viewer-texture-vram-budget.md) — Texture
@@ -1271,7 +1269,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (13)
+## bugs (14)
 
 ### protocol
 
@@ -1300,6 +1298,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 - [`viewer-sliders-show-no-value`](bugs/viewer-sliders-show-no-value.md) — A
   slider shows no value, and no bounds or step either
+- [`viewer-texture-filtering-in-linear-space`](bugs/viewer-texture-filtering-in-linear-space.md)
+  — Colour textures are filtered after sRGB decoding, the reference before
 - [`viewer-vintage-radar-range-colours`](bugs/viewer-vintage-radar-range-colours.md)
   — The radar's range column is unreadable on a light list
 
@@ -1311,7 +1311,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1245)
+## done (1246)
 
 ### protocol
 
@@ -3107,6 +3107,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-texture-anisotropic-filtering-missing`](done/viewer-texture-anisotropic-filtering-missing.md)
   — A texture's level-of-detail change never reached the faces sampling it (seen
   as soft checker edges, blamed on anisotropy)
+- [`viewer-texture-mip-chain-missing`](done/viewer-texture-mip-chain-missing.md)
+  — Face textures are uploaded without a mip chain
 - [`viewer-texture-picker-inventory-tree`](done/viewer-texture-picker-inventory-tree.md)
   — Texture picker — inventory folder tree navigation (blocked by
   `viewer-ui-texture-picker` (done))

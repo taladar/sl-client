@@ -150,7 +150,7 @@ fn border_landmarks() -> Vec<Landmark> {
 }
 
 /// Every named scene, in the order the binary's help lists them.
-const ALL: [NamedScenario; 4] = [
+const ALL: [NamedScenario; 5] = [
     NamedScenario {
         name: "stock",
         summary: "the standard region: one region-wide parcel, one scripted box, \
@@ -178,6 +178,15 @@ const ALL: [NamedScenario; 4] = [
         pair: None,
     },
     NamedScenario {
+        name: "far-floor",
+        summary: "one 64 m fullbright black-and-white checker slab with quarter-metre \
+                  cells, to look along from its south edge — for how a viewer \
+                  samples a texture many texels to a pixel",
+        dress: far_floor,
+        landmarks: far_floor_landmarks,
+        pair: None,
+    },
+    NamedScenario {
         name: "border",
         summary: "one checkered marker pillar floating just inside the region's \
                   west edge, for looking at (and walking into) the region next \
@@ -191,6 +200,27 @@ const ALL: [NamedScenario; 4] = [
         }),
     },
 ];
+
+/// The far-floor scene: the region's content replaced by
+/// [`super::far_floor()`].
+fn far_floor(region: RegionConfig) -> RegionConfig {
+    super::far_floor().into_region(region)
+}
+
+/// Where a camera stands and what it looks at in the far-floor scene: the
+/// middle of the slab's south edge and of its north edge, on its top face.
+fn far_floor_landmarks() -> Vec<Landmark> {
+    vec![
+        Landmark {
+            name: "floor-near-edge".to_owned(),
+            position: super::far_floor::near_edge(),
+        },
+        Landmark {
+            name: "floor-far-edge".to_owned(),
+            position: super::far_floor::far_edge(),
+        },
+    ]
+}
 
 /// The stock scene: a region dressed with nothing, so it inherits the
 /// grid-wide [`Scenario::default`](crate::Scenario).
@@ -434,6 +464,15 @@ mod test {
             border.landmark("border-marker").map(|found| found.position),
             Some(super::super::border::marker_position()),
             "the border scene's landmark is not where its marker pillar is"
+        );
+        let far_floor =
+            scenario("far-floor").ok_or("the far-floor scene is not in the registry")?;
+        assert_eq!(
+            far_floor
+                .landmark("floor-far-edge")
+                .map(|found| found.position),
+            Some(super::super::far_floor::far_edge()),
+            "the far-floor scene's landmark is not on its slab's far edge"
         );
         let stock = scenario("stock").ok_or("the stock scene is not in the registry")?;
         assert_eq!(

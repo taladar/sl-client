@@ -141,15 +141,25 @@ teleport between the regions from its map — see below.
 ### Named scenarios
 
 `--scenario <name>` picks the scene every region shows, from the registry
-in `fixtures::scenarios`. Four exist today: `stock` (the default — one
+in `fixtures::scenarios`. Five exist today: `stock` (the default — one
 region-wide parcel, one scripted box, an arrival greeting), `catalogue`
 (the named prim catalogue: one prim per rendering feature, plus two NPCs
 — one standing, one sitting on a bench — with every asset they reference
 served — see below), `catalogue-eep` (the same catalogue under an **EEP**
 sky, `sl_test_assets::environment::eep_sky`, with the sun fixed in the
-south-east), and `border` (one checkered marker pillar floating just
-inside the region's west edge, which with two adjacent `--region`s is a
-scene for looking across — and walking over — a border).
+south-east), `far-floor` (one 64 m fullbright black-and-white checker
+slab with quarter-metre cells, landmarks `floor-near-edge` and
+`floor-far-edge`, for looking along at a grazing angle) and `border` (one
+checkered marker pillar floating just inside the region's west edge, which
+with two adjacent `--region`s is a scene for looking across — and walking
+over — a border).
+
+`far-floor` exists for texture **minification**. Every other scene frames
+its subject square on from a few metres, where a texture's full-resolution
+level is the right one to sample and every viewer agrees. Looking along the
+slab from its near edge, the far half is many texels to a pixel: a viewer
+with a mip chain draws it settling to the checker's grey, one without draws
+it as shimmering noise and moiré.
 
 `catalogue-eep` exists because every other fixture sky is a *classic* one
 — the reference decides `classic_mode` by whether a sky carries a
