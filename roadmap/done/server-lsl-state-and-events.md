@@ -2,7 +2,7 @@
 id: server-lsl-state-and-events
 title: The event and state machine — 35 events and the rules around them
 topic: server
-status: ready
+status: done
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 8
 blocked_by: [server-lsl-vm-execution]
@@ -58,3 +58,50 @@ timer and drop listens; an event with no handler in the current state
 never reaches the queue; `changed` fires with the right bit for each of
 at least five raisers; and a table test covers every one of the 35
 events' parameter shapes against the syntax document.
+
+## Done (2026-09-28)
+
+Module `sl_lsl_runtime::vm` again; the book chapter's "As built: events and
+states" is the full description. The rules, each with a test in
+`src/vm/tests.rs`:
+
+- Only the current state's handlers are offered events; `state_entry` and
+  `state_exit` cannot be posted.
+- The queue holds **64** events; a 65th is dropped (aditi: of 100 link
+  messages queued at once, 0–63 arrived).
+- **`timer` never stacks** (aditi: a 0.1 s timer that fell due twenty times
+  during a two-second sleep ran once), and waits its turn behind earlier
+  events. `llSetTimerEvent` is tick-counted; `Engine::tick` fires timers
+  first.
+- **A state change** runs `state_exit`, discards the queue (aditi: 100 queued
+  link messages and a timer all vanished across a `state` statement), calls
+  the new `Host::left_state` hook — the host drops listens and taken controls
+  there (aditi: a listen set in `default` heard nothing in the next state) —
+  and runs `state_entry`. **The timer survives** (aditi: set in `default`, it
+  fired in `two`), contrary to this task's first draft; a reset stops it.
+- **The detected block** travels with the event (`Engine::post_detected`,
+  sixteen `llDetected*` implemented) and **any other event clears it** (aditi:
+  a `timer` right after a touch read nothing — the quirk this task expected
+  is not Second Life's). Past the block every function reads its type's zero,
+  `llDetectedName` the `NULL_KEY` string, the face 0.
+- **Touches, collisions and `changed` coalesce** under a region-wide
+  `Coalescing` policy — `Reference` (the default), `Never`, `WhileQueued` — so
+  a content test can force the most split and the most merged arrival a
+  script may meet (the user's request: on the grid the grouping is frame
+  timing no script controls). `Reference` is measured on aditi: one tick's
+  raises merge, and a later `changed` joins the newest queued `changed`
+  unless that one is next in line (four spaced changes made while the script
+  was busy arrived as `8` then `10`, four runs of four; made while it was
+  idle, twenty changes arrived as twenty events). `changed` is raised through
+  the one fan-in, `Engine::changed(id, bits)`. Also seen: a scripted
+  `llSetTexture` raises **no** `CHANGED_TEXTURE` — for whichever grid task
+  raises it.
+- **`on_rez`**: `Engine::rez(id, start_parameter)`; `llGetStartParameter`
+  answers it and a reset keeps it.
+- A table test posts every one of the table's 36 postable events with sample
+  parameters to a compiled handler and checks it printed them.
+
+Scope note: the acceptance's "`changed` fires with the right bit for each of
+at least five raisers" is met at the fan-in — six `CHANGED_*` bits through
+`Engine::changed` — because the raisers (inventory, link, colour, owner, …)
+are grid-side; they are [[server-world-changed-raisers]], filed for it.

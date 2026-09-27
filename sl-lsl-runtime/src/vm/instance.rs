@@ -13,7 +13,8 @@ use crate::bytecode::{Body, CodeOffset, Component, FunctionId, Instr, Program, S
 use crate::library::{self, Event};
 use crate::num::ticks_for;
 use crate::value::{Element, Value};
-use crate::vm::context::{Request, ScriptCtx, Tick};
+use crate::vm::context::{Request, ScriptCtx, ScriptData, Tick};
+use crate::vm::detected::{Detected, MAX_DETECTED, is_detection_event};
 use crate::vm::fault::{Fault, RuntimeError};
 use crate::vm::host::{CallerId, Host};
 
@@ -48,6 +49,81 @@ pub const BACKWARD_JUMP_COST: u32 = 512;
 /// `server-lsl-memory-and-limits` is what will stop it at the reference's
 /// exact depth.
 pub const MAX_CALL_DEPTH: usize = 4096;
+
+/// The most events a script's queue holds; one posted past it is dropped.
+/// Second Life's documented limit.
+pub const MAX_QUEUED: usize = 64;
+
+/// The detection events that coalesce: posted again in the tick an earlier
+/// one of the same event is still queued in, they merge into it — the
+/// detected lists joined, up to [`MAX_DETECTED`] — rather than queue a
+/// second event, so every avatar touching in one frame arrives as one
+/// `touch_start` with a count. A sensor sweep is one event already.
+const COALESCING: [&str; 6] = [
+    "collision",
+    "collision_end",
+    "collision_start",
+    "touch",
+    "touch_end",
+    "touch_start",
+];
+
+/// Which queued event a coalescing event — a touch, a collision, a `changed`
+/// — may merge into.
+///
+/// On the grid it is frame timing that decides whether two changes or two
+/// touches arrive as one event or two, and a script cannot choose; so a
+/// script has to handle both shapes, and a test has to be able to force
+/// each. [`Self::Reference`] is Second Life's behaviour and the default;
+/// the other two are the extremes a script may meet, for a content test to
+/// run a scenario under both and check it copes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Coalescing {
+    /// Second Life's rule, measured on aditi (2026-09-28). Everything raised
+    /// in one tick merges — the grid gathers one frame's changes and
+    /// touches into one event. A `changed` raised later also merges into the
+    /// newest `changed` still queued, **unless that one is next in line**:
+    /// four changes a fifth of a second apart, made while the script was
+    /// busy, arrived as the first alone and the other three as one, every
+    /// time. Touches and collisions merge within the tick only; nothing
+    /// measured them further.
+    #[default]
+    Reference,
+    /// Never merge: every raise is an event of its own, the most split-up
+    /// arrival a script can see.
+    Never,
+    /// Merge into the same event while it is still queued, whatever tick it
+    /// was raised in — the most merged arrival a script can see.
+    WhileQueued,
+}
+
+impl Coalescing {
+    /// Whether an event posted at `now` may merge into one posted at
+    /// `queued`; `behind_head` says the queued one is not next in line and
+    /// its kind follows the reference's queue rule (only `changed` does).
+    const fn merges(self, queued: Tick, now: Tick, behind_head: bool) -> bool {
+        match self {
+            Self::Reference => queued.0 == now.0 || behind_head,
+            Self::Never => false,
+            Self::WhileQueued => true,
+        }
+    }
+}
+
+/// When an event is posted and how it may merge: the tick, and the region's
+/// [`Coalescing`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Arrival {
+    /// The tick the event is posted in.
+    pub tick: Tick,
+    /// Which queued event it may merge into.
+    pub coalescing: Coalescing,
+}
+
+/// The events that never stack: one already queued, a second is dropped. A
+/// timer that falls due while its last event is still waiting fires once,
+/// not twice.
+const NON_STACKING: [&str; 1] = ["timer"];
 
 /// What one call of [`Instance::run_slice`] ended with.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -98,6 +174,14 @@ pub enum Posted {
     /// Dropped: the script is not running. A stopped script receives no
     /// events at all.
     Stopped,
+    /// Merged into the same event already queued this tick: a touch's or
+    /// collision's detected list grew, or a `changed`'s bits were OR-ed in,
+    /// instead of a second event queuing.
+    Merged,
+    /// Dropped: an event of a kind that never stacks is already queued.
+    AlreadyQueued,
+    /// Dropped: the queue holds [`MAX_QUEUED`] events already.
+    QueueFull,
 }
 
 /// A posted event whose arguments do not match the event's parameters — a
@@ -112,6 +196,23 @@ pub enum PostError {
         /// The number of parameters it has.
         expected: usize,
         /// The number of arguments posted.
+        found: usize,
+    },
+    /// `state_entry` and `state_exit` are the VM's own, run on a state
+    /// change; nothing posts them.
+    #[error("`{0}` is raised by a state change, not posted")]
+    Transition(&'static str),
+    /// A detection event posted without its detected block, or an event
+    /// without one posted with one
+    /// ([`Instance::post_detected`] is for the first kind only).
+    #[error("`{0}` carries a detected block exactly when it is a detection event")]
+    Detection(&'static str),
+    /// A detected block that is empty or longer than [`MAX_DETECTED`].
+    #[error("`{event}` needs 1 to 16 detections, got {found}")]
+    DetectedCount {
+        /// The event.
+        event: &'static str,
+        /// How many were posted.
         found: usize,
     },
     /// An argument of the wrong type.
@@ -184,10 +285,16 @@ struct Activity {
 /// An event waiting for its handler.
 #[derive(Debug, Clone)]
 struct Queued {
+    /// The event.
+    event: &'static Event,
     /// The handler's index in the current state.
     handler: usize,
     /// The arguments, already checked against the event's parameters.
     args: Vec<Value>,
+    /// The detected block, for a detection event.
+    detected: Option<Vec<Detected>>,
+    /// The tick it was posted in, which decides whether a later one merges.
+    posted: Tick,
 }
 
 /// What executing one instruction leads to.
@@ -228,6 +335,9 @@ pub struct Instance {
     pending_state: Option<StateId>,
     /// The first tick the script may run again.
     wake: Tick,
+    /// What the library may read and write: the detected block, the timer
+    /// and the start parameter.
+    data: ScriptData,
 }
 
 /// The body a [`BodyRef`] names.
@@ -376,8 +486,12 @@ struct Machine<'run> {
     caller: CallerId,
     /// The current tick.
     now: Tick,
+    /// The length of a tick.
+    step: Duration,
     /// The world.
     host: &'run mut dyn Host,
+    /// The library-visible state.
+    data: &'run mut ScriptData,
 }
 
 impl Machine<'_> {
@@ -490,7 +604,13 @@ impl Machine<'_> {
                 let descriptor = id.descriptor();
                 let args = pop_n(stack, descriptor.args.len())?;
                 *used = used.saturating_add(BUILTIN_CALL_COST);
-                let mut ctx = ScriptCtx::new(self.caller, self.now, &mut *self.host);
+                let mut ctx = ScriptCtx::new(
+                    self.caller,
+                    self.now,
+                    self.step,
+                    &mut *self.host,
+                    &mut *self.data,
+                );
                 let called = library::call(id, &mut ctx, args)?;
                 let request = ctx.take_request();
                 if called.stubbed {
@@ -599,6 +719,7 @@ impl Instance {
             activity: None,
             pending_state: None,
             wake: Tick::default(),
+            data: ScriptData::default(),
         };
         instance.reset();
         instance
@@ -679,8 +800,13 @@ impl Instance {
     /// initialisers to run again, the call and operand stacks, the event queue
     /// and any requested state change dropped, any sleep cancelled, and the
     /// state back to `default`, whose `state_entry` runs after the
-    /// initialisers. The run flag is left as it is.
+    /// initialisers. The timer is stopped and the detected block cleared; the
+    /// run flag and the start parameter are left as they are.
     pub fn reset(&mut self) {
+        self.data = ScriptData {
+            start_parameter: self.data.start_parameter,
+            ..ScriptData::default()
+        };
         self.globals = self
             .program
             .globals
@@ -708,12 +834,64 @@ impl Instance {
         });
     }
 
-    /// Offer the script an event.
+    /// Offer the script an event with no detected block.
     ///
     /// # Errors
     ///
-    /// [`PostError`] when `args` does not match the event's parameters.
-    pub fn post(&mut self, event: &'static Event, args: Vec<Value>) -> Result<Posted, PostError> {
+    /// [`PostError`] when `args` does not match the event's parameters, when
+    /// the event is a detection event (post those with
+    /// [`Self::post_detected`]), or when it is `state_entry` or `state_exit`.
+    pub fn post(
+        &mut self,
+        arrival: Arrival,
+        event: &'static Event,
+        args: Vec<Value>,
+    ) -> Result<Posted, PostError> {
+        if is_detection_event(event.name) {
+            return Err(PostError::Detection(event.name));
+        }
+        self.enqueue(arrival, event, args, None)
+    }
+
+    /// Offer the script a detection event — a touch, a collision, a sensor
+    /// sweep — with who or what was detected. The event's one parameter, how
+    /// many were detected, is the block's length.
+    ///
+    /// # Errors
+    ///
+    /// [`PostError`] when `event` is not a detection event, or `detected` is
+    /// empty or longer than [`MAX_DETECTED`].
+    pub fn post_detected(
+        &mut self,
+        arrival: Arrival,
+        event: &'static Event,
+        detected: Vec<Detected>,
+    ) -> Result<Posted, PostError> {
+        if !is_detection_event(event.name) {
+            return Err(PostError::Detection(event.name));
+        }
+        if detected.is_empty() || detected.len() > MAX_DETECTED {
+            return Err(PostError::DetectedCount {
+                event: event.name,
+                found: detected.len(),
+            });
+        }
+        let count = Value::Integer(i32::try_from(detected.len()).unwrap_or(i32::MAX));
+        self.enqueue(arrival, event, vec![count], Some(detected))
+    }
+
+    /// Check an event against its parameters and the queue's rules, and
+    /// queue it.
+    fn enqueue(
+        &mut self,
+        arrival: Arrival,
+        event: &'static Event,
+        args: Vec<Value>,
+        detected: Option<Vec<Detected>>,
+    ) -> Result<Posted, PostError> {
+        if matches!(event.name, "state_entry" | "state_exit") {
+            return Err(PostError::Transition(event.name));
+        }
         if args.len() != event.args.len() {
             return Err(PostError::Arity {
                 event: event.name,
@@ -737,8 +915,92 @@ impl Instance {
         let Some(handler) = handler_index(&self.program, self.state, event.name) else {
             return Ok(Posted::NoHandler);
         };
-        self.queue.push_back(Queued { handler, args });
+        if NON_STACKING.contains(&event.name)
+            && self
+                .queue
+                .iter()
+                .any(|queued| queued.event.name == event.name)
+        {
+            return Ok(Posted::AlreadyQueued);
+        }
+        if COALESCING.contains(&event.name)
+            && let Some(detected) = &detected
+            && let Some(queued) = self.queue.iter_mut().find(|queued| {
+                queued.event.name == event.name
+                    && arrival
+                        .coalescing
+                        .merges(queued.posted, arrival.tick, false)
+            })
+            && let Some(block) = queued.detected.as_mut()
+        {
+            for detection in detected {
+                if block.len() < MAX_DETECTED
+                    && !block.iter().any(|known| known.key == detection.key)
+                {
+                    block.push(detection.clone());
+                }
+            }
+            queued.args = vec![Value::Integer(
+                i32::try_from(block.len()).unwrap_or(i32::MAX),
+            )];
+            return Ok(Posted::Merged);
+        }
+        if event.name == "changed"
+            && let [Value::Integer(bits)] = args.as_slice()
+            && let Some(newest) = self
+                .queue
+                .iter()
+                .rposition(|queued| queued.event.name == "changed")
+            && let Some(queued) = self.queue.get_mut(newest)
+            && arrival
+                .coalescing
+                .merges(queued.posted, arrival.tick, newest > 0)
+            && let Some(Value::Integer(queued_bits)) = queued.args.first_mut()
+        {
+            *queued_bits |= *bits;
+            return Ok(Posted::Merged);
+        }
+        if self.queue.len() >= MAX_QUEUED {
+            return Ok(Posted::QueueFull);
+        }
+        self.queue.push_back(Queued {
+            event,
+            handler,
+            args,
+            detected,
+            posted: arrival.tick,
+        });
         Ok(Posted::Queued)
+    }
+
+    /// The start parameter, `llGetStartParameter`.
+    #[must_use]
+    pub const fn start_parameter(&self) -> i32 {
+        self.data.start_parameter
+    }
+
+    /// Set the start parameter — what the object was rezzed with, before its
+    /// `on_rez` is posted.
+    pub const fn set_start_parameter(&mut self, start_parameter: i32) {
+        self.data.start_parameter = start_parameter;
+    }
+
+    /// Whether a timer is set.
+    #[must_use]
+    pub const fn has_timer(&self) -> bool {
+        self.data.timer.is_some()
+    }
+
+    /// If the timer is due at `now`, schedule the next one and say so; the
+    /// caller posts the `timer` event.
+    pub(crate) fn timer_due(&mut self, now: Tick) -> bool {
+        match self.data.timer.as_mut() {
+            Some(timer) if timer.next <= now => {
+                timer.next = now.after(timer.interval);
+                true
+            }
+            Some(_) | None => false,
+        }
     }
 
     /// Run at most `budget` instructions at tick `now`, stopping early at the
@@ -779,11 +1041,13 @@ impl Instance {
                 pending_state: &mut self.pending_state,
                 caller,
                 now,
+                step,
                 host: &mut *host,
+                data: &mut self.data,
             };
             let outcome = match machine.step(&mut used) {
                 Ok(Flow::Next) => continue,
-                Ok(Flow::BodyDone) => self.finish_body(),
+                Ok(Flow::BodyDone) => self.finish_body(caller, host),
                 Ok(Flow::Sleep(seconds)) => {
                     let ticks = ticks_for(seconds, step);
                     if ticks == 0 {
@@ -824,9 +1088,18 @@ impl Instance {
 
     /// Start the handler of the oldest queued event, if there is one.
     fn start_next_event(&mut self) -> Result<(), RuntimeError> {
-        let Some(Queued { handler, args }) = self.queue.pop_front() else {
+        let Some(Queued {
+            handler,
+            args,
+            detected,
+            ..
+        }) = self.queue.pop_front()
+        else {
             return Ok(());
         };
+        // An event with no detected block clears the last one: a `timer`
+        // after a touch reads nothing (aditi, 2026-09-28).
+        self.data.detected = detected.unwrap_or_default();
         let body = BodyRef::Handler {
             state: self.state,
             index: handler,
@@ -851,20 +1124,25 @@ impl Instance {
                 stack: Vec::new(),
             });
         let is_started = started.is_some();
+        if is_started {
+            self.data.detected.clear();
+        }
         self.activity = started;
         is_started
     }
 
-    /// Move to `target`: the queue is discarded and `state_entry` is next.
-    fn switch_to(&mut self, target: StateId) -> Outcome {
+    /// Move to `target`: the queue is discarded, the host drops what the old
+    /// state held (listens, taken controls), and `state_entry` is next.
+    fn switch_to(&mut self, target: StateId, caller: CallerId, host: &mut dyn Host) -> Outcome {
         self.state = target;
         self.queue.clear();
+        host.left_state(caller);
         let _entered = self.start_transition_handler(target, "state_entry", Phase::Entry);
         Outcome::StateChanged(target)
     }
 
     /// The bottom body returned: decide what runs next.
-    fn finish_body(&mut self) -> Outcome {
+    fn finish_body(&mut self, caller: CallerId, host: &mut dyn Host) -> Outcome {
         let Some(finished) = self.activity.take() else {
             return Outcome::Finished;
         };
@@ -881,7 +1159,7 @@ impl Instance {
                     {
                         Outcome::Finished
                     } else {
-                        self.switch_to(target)
+                        self.switch_to(target, caller, host)
                     }
                 }
                 Some(_) | None => Outcome::Finished,
@@ -890,7 +1168,7 @@ impl Instance {
             // transition already under way wins.
             Phase::Exit(target) => {
                 self.pending_state = None;
-                self.switch_to(target)
+                self.switch_to(target, caller, host)
             }
         }
     }

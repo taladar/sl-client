@@ -27,6 +27,7 @@
 //! not depend on the machine it runs on.
 
 mod context;
+mod detected;
 mod engine;
 mod fault;
 mod host;
@@ -34,13 +35,16 @@ mod instance;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+pub(crate) use context::ScriptData;
 pub use context::{ScriptCtx, Tick};
+pub use detected::{DETECTION_EVENTS, Detected, MAX_DETECTED, Touch, is_detection_event};
 pub use engine::{
     Engine, EngineConfig, REGION_SCRIPT_SHARES, SCRIPT_INSTRUCTIONS_PER_SECOND, TickReport,
 };
 pub use fault::{Fault, RuntimeError};
 pub use host::{CallerId, Host};
 pub use instance::{
-    BACKWARD_JUMP_COST, BUILTIN_CALL_COST, Instance, MAX_CALL_DEPTH, Outcome, PostError, Posted,
-    Slice,
+    Arrival, BACKWARD_JUMP_COST, BUILTIN_CALL_COST, Coalescing, Instance, MAX_CALL_DEPTH,
+    MAX_QUEUED, Outcome, PostError, Posted, Slice,
 };

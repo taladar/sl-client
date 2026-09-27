@@ -31,4 +31,10 @@ pub trait Host {
     /// says so, once or every time, so nobody mistakes the default for the
     /// function's real answer.
     fn stubbed(&mut self, caller: CallerId, id: BuiltinId);
+
+    /// The script left a state: whatever the host holds for it that a state
+    /// change releases goes now — its listens (`llListen`) and the controls
+    /// it took (`llTakeControls`). Called after the old state's `state_exit`
+    /// and before the new one's `state_entry`.
+    fn left_state(&mut self, caller: CallerId);
 }

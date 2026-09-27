@@ -351,6 +351,65 @@ scripts-run percentage.
   simulator's log, where no resident sees it, so a host logs it and never
   turns it into chat. It is also what the VM's own tests observe.
 
+### As built: events and states
+
+`server-lsl-state-and-events`. The rules around the queue are as
+observable as the handlers, so each is a named rule with a test.
+
+- **Only the current state's handlers are offered events.** `post` drops an
+  event the current state does not handle (`Posted::NoHandler`) instead of
+  queueing it, so it cannot fire after a later state change. `state_entry`
+  and `state_exit` are the VM's own and cannot be posted.
+- **The queue holds `MAX_QUEUED` (64) events**; one more is dropped
+  (`Posted::QueueFull`).
+- **A timer never stacks.** `llSetTimerEvent` is counted in ticks, rounded
+  up and at least one; `Engine::tick` posts `timer` first when it falls due,
+  and a `timer` already waiting in the queue absorbs the next
+  (`Posted::AlreadyQueued`). A reset stops it; a state change does not.
+- **Touches and collisions coalesce per tick** (under the `Reference`
+  policy below). A detection event posted in the same tick as a queued one of
+  the same kind merges into it
+  (`Posted::Merged`): the detected lists join, without repeating a key, up to
+  `MAX_DETECTED` (16), and the count parameter follows. So everyone who
+  touched in one frame arrives as one `touch_start` with a count, as on the
+  grid; a touch in the next tick is an event of its own.
+- **The detected block travels with the event.** A host posts a detection
+  event (`touch*`, `collision*`, `sensor`) with `post_detected` and a list of
+  `Detected` records, and the count parameter is the list's length. The block
+  becomes current when the handler starts, and any other event clears it: a
+  `timer` right after a touch reads nothing (aditi, 2026-09-28 — the quirk
+  the roadmap once expected, the old block staying visible, is not Second
+  Life's). Past the end of the block every `llDetected*` reads its type's
+  zero — `NULL_KEY`, `0`, `ZERO_VECTOR`, `ZERO_ROTATION` — except
+  `llDetectedName`, which reads the `NULL_KEY` *string*; the touch face and
+  coordinates read zero too, not the `TOUCH_INVALID_*` markers a real touch
+  without surface information carries.
+- **A state change** runs the old state's `state_exit`, discards the queue,
+  calls `Host::left_state` — where the host drops the script's listens and
+  taken controls — and runs the new state's `state_entry`.
+- **`changed`** is raised through one function, `Engine::changed(id,
+  bits)`, which every raiser calls with the `CHANGED_*` bits of what
+  happened.
+- **Merging is a policy**, `EngineConfig::coalescing`, because on the grid
+  whether two changes or two touches arrive as one event is frame timing no
+  script controls, so a script must cope with both shapes and a test must be
+  able to force each. `Reference`, the default, is Second Life's rule as
+  measured on aditi: everything raised in one tick merges, and a `changed`
+  raised later joins the newest `changed` still queued **unless that one is
+  next in line** — four changes a fifth of a second apart, made while the
+  script was busy, arrived as the first alone and the rest as one, four runs
+  out of four, while changes made with the script idle arrive one event
+  each. `Never` makes every raise its own event and `WhileQueued` merges into
+  anything still queued: the most split and the most merged arrivals, for a
+  content test to run a scenario under both.
+- **`on_rez`**: `Engine::rez(id, start_parameter)` sets what
+  `llGetStartParameter` answers and raises `on_rez`. The start parameter
+  survives a reset.
+
+A table test posts every event of the table but the two transitions, with a
+sample value per parameter, to a handler compiled for it, and checks the
+handler printed exactly those values.
+
 ## 4. The library: one table, typed functions, an erased dispatch
 
 About 425 `ll*` functions, written over many tasks. The failure mode is

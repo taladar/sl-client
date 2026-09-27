@@ -11,6 +11,8 @@ use pretty_assertions::assert_eq;
 use super::*;
 use crate::bytecode::{Position, StateId};
 use crate::compile;
+use sl_lsl::ast::TypeName;
+
 use crate::library::{BuiltinId, Event, event};
 use crate::value::Value;
 
@@ -26,6 +28,8 @@ struct Recorder {
     printed: Vec<(u64, CallerId, String)>,
     /// Stub notices.
     stubbed: Vec<(CallerId, BuiltinId)>,
+    /// `(tick, caller)` per state left.
+    left: Vec<(u64, CallerId)>,
 }
 
 impl Host for Recorder {
@@ -35,6 +39,10 @@ impl Host for Recorder {
 
     fn stubbed(&mut self, caller: CallerId, id: BuiltinId) {
         self.stubbed.push((caller, id));
+    }
+
+    fn left_state(&mut self, caller: CallerId) {
+        self.left.push((self.now, caller));
     }
 }
 
@@ -231,7 +239,7 @@ fn a_stopped_script_keeps_its_globals_and_resumes_where_it_was() -> Result<(), S
         .set_running(false);
     let touch = named("touch_start")?;
     assert_eq!(
-        engine.post(A, touch, vec![Value::Integer(1)]),
+        engine.post_detected(A, touch, vec![toucher("a")]),
         Ok(Some(Posted::Stopped))
     );
     let reports = run(&mut engine, &mut host, 5);
@@ -358,19 +366,19 @@ fn a_reset_restarts_the_initialisers_and_drops_the_queue() -> Result<(), String>
                     llResetScript();
                     print(\"unreached\");
                 }
+                changed(integer change) { print(\"stale change\"); }
             }",
         )?,
     );
     let _reports = run(&mut engine, &mut host, 1);
     let touch = named("touch_start")?;
-    for _ in 0..2 {
-        assert_eq!(
-            engine.post(A, touch, vec![Value::Integer(1)]),
-            Ok(Some(Posted::Queued))
-        );
-    }
+    assert_eq!(
+        engine.post_detected(A, touch, vec![toucher("a")]),
+        Ok(Some(Posted::Queued))
+    );
+    assert_eq!(engine.changed(A, 1), Ok(Some(Posted::Queued)));
     let reports = run(&mut engine, &mut host, 2);
-    // One touch runs and resets; the second, queued behind it, is dropped
+    // The touch runs and resets; the change, queued behind it, is dropped
     // with the queue; the initialisers put `g` back to 5.
     assert_eq!(host.texts(A), vec!["5", "touch 7", "5"]);
     assert_eq!(
@@ -406,7 +414,7 @@ fn a_state_change_runs_exit_then_entry_and_discards_the_queue() -> Result<(), St
     let _reports = run(&mut engine, &mut host, 1);
     let touch = named("touch_start")?;
     for _ in 0..2 {
-        let _posted = engine.post(A, touch, vec![Value::Integer(1)]);
+        let _posted = engine.post_detected(A, touch, vec![toucher("a")]);
     }
     let reports = run(&mut engine, &mut host, 2);
     // The function's `state` yields 0 and the handler carries on; the
@@ -442,27 +450,37 @@ fn events_reach_only_a_handler_of_the_current_state() -> Result<(), String> {
     );
     let touch = named("touch_start")?;
     let timer = named("timer")?;
+    let link = named("link_message")?;
     assert_eq!(
-        engine.post(A, touch, vec![Value::Integer(3)]),
+        engine.post_detected(A, touch, vec![toucher("a"), toucher("b"), toucher("c")]),
         Ok(Some(Posted::Queued))
     );
     assert_eq!(engine.post(A, timer, vec![]), Ok(Some(Posted::NoHandler)));
     assert_eq!(engine.post(B, timer, vec![]), Ok(None));
     assert_eq!(
-        engine.post(A, touch, vec![]),
+        engine.post(A, link, vec![]),
         Err(PostError::Arity {
-            event: "touch_start",
-            expected: 1,
+            event: "link_message",
+            expected: 4,
             found: 0,
         })
     );
     assert_eq!(
-        engine.post(A, touch, vec![Value::Float(1.0)]),
+        engine.post(
+            A,
+            link,
+            vec![
+                Value::Float(1.0),
+                Value::Integer(0),
+                Value::String(String::new()),
+                Value::Key(String::new()),
+            ]
+        ),
         Err(PostError::Argument {
-            event: "touch_start",
+            event: "link_message",
             index: 0,
-            expected: sl_lsl::ast::TypeName::Integer,
-            found: sl_lsl::ast::TypeName::Float,
+            expected: TypeName::Integer,
+            found: TypeName::Float,
         })
     );
     let _reports = run(&mut engine, &mut host, 1);
@@ -604,5 +622,495 @@ fn a_restart_before_the_sleep_ends_still_waits_it_out() -> Result<(), String> {
         .set_running(true);
     let _reports = run(&mut engine, &mut host, 30);
     assert_eq!(host.from(A), vec![(1, "sleep"), (51, "woke")]);
+    Ok(())
+}
+
+/// A touch by `name`, keyed after it.
+fn toucher(name: &str) -> Detected {
+    Detected {
+        key: format!("{name:0>8}-0000-0000-0000-000000000000"),
+        name: name.to_owned(),
+        kind: 1,
+        touch: Touch {
+            face: 2,
+            ..Touch::INVALID
+        },
+        ..Detected::blank()
+    }
+}
+
+#[test]
+fn the_queue_holds_sixty_four_events_and_drops_the_rest() -> Result<(), String> {
+    let mut engine = engine();
+    let _none = engine.add(
+        A,
+        program(
+            "default { link_message(integer sender, integer number, string text, key id) { } }",
+        )?,
+    );
+    let link = named("link_message")?;
+    let args = || {
+        vec![
+            Value::Integer(1),
+            Value::Integer(0),
+            Value::String(String::new()),
+            Value::Key(String::new()),
+        ]
+    };
+    let posted: Vec<Posted> =
+        core::iter::repeat_with(|| engine.post(A, link, args()).ok().flatten())
+            .take(70)
+            .collect::<Option<_>>()
+            .ok_or("a post failed")?;
+    assert_eq!(
+        posted.iter().filter(|p| **p == Posted::Queued).count(),
+        MAX_QUEUED
+    );
+    assert_eq!(posted.last(), Some(&Posted::QueueFull));
+    assert_eq!(engine.instance(A).map(Instance::queued), Some(MAX_QUEUED));
+    Ok(())
+}
+
+#[test]
+fn a_timer_repeats_on_its_ticks_and_never_stacks() -> Result<(), String> {
+    let mut engine = engine();
+    let mut host = Recorder::default();
+    let _none = engine.add(
+        A,
+        program(
+            r#"integer n;
+            default {
+                state_entry() { llSetTimerEvent(0.3); }
+                timer() {
+                    ++n;
+                    print("timer " + (string)n);
+                    if (n == 2) llSleep(1.0);
+                    if (n == 3) llSetTimerEvent(0.0);
+                }
+            }"#,
+        )?,
+    );
+    let _reports = run(&mut engine, &mut host, 40);
+    // Due at 4 and 7; the second handler sleeps ten ticks, through three
+    // more due ticks (10, 13, 16), which queue one event, not three. That one
+    // runs when the sleep ends, at 17, and stops the timer.
+    assert_eq!(
+        host.from(A),
+        vec![(4, "timer 1"), (7, "timer 2"), (17, "timer 3")]
+    );
+    assert_eq!(engine.instance(A).map(Instance::has_timer), Some(false));
+    Ok(())
+}
+
+#[test]
+fn a_state_change_releases_the_hosts_hold_and_discards_the_queue() -> Result<(), String> {
+    let mut engine = engine();
+    let mut host = Recorder::default();
+    let _none = engine.add(
+        A,
+        program(
+            r#"default {
+                state_entry() { llSetTimerEvent(0.5); }
+                touch_start(integer n) { state two; }
+                link_message(integer sender, integer number, string text, key id) {
+                    print("stale link message");
+                }
+            }
+            state two {
+                timer() { print("timer in two"); llSetTimerEvent(0.0); }
+            }"#,
+        )?,
+    );
+    let _reports = run(&mut engine, &mut host, 1);
+    let touch = named("touch_start")?;
+    let link = named("link_message")?;
+    assert_eq!(
+        engine.post_detected(A, touch, vec![toucher("a")]),
+        Ok(Some(Posted::Queued))
+    );
+    assert_eq!(
+        engine.post(
+            A,
+            link,
+            vec![
+                Value::Integer(1),
+                Value::Integer(0),
+                Value::String(String::new()),
+                Value::Key(String::new()),
+            ]
+        ),
+        Ok(Some(Posted::Queued))
+    );
+    let _reports = run(&mut engine, &mut host, 10);
+    // The link message queued behind the touch is gone with the state; the
+    // host was told once; the timer set in `default` carries on in `two`.
+    assert_eq!(host.from(A), vec![(6, "timer in two")]);
+    assert_eq!(host.left, vec![(2, A)]);
+    Ok(())
+}
+
+#[test]
+fn detected_functions_read_the_block_of_the_event_being_handled_and_only_it() -> Result<(), String>
+{
+    let mut engine = engine();
+    let mut host = Recorder::default();
+    let _none = engine.add(
+        A,
+        program(
+            r#"string who(integer i) {
+                return llDetectedName(i) + "/" + (string)llDetectedType(i) + "/"
+                    + (string)llDetectedTouchFace(i) + "/" + (string)llDetectedKey(i);
+            }
+            default {
+                touch_start(integer n) {
+                    print((string)n + " " + who(0) + " " + who(1) + " " + who(2));
+                    llSetTimerEvent(0.1);
+                }
+                timer() { llSetTimerEvent(0.0); print("timer " + who(0)); }
+            }"#,
+        )?,
+    );
+    let touch = named("touch_start")?;
+    assert_eq!(
+        engine.post_detected(A, touch, vec![toucher("a")]),
+        Ok(Some(Posted::Queued))
+    );
+    // A second toucher in the same tick joins the queued event.
+    assert_eq!(
+        engine.post_detected(A, touch, vec![toucher("b"), toucher("a")]),
+        Ok(Some(Posted::Merged))
+    );
+    let _reports = run(&mut engine, &mut host, 3);
+    let a = "0000000a-0000-0000-0000-000000000000";
+    let b = "0000000b-0000-0000-0000-000000000000";
+    // Past the block, and in an event without one, everything reads zero —
+    // the name as the `NULL_KEY` string, the face as 0 (aditi, 2026-09-28).
+    let null = crate::value::NULL_KEY;
+    assert_eq!(
+        host.texts(A),
+        vec![
+            format!("2 a/1/2/{a} b/1/2/{b} {null}/0/0/{null}").as_str(),
+            format!("timer {null}/0/0/{null}").as_str(),
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn touches_in_different_ticks_are_separate_events() -> Result<(), String> {
+    let mut engine = engine();
+    let mut host = Recorder::default();
+    let _none = engine.add(
+        A,
+        program("default { touch_start(integer n) { print((string)n); llSleep(0.5); } }")?,
+    );
+    let touch = named("touch_start")?;
+    assert_eq!(
+        engine.post_detected(A, touch, vec![toucher("a")]),
+        Ok(Some(Posted::Queued))
+    );
+    let _reports = run(&mut engine, &mut host, 1);
+    for name in ["b", "c"] {
+        assert_eq!(
+            engine.post_detected(A, touch, vec![toucher(name)]),
+            Ok(Some(Posted::Queued))
+        );
+        let _reports = run(&mut engine, &mut host, 1);
+    }
+    let _reports = run(&mut engine, &mut host, 20);
+    assert_eq!(host.texts(A), vec!["1", "1", "1"]);
+    assert_eq!(
+        engine.post(A, touch, vec![Value::Integer(1)]),
+        Err(PostError::Detection("touch_start"))
+    );
+    assert_eq!(
+        engine.post_detected(A, touch, Vec::new()),
+        Err(PostError::DetectedCount {
+            event: "touch_start",
+            found: 0,
+        })
+    );
+    assert_eq!(
+        engine.post(A, named("state_entry")?, Vec::new()),
+        Err(PostError::Transition("state_entry"))
+    );
+    Ok(())
+}
+
+#[test]
+fn changed_carries_the_bits_of_whatever_raised_it() -> Result<(), String> {
+    let mut engine = engine();
+    let mut host = Recorder::default();
+    let _none = engine.add(
+        A,
+        program("default { changed(integer change) { print((string)change); } }")?,
+    );
+    let bit = |name: &str| match crate::library::constant(name).map(|c| c.value.to_value()) {
+        Some(Value::Integer(bit)) => Ok(bit),
+        _ => Err(format!("no constant {name}")),
+    };
+    let raised = [
+        "CHANGED_INVENTORY",
+        "CHANGED_COLOR",
+        "CHANGED_SCALE",
+        "CHANGED_LINK",
+        "CHANGED_OWNER",
+        "CHANGED_REGION_START",
+    ];
+    for (index, name) in raised.into_iter().enumerate() {
+        let expected = if index == 0 {
+            Posted::Queued
+        } else {
+            Posted::Merged
+        };
+        assert_eq!(engine.changed(A, bit(name)?), Ok(Some(expected)));
+    }
+    let _reports = run(&mut engine, &mut host, 1);
+    // One tick's changes are one event with every bit.
+    assert_eq!(host.texts(A), vec!["1195"]);
+    // Changes a tick apart are events of their own.
+    for name in ["CHANGED_TEXTURE", "CHANGED_SHAPE"] {
+        assert_eq!(engine.changed(A, bit(name)?), Ok(Some(Posted::Queued)));
+        let _reports = run(&mut engine, &mut host, 1);
+    }
+    assert_eq!(host.texts(A), vec!["1195", "16", "4"]);
+    Ok(())
+}
+
+#[test]
+fn on_rez_brings_the_start_parameter_and_a_reset_keeps_it() -> Result<(), String> {
+    let mut engine = engine();
+    let mut host = Recorder::default();
+    let _none = engine.add(
+        A,
+        program(
+            r#"integer resets;
+            default {
+                state_entry() { print("start " + (string)llGetStartParameter()); }
+                on_rez(integer param) {
+                    print("rez " + (string)param + " " + (string)llGetStartParameter());
+                    llResetScript();
+                }
+            }"#,
+        )?,
+    );
+    let _reports = run(&mut engine, &mut host, 1);
+    assert_eq!(engine.rez(A, 42), Ok(Some(Posted::Queued)));
+    let _reports = run(&mut engine, &mut host, 1);
+    assert_eq!(host.texts(A), vec!["start 0", "rez 42 42", "start 42"]);
+    Ok(())
+}
+
+#[test]
+fn the_engines_own_events_are_in_the_table() {
+    for name in ["timer", "changed", "on_rez"] {
+        assert!(event(name).is_some(), "{name}");
+    }
+}
+
+/// A sample argument of type `ty` and how `(string)` prints it.
+fn sample(ty: TypeName) -> Value {
+    match ty {
+        TypeName::Integer => Value::Integer(7),
+        TypeName::Float => Value::Float(1.5),
+        TypeName::String => Value::String("s".to_owned()),
+        TypeName::Key => Value::Key(crate::value::NULL_KEY.to_owned()),
+        TypeName::Vector => Value::Vector(sl_types::lsl::Vector {
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+        }),
+        TypeName::Rotation => Value::Rotation(crate::value::ZERO_ROTATION),
+        TypeName::List => Value::List(vec![crate::value::Element::Integer(4)]),
+    }
+}
+
+#[test]
+fn every_event_reaches_a_handler_with_its_parameters() -> Result<(), String> {
+    let mut checked = 0_usize;
+    for event in &crate::library::EVENTS {
+        if matches!(event.name, "state_entry" | "state_exit") {
+            continue;
+        }
+        let params: Vec<String> = event
+            .args
+            .iter()
+            .enumerate()
+            .map(|(i, arg)| format!("{} a{i}", arg.ty.keyword()))
+            .collect();
+        let printed: Vec<String> = (0..event.args.len())
+            .map(|i| format!("(string)a{i}"))
+            .collect();
+        let body = if printed.is_empty() {
+            format!("print({:?});", event.name)
+        } else {
+            format!("print({});", printed.join(" + \"|\" + "))
+        };
+        let source = format!(
+            "default {{ {}({}) {{ {body} }} }}",
+            event.name,
+            params.join(", ")
+        );
+        let mut engine = engine();
+        let mut host = Recorder::default();
+        let _none = engine.add(
+            A,
+            program(&source).map_err(|e| format!("{}: {e}", event.name))?,
+        );
+        let expected = if is_detection_event(event.name) {
+            let _posted = engine
+                .post_detected(A, event, vec![Detected::blank()])
+                .map_err(|e| e.to_string())?;
+            "1".to_owned()
+        } else {
+            let args: Vec<Value> = event.args.iter().map(|arg| sample(arg.ty)).collect();
+            let expected = if args.is_empty() {
+                event.name.to_owned()
+            } else {
+                args.iter()
+                    .map(|value| match crate::cast(value.clone(), TypeName::String) {
+                        Ok(Value::String(text)) => text,
+                        _ => String::new(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join("|")
+            };
+            assert_eq!(
+                engine.post(A, event, args),
+                Ok(Some(Posted::Queued)),
+                "{}",
+                event.name
+            );
+            expected
+        };
+        let _reports = run(&mut engine, &mut host, 1);
+        assert_eq!(host.texts(A), vec![expected.as_str()], "{}", event.name);
+        checked = checked.saturating_add(1);
+    }
+    assert_eq!(checked, crate::library::EVENTS.len().saturating_sub(2));
+    Ok(())
+}
+
+/// Three changes — two in one tick, one in the next — and two touches in
+/// one tick, under `coalescing`; what the script saw.
+fn arrivals(coalescing: Coalescing) -> Result<Vec<String>, String> {
+    let mut engine = Engine::new(EngineConfig {
+        coalescing,
+        ..EngineConfig::for_step(STEP)
+    });
+    let mut host = Recorder::default();
+    let _none = engine.add(
+        A,
+        program(
+            r#"default {
+                state_entry() { llSleep(0.3); }
+                changed(integer change) { print("changed " + (string)change); }
+                touch_start(integer n) { print("touch " + (string)n); }
+            }"#,
+        )?,
+    );
+    // The script sleeps through ticks 1-3, so everything below queues.
+    let _reports = run(&mut engine, &mut host, 1);
+    let touch = named("touch_start")?;
+    let posts = [
+        engine.changed(A, 2),
+        engine.changed(A, 8),
+        engine.post_detected(A, touch, vec![toucher("a")]),
+        engine.post_detected(A, touch, vec![toucher("b")]),
+    ];
+    let _reports = run(&mut engine, &mut host, 1);
+    let late = engine.changed(A, 16);
+    let _reports = run(&mut engine, &mut host, 5);
+    let mut seen: Vec<String> = posts
+        .iter()
+        .chain([&late])
+        .map(|posted| format!("{posted:?}"))
+        .collect();
+    seen.extend(host.texts(A).into_iter().map(str::to_owned));
+    Ok(seen)
+}
+
+#[test]
+fn a_test_can_force_every_arrival_shape_a_script_may_meet() -> Result<(), String> {
+    let queued = "Ok(Some(Queued))";
+    let merged = "Ok(Some(Merged))";
+    // The reference: one tick's raises merge; the late change finds the
+    // queued `changed` next in line and does not.
+    assert_eq!(
+        arrivals(Coalescing::Reference)?,
+        vec![
+            queued,
+            merged,
+            queued,
+            merged,
+            queued,
+            "changed 10",
+            "touch 2",
+            "changed 16"
+        ]
+    );
+    // The most split-up arrival.
+    assert_eq!(
+        arrivals(Coalescing::Never)?,
+        vec![
+            queued,
+            queued,
+            queued,
+            queued,
+            queued,
+            "changed 2",
+            "changed 8",
+            "touch 1",
+            "touch 1",
+            "changed 16"
+        ]
+    );
+    // The most merged: the late change joins the one still queued.
+    assert_eq!(
+        arrivals(Coalescing::WhileQueued)?,
+        vec![
+            queued,
+            merged,
+            queued,
+            merged,
+            merged,
+            "changed 26",
+            "touch 2"
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn a_later_change_joins_a_queued_one_unless_it_is_next_in_line() -> Result<(), String> {
+    // aditi (2026-09-28), four touches alike: while the handler was busy,
+    // scale, colour, (texture, which raised nothing) and scale again, a fifth
+    // of a second apart, arrived as `8` and then `10`.
+    let mut engine = engine();
+    let mut host = Recorder::default();
+    let _none = engine.add(
+        A,
+        program(
+            "default {
+                state_entry() { llSleep(1.0); }
+                changed(integer change) { print((string)change); }
+            }",
+        )?,
+    );
+    let mut posted = Vec::new();
+    for bits in [8, 2, 8] {
+        let _reports = run(&mut engine, &mut host, 2);
+        posted.push(engine.changed(A, bits));
+    }
+    let _reports = run(&mut engine, &mut host, 10);
+    assert_eq!(
+        posted,
+        vec![
+            Ok(Some(Posted::Queued)),
+            Ok(Some(Posted::Queued)),
+            Ok(Some(Posted::Merged)),
+        ]
+    );
+    assert_eq!(host.texts(A), vec!["8", "10"]);
     Ok(())
 }

@@ -21,6 +21,7 @@
 //! back from the committed baseline (`library/coverage.txt`).
 
 pub mod control;
+pub mod detection;
 pub mod dispatch;
 mod generated;
 pub mod lists;
@@ -51,7 +52,7 @@ mod tests {
 
     use super::*;
     use crate::value::{Element, Value};
-    use crate::vm::{CallerId, Host, ScriptCtx, Tick};
+    use crate::vm::{CallerId, Host, ScriptCtx, ScriptData, Tick};
 
     /// A host for calls that never reach it: the dispatch reports stubs
     /// through `Called::stubbed`, and only the VM tells the host.
@@ -61,6 +62,8 @@ mod tests {
         fn print(&mut self, _caller: CallerId, _text: &str) {}
 
         fn stubbed(&mut self, _caller: CallerId, _id: BuiltinId) {}
+
+        fn left_state(&mut self, _caller: CallerId) {}
     }
 
     #[test]
@@ -222,7 +225,14 @@ mod tests {
     #[test]
     fn calls_are_checked_against_the_table() {
         let mut host = Unreached;
-        let mut ctx = ScriptCtx::new(CallerId(1), Tick(0), &mut host);
+        let mut data = ScriptData::default();
+        let mut ctx = ScriptCtx::new(
+            CallerId(1),
+            Tick(0),
+            core::time::Duration::from_millis(100),
+            &mut host,
+            &mut data,
+        );
         assert_eq!(
             call(BuiltinId::LlAbs, &mut ctx, vec![Value::Integer(-3)]),
             Ok(Called {
@@ -280,7 +290,14 @@ mod tests {
     #[test]
     fn a_stub_checks_its_arguments_and_returns_the_default() {
         let mut host = Unreached;
-        let mut ctx = ScriptCtx::new(CallerId(1), Tick(0), &mut host);
+        let mut data = ScriptData::default();
+        let mut ctx = ScriptCtx::new(
+            CallerId(1),
+            Tick(0),
+            core::time::Duration::from_millis(100),
+            &mut host,
+            &mut data,
+        );
         assert_eq!(
             with_stubs::call(BuiltinId::LlGetPos, &mut ctx, vec![]),
             Ok(Called {

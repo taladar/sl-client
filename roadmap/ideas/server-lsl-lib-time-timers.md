@@ -48,3 +48,7 @@ Acceptance: a timer at 0.5 s fires the expected number of times over a
 known number of ticks; a handler longer than the interval drops ticks
 rather than accumulating them; `llGetUnixTime` returns the same sequence
 across two runs of one seed; and a state change cancels the timer.
+
+Already done by [[server-lsl-state-and-events]]: `llSetTimerEvent` and the
+`timer` event — tick-counted, never stacking, surviving a state change and
+stopped by a reset, each measured on aditi.

@@ -8,11 +8,12 @@ use core::ops::Bound;
 use core::time::Duration;
 
 use crate::bytecode::Program;
-use crate::library::Event;
+use crate::library::{Event, event};
 use crate::value::Value;
 use crate::vm::context::Tick;
+use crate::vm::detected::Detected;
 use crate::vm::host::{CallerId, Host};
-use crate::vm::instance::{Instance, Outcome, PostError, Posted, Slice};
+use crate::vm::instance::{Arrival, Coalescing, Instance, Outcome, PostError, Posted, Slice};
 
 /// How many instructions one script may run per second of region time, as
 /// charged — a library call and a loop's back-edge cost more than one
@@ -53,6 +54,8 @@ pub struct EngineConfig {
     pub script_budget: u32,
     /// Instructions the region's scripts may run per tick together.
     pub region_budget: u32,
+    /// Which queued touch, collision or `changed` a new one merges into.
+    pub coalescing: Coalescing,
 }
 
 impl EngineConfig {
@@ -75,6 +78,7 @@ impl EngineConfig {
             step,
             script_budget,
             region_budget,
+            coalescing: Coalescing::Reference,
         }
     }
 }
@@ -176,10 +180,75 @@ impl Engine {
         event: &'static Event,
         args: Vec<Value>,
     ) -> Result<Option<Posted>, PostError> {
+        let arrival = self.arrival();
         self.instances
             .get_mut(&id)
-            .map(|instance| instance.post(event, args))
+            .map(|instance| instance.post(arrival, event, args))
             .transpose()
+    }
+
+    /// Offer the instance `id` a detection event — a touch, a collision, a
+    /// sensor sweep — with who or what was detected; [`None`] when there is
+    /// no such instance. Posted again in the same tick, a touch or collision
+    /// merges into the one already queued.
+    ///
+    /// # Errors
+    ///
+    /// [`PostError`] when `event` is not a detection event or the block is
+    /// empty or too long.
+    pub fn post_detected(
+        &mut self,
+        id: CallerId,
+        event: &'static Event,
+        detected: Vec<Detected>,
+    ) -> Result<Option<Posted>, PostError> {
+        let arrival = self.arrival();
+        self.instances
+            .get_mut(&id)
+            .map(|instance| instance.post_detected(arrival, event, detected))
+            .transpose()
+    }
+
+    /// Raise `changed(change)` in the instance `id` — the one function every
+    /// raiser calls (an inventory change, a link, a colour, a scale, an owner,
+    /// a region crossing, a teleport, …), with the `CHANGED_*` bits of what
+    /// happened. Whether it merges into a `changed` already queued is the
+    /// region's [`Coalescing`]; by Second Life's rule, changes of one tick
+    /// always do, and later ones join the newest queued `changed` unless it
+    /// is next in line.
+    ///
+    /// # Errors
+    ///
+    /// None in practice: `changed` takes one integer.
+    pub fn changed(&mut self, id: CallerId, change: i32) -> Result<Option<Posted>, PostError> {
+        self.post(id, lifecycle("changed"), vec![Value::Integer(change)])
+    }
+
+    /// The object the instance `id` is in was rezzed with `start_parameter`:
+    /// set what `llGetStartParameter` answers, then raise
+    /// `on_rez(start_parameter)`.
+    ///
+    /// # Errors
+    ///
+    /// None in practice: `on_rez` takes one integer.
+    pub fn rez(&mut self, id: CallerId, start_parameter: i32) -> Result<Option<Posted>, PostError> {
+        if let Some(instance) = self.instances.get_mut(&id) {
+            instance.set_start_parameter(start_parameter);
+        }
+        self.post(
+            id,
+            lifecycle("on_rez"),
+            vec![Value::Integer(start_parameter)],
+        )
+    }
+
+    /// An event posted now: in the current tick, merging by the region's
+    /// policy.
+    const fn arrival(&self) -> Arrival {
+        Arrival {
+            tick: self.now,
+            coalescing: self.config.coalescing,
+        }
     }
 
     /// Advance one tick and run the region's scripts in it.
@@ -202,6 +271,13 @@ impl Engine {
             runnable: 0,
             served: 0,
         };
+        // Timers first, so a timer due this tick runs in it.
+        let arrival = self.arrival();
+        for instance in self.instances.values_mut() {
+            if instance.timer_due(now) {
+                let _posted = instance.post(arrival, lifecycle("timer"), Vec::new());
+            }
+        }
         let mut region_left = self.config.region_budget;
         for id in order {
             let Some(instance) = self.instances.get_mut(&id) else {
@@ -239,4 +315,16 @@ impl Engine {
         }
         report
     }
+}
+
+/// One of the events the engine raises itself, from the library table.
+fn lifecycle(name: &'static str) -> &'static Event {
+    /// A stand-in that can never match a handler, should the table ever lose
+    /// the event — the build's own table test catches that first.
+    static MISSING: Event = Event {
+        name: "",
+        args: &[],
+        tooltip: "",
+    };
+    event(name).unwrap_or(&MISSING)
 }

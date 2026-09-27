@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 118 |
-| ready | 308 |
-| blocked | 54 |
+| ready | 307 |
+| blocked | 55 |
 | in-progress | 25 |
 | bugs | 14 |
-| done | 1245 |
+| done | 1246 |
 | deferred | 30 |
 | wont-do | 16 |
-| **total** | **1810** |
+| **total** | **1811** |
 
 ## ideas (118)
 
@@ -236,7 +236,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done), `server-world-chat-routing`, `protocol-sim-script-messages`)
 - [`server-lsl-lib-detection-sensors`](ideas/server-lsl-lib-detection-sensors.md)
   — Library tranche — the detected block, sensors and raycasts (blocked by
-  `server-lsl-state-and-events`, `server-world-ecs-store`,
+  `server-lsl-state-and-events` (done), `server-world-ecs-store`,
   `server-world-touch-and-grab`)
 - [`server-lsl-lib-experience`](ideas/server-lsl-lib-experience.md) — Library
   tranche — experiences and the experience key-value store (blocked by
@@ -277,7 +277,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `server-lsl-vm-execution` (done), `server-world-determinism-contract`)
 - [`server-lsl-script-persistence`](ideas/server-lsl-script-persistence.md) —
   Script state that survives a take, a rez and a region restart (blocked by
-  `server-lsl-vm-execution` (done), `server-lsl-state-and-events`)
+  `server-lsl-vm-execution` (done), `server-lsl-state-and-events` (done))
 - [`server-map-service`](ideas/server-map-service.md) — Map service — tiles and
   map items
 - [`server-message-routing`](ideas/server-message-routing.md) — Global message
@@ -294,7 +294,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (308)
+## ready (307)
 
 ### protocol
 
@@ -1016,9 +1016,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-runtime-errors`](ready/server-lsl-runtime-errors.md) — Run-time
   errors where a resident can see them (blocked by `server-lsl-vm-execution`
   (done))
-- [`server-lsl-state-and-events`](ready/server-lsl-state-and-events.md) — The
-  event and state machine — 35 events and the rules around them (blocked by
-  `server-lsl-vm-execution` (done))
 - [`server-world-chat-routing`](ready/server-world-chat-routing.md) — The fake
   grid hears local chat and drops it
 - [`server-world-ecs-store`](ready/server-world-ecs-store.md) — An ECS scene
@@ -1026,7 +1023,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-world-heartbeat`](ready/server-world-heartbeat.md) — A region
   heartbeat — the fake grid has no simulation loop at all
 
-## blocked (54)
+## blocked (55)
 
 ### viewer
 
@@ -1181,6 +1178,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-world-agent-movement`](blocked/server-world-agent-movement.md) — The
   agent never moves — AgentUpdate is decoded and ignored (blocked by
   `server-world-heartbeat`)
+- [`server-world-changed-raisers`](blocked/server-world-changed-raisers.md) —
+  Raise changed() from every grid-side cause, with the right bit (blocked by
+  `server-fake-grid-script-engine-wiring`)
 - [`server-world-collision-and-physics`](blocked/server-world-collision-and-physics.md)
   — Enough physics for the collision, target and volume-detect events (blocked
   by `server-world-heartbeat`, `server-world-ecs-store`)
@@ -1310,7 +1310,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1245)
+## done (1246)
 
 ### protocol
 
@@ -4044,6 +4044,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-library-surface-table`](done/server-lsl-library-surface-table.md)
   — One generated table for the library, and a coverage harness over it (blocked
   by `server-lsl-architecture` (done))
+- [`server-lsl-state-and-events`](done/server-lsl-state-and-events.md) — The
+  event and state machine — 35 events and the rules around them (blocked by
+  `server-lsl-vm-execution` (done))
 - [`server-lsl-value-model`](done/server-lsl-value-model.md) — The LSL value
   model — seven types and their exact coercions
 - [`server-lsl-vm-execution`](done/server-lsl-vm-execution.md) — The script VM —

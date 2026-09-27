@@ -51,7 +51,11 @@ state change or a reset — and resume there on a later tick; an `Engine` serves
 region's instances round-robin per tick under a per-script and a region-wide
 instruction budget. Time is counted in ticks and budgets in instructions, never
 read from a clock. A run-time error stops the one script and never panics the
-host. Library calls reach the world only through the `Host` trait.
+host. Library calls reach the world only through the `Host` trait. Events
+follow Second Life's rules as measured on aditi — the 64-event queue, a timer
+that never stacks and survives a state change, the detected block a touch
+carries and any other event clears, and `changed` and touches merging by a
+policy a test can switch to force either arrival shape.
 
 ## Vendored library definition
 
