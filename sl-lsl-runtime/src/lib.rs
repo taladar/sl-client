@@ -5,7 +5,7 @@
 //! queue and the library, behind a `Host` trait the grid implements. Like
 //! `sl-lsl` it is I/O-free, Bevy-free and synchronous.
 //!
-//! What exists so far is the **value model** — the value half of LSL's type
+//! First, the **value model** — the value half of LSL's type
 //! rules, whose compile-time half is [`sl_lsl::types`]:
 //!
 //! - [`value`] — [`Value`] and the flat list [`Element`], with boolean
@@ -21,11 +21,17 @@
 //! document, with the typed dispatch that holds each implementation to it
 //! and the coverage count of what is implemented.
 //!
+//! And the **compiler** — [`compile()`]: source to a [`bytecode::Program`],
+//! a stack bytecode with every name resolved and every implicit conversion
+//! explicit, or the [`CompileError`]s a grid would answer an upload with.
+//!
 //! Every rule is pinned by a table-driven test quoting its oracle: LSL
 //! PyOptimizer's `lslbasefuncs.py` and its `unit_tests/expr.suite`
 //! expectations, which were measured against Second Life.
 
+pub mod bytecode;
 pub mod cast;
+pub mod compiler;
 pub mod error;
 pub mod format;
 pub mod library;
@@ -35,6 +41,7 @@ pub mod parse;
 pub mod value;
 
 pub use cast::cast;
+pub use compiler::{CompileError, CompileErrorKind, compile};
 pub use error::ValueError;
 pub use ops::{binary, prefix};
 pub use value::{Element, NULL_KEY, Value, ZERO_ROTATION, ZERO_VECTOR};

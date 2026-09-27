@@ -2,7 +2,7 @@
 id: server-lsl-compiler-ir
 title: Lower the LSL syntax tree to something executable
 topic: server
-status: ready
+status: done
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 13
 blocked_by: [server-lsl-architecture, server-lsl-value-model]
@@ -71,3 +71,64 @@ Acceptance: every script in `sl-lsl/tests/corpus/` that tailslide accepts
 lowers without error and every one it rejects produces at least one
 `ScriptCompileError` with a plausible line; the IR round-trips through a
 debug printer so a test can assert on it; and no `unwrap` in the pass.
+
+## As built (2026-09-27)
+
+`sl_lsl_runtime::compile(source) -> Result<Program, Vec<CompileError>>`;
+the design and its guarantees are in the book chapter
+`simulator/lsl-engine.md`, "As built: the compiler". In short:
+
+- **Three stages** — parse (first syntax error only), the semantic pass
+  against `library::lsl_syntax()` (the runtime's own table as an
+  `LslSyntax`), then the lowering (`compiler/lower.rs`), which types and
+  resolves completely and enforces every rule the pass misses, after
+  tailslide's passes. All 19 of the pass's remaining oracle misses
+  ([[viewer-lsl-oracle-misses]]) are compile errors here.
+- **E10019 decided: an error.** "Not all code paths return a value" is
+  tailslide's `final_pass.cc` rule, which PyOptimizer also raises: the last
+  statement of a value function must be a `return` or an `if`/`else` whose
+  branches both end in one.
+- **Evaluation order pinned** from tailslide's Mono back end: binary operands
+  right to left (left operand on top for `Binary`), arguments, list elements
+  and vector components left to right. `state` leaves the body at once, as
+  Mono's `ChangeState; ret` does.
+- **Messages are Linden's** (PyOptimizer's `EParse*` texts), grammar-level
+  mistakes are `Syntax error`, and `CompileError`'s `Display` is the wire
+  form with **zero-based** positions, as Second Life sends them.
+- **Debug printer**: `Program`'s `Display` disassembles with names resolved
+  and a `line:column` per instruction; the unit tests pin it.
+- **Acceptance**: `tests/compile_corpus.rs` with tailslide as the oracle —
+  the committed corpus is exact (every accepted script compiles, every
+  rejected one errs on a line tailslide names), and tailslide's own 187
+  scripts show no false rejection, no miss and no error elsewhere, bar two
+  known divergences reported apart (the parser's depth ceiling, and
+  functions missing from the vendored table:
+  [[server-lsl-library-table-refresh]]).
+
+**Confirmed live on aditi** (2026-09-27, two probe scripts run in stock
+Firestorm): the evaluation order above exactly (`f(1) - f(2) + f(3)` → 3,
+2, 1; lists, vectors and arguments left to right; `&&` both sides, right
+first); `c + 5 + e *= 4` as `c + 5 + (e *= 4)` (`a=14 e=8`); a nested
+`return` of a void call compiles and runs; `integer *= float` truncates
+(`3 *= 1.5` → 4). E10019 is a compile error, reported as `(4, 0): ERROR :
+Not all code paths return a value` for a function whose closing brace is on
+line 5 — so positions are zero-based and point at the **closing brace** (not
+the name, as tailslide has it); the lowering now does the same. And using
+the value of `integer *= float` (`float g = i *= 1.5;`) compiles, but the
+handler then fails with `System.InvalidProgramException: Invalid IL code …
+stloc.s 9` before its first line: the lowering marks such a body with a
+leading `InvalidProgram` instruction for the VM to raise.
+
+Found and fixed on the way, both in `sl-lsl`, each with a corpus case:
+
+- **The parser gave `=` to the wrong target.** `c + 5 + e *= 4` parsed as
+  `(c + 5 + e) *= 4`; the grid's grammar has an lvalue, not an expression, on
+  an assignment's left, so it is `c + 5 + (e *= 4)` (tailslide's
+  `tltp/exporter.lsl`). `parse_operand` now absorbs an assignment after a bare
+  variable or member.
+- **The semantic pass rejected a legal `return`.** Returning a void call from
+  a void function or event is legal nested in an `if` or loop (tailslide's
+  `void_return.lsl`); the pass now tracks the nesting.
+
+Also found: the client documents and shows grid compile-error positions as
+one-based — [[viewer-script-compile-error-positions-zero-based]].

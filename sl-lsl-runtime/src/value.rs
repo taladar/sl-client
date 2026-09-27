@@ -69,6 +69,23 @@ pub enum Element {
 }
 
 impl Value {
+    /// LSL's default for a type: `0`, `0.0`, `""`, an empty key,
+    /// [`ZERO_VECTOR`], [`ZERO_ROTATION`] or the empty list — what a variable
+    /// declared without an initialiser holds, and what a stubbed library
+    /// function returns.
+    #[must_use]
+    pub const fn default_of(ty: TypeName) -> Self {
+        match ty {
+            TypeName::Integer => Self::Integer(0),
+            TypeName::Float => Self::Float(0.0),
+            TypeName::String => Self::String(String::new()),
+            TypeName::Key => Self::Key(String::new()),
+            TypeName::Vector => Self::Vector(ZERO_VECTOR),
+            TypeName::Rotation => Self::Rotation(ZERO_ROTATION),
+            TypeName::List => Self::List(Vec::new()),
+        }
+    }
+
     /// The LSL type of this value.
     #[must_use]
     pub const fn type_name(&self) -> TypeName {

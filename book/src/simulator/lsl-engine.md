@@ -9,8 +9,9 @@ gives the reason for each, so that the lowering, the VM and the sixteen
 library tranches do not each decide them again.
 
 The crate this chapter describes exists, and its `README.md` points back
-here; so far it holds the value model (below). The rest of the chapter is
-still design.
+here; so far it holds the value model, the library table and the compiler
+(below, each marked **as built**). The VM, the scheduler and the `Host`
+trait are still design.
 
 ## 1. Where the code lives
 
@@ -142,6 +143,97 @@ stack machine keeps the lowering a straightforward post-order walk. The
 operand stack holds the runtime's `Value` enum; the lowering has already
 made every implicit conversion an explicit instruction, so the VM carries
 no coercion logic of its own.
+
+### As built: the compiler
+
+`sl_lsl_runtime::compile(source)` returns a `Program` or the compile errors
+a grid would answer the upload with (`server-lsl-compiler-ir`). It runs three
+stages and stops at the first that fails:
+
+1. **Parse.** Only the first syntax error is reported, as the grid's parser
+   stops there.
+2. **The semantic pass**, against an `LslSyntax` built from the library
+   table (`library::lsl_syntax`), so it checks against the same functions,
+   constants and events the lowering resolves. Its errors are mapped to the
+   grid's messages. It is conservative by design, so passing it proves
+   little.
+3. **The lowering**, which cannot be conservative: to emit an instruction
+   it must know every expression's type and every name's meaning. So it
+   enforces the rest of the grid's rules itself — tailslide's, which
+   reproduce Linden's compiler: operator, assignment, cast and condition
+   typing; void values; lists in lists; members; declarations that need a
+   `{ }`; constant global initialisers; the namespace rules; `state` in a
+   function outside an `if`; and "not all code paths return a value", which
+   is an **error** there (the last statement of a value function must be a
+   `return` or an `if`/`else` whose branches both end in one — a loop does
+   not count).
+
+The `Program` (module `bytecode`) holds the globals, a literal pool, one
+`Body` for the global initialisers, one per user function and one per event
+handler. A body lists its locals — parameters first, one slot per
+declaration, each starting at its type's default — and its instructions,
+with a parallel source map of byte spans; `Program`'s `Display` is a
+disassembler that the tests pin. What the lowering guarantees the VM:
+
+- **Every name is resolved** to a local, global, function, library
+  (`BuiltinId`) or state index.
+- **Every implicit conversion is a `Cast`**: an `integer` argument where a
+  `float` is wanted, `string` ↔ `key` on assignment, and the `integer` side
+  of a mixed `integer`/`float` (or `integer`/`vector`) operation. The last is
+  exactly what the value model does anyway (`int_to_float` first), so the
+  explicit cast changes no result.
+- **Operands of a binary operator are evaluated right to left**, so the
+  left operand is on top when `Binary` runs; call arguments, list elements
+  and vector components left to right. Both are what tailslide's Mono
+  back end emits and PyOptimizer measured. `&&` and `||` evaluate both
+  sides.
+- **The stack is empty between statements**, so any `jump` is sound. A
+  `jump` goes to the **last** label of its name in the function — though
+  the label must be in scope at the jump — which is the reference's
+  behaviour when a name repeats in nested blocks.
+- **Every body ends in an instruction that leaves it**, so no jump targets
+  the end.
+
+The order was confirmed on Second Life itself (aditi, 2026-09-27): a script
+printing from each operand saw `f(1) - f(2) + f(3)` evaluate 3, 2, 1; a
+list, a vector and a call's arguments left to right; `f(0) && f(11)` both
+sides, 11 first; `c + 5 + e *= 4` as `c + 5 + (e *= 4)`; and a nested
+`return` of a void call run.
+
+Three instructions carry reference quirks. `integer *= float` stores
+`(integer)((float)target * value)` and yields that integer as a `float`.
+`StateChange` requests the transition and leaves the body at once: in a
+function — legal only inside an `if`, the reference's "state change hack" —
+it returns the default of the return type, and the transition happens when
+the event handler ends, as Mono does. And `InvalidProgram`, only ever a
+body's first instruction, raises the run-time error Second Life raises when
+Mono refuses a whole method: using the *value* of `integer *= float` compiles
+there, but the event then fails with `System.InvalidProgramException` before
+its first line runs (measured on aditi), because the IL leaves an `int32`
+where it declares a `float`.
+
+**Compile errors use Linden's own messages** (`Syntax error`, `Name not
+defined within scope`, `Type mismatch`, `Function call mismatches type or
+number of arguments`, …, as PyOptimizer quotes them). Mistakes Linden's
+*grammar* catches — an unknown event or a wrong event signature, a missing
+or misplaced `default`, a state with no handler, a constant or event name
+used as a variable, an assignment to a non-variable, a non-constant global
+initialiser — are syntax errors, because there they are. "Not all code
+paths return a value" points at the function's closing brace, as Second
+Life's does. A `CompileError`'s `Display` is the string a grid sends,
+`(line, column): ERROR : message`, with **zero-based** line and column, as
+Second Life's are — measured on aditi, a function whose closing brace is on
+line 5, column 1 answers `(4, 0): ERROR : Not all code paths return a value`
+(the viewer passes the numbers to a zero-based `setCursor`, and OpenSim
+subtracts one from its own for the same reason).
+
+The proof is `tests/compile_corpus.rs`, with tailslide as the oracle
+(`SL_LSL_TAILSLIDE_BIN`): over `sl-lsl`'s corpus, and over tailslide's own
+187 test scripts (`SL_LSL_DIFFTEST_CORPUS`), every script tailslide accepts
+compiles and every one it rejects fails with an error on a line tailslide
+names. Two known divergences are set apart: the parser's 128-level nesting
+ceiling, and a few functions tailslide knows that the vendored library
+document lacks.
 
 ## 3. Scheduling: an instruction budget, round-robin, per tick
 

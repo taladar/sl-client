@@ -2,7 +2,7 @@
 id: server-lsl-vm-execution
 title: The script VM — suspendable execution in per-tick slices
 topic: server
-status: blocked
+status: ready
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 13
 blocked_by: [server-lsl-compiler-ir]

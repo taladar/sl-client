@@ -294,6 +294,21 @@ state active { state_entry() { } }";
     }
 
     #[test]
+    fn a_nested_return_of_a_void_call_is_legal() {
+        // tailslide `void_return.lsl`: legal nested in a control statement,
+        // an error directly in the body.
+        let src = "\
+none() { }
+nothing() { if (TRUE) return none(); }
+default { state_entry() { while (TRUE) return none(); return none(); } }";
+        assert_eq!(kinds(src), vec![DiagnosticKind::ReturnValueInVoid]);
+        assert_eq!(
+            kinds("default { state_entry() { if (TRUE) return 5; } }"),
+            vec![DiagnosticKind::ReturnValueInVoid]
+        );
+    }
+
+    #[test]
     fn missing_return_value() {
         assert_eq!(
             kinds("integer f() { return; } default { state_entry() { } }"),

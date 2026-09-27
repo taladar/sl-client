@@ -19,7 +19,7 @@ use sl_types::lsl::{Rotation, Vector};
 
 use crate::error::ValueError;
 use crate::library::generated::BuiltinId;
-use crate::value::{Element, Value, ZERO_ROTATION, ZERO_VECTOR};
+use crate::value::{Element, Value};
 
 /// A `key` argument or return value: text, typed apart from `string` so a
 /// signature says which one the reference means.
@@ -257,20 +257,6 @@ where
     })
 }
 
-/// The value a stub returns: LSL's default for the type, the value a
-/// variable of that type starts with.
-const fn default_value(ty: TypeName) -> Value {
-    match ty {
-        TypeName::Integer => Value::Integer(0),
-        TypeName::Float => Value::Float(0.0),
-        TypeName::String => Value::String(String::new()),
-        TypeName::Key => Value::Key(String::new()),
-        TypeName::Vector => Value::Vector(ZERO_VECTOR),
-        TypeName::Rotation => Value::Rotation(ZERO_ROTATION),
-        TypeName::List => Value::List(Vec::new()),
-    }
-}
-
 /// Answers a call to a function declared a stub: the arguments are still
 /// checked against the table, and the return value is the type's default.
 ///
@@ -298,7 +284,7 @@ pub fn stub(id: BuiltinId, args: &[Value]) -> Result<Called, CallError> {
         }
     }
     Ok(Called {
-        value: descriptor.ret.map(default_value),
+        value: descriptor.ret.map(Value::default_of),
         stubbed: true,
     })
 }

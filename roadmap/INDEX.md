@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 118 |
-| ready | 303 |
-| blocked | 59 |
+| ready | 306 |
+| blocked | 57 |
 | in-progress | 25 |
-| bugs | 13 |
-| done | 1242 |
+| bugs | 14 |
+| done | 1243 |
 | deferred | 30 |
 | wont-do | 16 |
-| **total** | **1806** |
+| **total** | **1809** |
 
 ## ideas (118)
 
@@ -78,7 +78,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-local-mesh`](ideas/viewer-local-mesh.md) — Local mesh — live-reload
   mesh from disk
 - [`viewer-lsl-oracle-misses`](ideas/viewer-lsl-oracle-misses.md) — Grid compile
-  errors the LSL semantic pass does not report (20 oracle misses)
+  errors the LSL semantic pass does not report (19 oracle misses)
 - [`viewer-lsl-preprocessor`](ideas/viewer-lsl-preprocessor.md) — LSL
   preprocessor (FS-compatible)
 - [`viewer-manual-music-stream-url`](ideas/viewer-manual-music-stream-url.md) —
@@ -295,7 +295,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (303)
+## ready (306)
 
 ### protocol
 
@@ -1002,11 +1002,18 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### server
 
-- [`server-lsl-compiler-ir`](ready/server-lsl-compiler-ir.md) — Lower the LSL
-  syntax tree to something executable (blocked by `server-lsl-architecture`
-  (done), `server-lsl-value-model` (done))
+- [`server-fake-grid-script-compile-on-upload`](ready/server-fake-grid-script-compile-on-upload.md)
+  — A script upload is accepted and never compiled (blocked by
+  `server-lsl-compiler-ir` (done))
+- [`server-lsl-compile-error-detail`](ready/server-lsl-compile-error-detail.md)
+  — Compile errors that say what is wrong, not only Linden's bare message
+- [`server-lsl-library-table-refresh`](ready/server-lsl-library-table-refresh.md)
+  — The vendored library document lacks 50 current functions
 - [`server-lsl-memory-sizes`](ready/server-lsl-memory-sizes.md) — Measure Second
   Life's per-value memory costs and rotation arithmetic on aditi
+- [`server-lsl-vm-execution`](ready/server-lsl-vm-execution.md) — The script VM
+  — suspendable execution in per-tick slices (blocked by
+  `server-lsl-compiler-ir` (done))
 - [`server-world-chat-routing`](ready/server-world-chat-routing.md) — The fake
   grid hears local chat and drops it
 - [`server-world-ecs-store`](ready/server-world-ecs-store.md) — An ECS scene
@@ -1014,7 +1021,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-world-heartbeat`](ready/server-world-heartbeat.md) — A region
   heartbeat — the fake grid has no simulation loop at all
 
-## blocked (59)
+## blocked (57)
 
 ### viewer
 
@@ -1156,9 +1163,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### server
 
-- [`server-fake-grid-script-compile-on-upload`](blocked/server-fake-grid-script-compile-on-upload.md)
-  — A script upload is accepted and never compiled (blocked by
-  `server-lsl-compiler-ir`)
 - [`server-fake-grid-script-engine-wiring`](blocked/server-fake-grid-script-engine-wiring.md)
   — Wire the script engine into the fake grid (blocked by
   `server-lsl-vm-execution`, `server-world-heartbeat`, `server-world-ecs-store`)
@@ -1176,9 +1180,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-state-and-events`](blocked/server-lsl-state-and-events.md) — The
   event and state machine — 35 events and the rules around them (blocked by
   `server-lsl-vm-execution`)
-- [`server-lsl-vm-execution`](blocked/server-lsl-vm-execution.md) — The script
-  VM — suspendable execution in per-tick slices (blocked by
-  `server-lsl-compiler-ir`)
 - [`server-world-agent-movement`](blocked/server-world-agent-movement.md) — The
   agent never moves — AgentUpdate is decoded and ignored (blocked by
   `server-world-heartbeat`)
@@ -1269,7 +1270,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (13)
+## bugs (14)
 
 ### protocol
 
@@ -1296,6 +1297,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The parcel audio bar's backing is a colour no skin can reach
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
+- [`viewer-script-compile-error-positions-zero-based`](bugs/viewer-script-compile-error-positions-zero-based.md)
+  — Grid compile-error positions are zero-based and shown as one-based
 - [`viewer-sliders-show-no-value`](bugs/viewer-sliders-show-no-value.md) — A
   slider shows no value, and no bounds or step either
 - [`viewer-vintage-radar-range-colours`](bugs/viewer-vintage-radar-range-colours.md)
@@ -1309,7 +1312,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1242)
+## done (1243)
 
 ### protocol
 
@@ -4035,6 +4038,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   them
 - [`server-lsl-architecture`](done/server-lsl-architecture.md) — LSL engine
   architecture — execution model, crate layout, scheduling
+- [`server-lsl-compiler-ir`](done/server-lsl-compiler-ir.md) — Lower the LSL
+  syntax tree to something executable (blocked by `server-lsl-architecture`
+  (done), `server-lsl-value-model` (done))
 - [`server-lsl-library-surface-table`](done/server-lsl-library-surface-table.md)
   — One generated table for the library, and a coverage harness over it (blocked
   by `server-lsl-architecture` (done))
