@@ -28,6 +28,11 @@
 //! - [`skin_violations`] — **R13**: a vertex weighted onto a joint outside the
 //!   render list reads a garbage matrix. Found as an armpit spike, localised
 //!   with a bespoke geometry-logging env var. It is a comparison.
+//! - [`cpu_skinning_violations`] — **R1 / R13's class**: a palette assembled
+//!   wrong (bind order, a stale joint, a shifted joint list) with every weight
+//!   valid. Found both times by a CPU re-skin read by hand; here the CPU skin
+//!   (`sl_client_bevy::cpu_skin_vertex`) is held against what the GPU is handed,
+//!   over every vertex of the shaped body.
 //! - [`sampler_violations`] — **R22h**: Bevy's default sampler clamps where
 //!   Second Life repeats, smearing an edge texel across a face. Found as a
 //!   "white torso" over a bake that was itself correct.
@@ -86,8 +91,8 @@ use crate::face_material::FaceMaterial;
 use crate::particle_render::ParticleInstances;
 use crate::render_readback::FRAME_SIDE;
 use crate::render_scene::{
-    DeclaredBounds, RenderScene, SamplerMayClamp, SceneAssets, SceneCamera, SceneCx,
-    SceneRuntimePlugin, SymmetricAbout, SymmetryAxis, UvsInUnitSquare, WorldScaleGeometry,
+    CpuSkinnedPositions, DeclaredBounds, RenderScene, SamplerMayClamp, SceneAssets, SceneCamera,
+    SceneCx, SceneRuntimePlugin, SymmetricAbout, SymmetryAxis, UvsInUnitSquare, WorldScaleGeometry,
     scene_root, scene_root_transform,
 };
 use crate::world_api::ViewerCamera;
@@ -145,6 +150,17 @@ const MAX_COORDINATE: f32 = 1_000.0;
 /// hair past it, and samples the same texel. The failure this guards is a UV at
 /// 2.0 or -0.5 — a whole tile away, which in an atlas is a different body part.
 const UV_EPSILON: f32 = 1.0e-4;
+
+/// How far, in metres, a vertex the GPU would skin may land from where the CPU
+/// reference skins it.
+///
+/// The two sides reach one pose by different float paths — the skeletal
+/// recurrence's world matrices against the back-solved locals Bevy propagates
+/// down the joint hierarchy — so they agree to a few ULPs of a metre-scale
+/// coordinate, not bit for bit. A tenth of a millimetre is far above that and far
+/// below anything structural: R13 was a spike of centimetres, a bind folded in
+/// the wrong order moves a vertex by the length of a bone.
+const CPU_SKIN_EPSILON: f32 = 1.0e-4;
 
 /// A position snapped onto a matching grid, so two vertices that *should* be the
 /// same point compare equal despite having been computed by different float
@@ -400,6 +416,18 @@ pub(crate) struct Geometry {
     /// render list a [`joint_indices`](Self::joint_indices) slot must fall
     /// inside.
     pub(crate) joint_count: Option<usize>,
+    /// The skinning palette the GPU is handed, one matrix per `SkinnedMesh`
+    /// joint: the joint's `GlobalTransform` times its inverse bind, exactly as
+    /// Bevy's `extract_skins` assembles it (empty if the entity is not skinned).
+    ///
+    /// A joint with no `GlobalTransform` contributes a NaN matrix rather than
+    /// being skipped, so a palette that lost an entry cannot shift the rest into
+    /// agreement.
+    pub(crate) palette: Vec<Mat4>,
+    /// Where the scene declared each vertex must land once skinned, computed on
+    /// the CPU and carried into Bevy world space ([`CpuSkinnedPositions`]), if it
+    /// declared one.
+    pub(crate) cpu_skinned: Option<Vec<Option<Vec3>>>,
     /// Where this renderable sits in the world, as its `GlobalTransform`'s matrix.
     ///
     /// Not read by any *violation* — the invariants are all properties of the mesh,
@@ -529,8 +557,12 @@ struct Gathered {
     uvs_in_unit_square: bool,
     /// Whether it declared its sampler may clamp.
     sampler_may_clamp: bool,
-    /// How many joints it binds, if skinned.
-    joint_count: Option<usize>,
+    /// Its skin, if skinned.
+    skin: Option<SkinnedMesh>,
+    /// Its declared CPU-skinned positions, if any, still in its parent's frame.
+    cpu_skinned: Option<CpuSkinnedPositions>,
+    /// Its parent, the frame [`cpu_skinned`](Self::cpu_skinned) is in.
+    parent: Option<Entity>,
     /// The live per-particle world positions, if this entity is a GPU-instanced
     /// particle cloud (it carries a [`ParticleInstances`] component) — used in place of
     /// the shared quad's four static vertices, so the finiteness / change checks still
@@ -547,6 +579,13 @@ pub(crate) fn scene_geometry(app: &mut App) -> Vec<Geometry> {
         .iter(app.world())
         .map(|(entity, name)| (entity, name.to_string()))
         .collect();
+    // Every entity's world matrix, for the joints a skin's palette is assembled
+    // from and the parent a declared CPU skin is expressed in.
+    let mut transforms = app.world_mut().query::<(Entity, &GlobalTransform)>();
+    let globals: HashMap<Entity, Mat4> = transforms
+        .iter(app.world())
+        .map(|(entity, global)| (entity, global.to_matrix()))
+        .collect();
 
     let mut query = app.world_mut().query::<(
         Entity,
@@ -561,6 +600,7 @@ pub(crate) fn scene_geometry(app: &mut App) -> Vec<Geometry> {
         Option<&SamplerMayClamp>,
         Option<&SkinnedMesh>,
         Option<&ParticleInstances>,
+        Option<&CpuSkinnedPositions>,
     )>();
     let gathered: Vec<Gathered> = query
         .iter(app.world())
@@ -578,6 +618,7 @@ pub(crate) fn scene_geometry(app: &mut App) -> Vec<Geometry> {
                 clamp,
                 skin,
                 particles,
+                cpu_skinned,
             )| {
                 let name = named
                     .get(&entity)
@@ -610,7 +651,9 @@ pub(crate) fn scene_geometry(app: &mut App) -> Vec<Geometry> {
                     symmetry: symmetry.copied(),
                     uvs_in_unit_square: atlas.is_some(),
                     sampler_may_clamp: clamp.is_some(),
-                    joint_count: skin.map(|skin| skin.joints.len()),
+                    skin: skin.cloned(),
+                    cpu_skinned: cpu_skinned.cloned(),
+                    parent: parent.map(ChildOf::parent),
                     particle_positions,
                 }
             },
@@ -620,6 +663,9 @@ pub(crate) fn scene_geometry(app: &mut App) -> Vec<Geometry> {
     let meshes = app.world().resource::<Assets<Mesh>>();
     let materials = app.world().resource::<Assets<FaceMaterial>>();
     let images = app.world().resource::<Assets<Image>>();
+    let bindposes = app
+        .world()
+        .resource::<Assets<SkinnedMeshInverseBindposes>>();
     gathered
         .into_iter()
         .filter_map(|entry| {
@@ -667,6 +713,23 @@ pub(crate) fn scene_geometry(app: &mut App) -> Vec<Geometry> {
                     indices,
                 ),
             };
+            let palette = entry
+                .skin
+                .as_ref()
+                .map_or_else(Vec::new, |skin| skin_palette(skin, bindposes, &globals));
+            let parent_world = entry
+                .parent
+                .and_then(|parent| globals.get(&parent).copied())
+                .unwrap_or(Mat4::IDENTITY);
+            let cpu_skinned = entry.cpu_skinned.map(|reference| {
+                reference
+                    .positions
+                    .iter()
+                    .map(|position| {
+                        position.map(|position| parent_world.transform_point3(position))
+                    })
+                    .collect()
+            });
             Some(Geometry {
                 name: entry.name,
                 group: entry.group,
@@ -676,7 +739,9 @@ pub(crate) fn scene_geometry(app: &mut App) -> Vec<Geometry> {
                 indices,
                 joint_indices,
                 joint_weights,
-                joint_count: entry.joint_count,
+                joint_count: entry.skin.as_ref().map(|skin| skin.joints.len()),
+                palette,
+                cpu_skinned,
                 world: entry.world,
                 uv_transform,
                 declared_bounds: entry.declared_bounds,
@@ -687,6 +752,28 @@ pub(crate) fn scene_geometry(app: &mut App) -> Vec<Geometry> {
                 sampler_may_clamp: entry.sampler_may_clamp,
                 is_point_cloud,
             })
+        })
+        .collect()
+}
+
+/// The palette Bevy's `extract_skins` hands the GPU for `skin`: each joint's
+/// world matrix times its inverse bind, zipped the way Bevy zips them (the
+/// shorter of the two lists wins).
+fn skin_palette(
+    skin: &SkinnedMesh,
+    bindposes: &Assets<SkinnedMeshInverseBindposes>,
+    globals: &HashMap<Entity, Mat4>,
+) -> Vec<Mat4> {
+    let Some(inverse_binds) = bindposes.get(&skin.inverse_bindposes) else {
+        return Vec::new();
+    };
+    skin.joints
+        .iter()
+        .zip(inverse_binds.iter())
+        .map(|(joint, inverse_bind)| {
+            globals
+                .get(joint)
+                .map_or(Mat4::NAN, |world| world.mul_mat4(inverse_bind))
         })
         .collect()
 }
@@ -1127,6 +1214,7 @@ pub(crate) fn declared_violations(geometry: &[Geometry]) -> Vec<String> {
         if let Some(symmetry) = object.symmetry {
             violations.extend(symmetry_violations(object, symmetry));
         }
+        violations.extend(cpu_skinning_violations(object));
         if object.uvs_in_unit_square
             && let Some((index, uv)) = object.uvs.iter().enumerate().find(|(_index, uv)| {
                 uv.x < -UV_EPSILON
@@ -1142,6 +1230,107 @@ pub(crate) fn declared_violations(geometry: &[Geometry]) -> Vec<String> {
                 object.name
             ));
         }
+    }
+    violations
+}
+
+/// Where the GPU would put vertex `index`: its rest `position` through the
+/// weighted sum of the palette matrices its joint attributes select — Bevy's
+/// `skin_model`, applied to the point rather than summed as matrices first
+/// (matrix times point is linear, so the two are the same).
+///
+/// `None` if a weighted slot names a palette entry that does not exist.
+fn gpu_skinned(object: &Geometry, index: usize, position: Vec3) -> Option<Vec3> {
+    let joints = object.joint_indices.get(index)?;
+    let weights = object.joint_weights.get(index)?;
+    let mut skinned = Vec3::ZERO;
+    for (&joint, &weight) in joints.iter().zip(weights) {
+        // An unweighted slot is not read by the shader, so its index may be
+        // anything. See `skin_violations`.
+        if weight <= 0.0 {
+            continue;
+        }
+        let point = object
+            .palette
+            .get(usize::from(joint))?
+            .transform_point3(position);
+        skinned = Vec3::new(
+            weight.mul_add(point.x, skinned.x),
+            weight.mul_add(point.y, skinned.y),
+            weight.mul_add(point.z, skinned.z),
+        );
+    }
+    Some(skinned)
+}
+
+/// **Declared.** Every vertex of a skinned part must land, on the GPU, where the
+/// CPU reference skins it ([`CpuSkinnedPositions`]).
+///
+/// The cross-check between the two skinning paths, and the one check here that
+/// sees the **palette**. The universal skin checks count weights and joint
+/// indices, and a bind folded in the wrong order, a transposed matrix, a joint
+/// whose world transform is stale or a joint list shifted by one all pass them:
+/// the weights stay valid and the body bends wrong. This is R1 and R13's
+/// class, found both times by reading a CPU re-skin by hand
+/// (`SL_VIEWER_LOG_AVATAR_GEOMETRY`), and here the machine reads every vertex.
+///
+/// One line per failing renderable — the count and the worst vertex — rather
+/// than one per vertex: a wrong palette entry moves every vertex bound to it.
+fn cpu_skinning_violations(object: &Geometry) -> Vec<String> {
+    let Some(expected) = &object.cpu_skinned else {
+        return Vec::new();
+    };
+    let name = &object.name;
+    if expected.len() != object.positions.len() {
+        return vec![format!(
+            "{name}: the CPU skin reference has {} positions for {} vertices — it was not \
+             computed from this mesh",
+            expected.len(),
+            object.positions.len()
+        )];
+    }
+    let mut violations = Vec::new();
+    let mut unskinnable = 0_usize;
+    let mut unreadable = 0_usize;
+    let mut off = 0_usize;
+    let mut worst: Option<(usize, f32, Vec3, Vec3)> = None;
+    for (index, (&position, expected)) in object.positions.iter().zip(expected).enumerate() {
+        let Some(expected) = *expected else {
+            unskinnable = unskinnable.saturating_add(1);
+            continue;
+        };
+        let Some(gpu) = gpu_skinned(object, index, position) else {
+            unreadable = unreadable.saturating_add(1);
+            continue;
+        };
+        let distance = gpu.distance(expected);
+        // A NaN distance counts as off rather than slipping past the comparison.
+        if distance.is_nan() || distance > CPU_SKIN_EPSILON {
+            off = off.saturating_add(1);
+            if worst.is_none_or(|(_index, far, _gpu, _cpu)| distance.is_nan() || distance > far) {
+                worst = Some((index, distance, gpu, expected));
+            }
+        }
+    }
+    if unskinnable > 0 {
+        violations.push(format!(
+            "{name}: the CPU reference could not skin {unskinnable} vertices — their weights name \
+             a render-list slot or a joint that does not exist, which is R13's garbage matrix"
+        ));
+    }
+    if unreadable > 0 {
+        violations.push(format!(
+            "{name}: {unreadable} vertices are weighted onto a palette entry the GPU is not \
+             handed"
+        ));
+    }
+    if let Some((index, distance, gpu, cpu)) = worst {
+        violations.push(format!(
+            "{name}: {off} of {} vertices skin somewhere other than the CPU reference puts them \
+             (worst: vertex {index}, {distance} m off — GPU {gpu:?}, CPU {cpu:?}); the palette the \
+             GPU is handed is not the one the Second Life data describes",
+            object.positions.len()
+        ));
     }
     violations
 }
@@ -1200,8 +1389,8 @@ pub(crate) fn scene_violations(geometry: &[Geometry]) -> Vec<String> {
 mod tests {
     use super::RenderScene;
     use super::{
-        Geometry, TestError, advance_to, capture_logs, geometry_violations, scene_geometry,
-        scene_violations, spawn_scene,
+        Geometry, TestError, advance_to, capture_logs, declared_violations, geometry_violations,
+        scene_geometry, scene_violations, spawn_scene,
     };
     use crate::render_scene::{SCENES, SceneCx, avatar_assets_dir, rigged_strip};
     use bevy::prelude::*;
@@ -1227,6 +1416,8 @@ mod tests {
             joint_indices: Vec::new(),
             joint_weights: Vec::new(),
             joint_count: None,
+            palette: Vec::new(),
+            cpu_skinned: None,
             world: Mat4::IDENTITY,
             uv_transform: None,
             declared_bounds: None,
@@ -1398,6 +1589,122 @@ mod tests {
             .is_empty(),
             "a properly skinned mesh must not be reported, or the check is just noise"
         );
+    }
+
+    /// A skinned triangle on a two-joint palette — joint 0 left where it was bound,
+    /// joint 1 lifted a metre — with every vertex half on each, and the CPU
+    /// reference that says so: half a metre up.
+    fn skinned_against_reference(mutate: impl FnOnce(&mut Geometry)) -> Vec<String> {
+        let positions = vec![Vec3::ZERO, Vec3::X, Vec3::Y];
+        let lifted = |position: Vec3| Some(Vec3::new(position.x, position.y, 0.5));
+        let mut object = Geometry {
+            name: "fixture".to_owned(),
+            group: "fixture".to_owned(),
+            cpu_skinned: Some(positions.iter().copied().map(lifted).collect()),
+            positions,
+            normals: Vec::new(),
+            uvs: Vec::new(),
+            indices: vec![0, 1, 2],
+            joint_indices: vec![[0, 1, 0, 0]; 3],
+            joint_weights: vec![[0.5, 0.5, 0.0, 0.0]; 3],
+            joint_count: Some(2),
+            palette: vec![Mat4::IDENTITY, Mat4::from_translation(Vec3::Z)],
+            world: Mat4::IDENTITY,
+            uv_transform: None,
+            declared_bounds: None,
+            max_extent: None,
+            symmetry: None,
+            uvs_in_unit_square: false,
+            textures: Vec::new(),
+            sampler_may_clamp: false,
+            is_point_cloud: false,
+        };
+        mutate(&mut object);
+        declared_violations(&[object])
+    }
+
+    /// The control: a palette that skins where the reference says is clean.
+    #[test]
+    fn a_palette_that_agrees_with_the_cpu_reference_is_clean() {
+        let violations = skinned_against_reference(|_unchanged| {});
+        assert!(
+            violations.is_empty(),
+            "the GPU and CPU skins agree, so nothing may be reported: {violations:#?}"
+        );
+    }
+
+    /// **The palette check has teeth.** A wrong palette entry — the shape of a
+    /// bind folded in the wrong order or a stale joint — is reported, although
+    /// every weight is valid.
+    #[test]
+    fn a_palette_entry_off_the_cpu_reference_is_reported() {
+        let violations = skinned_against_reference(|object| {
+            object.palette = vec![Mat4::IDENTITY, Mat4::from_translation(Vec3::X)];
+        });
+        assert!(
+            !violations.is_empty(),
+            "a palette entry a metre off the reference must be reported: {violations:#?}"
+        );
+    }
+
+    /// **And the joint order.** Weights onto the right joints swapped between
+    /// slots — a joint list shifted or reversed — are reported.
+    #[test]
+    fn a_blend_onto_the_wrong_joints_is_reported() {
+        let violations = skinned_against_reference(|object| {
+            object.joint_weights = vec![[0.25, 0.75, 0.0, 0.0]; 3];
+        });
+        assert!(
+            !violations.is_empty(),
+            "a blend weighted onto the wrong palette entry must be reported: {violations:#?}"
+        );
+    }
+
+    /// A vertex the reference itself could not skin is reported, not skipped.
+    #[test]
+    fn a_vertex_the_cpu_reference_could_not_skin_is_reported() {
+        let violations = skinned_against_reference(|object| {
+            if let Some(expected) = object.cpu_skinned.as_mut() {
+                expected.fill(None);
+            }
+        });
+        assert!(
+            !violations.is_empty(),
+            "an unskinnable vertex is R13's garbage matrix and must be reported: {violations:#?}"
+        );
+    }
+
+    /// **The avatar scenes carry a CPU reference, for every skinned part.**
+    ///
+    /// The guard against the palette check passing vacuously: a fixture that
+    /// stopped attaching [`CpuSkinnedPositions`](super::CpuSkinnedPositions)
+    /// would leave it with nothing to compare, and green.
+    #[test]
+    fn every_skinned_avatar_part_declares_its_cpu_skin() -> Result<(), TestError> {
+        for id in ["avatar-base-part", "avatar-morphed-body"] {
+            let scene = SCENES
+                .iter()
+                .find(|scene| scene.id == id)
+                .ok_or_else(|| format!("the {id} scene is not registered"))?;
+            let mut app = spawn_scene(SceneCx::new(), scene);
+            let geometry = scene_geometry(&mut app);
+            let skinned: Vec<&Geometry> = geometry
+                .iter()
+                .filter(|object| object.joint_count.is_some())
+                .collect();
+            assert!(!skinned.is_empty(), "`{id}` has no skinned part at all");
+            for object in skinned {
+                assert!(
+                    object
+                        .cpu_skinned
+                        .as_ref()
+                        .is_some_and(|positions| !positions.is_empty()),
+                    "`{}` is skinned but declares no CPU skin, so its palette is unchecked",
+                    object.name
+                );
+            }
+        }
+        Ok(())
     }
 
     /// **The R22h check has teeth.** A clamping texture is reported.

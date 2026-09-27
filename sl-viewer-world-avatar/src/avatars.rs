@@ -46,7 +46,7 @@ use sl_client_bevy::{
     MeshSkin, MorphWeights, Object, PartMorphMask, RUNTIME_MORPH_PARAMS, RegionHandle,
     ResolvedParams, SkeletalDeformations, SlCommand, SlEvent, SlIdentity, SlSessionEvent,
     TextureEntry, TextureKey, TextureUpload, VolumeDeformations, avatar_texture, composite_region,
-    joint_position_overrides, pcode, to_bevy_base_mesh, to_bevy_morphed_mesh,
+    cpu_skin_vertex, joint_position_overrides, pcode, to_bevy_base_mesh, to_bevy_morphed_mesh,
     to_bevy_runtime_morph_targets, upload_decoded, upload_pixels,
 };
 
@@ -3606,8 +3606,9 @@ pub(crate) fn apply_avatar_appearance(
     let mut volumes: HashMap<AgentKey, VolumeDeformations> = HashMap::new();
     // The ingested body-physics configuration per avatar (P34.1).
     let mut physics: HashMap<AgentKey, BodyPhysics> = HashMap::new();
-    // The rest deformed joint **world** matrices per avatar, kept only for the
-    // geometry diagnostic (R13) so it can reproduce the GPU skinning on the CPU.
+    // The rest deformed joint **world** matrices per avatar, for the geometry
+    // diagnostic (R13) to name an outlier vertex by. Only the log reads them: the
+    // standing check on the same skinning is the render harness's.
     let mut world_matrices: HashMap<AgentKey, Vec<Mat4>> = HashMap::new();
     for &agent in &eligible {
         if let Some(bytes) = state.appearances.get(&agent) {
@@ -3973,6 +3974,11 @@ pub(crate) fn apply_avatar_runtime_morphs(
 /// is dragged away and spikes even at rest. Each logged vertex carries the
 /// render-list index its weight selects and the skeleton joint that index
 /// resolves to, so the offending part / vertex / joint is named directly.
+///
+/// The skinning itself is [`cpu_skin_vertex`], which the render harness's
+/// `cpu_skinning_violations` holds every vertex of the avatar scenes to — so
+/// that check, not this log, is the standing R13 detector, and this stays as the
+/// tool for *naming* the vertex once a live body shows one.
 fn log_geometry_outliers(
     region: BodyRegion,
     base: &BaseMesh,
@@ -3996,35 +4002,16 @@ fn log_geometry_outliers(
     let count = weights.len().min(morphed_positions.len());
     let mut displacements: Vec<(f32, usize, usize)> = Vec::with_capacity(count);
     for index in 0..count {
-        let (Some(weight), Some(rest)) = (weights.get(index), morphed_positions.get(index)) else {
+        let (Some(&weight), Some(rest)) = (weights.get(index), morphed_positions.get(index)) else {
             continue;
         };
-        let rest = Vec3::new(rest[0], rest[1], rest[2]);
-        // The two adjacent render-list palette slots this vertex blends between.
-        let slot0 = weight.joint;
-        let slot1 = slot0
-            .saturating_add(1)
-            .min(skin.joints.len().saturating_sub(1));
-        let contrib = |slot: usize| -> Option<Vec3> {
-            let joint = *skin.joints.get(slot)?;
-            let inverse_bind = skin.inverse_bindposes.get(slot)?;
-            let joint_world = world.get(joint)?;
-            // palette = joint_world · inverse_bind, applied to the rest point.
-            Some(joint_world.transform_point3(inverse_bind.transform_point3(rest)))
-        };
-        let (Some(p0), Some(p1)) = (contrib(slot0), contrib(slot1)) else {
+        let rest = Vec3::from_array(*rest);
+        let Some(skinned) = cpu_skin_vertex(rest, weight, skin, world) else {
             continue;
         };
-        let blend = weight.blend;
-        // mix(M0,M1,t)·p == (1-t)·M0·p + t·M1·p (matrix-vector is linear).
-        let skinned = Vec3::new(
-            p0.x + (p1.x - p0.x) * blend,
-            p0.y + (p1.y - p0.y) * blend,
-            p0.z + (p1.z - p0.z) * blend,
-        );
         // `distance` is glam's own subtraction/length, so it stays clear of the
         // workspace `arithmetic_side_effects` lint the `Vec3` `-` operator trips.
-        displacements.push((skinned.distance(rest), index, slot0));
+        displacements.push((skinned.distance(rest), index, weight.joint));
     }
     displacements.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
     for &(distance, index, slot) in displacements.iter().take(10) {

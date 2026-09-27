@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 118 |
-| ready | 301 |
+| ready | 300 |
 | blocked | 62 |
 | in-progress | 25 |
 | bugs | 14 |
-| done | 1243 |
+| done | 1244 |
 | deferred | 30 |
 | wont-do | 16 |
 | **total** | **1809** |
@@ -294,7 +294,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (301)
+## ready (300)
 
 ### protocol
 
@@ -831,9 +831,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-render-closedness-check`](ready/viewer-render-closedness-check.md) —
   Closedness check — an object's faces must enclose a volume (blocked by
   `viewer-render-test-harness` (done))
-- [`viewer-render-cpu-skinning-crosscheck`](ready/viewer-render-cpu-skinning-crosscheck.md)
-  — CPU-skinning cross-check — make the R13 debug affordance a standing test
-  (blocked by `viewer-render-test-harness` (done))
 - [`viewer-render-metadata-overlays`](ready/viewer-render-metadata-overlays.md)
   — Render-metadata debug overlays
 - [`viewer-render-readback-tier`](ready/viewer-render-readback-tier.md) — Render
@@ -1316,7 +1313,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1243)
+## done (1244)
 
 ### protocol
 
@@ -2875,6 +2872,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A resolved parcel id names no question, so two askers cannot be told apart
 - [`viewer-remove-attachment-message-is-a-no-op`](done/viewer-remove-attachment-message-is-a-no-op.md)
   — '`Command::RemoveAttachment` sends a message no grid handles'
+- [`viewer-render-cpu-skinning-crosscheck`](done/viewer-render-cpu-skinning-crosscheck.md)
+  — CPU-skinning cross-check — make the R13 debug affordance a standing test
+  (blocked by `viewer-render-test-harness` (done))
 - [`viewer-render-fixtures-vendored-assets`](done/viewer-render-fixtures-vendored-assets.md)
   — Render-tier avatar fixtures default to the vendored character assets
 - [`viewer-render-friends-only`](done/viewer-render-friends-only.md) — Show

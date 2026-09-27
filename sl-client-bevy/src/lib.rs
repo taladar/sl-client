@@ -296,8 +296,8 @@ pub use crate::animations::{SampledJoint, sample_motion};
 pub use crate::assets::BevyAssetFetcher;
 pub use crate::avatars::{
     AnimationPose, BaseMeshSkin, BevySkeleton, BodySizeMetrics, JointOverrides,
-    RuntimeMorphTargets, joint_position_overrides, to_bevy_base_mesh, to_bevy_morphed_mesh,
-    to_bevy_runtime_morph_targets,
+    RuntimeMorphTargets, cpu_skin_vertex, joint_position_overrides, to_bevy_base_mesh,
+    to_bevy_morphed_mesh, to_bevy_runtime_morph_targets,
 };
 #[cfg(feature = "bevy_pbr")]
 pub use crate::clouds::{CloudMaterial, CloudMaterialPlugin, CloudParams};

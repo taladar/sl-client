@@ -32,7 +32,7 @@ use bevy::mesh::{Indices, Mesh, PrimitiveTopology, VertexAttributeValues};
 use bevy::transform::components::Transform;
 use sl_avatar::{
     AttachmentPoints, BaseMesh, CollisionVolume, Joint, JointSupport, MorphedMesh,
-    SkeletalDeformations, Skeleton, VolumeDeformations,
+    SkeletalDeformations, Skeleton, VertexSkinWeight, VolumeDeformations,
 };
 use sl_mesh::MeshSkin;
 
@@ -245,6 +245,45 @@ pub struct BaseMeshSkin {
     /// Inverse bind matrices (Second Life Z-up space), parallel to
     /// [`joints`](Self::joints).
     pub inverse_bindposes: Vec<Mat4>,
+}
+
+/// Skin one base-body vertex on the CPU, by the reference viewer's own formula:
+/// the position `rest` lands at once `joint_world` poses the skeleton.
+///
+/// `avatarSkinV.glsl` blends two adjacent **render-list** palette entries,
+/// `mix(palette[i], palette[i + 1], fract(weight))`, with the partner clamped
+/// to the last entry, and each entry is `joint_world · inverse_bind`. Matrix
+/// times point is linear, so the mix of the matrices applied to `rest` is the
+/// mix of the two transformed points, which is what this computes.
+///
+/// `joint_world` is indexed by **skeleton** joint (the
+/// [`BevySkeleton::deformed_world_matrices`] layout), in the same frame as the
+/// inverse binds: Second Life Z-up, relative to the skeleton root.
+///
+/// It is written from the Second Life data and not from anything the renderer
+/// is handed — the weight, the render list, the recurrence's matrices — so a
+/// renderer's own assembly (the `JOINT_INDEX` / `JOINT_WEIGHT` attributes, the
+/// `SkinnedMesh` joint list, the propagated joint transforms) can be held to it.
+/// `None` when the weight names a slot outside the render list or a joint the
+/// matrices do not cover: a vertex the reference itself could not skin.
+#[must_use]
+pub fn cpu_skin_vertex(
+    rest: Vec3,
+    weight: VertexSkinWeight,
+    skin: &BaseMeshSkin,
+    joint_world: &[Mat4],
+) -> Option<Vec3> {
+    let first = weight.joint;
+    let second = first
+        .saturating_add(1)
+        .min(skin.joints.len().saturating_sub(1));
+    let transformed = |slot: usize| -> Option<Vec3> {
+        let joint = *skin.joints.get(slot)?;
+        let inverse_bind = skin.inverse_bindposes.get(slot)?;
+        let world = joint_world.get(joint)?;
+        Some(world.transform_point3(inverse_bind.transform_point3(rest)))
+    };
+    Some(transformed(first)?.lerp(transformed(second)?, weight.blend))
 }
 
 /// A per-avatar Bevy skeleton, converted from a parsed [`sl_avatar::Skeleton`].
@@ -1374,10 +1413,11 @@ fn euler_deg_to_quat(rot: [f32; 3]) -> Quat {
 #[cfg(test)]
 mod tests {
     use super::{
-        AnimationPose, BevySkeleton, JointOverrides, joint_position_overrides, to_bevy_base_mesh,
+        AnimationPose, BaseMeshSkin, BevySkeleton, JointOverrides, VertexSkinWeight,
+        cpu_skin_vertex, joint_position_overrides, to_bevy_base_mesh,
         to_bevy_runtime_morph_targets,
     };
-    use bevy::math::Vec3;
+    use bevy::math::{Mat4, Vec3};
     use bevy::mesh::{Mesh, VertexAttributeValues};
     use bevy::transform::components::Transform;
     use pretty_assertions::{assert_eq, assert_ne};
@@ -2422,5 +2462,90 @@ mod tests {
         let before = held.clone();
         held.hold(&AnimationPose::new());
         assert_eq!(held, before);
+    }
+
+    /// A two-slot render list: skeleton joint 0 bound at the origin, joint 1 bound
+    /// a metre up Z.
+    fn two_joint_skin() -> BaseMeshSkin {
+        BaseMeshSkin {
+            joints: vec![0, 1],
+            inverse_bindposes: vec![
+                Mat4::IDENTITY,
+                Mat4::from_translation(Vec3::new(0.0, 0.0, -1.0)),
+            ],
+        }
+    }
+
+    /// At the bind pose every palette entry is the identity, so a vertex stays
+    /// exactly where it rests, whatever it is weighted onto.
+    #[test]
+    fn cpu_skinning_at_the_bind_pose_leaves_a_vertex_where_it_rests() {
+        let bind = [
+            Mat4::IDENTITY,
+            Mat4::from_translation(Vec3::new(0.0, 0.0, 1.0)),
+        ];
+        let rest = Vec3::new(0.25, -0.5, 1.5);
+        let weight = VertexSkinWeight {
+            joint: 0,
+            blend: 0.3,
+        };
+        assert_eq!(
+            cpu_skin_vertex(rest, weight, &two_joint_skin(), &bind),
+            Some(rest)
+        );
+    }
+
+    /// The blend is between the vertex's two adjacent render-list entries, in
+    /// proportion: a quarter of the way toward the second joint moves a quarter
+    /// of that joint's displacement.
+    #[test]
+    fn cpu_skinning_blends_toward_the_next_render_list_entry() {
+        // Joint 1 lifted 0.4 m off its bind; joint 0 stays put.
+        let posed = [
+            Mat4::IDENTITY,
+            Mat4::from_translation(Vec3::new(0.0, 0.0, 1.4)),
+        ];
+        let weight = VertexSkinWeight {
+            joint: 0,
+            blend: 0.25,
+        };
+        let skinned = cpu_skin_vertex(Vec3::new(0.0, 0.0, 1.0), weight, &two_joint_skin(), &posed);
+        assert!(
+            skinned.is_some_and(|point| point.abs_diff_eq(Vec3::new(0.0, 0.0, 1.1), 1.0e-6)),
+            "skinned to {skinned:?}"
+        );
+    }
+
+    /// The last render-list entry has no next one: its partner is clamped onto
+    /// itself, as the reference shader does, rather than read past the end.
+    #[test]
+    fn cpu_skinning_clamps_the_partner_of_the_last_entry() {
+        let posed = [
+            Mat4::IDENTITY,
+            Mat4::from_translation(Vec3::new(0.0, 0.0, 1.4)),
+        ];
+        let weight = VertexSkinWeight {
+            joint: 1,
+            blend: 0.0,
+        };
+        let skinned = cpu_skin_vertex(Vec3::new(0.0, 0.0, 1.0), weight, &two_joint_skin(), &posed);
+        assert!(
+            skinned.is_some_and(|point| point.abs_diff_eq(Vec3::new(0.0, 0.0, 1.4), 1.0e-6)),
+            "skinned to {skinned:?}"
+        );
+    }
+
+    /// A weight past the render list is a vertex the reference could not skin,
+    /// and says so rather than inventing a position.
+    #[test]
+    fn cpu_skinning_refuses_a_slot_outside_the_render_list() {
+        let weight = VertexSkinWeight {
+            joint: 5,
+            blend: 0.0,
+        };
+        assert_eq!(
+            cpu_skin_vertex(Vec3::ZERO, weight, &two_joint_skin(), &[Mat4::IDENTITY; 2]),
+            None
+        );
     }
 }
