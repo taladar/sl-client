@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 118 |
 | ready | 303 |
-| blocked | 60 |
+| blocked | 59 |
 | in-progress | 25 |
 | bugs | 13 |
-| done | 1241 |
+| done | 1242 |
 | deferred | 30 |
 | wont-do | 16 |
 | **total** | **1806** |
@@ -247,18 +247,19 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `server-lsl-vm-execution`, `server-world-determinism-contract`)
 - [`server-lsl-lib-json-linkset-data`](ideas/server-lsl-lib-json-linkset-data.md)
   — Library tranche — llJson* and the linkset data store (blocked by
-  `server-lsl-vm-execution`, `server-lsl-library-surface-table`)
+  `server-lsl-vm-execution`, `server-lsl-library-surface-table` (done))
 - [`server-lsl-lib-land-region-env`](ideas/server-lsl-lib-land-region-env.md) —
   Library tranche — parcel, region, estate and environment queries (blocked by
   `server-lsl-vm-execution`, `server-world-agent-movement`)
 - [`server-lsl-lib-math-rotations`](ideas/server-lsl-lib-math-rotations.md) —
   Library tranche — maths, vectors and rotations (blocked by
-  `server-lsl-vm-execution`, `server-lsl-library-surface-table`)
+  `server-lsl-vm-execution`, `server-lsl-library-surface-table` (done))
 - [`server-lsl-lib-money-permissions`](ideas/server-lsl-lib-money-permissions.md)
   — Library tranche — script permissions, money and payment (blocked by
   `server-lsl-vm-execution`, `protocol-sim-script-messages`)
 - [`server-lsl-lib-ossl`](ideas/server-lsl-lib-ossl.md) — Scope the OSSL (os*)
-  surface — how much, and why (blocked by `server-lsl-library-surface-table`)
+  surface — how much, and why (blocked by `server-lsl-library-surface-table`
+  (done))
 - [`server-lsl-lib-physics-vehicles`](ideas/server-lsl-lib-physics-vehicles.md)
   — Library tranche — status flags, forces, targets and vehicles (blocked by
   `server-lsl-vm-execution`, `server-world-collision-and-physics`)
@@ -268,7 +269,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `server-world-update-scheduling`)
 - [`server-lsl-lib-strings-lists`](ideas/server-lsl-lib-strings-lists.md) —
   Library tranche — strings, lists, encoding and hashing (blocked by
-  `server-lsl-vm-execution`, `server-lsl-library-surface-table`)
+  `server-lsl-vm-execution`, `server-lsl-library-surface-table` (done))
 - [`server-lsl-lib-task-inventory`](ideas/server-lsl-lib-task-inventory.md) —
   Library tranche — task inventory, giving, rezzing and notecards (blocked by
   `server-lsl-vm-execution`, `server-fake-grid-script-engine-wiring`)
@@ -314,6 +315,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — SimSession's 54 fields mix the driver's serving stores with the circuit
 - [`protocol-fetch-inventory-items-request`](ready/protocol-fetch-inventory-items-request.md)
   — Fetching inventory items by id (FetchInventory2's request half)
+- [`protocol-sim-lsl-syntax-document`](ready/protocol-sim-lsl-syntax-document.md)
+  — The fake grid serves an empty LSLSyntax document (blocked by
+  `server-lsl-library-surface-table` (done))
 - [`protocol-sim-script-messages`](ready/protocol-sim-script-messages.md) — The
   simulator-side script messages SimSession neither sends nor decodes
 - [`protocol-sl-llsd-serde`](ready/protocol-sl-llsd-serde.md) — serde
@@ -1001,9 +1005,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-compiler-ir`](ready/server-lsl-compiler-ir.md) — Lower the LSL
   syntax tree to something executable (blocked by `server-lsl-architecture`
   (done), `server-lsl-value-model` (done))
-- [`server-lsl-library-surface-table`](ready/server-lsl-library-surface-table.md)
-  — One generated table for the library, and a coverage harness over it (blocked
-  by `server-lsl-architecture` (done))
 - [`server-lsl-memory-sizes`](ready/server-lsl-memory-sizes.md) — Measure Second
   Life's per-value memory costs and rotation arithmetic on aditi
 - [`server-world-chat-routing`](ready/server-world-chat-routing.md) — The fake
@@ -1013,13 +1014,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-world-heartbeat`](ready/server-world-heartbeat.md) — A region
   heartbeat — the fake grid has no simulation loop at all
 
-## blocked (60)
-
-### protocol
-
-- [`protocol-sim-lsl-syntax-document`](blocked/protocol-sim-lsl-syntax-document.md)
-  — The fake grid serves an empty LSLSyntax document (blocked by
-  `server-lsl-library-surface-table`)
+## blocked (59)
 
 ### viewer
 
@@ -1314,7 +1309,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1241)
+## done (1242)
 
 ### protocol
 
@@ -4040,6 +4035,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   them
 - [`server-lsl-architecture`](done/server-lsl-architecture.md) — LSL engine
   architecture — execution model, crate layout, scheduling
+- [`server-lsl-library-surface-table`](done/server-lsl-library-surface-table.md)
+  — One generated table for the library, and a coverage harness over it (blocked
+  by `server-lsl-architecture` (done))
 - [`server-lsl-value-model`](done/server-lsl-value-model.md) — The LSL value
   model — seven types and their exact coercions
 

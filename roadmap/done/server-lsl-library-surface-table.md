@@ -2,7 +2,7 @@
 id: server-lsl-library-surface-table
 title: One generated table for the library, and a coverage harness over it
 topic: server
-status: ready
+status: done
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 5
 blocked_by: [server-lsl-architecture]
@@ -52,3 +52,38 @@ with its provenance recorded; a coverage test printing
 `implemented / stubbed / missing` counts and failing only on a
 *regression* in that split; and the descriptor used by the dispatch so
 arity and types cannot drift from it.
+
+## Done (2026-09-27)
+
+- **Source:** Linden's own `LSLSyntax` document,
+  `keywords_lsl_default.xml`, vendored at the `sl-lsl-runtime` crate root
+  (Firestorm `684bc1d1`, last upstream change `secondlife/viewer#1744`;
+  LGPL-2.1 like the workspace; SHA-256 and the reasons over tailslide's
+  `builtins.txt` and OpenSim's `ScriptSyntax.xml` in the crate README).
+  428 functions, 709 constants, 38 events.
+- **Generated at build time** (`sl-lsl-runtime/build.rs`, parsed with
+  `sl-llsd`): `BuiltinId`, `BUILTINS` (name, typed args, return, sleep,
+  energy, flags, tooltip), `CONSTANTS` (typed values; the `EOF` and
+  `JSON_*` notations decoded), `EVENTS`, and a `Signature` per function.
+  Lookups `builtin` / `constant` / `event` by name.
+- **Dispatch:** typed implementations registered with `registry!`, held
+  to the generated `Signature` at compile time through a generic
+  `Handler` over argument tuples; stubs check arguments against the
+  descriptor and return the type's default, flagged `stubbed` so the VM
+  can say so once.
+- **Coverage:** `status(id)`, and a test printing
+  `3 implemented / 0 stubbed / 425 missing of 428` that fails only when a
+  function falls back from `src/library/coverage.txt`.
+- **Proof of the pipeline:** `llAbs`, `llFabs` (keeps `-0.0` and a
+  negative NaN, per PyOptimizer) and `llGetListLength` implemented.
+- **Cross-check:** a test decodes the same file through `sl-wire`'s
+  independent `LSLSyntax` decoder and compares every function, event and
+  constant with the generated table — which found a real `sl-wire` bug,
+  fixed here: constant values served as `<uuid>` (`NULL_KEY`,
+  `TEXTURE_*`) decoded to no value.
+
+Differences from the design sketch, recorded in the book chapter: an
+unregistered function is `Missing` at run time rather than a compile
+error, and the call context is a type parameter until the VM task shapes
+`ScriptCtx` / `Host`. The `LSLSyntax` rendering itself stays with
+[[protocol-sim-lsl-syntax-document]], now unblocked.

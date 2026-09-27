@@ -31,6 +31,38 @@ The *compile-time* half — which combinations are legal and what type each
 produces — is `sl_lsl::types`, and a test here runs every combination through
 both and checks they agree.
 
+And the **library table** (`library`): every `ll*` function (428), constant
+(709) and event (38), generated at build time, with a typed dispatch that makes
+an implementation at the wrong arity or argument types a compile error, and a
+coverage test that prints `implemented / stubbed / missing` and fails only if a
+function falls back from the committed baseline (`src/library/coverage.txt`).
+
+## Vendored library definition
+
+`keywords_lsl_default.xml` is Linden Lab's own `LSLSyntax` document — the file
+the viewer ships as `indra/newview/app_settings/keywords_lsl_default.xml` —
+copied byte-for-byte from the Firestorm tree at commit `684bc1d1` (a merge of
+`secondlife/viewer`, 2024-06-21; the file's last upstream change is
+`secondlife/viewer#1744`, "Fix missing LSL constant INVENTORY_SETTING").
+SHA-256 `d665088d59981453e986306508bd8ed0d2886f57be0e1537eea905c7a4280cd8`.
+It is part of the viewer source, licensed LGPL-2.1 like this workspace.
+
+It was chosen over the two other local candidates because it is the only one
+that carries everything the table needs: tailslide's `builtins.txt` has no
+energy, sleep or descriptions, and OpenSim's `bin/ScriptSyntax.xml` has no
+energy or sleep either and adds OpenSim's `os*` functions. It is also already
+the format the grid serves, so the table and the served document cannot
+disagree about what a field means.
+
+Two of its string constants are spelled in a notation rather than literally,
+and `build.rs` decodes them: `EOF` (served escaped twice, `\\n\\n\\n`, meaning
+three newlines) and the `JSON_*` markers (served as `U+FDD0` … `U+FDD8`). The
+override for `EOF` records the raw text it expects, so an updated document that
+changes it stops the build rather than being misread. To update the file,
+replace it and let the tests say what moved: a test decodes the same file
+through `sl-wire`'s independent `LSLSyntax` decoder and compares every
+function, event and constant with the generated table.
+
 The oracles are LSL PyOptimizer's `lslopt/lslbasefuncs.py` and its
 `unit_tests/expr.suite` expected outputs, which were measured against Second
 Life; each test names the one it quotes.

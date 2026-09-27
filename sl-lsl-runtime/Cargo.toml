@@ -20,8 +20,13 @@ sl-lsl = { workspace = true }
 sl-types = { workspace = true }
 thiserror = { workspace = true }
 
+[build-dependencies]
+fs-err = { workspace = true }
+sl-llsd = { workspace = true }
+
 [dev-dependencies]
 pretty_assertions = { workspace = true }
+sl-wire = { workspace = true }
 
 [lints]
 workspace = true

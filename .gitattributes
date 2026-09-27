@@ -78,3 +78,9 @@ opensim-assets/licenses.txt -whitespace
 # repo-wide pre-commit check a per-file skipchecks cannot reach) is unset for
 # them.
 sl-object-asset/tests/data/*.txt -whitespace
+
+# Linden's own LSLSyntax document, vendored byte-for-byte as the source of the
+# LSL library table (sl-lsl-runtime/README.md records its SHA-256). Reformatting
+# it would break that provenance, so it is exempt from the xmllint group like the
+# vendored character XML above.
+sl-lsl-runtime/keywords_lsl_default.xml skipchecks=xml;;;vendored[[space]]upstream[[space]]content

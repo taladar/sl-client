@@ -243,6 +243,27 @@ a `&[Value]` by hand, and an unimplemented function is a compile error
 until it is either written or declared a stub — which is the
 implemented / stubbed / missing split the coverage harness reports.
 
+**As built** (`server-lsl-library-surface-table`): the source is Linden's
+own `LSLSyntax` document, `keywords_lsl_default.xml`, vendored in
+`sl-lsl-runtime` (provenance in its `README.md`), and `build.rs` turns it
+into `BuiltinId`, the `BUILTINS` / `CONSTANTS` / `EVENTS` descriptors and
+one generated `Signature` per function (its argument tuple and return
+type as Rust types). The per-function shim became one generic
+`Handler` over argument tuples, written once: `registry!` registers
+`LlAbs => math::ll_abs` by passing the function through
+`invoke::<signatures::LlAbs, _, _>`, so the compile-time check is the
+same — a mismatched implementation does not compile. Two differences
+from the sketch above:
+
+- **A function nobody has registered is `Missing` at run time**
+  (`CallError::Missing`), not a compile error. Making it one would mean
+  declaring 425 stubs before the first is written, and the coverage
+  count's third column would be empty by construction. The coverage test
+  fails instead when a function falls back from the committed baseline.
+- **The context is a type parameter** (`fn ll_abs<C>(_ctx: &mut C, …)`)
+  until the VM task gives `ScriptCtx` and `Host` their shape; the pure
+  functions ignore it.
+
 **`ScriptCtx`, not `&mut Vm`.** A library function sees the calling
 instance through a narrow context — which script is calling, the current
 tick, the current event's detected block, the instance's accounted

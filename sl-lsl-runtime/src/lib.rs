@@ -16,6 +16,11 @@
 //! - [`parse`] and [`format`](mod@format) — the lenient string parsers behind a cast out
 //!   of a string, and Mono's float/vector printing behind a cast into one.
 //!
+//! And the **library table** — [`library`]: every `ll*` function, constant
+//! and event, generated at build time from Linden Lab's own `LSLSyntax`
+//! document, with the typed dispatch that holds each implementation to it
+//! and the coverage count of what is implemented.
+//!
 //! Every rule is pinned by a table-driven test quoting its oracle: LSL
 //! PyOptimizer's `lslbasefuncs.py` and its `unit_tests/expr.suite`
 //! expectations, which were measured against Second Life.
@@ -23,6 +28,7 @@
 pub mod cast;
 pub mod error;
 pub mod format;
+pub mod library;
 mod num;
 pub mod ops;
 pub mod parse;

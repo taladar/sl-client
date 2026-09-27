@@ -1,0 +1,8 @@
+# The library's coverage baseline, read by the coverage test in
+# `library.rs`. One line per function that is implemented or
+# stubbed; the test fails if any function listed here falls back to a
+# lower status (implemented > stubbed > missing). When a function is
+# added, the test passes and asks for it to be listed here.
+implemented llAbs
+implemented llFabs
+implemented llGetListLength
