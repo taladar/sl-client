@@ -147,26 +147,24 @@ no coercion logic of its own.
 ### As built: the compiler
 
 `sl_lsl_runtime::compile(source)` returns a `Program` or the compile errors
-a grid would answer the upload with (`server-lsl-compiler-ir`). It runs three
+a grid would answer the upload with (`server-lsl-compiler-ir`). It runs two
 stages and stops at the first that fails:
 
 1. **Parse.** Only the first syntax error is reported, as the grid's parser
    stops there.
-2. **The semantic pass**, against an `LslSyntax` built from the library
-   table (`library::lsl_syntax`), so it checks against the same functions,
-   constants and events the lowering resolves. Its errors are mapped to the
-   grid's messages. It is conservative by design, so passing it proves
-   little.
-3. **The lowering**, which cannot be conservative: to emit an instruction
-   it must know every expression's type and every name's meaning. So it
-   enforces the rest of the grid's rules itself — tailslide's, which
-   reproduce Linden's compiler: operator, assignment, cast and condition
-   typing; void values; lists in lists; members; declarations that need a
-   `{ }`; constant global initialisers; the namespace rules; `state` in a
-   function outside an `if`; and "not all code paths return a value", which
-   is an **error** there (the last statement of a value function must be a
-   `return` or an `if`/`else` whose branches both end in one — a loop does
-   not count).
+2. **The lowering**, which cannot be conservative: to emit an instruction it
+   must know every expression's type and every name's meaning. So it enforces
+   the grid's rules itself — tailslide's, which reproduce Linden's compiler:
+   names and scopes, call arity and argument types, `return`s, operator,
+   assignment, cast and condition typing; void values; lists in lists;
+   members; declarations that need a `{ }`; constant global initialisers;
+   event signatures and the state layout; `state` in a function outside an
+   `if`; and "not all code paths return a value", which is an **error** there
+   (the last statement of a value function must be a `return` or an
+   `if`/`else` whose branches both end in one — a loop does not count).
+
+The editor's semantic pass (`sl_lsl::analyze`) is not a stage. It is
+conservative by design, and everything it reports the lowering reports too.
 
 The `Program` (module `bytecode`) holds the globals, a literal pool, one
 `Body` for the global initialisers, one per user function and one per event
@@ -212,15 +210,19 @@ there, but the event then fails with `System.InvalidProgramException` before
 its first line runs (measured on aditi), because the IL leaves an `int32`
 where it declares a `float`.
 
-**Compile errors use Linden's own messages** (`Syntax error`, `Name not
-defined within scope`, `Type mismatch`, `Function call mismatches type or
-number of arguments`, …, as PyOptimizer quotes them). Mistakes Linden's
-*grammar* catches — an unknown event or a wrong event signature, a missing
-or misplaced `default`, a state with no handler, a constant or event name
-used as a variable, an assignment to a non-variable, a non-constant global
-initialiser — are syntax errors, because there they are. "Not all code
-paths return a value" points at the function's closing brace, as Second
-Life's does. A `CompileError`'s `Display` is the string a grid sends,
+**A compile error happens exactly where Second Life's does, and says more.**
+Each carries the grid's kind — Linden's own message, as PyOptimizer quotes it
+(`Syntax error`, `Name not defined within scope`, `Type mismatch`, …) — and a
+message that names the specifics (`server-lsl-compile-error-detail`): the
+undefined name and a near name it may be a typo of, the types expected and
+found with a cast hint, the operator and its operand types, the called
+function's signature. Mistakes Linden's *grammar* catches — an unknown event or
+a wrong event signature, a missing or misplaced `default`, a state with no
+handler, a constant or event name used as a variable, an assignment to a
+non-variable, a non-constant global initialiser — are of the syntax kind,
+because there they are. "Not all code paths return a value" points at the
+function's closing brace, as Second Life's does. A `CompileError`'s `Display`
+has the shape a grid sends and the viewer parses,
 `(line, column): ERROR : message`, with **zero-based** line and column, as
 Second Life's are — measured on aditi, a function whose closing brace is on
 line 5, column 1 answers `(4, 0): ERROR : Not all code paths return a value`

@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 118 |
-| ready | 306 |
+| ready | 305 |
 | blocked | 57 |
 | in-progress | 25 |
 | bugs | 14 |
-| done | 1243 |
+| done | 1244 |
 | deferred | 30 |
 | wont-do | 16 |
 | **total** | **1809** |
@@ -295,7 +295,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (306)
+## ready (305)
 
 ### protocol
 
@@ -1005,8 +1005,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-script-compile-on-upload`](ready/server-fake-grid-script-compile-on-upload.md)
   — A script upload is accepted and never compiled (blocked by
   `server-lsl-compiler-ir` (done))
-- [`server-lsl-compile-error-detail`](ready/server-lsl-compile-error-detail.md)
-  — Compile errors that say what is wrong, not only Linden's bare message
 - [`server-lsl-library-table-refresh`](ready/server-lsl-library-table-refresh.md)
   — The vendored library document lacks 50 current functions
 - [`server-lsl-memory-sizes`](ready/server-lsl-memory-sizes.md) — Measure Second
@@ -1312,7 +1310,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1243)
+## done (1244)
 
 ### protocol
 
@@ -4038,6 +4036,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   them
 - [`server-lsl-architecture`](done/server-lsl-architecture.md) — LSL engine
   architecture — execution model, crate layout, scheduling
+- [`server-lsl-compile-error-detail`](done/server-lsl-compile-error-detail.md) —
+  Compile errors that say what is wrong, not only Linden's bare message
 - [`server-lsl-compiler-ir`](done/server-lsl-compiler-ir.md) — Lower the LSL
   syntax tree to something executable (blocked by `server-lsl-architecture`
   (done), `server-lsl-value-model` (done))

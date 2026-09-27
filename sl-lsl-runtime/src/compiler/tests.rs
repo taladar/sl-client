@@ -350,7 +350,11 @@ state two
 fn an_error_is_rendered_as_the_grid_sends_it() {
     let source = script("", "        string s = [1];");
     assert_eq!(errors(&source), vec![(Kind::TypeMismatch, 6, 20)]);
-    assert_eq!(disassemble(&source), "(5, 19): ERROR : Type mismatch");
+    assert_eq!(
+        disassemble(&source),
+        "(5, 19): ERROR : the initial value of `s` must be `string`, but this is `list`; \
+         an explicit `(string)` cast converts it"
+    );
 }
 
 #[test]
@@ -360,7 +364,14 @@ fn a_missing_return_is_reported_at_the_closing_brace() {
     let source = "integer g()\n{\n    while (TRUE)\n        return 1;\n}\n\ndefault\n{\n    state_entry()\n    {\n        g();\n    }\n}\n";
     assert_eq!(
         disassemble(source),
-        "(4, 0): ERROR : Not all code paths return a value"
+        "(4, 0): ERROR : `g` must return an `integer` on every path: its last \
+         statement has to be a `return`, or an `if`/`else` whose branches both end in one"
+    );
+    assert_eq!(
+        compile(source)
+            .err()
+            .and_then(|errors| errors.first().map(|error| error.kind)),
+        Some(Kind::MissingReturn)
     );
 }
 
@@ -471,5 +482,74 @@ fn a_misplaced_or_missing_default_state_is_a_syntax_error() {
     assert_eq!(
         errors("default\n{\n    state_entry() {}\n}\nstate empty\n{\n}\n"),
         vec![(Kind::Syntax, 5, 7)]
+    );
+}
+
+#[test]
+fn messages_say_what_is_wrong() {
+    let cases: &[(&str, &str, &str)] = &[
+        (
+            "",
+            "        llSay(0);",
+            "(5, 8): ERROR : `llSay(integer Channel, string Text)` takes 2 arguments, \
+             but 1 was given",
+        ),
+        (
+            "",
+            "        llSay(<1,2,3>, \"x\");",
+            "(5, 14): ERROR : argument 1 of `llSay(integer Channel, string Text)` must be \
+             `integer`, but this is `vector`",
+        ),
+        (
+            "",
+            "        llOwnerSya(\"x\");",
+            "(5, 8): ERROR : no function `llOwnerSya`; did you mean `llOwnerSay`?",
+        ),
+        (
+            "",
+            "        float f = 1.5; integer i = f;",
+            "(5, 35): ERROR : the initial value of `i` must be `integer`, but this is \
+             `float`; an explicit `(integer)` cast converts it",
+        ),
+        (
+            "",
+            "        key k; string s = k + \"a\";",
+            "(5, 26): ERROR : there is no `key + string`; `+` joins two strings, not keys \
+             — cast the key with `(string)`",
+        ),
+        (
+            "",
+            "        integer i; i += 1.0;",
+            "(5, 19): ERROR : `integer + float` is a `float`, which `+=` cannot store back \
+             into an `integer`",
+        ),
+        (
+            "",
+            "        vector v; float f = v.s;",
+            "(5, 30): ERROR : `v` is a vector, which has `.x`, `.y` and `.z`, not `.s`",
+        ),
+        (
+            "integer f() { return; }",
+            "",
+            "(0, 14): ERROR : `f` returns an `integer`, so its `return` needs a value",
+        ),
+        (
+            "",
+            "        return 1;",
+            "(5, 8): ERROR : the `state_entry` event returns nothing, so its `return` takes \
+             no value",
+        ),
+        (
+            "",
+            "        state nowhere;",
+            "(5, 14): ERROR : there is no state `nowhere`",
+        ),
+    ];
+    for (globals, body, expected) in cases {
+        assert_eq!(&disassemble(&script(globals, body)), expected);
+    }
+    assert_eq!(
+        disassemble("default { touch_start(string n) {} }"),
+        "(0, 10): ERROR : the `touch_start` event takes (integer NumberOfTouches), not (string)"
     );
 }

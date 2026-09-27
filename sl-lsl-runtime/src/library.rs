@@ -25,7 +25,6 @@ mod generated;
 pub mod lists;
 pub mod math;
 mod registry;
-mod syntax;
 pub mod table;
 
 pub use dispatch::{
@@ -34,7 +33,6 @@ pub use dispatch::{
 };
 pub use generated::{BUILTINS, BuiltinId, CONSTANTS, EVENTS, signatures};
 pub use registry::{call, status};
-pub use syntax::lsl_syntax;
 pub use table::{Argument, Builtin, Constant, ConstantValue, Event, builtin, constant, event};
 
 #[cfg(test)]

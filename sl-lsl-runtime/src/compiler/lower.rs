@@ -179,6 +179,8 @@ enum BodyKind {
 struct BodyBuilder {
     /// What it is.
     kind: BodyKind,
+    /// The function's or event's name, for messages.
+    name: String,
     /// Its return type.
     ret: Option<TypeName>,
     /// The code so far.
@@ -204,6 +206,7 @@ impl BodyBuilder {
     fn new(kind: BodyKind, ret: Option<TypeName>) -> Self {
         Self {
             kind,
+            name: String::new(),
             ret,
             body: Body::default(),
             scopes: Vec::new(),
@@ -257,10 +260,12 @@ impl<'source> Lowerer<'source> {
         }
     }
 
-    /// Record an error.
-    fn error(&mut self, kind: Kind, span: &Range<usize>) {
+    /// Record an error: the grid's kind, and a message saying what exactly
+    /// is wrong.
+    fn error(&mut self, kind: Kind, span: &Range<usize>, message: String) {
         self.errors.push(CompileError {
             kind,
+            message,
             span: span.clone(),
             position: self.source.position(span.start),
         });
@@ -269,7 +274,11 @@ impl<'source> Lowerer<'source> {
     /// A length as a bytecode index, or an error when it does not fit.
     fn index(&mut self, len: usize, span: &Range<usize>) -> u32 {
         u32::try_from(len).unwrap_or_else(|_| {
-            self.error(Kind::TooLarge, span);
+            self.error(
+                Kind::TooLarge,
+                span,
+                "the script is too large to assemble".to_owned(),
+            );
             0
         })
     }
@@ -316,11 +325,24 @@ impl<'source> Lowerer<'source> {
     /// states, `default` first, and at least one handler per state.
     fn check_layout(&mut self, script: &Script) {
         let Some(first) = script.states.first() else {
-            self.error(Kind::Syntax, &(script.span.end..script.span.end));
+            self.error(
+                Kind::Syntax,
+                &(script.span.end..script.span.end),
+                "a script needs a `default` state".to_owned(),
+            );
             return;
         };
         if let StateName::Named(name) = &first.name {
-            self.error(Kind::Syntax, &(first.span.start..name.span.end));
+            let has_default = script
+                .states
+                .iter()
+                .any(|state| matches!(state.name, StateName::Default(_)));
+            let message = if has_default {
+                format!("`default` must be the first state, before `{}`", name.name)
+            } else {
+                "a script needs a `default` state, and it must come first".to_owned()
+            };
+            self.error(Kind::Syntax, &(first.span.start..name.span.end), message);
         }
         for item in &script.globals {
             let span = match item {
@@ -328,13 +350,21 @@ impl<'source> Lowerer<'source> {
                 GlobalItem::Function(func) => &func.span,
             };
             if span.start > first.span.start {
-                self.error(Kind::Syntax, span);
+                self.error(
+                    Kind::Syntax,
+                    span,
+                    "global variables and functions must come before the states".to_owned(),
+                );
             }
         }
         for state in &script.states {
             if state.events.is_empty() {
-                let (_, span) = state_name(&state.name);
-                self.error(Kind::Syntax, &span);
+                let (name, span) = state_name(&state.name);
+                self.error(
+                    Kind::Syntax,
+                    &span,
+                    format!("state `{name}` has no event handlers; a state needs at least one"),
+                );
             }
         }
     }
@@ -343,17 +373,47 @@ impl<'source> Lowerer<'source> {
     /// or event (both are keywords of Linden's grammar), and a library
     /// function's name only for a local.
     fn check_definable(&mut self, name: &Ident, place: DefinedIn) {
-        if library::constant(&name.name).is_some() || library::event(&name.name).is_some() {
-            self.error(Kind::Syntax, &name.span);
+        let what = if library::constant(&name.name).is_some() {
+            Some("constant")
+        } else if library::event(&name.name).is_some() {
+            Some("event")
+        } else {
+            None
+        };
+        if let Some(what) = what {
+            self.error(
+                Kind::Syntax,
+                &name.span,
+                format!(
+                    "`{}` is a library {what}, so nothing can be named that",
+                    name.name
+                ),
+            );
         } else if place == DefinedIn::Global && library::builtin(&name.name).is_some() {
-            self.error(Kind::AlreadyDefined, &name.span);
+            self.error(
+                Kind::AlreadyDefined,
+                &name.span,
+                format!(
+                    "`{}` is a library function; only a local variable may reuse its name",
+                    name.name
+                ),
+            );
         }
     }
 
     /// Bind a name in the global scope, or report it taken.
     fn define_global(&mut self, name: &str, span: &Range<usize>, symbol: GlobalSymbol) {
-        if self.symbols.contains_key(name) {
-            self.error(Kind::AlreadyDefined, span);
+        if let Some(existing) = self.symbols.get(name) {
+            let what = match existing {
+                GlobalSymbol::Variable(_) => "a global variable",
+                GlobalSymbol::Function(_) => "a function",
+                GlobalSymbol::State(_) => "a state",
+            };
+            self.error(
+                Kind::AlreadyDefined,
+                span,
+                format!("`{name}` is already declared as {what}"),
+            );
         } else {
             let _previous = self.symbols.insert(name.to_owned(), symbol);
         }
@@ -367,11 +427,18 @@ impl<'source> Lowerer<'source> {
         if let Some(init) = &var.init {
             if simple_assignable(init, false) {
                 let found = self.expr(init);
-                if self.coerce(found, ty, &init.span(), Kind::TypeMismatch) {
+                let what = format!("the initial value of `{}`", var.name.name);
+                if self.coerce(found, ty, &init.span(), Kind::TypeMismatch, &what) {
                     self.emit(Instr::StoreGlobal(slot), &var.span);
                 }
             } else {
-                self.error(Kind::Syntax, &init.span());
+                self.error(
+                    Kind::Syntax,
+                    &init.span(),
+                    "a global's initial value must be a constant: a literal, a library \
+                     constant or an earlier global, or a list, vector or rotation of those"
+                        .to_owned(),
+                );
             }
         }
         self.globals.push(Global {
@@ -401,12 +468,22 @@ impl<'source> Lowerer<'source> {
             .get(usize::try_from(id.0).unwrap_or(usize::MAX))
             .and_then(|signature| signature.ret);
         self.current = BodyBuilder::new(BodyKind::Function, ret);
+        self.current.name.clone_from(&func.name.name);
         self.params(&func.params);
         self.block(&func.body);
         if ret.is_some() && !func.body.statements.last().is_some_and(always_returns) {
             // Second Life points at the body's closing brace (measured on
             // aditi, 2026-09-27; tailslide points at the name instead).
-            self.error(Kind::MissingReturn, &closing(&func.body.span));
+            self.error(
+                Kind::MissingReturn,
+                &closing(&func.body.span),
+                format!(
+                    "`{}` must return {} on every path: its last statement has to be a \
+                     `return`, or an `if`/`else` whose branches both end in one",
+                    func.name.name,
+                    ret.map_or_else(String::new, a)
+                ),
+            );
         }
         let body = self.finish_body(&closing(&func.body.span));
         self.functions.push(Function {
@@ -423,9 +500,18 @@ impl<'source> Lowerer<'source> {
         for handler in &state.events {
             let event = self.check_event(handler);
             if !handled.insert(handler.name.name.as_str()) {
-                self.error(Kind::AlreadyDefined, &handler.name.span);
+                let (state_name, _) = state_name(&state.name);
+                self.error(
+                    Kind::AlreadyDefined,
+                    &handler.name.span,
+                    format!(
+                        "state `{state_name}` already has a `{}` handler",
+                        handler.name.name
+                    ),
+                );
             }
             self.current = BodyBuilder::new(BodyKind::Event, None);
+            self.current.name.clone_from(&handler.name.name);
             self.params(&handler.params);
             self.block(&handler.body);
             let body = self.finish_body(&closing(&handler.body.span));
@@ -443,7 +529,15 @@ impl<'source> Lowerer<'source> {
     /// compiler, so a mismatch is a syntax error.
     fn check_event(&mut self, handler: &EventHandler) -> Option<&'static library::Event> {
         let Some(event) = library::event(&handler.name.name) else {
-            self.error(Kind::Syntax, &handler.name.span);
+            let hint = did_you_mean(
+                &handler.name.name,
+                library::EVENTS.iter().map(|event| event.name),
+            );
+            self.error(
+                Kind::Syntax,
+                &handler.name.span,
+                format!("`{}` is not an event{hint}", handler.name.name),
+            );
             return None;
         };
         let matches = handler.params.len() == event.args.len()
@@ -455,7 +549,26 @@ impl<'source> Lowerer<'source> {
         if matches {
             Some(event)
         } else {
-            self.error(Kind::Syntax, &handler.name.span);
+            let expected = event
+                .args
+                .iter()
+                .map(|arg| format!("{} {}", arg.ty.keyword(), arg.name))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let given = handler
+                .params
+                .iter()
+                .map(|param| param.ty.kind.keyword())
+                .collect::<Vec<_>>()
+                .join(", ");
+            self.error(
+                Kind::Syntax,
+                &handler.name.span,
+                format!(
+                    "the `{}` event takes ({expected}), not ({given})",
+                    event.name
+                ),
+            );
             None
         }
     }
@@ -471,7 +584,11 @@ impl<'source> Lowerer<'source> {
                 .last()
                 .is_some_and(|scope| scope.variables.contains_key(&param.name.name))
             {
-                self.error(Kind::AlreadyDefined, &param.name.span);
+                self.error(
+                    Kind::AlreadyDefined,
+                    &param.name.span,
+                    format!("parameter `{}` is declared twice", param.name.name),
+                );
             }
             let _slot = self.declare_local(&param.name, param.ty.kind);
             self.current.body.params = self.current.body.params.saturating_add(1);
@@ -598,8 +715,16 @@ impl<'source> Lowerer<'source> {
 
     /// Convert the value just pushed to `to`, as an assignment, argument or
     /// return does: nothing, a cast for one of LSL's two implicit
-    /// conversions, or `kind` reported. Whether it succeeded.
-    fn coerce(&mut self, found: Ty, to: TypeName, span: &Range<usize>, kind: Kind) -> bool {
+    /// conversions, or `kind` reported, the message naming the value as
+    /// `what`. Whether it succeeded.
+    fn coerce(
+        &mut self,
+        found: Ty,
+        to: TypeName,
+        span: &Range<usize>,
+        kind: Kind,
+        what: &str,
+    ) -> bool {
         match found {
             Ty::Error => false,
             Ty::Value(from) if from == to => true,
@@ -607,8 +732,32 @@ impl<'source> Lowerer<'source> {
                 self.emit(Instr::Cast(to), span);
                 true
             }
-            Ty::Void | Ty::Value(_) => {
-                self.error(kind, span);
+            Ty::Value(from) => {
+                let hint = if types::cast_legal(from, to) {
+                    format!("; an explicit `({})` cast converts it", to.keyword())
+                } else {
+                    String::new()
+                };
+                self.error(
+                    kind,
+                    span,
+                    format!(
+                        "{what} must be `{}`, but this is `{}`{hint}",
+                        to.keyword(),
+                        from.keyword()
+                    ),
+                );
+                false
+            }
+            Ty::Void => {
+                self.error(
+                    kind,
+                    span,
+                    format!(
+                        "{what} must be `{}`, but this returns nothing",
+                        to.keyword()
+                    ),
+                );
                 false
             }
         }
@@ -636,7 +785,11 @@ impl<'source> Lowerer<'source> {
             Stmt::Label { name, .. } => {
                 self.check_definable(name, DefinedIn::Local);
                 if !labels.insert(name.name.clone()) {
-                    self.error(Kind::AlreadyDefined, &name.span);
+                    self.error(
+                        Kind::AlreadyDefined,
+                        &name.span,
+                        format!("label `@{}` is already defined in this block", name.name),
+                    );
                 }
             }
             Stmt::If {
@@ -667,7 +820,13 @@ impl<'source> Lowerer<'source> {
     /// declaration.
     fn substatement(&mut self, stmt: &Stmt) {
         if let Stmt::Local { span, .. } = stmt {
-            self.error(Kind::DeclarationNeedsScope, span);
+            self.error(
+                Kind::DeclarationNeedsScope,
+                span,
+                "a declaration cannot be the whole body of an `if`, `else` or loop; \
+                 wrap it in `{ }`"
+                    .to_owned(),
+            );
         }
         self.stmt(stmt);
     }
@@ -751,7 +910,22 @@ impl<'source> Lowerer<'source> {
                     .iter()
                     .any(|scope| scope.labels.contains(&label.name));
                 if !visible {
-                    self.error(Kind::Undefined, &label.span);
+                    let hint = did_you_mean(
+                        &label.name,
+                        self.current
+                            .scopes
+                            .iter()
+                            .flat_map(|scope| scope.labels.iter().map(String::as_str)),
+                    );
+                    self.error(
+                        Kind::Undefined,
+                        &label.span,
+                        format!(
+                            "no label `@{}` in scope here — a label is visible only in its own \
+                             block and the blocks inside it{hint}",
+                            label.name
+                        ),
+                    );
                 }
                 let at = self.emit_jump(Instr::Jump, span);
                 self.current.jumps.push((at, label.name.clone()));
@@ -761,7 +935,13 @@ impl<'source> Lowerer<'source> {
                 let _previous = self.current.labels.insert(name.name.clone(), here);
             }
             Stmt::StateChange { target, span } => self.state_change(target, span),
-            Stmt::Error(span) => self.error(Kind::Syntax, span),
+            Stmt::Error(span) => {
+                self.error(
+                    Kind::Syntax,
+                    span,
+                    "this statement does not parse".to_owned(),
+                );
+            }
         }
     }
 
@@ -787,7 +967,8 @@ impl<'source> Lowerer<'source> {
         match init {
             Some(init) => {
                 let found = self.expr(init);
-                let _converted = self.coerce(found, ty, &init.span(), Kind::TypeMismatch);
+                let what = format!("the initial value of `{}`", name.name);
+                let _converted = self.coerce(found, ty, &init.span(), Kind::TypeMismatch, &what);
             }
             None => self.push_const(Value::default_of(ty), &name.span),
         }
@@ -796,7 +977,11 @@ impl<'source> Lowerer<'source> {
             scope.variables.contains_key(&name.name) || scope.labels.contains(&name.name)
         });
         if taken {
-            self.error(Kind::AlreadyDefined, &name.span);
+            self.error(
+                Kind::AlreadyDefined,
+                &name.span,
+                format!("`{}` is already declared in this block", name.name),
+            );
         }
         let slot = self.declare_local(name, ty);
         self.emit(Instr::StoreLocal(slot), &name.span);
@@ -805,7 +990,11 @@ impl<'source> Lowerer<'source> {
     /// A condition: any type but no void.
     fn condition(&mut self, cond: &Expr) {
         if self.expr(cond) == Ty::Void {
-            self.error(Kind::TypeMismatch, &cond.span());
+            self.error(
+                Kind::TypeMismatch,
+                &cond.span(),
+                "a condition needs a value, but this returns nothing".to_owned(),
+            );
         }
     }
 
@@ -818,12 +1007,39 @@ impl<'source> Lowerer<'source> {
                 // `return` is nested in a control statement.
                 Ty::Void if self.current.control_depth > 0 => self.emit(Instr::Return, span),
                 Ty::Error => {}
-                Ty::Void | Ty::Value(_) => self.error(Kind::ReturnValueInVoid, span),
+                found @ (Ty::Void | Ty::Value(_)) => {
+                    let whose = match self.current.kind {
+                        BodyKind::Event => format!("the `{}` event", self.current.name),
+                        BodyKind::Function | BodyKind::Init => {
+                            format!("`{}`", self.current.name)
+                        }
+                    };
+                    let note = if found == Ty::Void {
+                        " (returning a call that returns nothing is allowed only inside an \
+                         `if` or a loop)"
+                    } else {
+                        ""
+                    };
+                    self.error(
+                        Kind::ReturnValueInVoid,
+                        span,
+                        format!("{whose} returns nothing, so its `return` takes no value{note}"),
+                    );
+                }
             },
-            (Some(_), None) => self.error(Kind::ReturnWithoutValue, span),
+            (Some(ret), None) => self.error(
+                Kind::ReturnWithoutValue,
+                span,
+                format!(
+                    "`{}` returns {}, so its `return` needs a value",
+                    self.current.name,
+                    a(ret)
+                ),
+            ),
             (Some(ret), Some(expr)) => {
                 let found = self.expr(expr);
-                if self.coerce(found, ret, &expr.span(), Kind::TypeMismatch) {
+                let what = format!("the value `{}` returns", self.current.name);
+                if self.coerce(found, ret, &expr.span(), Kind::TypeMismatch, &what) {
                     self.emit(Instr::ReturnValue, span);
                 }
             }
@@ -836,12 +1052,24 @@ impl<'source> Lowerer<'source> {
         let id = match self.symbols.get(name) {
             Some(GlobalSymbol::State(id)) => *id,
             _ => {
-                self.error(Kind::Undefined, &name_span);
+                let hint = did_you_mean(
+                    name,
+                    self.names_of(|symbol| matches!(symbol, GlobalSymbol::State(_))),
+                );
+                self.error(
+                    Kind::Undefined,
+                    &name_span,
+                    format!("there is no state `{name}`{hint}"),
+                );
                 StateId::DEFAULT
             }
         };
         if self.current.kind == BodyKind::Function && self.current.if_depth == 0 {
-            self.error(Kind::StateChangeInFunction, span);
+            self.error(
+                Kind::StateChangeInFunction,
+                span,
+                "a function can change state only inside an `if`".to_owned(),
+            );
         }
         self.emit(Instr::StateChange(id), span);
     }
@@ -937,13 +1165,21 @@ impl<'source> Lowerer<'source> {
                         self.emit(Instr::Cast(TypeName::String), span);
                         self.emit(Instr::Print, span);
                     }
-                    Ty::Void => self.error(Kind::TypeMismatch, span),
+                    Ty::Void => self.error(
+                        Kind::TypeMismatch,
+                        span,
+                        "`print` needs a value, but this returns nothing".to_owned(),
+                    ),
                     Ty::Error => {}
                 }
                 Ty::Void
             }
             Expr::Error(span) => {
-                self.error(Kind::Syntax, span);
+                self.error(
+                    Kind::Syntax,
+                    span,
+                    "this expression does not parse".to_owned(),
+                );
                 Ty::Error
             }
         }
@@ -984,10 +1220,59 @@ impl<'source> Lowerer<'source> {
                 Ty::Value(value.type_name())
             }
             None => {
-                self.error(Kind::Undefined, &id.span);
+                self.undefined_variable(id);
                 Ty::Error
             }
         }
+    }
+
+    /// Report a variable name that resolves to nothing — naming what it is
+    /// instead, when it is a function or a state, and suggesting a near name
+    /// otherwise.
+    fn undefined_variable(&mut self, id: &Ident) {
+        let message = match self.symbols.get(&id.name) {
+            Some(GlobalSymbol::Function(_)) => {
+                format!(
+                    "`{}` is a function, not a variable; call it with `()`",
+                    id.name
+                )
+            }
+            Some(GlobalSymbol::State(_)) => format!("`{}` is a state, not a variable", id.name),
+            Some(GlobalSymbol::Variable(_)) => {
+                format!(
+                    "`{}` is declared later; a global's initial value can use only the globals above it",
+                    id.name
+                )
+            }
+            None if library::builtin(&id.name).is_some() => {
+                format!(
+                    "`{}` is a library function, not a variable; call it with `()`",
+                    id.name
+                )
+            }
+            None => {
+                let mut candidates: Vec<&str> = self
+                    .current
+                    .scopes
+                    .iter()
+                    .flat_map(|scope| scope.variables.keys().map(String::as_str))
+                    .collect();
+                candidates
+                    .extend(self.names_of(|symbol| matches!(symbol, GlobalSymbol::Variable(_))));
+                candidates.extend(library::CONSTANTS.iter().map(|constant| constant.name));
+                let hint = did_you_mean(&id.name, candidates.into_iter());
+                format!("no variable `{}` in scope here{hint}", id.name)
+            }
+        };
+        self.error(Kind::Undefined, &id.span, message);
+    }
+
+    /// The global names whose symbol matches.
+    fn names_of(&self, wanted: fn(&GlobalSymbol) -> bool) -> impl Iterator<Item = &str> {
+        self.symbols
+            .iter()
+            .filter(move |(_, symbol)| wanted(symbol))
+            .map(|(name, _)| name.as_str())
     }
 
     /// What an assignment or step targets: a variable, or one component of a
@@ -1005,11 +1290,15 @@ impl<'source> Lowerer<'source> {
                 }),
                 // A constant is a keyword token in Linden's grammar.
                 Some(Resolved::Constant(_)) => {
-                    self.error(Kind::Syntax, &id.span);
+                    self.error(
+                        Kind::Syntax,
+                        &id.span,
+                        format!("`{}` is a library constant and cannot be changed", id.name),
+                    );
                     None
                 }
                 None => {
-                    self.error(Kind::Undefined, &id.span);
+                    self.undefined_variable(id);
                     None
                 }
             },
@@ -1017,7 +1306,13 @@ impl<'source> Lowerer<'source> {
                 base, component, ..
             } => self.member(base, component),
             _ => {
-                self.error(Kind::Syntax, &target.span());
+                self.error(
+                    Kind::Syntax,
+                    &target.span(),
+                    "only a variable or one component of a vector or rotation variable can be \
+                     assigned, incremented or decremented"
+                        .to_owned(),
+                );
                 None
             }
         }
@@ -1031,11 +1326,19 @@ impl<'source> Lowerer<'source> {
             Some(Resolved::Local(slot, ty)) => Place::Local(slot, ty),
             Some(Resolved::Global(slot, ty)) => Place::Global(slot, ty),
             Some(Resolved::Constant(_)) => {
-                self.error(Kind::InvalidMember, &component.span);
+                self.error(
+                    Kind::InvalidMember,
+                    &component.span,
+                    format!(
+                        "`{}` is a library constant; a component can be taken only from a \
+                         variable",
+                        base.name
+                    ),
+                );
                 return None;
             }
             None => {
-                self.error(Kind::Undefined, &base.span);
+                self.undefined_variable(base);
                 return None;
             }
         };
@@ -1050,7 +1353,26 @@ impl<'source> Lowerer<'source> {
             | TypeName::List => false,
         });
         if member.is_none() {
-            self.error(Kind::InvalidMember, &component.span);
+            let message = match ty {
+                TypeName::Vector => format!(
+                    "`{}` is a vector, which has `.x`, `.y` and `.z`, not `.{}`",
+                    base.name, component.name
+                ),
+                TypeName::Rotation => format!(
+                    "`{}` is a rotation, which has `.x`, `.y`, `.z` and `.s`, not `.{}`",
+                    base.name, component.name
+                ),
+                TypeName::Integer
+                | TypeName::Float
+                | TypeName::String
+                | TypeName::Key
+                | TypeName::List => format!(
+                    "`{}` is `{}`; only vectors and rotations have components",
+                    base.name,
+                    ty.keyword()
+                ),
+            };
+            self.error(Kind::InvalidMember, &component.span, message);
         }
         member.map(|member| LValue {
             place,
@@ -1095,7 +1417,7 @@ impl<'source> Lowerer<'source> {
             Builtin(BuiltinId),
         }
         let (target, params, ret) =
-            if let Some(GlobalSymbol::Function(id)) = self.symbols.get(&callee.name) {
+            if let Some(GlobalSymbol::Function(id)) = self.symbols.get(&callee.name).copied() {
                 let signature = self
                     .signatures
                     .get(usize::try_from(id.0).unwrap_or(usize::MAX))
@@ -1104,7 +1426,7 @@ impl<'source> Lowerer<'source> {
                         params: Vec::new(),
                         ret: None,
                     });
-                (Target::User(*id), signature.params, signature.ret)
+                (Target::User(id), signature.params, signature.ret)
             } else if let Some(builtin) = library::builtin(&callee.name) {
                 (
                     Target::Builtin(builtin.id),
@@ -1112,19 +1434,59 @@ impl<'source> Lowerer<'source> {
                     builtin.ret,
                 )
             } else {
-                self.error(Kind::Undefined, &callee.span);
+                let message = if self.resolve(&callee.name).is_some() {
+                    format!("`{}` is a variable, not a function", callee.name)
+                } else {
+                    let mut candidates: Vec<&str> = self
+                        .names_of(|symbol| matches!(symbol, GlobalSymbol::Function(_)))
+                        .collect();
+                    candidates.extend(library::BUILTINS.iter().map(|builtin| builtin.name));
+                    let hint = did_you_mean(&callee.name, candidates.into_iter());
+                    format!("no function `{}`{hint}", callee.name)
+                };
+                self.error(Kind::Undefined, &callee.span, message);
                 for arg in args {
                     let _checked = self.expr(arg);
                 }
                 return Ty::Error;
             };
+        let signature = format!(
+            "`{}({})`",
+            callee.name,
+            match &target {
+                Target::Builtin(id) => id
+                    .descriptor()
+                    .args
+                    .iter()
+                    .map(|arg| format!("{} {}", arg.ty.keyword(), arg.name))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                Target::User(_) => params
+                    .iter()
+                    .map(|param| param.keyword())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            }
+        );
         if args.len() == params.len() {
-            for (arg, param) in args.iter().zip(params) {
+            for (index, (arg, param)) in args.iter().zip(params).enumerate() {
                 let found = self.expr(arg);
-                let _converted = self.coerce(found, param, &arg.span(), Kind::FunctionMismatch);
+                let what = format!("argument {} of {signature}", index.saturating_add(1));
+                let _converted =
+                    self.coerce(found, param, &arg.span(), Kind::FunctionMismatch, &what);
             }
         } else {
-            self.error(Kind::FunctionMismatch, span);
+            self.error(
+                Kind::FunctionMismatch,
+                span,
+                format!(
+                    "{signature} takes {} argument{}, but {} {} given",
+                    params.len(),
+                    if params.len() == 1 { "" } else { "s" },
+                    args.len(),
+                    if args.len() == 1 { "was" } else { "were" }
+                ),
+            );
             for arg in args {
                 let _checked = self.expr(arg);
             }
@@ -1140,8 +1502,16 @@ impl<'source> Lowerer<'source> {
     fn list(&mut self, elements: &[Expr], span: &Range<usize>) -> Ty {
         for element in elements {
             match self.expr(element) {
-                Ty::Value(TypeName::List) => self.error(Kind::ListInList, &element.span()),
-                Ty::Void => self.error(Kind::TypeMismatch, &element.span()),
+                Ty::Value(TypeName::List) => self.error(
+                    Kind::ListInList,
+                    &element.span(),
+                    "a list cannot contain a list; join lists with `+` instead".to_owned(),
+                ),
+                Ty::Void => self.error(
+                    Kind::TypeMismatch,
+                    &element.span(),
+                    "a list element needs a value, but this returns nothing".to_owned(),
+                ),
                 Ty::Value(_) | Ty::Error => {}
             }
         }
@@ -1153,6 +1523,11 @@ impl<'source> Lowerer<'source> {
     /// The components of a vector or rotation constructor: left to right,
     /// each a float or an integer converted to one.
     fn components(&mut self, components: &[&Expr]) {
+        let what = if components.len() == 4 {
+            "a rotation component"
+        } else {
+            "a vector component"
+        };
         for component in components {
             let found = self.expr(component);
             let _converted = self.coerce(
@@ -1160,6 +1535,7 @@ impl<'source> Lowerer<'source> {
                 TypeName::Float,
                 &component.span(),
                 Kind::TypeMismatch,
+                what,
             );
         }
     }
@@ -1183,12 +1559,34 @@ impl<'source> Lowerer<'source> {
                         self.emit(Instr::Prefix(op), span);
                         Ty::Value(result)
                     } else {
-                        self.error(Kind::TypeMismatch, span);
+                        let takes = match op {
+                            PrefixOp::Neg => "an `integer`, `float`, `vector` or `rotation`",
+                            PrefixOp::Not
+                            | PrefixOp::BitNot
+                            | PrefixOp::PreInc
+                            | PrefixOp::PreDec => "an `integer`",
+                        };
+                        self.error(
+                            Kind::TypeMismatch,
+                            span,
+                            format!(
+                                "`{}` takes {takes}, not `{}`",
+                                prefix_symbol(op),
+                                ty.keyword()
+                            ),
+                        );
                         Ty::Error
                     }
                 }
                 Ty::Void => {
-                    self.error(Kind::TypeMismatch, span);
+                    self.error(
+                        Kind::TypeMismatch,
+                        span,
+                        format!(
+                            "`{}` needs a value, but this returns nothing",
+                            prefix_symbol(op)
+                        ),
+                    );
                     Ty::Error
                 }
                 Ty::Error => Ty::Error,
@@ -1212,7 +1610,15 @@ impl<'source> Lowerer<'source> {
         };
         let ty = lvalue.ty();
         if types::prefix_result(step, ty).is_none() {
-            self.error(Kind::TypeMismatch, span);
+            self.error(
+                Kind::TypeMismatch,
+                span,
+                format!(
+                    "`{}` takes an `integer` or `float` variable, not `{}`",
+                    prefix_symbol(step),
+                    ty.keyword()
+                ),
+            );
             return Ty::Error;
         }
         self.load(lvalue, span);
@@ -1238,12 +1644,29 @@ impl<'source> Lowerer<'source> {
             (Ty::Value(left), Ty::Value(right)) => (left, right),
             (Ty::Error, _) | (_, Ty::Error) => return Ty::Error,
             (Ty::Void, _) | (_, Ty::Void) => {
-                self.error(Kind::TypeMismatch, span);
+                self.error(
+                    Kind::TypeMismatch,
+                    span,
+                    format!(
+                        "`{}` needs a value on both sides, but one side returns nothing",
+                        binary_symbol(op)
+                    ),
+                );
                 return Ty::Error;
             }
         };
         let Some(result) = types::binary_result(op, left, right) else {
-            self.error(Kind::TypeMismatch, span);
+            self.error(
+                Kind::TypeMismatch,
+                span,
+                format!(
+                    "there is no `{} {} {}`{}",
+                    left.keyword(),
+                    binary_symbol(op),
+                    right.keyword(),
+                    binary_hint(op, left, right)
+                ),
+            );
             return Ty::Error;
         };
         let concatenation =
@@ -1276,7 +1699,11 @@ impl<'source> Lowerer<'source> {
             let Some(lvalue) = self.lvalue(target) else {
                 return Ty::Error;
             };
-            if !self.coerce(found, lvalue.ty(), span, Kind::TypeMismatch) {
+            let what = format!(
+                "the value assigned to `{}`",
+                self.source.text().get(target.span()).unwrap_or_default()
+            );
+            if !self.coerce(found, lvalue.ty(), span, Kind::TypeMismatch, &what) {
                 return Ty::Error;
             }
             if want {
@@ -1298,12 +1725,37 @@ impl<'source> Lowerer<'source> {
             Ty::Value(right) => right,
             Ty::Error => return Ty::Error,
             Ty::Void => {
-                self.error(Kind::TypeMismatch, span);
+                self.error(
+                    Kind::TypeMismatch,
+                    span,
+                    format!(
+                        "`{}` needs a value on its right, but this returns nothing",
+                        assign_symbol(op)
+                    ),
+                );
                 return Ty::Error;
             }
         };
         if types::assign_result(op, ty, right).is_none() {
-            self.error(Kind::TypeMismatch, span);
+            let message = match types::binary_result(operator, ty, right) {
+                Some(result) => format!(
+                    "`{} {} {}` is {}, which `{}` cannot store back into {}",
+                    ty.keyword(),
+                    binary_symbol(operator),
+                    right.keyword(),
+                    a(result),
+                    assign_symbol(op),
+                    a(ty)
+                ),
+                None => format!(
+                    "there is no `{} {} {}`{}",
+                    ty.keyword(),
+                    binary_symbol(operator),
+                    right.keyword(),
+                    binary_hint(operator, ty, right)
+                ),
+            };
+            self.error(Kind::TypeMismatch, span, message);
             return Ty::Error;
         }
         self.load(lvalue, &target.span());
@@ -1351,12 +1803,107 @@ impl<'source> Lowerer<'source> {
                 self.emit(Instr::Cast(to), span);
                 Ty::Value(to)
             }
-            Ty::Value(_) | Ty::Void => {
-                self.error(Kind::TypeMismatch, span);
+            Ty::Value(from) => {
+                self.error(
+                    Kind::TypeMismatch,
+                    span,
+                    format!("{} cannot be cast to `{}`", a(from), to.keyword()),
+                );
+                Ty::Error
+            }
+            Ty::Void => {
+                self.error(
+                    Kind::TypeMismatch,
+                    span,
+                    "a cast needs a value, but this returns nothing".to_owned(),
+                );
                 Ty::Error
             }
             Ty::Error => Ty::Error,
         }
+    }
+}
+
+/// `; did you mean `x`?` when a candidate is a plausible typo of `name`,
+/// else nothing.
+fn did_you_mean<'a>(name: &str, candidates: impl Iterator<Item = &'a str>) -> String {
+    sl_lsl::closest(name, candidates)
+        .map_or_else(String::new, |close| format!("; did you mean `{close}`?"))
+}
+
+/// A type with its indefinite article: "an `integer`", "a `float`".
+fn a(ty: TypeName) -> String {
+    let article = if ty == TypeName::Integer { "an" } else { "a" };
+    format!("{article} `{}`", ty.keyword())
+}
+
+/// A binary operator as the source spells it.
+const fn binary_symbol(op: BinaryOp) -> &'static str {
+    match op {
+        BinaryOp::Add => "+",
+        BinaryOp::Sub => "-",
+        BinaryOp::Mul => "*",
+        BinaryOp::Div => "/",
+        BinaryOp::Mod => "%",
+        BinaryOp::Eq => "==",
+        BinaryOp::Ne => "!=",
+        BinaryOp::Lt => "<",
+        BinaryOp::Le => "<=",
+        BinaryOp::Gt => ">",
+        BinaryOp::Ge => ">=",
+        BinaryOp::Shl => "<<",
+        BinaryOp::Shr => ">>",
+        BinaryOp::BitAnd => "&",
+        BinaryOp::BitOr => "|",
+        BinaryOp::BitXor => "^",
+        BinaryOp::And => "&&",
+        BinaryOp::Or => "||",
+    }
+}
+
+/// A prefix operator as the source spells it.
+const fn prefix_symbol(op: PrefixOp) -> &'static str {
+    match op {
+        PrefixOp::Neg => "-",
+        PrefixOp::Not => "!",
+        PrefixOp::BitNot => "~",
+        PrefixOp::PreInc => "++",
+        PrefixOp::PreDec => "--",
+    }
+}
+
+/// An assignment operator as the source spells it.
+const fn assign_symbol(op: AssignOp) -> &'static str {
+    match op {
+        AssignOp::Assign => "=",
+        AssignOp::AddAssign => "+=",
+        AssignOp::SubAssign => "-=",
+        AssignOp::MulAssign => "*=",
+        AssignOp::DivAssign => "/=",
+        AssignOp::ModAssign => "%=",
+    }
+}
+
+/// A hint for the operand combinations people most often expect to work.
+fn binary_hint(op: BinaryOp, left: TypeName, right: TypeName) -> String {
+    let text = |ty| matches!(ty, TypeName::String | TypeName::Key);
+    match op {
+        BinaryOp::Add if text(left) && text(right) => {
+            "; `+` joins two strings, not keys — cast the key with `(string)`".to_owned()
+        }
+        BinaryOp::Add if text(left) || text(right) => {
+            "; cast the other side with `(string)` to join them".to_owned()
+        }
+        BinaryOp::And
+        | BinaryOp::Or
+        | BinaryOp::BitAnd
+        | BinaryOp::BitOr
+        | BinaryOp::BitXor
+        | BinaryOp::Shl
+        | BinaryOp::Shr => {
+            format!("; `{}` works on integers only", binary_symbol(op))
+        }
+        _ => String::new(),
     }
 }
 

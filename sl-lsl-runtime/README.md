@@ -37,13 +37,13 @@ an implementation at the wrong arity or argument types a compile error, and a
 coverage test that prints `implemented / stubbed / missing` and fails only if a
 function falls back from the committed baseline (`src/library/coverage.txt`).
 
-And the **compiler** (`compile`, modules `compiler` and `bytecode`): source
-to a stack bytecode `Program` — names resolved to slots and indices, implicit
+And the **compiler** (`compile`, modules `compiler` and `bytecode`): source to a
+stack bytecode `Program` — names resolved to slots and indices, implicit
 conversions spelled out as casts, a source map on every instruction — or the
-compile errors a grid would send, in Linden's words. It is held to tailslide
-as an oracle by `tests/compile_corpus.rs`: set `SL_LSL_TAILSLIDE_BIN` to a
-built `tailslide`, and `SL_LSL_DIFFTEST_CORPUS` to its `tests/scripts/` for
-the scale run.
+compile errors a grid would send — in the same situations, with messages that
+name what is wrong. It is held to tailslide as an oracle by
+`tests/compile_corpus.rs`: set `SL_LSL_TAILSLIDE_BIN` to a built `tailslide`,
+and `SL_LSL_DIFFTEST_CORPUS` to its `tests/scripts/` for the scale run.
 
 ## Vendored library definition
 
