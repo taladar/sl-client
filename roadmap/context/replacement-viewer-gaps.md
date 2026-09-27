@@ -199,8 +199,8 @@ bar and favourites bar the default skin has and Vintage does without.
 packs and freebies) closed on 2026-09-27: an item dropped into the body goes
 where it was dropped, and a click on an embedded sound, landmark or material
 does what the reference's does. `viewer-streaming-audio` (parcel music — a
-club with no stream is not a club) is **in progress** and should be finished
-before new fronts open; what is left of it is the nearby-media panel. The
+club with no stream is not a club) closed on 2026-09-27 with the Nearby Media
+window: every media source around the agent, each with its own controls. The
 third,
 `viewer-media-prim-browser`, closed on 2026-09-27 with the per-face media
 editor (the Texture tab's Media mode and the Media Settings window), the

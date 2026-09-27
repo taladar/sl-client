@@ -2,7 +2,7 @@
 id: viewer-stream-favorites
 title: Audio-stream favorites + now-playing title floater
 topic: viewer
-status: blocked
+status: ready
 origin: debug-settings/chat-lines survey (2026-07-23)
 blocked_by: [viewer-streaming-audio]
 ---

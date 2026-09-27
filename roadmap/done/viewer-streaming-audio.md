@@ -2,7 +2,7 @@
 id: viewer-streaming-audio
 title: Parcel streaming-audio / media-audio player
 topic: viewer
-status: in-progress
+status: done
 origin: reference-viewer feature-cluster survey (2026-07)
 refs: [viewer-audio-backend]
 ---
@@ -76,3 +76,39 @@ hand-off to the mixer's music bus (filed as
 [[viewer-gst-audio-mixer-handoff]]), and the fuller
 nearby-media panel (the reference's list of *all* nearby media with
 per-item control) beyond this compact cluster.
+
+## Done (2026-09-27): the Nearby Media window
+
+The mixer hand-off closed with [[viewer-gst-audio-mixer-handoff]]. The
+remaining piece, the reference's `LLPanelNearByMedia`, is now
+`sl-viewer-world-view/src/nearby_media.rs`. The parcel-audio bar's new **▲**
+opens it, where the reference uses the status bar's media button.
+
+- **The list:** Parcel Streaming Audio comes first, then every
+  media-on-a-prim face the surface driver ranks (focused face, then
+  nearest first). Each row has a play tick and a *(playing)* mark. The
+  **Show** filter offers all / in this parcel (the agent parcel's bitmap) /
+  outside it / on other avatars.
+- **Controls:** Stop All and Start All. The transport shows the set the
+  reference's `updateControls` shows for the selected row's kind: stop,
+  play, pause, volume, mute and zoom / unzoom. Zoom looks along the face's
+  own averaged normal (`getApproximateFaceNormal`), and, unlike the
+  reference, which keeps world up, rolls the camera so the page's bottom
+  is the screen's (`CameraRig::point_up`, from the face's UV gradient). The
+  floating bar's zoom does the same. The gear opens
+  Preferences on the Audio tab. A right-click offers Copy URL, plus Copy
+  Data for a `data:` page.
+- **What it needed below it:**
+  - A user **stop** in `MediaStartRequests`, the reference's
+    `setDisabled`. It holds a face surfaceless until the window or a click
+    on the face starts it, and a request is acted on the same frame.
+  - A per-source **gain** on `MixerStream`, so per-item volume is real in
+    series with the media bus.
+  - `MediaZoomRequest` in `media_controls`.
+  - `sl_viewer_media::parcel_stream`, so the window reaches the parcel
+    player without the two crates depending on each other.
+
+Not listed: legacy whole-parcel media video (`ParcelMediaUpdate`), which
+this viewer does not play yet ([[viewer-video-playback]]). Also not ported:
+the reference's More / Less collapse (a floater here, resizable and
+closable) and the row double-click zoom.

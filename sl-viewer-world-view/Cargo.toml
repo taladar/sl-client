@@ -16,6 +16,7 @@ publish.workspace = true
 [dependencies]
 # Not a workspace dependency: members disagree about `default-features`, so the
 # spec stays per-crate (see the root manifest).
+base64 = { workspace = true }
 bevy = { version = "0.19.0" }
 # The media bar's enable-gated labels express their state as a skin class, so this crate
 # names the CSS engine directly. Already in the closure through
@@ -30,6 +31,9 @@ image = { version = "0.25.10", default-features = false, features = [
   "tga",
 ] }
 parry3d = "0.27.0"
+# The Nearby Media window's Copy Data unescapes a `data:` URL. Already in the
+# closure through `url`; the package set is unchanged.
+percent-encoding = "2.3.2"
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 # The graceful-quit signal handler: a harness asks this viewer to log out with

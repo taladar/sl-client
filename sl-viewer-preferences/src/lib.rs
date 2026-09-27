@@ -95,6 +95,7 @@ pub(crate) use sl_viewer_world_scene::sky;
 pub(crate) use sl_viewer_world_view::camera;
 pub(crate) use sl_viewer_world_view::media_prim;
 pub(crate) use sl_viewer_world_view::movement;
+pub(crate) use sl_viewer_world_view::nearby_media;
 pub(crate) use sl_viewer_world_view::session;
 
 pub mod debug_settings;

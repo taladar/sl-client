@@ -219,6 +219,7 @@ pub(crate) use sl_viewer_world_view::input_action;
 pub(crate) use sl_viewer_world_view::input_context;
 pub(crate) use sl_viewer_world_view::media_controls;
 pub(crate) use sl_viewer_world_view::media_prim;
+pub(crate) use sl_viewer_world_view::nearby_media;
 mod menu_bar;
 mod menu_search;
 pub(crate) use sl_viewer_asset_editors::notecard_render;
@@ -1414,6 +1415,9 @@ fn run_session(
     // The floating media controls bar above the media face under the cursor
     // (LLPanelPrimMediaControls).
     .add_plugins(crate::media_controls::MediaControlsPlugin)
+    // The Nearby Media window (LLPanelNearByMedia): the parcel stream and every
+    // media face around the agent, each with its own controls.
+    .add_plugins(crate::nearby_media::NearbyMediaPlugin)
     // Parcel streaming audio (viewer-streaming-audio): the GStreamer radio
     // stream following the agent's parcel, with its bottom-bar controls.
     .add_plugins(crate::parcel_audio::ParcelAudioPlugin)

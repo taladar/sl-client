@@ -13,6 +13,7 @@
 //! - [`media_keys`] — keyboard routing into a focused media surface.
 //! - [`media_ime`] — IME composition into a focused media surface.
 //! - [`media_diagnostics`] — what the F3 overlay reports about media.
+//! - [`parcel_stream`] — the parcel music stream as its non-owners see it.
 //! - [`browser_widget`] — a page as a UI element.
 //! - [`web_floater`] — that widget's own floater, the in-viewer web browser.
 //! - [`web_auth`] — the browser-hosted login flow.
@@ -32,5 +33,6 @@ pub mod media_diagnostics;
 pub mod media_engine;
 pub mod media_ime;
 pub mod media_keys;
+pub mod parcel_stream;
 pub mod web_auth;
 pub mod web_floater;

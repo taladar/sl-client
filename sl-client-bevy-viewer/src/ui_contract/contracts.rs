@@ -964,6 +964,15 @@ pub(crate) const CONTRACTS: &[ElementContract] = &[
                     Row::emits(Gesture::Space, &["play-stop"]),
                 ],
             ),
+            NodeContract::new(
+                "parcel-audio-button:nearby-media",
+                &[
+                    Row::emits(Gesture::PrimaryClick, &["nearby-media"]),
+                    Row::emits(Gesture::DoubleClick, &["nearby-media", "nearby-media"]),
+                    Row::emits(Gesture::Enter, &["nearby-media"]),
+                    Row::emits(Gesture::Space, &["nearby-media"]),
+                ],
+            ),
             NodeContract::inert("parcel-audio-volume"),
         ],
     },

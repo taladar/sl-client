@@ -23,7 +23,9 @@
 //! **Zoom** parks the third-person camera squarely in front of the face
 //! (focus-on-point plus a normal-scaled offset — `LLViewerMediaFocus::
 //! setCameraZoom`'s geometry, simplified); **unzoom** returns the focus to
-//! the avatar. `Escape` (which also drops media focus) unzooms too.
+//! the avatar. `Escape` (which also drops media focus) unzooms too. The Nearby
+//! Media window zooms the same way, by [`MediaZoomRequest`] — onto a face it
+//! lists, which need not be under the cursor or even playing.
 
 use bevy::camera::primitives::Aabb;
 use bevy::input::keyboard::KeyboardInput;
@@ -134,6 +136,28 @@ pub struct MediaControlsState {
     zoomed: Option<MediaTarget>,
 }
 
+impl MediaControlsState {
+    /// The face the camera is zoomed onto, if any — the Nearby Media window
+    /// reads it to offer *unzoom* rather than *zoom* for that row.
+    #[must_use]
+    pub const fn zoomed(&self) -> Option<MediaTarget> {
+        self.zoomed
+    }
+}
+
+/// Zoom the camera onto a media face, or back out — the Nearby Media window's
+/// zoom / unzoom and its row double-click (the reference's
+/// `LLViewerMediaFocus::focusZoomOnMedia` / `unZoom`).
+///
+/// A zoom also gives the face media focus, as the reference's does, so the zoom
+/// holds until focus moves on (`Escape`, a click elsewhere) exactly as a zoom
+/// from the floating bar does.
+#[derive(Message, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MediaZoomRequest {
+    /// The face to zoom onto; `None` zooms back out to the avatar.
+    pub target: Option<MediaTarget>,
+}
+
 /// The floating media-controls plugin.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MediaControlsPlugin;
@@ -144,6 +168,7 @@ impl Plugin for MediaControlsPlugin {
             app.add_plugins(SliderWidgetPlugin);
         }
         app.init_resource::<MediaControlsState>()
+            .add_message::<MediaZoomRequest>()
             .add_systems(
                 Startup,
                 spawn_media_controls.after(UiScaffoldSystems::SpawnRoot),
@@ -154,6 +179,7 @@ impl Plugin for MediaControlsPlugin {
                     update_media_controls,
                     drive_scrub_visual,
                     handle_media_control_actions,
+                    handle_media_zoom_requests,
                     unzoom_on_focus_loss,
                 )
                     .chain()
@@ -853,7 +879,7 @@ fn handle_media_control_actions(
     mut actions: MessageReader<UiAction>,
     mut bar_state: ResMut<MediaControlsState>,
     media: MediaBarState,
-    face_geometry: Query<(&Aabb, &GlobalTransform)>,
+    lookups: ZoomLookups,
     mut cameras: Query<(&Projection, &GlobalTransform, &mut CameraRig), With<ViewerCamera>>,
     mut camera_focus: ResMut<FocusTarget>,
 ) {
@@ -921,46 +947,289 @@ fn handle_media_control_actions(
                 if bar_state.zoomed == Some(target) {
                     *camera_focus = FocusTarget::Avatar;
                     bar_state.zoomed = None;
-                } else if let Ok((aabb, transform)) = face_geometry.get(active.face_entity)
-                    && let Ok((projection, camera_transform, mut rig)) = cameras.single_mut()
+                } else if let Ok(face) = lookups.face_geometry.get(active.face_entity)
+                    && let Ok(camera) = cameras.single_mut()
+                    && zoom_camera_onto(
+                        face,
+                        camera,
+                        (
+                            ZoomView::HoverNormal(media.focus.hover_normal),
+                            lookups.media_down(active.face_entity),
+                        ),
+                        &mut camera_focus,
+                    )
                 {
-                    let center = transform.transform_point(Vec3::from(aabb.center));
-                    let world_half = Vec3::from(aabb.half_extents);
-                    let scale = transform.scale();
-                    let extent = (world_half.x * scale.x.abs())
-                        .max(world_half.y * scale.y.abs())
-                        .max(world_half.z * scale.z.abs())
-                        .max(0.1);
-                    let fov = match projection {
-                        Projection::Perspective(perspective) => perspective.fov,
-                        _ => core::f32::consts::FRAC_PI_4,
-                    };
-                    // Distance so the face's largest extent fills the view at a
-                    // slight padding (the reference's ZOOM_MEDIUM, padding 1.1).
-                    let distance = (extent * 1.1) / (fov * 0.5).tan();
-                    let towards_camera = Vec3::new(
-                        camera_transform.translation().x - center.x,
-                        camera_transform.translation().y - center.y,
-                        camera_transform.translation().z - center.z,
-                    );
-                    let normal = media
-                        .focus
-                        .hover_normal
-                        .filter(|normal| normal.dot(towards_camera) > 0.0)
-                        .unwrap_or(towards_camera)
-                        .normalize_or_zero();
-                    if normal != Vec3::ZERO {
-                        rig.set_point_offset(Vec3::new(
-                            normal.x * distance,
-                            normal.y * distance,
-                            normal.z * distance,
-                        ));
-                        *camera_focus = FocusTarget::Point(center);
-                        bar_state.zoomed = Some(target);
-                    }
+                    bar_state.zoomed = Some(target);
                 }
             }
             _ => {}
+        }
+    }
+}
+
+/// Which way a zoom looks at the face.
+#[derive(Debug, Clone, Copy)]
+enum ZoomView {
+    /// Along the normal at the last hover hit — when it faces the camera; a
+    /// hit on the far side of a double-sided face would put the camera behind
+    /// it, so otherwise straight from where the camera is.
+    HoverNormal(Option<Vec3>),
+    /// Along the face's own normal, whatever side the camera is on — the
+    /// reference's `getApproximateFaceNormal`, for a zoom that has no hover hit
+    /// (the Nearby Media window's). Looking from the camera instead gave a
+    /// tilted face, a ramp, a flat side-on view.
+    FaceNormal(Vec3),
+}
+
+/// Park the camera squarely in front of a face so its largest extent fills the
+/// view — `LLViewerMediaFocus::setCameraZoom`'s geometry, simplified, looking
+/// as `view` says. With the page's `down` direction (world space, see
+/// [`ZoomLookups::media_down`]) the camera also rolls so the page's bottom is
+/// the screen's; the reference keeps world up, which turns a page on a tilted
+/// face sideways. Returns whether it moved (a degenerate direction leaves it
+/// where it was).
+fn zoom_camera_onto(
+    (aabb, transform): (&Aabb, &GlobalTransform),
+    (projection, camera_transform, mut rig): (&Projection, &GlobalTransform, Mut<CameraRig>),
+    (view, down): (ZoomView, Option<Vec3>),
+    camera_focus: &mut FocusTarget,
+) -> bool {
+    let center = transform.transform_point(Vec3::from(aabb.center));
+    let world_half = Vec3::from(aabb.half_extents);
+    let scale = transform.scale();
+    let extent = (world_half.x * scale.x.abs())
+        .max(world_half.y * scale.y.abs())
+        .max(world_half.z * scale.z.abs())
+        .max(0.1);
+    let fov = match projection {
+        Projection::Perspective(perspective) => perspective.fov,
+        _ => core::f32::consts::FRAC_PI_4,
+    };
+    // Distance so the face's largest extent fills the view at a slight padding
+    // (the reference's ZOOM_MEDIUM, padding 1.1).
+    let distance = (extent * 1.1) / (fov * 0.5).tan();
+    let towards_camera = Vec3::new(
+        camera_transform.translation().x - center.x,
+        camera_transform.translation().y - center.y,
+        camera_transform.translation().z - center.z,
+    );
+    let normal = match view {
+        ZoomView::HoverNormal(normal) => normal
+            .filter(|normal| normal.dot(towards_camera) > 0.0)
+            .unwrap_or(towards_camera),
+        ZoomView::FaceNormal(normal) => normal,
+    }
+    .normalize_or_zero();
+    if normal == Vec3::ZERO {
+        return false;
+    }
+    let offset = Vec3::new(
+        normal.x * distance,
+        normal.y * distance,
+        normal.z * distance,
+    );
+    // The page's up, flattened into the plane the camera sees it in; a page
+    // seen edge-on along its own up has none, and keeps world up.
+    let up = down.and_then(|down| {
+        let up = Vec3::new(-down.x, -down.y, -down.z);
+        let along = up.dot(normal);
+        let flat = Vec3::new(
+            up.x - normal.x * along,
+            up.y - normal.y * along,
+            up.z - normal.z * along,
+        );
+        flat.try_normalize()
+    });
+    match up {
+        Some(up) => rig.set_point_view(offset, up),
+        None => rig.set_point_offset(offset),
+    }
+    *camera_focus = FocusTarget::Point(center);
+    true
+}
+
+/// Which way is down on a page drawn over a mesh, in the mesh's own space: the
+/// sum over its triangles of `∂P/∂v` — the direction the sampled `v` grows,
+/// `v` being each vertex's UV after `placement` — each weighted by its UV area.
+/// Zero when no triangle has a UV extent.
+fn page_down(
+    positions: &[[f32; 3]],
+    uvs: &[[f32; 2]],
+    indices: &[usize],
+    placement: bevy::math::Affine2,
+) -> Vec3 {
+    let corner = |index: usize| -> Option<(Vec3, Vec2)> {
+        let position = Vec3::from_array(*positions.get(index)?);
+        let uv = placement.transform_point2(Vec2::from_array(*uvs.get(index)?));
+        Some((position, uv))
+    };
+    let mut down = Vec3::ZERO;
+    for &[a, b, c] in indices.as_chunks::<3>().0 {
+        let (Some((p0, t0)), Some((p1, t1)), Some((p2, t2))) = (corner(a), corner(b), corner(c))
+        else {
+            continue;
+        };
+        let e1 = sl_viewer_world_api::vsub(p1, p0);
+        let e2 = sl_viewer_world_api::vsub(p2, p0);
+        let (du1, dv1) = (t1.x - t0.x, t1.y - t0.y);
+        let (du2, dv2) = (t2.x - t0.x, t2.y - t0.y);
+        let det = du1.mul_add(dv2, -(du2 * dv1));
+        if det.abs() <= f32::EPSILON {
+            continue;
+        }
+        // ∂P/∂v = (du1·e2 − du2·e1) / det; times |det| it is this.
+        let gradient = sl_viewer_world_api::vscale(
+            sl_viewer_world_api::vsub(
+                sl_viewer_world_api::vscale(e2, du1),
+                sl_viewer_world_api::vscale(e1, du2),
+            ),
+            det.signum(),
+        );
+        down = Vec3::new(
+            down.x + gradient.x,
+            down.y + gradient.y,
+            down.z + gradient.z,
+        );
+    }
+    down
+}
+
+/// The lookups a [`MediaZoomRequest`] resolves its face through, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam).
+#[derive(bevy::ecs::system::SystemParam)]
+struct ZoomLookups<'w, 's> {
+    /// The live surfaces — a playing face's entity is the one it wears.
+    prim_state: Res<'w, MediaPrimState>,
+    /// The object model, for a face that is not playing.
+    objects: Res<'w, ObjectState>,
+    /// The prim faces, to find that one's entity.
+    faces: Query<
+        'w,
+        's,
+        (
+            &'static sl_viewer_world_objects::objects::PrimFaceEntity,
+            &'static sl_viewer_world_objects::objects::FaceTextureDebug,
+        ),
+    >,
+    /// The face's bounds and placement.
+    face_geometry: Query<'w, 's, (&'static Aabb, &'static GlobalTransform)>,
+    /// The face's mesh, for its normal.
+    face_meshes: Query<'w, 's, &'static Mesh3d>,
+    /// The meshes (prim faces keep theirs on the CPU).
+    meshes: Res<'w, Assets<Mesh>>,
+}
+
+impl ZoomLookups<'_, '_> {
+    /// Which way is **down** on the page `entity` shows, in world space: the
+    /// direction the sampled `v` grows along the face (`ATTRIBUTE_UV_0` is
+    /// top-down, row 0 of the media image at `v = 0`), after the face's own
+    /// texture placement (repeats / offset / rotation — the media material's
+    /// `uv_transform`). Summed over the face's triangles, each `∂P/∂v` weighted
+    /// by its UV area. `None` without a mesh, UVs or a direction.
+    fn media_down(&self, entity: Entity) -> Option<Vec3> {
+        let mesh = self.meshes.get(&self.face_meshes.get(entity).ok()?.0)?;
+        let Some(bevy::mesh::VertexAttributeValues::Float32x3(positions)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            return None;
+        };
+        let Some(bevy::mesh::VertexAttributeValues::Float32x2(uvs)) =
+            mesh.attribute(Mesh::ATTRIBUTE_UV_0)
+        else {
+            return None;
+        };
+        let placement = self
+            .faces
+            .get(entity)
+            .map(
+                |(_face, sl_viewer_world_objects::objects::FaceTextureDebug(tf))| {
+                    sl_client_bevy::texture_face_uv_transform(tf)
+                },
+            )
+            .unwrap_or_default();
+        let indices: Vec<usize> = mesh.indices()?.iter().collect();
+        let down = page_down(positions, uvs, &indices, placement);
+        let (_aabb, transform) = self.face_geometry.get(entity).ok()?;
+        // A surface direction goes out by the transform's linear part itself
+        // (only a normal needs the inverse-transpose).
+        let world = Vec3::from(
+            transform
+                .affine()
+                .matrix3
+                .mul_vec3a(bevy::math::Vec3A::from(down)),
+        );
+        world.try_normalize()
+    }
+
+    /// `entity`'s face normal in world space: its mesh's vertex normals
+    /// averaged and carried out by the inverse-transpose of its transform (a
+    /// prim's scale is non-uniform). `None` without a mesh, normals, or a
+    /// direction (a face whose normals cancel out).
+    fn face_normal(&self, entity: Entity) -> Option<Vec3> {
+        let mesh = self.meshes.get(&self.face_meshes.get(entity).ok()?.0)?;
+        let Some(bevy::mesh::VertexAttributeValues::Float32x3(normals)) =
+            mesh.attribute(Mesh::ATTRIBUTE_NORMAL)
+        else {
+            return None;
+        };
+        let sum = normals.iter().fold(Vec3::ZERO, |sum, [x, y, z]| {
+            Vec3::new(sum.x + x, sum.y + y, sum.z + z)
+        });
+        let (_aabb, transform) = self.face_geometry.get(entity).ok()?;
+        let linear = transform.affine().matrix3;
+        let world = linear
+            .inverse()
+            .transpose()
+            .mul_vec3a(bevy::math::Vec3A::from(sum));
+        let world = Vec3::from(world).normalize_or_zero();
+        (world != Vec3::ZERO && world.is_finite()).then_some(world)
+    }
+}
+
+/// Carry out the Nearby Media window's zoom / unzoom.
+fn handle_media_zoom_requests(
+    mut requests: MessageReader<MediaZoomRequest>,
+    lookups: ZoomLookups,
+    mut bar_state: ResMut<MediaControlsState>,
+    mut focus: ResMut<MediaFocus>,
+    mut cameras: Query<(&Projection, &GlobalTransform, &mut CameraRig), With<ViewerCamera>>,
+    mut camera_focus: ResMut<FocusTarget>,
+) {
+    for request in requests.read() {
+        let Some(target) = request.target else {
+            if bar_state.zoomed.take().is_some() {
+                *camera_focus = FocusTarget::Avatar;
+            }
+            continue;
+        };
+        let active = lookups.prim_state.active.get(&target);
+        let face_entity = active.map(|active| active.face_entity).or_else(|| {
+            crate::media_prim::resolve_face_entity(&lookups.objects, target, &lookups.faces)
+        });
+        let Some(entity) = face_entity else {
+            continue;
+        };
+        let Ok(face) = lookups.face_geometry.get(entity) else {
+            continue;
+        };
+        let Ok(camera) = cameras.single_mut() else {
+            continue;
+        };
+        // No hover hit to take a normal from: the face's own, as the
+        // reference's `focusZoomOnMedia` does.
+        let view = lookups
+            .face_normal(entity)
+            .map_or(ZoomView::HoverNormal(None), ZoomView::FaceNormal);
+        if zoom_camera_onto(
+            face,
+            camera,
+            (view, lookups.media_down(entity)),
+            &mut camera_focus,
+        ) {
+            bar_state.zoomed = Some(target);
+            focus.focused = Some(target);
+            focus.focused_takes_keyboard =
+                active.is_some_and(|active| active.kind == MediaEngineKind::Web);
         }
     }
 }
@@ -976,10 +1245,61 @@ fn unzoom_on_focus_loss(
     let Some(zoomed) = bar_state.zoomed else {
         return;
     };
-    let face_gone = !prim_state.active.contains_key(&zoomed);
+    // A face zoomed onto from the Nearby Media window need not be playing, so
+    // "gone" is gone from the driver's list, not merely not live.
+    let face_gone = !prim_state.active.contains_key(&zoomed)
+        && !prim_state.nearby.iter().any(|face| face.target == zoomed);
     let focus_left = focus.focused != Some(zoomed) && focus.hover != Some(zoomed);
     if face_gone || (focus_left && focus.focused.is_none() && bar_state.target.is_none()) {
         *camera_focus = FocusTarget::Avatar;
         bar_state.zoomed = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy::math::{Affine2, Vec2, Vec3};
+    use pretty_assertions::assert_eq;
+
+    use super::page_down;
+
+    /// A unit quad in the XY plane whose UV `v` runs top-down along −Y: down
+    /// on the page is −Y. The face's texture rotation turns it with the page.
+    #[test]
+    fn page_down_follows_the_uvs_and_the_texture_rotation() {
+        let positions = [
+            [0.0, 1.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+        ];
+        let uvs = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        let indices = [0, 1, 2, 0, 2, 3];
+
+        let down = page_down(&positions, &uvs, &indices, Affine2::IDENTITY)
+            .try_normalize()
+            .unwrap_or(Vec3::ZERO);
+        assert!(down.abs_diff_eq(Vec3::NEG_Y, 1e-5), "{down}");
+
+        // A quarter turn of the texture about its centre: the page's down now
+        // runs along the quad's X axis.
+        let quarter = Affine2::from_translation(Vec2::splat(0.5))
+            * Affine2::from_angle(core::f32::consts::FRAC_PI_2)
+            * Affine2::from_translation(Vec2::splat(-0.5));
+        let turned = page_down(&positions, &uvs, &indices, quarter)
+            .try_normalize()
+            .unwrap_or(Vec3::ZERO);
+        assert!(turned.y.abs() < 1e-5 && turned.x.abs() > 0.99, "{turned}");
+    }
+
+    /// Degenerate UVs give no direction rather than a garbage one.
+    #[test]
+    fn page_down_is_zero_without_uv_extent() {
+        let positions = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+        let uvs = [[0.5, 0.5]; 3];
+        assert_eq!(
+            page_down(&positions, &uvs, &[0, 1, 2], Affine2::IDENTITY),
+            Vec3::ZERO
+        );
     }
 }

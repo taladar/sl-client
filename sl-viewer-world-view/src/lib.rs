@@ -6,12 +6,13 @@
 //! ties a login to a rendered region. It sits above both the object layer
 //! (`sl-viewer-world-objects`) and the scene layer (`sl-viewer-world-scene`).
 //!
-//! Two surfaces here are screen-space UI rather than view machinery, and are
+//! Three surfaces here are screen-space UI rather than view machinery, and are
 //! here because of what they read, not what they draw: [`hover_tooltip`] is the
-//! dwell tip over whatever [`gpu_pick`] resolved under the cursor, and
+//! dwell tip over whatever [`gpu_pick`] resolved under the cursor,
 //! [`media_controls`] is the bar that drives a [`media_prim`] surface and the
-//! camera focus that frames it. Neither could sit lower without dragging the
-//! pick buffers and the camera down with it.
+//! camera focus that frames it, and [`nearby_media`] is the window listing every
+//! such surface with the same controls and zoom. None could sit lower without
+//! dragging the pick buffers and the camera down with it.
 //!
 //! Every reach into a lower crate names that crate: a call site says
 //! `sl_viewer_kit::coords` or `sl_viewer_world_api::ObjectState`, never a
@@ -40,6 +41,7 @@ pub mod input_context;
 pub mod media_controls;
 pub mod media_prim;
 pub mod movement;
+pub mod nearby_media;
 pub mod panorama;
 pub mod physics;
 pub mod quiescence;

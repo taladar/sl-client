@@ -869,6 +869,9 @@ pub(crate) fn orbit_third_person(
         FocusTarget::Point(_point) => {
             if azimuth_delta != 0.0 || elevation_delta != 0.0 {
                 rig.point_offset = orbit_offset(rig.point_offset, azimuth_delta, elevation_delta);
+                // An orbit swings about world up; a media zoom's roll would
+                // tumble with it.
+                rig.point_up = None;
             }
             if zoom_in != 0.0 {
                 let factor = ZOOM_STEP.powf(zoom_in);
@@ -958,6 +961,7 @@ pub(crate) fn focus_on_object(
         // store the world offset from the point to the current eye, so the eye does
         // not jump (the reference does not move the camera on an alt-click focus).
         rig.point_offset = vsub(camera_transform.translation(), hit.point);
+        rig.point_up = None;
         *focus = FocusTarget::Point(hit.point);
         info!("camera: focus on {:?}", hit.point);
     }
@@ -1417,6 +1421,12 @@ pub(crate) fn position_camera(
                     }
                 );
             }
+            // A point focus may hold its own up (a media zoom's, framing the
+            // page upright); everything else looks with world up.
+            let up = match (sit_pose, *state.focus) {
+                (None, FocusTarget::Point(_)) => rig.point_up.unwrap_or(Vec3::Y),
+                _ => Vec3::Y,
+            };
             let (mut eye, focus, follow_avatar, collide) = match (sit_pose, *state.focus) {
                 // Scripted sit camera: fixed offsets from the (moving) seat, tracked
                 // rigidly like a follow, never collided.
@@ -1475,6 +1485,7 @@ pub(crate) fn position_camera(
                 &PoseTarget {
                     eye,
                     focus,
+                    up,
                     follow_avatar,
                     half_life: state.tuning.smoothing_half_life,
                     snap: false,
@@ -1529,6 +1540,8 @@ struct PoseTarget {
     eye: Vec3,
     /// The world point it looks at.
     focus: Vec3,
+    /// The camera's up direction (world up but for a media zoom's).
+    up: Vec3,
     /// Rigid avatar follow (only the eye's offset from the focus eases) rather
     /// than smoothing the whole pose in world space.
     follow_avatar: bool,
@@ -1568,6 +1581,7 @@ fn apply_pose(
     let &PoseTarget {
         eye,
         focus,
+        up,
         follow_avatar,
         half_life,
         snap,
@@ -1609,7 +1623,7 @@ fn apply_pose(
     } else {
         vadd(final_eye, transform.forward().as_vec3())
     };
-    let new_transform = Transform::from_translation(final_eye).looking_at(target, Vec3::Y);
+    let new_transform = Transform::from_translation(final_eye).looking_at(target, up);
     // Only ask for a write when the pose actually moved beyond a sub-perceptible
     // epsilon — see [`camera_pose_moved`]. A `snap` always writes: it is a
     // deliberate discontinuity, and a consumer that gates on camera movement has
@@ -1952,6 +1966,7 @@ mod tests {
                     &PoseTarget {
                         eye: vadd(anchor, eye_off),
                         focus: vadd(anchor, focus_off),
+                        up: Vec3::Y,
                         follow_avatar,
                         half_life: SMOOTH_HALF_LIFE,
                         snap: false,
@@ -2061,6 +2076,7 @@ mod tests {
                 &PoseTarget {
                     eye,
                     focus,
+                    up: Vec3::Y,
                     follow_avatar: false,
                     half_life: 0.0,
                     snap: false,
@@ -2311,6 +2327,7 @@ mod tests {
                 &PoseTarget {
                     eye,
                     focus,
+                    up: Vec3::Y,
                     follow_avatar: false,
                     half_life: SMOOTH_HALF_LIFE,
                     snap: false,
@@ -2340,6 +2357,7 @@ mod tests {
                 &PoseTarget {
                     eye: vadd(eye, Vec3::new(5.0, 0.0, 0.0)),
                     focus: vadd(focus, Vec3::new(5.0, 0.0, 0.0)),
+                    up: Vec3::Y,
                     follow_avatar: false,
                     half_life: SMOOTH_HALF_LIFE,
                     snap: false,
@@ -2356,6 +2374,7 @@ mod tests {
                 &PoseTarget {
                     eye: transform.translation,
                     focus: vadd(transform.translation, transform.forward().as_vec3()),
+                    up: Vec3::Y,
                     follow_avatar: false,
                     half_life: SMOOTH_HALF_LIFE,
                     snap: true,

@@ -273,6 +273,14 @@ pub const FLOATERS: &[FloaterElement] = &[
         content: crate::my_environments::spawn_my_environments_specimen,
     },
     FloaterElement {
+        id: "nearby-media",
+        summary: "Nearby Media: Stop All / Start All and the preferences gear, the Show filter, \
+                  the list of the parcel stream and the media faces around the agent with a \
+                  play tick each, and the selected row's transport.",
+        spec: crate::nearby_media::nearby_media_floater_spec,
+        content: crate::nearby_media::spawn_nearby_media_specimen,
+    },
+    FloaterElement {
         id: "notecard-editor",
         summary: "Notecard: the view toggle over the editable body and the Save button — the \
                   notecard asset editor. One window per notecard, so a second one cannot \

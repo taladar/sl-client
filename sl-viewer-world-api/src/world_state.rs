@@ -162,6 +162,12 @@ pub struct CameraRig {
     /// (which follows the heading) this is fixed in the world, as the reference's
     /// object focus is.
     pub point_offset: Vec3,
+    /// The camera's up direction while it looks at a `FocusTarget::Point`, or
+    /// `None` for world up. A media zoom sets it to the page's own up, so a face
+    /// tilted like a ramp reads upright rather than turned on its side; an orbit
+    /// or a new focus point clears it, since the camera's own frame then no
+    /// longer has anything to do with the face.
+    pub point_up: Option<Vec3>,
     /// The last rendered eye position, eased toward the mode's desired eye.
     pub smoothed_eye: Vec3,
     /// The last rendered look-at point, eased toward the mode's desired focus.
@@ -185,6 +191,7 @@ impl Default for CameraRig {
             pitch: 0.0,
             roll: 0.0,
             point_offset: Vec3::ZERO,
+            point_up: None,
             smoothed_eye: Vec3::ZERO,
             smoothed_focus: Vec3::ZERO,
             seeded: false,
@@ -263,6 +270,15 @@ impl CameraRig {
     /// `focus_on_object` capturing the offset at an alt-click.
     pub const fn set_point_offset(&mut self, offset: Vec3) {
         self.point_offset = offset;
+        self.point_up = None;
+    }
+
+    /// [`set_point_offset`](Self::set_point_offset), holding the camera's up at
+    /// `up` (see [`point_up`](Self::point_up)) — the media zoom, which frames a
+    /// page upright whatever the face's tilt.
+    pub const fn set_point_view(&mut self, offset: Vec3, up: Vec3) {
+        self.point_offset = offset;
+        self.point_up = Some(up);
     }
 }
 

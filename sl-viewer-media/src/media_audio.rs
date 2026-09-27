@@ -39,7 +39,7 @@ struct PcmFormat {
 
 /// State shared between a media source's audio thread (through `MixerSink`) and
 /// the viewer thread (through [`MixerStream`]).
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct SinkControl {
     /// The mixer input the source pushes into; `None` before the viewer opens it
     /// and during the brief reopen window on a format change (pushes drop then).
@@ -51,8 +51,39 @@ struct SinkControl {
     stopped: bool,
     /// Whether this source is muted at the mixer input (fed as silence).
     muted: bool,
+    /// This source's own linear gain in `[0, 1]`, applied before the mixer
+    /// input — the per-item volume the nearby-media panel sets, in series with
+    /// (not instead of) the bus level. `1.0` passes the PCM through untouched.
+    gain: f32,
     /// Reusable stereo-interleave scratch, so a push does not allocate.
     scratch: Vec<f32>,
+}
+
+impl Default for SinkControl {
+    /// A source that has announced nothing yet, at full gain — `0.0`, the
+    /// derived default, would be a silent source nobody had asked to be.
+    fn default() -> Self {
+        Self {
+            producer: None,
+            pending_format: None,
+            stopped: false,
+            muted: false,
+            gain: 1.0,
+            scratch: Vec::new(),
+        }
+    }
+}
+
+/// Scale `samples` in place for a source at `gain` that may be `muted`: silence
+/// when muted, untouched at unity, scaled otherwise.
+fn apply_level(samples: &mut [f32], muted: bool, gain: f32) {
+    if muted {
+        samples.fill(0.0);
+    } else if gain.to_bits() != 1.0_f32.to_bits() {
+        for sample in samples {
+            *sample *= gain;
+        }
+    }
 }
 
 /// The [`AudioSink`] handed to a media engine: normalises PCM to stereo and
@@ -77,6 +108,7 @@ impl AudioSink for MixerSink {
             let SinkControl {
                 producer,
                 muted,
+                gain,
                 scratch,
                 ..
             } = &mut *control;
@@ -84,9 +116,7 @@ impl AudioSink for MixerSink {
                 return;
             };
             interleaved_to_stereo(samples, channels, scratch);
-            if *muted {
-                scratch.fill(0.0);
-            }
+            apply_level(scratch, *muted, *gain);
             let _outcome = producer.push_interleaved(scratch);
         }
     }
@@ -96,6 +126,7 @@ impl AudioSink for MixerSink {
             let SinkControl {
                 producer,
                 muted,
+                gain,
                 scratch,
                 ..
             } = &mut *control;
@@ -103,9 +134,7 @@ impl AudioSink for MixerSink {
                 return;
             };
             planar_to_stereo(planes, scratch);
-            if *muted {
-                scratch.fill(0.0);
-            }
+            apply_level(scratch, *muted, *gain);
             let _outcome = producer.push_interleaved(scratch);
         }
     }
@@ -177,6 +206,25 @@ impl MixerStream {
         if self.spatial {
             self.position = position.to_array();
         }
+    }
+
+    /// Set this source's own linear gain (clamped to `[0, 1]`), applied to its
+    /// PCM before the mixer input and in series with its bus — the nearby-media
+    /// panel's per-item volume. Mute is separate and retains this level.
+    pub fn set_gain(&mut self, gain: f32) {
+        if let Ok(mut control) = self.control.lock() {
+            control.gain = if gain.is_finite() {
+                gain.clamp(0.0, 1.0)
+            } else {
+                1.0
+            };
+        }
+    }
+
+    /// This source's own linear gain (see [`set_gain`](Self::set_gain)).
+    #[must_use]
+    pub fn gain(&self) -> f32 {
+        self.control.lock().map_or(1.0, |control| control.gain)
     }
 
     /// Reconcile the mixer input with the source: (re)open it for a newly
@@ -320,6 +368,28 @@ mod tests {
         let planes: [&[f32]; 2] = [&left, &right];
         planar_to_stereo(&planes, &mut out);
         assert_eq!(out, vec![1.0, 2.0, 3.0, 4.0]);
+    }
+
+    /// A fresh source is at unity gain; a set gain scales the PCM, clamps into
+    /// `[0, 1]`, and mute silences without forgetting the level.
+    #[test]
+    fn gain_scales_and_mute_retains_it() {
+        let (mut stream, _sink) = MixerStream::new(Bus::Media, true);
+        assert_eq!(stream.gain().to_bits(), 1.0_f32.to_bits());
+        stream.set_gain(1.5);
+        assert_eq!(stream.gain().to_bits(), 1.0_f32.to_bits(), "clamped");
+        stream.set_gain(0.25);
+        assert_eq!(stream.gain().to_bits(), 0.25_f32.to_bits());
+
+        let mut samples = vec![1.0, -0.5];
+        apply_level(&mut samples, false, 0.25);
+        assert_eq!(samples, vec![0.25, -0.125]);
+        let mut samples = vec![1.0, -0.5];
+        apply_level(&mut samples, true, 0.25);
+        assert_eq!(samples, vec![0.0, 0.0]);
+        let mut samples = vec![1.0, -0.5];
+        apply_level(&mut samples, false, 1.0);
+        assert_eq!(samples, vec![1.0, -0.5]);
     }
 
     /// The sink writes a pending format on `configure`, drops pushes until a

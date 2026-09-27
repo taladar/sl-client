@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 119 |
-| ready | 303 |
-| blocked | 60 |
-| in-progress | 23 |
+| ready | 304 |
+| blocked | 59 |
+| in-progress | 22 |
 | bugs | 14 |
-| done | 1242 |
+| done | 1244 |
 | deferred | 31 |
 | wont-do | 16 |
-| **total** | **1808** |
+| **total** | **1809** |
 
 ## ideas (119)
 
@@ -300,7 +300,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (303)
+## ready (304)
 
 ### protocol
 
@@ -910,6 +910,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-stop-all-animations`](ready/viewer-stop-all-animations.md) — Stop all
   avatar animations (+ revoke variant)
+- [`viewer-stream-favorites`](ready/viewer-stream-favorites.md) — Audio-stream
+  favorites + now-playing title floater (blocked by `viewer-streaming-audio`
+  (done))
 - [`viewer-support-group-version-tags`](ready/viewer-support-group-version-tags.md)
   — Support-group chat version tags (send + display) (blocked by
   `viewer-about-floater` (done))
@@ -1019,7 +1022,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-world-heartbeat`](ready/server-world-heartbeat.md) — A region
   heartbeat — the fake grid has no simulation loop at all
 
-## blocked (60)
+## blocked (59)
 
 ### protocol
 
@@ -1111,8 +1114,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-snapshot-to-inventory`](blocked/viewer-snapshot-to-inventory.md) —
   Save a snapshot to inventory (as a texture) (blocked by
   `viewer-snapshot-floater` (done), `viewer-image-upload`)
-- [`viewer-stream-favorites`](blocked/viewer-stream-favorites.md) — Audio-stream
-  favorites + now-playing title floater (blocked by `viewer-streaming-audio`)
 - [`viewer-task-inventory-open-and-save-back`](blocked/viewer-task-inventory-open-and-save-back.md)
   — Open a task-inventory item into its editor + Save Back to Object (blocked by
   `viewer-notecard-editor` (done), `viewer-lsl-editor-save-compile`)
@@ -1212,7 +1213,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Batch world changes into per-tick update bursts (blocked by
   `server-world-heartbeat`, `server-world-ecs-store`)
 
-## in-progress (23)
+## in-progress (22)
 
 ### viewer
 
@@ -1255,8 +1256,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   by `viewer-rlv-restriction-state` (done))
 - [`viewer-sit-stand-actions`](in-progress/viewer-sit-stand-actions.md) — Sit /
   stand actions (blocked by `viewer-object-selection-core` (done))
-- [`viewer-streaming-audio`](in-progress/viewer-streaming-audio.md) — Parcel
-  streaming-audio / media-audio player
 - [`viewer-ui-text-caret-grapheme-motion`](in-progress/viewer-ui-text-caret-grapheme-motion.md)
   — Upstream issue — parley caret motion steps one codepoint, not one grapheme
 - [`viewer-ui-text-parley-pr-backdelete`](in-progress/viewer-ui-text-parley-pr-backdelete.md)
@@ -1318,7 +1317,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1242)
+## done (1244)
 
 ### protocol
 
@@ -1852,6 +1851,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-cef-audio-mixer-handoff`](done/viewer-cef-audio-mixer-handoff.md) —
   CEF page audio into the shared mixer (OnAudioStreamPacket) (blocked by
   `viewer-audio-backend` (done))
+- [`viewer-cef-profile-shared-between-viewers`](done/viewer-cef-profile-shared-between-viewers.md)
+  — Two viewers could not both run web media (one shared CEF profile)
 - [`viewer-chat-channel-and-commands`](done/viewer-chat-channel-and-commands.md)
   — Chat channels, whisper/shout & /me (blocked by `viewer-ui-text-input-emoji`
   (done))
@@ -3071,6 +3072,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   the viewer's static assets and answer every fetch from them first
 - [`viewer-straddling-transparency-oit`](done/viewer-straddling-transparency-oit.md)
   — A translucent prim straddling the waterline loses its emergent half
+- [`viewer-streaming-audio`](done/viewer-streaming-audio.md) — Parcel
+  streaming-audio / media-audio player
 - [`viewer-stretch-global-axis-object`](done/viewer-stretch-global-axis-object.md)
   — World-frame stretch still grows the object along its local axis
 - [`viewer-sun-disc-grey-aditi-hdr-scale`](done/viewer-sun-disc-grey-aditi-hdr-scale.md)

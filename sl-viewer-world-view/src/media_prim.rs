@@ -155,22 +155,53 @@ pub struct ActiveMedia {
     last_good_url: Option<ValidatedMediaUrl>,
 }
 
-/// Faces whose media the agent just set up and asked to see — the build tools'
-/// Media Settings OK / Apply, the reference's `navigateHomeSelectedFace`. The
-/// surface driver treats each as started by the user (so the world auto-play
-/// switch does not hold it back) once the grid's updated media for it has
+/// What the user asked of faces' media from outside the face itself: which to
+/// start and which to keep stopped.
+///
+/// **Start** — the build tools' Media Settings OK / Apply (the reference's
+/// `navigateHomeSelectedFace`) and the Nearby Media window's play / Start All.
+/// The surface driver treats each as started by the user (so the world
+/// auto-play switch does not hold it back) once the grid's media for it has
 /// arrived, and forgets it when the surface is up. A click on the face could
 /// not do this: while the build tools are open a click selects.
+///
+/// **Stop** — the Nearby Media window's stop / Stop All / unticked row, the
+/// reference's `LLViewerMediaImpl::setDisabled(true)`. A stopped face holds no
+/// surface whatever auto-play says, until the user starts it again: from the
+/// window, or with a click on the face (the reference's click-to-play).
 #[derive(Resource, Debug, Default)]
 pub struct MediaStartRequests {
     /// The faces waiting to start.
     pending: std::collections::HashSet<MediaTarget>,
+    /// The faces the user stopped.
+    stopped: std::collections::HashSet<MediaTarget>,
+    /// Set by a request, so the driver acts on it this frame rather than at
+    /// its next half-second tick — a pressed button that answers half a second
+    /// later reads as one that did not work.
+    urgent: bool,
 }
 
 impl MediaStartRequests {
-    /// Ask for `target`'s media to start as soon as it is there.
+    /// Ask for `target`'s media to start as soon as it is there, lifting any
+    /// earlier stop of it.
     pub fn request(&mut self, target: MediaTarget) {
+        self.stopped.remove(&target);
         self.pending.insert(target);
+        self.urgent = true;
+    }
+
+    /// Stop `target`'s media and keep it stopped until the user starts it
+    /// again.
+    pub fn stop(&mut self, target: MediaTarget) {
+        self.pending.remove(&target);
+        self.stopped.insert(target);
+        self.urgent = true;
+    }
+
+    /// Whether the user stopped `target`'s media.
+    #[must_use]
+    pub fn is_stopped(&self, target: MediaTarget) -> bool {
+        self.stopped.contains(&target)
     }
 }
 
@@ -178,7 +209,19 @@ impl WorldScoped for MediaStartRequests {
     /// The faces belonged to the departed region's objects.
     fn purge_world(&mut self, _purge: WorldPurge, _commands: &mut Commands) {
         self.pending.clear();
+        self.stopped.clear();
     }
+}
+
+/// One media face the surface driver last ranked — what the Nearby Media
+/// window lists, in the driver's own order.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NearbyMediaFace {
+    /// The face.
+    pub target: MediaTarget,
+    /// The squared distance from the camera (the interest metric), `f32::MAX`
+    /// while the object has no transform.
+    pub distance_squared: f32,
 }
 
 /// All live in-world media surfaces by target.
@@ -186,6 +229,10 @@ impl WorldScoped for MediaStartRequests {
 pub struct MediaPrimState {
     /// The live surfaces.
     pub active: HashMap<MediaTarget, ActiveMedia>,
+    /// Every media face the driver last ranked, live or not — focused first,
+    /// then nearest first (the reference's priority list). Refreshed with the
+    /// surfaces, twice a second or on a request.
+    pub nearby: Vec<NearbyMediaFace>,
 }
 
 /// System set for the media-on-a-prim frame work, for consumers (the
@@ -548,7 +595,7 @@ fn place_media_audio(
 }
 
 /// The face entity of `target`, resolved through [`ObjectState`].
-fn resolve_face_entity(
+pub(crate) fn resolve_face_entity(
     objects: &ObjectState,
     target: MediaTarget,
     faces: &Query<(&PrimFaceEntity, &FaceTextureDebug)>,
@@ -677,10 +724,11 @@ fn drive_media_surfaces(
     mut requests: ResMut<MediaStartRequests>,
 ) {
     *timer += time.delta_secs();
-    if *timer < 0.5 {
+    if *timer < 0.5 && !requests.urgent {
         return;
     }
     *timer = 0.0;
+    requests.urgent = false;
 
     // The auto-play master switch: with it off (the default) only faces the
     // user explicitly started may hold a surface.
@@ -725,7 +773,8 @@ fn drive_media_surfaces(
                 .get(&target)
                 .is_some_and(|active| active.user_started)
                 || requests.pending.contains(&target);
-            let startable = (entry.auto_play && auto_play_enabled) || user_started;
+            let startable = !requests.stopped.contains(&target)
+                && ((entry.auto_play && auto_play_enabled) || user_started);
             let distance = world
                 .objects
                 .entity_of(*key)
@@ -751,6 +800,14 @@ fn drive_media_surfaces(
             .cmp(&a_focused)
             .then(a.distance.total_cmp(&b.distance))
     });
+
+    stores.state.nearby = candidates
+        .iter()
+        .map(|candidate| NearbyMediaFace {
+            target: candidate.target,
+            distance_squared: candidate.distance,
+        })
+        .collect();
 
     // The wanted set: startable candidates within the cap.
     let wanted: Vec<MediaTarget> = candidates
@@ -1205,7 +1262,7 @@ fn handle_media_clicks(
     mut stores: MediaStores,
     objects: Res<ObjectState>,
     input: MediaInput,
-    mut sl_commands: MessageWriter<SlCommand>,
+    (mut sl_commands, mut requests): (MessageWriter<SlCommand>, ResMut<MediaStartRequests>),
 ) {
     for click in clicks.read() {
         let Some(object) = objects.full_key(&click.scoped) else {
@@ -1230,6 +1287,9 @@ fn handle_media_clicks(
         if !media_permission_allows(entry.perms_interact, is_owner) {
             continue;
         }
+        // A click is the user starting the face (click-to-play), which lifts
+        // a stop they gave it from the Nearby Media window.
+        requests.stopped.remove(&target);
         let was_focused = focus.focused == Some(target);
         focus.focused = Some(target);
         focus.focused_takes_keyboard = false;

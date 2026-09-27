@@ -881,6 +881,29 @@ volume-panel-music = Music
 volume-panel-media = Media
 volume-panel-voice = Voice
 
+## The Nearby Media window (viewer-streaming-audio): every media source around
+## the agent — the parcel music stream and the media-on-a-prim faces — with
+## per-item controls; the reference's `panel_nearby_media`, opened from the
+## parcel-audio bar's ▲.
+nearby-media-title = Nearby Media
+nearby-media-stop-all = Stop All
+nearby-media-start-all = Start All
+nearby-media-show = Show:
+nearby-media-show-all = All
+nearby-media-show-within-parcel = In this Parcel
+nearby-media-show-outside-parcel = Outside this Parcel
+nearby-media-show-on-others = On other Avatars
+nearby-media-col-playing = On
+nearby-media-col-name = Name
+# The list's name for the parcel's music stream row.
+nearby-media-parcel-audio = Parcel Streaming Audio
+# A media face with neither a title nor a URL.
+nearby-media-empty = <empty>
+# Appended to the name of media that is playing.
+nearby-media-playing = (playing)
+nearby-media-copy-url = Copy URL
+nearby-media-copy-data = Copy Data
+
 ## The Stand Up / Stop flycam / Stop Flying state button
 ## (viewer-sit-target-and-stand-button) — the reference's combined stand /
 ## stop-flying panel, in the toolbar's reserved leading slot. Only one is ever

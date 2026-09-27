@@ -53,8 +53,8 @@ use sl_settings::{Scope, SettingValue, SettingsStore};
 use sl_viewer_settings::env_pins::{EnvPinnedSettings, PinKind, log_active_env_knobs};
 
 use crate::floater::{
-    DeferredFloaterContent, FloaterCaps, FloaterCommand, FloaterHandle, FloaterOp, FloaterSpec,
-    spawn_floater,
+    DeferredFloaterContent, Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterOp,
+    FloaterSpec, show_floater, spawn_floater,
 };
 use crate::i18n::Translated;
 use crate::settings::ViewerSettings;
@@ -297,6 +297,47 @@ fn select_env_preferences_tab(
         strip.active = index;
         *done = true;
     }
+}
+
+/// A tab something outside the floater asked it to open on, applied once the
+/// content exists (the first open builds it a frame later).
+#[derive(Resource, Debug, Default)]
+struct PendingPreferencesTab(Option<&'static str>);
+
+/// The Nearby Media window's gear: open the preferences on the audio tab, where
+/// the media and music autoplay switches live — the reference's
+/// `MediaListCtrl.GoMediaPrefs`.
+fn open_media_preferences(
+    mut requests: MessageReader<crate::nearby_media::OpenMediaPreferences>,
+    floaters: Query<(Entity, &Floater)>,
+    mut panels: Query<&mut UiPanelShown>,
+    mut pending: ResMut<PendingPreferencesTab>,
+) {
+    if requests.read().count() == 0 {
+        return;
+    }
+    show_floater(&floaters, &mut panels, PREFERENCES_FLOATER_ID);
+    pending.0 = Some(crate::preferences_audio::TAB_ID);
+}
+
+/// Select the [`PendingPreferencesTab`] as soon as the tab strip exists.
+fn select_pending_preferences_tab(
+    ui: Option<Res<PreferencesUi>>,
+    mut strips: Query<&mut TabStrip>,
+    mut pending: ResMut<PendingPreferencesTab>,
+) {
+    let (Some(wanted), Some(ui)) = (pending.0, ui) else {
+        return;
+    };
+    let Ok(mut strip) = strips.get_mut(ui.tab_strip) else {
+        return;
+    };
+    if let Some(index) = PREF_TABS.iter().position(|tab| tab.id == wanted)
+        && strip.active != index
+    {
+        strip.active = index;
+    }
+    pending.0 = None;
 }
 
 /// Written once per OK press, after the settings have been saved — the per-tab
@@ -618,7 +659,9 @@ impl Plugin for PreferencesPlugin {
         app.insert_resource(collect_env_pins())
             .init_resource::<PreferencesState>()
             .init_resource::<PreferencesExtraHits>()
+            .init_resource::<PendingPreferencesTab>()
             .add_message::<PreferencesApplied>()
+            .add_message::<crate::nearby_media::OpenMediaPreferences>()
             .add_systems(
                 Startup,
                 spawn_preferences_floater.after(UiScaffoldSystems::SpawnRoot),
@@ -635,6 +678,10 @@ impl Plugin for PreferencesPlugin {
                     guard_pref_bindings,
                     annotate_env_pinned_rows,
                     select_env_preferences_tab,
+                    open_media_preferences,
+                    select_pending_preferences_tab
+                        .after(open_media_preferences)
+                        .after(crate::floater::build_deferred_floater_content),
                     mirror_preferences_filter,
                     apply_preferences_filter.after(mirror_preferences_filter),
                 ),

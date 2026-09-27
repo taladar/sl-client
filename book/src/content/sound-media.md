@@ -143,6 +143,14 @@ its backend (login `voice-config`, `SimulatorFeatures.VoiceServerType`,
 >   `music_url`, an autoplay policy behind the persisted
 >   `MusicStreamEnabled` / `MusicStreamVolume` settings, and the bottom-bar
 >   play / mute / volume cluster.
+> - Nearby Media window (`sl-viewer-world-view/src/nearby_media.rs`, the
+>   reference's `LLPanelNearByMedia`, opened from the bottom-bar cluster's
+>   ▲): the parcel stream and every media-on-a-prim face in one list. Each
+>   row has a play tick, and the list has a Show filter (in / outside this
+>   parcel, on other avatars), Stop All / Start All, and the selected row's
+>   transport (stop / play / pause, per-item volume, mute, zoom). The
+>   parcel stream is reached through `sl_viewer_media::parcel_stream`. A
+>   user stop keeps a face surfaceless until they start it again.
 > - Voice: caps `CAP_PROVISION_VOICE_ACCOUNT`, `CAP_PARCEL_VOICE_INFO`,
 >   `CAP_VOICE_SIGNALING`; LLSD helpers in `sl-wire/src/voice.rs`; driver
 >   `sl-client-tokio/src/voice.rs`; example `sl-client-tokio/examples/voice.rs`.

@@ -187,13 +187,101 @@ pub fn snapshots_dir() -> Option<PathBuf> {
 /// The Pictures-directory subfolder disk snapshots land in.
 const SNAPSHOTS_SUBDIR: &str = "sl-client-bevy-viewer snapshots";
 
-/// The web-media (CEF) engine's cache root under the **cache** directory —
-/// Chromium's disk caches and logs, shared across avatars like the asset
-/// caches — or `None` when the platform has no cache directory (the engine
-/// then keeps its caches under the working directory).
+/// The web-media (CEF) engine's directory under the **cache** root: the parent
+/// of the per-process profile directories [`claim_media_engine_profile`]
+/// hands out, or `None` when the platform has no cache directory.
 #[must_use]
 pub fn media_engine_cache_dir() -> Option<PathBuf> {
     Some(resolved_cache_root()?.join("cef"))
+}
+
+/// How many profile directories [`claim_media_engine_profile`] tries — far more
+/// viewers and galleries than anyone runs side by side.
+const MEDIA_ENGINE_PROFILE_SLOTS: u32 = 64;
+
+/// The file inside a profile directory whose exclusive lock marks the
+/// directory as this process's.
+const MEDIA_ENGINE_PROFILE_LOCK: &str = "sl-viewer-profile.lock";
+
+/// The claimed profile's lock file, held open (and so locked) for the rest of
+/// the process. The operating system drops the lock when the process ends, a
+/// crash included, which frees the directory for the next viewer.
+static MEDIA_ENGINE_PROFILE: OnceLock<(PathBuf, fs_err::File)> = OnceLock::new();
+
+/// Where the web-media profiles live when the platform has no cache directory.
+const MEDIA_ENGINE_FALLBACK_DIR: &str = ".sl-viewer-cef-cache";
+
+/// Why no web-media profile directory could be claimed.
+#[derive(Debug, thiserror::Error)]
+pub enum MediaProfileError {
+    /// Every one of the profile directories is held by another running viewer.
+    #[error("all {slots} web-media profile directories under {root} are held by other viewers")]
+    AllInUse {
+        /// The directory the profiles live under.
+        root: String,
+        /// How many there are.
+        slots: u32,
+    },
+    /// A profile directory or its lock file could not be created or locked.
+    #[error("web-media profile directory: {0}")]
+    Io(#[from] std::io::Error),
+}
+
+/// This process's own web-media (CEF) profile directory — Chromium's cache,
+/// cookies, local storage and logs — claimed on first call and the same for
+/// the rest of the process.
+///
+/// Chromium takes an exclusive lock on its profile, so two viewers (or a viewer
+/// and the gallery) given one directory cannot both start it: the second one's
+/// `cef::initialize` fails and it runs without web media. So each process
+/// claims its own: the first of `cef/profile-0`, `cef/profile-1`, … whose lock
+/// file no running process holds. A numbered slot rather than one per process
+/// id, because a slot is **reused** — a lone viewer comes back to the same
+/// profile every run, keeping a page's cookies and logins, and directories do
+/// not pile up for every process that ever ran.
+///
+/// # Errors
+///
+/// [`MediaProfileError`] when every slot is held, or a directory cannot be
+/// created or locked. (With no platform cache directory the profiles live
+/// under the working directory, as the engine's caches always did.)
+pub fn claim_media_engine_profile() -> Result<PathBuf, MediaProfileError> {
+    if let Some((dir, _lock)) = MEDIA_ENGINE_PROFILE.get() {
+        return Ok(dir.clone());
+    }
+    let root = media_engine_cache_dir().unwrap_or_else(|| PathBuf::from(MEDIA_ENGINE_FALLBACK_DIR));
+    let (dir, lock) = claim_profile_slot(&root, MEDIA_ENGINE_PROFILE_SLOTS)?;
+    // A second claim racing this one within the process keeps the first; its
+    // own lock file closes (and unlocks) as it drops.
+    let (claimed, _lock) = MEDIA_ENGINE_PROFILE.get_or_init(|| (dir, lock));
+    Ok(claimed.clone())
+}
+
+/// Claim the first of `root/profile-0` … `root/profile-{slots - 1}` whose lock
+/// file no one else holds, creating it as needed; returns the directory and the
+/// locked file, which keeps the claim for as long as it stays open.
+fn claim_profile_slot(
+    root: &std::path::Path,
+    slots: u32,
+) -> Result<(PathBuf, fs_err::File), MediaProfileError> {
+    for slot in 0..slots {
+        let dir = root.join(format!("profile-{slot}"));
+        fs_err::create_dir_all(&dir)?;
+        let lock = fs_err::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(dir.join(MEDIA_ENGINE_PROFILE_LOCK))?;
+        match lock.try_lock() {
+            Ok(()) => return Ok((dir, lock)),
+            Err(std::fs::TryLockError::WouldBlock) => {}
+            Err(std::fs::TryLockError::Error(error)) => return Err(error.into()),
+        }
+    }
+    Err(MediaProfileError::AllInUse {
+        root: root.display().to_string(),
+        slots,
+    })
 }
 
 /// The machine-wide global settings file, under the config root — falling back
@@ -292,7 +380,9 @@ mod tests {
         reason = "a failed expectation is the intended failure signal in a unit test"
     )]
 
-    use super::{PURGE_MARKER_FILE, purge_caches_in};
+    use pretty_assertions::assert_eq;
+
+    use super::{MediaProfileError, PURGE_MARKER_FILE, claim_profile_slot, purge_caches_in};
 
     /// A unique throwaway directory under the system temp dir (the crate has
     /// no `tempfile` dependency; this mirrors sl-settings' test helper).
@@ -308,6 +398,31 @@ mod tests {
         ));
         fs_err::create_dir_all(&dir).expect("temp cache root");
         dir
+    }
+
+    /// Two claims each get a profile of their own while both hold theirs, a
+    /// released one is reused, and a full set says so rather than sharing.
+    #[test]
+    fn each_claim_gets_its_own_profile_and_a_released_one_is_reused() {
+        let root = tempdir();
+        let (first, first_lock) = claim_profile_slot(&root, 2).expect("first claim");
+        let (second, second_lock) = claim_profile_slot(&root, 2).expect("second claim");
+        assert_eq!(first, root.join("profile-0"));
+        assert_eq!(second, root.join("profile-1"));
+        assert!(matches!(
+            claim_profile_slot(&root, 2),
+            Err(MediaProfileError::AllInUse { slots: 2, .. })
+        ));
+
+        drop(first_lock);
+        let (again, _again_lock) = claim_profile_slot(&root, 2).expect("reclaim");
+        assert_eq!(
+            again, first,
+            "a released profile comes back to the next viewer"
+        );
+
+        drop(second_lock);
+        fs_err::remove_dir_all(&root).expect("cleanup");
     }
 
     #[test]

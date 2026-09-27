@@ -351,8 +351,16 @@ fn initialize_media_engine(mut engine: NonSendMut<MediaEngine>) {
         );
         return;
     }
-    let cache_dir = sl_viewer_platform::paths::media_engine_cache_dir()
-        .unwrap_or_else(|| PathBuf::from(".sl-viewer-cef-cache"));
+    // A profile of this process's own: Chromium locks its profile, so a shared
+    // one would let only the first of several viewers start web media.
+    let cache_dir = match sl_viewer_platform::paths::claim_media_engine_profile() {
+        Ok(dir) => dir,
+        Err(error) => {
+            warn!("web media (media-on-a-prim, embedded browser) is disabled: {error}");
+            return;
+        }
+    };
+    info!("web-media profile: {}", cache_dir.display());
     let config = BackendConfig {
         cache_dir,
         subprocess_path,

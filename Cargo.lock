@@ -9858,12 +9858,14 @@ dependencies = [
 name = "sl-viewer-world-view"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "bevy",
  "bevy_flair",
  "clap",
  "fs-err",
  "image",
  "parry3d",
+ "percent-encoding",
  "pretty_assertions",
  "serde",
  "serde_json",

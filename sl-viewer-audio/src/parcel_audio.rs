@@ -33,10 +33,20 @@
 //!
 //! One right-aligned row in the bottom area's upper stack (the counterpart
 //! of the nearby-chat bar on the leading side), always shown:
-//! `♫ <now playing / stream host> ⏵/⏹ 🔊/🔇 [volume]`. While the current parcel
-//! has no stream URL the row is greyed and its play / mute buttons are
+//! `♫ <now playing / stream host> ⏵/⏹ 🔊/🔇 [volume] ▲`. While the current
+//! parcel has no stream URL the row is greyed and its play / mute buttons are
 //! disabled — the volume slider stays live, so a user can set it before
-//! entering a loud parcel. The inline volume slider and mute drive the shared
+//! entering a loud parcel. The trailing **▲** opens the **Nearby Media** window
+//! (`sl_viewer_world_view::nearby_media`, the reference's `LLPanelNearByMedia`,
+//! which the reference opens from its status bar's media button): every media
+//! source around the agent, this stream among them, each with its own controls.
+//! It stays live without a stream — the prim media it lists are not this
+//! parcel's.
+//!
+//! That window reaches this stream through [`sl_viewer_media::parcel_stream`]:
+//! the player publishes a [`ParcelStreamStatus`] and answers
+//! [`ParcelStreamRequest`]s, which run through the very decisions the bar's own
+//! buttons do. The inline volume slider and mute drive the shared
 //! mixer's **music bus** directly (the same `music_volume` / `music_mute`
 //! settings the [volume panel](crate::volume_panel) edits), so the stream has
 //! one volume, not a stream-level gain in series with the bus.
@@ -58,10 +68,15 @@ use bevy_flair::style::components::ClassList;
 use sl_audio::{Bus, Mixer};
 use sl_client_bevy::SlAgentParcel;
 use sl_gst::{AudioStreamPlayer, AudioStreamState, ValidatedMediaUrl};
+use sl_viewer_media::parcel_stream::{
+    NEARBY_MEDIA_FLOATER_ID, ParcelStreamRequest, ParcelStreamStatus,
+    register_parcel_stream_vocabulary,
+};
 use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::skin::{
     ACTION_BUTTON_CLASS, DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class_on, text_role,
 };
+use sl_viewer_ui_widgets::floater::{Floater, toggle_floater};
 
 use crate::media_audio::MixerStream;
 use crate::media_diagnostics::MediaDiagnostics;
@@ -69,7 +84,7 @@ use crate::settings::ViewerSettings;
 use crate::settings_binding::{SettingBinding, bound_slider};
 use crate::skin_palette::SkinPalette;
 use crate::ui::BottomArea;
-use crate::ui::row;
+use crate::ui::{UiPanelShown, row};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::ui_slider::{SliderStyle, SliderWidgetPlugin, spawn_slider};
@@ -314,6 +329,7 @@ impl Plugin for ParcelAudioPlugin {
         if !app.is_plugin_added::<SliderWidgetPlugin>() {
             app.add_plugins(SliderWidgetPlugin);
         }
+        register_parcel_stream_vocabulary(app);
         app.init_resource::<ParcelAudio>()
             .add_systems(Startup, register_parcel_audio_settings)
             .add_systems(
@@ -322,8 +338,10 @@ impl Plugin for ParcelAudioPlugin {
                     spawn_parcel_audio_bar,
                     drive_parcel_audio,
                     handle_parcel_audio_actions,
+                    handle_parcel_stream_requests,
                     request_parcel_audio_diagnosis,
                     sync_parcel_audio_ui,
+                    publish_parcel_stream_status,
                 )
                     .chain(),
             );
@@ -462,6 +480,10 @@ fn spawn_parcel_audio_cluster(
             Name::new("parcel-audio-volume"),
         ),
     );
+    // The Nearby Media window's opener — the reference's status-bar media
+    // button, which this bar stands in for. Never disabled: the window lists
+    // the prim media around the agent whether or not this parcel streams.
+    let _nearby = spawn_glyph_button(commands, cluster, glyph::EXPAND_UP, "nearby-media", 23);
     (
         wrapper,
         ParcelAudioUi {
@@ -573,9 +595,17 @@ fn handle_parcel_audio_actions(
     mut actions: MessageReader<UiAction>,
     mut audio: ResMut<ParcelAudio>,
     mut settings: Option<ResMut<ViewerSettings>>,
+    floaters: Query<(Entity, &Floater)>,
+    mut panels: Query<&mut UiPanelShown>,
 ) {
     for action in actions.read() {
         if action.element != PARCEL_AUDIO_ELEMENT {
+            continue;
+        }
+        // The window opener is not a control of *this* stream, so the no-stream
+        // gate below does not apply to it.
+        if action.action == "nearby-media" {
+            toggle_floater(&floaters, &mut panels, NEARBY_MEDIA_FLOATER_ID);
             continue;
         }
         // The play / mute buttons are disabled (greyed) while the parcel has no
@@ -594,17 +624,113 @@ fn handle_parcel_audio_actions(
                 // Mute is the music bus (the stream's single volume path); the
                 // volume panel's music row reflects the same flip.
                 if let Some(settings) = settings.as_mut() {
-                    let key = bus_mute_setting(Bus::Music);
-                    let now = settings.store().get_bool(&key).unwrap_or(false);
-                    settings.set(
-                        sl_settings::Scope::Global,
-                        &key,
-                        sl_settings::SettingValue::Bool(!now),
-                    );
+                    let now = music_muted(settings);
+                    set_music_muted(settings, !now);
                 }
             }
             _other => {}
         }
+    }
+}
+
+/// Whether the music bus — the stream's one volume path — is muted.
+fn music_muted(settings: &ViewerSettings) -> bool {
+    settings
+        .store()
+        .get_bool(&bus_mute_setting(Bus::Music))
+        .unwrap_or(false)
+}
+
+/// Mute or unmute the music bus; the volume panel's music row and this bar's
+/// mute glyph follow the same setting.
+fn set_music_muted(settings: &mut ViewerSettings, muted: bool) {
+    settings.set(
+        sl_settings::Scope::Global,
+        &bus_mute_setting(Bus::Music),
+        sl_settings::SettingValue::Bool(muted),
+    );
+}
+
+/// Answer what the Nearby Media window asks of the stream, through the same
+/// decisions as the bar's own buttons: a play is an explicit user start (it
+/// lifts a stop of this URL, and works with autoplay off), a stop is
+/// remembered for this URL, and the volume and mute are the music bus.
+///
+/// A play or stop with no stream is ignored, as the bar's disabled buttons
+/// are.
+fn handle_parcel_stream_requests(
+    mut requests: MessageReader<ParcelStreamRequest>,
+    mut audio: ResMut<ParcelAudio>,
+    mut settings: Option<ResMut<ViewerSettings>>,
+) {
+    for request in requests.read() {
+        match *request {
+            ParcelStreamRequest::Play => {
+                if !audio.running() {
+                    let decision = audio.state.toggle_play(false);
+                    audio.apply(decision);
+                }
+            }
+            ParcelStreamRequest::Stop => {
+                if audio.running() {
+                    let decision = audio.state.toggle_play(true);
+                    audio.apply(decision);
+                }
+            }
+            ParcelStreamRequest::SetMuted(muted) => {
+                if let Some(settings) = settings.as_mut()
+                    && music_muted(settings) != muted
+                {
+                    set_music_muted(settings, muted);
+                }
+            }
+            ParcelStreamRequest::SetVolume(volume) => {
+                if let Some(settings) = settings.as_mut()
+                    && volume.is_finite()
+                {
+                    settings.set(
+                        sl_settings::Scope::Global,
+                        &bus_volume_setting(Bus::Music),
+                        sl_settings::SettingValue::F32(volume.clamp(0.0, 1.0)),
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Publish what the stream is doing for the surfaces that do not own it (the
+/// Nearby Media window), written only on a change so its readers' change
+/// detection means something.
+fn publish_parcel_stream_status(
+    audio: Res<ParcelAudio>,
+    settings: Option<Res<ViewerSettings>>,
+    mut status: ResMut<ParcelStreamStatus>,
+) {
+    let player = audio.player.status();
+    let (muted, volume) = settings.as_deref().map_or((false, 0.0), |settings| {
+        (
+            music_muted(settings),
+            settings
+                .store()
+                .get_f32(&bus_volume_setting(Bus::Music))
+                .unwrap_or(0.0),
+        )
+    });
+    let wanted = ParcelStreamStatus {
+        url: audio
+            .state
+            .parcel_url
+            .as_ref()
+            .and_then(ValidatedMediaUrl::url)
+            .cloned(),
+        title: player.title.clone(),
+        running: stream_running(player.state),
+        muted,
+        volume,
+    };
+    if *status != wanted {
+        *status = wanted;
     }
 }
 
@@ -662,15 +788,7 @@ fn sync_parcel_audio_ui(
     let Some(ui) = ui else { return };
     let active = audio.state.parcel_url.is_some();
     // The mute glyph reflects the music bus (the stream's mute lives there now).
-    let music_muted = settings
-        .as_ref()
-        .and_then(|settings| {
-            settings
-                .store()
-                .get_bool(&bus_mute_setting(Bus::Music))
-                .ok()
-        })
-        .unwrap_or(false);
+    let music_muted = settings.as_deref().is_some_and(music_muted);
 
     // The ♫ marker greys with the cluster rather than with a button, so it
     // carries the class directly. The play / stop mark is a child of its button
