@@ -766,6 +766,87 @@ fn place_rich_text_objects(
 }
 
 // ---------------------------------------------------------------------------
+// A pointer, in the buffer.
+// ---------------------------------------------------------------------------
+
+/// What a rich-text field's pointer mapping reads, borrowed as one struct: the
+/// buffer and its layout, and where the field sits on screen.
+#[derive(Clone, Copy)]
+pub struct RichTextGeometry<'a> {
+    /// The field's editor, whose layout the point is hit-tested against.
+    pub editable: &'a EditableText,
+    /// The field's laid-out box.
+    pub node: &'a ComputedNode,
+    /// The field's transform, which a window point is carried into the field
+    /// through.
+    pub transform: &'a UiGlobalTransform,
+    /// The render target, for its scale factor.
+    pub target: &'a ComputedUiRenderTargetInfo,
+    /// How far the field is scrolled.
+    pub scroll: &'a TextScroll,
+}
+
+impl core::fmt::Debug for RichTextGeometry<'_> {
+    /// Everything but the editor, which is not `Debug`.
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("RichTextGeometry")
+            .field("node", self.node)
+            .field("transform", self.transform)
+            .field("target", self.target)
+            .field("scroll", self.scroll)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Where a window point falls in a rich-text field's buffer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RichTextPoint {
+    /// The byte offset of the caret position nearest the point — the offset a
+    /// press there would put the caret at.
+    pub index: usize,
+    /// Whether the point is inside the field's box at all. A point outside it
+    /// still maps to the nearest offset (as a drag past a field's edge does),
+    /// and this says it was not over the text.
+    pub inside: bool,
+}
+
+/// Map `pointer` — a window position in logical pixels, what a
+/// `Pointer` event's `pointer_location` carries — to a byte offset in the
+/// field's buffer.
+///
+/// The trip is the one `bevy_ui_widgets` makes to turn a press into a caret
+/// position, so "the character under the pointer" means the same thing to every
+/// caller as it does to the editor. `None` when the field has not been laid out
+/// yet or the transform cannot be inverted.
+#[must_use]
+pub fn rich_text_point(
+    geometry: RichTextGeometry<'_>,
+    ui_scale: f32,
+    pointer: Vec2,
+) -> Option<RichTextPoint> {
+    let layout = geometry.editable.editor.try_layout()?;
+    if ui_scale <= 0.0 {
+        return None;
+    }
+    let inverse = geometry.transform.try_inverse()?;
+    // Spelled out per component for the workspace's arithmetic lint.
+    let scale = geometry.target.scale_factor();
+    let ui_pointer = Vec2::new(pointer.x * scale / ui_scale, pointer.y * scale / ui_scale);
+    let in_field = inverse.transform_point2(ui_pointer);
+    let text_box = geometry.node.content_box().min;
+    let index = Cursor::from_point(
+        layout,
+        in_field.x - text_box.x + geometry.scroll.0.x,
+        in_field.y - text_box.y + geometry.scroll.0.y,
+    )
+    .index();
+    // The transform's origin is the node's centre.
+    let size = geometry.node.size();
+    let inside = in_field.x.abs() <= size.x * 0.5 && in_field.y.abs() <= size.y * 0.5;
+    Some(RichTextPoint { index, inside })
+}
+
+// ---------------------------------------------------------------------------
 // Read-only, and clicking a styled range.
 // ---------------------------------------------------------------------------
 
@@ -801,30 +882,20 @@ fn dispatch_rich_text_range_clicks(
     else {
         return;
     };
-    let Some(layout) = editable.editor.try_layout() else {
+    let Some(hit) = rich_text_point(
+        RichTextGeometry {
+            editable,
+            node,
+            transform,
+            target,
+            scroll,
+        },
+        ui_scale.0,
+        press.pointer_location.position,
+    ) else {
         return;
     };
-    if ui_scale.0 <= 0.0 {
-        return;
-    }
-    let Some(inverse) = transform.try_inverse() else {
-        return;
-    };
-    // The same trip `bevy_ui_widgets` makes to turn a press into a caret
-    // position, spelled out per component for the workspace's arithmetic lint.
-    let pointer = press.pointer_location.position;
-    let ui_pointer = Vec2::new(
-        pointer.x * target.scale_factor() / ui_scale.0,
-        pointer.y * target.scale_factor() / ui_scale.0,
-    );
-    let in_field = inverse.transform_point2(ui_pointer);
-    let text_box = node.content_box().min;
-    let index = Cursor::from_point(
-        layout,
-        in_field.x - text_box.x + scroll.0.x,
-        in_field.y - text_box.y + scroll.0.y,
-    )
-    .index();
+    let index = hit.index;
     for styled in &content.ranges {
         let RichTextStyle::Class(class) = styled.style else {
             continue;

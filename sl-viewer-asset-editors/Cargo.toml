@@ -34,6 +34,9 @@ sl-viewer-notifications = { workspace = true }
 sl-viewer-pickers = { workspace = true }
 sl-viewer-platform = { workspace = true }
 sl-viewer-ui-core = { workspace = true }
+# An embedded sound plays locally on the UI bus (`PlayAssetSound`). Already in
+# the closure through sl-viewer-world-avatar; the package set is unchanged.
+sl-viewer-ui-sounds = { workspace = true }
 sl-viewer-ui-widgets = { workspace = true }
 sl-viewer-world-api = { workspace = true }
 sl-viewer-world-avatar = { workspace = true }

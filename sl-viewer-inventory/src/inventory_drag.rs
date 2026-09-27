@@ -1001,6 +1001,7 @@ pub(crate) fn on_row_drag_end(
                 add_embedded.write(crate::inventory::AddEmbeddedItem {
                     item: item.clone(),
                     editor,
+                    at: Some(cursor),
                 });
             }
         }

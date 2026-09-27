@@ -108,6 +108,9 @@ notecard-status-saving = جارٍ الحفظ…
 notecard-status-saved = تم الحفظ.
 notecard-status-save-failed = فشل الحفظ.
 notecard-status-decode-failed = تعذَّرت قراءة هذه الملاحظة.
+menu-embedded-item = فتح
+menu-embedded-open = فتح
+menu-embedded-copy-to-inventory = نسخ إلى المخزون
 
 ## The LSL script editor floater (viewer-lsl-editor-save-compile).
 

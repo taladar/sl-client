@@ -108,6 +108,9 @@ notecard-status-saving = Zapisywanie…
 notecard-status-saved = Zapisano.
 notecard-status-save-failed = Zapis nie powiódł się.
 notecard-status-decode-failed = Nie można odczytać tej notatki.
+menu-embedded-item = Otwórz
+menu-embedded-open = Otwórz
+menu-embedded-copy-to-inventory = Kopiuj do szafy
 
 ## The LSL script editor floater (viewer-lsl-editor-save-compile).
 

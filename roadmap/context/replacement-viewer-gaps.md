@@ -195,10 +195,13 @@ bar and favourites bar the default skin has and Vintage does without.
 
 ### 1.5 Reading and hearing what the world hands you
 
-Two of these are **already in progress** and should be finished before new
-fronts open: `viewer-notecard-editor` (notecards are how SL ships
-instructions, landmark packs and freebies) and `viewer-streaming-audio`
-(parcel music — a club with no stream is not a club). The third,
+`viewer-notecard-editor` (notecards are how SL ships instructions, landmark
+packs and freebies) closed on 2026-09-27: an item dropped into the body goes
+where it was dropped, and a click on an embedded sound, landmark or material
+does what the reference's does. `viewer-streaming-audio` (parcel music — a
+club with no stream is not a club) is **in progress** and should be finished
+before new fronts open; what is left of it is the nearby-media panel. The
+third,
 `viewer-media-prim-browser`, closed on 2026-09-27 with the per-face media
 editor (the Texture tab's Media mode and the Media Settings window), the
 page's cursor and IME composition; its zero-copy headroom is the deferred
@@ -465,8 +468,8 @@ here cut across it, so a round can take one theme per agent:
   streaming-audio tasks already in flight, and tier 3's voice block when it
   comes up.
 
-One caution: the three in-progress tier-1 items (`viewer-notecard-editor`,
-`viewer-streaming-audio`, `viewer-video-playback`) are worth finishing before
-any of them opens a new front, because they are tier-1 entries themselves.
-The fourth, `viewer-media-prim-browser`, is done, and the money UI it held back
-is ready.
+One caution: the two in-progress tier-1 items (`viewer-streaming-audio`,
+`viewer-video-playback`) are worth finishing before either opens a new front,
+because they are tier-1 entries themselves. The other two,
+`viewer-media-prim-browser` and `viewer-notecard-editor`, are done, and the
+money UI the first held back is ready.

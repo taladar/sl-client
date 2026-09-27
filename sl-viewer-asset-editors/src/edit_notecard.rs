@@ -34,15 +34,15 @@
 //! - **edits** a modifiable notecard's text in that same body, so an item stays
 //!   visible, clickable and in place while the prose around it is typed;
 //! - lets a resident **drag an inventory item onto the editor to add it** as an
-//!   embedded item (`crate::inventory_drag`'s notecard drop target);
+//!   embedded item (`crate::inventory_drag`'s notecard drop target) — at the
+//!   character under the pointer when it is dropped on the body, the way the
+//!   reference's drop places it, and at the caret when it is dropped on the
+//!   window around it;
 //! - **saves** back to **agent** inventory over `UpdateNotecardAgentInventory`
 //!   or, for a notecard opened from a prim's contents, to that object's **task**
 //!   inventory over `UpdateNotecardTaskInventory` — one
 //!   [`Command::UpdateInventoryAsset`] whose [`NotecardSource`] picks the
 //!   capability and the "opened-from-task" provenance the reference carries.
-//!
-//! Still deferred (it needs the field to report where the caret is): dropping an
-//! item **at the caret** rather than appending its marker to the end.
 //!
 //! # Read-only when you cannot modify
 //!
@@ -67,10 +67,11 @@
 //! Reference (Firestorm, read-only): `llpreviewnotecard`, `llfloaternotecard`,
 //! `llviewertexteditor`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use bevy::prelude::*;
-use bevy::text::EditableText;
+use bevy::text::{EditableText, FontCx, LayoutCx};
+use bevy::ui::widget::TextScroll;
 use sl_client_bevy::{
     AssetKey, AssetType, Command, InventoryKey, InventoryType, ItemInfo, OwnerKey, Permissions,
     SaleType, SlCommand, SlEvent, SlSessionEvent, UpdatableAssetType, Uuid,
@@ -85,14 +86,19 @@ use crate::floater::{
     KeyedFloaters,
 };
 use sl_viewer_ui_widgets::ui_rich_text::{
-    RichTextClass, RichTextContent, RichTextObject, RichTextRange, RichTextRangeActivated,
-    RichTextSpec, RichTextStyle, spawn_rich_text, spawn_rich_text_object,
+    RichTextClass, RichTextContent, RichTextGeometry, RichTextObject, RichTextRange,
+    RichTextRangeActivated, RichTextSpec, RichTextStyle, rich_text_point, spawn_rich_text,
+    spawn_rich_text_object,
 };
 
 use crate::intents::{NotecardDropTarget, NotecardSource, OpenNotecard};
 use crate::inventory::AddEmbeddedItem;
 use crate::linkified_text::{LinkActivated, LinkTextStyle, populate_linkified_text};
-use crate::notecard_render::spawn_embedded_item_box;
+use crate::notecard_render::{
+    CONFIRM_NOTECARD_SAVE_BUTTON, CONFIRM_NOTECARD_SAVE_TEMPLATE, EmbeddedItemPlace,
+    PendingNotecardSaveConfirms, UnsavedEmbeddedItems, spawn_embedded_item_box,
+};
+use crate::notifications::NotificationResponse;
 use crate::ui::{column, row};
 use crate::ui_element::{ElementCx, TextMayClip};
 use crate::ui_font::UiFont;
@@ -141,6 +147,7 @@ impl Plugin for EditNotecardPlugin {
                     (
                         ingest_notecard_asset,
                         ingest_added_items,
+                        confirm_notecard_saves,
                         save_notecard,
                         report_notecard_save,
                     )
@@ -188,6 +195,10 @@ struct NotecardSaveInFlight {
     item: Uuid,
     /// The text that went out, which becomes the new baseline when it lands.
     text: String,
+    /// The embedded items that were unsaved when it went out, which the grid
+    /// holds once it lands. A snapshot, because an item dropped in while the
+    /// save is in flight is still not in the asset that save writes.
+    items: HashSet<u32>,
 }
 
 /// The notecard editor floater's [`FloaterSpec`] — shared with the `FLOATERS`
@@ -458,6 +469,7 @@ fn populate_editor(
     // the body's items are drawn on the frame it is built — and so a **specimen**,
     // which no system ever visits, still shows them.
     let mut body = NotecardBody {
+        field: handle.field,
         overlay: handle.overlay,
         baseline: notecard.clone(),
         source,
@@ -468,7 +480,9 @@ fn populate_editor(
     };
     let model = build_body_model(commands, &mut body, &notecard.text);
     body.shown_text = Some(notecard.text.clone());
-    commands.entity(handle.field).insert((body, model));
+    commands
+        .entity(handle.field)
+        .insert((body, model, UnsavedEmbeddedItems::default()));
 
     if !editable {
         return BuiltEditor::default();
@@ -514,6 +528,9 @@ const LINK_CLASS: usize = 0;
 /// reconciles against when the Save button reads the field.
 #[derive(Component, Debug)]
 struct NotecardBody {
+    /// The rich-text field this is the state of, which each item box names so a
+    /// click on it can find out whether the item is saved yet.
+    field: Entity,
     /// The rich-text field's overlay, which the item and link boxes are spawned
     /// under.
     overlay: Entity,
@@ -595,7 +612,8 @@ fn build_body_model(
     text: &str,
 ) -> RichTextContent {
     let style = LinkTextStyle::at(body.font_size);
-    let (overlay, source, read_only) = (body.overlay, body.source, body.read_only);
+    let (field, overlay, source, read_only) =
+        (body.field, body.overlay, body.source, body.read_only);
     let mut previous = core::mem::take(&mut body.objects);
     let mut kept: HashMap<NotecardObjectKey, Entity> = HashMap::new();
     let mut model = RichTextContent::default();
@@ -617,7 +635,12 @@ fn build_body_model(
         *ordinal = ordinal.saturating_add(1);
         let object = previous.remove(&key).unwrap_or_else(|| {
             let object = spawn_rich_text_object(commands, overlay);
-            spawn_embedded_item_box(commands, object, item, source, style, read_only);
+            let place = EmbeddedItemPlace {
+                body: field,
+                index,
+                source,
+            };
+            spawn_embedded_item_box(commands, object, item, place, style, read_only);
             object
         });
         kept.insert(key, object);
@@ -736,7 +759,7 @@ fn activate_notecard_link(
 fn save_notecard(
     mut requests: MessageReader<SaveEditorWindow>,
     mut windows: Query<&mut NotecardEditorState>,
-    fields: Query<(&EditableText, &NotecardBody)>,
+    fields: Query<(&EditableText, &NotecardBody, &UnsavedEmbeddedItems)>,
     mut sl_commands: MessageWriter<SlCommand>,
     mut commands: Commands,
 ) {
@@ -747,7 +770,7 @@ fn save_notecard(
         let (Some(field_entity), true) = (state.body_field, state.editable) else {
             continue;
         };
-        let Ok((field, body)) = fields.get(field_entity) else {
+        let Ok((field, body, unsaved)) = fields.get(field_entity) else {
             continue;
         };
         let edited = field.value().to_string();
@@ -765,6 +788,7 @@ fn save_notecard(
             // saved *that* text, and clearing the unsaved-work mark against the
             // buffer as it then stands would claim they had.
             text: edited,
+            items: unsaved.0.clone(),
         });
         if let Some(status) = state.status {
             set_status(&mut commands, status, "notecard-status-saving", DIM_COLOR);
@@ -782,6 +806,7 @@ fn save_notecard(
 fn report_notecard_save(
     mut events: MessageReader<SlEvent>,
     mut windows: Query<(&mut NotecardEditorState, Option<&mut EditedText>)>,
+    mut unsaved: Query<&mut UnsavedEmbeddedItems>,
     mut inventory: Option<ResMut<crate::inventory::InventoryModel>>,
     mut commands: Commands,
 ) {
@@ -815,6 +840,13 @@ fn report_notecard_save(
                     // window whose close was waiting on this save can close.
                     if let Some(edited) = edited.as_mut() {
                         edited.saved = pending.text;
+                    }
+                    // The items that went out with it are in the stored asset
+                    // now, so the grid can copy and serve them.
+                    if let Some(field) = state.body_field
+                        && let Ok(mut items) = unsaved.get_mut(field)
+                    {
+                        items.0.retain(|index| !pending.items.contains(index));
                     }
                     // The save wrote a **new** asset and the grid rebound the
                     // item to it. Point the inventory model at it too, or the
@@ -873,21 +905,60 @@ const fn may_embed(item: &ItemInfo) -> bool {
         .contains(Permissions::ITEM_UNRESTRICTED)
 }
 
+/// Where a notecard body sits on screen, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): what a drop point is
+/// carried into the buffer through, and the text contexts the caret is placed
+/// with once the item is in.
+#[derive(bevy::ecs::system::SystemParam)]
+struct BodyPlacement<'w, 's> {
+    /// Each body field's box, transform, target and scroll.
+    geometry: Query<
+        'w,
+        's,
+        (
+            &'static ComputedNode,
+            &'static UiGlobalTransform,
+            &'static ComputedUiRenderTargetInfo,
+            &'static TextScroll,
+        ),
+    >,
+    /// The UI scale a window point is divided by.
+    ui_scale: Res<'w, UiScale>,
+    /// The font context the caret's layout refresh needs.
+    font_cx: ResMut<'w, FontCx>,
+    /// The layout context the caret's layout refresh needs.
+    layout_cx: ResMut<'w, LayoutCx>,
+}
+
 /// Fold each dropped inventory item into the open notecard: add it to the
-/// baseline item table with a fresh index and append its marker code point to
-/// the edit buffer, so a Save reconciles it in via
-/// [`sl_notecard::Notecard::with_edited_text`]. The marker renders as a
-/// placeholder glyph in the plain field until the inline-box editor widget
-/// draws it inline; the read-only preview shows it as a clickable item at once.
+/// baseline item table with a fresh index and insert its marker code point
+/// into the edit buffer, so the body draws it at once and a Save reconciles it
+/// in via [`sl_notecard::Notecard::with_edited_text`].
+///
+/// **Where it goes** is the reference's drop: at the character under the
+/// pointer when it was released over the body, and at the caret when it was
+/// released over the rest of the window. Several items dragged together go in
+/// side by side, in the order they were dragged. The caret keeps its place in
+/// the text, or — for a drop at the caret — moves past the item, as if it had
+/// been typed.
 ///
 /// An item whose next-owner permissions are restricted is refused, as the
-/// reference refuses it — see [`may_embed`].
+/// reference refuses it — see [`may_embed`]. An accepted one is recorded as
+/// **unsaved** until a save carries it to the grid ([`UnsavedEmbeddedItems`]).
 fn ingest_added_items(
     mut adds: MessageReader<AddEmbeddedItem>,
     windows: Query<&NotecardEditorState>,
-    mut fields: Query<(&mut EditableText, &mut NotecardBody)>,
+    mut fields: Query<(
+        &mut EditableText,
+        &mut NotecardBody,
+        &mut UnsavedEmbeddedItems,
+    )>,
+    mut placement: BodyPlacement,
     mut commands: Commands,
 ) {
+    // The drop the previous item of this frame belonged to, and the offset just
+    // past it — where the next item of the same drop goes.
+    let mut chained: Option<(Entity, Option<Vec2>, usize)> = None;
     for add in adds.read() {
         // The drop names the window it landed on, so the item joins *that*
         // notecard rather than whichever one was opened last.
@@ -916,7 +987,23 @@ fn ingest_added_items(
         let Some(field_entity) = state.body_field else {
             continue;
         };
-        let Ok((mut editable, mut body)) = fields.get_mut(field_entity) else {
+        let pointer_index = add.at.and_then(|at| {
+            let (node, transform, target, scroll) = placement.geometry.get(field_entity).ok()?;
+            let (editable, _body, _unsaved) = fields.get(field_entity).ok()?;
+            let point = rich_text_point(
+                RichTextGeometry {
+                    editable,
+                    node,
+                    transform,
+                    target,
+                    scroll,
+                },
+                placement.ui_scale.0,
+                at,
+            )?;
+            point.inside.then_some(point.index)
+        });
+        let Ok((mut editable, mut body, mut unsaved)) = fields.get_mut(field_entity) else {
             continue;
         };
         // The item's index is its position in the table, so appending it gives
@@ -927,10 +1014,69 @@ fn ingest_added_items(
             warn!("notecard already holds the maximum embedded items; drop ignored");
             continue;
         };
-        body.baseline.items.push(to_embedded_item(&add.item));
         let mut value = editable.value().to_string();
-        value.push(marker);
-        editable.editor_mut().set_text(&value);
+        let caret = editable.editor.raw_selection().focus().index();
+        let follows = chained
+            .filter(|(editor, at, _end)| *editor == add.editor && *at == add.at)
+            .map(|(_editor, _at, end)| end);
+        let at_caret = follows.is_none() && pointer_index.is_none();
+        let index = follows.or(pointer_index).unwrap_or(caret);
+        // Every candidate is a caret position in this very buffer, so this only
+        // refuses an offset something upstream got wrong.
+        if !value.is_char_boundary(index) {
+            warn!("drop offset {index} is not a character boundary; drop ignored");
+            continue;
+        }
+        body.baseline.items.push(to_embedded_item(&add.item));
+        let _new = unsaved.0.insert(next_index);
+        value.insert(index, marker);
+        let past = index.saturating_add(marker.len_utf8());
+        let new_caret = if at_caret || follows.is_some() {
+            past
+        } else if caret > index {
+            caret.saturating_add(marker.len_utf8())
+        } else {
+            caret
+        };
+        chained = Some((add.editor, add.at, past));
+        let editor = editable.editor_mut();
+        editor.set_text(&value);
+        let mut driver = editor.driver(&mut placement.font_cx, &mut placement.layout_cx);
+        driver.refresh_layout();
+        driver.move_to_byte(new_caret);
+    }
+}
+
+/// Answer each `ConfirmNotecardSave` — raised by a click on an item dropped in
+/// since the last save — by saving the window that holds that body on **OK**,
+/// and doing nothing on cancel.
+fn confirm_notecard_saves(
+    mut responses: MessageReader<NotificationResponse>,
+    pending: Option<ResMut<PendingNotecardSaveConfirms>>,
+    windows: Query<(Entity, &NotecardEditorState)>,
+    mut saves: MessageWriter<SaveEditorWindow>,
+) {
+    let Some(mut pending) = pending else {
+        responses.clear();
+        return;
+    };
+    for response in responses.read() {
+        if response.template != CONFIRM_NOTECARD_SAVE_TEMPLATE {
+            continue;
+        }
+        let Some(body) = pending.queue.pop_front() else {
+            continue;
+        };
+        if response.button != Some(CONFIRM_NOTECARD_SAVE_BUTTON) {
+            continue;
+        }
+        // The window may have closed while the question was up.
+        if let Some((window, _state)) = windows
+            .iter()
+            .find(|(_window, state)| state.body_field == Some(body))
+        {
+            saves.write(SaveEditorWindow { window });
+        }
     }
 }
 
@@ -1495,15 +1641,17 @@ mod tests {
     mod body {
         use super::super::{
             NotecardBody, NotecardEditorState, ingest_added_items, ingest_notecard_asset,
-            open_notecard, rebuild_notecard_body,
+            open_notecard, rebuild_notecard_body, report_notecard_save, save_notecard,
         };
+        use crate::asset_editor::SaveEditorWindow;
         use crate::floater::FloaterPlugin;
         use crate::intents::{NotecardSource, OpenNotecard};
         use crate::inventory::AddEmbeddedItem;
+        use crate::notecard_render::UnsavedEmbeddedItems;
         use crate::ui::UiRoot;
         use bevy::input_focus::InputFocus;
         use bevy::prelude::*;
-        use bevy::text::EditableText;
+        use bevy::text::{EditableText, FontCx, LayoutCx};
         use pretty_assertions::assert_eq;
         use sl_client_bevy::{
             AgentKey, Asset, AssetType, InventoryFolderKey, InventoryKey, InventoryType, ItemInfo,
@@ -1535,7 +1683,10 @@ mod tests {
                 .add_message::<SlEvent>()
                 .add_message::<OpenNotecard>()
                 .add_message::<AddEmbeddedItem>()
+                .add_message::<SaveEditorWindow>()
                 .init_resource::<UiScale>()
+                .init_resource::<FontCx>()
+                .init_resource::<LayoutCx>()
                 .init_resource::<InputFocus>()
                 .init_resource::<ButtonInput<KeyCode>>()
                 .add_plugins(FloaterPlugin)
@@ -1545,6 +1696,8 @@ mod tests {
                         open_notecard,
                         ingest_notecard_asset,
                         ingest_added_items,
+                        save_notecard,
+                        report_notecard_save,
                         rebuild_notecard_body,
                     )
                         .chain(),
@@ -1782,6 +1935,7 @@ mod tests {
             app.world_mut().write_message(AddEmbeddedItem {
                 item: dropped_item("Our Home"),
                 editor,
+                at: None,
             });
             app.update();
             app.update();
@@ -1818,6 +1972,7 @@ mod tests {
                     Permissions::from_bits(0x0008_2000),
                 ),
                 editor,
+                at: None,
             });
             app.update();
             app.update();
@@ -1826,6 +1981,135 @@ mod tests {
                 model(&mut app)?.objects.is_empty(),
                 "a next-owner-restricted item was embedded anyway"
             );
+            Ok(())
+        }
+
+        /// The body's buffer, as the field holds it.
+        fn body_text(app: &mut App) -> Result<String, TestError> {
+            let field = body_field(app)?;
+            Ok(app
+                .world()
+                .get::<EditableText>(field)
+                .ok_or("the body field is not editable")?
+                .value()
+                .to_string())
+        }
+
+        /// Put the body's caret at byte `index`, as a click there would.
+        fn place_caret(app: &mut App, index: usize) -> Result<(), TestError> {
+            let field = body_field(app)?;
+            let world = app.world_mut();
+            world.resource_scope(|world, mut font_cx: Mut<FontCx>| {
+                world.resource_scope(|world, mut layout_cx: Mut<LayoutCx>| {
+                    let mut editable = world
+                        .get_mut::<EditableText>(field)
+                        .ok_or("the body field is not editable")?;
+                    let mut driver = editable.editor_mut().driver(&mut font_cx, &mut layout_cx);
+                    driver.move_to_byte(index);
+                    Ok::<(), TestError>(())
+                })
+            })
+        }
+
+        /// Drop `items` on the window's chrome (no pointer over the body).
+        fn drop_items(app: &mut App, items: &[&str]) -> Result<(), TestError> {
+            let editor = window(app)?;
+            for name in items {
+                app.world_mut().write_message(AddEmbeddedItem {
+                    item: dropped_item(name),
+                    editor,
+                    at: None,
+                });
+            }
+            app.update();
+            app.update();
+            Ok(())
+        }
+
+        /// An item dropped anywhere but over the body goes in **at the caret**
+        /// — not appended to the end, which is where it used to go whatever the
+        /// resident was pointing at — and the caret moves past it, as if typed.
+        #[test]
+        fn a_dropped_item_goes_in_at_the_caret() -> Result<(), TestError> {
+            let mut app = editor_app();
+            open_with(&mut app, true, LOADED_TEXT, Vec::new());
+            // "as |it was saved"
+            place_caret(&mut app, 3)?;
+
+            drop_items(&mut app, &["Our Home"])?;
+
+            let marker = sl_notecard::embedded_char(0).ok_or("no marker")?;
+            assert_eq!(body_text(&mut app)?, format!("as {marker}it was saved"));
+            let field = body_field(&mut app)?;
+            let caret = app
+                .world()
+                .get::<EditableText>(field)
+                .ok_or("the body field is not editable")?
+                .editor
+                .raw_selection()
+                .focus()
+                .index();
+            assert_eq!(
+                caret,
+                3 + marker.len_utf8(),
+                "the caret did not move past the item"
+            );
+            Ok(())
+        }
+
+        /// Several items dragged together go in side by side, in the order they
+        /// were dragged — not each one in front of the last.
+        #[test]
+        fn items_dropped_together_keep_their_order() -> Result<(), TestError> {
+            let mut app = editor_app();
+            open_with(&mut app, true, LOADED_TEXT, Vec::new());
+            place_caret(&mut app, 0)?;
+
+            drop_items(&mut app, &["First", "Second"])?;
+
+            let first = sl_notecard::embedded_char(0).ok_or("no marker")?;
+            let second = sl_notecard::embedded_char(1).ok_or("no marker")?;
+            assert_eq!(
+                body_text(&mut app)?,
+                format!("{first}{second}{LOADED_TEXT}")
+            );
+            Ok(())
+        }
+
+        /// A dropped item is **unsaved** — in the buffer, not in the grid's
+        /// asset, so a click on it must ask for a save rather than a copy the
+        /// grid would refuse — until a save carrying it lands.
+        #[test]
+        fn a_dropped_item_is_unsaved_until_its_save_lands() -> Result<(), TestError> {
+            let mut app = editor_app();
+            open_with(&mut app, true, LOADED_TEXT, Vec::new());
+            drop_items(&mut app, &["Our Home"])?;
+            let field = body_field(&mut app)?;
+            let unsaved = |app: &App| {
+                app.world()
+                    .get::<UnsavedEmbeddedItems>(field)
+                    .map(|items| items.0.clone())
+            };
+            assert_eq!(unsaved(&app), Some([0_u32].into_iter().collect()));
+
+            let editor = window(&mut app)?;
+            app.world_mut()
+                .write_message(SaveEditorWindow { window: editor });
+            app.update();
+            assert_eq!(
+                unsaved(&app),
+                Some([0_u32].into_iter().collect()),
+                "the item counted as saved before the save landed"
+            );
+
+            app.world_mut()
+                .write_message(SlEvent(SlSessionEvent::AssetUploaded {
+                    new_asset: Uuid::from_u128(0xFEED),
+                    new_inventory_item: None,
+                    created: None,
+                }));
+            app.update();
+            assert_eq!(unsaved(&app), Some(std::collections::HashSet::default()));
             Ok(())
         }
 

@@ -388,6 +388,80 @@ pub fn drive_ui_sounds(
     }
 }
 
+// ---------------------------------------------------------------------------
+// A grid sound asset, played locally.
+// ---------------------------------------------------------------------------
+
+/// How long a [`PlayAssetSound`] waits for its clip to fetch and decode before
+/// it is given up on, in seconds. Longer than a world one-shot's wait: this is
+/// a sound the resident asked for by clicking it, and nothing prefetched it.
+const ASSET_SOUND_MAX_WAIT_SECONDS: f32 = 10.0;
+
+/// Play a grid **sound asset** once, locally — heard by this viewer only, on the
+/// UI bus, with no position.
+///
+/// The reference's `triggerSound(asset, agent, 1.0, AUDIO_TYPE_UI, …)`: what a
+/// click on a sound embedded in a notecard does before offering to copy it. Not
+/// a [`PlayUiSound`]: that names one of the viewer's own feedback sounds and
+/// honours its toggle, where this names an arbitrary asset the resident chose.
+#[derive(Message, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlayAssetSound {
+    /// The sound asset to play.
+    pub asset: AssetKey,
+}
+
+/// The [`PlayAssetSound`]s whose clip is still being fetched, with the time
+/// ([`Time::elapsed_secs`]) each was asked for.
+#[derive(Resource, Debug, Default)]
+pub struct PendingAssetSounds(Vec<(AssetKey, f32)>);
+
+/// Play each requested asset sound once its clip is ready: request the fetch,
+/// hold the request until the clip decodes, and give it up — loudly — when the
+/// asset turns out unavailable or takes longer than
+/// ten seconds.
+pub fn drive_asset_sounds(
+    mut requests: MessageReader<PlayAssetSound>,
+    mut pending: ResMut<PendingAssetSounds>,
+    mut cache: ResMut<SoundCache>,
+    time: Res<Time>,
+    mixer: Option<NonSendMut<Mixer>>,
+) {
+    let now = time.elapsed_secs();
+    for request in requests.read() {
+        cache.request(request.asset);
+        pending.0.push((request.asset, now));
+    }
+    // No output device, no sound: the missing device is reported where the
+    // mixer is opened, and a request held for one would only pile up.
+    let Some(mut mixer) = mixer else {
+        pending.0.clear();
+        return;
+    };
+    let params = ClipParams {
+        bus: Bus::Ui,
+        gain: 1.0,
+        importance: Importance::Ui,
+        looped: false,
+    };
+    pending.0.retain(|(asset, asked)| {
+        if let Some(clip) = cache.clip(*asset) {
+            let _voice = mixer.play_clip(clip, params);
+            return false;
+        }
+        if cache.is_unavailable(*asset) {
+            warn!("sound asset {asset} is unavailable; not played");
+            return false;
+        }
+        if now - asked > ASSET_SOUND_MAX_WAIT_SECONDS {
+            warn!(
+                "sound asset {asset} did not arrive in {ASSET_SOUND_MAX_WAIT_SECONDS} s; not played"
+            );
+            return false;
+        }
+        true
+    });
+}
+
 /// The UI-sounds plugin: the [`PlayUiSound`] message, the login prefetch, the
 /// skin-sound decode, the per-frame driver, and the `-sk-uisnd-<key>` CSS
 /// properties. Settings are registered from `ViewerSettings::load`.
@@ -405,10 +479,17 @@ impl Plugin for UiSoundsPlugin {
     fn build(&self, app: &mut App) {
         register_skin_sound_properties(app);
         app.add_message::<PlayUiSound>()
+            .add_message::<PlayAssetSound>()
             .init_resource::<SkinSoundClips>()
+            .init_resource::<PendingAssetSounds>()
             .add_systems(
                 Update,
-                (prefetch_ui_sounds, decode_skin_sounds, drive_ui_sounds),
+                (
+                    prefetch_ui_sounds,
+                    decode_skin_sounds,
+                    drive_ui_sounds,
+                    drive_asset_sounds,
+                ),
             );
     }
 }

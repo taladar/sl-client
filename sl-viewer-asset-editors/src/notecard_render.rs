@@ -24,32 +24,55 @@
 //! - a **calling card** opens the named avatar's profile (the reference uses
 //!   the card's description-uuid, else its creator);
 //! - a **texture / snapshot** opens the texture preview;
+//! - a **sound** plays locally — heard by this viewer only, on the UI bus —
+//!   and then offers to copy it into inventory;
+//! - a **landmark** opens the About Landmark window on it, with its Teleport
+//!   button (the reference's place details). It is shown, not copied: the
+//!   reference's own `EmbeddedLandmarkCopyToInventory` off, and the copy is one
+//!   right-click away;
+//! - a **material** opens the material editor on it, without a Save — it is
+//!   not an item of the agent's to save onto;
 //! - **every other type** copies the embedded item into the agent's inventory
 //!   over [`Command::CopyInventoryFromNotecard`], behind the reference
 //!   `ConfirmItemCopy` confirmation ("Copy this item to your inventory?") — the
-//!   universal "keep this item" action for a landmark, object, notecard,
-//!   wearable, … a resident dropped into the body.
+//!   universal "keep this item" action for an object, notecard, wearable, … a
+//!   resident dropped into the body.
+//!
+//! An item dropped into the body **since the notecard was last saved** is not
+//! in the stored asset yet, so the grid can neither copy it nor serve it: any
+//! click on one asks to save the notecard first (the reference
+//! `ConfirmNotecardSave`), and does nothing else.
+//!
+//! A **right-click** offers the reference's (Catznip's) two-line menu, *Open*
+//! and *Copy to Inventory*, so a landmark or a material — whose click opens
+//! rather than copies — can still be kept.
 //!
 //! Reference (Firestorm, read-only): `llviewertexteditor` (the embedded-item
-//! segment rendering + `openEmbeddedItem`).
+//! segment rendering, `openEmbeddedItem`, `showCopyToInvDialog`),
+//! `menu_embedded_item.xml`.
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui_widgets::Button;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
-    AgentKey, AssetType, Command, InventoryFolderKey, InventoryKey, InventoryType, ItemInfo,
-    ObjectKey, OwnerKey, Permissions5, SlCommand, Uuid,
+    AgentKey, AssetKey, AssetType, Command, GroupKey, InventoryFolderKey, InventoryKey,
+    InventoryType, ItemInfo, ObjectKey, OwnerKey, Permissions, Permissions5, SaleInfo, SlCommand,
+    Uuid,
 };
+use sl_viewer_ui_sounds::ui_sounds::PlayAssetSound;
+use sl_viewer_ui_widgets::menu::{MenuCommand, MenuDef, MenuItemDef, OpenContextMenu};
 
 use crate::edit_notecard::embedded_icon;
 use crate::intents::NotecardSource;
 use crate::intents::OpenAvatarProfile;
+use crate::inventory::{OpenAboutLandmark, OpenMaterialEditor};
 use crate::inventory_properties::OpenItemPreview;
 use crate::linkified_text::LinkTextStyle;
 use crate::notifications::{NotificationResponse, ShowNotification};
+use crate::ui_element::UiAction;
 use crate::ui_font::UiFont;
 
 /// The catalogue template for the copy-embedded-item confirmation — the
@@ -58,6 +81,36 @@ const CONFIRM_ITEM_COPY_TEMPLATE: &str = "ConfirmItemCopy";
 
 /// The affirmative button's stable functor name on `ConfirmItemCopy`.
 const CONFIRM_ITEM_COPY_BUTTON: &str = "OK";
+
+/// The catalogue template asking to save the notecard before an item dropped
+/// into it since the last save can be opened or copied — the reference
+/// `ConfirmNotecardSave`.
+pub(crate) const CONFIRM_NOTECARD_SAVE_TEMPLATE: &str = "ConfirmNotecardSave";
+
+/// The affirmative button's stable functor name on `ConfirmNotecardSave`.
+pub(crate) const CONFIRM_NOTECARD_SAVE_BUTTON: &str = "OK";
+
+/// The element an embedded item's context menu attributes its actions to.
+const EMBEDDED_MENU_ELEMENT: &str = "notecard-embedded-item";
+
+/// The context menu's *Open* action.
+const ACTION_OPEN: &str = "open";
+
+/// The context menu's *Copy to Inventory* action.
+const ACTION_COPY: &str = "copy-to-inventory";
+
+/// The right-click menu on an embedded item — the reference's
+/// `menu_embedded_item.xml`, whose two lines are always enabled.
+static EMBEDDED_MENU: MenuDef = MenuDef {
+    label_key: "menu-embedded-item",
+    items: &[
+        MenuItemDef::Command(MenuCommand::new("menu-embedded-open", ACTION_OPEN)),
+        MenuItemDef::Command(MenuCommand::new(
+            "menu-embedded-copy-to-inventory",
+            ACTION_COPY,
+        )),
+    ],
+};
 
 /// The skin class on an embedded-item box — a clickable object inside notecard
 /// prose. Its hover is `:hover` and nothing else; this used to be a
@@ -83,15 +136,47 @@ const READ_ONLY_CLASS: &str = sl_viewer_ui_core::skin::READ_ONLY_CLASS;
 // The embedded-item box.
 // ---------------------------------------------------------------------------
 
-/// A rendered inline embedded-item box; its click observer runs [`action`].
+/// A rendered inline embedded-item box: what it stands for, and where.
 #[derive(Component, Debug, Clone)]
 struct EmbeddedItemBox {
-    /// What clicking the item does (copy to inventory, open profile, preview).
+    /// The body field the box is drawn in, whose [`UnsavedEmbeddedItems`] says
+    /// whether the grid has the item yet.
+    body: Entity,
+    /// The item's index in the notecard's table.
+    index: u32,
+    /// What a click on it does.
     action: EmbeddedAction,
+    /// Where the notecard lives — what a copy names, and what an opened
+    /// landmark or material says it was read out of.
+    source: NotecardSource,
+    /// The embedded item's own id, which a copy names.
+    item: InventoryKey,
 }
 
+impl EmbeddedItemBox {
+    /// What *Copy to Inventory* copies — every type has one, whatever its
+    /// click does.
+    const fn copy(&self) -> CopyTarget {
+        CopyTarget {
+            notecard: self.source.item_id(),
+            holder: self.source.object_id(),
+            item: self.item,
+        }
+    }
+}
+
+/// The indices of a notecard body's embedded items that were dropped in
+/// **since the notecard was last saved** — a component on the body field,
+/// kept by the editor.
+///
+/// Such an item is in the buffer and the local table but not in the stored
+/// asset, so a copy out of the notecard (which the grid serves from the stored
+/// asset) would fail.
+#[derive(Component, Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct UnsavedEmbeddedItems(pub(crate) HashSet<u32>);
+
 /// A copy-embedded-item-into-inventory target (the reference default action).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct CopyTarget {
     /// The notecard's own inventory item.
     notecard: InventoryKey,
@@ -106,17 +191,23 @@ struct CopyTarget {
 /// variant dwarfs the others.
 #[derive(Debug, Clone)]
 enum EmbeddedAction {
-    /// Copy the item into the agent's inventory (the reference default for a
-    /// landmark, object, notecard, wearable, animation, gesture, sound, …).
-    Copy(Box<CopyTarget>),
+    /// Copy the item into the agent's inventory (the reference default for an
+    /// object, notecard, wearable, animation, gesture, script, …).
+    Copy,
     /// Open an avatar's profile — a calling card.
     Profile(AgentKey),
     /// Open the texture preview — a texture / snapshot.
     Texture(Box<ItemInfo>),
+    /// Play the sound locally, then offer the copy — a sound.
+    Sound(AssetKey),
+    /// Open About Landmark on it — a landmark.
+    Landmark(Box<ItemInfo>),
+    /// Open the material editor on it, without a Save — a material.
+    Material(Box<ItemInfo>),
 }
 
-/// Resolve the click action for `item`, given where the notecard lives.
-fn resolve_action(item: &sl_notecard::InventoryItem, source: NotecardSource) -> EmbeddedAction {
+/// Resolve the click action for `item`.
+fn resolve_action(item: &sl_notecard::InventoryItem) -> EmbeddedAction {
     use sl_notecard::AssetType as A;
     match &item.asset_type {
         // A calling card opens its avatar's profile: the reference reads the
@@ -130,38 +221,82 @@ fn resolve_action(item: &sl_notecard::InventoryItem, source: NotecardSource) -> 
         }
         // A texture / snapshot opens the texture preview.
         A::Texture | A::TextureTga | A::ImageTga | A::ImageJpeg => {
-            EmbeddedAction::Texture(Box::new(texture_item_info(item)))
+            EmbeddedAction::Texture(Box::new(embedded_item_info(
+                item,
+                AssetType::Texture,
+                InventoryType::Texture,
+            )))
         }
+        A::Sound | A::SoundWav => EmbeddedAction::Sound(AssetKey::from(item.asset_id.0)),
+        A::Landmark => EmbeddedAction::Landmark(Box::new(embedded_item_info(
+            item,
+            AssetType::Landmark,
+            InventoryType::Landmark,
+        ))),
+        A::Material => EmbeddedAction::Material(Box::new(embedded_item_info(
+            item,
+            AssetType::Material,
+            InventoryType::Material,
+        ))),
         // Everything else copies into inventory.
-        _other => EmbeddedAction::Copy(Box::new(CopyTarget {
-            notecard: source.item_id(),
-            holder: source.object_id(),
-            item: InventoryKey::from(item.item_id.0),
-        })),
+        _other => EmbeddedAction::Copy,
     }
 }
 
-/// A minimal [`ItemInfo`] for opening a texture-class embedded item in the
-/// texture preview: the preview reads only the asset id + name + inventory
-/// type, so the ownership / permission fields are left nil.
-fn texture_item_info(item: &sl_notecard::InventoryItem) -> ItemInfo {
+/// An [`ItemInfo`] for an embedded item, so a surface that opens inventory
+/// items (the texture preview, About Landmark, the material editor) can open
+/// one read out of a notecard. `asset_type` / `inv_type` are the class the
+/// caller dispatched on, which is the class that surface expects.
+///
+/// Its ids, name, description, creator, owner, permissions and date are the
+/// embedded item's own; its folder is nil, because it is in no folder of the
+/// agent's.
+fn embedded_item_info(
+    item: &sl_notecard::InventoryItem,
+    asset_type: AssetType,
+    inv_type: InventoryType,
+) -> ItemInfo {
+    let perms = &item.permissions;
+    let owner = if perms.group_owned {
+        OwnerKey::Group(GroupKey::from(perms.group_id.0))
+    } else {
+        OwnerKey::Agent(AgentKey::from(perms.owner_id.0))
+    };
     ItemInfo {
         item_id: InventoryKey::from(item.item_id.0),
         folder_id: InventoryFolderKey::from(Uuid::nil()),
         name: item.name.clone(),
         description: item.description.clone(),
         asset_id: item.asset_id.0,
-        asset_type: AssetType::Texture,
-        inv_type: InventoryType::Texture,
-        flags: 0,
-        sale: sl_client_bevy::SaleInfo::default(),
-        creation_date: 0,
-        owner: OwnerKey::Agent(AgentKey::from(Uuid::nil())),
-        last_owner_id: Uuid::nil(),
-        creator_id: AgentKey::from(item.permissions.creator_id.0),
-        group: None,
-        permissions: Permissions5::empty(),
+        asset_type,
+        inv_type,
+        flags: item.flags,
+        sale: SaleInfo::default(),
+        creation_date: i32::try_from(item.creation_date).unwrap_or(0),
+        owner,
+        last_owner_id: perms.last_owner_id.0,
+        creator_id: AgentKey::from(perms.creator_id.0),
+        group: (!perms.group_id.0.is_nil()).then(|| GroupKey::from(perms.group_id.0)),
+        permissions: Permissions5 {
+            base: Permissions::from_bits(perms.base_mask.0),
+            owner: Permissions::from_bits(perms.owner_mask.0),
+            group: Permissions::from_bits(perms.group_mask.0),
+            everyone: Permissions::from_bits(perms.everyone_mask.0),
+            next_owner: Permissions::from_bits(perms.next_owner_mask.0),
+        },
     }
+}
+
+/// Where an embedded item box sits and what it stands for — what
+/// [`spawn_embedded_item_box`] needs beyond the node it fills.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct EmbeddedItemPlace {
+    /// The body field the box is drawn in.
+    pub(crate) body: Entity,
+    /// The item's index in the notecard's table.
+    pub(crate) index: u32,
+    /// Where the notecard lives.
+    pub(crate) source: NotecardSource,
 }
 
 /// Spawn one inline embedded-item box (icon + name) under `parent`, returning
@@ -176,11 +311,10 @@ pub(crate) fn spawn_embedded_item_box(
     commands: &mut Commands,
     parent: Entity,
     item: &sl_notecard::InventoryItem,
-    source: NotecardSource,
+    place: EmbeddedItemPlace,
     style: LinkTextStyle,
     read_only: bool,
 ) -> Entity {
-    let action = resolve_action(item, source);
     let classes = core::iter::once(ITEM_CLASS).chain(read_only.then_some(READ_ONLY_CLASS));
     let item_box = commands
         .spawn((
@@ -195,7 +329,13 @@ pub(crate) fn spawn_embedded_item_box(
             Button,
             TabIndex(0),
             Pickable::default(),
-            EmbeddedItemBox { action },
+            EmbeddedItemBox {
+                body: place.body,
+                index: place.index,
+                action: resolve_action(item),
+                source: place.source,
+                item: InventoryKey::from(item.item_id.0),
+            },
             ChildOf(parent),
         ))
         .id();
@@ -220,48 +360,164 @@ pub(crate) fn spawn_embedded_item_box(
 }
 
 // ---------------------------------------------------------------------------
-// Observers: hover highlight + click dispatch.
+// Dispatch: a click, or a line of the context menu.
 // ---------------------------------------------------------------------------
 
-/// On a primary press, run the item's resolved action. A **copy** is guarded by
-/// the reference `ConfirmItemCopy` confirmation — the target is parked until the
-/// dialog is answered ([`handle_embedded_copy_confirmations`]) — so a click
-/// never silently spawns an inventory item; a profile / texture open is direct.
+/// What an embedded item's click or menu line is carried out through, bundled
+/// as one [`SystemParam`](bevy::ecs::system::SystemParam).
 ///
-/// Every destination this reaches is a *viewer* channel, and this observer is
-/// attached wherever an item box is drawn — including the gallery, which spawns
-/// the notecard specimens with none of them. Bevy takes an app down when a
-/// system parameter fails validation, so the four are wrapped in [`If`]: in an
-/// app that cannot route the action the press is **inert** rather than fatal.
+/// Every destination is a *viewer* channel, and the item boxes are drawn
+/// wherever a notecard body is — including the gallery, which spawns the
+/// notecard specimens with none of them. Bevy takes an app down when a system
+/// parameter fails validation, so the whole bundle is taken through [`If`]: in
+/// an app that cannot route the action a press is **inert** rather than fatal.
 /// (Found by a click on the specimen's item in the gallery, 2026-09-13.)
-fn on_embedded_press(
-    press: On<Pointer<Press>>,
-    boxes: Query<&EmbeddedItemBox>,
-    If(mut pending): If<ResMut<PendingEmbeddedCopies>>,
-    If(mut notifications): If<MessageWriter<ShowNotification>>,
-    If(mut profiles): If<MessageWriter<OpenAvatarProfile>>,
-    If(mut previews): If<MessageWriter<OpenItemPreview>>,
+#[derive(bevy::ecs::system::SystemParam)]
+struct EmbeddedOutputs<'w> {
+    /// The copies parked behind their confirmation.
+    pending: ResMut<'w, PendingEmbeddedCopies>,
+    /// The notecard saves an unsaved item's click asked for.
+    saves: ResMut<'w, PendingNotecardSaveConfirms>,
+    /// The confirmations themselves.
+    notifications: MessageWriter<'w, ShowNotification>,
+    /// A calling card's profile.
+    profiles: MessageWriter<'w, OpenAvatarProfile>,
+    /// A texture's preview.
+    previews: MessageWriter<'w, OpenItemPreview>,
+    /// A sound, played locally.
+    sounds: MessageWriter<'w, PlayAssetSound>,
+    /// A landmark's details.
+    landmarks: MessageWriter<'w, OpenAboutLandmark>,
+    /// A material's editor.
+    materials: MessageWriter<'w, OpenMaterialEditor>,
+}
+
+/// What one press or menu line asks of an embedded item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EmbeddedRequest {
+    /// Open it the way a click does ([`EmbeddedAction`]).
+    Open,
+    /// Offer to copy it into inventory, whatever its type.
+    Copy,
+}
+
+/// Carry out `request` on `item_box` — unless the grid does not have the item
+/// yet, in which case ask to save the notecard first and do nothing else.
+fn run_embedded_request(
+    item_box: &EmbeddedItemBox,
+    request: EmbeddedRequest,
+    unsaved: Option<&UnsavedEmbeddedItems>,
+    out: &mut EmbeddedOutputs,
 ) {
-    if press.button != PointerButton::Primary {
+    if unsaved.is_some_and(|unsaved| unsaved.0.contains(&item_box.index)) {
+        out.saves.queue.push_back(item_box.body);
+        out.notifications
+            .write(ShowNotification::new(CONFIRM_NOTECARD_SAVE_TEMPLATE));
         return;
     }
-    let Ok(item_box) = boxes.get(press.entity) else {
-        return;
+    let action = match request {
+        EmbeddedRequest::Open => &item_box.action,
+        EmbeddedRequest::Copy => &EmbeddedAction::Copy,
     };
-    match &item_box.action {
-        EmbeddedAction::Copy(target) => {
-            // Park the copy behind the confirmation modal, one per queued dialog.
-            pending.queue.push_back(**target);
-            notifications.write(ShowNotification::new(CONFIRM_ITEM_COPY_TEMPLATE));
-        }
+    let source = item_box.source;
+    match action {
+        EmbeddedAction::Copy => offer_copy(item_box.copy(), out),
         EmbeddedAction::Profile(agent) => {
-            profiles.write(OpenAvatarProfile { agent: *agent });
+            out.profiles.write(OpenAvatarProfile { agent: *agent });
         }
         EmbeddedAction::Texture(item) => {
-            previews.write(OpenItemPreview {
+            out.previews.write(OpenItemPreview {
                 item: (**item).clone(),
             });
         }
+        EmbeddedAction::Sound(asset) => {
+            out.sounds.write(PlayAssetSound { asset: *asset });
+            offer_copy(item_box.copy(), out);
+        }
+        EmbeddedAction::Landmark(item) => {
+            out.landmarks.write(OpenAboutLandmark {
+                item: (**item).clone(),
+                notecard: Some(source),
+            });
+        }
+        EmbeddedAction::Material(item) => {
+            out.materials.write(OpenMaterialEditor {
+                item: (**item).clone(),
+                notecard: Some(source),
+            });
+        }
+    }
+}
+
+/// Park a copy behind the `ConfirmItemCopy` confirmation — one per queued
+/// dialog, answered by [`handle_embedded_copy_confirmations`] — so a click
+/// never silently spawns an inventory item.
+fn offer_copy(target: CopyTarget, out: &mut EmbeddedOutputs) {
+    out.pending.queue.push_back(target);
+    out.notifications
+        .write(ShowNotification::new(CONFIRM_ITEM_COPY_TEMPLATE));
+}
+
+/// A primary press opens the item ([`EmbeddedAction`]); a secondary press
+/// opens the *Open* / *Copy to Inventory* menu on it.
+fn on_embedded_press(
+    press: On<Pointer<Press>>,
+    boxes: Query<&EmbeddedItemBox>,
+    unsaved: Query<&UnsavedEmbeddedItems>,
+    If(mut out): If<EmbeddedOutputs>,
+    If(mut menus): If<MessageWriter<OpenContextMenu>>,
+    If(mut target): If<ResMut<EmbeddedMenuTarget>>,
+) {
+    let Ok(item_box) = boxes.get(press.entity) else {
+        return;
+    };
+    match press.button {
+        PointerButton::Primary => run_embedded_request(
+            item_box,
+            EmbeddedRequest::Open,
+            unsaved.get(item_box.body).ok(),
+            &mut out,
+        ),
+        PointerButton::Secondary => {
+            target.0 = Some(press.entity);
+            menus.write(OpenContextMenu {
+                menu: &EMBEDDED_MENU,
+                at: press.pointer_location.position,
+                element: EMBEDDED_MENU_ELEMENT,
+                conditions: Vec::new(),
+            });
+        }
+        PointerButton::Middle => {}
+    }
+}
+
+/// The item box the embedded-item menu was last opened on.
+#[derive(Resource, Debug, Default)]
+pub(crate) struct EmbeddedMenuTarget(Option<Entity>);
+
+/// Carry out a picked line of the embedded-item menu on the box it was opened
+/// on.
+fn handle_embedded_menu_actions(
+    mut actions: MessageReader<UiAction>,
+    target: Res<EmbeddedMenuTarget>,
+    boxes: Query<&EmbeddedItemBox>,
+    unsaved: Query<&UnsavedEmbeddedItems>,
+    If(mut out): If<EmbeddedOutputs>,
+) {
+    for action in actions.read() {
+        if action.element != EMBEDDED_MENU_ELEMENT {
+            continue;
+        }
+        let request = match action.action {
+            ACTION_OPEN => EmbeddedRequest::Open,
+            ACTION_COPY => EmbeddedRequest::Copy,
+            _other => continue,
+        };
+        // The box may have gone with its notecard while the menu was up.
+        let Some(item_box) = target.0.and_then(|entity| boxes.get(entity).ok()) else {
+            continue;
+        };
+        run_embedded_request(item_box, request, unsaved.get(item_box.body).ok(), &mut out);
     }
 }
 
@@ -272,6 +528,14 @@ fn on_embedded_press(
 pub(crate) struct PendingEmbeddedCopies {
     /// The parked copies, front = the dialog raised first.
     queue: VecDeque<CopyTarget>,
+}
+
+/// The notecard bodies awaiting their `ConfirmNotecardSave` answer, oldest
+/// first; the editor turns an **OK** into a save of the window holding the body.
+#[derive(Resource, Debug, Default)]
+pub(crate) struct PendingNotecardSaveConfirms {
+    /// The parked bodies, front = the dialog raised first.
+    pub(crate) queue: VecDeque<Entity>,
 }
 
 /// Answer each `ConfirmItemCopy`: on **Copy** issue the parked
@@ -299,24 +563,34 @@ fn handle_embedded_copy_confirmations(
     }
 }
 
-/// The plugin owning the notecard reader's confirm-to-copy routing (the reader's
-/// per-item observers are attached at spawn and need no registration).
+/// The plugin owning the embedded items' confirm-to-copy routing and their
+/// context menu (the per-item observers are attached at spawn and need no
+/// registration).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NotecardRenderPlugin;
 
 impl Plugin for NotecardRenderPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PendingEmbeddedCopies>()
-            .add_systems(Update, handle_embedded_copy_confirmations);
+            .init_resource::<PendingNotecardSaveConfirms>()
+            .init_resource::<EmbeddedMenuTarget>()
+            .add_systems(
+                Update,
+                (
+                    handle_embedded_copy_confirmations,
+                    handle_embedded_menu_actions,
+                ),
+            );
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{EmbeddedAction, resolve_action};
-    use crate::intents::NotecardSource;
+    use super::{EmbeddedAction, embedded_item_info, resolve_action};
     use pretty_assertions::assert_eq;
-    use sl_client_bevy::{InventoryKey, Uuid};
+    use sl_client_bevy::{
+        AgentKey, AssetKey, AssetType, InventoryType, OwnerKey, Permissions, Uuid,
+    };
 
     /// A one-item notecard fixture helper: an embedded item of a given type.
     fn item(asset_type: sl_notecard::AssetType, description: &str) -> sl_notecard::InventoryItem {
@@ -325,6 +599,8 @@ mod tests {
             parent_id: sl_types::key::NULL_KEY,
             permissions: sl_notecard::Permissions {
                 creator_id: sl_types::key::Key(Uuid::from_u128(0x99)),
+                owner_id: sl_types::key::Key(Uuid::from_u128(0x98)),
+                owner_mask: sl_notecard::PermissionMask(0x0008_e000),
                 ..sl_notecard::Permissions::default()
             },
             metadata: None,
@@ -336,25 +612,26 @@ mod tests {
             sale_info: sl_notecard::SaleInfo::default(),
             name: "Thing".to_owned(),
             description: description.to_owned(),
-            creation_date: 0,
+            creation_date: 1_700_000_000,
             unknown_fields: Vec::new(),
         }
     }
 
-    /// A landmark (and most types) resolves to a copy naming the notecard + item.
+    /// The types the reference only copies — an object, a notecard, a
+    /// wearable, a gesture — resolve to a copy.
     #[test]
-    fn most_types_copy_into_inventory() {
-        let notecard = InventoryKey::from(Uuid::from_u128(0x1));
-        let source = NotecardSource::Agent { item_id: notecard };
-        let action = resolve_action(&item(sl_notecard::AssetType::Landmark, ""), source);
-        assert!(
-            matches!(&action, EmbeddedAction::Copy(_)),
-            "a landmark should copy into inventory"
-        );
-        if let EmbeddedAction::Copy(target) = &action {
-            assert_eq!(target.notecard, notecard);
-            assert_eq!(target.holder, None);
-            assert_eq!(target.item, InventoryKey::from(Uuid::from_u128(0x42)));
+    fn copy_only_types_copy_into_inventory() {
+        for asset_type in [
+            sl_notecard::AssetType::Object,
+            sl_notecard::AssetType::Notecard,
+            sl_notecard::AssetType::Clothing,
+            sl_notecard::AssetType::Gesture,
+        ] {
+            let action = resolve_action(&item(asset_type.clone(), ""));
+            assert!(
+                matches!(action, EmbeddedAction::Copy),
+                "{asset_type:?} should copy into inventory, got {action:?}"
+            );
         }
     }
 
@@ -362,49 +639,83 @@ mod tests {
     /// creator when the description is not a uuid.
     #[test]
     fn calling_card_opens_a_profile() {
-        let source = NotecardSource::Agent {
-            item_id: InventoryKey::from(Uuid::from_u128(0x1)),
-        };
         // A description holding a uuid names that agent.
         let described = Uuid::from_u128(0xABCD);
-        let action = resolve_action(
-            &item(sl_notecard::AssetType::CallingCard, &described.to_string()),
-            source,
-        );
+        let action = resolve_action(&item(
+            sl_notecard::AssetType::CallingCard,
+            &described.to_string(),
+        ));
         assert!(
-            matches!(&action, EmbeddedAction::Profile(_)),
-            "a calling card should open a profile"
+            matches!(&action, EmbeddedAction::Profile(agent) if agent.uuid() == described),
+            "a calling card should open its described agent's profile, got {action:?}"
         );
-        if let EmbeddedAction::Profile(agent) = &action {
-            assert_eq!(agent.uuid(), described);
-        }
         // A non-uuid description falls back to the creator.
-        let action = resolve_action(
-            &item(sl_notecard::AssetType::CallingCard, "not a uuid"),
-            source,
-        );
+        let action = resolve_action(&item(sl_notecard::AssetType::CallingCard, "not a uuid"));
         assert!(
-            matches!(&action, EmbeddedAction::Profile(_)),
-            "a calling card should open a profile"
+            matches!(&action, EmbeddedAction::Profile(agent) if agent.uuid() == Uuid::from_u128(0x99)),
+            "a calling card should fall back to its creator, got {action:?}"
         );
-        if let EmbeddedAction::Profile(agent) = &action {
-            assert_eq!(agent.uuid(), Uuid::from_u128(0x99));
-        }
     }
 
     /// A texture opens the texture preview carrying the item's asset id.
     #[test]
     fn texture_opens_the_preview() {
-        let source = NotecardSource::Agent {
-            item_id: InventoryKey::from(Uuid::from_u128(0x1)),
-        };
-        let action = resolve_action(&item(sl_notecard::AssetType::Texture, ""), source);
+        let action = resolve_action(&item(sl_notecard::AssetType::Texture, ""));
         assert!(
-            matches!(&action, EmbeddedAction::Texture(_)),
-            "a texture should open the preview"
+            matches!(&action, EmbeddedAction::Texture(info) if info.asset_id == Uuid::from_u128(0x7)),
+            "a texture should open the preview on its asset, got {action:?}"
         );
-        if let EmbeddedAction::Texture(info) = &action {
-            assert_eq!(info.asset_id, Uuid::from_u128(0x7));
-        }
+    }
+
+    /// A sound plays its own asset (and the copy is offered after it).
+    #[test]
+    fn sound_plays_its_asset() {
+        let action = resolve_action(&item(sl_notecard::AssetType::Sound, ""));
+        assert!(
+            matches!(action, EmbeddedAction::Sound(asset) if asset == AssetKey::from(Uuid::from_u128(0x7))),
+            "a sound should play its asset, got {action:?}"
+        );
+    }
+
+    /// A landmark opens About Landmark, and a material the material editor,
+    /// each on an item of the class that surface expects.
+    #[test]
+    fn landmark_and_material_open_their_surfaces() {
+        let action = resolve_action(&item(sl_notecard::AssetType::Landmark, ""));
+        assert!(
+            matches!(&action, EmbeddedAction::Landmark(info)
+                if info.asset_type == AssetType::Landmark
+                    && info.inv_type == InventoryType::Landmark),
+            "a landmark should open About Landmark, got {action:?}"
+        );
+        let action = resolve_action(&item(sl_notecard::AssetType::Material, ""));
+        assert!(
+            matches!(&action, EmbeddedAction::Material(info)
+                if info.asset_type == AssetType::Material),
+            "a material should open the material editor, got {action:?}"
+        );
+    }
+
+    /// The item a surface opens carries the embedded item's own identity,
+    /// ownership and permissions, not placeholders — About Landmark shows its
+    /// creator and date, and decides editability from its owner.
+    #[test]
+    fn embedded_item_info_is_the_items_own() {
+        let info = embedded_item_info(
+            &item(sl_notecard::AssetType::Landmark, "notes"),
+            AssetType::Landmark,
+            InventoryType::Landmark,
+        );
+        assert_eq!(info.item_id.uuid(), Uuid::from_u128(0x42));
+        assert_eq!(info.asset_id, Uuid::from_u128(0x7));
+        assert_eq!(info.description, "notes");
+        assert_eq!(info.creator_id, AgentKey::from(Uuid::from_u128(0x99)));
+        assert_eq!(
+            info.owner,
+            OwnerKey::Agent(AgentKey::from(Uuid::from_u128(0x98)))
+        );
+        assert_eq!(info.permissions.owner, Permissions::from_bits(0x0008_e000));
+        assert_eq!(info.creation_date, 1_700_000_000);
+        assert_eq!(info.group, None);
     }
 }

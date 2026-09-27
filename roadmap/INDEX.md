@@ -14,9 +14,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ideas | 119 |
 | ready | 303 |
 | blocked | 60 |
-| in-progress | 24 |
+| in-progress | 23 |
 | bugs | 14 |
-| done | 1241 |
+| done | 1242 |
 | deferred | 31 |
 | wont-do | 16 |
 | **total** | **1808** |
@@ -1115,7 +1115,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   favorites + now-playing title floater (blocked by `viewer-streaming-audio`)
 - [`viewer-task-inventory-open-and-save-back`](blocked/viewer-task-inventory-open-and-save-back.md)
   — Open a task-inventory item into its editor + Save Back to Object (blocked by
-  `viewer-notecard-editor`, `viewer-lsl-editor-save-compile`)
+  `viewer-notecard-editor` (done), `viewer-lsl-editor-save-compile`)
 - [`viewer-usb-route-comments`](blocked/viewer-usb-route-comments.md) — USB
   waypoint comments in the viewer (blocked by `viewer-usb-route-map-display`)
 - [`viewer-usb-route-following`](blocked/viewer-usb-route-following.md) — USB
@@ -1212,7 +1212,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Batch world changes into per-tick update bursts (blocked by
   `server-world-heartbeat`, `server-world-ecs-store`)
 
-## in-progress (24)
+## in-progress (23)
 
 ### viewer
 
@@ -1233,8 +1233,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Audit the other per-subject singletons onto the keyed-floater scaffold
 - [`viewer-menu-touch-object`](in-progress/viewer-menu-touch-object.md) — Touch
   an object from the object and attachment menus
-- [`viewer-notecard-editor`](in-progress/viewer-notecard-editor.md) — Notecard
-  viewer & editor (rich text with embedded items)
 - [`viewer-object-rezzing`](in-progress/viewer-object-rezzing.md) — Object
   rezzing from inventory (blocked by `viewer-object-selection-core` (done),
   `viewer-inventory-context-actions` (done))
@@ -1320,7 +1318,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1241)
+## done (1242)
 
 ### protocol
 
@@ -2279,6 +2277,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The notecard editor and reader draw a huge stray shape beside the body
 - [`viewer-notecard-copied-item-loses-permissions`](done/viewer-notecard-copied-item-loses-permissions.md)
   — An item copied out of a notecard arrives with no permissions
+- [`viewer-notecard-editor`](done/viewer-notecard-editor.md) — Notecard viewer &
+  editor (rich text with embedded items)
 - [`viewer-notecard-format`](done/viewer-notecard-format.md) — Notecard format —
   a pure crate (sl-notecard)
 - [`viewer-notecard-inline-items`](done/viewer-notecard-inline-items.md) — A

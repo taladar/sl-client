@@ -11,6 +11,10 @@
 //! item over the `UpdateMaterialAgentInventory` capability
 //! ([`Command::UpdateInventoryAsset`]).
 //!
+//! A click on a material **embedded in a notecard** opens it here too — to look
+//! at and play with, not to save: it is not an item of the agent's inventory,
+//! so the reference's Save is disabled for it and ours is absent.
+//!
 //! This is the standalone-floater half of the material editing the viewer
 //! already does inline in the Build Tools Texture tab (`edit_material`): here the
 //! subject is an inventory asset previewed on a sphere, not a selected in-world
@@ -200,6 +204,10 @@ struct MatEdit {
     dirty: bool,
     /// A Save is in flight.
     saving: bool,
+    /// Whether there is anything for Save to write back onto: `false` for a
+    /// material read out of a notecard, which is not an item of the agent's
+    /// inventory (the reference disables Save for one).
+    can_save: bool,
     /// The preview sphere node.
     preview: Option<Entity>,
     /// The alpha-mode button's label node.
@@ -319,6 +327,7 @@ fn open_material_editor(
         phase: MatPhase::Loading,
         dirty: false,
         saving: false,
+        can_save: open.notecard.is_none(),
         preview: None,
         alpha_label: None,
         double_check: None,
@@ -360,7 +369,8 @@ fn populate_material_editor(
     edit.dirty = true;
 
     commands.entity(ui.content).despawn_related::<Children>();
-    let controls = spawn_material_controls(&mut commands, ui.content, FONT, &material);
+    let controls =
+        spawn_material_controls(&mut commands, ui.content, FONT, &material, edit.can_save);
     edit.preview = Some(controls.preview);
     edit.alpha_label = Some(controls.alpha_label);
     edit.double_check = Some(controls.double_check);
@@ -405,18 +415,23 @@ pub fn spawn_material_editor_specimen(
         double_sided: true,
         ..GltfMaterial::default()
     };
-    spawn_material_controls(commands, parent, cx.font_size, &material);
+    spawn_material_controls(commands, parent, cx.font_size, &material, true);
     parent
 }
 
 /// Build the editor's controls for `material` into `content` at `font_size`:
 /// the Save / Revert row, the status line, the preview sphere and one row per
 /// channel. Shared by the live editor and its specimen.
+///
+/// Without `can_save` — a material read out of a notecard — the row has no
+/// Save, and the status line says why: the edits still preview, and Revert
+/// still restores, but there is no item of the agent's to write them onto.
 fn spawn_material_controls(
     commands: &mut Commands,
     content: Entity,
     font_size: f32,
     material: &GltfMaterial,
+    can_save: bool,
 ) -> MatControls {
     let mut tab = 0_i32;
 
@@ -431,11 +446,19 @@ fn spawn_material_controls(
         ))
         .id();
     for (kind, label) in [(MatButton::Save, "Save"), (MatButton::Revert, "Revert")] {
+        if kind == MatButton::Save && !can_save {
+            continue;
+        }
         spawn_mat_button(commands, button_row, kind, label, &mut tab, font_size);
     }
+    let note = if can_save {
+        String::new()
+    } else {
+        "In a notecard: copy it to your inventory to save changes.".to_owned()
+    };
     let status = commands
         .spawn((
-            Text::new(String::new()),
+            Text::new(note),
             UiFont::Sans.at(font_size),
             text_role(LABEL_COLOR),
             Node {
@@ -925,6 +948,10 @@ fn on_mat_action_button(
         return;
     };
     match kind {
+        // Never spawned without `can_save`; checked again rather than trusted,
+        // since a save with nothing to write onto would overwrite whatever
+        // inventory item happens to share the embedded item's id.
+        MatButton::Save if !edit.can_save => {}
         MatButton::Save => {
             commands.write(SlCommand(Command::UpdateInventoryAsset {
                 location: AssetUpdateLocation::AgentInventory {
@@ -1156,6 +1183,7 @@ mod tests {
                     phase: MatPhase::Ready,
                     dirty: false,
                     saving: false,
+                    can_save: true,
                     preview: None,
                     alpha_label: Some(alpha_label),
                     double_check: None,

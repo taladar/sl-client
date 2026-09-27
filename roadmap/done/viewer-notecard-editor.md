@@ -2,7 +2,7 @@
 id: viewer-notecard-editor
 title: Notecard viewer & editor (rich text with embedded items)
 topic: viewer
-status: in-progress
+status: done
 origin: user request (2026-07)
 refs: [viewer-lsl-editor-widget, viewer-notecard-format,
   viewer-inventory-folder-tree, viewer-url-linkification,
@@ -164,3 +164,40 @@ What is still open here:
   the confirmed copy-to-inventory;
 - opening **other** task-inventory item types into their own editors, which
   stays [[viewer-task-inventory-open-and-save-back]].
+
+## The residue, closed (2026-09-27)
+
+- **A drop goes where it is dropped.** `AddEmbeddedItem` carries the release
+  point, and the body maps it into the buffer through the same point-to-offset
+  trip a caret click makes (`ui_rich_text::rich_text_point`, now shared with
+  the styled-range click): released over the body, the item goes in at the
+  character under the pointer, as the reference's `handleDragAndDrop` puts it;
+  released over the window around the body, it goes in at the caret, and the
+  caret moves past it as if typed. Several items dragged together go in side
+  by side in drag order, and the caret otherwise keeps its place in the text.
+- **The reference's type-specific opens** (`openEmbeddedItem`): a **sound**
+  plays locally on the UI bus (a new `ui_sounds::PlayAssetSound`, the
+  reference's `triggerSound(…, AUDIO_TYPE_UI)`) and then offers the copy; a
+  **landmark** opens About Landmark on it — details and Teleport, read-only,
+  keyed apart from any inventory landmark sharing its item id; a **material**
+  opens the material editor on it with no Save (the reference disables Save
+  for a notecard source). `OpenAboutLandmark` / `OpenMaterialEditor` gained a
+  `notecard: Option<NotecardSource>` provenance for this.
+- The landmark is **shown, not copied**: the reference's default
+  (`EmbeddedLandmarkCopyToInventory` on) copies it into inventory first unless
+  a landmark to the same spot is already there, and we have no index of
+  landmark positions to make that check — copying on every click would fill
+  the Landmarks folder. The Catznip "off" path is the one taken, and the copy
+  is one right-click away (below).
+- **The right-click menu** on an embedded item (Catznip's
+  `menu_embedded_item.xml`): *Open* and *Copy to Inventory*, so a landmark or a
+  material, whose click no longer copies, can still be kept.
+- **An unsaved item asks for a save.** An item dropped in since the last save
+  is in the buffer but not in the stored asset, so the grid could neither copy
+  it nor serve it; a click (or menu line) on one raises the reference's
+  `ConfirmNotecardSave` and saves the window on OK. The body tracks those
+  items (`UnsavedEmbeddedItems`) and a landed save clears the ones it carried —
+  a snapshot, so an item dropped while the save was in flight stays unsaved.
+
+Opening **other** task-inventory item types into their own editors stays
+[[viewer-task-inventory-open-and-save-back]], as before.

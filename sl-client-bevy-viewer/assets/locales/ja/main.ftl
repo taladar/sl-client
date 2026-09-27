@@ -100,6 +100,9 @@ notecard-status-saving = 保存中…
 notecard-status-saved = 保存しました。
 notecard-status-save-failed = 保存に失敗しました。
 notecard-status-decode-failed = このノートカードを読み取れませんでした。
+menu-embedded-item = 開く
+menu-embedded-open = 開く
+menu-embedded-copy-to-inventory = 持ち物にコピー
 
 ## The LSL script editor floater (viewer-lsl-editor-save-compile).
 

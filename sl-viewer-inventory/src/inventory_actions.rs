@@ -2004,8 +2004,10 @@ fn handle_inventory_menu_actions(
                 if let MenuTarget::Item(item) = &menu_target
                     && item.inv_type == InventoryType::Landmark
                 {
-                    landmark_opens
-                        .write(crate::inventory::OpenAboutLandmark { item: item.clone() });
+                    landmark_opens.write(crate::inventory::OpenAboutLandmark {
+                        item: item.clone(),
+                        notecard: None,
+                    });
                 }
             }
             "show-in-main" => {
@@ -2033,8 +2035,10 @@ fn handle_inventory_menu_actions(
             }
             "edit-material" => {
                 if let MenuTarget::Item(item) = &menu_target {
-                    material_editor
-                        .write(crate::inventory::OpenMaterialEditor { item: item.clone() });
+                    material_editor.write(crate::inventory::OpenMaterialEditor {
+                        item: item.clone(),
+                        notecard: None,
+                    });
                 }
             }
             "copy-asset-uuid" => {

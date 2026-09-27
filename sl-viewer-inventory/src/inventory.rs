@@ -4255,8 +4255,14 @@ fn bind_sample_rows(
 /// Open the About Landmark floater on a landmark item.
 #[derive(Message, Debug, Clone)]
 pub struct OpenAboutLandmark {
-    /// The landmark inventory item to show.
+    /// The landmark item to show.
     pub item: ItemInfo,
+    /// The notecard the landmark is **embedded in**, when it is one — an item
+    /// that is not in the agent's inventory at all, so it has no title or notes
+    /// of the agent's to edit (its item id may even be the id of the original
+    /// the notecard was made from, which an edit would rename). `None` for an
+    /// inventory landmark.
+    pub notecard: Option<crate::intents::NotecardSource>,
 }
 
 /// Open the appearance editor on a worn wearable (the inventory context menu's
@@ -4272,14 +4278,18 @@ pub struct OpenWearableEditor {
 pub struct OpenMaterialEditor {
     /// The material item to edit.
     pub item: ItemInfo,
+    /// The notecard the material is **embedded in**, when it is one. Such a
+    /// material is not an inventory item of the agent's, so there is nothing
+    /// for Save to write back onto — the reference opens it with Save
+    /// disabled. `None` for an inventory material.
+    pub notecard: Option<crate::intents::NotecardSource>,
 }
 
 /// Add a dropped inventory item to the open notecard as an **embedded item**.
 /// Written by [`crate::inventory_drag`] when an inventory row is dropped onto
-/// the notecard editor; consumed by `ingest_added_items`, which appends the
-/// item to the baseline item table and its marker to the edit buffer (the
-/// reference's drag-into-notecard, minus the caret-precise placement the
-/// inline-box widget will add).
+/// the notecard editor; consumed by `ingest_added_items`, which adds the item
+/// to the baseline item table and inserts its marker into the edit buffer
+/// where it was dropped (the reference's drag-into-notecard).
 #[derive(Message, Debug, Clone)]
 pub struct AddEmbeddedItem {
     /// The inventory item to embed.
@@ -4290,6 +4300,11 @@ pub struct AddEmbeddedItem {
     /// names its window; without it the item would land in whichever one a
     /// resource happened to hold.
     pub editor: Entity,
+    /// Where the pointer was released, in window logical pixels. Over the body
+    /// the item goes in at the character under it, as the reference's drop
+    /// puts it; elsewhere on the window (or with no pointer at all) it goes in
+    /// at the caret.
+    pub at: Option<Vec2>,
 }
 
 #[cfg(test)]

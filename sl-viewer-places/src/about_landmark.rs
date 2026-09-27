@@ -5,7 +5,10 @@
 //! and the Teleport / Show on Map / Copy SLURL buttons. Opened by the
 //! inventory context menu's
 //! **About Landmark** entry and by **Open** on a landmark
-//! ([`crate::inventory_properties`] forwards its Landmark previews here).
+//! ([`crate::inventory_properties`] forwards its Landmark previews here), and
+//! by a click on a landmark **embedded in a notecard** — which is shown, with
+//! its Teleport button, but not editable, since it is not an item of the
+//! agent's inventory.
 //!
 //! # Data flow
 //!
@@ -46,6 +49,7 @@ use crate::floater::{
     host_floater,
 };
 use crate::i18n::{Translated, Translator};
+use crate::intents::NotecardSource;
 use crate::inventory::OpenAboutLandmark;
 use crate::inventory_properties::{
     LandmarkAsset, format_unix_date, parse_landmark, send_item_update,
@@ -226,8 +230,21 @@ pub fn about_landmark_floater_spec() -> FloaterSpec {
 /// The [`FloaterKey`] of the window showing the landmark `item` — one window
 /// per landmark, keyed by its inventory id. A subject key, so nothing is
 /// persisted.
-fn landmark_key(item: InventoryKey) -> FloaterKey {
-    FloaterKey::subject(&item)
+///
+/// A landmark **embedded in a notecard** is keyed by the notecard (and the prim
+/// holding it) too: its item id is the one it had when it was dropped in, which
+/// may well be the id of the resident's own inventory landmark it was made
+/// from, and the two are different windows — one editable, one not.
+fn landmark_key(item: InventoryKey, notecard: Option<NotecardSource>) -> FloaterKey {
+    match notecard {
+        None => FloaterKey::subject(&item),
+        Some(source) => {
+            let holder = source
+                .object_id()
+                .map_or_else(String::new, |object| object.to_string());
+            FloaterKey::subject(&format!("{holder}/{}/{item}", source.item_id()))
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -256,6 +273,17 @@ struct LandmarkContent<'w, 's> {
     children: Query<'w, 's, &'static Children>,
     /// The texts the rebuilt content writes.
     texts: Query<'w, 's, &'static mut Text>,
+}
+
+/// The landmark a window shows, and whether it is an item of the agent's own
+/// inventory (rather than one read out of a notecard) — which is what decides
+/// whether its title and notes are editable.
+#[derive(Debug, Clone, Copy)]
+struct LandmarkSubject<'a> {
+    /// The landmark item.
+    item: &'a ItemInfo,
+    /// Whether it is in the agent's inventory.
+    in_inventory: bool,
 }
 
 /// The name sources one landmark's content is rendered from, borrowed as one
@@ -318,7 +346,13 @@ fn open_about_landmark(
     } = content;
     for open in opens.read().cloned() {
         let item = open.item;
-        let opened = floaters.open(about_landmark_floater_spec(), landmark_key(item.item_id));
+        // Only a landmark in the agent's own inventory has a title and notes
+        // the agent may edit; one read out of a notecard is shown, not owned.
+        let in_inventory = open.notecard.is_none();
+        let opened = floaters.open(
+            about_landmark_floater_spec(),
+            landmark_key(item.item_id, open.notecard),
+        );
         match opened {
             KeyedFloaterOpen::Spawned(handle) => {
                 commands
@@ -328,7 +362,10 @@ fn open_about_landmark(
                     &mut commands,
                     handle.content,
                     handle.title_text,
-                    &item,
+                    LandmarkSubject {
+                        item: &item,
+                        in_inventory,
+                    },
                     LandmarkRefs {
                         identity: &identity,
                         avatars: &avatars,
@@ -353,7 +390,10 @@ fn open_about_landmark(
                     &mut commands,
                     ui.content,
                     ui.title_text,
-                    &item,
+                    LandmarkSubject {
+                        item: &item,
+                        in_inventory,
+                    },
                     LandmarkRefs {
                         identity: &identity,
                         avatars: &avatars,
@@ -376,11 +416,12 @@ fn fill_landmark_content(
     commands: &mut Commands,
     content: Entity,
     title_text: Entity,
-    item: &ItemInfo,
+    subject: LandmarkSubject<'_>,
     refs: LandmarkRefs<'_, '_>,
     texts: &mut Query<&mut Text>,
     sl_commands: &mut MessageWriter<SlCommand>,
 ) -> (AboutLandmarkState, AboutLandmarkUi) {
+    let LandmarkSubject { item, in_inventory } = subject;
     let LandmarkRefs {
         identity,
         avatars,
@@ -390,7 +431,8 @@ fn fill_landmark_content(
     if let Ok(mut text) = texts.get_mut(title_text) {
         item.name.clone_into(&mut text.0);
     }
-    let editable = matches!(item.owner, OwnerKey::Agent(agent) if Some(agent) == identity.agent_id);
+    let editable = in_inventory
+        && matches!(item.owner, OwnerKey::Agent(agent) if Some(agent) == identity.agent_id);
     let loading = translator.get("about-landmark-loading");
     // Every destination row reads "(loading)" until its resolve step lands.
     let seed = LandmarkSeed {
@@ -1486,8 +1528,10 @@ mod tests {
 
         /// Open a landmark the way the inventory row does.
         fn open(app: &mut App, item: &ItemInfo) {
-            app.world_mut()
-                .write_message(OpenAboutLandmark { item: item.clone() });
+            app.world_mut().write_message(OpenAboutLandmark {
+                item: item.clone(),
+                notecard: None,
+            });
             app.update();
         }
 
@@ -1519,8 +1563,8 @@ mod tests {
                 .iter()
                 .map(|(window, _item)| world.get::<Floater>(*window).and_then(Floater::key))
                 .collect();
-            assert!(keys.contains(&Some(&landmark_key(first.item_id))));
-            assert!(keys.contains(&Some(&landmark_key(second.item_id))));
+            assert!(keys.contains(&Some(&landmark_key(first.item_id, None))));
+            assert!(keys.contains(&Some(&landmark_key(second.item_id, None))));
             Ok(())
         }
 

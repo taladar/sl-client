@@ -1269,7 +1269,10 @@ fn open_previews(
             }
             InventoryType::Landmark => {
                 // The full About Landmark floater owns this type.
-                landmark_opens.write(crate::inventory::OpenAboutLandmark { item: item.clone() });
+                landmark_opens.write(crate::inventory::OpenAboutLandmark {
+                    item: item.clone(),
+                    notecard: None,
+                });
             }
             InventoryType::Settings => {
                 // The settings editors own this type — the fixed sky and water
