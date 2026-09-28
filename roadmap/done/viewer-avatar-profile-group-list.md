@@ -36,8 +36,8 @@ the avatar's groups (`AvatarGroupsReply`) as a plain column of **static name
 labels** — it is not a real list. Make it a proper group list matching the
 reference (`llpanelprofilesecondlife` group list):
 
-- each group row is **clickable** and opens the group [profile
-  floater](../ready/viewer-social-group-profile.md) via
+- each group row is **clickable** and opens the group profile floater
+  ([[viewer-social-group-profile]]) via
   `group_profile::OpenGroupProfile { group }` (the avatar profile was the entry
   point a user reached for first);
 - show each group's **insignia** thumbnail beside the name (the reply carries
