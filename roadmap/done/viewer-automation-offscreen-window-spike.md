@@ -2,11 +2,39 @@
 id: viewer-automation-offscreen-window-spike
 title: Spike — how a windowless viewer renders and picks at the same time
 topic: viewer
-status: ready
+status: done
 origin: viewer automation design review (2026-09-28)
 points: 3
 refs: [viewer-automation-windowless-mode, viewer-ui-interaction-harness]
 ---
+
+## Done (2026-09-28)
+
+**Decision: option 1, a surfaceless window in the Bevy fork** — written up,
+with the rejected options and why, under "Rendering and picking without a
+window" in [context/automation.md](../context/automation.md);
+[[viewer-automation-windowless-mode]] now says how to build it into the
+viewer.
+
+- Fork: `bevy::window::OffscreenWindow`. `bevy_winit` creates no platform
+  window for it; `bevy_render` extracts it with no `RawHandleWrapper`, gives
+  it an `Rgba8UnormSrgb` texture of its physical size as its swap chain
+  (`TEXTURE_BINDING | COPY_SRC`, never presented, no surface configured) and
+  `Screenshot::primary_window()` reads it back.
+- Prototype: `full_stack_test`'s `HarnessOptions::in_offscreen_window` spawns
+  the primary window with the marker (scale factor 1), installs
+  `SyntheticInputPlugin` and screenshots the window every frame. The test
+  `an_offscreen_window_renders_the_ui_and_takes_clicks_and_picks` logs into
+  the fake grid in a 1280×720 off-screen window, renders the world with the
+  full chrome over it, right-clicks the stock box (GPU ID-buffer pick → the
+  box → its object pie), and clicks the toolbar's Inventory button where the
+  locator engine aims (its "receives events" check is `bevy_picking` against
+  the window's UI camera). Every pixel of the floater's laid-out box changes
+  between the frames, and almost nothing outside it; hiding the floater makes
+  it fail.
+- Found on the way: `Escape` never closed a pie, although `pie_menu.rs`
+  promised it (only focus loss did) — fixed (`abort_pie_on_escape`, live
+  pies only) with `escape_closes_a_pinned_pie`.
 
 Context: [context/automation.md](../context/automation.md).
 

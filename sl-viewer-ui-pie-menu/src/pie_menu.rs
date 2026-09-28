@@ -1100,6 +1100,7 @@ impl Plugin for PieMenuPlugin {
                     drive_pie_cursor,
                     commit_pie_selection,
                     abort_pie_on_focus_loss,
+                    abort_pie_on_escape,
                     update_pie_labels,
                     // After the rebuild, so a caption spawned this frame is
                     // painted before it is ever drawn.
@@ -1936,6 +1937,24 @@ fn abort_pie_on_focus_loss(
     pies: Query<Entity, With<PieMenu>>,
 ) {
     if !focused.read().any(|event| !event.focused) {
+        return;
+    }
+    for pie in &pies {
+        commands.entity(pie).despawn();
+    }
+}
+
+/// Close an open pie on `Escape`, in either mode — the one way out of a pinned
+/// menu that does not need the pointer.
+///
+/// Only a live pie (one with a [`PiePlacement`]): a specimen shown in a gallery
+/// card is not a menu anyone opened.
+fn abort_pie_on_escape(
+    keys: Option<Res<ButtonInput<KeyCode>>>,
+    mut commands: Commands,
+    pies: Query<Entity, (With<PieMenu>, With<PiePlacement>)>,
+) {
+    if !keys.is_some_and(|keys| keys.just_pressed(KeyCode::Escape)) {
         return;
     }
     for pie in &pies {
@@ -3284,6 +3303,35 @@ mod tests {
         assert!(
             find_by_name(&mut app, "pie-menu").is_none(),
             "a click in a pinned pie's dead zone dismisses it"
+        );
+        Ok(())
+    }
+
+    /// **`Escape` closes a pinned pie** — the one way out that does not need the
+    /// pointer. The module promised it; nothing did it until an automated run
+    /// of the whole viewer pressed `Escape` over an open object pie and waited
+    /// for it to close.
+    #[test]
+    fn escape_closes_a_pinned_pie() -> Result<(), TestError> {
+        let mut app = pointer_pie_app()?;
+        let centre = interact::centre_of(&mut app, "pie-ring").ok_or("the ring never laid out")?;
+        // A dead-zone release pins it (see the test above).
+        pointer_click(&mut app, centre);
+        find_by_name(&mut app, "pie-menu").ok_or("the pie should be pinned open")?;
+
+        interact::tap(
+            &mut app,
+            KeyCode::Escape,
+            bevy::input::keyboard::Key::Escape,
+        );
+        assert!(
+            find_by_name(&mut app, "pie-menu").is_none(),
+            "Escape must close an open pie"
+        );
+        assert_eq!(
+            drain_actions(&mut app),
+            vec![],
+            "closing on Escape picks nothing"
         );
         Ok(())
     }

@@ -218,6 +218,18 @@ pub(crate) struct HarnessOptions {
     ///
     /// [`EnvironmentState::apply`]: sl_viewer_world_scene::environment::EnvironmentState
     day_position: Option<f32>,
+    /// Render into an **off-screen primary window** of this physical size
+    /// rather than into a readback image, with the synthetic input injector
+    /// installed — or `None` for the image.
+    ///
+    /// The image is the default because it is what every pixel test here was
+    /// written against: one camera, one square frame. The window is the
+    /// automation tier's rig ([[viewer-automation-offscreen-window-spike]]):
+    /// every camera the viewer spawns keeps its `WindowRef::Primary` target, so
+    /// the UI renders over the world, `bevy_picking` hits the UI the window's
+    /// pointer is over, and every `Window::cursor_position()` reader (the GPU
+    /// pick, the pie menus) sees the synthetic cursor.
+    offscreen_window: Option<UVec2>,
 }
 
 impl Default for HarnessOptions {
@@ -225,6 +237,7 @@ impl Default for HarnessOptions {
         Self {
             imitates: sl_fake_grid::ImitatedGrid::default(),
             day_position: Some(DAY_POSITION),
+            offscreen_window: None,
         }
     }
 }
@@ -234,6 +247,15 @@ impl HarnessOptions {
     fn following_the_region_environment() -> Self {
         Self {
             day_position: None,
+            ..Self::default()
+        }
+    }
+
+    /// Render into an off-screen primary window of `size` physical pixels,
+    /// with synthetic input installed, rather than into the readback image.
+    fn in_offscreen_window(size: UVec2) -> Self {
+        Self {
+            offscreen_window: Some(size),
             ..Self::default()
         }
     }
@@ -262,6 +284,8 @@ pub(crate) struct ViewerHarness {
     app: App,
     /// The cell each rendered frame is read back into.
     captured: Captured,
+    /// The size of the frames read back into [`captured`](Self::captured).
+    frame_size: UVec2,
     /// The grid-side handle onto this agent's session, once logged in.
     agent: Option<FakeAgent>,
     /// Login notices, subscribed before the app starts.
@@ -352,6 +376,7 @@ impl ViewerHarness {
                 "0.0",
             ),
         };
+        let frame_size = options.offscreen_window.unwrap_or(UVec2::new(FRAME, FRAME));
         let (mut app, captured) = build_viewer_app(params, options)?;
         // `App::finish` / `cleanup` are what build the render app and publish
         // its `RenderDevice` into the main world; the plain `update` loop this
@@ -366,6 +391,7 @@ impl ViewerHarness {
             grid,
             app,
             captured,
+            frame_size,
             agent: None,
             logins,
             teleports,
@@ -530,9 +556,10 @@ impl ViewerHarness {
             .captured
             .take()
             .ok_or("the readback slot was empty after a settled render")?;
-        Ok(Some(Frame::from_rgba8(bytes, FRAME, FRAME).ok_or(
-            "the readback and the render target disagree about the frame size",
-        )?))
+        Ok(Some(
+            Frame::from_rgba8(bytes, self.frame_size.x, self.frame_size.y)
+                .ok_or("the readback and the render target disagree about the frame size")?,
+        ))
     }
 
     /// Take the **scene clock** over: from here on `Time` advances only by what
@@ -1018,6 +1045,11 @@ fn build_viewer_app(
 
     let captured = app.world().resource::<Captured>().clone();
 
+    if let Some(size) = options.offscreen_window {
+        install_offscreen_window(&mut app, size);
+        return Ok((app, captured));
+    }
+
     // The render target: an ordinary image, plus `COPY_SRC` so the readback can
     // lift it back off the GPU.
     let mut target = Image::new_target_texture(FRAME, FRAME, TextureFormat::Rgba8UnormSrgb, None);
@@ -1059,6 +1091,48 @@ fn build_viewer_app(
     );
 
     Ok((app, captured))
+}
+
+/// Give a windowless viewer an **off-screen primary window** of `size`
+/// physical pixels, the synthetic input injector, and a window screenshot every
+/// frame into [`Captured`].
+///
+/// The window carries [`OffscreenWindow`](bevy::window::OffscreenWindow): no
+/// OS window is created for it and the renderer hands it an off-screen texture
+/// as its swap chain, so the cameras the viewer spawns render into it
+/// unchanged. The scale factor is pinned to 1, so a logical pixel — what the
+/// UI, picking and the injector speak — is a pixel of the frame.
+///
+/// A screenshot per frame rather than a `Readback`: a window's texture is not
+/// an `Image` asset a readback could name, and a screenshot of a window is
+/// Bevy's own way to read one.
+fn install_offscreen_window(app: &mut App, size: UVec2) {
+    app.world_mut().spawn((
+        Window {
+            title: "sl-client-bevy-viewer (off-screen)".to_owned(),
+            resolution: bevy::window::WindowResolution::new(size.x, size.y)
+                .with_scale_factor_override(1.0),
+            ..default()
+        },
+        bevy::window::PrimaryWindow,
+        bevy::window::OffscreenWindow,
+    ));
+    app.add_plugins(sl_viewer_ui_core::synthetic_input::SyntheticInputPlugin)
+        .add_systems(Last, screenshot_the_window);
+}
+
+/// Ask for a screenshot of the primary window, landing in [`Captured`].
+fn screenshot_the_window(mut commands: Commands) {
+    commands
+        .spawn(bevy::render::view::screenshot::Screenshot::primary_window())
+        .observe(
+            |shot: On<bevy::render::view::screenshot::ScreenshotCaptured>,
+             captured: Res<Captured>| {
+                if let Some(data) = &shot.image.data {
+                    captured.set(data.clone());
+                }
+            },
+        );
 }
 
 #[cfg(test)]
@@ -1203,6 +1277,237 @@ mod tests {
             .into());
         }
         Ok(Silhouette { centre, radius })
+    }
+
+    /// Queue `action` on the viewer's synthetic input and step frames until it
+    /// has been applied.
+    fn perform(
+        harness: &mut ViewerHarness,
+        action: sl_viewer_ui_core::synthetic_input::InputAction,
+    ) -> Result<(), TestError> {
+        use sl_viewer_ui_core::synthetic_input::{ActionStatus, SyntheticInput};
+        let id = harness
+            .app_world_mut()
+            .resource_mut::<SyntheticInput>()
+            .enqueue(action);
+        harness.run_until("the synthetic input to be applied", |harness| {
+            matches!(
+                harness.world().resource::<SyntheticInput>().status(id),
+                ActionStatus::Done { .. }
+            )
+            .then_some(())
+        })
+    }
+
+    /// Step frames until the one node `locator` names is actionable for
+    /// `intent`, through the locator engine, and return where to aim at it.
+    fn pursue(
+        harness: &mut ViewerHarness,
+        locator: sl_automation_proto::Locator,
+        intent: sl_viewer_automation::Intent,
+    ) -> Result<Vec2, TestError> {
+        let mut pursuit = sl_viewer_automation::Pursuit::new(locator, intent);
+        harness
+            .run_until(
+                "the locator engine to find the node",
+                |harness| match pursuit.poll(harness.app_world_mut()) {
+                    Ok(sl_viewer_automation::Progress::Ready(target)) => Some(Ok(target.aim)),
+                    Ok(sl_viewer_automation::Progress::Waiting(_)) => None,
+                    Err(error) => Some(Err(error.to_string())),
+                },
+            )?
+            .map_err(Into::into)
+    }
+
+    /// Whether any pie menu is open.
+    fn a_pie_is_open(harness: &mut ViewerHarness) -> bool {
+        let world = harness.app_world_mut();
+        world
+            .query::<&crate::pie_menu::PieMenu>()
+            .iter(world)
+            .next()
+            .is_some()
+    }
+
+    /// Whether the singleton floater `id` is shown.
+    fn floater_shown(harness: &mut ViewerHarness, id: &str) -> bool {
+        let world = harness.app_world_mut();
+        world
+            .query::<(&crate::floater::Floater, &crate::ui::UiPanelShown)>()
+            .iter(world)
+            .any(|(floater, shown)| floater.id == id && shown.0)
+    }
+
+    /// The singleton floater `id`'s laid-out box, as its (min, max) corners in
+    /// physical pixels of the frame.
+    fn floater_rect(harness: &mut ViewerHarness, id: &str) -> Result<(Vec2, Vec2), TestError> {
+        let world = harness.app_world_mut();
+        let (size, centre) = world
+            .query::<(
+                &crate::floater::Floater,
+                &bevy::ui::ComputedNode,
+                &bevy::ui::UiGlobalTransform,
+            )>()
+            .iter(world)
+            .find(|(floater, _, _)| floater.id == id)
+            .map(|(_, node, transform)| (node.size(), transform.translation))
+            .ok_or_else(|| format!("no `{id}` floater"))?;
+        let half = Vec2::new(size.x / 2.0, size.y / 2.0);
+        Ok((
+            Vec2::new(centre.x - half.x, centre.y - half.y),
+            Vec2::new(centre.x + half.x, centre.y + half.y),
+        ))
+    }
+
+    /// How many pixels differ between `a` and `b` inside the rectangle `rect`
+    /// (min and max corners, pixels), and how many outside it.
+    fn differing_inside_and_outside(a: &Frame, b: &Frame, rect: (Vec2, Vec2)) -> (u32, u32) {
+        let (mut inside, mut outside) = (0_u32, 0_u32);
+        let size = a.size();
+        for y in 0..size.y {
+            for x in 0..size.x {
+                let (Some(one), Some(other)) = (a.pixel(x, y), b.pixel(x, y)) else {
+                    continue;
+                };
+                if !pixels_differ(one, other) {
+                    continue;
+                }
+                let point = Vec2::new(
+                    crate::pixel_oracle::f32_from_u32(x),
+                    crate::pixel_oracle::f32_from_u32(y),
+                );
+                if point.cmpge(rect.0).all() && point.cmplt(rect.1).all() {
+                    inside = inside.saturating_add(1);
+                } else {
+                    outside = outside.saturating_add(1);
+                }
+            }
+        }
+        (inside, outside)
+    }
+
+    /// **An off-screen window renders the UI over the world, takes a synthetic
+    /// click on a UI button, and a synthetic right-click GPU-picks a prim** —
+    /// the prototype of [[viewer-automation-offscreen-window-spike]].
+    ///
+    /// Before the fork's `OffscreenWindow`, a windowless viewer could do one
+    /// or the other: render into an image (which the window's pointer never
+    /// hits, so nothing could be clicked) or pick against a surfaceless window
+    /// (which renders nothing). Here every camera keeps its window target and
+    /// the window has no OS window behind it, so all three are one run:
+    ///
+    /// 1. a right-click over the stock box goes through `Window::cursor_position`
+    ///    into the GPU ID-buffer pick, whose readback resolves to the box and
+    ///    opens the object pie on it;
+    /// 2. the locator engine finds the toolbar's Inventory button, judges it
+    ///    actionable (its "receives events" check is a `bevy_picking` hit test
+    ///    against the window's UI camera), and a synthetic click opens the
+    ///    floater;
+    /// 3. the floater is drawn: the frame after differs from the frame before
+    ///    over the floater's own laid-out box.
+    #[test]
+    fn an_offscreen_window_renders_the_ui_and_takes_clicks_and_picks() -> Result<(), TestError> {
+        use sl_automation_proto::Locator;
+        use sl_viewer_automation::Intent;
+        use sl_viewer_ui_core::synthetic_input::InputAction;
+
+        let mut harness = ViewerHarness::start_in_with(
+            vec![stock_fixture().into_region(RegionConfig::default())],
+            HarnessOptions::in_offscreen_window(UVec2::new(1280, 720)),
+        )?;
+        harness.login()?;
+        let at = sl_fake_grid::scenario::STOCK_SCRIPTED_OBJECT_POSITION;
+        // From the east, looking back west: the avatar arrives at the region
+        // centre, 4 m west of the box, so from the west it would stand between
+        // the camera and the box and take the pick.
+        let eye = Vector {
+            x: at.x + 4.0,
+            y: at.y,
+            z: at.z + 1.0,
+        };
+        harness.look_from(eye.clone(), at.clone());
+        let Some(first) = harness.capture()? else {
+            no_adapter("the off-screen window check");
+            return Ok(());
+        };
+        let frame_health = health(&first);
+        assert!(
+            !frame_health.all_black && !frame_health.all_transparent,
+            "the off-screen window drew nothing: {frame_health:?}"
+        );
+
+        // 1. The GPU pick: a right-click over the box opens its pie.
+        let aim = harness
+            .project(core::slice::from_ref(&at))
+            .get(0)
+            .ok_or("the stock box is not in front of the camera")?;
+        perform(&mut harness, InputAction::click(aim, MouseButton::Right))?;
+        harness.run_until("the object pie on the stock box", |harness| {
+            let picked = harness
+                .world()
+                .resource::<crate::object_menu::ObjectMenuTarget>()
+                .hit
+                .as_ref()
+                .map(|hit| hit.summary.picked_full);
+            (picked == Some(sl_fake_grid::scenario::stock_scripted_object())
+                && a_pie_is_open(harness))
+            .then_some(())
+        })?;
+        perform(
+            &mut harness,
+            InputAction::tap(KeyCode::Escape, bevy::input::keyboard::Key::Escape),
+        )?;
+        harness.run_until("the pie to close", |harness| {
+            (!a_pie_is_open(harness)).then_some(())
+        })?;
+
+        // 2. The UI click, aimed by the locator engine. The pose again first:
+        // the Escape that closed the pie also left flycam, and a frame pair
+        // whose camera moved differs everywhere, floater or no floater.
+        assert!(
+            !floater_shown(&mut harness, "inventory"),
+            "the inventory floater is open before anything asked for it"
+        );
+        harness.look_from(eye, at);
+        let button = pursue(
+            &mut harness,
+            Locator::test_id("bottom-toolbar-button:toggle-inventory"),
+            Intent::Click,
+        )?;
+        // The pointer onto the button before the "before" frame, so that frame
+        // does not carry the hover tooltip the box raised under the pointer.
+        perform(&mut harness, InputAction::move_to(button))?;
+        let Some(before) = harness.capture()? else {
+            no_adapter("the off-screen window check");
+            return Ok(());
+        };
+        perform(&mut harness, InputAction::click(button, MouseButton::Left))?;
+        harness.run_until("the inventory floater to open", |harness| {
+            floater_shown(harness, "inventory").then_some(())
+        })?;
+
+        // 3. …and it is drawn into the window: the frame changed over the
+        // floater's own box, and hardly anywhere else.
+        let Some(after) = harness.capture()? else {
+            no_adapter("the off-screen window check");
+            return Ok(());
+        };
+        let rect = floater_rect(&mut harness, "inventory")?;
+        drop(harness);
+        let (inside, outside) = differing_inside_and_outside(&before, &after, rect);
+        let area = (rect.1.x - rect.0.x) * (rect.1.y - rect.0.y);
+        assert!(
+            crate::pixel_oracle::f32_from_u32(inside) > area / 2.0,
+            "only {inside} of the ~{area} pixels of the inventory floater's box changed \
+             when it opened — the UI is not being drawn into the off-screen window"
+        );
+        assert!(
+            outside < inside / 10,
+            "{outside} pixels changed outside the inventory floater's box against {inside} \
+             inside it — the scene moved between the two frames, so the pair says nothing \
+             about the floater"
+        );
+        Ok(())
     }
 
     /// **The harness runs the interface the user runs, not a world without one.**

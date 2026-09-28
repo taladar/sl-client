@@ -120,14 +120,40 @@ replaces that person.
   listener binds a fixed port (two viewers collide) and loses bind errors,
   and a port-0 bind never reports the real port. See
   [[viewer-automation-remote-transport]].
-- **Rendering and picking without a window is unsolved.** `bevy_ui` and
-  `bevy_picking` only hit cameras whose render target equals the pointer's,
-  so UI cameras rendering into an `Image` get no hits from a window pointer;
-  about 25 viewer files read `Window::cursor_position()`; a `Window` with no
-  raw handle renders nothing. That is why `InteractionTest` picks but never
-  renders and the screenshot harness renders but never clicks.
-  [[viewer-automation-offscreen-window-spike]] decides the design
-  (recommended: a surfaceless window rendered off-screen in the Bevy fork).
+- **Rendering and picking without a window: an off-screen window**
+  (decided 2026-09-28, [[viewer-automation-offscreen-window-spike]]). The
+  problem: `bevy_ui` and `bevy_picking` only hit cameras whose render target
+  equals the pointer's, so UI cameras rendering into an `Image` get no hits
+  from a window pointer; about 25 viewer files read
+  `Window::cursor_position()`; and a `Window` with no raw handle rendered
+  nothing. That is why `InteractionTest` picks but never renders and the
+  screenshot harness renders but never clicks.
+  - **Chosen: `bevy::window::OffscreenWindow`**, a marker in the Bevy fork. A
+    `Window` carrying it gets no platform window from `bevy_winit`, and
+    `bevy_render` gives it an `Rgba8UnormSrgb` texture of its physical size as
+    its swap chain (kept across frames, never presented, no surface
+    configured); `Screenshot::primary_window()` reads it back. Every camera
+    keeps `WindowRef::Primary`, so picking, the UI and the cursor readers are
+    untouched — nothing in the viewer changes but who spawns the window. Pin
+    its scale factor to 1 so a logical pixel (what the UI, picking and the
+    injector speak) is a pixel of the frame.
+  - **Rejected: custom pointers on an image** — a `PointerId` targeting the
+    image fixes `bevy_picking`, but every `PrimaryWindow` cursor reader (GPU
+    pick, camera, pie menus, floater and inventory drags, edit tools,
+    tooltips…) would have to learn to ask "the pointer" instead, and each one
+    missed is a feature that silently does nothing under automation.
+  - **Rejected: an invisible winit window** — still needs a compositor, and on
+    Wayland a compositor may not map, size or render an unmapped window.
+  - **Prototype**: the full-stack test
+    `an_offscreen_window_renders_the_ui_and_takes_clicks_and_picks`
+    (the harness's `HarnessOptions::in_offscreen_window`): a fake-grid login
+    rendered into a 1280×720 off-screen window; a synthetic right-click over
+    the stock box resolves through the GPU ID-buffer pick to that box and
+    opens its pie; the locator engine judges the toolbar's Inventory button
+    actionable (its hit test is `bevy_picking` against the window's UI camera)
+    and a synthetic click opens the floater, which the next frame draws.
+  - The window's size is exactly its `resolution`: nothing resizes an
+    off-screen window, which is also what a capture wants.
 - Headless input isolation must also drop the device plugins (evdev,
   SpaceNavigator) and gamepads, not only window events; the OS clipboard is
   replaced by a per-App one so copy/paste is testable and never touches the

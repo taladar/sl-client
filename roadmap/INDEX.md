@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 122 |
 | ready | 313 |
-| blocked | 64 |
+| blocked | 63 |
 | in-progress | 21 |
 | bugs | 17 |
-| done | 1267 |
+| done | 1268 |
 | deferred | 31 |
 | wont-do | 16 |
 | **total** | **1851** |
@@ -388,8 +388,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-automation-accesskit-bridge`](ready/viewer-automation-accesskit-bridge.md)
   — Feed AccessKit from the semantic UI model (blocked by
   `viewer-automation-semantic-custom-widgets` (done))
-- [`viewer-automation-offscreen-window-spike`](ready/viewer-automation-offscreen-window-spike.md)
-  — Spike — how a windowless viewer renders and picks at the same time
 - [`viewer-automation-per-app-state`](ready/viewer-automation-per-app-state.md)
   — Per-App state — two logged-in viewers in one process (blocked by
   `viewer-automation-app-builder` (done))
@@ -397,6 +395,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The in-process tiers speak locators too (blocked by
   `viewer-automation-locator-engine` (done), `viewer-automation-app-builder`
   (done))
+- [`viewer-automation-windowless-mode`](ready/viewer-automation-windowless-mode.md)
+  — Windowless viewer — the whole app, UI included, with no OS window (blocked
+  by `viewer-automation-app-builder` (done),
+  `viewer-automation-offscreen-window-spike` (done))
 - [`viewer-automation-world-model`](ready/viewer-automation-world-model.md) —
   World locators — find and read objects and avatars (blocked by
   `viewer-automation-protocol` (done))
@@ -1055,7 +1057,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-world-heartbeat`](ready/server-world-heartbeat.md) — A region
   heartbeat — the fake grid has no simulation loop at all
 
-## blocked (64)
+## blocked (63)
 
 ### viewer
 
@@ -1079,10 +1081,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-automation-state-probes`](blocked/viewer-automation-state-probes.md)
   — State probes — chat, notifications, agent, logs and screenshots (blocked by
   `viewer-automation-protocol` (done), `viewer-automation-windowless-mode`)
-- [`viewer-automation-windowless-mode`](blocked/viewer-automation-windowless-mode.md)
-  — Windowless viewer — the whole app, UI included, with no OS window (blocked
-  by `viewer-automation-app-builder` (done),
-  `viewer-automation-offscreen-window-spike`)
 - [`viewer-automation-world-aim`](blocked/viewer-automation-world-aim.md) —
   World actions — pick-verified aiming, reveal, click and pie (blocked by
   `viewer-automation-world-model`, `viewer-automation-synthetic-input` (done))
@@ -1373,7 +1371,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1267)
+## done (1268)
 
 ### protocol
 
@@ -1824,6 +1822,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The locator engine — strict resolution and actionability (blocked by
   `viewer-automation-semantic-ui-model` (done),
   `viewer-automation-semantic-custom-widgets` (done))
+- [`viewer-automation-offscreen-window-spike`](done/viewer-automation-offscreen-window-spike.md)
+  — Spike — how a windowless viewer renders and picks at the same time
 - [`viewer-automation-protocol`](done/viewer-automation-protocol.md) —
   sl-automation-proto — the locator, request and snapshot vocabulary
 - [`viewer-automation-semantic-custom-widgets`](done/viewer-automation-semantic-custom-widgets.md)
