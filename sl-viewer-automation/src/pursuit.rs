@@ -82,7 +82,7 @@ pub enum PursuitError {
     #[error(transparent)]
     Automation(#[from] Box<AutomationError>),
     /// The semantic model could not be read from the world at all.
-    #[error("the semantic UI model could not be read: {0}")]
+    #[error("the semantic model could not be read: {0}")]
     Model(#[from] SystemParamValidationError),
 }
 

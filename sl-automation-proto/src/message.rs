@@ -235,6 +235,7 @@ mod tests {
     use crate::failure::{ActionabilityCheck, AutomationError};
     use crate::locator::Locator;
     use crate::snapshot::{Bounds, NodeId, NodeState, NodeValue, NodeVisibility, Role, UiNode};
+    use crate::world::{WorldKind, WorldLocator, WorldNode};
 
     /// Serializes `value`, reads it back and checks nothing was lost.
     fn round_trip<T>(value: &T) -> Result<String, serde_json::Error>
@@ -287,6 +288,31 @@ mod tests {
             bounds: Bounds::default(),
             visibility: NodeVisibility::Visible,
             children: Vec::new(),
+        }
+    }
+
+    /// An unnamed prim with nothing optional set.
+    fn world_node() -> WorldNode {
+        WorldNode {
+            kind: WorldKind::Object,
+            own: false,
+            full_id: uuid::Uuid::from_u128(3),
+            local_id: None,
+            pcode: 9,
+            name: None,
+            description: None,
+            owner: None,
+            position: None,
+            rotation: None,
+            scale: None,
+            parent: None,
+            children: Vec::new(),
+            attachment_point: None,
+            worn_by: None,
+            sitting_on: None,
+            selected: false,
+            hover_text: None,
+            name_tag: None,
         }
     }
 
@@ -372,6 +398,17 @@ mod tests {
                 condition: Some(WaitCondition::Hidden),
                 failed_check: None,
                 last_observed: vec![full_node()],
+                frames: 600,
+                millis: 10_000,
+            }),
+            Err(AutomationError::WorldAmbiguous {
+                locator: WorldLocator::kind(WorldKind::Object).named("Door"),
+                candidates: vec![world_node(), world_node()],
+            }),
+            Err(AutomationError::WorldTimedOut {
+                locator: WorldLocator::own_avatar(),
+                unresolved: vec![world_node()],
+                last_observed: Vec::new(),
                 frames: 600,
                 millis: 10_000,
             }),

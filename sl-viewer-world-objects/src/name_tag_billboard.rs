@@ -35,10 +35,11 @@
 //! ([`crate::hover_text`]), and the plugin's one chain deliberately interleaves
 //! the two so a settings change and a content change reach the same frame's
 //! meshes. It therefore has to sit below both of its users, and the object
-//! layer is the lower one — which is also why the vocabulary the two writers
-//! share ([`TagContent`], [`TagLine`], [`TagLineSize`]) and the marker the
-//! placement queries by ([`NameTag`]) live here rather than with the avatar
-//! composer that fills them in.
+//! layer is the lower one — which is also why the marker the placement queries
+//! by ([`NameTag`]) lives here rather than with the avatar composer that fills
+//! the tag in. The vocabulary the two writers share ([`TagContent`],
+//! [`TagLine`], [`TagLineSize`]) sits lower still, in the world API, so a
+//! reader of what a tag says needs no renderer; it is re-exported here.
 
 use bevy::asset::{Asset, load_internal_asset, uuid_handle};
 use bevy::camera::visibility::RenderLayers;
@@ -308,78 +309,12 @@ impl TextSection for TagText {
     }
 }
 
-/// The font size, physical px at scale factor 1, of the main name line (the
-/// reference renders the name in `SansSerif`; the tag previously used 16 px).
-pub const NAME_FONT_SIZE_PX: f32 = 16.0;
-
-/// The font size of the auxiliary lines — status, group title, username,
-/// distance (the reference's `SansSerifSmall`; small/medium ratio 0.8 → 13 px
-/// against the 16 px name line).
-pub const SMALL_FONT_SIZE_PX: f32 = 13.0;
-
-/// The relative font tier of one tag line; the renderer maps tiers to sizes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TagLineSize {
-    /// The main name line (reference `SansSerif`).
-    Name,
-    /// An auxiliary line (reference `SansSerifSmall`).
-    Small,
-}
-
-impl TagLineSize {
-    /// The font size, in logical px, this tier renders at.
-    #[must_use]
-    pub const fn font_size_px(self) -> f32 {
-        match self {
-            Self::Name => NAME_FONT_SIZE_PX,
-            Self::Small => SMALL_FONT_SIZE_PX,
-        }
-    }
-}
-
-/// One composed line of world-anchored text, top-to-bottom order in
-/// [`TagContent::lines`].
-#[derive(Debug, Clone, PartialEq)]
-pub struct TagLine {
-    /// The line's text (no trailing newline; the renderer joins lines).
-    pub text: String,
-    /// The line's font tier.
-    pub size: TagLineSize,
-    /// The line's colour.
-    pub color: Color,
-}
-
-/// The composed content of one billboard; a component on the tag (label)
-/// entity. The renderer rebuilds spans/layout/mesh on `Changed<TagContent>`,
-/// so writers must compare before assigning.
-///
-/// Held here rather than with either writer because both of them write it:
-/// `sl_viewer_world_avatar::name_tag_content` composes an avatar's name-tag
-/// lines and [`crate::hover_text`] an object's `llSetText`.
-#[derive(Component, Debug, Clone, PartialEq, Default)]
-pub struct TagContent {
-    /// Ordered top-to-bottom: for a name tag, `[status?, group title?, name,
-    /// username?, distance?]`.
-    pub lines: Vec<TagLine>,
-    /// The resolved whole-tag colour (the name/status/title line tint; the
-    /// bubble itself stays the reference's black backdrop regardless).
-    pub base_color: Color,
-}
-
-impl TagContent {
-    /// A single plain white name line — the minimal tag shown until the
-    /// composer has resolved richer content.
-    pub fn plain_name(name: impl Into<String>) -> Self {
-        Self {
-            lines: vec![TagLine {
-                text: name.into(),
-                size: TagLineSize::Name,
-                color: Color::WHITE,
-            }],
-            base_color: Color::WHITE,
-        }
-    }
-}
+// The tag vocabulary both writers fill in (`TagContent`, `TagLine`,
+// `TagLineSize`) and its font tiers live in the world API, below every layer
+// that reads them; re-exported here, where the renderer that draws it lives.
+pub use sl_viewer_world_api::world_vocabulary::{
+    NAME_FONT_SIZE_PX, SMALL_FONT_SIZE_PX, TagContent, TagLine, TagLineSize,
+};
 
 /// The extra leading, logical px, added to each line's height over its font
 /// size — the reference's `LINE_PADDING` between tag lines.

@@ -42,12 +42,25 @@
 //!   caller does it through the real input path.
 //! - [`open_floater`] opens a window by id, as a debug run's
 //!   `SL_VIEWER_OPEN_FLOATER` does, and names it as a scope.
+//!
+//! Beside the UI sits the **world model**: [`WorldModel`] reads the objects,
+//! avatars and attachments the viewer tracks as
+//! [`sl_automation_proto::WorldNode`]s — ids, name, owner, region-local
+//! placement, link set, attachment point, sit state, selection, floating text
+//! and name tag — from the world layers' own bookkeeping. The one thing those
+//! do not keep is an object's name and owner, which arrive in property replies;
+//! [`WorldModelPlugin`] collects them into [`ObjectFacts`]. [`find_world`]
+//! resolves a [`sl_automation_proto::WorldLocator`], and a [`WorldQuery`] waits
+//! for it, asking the simulator for the properties of the objects it cannot
+//! judge yet.
 
 mod locate;
 mod pursuit;
 mod reveal;
 mod route;
 mod ui_model;
+mod world_model;
+mod world_query;
 
 pub use crate::locate::{find_all, find_one, shallow};
 pub use crate::pursuit::{
@@ -56,3 +69,5 @@ pub use crate::pursuit::{
 pub use crate::reveal::{open_floater, scroll_into_view};
 pub use crate::route::{Gesture, Route, RouteProgress};
 pub use crate::ui_model::{UiModel, entity_of, node_id, snapshot};
+pub use crate::world_model::{ObjectFacts, WorldModel, WorldModelPlugin, world_snapshot};
+pub use crate::world_query::{WorldProgress, WorldQuery, WorldWant, find_world};

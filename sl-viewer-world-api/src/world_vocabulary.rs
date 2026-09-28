@@ -2,8 +2,8 @@
 //!
 //! Which render layer the HUD draws on and whether an entity sits on it, the
 //! markers on an avatar's anchor and its pick target, a region's terrain
-//! surface, the name-tag render layers, and what a click on a media prim
-//! carries. Each is named by parts of the world that do not otherwise know
+//! surface, the name-tag render layers, what a name tag or an object's floating
+//! text says, and what a click on a media prim carries. Each is named by parts of the world that do not otherwise know
 //! about each other, and none of them names anything back.
 
 use std::collections::{HashMap, HashSet};
@@ -1358,6 +1358,81 @@ fn used_baked_slots(texture_entry: &[u8]) -> Vec<usize> {
     slots.sort_unstable();
     slots.dedup();
     slots
+}
+
+/// The font size, physical px at scale factor 1, of the main name line (the
+/// reference renders the name in `SansSerif`; the tag previously used 16 px).
+pub const NAME_FONT_SIZE_PX: f32 = 16.0;
+
+/// The font size of the auxiliary lines — status, group title, username,
+/// distance (the reference's `SansSerifSmall`; small/medium ratio 0.8 → 13 px
+/// against the 16 px name line).
+pub const SMALL_FONT_SIZE_PX: f32 = 13.0;
+
+/// The relative font tier of one tag line; the renderer maps tiers to sizes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TagLineSize {
+    /// The main name line (reference `SansSerif`).
+    Name,
+    /// An auxiliary line (reference `SansSerifSmall`).
+    Small,
+}
+
+impl TagLineSize {
+    /// The font size, in logical px, this tier renders at.
+    #[must_use]
+    pub const fn font_size_px(self) -> f32 {
+        match self {
+            Self::Name => NAME_FONT_SIZE_PX,
+            Self::Small => SMALL_FONT_SIZE_PX,
+        }
+    }
+}
+
+/// One composed line of world-anchored text, top-to-bottom order in
+/// [`TagContent::lines`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct TagLine {
+    /// The line's text (no trailing newline; the renderer joins lines).
+    pub text: String,
+    /// The line's font tier.
+    pub size: TagLineSize,
+    /// The line's colour.
+    pub color: Color,
+}
+
+/// The composed content of one billboard; a component on the tag (label)
+/// entity. The renderer rebuilds spans/layout/mesh on `Changed<TagContent>`,
+/// so writers must compare before assigning.
+///
+/// Held here rather than with either writer because both of them write it —
+/// `sl_viewer_world_avatar::name_tag_content` composes an avatar's name-tag
+/// lines and `sl_viewer_world_objects::hover_text` an object's `llSetText` —
+/// and because a reader outside the world layers (the automation model, which
+/// reports what a tag says) must not need the renderer to read it.
+#[derive(Component, Debug, Clone, PartialEq, Default)]
+pub struct TagContent {
+    /// Ordered top-to-bottom: for a name tag, `[status?, group title?, name,
+    /// username?, distance?]`.
+    pub lines: Vec<TagLine>,
+    /// The resolved whole-tag colour (the name/status/title line tint; the
+    /// bubble itself stays the reference's black backdrop regardless).
+    pub base_color: Color,
+}
+
+impl TagContent {
+    /// A single plain white name line — the minimal tag shown until the
+    /// composer has resolved richer content.
+    pub fn plain_name(name: impl Into<String>) -> Self {
+        Self {
+            lines: vec![TagLine {
+                text: name.into(),
+                size: TagLineSize::Name,
+                color: Color::WHITE,
+            }],
+            base_color: Color::WHITE,
+        }
+    }
 }
 
 #[cfg(test)]

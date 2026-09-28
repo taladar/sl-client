@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::locator::Locator;
 use crate::message::WaitCondition;
 use crate::snapshot::UiNode;
+use crate::world::{WorldLocator, WorldNode};
 
 /// One of the checks a node must pass before an action is applied to it, in
 /// the order they are made.
@@ -114,10 +115,43 @@ pub enum AutomationError {
         /// The wall-clock milliseconds waited.
         millis: u64,
     },
+    /// A world locator an action needs one thing for matches several.
+    #[error(
+        "{locator} matches {} things in the world, an action needs exactly one: {}",
+        candidates.len(),
+        list_nodes(candidates)
+    )]
+    WorldAmbiguous {
+        /// The locator that matched too much.
+        locator: WorldLocator,
+        /// Every thing it matched, in the resolver's order.
+        candidates: Vec<WorldNode>,
+    },
+    /// A wait on a world locator ran out of time: it matched nothing (when
+    /// one match was wanted), or things it might match were still waiting
+    /// for the names or owners the viewer asked the simulator for.
+    #[error(
+        "timed out after {frames} frames ({millis} ms) on {locator}{}",
+        world_timeout_detail(unresolved, last_observed.len())
+    )]
+    WorldTimedOut {
+        /// The locator being waited on.
+        locator: WorldLocator,
+        /// The things whose name or owner never arrived, so whether they
+        /// match could not be told.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        unresolved: Vec<WorldNode>,
+        /// The things the locator matched when time ran out.
+        last_observed: Vec<WorldNode>,
+        /// The frames waited.
+        frames: u32,
+        /// The wall-clock milliseconds waited.
+        millis: u64,
+    },
 }
 
 /// The nodes of an error message, one after the other.
-fn list_nodes(nodes: &[UiNode]) -> String {
+fn list_nodes<T: fmt::Display>(nodes: &[T]) -> String {
     nodes
         .iter()
         .map(ToString::to_string)
@@ -139,6 +173,20 @@ fn timeout_detail(
     format!("{awaited} ({observed} matching nodes at the end)")
 }
 
+/// The tail of a world timeout's message: what was still unresolved and how
+/// much matched at the end.
+fn world_timeout_detail(unresolved: &[WorldNode], observed: usize) -> String {
+    let pending = if unresolved.is_empty() {
+        String::new()
+    } else {
+        format!(
+            ", still waiting for the name or owner of {}",
+            list_nodes(unresolved)
+        )
+    };
+    format!("{pending} ({observed} matching things at the end)")
+}
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
@@ -149,6 +197,7 @@ mod tests {
     use crate::locator::Locator;
     use crate::message::WaitCondition;
     use crate::snapshot::{Bounds, NodeId, NodeVisibility, Role, UiNode};
+    use crate::world::{WorldKind, WorldLocator, WorldNode};
 
     /// A named OK button at `x`, with a test id.
     fn ok_at(x: f32, test_id: &str) -> UiNode {
@@ -182,6 +231,42 @@ mod tests {
         assert_eq!(
             error.to_string(),
             r#"button name="OK" matches 2 UI nodes, an action needs exactly one: button "OK" key=button-ok #prefs.ok at 10,20 120x30; button "OK" key=button-ok #profile.ok at 200.5,20 120x30"#
+        );
+    }
+
+    #[test]
+    fn a_world_timeout_names_what_never_resolved() {
+        let pending = WorldNode {
+            kind: WorldKind::Object,
+            own: false,
+            full_id: uuid::Uuid::from_u128(2),
+            local_id: Some(2),
+            pcode: 9,
+            name: None,
+            description: None,
+            owner: None,
+            position: Some([1.0, 2.0, 3.0]),
+            rotation: None,
+            scale: None,
+            parent: None,
+            children: Vec::new(),
+            attachment_point: None,
+            worn_by: None,
+            sitting_on: None,
+            selected: false,
+            hover_text: None,
+            name_tag: None,
+        };
+        let error = AutomationError::WorldTimedOut {
+            locator: WorldLocator::kind(WorldKind::Object).named("Door"),
+            unresolved: vec![pending],
+            last_observed: Vec::new(),
+            frames: 60,
+            millis: 1000,
+        };
+        assert_eq!(
+            error.to_string(),
+            r#"timed out after 60 frames (1000 ms) on object name="Door", still waiting for the name or owner of object #00000000-0000-0000-0000-000000000002 local=2 at <1,2,3> (0 matching things at the end)"#
         );
     }
 

@@ -2,7 +2,7 @@
 id: viewer-automation-world-aim
 title: World actions — pick-verified aiming, reveal, click and pie
 topic: viewer
-status: blocked
+status: ready
 origin: viewer automation design review (2026-09-28)
 points: 8
 blocked_by: [viewer-automation-world-model, viewer-automation-synthetic-input]
@@ -26,6 +26,11 @@ be in front of it, and a test must not need to know where the camera is.
 - Actions over the synthetic input: click / touch, right-click (the object
   pie opens with this object as its target), hover (hover text shows),
   select in build mode, drag.
+
+The target is resolved with `WorldQuery` and `WorldWant::One`
+(`sl-viewer-automation`, [[viewer-automation-world-model]]). It waits for
+names and fails on ambiguity. Its `WorldNode` has the region-local position;
+the entity to aim at is the `ObjectState` entry for its local id.
 
 Acceptance: in a `WorldTest` fixture a prim hidden behind another is
 reported covered and a click on it reveals, then hits it; a right-click

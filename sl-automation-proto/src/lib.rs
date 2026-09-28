@@ -13,6 +13,12 @@
 //! - A [`UiNode`] is one node of a semantic snapshot: role, name, name key,
 //!   test id, [`NodeState`]s, [`NodeValue`], [`Bounds`] in logical pixels and
 //!   [`NodeVisibility`].
+//! - A [`WorldLocator`] names an in-world thing the same way: a [`WorldKind`]
+//!   (object, avatar, attachment), the own avatar, a name, an id, an owner, an
+//!   object class or floating text, ordered by distance with [`Near`] and
+//!   picked with [`WorldLocator::nth`]. A [`WorldNode`] is what the viewer
+//!   reports for one: ids, name, owner, region-local placement, link set,
+//!   attachment point, sit state, selection and the text shown over it.
 //! - A [`Request`] and its [`Response`] share a [`RequestId`], so several
 //!   requests may be in flight on one channel.
 //! - An [`AutomationError`] is what a test matches on: not found, ambiguous
@@ -46,6 +52,7 @@ mod failure;
 mod locator;
 mod message;
 mod snapshot;
+mod world;
 
 pub use crate::failure::{ActionabilityCheck, AutomationError};
 pub use crate::locator::{Locator, NameMatcher};
@@ -53,3 +60,4 @@ pub use crate::message::{
     Deadline, Request, RequestBody, RequestId, Response, ResponseBody, WaitCondition,
 };
 pub use crate::snapshot::{Bounds, NodeId, NodeState, NodeValue, NodeVisibility, Role, UiNode};
+pub use crate::world::{Anchor, Near, WorldKind, WorldLocator, WorldNode};

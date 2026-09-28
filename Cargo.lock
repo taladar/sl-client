@@ -8479,6 +8479,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.19",
+ "uuid",
 ]
 
 [[package]]
@@ -9240,10 +9241,13 @@ dependencies = [
  "bevy_flair",
  "pretty_assertions",
  "sl-automation-proto",
+ "sl-client-bevy",
+ "sl-viewer-kit",
  "sl-viewer-testkit",
  "sl-viewer-ui-core",
  "sl-viewer-ui-pie-menu",
  "sl-viewer-ui-widgets",
+ "sl-viewer-world-api",
  "thiserror 2.0.19",
 ]
 

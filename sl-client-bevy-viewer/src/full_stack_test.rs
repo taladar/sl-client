@@ -68,8 +68,8 @@ use sl_fake_grid::{
 use crate::assembly::{MediaRuntime, Storage, ViewerAppBuilder, ViewerAppOptions, WindowMode};
 use crate::pixel_oracle::Frame;
 use crate::render_readback::{
-    Captured, FRAME, HOLD_FRAMES, PipelineStatusPlugin, Projected, STEP_DURATION, SettleError,
-    frames_for, gpu_lock, settle,
+    Captured, FRAME, HOLD_FRAMES, PipelineStatus, PipelineStatusPlugin, Projected, STEP_DURATION,
+    SettleError, frames_for, gpu_lock, settle,
 };
 use crate::render_test::{LogCapture, TestError, capture_logs};
 use crate::world_api::{CameraMode, ViewerCamera};
@@ -308,6 +308,43 @@ pub(crate) struct ViewerHarness {
     _log_guard: DefaultGuard,
     /// Serialises this tier against the other GPU tiers in the same process.
     _gpu: MutexGuard<'static, ()>,
+}
+
+/// The most frames a dropped harness steps while it waits for its pipelines to
+/// finish compiling — a cold shader cache takes a few hundred.
+const DRAIN_FRAMES: u32 = 2000;
+
+/// Let every pipeline the viewer queued finish compiling before anything is
+/// dropped.
+///
+/// Bevy compiles pipelines as tasks on the **process-wide** task pool, and
+/// those threads outlive the app. A test that ends while one is still inside
+/// the Vulkan driver (a login it never waited to settle does exactly that)
+/// returns, the process exits, and `exit` tears the driver's and the
+/// validation layer's global state down under the compiling thread: a
+/// `SIGSEGV` in `spvValidate` or an abort in `vvl::GetDeviceFromKey`, *after*
+/// the test itself passed. Stepping until nothing is queued or compiling makes
+/// the end of a test the end of its GPU work.
+impl Drop for ViewerHarness {
+    fn drop(&mut self) {
+        let status = self.app.world().get_resource::<PipelineStatus>().cloned();
+        let Some(status) = status else {
+            return;
+        };
+        for _frame in 0..DRAIN_FRAMES {
+            // Read after a frame, since the render world publishes the count
+            // at the end of one.
+            self.app.update();
+            if status.waiting() == 0 {
+                return;
+            }
+        }
+        tracing::error!(
+            "a dropped viewer harness still had {} pipeline(s) compiling after {DRAIN_FRAMES} \
+             frames; the process may crash on exit",
+            status.waiting()
+        );
+    }
 }
 
 impl ViewerHarness {

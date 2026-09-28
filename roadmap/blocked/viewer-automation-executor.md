@@ -32,6 +32,11 @@ with a `Response` — independent of how the request arrived.
 - Installed only when automation is requested — a runtime switch, never a
   Cargo feature (a feature would double the `cargo hack` powerset); no cost
   otherwise.
+- World requests land here, their first consumer
+  ([[viewer-automation-world-model]] built the model without them): a
+  `find_world` answered from `WorldQuery` with `WorldWant::All`, a
+  `wait_for_world`, and `WorldModelPlugin` installed with the executor so
+  object names are collected.
 
 Acceptance: an App-level test drives a login, opens a floater, clicks a
 button and waits for its effect entirely through requests; each failure

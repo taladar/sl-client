@@ -191,6 +191,16 @@ replaces that person.
   prove a bound match unique — about three frames a page, 50 s on a
   10 000-item inventory. A browser driver has the same blind spot with a
   virtualised table.
+- **Object names are not streamed.** `ObjectUpdate` places an object;
+  its name, description and owner come only in a property reply. The world
+  model keeps every reply it sees (`ObjectFacts`, filled by
+  `WorldModelPlugin`). A `WorldQuery` that compares a name or an owner asks
+  for the missing ones with `RequestObjectPropertiesFamily`, which is the
+  hover's request and selects nothing. `RequestObjectProperties` would
+  select the object on the grid.
+- **World positions are region-local to the agent's region.** An avatar is
+  placed by its tracked object entity, not by its anchor: the anchor (a
+  sphere or a body root) does not carry the region basis.
 - Every new crate here trips the extraction gates (`private_interfaces`,
   `must_use_candidate`, fmt, machete, cargo-about, rustdoc, `cliff.toml`,
   `CHANGELOG.md`).
@@ -206,6 +216,12 @@ replaces that person.
   `ButtonSpec::name_key`. `ui_contract::every_focus_stop_has_a_contract_row`
   fails any focus stop of any registered element or floater with no role or
   no name, and any floater that is not a named window.
+- **a world readout**: a field on `WorldNode` (`sl-automation-proto`),
+  filled in `WorldModel` (`sl-viewer-automation/src/world_model.rs`) from
+  the world layers' own bookkeeping, never from a new per-frame system. If
+  it is also a criterion, add it to `WorldLocator::matches_node`. If it is
+  not streamed (a name, an owner), `WorldQuery::unresolved` must also wait
+  for it.
 - **a state probe**: a request variant in `sl-automation-proto`, a reader in
   `sl-viewer-automation`, a driver method, and a teeth test that the probe
   changes when the state does.
