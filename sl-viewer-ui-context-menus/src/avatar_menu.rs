@@ -86,6 +86,7 @@
 use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
 use sl_client_bevy::{AgentKey, Command, MuteType, SlCommand};
 
 use crate::attachment_menu::{ATTACHMENT_MENU_ELEMENT, OpenAttachmentMenu};
@@ -893,7 +894,7 @@ fn setup_pick_inspector(mut commands: Commands) {
 #[derive(bevy::ecs::system::SystemParam)]
 struct PickOcclusion<'w, 's> {
     /// The window the cursor position is read from.
-    windows: Query<'w, 's, &'static Window>,
+    windows: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
     /// The HUD ray, which occludes the world behind a worn HUD.
     hud: HudRayCast<'w, 's>,
     /// What the pointer is over this frame.

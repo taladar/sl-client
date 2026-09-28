@@ -39,6 +39,7 @@ use bevy::camera::{CameraOutputMode, Hdr, ScalingMode};
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
 use bevy::render::render_resource::BlendState;
+use bevy::window::PrimaryWindow;
 
 use sl_viewer_kit::avatar_assets::AvatarAssetLibrary;
 use sl_viewer_kit::coords::{sl_euler_deg_to_quat, sl_to_bevy_rotation};
@@ -470,7 +471,7 @@ const HUD_CAMERA_DEPTH: f32 = 64.0;
 /// applied to the node translations here instead — the same arithmetic, at the only
 /// place the reference actually applies it.
 pub(crate) fn fit_hud_points(
-    windows: Query<&Window>,
+    windows: Query<&Window, With<PrimaryWindow>>,
     mut points: Query<(&HudPointNode, &mut Transform)>,
 ) {
     let Ok(window) = windows.single() else {

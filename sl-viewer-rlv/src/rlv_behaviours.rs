@@ -38,7 +38,7 @@ use sl_client_bevy::Uuid;
 use sl_rlv::{
     RlvBehaviour, RlvException, RlvExceptionOption, RlvHeldCommand, RlvParamKind, RlvState,
 };
-use sl_viewer_platform::clipboard::{ViewerClipboard, copy_to_clipboard};
+use sl_viewer_platform::clipboard::copy_to_clipboard;
 use sl_viewer_ui_core::i18n::{TransArgs, Translated, Translator};
 use sl_viewer_ui_core::skin::text_role;
 use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems, column, row};
@@ -620,11 +620,11 @@ fn spawn_copy_button(commands: &mut Commands, parent: Entity, font_size: f32) {
     commands.entity(button).observe(
         move |_activate: On<Activate>,
               session: Option<Res<RlvSession>>,
-              clipboard: Option<Res<ViewerClipboard>>| {
-            let (Some(session), Some(clipboard)) = (session, clipboard) else {
+              clipboard: Option<ResMut<Clipboard>>| {
+            let (Some(session), Some(mut clipboard)) = (session, clipboard) else {
                 return;
             };
-            copy_to_clipboard(&clipboard, &formatted_restrictions(session.state()));
+            copy_to_clipboard(&mut clipboard, &formatted_restrictions(session.state()));
         },
     );
 }

@@ -3176,7 +3176,7 @@ fn on_group_profile_action(
         &GroupProfileUi,
     )>,
     fields: Query<&EditableText>,
-    clipboard: Res<crate::clipboard::ViewerClipboard>,
+    mut clipboard: ResMut<bevy::clipboard::Clipboard>,
     mut sl_commands: MessageWriter<SlCommand>,
 ) {
     if press.button != PointerButton::Primary {
@@ -3207,7 +3207,7 @@ fn on_group_profile_action(
         }
         GroupProfileAction::CopySlurl => {
             crate::clipboard::copy_to_clipboard(
-                &clipboard,
+                &mut clipboard,
                 &format!("secondlife:///app/group/{}/about", target.uuid()),
             );
         }

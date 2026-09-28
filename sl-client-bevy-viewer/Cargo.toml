@@ -158,6 +158,9 @@ profile-chrome = ["bevy/trace", "bevy/trace_chrome", "dep:tracing-chrome"]
 # sequence-carrying clear color) — the same pin `sl-client-bevy` uses.
 bevy = { version = "0.19.0", features = [
   "multi_threaded",
+  # The OS clipboard behind Bevy's `Clipboard`: the text fields' copy / paste
+  # and every "Copy …" button. A headless or test App swaps in a private one.
+  "system_clipboard",
   "system_font_discovery",
   "track_location",
 ] }

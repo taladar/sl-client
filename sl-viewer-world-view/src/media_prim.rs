@@ -1038,7 +1038,7 @@ fn close_media_surface(
 #[derive(bevy::ecs::system::SystemParam)]
 struct HoverPick<'w, 's> {
     /// The primary window (for the cursor position).
-    windows: Query<'w, 's, &'static Window>,
+    windows: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
     /// The world camera the ray is cast from.
     cameras: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<ViewerCamera>>,
     /// The UI hover map (occlusion).

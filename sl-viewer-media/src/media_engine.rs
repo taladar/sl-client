@@ -82,6 +82,19 @@ pub struct MediaEngine {
     /// Whether the video engine is enabled at all (`--disable-video-media`
     /// clears it).
     pub video_enabled: bool,
+    /// Whether the viewer has a display, or the web engine must run on
+    /// Chromium's headless platform.
+    display: EngineDisplay,
+}
+
+/// Whether the viewer the engines serve has a display to reach for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum EngineDisplay {
+    /// A real window on a desktop.
+    #[default]
+    Present,
+    /// No display at all (`--headless`).
+    Absent,
 }
 
 /// Hand-written because the backends are trait objects, which cannot derive
@@ -298,6 +311,9 @@ pub struct MediaEnginePlugin {
     pub enabled: bool,
     /// Whether the video (GStreamer) engine may initialise at all.
     pub video_enabled: bool,
+    /// Whether the viewer runs with no display (`--headless`), so the web
+    /// engine must not look for one either.
+    pub headless: bool,
 }
 
 impl Plugin for MediaEnginePlugin {
@@ -308,6 +324,11 @@ impl Plugin for MediaEnginePlugin {
             initialized: false,
             enabled: self.enabled,
             video_enabled: self.video_enabled,
+            display: if self.headless {
+                EngineDisplay::Absent
+            } else {
+                EngineDisplay::Present
+            },
         });
         app.insert_non_send(MediaSurfaces::default());
         app.add_systems(Startup, initialize_media_engine);
@@ -366,6 +387,7 @@ fn initialize_media_engine(mut engine: NonSendMut<MediaEngine>) {
         subprocess_path,
         locale: None,
         user_agent_product: Some(format!("SLClientBevyViewer/{}", clap::crate_version!())),
+        headless: engine.display == EngineDisplay::Absent,
     };
     match CefMediaBackend::initialize(&config) {
         Ok(backend) => {

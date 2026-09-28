@@ -28,6 +28,7 @@ fn main() {
         subprocess_path: Some(helper),
         locale: Some(String::from("en-US")),
         user_agent_product: None,
+        headless: false,
     })
     .unwrap_or_else(|error| panic!("backend init failed: {error}"));
 

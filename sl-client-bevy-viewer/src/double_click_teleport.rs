@@ -35,6 +35,7 @@
 use bevy::ecs::system::SystemParam;
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
 use sl_settings::{Scope, SettingValue};
 
 use sl_client_bevy::{RegionCoordinates, RegionHandle, SlCommand, SlIdentity, Vector};
@@ -196,7 +197,7 @@ struct TeleportGate<'w, 's> {
     /// The setting that switches the gesture on.
     settings: Res<'w, ViewerSettings>,
     /// The window the cursor position is read from.
-    windows: Query<'w, 's, &'static Window>,
+    windows: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
 }
 
 /// Detect a double-click and request the GPU ID-buffer pick under it (when

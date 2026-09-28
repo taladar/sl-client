@@ -59,6 +59,18 @@
 //! asks for exactly one of them **hides** the other rather than leaving it
 //! somewhere: `--capture-hud` alone means no UI anywhere for that run.
 //!
+//! # A headless run: the window *is* the capture
+//!
+//! All of the above is for a real window, whose size belongs to the
+//! compositor. A `--headless` viewer's primary window is an off-screen one
+//! (Bevy's `OffscreenWindow`) created at exactly the capture size, which
+//! nothing ever resizes — so there the retargeting is unnecessary, and a frame
+//! is a screenshot of that window ([`CaptureTarget::Window`]). Every camera
+//! keeps drawing into it; a layer the run did not ask for is **hidden** instead
+//! of routed elsewhere (the UI roots, the HUD screens, the gizmo camera), and
+//! there is no preview, since there is no window to put one in (`--watch`
+//! shows the window's own frames instead).
+//!
 //! # The window preview
 //!
 //! With every camera of the capture rendering off-screen, the window would show
@@ -66,7 +78,7 @@
 //! camera of its own: what is on screen is what lands in the frame. It is a
 //! textured quad rather than a UI image node for two reasons, both learned the
 //! hard way, and it matches the window's other cameras' sample count and
-//! HDR-ness for a third — see `spawn_capture_preview`.
+//! HDR-ness for a third — see `spawn_frame_preview`.
 
 use core::str::FromStr;
 use std::path::PathBuf;
@@ -106,6 +118,21 @@ pub struct ScreenshotPlugin {
     /// something that is never coming, and the frames of the replayed avatar are
     /// exactly what the run is for.
     pub grid_expected: bool,
+    /// Where the frames are read from. See [the module docs](self).
+    pub target: CaptureTarget,
+}
+
+/// Where a capture run's frames come from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CaptureTarget {
+    /// An off-screen image of the pinned size that the capture's cameras are
+    /// retargeted into, previewed on the (real) window — for a windowed
+    /// viewer, whose window size the compositor decides.
+    #[default]
+    PinnedImage,
+    /// The primary window itself: an off-screen window already created at the
+    /// capture size (`--headless`), captured with a window screenshot.
+    Window,
 }
 
 impl Plugin for ScreenshotPlugin {
@@ -115,17 +142,36 @@ impl Plugin for ScreenshotPlugin {
             self.grid_expected,
         ))
         .insert_resource(self.content)
-        // After `Startup`, which is where the viewer spawns its one camera.
-        .add_systems(PostStartup, pin_capture_target)
-        .add_systems(
-            Update,
-            (
-                route_overlay_cameras,
-                capture_screenshots,
-                poll_screenshot_saves,
-            )
-                .chain(),
-        );
+        .insert_resource(CaptureTargetMode(self.target));
+        match self.target {
+            CaptureTarget::PinnedImage => {
+                app
+                    // After `Startup`, which is where the viewer spawns its one
+                    // camera.
+                    .add_systems(PostStartup, pin_capture_target)
+                    .add_systems(
+                        Update,
+                        (
+                            route_overlay_cameras,
+                            capture_screenshots,
+                            poll_screenshot_saves,
+                        )
+                            .chain(),
+                    );
+            }
+            CaptureTarget::Window => {
+                app.add_systems(PostStartup, announce_window_capture)
+                    .add_systems(
+                        Update,
+                        (
+                            hide_uncaptured_layers,
+                            capture_screenshots,
+                            poll_screenshot_saves,
+                        )
+                            .chain(),
+                    );
+            }
+        }
     }
 }
 
@@ -296,6 +342,10 @@ fn parse_dimension(field: &str, text: &str) -> Result<u32, String> {
 pub fn parse_capture_size(text: &str) -> Result<CaptureSize, String> {
     CaptureSize::from_str(text)
 }
+
+/// Where this run's frames come from, as a resource for [`capture_screenshots`].
+#[derive(Debug, Clone, Copy, Resource)]
+pub(crate) struct CaptureTargetMode(CaptureTarget);
 
 /// The screenshot capture schedule, inserted only in screenshot mode.
 #[derive(Debug, Resource)]
@@ -535,10 +585,13 @@ fn pin_capture_target(
     commands
         .entity(camera)
         .insert(RenderTarget::Image(target.clone().into()));
-    let preview = spawn_capture_preview(
+    let preview = spawn_frame_preview(
         &mut commands,
-        &target,
-        content.size,
+        FramePreview {
+            frame: &target,
+            size: content.size,
+            window: WindowRef::Primary,
+        },
         &mut meshes,
         &mut materials,
     );
@@ -567,8 +620,21 @@ fn pin_capture_target(
     }
 }
 
-/// The window-side preview of the capture: a camera of its own showing the
-/// captured image on an unlit quad, letterboxed against black.
+/// What [`spawn_frame_preview`] shows, and where.
+#[derive(Debug, Clone, Copy)]
+pub struct FramePreview<'frame> {
+    /// The image holding the frame.
+    pub frame: &'frame Handle<Image>,
+    /// The frame's pixel grid, whose aspect the quad keeps.
+    pub size: CaptureSize,
+    /// The window the preview is drawn on.
+    pub window: WindowRef,
+}
+
+/// The window-side preview of a frame: a camera of its own showing the frame
+/// image on an unlit quad, letterboxed against black. The capture harness shows
+/// its pinned target on the primary window this way; a watched headless run
+/// (`--watch`) shows the off-screen window's frames on the watch window.
 ///
 /// Two things make this a textured quad rather than the obvious `bevy_ui`
 /// [`ImageNode`]. The frame's **alpha is not opacity** — it carries the glow
@@ -579,16 +645,20 @@ fn pin_capture_target(
 /// by the default UI camera — the very camera a UI capture routes into the
 /// captured image, which would put the preview inside the frame it previews.
 ///
-/// The camera sees [`CAPTURE_PREVIEW_RENDER_LAYER`] alone, so it renders no
+/// The camera sees `CAPTURE_PREVIEW_RENDER_LAYER` alone, so it renders no
 /// world geometry and (being on no layer the sun is on) builds no shadow
 /// cascades; the quad is invisible to every other camera.
-fn spawn_capture_preview(
+pub fn spawn_frame_preview(
     commands: &mut Commands,
-    target: &Handle<Image>,
-    size: CaptureSize,
+    preview: FramePreview<'_>,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
 ) -> (Entity, Entity) {
+    let FramePreview {
+        frame: target,
+        size,
+        window,
+    } = preview;
     let aspect = size.aspect();
     let layers = RenderLayers::layer(CAPTURE_PREVIEW_RENDER_LAYER);
     let camera = commands
@@ -602,6 +672,7 @@ fn spawn_capture_preview(
                 clear_color: ClearColorConfig::Custom(Color::BLACK),
                 ..default()
             },
+            RenderTarget::Window(window),
             // The captured frame, fitted: a view at least `aspect` wide and one
             // unit high shows the whole quad and letterboxes whatever the
             // window's own aspect leaves over.
@@ -719,6 +790,46 @@ fn route_overlay_cameras(
     }
 }
 
+/// Say what a window capture holds, once — the headless counterpart of the
+/// line [`pin_capture_target`] logs.
+fn announce_window_capture(content: Res<CaptureContent>) {
+    info!(
+        "screenshot: capturing {} from the off-screen window",
+        content.describe()
+    );
+}
+
+/// In a window capture, hide every layer the run did not ask for — the
+/// counterpart of [`route_overlay_cameras`] when there is nowhere else to route
+/// a camera to, because the window *is* the frame.
+///
+/// Per frame, for the same reasons: the gizmo camera is spawned lazily and a UI
+/// root can appear at any time.
+fn hide_uncaptured_layers(
+    content: Res<CaptureContent>,
+    mut overlays: Query<(&OverlayCamera, &mut Camera)>,
+    mut hud_screens: Query<&mut Visibility, With<crate::hud::HudScreen>>,
+    mut ui_roots: UiRootQuery,
+) {
+    if !content.gizmos {
+        for (layer, mut camera) in &mut overlays {
+            if *layer == OverlayCamera::Gizmos && camera.is_active {
+                camera.is_active = false;
+            }
+        }
+    }
+    if !content.hud {
+        for mut visibility in &mut hud_screens {
+            set_hidden(&mut visibility);
+        }
+    }
+    if !content.ui {
+        for (_entity, mut visibility) in &mut ui_roots {
+            set_hidden(&mut visibility);
+        }
+    }
+}
+
 /// Hide a subtree without touching an already-hidden one, so the harness does not
 /// mark a `Visibility` changed on every frame of a run.
 fn set_hidden(visibility: &mut Mut<'_, Visibility>) {
@@ -826,6 +937,7 @@ pub(crate) fn capture_screenshots(
     mut schedule: ResMut<ScreenshotSchedule>,
     mut rig: CaptureRig,
     environment: Option<Res<sl_viewer_world_scene::environment::EnvironmentState>>,
+    target: Res<CaptureTargetMode>,
 ) {
     let now = time.elapsed_secs();
     // Sampled every frame rather than once, because the environment arrives
@@ -934,15 +1046,24 @@ pub(crate) fn capture_screenshots(
         .dir
         .join(format!("frame_{:03}.png", schedule.index));
     info!("screenshot: capturing {}", path.display());
-    // The cameras of the capture already point at the pinned target every frame,
-    // so capturing that image is capturing this frame at the size and with the
-    // layers the run asked for.
-    let Some(pinned) = rig.pinned else {
-        // `pin_capture_target` said why; do not silently capture something else.
-        return;
+    let screenshot = match target.0 {
+        // The cameras of the capture already point at the pinned target every
+        // frame, so capturing that image is capturing this frame at the size and
+        // with the layers the run asked for.
+        CaptureTarget::PinnedImage => {
+            let Some(pinned) = rig.pinned else {
+                // `pin_capture_target` said why; do not silently capture
+                // something else.
+                return;
+            };
+            Screenshot::image(pinned.target.clone())
+        }
+        // The off-screen window is the capture size, and holds only the layers
+        // asked for (`hide_uncaptured_layers`).
+        CaptureTarget::Window => Screenshot::primary_window(),
     };
     rig.commands
-        .spawn(Screenshot::image(pinned.target.clone()))
+        .spawn(screenshot)
         .observe(save_off_thread(path));
     schedule.index = schedule.index.saturating_add(1);
     schedule.next_at = Some(now + schedule.interval);

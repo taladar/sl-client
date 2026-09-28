@@ -170,8 +170,8 @@ pub fn install_ui_interaction(app: &mut App) {
 /// `TextPlugin`** owns `EditableTextSystems` and the single system in it,
 /// `apply_text_edits` — the one that drains `EditableText::pending_edits` into
 /// the parley editor. It drags in **no renderer**: a `Font` asset store, a
-/// `ClipboardPlugin` (an in-process buffer unless the `system_clipboard`
-/// feature is on) and parley's contexts, which this harness already has.
+/// `ClipboardPlugin` (given a private in-process clipboard here, whatever
+/// the `system_clipboard` feature says) and parley's contexts, which this harness already has.
 ///
 /// The *UI* half of editing is not in that plugin at all. It lives in
 /// `bevy_ui`'s `build_text_interop`, a private function of `UiPlugin`, which
@@ -192,7 +192,16 @@ pub fn install_text_editing(app: &mut App) {
     // `TextPlugin` also brings `ClipboardPlugin` (unless one is already added)
     // and re-inits the `Font` store the layout half created — an empty store
     // either way, and `register_ui_fonts` fills the default slot at `Startup`,
-    // long after this.
+    // long after this. The clipboard is a private one, inserted first so the
+    // plugin never opens the OS clipboard (the viewer builds Bevy with
+    // `system_clipboard`): a test's copy and paste must not read or overwrite
+    // the developer's.
+    if !app
+        .world()
+        .contains_resource::<bevy::clipboard::Clipboard>()
+    {
+        app.insert_resource(bevy::clipboard::Clipboard::in_process());
+    }
     app.add_plugins(bevy::text::TextPlugin);
     // The glyph atlas `update_editable_text_layout` rasterises into. A UI-only
     // harness has no `ImagePlugin`, so the store is created here.

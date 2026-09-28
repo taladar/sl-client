@@ -2625,8 +2625,6 @@ struct ProfileActionFacts<'w, 's> {
     fields: Query<'w, 's, &'static EditableText>,
     /// The name mirror, for the label an action carries.
     avatars: Res<'w, AvatarState>,
-    /// The clipboard a copy action writes to.
-    clipboard: Res<'w, crate::clipboard::ViewerClipboard>,
 }
 
 /// Everything a profile action raises, bundled as one
@@ -2660,6 +2658,8 @@ fn on_profile_action(
     mut instances: Query<(&mut ProfileState, &mut ProfileDirty, &ProfileUi)>,
     facts: ProfileActionFacts,
     mut out: ProfileActionOut,
+    // Beside the facts rather than in them: Bevy's clipboard is not `Debug`.
+    mut clipboard: ResMut<bevy::clipboard::Clipboard>,
 ) {
     if press.button != PointerButton::Primary {
         return;
@@ -2710,7 +2710,7 @@ fn on_profile_action(
         }
         ProfileAction::CopySlurl => {
             crate::clipboard::copy_to_clipboard(
-                &facts.clipboard,
+                &mut clipboard,
                 &format!("secondlife:///app/agent/{}/about", target.uuid()),
             );
         }

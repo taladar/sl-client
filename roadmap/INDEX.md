@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 122 |
 | ready | 313 |
-| blocked | 63 |
+| blocked | 62 |
 | in-progress | 21 |
 | bugs | 17 |
-| done | 1268 |
+| done | 1269 |
 | deferred | 31 |
 | wont-do | 16 |
 | **total** | **1851** |
@@ -391,14 +391,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-automation-per-app-state`](ready/viewer-automation-per-app-state.md)
   — Per-App state — two logged-in viewers in one process (blocked by
   `viewer-automation-app-builder` (done))
+- [`viewer-automation-state-probes`](ready/viewer-automation-state-probes.md) —
+  State probes — chat, notifications, agent, logs and screenshots (blocked by
+  `viewer-automation-protocol` (done), `viewer-automation-windowless-mode`
+  (done))
 - [`viewer-automation-testkit-locators`](ready/viewer-automation-testkit-locators.md)
   — The in-process tiers speak locators too (blocked by
   `viewer-automation-locator-engine` (done), `viewer-automation-app-builder`
   (done))
-- [`viewer-automation-windowless-mode`](ready/viewer-automation-windowless-mode.md)
-  — Windowless viewer — the whole app, UI included, with no OS window (blocked
-  by `viewer-automation-app-builder` (done),
-  `viewer-automation-offscreen-window-spike` (done))
 - [`viewer-automation-world-model`](ready/viewer-automation-world-model.md) —
   World locators — find and read objects and avatars (blocked by
   `viewer-automation-protocol` (done))
@@ -1057,7 +1057,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-world-heartbeat`](ready/server-world-heartbeat.md) — A region
   heartbeat — the fake grid has no simulation loop at all
 
-## blocked (63)
+## blocked (62)
 
 ### viewer
 
@@ -1074,13 +1074,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-automation-inprocess-transport`](blocked/viewer-automation-inprocess-transport.md)
   — In-process transport — the same requests against Apps in the test process
   (blocked by `viewer-automation-executor`, `viewer-automation-per-app-state`,
-  `viewer-automation-windowless-mode`)
+  `viewer-automation-windowless-mode` (done))
 - [`viewer-automation-remote-transport`](blocked/viewer-automation-remote-transport.md)
   — Remote transport — automation over a private Unix socket (blocked by
   `viewer-automation-executor`)
-- [`viewer-automation-state-probes`](blocked/viewer-automation-state-probes.md)
-  — State probes — chat, notifications, agent, logs and screenshots (blocked by
-  `viewer-automation-protocol` (done), `viewer-automation-windowless-mode`)
 - [`viewer-automation-world-aim`](blocked/viewer-automation-world-aim.md) —
   World actions — pick-verified aiming, reveal, click and pie (blocked by
   `viewer-automation-world-model`, `viewer-automation-synthetic-input` (done))
@@ -1371,7 +1368,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1268)
+## done (1269)
 
 ### protocol
 
@@ -1835,6 +1832,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-automation-synthetic-input`](done/viewer-automation-synthetic-input.md)
   — Synthetic input for a live viewer — interact.rs as a frame-queued injector
   (blocked by `viewer-automation-protocol` (done))
+- [`viewer-automation-windowless-mode`](done/viewer-automation-windowless-mode.md)
+  — Windowless viewer — the whole app, UI included, with no OS window (blocked
+  by `viewer-automation-app-builder` (done),
+  `viewer-automation-offscreen-window-spike` (done))
 - [`viewer-avatar-complexity-limit`](done/viewer-avatar-complexity-limit.md) —
   Avatar complexity limiting (jellydoll)
 - [`viewer-avatar-context-menu`](done/viewer-avatar-context-menu.md) — Avatar

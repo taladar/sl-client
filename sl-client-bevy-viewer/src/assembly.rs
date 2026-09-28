@@ -15,8 +15,10 @@
 //! [`ViewerAppBuilder::build`], and what differs between them is an option with
 //! a name:
 //!
-//! - [`WindowMode`]: an OS window and its event loop, or neither — a harness
-//!   that steps `update` itself and renders into images.
+//! - [`WindowMode`]: an OS window and its event loop; an off-screen window
+//!   that renders and picks with no display (`--headless`, optionally watched
+//!   through a view-only window); or no window at all — a harness that steps
+//!   `update` itself and renders into images.
 //! - [`Storage`]: the user's settings, chat logs and caches, or nothing on
 //!   disk at all.
 //! - `audio_device`: whether the machine's speakers are opened.
@@ -73,10 +75,36 @@ pub enum WindowMode {
     /// thread. Nothing reads the machine's input devices, the cursor is never
     /// grabbed, and only cameras aimed at an image render anything — a camera
     /// aimed at the (absent) window draws nothing. The full-stack harness is
-    /// this mode; rendering and picking the interface with no window is
-    /// `viewer-automation-windowless-mode`'s to add.
+    /// harness's image-readback tier is this mode.
     Windowless,
+    /// A **headless** viewer (`--headless`): the primary window is an
+    /// off-screen one (Bevy's `OffscreenWindow`) of `size` physical pixels at
+    /// a scale factor of 1, so every camera — world, HUD, UI, gizmos — renders
+    /// into it through its unchanged window target, `bevy_picking` hits the UI
+    /// the window's pointer is over, and every `Window::cursor_position()`
+    /// reader sees the synthetic cursor. No display is needed.
+    ///
+    /// Nothing but the synthetic input injector
+    /// (`sl_viewer_ui_core::synthetic_input`, installed here) moves the viewer:
+    /// no device plugins, no gamepads, and a private in-process clipboard. The
+    /// frames run at a fixed 60 Hz that never throttles for focus or
+    /// occlusion; a caller stepping [`App::update`] itself counts frames
+    /// instead.
+    ///
+    /// With `watch`, a second, winit-backed window that is **not** primary
+    /// shows the off-screen window's frames for a person to follow; it takes no
+    /// input (Bevy's `ViewOnlyWindow`), and closing it quits the run.
+    Headless {
+        /// The off-screen window's size in physical (= logical) pixels.
+        size: UVec2,
+        /// Whether a view-only window shows the run (`--watch`).
+        watch: bool,
+    },
 }
+
+/// The fixed frame rate of a headless viewer that runs itself: the rate the
+/// interactive viewer is usually presented at, and never throttled.
+const HEADLESS_FRAME_RATE: f64 = 60.0;
 
 /// Where the viewer keeps what it stores between sessions.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -334,11 +362,17 @@ impl ViewerAppBuilder {
             spin: camera_spin,
             field_of_view: camera_fov,
         } = camera;
+        let spin_without_pose = camera_spin.rate != 0.0 && camera_start.position.is_none();
         let SkinRuntime {
             selection: skin,
             watch: watch_skins,
         } = skin;
         let windowed = window == WindowMode::Windowed;
+        // A viewer that must not touch the desktop gets a private clipboard,
+        // inserted before `DefaultPlugins` so Bevy's `ClipboardPlugin` never
+        // opens the system one: a copy in it is what a paste in this App reads
+        // back, and the user's clipboard is never read or written.
+        let private_clipboard = !windowed;
         let user_directories = storage == Storage::UserDirectories;
         // Per-avatar on-disk directories, keyed by grid + avatar name (with UUID
         // rename discovery). Each kind lands under the XDG root that fits it: chat
@@ -369,6 +403,9 @@ impl ViewerAppBuilder {
 
         let mut app = App::new();
         app.insert_resource(local_time_zone);
+        if private_clipboard {
+            crate::clipboard::use_private_clipboard(&mut app);
+        }
         // The render debug knobs (`SL_VIEWER_DISABLE_GLOW`, `SL_VIEWER_SKY_DAY_POSITION`,
         // …), read from the environment exactly once and only here — while the process
         // is still single-threaded — unless the caller stated them, and the environment
@@ -399,7 +436,22 @@ impl ViewerAppBuilder {
             // pre-window login logs go somewhere), and a harness captures the
             // logs itself; drop Bevy's `LogPlugin` to avoid the "global
             // subscriber already set" clash.
-            .disable::<LogPlugin>();
+            .disable::<LogPlugin>()
+            // Bevy's own audio output: the viewer plays every sound through its
+            // `sl-audio` mixer (`AudioPlugin` of `crate::audio`, which honours
+            // `audio_device`), and Bevy's plugin opened a second, silent rodio
+            // stream on the default device at startup in every mode — a test
+            // viewer and a headless one included. Only its `AudioSource` asset
+            // is used (a skin's UI sound files), registered below.
+            .disable::<bevy::audio::AudioPlugin>();
+        // Only a windowed viewer reads the machine's input devices; every other
+        // mode is driven by its caller alone, and a gamepad left on the desk
+        // must not steer a test.
+        let default_plugins = if windowed {
+            default_plugins
+        } else {
+            default_plugins.disable::<GilrsPlugin>()
+        };
         match window {
             WindowMode::Windowed => {
                 // Start the cursor free (visible, un-grabbed): the viewer opens in
@@ -449,7 +501,49 @@ impl ViewerAppBuilder {
                 )
                 .add_plugins(ScheduleRunnerPlugin::run_loop(core::time::Duration::ZERO));
             }
+            WindowMode::Headless { size, watch } => {
+                let default_plugins = default_plugins
+                    .set(WindowPlugin {
+                        // The primary window is spawned below, off-screen.
+                        primary_window: None,
+                        // Nothing closes the off-screen window; the run ends
+                        // through the session's logout, like any quit.
+                        exit_condition: ExitCondition::DontExit,
+                        // A close of the watch window is a quit request that
+                        // `handle_quit_requests` turns into a graceful logout.
+                        close_when_requested: false,
+                        ..default()
+                    })
+                    // As `Windowless`: one `update` is exactly one rendered frame,
+                    // which is what the automation tier counts in.
+                    .disable::<PipelinedRenderingPlugin>();
+                if watch {
+                    // winit for the watch window only: it creates no platform
+                    // window for the off-screen one, and drops every input event
+                    // the view-only watch window receives.
+                    app.add_plugins(default_plugins).add_plugins(
+                        crate::watch_window::WatchWindowPlugin {
+                            frame: crate::screenshot::CaptureSize {
+                                width: size.x,
+                                height: size.y,
+                            },
+                        },
+                    );
+                } else {
+                    app.add_plugins(default_plugins.disable::<WinitPlugin>())
+                        .add_plugins(ScheduleRunnerPlugin::run_loop(
+                            core::time::Duration::from_secs_f64(1.0 / HEADLESS_FRAME_RATE),
+                        ));
+                }
+                spawn_offscreen_window(&mut app, size);
+                app.add_plugins(sl_viewer_ui_core::synthetic_input::SyntheticInputPlugin);
+            }
         }
+        // The one part of Bevy's audio the viewer uses: the `AudioSource` asset
+        // and its loader, which a skin's UI sound files load as (the clips are
+        // decoded into the viewer's own mixer, never played by Bevy).
+        app.init_asset::<bevy::audio::AudioSource>()
+            .init_asset_loader::<bevy::audio::AudioLoader>();
         app.insert_resource(skin).add_plugins(SlClientPlugin {
             params: params.clone(),
             diagnostics: true,
@@ -517,6 +611,7 @@ impl ViewerAppBuilder {
             .add_plugins(ViewerShellPlugins {
                 audio_device,
                 media,
+                headless: !windowed,
             });
         app
             // The per-avatar account identity (grid + name + accounts root), used by
@@ -582,6 +677,11 @@ impl ViewerAppBuilder {
         if let Some(library) = load_avatar_library(viewer_assets.as_deref()) {
             app.insert_resource(library);
         }
+        if spin_without_pose {
+            // Only the flycam spins, and only a fixed start pose starts in it;
+            // the third-person camera would ignore the spin without a word.
+            warn!("--camera-spin has no effect without --camera-position");
+        }
         if repeat_animation && play_animation.is_empty() {
             // There is nothing to repeat, and a silent no-op looks exactly like a
             // run that worked — the same reasoning as the `--capture-*` warnings.
@@ -613,6 +713,14 @@ impl ViewerAppBuilder {
                 // A replay run has no grid, so it must not wait for a region to come
                 // up before it photographs the avatar it rebuilt offline.
                 grid_expected: !offline,
+                // A headless viewer's window is off-screen at its own fixed size,
+                // so it is the frame; a real window's size is the compositor's,
+                // so the frame is an image of the pinned size instead.
+                target: if matches!(window, WindowMode::Headless { .. }) {
+                    crate::screenshot::CaptureTarget::Window
+                } else {
+                    crate::screenshot::CaptureTarget::PinnedImage
+                },
             });
             // The structured description of the scene those frames were taken from,
             // in the same document the patched Firestorm writes — so a frame pair
@@ -634,7 +742,7 @@ impl ViewerAppBuilder {
             // without a capture there is no moment to describe. Say so rather than
             // writing nothing and leaving the operator to wonder.
             warn!("--scene-dump has no effect without --screenshot-dir");
-        } else if capture.content != crate::screenshot::CaptureContent::WORLD_ONLY {
+        } else if capture.content != uncaptured_content(window, capture.content) {
             // Capture knobs with nothing to capture is a mistyped command line, and a
             // silent no-op would look exactly like a run that worked.
             warn!("the --capture-* options have no effect without --screenshot-dir");
@@ -688,6 +796,42 @@ impl ViewerApp {
     pub fn into_app(self) -> App {
         self.app
     }
+}
+
+/// What the `--capture-*` options hold when none was given for a run in
+/// `window` mode, against which a run without a capture directory is checked.
+/// Headless, the size is the off-screen window's, which is not a capture knob
+/// with nothing to capture.
+const fn uncaptured_content(
+    window: WindowMode,
+    content: crate::screenshot::CaptureContent,
+) -> crate::screenshot::CaptureContent {
+    crate::screenshot::CaptureContent {
+        size: if matches!(window, WindowMode::Headless { .. }) {
+            content.size
+        } else {
+            crate::screenshot::CaptureSize::DEFAULT
+        },
+        ..crate::screenshot::CaptureContent::WORLD_ONLY
+    }
+}
+
+/// Spawn a headless viewer's primary window: off-screen (Bevy's
+/// `OffscreenWindow` — no platform window, an off-screen texture as its swap
+/// chain), `size` physical pixels, with its scale factor pinned to 1 so a
+/// logical pixel — what the UI, picking and the input injector speak — is a
+/// pixel of the frame.
+fn spawn_offscreen_window(app: &mut App, size: UVec2) {
+    app.world_mut().spawn((
+        Window {
+            title: "sl-client-bevy-viewer (headless)".to_owned(),
+            resolution: bevy::window::WindowResolution::new(size.x, size.y)
+                .with_scale_factor_override(1.0),
+            ..default()
+        },
+        bevy::window::PrimaryWindow,
+        bevy::window::OffscreenWindow,
+    ));
 }
 
 /// The vendored character directory (`viewer-assets/character/` at the

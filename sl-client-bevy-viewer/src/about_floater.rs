@@ -25,7 +25,7 @@ use bevy_flair::style::components::ClassList;
 use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
 
 use crate::build_info;
-use crate::clipboard::{ViewerClipboard, copy_to_clipboard};
+use crate::clipboard::copy_to_clipboard;
 use crate::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, floater_shown, spawn_floater,
 };
@@ -1074,7 +1074,7 @@ fn draw_sample_license(
 fn on_about_action(
     press: On<Pointer<Press>>,
     actions: Query<&AboutAction>,
-    clipboard: Res<ViewerClipboard>,
+    mut clipboard: ResMut<Clipboard>,
     mut state: ResMut<AboutState>,
 ) {
     if press.button != PointerButton::Primary {
@@ -1084,7 +1084,7 @@ fn on_about_action(
         return;
     };
     match action {
-        AboutAction::CopyInfo => copy_to_clipboard(&clipboard, &state.rendered_block),
+        AboutAction::CopyInfo => copy_to_clipboard(&mut clipboard, &state.rendered_block),
         AboutAction::SelectLicense(index) => state.selected_license = *index,
     }
 }

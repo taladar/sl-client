@@ -50,7 +50,7 @@ use sl_client_bevy::{
 use sl_settings::{Scope, SettingValue};
 use sl_types::map::RegionName;
 
-use crate::clipboard::{ViewerClipboard, copy_to_clipboard};
+use crate::clipboard::copy_to_clipboard;
 use crate::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater,
 };
@@ -388,14 +388,14 @@ pub struct WorldMapPlugin;
 
 impl Plugin for WorldMapPlugin {
     fn build(&self, app: &mut App) {
+        // The viewer's clipboard is Bevy's `ClipboardPlugin`'s, already there
+        // in the viewer. Wherever this plugin stands alone it gets a private
+        // one, so `handle_world_map_actions` — which reads it — is not skipped
+        // for a missing parameter, and a test never touches the OS clipboard.
+        crate::clipboard::init_private_clipboard(app.world_mut());
         app.init_resource::<WorldMapState>()
             .init_resource::<WorldMapModel>()
             .init_resource::<WorldMapTiles>()
-            // The shared handle, which the viewer's `ClipboardPlugin` also
-            // registers: `init_resource` is idempotent, and doing it here keeps
-            // `handle_world_map_actions` — which reads it — from being skipped
-            // for a missing parameter wherever this plugin stands alone.
-            .init_resource::<ViewerClipboard>()
             .add_message::<OpenWorldMap>()
             .add_systems(Startup, spawn_world_map.after(UiScaffoldSystems::SpawnRoot))
             .add_systems(
@@ -2924,7 +2924,7 @@ fn handle_world_map_actions(
     mut state: ResMut<WorldMapState>,
     mut settings: ResMut<ViewerSettings>,
     model: Res<WorldMapModel>,
-    clipboard: Res<ViewerClipboard>,
+    mut clipboard: ResMut<Clipboard>,
     mut commands: MessageWriter<SlCommand>,
     mut begin: MessageWriter<BeginTeleportFlow>,
 ) {
@@ -2968,7 +2968,7 @@ fn handle_world_map_actions(
             }
             "copy-slurl" => {
                 if let Some(slurl) = selection_slurl(&state, &model) {
-                    copy_to_clipboard(&clipboard, &slurl);
+                    copy_to_clipboard(&mut clipboard, &slurl);
                 }
             }
             "zoom-close" => set_scale(&mut state, world_map_math::WORLD_MAP_SCALE_CLOSE),
@@ -3304,8 +3304,7 @@ mod tests {
     use sl_types::map::GridCoordinates;
 
     use super::{
-        MenuDef, MenuItemDef, ViewerClipboard, WORLD_MAP_MENU, WorldMapPlugin, effective_base_url,
-        search_results,
+        MenuDef, MenuItemDef, WORLD_MAP_MENU, WorldMapPlugin, effective_base_url, search_results,
     };
 
     /// Collect every action string reachable from a menu.
@@ -3353,18 +3352,18 @@ mod tests {
         }
     }
 
-    /// The map used to open a second `arboard` handle of its own. It now shares
-    /// the viewer's, which is a resource of another crate's plugin — so this
-    /// pins that the map still registers it. Without the resource, Bevy would
-    /// not fail loudly: it would skip [`super::handle_world_map_actions`] for an
-    /// unresolved parameter, and with it every world-map menu pick, not just
-    /// Copy SLURL.
+    /// The map shares the viewer's clipboard, which is a resource of another
+    /// plugin — so this pins that the map, standing alone, still has one.
+    /// Without the resource, Bevy would not fail loudly: it would skip
+    /// [`super::handle_world_map_actions`] for an unresolved parameter, and with
+    /// it every world-map menu pick, not just Copy SLURL.
     #[test]
     fn the_plugin_registers_the_shared_clipboard() {
         let mut app = App::new();
         app.add_plugins(WorldMapPlugin);
         assert!(
-            app.world().contains_resource::<ViewerClipboard>(),
+            app.world()
+                .contains_resource::<bevy::clipboard::Clipboard>(),
             "WorldMapPlugin must register the shared clipboard its action \
              handler reads"
         );

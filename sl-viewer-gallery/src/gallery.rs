@@ -383,6 +383,7 @@ pub fn run(assets: AssetPlugin, registry: GalleryRegistry) -> AppExit {
             // The gallery has no in-world media faces, so the video engine
             // has nothing to show; skip initialising GStreamer.
             video_enabled: false,
+            headless: false,
         })
         .add_plugins(crate::browser_widget::BrowserWidgetPlugin)
         // The i18n scaffold, so the linkified-text widget's `Translator` (the

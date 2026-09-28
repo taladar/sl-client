@@ -43,7 +43,7 @@ use sl_client_bevy::{
     SlIdentity, SlSessionEvent, TextureKey, Uuid,
 };
 
-use crate::clipboard::{ViewerClipboard, copy_to_clipboard};
+use crate::clipboard::copy_to_clipboard;
 use crate::floater::{
     Floater, FloaterCaps, FloaterKey, FloaterSpec, FloaterSystems, KeyedFloaterOpen, KeyedFloaters,
     host_floater,
@@ -767,7 +767,7 @@ fn spawn_landmark_content(
          parents: Query<&ChildOf>,
          floaters: Query<(Entity, &Floater)>,
          windows: Query<&AboutLandmarkState>,
-         clipboard: Res<ViewerClipboard>| {
+         mut clipboard: ResMut<Clipboard>| {
             if press.button != PointerButton::Primary {
                 return;
             }
@@ -779,7 +779,7 @@ fn spawn_landmark_content(
             if let Ok(state) = windows.get(window)
                 && let Some(slurl) = state.slurl.as_deref()
             {
-                copy_to_clipboard(&clipboard, slurl);
+                copy_to_clipboard(&mut clipboard, slurl);
             }
         },
     );
@@ -820,7 +820,7 @@ pub fn spawn_about_landmark_specimen(
     // viewer's plugins (the gallery) would fail their parameter validation on
     // a click. With them present the press finds no landmark state and does
     // nothing, which is what a specimen's button should do.
-    commands.init_resource::<ViewerClipboard>();
+    commands.queue(crate::clipboard::init_private_clipboard);
     commands.init_resource::<Messages<OpenWorldMap>>();
     // A transformed sample may not be a valid region name; the region line
     // then shows its id fallback, and the SLURL stays blank, as live.

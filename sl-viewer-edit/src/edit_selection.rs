@@ -55,6 +55,7 @@ use bevy::mesh::skinning::SkinnedMesh;
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use bevy::window::PrimaryWindow;
 use sl_client_bevy::{
     Command, DeRezDestination, FolderType, ObjectKey, PrimFaceId, ScopedObjectId, SlCommand,
     SlEvent, SlSessionEvent, TransactionId, Uuid, texture_face_uv_transform,
@@ -393,7 +394,7 @@ struct SelectPointer<'w, 's> {
     /// entry the occlusion guard alone would miss.
     ui_claim: Res<'w, crate::ui::UiPointerClaim>,
     /// The window, for the cursor position.
-    windows: Query<'w, 's, &'static Window>,
+    windows: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
     /// The world camera, to build pick rays and project candidate bounds.
     camera: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<ViewerCamera>>,
     /// Render layers, to exclude HUD / gizmo geometry from world picks.

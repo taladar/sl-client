@@ -35,6 +35,7 @@ use bevy::text::{EditableText, FontCx, LayoutCx};
 use bevy::ui_widgets::{
     Activate, Slider, SliderDragState, SliderRange, SliderStep, SliderValue, ValueChange,
 };
+use bevy::window::PrimaryWindow;
 use bevy_flair::style::components::ClassList;
 use sl_cef::{PlaybackState, ValidatedMediaUrl};
 use sl_client_bevy::{Command, SlCommand};
@@ -540,7 +541,7 @@ struct BarProjection<'w, 's> {
     /// The face's bounds and world pose.
     face_geometry: Query<'w, 's, (&'static Aabb, &'static GlobalTransform)>,
     /// The window the projection lands in.
-    windows: Query<'w, 's, &'static Window>,
+    windows: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
 }
 
 /// The pointer activity the bar's auto-hide is driven by, bundled as one

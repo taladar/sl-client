@@ -800,7 +800,7 @@ struct CreatePointer<'w, 's> {
     /// The per-frame UI-claim flag (a widget that consumed the press).
     ui_claim: Res<'w, UiPointerClaim>,
     /// The window, for the cursor position.
-    windows: Query<'w, 's, &'static Window>,
+    windows: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
     /// The world camera, to build the pick ray.
     camera: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<ViewerCamera>>,
     /// Render layers, to exclude HUD / gizmo geometry from the build pick.

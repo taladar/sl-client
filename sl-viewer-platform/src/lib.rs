@@ -15,7 +15,7 @@
 //! - [`asset_retry`] — the backoff policy for a fetch that failed.
 //! - [`local_time`] — the system time zone, captured once while the process
 //!   is still single-threaded, for every surface that stamps a local date.
-//! - [`clipboard`] — OS clipboard access.
+//! - [`clipboard`] — the viewer's clipboard, and a private one for a headless App.
 //! - [`file_dialog`] — the host's file-open dialog, through the desktop's own
 //!   file chooser.
 //! - [`system_browser`] — handing a URL to the desktop's own browser, behind

@@ -2,7 +2,7 @@
 id: viewer-automation-state-probes
 title: State probes — chat, notifications, agent, logs and screenshots
 topic: viewer
-status: blocked
+status: ready
 origin: viewer automation design (2026-09-28)
 points: 8
 blocked_by: [viewer-automation-protocol, viewer-automation-windowless-mode]

@@ -53,6 +53,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 use bevy::ui_widgets::{SliderRange, SliderStep};
+use bevy::window::PrimaryWindow;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
     Command, ParcelInfo, ParcelRequestResult, RegionHandle, RegionLocalParcelId, SlCommand,
@@ -700,7 +701,7 @@ struct LandPointer<'w, 's> {
     /// A widget's claim on this frame's pointer.
     ui_claim: Res<'w, UiPointerClaim>,
     /// The window the cursor is in.
-    windows: Query<'w, 's, &'static Window>,
+    windows: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
     /// The world camera the ground ray is cast from.
     camera: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<ViewerCamera>>,
     /// Render layers, to exclude HUD / gizmo geometry from the ground pick.

@@ -154,10 +154,31 @@ replaces that person.
     and a synthetic click opens the floater, which the next frame draws.
   - The window's size is exactly its `resolution`: nothing resizes an
     off-screen window, which is also what a capture wants.
+  - **Built** ([[viewer-automation-windowless-mode]]):
+    `WindowMode::Headless { size, watch }` in `ViewerAppBuilder` (the
+    binary's `--headless`, sized by `--capture-size`) spawns that window,
+    installs `SyntheticInputPlugin`, drops the device plugins and gilrs, gives
+    the App a private clipboard and runs a fixed 60 Hz `ScheduleRunnerPlugin`;
+    the full-stack harness's `in_offscreen_window` builds through it. A
+    headless `--screenshot-dir` run captures the window itself
+    (`CaptureTarget::Window`) and hides the layers it was not asked for,
+    rather than retargeting cameras into an image.
+  - **`--watch`** keeps winit for a second window that is **not** primary
+    and carries the fork's `ViewOnlyWindow` (winit drops its input events,
+    and device mouse motion while no window takes input). It shows the frame
+    preview quad; the render world copies the off-screen texture into the
+    preview's image after each frame (`watch_window.rs`).
+  - **A `Window` reader filters on `PrimaryWindow`.** With the watch window
+    there are two windows: an unfiltered `Query<&Window>` either fails its
+    `single()` or reads the watch window's (dead) cursor.
 - Headless input isolation must also drop the device plugins (evdev,
   SpaceNavigator) and gamepads, not only window events; the OS clipboard is
   replaced by a per-App one so copy/paste is testable and never touches the
-  user's.
+  user's. The viewer has **one** clipboard, Bevy's `Clipboard` (built with
+  `system_clipboard` in the viewer); a non-windowed App inserts the fork's
+  `Clipboard::in_process()` before `DefaultPlugins`, and a plugin that may
+  stand alone falls back to `sl_viewer_platform::clipboard::
+  init_private_clipboard`, never to a default (OS) one.
 - AccessKit needs a winit window, so it is absent headless; the semantic
   model must never depend on it.
 - Several statics are process-wide (`STARTUP_OVERRIDES`,
@@ -192,7 +213,8 @@ replaces that person.
   plugins by hand — `ViewerAppOptions::new(params)` is the interactive
   viewer; set `window: WindowMode::Windowless`, `storage:
   Storage::Ephemeral`, `audio_device: false`, `media: MediaRuntime::OFF`
-  and stated `render_overrides` for a test, then
+  and stated `render_overrides` for a test (`WindowMode::Headless { .. }`
+  instead when it must render the UI and take clicks), then
   `ViewerAppBuilder::from_options(..).build()`
   (`sl-client-bevy-viewer/src/assembly.rs`). A new viewer-wide option
   belongs there, with its first consumer.

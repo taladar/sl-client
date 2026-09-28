@@ -260,6 +260,11 @@ pub struct BackendConfig {
     /// Extra product token appended to the user agent, e.g.
     /// `SLClientViewer/0.1`.
     pub user_agent_product: Option<String>,
+    /// Whether the embedder runs with no display at all (a headless viewer):
+    /// the engine must then not reach for a windowing system either. For
+    /// Chromium that is its `headless` Ozone platform, without which it exits
+    /// on start when there is no Wayland or X display to connect to.
+    pub headless: bool,
 }
 
 /// Who wrote the content a surface loads — the viewer itself, or whoever

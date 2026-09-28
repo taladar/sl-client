@@ -1034,12 +1034,13 @@ pub(crate) struct ViewerShellPlugins {
     pub(crate) audio_device: bool,
     /// Which media engines may start, and whether the website login runs.
     pub(crate) media: MediaRuntime,
+    /// Whether the viewer has no display (any mode but a real window), so the
+    /// media engines must not look for one.
+    pub(crate) headless: bool,
 }
 
 impl Plugin for ViewerShellPlugins {
     fn build(&self, app: &mut App) {
-        // Shared OS-clipboard handle for the "Copy SLURL" affordances.
-        app.add_plugins(crate::clipboard::ClipboardPlugin);
         // The host's file-open dialog (the XDG FileChooser portal on Linux), for
         // every "… from disk": the settings editors' Import today, the uploaders
         // when they land.
@@ -1064,6 +1065,7 @@ impl Plugin for ViewerShellPlugins {
             .add_plugins(crate::media_engine::MediaEnginePlugin {
                 enabled: self.media.web,
                 video_enabled: self.media.video,
+                headless: self.headless,
             })
             // The Second Life website auto-login (viewer-web-openid-auth): at login,
             // POST the login response's OpenID token off-thread and inject the reply's

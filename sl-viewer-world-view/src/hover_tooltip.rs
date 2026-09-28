@@ -30,6 +30,7 @@ use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::picking::hover::HoverMap;
 use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
 use std::collections::HashSet as StdHashSet;
 
 use sl_client_bevy::{
@@ -453,7 +454,7 @@ fn tip_toggles(settings: Option<&sl_viewer_settings::ViewerSettings>) -> (bool, 
 #[derive(Debug, SystemParam)]
 struct HoverGesture<'w, 's> {
     /// The window the cursor position comes from.
-    windows: Query<'w, 's, &'static Window>,
+    windows: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
     /// This frame's pointer motion, which resets the dwell.
     motion: Res<'w, AccumulatedMouseMotion>,
     /// The mouse buttons: a held one is a drag, and shows no tip.

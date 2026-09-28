@@ -463,7 +463,10 @@ wrap_client! {
 wrap_app! {
     // The browser-process application: injects command-line switches before
     // Chromium parses them.
-    struct OsrApp {}
+    struct OsrApp {
+        // Whether to run on Chromium's `headless` Ozone platform (no display).
+        headless: bool,
+    }
     impl App {
         fn on_before_command_line_processing(
             &self,
@@ -500,6 +503,23 @@ wrap_app! {
                     Some(&CefString::from("password-store")),
                     Some(&CefString::from("basic")),
                 );
+                // A headless embedder has no display, and Chromium's default
+                // Ozone platform (Wayland / X11) exits the whole engine when it
+                // cannot connect to one. Off-screen rendering needs none, so run
+                // on the `headless` platform, which Chromium passes on to its
+                // subprocesses itself. That platform has no EGL display either,
+                // so the GPU process fails to start and is respawned again and
+                // again; the surfaces here are painted into CPU buffers
+                // (`on_paint`) anyway, so raster and composite in software.
+                if self.headless {
+                    command_line.append_switch_with_value(
+                        Some(&CefString::from("ozone-platform")),
+                        Some(&CefString::from("headless")),
+                    );
+                    command_line.append_switch(Some(&CefString::from("disable-gpu")));
+                    command_line
+                        .append_switch(Some(&CefString::from("disable-gpu-compositing")));
+                }
             }
         }
     }
@@ -987,7 +1007,7 @@ impl CefMediaBackend {
             settings.user_agent_product = CefString::from(product.as_str());
         }
 
-        let mut app = OsrApp::new();
+        let mut app = OsrApp::new(config.headless);
         let ok = cef::initialize(
             Some(args.as_main_args()),
             Some(&settings),

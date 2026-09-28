@@ -45,6 +45,7 @@
 
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
 use std::collections::{HashMap, HashSet};
 
 use sl_client_bevy::{
@@ -123,7 +124,7 @@ pub struct RankedScene<'w, 's> {
     /// re-prioritisation off.
     camera: Query<'w, 's, (&'static GlobalTransform, &'static Projection), With<ViewerCamera>>,
     /// The window, for the viewport height the pixel area is measured in.
-    windows: Query<'w, 's, &'static Window>,
+    windows: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
     /// Every face, ranked for its diffuse texture's fetch priority.
     faces: Query<
         'w,

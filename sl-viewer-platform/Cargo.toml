@@ -13,9 +13,17 @@ categories = ["filesystem", "game-development"]
 exclude.workspace = true
 publish.workspace = true
 
+[package.metadata.cargo-machete]
+# `arboard` is present for its `wayland-data-control` feature alone (see its
+# entry under `[dependencies]`).
+ignored = ["arboard"]
+
 [dependencies]
-# OS clipboard. Default features off: the default `image-data` support drags in
-# the AVIF encoder stack for image clipboards the viewer does not use.
+# Not called: the viewer's clipboard is Bevy's (`bevy_clipboard`, see
+# `clipboard.rs`), which builds `arboard` with no features at all and would copy
+# through XWayland on a Wayland desktop. Named here only to unify the Wayland
+# data-control protocol onto Bevy's copy. Default features off: `image-data`
+# drags in the AVIF encoder stack for image clipboards the viewer does not use.
 arboard = { version = "3.6.1", default-features = false, features = [
   "wayland-data-control",
 ] }

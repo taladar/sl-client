@@ -400,7 +400,10 @@ fn scroll_notches(wheel: &AccumulatedMouseScroll) -> f32 {
 /// shape of what is being rendered, not of the window chrome around it. Here
 /// the 3D view *is* the window — the UI is drawn over it rather than beside it
 /// — so the window's own ratio is the world view's.
-fn publish_view_aspect_ratio(windows: Query<&Window>, mut facts: ResMut<RlvExtFacts>) {
+fn publish_view_aspect_ratio(
+    windows: Query<&Window, With<PrimaryWindow>>,
+    mut facts: ResMut<RlvExtFacts>,
+) {
     let ratio = windows.iter().next().and_then(|window| {
         let (width, height) = (window.width(), window.height());
         (height > 0.0).then_some(width / height)
@@ -918,7 +921,7 @@ type WaterQuery<'world, 'state> = Query<'world, 'state, Entity, With<WaterCell>>
 pub(crate) fn focus_on_object(
     mode: Res<CameraMode>,
     input: CameraInput,
-    windows: Query<&Window>,
+    windows: Query<&Window, With<PrimaryWindow>>,
     water: WaterQuery,
     mut cameras: Query<(&Camera, &GlobalTransform, &mut CameraRig), With<ViewerCamera>>,
     mut ray_cast: MeshRayCast,

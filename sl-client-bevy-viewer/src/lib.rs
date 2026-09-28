@@ -317,6 +317,7 @@ pub(crate) use sl_viewer_world_avatar::replay_bundle;
 pub(crate) use sl_viewer_world_view::scene_dump;
 pub(crate) use sl_viewer_world_view::screenshot;
 pub(crate) use sl_viewer_world_view::session;
+pub(crate) use sl_viewer_world_view::watch_window;
 // The settings store is its own crate now that it no longer names the
 // features that register with it — that list is `REGISTRARS` above.
 pub(crate) use sl_viewer_settings as settings;
@@ -399,7 +400,9 @@ use sl_repl::{Avatar, Credentials};
 use tracing::{info, warn};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt as _, util::SubscriberInitExt as _};
 
-use crate::assembly::{CaptureStartup, MediaRuntime, ViewerAppBuilder, ViewerAppOptions};
+use crate::assembly::{
+    CaptureStartup, MediaRuntime, ViewerAppBuilder, ViewerAppOptions, WindowMode,
+};
 use crate::camera::{CameraSpin, CameraStart, SpinAxis};
 
 /// The local OpenSim grid login URI used when none is otherwise resolved.
@@ -540,7 +543,8 @@ struct Options {
     /// because a window's size is a request no window manager promises to honour
     /// or to keep constant — and two frames of different sizes cannot be diffed.
     /// The environment variable is the one the Firestorm capture harness reads,
-    /// so one env block sizes both viewers.
+    /// so one env block sizes both viewers. Under `--headless` it is also the
+    /// size of the off-screen window, which then *is* the captured frame.
     #[clap(long, env = "SL_VIEWER_CAPTURE_SIZE", value_parser = crate::screenshot::parse_capture_size)]
     capture_size: Option<crate::screenshot::CaptureSize>,
     /// Put the viewer's UI in the captured frames. Off by default, so a
@@ -622,7 +626,9 @@ struct Options {
     camera_look_at: Option<Vec3>,
     /// A debug affordance: auto-rotate the camera at this many degrees per second
     /// about the axis chosen by `--camera-spin-axis` — a slow survey pan for a
-    /// screenshot sequence. Works with the login-snapped camera too.
+    /// screenshot sequence. Only the flycam spins, so this needs a fixed
+    /// `--camera-position`; the default third-person camera, which follows the
+    /// avatar, ignores it.
     #[clap(long, allow_hyphen_values = true)]
     camera_spin: Option<f32>,
     /// Which camera axis `--camera-spin` rotates about (default `yaw`, a
@@ -713,6 +719,20 @@ struct Options {
     /// image-based-lighting materials have a probe to sample. Off by default.
     #[clap(long)]
     replay_reflection_probe: bool,
+    /// Run with no OS window and no display: the viewer renders the world and
+    /// its interface into an off-screen window of `--capture-size` (default
+    /// 1920x1080) at a UI scale factor of 1, at a fixed 60 frames a second.
+    /// It reads no mouse, keyboard, gamepad or 3D mouse, never touches the
+    /// desktop's clipboard and opens no audio device: only the automation
+    /// tier's synthetic input moves it. With `--screenshot-dir`, the frames are
+    /// that window.
+    #[clap(long)]
+    headless: bool,
+    /// With `--headless`, also open a window showing the run, for a person to
+    /// follow. It takes no input — moving the mouse or typing over it changes
+    /// nothing — and closing it ends the run with a graceful logout.
+    #[clap(long, requires = "headless")]
+    watch: bool,
 }
 
 /// Parse a `--capture-ui-scale` argument: a factor within the `UiScale`
@@ -872,6 +892,18 @@ fn cli_app_options(options: &Options, params: LoginParams) -> ViewerAppOptions {
     };
     app_options.camera.field_of_view = options.camera_fov.map(f32::to_radians);
     app_options.skin.watch = options.watch_skins;
+    if options.headless {
+        // The off-screen window is the capture size, so a headless capture's
+        // frames are the window itself.
+        let size = app_options.capture.content.size;
+        app_options.window = WindowMode::Headless {
+            size: UVec2::new(size.width, size.height),
+            watch: options.watch,
+        };
+        // An unattended run plays nothing through the machine's speakers,
+        // watched or not — the same as the test harness.
+        app_options.audio_device = false;
+    }
     app_options
 }
 

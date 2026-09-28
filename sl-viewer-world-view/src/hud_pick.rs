@@ -36,6 +36,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::picking::hover::HoverMap;
 use bevy::picking::mesh_picking::ray_cast::RayMeshHit;
 use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
 use sl_client_bevy::{Command, SlCommand};
 
 use crate::hud::{HudCamera, HudScreen};
@@ -66,7 +67,7 @@ pub struct TouchPointer<'w, 's> {
     /// Their computed sizes, for the hit test.
     node_sizes: Query<'w, 's, &'static ComputedNode>,
     /// The window the cursor position is read from.
-    windows: Query<'w, 's, &'static Window>,
+    windows: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
 }
 
 impl TouchPointer<'_, '_> {

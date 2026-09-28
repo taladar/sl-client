@@ -218,9 +218,10 @@ pub(crate) struct HarnessOptions {
     ///
     /// [`EnvironmentState::apply`]: sl_viewer_world_scene::environment::EnvironmentState
     day_position: Option<f32>,
-    /// Render into an **off-screen primary window** of this physical size
-    /// rather than into a readback image, with the synthetic input injector
-    /// installed — or `None` for the image.
+    /// Render into an **off-screen primary window** of this physical size —
+    /// the headless viewer's ([`WindowMode::Headless`]), synthetic input
+    /// injector and all — rather than into a readback image, or `None` for the
+    /// image.
     ///
     /// The image is the default because it is what every pixel test here was
     /// written against: one camera, one square frame. The window is the
@@ -1021,7 +1022,15 @@ fn build_viewer_app(
     // the per-face `MediaEntry` set reaching `MediaData`. The other half, a live
     // surface's placeholder and its first paint, needs a browser process.
     let mut app_options = ViewerAppOptions::new(params);
-    app_options.window = WindowMode::Windowless;
+    // Headless, the builder's off-screen window, when the test asked for one;
+    // otherwise no window at all, and the camera retargeted into a readback
+    // image below.
+    app_options.window = options
+        .offscreen_window
+        .map_or(WindowMode::Windowless, |size| WindowMode::Headless {
+            size,
+            watch: false,
+        });
     app_options.storage = Storage::Ephemeral;
     app_options.audio_device = false;
     app_options.media = MediaRuntime::OFF;
@@ -1045,8 +1054,10 @@ fn build_viewer_app(
 
     let captured = app.world().resource::<Captured>().clone();
 
-    if let Some(size) = options.offscreen_window {
-        install_offscreen_window(&mut app, size);
+    if options.offscreen_window.is_some() {
+        // The builder spawned the off-screen window and installed the input
+        // injector; what is this harness's own is reading every frame back.
+        app.add_systems(Last, screenshot_the_window);
         return Ok((app, captured));
     }
 
@@ -1093,35 +1104,11 @@ fn build_viewer_app(
     Ok((app, captured))
 }
 
-/// Give a windowless viewer an **off-screen primary window** of `size`
-/// physical pixels, the synthetic input injector, and a window screenshot every
-/// frame into [`Captured`].
-///
-/// The window carries [`OffscreenWindow`](bevy::window::OffscreenWindow): no
-/// OS window is created for it and the renderer hands it an off-screen texture
-/// as its swap chain, so the cameras the viewer spawns render into it
-/// unchanged. The scale factor is pinned to 1, so a logical pixel — what the
-/// UI, picking and the injector speak — is a pixel of the frame.
+/// Ask for a screenshot of the primary window, landing in [`Captured`].
 ///
 /// A screenshot per frame rather than a `Readback`: a window's texture is not
 /// an `Image` asset a readback could name, and a screenshot of a window is
 /// Bevy's own way to read one.
-fn install_offscreen_window(app: &mut App, size: UVec2) {
-    app.world_mut().spawn((
-        Window {
-            title: "sl-client-bevy-viewer (off-screen)".to_owned(),
-            resolution: bevy::window::WindowResolution::new(size.x, size.y)
-                .with_scale_factor_override(1.0),
-            ..default()
-        },
-        bevy::window::PrimaryWindow,
-        bevy::window::OffscreenWindow,
-    ));
-    app.add_plugins(sl_viewer_ui_core::synthetic_input::SyntheticInputPlugin)
-        .add_systems(Last, screenshot_the_window);
-}
-
-/// Ask for a screenshot of the primary window, landing in [`Captured`].
 fn screenshot_the_window(mut commands: Commands) {
     commands
         .spawn(bevy::render::view::screenshot::Screenshot::primary_window())
@@ -1506,6 +1493,47 @@ mod tests {
             "{outside} pixels changed outside the inventory floater's box against {inside} \
              inside it — the scene moved between the two frames, so the pair says nothing \
              about the floater"
+        );
+        Ok(())
+    }
+
+    /// **A headless viewer answers nothing but its own injector.**
+    ///
+    /// The shape `WindowMode::Headless` promises, pinned without a frame: the
+    /// primary window is off-screen at the asked size and a scale factor of 1
+    /// (so a logical pixel is a pixel of the frame), there is no event loop to
+    /// deliver the machine's input, no gamepad backend, and the synthetic
+    /// injector is installed. Each missing piece is a way for
+    /// the desk the test runs on to move the viewer.
+    #[test]
+    fn a_headless_viewer_reads_no_device_of_the_machine() -> Result<(), TestError> {
+        let mut harness = ViewerHarness::start_in_with(
+            vec![stock_fixture().into_region(RegionConfig::default())],
+            HarnessOptions::in_offscreen_window(UVec2::new(800, 600)),
+        )?;
+        let app = &mut harness.app;
+        let winit = app.is_plugin_added::<bevy::winit::WinitPlugin>();
+        let gilrs = app.is_plugin_added::<bevy::gilrs::GilrsPlugin>();
+        let injector = app
+            .world()
+            .contains_resource::<sl_viewer_ui_core::synthetic_input::SyntheticInput>();
+        let world = app.world_mut();
+        let windows: Vec<(UVec2, f32, bool)> = world
+            .query_filtered::<(&Window, Has<bevy::window::OffscreenWindow>), With<bevy::window::PrimaryWindow>>()
+            .iter(world)
+            .map(|(window, offscreen)| (window.physical_size(), window.scale_factor(), offscreen))
+            .collect();
+        drop(harness);
+        assert!(!winit, "a headless viewer has no event loop");
+        assert!(!gilrs, "a headless viewer reads no gamepad");
+        assert!(
+            injector,
+            "the synthetic injector is what drives a headless viewer"
+        );
+        pretty_assertions::assert_eq!(
+            windows,
+            vec![(UVec2::new(800, 600), 1.0, true)],
+            "want one primary window, off-screen, 800x600 at a scale factor of 1"
         );
         Ok(())
     }

@@ -2,7 +2,7 @@
 id: viewer-automation-windowless-mode
 title: Windowless viewer — the whole app, UI included, with no OS window
 topic: viewer
-status: ready
+status: done
 origin: viewer automation design (2026-09-28)
 points: 13
 blocked_by: [viewer-automation-app-builder, viewer-automation-offscreen-window-spike]
@@ -63,3 +63,50 @@ machine with no Wayland or X display, renders UI and world, and a synthetic
 click opens a floater and a synthetic right-click on a prim opens its pie;
 `--watch` shows the same run; moving the real mouse during a watched run
 changes nothing.
+
+## Implementation (2026-09-28)
+
+- `WindowMode::Headless { size, watch }` in `assembly.rs` (the binary's
+  `--headless`, sized by `--capture-size`; `--watch` requires it): an
+  `OffscreenWindow` primary at scale factor 1, `SyntheticInputPlugin`, no
+  winit (unless watched), no pipelined rendering, a fixed 60 Hz
+  `ScheduleRunnerPlugin`, no device plugins. The full-stack harness's
+  `in_offscreen_window` builds through it; its old hand-spawned window is gone.
+- Every non-windowed mode drops `GilrsPlugin` and gets a private clipboard.
+- **Clipboard**: the viewer's own `arboard` handle (`ViewerClipboard`) is
+  gone; every "Copy …" button uses Bevy's `Clipboard`, which the viewer now
+  builds with `system_clipboard` (the text fields' Ctrl+C / Ctrl+V had been
+  going to an in-process buffer). A non-windowed App inserts the fork's
+  `Clipboard::in_process()`; the testkit's text editing does too.
+- **Capture**: a headless `--screenshot-dir` run screenshots the off-screen
+  window (`CaptureTarget::Window`) and hides the layers it did not ask for;
+  the pinned-image retargeting stays for a real window only.
+- **`--watch`** (`sl-viewer-world-view/src/watch_window.rs`): a second window
+  carrying the fork's `ViewOnlyWindow` (winit drops its input, and device
+  motion while no window takes input), showing the frame preview quad; the
+  render world copies the off-screen texture into the preview image after
+  each frame.
+- The 15 `Query<&Window>` readers (cursor, viewport size) now filter on
+  `PrimaryWindow`, so a second window cannot answer for the primary one.
+- Window title / resize and the IME area needed nothing: nothing resizes the
+  window, and title / IME writes on an off-screen window reach no platform.
+  Cursor grab was already off for every non-windowed mode.
+- **Audio**: `--headless` opens no audio device. Bevy's own `AudioPlugin`
+  is disabled in every mode: it opened a second, silent rodio stream on the
+  default device at startup (the interactive viewer and every test harness
+  too); the viewer registers only its `AudioSource` asset and loader, which
+  the skin UI sounds load as.
+- **CEF**: a headless viewer passes `--ozone-platform=headless` (without it
+  Chromium exits when there is no Wayland / X display) plus `--disable-gpu`
+  and `--disable-gpu-compositing` (the headless platform has no EGL, and the
+  GPU process respawned in a loop); `BackendConfig::headless` carries it.
+- `--camera-spin` only turns the flycam; its help says so now, and a spin
+  without `--camera-position` warns.
+
+Verified: the binary logged into the fake grid with `--headless` with no
+`WAYLAND_DISPLAY`, `DISPLAY` or `XDG_RUNTIME_DIR`, CEF initialised, and it
+wrote 1280x720 frames of world + UI and logged out cleanly; the full-stack
+off-screen test clicks the Inventory floater open and right-clicks the prim's
+pie through the builder's headless mode; the user watched a `--watch` run
+(live, spinning preview; mouse and keys over it did nothing; closing it logged
+out).

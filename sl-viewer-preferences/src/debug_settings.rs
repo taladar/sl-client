@@ -47,7 +47,7 @@ use bevy_flair::style::components::{ClassList, PseudoElementsSupport};
 use sl_rlv::is_debug_setting_locked;
 use sl_settings::{Scope, SettingDecl, SettingKind, SettingValue};
 
-use crate::clipboard::{ViewerClipboard, copy_to_clipboard};
+use crate::clipboard::copy_to_clipboard;
 use crate::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, floater_shown, spawn_floater,
 };
@@ -1809,10 +1809,10 @@ fn on_reset_setting(
 fn on_copy_setting_name(
     _activate: On<Activate>,
     state: Res<DebugEditorState>,
-    clipboard: Option<Res<ViewerClipboard>>,
+    clipboard: Option<ResMut<Clipboard>>,
 ) {
-    if let (Some(name), Some(clipboard)) = (state.selected.as_deref(), clipboard) {
-        copy_to_clipboard(&clipboard, name);
+    if let (Some(name), Some(mut clipboard)) = (state.selected.as_deref(), clipboard) {
+        copy_to_clipboard(&mut clipboard, name);
     }
 }
 

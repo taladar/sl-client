@@ -49,3 +49,4 @@ pub mod scene_dump;
 pub mod screenshot;
 pub mod session;
 pub mod sit_camera;
+pub mod watch_window;

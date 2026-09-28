@@ -70,6 +70,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 use bevy::render::render_resource::BlendState;
+use bevy::window::PrimaryWindow;
 use sl_client_bevy::{Command, ObjectTransform, Rotation, ScopedObjectId, SlCommand, Vector};
 
 use crate::coords::{
@@ -1620,7 +1621,7 @@ struct ScreenView<'w, 's> {
     /// The world camera's pose and projection.
     cameras: Query<'w, 's, (&'static GlobalTransform, &'static Projection), With<ViewerCamera>>,
     /// The window, for the viewport height the scale is in pixels of.
-    windows: Query<'w, 's, &'static Window>,
+    windows: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
 }
 
 /// Place the rig at the live selection pivot, grid-frame orientation, and
@@ -1744,7 +1745,7 @@ pub(crate) struct GizmoPointer<'w, 's> {
     /// Node sizes, for the UI-occlusion guard.
     node_sizes: Query<'w, 's, &'static ComputedNode>,
     /// The window, for the cursor position.
-    windows: Query<'w, 's, &'static Window>,
+    windows: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
     /// The world camera, to build the pick ray (the overlay camera shares its
     /// pose and projection).
     cameras: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<ViewerCamera>>,
