@@ -268,17 +268,18 @@ multi-region offsets, in-flight asset leaks, NPC appearance delivery.
   GPU avatar palettes) that a global observer would drain into the frame
   slot.
 
-  Four things the harness has to bring itself, because `run_session`
-  brings them and no plugin group does: the **avatar asset library**
-  (without it every avatar in the scene is a placeholder sphere and no
-  capture of one means anything), the **bundled fonts** (without them no
-  world-space text billboard — a name tag, an object's floating text —
-  lays out at all), the **media plugins** (`MediaEnginePlugin` with both
-  engines `enabled: false` plus `MediaPrimPlugin` — enough for the
-  `ObjectMedia` fetch, not for a surface's first paint, which needs a
-  Chromium process a test binary has no helper to start), and the **day
-  position**. That last one is pinned
-  because the sky follows a clock no test controls; it is pinned at
+  The harness is **the viewer the user runs**: it is built through
+  `ViewerAppBuilder` (`sl-client-bevy-viewer/src/assembly.rs`), the
+  same assembly as the binary — all six plugin groups, the avatar asset
+  library, the bundled fonts, the media plugins (both engines off:
+  enough for the `ObjectMedia` fetch, not for a surface's first paint,
+  which needs a Chromium process a test binary has no helper to start) —
+  with the options a test must set: `WindowMode::Windowless` (no window,
+  no event loop, the render inline), `Storage::Ephemeral` (no settings
+  read or written, no chat logs, no inventory cache), no audio device,
+  and the render overrides **stated**, including the **day position**.
+  That last one is pinned because the sky follows a clock no test
+  controls; it is pinned at
   `0.5`, which on the synthesised preset cycle is midday (`0.0`
   midnight, `0.25` sunrise, `0.75` sunset — it was `0.25` for a while,
   and a scene lit at dawn is dim enough that a coloured avatar

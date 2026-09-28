@@ -51,32 +51,27 @@ use core::time::Duration;
 use std::sync::MutexGuard;
 use std::time::Instant;
 
-use bevy::app::ScheduleRunnerPlugin;
 use bevy::camera::RenderTarget;
-use bevy::log::LogPlugin;
 use bevy::prelude::*;
 use bevy::render::gpu_readback::{Readback, ReadbackComplete};
-use bevy::render::pipelined_rendering::PipelinedRenderingPlugin;
 use bevy::render::render_resource::{TextureFormat, TextureUsages};
-use bevy::winit::WinitPlugin;
 use tracing::subscriber::DefaultGuard;
 
 use sl_client_bevy::{
-    ChatLogConfig, ClientDirectories, Command, InventoryCacheConfig, LoginParams, LoginRequest,
-    SlCapabilities, SlClientPlugin, SlCommand, SlEvent, SlSessionEvent, StartLocation,
+    Command, LoginParams, LoginRequest, SlCapabilities, SlCommand, SlEvent, SlSessionEvent,
+    StartLocation,
 };
 use sl_fake_grid::{
     AccountConfig, FakeAgent, FakeGrid, FakeGridBuilder, RegionConfig, RegionFixture,
 };
 
+use crate::assembly::{MediaRuntime, Storage, ViewerAppBuilder, ViewerAppOptions, WindowMode};
 use crate::pixel_oracle::Frame;
 use crate::render_readback::{
     Captured, FRAME, HOLD_FRAMES, PipelineStatusPlugin, Projected, STEP_DURATION, SettleError,
     frames_for, gpu_lock, settle,
 };
 use crate::render_test::{LogCapture, TestError, capture_logs};
-use crate::viewer_camera::viewer_camera_bundle;
-use crate::viewer_plugins::{ViewerInputPlugins, ViewerRenderPlugins, ViewerWorldPlugins};
 use crate::world_api::{CameraMode, ViewerCamera};
 
 /// The account every harness logs in as.
@@ -357,7 +352,7 @@ impl ViewerHarness {
                 "0.0",
             ),
         };
-        let (mut app, captured) = build_viewer_app(params, options);
+        let (mut app, captured) = build_viewer_app(params, options)?;
         // `App::finish` / `cleanup` are what build the render app and publish
         // its `RenderDevice` into the main world; the plain `update` loop this
         // harness drives never calls them on its own, and without them Bevy's
@@ -970,174 +965,56 @@ fn timeout_report(app: &App, logs: &LogCapture, what: &str) -> String {
     )
 }
 
-/// Build the headless viewer: the readback base (no window, no winit, no log,
-/// no render thread), the viewer's own world, input and render groups, the real
-/// client plugin, and a camera rendering into the texture this reads back.
+/// Build the headless viewer: the whole viewer through
+/// [`ViewerAppBuilder`], windowless and with nothing on disk, plus the
+/// readback base and the viewer's own camera retargeted into the texture this
+/// reads back.
 ///
-/// The UI, shell and edit groups are deliberately absent. They own no pixel of
-/// the world this tier looks at, they drag in CEF and the whole floater
-/// scaffold, and the UI tier already covers them under a synthetic pointer.
-fn build_viewer_app(params: LoginParams, options: HarnessOptions) -> (App, Captured) {
-    let mut app = App::new();
-    app.add_plugins(
-        DefaultPlugins
-            .set(WindowPlugin {
-                // Headless: no window at all, and the app must not exit for the
-                // lack of one.
-                primary_window: None,
-                exit_condition: bevy::window::ExitCondition::DontExit,
-                ..default()
-            })
-            // No event loop: the harness drives `update` itself, so the frames
-            // are counted rather than raced.
-            .disable::<WinitPlugin>()
-            // No render thread either: with the render app run inline, one
-            // `update` is exactly one rendered frame and everything the render
-            // world logs lands on this thread's log capture.
-            .disable::<PipelinedRenderingPlugin>()
-            // The harness owns the subscriber (`capture_logs`); two would clash.
-            .disable::<LogPlugin>(),
-    )
-    .add_plugins(ScheduleRunnerPlugin::run_loop(Duration::ZERO))
-    .add_plugins(PipelineStatusPlugin);
-
-    // The render overrides, stated rather than read from the environment: this
-    // is a test, and a developer with `SL_VIEWER_DISABLE_GLOW` exported in their
+/// # Errors
+///
+/// Whatever [`ViewerAppBuilder::build`] refuses; with no capture directory
+/// that is nothing today.
+fn build_viewer_app(
+    params: LoginParams,
+    options: HarnessOptions,
+) -> Result<(App, Captured), TestError> {
+    // The viewer the user runs, through the one assembly the binary uses, with
+    // what a test has no business touching turned off: no window (this harness
+    // steps `update` itself and renders into its readback target), nothing read
+    // from or written to the developer's directories, no speakers, no Chromium
+    // or GStreamer (a test binary has no `sl-cef-helper` beside it to start one
+    // with) — and the render overrides **stated** rather than read from the
+    // environment: a developer with `SL_VIEWER_DISABLE_GLOW` exported in their
     // shell must not get a different answer from CI. The day is pinned so the
     // sky is the same one in every run.
-    let overrides = crate::render_overrides::RenderOverrides {
+    //
+    // The media plugins are still in, engines off: that is enough for the half
+    // of the media path this tier is for — the object update's `MediaURL`
+    // version triggering a `RequestObjectMedia`, the capability's reply, and
+    // the per-face `MediaEntry` set reaching `MediaData`. The other half, a live
+    // surface's placeholder and its first paint, needs a browser process.
+    let mut app_options = ViewerAppOptions::new(params);
+    app_options.window = WindowMode::Windowless;
+    app_options.storage = Storage::Ephemeral;
+    app_options.audio_device = false;
+    app_options.media = MediaRuntime::OFF;
+    app_options.render_overrides = Some(crate::render_overrides::RenderOverrides {
         day_position: options.day_position,
         ..crate::render_overrides::RenderOverrides::default()
-    };
-    app.insert_resource(crate::environment::EnvironmentState::from_overrides(
-        &overrides,
-    ));
-    app.insert_resource(overrides);
-
-    // The login-parameter resources `run_session` inserts before the groups.
-    app.insert_resource(crate::settings::ViewerSettings::declared_for_test(
-        crate::REGISTRARS,
-    ));
-    app.insert_resource(crate::animations::AnimationManager::new());
-    app.init_resource::<crate::camera::CameraStart>();
-
-    // Resources the world and render groups *read* but do not own, whose
-    // owners are in the groups this harness leaves out. Bevy fails a system's
-    // parameter validation on a missing resource, and the message names
-    // neither the system nor the resource without a debug rebuild — so these
-    // are inserted deliberately, in their empty state, rather than discovered
-    // one panic at a time. The same list the fixture world keeps, minus what
-    // the input group brings with it.
-    app.init_resource::<crate::world_api::SelectionSet>();
-    app.init_resource::<crate::world_api::DerenderList>();
-    app.init_resource::<crate::world_api::MatModeState>();
-    app.init_resource::<crate::world_api::EditToolState>();
-    app.init_resource::<crate::social::FriendsModel>();
-    app.init_resource::<sl_viewer_world_avatar::avatar_complexity::AvatarComplexityModel>();
-    app.init_resource::<crate::avatar_render_settings::AvatarRenderSettings>();
-    app.init_resource::<sl_viewer_inventory::inventory::InventoryModel>();
-    // The tracked map destination the in-world beacon draws from, owned by the
-    // map floater.
-    app.init_resource::<crate::social::MapTracking>();
-    // There is no cursor to grab: an unattended run must never reach for the
-    // desktop's pointer, the same reason screenshot mode says `false`.
-    app.insert_resource(crate::input_context::CursorGrabAllowed(false));
-
-    // The message vocabulary the world group writes into, registered wholesale
-    // for the same reason as the resources above: an unregistered `Messages<T>`
-    // fails a system's parameter validation the moment that system runs, which
-    // in a full session is the moment a menu is dispatched or a sound is asked
-    // for — not at startup, where it would be found.
-    app.add_message::<sl_viewer_ui_core::ui_element::UiAction>();
-    app.add_message::<sl_viewer_ui_sounds::ui_sounds::PlayUiSound>();
-    app.add_message::<sl_viewer_notifications::ShowNotification>();
-    app.add_message::<crate::derender::RequestDerender>();
-    app.add_message::<crate::about_land::OpenAboutLand>();
-    app.add_message::<crate::edit_contents::OpenObjectContents>();
-    app.add_message::<crate::avatar_render_settings::RequestRenderException>();
-    app.add_message::<crate::contact_sets_panel::OpenSetPseudonym>();
-    app.add_message::<crate::intents::OpenAvatarProfile>();
-    app.add_message::<crate::intents::OpenConversation>();
-    app.add_message::<crate::intents::OpenAddToContactSet>();
-    app.add_message::<crate::world_api::MediaWorldClick>();
-    app.add_message::<crate::intents::OpenGroupProfile>();
-    app.add_message::<crate::intents::OpenAvatarPicker>();
-    app.add_message::<crate::intents::AvatarPicked>();
-    app.add_message::<crate::intents::OpenTexturePicker>();
-    app.add_message::<crate::intents::TexturePicked>();
-    app.add_message::<crate::intents::OpenWebBrowser>();
-    app.add_message::<crate::intents::BeginTeleportFlow>();
-    app.add_message::<crate::intents::ContentsMutated>();
-    app.add_message::<crate::intents::OpenNotecard>();
-    app.add_message::<crate::intents::OpenScript>();
-    app.add_message::<crate::intents::StartConference>();
-
-    app.add_plugins(SlClientPlugin {
-        params,
-        diagnostics: false,
-        chat_log_config: ChatLogConfig::default(),
-        directories: ClientDirectories::default(),
-        account_dirs: None,
-        inventory_cache_config: InventoryCacheConfig::default(),
-        background_inventory_fetch: false,
-        fetch_server_chat_history: false,
-        offline: false,
-    })
-    .add_plugins(ViewerRenderPlugins::default())
-    .add_plugins(ViewerWorldPlugins::default())
-    .add_plugins(ViewerInputPlugins::without_devices());
-    // The string lookup with no bundles behind it, so every key resolves to
-    // itself. The world group carries `PieMenuPlugin`, whose systems resolve a
-    // slice's `label_key` as the labels are built — so a frame run without a
-    // `Translator` panics on the missing resource. `ViewerI18nPlugin` is the
-    // real thing and is deliberately not here: it would drag the Fluent asset
-    // pipeline and a folder load that finishes some unknown number of frames
-    // later into a tier that counts its frames.
-    sl_viewer_ui_core::i18n::install_untranslated(&mut app);
-    app
-        // Media-on-a-prim, which like the avatar library and the fonts is added by
-        // `run()` and by none of the six groups. Both engines are **off**: with
-        // `enabled: false` the plugin still registers `MediaEngine` /
-        // `MediaSurfaces` and the `Pump` set that `MediaPrimPlugin` schedules
-        // against, but never starts Chromium or GStreamer — and a test binary has
-        // no `sl-cef-helper` beside it to start anyway.
-        //
-        // That is enough for the half of the media path this tier is for: the
-        // object update's `MediaURL` version triggering a `RequestObjectMedia`,
-        // the capability's reply, and the per-face `MediaEntry` set reaching
-        // `MediaData`. The other half — a live surface's placeholder and its first
-        // paint — needs a browser process, and belongs to a rig that has one.
-        .add_plugins(crate::media_engine::MediaEnginePlugin {
-            enabled: false,
-            video_enabled: false,
-        })
-        .add_plugins(crate::media_prim::MediaPrimPlugin)
+    });
+    // The login-time chat history fetch is not what any test here is about,
+    // and the fake grid does not serve the capability.
+    app_options.content.fetch_server_chat_history = false;
+    let mut app = ViewerAppBuilder::from_options(app_options)
+        .build()?
+        .into_app();
+    app.add_plugins(PipelineStatusPlugin)
         .init_resource::<Recorded>()
         .init_resource::<SceneWork>()
         .init_resource::<Captured>()
-        // The bundled font stack. The world's **text** — an object's floating text
-        // and an avatar's name tag — is laid out through the same glyph atlas the
-        // UI is, and the system that installs the faces belongs to the UI group
-        // this harness deliberately leaves out. Without it the world-space text
-        // billboards lay out against a font nothing registered and draw nothing,
-        // which reads as "the tag renderer is broken" rather than as "the fixture
-        // has no font".
-        .add_systems(Startup, crate::ui_font::register_ui_fonts)
         // After the plugin's `(drive, maintain_world)` chain, so a frame's world
         // state and its events are observed together.
         .add_systems(PostUpdate, (record, drain_capabilities, note_scene_work));
-
-    // The system-avatar `character/` assets: the skeleton, the body meshes and
-    // the morph bindings a rigged avatar is built from. Loaded here for the same
-    // reason the fonts above are — the loader belongs to `run_session` rather
-    // than to any of the six plugin groups — and without them **every avatar in
-    // the scene stays a placeholder sphere** (`avatars::spawn_sphere`), which is
-    // not a picture of an avatar at all. Absent (a build with no vendored
-    // `character/` beside it) the tier keeps the spheres, exactly as a session
-    // with a bad `--viewer-assets` does.
-    if let Some(library) = crate::load_avatar_library(crate::default_viewer_assets().as_deref()) {
-        app.insert_resource(library);
-    }
 
     let captured = app.world().resource::<Captured>().clone();
 
@@ -1148,35 +1025,40 @@ fn build_viewer_app(params: LoginParams, options: HarnessOptions) -> (App, Captu
     let target = app.world_mut().resource_mut::<Assets<Image>>().add(target);
 
     let readback_target = target.clone();
-    app.add_systems(Startup, move |mut commands: Commands| {
-        // The viewer's own camera bundle — its exposure, its HDR target, the
-        // `ViewerCamera` marker every world phase reads — aimed into the
-        // readback target instead of at a window that does not exist. A
-        // provisional pose; each test frames its own subject with `look_from`.
-        commands.spawn((
-            viewer_camera_bundle(Transform::from_xyz(128.0, 30.0, -128.0)),
-            crate::world_api::CameraRig::default(),
-            RenderTarget::Image(readback_target.clone().into()),
-            Name::new("full-stack-camera"),
-        ));
-        // The observer is attached to **this** readback entity rather than
-        // registered globally. The full viewer has other readbacks running —
-        // the GPU pick lifts its ID buffer back the same way, and the GPU
-        // avatar pipeline its palettes — and a global `On<ReadbackComplete>`
-        // would drain whichever fired last into the frame slot. The symptom is
-        // not subtle but it is misleading: the buffer is the wrong length for
-        // a 256² frame and the capture reads as "the readback and the render
-        // target disagree about the frame size".
-        commands
-            .spawn(Readback::texture(readback_target.clone()))
-            .observe(
-                move |readback: On<ReadbackComplete>, captured: Res<Captured>| {
-                    captured.set(readback.data.clone());
-                },
-            );
-    });
+    app.add_systems(
+        Startup,
+        (move |mut commands: Commands, camera: Single<Entity, With<ViewerCamera>>| {
+            // The viewer's own camera — its exposure, its HDR target, the
+            // `ViewerCamera` marker every world phase reads — aimed into the
+            // readback target instead of at a window that does not exist. Its
+            // pose is provisional; each test frames its own subject with
+            // `look_from`.
+            commands.entity(*camera).insert((
+                RenderTarget::Image(readback_target.clone().into()),
+                Name::new("full-stack-camera"),
+            ));
+            // The observer is attached to **this** readback entity rather than
+            // registered globally. The full viewer has other readbacks running —
+            // the GPU pick lifts its ID buffer back the same way, and the GPU
+            // avatar pipeline its palettes — and a global `On<ReadbackComplete>`
+            // would drain whichever fired last into the frame slot. The symptom is
+            // not subtle but it is misleading: the buffer is the wrong length for
+            // a 256² frame and the capture reads as "the readback and the render
+            // target disagree about the frame size".
+            commands
+                .spawn(Readback::texture(readback_target.clone()))
+                .observe(
+                    move |readback: On<ReadbackComplete>, captured: Res<Captured>| {
+                        captured.set(readback.data.clone());
+                    },
+                );
+        })
+        // After the builder's `setup_scene` has spawned the camera, and its
+        // commands have been applied.
+        .after(crate::assembly::setup_scene),
+    );
 
-    (app, captured)
+    Ok((app, captured))
 }
 
 #[cfg(test)]
@@ -1321,6 +1203,46 @@ mod tests {
             .into());
         }
         Ok(Silhouette { centre, radius })
+    }
+
+    /// **The harness runs the interface the user runs, not a world without one.**
+    ///
+    /// It is built through the same `ViewerAppBuilder` as the binary, so the
+    /// windows every feature spawns at start-up are there after a login, and a
+    /// test can ask them their state. It used to leave the whole interface out
+    /// and stub what the world read of it, so no test at this tier could say
+    /// anything about what the interface did on arrival — and each new plugin
+    /// was one more stub to discover by a panic.
+    #[test]
+    fn the_harness_runs_the_interface_too() -> Result<(), TestError> {
+        let mut harness = ViewerHarness::start(stock_fixture())?;
+        harness.login()?;
+        let world = harness.app_world_mut();
+        let floaters: Vec<(&'static str, bool)> = world
+            .query::<(&crate::floater::Floater, &Node)>()
+            .iter(world)
+            .map(|(floater, node)| (floater.id, node.display != Display::None))
+            .collect();
+        drop(harness);
+        for id in [
+            "about",
+            "conversations",
+            "inventory",
+            "minimap",
+            "preferences",
+        ] {
+            let Some(&(_, shown)) = floaters.iter().find(|(spawned, _)| *spawned == id) else {
+                return Err(format!(
+                    "no `{id}` floater after login; the spawned ones are {floaters:?}"
+                )
+                .into());
+            };
+            // Nothing asked for any of them, so each is spawned closed.
+            if shown {
+                return Err(format!("the `{id}` floater is open without being asked").into());
+            }
+        }
+        Ok(())
     }
 
     /// **A login renders the ground, the sea and the sky — each in its place.**

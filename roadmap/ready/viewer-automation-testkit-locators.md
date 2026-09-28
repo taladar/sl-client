@@ -2,7 +2,7 @@
 id: viewer-automation-testkit-locators
 title: The in-process tiers speak locators too
 topic: viewer
-status: blocked
+status: ready
 origin: viewer automation design (2026-09-28)
 points: 3
 blocked_by: [viewer-automation-locator-engine, viewer-automation-app-builder]

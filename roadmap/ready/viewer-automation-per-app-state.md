@@ -2,7 +2,7 @@
 id: viewer-automation-per-app-state
 title: Per-App state — two logged-in viewers in one process
 topic: viewer
-status: blocked
+status: ready
 origin: viewer automation design (2026-09-28)
 points: 8
 blocked_by: [viewer-automation-app-builder]

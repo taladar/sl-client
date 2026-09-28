@@ -1,19 +1,20 @@
 //! The viewer's plugin groups: the one definition of which plugins make up the
-//! input layer, the render stack, the world fold and the build tools, shared by
-//! [`crate::run`] and every headless harness that stands up a subset of the
-//! viewer — the readback rig, the fixture world, the full-stack harness against
-//! the fake grid.
+//! interface, the input layer, the render stack, the world fold, the build
+//! tools and the host shell. [`crate::assembly`] assembles all six into the
+//! viewer; the headless harnesses that stand up a subset of it — the readback
+//! rig, the fixture world — take the groups they need.
 //!
 //! A plugin appears in exactly one group. The groups are `Plugin`s rather than
 //! `PluginGroup`s so each registration keeps its comment and its shape from the
 //! viewer's original assembly; consumers add them with `add_plugins` either way.
-//! What is **not** in a group — the UI scaffold and its panels, the session
-//! driver, audio, media, persistence, diagnostics — stays in `run_session`,
-//! because it either needs the login parameters or has no business in a test.
+//! What is **not** in a group — the protocol plugin, the session driver, the
+//! settings store, the capture harness — is the builder's, because it needs the
+//! login parameters or the run's options.
 //!
-//! Order matters in one place: [`ViewerRenderPlugins`] registers
-//! `SlFaceMaterialPlugin`, whose `Assets<FaceMaterial>` the edit plugins'
-//! `FromWorld` resources build against, so it is added before
+//! Order matters in two places: [`ViewerUiPlugins`] comes first, because the
+//! world group's pie menus need its scaffold; and [`ViewerRenderPlugins`]
+//! registers `SlFaceMaterialPlugin`, whose `Assets<FaceMaterial>` the edit
+//! plugins' `FromWorld` resources build against, so it is added before
 //! [`ViewerEditPlugins`].
 //!
 //! # These are groups, not schedules
@@ -31,6 +32,7 @@
 
 use bevy::app::{HierarchyPropagatePlugin, PropagateSet};
 use bevy::camera::visibility::{RenderLayers, VisibilitySystems};
+use bevy::diagnostic::{EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin};
 use bevy::light::DirectionalLightShadowMap;
 use bevy::prelude::*;
 use sl_client_bevy::{
@@ -38,28 +40,78 @@ use sl_client_bevy::{
     TerrainMaterialPlugin, WaterMaterialPlugin,
 };
 
+use crate::about_floater::AboutFloaterPlugin;
+use crate::about_land::AboutLandPlugin;
+use crate::about_landmark::AboutLandmarkPlugin;
+use crate::about_region::AboutRegionPlugin;
+use crate::assembly::MediaRuntime;
+use crate::asset_blacklist::AssetBlacklistPlugin;
 use crate::attachment_menu::AttachmentMenuPlugin;
 use crate::avatar_menu::AvatarMenuPlugin;
+use crate::avatar_picker::AvatarPickerPlugin;
+use crate::avatar_profile::AvatarProfilePlugin;
+use crate::blocked::BlockedPlugin;
 use crate::camera::CameraPlugin;
+use crate::chat_input::ChatInputPlugin;
+use crate::conversations::ConversationsPlugin;
+use crate::derender::DerenderPlugin;
 use crate::edit_selection::EditSelectionPlugin;
 use crate::edit_tool::EditToolPlugin;
+use crate::emoji_complete::ColonCompletePlugin;
+use crate::emoji_picker::EmojiPickerPlugin;
+use crate::experience_log::ExperienceLogPlugin;
+use crate::experience_permission::ExperiencePermissionPlugin;
+use crate::experience_picker::ExperiencePickerPlugin;
+use crate::experience_profile::ExperienceProfilePlugin;
+use crate::experiences_floater::ExperiencesPlugin;
 use crate::exposure::SlExposurePlugin;
+use crate::floater::FloaterPlugin;
+use crate::floater_persist::FloaterPersistPlugin;
 use crate::gizmos::EditGizmoPlugin;
 use crate::glow::SlGlowPlugin;
+use crate::group_notice::GroupNoticePlugin;
+use crate::group_picker::GroupPickerPlugin;
+use crate::group_profile::GroupProfilePlugin;
+use crate::groups::GroupsPlugin;
 use crate::hud_pick::pick_and_touch;
+use crate::i18n::ViewerI18nPlugin;
 use crate::input_action::InputActionPlugin;
 use crate::input_context::InputContextPlugin;
+use crate::inventory::InventoryPlugin;
+use crate::inventory_actions::InventoryActionsPlugin;
+use crate::inventory_drag::InventoryDragPlugin;
+use crate::inventory_filters::InventoryFiltersPlugin;
+use crate::inventory_gallery::InventoryGalleryPlugin;
+use crate::inventory_properties::InventoryPropertiesPlugin;
 use crate::land_menu::LandMenuPlugin;
+use crate::load_url::LoadUrlPlugin;
+use crate::local_chat_input::LocalChatInputPlugin;
+use crate::nearby_chat_bar::NearbyChatBarPlugin;
+use crate::notification_host::{NotificationHostPlugin, NotificationSourcesPlugin};
+use crate::notification_persist::NotificationPersistPlugin;
 use crate::object_menu::ObjectMenuPlugin;
+use crate::offers_invites::OffersInvitesPlugin;
 use crate::particle_render::{ParticleRenderPlugin, setup_particle_quad};
+use crate::people::PeoplePlugin;
 use crate::physics::PhysicsPlugin;
 use crate::pie_menu::PieMenuPlugin;
 use crate::probes::ReflectionProbePlugin;
 use crate::resolution_divisor::ResolutionDivisorPlugin;
+use crate::script_dialog::ScriptDialogPlugin;
+use crate::script_permission::ScriptPermissionPlugin;
+use crate::settings::SettingsPersistPlugin;
+use crate::settings_binding::SettingsBindingPlugin;
+use crate::settings_index::SettingsIndexPlugin;
 use crate::sit_camera::SitCameraPlugin;
 use crate::spacenav::{DeviceRead, SpacenavPlugin};
+use crate::stand_stop_button::StandStopButtonPlugin;
 use crate::tonemap::SlTonemapPlugin;
+use crate::ui::ViewerUiPlugin;
+use crate::ui_tab::TabWidgetPlugin;
+use crate::ui_table::TableWidgetPlugin;
+use crate::ui_text_input::TextInputPlugin;
 use crate::underwater_fog::UnderwaterFogPlugin;
+use crate::virtual_list::VirtualListPlugin;
 
 /// Input focus and actions, the camera, avatar movement, the sit camera and the
 /// SpaceNavigator: what turns keys, mouse and devices into world intent.
@@ -71,10 +123,10 @@ pub(crate) struct ViewerInputPlugins {
 
 impl ViewerInputPlugins {
     /// The input fold with the 6-DOF **device read** left out — the headless
-    /// fixture world's configuration. Every other input seam is driven through
-    /// a window message the harness writes; the SpaceNavigator alone is read
-    /// straight off the machine, so a fixture world keeps only the ECS half.
-    #[cfg(test)]
+    /// fixture world's configuration, and a windowless viewer's. Every other
+    /// input seam is driven through a window message the harness writes; the
+    /// SpaceNavigator alone is read straight off the machine, so a viewer that
+    /// must not answer the machine's input keeps only the ECS half.
     pub(crate) const fn without_devices() -> Self {
         Self {
             spacenav: DeviceRead::None,
@@ -499,5 +551,578 @@ impl Plugin for ViewerEditPlugins {
         // Object-edit undo / redo (viewer-build-undo-redo): Ctrl+Z / Ctrl+Y and
         // the Build menu, sending the server-side Undo / Redo for the selection.
         app.add_plugins(crate::edit_undo::EditUndoPlugin);
+    }
+}
+
+/// The interface and every feature surface: the UI scaffold, skin and i18n,
+/// the widgets, the floater manager and every window it hosts, the menus, the
+/// toolbars, the notification host and its toasts, the chat, social, inventory,
+/// places, environment, RLV, preferences and media surfaces, and the features
+/// whose state those windows show. Everything here is logic and layout; what
+/// touches the host machine is [`ViewerShellPlugins`].
+///
+/// Added **before** the other groups: [`ViewerWorldPlugins`]' pie menus need
+/// the scaffold, and a few plugins here add a widget plugin its later users
+/// only add when it is missing (the trackball, the combo, the text input).
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct ViewerUiPlugins;
+
+impl Plugin for ViewerUiPlugins {
+    fn build(&self, app: &mut App) {
+        app
+            // The viewer UI scaffold (viewer-ui-widget-scaffold): the `bevy_ui` +
+            // `bevy_ui_widgets` + `bevy_input_focus` bring-up, the one `UiRoot` every
+            // panel parents itself to, tab navigation, the bundled font stack, and the
+            // direction-neutral / content-driven layout conventions the whole UI cluster
+            // inherits.
+            .add_plugins(ViewerUiPlugin)
+            // The UI skin / design-token system (viewer-ui-skin-tokens): stands up the
+            // `bevy_flair` CSS engine, registers the logical box / corner properties (so
+            // skins author `margin-inline-start`, never physical `left`), and dresses the
+            // `UiRoot` in the selected skin's hot-reloadable `.css` tokens. After
+            // `ViewerUiPlugin` so the `UiRoot` it styles already exists.
+            .add_plugins(crate::skin::ViewerSkinPlugin)
+            .add_plugins(crate::skin_colors::SkinColorsPlugin)
+            // The i18n foundation (viewer-i18n-fluent-scaffold): Project Fluent `.ftl`
+            // bundles behind Bevy assets with runtime locale switching, the `Translator`
+            // string-lookup API (typed named arguments → per-locale plural / gender), and
+            // the `UiLocale` resource carrying the locale's LTR/RTL direction and
+            // typographic conventions (the tab widget's truncation ellipsis). Ahead of
+            // every UI-bearing panel so panels are authored translatable from day one.
+            .add_plugins(ViewerI18nPlugin)
+            // The reusable tab widget's runtime half (viewer-ui-tab-widget): reflects a
+            // resizable strip's persisted / dragged width onto its node.
+            .add_plugins(TabWidgetPlugin)
+            // The reusable table widget's runtime half (viewer-ui-table-widget): column
+            // width sync + resize, locale-ellipsis reveal, sort-arrow drive, and the
+            // per-table sort / column-width settings seed + persist.
+            .add_plugins(TableWidgetPlugin)
+            // The reusable clickable name-link widget (viewer-clickable-name-widgets):
+            // resolves an avatar / group / owner name against the caches, keeps the
+            // label + link tint in step, and opens the right profile on click.
+            .add_plugins(crate::ui_name_link::NameLinkPlugin)
+            // The shared URL-linkification widget (viewer-url-linkification): renders text
+            // with clickable http(s) / SLURL / secondlife:///app links, resolves agent /
+            // group / parcel names in place, shows the target URL on hover, and opens web
+            // links. The parcel-name cache feeds the parcel-link labels.
+            .add_plugins(crate::parcel_names::ParcelNamesPlugin)
+            .add_plugins(crate::linkified_text::LinkifiedTextPlugin)
+            // Routes a clicked / command-line SLURL to its handler (profile, IM,
+            // teleport, world map): viewer-slurl-parse-dispatch.
+            .add_plugins(crate::slurl_dispatch::SlurlDispatchPlugin)
+            // The self-dismissing avatar / object inspector mini-popups opened from a
+            // clicked `.../inspect` / objectim link: viewer-inspector-popups.
+            .add_plugins(crate::inspector_popup::InspectorPopupPlugin)
+            // The reusable radio-widget's runtime half (viewer-ui-radio-widget): keeps
+            // each option's `Checked` marker and indicator glyph reconciled to the
+            // group's selection, so a click and an external write (the Build Tools
+            // floater's tool sync) drive the same visual path.
+            .add_plugins(crate::ui_radio::RadioWidgetPlugin)
+            // The sun / moon trackball's drawing half (viewer-ui-virtual-trackball):
+            // places each marker from the aim its window wrote and paints the
+            // below-horizon state. The environment editors' `RowsPlugin` adds it too,
+            // guarded, so a host that takes only those windows still draws them.
+            .add_plugins(crate::ui_trackball::TrackballPlugin)
+            // The reusable combo / dropdown widget (viewer-ui-combo-widget): the closed
+            // value reconcile, the ComboChanged message, and the outside-press dismiss.
+            .add_plugins(crate::ui_combo::ComboWidgetPlugin)
+            // The reusable colour-picker floater + swatch (viewer-ui-color-picker): the
+            // OpenColorPicker / ColorPicked messages, the RGB-slider floater, and the
+            // swatch fill reconcile.
+            .add_plugins(crate::ui_color_picker::ColorPickerPlugin)
+            // The reusable texture-picker floater + swatch (viewer-ui-texture-picker):
+            // the OpenTexturePicker / TexturePicked messages, the inventory thumbnail
+            // grid floater, and the swatch thumbnail reconcile.
+            .add_plugins(crate::ui_texture_picker::TexturePickerPlugin)
+            // The reusable text-input widget's runtime half (viewer-ui-text-input-widget):
+            // the whole-string numeric validator that reverts a field to its last valid
+            // value when an edit makes it structurally invalid (a second '.', a misplaced
+            // '-') — the part `EditableTextFilter`'s per-character check cannot express.
+            .add_plugins(TextInputPlugin)
+            // The reusable search-field widget's runtime half (viewer-ui-search-field):
+            // the clear-button / placeholder visibility and clear-on-Escape, shared by the
+            // menu-bar and inventory search boxes.
+            .add_plugins(crate::ui_search::SearchFieldPlugin)
+            // The two-way widget↔settings binding (viewer-ui-settings-binding): the
+            // `control_name=` idiom — a checkbox / slider names the setting it edits and
+            // the store and widget are kept in sync both ways. Also owns the `F7` demo.
+            .add_plugins(SettingsBindingPlugin)
+            // The Stand Up / Stop flycam state button in the bottom toolbar's reserved
+            // slot (viewer-sit-target-and-stand-button): Stand while seated, Stop flycam
+            // while in flycam.
+            .add_plugins(StandStopButtonPlugin)
+            // The Spawn crowd debug button (SL_VIEWER_CROWD): only present while a
+            // synthetic crowd is armed, hands the user the manual capture trigger.
+            .add_plugins(crate::crowd_debug_button::CrowdDebugButtonPlugin)
+            .add_plugins(crate::teleport_progress::TeleportProgressPlugin)
+            .add_plugins(crate::double_click_teleport::DoubleClickTeleportPlugin)
+            // The line-based menu widget (viewer-ui-context-menu) + reusable menu bar
+            // (viewer-ui-menu-bar): drop-down / context menus and the strip of buttons
+            // that open them, built on `bevy_ui_widgets`' headless menu machinery. The
+            // mechanism only — which entries a menu holds is per-domain (the live top
+            // bar is `crate::menu_bar`, gear menus belong to their window).
+            .add_plugins(crate::menu::MenuWidgetPlugin)
+            // The virtualized (windowed-recycling) list widget (viewer-ui-virtualized-list):
+            // a bounded row pool that recycles as the viewport scrolls, so a long panel
+            // (inventory, radar, chat at scale) costs the viewport, not the item count.
+            .add_plugins(VirtualListPlugin)
+            // The floater window manager (viewer-ui-floater-basic / -resize-dock): the
+            // draggable, raise-on-click, closable title-bar window — plus resize, minimize
+            // and dock / tear-off — every panel hangs off. Spawns a trailing-edge dock host.
+            // The inventory window (below) is its first live consumer.
+            .add_plugins(FloaterPlugin)
+            // The inventory window (viewer-inventory-folder-tree / -outfit-tab /
+            // -search-filter): the folder tree, the Everything / Recent / Worn tabs and the
+            // search bar, on the high-level inventory bridge, toggled with `Ctrl+I`. Hosted
+            // in a floater, so it drags / resizes / minimizes / docks.
+            .add_plugins(InventoryPlugin)
+            .add_plugins(InventoryActionsPlugin)
+            .add_plugins(InventoryDragPlugin)
+            .add_plugins(InventoryFiltersPlugin)
+            .add_plugins(InventoryGalleryPlugin)
+            .add_plugins(InventoryPropertiesPlugin)
+            // The settings-asset index (viewer-environment-settings-index): every sky /
+            // water / day-cycle item the mirror holds, grouped by kind and addressable
+            // by name — what `@setenv_preset:<name>` resolves against, and what the
+            // environment pickers list. Needs InventoryPlugin's model, so it follows it.
+            .add_plugins(SettingsIndexPlugin)
+            .add_plugins(AboutLandmarkPlugin)
+            .add_plugins(AvatarPickerPlugin)
+            // The group picker (viewer-region-estate-group-picker): the chooser behind
+            // every set-group control — About Land's group, the build tool's, and the
+            // estate's allowed-groups Add. Lists the agent's memberships (GroupsModel,
+            // whose GroupsPlugin follows) and, where the caller can use one, searches
+            // the directory for a group the agent is not in.
+            .add_plugins(GroupPickerPlugin)
+            // The avatar profile floater (viewer-social-profiles): 2nd Life / Web /
+            // Picks / Classifieds / 1st Life / Notes, opened from the avatar pie's
+            // Profile slice and the People list, editable for one's own profile.
+            .add_plugins(AvatarProfilePlugin)
+            // The embedded-browser UI widget (LLMediaCtrl): surface-backed image
+            // nodes with click-to-focus pointer / keyboard routing.
+            .add_plugins(crate::browser_widget::BrowserWidgetPlugin)
+            // The in-viewer web browser floater (floater_web_content): navigation
+            // toolbar + browser view + status row, opened from Content ▸ Web Browser.
+            .add_plugins(crate::web_floater::WebFloaterPlugin)
+            // The minimap ("net map") floater: terrain / object / parcel layers,
+            // avatar dots, frustum wedge, double-click teleport and context menu.
+            .add_plugins(crate::minimap::MinimapPlugin)
+            // The world-map floater: grid-wide tile imagery (shared sl-map-apis
+            // fetch / cache), per-region info + item markers, region-name search.
+            .add_plugins(crate::world_map::WorldMapPlugin)
+            // The Search floater: the protocol-backed legacy directory search
+            // (people / groups / events / places / land / classifieds).
+            .add_plugins(crate::search::SearchFloaterPlugin)
+            // Media-on-a-prim (LLViewerMedia / LLViewerMediaFocus): ObjectMedia data
+            // driving per-face surfaces, world input routing and the focus model.
+            .add_plugins(crate::media_prim::MediaPrimPlugin)
+            // The floating media controls bar above the media face under the cursor
+            // (LLPanelPrimMediaControls).
+            .add_plugins(crate::media_controls::MediaControlsPlugin)
+            // The Nearby Media window (LLPanelNearByMedia): the parcel stream and every
+            // media face around the agent, each with its own controls.
+            .add_plugins(crate::nearby_media::NearbyMediaPlugin)
+            // Parcel streaming audio (viewer-streaming-audio): the GStreamer radio
+            // stream following the agent's parcel, with its bottom-bar controls.
+            .add_plugins(crate::parcel_audio::ParcelAudioPlugin)
+            .add_plugins(crate::volume_panel::VolumePanelPlugin)
+            // The emoji-picker floater (viewer-emoji-picker-floater): a grouped,
+            // searchable grid of emoji in a floater, toggled with `Ctrl+E`; clicking a
+            // glyph inserts it into the text field the picker last saw focused. On the
+            // emoji dataset (`sl-emoji`), the search-field / tab / virtualized-list
+            // widgets and the floater manager. After the floater plugin (its host) and
+            // the inventory plugin (a search-field consumer it shares systems with).
+            .add_plugins(EmojiPickerPlugin)
+            // The inline `:`-emoji completer (viewer-emoji-colon-autocomplete): a popup of
+            // matching short-codes on a field's trailing `:token`. Defines the
+            // `ColonCompleteSet` the chat input's Enter-to-send orders after.
+            .add_plugins(ColonCompletePlugin)
+            // The reusable chat-input widget (viewer-ui-text-input-emoji): a single-line
+            // field with an emoji button (opens the picker for it) and the `:`-completer,
+            // emitting a submit event. The base every chat surface is built on.
+            .add_plugins(ChatInputPlugin)
+            // The reusable local-chat-input widget (viewer-chat-channel-and-commands): the
+            // chat input plus a whisper/say/shout select box, `/N` channel routing,
+            // Shift/Ctrl+Enter volume overrides and the `/command` registry. Emits a
+            // structured submission; the live nearby-chat bar and conversations floater
+            // (each a follow-up) are its consumers.
+            .add_plugins(LocalChatInputPlugin)
+            // The live top menu bar (viewer-ui-menu-bar): the strip of pull-down menu
+            // names at the top of the screen, on `crate::menu`'s widget. After the
+            // inventory plugin so the Avatar ▸ Inventory entry can toggle its window.
+            .add_plugins(crate::menu_bar::TopMenuBarPlugin)
+            // Menu search (viewer-ui-menu-search): a text field in the bar (after the last
+            // menu) whose term drives `crate::menu`'s `MenuFilter`, so opening a menu shows
+            // only the matching entries. After the top-menu plugin, which spawns the field.
+            .add_plugins(crate::menu_search::MenuSearchPlugin)
+            // The status area (viewer-ui-status-bar): the parcel permission icons,
+            // region / parcel / position, L$ balance, SLT time and FPS read-outs that
+            // share the top row, hugging its trailing edge next to the menu bar.
+            .add_plugins(crate::status_bar::StatusBarPlugin)
+            // The toast / notification host (viewer-ui-notification-host): the screen
+            // channel that stacks, times out, fades and dismisses transient
+            // notifications from the declarative catalogue, plus the modal-alert scrim —
+            // the shared substrate the specific dialogs sit in.
+            .add_plugins(NotificationHostPlugin)
+            // The live sources that raise into it — simulator alerts, failed commands,
+            // protocol diagnostics and the demo spread. A separate plugin because all
+            // of them read the session, which the host deliberately does not (so the
+            // login-free gallery can still host toast specimens).
+            .add_plugins(NotificationSourcesPlugin)
+            // The bottom toolbar (viewer-ui-bottom-toolbar): the persistent strip of
+            // toggle buttons that open the main floaters (Inventory wired today, the rest
+            // disabled placeholders until their tasks land), and the bottom-area layout
+            // host the nearby-chat / audio / voice / quick-preferences controls hang off.
+            // After the inventory plugin so its Inventory toggle can reach the window.
+            .add_plugins(crate::bottom_toolbar::BottomToolbarPlugin)
+            // The live nearby-chat bar (viewer-chat-input-bar): the local-chat-input
+            // widget placed in the bottom-area upper stack (above the button bar), sending
+            // its LocalChatSubmit as Command::Chat, driving the typing animation, and
+            // focused by Enter. The bottom toolbar's leading chat button toggles it. After
+            // the toolbar (whose BottomArea it fills) and the local-chat-input plugin.
+            .add_plugins(NearbyChatBarPlugin)
+            // The Conversations floater (viewer-social-im-conversations): one window with
+            // vertical tabs for nearby chat, 1:1 IMs, group chats and conferences, each a
+            // transcript pane plus its chat input. After the chat-input / local-chat-input
+            // plugins whose widgets it hosts, and the floater manager.
+            .add_plugins(ConversationsPlugin)
+            // The People / Contacts surface (viewer-social-people-panel): the Friends
+            // list hosted as a pinned tab inside the Conversations floater. After
+            // ConversationsPlugin, whose strip / panel area it adds its tab and pane into.
+            .add_plugins(PeoplePlugin)
+            .add_plugins(crate::radar::RadarPlugin)
+            // The Groups list (viewer-social-groups): the member's own groups, built into
+            // the Groups sub-tab of the People pane. After PeoplePlugin, whose Groups
+            // content slot it fills.
+            .add_plugins(GroupsPlugin)
+            // The Blocked Residents & Objects list (viewer-block-list): the mute list
+            // built into the Blocked sub-tab of the People pane, plus the by-name block
+            // floater. After PeoplePlugin, whose Blocked content slot it fills.
+            .add_plugins(BlockedPlugin)
+            // Contact sets (viewer-contact-sets): the client-side named, coloured groups
+            // of residents, their per-account store, and the Contact Sets sub-tab of the
+            // People pane (plus the add-to-set and set-settings floaters). After
+            // PeoplePlugin, whose Contact Sets content slot the panel fills.
+            .add_plugins(crate::contact_sets::ContactSetsPlugin)
+            .add_plugins(crate::contact_sets_panel::ContactSetsPanelPlugin)
+            // Avatar complexity limiting (viewer-avatar-complexity-limit): score what each
+            // nearby avatar costs to draw and, past the budget, draw them as a flat
+            // jellydoll instead of their attachments. Its systems bracket the scene mirror
+            // and the avatar bake / visibility passes through explicit edges.
+            .add_plugins(crate::avatar_complexity::AvatarComplexityPlugin)
+            // The standing per-avatar render exceptions
+            // (viewer-avatar-render-settings-manager): the persisted "always draw this
+            // person in full" / "never draw them in full" decisions the complexity
+            // limit obeys above its own rules, and the floater that manages them.
+            // Before AvatarComplexityPlugin's mirror by explicit edge.
+            .add_plugins(crate::avatar_render_settings::AvatarRenderSettingsPlugin)
+            .add_plugins(crate::avatar_render_floater::AvatarRenderFloaterPlugin)
+            // Derender + asset blacklist (viewer-derender-blacklist): the client-side
+            // suppression of an object / avatar the user does not want to see, its
+            // per-avatar persisted blacklist, and the scene purge. Its systems bracket
+            // the scene mirror (before the ingest, after the fold) via explicit edges.
+            .add_plugins(DerenderPlugin)
+            // The Asset Blacklist floater (viewer-derender-blacklist): the list of what
+            // this avatar has derendered, with Re-render / Clear temporary. After
+            // DerenderPlugin, whose list it presents.
+            .add_plugins(AssetBlacklistPlugin)
+            // The RLVa control surface (viewer-rlva-floaters-toggles): the console,
+            // the restrictions / locks / strings windows, and the RLVa menu's toggles.
+            // They read the one RlvSession the world-API tier holds, so they can go
+            // anywhere after it is initialised.
+            // The environment editors (viewer-environment-personal-lighting): the
+            // Personal Lighting window and the local sky / water override it writes.
+            // After the environment state exists, which the scene tier initialises.
+            .add_plugins(sl_viewer_environment::EnvironmentUiPlugins)
+            .add_plugins(sl_viewer_rlv::RlvUiPlugins)
+            // The RLV command intake (viewer-rlv-command-intake): the owner-say gate a
+            // worn collar speaks through, the one seam every `@get*` / `@notify` answer
+            // is shouted back by, and the pass that lifts a vanished object's
+            // restrictions. Separate from the windows above because it is the wiring
+            // that makes the engine reachable at all rather than a surface that draws
+            // it; after them, since it fills the console they show.
+            .add_plugins(sl_viewer_rlv::intake::RlvIntakePlugin)
+            .add_plugins(GroupProfilePlugin)
+            // The group-notice toast host (viewer-group-notice-display): pops a card —
+            // group image, subject, body and any attached item — when a group posts a
+            // notice, mirroring the reference LLToastGroupNotifyPanel. After
+            // GroupProfilePlugin (whose RequestedGroupNotices it reads to suppress a
+            // toast for a notice the Notices tab pulled up itself) and GroupsPlugin
+            // (whose membership insignia it shows).
+            .add_plugins(GroupNoticePlugin)
+            // The script-dialog toast host (viewer-dialog-lldialog): pops a card — object
+            // / owner title, message, and a button grid or a text field — when a scripted
+            // object calls llDialog / llTextBox, wiring the reply on the hidden chat
+            // channel (Command::ReplyScriptDialog). After NotificationHostPlugin, whose
+            // shared channel it adopts its card into.
+            .add_plugins(ScriptDialogPlugin)
+            // The script web-page request toast host (viewer-dialog-script-load-url):
+            // pops a card — heading, object / owner title, message and the target URL —
+            // when a scripted object calls llLoadURL (the LoadURL message), with Load
+            // (open the URL in the embedded browser), Block (mute) and Ignore actions.
+            // After NotificationHostPlugin (whose shared channel it adopts its card into)
+            // and WebFloaterPlugin (whose OpenWebBrowser message Load writes).
+            .add_plugins(LoadUrlPlugin)
+            // The script permission-request toast host (viewer-permission-request-dialog):
+            // pops a card — object / owner, the requested permission bits, Yes / No /
+            // Block (or the money-access caution card with Allow access / Deny) — when a
+            // scripted object calls llRequestPermissions (the ScriptQuestion message),
+            // wiring the grant / deny reply (Command::AnswerScriptPermissions). After
+            // NotificationHostPlugin, whose shared channel it adopts its card into.
+            .add_plugins(ScriptPermissionPlugin)
+            // The experience-acceptance toast host (viewer-experience-permission-dialog):
+            // pops the reference ScriptQuestionExperience card — object / owner, the
+            // experience name / scope, the requested permission bits, Yes / No / Block
+            // Experience / Block Object — when a scripted object requests to run under an
+            // experience (a ScriptQuestion carrying an Experience id), admitting or
+            // blocking the experience (Command::SetExperiencePermission) alongside the
+            // grant / deny reply. After ScriptPermissionPlugin (which skips the experience
+            // requests this host owns) and NotificationHostPlugin (whose shared channel it
+            // adopts its card into).
+            .add_plugins(ExperiencePermissionPlugin)
+            // The Experiences floater (viewer-experiences-floater): the manage surface's
+            // seven tabs -- search, the agent's allowed / blocked / admin / contributor
+            // / owned lists, and the event log -- over the experience caps. After
+            // FloaterPlugin, whose spawn_floater it builds on.
+            .add_plugins(ExperiencesPlugin)
+            // One experience's own page (viewer-experiences-floater): a keyed window per
+            // experience, carrying the metadata, the allow / forget / block actions and
+            // -- for an administrator -- the editable fields. After ExperiencesPlugin,
+            // whose lists and search results open it.
+            .add_plugins(ExperienceProfilePlugin)
+            // The reusable "Choose Experience" picker (viewer-region-experiences-panel):
+            // the window every estate experience list's Add opens, answering an
+            // OpenExperiencePicker with an ExperiencePicked. After ExperiencesPlugin,
+            // whose persisted search-rating setting it shares, and ExperienceProfilePlugin,
+            // whose window its View Profile button opens.
+            .add_plugins(ExperiencePickerPlugin)
+            // The experience event log (viewer-experience-event-stream): the per-account
+            // record of what the experiences the agent joined actually did to them, the
+            // only signal in the protocol that reports an experience attachment, and the
+            // producer of the ExperienceEvent / ExperienceEventAttachment toasts. Before
+            // ExperiencesPlugin would read it is unnecessary -- the floater's Events
+            // section reads the resource, which exists from plugin build.
+            .add_plugins(ExperienceLogPlugin)
+            // The offers & invites toast host (viewer-dialog-offers-invites): pops an
+            // accept / decline card when the grid throws an inventory offer, a teleport
+            // lure, a friendship offer or a group-membership invitation over IM, wiring
+            // each to its protocol reply (AcceptInventoryOffer / AcceptTeleportLure /
+            // AcceptFriendship / AcceptGroupInvitation and the matching declines). After
+            // NotificationHostPlugin, whose shared channel it adopts its card into, and
+            // InventoryPlugin, whose folders the accept replies file into.
+            .add_plugins(OffersInvitesPlugin)
+            // The friendship-offer path (viewer-add-friend-offers-silently): the one
+            // prompted way an Add Friend affordance — the avatar pie, the radar, the
+            // minimap, the profile, the inspector, search, a secondlife:///…/requestfriend
+            // link — reaches the wire, asking for the offer's message the way the
+            // reference's AddFriendWithMessage dialog does, refusing self-friendship and
+            // confirming what was sent. After NotificationHostPlugin, whose dialog it
+            // raises and whose answer it reads.
+            .add_plugins(crate::add_friend::AddFriendPlugin)
+            // The presence modes (viewer-do-not-disturb-away): Away / auto-AFK, Do Not
+            // Disturb and the two autorespond modes, their signalled-animation wire
+            // writes, and the canned IM replies they send. After the conversations
+            // plugin, whose ingest the auto-reply orders itself ahead of.
+            .add_plugins(crate::presence::PresencePlugin)
+            // The About Land floater (viewer-parcel-options-general): the parcel's
+            // General / Covenant / Objects tabs. Subject-bound, persistence-exempt;
+            // opened from the top-bar location read-out and the land pie.
+            .add_plugins(AboutLandPlugin)
+            // The Region / Estate floater (viewer-region-options-debug / -general /
+            // -terrain / -estate): the region-and-estate info surface. Bound to the
+            // current region, persistence-exempt; opened from the World menu.
+            .add_plugins(AboutFloaterPlugin)
+            .add_plugins(AboutRegionPlugin)
+            // The snapshot floater (viewer-snapshot-floater): a framed live world preview
+            // (a second off-screen camera into an image) with resolution / format
+            // selection and a save-to-disk destination that echoes the path to chat.
+            // Opened from the bottom toolbar's Snapshot button.
+            .add_plugins(crate::snapshot_floater::SnapshotFloaterPlugin)
+            // The 360-degree snapshot floater (viewer-360-snapshot): a capture renderer
+            // of its own -- six cube-map faces shot from the camera's eye point with the
+            // viewer camera itself, reprojected into an equirectangular panorama and
+            // written with the GPano metadata that makes it open as a sphere. Opened
+            // from World > Photo and Video.
+            .add_plugins(crate::panorama::PanoramaPlugin)
+            // The Preferences floater shell (viewer-preferences-floater): the tabbed
+            // settings window over the typed store — snapshot on open, revert on
+            // Cancel / close, persist on OK, with the cross-tab search filter. The
+            // per-tab tasks plug their panels into its registry. After FloaterPlugin,
+            // whose spawn_floater and deferred-content build it rides.
+            .add_plugins(crate::preferences::PreferencesPlugin)
+            // The raw debug-settings editor (viewer-preferences-debug-settings-editor):
+            // a separate floater over *every* registered setting — searchable list,
+            // per-kind detail editor, per-scope override editing. Live edits, no
+            // OK / Cancel snapshot. After FloaterPlugin, whose spawn_floater and
+            // deferred-content build it rides.
+            .add_plugins(crate::debug_settings::DebugSettingsPlugin)
+            // The Quick Preferences panel (viewer-quick-preferences): the small
+            // bottom-right floater of the settings reached-for hourly (draw distance,
+            // particle cap, environment preset + time of day), a curated view over the
+            // typed store. Opened from a gear button in the bottom toolbar's trailing
+            // area. After FloaterPlugin (its spawn_floater / deferred-content build) and
+            // the bottom toolbar (its BottomArea host).
+            .add_plugins(crate::quick_preferences::QuickPreferencesPlugin)
+            .add_plugins(crate::quick_prefs_environment::QuickPrefsEnvironmentPlugin)
+            // Phototools (viewer-phototools): the photographer's window — the
+            // environment on one tab and the render knobs that change the *look* on the
+            // others, a second curated view over the same store the graphics tab binds.
+            // Opened from World ▸ Photo and Video ▸ Phototools (Alt+P).
+            .add_plugins(crate::phototools::PhototoolsPlugin)
+            // The alerts tab's popup list (viewer-preferences-alerts-tab): the model
+            // refresh, row pool and binding behind the panel build_alerts_tab plugs
+            // into the shell's registry.
+            .add_plugins(crate::preferences_alerts::PreferencesAlertsPlugin)
+            // The general tab's appliers (viewer-preferences-general-tab): the live
+            // UI-scale write and the maturity-preference server conversation behind
+            // the panel build_general_tab plugs into the shell's registry.
+            .add_plugins(crate::preferences_general::PreferencesGeneralPlugin)
+            .add_plugins(crate::preferences_graphics::PreferencesGraphicsPlugin)
+            // The audio tab's live output-device re-enumeration
+            // (viewer-preferences-audio-tab); the tab content itself plugs into the
+            // shell's registry.
+            .add_plugins(crate::preferences_audio::PreferencesAudioPlugin)
+            // The chat / IM + privacy tab's runtime side
+            // (viewer-preferences-chat-privacy-tab): the login-time chat-log
+            // configuration push, the `UserInfo` request / seed pair, and the per-OK
+            // apply hook; the tab content itself plugs into the shell's registry.
+            .add_plugins(crate::preferences_chat::PreferencesChatPlugin)
+            // The camera & movement tab's runtime side
+            // (viewer-preferences-camera-move-tab): the per-frame CameraTuning /
+            // MovementTuning refreshes and the field-of-view / mouselook-avatar
+            // appliers; the tab content itself plugs into the shell's registry.
+            .add_plugins(crate::preferences_camera_move::PreferencesCameraMovePlugin)
+            .add_plugins(crate::preferences_colors_skins::PreferencesColorsSkinsPlugin)
+            .add_plugins(crate::preferences_network_cache::PreferencesNetworkCachePlugin)
+            // In-world hover tooltips over objects / avatars / land (viewer-hover-tooltips).
+            .add_plugins(crate::hover_tooltip::HoverTooltipPlugin)
+            // The `F3` pipeline-status overlay and the asset-store statistics it and the
+            // Tracy plots read.
+            .add_plugins((
+                crate::diagnostics::PipelineOverlayPlugin,
+                crate::asset_stats::AssetStatsPlugin,
+                crate::avatar_asset_stats::AvatarAssetStatsPlugin,
+            ))
+            // Gate bevy_ui's unconditional full-tree stack rebuild and layout walk
+            // behind "did any of that system's inputs actually change (visibly)"
+            // (viewer-perf-ui-layout-per-frame-relayout), and bring the env-gated
+            // skip-rate meter that says whether the gate is behaving with it.
+            // `SL_VIEWER_LOG_UI_DIRTY=1` names what tripped it per frame.
+            .add_plugins(crate::ui_perf::UiLayoutGatePlugin)
+            // The on-screen nearby-chat overlay, and the two demo panels the
+            // screenshot harness captures (`SL_VIEWER_TEXT_DEMO`, F4;
+            // `SL_VIEWER_TEXT_INPUT_DEMO`, F8).
+            .add_plugins((
+                crate::chat::ChatOverlayPlugin,
+                crate::ui_text::TextDemoPlugin,
+                crate::ui_text_input::TextInputDemoPlugin,
+            ));
+    }
+}
+
+/// What the viewer needs of the machine it runs on: the OS clipboard and file
+/// dialog, the audio device and the sound producers that feed it, the web and
+/// video engines and the website login, the files notification and floater
+/// state persist to, the settings store's write-back, the diagnostics
+/// instruments and the avatar-state capture. After [`ViewerUiPlugins`], whose
+/// surfaces are the consumers of all of it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ViewerShellPlugins {
+    /// Whether the audio device is opened. Off, the mixer does not exist and
+    /// every producer — each guards on it — plays nothing: a test process must
+    /// not reach for the machine's speakers.
+    pub(crate) audio_device: bool,
+    /// Which media engines may start, and whether the website login runs.
+    pub(crate) media: MediaRuntime,
+}
+
+impl Plugin for ViewerShellPlugins {
+    fn build(&self, app: &mut App) {
+        // Shared OS-clipboard handle for the "Copy SLURL" affordances.
+        app.add_plugins(crate::clipboard::ClipboardPlugin);
+        // The host's file-open dialog (the XDG FileChooser portal on Linux), for
+        // every "… from disk": the settings editors' Import today, the uploaders
+        // when they land.
+        app.add_plugins(crate::file_dialog::FileDialogPlugin);
+        if self.audio_device {
+            app.add_plugins(crate::audio::AudioPlugin);
+        }
+        app
+            // The shared sound-asset fetch/decode/cache (viewer-in-world-sounds,
+            // viewer-ui-sound-effects) and the in-world spatial-sound producer that
+            // feeds the mixer's Sfx bus (llTriggerSound one-shots + attached sounds).
+            .add_plugins(crate::sound_cache::SoundCachePlugin)
+            .add_plugins(crate::world_sounds::WorldSoundsPlugin)
+            // The viewer's own 2-D UI feedback sounds on the mixer's UI bus
+            // (viewer-ui-sound-effects): the typing chirp, money up/down, teleport,
+            // snapshot shutter — raised as PlayUiSound messages by their surfaces.
+            .add_plugins(crate::ui_sounds::UiSoundsPlugin)
+            // The web-media engine (viewer-media-prim-browser): offscreen Chromium
+            // (sl-cef) pumped on the main thread, one surface per embedded page. The
+            // consumers (browser widget / floater, media-on-a-prim, controls bar)
+            // all no-op when it is disabled or failed to start.
+            .add_plugins(crate::media_engine::MediaEnginePlugin {
+                enabled: self.media.web,
+                video_enabled: self.media.video,
+            })
+            // The Second Life website auto-login (viewer-web-openid-auth): at login,
+            // POST the login response's OpenID token off-thread and inject the reply's
+            // session cookie into the shared browser context, so the web surfaces
+            // open already signed in. No-op off Second Life or with `--no-web-auth`.
+            .add_plugins(crate::web_auth::WebAuthPlugin {
+                enabled: self.media.web && self.media.web_auth,
+            })
+            // Recovers the real DNS / TCP / TLS / HTTP reason a media stream failed,
+            // which GStreamer's souphttpsrc hides — shared by the parcel-audio and
+            // media-on-a-prim consumers.
+            .add_plugins(crate::media_diagnostics::MediaDiagnosticsPlugin)
+            // The persistent-notification store (viewer-notification-persistence): saves
+            // the open (unacknowledged) sticky notifications to a per-account file and
+            // re-displays them on next login (the reference LLPersistentNotificationStorage).
+            // After the host, whose PersistNotification / NotificationResponse it records.
+            .add_plugins(NotificationPersistPlugin)
+            // Per-user floater geometry (viewer-ui-floater-persist-geometry): remember
+            // each floater's position, size, minimized / docked state and open / closed
+            // state across sessions, in the per-avatar account settings.
+            .add_plugins(FloaterPersistPlugin)
+            // The settings store's write-back and its account-scope loader. The store
+            // itself is the builder's to insert: it decides which files, if any, the
+            // settings are read from and written to.
+            .add_plugins(SettingsPersistPlugin)
+            // Avatar-state capture (viewer-avatar-state-dump-replay), which adds
+            // nothing at all unless `SL_VIEWER_DUMP_DIR` is set.
+            .add_plugins(crate::avatar_dump::AvatarDumpPlugin)
+            // Frame-time / FPS instruments — the smoothed FPS the status area
+            // (`crate::status_bar`) shows and the frame budget the fetch/decode pipeline
+            // work is watched against.
+            .add_plugins(FrameTimeDiagnosticsPlugin::default())
+            // Live entity count — cheap, and (via `tracy_plots`) plotted over time so a
+            // Tracy capture shows how per-frame system cost tracks the rezzing entity
+            // population instead of leaving it to be guessed from batch-span counts.
+            .add_plugins(EntityCountDiagnosticsPlugin::default());
+        // Extra diagnostic *sources* that are only worth their cost while a profiler
+        // is attached (nothing consumes them outside the Tracy plots yet — move them
+        // out of this gate once the statistics floater reads them), so they compile
+        // in only with the Tracy client:
+        //   * process/system CPU + memory — carries real sampling overhead;
+        //   * the live region-circuit count (`crate::net_diagnostics`);
+        //   * the per-kind entity population, main and render world
+        //     (`crate::entity_diagnostics`).
+        // Render-pass GPU/CPU timings + draw-call / pipeline stats need no add here:
+        // `RenderPlugin` (via `DefaultPlugins`) already installs
+        // `RenderDiagnosticsPlugin`, so those rows are always in the store and stream
+        // through `tracy_plots` whenever a profiler is attached.
+        #[cfg(feature = "profile-tracy")]
+        app.add_plugins((
+            bevy::diagnostic::SystemInformationDiagnosticsPlugin,
+            crate::net_diagnostics::NetDiagnosticsPlugin,
+            crate::entity_diagnostics::EntityDiagnosticsPlugin,
+        ));
+        // Stream those diagnostics (and any others registered) to Tracy as plots,
+        // and mark the fixed-timestep physics loop as a Tracy secondary frame, so
+        // the profiler shows graphed telemetry and a physics-cadence timeline on top
+        // of the `tracing` zones. Only present with the Tracy client compiled in.
+        #[cfg(feature = "profile-tracy")]
+        app.add_plugins(crate::tracy_plots::TracyProfilingPlugin);
     }
 }

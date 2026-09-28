@@ -29,8 +29,10 @@
 //! happens not to use tripping `dead_code`.
 //!
 //! Only what a shell actually calls ([`run`], [`Error`], [`init_tracing`],
-//! [`asset_root`], [`floaters`], [`ui_elements`]) is `pub`; the rest of the
-//! module tree stays `pub(crate)` exactly as it was.
+//! [`asset_root`], [`floaters`], [`ui_elements`]) is `pub`, and
+//! [`assembly`], the one assembly of the viewer App that the binary, the
+//! full-stack harness and the end-to-end tier share; the rest of the module
+//! tree stays `pub(crate)` exactly as it was.
 
 mod about_floater;
 pub(crate) use sl_viewer_people::add_friend;
@@ -40,6 +42,7 @@ pub(crate) use sl_viewer_places::about_region;
 pub(crate) use sl_viewer_places::telehub;
 pub(crate) use sl_viewer_places::top_objects;
 pub(crate) use sl_viewer_world_avatar::animations;
+pub mod assembly;
 /// Every module that declares settings, in registration order.
 ///
 /// This list lives here rather than in `settings` because a store that
@@ -386,85 +389,18 @@ pub(crate) use sl_viewer_world_scene::water;
 pub(crate) use sl_viewer_world_scene::water_exclusion;
 pub(crate) use sl_viewer_world_scene::water_scene_depth;
 
-use std::collections::BTreeSet;
 use std::num::NonZero;
 use std::path::{Path, PathBuf};
 
-use bevy::diagnostic::{EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin};
-use bevy::log::LogPlugin;
 use bevy::prelude::*;
-use bevy::window::{CursorGrabMode, CursorOptions};
 use clap::Parser as _;
-use sl_client_bevy::{
-    AccountDirsConfig, AnimationKey, ChatLogConfig, ClientDirectories, InventoryCacheConfig,
-    LoggedChatType, LoginFailure, LoginParams, LoginRequest, MfaChallenge, SlClientPlugin,
-    SlLoginRejected, SlMfaChallenge, StartLocation, Uuid,
-};
+use sl_client_bevy::{LoginParams, LoginRequest, StartLocation, Uuid};
 use sl_repl::{Avatar, Credentials};
 use tracing::{info, warn};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt as _, util::SubscriberInitExt as _};
 
-use crate::about_floater::AboutFloaterPlugin;
-use crate::about_land::AboutLandPlugin;
-use crate::about_landmark::AboutLandmarkPlugin;
-use crate::about_region::AboutRegionPlugin;
-use crate::animations::AnimationManager;
-use crate::asset_blacklist::AssetBlacklistPlugin;
-use crate::avatar_assets::AvatarAssetLibrary;
-use crate::avatar_picker::AvatarPickerPlugin;
-use crate::avatar_profile::AvatarProfilePlugin;
-use crate::blocked::BlockedPlugin;
+use crate::assembly::{CaptureStartup, MediaRuntime, ViewerAppBuilder, ViewerAppOptions};
 use crate::camera::{CameraSpin, CameraStart, SpinAxis};
-use crate::chat_input::ChatInputPlugin;
-use crate::conversations::ConversationsPlugin;
-use crate::derender::DerenderPlugin;
-use crate::emoji_complete::ColonCompletePlugin;
-use crate::emoji_picker::EmojiPickerPlugin;
-use crate::experience_log::ExperienceLogPlugin;
-use crate::experience_permission::ExperiencePermissionPlugin;
-use crate::experience_picker::ExperiencePickerPlugin;
-use crate::experience_profile::ExperienceProfilePlugin;
-use crate::experiences_floater::ExperiencesPlugin;
-use crate::floater::FloaterPlugin;
-use crate::floater_persist::FloaterPersistPlugin;
-use crate::group_notice::GroupNoticePlugin;
-use crate::group_picker::GroupPickerPlugin;
-use crate::group_profile::GroupProfilePlugin;
-use crate::groups::GroupsPlugin;
-use crate::i18n::ViewerI18nPlugin;
-use crate::input_context::CursorGrabAllowed;
-use crate::inventory::InventoryPlugin;
-use crate::inventory_actions::InventoryActionsPlugin;
-use crate::inventory_drag::InventoryDragPlugin;
-use crate::inventory_filters::InventoryFiltersPlugin;
-use crate::inventory_gallery::InventoryGalleryPlugin;
-use crate::inventory_properties::InventoryPropertiesPlugin;
-use crate::load_url::LoadUrlPlugin;
-use crate::local_chat_input::LocalChatInputPlugin;
-use crate::nearby_chat_bar::NearbyChatBarPlugin;
-use crate::notification_host::{NotificationHostPlugin, NotificationSourcesPlugin};
-use crate::notification_persist::NotificationPersistPlugin;
-use crate::offers_invites::OffersInvitesPlugin;
-use crate::people::PeoplePlugin;
-use crate::script_dialog::ScriptDialogPlugin;
-use crate::script_permission::ScriptPermissionPlugin;
-use crate::session::PlayOnLogin;
-use crate::settings::{
-    AccountContext, SettingsAgent, SettingsPersistPlugin, ViewerSettings, load_account_settings,
-};
-use crate::settings_binding::SettingsBindingPlugin;
-use crate::settings_index::SettingsIndexPlugin;
-use crate::stand_stop_button::StandStopButtonPlugin;
-use crate::ui::ViewerUiPlugin;
-use crate::ui_tab::TabWidgetPlugin;
-use crate::ui_table::TableWidgetPlugin;
-use crate::ui_text_input::TextInputPlugin;
-use crate::viewer_camera::viewer_camera_bundle;
-use crate::viewer_plugins::{
-    ViewerEditPlugins, ViewerInputPlugins, ViewerRenderPlugins, ViewerWorldPlugins,
-};
-use crate::virtual_list::VirtualListPlugin;
-use crate::world_api::{CameraMode, CameraRig};
 
 /// The local OpenSim grid login URI used when none is otherwise resolved.
 const DEFAULT_LOGIN_URI: &str = "http://127.0.0.1:9000/";
@@ -853,107 +789,6 @@ fn resolve_login_uri(options: &Options, avatar: &Avatar) -> Result<String, Error
     Ok(DEFAULT_LOGIN_URI.to_owned())
 }
 
-/// The recoverable outcome of one windowed session: an MFA challenge to answer
-/// or a retryable login rejection, either of which stops the app.
-#[derive(Resource, Default)]
-struct LoginOutcome {
-    /// The MFA challenge the session stopped on, if any.
-    challenge: Option<MfaChallenge>,
-    /// The retryable "already logged in" rejection, if any.
-    rejected: Option<LoginFailure>,
-}
-
-/// Startup system: spawn the one [`ViewerCamera`]. The scene's directional light
-/// (the sun / moon) is spawned by `sky::setup_sky`, which also drives it
-/// from the region's environment.
-///
-/// The camera starts in third-person, which follows the avatar as soon as it
-/// arrives (`camera::position_camera`), so no login camera-snap is needed. A fixed
-/// `--camera-position` instead starts it in **flycam** at that absolute pose (and
-/// aims it), which is what the unattended screenshot harness frames from; the
-/// `SL_VIEWER_CAMERA_*` envs seed the third-person orbit so the harness can also
-/// frame the avatar from a chosen angle.
-fn setup_scene(
-    mut commands: Commands,
-    camera_start: Res<CameraStart>,
-    mut mode: ResMut<CameraMode>,
-) {
-    let mut rig = CameraRig::default();
-    // Seed the third-person orbit from the debug framing envs (a no-op when unset):
-    // orbit → azimuth, elevation → elevation, distance → distance.
-    rig.seed_orbit_from_env();
-    let camera_transform = if let Some(position) = camera_start.position {
-        // A fixed pose is a flycam pose: place and aim it, and leave it alone.
-        let mut transform = Transform::from_translation(position);
-        if let Some(look) = camera_start.look {
-            rig.aim_along(look);
-            // `drive_flycam` owns the flycam transform and only integrates input
-            // deltas onto it — it never reads the rig's yaw/pitch. So the initial
-            // facing has to be baked into the transform rotation here, or the camera
-            // keeps its identity (SL-north) orientation and `--camera-look-at` is
-            // silently ignored. Reconstruct the rotation from the rig exactly as
-            // mouselook does (`aim_quat` → forward along `look`), so the transform
-            // and rig agree from the first frame.
-            transform.rotation = rig.aim_quat();
-        }
-        *mode = CameraMode::Flycam;
-        transform
-    } else {
-        // A provisional pose near a region centre; `position_camera` moves it to
-        // frame the avatar the moment one arrives.
-        Transform::from_translation(Vec3::new(128.0, 30.0, -128.0))
-    };
-    commands.spawn((viewer_camera_bundle(camera_transform), rig));
-}
-
-/// Capture a login-stopping outcome (MFA challenge or retryable rejection) into
-/// the [`LoginOutcome`] resource and exit the app so the caller can restart the
-/// login with the answer folded in.
-fn capture_login_outcome(
-    mut mfa: MessageReader<SlMfaChallenge>,
-    mut rejected: MessageReader<SlLoginRejected>,
-    mut outcome: ResMut<LoginOutcome>,
-    mut exit: MessageWriter<AppExit>,
-) {
-    for challenge in mfa.read() {
-        outcome.challenge = Some(challenge.0.clone());
-        exit.write(AppExit::Success);
-    }
-    for rejection in rejected.read() {
-        outcome.rejected = Some(rejection.0.clone());
-        exit.write(AppExit::Success);
-    }
-}
-
-/// Load the system-avatar `character/` assets from `dir`, logging (and swallowing)
-/// a failure so a bad `--viewer-assets` path leaves avatars as placeholder
-/// spheres rather than aborting the session.
-fn load_avatar_library(dir: Option<&Path>) -> Option<AvatarAssetLibrary> {
-    let dir = dir?;
-    match AvatarAssetLibrary::load(dir) {
-        Ok(library) => Some(library),
-        Err(error) => {
-            warn!(
-                "failed to load avatar assets from {}: {error}; avatars stay spheres",
-                dir.display()
-            );
-            None
-        }
-    }
-}
-
-/// The vendored character directory (`viewer-assets/character/` at the
-/// workspace root, see its README for provenance), when this build still sits
-/// beside its sources — the default for `--viewer-assets` /
-/// `SL_VIEWER_ASSETS`, so avatars get the real Linden bodies out of the box
-/// while an explicit flag or environment variable still overrides.
-fn default_viewer_assets() -> Option<PathBuf> {
-    let vendored = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()?
-        .join("viewer-assets/character");
-    vendored.is_dir().then_some(vendored)
-}
-
 /// The vendored static-asset directories (`viewer-assets/static_assets/` and
 /// `viewer-assets/fs_static_assets/` at the workspace root, see the
 /// `viewer-assets` README for provenance), when this build still sits beside
@@ -997,20 +832,6 @@ fn install_static_assets(options: &Options) {
     }
 }
 
-/// The camera's start-up configuration for a viewer session — the fixed pose
-/// (if any) and the optional auto-spin — bundled so [`run_session`] stays within
-/// the argument-count lint.
-struct CameraStartup {
-    /// The fixed start pose, or the login-snapped default.
-    start: CameraStart,
-    /// The optional auto-spin survey pan.
-    spin: CameraSpin,
-    /// A vertical field of view in radians overriding the persisted
-    /// `CameraAngle` for this run (`--camera-fov`, in degrees on the command
-    /// line), or `None` to use the preference.
-    field_of_view: Option<f32>,
-}
-
 /// What this run's captured frames hold, from the `--capture-*` options: the
 /// pixel grid, and each layer of the composited frame independently.
 fn capture_content(options: &Options) -> crate::screenshot::CaptureContent {
@@ -1024,938 +845,51 @@ fn capture_content(options: &Options) -> crate::screenshot::CaptureContent {
     }
 }
 
-/// The unattended capture harness's configuration for a viewer session: where
-/// the PNG sequence goes, and what its frames hold. Bundled alongside
-/// [`CameraStartup`] to keep [`run_session`] within the argument-count lint —
-/// and because capture settings without a directory are meaningless, which reads
-/// better as one value than as several arguments that have to agree.
-#[derive(Clone, Copy)]
-struct CaptureStartup<'a> {
-    /// The screenshot directory (`--screenshot-dir`), or `None` for an ordinary
-    /// interactive session.
-    dir: Option<&'a Path>,
-    /// The pixel grid the frames are rendered at and which layers of the
-    /// composited frame they hold (`--capture-size`, `--capture-ui`,
-    /// `--capture-hud`, `--capture-gizmos`).
-    content: crate::screenshot::CaptureContent,
-    /// Where the structured scene dump goes (`--scene-dump`), or `None` for
-    /// `<screenshot-dir>/scene.json`.
-    scene_dump: Option<&'a Path>,
-    /// Whether the run may make sound (`--capture-audio`).
-    audio: bool,
-    /// The interface scale pinned for this run (`--capture-ui-scale`), or
-    /// `None` to use the preference. Honoured with or without a screenshot
-    /// directory, as the pinned lens is.
-    ui_scale: Option<f32>,
-}
-
-/// The skin configuration for a viewer session: which skin / theme to wear and
-/// whether to hot-watch the `.css` files. Bundled alongside [`CameraStartup`] to
-/// keep [`run_session`] within the argument-count lint.
-struct SkinRuntime {
-    /// The initial skin + theme selection.
-    selection: crate::skin::SkinSelection,
-    /// Whether to watch the skin `.css` files for live edits (`--watch-skins`).
-    watch: bool,
-}
-
-/// Which media engines a viewer session may start: the web (CEF) and video
-/// (GStreamer) switches from `--disable-web-media` / `--disable-video-media`.
-/// Bundled alongside [`CameraStartup`] to keep [`run_session`] within the
-/// argument-count lint.
-struct MediaRuntime {
-    /// Whether the web (CEF) engine may initialise.
-    web: bool,
-    /// Whether the video (GStreamer) engine may initialise.
-    video: bool,
-    /// Whether to auto-login the grid account into the Second Life websites at
-    /// login (`viewer-web-openid-auth`); cleared by `--no-web-auth`.
-    web_auth: bool,
-}
-
-/// What a viewer session is fed at startup, beside the login parameters: where
-/// its art comes from, which animations it plays on the own avatar, whether it
-/// backfills group chat history from the server, and whether the whole run is
-/// an offline replay rather than a login. Bundled alongside [`CameraStartup`]
-/// to keep [`run_session`] within the argument-count lint.
-struct SessionContent<'a> {
-    /// The viewer-asset root (`--viewer-assets`), or `None` for the vendored
-    /// `viewer-assets/` tree.
-    viewer_assets: Option<&'a Path>,
-    /// The animations to start on the own avatar once logged in
-    /// (`--play-animation`).
-    play_animation: &'a [Uuid],
-    /// Whether those animations loop rather than playing once
-    /// (`--repeat-animation`).
-    repeat_animation: bool,
-    /// Whether to ask the server for group chat history at login; cleared by
-    /// `--no-group-chat-history`.
-    fetch_server_chat_history: bool,
-    /// The avatar-state replay bundle (`--replay`), or `None` for a live login.
-    /// Its presence is what puts the session in offline mode.
-    replay: Option<crate::avatar_replay::ReplayConfig>,
-}
-
-/// Run one windowed session to completion, returning any recoverable login
-/// outcome (an MFA challenge or a retryable rejection) it stopped on.
-///
-/// # Errors
-///
-/// Returns [`Error::ScreenshotDir`] if `--screenshot-dir` names a directory
-/// that cannot be created — the run was started to take frames, and one that
-/// cannot write them has already failed. Returns [`Error::AppFailed`] if the
-/// Bevy app exited with a failing status, which is **not** a recoverable
-/// outcome: the caller must not retry it the way it retries an MFA challenge.
-fn run_session(
-    params: &LoginParams,
-    content: SessionContent<'_>,
-    capture: CaptureStartup<'_>,
-    camera: CameraStartup,
-    skin: SkinRuntime,
-    media: MediaRuntime,
-) -> Result<LoginOutcome, Error> {
-    let SessionContent {
-        viewer_assets,
-        play_animation,
-        repeat_animation,
-        fetch_server_chat_history,
-        replay,
-    } = content;
-    // Offline (avatar-state replay) mode: the plugin registers its event/resource
-    // substrate but never logs in; the session is fed synthetic events from the
-    // bundle instead (see `crate::avatar_replay`).
-    let offline = replay.is_some();
-    let CameraStartup {
-        start: camera_start,
-        spin: camera_spin,
-        field_of_view: camera_fov,
-    } = camera;
-    let SkinRuntime {
-        selection: skin,
-        watch: watch_skins,
-    } = skin;
-    // Start the cursor free (visible, un-grabbed): the viewer opens in
-    // third-person, whose pointer is free to click the world / UI.
-    // `crate::input_context::drive_cursor_grab` captures it only when the camera
-    // enters mouselook. (In screenshot mode it stays free regardless, so an
-    // unattended capture run never hijacks the desktop's pointer.)
-    let cursor_options = CursorOptions {
-        grab_mode: CursorGrabMode::None,
-        visible: true,
-        ..default()
+/// The builder options every command-line run shares: the interactive
+/// viewer's, with what the command line says about the capture, the camera's
+/// spin and lens, the avatar art and animations, and the skin watch.
+fn cli_app_options(options: &Options, params: LoginParams) -> ViewerAppOptions {
+    let mut app_options = ViewerAppOptions::new(params);
+    app_options
+        .content
+        .viewer_assets
+        .clone_from(&options.viewer_assets);
+    app_options
+        .content
+        .play_animation
+        .clone_from(&options.play_animation);
+    app_options.content.repeat_animation = options.repeat_animation;
+    app_options.capture = CaptureStartup {
+        dir: options.screenshot_dir.clone(),
+        content: capture_content(options),
+        scene_dump: options.scene_dump.clone(),
+        audio: options.capture_audio,
+        ui_scale: options.capture_ui_scale,
     };
-    // Per-avatar on-disk directories, keyed by grid + avatar name (with UUID
-    // rename discovery). Each kind lands under the XDG root that fits it: chat
-    // transcripts under state, the inventory cache under cache, account settings
-    // under config — a separate `accounts/<grid>/<name>/` tree under each.
-    // Derived from the login parameters (grid from the login URI, name from the
-    // request) and resolved to the avatar's directory at login, once the UUID is
-    // known — by the plugin (`account_dirs`, for chat / inventory) and the
-    // settings account-scope loader (`AccountContext` + `load_account_settings`).
-    let grid = sl_account_dirs::grid_dir_name(&params.login_uri);
-    let avatar =
-        sl_account_dirs::avatar_dir_name(&params.request.first_name, &params.request.last_name);
-    let account_dirs = Some(AccountDirsConfig {
-        grid: grid.clone(),
-        avatar: avatar.clone(),
-        chat_log_base: crate::paths::state_accounts_base(),
-        inventory_cache_base: crate::paths::cache_accounts_base(),
-    });
-    let config_accounts_base = crate::paths::config_accounts_base();
-
-    // Resolve the system time zone now, while the process is still single-threaded:
-    // it reads the `TZ` environment variable, and reading the environment is only
-    // sound before Bevy's task pools spawn (below, with `DefaultPlugins`). The
-    // snapshot floater reuses this cached zone to stamp filenames in local time.
-    let local_time_zone = crate::local_time::LocalTimeZone::capture();
-
-    let mut app = App::new();
-    app.insert_resource(local_time_zone);
-    // The render debug knobs (`SL_VIEWER_DISABLE_GLOW`, `SL_VIEWER_SKY_DAY_POSITION`,
-    // …), read from the environment exactly once and only here — while the process
-    // is still single-threaded — and the environment state their day-position pin
-    // seeds. Every consumer reads the resource; a headless rig inserts its own.
-    let render_overrides = crate::render_overrides::RenderOverrides::from_env();
-    app.insert_resource(crate::environment::EnvironmentState::from_overrides(
-        &render_overrides,
-    ));
-    app.insert_resource(render_overrides);
-    // The About floater's login-derived facts (grid, login URI, reported
-    // channel/version) — captured here where they are all still at hand.
-    app.insert_resource(crate::about_floater::AboutSessionInfo {
-        grid: grid.clone(),
-        login_uri: params.login_uri.to_string(),
-        channel: params.request.channel.clone(),
-        version: params.request.version.clone(),
-    });
-    app.add_plugins(
-        DefaultPlugins
-            .set(WindowPlugin {
-                primary_window: Some(Window {
-                    title: "sl-client-bevy-viewer".to_owned(),
-                    // Wayland app-id (also X11 WM_CLASS) so compositors can
-                    // match window rules / icons to this application.
-                    name: Some("sl-client-bevy-viewer".to_owned()),
-                    ..default()
-                }),
-                primary_cursor_options: Some(cursor_options),
-                // Don't let Bevy's default close-to-exit despawn the window on a
-                // close request (X button, or a Wayland compositor close): our
-                // `handle_quit_requests` owns it and logs out gracefully first.
-                close_when_requested: false,
-                ..default()
-            })
-            // Resolve the viewer's own `assets/` (icons, locales, skins) rather
-            // than inheriting Bevy's executable-relative default, which a binary
-            // run out of `target/` finds nothing under — see `asset_root`.
-            //
-            // Watch the asset directory so an edited skin `.css` re-applies live
-            // (`--watch-skins`, the skin-authoring loop). Off unless asked, since
-            // watching carries a small background cost.
-            .set(crate::asset_root::asset_plugin(watch_skins.then_some(true)))
-            // The binary installs its own `tracing` subscriber (so the
-            // pre-window login logs go somewhere); drop Bevy's `LogPlugin` to
-            // avoid the "global subscriber already set" clash.
-            .disable::<LogPlugin>(),
-    )
-    .insert_resource(skin)
-    .add_plugins(SlClientPlugin {
-        params: params.clone(),
-        diagnostics: true,
-        // Log every text-chat type to the per-avatar chat directory — the
-        // pre-login default; once the account settings load,
-        // `preferences_chat` pushes the avatar's stored logging preferences
-        // over this via `Command::SetChatLogConfig`.
-        chat_log_config: ChatLogConfig {
-            enabled: BTreeSet::from([
-                LoggedChatType::Nearby,
-                LoggedChatType::InstantMessage,
-                LoggedChatType::Group,
-                LoggedChatType::Conference,
-            ]),
-            ..ChatLogConfig::default()
-        },
-        directories: ClientDirectories::default(),
-        account_dirs,
-        // Cache the inventory tree per avatar (agent tree + Library).
-        inventory_cache_config: InventoryCacheConfig {
-            enabled: true,
-            cache_library: true,
-        },
-        // **On**, which the default is not. The flag defaults off so a *library*
-        // consumer that ignores inventory pays nothing for it; a viewer is the
-        // other case entirely, and leaving it off meant caching a tree we never
-        // fetched — the persistence paid for, the completeness not.
-        //
-        // Everything that asks a question of the whole inventory is wrong
-        // without it, and wrong *silently*, because a folder nobody has expanded
-        // simply contributes nothing: inventory search matches only what has
-        // been browsed to, and the settings surfaces (the quick-preferences
-        // combos, the My Environments library, the settings picker) listed only
-        // the folders the user happened to have opened — which is how a freshly
-        // created sky came to be invisible until its folder was clicked.
-        //
-        // The cost is bounded and paid once per account: the crawl is
-        // breadth-first with a bounded number of folder-contents requests in
-        // flight, and the on-disk cache above reconciles against the login
-        // skeleton so version-matching folders skip the refetch on every later
-        // login.
-        background_inventory_fetch: true,
-        fetch_server_chat_history,
-        offline,
-    })
-    // The viewer UI scaffold (viewer-ui-widget-scaffold): the `bevy_ui` +
-    // `bevy_ui_widgets` + `bevy_input_focus` bring-up, the one `UiRoot` every
-    // panel parents itself to, tab navigation, the bundled font stack, and the
-    // direction-neutral / content-driven layout conventions the whole UI cluster
-    // inherits.
-    .add_plugins(ViewerUiPlugin)
-    // The UI skin / design-token system (viewer-ui-skin-tokens): stands up the
-    // `bevy_flair` CSS engine, registers the logical box / corner properties (so
-    // skins author `margin-inline-start`, never physical `left`), and dresses the
-    // `UiRoot` in the selected skin's hot-reloadable `.css` tokens. After
-    // `ViewerUiPlugin` so the `UiRoot` it styles already exists.
-    .add_plugins(crate::skin::ViewerSkinPlugin)
-    .add_plugins(crate::skin_colors::SkinColorsPlugin)
-    // The i18n foundation (viewer-i18n-fluent-scaffold): Project Fluent `.ftl`
-    // bundles behind Bevy assets with runtime locale switching, the `Translator`
-    // string-lookup API (typed named arguments → per-locale plural / gender), and
-    // the `UiLocale` resource carrying the locale's LTR/RTL direction and
-    // typographic conventions (the tab widget's truncation ellipsis). Ahead of
-    // every UI-bearing panel so panels are authored translatable from day one.
-    .add_plugins(ViewerI18nPlugin)
-    // The reusable tab widget's runtime half (viewer-ui-tab-widget): reflects a
-    // resizable strip's persisted / dragged width onto its node.
-    .add_plugins(TabWidgetPlugin)
-    // The reusable table widget's runtime half (viewer-ui-table-widget): column
-    // width sync + resize, locale-ellipsis reveal, sort-arrow drive, and the
-    // per-table sort / column-width settings seed + persist.
-    .add_plugins(TableWidgetPlugin)
-    // The reusable clickable name-link widget (viewer-clickable-name-widgets):
-    // resolves an avatar / group / owner name against the caches, keeps the
-    // label + link tint in step, and opens the right profile on click.
-    .add_plugins(crate::ui_name_link::NameLinkPlugin)
-    // The shared URL-linkification widget (viewer-url-linkification): renders text
-    // with clickable http(s) / SLURL / secondlife:///app links, resolves agent /
-    // group / parcel names in place, shows the target URL on hover, and opens web
-    // links. The parcel-name cache feeds the parcel-link labels.
-    .add_plugins(crate::parcel_names::ParcelNamesPlugin)
-    .add_plugins(crate::linkified_text::LinkifiedTextPlugin)
-    // Shared OS-clipboard handle for the "Copy SLURL" affordances.
-    .add_plugins(crate::clipboard::ClipboardPlugin)
-    // The host's file-open dialog (the XDG FileChooser portal on Linux), for
-    // every "… from disk": the settings editors' Import today, the uploaders
-    // when they land.
-    .add_plugins(crate::file_dialog::FileDialogPlugin)
-    // Routes a clicked / command-line SLURL to its handler (profile, IM,
-    // teleport, world map): viewer-slurl-parse-dispatch.
-    .add_plugins(crate::slurl_dispatch::SlurlDispatchPlugin)
-    // The self-dismissing avatar / object inspector mini-popups opened from a
-    // clicked `.../inspect` / objectim link: viewer-inspector-popups.
-    .add_plugins(crate::inspector_popup::InspectorPopupPlugin)
-    // The reusable radio-widget's runtime half (viewer-ui-radio-widget): keeps
-    // each option's `Checked` marker and indicator glyph reconciled to the
-    // group's selection, so a click and an external write (the Build Tools
-    // floater's tool sync) drive the same visual path.
-    .add_plugins(crate::ui_radio::RadioWidgetPlugin)
-    // The sun / moon trackball's drawing half (viewer-ui-virtual-trackball):
-    // places each marker from the aim its window wrote and paints the
-    // below-horizon state. The environment editors' `RowsPlugin` adds it too,
-    // guarded, so a host that takes only those windows still draws them.
-    .add_plugins(crate::ui_trackball::TrackballPlugin)
-    // The reusable combo / dropdown widget (viewer-ui-combo-widget): the closed
-    // value reconcile, the ComboChanged message, and the outside-press dismiss.
-    .add_plugins(crate::ui_combo::ComboWidgetPlugin)
-    // The reusable colour-picker floater + swatch (viewer-ui-color-picker): the
-    // OpenColorPicker / ColorPicked messages, the RGB-slider floater, and the
-    // swatch fill reconcile.
-    .add_plugins(crate::ui_color_picker::ColorPickerPlugin)
-    // The reusable texture-picker floater + swatch (viewer-ui-texture-picker):
-    // the OpenTexturePicker / TexturePicked messages, the inventory thumbnail
-    // grid floater, and the swatch thumbnail reconcile.
-    .add_plugins(crate::ui_texture_picker::TexturePickerPlugin)
-    // The reusable text-input widget's runtime half (viewer-ui-text-input-widget):
-    // the whole-string numeric validator that reverts a field to its last valid
-    // value when an edit makes it structurally invalid (a second '.', a misplaced
-    // '-') — the part `EditableTextFilter`'s per-character check cannot express.
-    .add_plugins(TextInputPlugin)
-    // The reusable search-field widget's runtime half (viewer-ui-search-field):
-    // the clear-button / placeholder visibility and clear-on-Escape, shared by the
-    // menu-bar and inventory search boxes.
-    .add_plugins(crate::ui_search::SearchFieldPlugin)
-    // The two-way widget↔settings binding (viewer-ui-settings-binding): the
-    // `control_name=` idiom — a checkbox / slider names the setting it edits and
-    // the store and widget are kept in sync both ways. Also owns the `F7` demo.
-    .add_plugins(SettingsBindingPlugin)
-    // The four plugin groups the headless harnesses share with the viewer
-    // (`crate::viewer_plugins`): input, then the render stack (whose
-    // `SlFaceMaterialPlugin` the editor plugins' `FromWorld` resources build
-    // against), the world fold, and the build tools.
-    .add_plugins(ViewerInputPlugins::default())
-    .add_plugins(ViewerRenderPlugins::default())
-    .add_plugins(ViewerWorldPlugins::default())
-    .add_plugins(ViewerEditPlugins)
-    // The Stand Up / Stop flycam state button in the bottom toolbar's reserved
-    // slot (viewer-sit-target-and-stand-button): Stand while seated, Stop flycam
-    // while in flycam.
-    .add_plugins(StandStopButtonPlugin)
-    // The Spawn crowd debug button (SL_VIEWER_CROWD): only present while a
-    // synthetic crowd is armed, hands the user the manual capture trigger.
-    .add_plugins(crate::crowd_debug_button::CrowdDebugButtonPlugin)
-    .add_plugins(crate::teleport_progress::TeleportProgressPlugin)
-    .add_plugins(crate::double_click_teleport::DoubleClickTeleportPlugin)
-    .add_plugins(crate::audio::AudioPlugin)
-    // The shared sound-asset fetch/decode/cache (viewer-in-world-sounds,
-    // viewer-ui-sound-effects) and the in-world spatial-sound producer that
-    // feeds the mixer's Sfx bus (llTriggerSound one-shots + attached sounds).
-    .add_plugins(crate::sound_cache::SoundCachePlugin)
-    .add_plugins(crate::world_sounds::WorldSoundsPlugin)
-    // The viewer's own 2-D UI feedback sounds on the mixer's UI bus
-    // (viewer-ui-sound-effects): the typing chirp, money up/down, teleport,
-    // snapshot shutter — raised as PlayUiSound messages by their surfaces.
-    .add_plugins(crate::ui_sounds::UiSoundsPlugin)
-    // The line-based menu widget (viewer-ui-context-menu) + reusable menu bar
-    // (viewer-ui-menu-bar): drop-down / context menus and the strip of buttons
-    // that open them, built on `bevy_ui_widgets`' headless menu machinery. The
-    // mechanism only — which entries a menu holds is per-domain (the live top
-    // bar is `crate::menu_bar`, gear menus belong to their window).
-    .add_plugins(crate::menu::MenuWidgetPlugin)
-    // The virtualized (windowed-recycling) list widget (viewer-ui-virtualized-list):
-    // a bounded row pool that recycles as the viewport scrolls, so a long panel
-    // (inventory, radar, chat at scale) costs the viewport, not the item count.
-    .add_plugins(VirtualListPlugin)
-    // The floater window manager (viewer-ui-floater-basic / -resize-dock): the
-    // draggable, raise-on-click, closable title-bar window — plus resize, minimize
-    // and dock / tear-off — every panel hangs off. Spawns a trailing-edge dock host.
-    // The inventory window (below) is its first live consumer.
-    .add_plugins(FloaterPlugin)
-    // The inventory window (viewer-inventory-folder-tree / -outfit-tab /
-    // -search-filter): the folder tree, the Everything / Recent / Worn tabs and the
-    // search bar, on the high-level inventory bridge, toggled with `Ctrl+I`. Hosted
-    // in a floater, so it drags / resizes / minimizes / docks.
-    .add_plugins(InventoryPlugin)
-    .add_plugins(InventoryActionsPlugin)
-    .add_plugins(InventoryDragPlugin)
-    .add_plugins(InventoryFiltersPlugin)
-    .add_plugins(InventoryGalleryPlugin)
-    .add_plugins(InventoryPropertiesPlugin)
-    // The settings-asset index (viewer-environment-settings-index): every sky /
-    // water / day-cycle item the mirror holds, grouped by kind and addressable
-    // by name — what `@setenv_preset:<name>` resolves against, and what the
-    // environment pickers list. Needs InventoryPlugin's model, so it follows it.
-    .add_plugins(SettingsIndexPlugin)
-    .add_plugins(AboutLandmarkPlugin)
-    .add_plugins(AvatarPickerPlugin)
-    // The group picker (viewer-region-estate-group-picker): the chooser behind
-    // every set-group control — About Land's group, the build tool's, and the
-    // estate's allowed-groups Add. Lists the agent's memberships (GroupsModel,
-    // whose GroupsPlugin follows) and, where the caller can use one, searches
-    // the directory for a group the agent is not in.
-    .add_plugins(GroupPickerPlugin)
-    // The avatar profile floater (viewer-social-profiles): 2nd Life / Web /
-    // Picks / Classifieds / 1st Life / Notes, opened from the avatar pie's
-    // Profile slice and the People list, editable for one's own profile.
-    .add_plugins(AvatarProfilePlugin)
-    // The web-media engine (viewer-media-prim-browser): offscreen Chromium
-    // (sl-cef) pumped on the main thread, one surface per embedded page. The
-    // consumers below (browser widget / floater, media-on-a-prim, controls
-    // bar) all no-op when it is disabled or failed to start.
-    .add_plugins(crate::media_engine::MediaEnginePlugin {
-        enabled: media.web,
-        video_enabled: media.video,
-    })
-    // The Second Life website auto-login (viewer-web-openid-auth): at login,
-    // POST the login response's OpenID token off-thread and inject the reply's
-    // session cookie into the shared browser context, so the web surfaces
-    // below open already signed in. No-op off Second Life or with
-    // `--no-web-auth`.
-    .add_plugins(crate::web_auth::WebAuthPlugin {
-        enabled: media.web && media.web_auth,
-    })
-    // The embedded-browser UI widget (LLMediaCtrl): surface-backed image
-    // nodes with click-to-focus pointer / keyboard routing.
-    .add_plugins(crate::browser_widget::BrowserWidgetPlugin)
-    // The in-viewer web browser floater (floater_web_content): navigation
-    // toolbar + browser view + status row, opened from Content ▸ Web Browser.
-    .add_plugins(crate::web_floater::WebFloaterPlugin)
-    // The minimap ("net map") floater: terrain / object / parcel layers,
-    // avatar dots, frustum wedge, double-click teleport and context menu.
-    .add_plugins(crate::minimap::MinimapPlugin)
-    // The world-map floater: grid-wide tile imagery (shared sl-map-apis
-    // fetch / cache), per-region info + item markers, region-name search.
-    .add_plugins(crate::world_map::WorldMapPlugin)
-    // The Search floater: the protocol-backed legacy directory search
-    // (people / groups / events / places / land / classifieds).
-    .add_plugins(crate::search::SearchFloaterPlugin)
-    // Recovers the real DNS / TCP / TLS / HTTP reason a media stream failed,
-    // which GStreamer's souphttpsrc hides — shared by the parcel-audio and
-    // media-on-a-prim consumers below.
-    .add_plugins(crate::media_diagnostics::MediaDiagnosticsPlugin)
-    // Media-on-a-prim (LLViewerMedia / LLViewerMediaFocus): ObjectMedia data
-    // driving per-face surfaces, world input routing and the focus model.
-    .add_plugins(crate::media_prim::MediaPrimPlugin)
-    // The floating media controls bar above the media face under the cursor
-    // (LLPanelPrimMediaControls).
-    .add_plugins(crate::media_controls::MediaControlsPlugin)
-    // The Nearby Media window (LLPanelNearByMedia): the parcel stream and every
-    // media face around the agent, each with its own controls.
-    .add_plugins(crate::nearby_media::NearbyMediaPlugin)
-    // Parcel streaming audio (viewer-streaming-audio): the GStreamer radio
-    // stream following the agent's parcel, with its bottom-bar controls.
-    .add_plugins(crate::parcel_audio::ParcelAudioPlugin)
-    .add_plugins(crate::volume_panel::VolumePanelPlugin)
-    // The emoji-picker floater (viewer-emoji-picker-floater): a grouped,
-    // searchable grid of emoji in a floater, toggled with `Ctrl+E`; clicking a
-    // glyph inserts it into the text field the picker last saw focused. On the
-    // emoji dataset (`sl-emoji`), the search-field / tab / virtualized-list
-    // widgets and the floater manager. After the floater plugin (its host) and
-    // the inventory plugin (a search-field consumer it shares systems with).
-    .add_plugins(EmojiPickerPlugin)
-    // The inline `:`-emoji completer (viewer-emoji-colon-autocomplete): a popup of
-    // matching short-codes on a field's trailing `:token`. Defines the
-    // `ColonCompleteSet` the chat input's Enter-to-send orders after.
-    .add_plugins(ColonCompletePlugin)
-    // The reusable chat-input widget (viewer-ui-text-input-emoji): a single-line
-    // field with an emoji button (opens the picker for it) and the `:`-completer,
-    // emitting a submit event. The base every chat surface is built on.
-    .add_plugins(ChatInputPlugin)
-    // The reusable local-chat-input widget (viewer-chat-channel-and-commands): the
-    // chat input plus a whisper/say/shout select box, `/N` channel routing,
-    // Shift/Ctrl+Enter volume overrides and the `/command` registry. Emits a
-    // structured submission; the live nearby-chat bar and conversations floater
-    // (each a follow-up) are its consumers.
-    .add_plugins(LocalChatInputPlugin)
-    // The live top menu bar (viewer-ui-menu-bar): the strip of pull-down menu
-    // names at the top of the screen, on `crate::menu`'s widget. After the
-    // inventory plugin so the Avatar ▸ Inventory entry can toggle its window.
-    .add_plugins(crate::menu_bar::TopMenuBarPlugin)
-    // Menu search (viewer-ui-menu-search): a text field in the bar (after the last
-    // menu) whose term drives `crate::menu`'s `MenuFilter`, so opening a menu shows
-    // only the matching entries. After the top-menu plugin, which spawns the field.
-    .add_plugins(crate::menu_search::MenuSearchPlugin)
-    // The status area (viewer-ui-status-bar): the parcel permission icons,
-    // region / parcel / position, L$ balance, SLT time and FPS read-outs that
-    // share the top row, hugging its trailing edge next to the menu bar.
-    .add_plugins(crate::status_bar::StatusBarPlugin)
-    // The toast / notification host (viewer-ui-notification-host): the screen
-    // channel that stacks, times out, fades and dismisses transient
-    // notifications from the declarative catalogue, plus the modal-alert scrim —
-    // the shared substrate the specific dialogs sit in.
-    .add_plugins(NotificationHostPlugin)
-    // The live sources that raise into it — simulator alerts, failed commands,
-    // protocol diagnostics and the demo spread. A separate plugin because all
-    // of them read the session, which the host deliberately does not (so the
-    // login-free gallery can still host toast specimens).
-    .add_plugins(NotificationSourcesPlugin)
-    // The persistent-notification store (viewer-notification-persistence): saves
-    // the open (unacknowledged) sticky notifications to a per-account file and
-    // re-displays them on next login (the reference LLPersistentNotificationStorage).
-    // After the host, whose PersistNotification / NotificationResponse it records.
-    .add_plugins(NotificationPersistPlugin)
-    // The bottom toolbar (viewer-ui-bottom-toolbar): the persistent strip of
-    // toggle buttons that open the main floaters (Inventory wired today, the rest
-    // disabled placeholders until their tasks land), and the bottom-area layout
-    // host the nearby-chat / audio / voice / quick-preferences controls hang off.
-    // After the inventory plugin so its Inventory toggle can reach the window.
-    .add_plugins(crate::bottom_toolbar::BottomToolbarPlugin)
-    // The live nearby-chat bar (viewer-chat-input-bar): the local-chat-input
-    // widget placed in the bottom-area upper stack (above the button bar), sending
-    // its LocalChatSubmit as Command::Chat, driving the typing animation, and
-    // focused by Enter. The bottom toolbar's leading chat button toggles it. After
-    // the toolbar (whose BottomArea it fills) and the local-chat-input plugin.
-    .add_plugins(NearbyChatBarPlugin)
-    // The Conversations floater (viewer-social-im-conversations): one window with
-    // vertical tabs for nearby chat, 1:1 IMs, group chats and conferences, each a
-    // transcript pane plus its chat input. After the chat-input / local-chat-input
-    // plugins whose widgets it hosts, and the floater manager.
-    .add_plugins(ConversationsPlugin)
-    // The People / Contacts surface (viewer-social-people-panel): the Friends
-    // list hosted as a pinned tab inside the Conversations floater. After
-    // ConversationsPlugin, whose strip / panel area it adds its tab and pane into.
-    .add_plugins(PeoplePlugin)
-    .add_plugins(crate::radar::RadarPlugin)
-    // The Groups list (viewer-social-groups): the member's own groups, built into
-    // the Groups sub-tab of the People pane. After PeoplePlugin, whose Groups
-    // content slot it fills.
-    .add_plugins(GroupsPlugin)
-    // The Blocked Residents & Objects list (viewer-block-list): the mute list
-    // built into the Blocked sub-tab of the People pane, plus the by-name block
-    // floater. After PeoplePlugin, whose Blocked content slot it fills.
-    .add_plugins(BlockedPlugin)
-    // Contact sets (viewer-contact-sets): the client-side named, coloured groups
-    // of residents, their per-account store, and the Contact Sets sub-tab of the
-    // People pane (plus the add-to-set and set-settings floaters). After
-    // PeoplePlugin, whose Contact Sets content slot the panel fills.
-    .add_plugins(crate::contact_sets::ContactSetsPlugin)
-    .add_plugins(crate::contact_sets_panel::ContactSetsPanelPlugin)
-    // Avatar complexity limiting (viewer-avatar-complexity-limit): score what each
-    // nearby avatar costs to draw and, past the budget, draw them as a flat
-    // jellydoll instead of their attachments. Its systems bracket the scene mirror
-    // and the avatar bake / visibility passes through explicit edges.
-    .add_plugins(crate::avatar_complexity::AvatarComplexityPlugin)
-    // The standing per-avatar render exceptions
-    // (viewer-avatar-render-settings-manager): the persisted "always draw this
-    // person in full" / "never draw them in full" decisions the complexity
-    // limit obeys above its own rules, and the floater that manages them.
-    // Before AvatarComplexityPlugin's mirror by explicit edge.
-    .add_plugins(crate::avatar_render_settings::AvatarRenderSettingsPlugin)
-    .add_plugins(crate::avatar_render_floater::AvatarRenderFloaterPlugin)
-    // Derender + asset blacklist (viewer-derender-blacklist): the client-side
-    // suppression of an object / avatar the user does not want to see, its
-    // per-avatar persisted blacklist, and the scene purge. Its systems bracket
-    // the scene mirror (before the ingest, after the fold) via explicit edges.
-    .add_plugins(DerenderPlugin)
-    // The Asset Blacklist floater (viewer-derender-blacklist): the list of what
-    // this avatar has derendered, with Re-render / Clear temporary. After
-    // DerenderPlugin, whose list it presents.
-    .add_plugins(AssetBlacklistPlugin)
-    // The RLVa control surface (viewer-rlva-floaters-toggles): the console,
-    // the restrictions / locks / strings windows, and the RLVa menu's toggles.
-    // They read the one RlvSession the world-API tier holds, so they can go
-    // anywhere after it is initialised.
-    // The environment editors (viewer-environment-personal-lighting): the
-    // Personal Lighting window and the local sky / water override it writes.
-    // After the environment state exists, which the scene tier initialises.
-    .add_plugins(sl_viewer_environment::EnvironmentUiPlugins)
-    .add_plugins(sl_viewer_rlv::RlvUiPlugins)
-    // The RLV command intake (viewer-rlv-command-intake): the owner-say gate a
-    // worn collar speaks through, the one seam every `@get*` / `@notify` answer
-    // is shouted back by, and the pass that lifts a vanished object's
-    // restrictions. Separate from the windows above because it is the wiring
-    // that makes the engine reachable at all rather than a surface that draws
-    // it; after them, since it fills the console they show.
-    .add_plugins(sl_viewer_rlv::intake::RlvIntakePlugin)
-    .add_plugins(GroupProfilePlugin)
-    // The group-notice toast host (viewer-group-notice-display): pops a card —
-    // group image, subject, body and any attached item — when a group posts a
-    // notice, mirroring the reference LLToastGroupNotifyPanel. After
-    // GroupProfilePlugin (whose RequestedGroupNotices it reads to suppress a
-    // toast for a notice the Notices tab pulled up itself) and GroupsPlugin
-    // (whose membership insignia it shows).
-    .add_plugins(GroupNoticePlugin)
-    // The script-dialog toast host (viewer-dialog-lldialog): pops a card — object
-    // / owner title, message, and a button grid or a text field — when a scripted
-    // object calls llDialog / llTextBox, wiring the reply on the hidden chat
-    // channel (Command::ReplyScriptDialog). After NotificationHostPlugin, whose
-    // shared channel it adopts its card into.
-    .add_plugins(ScriptDialogPlugin)
-    // The script web-page request toast host (viewer-dialog-script-load-url):
-    // pops a card — heading, object / owner title, message and the target URL —
-    // when a scripted object calls llLoadURL (the LoadURL message), with Load
-    // (open the URL in the embedded browser), Block (mute) and Ignore actions.
-    // After NotificationHostPlugin (whose shared channel it adopts its card into)
-    // and WebFloaterPlugin (whose OpenWebBrowser message Load writes).
-    .add_plugins(LoadUrlPlugin)
-    // The script permission-request toast host (viewer-permission-request-dialog):
-    // pops a card — object / owner, the requested permission bits, Yes / No /
-    // Block (or the money-access caution card with Allow access / Deny) — when a
-    // scripted object calls llRequestPermissions (the ScriptQuestion message),
-    // wiring the grant / deny reply (Command::AnswerScriptPermissions). After
-    // NotificationHostPlugin, whose shared channel it adopts its card into.
-    .add_plugins(ScriptPermissionPlugin)
-    // The experience-acceptance toast host (viewer-experience-permission-dialog):
-    // pops the reference ScriptQuestionExperience card — object / owner, the
-    // experience name / scope, the requested permission bits, Yes / No / Block
-    // Experience / Block Object — when a scripted object requests to run under an
-    // experience (a ScriptQuestion carrying an Experience id), admitting or
-    // blocking the experience (Command::SetExperiencePermission) alongside the
-    // grant / deny reply. After ScriptPermissionPlugin (which skips the experience
-    // requests this host owns) and NotificationHostPlugin (whose shared channel it
-    // adopts its card into).
-    .add_plugins(ExperiencePermissionPlugin)
-    // The Experiences floater (viewer-experiences-floater): the manage surface's
-    // seven tabs -- search, the agent's allowed / blocked / admin / contributor
-    // / owned lists, and the event log -- over the experience caps. After
-    // FloaterPlugin, whose spawn_floater it builds on.
-    .add_plugins(ExperiencesPlugin)
-    // One experience's own page (viewer-experiences-floater): a keyed window per
-    // experience, carrying the metadata, the allow / forget / block actions and
-    // -- for an administrator -- the editable fields. After ExperiencesPlugin,
-    // whose lists and search results open it.
-    .add_plugins(ExperienceProfilePlugin)
-    // The reusable "Choose Experience" picker (viewer-region-experiences-panel):
-    // the window every estate experience list's Add opens, answering an
-    // OpenExperiencePicker with an ExperiencePicked. After ExperiencesPlugin,
-    // whose persisted search-rating setting it shares, and ExperienceProfilePlugin,
-    // whose window its View Profile button opens.
-    .add_plugins(ExperiencePickerPlugin)
-    // The experience event log (viewer-experience-event-stream): the per-account
-    // record of what the experiences the agent joined actually did to them, the
-    // only signal in the protocol that reports an experience attachment, and the
-    // producer of the ExperienceEvent / ExperienceEventAttachment toasts. Before
-    // ExperiencesPlugin would read it is unnecessary -- the floater's Events
-    // section reads the resource, which exists from plugin build.
-    .add_plugins(ExperienceLogPlugin)
-    // The offers & invites toast host (viewer-dialog-offers-invites): pops an
-    // accept / decline card when the grid throws an inventory offer, a teleport
-    // lure, a friendship offer or a group-membership invitation over IM, wiring
-    // each to its protocol reply (AcceptInventoryOffer / AcceptTeleportLure /
-    // AcceptFriendship / AcceptGroupInvitation and the matching declines). After
-    // NotificationHostPlugin, whose shared channel it adopts its card into, and
-    // InventoryPlugin, whose folders the accept replies file into.
-    .add_plugins(OffersInvitesPlugin)
-    // The friendship-offer path (viewer-add-friend-offers-silently): the one
-    // prompted way an Add Friend affordance — the avatar pie, the radar, the
-    // minimap, the profile, the inspector, search, a secondlife:///…/requestfriend
-    // link — reaches the wire, asking for the offer's message the way the
-    // reference's AddFriendWithMessage dialog does, refusing self-friendship and
-    // confirming what was sent. After NotificationHostPlugin, whose dialog it
-    // raises and whose answer it reads.
-    .add_plugins(crate::add_friend::AddFriendPlugin)
-    // The presence modes (viewer-do-not-disturb-away): Away / auto-AFK, Do Not
-    // Disturb and the two autorespond modes, their signalled-animation wire
-    // writes, and the canned IM replies they send. After the conversations
-    // plugin, whose ingest the auto-reply orders itself ahead of.
-    .add_plugins(crate::presence::PresencePlugin)
-    // The About Land floater (viewer-parcel-options-general): the parcel's
-    // General / Covenant / Objects tabs. Subject-bound, persistence-exempt;
-    // opened from the top-bar location read-out and the land pie.
-    .add_plugins(AboutLandPlugin)
-    // The Region / Estate floater (viewer-region-options-debug / -general /
-    // -terrain / -estate): the region-and-estate info surface. Bound to the
-    // current region, persistence-exempt; opened from the World menu.
-    .add_plugins(AboutFloaterPlugin)
-    .add_plugins(AboutRegionPlugin)
-    // The snapshot floater (viewer-snapshot-floater): a framed live world preview
-    // (a second off-screen camera into an image) with resolution / format
-    // selection and a save-to-disk destination that echoes the path to chat.
-    // Opened from the bottom toolbar's Snapshot button.
-    .add_plugins(crate::snapshot_floater::SnapshotFloaterPlugin)
-    // The 360-degree snapshot floater (viewer-360-snapshot): a capture renderer
-    // of its own -- six cube-map faces shot from the camera's eye point with the
-    // viewer camera itself, reprojected into an equirectangular panorama and
-    // written with the GPano metadata that makes it open as a sphere. Opened
-    // from World > Photo and Video.
-    .add_plugins(crate::panorama::PanoramaPlugin)
-    // The Preferences floater shell (viewer-preferences-floater): the tabbed
-    // settings window over the typed store — snapshot on open, revert on
-    // Cancel / close, persist on OK, with the cross-tab search filter. The
-    // per-tab tasks plug their panels into its registry. After FloaterPlugin,
-    // whose spawn_floater and deferred-content build it rides.
-    .add_plugins(crate::preferences::PreferencesPlugin)
-    // The raw debug-settings editor (viewer-preferences-debug-settings-editor):
-    // a separate floater over *every* registered setting — searchable list,
-    // per-kind detail editor, per-scope override editing. Live edits, no
-    // OK / Cancel snapshot. After FloaterPlugin, whose spawn_floater and
-    // deferred-content build it rides.
-    .add_plugins(crate::debug_settings::DebugSettingsPlugin)
-    // The Quick Preferences panel (viewer-quick-preferences): the small
-    // bottom-right floater of the settings reached-for hourly (draw distance,
-    // particle cap, environment preset + time of day), a curated view over the
-    // typed store. Opened from a gear button in the bottom toolbar's trailing
-    // area. After FloaterPlugin (its spawn_floater / deferred-content build) and
-    // the bottom toolbar (its BottomArea host).
-    .add_plugins(crate::quick_preferences::QuickPreferencesPlugin)
-    .add_plugins(crate::quick_prefs_environment::QuickPrefsEnvironmentPlugin)
-    // Phototools (viewer-phototools): the photographer's window — the
-    // environment on one tab and the render knobs that change the *look* on the
-    // others, a second curated view over the same store the graphics tab binds.
-    // Opened from World ▸ Photo and Video ▸ Phototools (Alt+P).
-    .add_plugins(crate::phototools::PhototoolsPlugin)
-    // The alerts tab's popup list (viewer-preferences-alerts-tab): the model
-    // refresh, row pool and binding behind the panel build_alerts_tab plugs
-    // into the shell's registry.
-    .add_plugins(crate::preferences_alerts::PreferencesAlertsPlugin)
-    // The general tab's appliers (viewer-preferences-general-tab): the live
-    // UI-scale write and the maturity-preference server conversation behind
-    // the panel build_general_tab plugs into the shell's registry.
-    .add_plugins(crate::preferences_general::PreferencesGeneralPlugin)
-    .add_plugins(crate::preferences_graphics::PreferencesGraphicsPlugin)
-    // The audio tab's live output-device re-enumeration
-    // (viewer-preferences-audio-tab); the tab content itself plugs into the
-    // shell's registry.
-    .add_plugins(crate::preferences_audio::PreferencesAudioPlugin)
-    // The chat / IM + privacy tab's runtime side
-    // (viewer-preferences-chat-privacy-tab): the login-time chat-log
-    // configuration push, the `UserInfo` request / seed pair, and the per-OK
-    // apply hook; the tab content itself plugs into the shell's registry.
-    .add_plugins(crate::preferences_chat::PreferencesChatPlugin)
-    // The camera & movement tab's runtime side
-    // (viewer-preferences-camera-move-tab): the per-frame CameraTuning /
-    // MovementTuning refreshes and the field-of-view / mouselook-avatar
-    // appliers; the tab content itself plugs into the shell's registry.
-    .add_plugins(crate::preferences_camera_move::PreferencesCameraMovePlugin)
-    .add_plugins(crate::preferences_colors_skins::PreferencesColorsSkinsPlugin)
-    .add_plugins(crate::preferences_network_cache::PreferencesNetworkCachePlugin)
-    // Per-user floater geometry (viewer-ui-floater-persist-geometry): remember
-    // each floater's position, size, minimized / docked state and open / closed
-    // state across sessions, in the per-avatar account settings.
-    .add_plugins(FloaterPersistPlugin)
-    // In-world hover tooltips over objects / avatars / land (viewer-hover-tooltips).
-    .add_plugins(crate::hover_tooltip::HoverTooltipPlugin)
-    // The `F3` pipeline-status overlay and the asset-store statistics it and the
-    // Tracy plots read.
-    .add_plugins((
-        crate::diagnostics::PipelineOverlayPlugin,
-        crate::asset_stats::AssetStatsPlugin,
-        crate::avatar_asset_stats::AvatarAssetStatsPlugin,
-    ))
-    // Gate bevy_ui's unconditional full-tree stack rebuild and layout walk
-    // behind "did any of that system's inputs actually change (visibly)"
-    // (viewer-perf-ui-layout-per-frame-relayout), and bring the env-gated
-    // skip-rate meter that says whether the gate is behaving with it.
-    // `SL_VIEWER_LOG_UI_DIRTY=1` names what tripped it per frame.
-    .add_plugins(ui_perf::UiLayoutGatePlugin)
-    // Frame-time / FPS instruments — the smoothed FPS the status area
-    // (`crate::status_bar`) shows and the frame budget the fetch/decode pipeline
-    // work is watched against.
-    .add_plugins(FrameTimeDiagnosticsPlugin::default())
-    // Live entity count — cheap, and (via `tracy_plots`) plotted over time so a
-    // Tracy capture shows how per-frame system cost tracks the rezzing entity
-    // population instead of leaving it to be guessed from batch-span counts.
-    .add_plugins(EntityCountDiagnosticsPlugin::default());
-    // Extra diagnostic *sources* that are only worth their cost while a profiler
-    // is attached (nothing consumes them outside the Tracy plots yet — move them
-    // out of this gate once the statistics floater reads them), so they compile
-    // in only with the Tracy client:
-    //   * process/system CPU + memory — carries real sampling overhead;
-    //   * the live region-circuit count (`crate::net_diagnostics`);
-    //   * the per-kind entity population, main and render world
-    //     (`crate::entity_diagnostics`).
-    // Render-pass GPU/CPU timings + draw-call / pipeline stats need no add here:
-    // `RenderPlugin` (via `DefaultPlugins`) already installs
-    // `RenderDiagnosticsPlugin`, so those rows are always in the store and stream
-    // through `tracy_plots` whenever a profiler is attached.
-    #[cfg(feature = "profile-tracy")]
-    app.add_plugins((
-        bevy::diagnostic::SystemInformationDiagnosticsPlugin,
-        crate::net_diagnostics::NetDiagnosticsPlugin,
-        crate::entity_diagnostics::EntityDiagnosticsPlugin,
-    ));
-    // Stream those diagnostics (and any others registered) to Tracy as plots,
-    // and mark the fixed-timestep physics loop as a Tracy secondary frame, so
-    // the profiler shows graphed telemetry and a physics-cadence timeline on top
-    // of the `tracing` zones. Only present with the Tracy client compiled in.
-    #[cfg(feature = "profile-tracy")]
-    app.add_plugins(crate::tracy_plots::TracyProfilingPlugin);
-    app
-        // The per-avatar account identity (grid + name + accounts root), used by
-        // `load_account_settings` to locate the account-scope settings once the
-        // agent UUID is known at login.
-        .insert_resource(AccountContext {
-            accounts_base: config_accounts_base,
-            grid: grid.clone(),
-            avatar,
-        })
-        // The viewer settings store (viewer-ui-settings-store), the reference's
-        // `gSavedSettings`: registers each feature's settings and loads any persisted
-        // global overrides (e.g. SpaceNavigator sensitivities). `REGISTRARS` is the
-        // binary's to hold — a store that named its own users would depend on all of
-        // them — so the store is inserted here and only its *persistence* is a plugin.
-        .insert_resource(ViewerSettings::load_with(
-            crate::paths::global_settings_file(),
-            REGISTRARS,
-        ))
-        .add_plugins(SettingsPersistPlugin)
-        // Hand the settings store the one runtime fact its account-scope loader
-        // needs. It reads this mirror rather than `SlIdentity` so that the
-        // protocol stack does not sit underneath every crate that reads a
-        // setting.
-        .add_systems(Update, mirror_agent_id.before(load_account_settings))
-        // The debug camera override (`--camera-position` / `--camera-look-at` /
-        // `--camera-spin`): `setup_scene` reads the start pose, `drive_flycam` reads
-        // the spin, and third-person auto-follows when no pose is fixed. The world
-        // context may grab the cursor (only in mouselook) unless this is an unattended
-        // screenshot run, whose whole point is to leave the desktop's pointer alone.
-        .insert_resource(CursorGrabAllowed(capture.dir.is_none()))
-        .insert_resource(camera_start)
-        .insert_resource(camera_spin)
-        .init_resource::<LoginOutcome>()
-        .insert_resource(AnimationManager::new())
-        // The session driver and its shutdown: the `SlEvent` fold, the draw
-        // distance and interest-camera reports, the graceful logout every quit
-        // path routes through, and the synchronous exit save. `--repeat-animation`
-        // is the one part that is a run's choice rather than the session's.
-        .add_plugins(crate::session::SessionDriverPlugin { repeat_animation })
-        // The debug animations to play on the own avatar once it lands
-        // (`--play-animation`), over the plugin's "play nothing" default.
-        .insert_resource(PlayOnLogin {
-            animations: play_animation
-                .iter()
-                .copied()
-                .map(AnimationKey::from)
-                .collect(),
-            repeat: repeat_animation,
-        })
-        // The on-screen nearby-chat overlay, and the two demo panels the
-        // screenshot harness captures (`SL_VIEWER_TEXT_DEMO`, F4;
-        // `SL_VIEWER_TEXT_INPUT_DEMO`, F8).
-        .add_plugins((
-            crate::chat::ChatOverlayPlugin,
-            crate::ui_text::TextDemoPlugin,
-            crate::ui_text_input::TextInputDemoPlugin,
-        ))
-        // Avatar-state capture (viewer-avatar-state-dump-replay), which adds
-        // nothing at all unless `SL_VIEWER_DUMP_DIR` is set.
-        .add_plugins(crate::avatar_dump::AvatarDumpPlugin)
-        .add_systems(Startup, setup_scene)
-        .add_systems(Update, capture_login_outcome);
-    // (Worn rigid attachments no longer need a hand re-propagation: their
-    // attachment-point node is an avatar-root child whose local `Transform` the
-    // pose driver's socket writer sets each frame, so ordinary change-gated
-    // propagation seats the worn subtree — the former `pose_attachment_nodes`
-    // pass, Phase 4 §5.4.)
-    // Load the client-side avatar assets (if a directory was given) so rigged
-    // bodies replace the placeholder spheres; absent them the viewer keeps spheres.
-    if let Some(library) = load_avatar_library(viewer_assets) {
-        app.insert_resource(library);
-    }
-    if repeat_animation && play_animation.is_empty() {
-        // There is nothing to repeat, and a silent no-op looks exactly like a
-        // run that worked — the same reasoning as the `--capture-*` warnings.
-        // (The repeat *system* is `SessionDriverPlugin`'s to add or not.)
-        warn!("--repeat-animation has no effect without --play-animation");
-    }
-    // Avatar-state replay (viewer-avatar-state-dump-replay): inject the bundle's
-    // captured events once and drive the optional test rig (orbit light /
-    // reflection probe). Only present in `--replay` mode.
-    let replaying = replay.is_some();
-    if let Some(config) = replay {
-        app.insert_resource(config)
-            .add_plugins(crate::avatar_replay::AvatarReplayPlugin);
-    }
-    // In screenshot mode, capture a numbered PNG sequence after a startup delay,
-    // then quit (the R11 offline-inspection harness) — from the window, or from
-    // an off-screen target of the pinned `--capture-size` when one was asked for.
-    if let Some(dir) = capture.dir {
-        // Abort here rather than warning and running on. A run given
-        // `--screenshot-dir` exists to write frames into it; carrying on gives
-        // a `ScreenshotPlugin` that fails on every single capture, which buries
-        // the one error that explains why under a run's worth of noise.
-        fs_err::create_dir_all(dir).map_err(Error::ScreenshotDir)?;
-        if !capture.audio {
-            app.insert_resource(crate::volume_panel::SilenceAudioForRun);
-        }
-        app.add_plugins(crate::screenshot::ScreenshotPlugin {
-            dir: dir.to_path_buf(),
-            content: capture.content,
-            // A replay run has no grid, so it must not wait for a region to come
-            // up before it photographs the avatar it rebuilt offline.
-            grid_expected: !replaying,
-        });
-        // The structured description of the scene those frames were taken from,
-        // in the same document the patched Firestorm writes — so a frame pair
-        // that differs can be asked *why* it differs. `--scene-dump` moves it;
-        // by default it lands beside the frames it describes.
-        app.add_plugins(crate::scene_dump::SceneDumpPlugin {
-            path: capture
-                .scene_dump
-                .map_or_else(|| dir.join("scene.json"), Path::to_path_buf),
-            identity: crate::scene_dump::DumpIdentity {
-                channel: params.request.channel.clone(),
-                version: params.request.version.clone(),
-                grid: grid.clone(),
-            },
-        });
-    } else if capture.scene_dump.is_some() {
-        // A dump describes the scene a capture's last frame was taken from, so
-        // without a capture there is no moment to describe. Say so rather than
-        // writing nothing and leaving the operator to wonder.
-        warn!("--scene-dump has no effect without --screenshot-dir");
-    } else if capture.content != crate::screenshot::CaptureContent::WORLD_ONLY {
-        // Capture knobs with nothing to capture is a mistyped command line, and a
-        // silent no-op would look exactly like a run that worked.
-        warn!("the --capture-* options have no effect without --screenshot-dir");
-    }
-    // A lens pinned for this run (`--camera-fov`), which beats the persisted
-    // `CameraAngle` without rewriting it.
-    if let Some(radians) = camera_fov {
-        app.insert_resource(crate::preferences_camera_move::CameraFovOverride { radians });
-    }
-    // Likewise an interface scale pinned for this run (`--capture-ui-scale`).
-    if let Some(factor) = capture.ui_scale {
-        app.insert_resource(crate::preferences_general::UiScaleOverride { factor });
-    }
-    let exit = app.run();
-    // Taken before the exit is judged, so the outcome is out of the world
-    // either way — but reported only on a clean exit. An app that failed has
-    // not "stopped on an MFA challenge"; it stopped on the failure, and
-    // handing the caller a challenge to retry would send it round the login
-    // loop again on the strength of a run that never got that far.
-    let outcome = app
-        .world_mut()
-        .remove_resource::<LoginOutcome>()
-        .unwrap_or_default();
-    match exit {
-        AppExit::Success => Ok(outcome),
-        AppExit::Error(code) => Err(Error::AppFailed(code)),
-    }
+    app_options.camera.spin = CameraSpin {
+        rate: options.camera_spin.unwrap_or(0.0).to_radians(),
+        axis: options.camera_spin_axis,
+    };
+    app_options.camera.field_of_view = options.camera_fov.map(f32::to_radians);
+    app_options.skin.watch = options.watch_skins;
+    app_options
 }
 
-/// Mirror the logged-in agent's UUID from the runtime's `SlIdentity` into
-/// [`SettingsAgent`], which is all `sl-viewer-settings`' account-scope loader
-/// needs to know about login.
-///
-/// The settings store is a floor nearly every crate in the viewer stands on, so
-/// it names no runtime: reading `SlIdentity` there put `sl-proto`, `sl-wire`,
-/// `sl-asset`, `reqwest` and `tokio` underneath all of them for one `Uuid`. The
-/// composition root is the one place that legitimately knows both sides, so the
-/// mirroring lives here.
-fn mirror_agent_id(identity: Res<sl_client_bevy::SlIdentity>, mut agent: ResMut<SettingsAgent>) {
-    let current = identity.agent_id.map(|id| id.uuid());
-    if agent.0 != current {
-        agent.0 = current;
-    }
+/// The fixed camera pose `--camera-position` / `--camera-look-at` ask for,
+/// aimed at the look-at point (the direction from the camera to the target), or
+/// `None` without a fixed position — a look-at alone is ignored.
+fn fixed_camera_start(options: &Options) -> Option<CameraStart> {
+    let position = options.camera_position?;
+    Some(CameraStart {
+        position: Some(position),
+        look: options.camera_look_at.map(|target| {
+            Vec3::new(
+                target.x - position.x,
+                target.y - position.y,
+                target.z - position.z,
+            )
+        }),
+    })
 }
 
 /// Run the viewer end-to-end, restarting the windowed app once per MFA
@@ -2026,59 +960,21 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
             login_uri: login_uri.parse()?,
             request: request.clone(),
         };
-        let camera_start = CameraStart {
-            position: options.camera_position,
-            // Aim the fixed camera at the look-at point (the direction from the
-            // camera to the target); ignored without a fixed position.
-            look: match (options.camera_position, options.camera_look_at) {
-                (Some(position), Some(target)) => Some(Vec3::new(
-                    target.x - position.x,
-                    target.y - position.y,
-                    target.z - position.z,
-                )),
-                _other => None,
-            },
+        let mut app_options = cli_app_options(options, params);
+        app_options.content.fetch_server_chat_history = !options.no_group_chat_history;
+        app_options.camera.start = fixed_camera_start(options).unwrap_or_default();
+        app_options.skin.selection = crate::skin::SkinSelection::resolve(
+            options.skin.clone(),
+            options.theme.clone(),
+            stored_skin.clone(),
+            stored_theme.clone(),
+        );
+        app_options.media = MediaRuntime {
+            web: !options.disable_web_media,
+            video: !options.disable_video_media,
+            web_auth: !options.no_web_auth,
         };
-        let camera_spin = CameraSpin {
-            rate: options.camera_spin.unwrap_or(0.0).to_radians(),
-            axis: options.camera_spin_axis,
-        };
-        let outcome = run_session(
-            &params,
-            SessionContent {
-                viewer_assets: options.viewer_assets.as_deref(),
-                play_animation: &options.play_animation,
-                repeat_animation: options.repeat_animation,
-                fetch_server_chat_history: !options.no_group_chat_history,
-                replay: None,
-            },
-            CaptureStartup {
-                dir: options.screenshot_dir.as_deref(),
-                content: capture_content(options),
-                scene_dump: options.scene_dump.as_deref(),
-                audio: options.capture_audio,
-                ui_scale: options.capture_ui_scale,
-            },
-            CameraStartup {
-                start: camera_start,
-                spin: camera_spin,
-                field_of_view: options.camera_fov.map(f32::to_radians),
-            },
-            SkinRuntime {
-                selection: crate::skin::SkinSelection::resolve(
-                    options.skin.clone(),
-                    options.theme.clone(),
-                    stored_skin.clone(),
-                    stored_theme.clone(),
-                ),
-                watch: options.watch_skins,
-            },
-            MediaRuntime {
-                web: !options.disable_web_media,
-                video: !options.disable_video_media,
-                web_auth: !options.no_web_auth,
-            },
-        )?;
+        let outcome = ViewerAppBuilder::from_options(app_options).build()?.run()?;
         if let Some(challenge) = outcome.challenge {
             info!(
                 "multi-factor authentication required: {}",
@@ -2144,25 +1040,7 @@ fn run_replay(options: &Options, bundle_dir: &Path) -> Result<(), Error> {
     );
 
     // Frame the camera on the primary avatar unless the operator fixed a pose.
-    let camera_start = if options.camera_position.is_some() {
-        CameraStart {
-            position: options.camera_position,
-            look: match (options.camera_position, options.camera_look_at) {
-                (Some(position), Some(target)) => Some(Vec3::new(
-                    target.x - position.x,
-                    target.y - position.y,
-                    target.z - position.z,
-                )),
-                _other => None,
-            },
-        }
-    } else {
-        replay_camera_start(&config)
-    };
-    let camera_spin = CameraSpin {
-        rate: options.camera_spin.unwrap_or(0.0).to_radians(),
-        axis: options.camera_spin_axis,
-    };
+    let camera_start = fixed_camera_start(options).unwrap_or_else(|| replay_camera_start(&config));
 
     // A placeholder login (never used offline), only to satisfy the plugin's
     // required `LoginParams`.
@@ -2177,55 +1055,31 @@ fn run_replay(options: &Options, bundle_dir: &Path) -> Result<(), Error> {
             options.version.clone(),
         ),
     };
-    let _outcome = run_session(
-        &params,
-        SessionContent {
-            viewer_assets: options.viewer_assets.as_deref(),
-            play_animation: &options.play_animation,
-            repeat_animation: options.repeat_animation,
-            // Offline there is no session thread, so the flag is inert; false
-            // keeps the no-network intent explicit.
-            fetch_server_chat_history: false,
-            replay: Some(config),
-        },
-        CaptureStartup {
-            dir: options.screenshot_dir.as_deref(),
-            content: capture_content(options),
-            scene_dump: options.scene_dump.as_deref(),
-            audio: options.capture_audio,
-            ui_scale: options.capture_ui_scale,
-        },
-        CameraStartup {
-            start: camera_start,
-            spin: camera_spin,
-            field_of_view: options.camera_fov.map(f32::to_radians),
-        },
-        SkinRuntime {
-            selection: {
-                // The persisted skin choice dresses the replay UI too; the
-                // throwaway pre-app load is the `run_viewer` idiom.
-                let settings = crate::settings::ViewerSettings::load_with(
-                    crate::paths::global_settings_file(),
-                    crate::REGISTRARS,
-                );
-                let (stored_skin, stored_theme) =
-                    crate::preferences_colors_skins::stored_skin_choice(&settings);
-                crate::skin::SkinSelection::resolve(
-                    options.skin.clone(),
-                    options.theme.clone(),
-                    stored_skin,
-                    stored_theme,
-                )
-            },
-            watch: options.watch_skins,
-        },
-        // No network surfaces offline: keep the media engines and web auth off.
-        MediaRuntime {
-            web: false,
-            video: false,
-            web_auth: false,
-        },
-    )?;
+    let mut app_options = cli_app_options(options, params);
+    // Offline there is no session thread, so the flag is inert; false keeps the
+    // no-network intent explicit.
+    app_options.content.fetch_server_chat_history = false;
+    app_options.content.replay = Some(config);
+    app_options.camera.start = camera_start;
+    app_options.skin.selection = {
+        // The persisted skin choice dresses the replay UI too; the throwaway
+        // pre-app load is the `run_viewer` idiom.
+        let settings = crate::settings::ViewerSettings::load_with(
+            crate::paths::global_settings_file(),
+            crate::REGISTRARS,
+        );
+        let (stored_skin, stored_theme) =
+            crate::preferences_colors_skins::stored_skin_choice(&settings);
+        crate::skin::SkinSelection::resolve(
+            options.skin.clone(),
+            options.theme.clone(),
+            stored_skin,
+            stored_theme,
+        )
+    };
+    // No network surfaces offline: keep the media engines and web auth off.
+    app_options.media = MediaRuntime::OFF;
+    let _outcome = ViewerAppBuilder::from_options(app_options).build()?.run()?;
     info!("replay ended");
     Ok(())
 }
@@ -2325,7 +1179,7 @@ impl tracing_tracy::Config for TracyConfig {
 
 /// Install the `tracing` subscriber both binaries share.
 ///
-/// The viewer disables Bevy's own `LogPlugin` (see `run_session`) because the
+/// The viewer disables Bevy's own `LogPlugin` (see [`assembly`]) because the
 /// login happens before the window exists and its logs must go somewhere, so the
 /// subscriber is ours to install — once, from the binary, before any Bevy plugin
 /// could claim the global slot. Bevy's own profilers attach their tracing layers
@@ -2420,7 +1274,10 @@ pub fn run() -> Result<(), Error> {
     let mut options = Options::parse();
     // An explicit `--viewer-assets` / `SL_VIEWER_ASSETS` wins; otherwise the
     // vendored character directory serves the real Linden bodies by default.
-    options.viewer_assets = options.viewer_assets.take().or_else(default_viewer_assets);
+    options.viewer_assets = options
+        .viewer_assets
+        .take()
+        .or_else(crate::assembly::default_viewer_assets);
     // Likewise for the shipped assets, and installed here — before anything
     // builds an asset store, which snapshots the library as it is.
     if options.static_assets.is_empty() {

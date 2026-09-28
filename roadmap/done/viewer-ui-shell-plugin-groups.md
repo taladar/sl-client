@@ -2,11 +2,32 @@
 id: viewer-ui-shell-plugin-groups
 title: The two plugin groups the group carve-up left behind — UI and shell
 topic: viewer
-status: ready
+status: done
 origin: the viewer-plugin-groups work (2026-08-30) named six groups and landed four
 points: 5
 refs: [viewer-plugin-groups, viewer-ui-baseline-regressions, viewer-test-baseline-format]
 ---
+
+## Done (2026-09-28)
+
+Landed with [[viewer-automation-app-builder]], which needed both groups.
+`ViewerUiPlugins` (the scaffold, skin, i18n, widgets, every window and the
+features they show) and `ViewerShellPlugins { audio_device, media }` (OS
+clipboard and file dialog, audio device and producers, web / video engines
+and website login, notification / floater / settings persistence, avatar
+capture, diagnostics) in `viewer_plugins.rs`. Every registration moved with
+its comment; the relative order inside each list is the old order, but
+the UI group as a whole now builds before the input / render / world /
+edit groups and the shell after them (the old list had the four groups
+in the middle of it) — no plugin reads another's resource at build time
+across that seam.
+
+The acceptance's "a headless app built from `ViewerUiPlugins` alone" became
+"the full-stack harness, built through the builder with every group":
+`the_harness_runs_the_interface_too` asks the spawned floaters their state
+after a fake-grid login. The `--screenshot-dir` smoke run against the local
+grid was taken; the settings golden is untouched (the registrars did not
+move).
 
 Context: [context/testing.md](../context/testing.md).
 

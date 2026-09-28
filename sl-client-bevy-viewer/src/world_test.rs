@@ -34,7 +34,7 @@ const VIEWPORT: UVec2 = UVec2::new(800, 600);
 
 /// Build the fixture world: task pools and assets, the testkit input stack
 /// (window, synthetic pointer, picking core, focus), visibility propagation,
-/// the login-parameter resources `run_session` would have inserted, and the
+/// the login-parameter resources the viewer's builder would have inserted, and the
 /// world fold with the CPU pick resolver. No UI scaffold, no render app.
 pub(crate) fn world_app() -> App {
     let mut app = App::new();
@@ -73,8 +73,8 @@ pub(crate) fn world_app() -> App {
         bevy::camera::visibility::update_frusta
             .in_set(bevy::camera::visibility::VisibilitySystems::UpdateFrusta),
     );
-    // The login-parameter resources the world group expects `run_session` to
-    // have inserted.
+    // The login-parameter resources the world group expects the viewer's
+    // builder (`crate::assembly`) to have inserted.
     app.insert_resource(crate::settings::ViewerSettings::declared_for_test(
         crate::REGISTRARS,
     ));
@@ -305,7 +305,7 @@ pub(crate) fn world_app_with_input() -> App {
 /// The input half of [`world_app_with_input`], on its own, so a fixture world
 /// still being composed (the UI fold) can take the input group too.
 fn add_input_plugins(app: &mut App) {
-    // The login-parameter resources `run_session` inserts beside the group —
+    // The login-parameter resources the builder inserts beside the group —
     // the same role `world_app`'s `ViewerSettings` / `CameraStart` play for the
     // world fold. The grab is *allowed* (the viewer forbids it only for an
     // unattended screenshot run), because whether mouselook takes the pointer

@@ -10,12 +10,13 @@ of the ones described there, it does not replace them.
 
 Every tier below this one cuts the app somewhere. `InteractionTest` and
 `WorldTest` drive *fragments* of the viewer and address widgets by `Name`
-string; `ViewerHarness` runs the real grid path but stubs the UI, shell and
-edit plugin groups; `sl-crosscheck` runs the real binary but can only pass it
-flags and read files it wrote. Nothing can open a floater in the real binary,
-click a disabled button and see that nothing happened, or have two logged-in
-viewers watch each other. So the last step of verifying a feature is still a
-person logging in and clicking. This tier is what replaces that person.
+string; `ViewerHarness` runs the whole viewer (`ViewerAppBuilder`) against the
+fake grid but steps it by hand and never clicks; `sl-crosscheck` runs the real
+binary but can only pass it flags and read files it wrote. Nothing can open a
+floater in the real binary, click a disabled button and see that nothing
+happened, or have two logged-in viewers watch each other. So the last step of
+verifying a feature is still a person logging in and clicking. This tier is what
+replaces that person.
 
 ## Requirements (user, 2026-09-28)
 
@@ -161,6 +162,14 @@ person logging in and clicking. This tier is what replaces that person.
 - **a state probe**: a request variant in `sl-automation-proto`, a reader in
   `sl-viewer-automation`, a driver method, and a teeth test that the probe
   changes when the state does.
+- **a whole viewer App** (a transport, a harness, a stage): never assemble
+  plugins by hand — `ViewerAppOptions::new(params)` is the interactive
+  viewer; set `window: WindowMode::Windowless`, `storage:
+  Storage::Ephemeral`, `audio_device: false`, `media: MediaRuntime::OFF`
+  and stated `render_overrides` for a test, then
+  `ViewerAppBuilder::from_options(..).build()`
+  (`sl-client-bevy-viewer/src/assembly.rs`). A new viewer-wide option
+  belongs there, with its first consumer.
 - **an end-to-end test**: in `sl-client-bevy-viewer/tests/`, build a
   `Stage`, launch viewers, act through locators, assert with `expect`. Take
   the lowest tier that can produce the failure (see

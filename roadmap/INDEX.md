@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 122 |
 | ready | 313 |
-| blocked | 66 |
+| blocked | 64 |
 | in-progress | 21 |
 | bugs | 17 |
-| done | 1265 |
+| done | 1267 |
 | deferred | 31 |
 | wont-do | 16 |
 | **total** | **1851** |
@@ -388,10 +388,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-automation-accesskit-bridge`](ready/viewer-automation-accesskit-bridge.md)
   — Feed AccessKit from the semantic UI model (blocked by
   `viewer-automation-semantic-custom-widgets` (done))
-- [`viewer-automation-app-builder`](ready/viewer-automation-app-builder.md) — A
-  public ViewerAppBuilder — one assembly for the binary, the harness and tests
 - [`viewer-automation-offscreen-window-spike`](ready/viewer-automation-offscreen-window-spike.md)
   — Spike — how a windowless viewer renders and picks at the same time
+- [`viewer-automation-per-app-state`](ready/viewer-automation-per-app-state.md)
+  — Per-App state — two logged-in viewers in one process (blocked by
+  `viewer-automation-app-builder` (done))
+- [`viewer-automation-testkit-locators`](ready/viewer-automation-testkit-locators.md)
+  — The in-process tiers speak locators too (blocked by
+  `viewer-automation-locator-engine` (done), `viewer-automation-app-builder`
+  (done))
 - [`viewer-automation-world-model`](ready/viewer-automation-world-model.md) —
   World locators — find and read objects and avatars (blocked by
   `viewer-automation-protocol` (done))
@@ -964,8 +969,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-settings-binding-text`](ready/viewer-ui-settings-binding-text.md)
   — Text-field↔settings two-way binding (blocked by
   `viewer-ui-text-input-widget` (done), `viewer-ui-settings-binding` (done))
-- [`viewer-ui-shell-plugin-groups`](ready/viewer-ui-shell-plugin-groups.md) —
-  The two plugin groups the group carve-up left behind — UI and shell
 - [`viewer-ui-skin-l10n-functions`](ready/viewer-ui-skin-l10n-functions.md) —
   Skin CSS l10n/i18n functions (theme-authored labels & numbers) (blocked by
   `viewer-ui-skin-tokens` (done))
@@ -1052,7 +1055,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-world-heartbeat`](ready/server-world-heartbeat.md) — A region
   heartbeat — the fake grid has no simulation loop at all
 
-## blocked (66)
+## blocked (64)
 
 ### viewer
 
@@ -1070,21 +1073,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — In-process transport — the same requests against Apps in the test process
   (blocked by `viewer-automation-executor`, `viewer-automation-per-app-state`,
   `viewer-automation-windowless-mode`)
-- [`viewer-automation-per-app-state`](blocked/viewer-automation-per-app-state.md)
-  — Per-App state — two logged-in viewers in one process (blocked by
-  `viewer-automation-app-builder`)
 - [`viewer-automation-remote-transport`](blocked/viewer-automation-remote-transport.md)
   — Remote transport — automation over a private Unix socket (blocked by
   `viewer-automation-executor`)
 - [`viewer-automation-state-probes`](blocked/viewer-automation-state-probes.md)
   — State probes — chat, notifications, agent, logs and screenshots (blocked by
   `viewer-automation-protocol` (done), `viewer-automation-windowless-mode`)
-- [`viewer-automation-testkit-locators`](blocked/viewer-automation-testkit-locators.md)
-  — The in-process tiers speak locators too (blocked by
-  `viewer-automation-locator-engine` (done), `viewer-automation-app-builder`)
 - [`viewer-automation-windowless-mode`](blocked/viewer-automation-windowless-mode.md)
   — Windowless viewer — the whole app, UI included, with no OS window (blocked
-  by `viewer-automation-app-builder`,
+  by `viewer-automation-app-builder` (done),
   `viewer-automation-offscreen-window-spike`)
 - [`viewer-automation-world-aim`](blocked/viewer-automation-world-aim.md) —
   World actions — pick-verified aiming, reveal, click and pie (blocked by
@@ -1376,7 +1373,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1265)
+## done (1267)
 
 ### protocol
 
@@ -1821,6 +1818,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-auto-reject-offers`](done/viewer-auto-reject-offers.md) —
   Auto-decline teleport/friendship/group-invite modes (blocked by
   `viewer-dialog-offers-invites` (done))
+- [`viewer-automation-app-builder`](done/viewer-automation-app-builder.md) — A
+  public ViewerAppBuilder — one assembly for the binary, the harness and tests
 - [`viewer-automation-locator-engine`](done/viewer-automation-locator-engine.md)
   — The locator engine — strict resolution and actionability (blocked by
   `viewer-automation-semantic-ui-model` (done),
@@ -3289,6 +3288,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-settings-store` (done))
 - [`viewer-ui-settings-store`](done/viewer-ui-settings-store.md) — Typed
   persistent settings store
+- [`viewer-ui-shell-plugin-groups`](done/viewer-ui-shell-plugin-groups.md) — The
+  two plugin groups the group carve-up left behind — UI and shell
 - [`viewer-ui-skin-tokens`](done/viewer-ui-skin-tokens.md) — Skin system —
   design tokens (bevy_flair CSS) (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-sound-effects`](done/viewer-ui-sound-effects.md) — UI sound
