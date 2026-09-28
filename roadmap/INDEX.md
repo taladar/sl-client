@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 122 |
-| ready | 312 |
-| blocked | 72 |
+| ready | 314 |
+| blocked | 69 |
 | in-progress | 21 |
 | bugs | 17 |
-| done | 1260 |
+| done | 1261 |
 | deferred | 31 |
 | wont-do | 16 |
 | **total** | **1851** |
@@ -210,7 +210,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `test-e2e-pilot-suite`)
 - [`test-firestorm-automation-endpoint`](ideas/test-firestorm-automation-endpoint.md)
   — The patched Firestorm answers the same automation protocol (blocked by
-  `viewer-automation-protocol`, `viewer-automation-remote-transport`)
+  `viewer-automation-protocol` (done), `viewer-automation-remote-transport`)
 - [`test-reference-cpp-oracles`](ideas/test-reference-cpp-oracles.md) —
   Reference-viewer C++ math and GLSL as test oracles (FFI / naga)
 
@@ -309,7 +309,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (312)
+## ready (314)
 
 ### protocol
 
@@ -389,8 +389,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   public ViewerAppBuilder — one assembly for the binary, the harness and tests
 - [`viewer-automation-offscreen-window-spike`](ready/viewer-automation-offscreen-window-spike.md)
   — Spike — how a windowless viewer renders and picks at the same time
-- [`viewer-automation-protocol`](ready/viewer-automation-protocol.md) —
-  sl-automation-proto — the locator, request and snapshot vocabulary
+- [`viewer-automation-semantic-ui-model`](ready/viewer-automation-semantic-ui-model.md)
+  — The semantic UI model — roles, names and states read from the ECS (blocked
+  by `viewer-automation-protocol` (done))
+- [`viewer-automation-synthetic-input`](ready/viewer-automation-synthetic-input.md)
+  — Synthetic input for a live viewer — interact.rs as a frame-queued injector
+  (blocked by `viewer-automation-protocol` (done))
+- [`viewer-automation-world-model`](ready/viewer-automation-world-model.md) —
+  World locators — find and read objects and avatars (blocked by
+  `viewer-automation-protocol` (done))
 - [`viewer-autopilot-click-to-walk`](ready/viewer-autopilot-click-to-walk.md) —
   Autopilot core + click-to-walk (blocked by `viewer-input-action-map` (done))
 - [`viewer-avatar-alignment-tools`](ready/viewer-avatar-alignment-tools.md) —
@@ -1048,7 +1055,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-world-heartbeat`](ready/server-world-heartbeat.md) — A region
   heartbeat — the fake grid has no simulation loop at all
 
-## blocked (72)
+## blocked (69)
 
 ### viewer
 
@@ -1082,15 +1089,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-automation-semantic-custom-widgets`](blocked/viewer-automation-semantic-custom-widgets.md)
   — Semantic roles for the custom widgets, and a completeness guard (blocked by
   `viewer-automation-semantic-ui-model`)
-- [`viewer-automation-semantic-ui-model`](blocked/viewer-automation-semantic-ui-model.md)
-  — The semantic UI model — roles, names and states read from the ECS (blocked
-  by `viewer-automation-protocol`)
 - [`viewer-automation-state-probes`](blocked/viewer-automation-state-probes.md)
   — State probes — chat, notifications, agent, logs and screenshots (blocked by
-  `viewer-automation-protocol`, `viewer-automation-windowless-mode`)
-- [`viewer-automation-synthetic-input`](blocked/viewer-automation-synthetic-input.md)
-  — Synthetic input for a live viewer — interact.rs as a frame-queued injector
-  (blocked by `viewer-automation-protocol`)
+  `viewer-automation-protocol` (done), `viewer-automation-windowless-mode`)
 - [`viewer-automation-testkit-locators`](blocked/viewer-automation-testkit-locators.md)
   — The in-process tiers speak locators too (blocked by
   `viewer-automation-locator-engine`, `viewer-automation-app-builder`)
@@ -1101,9 +1102,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-automation-world-aim`](blocked/viewer-automation-world-aim.md) —
   World actions — pick-verified aiming, reveal, click and pie (blocked by
   `viewer-automation-world-model`, `viewer-automation-synthetic-input`)
-- [`viewer-automation-world-model`](blocked/viewer-automation-world-model.md) —
-  World locators — find and read objects and avatars (blocked by
-  `viewer-automation-protocol`)
 - [`viewer-avatar-moderation-actions`](blocked/viewer-avatar-moderation-actions.md)
   — Per-avatar parcel / estate moderation — the shared action layer (blocked by
   `viewer-region-options-estate`)
@@ -1391,7 +1389,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1260)
+## done (1261)
 
 ### protocol
 
@@ -1836,6 +1834,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-auto-reject-offers`](done/viewer-auto-reject-offers.md) —
   Auto-decline teleport/friendship/group-invite modes (blocked by
   `viewer-dialog-offers-invites` (done))
+- [`viewer-automation-protocol`](done/viewer-automation-protocol.md) —
+  sl-automation-proto — the locator, request and snapshot vocabulary
 - [`viewer-avatar-complexity-limit`](done/viewer-avatar-complexity-limit.md) —
   Avatar complexity limiting (jellydoll)
 - [`viewer-avatar-context-menu`](done/viewer-avatar-context-menu.md) — Avatar

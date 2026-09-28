@@ -2,7 +2,7 @@
 id: viewer-automation-synthetic-input
 title: Synthetic input for a live viewer — interact.rs as a frame-queued injector
 topic: viewer
-status: blocked
+status: ready
 origin: viewer automation design (2026-09-28)
 points: 8
 blocked_by: [viewer-automation-protocol]

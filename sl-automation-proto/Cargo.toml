@@ -1,0 +1,27 @@
+[package]
+name = "sl-automation-proto"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+description = "The viewer-neutral vocabulary for driving a Second Life viewer from a test or an agent: semantic locators, UI node snapshots, requests, responses and the errors a test matches on"
+readme = { workspace = true }
+license = { workspace = true }
+
+repository = { workspace = true }
+keywords = ["automation", "opensim", "secondlife", "testing", "viewer"]
+categories = ["development-tools::testing", "game-development"]
+publish = { workspace = true }
+
+exclude = { workspace = true }
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

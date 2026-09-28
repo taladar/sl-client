@@ -2,7 +2,7 @@
 id: viewer-automation-world-model
 title: World locators — find and read objects and avatars
 topic: viewer
-status: blocked
+status: ready
 origin: viewer automation design (2026-09-28)
 points: 8
 blocked_by: [viewer-automation-protocol]

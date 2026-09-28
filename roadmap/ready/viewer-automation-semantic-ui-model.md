@@ -2,7 +2,7 @@
 id: viewer-automation-semantic-ui-model
 title: The semantic UI model — roles, names and states read from the ECS
 topic: viewer
-status: blocked
+status: ready
 origin: viewer automation design (2026-09-28)
 points: 8
 blocked_by: [viewer-automation-protocol]

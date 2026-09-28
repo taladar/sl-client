@@ -1,0 +1,192 @@
+//! One node of a semantic UI snapshot, and the roles, states, values, bounds
+//! and visibility it carries.
+
+use std::collections::BTreeSet;
+use std::fmt;
+
+use serde::{Deserialize, Serialize};
+
+/// What a UI node *is* to its user — the accessibility role, which is also
+/// the first thing a [`Locator`](crate::Locator) names.
+///
+/// Serialized in lowercase (`"menuitem"`, `"listitem"`), the spelling ARIA
+/// uses for the same roles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Role {
+    /// A push button.
+    Button,
+    /// A two-state (or mixed) check box.
+    Checkbox,
+    /// One option of a radio group.
+    Radio,
+    /// A single- or multi-line text field.
+    Textbox,
+    /// A drop-down: a closed control that opens a list of choices.
+    Combobox,
+    /// A slider or spinner over a numeric range.
+    Slider,
+    /// One tab of a tab container.
+    Tab,
+    /// One entry of a menu, a context menu or a pie menu.
+    MenuItem,
+    /// One row of a list, a tree or a grid.
+    ListItem,
+    /// A floater or another top-level window.
+    Window,
+    /// Static text.
+    Text,
+    /// An image with no interaction of its own.
+    Image,
+    /// A container with no widget role of its own — a panel, a list body, a
+    /// scroll area — kept in the tree so a locator can scope to it.
+    Group,
+}
+
+impl Role {
+    /// The role's serialized spelling, used for display too.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Button => "button",
+            Self::Checkbox => "checkbox",
+            Self::Radio => "radio",
+            Self::Textbox => "textbox",
+            Self::Combobox => "combobox",
+            Self::Slider => "slider",
+            Self::Tab => "tab",
+            Self::MenuItem => "menuitem",
+            Self::ListItem => "listitem",
+            Self::Window => "window",
+            Self::Text => "text",
+            Self::Image => "image",
+            Self::Group => "group",
+        }
+    }
+}
+
+impl fmt::Display for Role {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// A boolean state a node may be in; a node's states are the set of those it
+/// is in, and every state it is absent from is false.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeState {
+    /// Disabled, on the node itself **or any ancestor** — the viewer's
+    /// disabled marker is advisory, so the snapshot is what makes an
+    /// inherited one observable.
+    Disabled,
+    /// A text field that shows its value but refuses edits.
+    ReadOnly,
+    /// A checked check box, a chosen radio option, a ticked menu entry.
+    Checked,
+    /// A selected list row, the front tab of a tab container.
+    Selected,
+    /// An open combo box, an unfolded tree row, an open menu.
+    Expanded,
+    /// Holds the keyboard focus.
+    Focused,
+    /// Under the pointer.
+    Hovered,
+}
+
+/// The value a node shows, for the roles that have one.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeValue {
+    /// The text of a text field, or the chosen entry of a combo box.
+    Text(String),
+    /// The position of a slider or a spinner.
+    Number(f32),
+}
+
+/// Whether, and why not, a node can be seen.
+///
+/// Only [`Visible`](Self::Visible) is actionable; the others name the first
+/// reason a user could not see the node, checked in declaration order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeVisibility {
+    /// Drawn, on screen and not covered.
+    Visible,
+    /// Not drawn at all: hidden itself, or laid out away (display none) on
+    /// the node or an ancestor.
+    Hidden,
+    /// Scrolled out of the visible part of an enclosing scroll area.
+    Clipped,
+    /// Outside the viewport.
+    OffScreen,
+    /// Drawn, but something else is on top of it: a hit test at its centre
+    /// lands on a node that is neither it nor one of its descendants.
+    Covered,
+}
+
+/// A node's box in **logical** pixels, the origin at the viewport's top left
+/// and `y` growing downwards.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+pub struct Bounds {
+    /// The left edge.
+    pub x: f32,
+    /// The top edge.
+    pub y: f32,
+    /// The width.
+    pub width: f32,
+    /// The height.
+    pub height: f32,
+}
+
+/// An opaque handle on one node of one viewer, stable for as long as that
+/// node exists and meaningless to any other viewer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct NodeId(pub u64);
+
+/// One node of a semantic UI snapshot.
+///
+/// The optional parts are left out of the JSON when absent, so a snapshot of
+/// a large floater stays readable.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UiNode {
+    /// The node's handle within its viewer.
+    pub id: NodeId,
+    /// What the node is.
+    pub role: Role,
+    /// The accessible name as the user reads it, resolved in the viewer's
+    /// current locale.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The Fluent key the name was translated from, when it was — the
+    /// locale-independent way to address the node.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_key: Option<String>,
+    /// The viewer's own identifier for the node (in sl-client, the entity's
+    /// `Name`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub test_id: Option<String>,
+    /// The states the node is in.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub states: BTreeSet<NodeState>,
+    /// The value the node shows, for text fields, combo boxes and sliders.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<NodeValue>,
+    /// The node's box.
+    pub bounds: Bounds,
+    /// Whether the node can be seen.
+    pub visibility: NodeVisibility,
+    /// The node's children, in the order the user reads them. Empty for a
+    /// leaf, and for a node reported on its own rather than in a tree.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<Self>,
+}
+
+impl UiNode {
+    /// Whether the node is in `state`.
+    #[must_use]
+    pub fn has_state(&self, state: NodeState) -> bool {
+        self.states.contains(&state)
+    }
+}

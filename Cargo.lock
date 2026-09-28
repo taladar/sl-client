@@ -8471,6 +8471,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-automation-proto"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+]
+
+[[package]]
 name = "sl-avatar"
 version = "0.1.0"
 dependencies = [
