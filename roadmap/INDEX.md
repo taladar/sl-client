@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 122 |
-| ready | 315 |
+| ready | 314 |
 | blocked | 66 |
 | in-progress | 21 |
 | bugs | 17 |
-| done | 1263 |
+| done | 1264 |
 | deferred | 31 |
 | wont-do | 16 |
 | **total** | **1851** |
@@ -309,7 +309,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (315)
+## ready (314)
 
 ### protocol
 
@@ -390,10 +390,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-automation-semantic-custom-widgets` (done))
 - [`viewer-automation-app-builder`](ready/viewer-automation-app-builder.md) — A
   public ViewerAppBuilder — one assembly for the binary, the harness and tests
-- [`viewer-automation-locator-engine`](ready/viewer-automation-locator-engine.md)
-  — The locator engine — strict resolution and actionability (blocked by
-  `viewer-automation-semantic-ui-model` (done),
-  `viewer-automation-semantic-custom-widgets` (done))
 - [`viewer-automation-offscreen-window-spike`](ready/viewer-automation-offscreen-window-spike.md)
   — Spike — how a windowless viewer renders and picks at the same time
 - [`viewer-automation-synthetic-input`](ready/viewer-automation-synthetic-input.md)
@@ -1071,8 +1067,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-automation-remote-transport`, `viewer-automation-inprocess-transport`)
 - [`viewer-automation-executor`](blocked/viewer-automation-executor.md) —
   AutomationPlugin — the in-viewer request executor (blocked by
-  `viewer-automation-locator-engine`, `viewer-automation-synthetic-input`,
-  `viewer-automation-world-aim`, `viewer-automation-state-probes`)
+  `viewer-automation-locator-engine` (done),
+  `viewer-automation-synthetic-input`, `viewer-automation-world-aim`,
+  `viewer-automation-state-probes`)
 - [`viewer-automation-inprocess-transport`](blocked/viewer-automation-inprocess-transport.md)
   — In-process transport — the same requests against Apps in the test process
   (blocked by `viewer-automation-executor`, `viewer-automation-per-app-state`,
@@ -1088,7 +1085,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-automation-protocol` (done), `viewer-automation-windowless-mode`)
 - [`viewer-automation-testkit-locators`](blocked/viewer-automation-testkit-locators.md)
   — The in-process tiers speak locators too (blocked by
-  `viewer-automation-locator-engine`, `viewer-automation-app-builder`)
+  `viewer-automation-locator-engine` (done), `viewer-automation-app-builder`)
 - [`viewer-automation-windowless-mode`](blocked/viewer-automation-windowless-mode.md)
   — Windowless viewer — the whole app, UI included, with no OS window (blocked
   by `viewer-automation-app-builder`,
@@ -1383,7 +1380,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1263)
+## done (1264)
 
 ### protocol
 
@@ -1828,6 +1825,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-auto-reject-offers`](done/viewer-auto-reject-offers.md) —
   Auto-decline teleport/friendship/group-invite modes (blocked by
   `viewer-dialog-offers-invites` (done))
+- [`viewer-automation-locator-engine`](done/viewer-automation-locator-engine.md)
+  — The locator engine — strict resolution and actionability (blocked by
+  `viewer-automation-semantic-ui-model` (done),
+  `viewer-automation-semantic-custom-widgets` (done))
 - [`viewer-automation-protocol`](done/viewer-automation-protocol.md) —
   sl-automation-proto — the locator, request and snapshot vocabulary
 - [`viewer-automation-semantic-custom-widgets`](done/viewer-automation-semantic-custom-widgets.md)

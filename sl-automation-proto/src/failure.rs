@@ -69,7 +69,11 @@ pub enum AutomationError {
     },
     /// An action's locator matches several nodes; an action needs exactly
     /// one.
-    #[error("{locator} matches {} UI nodes, an action needs exactly one", candidates.len())]
+    #[error(
+        "{locator} matches {} UI nodes, an action needs exactly one: {}",
+        candidates.len(),
+        list_nodes(candidates)
+    )]
     Ambiguous {
         /// The locator that matched too much.
         locator: Locator,
@@ -112,6 +116,15 @@ pub enum AutomationError {
     },
 }
 
+/// The nodes of an error message, one after the other.
+fn list_nodes(nodes: &[UiNode]) -> String {
+    nodes
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
 /// The tail of a timeout's message: what was awaited and what was seen last.
 fn timeout_detail(
     condition: Option<WaitCondition>,
@@ -130,10 +143,47 @@ fn timeout_detail(
 mod tests {
     use pretty_assertions::assert_eq;
 
+    use std::collections::BTreeSet;
+
     use super::{ActionabilityCheck, AutomationError};
     use crate::locator::Locator;
     use crate::message::WaitCondition;
-    use crate::snapshot::Role;
+    use crate::snapshot::{Bounds, NodeId, NodeVisibility, Role, UiNode};
+
+    /// A named OK button at `x`, with a test id.
+    fn ok_at(x: f32, test_id: &str) -> UiNode {
+        UiNode {
+            id: NodeId(1),
+            role: Role::Button,
+            name: Some("OK".to_owned()),
+            name_key: Some("button-ok".to_owned()),
+            test_id: Some(test_id.to_owned()),
+            states: BTreeSet::new(),
+            value: None,
+            level: None,
+            accelerator: None,
+            bounds: Bounds {
+                x,
+                y: 20.0,
+                width: 120.0,
+                height: 30.0,
+            },
+            visibility: NodeVisibility::Visible,
+            children: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn an_ambiguity_names_every_candidate() {
+        let error = AutomationError::Ambiguous {
+            locator: Locator::role(Role::Button).named("OK"),
+            candidates: vec![ok_at(10.0, "prefs.ok"), ok_at(200.5, "profile.ok")],
+        };
+        assert_eq!(
+            error.to_string(),
+            r#"button name="OK" matches 2 UI nodes, an action needs exactly one: button "OK" key=button-ok #prefs.ok at 10,20 120x30; button "OK" key=button-ok #profile.ok at 200.5,20 120x30"#
+        );
+    }
 
     #[test]
     fn timeout_messages_say_what_was_awaited() {

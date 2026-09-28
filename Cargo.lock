@@ -9241,7 +9241,9 @@ dependencies = [
  "sl-automation-proto",
  "sl-viewer-testkit",
  "sl-viewer-ui-core",
+ "sl-viewer-ui-pie-menu",
  "sl-viewer-ui-widgets",
+ "thiserror 2.0.19",
 ]
 
 [[package]]

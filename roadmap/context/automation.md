@@ -136,6 +136,11 @@ person logging in and clicking. This tier is what replaces that person.
   `OnceLock` switches), as are Bevy's tracing subscriber and task pools; two
   viewers in one process need the former per App
   ([[viewer-automation-per-app-state]]).
+- **A virtual list is strict only over its bound rows.** The locator engine
+  pages a list when nothing matches, but it does not page to the end to
+  prove a bound match unique — about three frames a page, 50 s on a
+  10 000-item inventory. A browser driver has the same blind spot with a
+  virtualised table.
 - Every new crate here trips the extraction gates (`private_interfaces`,
   `must_use_candidate`, fmt, machete, cargo-about, rustdoc, `cliff.toml`,
   `CHANGELOG.md`).

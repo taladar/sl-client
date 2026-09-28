@@ -226,3 +226,28 @@ impl UiNode {
         self.states.contains(&state)
     }
 }
+
+/// One line naming the node for a person reading an error — role, name, key,
+/// test id and box: `button "OK" key=button-ok #prefs.ok at 10,20 120x30`.
+/// Its states and children are left out.
+impl fmt::Display for UiNode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.role.as_str())?;
+        if let Some(name) = &self.name {
+            write!(f, " {name:?}")?;
+        }
+        if let Some(key) = &self.name_key {
+            write!(f, " key={key}")?;
+        }
+        if let Some(id) = &self.test_id {
+            write!(f, " #{id}")?;
+        }
+        let Bounds {
+            x,
+            y,
+            width,
+            height,
+        } = self.bounds;
+        write!(f, " at {x},{y} {width}x{height}")
+    }
+}

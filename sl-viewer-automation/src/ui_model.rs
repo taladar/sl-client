@@ -580,36 +580,28 @@ impl UiModel<'_, '_> {
     /// The first reason the node cannot be seen, or
     /// [`NodeVisibility::Visible`].
     fn visibility_of(&self, facts: &NodeFactsItem<'_, '_>, inherited: Inherited) -> NodeVisibility {
-        let shown = facts
-            .inherited_visibility
-            .is_some_and(|visibility| visibility.get());
-        let size = facts.computed.size;
-        if !shown || inherited.display_none || size.x <= 0.0 || size.y <= 0.0 {
-            return NodeVisibility::Hidden;
-        }
-        let mut visible = physical_rect(facts.computed, facts.transform);
-        if let Some(clip) = facts.clip {
-            visible = visible.intersect(clip.clip);
-            if visible.is_empty() {
-                return NodeVisibility::Clipped;
+        match visible_part(facts, inherited) {
+            Err(reason) => reason,
+            Ok(visible) if self.hit_reaches(visible.center(), facts.entity) => {
+                NodeVisibility::Visible
             }
+            Ok(_covered) => NodeVisibility::Covered,
         }
-        if let Some(target) = facts.target
-            && target.physical_size() != UVec2::ZERO
-        {
-            visible = visible.intersect(Rect::from_corners(
-                Vec2::ZERO,
-                target.physical_size().as_vec2(),
-            ));
-            if visible.is_empty() {
-                return NodeVisibility::OffScreen;
-            }
-        }
-        if self.hit_reaches(visible.center(), facts.entity) {
-            NodeVisibility::Visible
-        } else {
-            NodeVisibility::Covered
-        }
+    }
+
+    /// Where a pointer aimed at `entity` goes, in logical pixels: the centre of
+    /// the part of it a user can see — not of its box, which a scroll area or
+    /// the viewport edge may cut. The same point the model's covered test is
+    /// made at, so a node the model calls visible is hit there.
+    ///
+    /// `None` when `entity` is not a UI node, or no part of it can be seen.
+    #[must_use]
+    pub fn aim_point(&self, entity: Entity) -> Option<Vec2> {
+        let facts = self.nodes.get(entity).ok()?;
+        let inherited = self.inherited_at(entity).through(&facts);
+        let centre = visible_part(&facts, inherited).ok()?.center();
+        let scale = facts.computed.inverse_scale_factor;
+        Some(Vec2::new(centre.x * scale, centre.y * scale))
     }
 
     /// Whether a pointer at `point` (physical pixels) would reach `target` —
@@ -652,6 +644,42 @@ impl UiModel<'_, '_> {
         }
         false
     }
+}
+
+/// The part of the node a user can see, in physical pixels: its box cut
+/// down by its scroll ancestors' clip and by the viewport — or the first
+/// reason there is none (hidden, clipped or off screen). Whether something
+/// covers it is not asked here.
+fn visible_part(
+    facts: &NodeFactsItem<'_, '_>,
+    inherited: Inherited,
+) -> Result<Rect, NodeVisibility> {
+    let shown = facts
+        .inherited_visibility
+        .is_some_and(|visibility| visibility.get());
+    let size = facts.computed.size;
+    if !shown || inherited.display_none || size.x <= 0.0 || size.y <= 0.0 {
+        return Err(NodeVisibility::Hidden);
+    }
+    let mut visible = physical_rect(facts.computed, facts.transform);
+    if let Some(clip) = facts.clip {
+        visible = visible.intersect(clip.clip);
+        if visible.is_empty() {
+            return Err(NodeVisibility::Clipped);
+        }
+    }
+    if let Some(target) = facts.target
+        && target.physical_size() != UVec2::ZERO
+    {
+        visible = visible.intersect(Rect::from_corners(
+            Vec2::ZERO,
+            target.physical_size().as_vec2(),
+        ));
+        if visible.is_empty() {
+            return Err(NodeVisibility::OffScreen);
+        }
+    }
+    Ok(visible)
 }
 
 /// Whether a role's subtree belongs to it — its label and decoration — rather

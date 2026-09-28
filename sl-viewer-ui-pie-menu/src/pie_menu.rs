@@ -260,6 +260,10 @@ const PIE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("2a7f5c31-9d84-4e62-b1a7-
 /// ninth slice.
 pub const PIE_SLICES: usize = 8;
 
+/// The `Name` of an open pie's root: its test id, the scope a locator picks a
+/// slice within.
+pub const PIE_MENU_NAME: &str = "pie-menu";
+
 /// The name tying the labels' declared directions to the ring they are measured
 /// from. One group: a matrix cell spawns one element, and a viewer only ever has
 /// one pie open.
@@ -1200,7 +1204,7 @@ pub fn spawn_pie_menu(
             // leaves them alone until the pie descends.
             DisplayedPiePath::default(),
             Semantic::new(Role::Menu),
-            Name::new("pie-menu"),
+            Name::new(PIE_MENU_NAME),
             ChildOf(parent),
         ))
         // **Swallow pointer presses that land on the menu**, so they do not bubble
