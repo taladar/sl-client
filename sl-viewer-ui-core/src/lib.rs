@@ -38,6 +38,9 @@
 //!   states read.
 //! - [`semantic`] — what a custom widget *is* (a window, a tab, a menu entry,
 //!   a tree row), for the automation model and assistive technology to read.
+//! - [`synthetic_input`] — real input written into a running app from a queue,
+//!   one step a frame: the testkit's pointer and keyboard driver, and the
+//!   automation executor's hands.
 //!
 //! The UI's own **sound effects** used to be a module here. They are
 //! `sl-viewer-ui-sounds` now: three lines of them named the audio engine and
@@ -61,6 +64,7 @@ pub mod semantic;
 pub mod skin;
 pub mod skin_colors;
 pub mod skin_palette;
+pub mod synthetic_input;
 pub mod ui;
 pub mod ui_element;
 pub mod ui_ellipsis;

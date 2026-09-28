@@ -64,7 +64,7 @@ person logging in and clicking. This tier is what replaces that person.
 | Crate | Role | Task |
 | --- | --- | --- |
 | `sl-automation-proto` | pure serde vocabulary, viewer-neutral | [[viewer-automation-protocol]] |
-| `sl-viewer-automation` | in-viewer plugin: model, input, executor | [[viewer-automation-executor]] and its blockers |
+| `sl-viewer-automation` | in-viewer plugin: model, locators, executor (input: `sl-viewer-ui-core`'s `synthetic_input`) | [[viewer-automation-executor]] and its blockers |
 | `sl-viewer-driver` | async client API over both transports | [[viewer-automation-driver]] |
 | `sl-e2e` | `Stage`: fake grid + N viewers + grid control | [[test-e2e-stage]] |
 | `sl-viewer-ctl` | CLI over the driver | [[viewer-automation-ctl-cli]] |
@@ -87,7 +87,9 @@ person logging in and clicking. This tier is what replaces that person.
   actionability for scroll areas and virtual lists.
 - **Input goes through the real input path**, never by triggering widget
   observers: the typed `bevy_input` messages plus their `WindowEvent`
-  wrappers, one step per frame, exactly as `interact.rs` established. A
+  wrappers, one step per frame, written by the injector in
+  `sl_viewer_ui_core::synthetic_input` (a queue of `InputAction`s that the
+  running app drains itself, which the testkit's `interact` functions wrap). A
   test that asserts "disabled buttons do nothing" must be able to fail.
 - **World clicks are pick-verified.** An object's aim point is a projected
   point the viewer's own pick resolver confirms hits *that* object; if no

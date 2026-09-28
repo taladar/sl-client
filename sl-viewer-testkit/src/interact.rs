@@ -5,9 +5,10 @@
 //! *where the user's pointer thinks it is*, cannot tell the buttons apart, and
 //! cannot hover, scroll or drag. This module adds the missing half: a driver
 //! that writes the same messages winit writes live — the typed `bevy_input` /
-//! `bevy_window` messages **plus their [`WindowEvent`] wrappers** — and lets
-//! Bevy's own picking input plugin derive `PointerInput` from them, exactly as
-//! it does under a real window. One source of truth, so `ButtonInput`, the
+//! `bevy_window` messages **plus their
+//! [`WindowEvent`](bevy::window::WindowEvent) wrappers** — and lets Bevy's own
+//! picking input plugin derive `PointerInput` from them, exactly as it does
+//! under a real window. One source of truth, so `ButtonInput`, the
 //! accumulated mouse resources, `Window::cursor_position()` and the picking
 //! pointer can never disagree.
 //!
@@ -21,12 +22,19 @@
 //! time. [`click`] also pins the multi-click interval to zero around its
 //! frames, because the click counter is wall-clock and two test clicks in
 //! consecutive frames would otherwise read as a double click.
+//!
+//! # Where the writing lives
+//!
+//! Not here. The messages are written by `sl_viewer_ui_core`'s
+//! [`synthetic_input`](sl_viewer_ui_core::synthetic_input) injector, which a
+//! running viewer drains one step per frame on its own; each function here
+//! queues one [`InputAction`] and steps the app until it is done
+//! ([`perform`]). So a test and a live automation run go through the same
+//! writer, and the frame counts above are the injector's.
 
-use bevy::input::keyboard::{Key, KeyboardInput};
-use bevy::input::mouse::{MouseButtonInput, MouseMotion, MouseScrollUnit, MouseWheel};
-use bevy::input::{ButtonState, InputPlugin};
+use bevy::input::InputPlugin;
+use bevy::input::keyboard::Key;
 use bevy::input_focus::{FocusCause, InputDispatchPlugin, InputFocus, InputFocusPlugin};
-use bevy::picking::PickingSettings;
 use bevy::prelude::*;
 use bevy::text::{EditableText, EditableTextSystems};
 use bevy::time::TimeUpdateStrategy;
@@ -35,9 +43,13 @@ use bevy::ui::widget::{
     update_editable_text_styles,
 };
 use bevy::ui::{UiStack, UiSystems, ui_focus_system, ui_stack_system};
-use bevy::window::{PrimaryWindow, WindowEvent, WindowResolution};
+use bevy::window::{PrimaryWindow, WindowResolution};
 
 use crate::{LayoutTest, record};
+pub use sl_viewer_ui_core::synthetic_input::key_code_for;
+use sl_viewer_ui_core::synthetic_input::{
+    ActionStatus, ImeStep, InputAction, SyntheticInput, SyntheticInputPlugin,
+};
 use sl_viewer_ui_core::ui::install_ui_pointer_claim;
 use sl_viewer_ui_core::ui_element::UiAction;
 
@@ -252,15 +264,38 @@ pub fn install_input_stack(app: &mut App, viewport: UVec2, scale_factor: f32) ->
     // Focus bookkeeping and the dispatch that routes keys to the focused
     // widget (`FocusedInput` — Enter / Space activation, text entry).
     app.add_plugins((InputFocusPlugin, InputDispatchPlugin));
+    // The writer every driver function queues on.
+    app.add_plugins(SyntheticInputPlugin);
     window_entity
 }
 
-/// The primary window entity, for message stamping.
-fn window_entity(app: &mut App) -> Entity {
-    let mut windows = app
+/// Queue `action` on the app's [`SyntheticInput`] and run frames until it is
+/// done — the stepping half of the driver, over the injector a live viewer
+/// drains on its own.
+///
+/// Returns once the action's last frame has finished, so a caller reading the
+/// world afterwards sees everything its last step caused. Anything queued
+/// before it runs first.
+///
+/// # Panics
+///
+/// When the app has no injector: [`install_input_stack`] installs one, and an
+/// app without it would never apply the action.
+pub fn perform(app: &mut App, action: InputAction) {
+    assert!(
+        app.world().contains_resource::<SyntheticInput>(),
+        "the app has no synthetic input injector; build it with `install_input_stack`"
+    );
+    let id = app
         .world_mut()
-        .query_filtered::<Entity, With<PrimaryWindow>>();
-    windows.single(app.world()).unwrap_or(Entity::PLACEHOLDER)
+        .resource_mut::<SyntheticInput>()
+        .enqueue(action);
+    while matches!(
+        app.world().resource::<SyntheticInput>().status(id),
+        ActionStatus::Queued | ActionStatus::Running
+    ) {
+        app.update();
+    }
 }
 
 /// The pointer's current logical position, as the window knows it.
@@ -304,39 +339,7 @@ pub fn centre_of_entity(app: &App, entity: Entity) -> Option<Vec2> {
 /// Move the pointer to `at` (logical pixels) and run one frame: the window's
 /// cursor, the typed `CursorMoved` / `MouseMotion` and their wrappers.
 pub fn hover(app: &mut App, at: Vec2) {
-    let window = window_entity(app);
-    let previous = cursor(app);
-    let scale_factor = {
-        let mut windows = app
-            .world_mut()
-            .query_filtered::<&mut Window, With<PrimaryWindow>>();
-        let mut win = match windows.single_mut(app.world_mut()) {
-            Ok(win) => win,
-            Err(_missing) => return,
-        };
-        let scale_factor = win.scale_factor();
-        // Component-wise `f32`: the lint fires on `glam` operators.
-        let physical = Vec2::new(at.x * scale_factor, at.y * scale_factor);
-        win.set_physical_cursor_position(Some(physical.as_dvec2()));
-        scale_factor
-    };
-    let _unused = scale_factor;
-    let delta = previous.map(|was| Vec2::new(at.x - was.x, at.y - was.y));
-    let moved = CursorMoved {
-        window,
-        position: at,
-        delta,
-    };
-    app.world_mut().write_message(moved.clone());
-    app.world_mut()
-        .write_message(WindowEvent::CursorMoved(moved));
-    if let Some(delta) = delta {
-        let motion = MouseMotion { delta };
-        app.world_mut().write_message(motion);
-        app.world_mut()
-            .write_message(WindowEvent::MouseMotion(motion));
-    }
-    app.update();
+    perform(app, InputAction::move_to(at));
 }
 
 /// Move the pointer to the named node's centre. Errors when it never laid out.
@@ -352,30 +355,12 @@ pub fn hover_node(app: &mut App, name: &str) -> Result<Vec2, String> {
 
 /// Press `button` where the pointer is, and run one frame.
 pub fn press(app: &mut App, button: MouseButton) {
-    let window = window_entity(app);
-    let input = MouseButtonInput {
-        button,
-        state: ButtonState::Pressed,
-        window,
-    };
-    app.world_mut().write_message(input);
-    app.world_mut()
-        .write_message(WindowEvent::MouseButtonInput(input));
-    app.update();
+    perform(app, InputAction::press(button));
 }
 
 /// Release `button` where the pointer is, and run one frame.
 pub fn release(app: &mut App, button: MouseButton) {
-    let window = window_entity(app);
-    let input = MouseButtonInput {
-        button,
-        state: ButtonState::Released,
-        window,
-    };
-    app.world_mut().write_message(input);
-    app.world_mut()
-        .write_message(WindowEvent::MouseButtonInput(input));
-    app.update();
+    perform(app, InputAction::release(button));
 }
 
 /// One single click at `at`: move, press, release — each its own frame — with
@@ -383,23 +368,7 @@ pub fn release(app: &mut App, button: MouseButton) {
 /// frames are two singles, not a double. One settling frame at the end lets
 /// the widgets' own observers run before the caller drains.
 pub fn click(app: &mut App, at: Vec2, button: MouseButton) {
-    let interval = app
-        .world()
-        .get_resource::<PickingSettings>()
-        .map(|settings| settings.multi_click_interval);
-    if let Some(mut settings) = app.world_mut().get_resource_mut::<PickingSettings>() {
-        settings.multi_click_interval = core::time::Duration::ZERO;
-    }
-    hover(app, at);
-    press(app, button);
-    release(app, button);
-    app.update();
-    if let (Some(interval), Some(mut settings)) = (
-        interval,
-        app.world_mut().get_resource_mut::<PickingSettings>(),
-    ) {
-        settings.multi_click_interval = interval;
-    }
+    perform(app, InputAction::click(at, button));
 }
 
 /// A single left click on the named node's centre.
@@ -416,146 +385,44 @@ pub fn click_node(app: &mut App, name: &str) -> Result<(), String> {
 /// Two clicks at `at` under the default multi-click interval, so the second
 /// carries `count == 2` — the double click the widgets read.
 pub fn double_click(app: &mut App, at: Vec2, button: MouseButton) {
-    hover(app, at);
-    press(app, button);
-    release(app, button);
-    press(app, button);
-    release(app, button);
-    app.update();
+    perform(app, InputAction::double_click(at, button));
 }
 
 /// Press at `from`, step the pointer to `to` across `steps` frames, release —
 /// the shape every drag reader (title bars, gizmos, sliders) consumes.
 pub fn drag(app: &mut App, from: Vec2, to: Vec2, steps: u32, button: MouseButton) {
-    hover(app, from);
-    press(app, button);
-    let count = steps.max(1);
-    for step in 1..=count {
-        let t = f32::from(u16::try_from(step).unwrap_or(u16::MAX))
-            / f32::from(u16::try_from(count).unwrap_or(u16::MAX));
-        hover(app, from.lerp(to, t));
-    }
-    release(app, button);
-    app.update();
+    perform(app, InputAction::drag(from, to, steps, button));
 }
 
 /// Scroll `lines` at `at` (vertical positive = away from the user).
 pub fn scroll(app: &mut App, at: Vec2, lines: Vec2) {
-    hover(app, at);
-    let window = window_entity(app);
-    let wheel = MouseWheel {
-        unit: MouseScrollUnit::Line,
-        x: lines.x,
-        y: lines.y,
-        window,
-        phase: bevy::input::touch::TouchPhase::Moved,
-    };
-    app.world_mut().write_message(wheel);
-    app.world_mut()
-        .write_message(WindowEvent::MouseWheel(wheel));
-    app.update();
+    perform(app, InputAction::scroll(at, lines));
 }
 
 /// Raw relative mouse motion with **no** cursor move — what mouselook reads.
 pub fn hold_mouse_motion(app: &mut App, delta: Vec2) {
-    let motion = MouseMotion { delta };
-    app.world_mut().write_message(motion);
-    app.world_mut()
-        .write_message(WindowEvent::MouseMotion(motion));
-    app.update();
+    perform(app, InputAction::mouse_motion(delta));
 }
 
 /// Press `key` down (with its logical meaning and optional text), one frame.
 pub fn key_down(app: &mut App, key_code: KeyCode, logical: Key, text: Option<&str>) {
-    write_key(app, key_code, logical, text, ButtonState::Pressed);
+    perform(app, InputAction::key_down(key_code, logical, text));
 }
 
 /// Release `key`, one frame.
 pub fn key_up(app: &mut App, key_code: KeyCode, logical: Key) {
-    write_key(app, key_code, logical, None, ButtonState::Released);
+    perform(app, InputAction::key_up(key_code, logical));
 }
 
 /// Tap `key`: down, up — two frames.
 pub fn tap(app: &mut App, key_code: KeyCode, logical: Key) {
-    key_down(app, key_code, logical.clone(), None);
-    key_up(app, key_code, logical);
+    perform(app, InputAction::tap(key_code, logical));
 }
 
-/// Type `text`, one character key per frame pair, as an IME-less keyboard
-/// delivers it: the logical key and its text (what a text field inserts) over
-/// the **physical** key that carries the character on a US layout (what
-/// `ButtonInput<KeyCode>` — and so every world key binding — reads).
-///
-/// Both halves matter and they are read by different code. A driver that typed
-/// every character on one placeholder key would drive the field perfectly while
-/// silently telling the world that no letter was ever pressed — which is
-/// precisely the coincidence a focus-routing test exists to rule out. A
-/// character with no US-layout key ([`key_code_for`] returns `None`) is typed
-/// on [`KeyCode::F35`], a key no profile binds, so the logical half still works.
+/// Type `text`, one character key per frame pair, over the physical key each
+/// character sits on — see [`InputAction::type_text`] for why both halves.
 pub fn type_str(app: &mut App, text: &str) {
-    for character in text.chars() {
-        let logical = Key::Character(character.to_string().into());
-        let key_code = key_code_for(character).unwrap_or(KeyCode::F35);
-        key_down(app, key_code, logical.clone(), Some(&character.to_string()));
-        key_up(app, key_code, logical);
-    }
-}
-
-/// The physical key a US-layout keyboard puts `character` on, or `None` when
-/// this table has no entry for it.
-///
-/// Deliberately shallow: the letters, the digit row, and the punctuation the
-/// viewer's own fields actually take (a numeric field's `-` and `.`, a chat
-/// bar's space and comma). It is a *physical* mapping, so an upper-case letter
-/// resolves to the same key as its lower-case twin — the shift state a real
-/// keyboard would also be holding is the caller's to press if it matters.
-#[must_use]
-pub const fn key_code_for(character: char) -> Option<KeyCode> {
-    let key = match character.to_ascii_lowercase() {
-        'a' => KeyCode::KeyA,
-        'b' => KeyCode::KeyB,
-        'c' => KeyCode::KeyC,
-        'd' => KeyCode::KeyD,
-        'e' => KeyCode::KeyE,
-        'f' => KeyCode::KeyF,
-        'g' => KeyCode::KeyG,
-        'h' => KeyCode::KeyH,
-        'i' => KeyCode::KeyI,
-        'j' => KeyCode::KeyJ,
-        'k' => KeyCode::KeyK,
-        'l' => KeyCode::KeyL,
-        'm' => KeyCode::KeyM,
-        'n' => KeyCode::KeyN,
-        'o' => KeyCode::KeyO,
-        'p' => KeyCode::KeyP,
-        'q' => KeyCode::KeyQ,
-        'r' => KeyCode::KeyR,
-        's' => KeyCode::KeyS,
-        't' => KeyCode::KeyT,
-        'u' => KeyCode::KeyU,
-        'v' => KeyCode::KeyV,
-        'w' => KeyCode::KeyW,
-        'x' => KeyCode::KeyX,
-        'y' => KeyCode::KeyY,
-        'z' => KeyCode::KeyZ,
-        '0' => KeyCode::Digit0,
-        '1' => KeyCode::Digit1,
-        '2' => KeyCode::Digit2,
-        '3' => KeyCode::Digit3,
-        '4' => KeyCode::Digit4,
-        '5' => KeyCode::Digit5,
-        '6' => KeyCode::Digit6,
-        '7' => KeyCode::Digit7,
-        '8' => KeyCode::Digit8,
-        '9' => KeyCode::Digit9,
-        ' ' => KeyCode::Space,
-        '-' => KeyCode::Minus,
-        '.' => KeyCode::Period,
-        ',' => KeyCode::Comma,
-        '/' => KeyCode::Slash,
-        _other => return None,
-    };
-    Some(key)
+    perform(app, InputAction::type_text(text));
 }
 
 /// Hold `modifier` down, run `body`, release it — the shape of every chord
@@ -595,7 +462,7 @@ pub fn text_of(app: &mut App, name: &str) -> Option<String> {
 /// Announce that the platform IME has become active for the focused field, and
 /// run one frame. `bevy_ui_widgets` clears any stale composition on this.
 pub fn ime_enable(app: &mut App) {
-    write_ime(app, |window| Ime::Enabled { window });
+    perform(app, InputAction::ime(ImeStep::Enable));
 }
 
 /// Deliver an IME **preedit** — the composing text the candidate window is
@@ -605,58 +472,25 @@ pub fn ime_enable(app: &mut App) {
 /// committed, which is the property worth a test: a viewer that read the
 /// preedit as typed text would send half-composed Japanese to chat.
 pub fn ime_preedit(app: &mut App, value: &str, cursor: Option<(usize, usize)>) {
-    let value = value.to_owned();
-    write_ime(app, move |window| Ime::Preedit {
-        window,
-        value,
-        cursor,
-    });
+    perform(
+        app,
+        InputAction::ime(ImeStep::Preedit {
+            value: value.to_owned(),
+            cursor,
+        }),
+    );
 }
 
 /// Deliver an IME **commit** — the composition the user accepted — and run one
 /// frame. This is the point the text enters the buffer.
 pub fn ime_commit(app: &mut App, value: &str) {
-    let value = value.to_owned();
-    write_ime(app, move |window| Ime::Commit { window, value });
+    perform(app, InputAction::ime(ImeStep::Commit(value.to_owned())));
 }
 
 /// Announce that the platform IME was force-disabled, cancelling any
 /// composition in progress, and run one frame.
 pub fn ime_disable(app: &mut App) {
-    write_ime(app, |window| Ime::Disabled { window });
-}
-
-/// The shared IME write: the typed message plus its [`WindowEvent`] wrapper,
-/// then one frame — the same one-source-of-truth shape the pointer uses.
-fn write_ime(app: &mut App, build: impl FnOnce(Entity) -> Ime) {
-    let window = window_entity(app);
-    let ime = build(window);
-    app.world_mut().write_message(ime.clone());
-    app.world_mut().write_message(WindowEvent::Ime(ime));
-    app.update();
-}
-
-/// The shared keyboard write: the typed message plus its wrapper.
-fn write_key(
-    app: &mut App,
-    key_code: KeyCode,
-    logical: Key,
-    text: Option<&str>,
-    state: ButtonState,
-) {
-    let window = window_entity(app);
-    let input = KeyboardInput {
-        key_code,
-        logical_key: logical,
-        state,
-        text: text.map(Into::into),
-        repeat: false,
-        window,
-    };
-    app.world_mut().write_message(input.clone());
-    app.world_mut()
-        .write_message(WindowEvent::KeyboardInput(input));
-    app.update();
+    perform(app, InputAction::ime(ImeStep::Disable));
 }
 
 #[cfg(test)]
@@ -988,6 +822,66 @@ mod tests {
             Some(second),
             "the next Tab moves one stop on"
         );
+    }
+
+    /// The button a system inside the app aims at, and whether it has asked.
+    #[derive(Resource)]
+    struct InAppClick {
+        /// Where to click.
+        at: Vec2,
+        /// The frame (counted by the system itself) at which to queue it.
+        on_frame: u32,
+        /// Frames seen so far.
+        frames: u32,
+    }
+
+    /// Queue one click from inside the app, at a frame of its own choosing —
+    /// what the automation executor does, with nobody stepping it.
+    fn queue_click_from_inside(
+        mut plan: ResMut<InAppClick>,
+        mut input: ResMut<sl_viewer_ui_core::synthetic_input::SyntheticInput>,
+    ) {
+        plan.frames = plan.frames.saturating_add(1);
+        if plan.frames == plan.on_frame {
+            input.enqueue(super::InputAction::click(plan.at, MouseButton::Left));
+        }
+    }
+
+    /// **A click queued from inside a running app reaches the widget**, with the
+    /// app simply running its frames — no test code between the steps. This is
+    /// the shape a live viewer drives itself in.
+    #[test]
+    fn a_click_queued_inside_the_running_app_activates_the_button() -> Result<(), String> {
+        let mut app = interactive_app();
+        let button = crate::spawn_under_root(
+            &mut app,
+            (
+                solid_node(10.0, 10.0, 100.0, 40.0),
+                bevy::ui_widgets::Button,
+            ),
+        );
+        app.world_mut().entity_mut(button).observe(
+            |_activate: On<bevy::ui_widgets::Activate>, mut clicks: ResMut<Clicks>| {
+                clicks.0.push(("button".to_owned(), 1));
+            },
+        );
+        settle(&mut app);
+        let at = super::centre_of_entity(&app, button).ok_or("the button never laid out")?;
+        app.insert_resource(InAppClick {
+            at,
+            on_frame: 3,
+            frames: 0,
+        })
+        .add_systems(Update, queue_click_from_inside);
+        for _ in 0..12 {
+            app.update();
+        }
+        assert_eq!(
+            app.world().resource::<Clicks>().0,
+            vec![("button".to_owned(), 1)],
+            "the queued click must activate the button exactly once"
+        );
+        Ok(())
     }
 
     /// **The window tracks the pointer**: `cursor_position()` — what the
