@@ -232,6 +232,8 @@ fs-err = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
+# The vocabulary the automation sweep's snapshots are written in.
+sl-automation-proto = { workspace = true }
 # The loopback grid the full-stack tier (`src/full_stack_test.rs`) renders
 # against: the real viewer logging into a real grid, in one process.
 sl-fake-grid = { path = "../sl-fake-grid", version = "0.1.0" }
@@ -240,6 +242,9 @@ sl-proto = { workspace = true }
 # The shared procedural fixtures the fake grid dresses a region with — the
 # full-stack tier states the environment it publishes in the same values.
 sl-test-assets = { workspace = true }
+# The semantic UI model the automation sweep (`src/automation_model.rs`) reads
+# every registered element and floater through.
+sl-viewer-automation = { workspace = true }
 # The render-scene registry the harness tiers (`render_matrix`,
 # `render_readback`, `render_test`) draw. A dev-dependency: only those tiers
 # build scenes, so the shipped viewer never compiles a fixture.

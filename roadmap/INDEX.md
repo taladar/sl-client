@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 122 |
 | ready | 314 |
-| blocked | 69 |
+| blocked | 68 |
 | in-progress | 21 |
 | bugs | 17 |
-| done | 1261 |
+| done | 1262 |
 | deferred | 31 |
 | wont-do | 16 |
 | **total** | **1851** |
@@ -389,9 +389,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   public ViewerAppBuilder — one assembly for the binary, the harness and tests
 - [`viewer-automation-offscreen-window-spike`](ready/viewer-automation-offscreen-window-spike.md)
   — Spike — how a windowless viewer renders and picks at the same time
-- [`viewer-automation-semantic-ui-model`](ready/viewer-automation-semantic-ui-model.md)
-  — The semantic UI model — roles, names and states read from the ECS (blocked
-  by `viewer-automation-protocol` (done))
+- [`viewer-automation-semantic-custom-widgets`](ready/viewer-automation-semantic-custom-widgets.md)
+  — Semantic roles for the custom widgets, and a completeness guard (blocked by
+  `viewer-automation-semantic-ui-model` (done))
 - [`viewer-automation-synthetic-input`](ready/viewer-automation-synthetic-input.md)
   — Synthetic input for a live viewer — interact.rs as a frame-queued injector
   (blocked by `viewer-automation-protocol` (done))
@@ -1055,7 +1055,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-world-heartbeat`](ready/server-world-heartbeat.md) — A region
   heartbeat — the fake grid has no simulation loop at all
 
-## blocked (69)
+## blocked (68)
 
 ### viewer
 
@@ -1078,7 +1078,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-automation-windowless-mode`)
 - [`viewer-automation-locator-engine`](blocked/viewer-automation-locator-engine.md)
   — The locator engine — strict resolution and actionability (blocked by
-  `viewer-automation-semantic-ui-model`,
+  `viewer-automation-semantic-ui-model` (done),
   `viewer-automation-semantic-custom-widgets`)
 - [`viewer-automation-per-app-state`](blocked/viewer-automation-per-app-state.md)
   — Per-App state — two logged-in viewers in one process (blocked by
@@ -1086,9 +1086,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-automation-remote-transport`](blocked/viewer-automation-remote-transport.md)
   — Remote transport — automation over a private Unix socket (blocked by
   `viewer-automation-executor`)
-- [`viewer-automation-semantic-custom-widgets`](blocked/viewer-automation-semantic-custom-widgets.md)
-  — Semantic roles for the custom widgets, and a completeness guard (blocked by
-  `viewer-automation-semantic-ui-model`)
 - [`viewer-automation-state-probes`](blocked/viewer-automation-state-probes.md)
   — State probes — chat, notifications, agent, logs and screenshots (blocked by
   `viewer-automation-protocol` (done), `viewer-automation-windowless-mode`)
@@ -1389,7 +1386,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1261)
+## done (1262)
 
 ### protocol
 
@@ -1836,6 +1833,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-dialog-offers-invites` (done))
 - [`viewer-automation-protocol`](done/viewer-automation-protocol.md) —
   sl-automation-proto — the locator, request and snapshot vocabulary
+- [`viewer-automation-semantic-ui-model`](done/viewer-automation-semantic-ui-model.md)
+  — The semantic UI model — roles, names and states read from the ECS (blocked
+  by `viewer-automation-protocol` (done))
 - [`viewer-avatar-complexity-limit`](done/viewer-avatar-complexity-limit.md) —
   Avatar complexity limiting (jellydoll)
 - [`viewer-avatar-context-menu`](done/viewer-avatar-context-menu.md) — Avatar

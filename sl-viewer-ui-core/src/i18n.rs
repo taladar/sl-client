@@ -905,6 +905,13 @@ impl Translated {
     pub fn new(key: impl Into<String>) -> Self {
         Self { key: key.into() }
     }
+
+    /// The Fluent key this label resolves to — the locale-independent name
+    /// the automation model reports beside the resolved text.
+    #[must_use]
+    pub fn key(&self) -> &str {
+        &self.key
+    }
 }
 
 /// Keep every [`Translated`] label's [`Text`] resolved from its key.

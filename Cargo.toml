@@ -48,6 +48,7 @@ members = [
   "sl-tree",
   "sl-viewer-asset-editors",
   "sl-viewer-audio",
+  "sl-viewer-automation",
   "sl-viewer-chat",
   "sl-viewer-edit",
   "sl-viewer-environment",
@@ -121,6 +122,7 @@ rustyline = { version = "17.0.2" }
 serde = { version = "1.0.229" }
 serde_json = { version = "1.0.151" }
 sl-account-dirs = { path = "sl-account-dirs", version = "0.1.0" }
+sl-automation-proto = { path = "sl-automation-proto", version = "0.1.0" }
 sl-anim = { path = "sl-anim", version = "0.1.0" }
 sl-asset = { path = "sl-asset", version = "0.1.0" }
 sl-asset-sched = { path = "sl-asset-sched", version = "0.1.0" }
@@ -143,6 +145,7 @@ sl-test-assets = { path = "sl-test-assets", version = "0.1.0" }
 sl-types = { version = "0.8.0" }
 sl-viewer-asset-editors = { path = "sl-viewer-asset-editors", version = "0.1.0" }
 sl-viewer-audio = { path = "sl-viewer-audio", version = "0.1.0" }
+sl-viewer-automation = { path = "sl-viewer-automation", version = "0.1.0" }
 sl-viewer-chat = { path = "sl-viewer-chat", version = "0.1.0" }
 sl-viewer-edit = { path = "sl-viewer-edit", version = "0.1.0" }
 sl-viewer-environment = { path = "sl-viewer-environment", version = "0.1.0" }

@@ -123,6 +123,8 @@ mod bottom_toolbar;
 // path in the viewer still resolves.
 pub(crate) use sl_viewer_media::browser_widget;
 #[cfg(test)]
+mod automation_model;
+#[cfg(test)]
 mod build_floater_test;
 mod build_info;
 pub(crate) use sl_viewer_chat::chat;

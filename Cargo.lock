@@ -8564,6 +8564,7 @@ dependencies = [
  "pretty_assertions",
  "sl-account-dirs",
  "sl-asset",
+ "sl-automation-proto",
  "sl-client-bevy",
  "sl-fake-grid",
  "sl-l10n",
@@ -8575,6 +8576,7 @@ dependencies = [
  "sl-texture",
  "sl-viewer-asset-editors",
  "sl-viewer-audio",
+ "sl-viewer-automation",
  "sl-viewer-chat",
  "sl-viewer-edit",
  "sl-viewer-environment",
@@ -9227,6 +9229,18 @@ dependencies = [
  "sl-viewer-world-api",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "sl-viewer-automation"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "pretty_assertions",
+ "sl-automation-proto",
+ "sl-viewer-testkit",
+ "sl-viewer-ui-core",
+ "sl-viewer-ui-widgets",
 ]
 
 [[package]]

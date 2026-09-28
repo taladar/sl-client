@@ -2,7 +2,7 @@
 id: viewer-automation-semantic-custom-widgets
 title: Semantic roles for the custom widgets, and a completeness guard
 topic: viewer
-status: blocked
+status: ready
 origin: viewer automation design review (2026-09-28)
 points: 8
 blocked_by: [viewer-automation-semantic-ui-model]
