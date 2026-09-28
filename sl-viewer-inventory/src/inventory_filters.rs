@@ -26,6 +26,7 @@ use bevy::text::EditableText;
 use bevy::ui::Checked;
 use bevy::ui_widgets::ValueChange;
 use sl_client_bevy::{InventoryType, ItemInfo};
+use sl_viewer_ui_core::semantic::LabelledBy;
 
 use crate::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater,
@@ -616,12 +617,14 @@ fn spawn_filters_content(
             )
         },
     );
-    spawn_label(
+    // Each unit after its field is the field's caption.
+    let hours_label = spawn_label(
         commands,
         range_row,
         "inventory-filter-hours-label",
         font_size,
     );
+    commands.entity(hours_field).insert(LabelledBy(hours_label));
     let days_field = crate::ui_text_input::spawn_text_input(
         commands,
         range_row,
@@ -636,12 +639,13 @@ fn spawn_filters_content(
             )
         },
     );
-    spawn_label(
+    let days_label = spawn_label(
         commands,
         range_row,
         "inventory-filter-days-label",
         font_size,
     );
+    commands.entity(days_field).insert(LabelledBy(days_label));
 
     // Reset.
     let reset_row = commands
@@ -718,15 +722,20 @@ fn spawn_text_button(
     .button
 }
 
-/// Spawn a plain translated label.
-fn spawn_label(commands: &mut Commands, parent: Entity, label_key: &'static str, font_size: f32) {
+/// Spawn a plain translated label, and return it.
+fn spawn_label(
+    commands: &mut Commands,
+    parent: Entity,
+    label_key: &'static str,
+    font_size: f32,
+) -> Entity {
     ui_spawn::spawn_label(
         commands,
         parent,
         UiLabel::key(label_key),
         LABEL_COLOR,
         font_size,
-    );
+    )
 }
 
 /// Fold the hours / days numeric fields into the state when they change.

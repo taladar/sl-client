@@ -79,6 +79,7 @@ use sl_viewer_inventory::settings_index::SettingsIndex;
 use sl_viewer_notifications::{NotificationResponse, ShowNotification};
 use sl_viewer_settings::ViewerSettings;
 use sl_viewer_ui_core::i18n::{TransArgs, Translated, Translator};
+use sl_viewer_ui_core::semantic::LabelledBy;
 use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems, column, row};
 use sl_viewer_ui_core::ui_element::UiAction;
 use sl_viewer_ui_core::ui_font::UiFont;
@@ -600,14 +601,16 @@ fn spawn_rename_row(commands: &mut Commands, parent: Entity, font_size: f32) -> 
             ChildOf(parent),
         ))
         .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new("my-environments-name"),
-        UiFont::Sans.at(font_size),
-        text_role(LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(holder),
-    ));
+    let label = commands
+        .spawn((
+            Text::default(),
+            Translated::new("my-environments-name"),
+            UiFont::Sans.at(font_size),
+            text_role(LABEL_COLOR),
+            Pickable::IGNORE,
+            ChildOf(holder),
+        ))
+        .id();
     let field = spawn_text_input(
         commands,
         holder,
@@ -619,6 +622,8 @@ fn spawn_rename_row(commands: &mut Commands, parent: Entity, font_size: f32) -> 
             ..TextInputSpec::new("my-environments-rename", TextInputKind::Line)
         },
     );
+    // Named by the caption beside it.
+    commands.entity(field).insert(LabelledBy(label));
     spawn_action_button(
         commands,
         holder,

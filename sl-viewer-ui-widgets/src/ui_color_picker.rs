@@ -102,6 +102,7 @@ use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use sl_settings::{Scope, SettingValue};
 use sl_viewer_settings::ViewerSettings;
 use sl_viewer_ui_core::i18n::Translated;
+use sl_viewer_ui_core::semantic::{Role, Semantic};
 use sl_viewer_ui_core::skin::text_role;
 use sl_viewer_ui_core::ui::{LogicalInset, LogicalRect, UiRoot, UiScaffoldSystems, column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
@@ -334,6 +335,7 @@ pub fn spawn_color_swatch(
             ColorSwatchValue(initial),
             ColorSwatchField(Box::from(element)),
             Pickable::default(),
+            Semantic::new(Role::ColorWell),
             Name::new(format!("{element}:color-swatch")),
             ChildOf(parent),
         ))
@@ -662,6 +664,19 @@ enum ChannelAxis {
 }
 
 impl ChannelAxis {
+    /// The Fluent key of what the axis's slider is called — the word the
+    /// one-letter caption beside it abbreviates.
+    const fn name_key(self) -> &'static str {
+        match self {
+            Self::Red => "color-picker-red-name",
+            Self::Green => "color-picker-green-name",
+            Self::Blue => "color-picker-blue-name",
+            Self::Hue => "color-picker-hue-name",
+            Self::Saturation => "color-picker-saturation-name",
+            Self::Luminance => "color-picker-luminance-name",
+        }
+    }
+
     /// Every axis, in the order the picker stacks them.
     const ALL: [Self; 6] = [
         Self::Red,
@@ -1298,6 +1313,9 @@ fn spawn_channel_row(
             BorderColor::all(CONTROL_BORDER),
             BackgroundColor(TRACK_FILL),
             TabIndex(0),
+            // Named by the word its caption letter abbreviates: "R" is no
+            // name a screen reader or a test locator should have to use.
+            Semantic::new(Role::Slider).name_key(axis.name_key()),
             Name::new(format!("color-picker-slider:{name}")),
             ChildOf(channel_row),
         ))
@@ -1364,6 +1382,8 @@ fn spawn_hex_row(commands: &mut Commands, parent: Entity) -> Entity {
             font_size: PICKER_FONT,
             width_glyphs: 7.0,
             max_characters: Some(6),
+            // The `#` beside it names nothing, so the field is named outright.
+            name_key: Some("color-picker-hex-name"),
             ..TextInputSpec::new("color-picker-hex", TextInputKind::Line)
         },
     );

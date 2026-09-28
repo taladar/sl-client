@@ -11,9 +11,13 @@ use bevy::text::EditableText;
 use bevy::ui::{
     Checked, ComputedStackIndex, InteractionDisabled, Selected, UiStack, clip_check_recursive,
 };
-use bevy::ui_widgets::{Button, Checkbox, RadioButton, Slider, SliderValue};
+use bevy::ui_widgets::{Button, Checkbox, RadioButton, RadioGroup, Slider, SliderValue};
+use bevy_flair::prelude::ClassList;
 use sl_automation_proto::{Bounds, NodeId, NodeState, NodeValue, NodeVisibility, Role, UiNode};
-use sl_viewer_ui_core::i18n::Translated;
+use sl_viewer_ui_core::i18n::{Translated, Translator};
+use sl_viewer_ui_core::semantic::{
+    Expanded, LabelledBy, Semantic, SemanticName, role_from_classes, selected_by_class,
+};
 use sl_viewer_ui_widgets::ui_text_input::ReadOnlyField;
 
 /// The handle a snapshot reports for `entity`: its bits, stable for the
@@ -79,6 +83,10 @@ struct NodeFacts {
     target: Option<&'static ComputedUiRenderTargetInfo>,
     /// Its place in the stacking order.
     stack_index: Option<&'static ComputedStackIndex>,
+    /// What a custom widget says it is.
+    semantic: Option<&'static Semantic>,
+    /// Its skin classes, which mark list rows and the selected one.
+    classes: Option<&'static ClassList>,
     /// The marker components the role and states are read from.
     markers: NodeMarkers,
 }
@@ -88,6 +96,10 @@ struct NodeFacts {
 struct NodeMarkers {
     /// `bevy_ui_widgets`' headless button.
     button: Has<Button>,
+    /// `bevy_ui`'s own button, pressed through `Interaction`.
+    interaction_button: Has<bevy::ui::widget::Button>,
+    /// A set of radio options.
+    radio_group: Has<RadioGroup>,
     /// A check box.
     checkbox: Has<Checkbox>,
     /// A radio option.
@@ -102,6 +114,8 @@ struct NodeMarkers {
     checked: Has<Checked>,
     /// Selected.
     selected: Has<Selected>,
+    /// Open, or unfolded.
+    expanded: Has<Expanded>,
     /// A read-only text field.
     read_only: Has<ReadOnlyField>,
 }
@@ -113,6 +127,16 @@ struct Inherited {
     disabled: bool,
     /// An ancestor is laid out away (`Display::None`).
     display_none: bool,
+}
+
+impl Inherited {
+    /// What a child of the node `facts` describes inherits.
+    fn through(self, facts: &NodeFactsItem<'_, '_>) -> Self {
+        Self {
+            disabled: self.disabled || facts.markers.disabled,
+            display_none: self.display_none || facts.node.display == Display::None,
+        }
+    }
 }
 
 /// The per-snapshot facts shared by every node: who is hovered, who has
@@ -159,12 +183,17 @@ pub struct UiModel<'w, 's> {
     clip_parents: Query<'w, 's, &'static ChildOf, Without<OverrideClip>>,
     /// Pickability, for whether a hit blocks the nodes below it.
     pickables: Query<'w, 's, &'static Pickable>,
+    /// Form rows whose label names the controls in them.
+    labellings: Query<'w, 's, &'static LabelledBy>,
     /// The UI stack, back to front, for the hit test.
     stack: Option<Res<'w, UiStack>>,
     /// The keyboard focus.
     focus: Option<Res<'w, InputFocus>>,
     /// What each pointer is over.
     hover: Option<Res<'w, HoverMap>>,
+    /// The string lookup, for a name given as a Fluent key. Absent where no
+    /// locale is loaded; the key then names the node as it is.
+    translator: Option<Translator<'w>>,
 }
 
 impl UiModel<'_, '_> {
@@ -240,19 +269,48 @@ impl UiModel<'_, '_> {
         let Ok(facts) = self.nodes.get(entity) else {
             return;
         };
-        let here = Inherited {
-            disabled: inherited.disabled || facts.markers.disabled,
-            display_none: inherited.display_none || facts.node.display == Display::None,
-        };
+        let here = inherited.through(&facts);
         let Some(role) = self.role_of(&facts) else {
             self.collect_children(entity, here, frame, out);
             return;
         };
         let mut node = self.describe(&facts, role, here, frame);
-        if !is_leaf(role) {
+        if is_leaf(role) {
+            self.collect_owned(entity, here, frame, &mut node.children);
+        } else {
             self.collect_children(entity, here, frame, &mut node.children);
         }
         out.push(node);
+    }
+
+    /// The popups a leaf widget owns: a leaf's subtree is its label, but a
+    /// combo's list and a menu button's menu are spawned under it too, and
+    /// they are nodes of their own (ARIA's `aria-owns`). Any descendant whose
+    /// [`Semantic`] is a container role is collected as the leaf's child; the
+    /// rest of the subtree stays the label.
+    fn collect_owned(
+        &self,
+        entity: Entity,
+        inherited: Inherited,
+        frame: &Frame,
+        out: &mut Vec<UiNode>,
+    ) {
+        let Ok(children) = self.children.get(entity) else {
+            return;
+        };
+        for &child in children {
+            let Ok(facts) = self.nodes.get(child) else {
+                continue;
+            };
+            if facts
+                .semantic
+                .is_some_and(|semantic| !is_leaf(semantic.role()))
+            {
+                self.collect(child, inherited, frame, out);
+            } else {
+                self.collect_owned(child, inherited.through(&facts), frame, out);
+            }
+        }
     }
 
     /// [`Self::collect`] over each child of `entity`, in order.
@@ -272,13 +330,16 @@ impl UiModel<'_, '_> {
 
     /// The role a node plays, or `None` for a layout-only container.
     ///
-    /// Widget components win over what the node happens to draw. A text node
+    /// A [`Semantic`] wins over everything: it is the widget saying what it
+    /// is. After it, widget components win over what the node happens to draw. A text node
     /// with nothing in it, and an image nobody named, are decoration rather
     /// than content; a container is a group only when it has a test id or an
     /// accessible label to scope a locator by.
     fn role_of(&self, facts: &NodeFactsItem<'_, '_>) -> Option<Role> {
         let markers = &facts.markers;
-        if facts.editable.is_some() {
+        if let Some(semantic) = facts.semantic {
+            Some(semantic.role())
+        } else if facts.editable.is_some() {
             Some(Role::Textbox)
         } else if markers.slider {
             Some(Role::Slider)
@@ -286,8 +347,12 @@ impl UiModel<'_, '_> {
             Some(Role::Checkbox)
         } else if markers.radio {
             Some(Role::Radio)
-        } else if markers.button {
+        } else if markers.button || markers.interaction_button {
             Some(Role::Button)
+        } else if markers.radio_group {
+            Some(Role::RadioGroup)
+        } else if let Some(role) = facts.classes.and_then(role_from_classes) {
+            Some(role)
         } else if facts.text.is_some() {
             (!self.text_content(facts.entity).trim().is_empty()).then_some(Role::Text)
         } else if markers.image && (facts.name.is_some() || facts.label.is_some()) {
@@ -308,12 +373,22 @@ impl UiModel<'_, '_> {
         frame: &Frame,
     ) -> UiNode {
         let (name, name_key) = self.name_of(facts, role);
+        // The front tab of a strip is the strip's checked radio option: to its
+        // user it is selected, not ticked.
+        let checked_is_selected = role == Role::Tab;
+        let selected = facts.markers.selected
+            || facts.classes.is_some_and(selected_by_class)
+            || (checked_is_selected && facts.markers.checked);
         let mut states = BTreeSet::new();
         for (state, holds) in [
             (NodeState::Disabled, inherited.disabled),
             (NodeState::ReadOnly, facts.markers.read_only),
-            (NodeState::Checked, facts.markers.checked),
-            (NodeState::Selected, facts.markers.selected),
+            (
+                NodeState::Checked,
+                facts.markers.checked && !checked_is_selected,
+            ),
+            (NodeState::Selected, selected),
+            (NodeState::Expanded, facts.markers.expanded),
             (NodeState::Focused, frame.focused == Some(facts.entity)),
             (NodeState::Hovered, frame.hovered.contains(&facts.entity)),
         ] {
@@ -321,8 +396,11 @@ impl UiModel<'_, '_> {
                 states.insert(state);
             }
         }
+        let semantic = facts.semantic;
         let value = if let Some(editable) = facts.editable {
             Some(NodeValue::Text(editable.editor.text().to_string()))
+        } else if let Some(shown) = semantic.and_then(Semantic::value_node) {
+            Some(NodeValue::Text(self.label_text(shown).0))
         } else {
             facts.slider_value.map(|value| NodeValue::Number(value.0))
         };
@@ -334,6 +412,8 @@ impl UiModel<'_, '_> {
             test_id: facts.name.map(|name| name.as_str().to_owned()),
             states,
             value,
+            level: semantic.and_then(Semantic::tree_level),
+            accelerator: semantic.and_then(|semantic| semantic.shortcut().map(str::to_owned)),
             bounds: logical_bounds(facts.computed, facts.transform),
             visibility: self.visibility_of(facts, inherited),
             children: Vec::new(),
@@ -354,21 +434,82 @@ impl UiModel<'_, '_> {
         if let Some(label) = facts.label {
             return (non_empty(label.0.clone()), None);
         }
+        match facts.semantic.map(Semantic::name) {
+            Some(SemanticName::LabelledBy(label)) => {
+                let (text, key) = self.label_text(*label);
+                return (non_empty(text), key);
+            }
+            Some(SemanticName::Key(key)) => {
+                let text = self
+                    .translator
+                    .as_ref()
+                    .map_or_else(|| key.to_string(), |translator| translator.get(key));
+                return (non_empty(text), Some(key.to_string()));
+            }
+            Some(SemanticName::Content) | None => {}
+        }
         match role {
             Role::Text => (
                 non_empty(self.text_content(facts.entity)),
                 facts.translated.map(|key| key.key().to_owned()),
             ),
-            Role::Group | Role::Image => (None, None),
-            _ => {
-                if let Some((text, key)) = self.translated_label(facts.entity) {
-                    (non_empty(text), Some(key))
-                } else {
-                    let mut texts = Vec::new();
-                    self.descendant_texts(facts.entity, &mut texts);
-                    (non_empty(texts.join(" ")), None)
+            Role::Group
+            | Role::Image
+            | Role::Window
+            | Role::TabList
+            | Role::MenuBar
+            | Role::Menu
+            | Role::List
+            | Role::Tree => (None, None),
+            Role::Button
+            | Role::Checkbox
+            | Role::Radio
+            | Role::Textbox
+            | Role::Combobox
+            | Role::Slider
+            | Role::ColorWell
+            | Role::Trackball
+            | Role::Tab
+            | Role::MenuItem
+            | Role::ListItem
+            | Role::TreeItem => {
+                let (text, key) = self.label_text(facts.entity);
+                match non_empty(text) {
+                    Some(text) => (Some(text), key),
+                    None => self.labelled_by_of(facts.entity),
                 }
             }
+            // A radio group is named by the row it sits in, when it has one.
+            Role::RadioGroup => self.labelled_by_of(facts.entity),
+        }
+    }
+
+    /// The name a [`LabelledBy`] gives `entity` — its own, else its nearest
+    /// ancestor's: that label's text and key. A field, a slider or a swatch
+    /// that draws no text of its own is called what its row says.
+    fn labelled_by_of(&self, entity: Entity) -> (Option<String>, Option<String>) {
+        let Some(row) = core::iter::once(entity)
+            .chain(self.parents.iter_ancestors(entity))
+            .find_map(|node| self.labellings.get(node).ok())
+        else {
+            return (None, None);
+        };
+        let (text, key) = self.label_text(row.0);
+        match non_empty(text) {
+            Some(text) => (Some(text), key),
+            None => (None, None),
+        }
+    }
+
+    /// The text `entity` shows as a label: its first translated text, with
+    /// the key, else all its text joined.
+    fn label_text(&self, entity: Entity) -> (String, Option<String>) {
+        if let Some((text, key)) = self.translated_label(entity) {
+            (text, Some(key))
+        } else {
+            let mut texts = Vec::new();
+            self.descendant_texts(entity, &mut texts);
+            (texts.join(" "), None)
         }
     }
 
@@ -384,7 +525,18 @@ impl UiModel<'_, '_> {
             .get(entity)
             .ok()?
             .iter()
+            .filter(|&child| !self.is_owned_popup(child))
             .find_map(|child| self.translated_label(child))
+    }
+
+    /// Whether `entity` is a popup its leaf ancestor owns — a node of its own
+    /// (see [`Self::collect_owned`]), so none of its text names that leaf.
+    fn is_owned_popup(&self, entity: Entity) -> bool {
+        self.nodes.get(entity).is_ok_and(|facts| {
+            facts
+                .semantic
+                .is_some_and(|semantic| !is_leaf(semantic.role()))
+        })
     }
 
     /// Every non-empty text in `entity`'s subtree, itself first, depth first.
@@ -402,7 +554,9 @@ impl UiModel<'_, '_> {
         }
         if let Ok(children) = self.children.get(entity) {
             for &child in children {
-                self.descendant_texts(child, out);
+                if !self.is_owned_popup(child) {
+                    self.descendant_texts(child, out);
+                }
             }
         }
     }
@@ -502,8 +656,23 @@ impl UiModel<'_, '_> {
 
 /// Whether a role's subtree belongs to it — its label and decoration — rather
 /// than holding nodes of its own.
+///
+/// A row is not a leaf: a list row may hold a button, a tree row a check box,
+/// and each is its own node. A row is still *named* by all its text.
 const fn is_leaf(role: Role) -> bool {
-    !matches!(role, Role::Group | Role::Window)
+    !matches!(
+        role,
+        Role::Group
+            | Role::RadioGroup
+            | Role::Window
+            | Role::TabList
+            | Role::MenuBar
+            | Role::Menu
+            | Role::List
+            | Role::ListItem
+            | Role::Tree
+            | Role::TreeItem
+    )
 }
 
 /// `text`, unless it is blank.

@@ -381,6 +381,8 @@ fn build_picker_content(commands: &mut Commands, content: Entity, font_size: f32
             font_size,
             width_glyphs: 18.0,
             tab_index: 2,
+            // No caption sits beside the field.
+            name_key: Some("group-picker-search-name"),
             ..crate::ui_text_input::TextInputSpec::new(
                 "group-picker-search",
                 crate::ui_text_input::TextInputKind::Line,

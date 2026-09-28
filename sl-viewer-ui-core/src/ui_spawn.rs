@@ -57,6 +57,8 @@
 //! over its own caption. Most copies had it; the ones that did not were not
 //! choosing differently, they were missing it.
 
+use std::borrow::Cow;
+
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui::InteractionDisabled;
@@ -64,6 +66,7 @@ use bevy_flair::style::components::{ClassList, PseudoElementsSupport};
 
 use crate::glyph::GLYPH_CLASS;
 use crate::i18n::Translated;
+use crate::semantic::{LabelledBy, Role, Semantic};
 use crate::skin::{
     ACTION_BUTTON_CLASS, BUTTON_CLASS, COMPACT_BUTTON_CLASS, PRIMARY_BUTTON_CLASS, TEXT_CLASS,
     role_class,
@@ -177,6 +180,10 @@ pub struct ButtonSpec {
     /// [`InteractionDisabled`], and the skin greys the box and its caption from
     /// `:disabled` rather than the panel choosing a dim colour.
     pub disabled: bool,
+    /// The Fluent key of what the button is called, for a button whose label
+    /// says nothing in words — a glyph, an arrow, a `×`. Set by
+    /// [`Self::name_key`].
+    pub name_key: Option<Cow<'static, str>>,
 }
 
 /// The dominant padding of a bordered push button, in logical pixels.
@@ -216,6 +223,7 @@ impl ButtonSpec {
             label_class: None,
             no_wrap: false,
             disabled: false,
+            name_key: None,
         }
     }
 
@@ -361,6 +369,14 @@ impl ButtonSpec {
         self
     }
 
+    /// Name the button by the Fluent key `key` — for a glyph or icon button,
+    /// whose label is no name a screen reader or a test could use.
+    #[must_use]
+    pub fn name_key(mut self, key: impl Into<Cow<'static, str>>) -> Self {
+        self.name_key = Some(key.into());
+        self
+    }
+
     /// Adjust the box's layout beyond padding and border — alignment within its
     /// parent, a minimum width, a margin.
     ///
@@ -410,6 +426,12 @@ pub fn spawn_button(commands: &mut Commands, parent: Entity, spec: ButtonSpec) -
     if let Some(index) = spec.tab_index {
         button.insert(TabIndex(index));
     }
+    // Whichever component it presses through — or none, for a button driven
+    // by its own observer — this is a button to its user.
+    button.insert(match spec.name_key.clone() {
+        Some(key) => Semantic::new(Role::Button).name_key(key),
+        None => Semantic::new(Role::Button),
+    });
     if spec.disabled {
         button.insert(InteractionDisabled);
     }
@@ -597,6 +619,8 @@ pub fn spawn_labeled_row(
         None,
         false,
     );
+    // The label names whatever control the caller parents into the row.
+    commands.entity(row).insert(LabelledBy(label));
     if spec.label_width.is_some() || spec.label_min_width.is_some() {
         commands.entity(label).insert(Node {
             width: spec.label_width.unwrap_or(Val::Auto),

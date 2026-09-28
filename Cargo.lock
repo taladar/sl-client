@@ -9236,6 +9236,7 @@ name = "sl-viewer-automation"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_flair",
  "pretty_assertions",
  "sl-automation-proto",
  "sl-viewer-testkit",
@@ -9750,6 +9751,7 @@ dependencies = [
  "fs-err",
  "parley",
  "pretty_assertions",
+ "sl-automation-proto",
  "sl-l10n",
  "sl-settings",
  "sl-viewer-settings",

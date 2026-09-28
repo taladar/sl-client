@@ -82,6 +82,7 @@ use sl_viewer_notifications::{NotificationResponse, ShowNotification};
 use sl_viewer_pickers::ui_texture_picker::TextureSwatchValue;
 use sl_viewer_platform::environment_assets::EnvironmentAssetManager;
 use sl_viewer_ui_core::i18n::{TransArgs, Translated, Translator};
+use sl_viewer_ui_core::semantic::LabelledBy;
 use sl_viewer_ui_core::skin::{
     SELECTED_CLASS, set_action_button_enabled, set_button_on, set_state_class, text_role,
 };
@@ -817,13 +818,15 @@ fn spawn_name_row(commands: &mut Commands, parent: Entity, font_size: f32, tab: 
             ChildOf(parent),
         ))
         .id();
-    commands.spawn((
-        Text::new(String::new()),
-        UiFont::Sans.at(font_size),
-        text_role(LABEL_COLOR),
-        Translated::new("settings-editor-name"),
-        ChildOf(holder),
-    ));
+    let label = commands
+        .spawn((
+            Text::new(String::new()),
+            UiFont::Sans.at(font_size),
+            text_role(LABEL_COLOR),
+            Translated::new("settings-editor-name"),
+            ChildOf(holder),
+        ))
+        .id();
     let field = spawn_text_input(
         commands,
         holder,
@@ -835,7 +838,10 @@ fn spawn_name_row(commands: &mut Commands, parent: Entity, font_size: f32, tab: 
             ..TextInputSpec::new("day-cycle-editor-name", TextInputKind::Line)
         },
     );
-    commands.entity(field).insert(DayNameField);
+    // Named by the caption beside it.
+    commands
+        .entity(field)
+        .insert((DayNameField, LabelledBy(label)));
     *tab = tab.saturating_add(1);
 }
 

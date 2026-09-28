@@ -2,7 +2,7 @@
 id: viewer-automation-accesskit-bridge
 title: Feed AccessKit from the semantic UI model
 topic: viewer
-status: blocked
+status: ready
 origin: viewer automation design (2026-09-28)
 points: 8
 blocked_by: [viewer-automation-semantic-custom-widgets]

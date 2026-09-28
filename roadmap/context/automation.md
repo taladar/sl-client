@@ -142,10 +142,15 @@ person logging in and clicking. This tier is what replaces that person.
 
 ## How to add …
 
-- **a semantic role** for a custom widget: put a `Semantic` component on the
-  widget's root at spawn (role, and a name key when no child text names
-  it); the registry sweep over `ELEMENTS` and `FLOATERS` fails any
-  interactive entity with no role or name.
+- **a semantic role** for a custom widget: put a `Semantic`
+  (`sl_viewer_ui_core::semantic`) on the widget's root at spawn — the role,
+  and where the name comes from (`labelled_by` a caption node, or a Fluent
+  `name_key` when no text names it). Keep open state in an `Expanded`
+  marker through `sync_expanded`. A control whose caption sits beside it
+  takes a `LabelledBy` (on itself or its row); an icon button a
+  `ButtonSpec::name_key`. `ui_contract::every_focus_stop_has_a_contract_row`
+  fails any focus stop of any registered element or floater with no role or
+  no name, and any floater that is not a named window.
 - **a state probe**: a request variant in `sl-automation-proto`, a reader in
   `sl-viewer-automation`, a driver method, and a teeth test that the probe
   changes when the state does.

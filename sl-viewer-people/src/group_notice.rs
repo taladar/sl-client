@@ -75,6 +75,7 @@ use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use crate::world_api::ui_texture::{PendingUiTexture, UiTexturePlugin};
 use sl_viewer_ui_core::glyph;
+use sl_viewer_ui_core::semantic::{Role, Semantic};
 
 /// The catalogue-template sentinel a group-notice toast reports as (it is not a
 /// real [`crate::notifications::NOTIFICATIONS`] entry — the card is bespoke — but
@@ -788,6 +789,8 @@ fn spawn_close_button(commands: &mut Commands, card: Entity) -> Entity {
                 ..default()
             },
             ClassList::new_with_classes([BUTTON_CLASS]),
+            // The × says nothing in words, so the button is named.
+            Semantic::new(Role::Button).name_key("notification-button-close"),
             Name::new("group-notice-close"),
             ChildOf(close_row),
         ))

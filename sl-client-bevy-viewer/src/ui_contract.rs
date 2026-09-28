@@ -346,10 +346,20 @@ mod tests {
         TestError, drain_actions, find_by_name, focusable_nodes, interaction_violations,
         interactive_nodes, settle, spawn_element_into,
     };
+    use std::collections::HashMap;
+
     use bevy::input::keyboard::Key;
+    use bevy::input_focus::tab_navigation::TabIndex;
     use bevy::prelude::*;
     use bevy::ui_widgets::Activate;
     use pretty_assertions::assert_eq;
+    use sl_automation_proto::{NodeId, Role, UiNode};
+    use sl_viewer_automation::{node_id, snapshot};
+    use sl_viewer_ui_core::semantic::Semantic;
+
+    use crate::floater::Floater;
+    use crate::floater_chrome::floater_app;
+    use crate::floaters::FLOATERS;
 
     /// An interactive app with one registered element spawned and settled.
     ///
@@ -722,7 +732,7 @@ mod tests {
     // table it compares against.
     // -----------------------------------------------------------------------
 
-    /// **No focus stop lacks a contract row.**
+    /// **No focus stop lacks a contract row, a role or a name.**
     ///
     /// The registry guard, the counterpart of
     /// `ui_test::the_matrix_covers_the_whole_registry`. A stop the table says
@@ -731,8 +741,15 @@ mod tests {
     /// the same. Requiring a row (an empty one, via [`NodeContract::inert`], is
     /// a legitimate answer) makes the distinction something an author states
     /// rather than something they omit.
+    ///
+    /// The same stops must also be something a test driver and a screen reader
+    /// can address: each resolves, through the semantic model, to a **role** and
+    /// a **non-empty name** ([`semantic_failures`]). That half runs over every
+    /// registered floater too, whose own window must be a named `window`. A
+    /// node that cannot be named takes an [`UNNAMED_STOPS`] entry with its
+    /// reason.
     #[test]
-    fn every_focus_stop_has_a_contract_row() {
+    fn every_focus_stop_has_a_contract_row() -> Result<(), String> {
         let test = InteractionTest::new();
         let mut missing = Vec::new();
         for element in ELEMENTS {
@@ -746,8 +763,144 @@ mod tests {
                     ));
                 }
             }
+            missing.extend(semantic_failures(
+                &mut app,
+                &format!("element `{}`", element.id),
+            )?);
+        }
+        for floater in FLOATERS {
+            let mut app = floater_app(test, floater);
+            missing.extend(semantic_failures(
+                &mut app,
+                &format!("floater `{}`", floater.id),
+            )?);
         }
         assert!(missing.is_empty(), "{missing:#?}");
+        Ok(())
+    }
+
+    /// Focus stops that may resolve to no name, each with the reason. Keyed by
+    /// the stop's `Name`, the contract table's address space.
+    const UNNAMED_STOPS: &[(&str, &str)] = &[(
+        "browser-view",
+        "an embedded web page: what it holds is the page's own accessibility tree, which the \
+         offscreen browser does not expose, so the surface has no role of ours to give",
+    )];
+
+    /// The roles a stop may take unnamed: a composite whose *items* are what a
+    /// locator names — the tab strip is one focus stop, and its tabs are called
+    /// something.
+    const COMPOSITE_ROLES: &[Role] = &[
+        Role::RadioGroup,
+        Role::TabList,
+        Role::List,
+        Role::Tree,
+        Role::Menu,
+        Role::MenuBar,
+    ];
+
+    /// What is wrong with `app`'s semantics, prefixed with `what` it is: every
+    /// focus stop not in the tree, or in it with no name; and every floater
+    /// window not a named `window`.
+    fn semantic_failures(app: &mut App, what: &str) -> Result<Vec<String>, String> {
+        let nodes = snapshot(app.world_mut()).map_err(|error| error.to_string())?;
+        let mut tree = HashMap::new();
+        index_tree(&nodes, &mut tree);
+        let mut failures = Vec::new();
+        let mut stops = app
+            .world_mut()
+            .query_filtered::<(Entity, &Name), With<TabIndex>>();
+        for (entity, name) in stops.iter(app.world()) {
+            let stop = name.as_str();
+            if UNNAMED_STOPS.iter().any(|(exempt, _why)| *exempt == stop) {
+                continue;
+            }
+            // A named node with nothing else is a group — a scope, not something
+            // a user focuses — so for a stop it is the same as no role.
+            match tree
+                .get(&node_id(entity))
+                .filter(|node| node.role != Role::Group)
+            {
+                None => failures.push(format!(
+                    "{what} stop `{stop}`: has no role — put a `Semantic` on it, or give it a \
+                     widget component the model knows"
+                )),
+                Some(node) if node.name.is_none() && !COMPOSITE_ROLES.contains(&node.role) => {
+                    failures.push(format!(
+                        "{what} stop `{stop}` ({}): has no name — label it, or name it with \
+                         `Semantic::name_key`",
+                        node.role
+                    ));
+                }
+                Some(_) => {}
+            }
+        }
+        let mut windows = app.world_mut().query_filtered::<Entity, With<Floater>>();
+        for entity in windows.iter(app.world()) {
+            match tree.get(&node_id(entity)) {
+                Some(node) if node.role == Role::Window && node.name.is_some() => {}
+                Some(node) => failures.push(format!(
+                    "{what}: its window reads as {} named {:?}, not a named window",
+                    node.role, node.name
+                )),
+                None => failures.push(format!("{what}: its window is not in the semantic tree")),
+            }
+        }
+        Ok(failures)
+    }
+
+    /// **The semantic half bites.** A floater that loses its `Semantic` is no
+    /// longer a named window, and the guard says which floater; a focus stop
+    /// with neither a widget component nor a `Semantic` has no role, and the
+    /// guard names the stop.
+    #[test]
+    fn the_semantic_guard_names_what_lost_its_role() -> Result<(), String> {
+        let test = InteractionTest::new();
+        let floater = FLOATERS.first().ok_or("no registered floaters")?;
+        let mut app = floater_app(test, floater);
+        let what = format!("floater `{}`", floater.id);
+        let clean = semantic_failures(&mut app, &what)?;
+        assert!(
+            clean.is_empty(),
+            "the untouched floater already fails: {clean:#?}"
+        );
+
+        let mut windows = app.world_mut().query_filtered::<Entity, With<Floater>>();
+        let windows: Vec<Entity> = windows.iter(app.world()).collect();
+        for window in windows {
+            app.world_mut().entity_mut(window).remove::<Semantic>();
+        }
+        let failures = semantic_failures(&mut app, &what)?;
+        assert!(
+            failures
+                .iter()
+                .any(|failure| failure.contains(&what) && failure.contains("window")),
+            "a floater without its Semantic passed: {failures:#?}"
+        );
+
+        let root = app.world().resource::<crate::ui::UiRoot>().0;
+        app.world_mut().spawn((
+            Name::new("teeth:bare-stop"),
+            Node::default(),
+            TabIndex(0),
+            ChildOf(root),
+        ));
+        let failures = semantic_failures(&mut app, &what)?;
+        assert!(
+            failures
+                .iter()
+                .any(|failure| failure.contains("teeth:bare-stop") && failure.contains("no role")),
+            "a focus stop with no role passed: {failures:#?}"
+        );
+        Ok(())
+    }
+
+    /// Every node of `nodes`, at any depth, by id.
+    fn index_tree<'a>(nodes: &'a [UiNode], into: &mut HashMap<NodeId, &'a UiNode>) {
+        for node in nodes {
+            into.insert(node.id, node);
+            index_tree(&node.children, into);
+        }
     }
 
     /// **The table names only things that exist.**

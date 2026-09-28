@@ -89,6 +89,7 @@ use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use sl_viewer_ui_core::glyph;
+use sl_viewer_ui_core::semantic::{Role, Semantic};
 use sl_viewer_ui_core::skin::BUTTON_CLASS;
 use sl_viewer_ui_core::skin::role_class;
 
@@ -729,6 +730,8 @@ fn spawn_close_button(commands: &mut Commands, card: Entity) -> Entity {
                 ..default()
             },
             ClassList::new_with_classes([BUTTON_CLASS]),
+            // The × says nothing in words, so the button is named.
+            Semantic::new(Role::Button).name_key("notification-button-close"),
             Name::new("experience-permission-close"),
             ChildOf(close_row),
         ))

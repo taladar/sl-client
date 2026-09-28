@@ -70,6 +70,7 @@ use crate::ui_text_input::{TextInputKind, TextInputSpec, TextInputValue, spawn_t
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists, spawn_specimen_row};
 use crate::world_api::rlv::RlvSession;
 use sl_viewer_ui_core::glyph;
+use sl_viewer_ui_core::semantic::{LabelledBy, Role, Semantic};
 
 /// The floater's stable id (geometry persistence, menu toggle, tests).
 pub const DEBUG_SETTINGS_FLOATER_ID: &str = "debug_settings";
@@ -95,6 +96,10 @@ const CHANGED_COL_WIDTH: f32 = 22.0;
 /// the value column aligned across the rows (a longer translation may widen
 /// its own row rather than overflow).
 const DETAIL_LABEL_WIDTH: f32 = 84.0;
+
+/// The Fluent key naming a captionless editor control — the selected
+/// setting's value, whichever kind edits it.
+const VALUE_NAME_KEY: &str = "debug-settings-value-name";
 
 /// The value shown for a layer holding no override.
 const NO_OVERRIDE: &str = "–";
@@ -494,14 +499,20 @@ fn spawn_debug_settings_body(commands: &mut Commands, slot: Entity) -> DebugSett
     commands
         .entity(changed_only.checkbox)
         .insert(bound_checkbox(SettingBinding::global(SETTING_HIDE_DEFAULT)));
-    commands.spawn((
-        Text::default(),
-        Translated::new("debug-settings-changed-only"),
-        UiFont::Sans.at(FONT),
-        text_role(CELL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(changed_only_row),
-    ));
+    let changed_only_caption = commands
+        .spawn((
+            Text::default(),
+            Translated::new("debug-settings-changed-only"),
+            UiFont::Sans.at(FONT),
+            text_role(CELL_COLOR),
+            Pickable::IGNORE,
+            ChildOf(changed_only_row),
+        ))
+        .id();
+    // The caption sits beside the box rather than in it, so name it explicitly.
+    commands
+        .entity(changed_only.checkbox)
+        .insert(LabelledBy(changed_only_caption));
     let table = spawn_table(commands, left, &DEBUG_TABLE);
 
     // --- Right pane: the detail read-outs and the per-kind editor stacks. ---
@@ -627,7 +638,11 @@ fn spawn_debug_settings_body(commands: &mut Commands, slot: Entity) -> DebugSett
         },
     )
     .checkbox;
-    commands.entity(bool_checkbox).insert(DebugBoolCheckbox);
+    // Captionless: the selected setting's name, above, says what it edits.
+    commands.entity(bool_checkbox).insert((
+        DebugBoolCheckbox,
+        Semantic::new(Role::Checkbox).name_key(VALUE_NAME_KEY),
+    ));
 
     // String: a line field.
     let string_row = spawn_editor_row(commands, right, "debug-settings:edit:string");
@@ -635,6 +650,7 @@ fn spawn_debug_settings_body(commands: &mut Commands, slot: Entity) -> DebugSett
         commands,
         string_row,
         "debug-settings-string",
+        Some(VALUE_NAME_KEY),
         TextInputKind::Line,
         24.0,
     );
@@ -646,6 +662,7 @@ fn spawn_debug_settings_body(commands: &mut Commands, slot: Entity) -> DebugSett
         commands,
         f32_row,
         "debug-settings-f32",
+        Some(VALUE_NAME_KEY),
         TextInputKind::Float,
         12.0,
     );
@@ -654,6 +671,7 @@ fn spawn_debug_settings_body(commands: &mut Commands, slot: Entity) -> DebugSett
         commands,
         i32_row,
         "debug-settings-i32",
+        Some(VALUE_NAME_KEY),
         TextInputKind::Integer,
         12.0,
     );
@@ -662,6 +680,7 @@ fn spawn_debug_settings_body(commands: &mut Commands, slot: Entity) -> DebugSett
         commands,
         u32_row,
         "debug-settings-u32",
+        Some(VALUE_NAME_KEY),
         TextInputKind::NonNegativeInteger,
         12.0,
     );
@@ -670,39 +689,50 @@ fn spawn_debug_settings_body(commands: &mut Commands, slot: Entity) -> DebugSett
     // with their conventional single-letter axis names.
     let vec_row = spawn_editor_row(commands, right, "debug-settings:edit:vec");
     let vec_fields = ["X", "Y", "Z"].map(|axis| {
-        spawn_component_label(commands, vec_row, axis);
-        spawn_editor_field(
+        let label = spawn_component_label(commands, vec_row, axis);
+        let field = spawn_editor_field(
             commands,
             vec_row,
             "debug-settings-vec",
+            None,
             TextInputKind::Float,
             8.0,
-        )
+        );
+        commands.entity(field).insert(LabelledBy(label));
+        field
     });
     let rect_row = spawn_editor_row(commands, right, "debug-settings:edit:rect");
     let rect_fields = ["L", "T", "R", "B"].map(|edge| {
-        spawn_component_label(commands, rect_row, edge);
-        spawn_editor_field(
+        let label = spawn_component_label(commands, rect_row, edge);
+        let field = spawn_editor_field(
             commands,
             rect_row,
             "debug-settings-rect",
+            None,
             TextInputKind::Integer,
             7.0,
-        )
+        );
+        commands.entity(field).insert(LabelledBy(label));
+        field
     });
 
     // The colour swatch (Color3 / Color4) and the Color4 alpha field.
     let color_row = spawn_editor_row(commands, right, "debug-settings:edit:color");
     let color_swatch = spawn_color_swatch(commands, color_row, "debug-settings", 0, Color::BLACK);
+    commands
+        .entity(color_swatch)
+        .insert(Semantic::new(Role::ColorWell).name_key(VALUE_NAME_KEY));
     let alpha_row = spawn_editor_row(commands, right, "debug-settings:edit:alpha");
-    spawn_component_label(commands, alpha_row, "A");
+    let alpha_label = spawn_component_label(commands, alpha_row, "A");
     let alpha_field = spawn_editor_field(
         commands,
         alpha_row,
         "debug-settings-alpha",
+        None,
         TextInputKind::Float,
         8.0,
     );
+    commands.entity(alpha_field).insert(LabelledBy(alpha_label));
 
     // The reset button, trailing.
     let footer = commands
@@ -827,11 +857,13 @@ fn spawn_editor_row(commands: &mut Commands, parent: Entity, name: &'static str)
         .id()
 }
 
-/// Spawn one commit-tracked editor text field.
+/// Spawn one commit-tracked editor text field, called `name_key` when no
+/// component letter labels it.
 fn spawn_editor_field(
     commands: &mut Commands,
     parent: Entity,
     element: &'static str,
+    name_key: Option<&'static str>,
     kind: TextInputKind,
     width_glyphs: f32,
 ) -> Entity {
@@ -841,6 +873,7 @@ fn spawn_editor_field(
         &TextInputSpec {
             font_size: FONT,
             width_glyphs,
+            name_key,
             ..TextInputSpec::new(element, kind)
         },
     );
@@ -850,15 +883,17 @@ fn spawn_editor_field(
 
 /// Spawn a component field's single-letter lead-in label (an axis / edge
 /// name, deliberately untranslated — a technical symbol, as in the
-/// reference's spinner labels).
-fn spawn_component_label(commands: &mut Commands, parent: Entity, letter: &'static str) {
-    commands.spawn((
-        Text::new(letter),
-        UiFont::Sans.at(FONT),
-        text_role(MUTED_COLOR),
-        Pickable::IGNORE,
-        ChildOf(parent),
-    ));
+/// reference's spinner labels), returning it: it names the field after it.
+fn spawn_component_label(commands: &mut Commands, parent: Entity, letter: &'static str) -> Entity {
+    commands
+        .spawn((
+            Text::new(letter),
+            UiFont::Sans.at(FONT),
+            text_role(MUTED_COLOR),
+            Pickable::IGNORE,
+            ChildOf(parent),
+        ))
+        .id()
 }
 
 // ---------------------------------------------------------------------------

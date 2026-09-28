@@ -232,7 +232,15 @@ fn spawn_gallery_content(commands: &mut Commands, content: Entity, font_size: f3
             ChildOf(content),
         ))
         .id();
-    let back = spawn_nav_button(commands, nav, glyph::BACK, "back", 1, font_size);
+    let back = spawn_nav_button(
+        commands,
+        nav,
+        glyph::BACK,
+        "back",
+        "inventory-gallery-back-name",
+        1,
+        font_size,
+    );
     commands.entity(back).observe(
         |press: On<Pointer<Press>>, mut state: ResMut<GalleryState>| {
             if press.button == PointerButton::Primary {
@@ -240,7 +248,15 @@ fn spawn_gallery_content(commands: &mut Commands, content: Entity, font_size: f3
             }
         },
     );
-    let forward = spawn_nav_button(commands, nav, glyph::FORWARD, "forward", 2, font_size);
+    let forward = spawn_nav_button(
+        commands,
+        nav,
+        glyph::FORWARD,
+        "forward",
+        "inventory-gallery-forward-name",
+        2,
+        font_size,
+    );
     commands.entity(forward).observe(
         |press: On<Pointer<Press>>, mut state: ResMut<GalleryState>| {
             if press.button == PointerButton::Primary {
@@ -248,7 +264,15 @@ fn spawn_gallery_content(commands: &mut Commands, content: Entity, font_size: f3
             }
         },
     );
-    let up = spawn_nav_button(commands, nav, glyph::UP, "up", 3, font_size);
+    let up = spawn_nav_button(
+        commands,
+        nav,
+        glyph::UP,
+        "up",
+        "inventory-gallery-up-name",
+        3,
+        font_size,
+    );
     commands.entity(up).observe(
         |press: On<Pointer<Press>>, model: Res<InventoryModel>, mut state: ResMut<GalleryState>| {
             if press.button != PointerButton::Primary {
@@ -350,12 +374,14 @@ pub fn spawn_inventory_gallery_specimen(
     parent
 }
 
-/// Spawn one square navigation button with a glyph label.
+/// Spawn one square navigation button with a glyph label, called `name_key`
+/// since the glyph says nothing in words.
 fn spawn_nav_button(
     commands: &mut Commands,
     parent: Entity,
     slot: &'static str,
     name: &str,
+    name_key: &'static str,
     tab_index: i32,
     font_size: f32,
 ) -> Entity {
@@ -369,7 +395,8 @@ fn spawn_nav_button(
         .tab_index(tab_index)
         .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
         .label_color(LABEL_COLOR)
-        .font_size(font_size),
+        .font_size(font_size)
+        .name_key(name_key),
     )
     .button
 }

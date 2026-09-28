@@ -62,6 +62,7 @@ use bevy::text::EditableText;
 use bevy::ui_widgets::Activate;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{AgentKey, Command, MuteEntry, MuteFlags, MuteType, SlCommand, Uuid};
+use sl_viewer_ui_core::semantic::LabelledBy;
 
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::{TransArgs, Translated, Translator};
@@ -659,20 +660,22 @@ pub fn spawn_block_by_name_specimen(
 /// prompt, the note, the name field and the OK / Cancel row. Returns the name
 /// field's entity. Shared by the live floater and its specimen.
 fn spawn_block_by_name_content(commands: &mut Commands, content: Entity, font_size: f32) -> Entity {
-    for key in ["block-by-name-prompt", "block-by-name-note"] {
-        commands.spawn((
-            Text::default(),
-            Translated::new(key),
-            UiFont::Sans.at(font_size),
-            text_role(if key == "block-by-name-note" {
-                DIM_LABEL_COLOR
-            } else {
-                LABEL_COLOR
-            }),
-            Pickable::IGNORE,
-            ChildOf(content),
-        ));
-    }
+    let [prompt, _note] = [
+        ("block-by-name-prompt", LABEL_COLOR),
+        ("block-by-name-note", DIM_LABEL_COLOR),
+    ]
+    .map(|(key, color)| {
+        commands
+            .spawn((
+                Text::default(),
+                Translated::new(key),
+                UiFont::Sans.at(font_size),
+                text_role(color),
+                Pickable::IGNORE,
+                ChildOf(content),
+            ))
+            .id()
+    });
     let field = spawn_text_input(
         commands,
         content,
@@ -683,6 +686,8 @@ fn spawn_block_by_name_content(commands: &mut Commands, content: Entity, font_si
             ..TextInputSpec::new("block-by-name-field", TextInputKind::Line)
         },
     );
+    // The prompt above the field is its caption.
+    commands.entity(field).insert(LabelledBy(prompt));
     let buttons = commands
         .spawn((
             Node {

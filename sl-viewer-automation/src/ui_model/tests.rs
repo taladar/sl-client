@@ -11,11 +11,14 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui::{Checked, InteractionDisabled};
 use bevy::ui_widgets::{Button, Checkbox, RadioButton, Slider, SliderRange, SliderValue};
+use bevy_flair::prelude::ClassList;
 use pretty_assertions::assert_eq;
 use sl_automation_proto::{NodeState, NodeValue, NodeVisibility, Role, UiNode};
 use sl_viewer_testkit::interact::{self, InteractionTest};
 use sl_viewer_testkit::{settle, spawn_under_root};
 use sl_viewer_ui_core::i18n::Translated;
+use sl_viewer_ui_core::semantic::{Expanded, Semantic};
+use sl_viewer_ui_core::skin::{LIST_ROW_CLASS, SELECTED_CLASS};
 use sl_viewer_ui_widgets::ui_text_input::ReadOnlyField;
 
 use super::{entity_of, node_id, snapshot};
@@ -509,6 +512,232 @@ fn a_subtree_snapshot_carries_what_its_ancestors_impose() -> Result<(), String> 
         summary,
         vec![(Some("button"), true)],
         "an unnamed root yields its descendants, still disabled by the panel above"
+    );
+    Ok(())
+}
+
+/// Put `class` on `entity`'s class list, or take it off.
+fn set_class(app: &mut App, entity: Entity, class: &'static str, on: bool) -> Result<(), String> {
+    let mut classes = app
+        .world_mut()
+        .get_mut::<ClassList>(entity)
+        .ok_or("no class list")?;
+    if on {
+        classes.add(class);
+    } else {
+        classes.remove(class);
+    }
+    Ok(())
+}
+
+#[test]
+fn a_list_row_is_a_list_item_selected_by_its_class() -> Result<(), String> {
+    let mut app = app();
+    let list = spawn_under_root(
+        &mut app,
+        (
+            Name::new("list"),
+            Semantic::new(Role::List),
+            Node {
+                flex_direction: FlexDirection::Column,
+                ..default()
+            },
+        ),
+    );
+    let rows: Vec<Entity> = ["Aviary", "Bay City"]
+        .into_iter()
+        .map(|caption| {
+            app.world_mut()
+                .spawn((
+                    Name::new(caption.to_lowercase()),
+                    ClassList::new_with_classes([LIST_ROW_CLASS]),
+                    Node::default(),
+                    ChildOf(list),
+                ))
+                .with_child(Text::new(caption))
+                .id()
+        })
+        .collect();
+    let [aviary, _bay] = rows.as_slice() else {
+        return Err("two rows".to_owned());
+    };
+
+    let nodes = snap(&mut app)?;
+    let list = find(&nodes, "list").ok_or("no list")?;
+    let summary: Vec<(Role, Option<&str>, bool)> = list
+        .children
+        .iter()
+        .map(|row| {
+            (
+                row.role,
+                row.name.as_deref(),
+                row.has_state(NodeState::Selected),
+            )
+        })
+        .collect();
+    assert_eq!(
+        summary,
+        vec![
+            (Role::ListItem, Some("Aviary"), false),
+            (Role::ListItem, Some("Bay City"), false),
+        ],
+        "a row drawn as a list row is a list item, named by its text"
+    );
+
+    set_class(&mut app, *aviary, SELECTED_CLASS, true)?;
+    assert!(
+        node(&mut app, "aviary")?.has_state(NodeState::Selected),
+        "the selection class selects the row"
+    );
+    assert!(
+        !node(&mut app, "bay city")?.has_state(NodeState::Selected),
+        "and only that row"
+    );
+    set_class(&mut app, *aviary, SELECTED_CLASS, false)?;
+    assert!(
+        !node(&mut app, "aviary")?.has_state(NodeState::Selected),
+        "dropping the class deselects it"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_tree_row_reports_its_level_and_whether_it_is_unfolded() -> Result<(), String> {
+    let mut app = app();
+    let tree = spawn_under_root(
+        &mut app,
+        (
+            Name::new("tree"),
+            Semantic::new(Role::Tree),
+            Node::default(),
+        ),
+    );
+    let folder = app
+        .world_mut()
+        .spawn((
+            Name::new("folder"),
+            Semantic::new(Role::TreeItem).level(2),
+            Node::default(),
+            ChildOf(tree),
+        ))
+        .with_child(Text::new("Clothing"))
+        .id();
+
+    let row = node(&mut app, "folder")?;
+    assert_eq!(
+        (row.role, row.name.as_deref(), row.level),
+        (Role::TreeItem, Some("Clothing"), Some(2)),
+        "a tree row carries its level"
+    );
+    assert!(!row.has_state(NodeState::Expanded), "folded to begin with");
+
+    app.world_mut().entity_mut(folder).insert(Expanded);
+    assert!(
+        node(&mut app, "folder")?.has_state(NodeState::Expanded),
+        "the marker unfolds it"
+    );
+    app.world_mut().entity_mut(folder).remove::<Expanded>();
+    assert!(
+        !node(&mut app, "folder")?.has_state(NodeState::Expanded),
+        "and its removal folds it again"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_leaf_keeps_its_label_but_not_the_popup_it_owns() -> Result<(), String> {
+    let mut app = app();
+    let combo = spawn_button(&mut app, "combo", "Medium");
+    app.world_mut()
+        .entity_mut(combo)
+        .insert(Semantic::new(Role::Combobox));
+    let popup = app
+        .world_mut()
+        .spawn((
+            Name::new("popup"),
+            Semantic::new(Role::List),
+            placed(0.0, 30.0, 120.0, 40.0),
+            ChildOf(combo),
+        ))
+        .id();
+    app.world_mut().spawn((
+        Name::new("option"),
+        ClassList::new_with_classes([LIST_ROW_CLASS]),
+        Node::default(),
+        Text::new("High"),
+        ChildOf(popup),
+    ));
+
+    let combo = node(&mut app, "combo")?;
+    assert_eq!(
+        combo.name.as_deref(),
+        Some("Medium"),
+        "the popup's rows are not part of the combo's name"
+    );
+    let owned: Vec<(Option<&str>, Role)> = combo
+        .children
+        .iter()
+        .map(|child| (child.test_id.as_deref(), child.role))
+        .collect();
+    assert_eq!(
+        owned,
+        vec![(Some("popup"), Role::List)],
+        "the label text is swallowed, the owned popup is not"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_semantic_names_by_another_node_or_by_a_key() -> Result<(), String> {
+    let mut app = app();
+    let window = spawn_under_root(&mut app, (Name::new("window"), Node::default()));
+    let title = app
+        .world_mut()
+        .spawn((
+            Text::new("Preferences"),
+            Translated::new("floater-preferences"),
+            ChildOf(window),
+        ))
+        .id();
+    app.world_mut()
+        .spawn((Text::new("A sentence of content."), ChildOf(window)));
+    app.world_mut()
+        .entity_mut(window)
+        .insert(Semantic::new(Role::Window).labelled_by(title));
+    let ball = spawn_under_root(
+        &mut app,
+        (
+            Name::new("ball"),
+            Semantic::new(Role::Trackball).name_key("trackball-sun"),
+            placed(10.0, 10.0, 40.0, 40.0),
+        ),
+    );
+    app.world_mut().spawn((
+        Text::new("N"),
+        Translated::new("trackball-north"),
+        ChildOf(ball),
+    ));
+
+    let window = node(&mut app, "window")?;
+    assert_eq!(
+        (
+            window.role,
+            window.name.as_deref(),
+            window.name_key.as_deref()
+        ),
+        (
+            Role::Window,
+            Some("Preferences"),
+            Some("floater-preferences")
+        ),
+        "a window is named by its title, not its content"
+    );
+    let ball = node(&mut app, "ball")?;
+    assert_eq!(
+        (ball.name.as_deref(), ball.name_key.as_deref()),
+        (Some("trackball-sun"), Some("trackball-sun")),
+        "a key names the node — itself, with no locale loaded — over the letters \
+         drawn on it"
     );
     Ok(())
 }

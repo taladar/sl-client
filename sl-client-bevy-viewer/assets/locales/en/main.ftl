@@ -90,8 +90,10 @@ people-contact-sets-tab = Contact Sets
 people-header-name = Name
 people-header-status = Status
 # The two permission-column groups: rights this agent grants the friend
-# ("They can …") and rights the friend grants this agent ("You can …"). Each group
-# has three generated icon columns (see online status, find on map, edit objects).
+# ("They can …") and rights the friend grants this agent ("You can …"). Each
+# group
+# has three generated icon columns (see online status, find on map, edit
+# objects).
 people-rights-they = They
 people-rights-you = You
 # The per-friend action buttons under the Friends list.
@@ -100,7 +102,8 @@ people-action-teleport = Offer Teleport
 people-action-remove = Remove Friend
 people-action-block = Block
 # The confirm dialog shown before granting a friend the edit-my-objects right
-# (the one dangerous grant); revokes and the other rights apply without a prompt.
+# (the one dangerous grant); revokes and the other rights apply without a
+# prompt.
 people-grant-confirm-prompt = Give { $name } permission to edit, delete or take your objects?
 people-grant-confirm-yes = Grant
 people-grant-confirm-no = Cancel
@@ -1247,6 +1250,9 @@ worldmap-layer-region-names = Region Names
 # The Search floater (viewer-search-floater): the Firestorm fsfloatersearch
 # reproduction — a tab strip of result tables plus a shared details pane.
 search-title = Search
+# What a search box with no prompt of its own is called, for a screen reader
+# and a test locator.
+search-field-name = Search
 search-query-label = Search:
 search-button = Search
 search-maturity-label = Show:
@@ -1555,6 +1561,10 @@ trackball-north = N
 trackball-east = E
 trackball-south = S
 trackball-west = W
+# What each trackball is called, for a screen reader and a test locator — the
+# control itself shows only the compass letters.
+trackball-sun = Sun direction
+trackball-moon = Moon direction
 texture-picker-title = Pick: Texture
 texture-picker-title-material = Pick: Material
 texture-picker-search = Search
@@ -3451,7 +3461,8 @@ load-url-button-load = Load
 load-url-button-block = Block
 load-url-button-ignore = Ignore
 
-# The shared URL-linkification widget (viewer-url-linkification): the placeholder
+# The shared URL-linkification widget (viewer-url-linkification): the
+# placeholder
 # an agent / group link shows until its name resolves, and the hover-tooltip
 # category lines (shown above the link's actual destination URL). Mirror the
 # reference Tooltip* strings.
@@ -3478,7 +3489,8 @@ inspector-button-offer-teleport = Offer Teleport
 inspector-button-show-on-map = Show on Map
 inspector-button-block = Block
 
-# The script permission-request toast (viewer-permission-request-dialog): the card
+# The script permission-request toast (viewer-permission-request-dialog): the
+# card
 # a scripted object's llRequestPermissions pops (the ScriptQuestion message),
 # naming the object / owner and the requested permission bits.
 script-permission-intro = '{ $object }', an object owned by { $owner }, would like to:
@@ -3486,14 +3498,16 @@ script-permission-confirm = Is this OK?
 script-permission-button-yes = Yes
 script-permission-button-no = No
 script-permission-button-block = Block
-# The caution (money-access) variant (ScriptQuestionCaution), shown when a script
+# The caution (money-access) variant (ScriptQuestionCaution), shown when a
+# script
 # asks to debit the agent's L$ account.
 script-permission-caution-warning = The object '{ $object }' wants access to take money from your Linden Dollar account. If you allow this, it can take any or all of your money from you at any time, with no further warning or request.
 script-permission-caution-advice = Before allowing this access, make sure you know what the object is and why it is making this request, as well as whether you trust the creator. If you're not certain, click Deny.
 script-permission-caution-additional = If you allow access to your account, you will also be allowing the object to:
 script-permission-button-allow = Allow access
 script-permission-button-deny = Deny
-# The requested-permission lines (the reference ScriptQuestion [QUESTIONS] strings).
+# The requested-permission lines (the reference ScriptQuestion [QUESTIONS]
+# strings).
 script-permission-q-debit = Take Linden dollars (L$) from you
 script-permission-q-controls = Act on your control inputs
 script-permission-q-animation = Animate your avatar
@@ -3509,7 +3523,8 @@ script-permission-q-return-objects = Return objects on your behalf
 
 # The experience-acceptance toast (viewer-experience-permission-dialog): the
 # reference ScriptQuestionExperience card a scripted object pops to run under an
-# experience. The object / owner / scope come from the ScriptQuestion; the name and
+# experience. The object / owner / scope come from the ScriptQuestion; the name
+# and
 # scope from the fetched experience metadata; the permission lines reuse the
 # script-permission-q-* strings above.
 experience-permission-intro = '{ $object }', an object owned by { $owner }, requests your participation in the { $scope } experience:
@@ -4058,7 +4073,8 @@ quick-prefs-env-shared = Shared (region)
 quick-prefs-env-daycycle = Region day cycle
 quick-prefs-env-legacy = Legacy WindLight
 quick-prefs-env-modern = Modern (EEP)
-# Shown, never offered: a settings asset from the three combos below is in force.
+# Shown, never offered: a settings asset from the three combos below is in
+# force.
 quick-prefs-env-custom = Custom
 # The times of day.
 quick-prefs-time-sunrise = Sunrise
@@ -5279,3 +5295,106 @@ setting-desc-table-column-widths = Table column widths (token:px, …).
 setting-desc-table-sort-order = Table sort order, most-significant column first (token:dir, …).
 setting-desc-ui-sound-asset = Override the sound asset UUID for this UI feedback sound (blank = default)
 setting-desc-ui-sound-enabled = Whether this UI feedback sound plays
+
+## Accessible names: what a control is called when it draws no words of its
+## own (an icon button, a field with no caption beside it) — read by a screen
+## reader and by the automation model's locators.
+
+# What the text-field gallery specimens are called, for a screen reader and a
+# test locator.
+text-input-line-name = Text
+text-input-multiline-name = Multi-line text
+text-input-float-name = Decimal number
+text-input-integer-name = Whole number
+text-input-unsigned-name = Non-negative number
+text-input-read-only-name = Read-only text
+# What the gallery's multi-line text editor specimen is called.
+text-editor-name = Text editor
+# What the colour picker's hex-code field is called.
+color-picker-hex-name = Hex code
+# What a chat line (nearby chat bar, conversation input) is called.
+chat-input-name = Message
+# What a notification toast's text field is called.
+toast-input-name = Response
+# What a scripted llTextBox dialog's reply field is called.
+script-dialog-textbox-name = Reply
+# What the notecard and script editors' body fields are called.
+notecard-body-name = Notecard text
+script-body-name = Script text
+# What the colour picker's channel sliders are called: the words their
+# one-letter captions abbreviate.
+color-picker-red-name = Red
+color-picker-green-name = Green
+color-picker-blue-name = Blue
+color-picker-hue-name = Hue
+color-picker-saturation-name = Saturation
+color-picker-luminance-name = Luminance
+
+# What the pickers' uncaptioned search fields are called, for a screen reader
+# and a test locator.
+avatar-picker-search-name = Resident name
+group-picker-search-name = Group name
+
+# What a contact set's three reply fields are called (the toggle above each says
+# when it is used).
+contact-set-config-reply-busy-name = Unavailable reply
+contact-set-config-reply-autorespond-name = Autoresponse reply
+contact-set-config-reply-non-friends-name = Non-friends reply
+
+# What the inventory gallery's glyph-only navigation buttons are called, for a
+# screen reader and a test locator.
+inventory-gallery-back-name = Back
+inventory-gallery-forward-name = Forward
+inventory-gallery-up-name = Up one folder
+
+# What the RLVa console's command line and the RLVa strings editor's text field
+# are called.
+rlv-console-input-name = Command
+rlv-strings-value-name = String text
+
+# What the debug-settings editor's captionless value control is called (the
+# setting's name sits above it).
+debug-settings-value-name = Value
+
+# What the build window's linked-part arrow buttons are called, for a screen
+# reader and a test locator.
+build-link-part-prev-name = Previous linked part
+build-link-part-next-name = Next linked part
+
+# What the media settings' two size fields are called (one "Size:" caption
+# covers both).
+media-settings-width-name = Width
+media-settings-height-name = Height
+
+# What the preset step buttons beside the sky / water / day-cycle combos are
+# called.
+quick-prefs-preset-sky-previous-name = Previous sky preset
+quick-prefs-preset-sky-next-name = Next sky preset
+quick-prefs-preset-water-previous-name = Previous water preset
+quick-prefs-preset-water-next-name = Next water preset
+quick-prefs-preset-day-cycle-previous-name = Previous day cycle
+quick-prefs-preset-day-cycle-next-name = Next day cycle
+
+# What the Nearby Media window's glyph buttons, volume slider and row ticks are
+# called.
+nearby-media-preferences-name = Media preferences
+nearby-media-stop-name = Stop
+nearby-media-play-name = Play
+nearby-media-pause-name = Pause
+nearby-media-mute-name = Mute
+nearby-media-zoom-name = Zoom to media
+nearby-media-volume-name = Volume
+nearby-media-tick-name = Playing
+
+# What the parcel audio bar's glyph buttons and volume slider are called.
+parcel-audio-play-stop-name = Play or stop parcel audio
+parcel-audio-mute-toggle-name = Mute parcel audio
+parcel-audio-nearby-media-name = Nearby media
+parcel-audio-volume-name = Parcel audio volume
+
+# What the web browser's address field and toolbar buttons are called.
+web-browser-address-name = Address
+web-browser-back-name = Back
+web-browser-forward-name = Forward
+web-browser-reload-or-stop-name = Reload or stop
+web-browser-open-external-name = Open in external browser

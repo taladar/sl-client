@@ -20,18 +20,38 @@ pub enum Role {
     Checkbox,
     /// One option of a radio group.
     Radio,
+    /// A set of radio options, one focus stop; its options are its children.
+    RadioGroup,
     /// A single- or multi-line text field.
     Textbox,
     /// A drop-down: a closed control that opens a list of choices.
     Combobox,
-    /// A slider or spinner over a numeric range.
+    /// A slider over a numeric range.
     Slider,
+    /// A swatch showing a colour, which opens a colour picker.
+    ColorWell,
+    /// A ball dragged to aim a direction or a rotation.
+    Trackball,
+    /// The row of tabs of a tab container; its tabs are its children.
+    TabList,
     /// One tab of a tab container.
     Tab,
-    /// One entry of a menu, a context menu or a pie menu.
+    /// A bar of menu buttons along the top of a window.
+    MenuBar,
+    /// An open menu: a drop-down, a context menu or a pie menu; its entries
+    /// are its children.
+    Menu,
+    /// One entry of a menu bar, a menu, a context menu or a pie menu.
     MenuItem,
-    /// One row of a list, a tree or a grid.
+    /// A list or a grid; its rows are its children.
+    List,
+    /// One row of a list or a grid.
     ListItem,
+    /// A tree; its rows are its children, their depth their
+    /// [`level`](UiNode::level).
+    Tree,
+    /// One row of a tree.
+    TreeItem,
     /// A floater or another top-level window.
     Window,
     /// Static text.
@@ -51,12 +71,21 @@ impl Role {
             Self::Button => "button",
             Self::Checkbox => "checkbox",
             Self::Radio => "radio",
+            Self::RadioGroup => "radiogroup",
             Self::Textbox => "textbox",
             Self::Combobox => "combobox",
             Self::Slider => "slider",
+            Self::ColorWell => "colorwell",
+            Self::Trackball => "trackball",
+            Self::TabList => "tablist",
             Self::Tab => "tab",
+            Self::MenuBar => "menubar",
+            Self::Menu => "menu",
             Self::MenuItem => "menuitem",
+            Self::List => "list",
             Self::ListItem => "listitem",
+            Self::Tree => "tree",
+            Self::TreeItem => "treeitem",
             Self::Window => "window",
             Self::Text => "text",
             Self::Image => "image",
@@ -173,6 +202,13 @@ pub struct UiNode {
     /// The value the node shows, for text fields, combo boxes and sliders.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<NodeValue>,
+    /// How deep a tree row sits, the top level being 1 (as ARIA counts).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub level: Option<u32>,
+    /// The keyboard shortcut a menu entry shows, as the user reads it
+    /// (`Ctrl+B`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accelerator: Option<String>,
     /// The node's box.
     pub bounds: Bounds,
     /// Whether the node can be seen.

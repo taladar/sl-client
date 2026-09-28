@@ -92,6 +92,7 @@ const FLAGS_CAST_SHADOWS: u32 = 1 << 1;
 // The agent-relative permission bits (`FLAGS_OBJECT_MODIFY` / `_COPY` / `_MOVE`)
 // live on [`crate::objects`], shared with the build-tool permission gate.
 use crate::world_api::{FLAGS_OBJECT_COPY, FLAGS_OBJECT_MODIFY, FLAGS_OBJECT_MOVE};
+use sl_viewer_ui_core::semantic::LabelledBy;
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 /// The agent-relative `FLAGS_OBJECT_TRANSFER` bit.
@@ -976,7 +977,9 @@ fn spawn_param_row(
             ChildOf(parent),
         ))
         .id();
-    spawn_row_label(commands, row_entity, label_key, font_size);
+    let label = spawn_row_label(commands, row_entity, label_key, font_size);
+    // The caption names a control in the row that names nothing itself.
+    commands.entity(row_entity).insert(LabelledBy(label));
     row_entity
 }
 

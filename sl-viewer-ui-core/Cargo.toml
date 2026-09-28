@@ -28,6 +28,7 @@ fluent = { version = "0.16.1" }
 fluent_content = { version = "0.0.5" }
 fs-err = { workspace = true }
 parley = { version = "0.9.0", default-features = false, features = ["std"] }
+sl-automation-proto = { workspace = true }
 sl-l10n = { path = "../sl-l10n", version = "0.1.0" }
 sl-settings = { workspace = true }
 sl-viewer-settings = { workspace = true }

@@ -80,6 +80,7 @@ use crate::world_api::ui_texture::{PendingUiTexture, UiTexturePlugin};
 use crate::world_map::OpenWorldMap;
 use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
+use sl_viewer_ui_core::semantic::LabelledBy;
 use sl_viewer_ui_core::skin::{SELECTED_CLASS, set_state_class, text_role};
 
 // ---------------------------------------------------------------------------
@@ -1317,13 +1318,15 @@ fn spawn_search_content(
             ChildOf(left),
         ))
         .id();
-    spawn_label(
+    let query_label = spawn_label(
         commands,
         query_row,
         "search-query-label",
         LABEL_COLOR,
         font_size,
     );
+    // "Search:" names the query field beside it.
+    commands.entity(query_row).insert(LabelledBy(query_label));
     let search_field = spawn_text_input(
         commands,
         query_row,
@@ -2077,15 +2080,15 @@ fn spawn_paging_button(
         .observe(on_paging_press);
 }
 
-/// Spawn a translated static label.
+/// Spawn a translated static label, and return it.
 fn spawn_label(
     commands: &mut Commands,
     parent: Entity,
     key: &'static str,
     color: Color,
     font_size: f32,
-) {
-    ui_spawn::spawn_label(commands, parent, UiLabel::key(key), color, font_size);
+) -> Entity {
+    ui_spawn::spawn_label(commands, parent, UiLabel::key(key), color, font_size)
 }
 
 /// Spawn a bordered translated push button; the caller attaches the observer.

@@ -422,6 +422,7 @@ fn populate_editor(
             content,
             text,
             "script-body",
+            "script-body-name",
             BODY_VISIBLE_LINES,
             font_size,
         ))

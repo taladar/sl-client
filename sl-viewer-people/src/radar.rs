@@ -49,6 +49,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy_flair::style::components::{ClassList, PseudoElementsSupport};
 use sl_viewer_ui_core::glyph;
+use sl_viewer_ui_core::semantic::LabelledBy;
 
 use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use sl_client_bevy::{
@@ -1082,6 +1083,8 @@ fn spawn_radar_content(
             ..TextInputSpec::new("radar-range", TextInputKind::Float)
         },
     );
+    // The limit checkbox's caption, "Limit range (m)", is the field's label.
+    commands.entity(range_field).insert(LabelledBy(limit.label));
 
     // The counts line.
     let counts_text = commands

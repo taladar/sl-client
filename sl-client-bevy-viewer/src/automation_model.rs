@@ -6,10 +6,11 @@
 //! claim checked here is the one a test driver stands on: every stock widget
 //! any element spawns appears in the tree **exactly once, with its role** — not
 //! swallowed by a leaf widget around it, not duplicated, not missing because
-//! it sits under a container the walk skipped. The custom widgets (floaters,
-//! tab rows, lists, menus) get their roles in
-//! `viewer-automation-semantic-custom-widgets`, which extends this sweep's
-//! question to them.
+//! it sits under a container the walk skipped. A stock widget that a custom
+//! widget is built on (a tab's radio option, a menu button, a combo's anchor)
+//! is expected under the role its `Semantic` names. That every focus stop has a
+//! role and a name at all is the contract guard's question
+//! (`ui_contract::every_focus_stop_has_a_contract_row`).
 
 #[cfg(test)]
 mod tests {
@@ -19,15 +20,19 @@ mod tests {
     use bevy::prelude::*;
     use bevy::text::EditableText;
     use bevy::ui_widgets::{Button, Checkbox, RadioButton, Slider};
-    use sl_automation_proto::{NodeId, Role, UiNode};
+    use pretty_assertions::assert_eq;
+    use sl_automation_proto::{NodeId, NodeState, NodeValue, Role, UiNode};
     use sl_viewer_automation::{node_id, snapshot};
+    use sl_viewer_ui_core::i18n::Translator;
+    use sl_viewer_ui_core::semantic::Semantic;
+    use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems};
 
     use crate::floater_chrome::floater_app;
     use crate::floaters::FLOATERS;
     use crate::ui_contract::install_element_hosting;
     use crate::ui_element::{ElementCx, UiElement};
     use crate::ui_elements::ELEMENTS;
-    use crate::ui_test::interact::InteractionTest;
+    use crate::ui_test::interact::{self, InteractionTest};
     use crate::ui_test::{settle, spawn_element_into};
 
     /// An interactive app with one registered element spawned and settled —
@@ -40,11 +45,13 @@ mod tests {
         app
     }
 
-    /// Every stock widget in the app and the role the model must give it.
+    /// Every stock widget in the app and the role the model must give it —
+    /// its stock role, or the role a `Semantic` on it says it really plays.
     fn stock_widgets(app: &mut App) -> Vec<(Entity, Option<String>, Role)> {
         let mut query = app.world_mut().query::<(
             Entity,
             Option<&Name>,
+            Option<&Semantic>,
             Has<EditableText>,
             Has<Slider>,
             Has<Checkbox>,
@@ -52,10 +59,16 @@ mod tests {
             Has<Button>,
         )>();
         let mut widgets = Vec::new();
-        for (entity, name, field, slider, checkbox, radio, button) in query.iter(app.world()) {
+        for (entity, name, semantic, field, slider, checkbox, radio, button) in
+            query.iter(app.world())
+        {
             // The model's own precedence, spelled out independently: a field
             // that is also a button is a field.
-            let role = if field {
+            let role = if !(field || slider || checkbox || radio || button) {
+                continue;
+            } else if let Some(semantic) = semantic {
+                semantic.role()
+            } else if field {
                 Role::Textbox
             } else if slider {
                 Role::Slider
@@ -114,6 +127,229 @@ mod tests {
         }
         assert!(checked > 0, "the sweep found no stock widgets to check");
         assert!(failures.is_empty(), "{failures:#?}");
+        Ok(())
+    }
+
+    /// The node whose test id is `test_id`, anywhere in `nodes`.
+    fn find<'a>(nodes: &'a [UiNode], test_id: &str) -> Option<&'a UiNode> {
+        nodes.iter().find_map(|node| {
+            if node.test_id.as_deref() == Some(test_id) {
+                Some(node)
+            } else {
+                find(&node.children, test_id)
+            }
+        })
+    }
+
+    /// The node `test_id` in a fresh snapshot of `app`.
+    fn node(app: &mut App, test_id: &str) -> Result<UiNode, String> {
+        settle(app);
+        let nodes = snapshot(app.world_mut()).map_err(|error| error.to_string())?;
+        find(&nodes, test_id)
+            .cloned()
+            .ok_or_else(|| format!("no node `{test_id}` in {nodes:#?}"))
+    }
+
+    /// The registered element `id`, hosted as the contract sweep hosts it.
+    fn registered(id: &str) -> Result<App, String> {
+        let element = ELEMENTS
+            .iter()
+            .find(|element| element.id == id)
+            .ok_or_else(|| format!("the registry has no `{id}` element"))?;
+        Ok(element_app(element))
+    }
+
+    /// **A combo is expanded exactly while its list is open, and its value is
+    /// the chosen entry.** Opened and picked through the real pointer.
+    #[test]
+    fn a_combo_is_expanded_while_open_and_shows_its_choice() -> Result<(), String> {
+        let mut app = registered("combo-box")?;
+        app.add_plugins(crate::ui_combo::ComboWidgetPlugin);
+        let combo = node(&mut app, "combo-demo:combo")?;
+        assert_eq!(
+            (combo.role, combo.value.clone()),
+            (Role::Combobox, Some(NodeValue::Text("Medium".to_owned()))),
+            "a closed combo shows its choice"
+        );
+        assert!(
+            !combo.has_state(NodeState::Expanded),
+            "closed to begin with"
+        );
+
+        interact::click_node(&mut app, "combo-demo:combo")?;
+        let open = node(&mut app, "combo-demo:combo")?;
+        assert!(open.has_state(NodeState::Expanded), "a click opens it");
+        let list = find(&open.children, "combo-popover").ok_or("the open list is not its child")?;
+        let rows: Vec<(Role, Option<&str>)> = list
+            .children
+            .iter()
+            .map(|row| (row.role, row.name.as_deref()))
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                (Role::ListItem, Some("Low")),
+                (Role::ListItem, Some("Medium")),
+                (Role::ListItem, Some("High")),
+            ],
+            "the list's options"
+        );
+
+        interact::click_node(&mut app, "combo-option:2")?;
+        let picked = node(&mut app, "combo-demo:combo")?;
+        assert_eq!(
+            picked.value,
+            Some(NodeValue::Text("High".to_owned())),
+            "the pick is the new value"
+        );
+        assert!(
+            !picked.has_state(NodeState::Expanded),
+            "and picking closes the list"
+        );
+        Ok(())
+    }
+
+    /// **A tab strip is a tab list, and the selection moves with a click.**
+    #[test]
+    fn the_selected_tab_follows_the_click() -> Result<(), String> {
+        let mut app = registered("tabs-top")?;
+        let strip = node(&mut app, "tabs-top:tab-strip")?;
+        assert_eq!(strip.role, Role::TabList, "the strip");
+        let selected = |strip: &UiNode| -> Vec<(Option<String>, bool)> {
+            let mut tabs = Vec::new();
+            collect_tabs(strip, &mut tabs);
+            tabs
+        };
+        let before = selected(&strip);
+        assert_eq!(before.len(), 3, "three tabs: {before:?}");
+        assert!(
+            before.iter().all(|(name, _)| name.is_some()),
+            "every tab is named: {before:?}"
+        );
+        assert_eq!(
+            before.iter().map(|(_, on)| *on).collect::<Vec<_>>(),
+            vec![true, false, false],
+            "the first tab starts selected"
+        );
+        interact::click_node(&mut app, "tabs-top:tab:1")?;
+        let after = selected(&node(&mut app, "tabs-top:tab-strip")?);
+        assert_eq!(
+            after.iter().map(|(_, on)| *on).collect::<Vec<_>>(),
+            vec![false, true, false],
+            "the clicked tab is the selected one, and only it"
+        );
+        Ok(())
+    }
+
+    /// Every tab under `node`, depth first: its name and whether it is
+    /// selected.
+    fn collect_tabs(node: &UiNode, out: &mut Vec<(Option<String>, bool)>) {
+        if node.role == Role::Tab {
+            out.push((node.name.clone(), node.has_state(NodeState::Selected)));
+        }
+        for child in &node.children {
+            collect_tabs(child, out);
+        }
+    }
+
+    /// **A pie slice is a menu item named by its key**, resolved in English
+    /// — not by its compass position, and not left as an unnamed picture.
+    #[test]
+    fn a_pie_slice_is_named_by_its_key() -> Result<(), String> {
+        let mut app = InteractionTest::new().build();
+        install_element_hosting(&mut app);
+        app.add_systems(
+            Startup,
+            (|mut commands: Commands, translator: Translator, root: Res<UiRoot>| {
+                crate::pie_menu::spawn_pie_menu(
+                    &mut commands,
+                    root.0,
+                    ElementCx::new(),
+                    &translator,
+                    &crate::pie_menu::FIXTURE_PIE,
+                    "radial-menu",
+                    crate::pie_menu::PieConditions::default(),
+                );
+            })
+            .after(UiScaffoldSystems::SpawnRoot),
+        );
+        let pie = node(&mut app, "pie-menu")?;
+        assert_eq!(pie.role, Role::Menu, "the pie is a menu");
+        let north = find(&pie.children, "pie-label:north").ok_or("no north slice")?;
+        assert_eq!(
+            (north.role, north.name_key.as_deref()),
+            (Role::MenuItem, Some("pie-fixture-touch")),
+            "the north slice"
+        );
+        assert!(
+            north
+                .name
+                .as_deref()
+                .is_some_and(|name| name != "pie-fixture-touch"),
+            "the key resolves to English, not to itself: {:?}",
+            north.name
+        );
+        assert!(
+            pie.children
+                .iter()
+                .filter(|slice| slice.role == Role::MenuItem)
+                .all(|slice| slice.name.is_some()),
+            "every slice is named: {pie:#?}"
+        );
+        Ok(())
+    }
+
+    /// **A menu button is expanded while its menu is open, and each entry is
+    /// named by its key and shows its shortcut.**
+    #[test]
+    fn a_menu_opens_expanded_with_named_entries() -> Result<(), String> {
+        let mut app = registered("menu-bar")?;
+        let bar = node(&mut app, "menu-bar")?;
+        assert_eq!(bar.role, Role::MenuBar, "the bar");
+        let button = "menu-button:menu-fixture-world";
+        let closed = node(&mut app, button)?;
+        assert!(
+            !closed.has_state(NodeState::Expanded),
+            "closed to begin with"
+        );
+        interact::click_node(&mut app, button)?;
+        let open = node(&mut app, button)?;
+        assert_eq!(open.role, Role::MenuItem, "a menu button is a menu item");
+        assert_eq!(
+            open.name, closed.name,
+            "the open menu's entries are not part of the button's name"
+        );
+        assert!(open.has_state(NodeState::Expanded), "a click opens it");
+        // The drop-down hangs under the button's host, beside the button.
+        let menu = node(&mut app, "menu-popup:menu-fixture-world")?;
+        assert_eq!(menu.role, Role::Menu, "the drop-down");
+        let entry = find(&menu.children, "menu-item:mini-map").ok_or("no mini-map entry")?;
+        assert_eq!(
+            (
+                entry.role,
+                entry.name_key.as_deref(),
+                entry.accelerator.as_deref()
+            ),
+            (
+                Role::MenuItem,
+                Some("menu-fixture-mini-map"),
+                Some("Ctrl+Shift+M")
+            ),
+            "an entry is named by its key and carries its shortcut"
+        );
+        assert!(
+            entry
+                .name
+                .as_deref()
+                .is_some_and(|name| !name.contains("Ctrl")),
+            "the shortcut is not part of the name: {:?}",
+            entry.name
+        );
+        interact::click_node(&mut app, button)?;
+        assert!(
+            !node(&mut app, button)?.has_state(NodeState::Expanded),
+            "a second click closes it"
+        );
         Ok(())
     }
 

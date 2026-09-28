@@ -63,6 +63,7 @@ use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use sl_viewer_ui_core::glyph;
+use sl_viewer_ui_core::semantic::{Role, Semantic};
 use sl_viewer_ui_core::skin::BUTTON_CLASS;
 use sl_viewer_ui_core::skin::{role_class, text_role};
 
@@ -295,6 +296,8 @@ fn build_script_dialog_card(
                     width_glyphs: 28.0,
                     // `llTextBox` caps the reply at 254 characters.
                     max_characters: Some(254),
+                    // No caption sits beside the reply field, so it is named outright.
+                    name_key: Some("script-dialog-textbox-name"),
                     ..TextInputSpec::new("script-dialog-textbox", TextInputKind::Line)
                 },
             ));
@@ -658,6 +661,8 @@ fn spawn_close_button(commands: &mut Commands, card: Entity) -> Entity {
                 ..default()
             },
             ClassList::new_with_classes([BUTTON_CLASS]),
+            // The × says nothing in words, so the button is named.
+            Semantic::new(Role::Button).name_key("notification-button-close"),
             Name::new("script-dialog-close"),
             ChildOf(close_row),
         ))

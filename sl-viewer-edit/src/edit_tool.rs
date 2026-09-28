@@ -60,6 +60,7 @@ use crate::world_api::InputContext;
 use crate::world_api::ObjectState;
 use crate::world_api::SelectionSet;
 use sl_viewer_ui_core::glyph;
+use sl_viewer_ui_core::semantic::LabelledBy;
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 /// The floater's font size, in logical pixels.
@@ -561,7 +562,7 @@ fn spawn_build_tools_content(
             ChildOf(content),
         ))
         .id();
-    spawn_row_label(commands, grid_row, "build-grid-unit-label", font_size);
+    let grid_label = spawn_row_label(commands, grid_row, "build-grid-unit-label", font_size);
     let grid_field = spawn_text_input(
         commands,
         grid_row,
@@ -573,7 +574,10 @@ fn spawn_build_tools_content(
             ..TextInputSpec::new("build-grid-unit", TextInputKind::Float)
         },
     );
-    commands.entity(grid_field).insert(BuildGridUnitField);
+    // Named by the caption beside it.
+    commands
+        .entity(grid_field)
+        .insert((BuildGridUnitField, LabelledBy(grid_label)));
 
     // Selection summary.
     let summary_text = commands
@@ -842,9 +846,21 @@ fn spawn_link_part_nav(commands: &mut Commands, parent: Entity, font_size: f32) 
         ))
         .id();
     spawn_row_label(commands, nav_row, "build-link-part-label", font_size);
-    for (dir, slot, name, tab_index) in [
-        (LinkPartDir::Prev, glyph::BACK, "prev", 9_i32),
-        (LinkPartDir::Next, glyph::FORWARD, "next", 10_i32),
+    for (dir, slot, name, name_key, tab_index) in [
+        (
+            LinkPartDir::Prev,
+            glyph::BACK,
+            "prev",
+            "build-link-part-prev-name",
+            9_i32,
+        ),
+        (
+            LinkPartDir::Next,
+            glyph::FORWARD,
+            "next",
+            "build-link-part-next-name",
+            10_i32,
+        ),
     ] {
         // Flat rather than bordered: these two carry no box of their own, and
         // `.sk-action-button` is the class that adds a state without imposing a
@@ -857,6 +873,8 @@ fn spawn_link_part_nav(commands: &mut Commands, parent: Entity, font_size: f32) 
                 format!("build-tools:link-part-{name}"),
             )
             .kind(ButtonKind::Headless)
+            // The arrow glyph says nothing in words.
+            .name_key(name_key)
             .tab_index(tab_index)
             .padding(8.0, 2.0)
             .colors(Color::NONE, Color::NONE)

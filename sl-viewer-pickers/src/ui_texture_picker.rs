@@ -66,6 +66,7 @@ use sl_client_bevy::{
 };
 use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
+use sl_viewer_ui_core::semantic::LabelledBy;
 use sl_viewer_ui_core::skin::{SELECTED_CLASS, TEXT_CLASS, set_state_class, text_role};
 use std::hash::{Hash, Hasher as _};
 
@@ -523,13 +524,17 @@ fn spawn_picker_content(
             ChildOf(content),
         ))
         .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new("texture-picker-search"),
-        UiFont::Sans.at(font_size),
-        text_role(TEXT_COLOR),
-        ChildOf(search_row),
-    ));
+    let search_label = commands
+        .spawn((
+            Text::default(),
+            Translated::new("texture-picker-search"),
+            UiFont::Sans.at(font_size),
+            text_role(TEXT_COLOR),
+            ChildOf(search_row),
+        ))
+        .id();
+    // The caption beside the field names it.
+    commands.entity(search_row).insert(LabelledBy(search_label));
     let search = spawn_text_input(
         commands,
         search_row,

@@ -66,6 +66,7 @@ use bevy::text::EditableText;
 use bevy::ui_widgets::Activate;
 use bevy_flair::style::components::ClassList;
 
+use crate::semantic::{Role, Semantic};
 use crate::skin::text_role;
 use crate::skin_palette::SkinPalette;
 use crate::ui::{LogicalPadding, LogicalRect, column, row};
@@ -730,6 +731,8 @@ pub fn spawn_text_editor(commands: &mut Commands, parent: Entity, cx: ElementCx)
             BorderColor::all(SkinPalette::FALLBACK.control_border),
             BackgroundColor(SkinPalette::FALLBACK.field_bg),
             ClassList::new_with_classes([FIELD_CLASS]),
+            // Nothing captions the editor, so it is named outright.
+            Semantic::new(Role::Textbox).name_key("text-editor-name"),
             Name::new("text-editor"),
             ChildOf(parent),
         ))

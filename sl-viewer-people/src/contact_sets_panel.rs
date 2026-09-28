@@ -74,6 +74,7 @@ use bevy::text::{EditableText, FontCx, LayoutCx};
 use bevy::ui::Checked;
 use bevy::ui_widgets::{Activate, ValueChange};
 use bevy_flair::style::components::ClassList;
+use sl_viewer_ui_core::semantic::LabelledBy;
 
 use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use sl_client_bevy::{AgentKey, Command, SlCommand};
@@ -1058,14 +1059,18 @@ fn spawn_config_content(
             ChildOf(content),
         ))
         .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new("contact-set-config-name"),
-        UiFont::Sans.at(font_size),
-        text_role(DIM_LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(name_row),
-    ));
+    let name_label = commands
+        .spawn((
+            Text::default(),
+            Translated::new("contact-set-config-name"),
+            UiFont::Sans.at(font_size),
+            text_role(DIM_LABEL_COLOR),
+            Pickable::IGNORE,
+            ChildOf(name_row),
+        ))
+        .id();
+    // The caption names the row's field.
+    commands.entity(name_row).insert(LabelledBy(name_label));
     let name_field = spawn_text_input(
         commands,
         name_row,
@@ -1089,14 +1094,18 @@ fn spawn_config_content(
             ChildOf(content),
         ))
         .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new("contact-set-config-color"),
-        UiFont::Sans.at(font_size),
-        text_role(DIM_LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(color_row),
-    ));
+    let color_label = commands
+        .spawn((
+            Text::default(),
+            Translated::new("contact-set-config-color"),
+            UiFont::Sans.at(font_size),
+            text_role(DIM_LABEL_COLOR),
+            Pickable::IGNORE,
+            ChildOf(color_row),
+        ))
+        .id();
+    // The caption names the row's swatch.
+    commands.entity(color_row).insert(LabelledBy(color_label));
     let swatch = spawn_color_swatch(
         commands,
         color_row,
@@ -1236,6 +1245,12 @@ fn spawn_config_autoresponse(
             font_size,
             visible_lines: 3.0,
             tab_index: tab.saturating_add(1),
+            // The toggle above says when the reply is used; this is the reply.
+            name_key: Some(match mode {
+                SetAutoresponseMode::Busy => "contact-set-config-reply-busy-name",
+                SetAutoresponseMode::Autorespond => "contact-set-config-reply-autorespond-name",
+                SetAutoresponseMode::NonFriends => "contact-set-config-reply-non-friends-name",
+            }),
             ..TextInputSpec::new(
                 match mode {
                     SetAutoresponseMode::Busy => "contact-set-config-reply-busy-field",

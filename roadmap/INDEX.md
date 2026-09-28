@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 122 |
-| ready | 314 |
-| blocked | 68 |
+| ready | 315 |
+| blocked | 66 |
 | in-progress | 21 |
 | bugs | 17 |
-| done | 1262 |
+| done | 1263 |
 | deferred | 31 |
 | wont-do | 16 |
 | **total** | **1851** |
@@ -309,7 +309,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (314)
+## ready (315)
 
 ### protocol
 
@@ -385,13 +385,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   not a preference
 - [`viewer-audit-world-api-query-tests`](ready/viewer-audit-world-api-query-tests.md)
   — sl-viewer-world-api has 214 functions and 5 tests
+- [`viewer-automation-accesskit-bridge`](ready/viewer-automation-accesskit-bridge.md)
+  — Feed AccessKit from the semantic UI model (blocked by
+  `viewer-automation-semantic-custom-widgets` (done))
 - [`viewer-automation-app-builder`](ready/viewer-automation-app-builder.md) — A
   public ViewerAppBuilder — one assembly for the binary, the harness and tests
+- [`viewer-automation-locator-engine`](ready/viewer-automation-locator-engine.md)
+  — The locator engine — strict resolution and actionability (blocked by
+  `viewer-automation-semantic-ui-model` (done),
+  `viewer-automation-semantic-custom-widgets` (done))
 - [`viewer-automation-offscreen-window-spike`](ready/viewer-automation-offscreen-window-spike.md)
   — Spike — how a windowless viewer renders and picks at the same time
-- [`viewer-automation-semantic-custom-widgets`](ready/viewer-automation-semantic-custom-widgets.md)
-  — Semantic roles for the custom widgets, and a completeness guard (blocked by
-  `viewer-automation-semantic-ui-model` (done))
 - [`viewer-automation-synthetic-input`](ready/viewer-automation-synthetic-input.md)
   — Synthetic input for a live viewer — interact.rs as a frame-queued injector
   (blocked by `viewer-automation-protocol` (done))
@@ -1055,13 +1059,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-world-heartbeat`](ready/server-world-heartbeat.md) — A region
   heartbeat — the fake grid has no simulation loop at all
 
-## blocked (68)
+## blocked (66)
 
 ### viewer
 
-- [`viewer-automation-accesskit-bridge`](blocked/viewer-automation-accesskit-bridge.md)
-  — Feed AccessKit from the semantic UI model (blocked by
-  `viewer-automation-semantic-custom-widgets`)
 - [`viewer-automation-ctl-cli`](blocked/viewer-automation-ctl-cli.md) —
   sl-viewer-ctl — drive a running viewer from the shell (blocked by
   `viewer-automation-driver`)
@@ -1076,10 +1077,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — In-process transport — the same requests against Apps in the test process
   (blocked by `viewer-automation-executor`, `viewer-automation-per-app-state`,
   `viewer-automation-windowless-mode`)
-- [`viewer-automation-locator-engine`](blocked/viewer-automation-locator-engine.md)
-  — The locator engine — strict resolution and actionability (blocked by
-  `viewer-automation-semantic-ui-model` (done),
-  `viewer-automation-semantic-custom-widgets`)
 - [`viewer-automation-per-app-state`](blocked/viewer-automation-per-app-state.md)
   — Per-App state — two logged-in viewers in one process (blocked by
   `viewer-automation-app-builder`)
@@ -1386,7 +1383,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1262)
+## done (1263)
 
 ### protocol
 
@@ -1833,6 +1830,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-dialog-offers-invites` (done))
 - [`viewer-automation-protocol`](done/viewer-automation-protocol.md) —
   sl-automation-proto — the locator, request and snapshot vocabulary
+- [`viewer-automation-semantic-custom-widgets`](done/viewer-automation-semantic-custom-widgets.md)
+  — Semantic roles for the custom widgets, and a completeness guard (blocked by
+  `viewer-automation-semantic-ui-model` (done))
 - [`viewer-automation-semantic-ui-model`](done/viewer-automation-semantic-ui-model.md)
   — The semantic UI model — roles, names and states read from the ECS (blocked
   by `viewer-automation-protocol` (done))

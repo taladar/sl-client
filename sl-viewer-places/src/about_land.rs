@@ -59,6 +59,7 @@
 //! Reference (Firestorm, read-only): `llfloaterland`, `llpanelland*`; the
 //! `ParcelPropertiesUpdate`, `ParcelAccessListUpdate` messages.
 
+use sl_viewer_ui_core::semantic::LabelledBy;
 use sl_viewer_ui_core::skin::{TEXT_CLASS, text_role};
 
 use crate::skin_palette::SkinPalette;
@@ -1346,8 +1347,8 @@ fn build_general_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> 
     ));
     let id_row = spawn_labeled_row(commands, panel, "about-land-parcel-id", font_size);
     handles.parcel_id = Some(spawn_value_node(commands, id_row, font_size));
-    spawn_section_label(commands, panel, "about-land-description", font_size);
-    handles.desc_field = Some(spawn_multiline_field(
+    let desc_label = spawn_section_label(commands, panel, "about-land-description", font_size);
+    let desc_field = spawn_multiline_field(
         commands,
         panel,
         "about-land-desc-field",
@@ -1355,7 +1356,10 @@ fn build_general_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> 
         3,
         255,
         font_size,
-    ));
+    );
+    // The section caption above the field is its label.
+    commands.entity(desc_field).insert(LabelledBy(desc_label));
+    handles.desc_field = Some(desc_field);
     let type_row = spawn_labeled_row(commands, panel, "about-land-type", font_size);
     handles.land_type = Some(spawn_value_node(commands, type_row, font_size));
     let rating_row = spawn_labeled_row(commands, panel, "about-land-rating", font_size);
@@ -4161,21 +4165,23 @@ fn spawn_labeled_row(
     .row
 }
 
-/// A translated section label on its own line.
+/// A translated section label on its own line, returning it.
 fn spawn_section_label(
     commands: &mut Commands,
     parent: Entity,
     label_key: &'static str,
     font_size: f32,
-) {
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(font_size),
-        text_role(DIM_LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(parent),
-    ));
+) -> Entity {
+    commands
+        .spawn((
+            Text::default(),
+            Translated::new(label_key),
+            UiFont::Sans.at(font_size),
+            text_role(DIM_LABEL_COLOR),
+            Pickable::IGNORE,
+            ChildOf(parent),
+        ))
+        .id()
 }
 
 /// A wrapped translated note paragraph.

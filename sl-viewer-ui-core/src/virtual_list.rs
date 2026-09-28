@@ -64,6 +64,7 @@ use crate::scrollbar::{
     SCROLLBAR_MIN_THUMB, SCROLLBAR_THICKNESS, ScrollTarget, ScrollbarFrame,
     ensure_scrollbar_widget, spawn_scrollbar,
 };
+use crate::semantic::{Role, Semantic};
 use crate::skin::{SCROLLBAR_THUMB_CLASS, STRIPE_CLASS, set_state_class};
 use crate::skin_palette::SkinPalette;
 use crate::ui::{LogicalInset, LogicalRect, UiDirection};
@@ -326,7 +327,11 @@ fn drive_virtual_scrollbars(
 /// The consumer sets [`row_height`](Self::row_height) and keeps
 /// [`item_count`](Self::item_count) current; the scroll offset is owned here and
 /// nudged by [`scroll_virtual_lists`] / clamped by [`layout_virtual_lists`].
+///
+/// A list to the automation model unless the consumer says otherwise (the
+/// inventory's is a tree): the [`Semantic`] it requires is only a default.
 #[derive(Component, Debug, Clone, Copy)]
+#[require(Semantic = LIST_SEMANTIC)]
 pub struct VirtualList {
     /// The uniform height of every row, in logical pixels. Uniform because the
     /// windowing arithmetic maps a scroll offset to a row index by division —
@@ -405,6 +410,9 @@ impl VirtualList {
         self.scroll = row_top(index, self.row_height);
     }
 }
+
+/// What a [`VirtualList`] is when its consumer does not say.
+const LIST_SEMANTIC: Semantic = Semantic::new(Role::List);
 
 /// A pooled row entity: a child of a [`VirtualList`] viewport that is repeatedly
 /// re-bound to whichever item is currently at its screen position.

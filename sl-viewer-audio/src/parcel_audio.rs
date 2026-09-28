@@ -73,6 +73,7 @@ use sl_viewer_media::parcel_stream::{
     register_parcel_stream_vocabulary,
 };
 use sl_viewer_ui_core::glyph;
+use sl_viewer_ui_core::semantic::{Role, Semantic};
 use sl_viewer_ui_core::skin::{
     ACTION_BUTTON_CLASS, DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class_on, text_role,
 };
@@ -478,6 +479,8 @@ fn spawn_parcel_audio_cluster(
                 SliderStep(0.05),
             ),
             Name::new("parcel-audio-volume"),
+            // The slider draws no caption of its own.
+            Semantic::new(Role::Slider).name_key("parcel-audio-volume-name"),
         ),
     );
     // The Nearby Media window's opener — the reference's status-bar media
@@ -519,6 +522,8 @@ fn spawn_glyph_button(
             ClassList::new_with_classes([ACTION_BUTTON_CLASS]),
             Pickable::default(),
             Name::new(format!("parcel-audio-button:{action}")),
+            // The glyph says nothing in words.
+            Semantic::new(Role::Button).name_key(glyph_button_name_key(action)),
             ChildOf(parent),
         ))
         .observe(
@@ -537,6 +542,16 @@ fn spawn_glyph_button(
         ))
         .id();
     (button, label)
+}
+
+/// The Fluent key naming the glyph button that reports `action`.
+fn glyph_button_name_key(action: &'static str) -> &'static str {
+    match action {
+        "play-stop" => "parcel-audio-play-stop-name",
+        "mute-toggle" => "parcel-audio-mute-toggle-name",
+        "nearby-media" => "parcel-audio-nearby-media-name",
+        _ => "",
+    }
 }
 
 /// Whether the player is running (or trying to run) rather than stopped /

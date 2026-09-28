@@ -32,6 +32,7 @@ use bevy_flair::style::components::ClassList;
 
 use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::i18n::Translated;
+use sl_viewer_ui_core::semantic::{Expanded, Role, Semantic, sync_expanded};
 use sl_viewer_ui_core::skin::COMBO_OPTION_CLASS;
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems, row};
@@ -267,10 +268,32 @@ impl Plugin for ComboWidgetPlugin {
                 Update,
                 (apply_set_combo_options, apply_combo_selection).chain(),
             )
+            .add_systems(PostUpdate, mark_open_combos)
             .add_systems(
                 Startup,
                 attach_combo_dismiss.after(UiScaffoldSystems::SpawnRoot),
             );
+    }
+}
+
+/// Keep [`Expanded`] on each combo exactly while its list is open.
+///
+/// Does nothing on a frame where no list opened or closed, which is nearly
+/// every frame.
+fn mark_open_combos(
+    opened: Query<(), Added<ComboPopover>>,
+    mut closed: RemovedComponents<ComboPopover>,
+    popovers: Query<&ComboPopover>,
+    combos: Query<(Entity, Has<Expanded>), With<ComboSelection>>,
+    mut commands: Commands,
+) {
+    let closed_any = closed.read().count() > 0;
+    if opened.is_empty() && !closed_any {
+        return;
+    }
+    for (combo, expanded) in &combos {
+        let open = popovers.iter().any(|popover| popover.combo == combo);
+        sync_expanded(&mut commands, combo, open, expanded);
     }
 }
 
@@ -323,6 +346,11 @@ pub fn spawn_combo(commands: &mut Commands, parent: Entity, spec: &ComboSpec) ->
         ))
         .id();
     seed_value_text(commands, value, spec, active);
+    // Named by what it shows — a combo has no caption of its own; the label
+    // beside it in a form row is a separate node.
+    commands
+        .entity(anchor)
+        .insert(Semantic::new(Role::Combobox).value_from(value));
 
     commands.spawn((
         // The arrow is the skin's `glyph::DROP_DOWN` mark. It wears the same
@@ -470,6 +498,7 @@ fn build_combo_popover(
             // popups' trick.
             OverrideClip,
             ComboPopover { combo: anchor },
+            Semantic::new(Role::List),
             Pickable::default(),
             Name::new("combo-popover"),
             ChildOf(anchor),

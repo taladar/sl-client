@@ -74,6 +74,7 @@ use crate::world_map_math::{
 };
 use crate::world_map_tiles::{TileKey, TileState, WorldMapTiles};
 use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
+use sl_viewer_ui_core::semantic::LabelledBy;
 use sl_viewer_ui_core::skin::{self, LIST_ROW_CLASS, SELECTED_CLASS, text_role};
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 
@@ -713,13 +714,17 @@ fn spawn_world_map_content(
                 ChildOf(coords_row),
             ))
             .id();
-        commands.spawn((
-            Text::new(label),
-            UiFont::Sans.at(font_size),
-            text_role(SkinPalette::FALLBACK.text_muted),
-            Pickable::IGNORE,
-            ChildOf(pair),
-        ));
+        let caption = commands
+            .spawn((
+                Text::new(label),
+                UiFont::Sans.at(font_size),
+                text_role(SkinPalette::FALLBACK.text_muted),
+                Pickable::IGNORE,
+                ChildOf(pair),
+            ))
+            .id();
+        // The axis letter names the field beside it.
+        commands.entity(pair).insert(LabelledBy(caption));
         let field = spawn_text_input(
             commands,
             pair,

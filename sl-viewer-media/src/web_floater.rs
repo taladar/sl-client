@@ -254,6 +254,7 @@ fn spawn_web_content(
             tab_index: 4,
             max_characters: Some(1024),
             fill: true,
+            name_key: Some("web-browser-address-name"),
             ..TextInputSpec::new("web-address", TextInputKind::Line)
         },
     );
@@ -315,6 +316,8 @@ fn spawn_toolbar_button(
         parent,
         ButtonSpec::bordered(UiLabel::Glyph(slot), format!("web-browser-button:{action}"))
             .kind(ButtonKind::Headless)
+            // The glyph says nothing in words.
+            .name_key(toolbar_button_name_key(action))
             .tab_index(tab_index)
             .padding(7.0, 3.0)
             .font_size(font_size),
@@ -328,6 +331,17 @@ fn spawn_toolbar_button(
         },
     );
     spawned.label
+}
+
+/// The Fluent key naming the toolbar button that reports `action`.
+fn toolbar_button_name_key(action: &'static str) -> &'static str {
+    match action {
+        "back" => "web-browser-back-name",
+        "forward" => "web-browser-forward-name",
+        "reload-or-stop" => "web-browser-reload-or-stop-name",
+        "open-external" => "web-browser-open-external-name",
+        _ => "",
+    }
 }
 
 /// `Enter` in the address field navigates the view to the typed URL.

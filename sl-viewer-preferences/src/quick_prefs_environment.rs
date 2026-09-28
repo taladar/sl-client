@@ -95,6 +95,23 @@ const ROW_LABEL_KEYS: [&str; 3] = [
     "quick-prefs-env-day-cycle",
 ];
 
+/// The Fluent keys naming each kind's prev / next buttons, in sky, water,
+/// day-cycle order: `(previous, next)`.
+const STEP_NAME_KEYS: [(&str, &str); 3] = [
+    (
+        "quick-prefs-preset-sky-previous-name",
+        "quick-prefs-preset-sky-next-name",
+    ),
+    (
+        "quick-prefs-preset-water-previous-name",
+        "quick-prefs-preset-water-next-name",
+    ),
+    (
+        "quick-prefs-preset-day-cycle-previous-name",
+        "quick-prefs-preset-day-cycle-next-name",
+    ),
+];
+
 /// The suffix the reference appends to a legacy WindLight sky's label so it
 /// reads apart from an inventory asset of the same name.
 const LEGACY_SUFFIX: &str = " [WL]";
@@ -356,6 +373,14 @@ fn label_key_of(kind: SettingsKind) -> &'static str {
     ROW_LABEL_KEYS.get(kind_index(kind)).copied().unwrap_or("")
 }
 
+/// The Fluent key naming one kind's prev (`forward` false) or next button.
+fn step_name_key_of(kind: SettingsKind, forward: bool) -> &'static str {
+    STEP_NAME_KEYS.get(kind_index(kind)).map_or(
+        "",
+        |&(previous, next)| if forward { next } else { previous },
+    )
+}
+
 /// Spawn one labelled row: `label  ‹ [combo] ›`, returning the combo's anchor.
 fn spawn_preset_row(
     commands: &mut Commands,
@@ -443,6 +468,8 @@ fn spawn_step_button(
             format!("{element}:{side}"),
         )
         .kind(ButtonKind::Headless)
+        // The arrow says nothing in words; the name says which preset it steps.
+        .name_key(step_name_key_of(kind, forward))
         .tab_index(0)
         .compact()
         .padding(5.0, 1.0)

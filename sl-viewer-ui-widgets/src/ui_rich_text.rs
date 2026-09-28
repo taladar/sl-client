@@ -263,6 +263,9 @@ pub struct RichTextSpec {
     pub decorated: bool,
     /// The style classes the content's ranges name.
     pub classes: Vec<RichTextClass>,
+    /// The Fluent key of what the field is called, for a field with no caption
+    /// beside it; see [`crate::ui_text_input::TextInputSpec::name_key`].
+    pub name_key: Option<&'static str>,
 }
 
 /// The query a field's section sync reads, named so the widget's systems stay
@@ -295,6 +298,7 @@ impl RichTextSpec {
             read_only: false,
             decorated: true,
             classes: Vec::new(),
+            name_key: None,
         }
     }
 }
@@ -359,6 +363,7 @@ pub fn spawn_rich_text(
             decorated: spec.decorated,
             fill: spec.fill,
             read_only: spec.read_only,
+            name_key: spec.name_key,
             ..TextInputSpec::new(spec.element, TextInputKind::Multiline)
         },
     );

@@ -351,6 +351,8 @@ fn build_picker_content(
             font_size,
             width_glyphs: 18.0,
             tab_index: 2,
+            // No caption sits beside the field.
+            name_key: Some("avatar-picker-search-name"),
             ..crate::ui_text_input::TextInputSpec::new(
                 "avatar-picker-search",
                 crate::ui_text_input::TextInputKind::Line,

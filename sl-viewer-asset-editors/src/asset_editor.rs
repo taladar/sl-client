@@ -124,7 +124,8 @@ pub(crate) fn spawn_note(
 
 /// Spawn the editable multi-line body field, returning its entity.
 ///
-/// `element` names the field for the skin and the layout sweeps;
+/// `element` names the field for the skin and the layout sweeps; `name_key`
+/// is the Fluent key of what it is called, as nothing captions it;
 /// `visible_lines` is the field's height, which is an *intrinsic* control size
 /// and therefore what sizes the window rather than the other way round (see
 /// `ui_text_input`'s `fill`).
@@ -133,6 +134,7 @@ pub(crate) fn spawn_body_field(
     parent: Entity,
     text: &str,
     element: &'static str,
+    name_key: &'static str,
     visible_lines: f32,
     font_size: f32,
 ) -> Entity {
@@ -147,6 +149,8 @@ pub(crate) fn spawn_body_field(
             // An editor's body is the part of its window worth making bigger,
             // so it takes the room a resized floater gives its content slot.
             fill: true,
+            // Nothing captions the body, so it is named outright.
+            name_key: Some(name_key),
             ..crate::ui_text_input::TextInputSpec::new(
                 element,
                 crate::ui_text_input::TextInputKind::Multiline,

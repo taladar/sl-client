@@ -59,6 +59,7 @@ use bevy::text::EditableText;
 use bevy::ui::{Checked, InteractionDisabled};
 use bevy::ui_widgets::ValueChange;
 use bevy_flair::style::components::ClassList;
+use sl_viewer_ui_core::semantic::LabelledBy;
 
 use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use sl_client_bevy::{
@@ -2009,9 +2010,9 @@ fn build_general_structure(
 
     // Charter — a build-once editor for identity-holders (its value is never
     // overwritten so edits survive), a read block otherwise.
-    spawn_section_label(commands, panel, "group-profile-charter");
+    let charter_label = spawn_section_label(commands, panel, "group-profile-charter");
     if sig.can_edit_identity {
-        ui.charter_field = Some(spawn_text_input(
+        let charter = spawn_text_input(
             commands,
             panel,
             &TextInputSpec {
@@ -2022,7 +2023,10 @@ fn build_general_structure(
                 max_characters: Some(511),
                 ..TextInputSpec::new("group-charter", TextInputKind::Multiline)
             },
-        ));
+        );
+        // The section caption above the editor is its label.
+        commands.entity(charter).insert(LabelledBy(charter_label));
+        ui.charter_field = Some(charter);
     } else {
         spawn_text_block(commands, panel, profile.charter.clone());
     }
@@ -3429,15 +3433,17 @@ fn spawn_labeled_row(commands: &mut Commands, parent: Entity, label_key: &'stati
 }
 
 /// A translated section label on its own line.
-fn spawn_section_label(commands: &mut Commands, parent: Entity, label_key: &'static str) {
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(FONT_SIZE),
-        TextColor(DIM_LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(parent),
-    ));
+fn spawn_section_label(commands: &mut Commands, parent: Entity, label_key: &'static str) -> Entity {
+    commands
+        .spawn((
+            Text::default(),
+            Translated::new(label_key),
+            UiFont::Sans.at(FONT_SIZE),
+            TextColor(DIM_LABEL_COLOR),
+            Pickable::IGNORE,
+            ChildOf(parent),
+        ))
+        .id()
 }
 
 /// A plain value label.

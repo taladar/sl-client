@@ -117,6 +117,7 @@ use bevy::window::PrimaryWindow;
 use bevy_flair::style::components::ClassList;
 
 use sl_viewer_ui_core::glyph;
+use sl_viewer_ui_core::semantic::{Role, Semantic};
 use sl_viewer_ui_core::skin::{
     FLOATER_BUTTON_CLASS, FRONTMOST_CLASS, FRONTMOST_TEXT_CLASS, set_state_class,
     set_state_class_on, text_role,
@@ -1478,7 +1479,12 @@ pub fn spawn_keyed_floater(
     );
 
     let parts = build_floater_chrome(commands, floater, &spec.title, font.clone(), spec.caps);
-    commands.entity(floater).insert(parts);
+    // A window, named by its title — which a caller may rebind to a Fluent key
+    // after the spawn, and the name follows it.
+    commands.entity(floater).insert((
+        parts,
+        Semantic::new(Role::Window).labelled_by(parts.title_text),
+    ));
 
     // Make the chrome live: the drag handle moves the floater (or tears it off a
     // host), the grip resizes it, and each button raises then acts. Each observer

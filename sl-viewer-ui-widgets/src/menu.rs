@@ -104,6 +104,7 @@ use bevy_flair::style::components::ClassList;
 
 use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::i18n::{Translated, Translator};
+use sl_viewer_ui_core::semantic::{Expanded, Role, Semantic, sync_expanded};
 use sl_viewer_ui_core::skin::{HIGHLIGHTED_CLASS, set_state_class};
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 use sl_viewer_ui_core::ui::{
@@ -642,6 +643,27 @@ pub struct MenuHost {
     pub(crate) open: Option<Entity>,
 }
 
+/// Keep [`Expanded`] on each menu button and submenu line exactly while the
+/// menu it fronts is open. Reads only the hosts and branches whose open state
+/// changed.
+fn mark_open_menus(
+    hosts: Query<(&MenuHost, &Children), Changed<MenuHost>>,
+    buttons: Query<Has<Expanded>, With<MenuBarButton>>,
+    branches: Query<(Entity, &MenuBranch, Has<Expanded>), Changed<MenuBranch>>,
+    mut commands: Commands,
+) {
+    for (host, children) in &hosts {
+        for &child in children {
+            if let Ok(expanded) = buttons.get(child) {
+                sync_expanded(&mut commands, child, host.open.is_some(), expanded);
+            }
+        }
+    }
+    for (line, branch, expanded) in &branches {
+        sync_expanded(&mut commands, line, branch.open.is_some(), expanded);
+    }
+}
+
 /// A menu-bar (or gear) button, so `highlight_menu_hover` lights it on hover.
 #[derive(Component)]
 struct MenuBarButton;
@@ -819,6 +841,7 @@ pub fn spawn_menu_bar(
             },
             BackgroundColor(SkinPalette::default().surface_bg),
             ClassList::new_with_classes(["sk-menu-bar"]),
+            Semantic::new(Role::MenuBar),
             Name::new("menu-bar"),
             ChildOf(parent),
         ))
@@ -866,6 +889,8 @@ pub fn spawn_menu_button(
             },
             BackgroundColor(ENTRY_BACKGROUND),
             ClassList::new_with_classes(["sk-menu-bar-item"]),
+            // Named by its bound label, which carries the key too.
+            Semantic::new(Role::MenuItem),
             Name::new(format!("menu-button:{}", def.label_key)),
             ChildOf(host),
         ))
@@ -1439,6 +1464,7 @@ fn build_menu_popup(
             // root; this makes every menu popup uniform.
             OverrideClip,
             ClassList::new_with_classes(["sk-menu"]),
+            Semantic::new(Role::Menu),
             Name::new(format!("menu-popup:{}", source.label_key())),
             ChildOf(anchor),
         ))
@@ -1669,6 +1695,13 @@ fn spawn_command_line(
     if let Some((key, _)) = draw.jump {
         commands.entity(row).insert(MenuMnemonic { key });
     }
+    // The label is this key resolved, so the key names the entry exactly — and
+    // not the check mark or the shortcut drawn beside it.
+    let semantic = Semantic::new(Role::MenuItem).name_key(command.label_key);
+    commands.entity(row).insert(match command.accelerator {
+        Some(accelerator) => semantic.accelerator(accelerator),
+        None => semantic,
+    });
     // Emission is a single point — an `Activate` observer — so a press (mouse)
     // and the harness (`activate`) both dispatch the one way. The press also
     // closes the stack.
@@ -1762,6 +1795,10 @@ fn spawn_dynamic_line(
     spawn_gutter(commands, row);
     let label_entity = spawn_entry_label(commands, row, label, None);
     commands.entity(label_entity).insert(MenuDynamicLabel);
+    // A data line has no key: its label is the name.
+    commands
+        .entity(row)
+        .insert(Semantic::new(Role::MenuItem).labelled_by(label_entity));
     spawn_trailing_slot(commands, row);
 }
 
@@ -1795,6 +1832,7 @@ fn spawn_submenu_line(
                 open: None,
                 filter_parent_matched,
             },
+            Semantic::new(Role::MenuItem).name_key(sub.label_key()),
             Name::new(format!("menu-submenu:{}", sub.label_key())),
             ChildOf(popup),
         ))
@@ -2998,6 +3036,7 @@ impl Plugin for MenuWidgetPlugin {
                 Startup,
                 attach_menu_dismiss.after(UiScaffoldSystems::SpawnRoot),
             )
+            .add_systems(PostUpdate, mark_open_menus)
             .add_systems(
                 Update,
                 (

@@ -462,6 +462,8 @@ fn populate_editor(
                 underline: true,
                 clickable: true,
             }],
+            // Nothing captions the body, so it is named outright.
+            name_key: Some("notecard-body-name"),
             ..RichTextSpec::new("notecard-body")
         },
     );

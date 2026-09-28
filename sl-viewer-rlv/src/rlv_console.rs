@@ -533,6 +533,8 @@ fn spawn_console_content(commands: &mut Commands, parent: Entity, font_size: f32
             font_size,
             width_glyphs: INPUT_WIDTH_GLYPHS,
             fill: true,
+            // The prompt beside it is a `>` glyph, not a caption.
+            name_key: Some("rlv-console-input-name"),
             ..TextInputSpec::new("rlv-console-input", TextInputKind::Line)
         },
     );

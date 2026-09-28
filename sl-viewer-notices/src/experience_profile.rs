@@ -75,6 +75,7 @@ use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use bevy::text::EditableText;
 use bevy::ui_widgets::Activate;
 use bevy_flair::style::components::ClassList;
+use sl_viewer_ui_core::semantic::LabelledBy;
 use sl_viewer_ui_core::skin::{
     DISABLED_TEXT_CLASS, EXPERIENCE_TEXT_CLASS, TEXT_CLASS, set_state_class, text_meaning,
     text_role,
@@ -852,7 +853,7 @@ fn build_edit_panel(commands: &mut Commands, parent: Entity, font_size: f32) -> 
             ChildOf(parent),
         ))
         .id();
-    spawn_caption(
+    let name_caption = spawn_caption(
         commands,
         panel,
         "experience-profile-name-caption",
@@ -868,7 +869,9 @@ fn build_edit_panel(commands: &mut Commands, parent: Entity, font_size: f32) -> 
             ..TextInputSpec::new("experience-profile-name-field", TextInputKind::Line)
         },
     );
-    spawn_caption(
+    // Each field is named by the caption line above it.
+    commands.entity(name_field).insert(LabelledBy(name_caption));
+    let description_caption = spawn_caption(
         commands,
         panel,
         "experience-profile-description-caption",
@@ -887,6 +890,9 @@ fn build_edit_panel(commands: &mut Commands, parent: Entity, font_size: f32) -> 
             )
         },
     );
+    commands
+        .entity(description_field)
+        .insert(LabelledBy(description_caption));
     let rating_row = spawn_caption_row(commands, panel, "experience-profile-rating", font_size);
     let labels: Vec<String> = MATURITY_KEYS.iter().map(|key| (*key).to_owned()).collect();
     let maturity_combo = spawn_combo(
@@ -992,21 +998,23 @@ fn build_edit_panel(commands: &mut Commands, parent: Entity, font_size: f32) -> 
     }
 }
 
-/// Spawn a caption line on its own.
+/// Spawn a caption line on its own, and return it.
 fn spawn_caption(
     commands: &mut Commands,
     parent: Entity,
     caption_key: &'static str,
     font_size: f32,
-) {
-    commands.spawn((
-        Text::default(),
-        Translated::new(caption_key),
-        UiFont::Sans.at(font_size),
-        text_role(DIM_TEXT_COLOR),
-        Pickable::IGNORE,
-        ChildOf(parent),
-    ));
+) -> Entity {
+    commands
+        .spawn((
+            Text::default(),
+            Translated::new(caption_key),
+            UiFont::Sans.at(font_size),
+            text_role(DIM_TEXT_COLOR),
+            Pickable::IGNORE,
+            ChildOf(parent),
+        ))
+        .id()
 }
 
 /// Spawn a `caption value` row and return the row, for a caller that fills the

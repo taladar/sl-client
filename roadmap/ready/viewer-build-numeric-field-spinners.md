@@ -5,7 +5,7 @@ topic: viewer
 status: ready
 origin: user request (2026-07-24) while reviewing the build-tool numeric fields
 refs: [viewer-prim-parameter-editing, viewer-prim-texture-editing,
-  viewer-object-edit-floater-shell]
+  viewer-object-edit-floater-shell, viewer-automation-semantic-custom-widgets]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -35,3 +35,12 @@ field and any future numeric field gets arrows for free.
 
 Reference (Firestorm, read-only): `llspinctrl.cpp` / `llspinctrl.h`
 (`LLSpinCtrl` — the arrow buttons, increment, hold-to-repeat, clamp).
+
+**Automation semantics** (deferred here from
+[[viewer-automation-semantic-custom-widgets]], which found no spinner to give a
+role): the widget adds a `spinbutton` role to `sl-automation-proto`'s `Role`,
+puts `Semantic::new(Role::SpinButton)` on its root with the field's number as
+its value (a `NodeValue::Number`), and names its two arrows ("Increase" /
+"Decrease" keys) so the focus-stop guard
+(`ui_contract::every_focus_stop_has_a_contract_row`) passes. A teeth test in
+`automation_model.rs`: an arrow click changes the reported value.

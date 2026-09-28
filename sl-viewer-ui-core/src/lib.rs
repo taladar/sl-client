@@ -36,6 +36,8 @@
 //!   palette bridge that feeds a skin's user-tunable colours to the settings
 //!   store as defaults, and the chrome role palette the Rust-painted widget
 //!   states read.
+//! - [`semantic`] — what a custom widget *is* (a window, a tab, a menu entry,
+//!   a tree row), for the automation model and assistive technology to read.
 //!
 //! The UI's own **sound effects** used to be a module here. They are
 //! `sl-viewer-ui-sounds` now: three lines of them named the audio engine and
@@ -55,6 +57,7 @@ pub mod glyph;
 pub mod hold_repeat;
 pub mod i18n;
 pub mod scrollbar;
+pub mod semantic;
 pub mod skin;
 pub mod skin_colors;
 pub mod skin_palette;

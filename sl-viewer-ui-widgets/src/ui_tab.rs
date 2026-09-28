@@ -155,6 +155,7 @@ use sl_viewer_ui_core::ui_element::{ContentMayOverflow, ElementCx, TextMayClip, 
 
 use sl_viewer_ui_core::hold_repeat::{HoldToRepeat, ensure_hold_repeat};
 use sl_viewer_ui_core::scrollbar::{ScrollTarget, ensure_scrollbar_widget, spawn_scrollbar};
+use sl_viewer_ui_core::semantic::{Role, Semantic};
 use sl_viewer_ui_core::skin::{TAB_SCROLL_BUTTON_CLASS, TEXT_CLASS};
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 use sl_viewer_ui_core::ui_ellipsis::{RevealEllipsis, spawn_ellipsis_marker};
@@ -949,6 +950,7 @@ pub fn spawn_dynamic_tab_strip(
             spec.placement
                 .wrapper_node(spec.strip_width.filter(|_| resizable)),
             TabIndex(spec.tab_index),
+            Semantic::new(Role::TabList),
             Name::new(format!("{}:tab-strip", spec.element)),
             ChildOf(parent),
         ))
@@ -1541,6 +1543,11 @@ fn spawn_tab_button(
             .id()
     };
     caption.bind(commands, label);
+    // Named by the caption alone: a clipped tab also holds its ellipsis
+    // marker, which is no part of what the tab is called.
+    commands
+        .entity(button)
+        .insert(Semantic::new(Role::Tab).labelled_by(label));
 
     TabHandle { button, label }
 }

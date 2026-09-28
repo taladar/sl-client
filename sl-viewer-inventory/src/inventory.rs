@@ -69,6 +69,7 @@ use crate::virtual_list::{
 };
 use bevy_flair::style::components::{ClassList, PseudoElementsSupport};
 use sl_viewer_ui_core::glyph;
+use sl_viewer_ui_core::semantic::{Expanded, Role, Semantic, sync_expanded};
 use sl_viewer_ui_core::skin::{
     FOLDER_LABEL_CLASS, LIST_ROW_CLASS, LIST_SURFACE_CLASS, SELECTED_CLASS, TEXT_CLASS, role_class,
     set_state_class, set_state_class_on, text_role,
@@ -3134,6 +3135,8 @@ fn dress_tree_row(commands: &mut Commands, row_entity: Entity, font_size: f32) -
         // drag-and-drop target (`.sk-drop-target`,
         // [`crate::inventory_drag`]) are all this one class list's.
         ClassList::new_with_classes([LIST_ROW_CLASS]),
+        // A tree row; its level follows the item it is bound to (`bind_row`).
+        Semantic::new(Role::TreeItem),
     ));
     let parts = spawn_row_parts(commands, row_entity, font_size);
     commands
@@ -3380,6 +3383,10 @@ pub(crate) struct RowPaint<'w, 's> {
     fonts: Query<'w, 's, &'static mut TextFont>,
     /// The name's classes, which say whether it is a folder's.
     classes: Query<'w, 's, &'static mut ClassList>,
+    /// The row's tree semantics: its level, and whether it is unfolded.
+    semantics: Query<'w, 's, (&'static mut Semantic, Has<Expanded>)>,
+    /// For the unfolded marker.
+    commands: Commands<'w, 's>,
 }
 
 /// Bind each row's parts to the [`DisplayRow`] it now points at — on the frame
@@ -3388,7 +3395,7 @@ fn bind_rows(
     view: Res<InventoryView>,
     style: Res<SuffixStyle>,
     ui: Option<Res<InventoryUi>>,
-    rows: Query<(Ref<VirtualRow>, &ChildOf, &RowParts)>,
+    rows: Query<(Entity, Ref<VirtualRow>, &ChildOf, &RowParts)>,
     mut paint: RowPaint,
 ) {
     let Some(ui) = ui else {
@@ -3397,7 +3404,7 @@ fn bind_rows(
     // A narrowed panel respells every decoration, so a changed style rebinds the
     // whole pool exactly as a rebuilt view does.
     let rebuild_all = view.is_changed() || style.is_changed();
-    for (row, child_of, parts) in &rows {
+    for (entity, row, child_of, parts) in &rows {
         if child_of.parent() != ui.viewport {
             continue;
         }
@@ -3410,20 +3417,37 @@ fn bind_rows(
         let Some(display) = view.rows.get(index) else {
             continue;
         };
-        bind_row(&mut paint, parts, display, *style);
+        bind_row(&mut paint, entity, parts, display, *style);
     }
 }
 
 /// Write one [`DisplayRow`] into a row's parts, with its decoration spelled for
 /// `style` — the per-row half of [`bind_rows`], shared with the gallery
 /// specimen's sample rows.
-fn bind_row(paint: &mut RowPaint, parts: &RowParts, display: &DisplayRow, style: SuffixStyle) {
+fn bind_row(
+    paint: &mut RowPaint,
+    row: Entity,
+    parts: &RowParts,
+    display: &DisplayRow,
+    style: SuffixStyle,
+) {
     let RowPaint {
         nodes,
         texts,
         fonts,
         classes,
+        semantics,
+        commands,
     } = paint;
+    if let Ok((mut semantic, expanded)) = semantics.get_mut(row) {
+        let level = u32::try_from(display.depth.saturating_add(1)).unwrap_or(u32::MAX);
+        let wanted = Semantic::new(Role::TreeItem).level(level);
+        if *semantic != wanted {
+            *semantic = wanted;
+        }
+        let unfolded = matches!(display.arrow, RowArrow::Expanded);
+        sync_expanded(commands, row, unfolded, expanded);
+    }
     if let Ok(mut indent) = nodes.get_mut(parts.indent) {
         indent.width = Val::Px(depth_indent(display.depth));
     }
@@ -4021,6 +4045,7 @@ fn spawn_inventory_content(
             ClassList::new_with_classes([LIST_SURFACE_CLASS]),
             VirtualList::new(row_height(row_font_size)),
             VirtualViewport,
+            Semantic::new(Role::Tree),
             Pickable::default(),
             TabIndex(7),
             Name::new("inventory-viewport"),
@@ -4241,21 +4266,21 @@ pub fn spawn_inventory_specimen(
                 .entry::<ClassList>()
                 .and_modify(|mut classes| set_state_class(&mut classes, SELECTED_CLASS, true));
         }
-        bound.push((parts, display));
+        bound.push((row, parts, display));
     }
     let style = suffix_style_for(PANEL_WIDTH, SuffixStyle::default());
     commands.run_system_cached_with(bind_sample_rows, (bound, style));
     parent
 }
 
+/// One specimen row to bind: the pooled row, its parts, and what it shows.
+type SampleRow = (Entity, RowParts, DisplayRow);
+
 /// Bind the specimen's pooled rows through the live [`bind_row`] — run once,
 /// after the rows' parts exist.
-fn bind_sample_rows(
-    In((rows, style)): In<(Vec<(RowParts, DisplayRow)>, SuffixStyle)>,
-    mut paint: RowPaint,
-) {
-    for (parts, display) in &rows {
-        bind_row(&mut paint, parts, display, style);
+fn bind_sample_rows(In((rows, style)): In<(Vec<SampleRow>, SuffixStyle)>, mut paint: RowPaint) {
+    for (row, parts, display) in &rows {
+        bind_row(&mut paint, *row, parts, display, style);
     }
 }
 

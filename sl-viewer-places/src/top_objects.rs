@@ -120,6 +120,7 @@
 //! `floater_top_objects.xml`, `llfloaterregioninfo.cpp`
 //! (`LLPanelRegionDebugInfo::onClickTopScripts`), `llparcel.h` (`RT_NONE`).
 
+use sl_viewer_ui_core::semantic::LabelledBy;
 use sl_viewer_ui_core::skin::TEXT_CLASS;
 use sl_viewer_ui_core::skin::text_role;
 
@@ -1357,14 +1358,18 @@ fn spawn_labelled_row(
     font_size: f32,
 ) -> Entity {
     let row_entity = spawn_row(commands, parent);
-    commands.spawn((
-        Text::default(),
-        Translated::new(key),
-        UiFont::Sans.at(font_size),
-        text_role(DIM_LABEL_COLOR),
-        Pickable::IGNORE,
-        ChildOf(row_entity),
-    ));
+    let label = commands
+        .spawn((
+            Text::default(),
+            Translated::new(key),
+            UiFont::Sans.at(font_size),
+            text_role(DIM_LABEL_COLOR),
+            Pickable::IGNORE,
+            ChildOf(row_entity),
+        ))
+        .id();
+    // The caption names the filter field the row holds.
+    commands.entity(row_entity).insert(LabelledBy(label));
     row_entity
 }
 

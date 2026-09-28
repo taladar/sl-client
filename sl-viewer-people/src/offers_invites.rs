@@ -90,6 +90,7 @@ use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use sl_viewer_ui_core::glyph;
+use sl_viewer_ui_core::semantic::{Role, Semantic};
 
 /// The catalogue-template sentinel an inventory-offer card reports as. Like the
 /// sibling bespoke cards these are not real [`crate::notifications::NOTIFICATIONS`]
@@ -1112,6 +1113,8 @@ fn spawn_close_button(commands: &mut Commands, card: Entity) -> Entity {
                 ..default()
             },
             ClassList::new_with_classes([BUTTON_CLASS]),
+            // The × says nothing in words, so the button is named.
+            Semantic::new(Role::Button).name_key("notification-button-close"),
             Name::new("offer-invite-close"),
             ChildOf(close_row),
         ))

@@ -92,6 +92,7 @@ use sl_viewer_platform::file_dialog::{
     FileDialogClosed, FileDialogFilter, FileDialogOutcome, FileDialogSelection, OpenFileDialog,
 };
 use sl_viewer_ui_core::i18n::{Translated, Translator};
+use sl_viewer_ui_core::semantic::LabelledBy;
 use sl_viewer_ui_core::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
 use sl_viewer_ui_widgets::floater::{
@@ -794,13 +795,15 @@ fn spawn_name_row(
             ChildOf(parent),
         ))
         .id();
-    commands.spawn((
-        Text::new(String::new()),
-        UiFont::Sans.at(font_size),
-        text_role(LABEL_COLOR),
-        Translated::new("settings-editor-name"),
-        ChildOf(row_entity),
-    ));
+    let label = commands
+        .spawn((
+            Text::new(String::new()),
+            UiFont::Sans.at(font_size),
+            text_role(LABEL_COLOR),
+            Translated::new("settings-editor-name"),
+            ChildOf(row_entity),
+        ))
+        .id();
     let field = spawn_text_input(
         commands,
         row_entity,
@@ -818,7 +821,10 @@ fn spawn_name_row(
             )
         },
     );
-    commands.entity(field).insert(EditorNameField(editor));
+    // Named by the caption beside it.
+    commands
+        .entity(field)
+        .insert((EditorNameField(editor), LabelledBy(label)));
     *tab = tab.saturating_add(1);
 }
 

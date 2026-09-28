@@ -294,6 +294,8 @@ pub fn spawn_chat_input(
             font_size: spec.font_size,
             decorated: false,
             fill: true,
+            // A chat line has no caption beside it, so it is named outright.
+            name_key: Some("chat-input-name"),
             ..TextInputSpec::new(spec.element, TextInputKind::Line)
         },
     );

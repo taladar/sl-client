@@ -126,6 +126,7 @@ use bevy::ui::UiSystems;
 
 use bevy_flair::style::components::ClassList;
 
+use sl_viewer_ui_core::semantic::{Role, Semantic};
 use sl_viewer_ui_core::skin::{READ_ONLY_CLASS, SkinTextCaret, set_state_class};
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 use sl_viewer_ui_core::ui::{LogicalMargin, LogicalRect, UiPanelShown, UiRoot, column, row};
@@ -420,6 +421,12 @@ pub struct TextInputSpec {
     /// How much block padding the field carries — [`FieldDensity::Regular`] by
     /// default.
     pub density: FieldDensity,
+    /// The Fluent key of what the field is called, for a field with no caption
+    /// beside it (a chat line, a filter). A captioned field is named by its
+    /// caption instead (a
+    /// [`LabelledBy`](sl_viewer_ui_core::semantic::LabelledBy) on it or on its
+    /// row).
+    pub name_key: Option<&'static str>,
 }
 
 /// How tall a field is around its text.
@@ -455,6 +462,7 @@ impl TextInputSpec {
             fill: false,
             read_only: false,
             density: FieldDensity::Regular,
+            name_key: None,
         }
     }
 
@@ -626,6 +634,9 @@ pub fn spawn_text_input(commands: &mut Commands, parent: Entity, spec: &TextInpu
     }
     if spec.read_only {
         field.insert(ReadOnlyField);
+    }
+    if let Some(key) = spec.name_key {
+        field.insert(Semantic::new(Role::Textbox).name_key(key));
     }
     if let Some(filter) = spec.kind.char_filter() {
         field.insert(EditableTextFilter::new(filter));
@@ -1221,6 +1232,9 @@ fn reconcile_numeric_field(
 // in every writing system.
 // ---------------------------------------------------------------------------
 
+// A specimen stands alone with no caption, so each is named by its own
+// `text-input-*-name` key.
+
 /// The sample prose a free-text field's specimen shows — long enough that a
 /// multi-line field wraps and a single-line field scrolls.
 const SAMPLE_TEXT: &str = "The quick brown fox jumps over the lazy dog.";
@@ -1233,6 +1247,7 @@ pub fn spawn_line_specimen(commands: &mut Commands, parent: Entity, cx: ElementC
         &TextInputSpec {
             initial: cx.text(SAMPLE_TEXT),
             font_size: cx.font_size,
+            name_key: Some("text-input-line-name"),
             ..TextInputSpec::new("text-input-line", TextInputKind::Line)
         },
     )
@@ -1246,6 +1261,7 @@ pub fn spawn_multiline_specimen(commands: &mut Commands, parent: Entity, cx: Ele
         &TextInputSpec {
             initial: cx.text(SAMPLE_TEXT),
             font_size: cx.font_size,
+            name_key: Some("text-input-multiline-name"),
             ..TextInputSpec::new("text-input-multiline", TextInputKind::Multiline)
         },
     )
@@ -1260,6 +1276,7 @@ pub fn spawn_float_specimen(commands: &mut Commands, parent: Entity, cx: Element
         &TextInputSpec {
             initial: "-3.5".to_owned(),
             font_size: cx.font_size,
+            name_key: Some("text-input-float-name"),
             ..TextInputSpec::new("text-input-float", TextInputKind::Float)
         },
     )
@@ -1273,6 +1290,7 @@ pub fn spawn_integer_specimen(commands: &mut Commands, parent: Entity, cx: Eleme
         &TextInputSpec {
             initial: "-42".to_owned(),
             font_size: cx.font_size,
+            name_key: Some("text-input-integer-name"),
             ..TextInputSpec::new("text-input-integer", TextInputKind::Integer)
         },
     )
@@ -1286,6 +1304,7 @@ pub fn spawn_unsigned_specimen(commands: &mut Commands, parent: Entity, cx: Elem
         &TextInputSpec {
             initial: "128".to_owned(),
             font_size: cx.font_size,
+            name_key: Some("text-input-unsigned-name"),
             ..TextInputSpec::new("text-input-unsigned", TextInputKind::NonNegativeInteger)
         },
     )
@@ -1301,6 +1320,7 @@ pub fn spawn_read_only_specimen(commands: &mut Commands, parent: Entity, cx: Ele
             initial: cx.text(SAMPLE_TEXT),
             font_size: cx.font_size,
             read_only: true,
+            name_key: Some("text-input-read-only-name"),
             ..TextInputSpec::new("text-input-read-only", TextInputKind::Line)
         },
     )

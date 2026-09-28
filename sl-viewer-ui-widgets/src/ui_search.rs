@@ -55,6 +55,7 @@ use bevy_flair::style::components::ClassList;
 
 use crate::ui_text_input::{FieldDensity, TextInputKind, TextInputSpec, spawn_text_input};
 use sl_viewer_ui_core::glyph;
+use sl_viewer_ui_core::semantic::{LabelledBy, Role, Semantic};
 use sl_viewer_ui_core::skin::{
     FIELD_PLACEHOLDER_CLASS, FOCUS_WITHIN_CLASS, TEXT_CLASS, set_state_class,
 };
@@ -347,6 +348,14 @@ pub fn spawn_search_field(
         ));
         placeholder = Some(node.id());
     }
+    // A search field is named by its prompt, as a browser names one; with no
+    // prompt it is simply the search field.
+    match placeholder {
+        Some(prompt) => commands.entity(field).insert(LabelledBy(prompt)),
+        None => commands
+            .entity(field)
+            .insert(Semantic::new(Role::Textbox).name_key("search-field-name")),
+    };
 
     spawn_clear_button(commands, container, field, spec.element);
 

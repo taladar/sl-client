@@ -55,6 +55,7 @@ use sl_viewer_media::parcel_stream::{
 };
 use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::i18n::{Translated, Translator};
+use sl_viewer_ui_core::semantic::{Role, Semantic};
 use sl_viewer_ui_core::skin::{SELECTED_CLASS, set_state_class, set_state_class_on, text_role};
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems, column, row};
@@ -730,6 +731,8 @@ fn spawn_transport(commands: &mut Commands, parent: Entity, font_size: f32) -> T
             SliderStep(0.05),
             NearbyMediaVolume,
             Name::new("nearby-media-volume"),
+            // The slider draws no caption of its own.
+            Semantic::new(Role::Slider).name_key("nearby-media-volume-name"),
         ),
     );
     commands.entity(volume).observe(on_volume_change);
@@ -801,6 +804,8 @@ fn spawn_glyph_button(
             format!("nearby-media-button:{action}"),
         )
         .kind(ButtonKind::Headless)
+        // The glyph says nothing in words.
+        .name_key(glyph_button_name_key(action))
         .tab_index(tab_index)
         .compact()
         .label_color(LABEL_COLOR)
@@ -808,6 +813,19 @@ fn spawn_glyph_button(
     );
     observe_action(commands, spawned.button, action);
     (spawned.button, spawned.label)
+}
+
+/// The Fluent key naming the glyph button that reports `action`.
+fn glyph_button_name_key(action: &'static str) -> &'static str {
+    match action {
+        "preferences" => "nearby-media-preferences-name",
+        "stop" => "nearby-media-stop-name",
+        "play" => "nearby-media-play-name",
+        "pause" => "nearby-media-pause-name",
+        "mute" => "nearby-media-mute-name",
+        "zoom" => "nearby-media-zoom-name",
+        _ => "",
+    }
 }
 
 /// Make `button` report `action` under [`NEARBY_MEDIA_ELEMENT`] when pressed.
@@ -1187,9 +1205,13 @@ fn spawn_row_tick(commands: &mut Commands, cell: Entity, row_entity: Entity) -> 
             translate_label: false,
         },
     );
+    // The tick has no caption; its column header ("On") is too terse to name it.
     commands
         .entity(tick.checkbox)
-        .insert(NearbyMediaTick { row: row_entity })
+        .insert((
+            NearbyMediaTick { row: row_entity },
+            Semantic::new(Role::Checkbox).name_key("nearby-media-tick-name"),
+        ))
         .observe(on_tick_change);
     tick.checkbox
 }

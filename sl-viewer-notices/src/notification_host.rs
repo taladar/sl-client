@@ -74,6 +74,7 @@ use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use sl_viewer_ui_core::glyph;
+use sl_viewer_ui_core::semantic::{Role, Semantic};
 use sl_viewer_ui_core::skin::{BUTTON_CLASS, TEXT_CLASS as SK_TEXT_CLASS, role_class};
 
 /// The element id the gallery specimen and its inert actions report under.
@@ -740,6 +741,8 @@ fn build_toast_card(commands: &mut Commands, content: &ToastContent) -> ToastCar
                     ..default()
                 },
                 ClassList::new_with_classes([BUTTON_CLASS]),
+                // The × says nothing in words, so the button is named.
+                Semantic::new(Role::Button).name_key("notification-button-close"),
                 Name::new("toast-close"),
                 ChildOf(close_row),
             ))
@@ -839,6 +842,8 @@ fn build_toast_card(commands: &mut Commands, content: &ToastContent) -> ToastCar
             tab_index: 1,
             font_size: content.font_size,
             fill: true,
+            // No caption sits beside the field, so it is named outright.
+            name_key: Some("toast-input-name"),
             ..TextInputSpec::new("toast-input", TextInputKind::Line)
         };
         spawn_text_input(commands, input_row, &spec)

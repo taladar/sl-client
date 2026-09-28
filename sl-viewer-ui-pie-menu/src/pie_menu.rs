@@ -240,6 +240,7 @@ use bevy::window::{PrimaryWindow, WindowFocused};
 
 use bevy_flair::style::components::ClassList;
 use sl_viewer_ui_core::i18n::Translator;
+use sl_viewer_ui_core::semantic::{Role, Semantic};
 use sl_viewer_ui_core::skin::text_role;
 use sl_viewer_ui_core::skin_palette::{SkinColors, SkinPalette};
 use sl_viewer_ui_core::ui::{UiRoot, column};
@@ -1198,6 +1199,7 @@ pub fn spawn_pie_menu(
             // displayed path starts empty and matches — `update_pie_labels` then
             // leaves them alone until the pie descends.
             DisplayedPiePath::default(),
+            Semantic::new(Role::Menu),
             Name::new("pie-menu"),
             ChildOf(parent),
         ))
@@ -1332,7 +1334,7 @@ fn rebuild_pie_labels(
             (true, SlotOutcome::SubPie(_)) => PieLabelRole::SubPie,
             (true, SlotOutcome::Action(_)) => PieLabelRole::Action,
         };
-        commands
+        let label = commands
             .spawn((
                 // A label is a **picture, not a click target**. The pointer has one
                 // selection path and it is angular: `commit_pie_selection` reads the
@@ -1369,6 +1371,9 @@ fn rebuild_pie_labels(
                     tolerance: core::f32::consts::TAU / 16.0,
                 },
                 PieLabel { at: point },
+                // The slice, to a test and a screen reader: named by the key
+                // its text is resolved from.
+                Semantic::new(Role::MenuItem).name_key(slot.label_key),
                 Name::new(format!("pie-label:{}", point.name())),
                 ChildOf(root),
             ))
@@ -1391,7 +1396,13 @@ fn rebuild_pie_labels(
                 ClassList::new_with_classes([role.class()]),
                 role,
                 Name::new(format!("pie-label-text:{}", point.name())),
-            ));
+            ))
+            .id();
+        if !slot.enabled {
+            // True of the slice, not only of its colour: the commit refuses a
+            // disabled slot, and the marker says so where the tree can read it.
+            commands.entity(label).insert(bevy::ui::InteractionDisabled);
+        }
     }
 }
 

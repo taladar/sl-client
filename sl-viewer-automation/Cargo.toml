@@ -18,6 +18,7 @@ publish.workspace = true
 # spec stays per-crate (see the root manifest). The feature matches the UI
 # crates this one reads, so the two unify on one Bevy build.
 bevy = { version = "0.19.0", features = ["system_font_discovery"] }
+bevy_flair = { version = "0.8.0" }
 sl-automation-proto = { workspace = true }
 sl-viewer-ui-core = { workspace = true }
 sl-viewer-ui-widgets = { workspace = true }

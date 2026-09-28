@@ -229,6 +229,8 @@ fn spawn_strings_content(commands: &mut Commands, parent: Entity, font_size: f32
             tab_index: 1,
             font_size,
             visible_lines: VALUE_LINES,
+            // The description above it changes with the picked string.
+            name_key: Some("rlv-strings-value-name"),
             ..TextInputSpec::new("rlv-strings-value", TextInputKind::Multiline)
         },
     );

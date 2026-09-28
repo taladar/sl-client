@@ -71,6 +71,7 @@ use sl_viewer_media::browser_widget::{
 };
 use sl_viewer_media::media_engine::MediaSurfaces;
 use sl_viewer_notifications::{NotificationResponse, ShowNotification};
+use sl_viewer_ui_core::semantic::LabelledBy;
 use sl_viewer_ui_core::skin::{TEXT_CLASS, WARN_TEXT_CLASS, text_meaning, text_role};
 use sl_viewer_world_view::media_prim::{MediaData, MediaPrimState, MediaStartRequests};
 
@@ -1367,7 +1368,7 @@ fn spawn_general_tab(
     controls: &mut Vec<Entity>,
 ) -> GeneralParts {
     let home_row = spawn_flow_row(commands, panel, 8.0);
-    spawn_label(
+    let home_label = spawn_label(
         commands,
         home_row,
         "media-settings-home-label",
@@ -1391,6 +1392,8 @@ fn spawn_general_tab(
             ..TextInputSpec::new("media-settings-home-url", TextInputKind::Line)
         },
     );
+    // Named by its caption, which sits in the row above it.
+    commands.entity(home_url).insert(LabelledBy(home_label));
     *tab_index = tab_index.saturating_add(1);
     controls.push(home_url);
 
@@ -1434,7 +1437,7 @@ fn spawn_general_tab(
         font_size,
     );
 
-    spawn_label(
+    let current_label = spawn_label(
         commands,
         panel,
         "media-settings-current-label",
@@ -1453,6 +1456,10 @@ fn spawn_general_tab(
             ..TextInputSpec::new("media-settings-current-url", TextInputKind::Line)
         },
     );
+    // Named by its caption, which sits on the line above it.
+    commands
+        .entity(current_url)
+        .insert(LabelledBy(current_label));
     *tab_index = tab_index.saturating_add(1);
     let reset = spawn_settings_button(
         commands,
@@ -1514,7 +1521,12 @@ fn spawn_general_tab(
         DIM_COLOR,
         font_size,
     );
-    let size_field = |commands: &mut Commands, element: &'static str, tab_index: &mut i32| {
+    // The row's one "Size:" caption covers both fields, so each is named on
+    // its own: which dimension it is.
+    let size_field = |commands: &mut Commands,
+                      element: &'static str,
+                      name_key: &'static str,
+                      tab_index: &mut i32| {
         let field = spawn_text_input(
             commands,
             size_row,
@@ -1522,13 +1534,19 @@ fn spawn_general_tab(
                 font_size,
                 width_glyphs: SIZE_FIELD_GLYPHS,
                 tab_index: *tab_index,
+                name_key: Some(name_key),
                 ..TextInputSpec::new(element, TextInputKind::Integer)
             },
         );
         *tab_index = tab_index.saturating_add(1);
         field
     };
-    let width_pixels = size_field(commands, "media-settings-width", tab_index);
+    let width_pixels = size_field(
+        commands,
+        "media-settings-width",
+        "media-settings-width-name",
+        tab_index,
+    );
     spawn_label(
         commands,
         size_row,
@@ -1536,7 +1554,12 @@ fn spawn_general_tab(
         DIM_COLOR,
         font_size,
     );
-    let height_pixels = size_field(commands, "media-settings-height", tab_index);
+    let height_pixels = size_field(
+        commands,
+        "media-settings-height",
+        "media-settings-height-name",
+        tab_index,
+    );
     controls.extend([
         auto_loop,
         first_click_interact,
@@ -1774,6 +1797,8 @@ fn spawn_whitelist_entry_content(
             width_glyphs: URL_FIELD_GLYPHS,
             tab_index: 0,
             max_characters: Some(1024),
+            // The help line above is a sentence, not a caption.
+            name_key: Some("media-settings-whitelist-entry"),
             ..TextInputSpec::new("media-whitelist-entry-field", TextInputKind::Line)
         },
     );

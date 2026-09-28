@@ -18,6 +18,7 @@ use bevy::ui_widgets::{Slider, SliderRange, SliderStep, SliderValue};
 use sl_client_bevy::TextureKey;
 use sl_viewer_pickers::ui_texture_picker::spawn_texture_swatch;
 use sl_viewer_ui_core::i18n::Translated;
+use sl_viewer_ui_core::semantic::LabelledBy;
 use sl_viewer_ui_core::skin::{ACTION_BUTTON_CLASS, TEXT_CLASS, text_role};
 use sl_viewer_ui_core::ui::{LogicalMargin, LogicalRect, column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
@@ -112,22 +113,26 @@ pub fn spawn_labelled_block(
     // push the caption past the column's edge and over the next column. It
     // takes what the readout leaves (a zero basis, growing), so it wraps to
     // share the line — down to its longest word, where the row wraps instead.
-    commands.spawn((
-        Text::new(String::new()),
-        TextLayout {
-            linebreak: LineBreak::WordBoundary,
-            ..Default::default()
-        },
-        Node {
-            flex_grow: 1.0,
-            flex_basis: Val::Px(0.0),
-            ..Default::default()
-        },
-        UiFont::Sans.at(FONT_SIZE),
-        text_role(LABEL_COLOR),
-        Translated::new(label_key),
-        ChildOf(caption),
-    ));
+    // It is also what the control under it is called (`LabelledBy`).
+    let label = commands
+        .spawn((
+            Text::new(String::new()),
+            TextLayout {
+                linebreak: LineBreak::WordBoundary,
+                ..Default::default()
+            },
+            Node {
+                flex_grow: 1.0,
+                flex_basis: Val::Px(0.0),
+                ..Default::default()
+            },
+            UiFont::Sans.at(FONT_SIZE),
+            text_role(LABEL_COLOR),
+            Translated::new(label_key),
+            ChildOf(caption),
+        ))
+        .id();
+    commands.entity(block).insert(LabelledBy(label));
     (block, caption)
 }
 

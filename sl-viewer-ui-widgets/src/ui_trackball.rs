@@ -63,6 +63,7 @@ use bevy_flair::style::components::ClassList;
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 use sl_viewer_ui_core::i18n::Translated;
+use sl_viewer_ui_core::semantic::{Role, Semantic};
 use sl_viewer_ui_core::skin::{set_state_class_on, text_role};
 use sl_viewer_ui_core::ui_font::UiFont;
 
@@ -173,6 +174,15 @@ impl TrackballBody {
         match self {
             Self::Sun => "sk-trackball-sun",
             Self::Moon => "sk-trackball-moon",
+        }
+    }
+
+    /// The Fluent key of what a trackball aiming this body is called — its
+    /// accessible name, since the only text on it is the compass letters.
+    const fn name_key(self) -> &'static str {
+        match self {
+            Self::Sun => "trackball-sun",
+            Self::Moon => "trackball-moon",
         }
     }
 
@@ -340,6 +350,7 @@ pub fn spawn_trackball(
             TrackballDrag::default(),
             TabIndex(tab_index),
             Pickable::default(),
+            Semantic::new(Role::Trackball).name_key(body.name_key()),
             Name::new(format!("{element}-{}:trackball", body.slug())),
             ChildOf(parent),
         ))
