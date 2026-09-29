@@ -26,7 +26,7 @@
 //!   write half still gets the answers to what it sent; one that goes away
 //!   entirely has its subscriptions ended and its pending answers dropped.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::io;
 use std::os::unix::fs::{
     DirBuilderExt as _, FileTypeExt as _, MetadataExt as _, PermissionsExt as _,
@@ -39,7 +39,7 @@ use std::time::Duration;
 
 use bevy::prelude::*;
 use sl_automation_proto::{
-    AutomationError, Notification, Request, RequestBody, RequestId, Response, ViewerMessage,
+    AutomationError, Notification, Request, RequestId, Response, ViewerMessage,
 };
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
 use tokio::net::{UnixListener, UnixStream};
@@ -47,6 +47,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::{JoinHandle, JoinSet};
 
 use crate::executor::{AutomationPlugin, AutomationQueue, AutomationSystems};
+use crate::relay::Relay;
 
 /// The first id the transport gives a request in the [`AutomationQueue`].
 /// Anything else that submits to the same queue must stay below it.
@@ -286,50 +287,15 @@ enum Inbound {
     },
 }
 
-/// A connected client, as the frame loop keeps it.
-#[derive(Debug)]
-struct Connection {
-    /// Where its lines are written; dropped with the connection, which ends
-    /// its writer.
-    outbound: UnboundedSender<String>,
-    /// The ids of its requests not answered yet.
-    in_flight: HashSet<RequestId>,
-    /// Its subscriptions: its id for each, and the queue's.
-    subscriptions: HashMap<RequestId, RequestId>,
-    /// Whether it has closed its write half.
-    finished: bool,
-}
-
-impl Connection {
-    /// Write `message` to the client. A client that has gone is noticed by
-    /// the listener, which reports it.
-    fn send(&self, message: &ViewerMessage) {
-        match serde_json::to_string(message) {
-            Ok(line) => {
-                let _gone = self.outbound.send(line);
-            }
-            Err(error) => error!("could not encode an automation message: {error}"),
+/// Write `message` to a client's writer. A client that has gone is noticed
+/// by the listener, which reports it.
+fn send_to(outbound: &UnboundedSender<String>, message: &ViewerMessage) {
+    match serde_json::to_string(message) {
+        Ok(line) => {
+            let _gone = outbound.send(line);
         }
+        Err(error) => error!("could not encode an automation message: {error}"),
     }
-
-    /// Answer the request `id` with an error, without the queue.
-    fn refuse(&self, id: RequestId, reason: String) {
-        self.send(&ViewerMessage::Response(Box::new(Response {
-            id,
-            result: Err(AutomationError::InvalidRequest { reason }),
-            report: None,
-        })));
-    }
-}
-
-/// A request in the queue on a client's behalf.
-#[derive(Debug)]
-struct Pending {
-    /// Whose, and under which of its ids; `None` for the transport's own
-    /// (ending a departed client's subscriptions), whose answer is dropped.
-    client: Option<(ConnectionId, RequestId)>,
-    /// Whether it starts a subscription.
-    subscribe: bool,
 }
 
 /// The open automation socket and its clients: a resource of the App whose
@@ -342,14 +308,11 @@ pub struct RemoteEndpoint {
     inbound: UnboundedReceiver<Inbound>,
     /// The listener, stopped on drop (and every connection with it).
     listener: JoinHandle<()>,
-    /// The connected clients.
-    connections: HashMap<ConnectionId, Connection>,
-    /// The requests in the queue, by the queue's id.
-    pending: HashMap<RequestId, Pending>,
-    /// The running subscriptions, by the queue's id: whose, under which id.
-    subscriptions: HashMap<RequestId, (ConnectionId, RequestId)>,
-    /// The queue id the next request gets.
-    next_id: u64,
+    /// Where each connected client's lines are written; dropped with the
+    /// connection, which ends its writer.
+    outbound: HashMap<ConnectionId, UnboundedSender<String>>,
+    /// What each client has in flight, and its subscriptions.
+    relay: Relay<ConnectionId>,
 }
 
 impl Drop for RemoteEndpoint {
@@ -386,10 +349,8 @@ impl RemoteEndpoint {
             socket,
             inbound,
             listener,
-            connections: HashMap::new(),
-            pending: HashMap::new(),
-            subscriptions: HashMap::new(),
-            next_id: REMOTE_ID_BASE,
+            outbound: HashMap::new(),
+            relay: Relay::new(REMOTE_ID_BASE),
         })
     }
 
@@ -399,162 +360,33 @@ impl RemoteEndpoint {
         &self.socket.path
     }
 
-    /// A fresh queue id.
-    const fn allocate(&mut self) -> RequestId {
-        let id = RequestId(self.next_id);
-        self.next_id = self.next_id.saturating_add(1);
-        id
-    }
-
-    /// Put the client's `request` into the queue under a fresh id — or,
-    /// when it cannot be, answer it at once.
+    /// Put the client's `request` into the queue — or, when it cannot be,
+    /// answer it at once.
     fn submit(&mut self, connection: ConnectionId, request: Request, queue: &mut AutomationQueue) {
-        let Request { id, body } = request;
-        let Some(client) = self.connections.get(&connection) else {
-            return;
-        };
-        if client.in_flight.contains(&id) {
-            client.refuse(id, format!("request {} is already in flight", id.0));
-            return;
-        }
-        let subscribe = matches!(body, RequestBody::Subscribe { .. });
-        if subscribe && client.subscriptions.contains_key(&id) {
-            client.refuse(id, format!("subscription {} is already running", id.0));
-            return;
-        }
-        let body = match body {
-            RequestBody::Unsubscribe { subscription } => {
-                let Some(&queued) = client.subscriptions.get(&subscription) else {
-                    client.refuse(id, format!("there is no subscription {}", subscription.0));
-                    return;
-                };
-                RequestBody::Unsubscribe {
-                    subscription: queued,
-                }
-            }
-            body => body,
-        };
-        let queued = self.allocate();
-        let Some(client) = self.connections.get_mut(&connection) else {
-            return;
-        };
-        let _new = client.in_flight.insert(id);
-        if subscribe {
-            let _previous = client.subscriptions.insert(id, queued);
-            let _previous = self.subscriptions.insert(queued, (connection, id));
-        }
-        let _previous = self.pending.insert(
-            queued,
-            Pending {
-                client: Some((connection, id)),
-                subscribe,
-            },
-        );
-        queue.submit(Request { id: queued, body });
-    }
-
-    /// The client closed its write half: end its subscriptions; it keeps its
-    /// connection until its last answer is written, and loses it now when
-    /// nothing is left to answer.
-    fn finish(&mut self, connection: ConnectionId, queue: &mut AutomationQueue) {
-        let Some(client) = self.connections.get_mut(&connection) else {
-            return;
-        };
-        client.finished = true;
-        let answered = client.in_flight.is_empty();
-        let subscriptions: Vec<RequestId> = client
-            .subscriptions
-            .drain()
-            .map(|(_id, queued)| queued)
-            .collect();
-        if answered {
-            let _gone = self.connections.remove(&connection);
-        }
-        for subscription in subscriptions {
-            self.end_subscription(subscription, queue);
+        if let Some(refusal) = self.relay.submit(connection, request, queue)
+            && let Some(outbound) = self.outbound.get(&connection)
+        {
+            send_to(outbound, &refusal);
         }
     }
 
-    /// The client went away: end its subscriptions and forget its requests.
-    fn close(&mut self, connection: ConnectionId, queue: &mut AutomationQueue) {
-        self.finish(connection, queue);
-        let _gone = self.connections.remove(&connection);
-        for pending in self.pending.values_mut() {
-            if pending
-                .client
-                .is_some_and(|(owner, _id)| owner == connection)
-            {
-                pending.client = None;
-            }
-        }
-    }
-
-    /// End the subscription the queue knows as `subscription`, on the
-    /// transport's own behalf.
-    fn end_subscription(&mut self, subscription: RequestId, queue: &mut AutomationQueue) {
-        let _gone = self.subscriptions.remove(&subscription);
-        let queued = self.allocate();
-        let _previous = self.pending.insert(
-            queued,
-            Pending {
-                client: None,
-                subscribe: false,
-            },
-        );
-        queue.submit(Request {
-            id: queued,
-            body: RequestBody::Unsubscribe { subscription },
-        });
+    /// Let go of the writers of clients the relay no longer keeps: that ends
+    /// their connections.
+    fn forget_departed(&mut self) {
+        let relay = &self.relay;
+        self.outbound
+            .retain(|&connection, _outbound| relay.is_connected(connection));
     }
 
     /// Write every answer and notification the queue holds for a client, and
     /// let a finished client with nothing left to wait for go.
     fn deliver(&mut self, queue: &mut AutomationQueue) {
-        let answered: Vec<(RequestId, Response)> = self
-            .pending
-            .keys()
-            .filter_map(|&queued| {
-                queue
-                    .take_response(queued)
-                    .map(|response| (queued, response))
-            })
-            .collect();
-        for (queued, mut response) in answered {
-            let Some(pending) = self.pending.remove(&queued) else {
-                continue;
-            };
-            let Some((connection, id)) = pending.client else {
-                continue;
-            };
-            let Some(client) = self.connections.get_mut(&connection) else {
-                continue;
-            };
-            let _answered = client.in_flight.remove(&id);
-            if pending.subscribe && response.result.is_err() {
-                let _gone = client.subscriptions.remove(&id);
-                let _gone = self.subscriptions.remove(&queued);
-            }
-            response.id = id;
-            client.send(&ViewerMessage::Response(Box::new(response)));
-        }
-        for (&queued, &(connection, id)) in &self.subscriptions {
-            let notifications = queue.take_notifications(queued);
-            let Some(client) = self.connections.get(&connection) else {
-                continue;
-            };
-            for notification in notifications {
-                let notification = match notification {
-                    Notification::Log { page, .. } => Notification::Log {
-                        subscription: id,
-                        page,
-                    },
-                    other @ Notification::Rejected { .. } => other,
-                };
-                client.send(&ViewerMessage::Notification(notification));
+        for (connection, message) in self.relay.deliver(queue) {
+            if let Some(outbound) = self.outbound.get(&connection) {
+                send_to(outbound, &message);
             }
         }
-        self.connections
-            .retain(|_id, client| !(client.finished && client.in_flight.is_empty()));
+        self.forget_departed();
     }
 }
 
@@ -609,29 +441,28 @@ fn receive(mut endpoint: ResMut<'_, RemoteEndpoint>, mut queue: ResMut<'_, Autom
                 connection,
                 outbound,
             } => {
-                let _previous = endpoint.connections.insert(
-                    connection,
-                    Connection {
-                        outbound,
-                        in_flight: HashSet::new(),
-                        subscriptions: HashMap::new(),
-                        finished: false,
-                    },
-                );
+                endpoint.relay.connect(connection);
+                let _previous = endpoint.outbound.insert(connection, outbound);
             }
             Inbound::Request {
                 connection,
                 request,
             } => endpoint.submit(connection, *request, &mut queue),
-            Inbound::Finished { connection } => endpoint.finish(connection, &mut queue),
-            Inbound::Closed { connection } => endpoint.close(connection, &mut queue),
+            Inbound::Finished { connection } => {
+                endpoint.relay.finish(connection, &mut queue);
+                endpoint.forget_departed();
+            }
+            Inbound::Closed { connection } => {
+                endpoint.relay.close(connection, &mut queue);
+                endpoint.forget_departed();
+            }
         }
     }
 }
 
 /// Write the queue's answers and notifications to their clients.
 fn send(mut endpoint: ResMut<'_, RemoteEndpoint>, mut queue: ResMut<'_, AutomationQueue>) {
-    if endpoint.pending.is_empty() && endpoint.subscriptions.is_empty() {
+    if endpoint.relay.is_idle() {
         return;
     }
     endpoint.deliver(&mut queue);

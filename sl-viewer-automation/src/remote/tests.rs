@@ -320,17 +320,17 @@ fn a_departed_client_takes_its_subscriptions_with_it() -> Result<(), String> {
         "{result:?}"
     );
     assert_eq!(
-        app.world().resource::<RemoteEndpoint>().subscriptions.len(),
+        app.world()
+            .resource::<RemoteEndpoint>()
+            .relay
+            .subscription_count(),
         1
     );
     drop(client);
     for _frame in 0..PATIENCE {
         app.update();
         let endpoint = app.world().resource::<RemoteEndpoint>();
-        if endpoint.connections.is_empty()
-            && endpoint.subscriptions.is_empty()
-            && endpoint.pending.is_empty()
-        {
+        if endpoint.outbound.is_empty() && endpoint.relay.is_idle() {
             // Nothing piles up in the queue for the subscription either.
             act(&mut app, "after");
             app.update();

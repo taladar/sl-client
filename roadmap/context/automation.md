@@ -306,6 +306,16 @@ replaces that person.
   a deep directory fails with "shorter than SUN_LEN" — the default under
   `/run/user/<uid>` is short. Requests that play input need `--headless` (the
   synthetic input is installed only there).
+- **The in-process transport** ([[viewer-automation-inprocess-transport]]) is
+  `InProcessTransport` (`sl-viewer-automation/src/in_process.rs`): it hosts
+  `HostedApp`s (a plain `App`, or the viewer's `ViewerApp`, stepped in its
+  span), submits straight to each one's queue, and steps every live App a
+  frame per round (2 ms apart) while a caller waits, so a wait on one viewer
+  never pauses another. Both transports keep their clients through one
+  `Relay` (`relay.rs`): ids renumbered from a base (`IN_PROCESS_ID_BASE` 2⁴⁷,
+  `REMOTE_ID_BASE` 2⁴⁸), duplicates refused, answers delivered in the order
+  the executor gave them. A Bevy `App` is not `Send`: the Apps are built and
+  stepped on one thread, the caller's.
 - **Event-log subscriptions live in the executor**, not the transport: a
   `subscribe` answers at once and its notifications queue beside the
   responses, so the in-process transport streams them the same way.

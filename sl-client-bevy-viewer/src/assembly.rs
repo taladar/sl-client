@@ -978,6 +978,22 @@ impl ViewerApp {
     }
 }
 
+/// A viewer the in-process automation transport hosts steps inside its span,
+/// so every line it logs stays attributable.
+impl sl_viewer_automation::HostedApp for ViewerApp {
+    fn app(&self) -> &App {
+        &self.app
+    }
+
+    fn app_mut(&mut self) -> &mut App {
+        &mut self.app
+    }
+
+    fn step(&mut self) {
+        self.update();
+    }
+}
+
 /// What the `--capture-*` options hold when none was given for a run in
 /// `window` mode, against which a run without a capture directory is checked.
 /// Headless, the size is the off-screen window's, which is not a capture knob

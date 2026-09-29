@@ -2,7 +2,7 @@
 id: viewer-automation-driver
 title: sl-viewer-driver — the async test API over both transports
 topic: viewer
-status: blocked
+status: ready
 origin: viewer automation design (2026-09-28)
 points: 8
 blocked_by: [viewer-automation-remote-transport, viewer-automation-inprocess-transport]

@@ -138,6 +138,20 @@ impl AutomationQueue {
         self.answered.remove(index)
     }
 
+    /// Take the responses to the requests `ours` claims, in the order they
+    /// were answered, leaving the rest.
+    pub(crate) fn take_responses(
+        &mut self,
+        mut ours: impl FnMut(RequestId) -> bool,
+    ) -> Vec<Response> {
+        let (taken, kept): (Vec<Response>, Vec<Response>) = self
+            .answered
+            .drain(..)
+            .partition(|response| ours(response.id));
+        self.answered = kept.into();
+        taken
+    }
+
     /// Take every response not yet taken, in the order they were answered.
     pub fn drain_responses(&mut self) -> Vec<Response> {
         self.answered.drain(..).collect()

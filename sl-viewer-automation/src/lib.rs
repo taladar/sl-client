@@ -93,16 +93,22 @@
 //! A **transport** moves requests into that queue and responses out of it.
 //! The remote one is a [`RemoteEndpoint`]: line-delimited JSON on a private
 //! Unix socket, served by [`RemoteAutomationPlugin`], so a test, the command
-//! line tool or an agent drives a viewer running in its own process.
+//! line tool or an agent drives a viewer running in its own process. The
+//! in-process one is an [`InProcessTransport`]: it hosts viewer Apps in the
+//! test's own process, steps them while a caller waits, and hands the same
+//! requests to their executors directly. Both keep their clients' ids apart
+//! the same way.
 
 mod diagnostics;
 mod event_log;
 mod executor;
+mod in_process;
 mod locate;
 mod manipulator_drag;
 mod probe_sources;
 mod probes;
 mod pursuit;
+mod relay;
 mod remote;
 mod render_settle;
 mod reveal;
@@ -121,6 +127,10 @@ pub use crate::event_log::{DETAIL_LIMIT, EventLog, EventLogPlugin};
 pub use crate::executor::{
     AutomationIdentity, AutomationPlugin, AutomationQueue, AutomationSystems, NOTIFICATION_ENTRIES,
     REPORT_DIAGNOSTICS, REPORT_EVENTS,
+};
+pub use crate::in_process::{
+    DEFAULT_PATIENCE, FRAME_PAUSE, HostedApp, IN_PROCESS_ID_BASE, InProcessError,
+    InProcessTransport, ViewerHandle,
 };
 pub use crate::locate::{find_all, find_one, shallow};
 pub use crate::manipulator_drag::{DragProgress, DragStage, HeldKeys, ManipulatorDrag};
