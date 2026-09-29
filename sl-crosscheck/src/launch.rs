@@ -157,16 +157,11 @@ impl RunDirs {
 pub struct Launch {
     /// Which viewer this is.
     pub viewer: Viewer,
-    /// The executable.
-    pub program: PathBuf,
-    /// Its arguments.
-    pub args: Vec<String>,
-    /// Environment entries **added** to the inherited environment.
-    pub env: Vec<(String, String)>,
     /// Where its frames, dump and status file land.
     pub artefacts: PathBuf,
-    /// Where its own output is written.
-    pub log: PathBuf,
+    /// The process: program, arguments, environment and log — what
+    /// [`sl_viewer_launch::run`] spawns and stops.
+    pub process: sl_viewer_launch::Launch,
 }
 
 /// The launch for this workspace's viewer.
@@ -211,21 +206,17 @@ pub fn sl_client(
     }
     // All four roots, not just the cache: this viewer writes its settings back
     // on the way out, and a harness run must not be able to edit the operator's.
-    for (key, leaf) in [
-        ("XDG_CONFIG_HOME", "config"),
-        ("XDG_DATA_HOME", "data"),
-        ("XDG_STATE_HOME", "state"),
-        ("XDG_CACHE_HOME", "cache"),
-    ] {
-        env.push((key.to_owned(), state.join(leaf).display().to_string()));
-    }
+    env.extend(sl_viewer_launch::confined_env(&state));
     Launch {
         viewer: Viewer::SlClient,
-        program: program.into(),
-        args,
-        env,
-        log: dirs.log(Viewer::SlClient),
         artefacts,
+        process: sl_viewer_launch::Launch::new(
+            Viewer::SlClient.name(),
+            program,
+            dirs.log(Viewer::SlClient),
+        )
+        .args(args)
+        .envs(env),
     }
 }
 
@@ -276,11 +267,14 @@ pub fn firestorm(
     ));
     Ok(Launch {
         viewer: Viewer::Firestorm,
-        program: program.into(),
-        args,
-        env,
-        log: dirs.log(Viewer::Firestorm),
         artefacts,
+        process: sl_viewer_launch::Launch::new(
+            Viewer::Firestorm.name(),
+            program,
+            dirs.log(Viewer::Firestorm),
+        )
+        .args(args)
+        .envs(env),
     })
 }
 
@@ -344,8 +338,12 @@ mod tests {
 
     /// The value following `flag`, for asserting on an argument list.
     fn value_of<'args>(launch: &'args Launch, flag: &str) -> Option<&'args str> {
-        let index = launch.args.iter().position(|arg| arg == flag)?;
-        launch.args.get(index.checked_add(1)?).map(String::as_str)
+        let index = launch.process.args.iter().position(|arg| arg == flag)?;
+        launch
+            .process
+            .args
+            .get(index.checked_add(1)?)
+            .map(String::as_str)
     }
 
     /// A relative run directory is made absolute: a viewer resolves the paths
@@ -398,11 +396,11 @@ mod tests {
         let theirs = firestorm("firestorm", &dirs, &plan, &files)?;
         for (key, value) in plan.capture.env() {
             assert!(
-                ours.env.contains(&(key.clone(), value.clone())),
+                ours.process.env.contains(&(key.clone(), value.clone())),
                 "sl-client is missing {key}={value}"
             );
             assert!(
-                theirs.env.contains(&(key.clone(), value.clone())),
+                theirs.process.env.contains(&(key.clone(), value.clone())),
                 "firestorm is missing {key}={value}"
             );
         }
@@ -417,9 +415,9 @@ mod tests {
         let dirs = RunDirs::new("/tmp/run")?;
         let launch = firestorm("firestorm", &dirs, &plan()?, &files(&dirs))?;
         assert_eq!(value_of(&launch, "--grid"), Some("127.0.0.1:9100"));
-        assert!(!launch.args.iter().any(|arg| arg == "--loginuri"));
+        assert!(!launch.process.args.iter().any(|arg| arg == "--loginuri"));
         // Without this a second instance refuses to start.
-        assert!(launch.args.iter().any(|arg| arg == "--multiple"));
+        assert!(launch.process.args.iter().any(|arg| arg == "--multiple"));
         Ok(())
     }
 
@@ -439,6 +437,7 @@ mod tests {
             "XDG_CACHE_HOME",
         ] {
             let value = ours
+                .process
                 .env
                 .iter()
                 .find(|(name, _value)| name == key)
@@ -451,6 +450,7 @@ mod tests {
         }
         let theirs = firestorm("firestorm", &dirs, &plan, &files)?;
         let user_dir = theirs
+            .process
             .env
             .iter()
             .find(|(name, _value)| name == "FIRESTORM_X64_USER_DIR")
@@ -474,7 +474,7 @@ mod tests {
             &files(&dirs),
             Some(Path::new("/repo/sl-client-bevy-viewer")),
         );
-        assert!(launch.env.contains(&(
+        assert!(launch.process.env.contains(&(
             "BEVY_ASSET_ROOT".to_owned(),
             "/repo/sl-client-bevy-viewer".to_owned()
         )));

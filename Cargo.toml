@@ -57,6 +57,7 @@ members = [
   "sl-viewer-intents",
   "sl-viewer-inventory",
   "sl-viewer-kit",
+  "sl-viewer-launch",
   "sl-viewer-map",
   "sl-viewer-media",
   "sl-viewer-notices",
@@ -123,10 +124,10 @@ rustyline = { version = "17.0.2" }
 serde = { version = "1.0.229" }
 serde_json = { version = "1.0.151" }
 sl-account-dirs = { path = "sl-account-dirs", version = "0.1.0" }
-sl-automation-proto = { path = "sl-automation-proto", version = "0.1.0" }
 sl-anim = { path = "sl-anim", version = "0.1.0" }
 sl-asset = { path = "sl-asset", version = "0.1.0" }
 sl-asset-sched = { path = "sl-asset-sched", version = "0.1.0" }
+sl-automation-proto = { path = "sl-automation-proto", version = "0.1.0" }
 sl-avatar = { path = "sl-avatar", version = "0.1.0" }
 sl-client-bevy = { path = "sl-client-bevy", version = "0.1.0" }
 sl-client-common = { path = "sl-client-common", version = "0.1.0" }
@@ -155,6 +156,7 @@ sl-viewer-gallery = { path = "sl-viewer-gallery", version = "0.1.0" }
 sl-viewer-intents = { path = "sl-viewer-intents", version = "0.1.0" }
 sl-viewer-inventory = { path = "sl-viewer-inventory", version = "0.1.0" }
 sl-viewer-kit = { path = "sl-viewer-kit", version = "0.1.0" }
+sl-viewer-launch = { path = "sl-viewer-launch", version = "0.1.0" }
 sl-viewer-map = { path = "sl-viewer-map", version = "0.1.0" }
 sl-viewer-media = { path = "sl-viewer-media", version = "0.1.0" }
 sl-viewer-notices = { path = "sl-viewer-notices", version = "0.1.0" }

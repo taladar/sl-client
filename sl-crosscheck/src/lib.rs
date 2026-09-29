@@ -24,7 +24,7 @@
 //!
 //! Comparing those artefacts is a separate step with a separate audience, and
 //! keeping the collection honest is easier when it has no opinion about what the
-//! frames should look like — so the runner ([`crate::process`], [`summary`]) has
+//! frames should look like — so the runner ([`sl_viewer_launch`], [`summary`]) has
 //! never looked at a pixel, and the comparison ([`report`], [`frames`],
 //! [`scene_diff`], [`sheet`]) is reached through its own binary,
 //! `sl-crosscheck-report <run>`.
@@ -62,7 +62,8 @@
 //! - [`files`] — the credentials and grid files the viewers read, written into
 //!   the run directory so no real credential file is involved.
 //! - [`launch`] — each viewer's program, arguments and environment.
-//! - [`process`] — spawning one viewer and getting it to stop.
+//! - [`sl_viewer_launch`] — spawning one viewer and getting it to stop (shared
+//!   with the end-to-end stage).
 //! - [`status`] — reading back `harness-status.json` and the artefacts beside it.
 //! - [`summary`] — `run.json` and the printed report.
 //!
@@ -80,7 +81,6 @@ pub mod font;
 pub mod frames;
 pub mod launch;
 pub mod plan;
-pub mod process;
 pub mod report;
 pub mod scene_diff;
 pub mod sheet;

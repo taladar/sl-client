@@ -19,8 +19,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::launch::Viewer;
 use crate::plan::{FirestormSkin, RunPlan, SlClientSkin};
-use crate::process::Ending;
 use crate::status::Artefacts;
+use sl_viewer_launch::Ending;
 
 /// One viewer's half of a run.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -417,10 +417,10 @@ mod tests {
     use super::{RunSummary, ViewerRun};
     use crate::launch::Viewer;
     use crate::plan::{CaptureSpec, FirestormSkin, RunPlan, SlClientSkin};
-    use crate::process::Ending;
     use crate::status::{
         Artefacts, DayPositionStatus, FrameSizes, HarnessStatus, Status, WindowSizeStatus,
     };
+    use sl_viewer_launch::Ending;
 
     /// The boxed error every test in this module reports through.
     type TestError = Box<dyn core::error::Error>;

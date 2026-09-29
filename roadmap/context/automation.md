@@ -67,6 +67,7 @@ replaces that person.
 | `sl-automation-proto` | pure serde vocabulary, viewer-neutral | [[viewer-automation-protocol]] |
 | `sl-viewer-automation` | in-viewer plugin: model, locators, executor (input: `sl-viewer-ui-core`'s `synthetic_input`) | [[viewer-automation-executor]] and its blockers |
 | `sl-viewer-driver` | async client API over both transports | [[viewer-automation-driver]] |
+| `sl-viewer-launch` | viewer processes: confinement, graceful stop | [[test-e2e-viewer-process-launch]] |
 | `sl-e2e` | `Stage`: fake grid + N viewers + grid control | [[test-e2e-stage]] |
 | `sl-viewer-ctl` | CLI over the driver | [[viewer-automation-ctl-cli]] |
 
@@ -363,6 +364,15 @@ replaces that person.
   the socket transport is the one a viewer process serves, so the process
   backend differs only in who launches the viewer
   ([[test-e2e-viewer-process-launch]]).
+- **A viewer process is launched and stopped through `sl-viewer-launch`**
+  ([[test-e2e-viewer-process-launch]]), shared with `sl-crosscheck`: a
+  `ViewerDir` per viewer (the four `XDG_*` roots under its `state/`, its
+  `viewer.log`), `Launch::in_dir` plus the flags (`--headless`,
+  `--automation-socket`), and `RunningViewer`, stopped by `SIGTERM` → logout
+  grace → `SIGKILL`. `stop_all` stops several in parallel, and dropping a
+  running one stops it the same way, so a panicking test logs its viewers
+  out. The viewer turns `SIGTERM` into a logout at any point after start-up
+  (`tests/viewer_processes.rs` checks the grid sees `LoggedOut` for both).
 - **Event-log subscriptions live in the executor**, not the transport: a
   `subscribe` answers at once and its notifications queue beside the
   responses, so the in-process transport streams them the same way.

@@ -31,7 +31,6 @@ use sl_crosscheck::plan::{
     CameraSpec, CaptureAudio, CaptureSpec, DEFAULT_UI_SCALE, FirestormSkin, RegionPoint, RunPlan,
     SlClientSkin, default_run_dir, parse_region_point,
 };
-use sl_crosscheck::process::{self, Ending};
 use sl_crosscheck::status::Artefacts;
 use sl_crosscheck::summary::{RunSummary, ViewerRun};
 use sl_crosscheck::{files, launch};
@@ -41,6 +40,7 @@ use sl_fake_grid::{
 };
 use sl_types::lsl::Vector;
 use sl_types::map::RegionCoordinates;
+use sl_viewer_launch::Ending;
 
 /// The workspace root, as it stood when this binary was built. The viewer's own
 /// vendored-asset defaults are resolved the same way, so a build that has been
@@ -522,7 +522,7 @@ fn run_viewer(
     interrupted: &Arc<AtomicBool>,
 ) -> ViewerRun {
     tracing::info!("running {}", launch.viewer.name());
-    match process::run(launch, deadline, interrupted) {
+    match sl_viewer_launch::run(&launch.process, deadline, interrupted) {
         Ok(ran) => {
             if ran.ending == Ending::Killed {
                 tracing::error!(
@@ -599,7 +599,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     let want_ours = options.only != Some(Which::Firestorm);
     let want_theirs = options.only != Some(Which::SlClient);
-    if want_ours && !process::is_executable(&viewer_bin) {
+    if want_ours && !sl_viewer_launch::is_executable(&viewer_bin) {
         return Err(format!(
             "no viewer at {}; build it with `cargo build --release -p sl-client-bevy-viewer` \
              or pass --viewer",
@@ -609,7 +609,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     if let Some(firestorm) = &options.firestorm
         && want_theirs
-        && !process::is_executable(firestorm)
+        && !sl_viewer_launch::is_executable(firestorm)
     {
         return Err(format!("no Firestorm launcher at {}", firestorm.display()).into());
     }
@@ -722,7 +722,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .deadline
             .unwrap_or_else(|| plan.capture.suggested_deadline_secs()),
     );
-    let interrupted = process::interrupt_flag()?;
+    let interrupted = sl_viewer_launch::interrupt_flag()?;
 
     let asset_root = PathBuf::from(WORKSPACE_ROOT).join("sl-client-bevy-viewer");
     // Only when this viewer is in the run: a `--only firestorm` run is entitled

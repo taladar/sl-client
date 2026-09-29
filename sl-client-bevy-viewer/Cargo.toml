@@ -254,6 +254,9 @@ sl-test-assets = { workspace = true }
 # The async test API the driver acceptance (`src/automation_driver.rs`) drives
 # viewers with, over the in-process link and the automation socket.
 sl-viewer-driver = { workspace = true }
+# Launching the built viewer as confined processes and stopping them without
+# stranding a session (`tests/viewer_processes.rs`).
+sl-viewer-launch = { workspace = true }
 # The render-scene registry the harness tiers (`render_matrix`,
 # `render_readback`, `render_test`) draw. A dev-dependency: only those tiers
 # build scenes, so the shipped viewer never compiles a fixture.

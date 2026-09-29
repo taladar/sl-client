@@ -8589,6 +8589,7 @@ dependencies = [
  "sl-viewer-intents",
  "sl-viewer-inventory",
  "sl-viewer-kit",
+ "sl-viewer-launch",
  "sl-viewer-map",
  "sl-viewer-media",
  "sl-viewer-notices",
@@ -8705,13 +8706,12 @@ dependencies = [
  "dotenvy",
  "fs-err",
  "image",
- "nix 0.31.3",
  "pretty_assertions",
  "serde",
  "serde_json",
- "signal-hook",
  "sl-fake-grid",
  "sl-types",
+ "sl-viewer-launch",
  "thiserror 2.0.19",
  "tokio",
  "toml",
@@ -9412,6 +9412,18 @@ dependencies = [
  "serde",
  "sl-client-bevy",
  "sl-l10n",
+ "thiserror 2.0.19",
+ "tracing",
+]
+
+[[package]]
+name = "sl-viewer-launch"
+version = "0.1.0"
+dependencies = [
+ "fs-err",
+ "nix 0.31.3",
+ "pretty_assertions",
+ "signal-hook",
  "thiserror 2.0.19",
  "tracing",
 ]

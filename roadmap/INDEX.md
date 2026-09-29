@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 122 |
 | ready | 311 |
-| blocked | 56 |
+| blocked | 55 |
 | in-progress | 21 |
 | bugs | 16 |
-| done | 1278 |
+| done | 1279 |
 | deferred | 31 |
 | wont-do | 16 |
 | **total** | **1851** |
@@ -1019,8 +1019,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Factor the repeated session/id acquisition out of the conformance cases
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
-- [`test-e2e-viewer-process-launch`](ready/test-e2e-viewer-process-launch.md) —
-  Extract viewer process launch and graceful stop from sl-crosscheck
+- [`test-e2e-stage`](ready/test-e2e-stage.md) — sl-e2e Stage — a fake grid,
+  several viewers and grid control in one test (blocked by
+  `viewer-automation-driver` (done), `test-e2e-viewer-process-launch` (done))
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
@@ -1051,7 +1052,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-world-heartbeat`](ready/server-world-heartbeat.md) — A region
   heartbeat — the fake grid has no simulation loop at all
 
-## blocked (56)
+## blocked (55)
 
 ### viewer
 
@@ -1168,9 +1169,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-e2e-pilot-suite`](blocked/test-e2e-pilot-suite.md) — The first
   end-to-end tests — one viewer, two viewers, two regions (blocked by
   `test-e2e-stage`)
-- [`test-e2e-stage`](blocked/test-e2e-stage.md) — sl-e2e Stage — a fake grid,
-  several viewers and grid control in one test (blocked by
-  `viewer-automation-driver` (done), `test-e2e-viewer-process-launch`)
 - [`test-fake-grid-lsl-offline-cases`](blocked/test-fake-grid-lsl-offline-cases.md)
   — Move the script and chat conformance cases offline (blocked by
   `server-fake-grid-scripted-scenario`)
@@ -1339,7 +1337,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1278)
+## done (1279)
 
 ### protocol
 
@@ -3763,6 +3761,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   GetDisplayNames
 - [`test-draw-distance`](done/test-draw-distance-set-draw-distance-confirm-no-error-and-any-echoed-state.md)
   — set draw distance; confirm no error and any echoed state
+- [`test-e2e-viewer-process-launch`](done/test-e2e-viewer-process-launch.md) —
+  Extract viewer process launch and graceful stop from sl-crosscheck
 - [`test-economy-data`](done/test-economy-data-request-economy-data.md) —
   request economy data
 - [`test-environment`](done/test-environment-request-environment-settings.md) —

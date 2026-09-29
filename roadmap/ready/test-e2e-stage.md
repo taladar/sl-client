@@ -2,7 +2,7 @@
 id: test-e2e-stage
 title: sl-e2e Stage — a fake grid, several viewers and grid control in one test
 topic: test
-status: blocked
+status: ready
 origin: viewer automation design (2026-09-28)
 points: 8
 blocked_by: [viewer-automation-driver, test-e2e-viewer-process-launch]

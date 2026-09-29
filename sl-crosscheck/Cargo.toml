@@ -30,15 +30,14 @@ fs-err = { workspace = true }
 # The contact sheet and the image diff. PNG only: both viewers write PNG frames,
 # and a decoder for a format neither of them emits is a dependency for nothing.
 image = { version = "0.25.10", default-features = false, features = ["png"] }
-# `kill` with a signal of our choosing: `Child::kill` is SIGKILL only, and a
-# viewer killed outright never sends its LogoutRequest.
-nix = { version = "0.31.3", features = ["signal"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-signal-hook = { version = "0.4.4", default-features = false }
 sl-fake-grid = { path = "../sl-fake-grid", version = "0.1.0" }
 # Region coordinates and the velocity a scripted border crossing carries over.
 sl-types = { workspace = true }
+# Spawning each viewer confined to the run, and stopping it without stranding
+# its session — shared with the end-to-end stage.
+sl-viewer-launch = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "time"] }
 toml = { workspace = true }

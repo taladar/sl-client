@@ -1,0 +1,33 @@
+[package]
+name = "sl-viewer-launch"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+description = "Launches Second Life viewer processes confined to a run directory, and stops them the way a person would — SIGTERM, a logout grace, and only then SIGKILL — so no grid is left holding a stranded session"
+readme = { workspace = true }
+license = { workspace = true }
+
+repository = { workspace = true }
+keywords = ["opensim", "process", "secondlife", "testing", "viewer"]
+categories = ["development-tools::testing", "game-development"]
+publish = { workspace = true }
+
+exclude = { workspace = true }
+
+[dependencies]
+# The log file and the run directories, with the path in the error.
+fs-err = { workspace = true }
+# `kill` with a signal of our choosing: `Child::kill` is SIGKILL only, and a
+# viewer killed outright never sends its LogoutRequest.
+nix = { version = "0.31.3", features = ["signal"] }
+# The runner's own Ctrl-C, turned into a flag rather than a death.
+signal-hook = { version = "0.4.4", default-features = false }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+
+[lints]
+workspace = true

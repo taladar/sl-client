@@ -12,7 +12,7 @@
 max-threads = 1
 
 [[profile.default.overrides]]
-filter = "test(/^render_readback::/) | test(/^render_matrix::/) | test(/^full_stack_test::/) | test(/^world_test::gpu_/)"
+filter = "test(/^render_readback::/) | test(/^render_matrix::/) | test(/^full_stack_test::/) | test(/^world_test::gpu_/) | binary(viewer_processes)"
 test-group = "gpu"
 # A capture settles by observation rather than by a fixed frame count, but the
 # first pipeline compile on a cold shader cache is slow; give it room before
