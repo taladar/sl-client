@@ -1121,6 +1121,8 @@ struct MapFetchAs<'w> {
     identity: Res<'w, SlIdentity>,
     /// The account context a tile URL is signed with; absent before login.
     context: Option<Res<'w, AccountContext>>,
+    /// Where this viewer caches the tiles; absent, they go to the temp dir.
+    paths: Option<Res<'w, crate::paths::ViewerPaths>>,
 }
 
 /// The map's own model and tile cache, bundled as one
@@ -1473,6 +1475,7 @@ fn request_world_map_data(
         settings,
         identity,
         context,
+        paths,
     } = fetch_as;
     let Some(ui) = ui else {
         return;
@@ -1496,10 +1499,13 @@ fn request_world_map_data(
             login_url.as_deref(),
             &context.grid,
         ) {
-            let cache_dir = crate::paths::asset_cache_dir("maptiles").map_or_else(
-                || std::env::temp_dir().join("sl-client-maptiles"),
-                |dir| dir.join(&context.grid),
-            );
+            let cache_dir = paths
+                .as_ref()
+                .and_then(|paths| paths.asset_cache_dir("maptiles"))
+                .map_or_else(
+                    || std::env::temp_dir().join("sl-client-maptiles"),
+                    |dir| dir.join(&context.grid),
+                );
             tiles.ensure_service(&base_url, cache_dir);
         }
     }

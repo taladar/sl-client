@@ -545,8 +545,8 @@ impl ViewerSettings {
     /// before the Bevy [`World`] exists) reads the same store.
     ///
     /// `global_path` is where the global scope persists. The caller names it
-    /// (the viewer passes `sl_viewer_platform::paths::global_settings_file()`)
-    /// rather than this crate resolving it, because resolving it meant
+    /// (the viewer passes its `ViewerPaths::global_settings_file`) rather than
+    /// this crate resolving it, because resolving it meant
     /// depending on `sl-viewer-platform` for one call — and through it on the
     /// audio engine and the whole protocol runtime, underneath every crate that
     /// reads a setting.
@@ -555,6 +555,17 @@ impl ViewerSettings {
         settings.run_registrars(registrars);
         settings.load_global();
         settings
+    }
+
+    /// [`load_with`](Self::load_with) from `global_path`, or, for a viewer
+    /// that keeps nothing on disk (`None`), every setting at its declared
+    /// default and nothing ever loaded — the store of a test viewer, which
+    /// must neither read the developer's preferences nor write its own.
+    pub fn load_or_declared(global_path: Option<PathBuf>, registrars: &[fn(&mut Self)]) -> Self {
+        global_path.map_or_else(
+            || Self::declared_for_test(registrars),
+            |path| Self::load_with(path, registrars),
+        )
     }
 
     /// Run each registrar against this store, in the order given.
@@ -568,8 +579,9 @@ impl ViewerSettings {
     /// test can compare the declared surface without touching the filesystem.
     /// Not `#[cfg(test)]`: the viewer's own tests build settings this way,
     /// and a `cfg(test)` item is not compiled when a *dependent* crate runs
-    /// its tests. The `_for_test` name is the documentation — nothing in a
-    /// running viewer should call it.
+    /// its tests. The `_for_test` name is the documentation — a running
+    /// viewer reaches it only through
+    /// [`load_or_declared`](Self::load_or_declared), when it stores nothing.
     pub fn declared_for_test(registrars: &[fn(&mut Self)]) -> Self {
         let mut settings = Self::empty(PathBuf::new());
         settings.run_registrars(registrars);

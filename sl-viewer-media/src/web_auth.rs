@@ -122,13 +122,11 @@ fn start_web_auth(identity: Res<SlIdentity>, mut auth: ResMut<WebAuth>) {
     let (sender, receiver) = bounded(1);
     // A one-shot blocking HTTP POST off the main thread (the reqwest::blocking
     // idiom the driver uses for login), its result polled by `apply_web_auth`.
-    let spawned = std::thread::Builder::new()
-        .name("web-openid-auth".to_owned())
-        .spawn(move || {
-            let result = fetch_openid_cookies(&url, &token);
-            // The receiver may be gone if the app is exiting; ignore that.
-            let _sent = sender.send(result);
-        });
+    let spawned = sl_client_bevy::log_context::spawn_named_thread("web-openid-auth", move || {
+        let result = fetch_openid_cookies(&url, &token);
+        // The receiver may be gone if the app is exiting; ignore that.
+        let _sent = sender.send(result);
+    });
     auth.phase = match spawned {
         Ok(_handle) => WebAuthPhase::InFlight(receiver),
         Err(error) => {

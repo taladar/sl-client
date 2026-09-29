@@ -35,6 +35,7 @@ pub mod asset_blacklist;
 pub mod avatar_asset_stats;
 pub mod avatar_complexity;
 pub mod avatar_dump;
+pub mod avatar_overrides;
 pub mod avatar_render_floater;
 pub mod avatar_render_settings;
 pub mod avatar_replay;

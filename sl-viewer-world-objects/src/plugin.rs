@@ -107,7 +107,7 @@ fn register_state(app: &mut App) {
     app.init_resource::<PrimTextures>();
     app.init_resource::<TextureApplyBudget>();
     app.init_resource::<DeferredFaceTextures>();
-    app.insert_resource(MaterialManager::new());
+    app.init_resource::<MaterialManager>();
     app.init_resource::<LegacyMaterialManager>();
     app.init_resource::<BumpManager>();
     // The cross-instance caches: shared mesh handles for identical prim /

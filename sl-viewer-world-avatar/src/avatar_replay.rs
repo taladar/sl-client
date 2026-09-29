@@ -3,7 +3,7 @@
 //!
 //! Given a bundle directory (`--replay <dir>`), `sl_client_bevy_viewer::run` points the asset
 //! stores at the bundle's drop-in `cache/` (via
-//! [`sl_viewer_platform::paths::set_replay_cache_root`]) and runs the *normal* viewer app with
+//! [`ViewerPaths::with_replay_cache_root`](sl_viewer_platform::paths::ViewerPaths::with_replay_cache_root)) and runs the *normal* viewer app with
 //! [`SlClientPlugin`](sl_client_bevy::SlClientPlugin) in **offline** mode, plus
 //! the systems here. `inject_replay_bundle` then, once, feeds the session the
 //! captured events — a synthetic [`SlCapabilities`] (so the cap-gated asset

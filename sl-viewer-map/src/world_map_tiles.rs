@@ -159,9 +159,10 @@ impl WorldMapTiles {
         let (request_tx, request_rx) = unbounded::<TileKey>();
         let (response_tx, response_rx) = unbounded::<(TileKey, TileAnswer)>();
         let url = base_url.to_owned();
-        let thread = std::thread::Builder::new()
-            .name("world-map-tiles".to_owned())
-            .spawn(move || tile_worker(&url, cache_dir, &request_rx, &response_tx));
+        let thread =
+            sl_client_bevy::log_context::spawn_named_thread("world-map-tiles", move || {
+                tile_worker(&url, cache_dir, &request_rx, &response_tx);
+            });
         match thread {
             Ok(thread) => {
                 self.handle = Some(ServiceHandle {

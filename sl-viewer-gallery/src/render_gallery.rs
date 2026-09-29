@@ -751,7 +751,11 @@ fn drive_keys(
 /// re-set every `Update` but in the sky-less gallery would have compounded frame
 /// after frame until the stage went black. The probes' share is a factor of the
 /// value asked for now, on both sides, so holding it is enough.
-fn hold_stage_ambient(cell: Res<GalleryCell>, mut ambient: ResMut<GlobalAmbientLight>) {
+fn hold_stage_ambient(
+    cell: Res<GalleryCell>,
+    overrides: Res<crate::render_overrides::RenderOverrides>,
+    mut ambient: ResMut<GlobalAmbientLight>,
+) {
     let own = cell
         .scene()
         .is_some_and(|scene| scene.lighting == SceneLighting::Own);
@@ -760,7 +764,7 @@ fn hold_stage_ambient(cell: Res<GalleryCell>, mut ambient: ResMut<GlobalAmbientL
     } else {
         STAGE_AMBIENT
     };
-    let brightness = stage * probe_ambient_scale();
+    let brightness = stage * probe_ambient_scale(&overrides);
     if ambient.brightness.to_bits() != brightness.to_bits() {
         ambient.brightness = brightness;
     }

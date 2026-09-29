@@ -188,17 +188,25 @@ pub struct HandPoseMotion {
     states: HashMap<AgentKey, AgentHandPose>,
 }
 
-/// Force every avatar's requested hand pose from `SL_VIEWER_HAND_POSE_TEST`
-/// (a pose index, e.g. `3` for a fist), overriding the playing animation, so the
-/// morph can be seen without hunting for content that requests an unusual pose.
-fn forced_hand_pose() -> Option<HandPose> {
-    let raw = std::env::var("SL_VIEWER_HAND_POSE_TEST").ok()?;
-    HandPose::from_index(raw.trim().parse().ok()?)
-}
-
 /// Whether `SL_VIEWER_LOG_HAND_POSE` asks for the per-avatar hand-pose trace.
 fn log_hand_pose() -> bool {
     std::env::var("SL_VIEWER_LOG_HAND_POSE").is_ok_and(|value| value != "0")
+}
+
+/// What decides the hand pose each avatar asks for, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): its playing animations,
+/// the decoded motions that name their poses, the editing reach, and a pose
+/// the run forces (`SL_VIEWER_HAND_POSE_TEST`).
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct HandPoseRequests<'w> {
+    /// The per-avatar playing sets.
+    playback: Res<'w, AnimationPlayback>,
+    /// The decoded motions, which carry each one's hand pose.
+    manager: Res<'w, AnimationManager>,
+    /// Who is editing, whose hand takes the editing shape.
+    point_at: Res<'w, PointAtTargets>,
+    /// The run's debug avatar knobs: a forced pose, overriding the rest.
+    overrides: Res<'w, crate::avatar_overrides::AvatarOverrides>,
 }
 
 /// Drive every rigged avatar's hand-pose morphs (P31.13): resolve the pose its
@@ -216,14 +224,18 @@ fn log_hand_pose() -> bool {
 pub(crate) fn drive_hand_poses(
     time: Res<Time>,
     state: Res<AvatarState>,
-    playback: Res<AnimationPlayback>,
-    manager: Res<AnimationManager>,
-    point_at: Res<PointAtTargets>,
+    requests: HandPoseRequests,
     mut motion: ResMut<HandPoseMotion>,
     mut runtime_morphs: ResMut<AvatarRuntimeMorphs>,
 ) {
+    let HandPoseRequests {
+        playback,
+        manager,
+        point_at,
+        overrides,
+    } = requests;
     let dt = time.delta_secs();
-    let forced = forced_hand_pose();
+    let forced = overrides.pose.hand_pose;
     let log = log_hand_pose();
     let agents = state.rigged_agents();
     for &agent in &agents {

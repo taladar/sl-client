@@ -2,7 +2,7 @@
 id: viewer-automation-inprocess-transport
 title: In-process transport — the same requests against Apps in the test process
 topic: viewer
-status: blocked
+status: ready
 origin: viewer automation design (2026-09-28)
 points: 5
 blocked_by: [viewer-automation-executor, viewer-automation-per-app-state,
@@ -24,6 +24,12 @@ start, debuggable in one process, and runnable under a paused clock.
 - Same `Request` / `Response` values as the remote transport, handed to the
   executor directly.
 - Several viewers in one process, each its own App with its own login.
+
+Starting point: `per_app_test` (`sl-client-bevy-viewer`) already builds two
+Apps with `Storage::Directories(ViewerPaths::under(..))`, a `log_label` each
+and `TerminationFlag::own()`, and steps them round-robin with
+`ViewerApp::update` (which runs inside the viewer's log span) — the shape
+this transport owns.
 
 Acceptance: the executor's end-to-end test passes unchanged through this
 transport; two Apps log into one fake grid and both answer requests.

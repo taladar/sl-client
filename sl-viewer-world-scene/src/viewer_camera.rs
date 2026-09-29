@@ -9,7 +9,7 @@
 //! does nothing — which is exactly how a harness ends up asserting on a frame
 //! the viewer would never show.
 
-use bevy::camera::{Exposure, Hdr};
+use bevy::camera::{Exposure, Hdr, ShadowLodOrigin};
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::light::cluster::{ClusterConfig, ClusterFarZMode, ClusterZConfig};
 use bevy::prelude::*;
@@ -187,6 +187,11 @@ pub fn viewer_camera_bundle(transform: Transform) -> impl Bundle {
         // the copy pass serves exactly one view, and a reflection-probe capture
         // (which renders water too) must not overwrite it.
         WaterSceneDepthView,
+        // The point / spot light shadow LOD follows the viewpoint. Without the
+        // marker Bevy takes a window camera, else *any* camera — a reflection
+        // probe's capture camera, when this one renders into an image (the
+        // render tiers) or no window is primary — and warns that it had to.
+        ShadowLodOrigin,
     )
 }
 

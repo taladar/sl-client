@@ -44,6 +44,12 @@ static SHARED_RUNTIME: std::sync::LazyLock<Option<Runtime>> = std::sync::LazyLoc
 /// The shared runtime's handle, for a subsystem that runs a long-lived service
 /// on it (a listener, rather than one future awaited from a Bevy task), or
 /// `None` if the runtime could not be built.
+///
+/// **Process-wide on purpose**: every viewer App of a process shares these
+/// few threads, as they share Bevy's task pools — a runtime per App would
+/// multiply the threads for no isolation anyone needs. A task spawned on it
+/// should carry its App's tracing context
+/// ([`future_carrying_context`](crate::log_context::future_carrying_context)).
 #[must_use]
 pub fn shared_runtime() -> Option<&'static tokio::runtime::Handle> {
     SHARED_RUNTIME.as_ref().map(Runtime::handle)
@@ -63,7 +69,10 @@ where
     T: Send + 'static,
 {
     let runtime = SHARED_RUNTIME.as_ref()?;
-    runtime.spawn(future).await.ok()
+    runtime
+        .spawn(crate::log_context::future_carrying_context(future))
+        .await
+        .ok()
 }
 
 #[cfg(test)]

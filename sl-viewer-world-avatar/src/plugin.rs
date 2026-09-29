@@ -93,6 +93,8 @@ fn register_state(app: &mut App) {
     // The live A/B state of the shape's collision-volume displacement
     // (P34.3), seeded from `SL_VIEWER_VOLUME_MORPH_GAIN` and toggled by `V`.
     app.init_resource::<VolumeMorphGain>();
+    // The run's debug avatar knobs; the viewer inserts its own first.
+    app.init_resource::<crate::avatar_overrides::AvatarOverrides>();
     app.init_resource::<crate::name_tag_content::NameTagStatuses>();
     app.init_resource::<crate::look_at::LookAtTargets>();
     app.init_resource::<crate::look_at::LookAtMotion>();

@@ -38,6 +38,10 @@ const FETCH_TIMEOUT: Duration = Duration::from_secs(60);
 /// the `GetTexture` / `GetMesh` / `ViewerAsset` hosts pool across all asset
 /// pipelines. `None` if the client could not be built (the fetchers then fall
 /// back to their own blocking client). Built lazily on first fetch.
+///
+/// **Process-wide on purpose**: several viewer Apps in one process share the
+/// pool as they share the hosts it connects to; nothing about a connection is
+/// per viewer (credentials travel in each request's capability URL).
 static FETCH_CLIENT: std::sync::LazyLock<Option<reqwest::Client>> =
     std::sync::LazyLock::new(|| {
         crate::http_proxy::async_client_builder()

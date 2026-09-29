@@ -252,6 +252,9 @@ pub fn run(assets: AssetPlugin, registry: GalleryRegistry) -> AppExit {
         .insert_resource(bevy::ecs::error::FallbackErrorHandler(
             bevy::ecs::error::error,
         ))
+        // The user's directories, as the viewer's own: the web-media profile
+        // and the asset caches the specimens read land where the viewer's do.
+        .insert_resource(sl_viewer_platform::paths::ViewerPaths::platform())
         .add_plugins(
             DefaultPlugins
                 .set(WindowPlugin {

@@ -502,6 +502,9 @@ pub(crate) struct BlendInputs<'w, 's> {
     manager: Option<Res<'w, AnimationManager>>,
     /// The viewer camera, for the exact-phase sync distance.
     camera: Query<'w, 's, &'static GlobalTransform, With<sl_viewer_world_api::ViewerCamera>>,
+    /// The run's debug avatar knobs: whether every avatar is frozen in its
+    /// T-pose (absent in an app without the avatar layer).
+    overrides: Option<Res<'w, crate::avatar_overrides::AvatarOverrides>>,
 }
 
 /// The three stores a staging pass writes into, bundled as one
@@ -791,7 +794,10 @@ pub(crate) fn stage_gpu_avatars(
     // all avatars' active slots, phases bucketed for far avatars — assign
     // cache bases, and build the frame-indexed playback row blocks plus the
     // sparse correction list.
-    let t_pose = crate::animations::t_pose_enabled();
+    let t_pose = blend_inputs
+        .overrides
+        .as_deref()
+        .is_some_and(|overrides| overrides.pose.t_pose);
     let blend = true;
     let mut jobs: Vec<GpuSampleJob> = Vec::new();
     let mut cache_len = 0_u32;

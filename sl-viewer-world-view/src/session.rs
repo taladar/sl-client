@@ -105,6 +105,8 @@ pub struct SessionDriverPlugin {
 impl Plugin for SessionDriverPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ViewerSession>()
+            // The process's signal flag, unless the host gave this App its own.
+            .init_resource::<TerminationFlag>()
             // The viewer inserts the real one from its command line; this is
             // the "play nothing" default every other host wants.
             .init_resource::<PlayOnLogin>()
@@ -369,15 +371,63 @@ pub fn report_agent_viewport(
 #[derive(Debug, Message, Default)]
 pub struct QuitRequested;
 
-/// Set by the `SIGTERM` / `SIGINT` handler, read by [`quit_on_termination_signal`].
+/// Set by the `SIGTERM` / `SIGINT` handler: the flag every App's
+/// [`TerminationFlag`] holds unless it was given one of its own.
 ///
 /// An [`AtomicBool`](core::sync::atomic::AtomicBool) rather than anything that
 /// allocates or locks, because it is written from inside a signal handler; in an
 /// [`Arc`](std::sync::Arc) because that is what `signal_hook`'s flag registration
 /// holds on to.
-#[cfg(unix)]
 static TERMINATION_REQUESTED: std::sync::LazyLock<std::sync::Arc<core::sync::atomic::AtomicBool>> =
     std::sync::LazyLock::new(|| std::sync::Arc::new(core::sync::atomic::AtomicBool::new(false)));
+
+/// The flag whose raising asks **this App** to log out and quit, which
+/// [`quit_on_termination_signal`] polls.
+///
+/// A signal is sent to a process, not to an App, so by default
+/// ([`TerminationFlag::process`]) every App holds the one flag the
+/// `SIGTERM` / `SIGINT` handler raises: one signal logs every viewer of a test
+/// process out, as it must — none of them may strand its session. An App given
+/// a flag of its own ([`TerminationFlag::own`]) is out of the signal's reach and
+/// quits only when that flag is [raised](TerminationFlag::raise): how a test
+/// asks one of several viewers to quit exactly as a signal would.
+#[derive(Resource, Debug, Clone)]
+pub struct TerminationFlag(std::sync::Arc<core::sync::atomic::AtomicBool>);
+
+impl TerminationFlag {
+    /// The process's flag, raised by `SIGTERM` / `SIGINT` once
+    /// [`install_termination_handler`] has run.
+    #[must_use]
+    pub fn process() -> Self {
+        Self(std::sync::Arc::clone(&TERMINATION_REQUESTED))
+    }
+
+    /// A flag of this App's own, which no signal raises.
+    #[must_use]
+    pub fn own() -> Self {
+        Self(std::sync::Arc::new(core::sync::atomic::AtomicBool::new(
+            false,
+        )))
+    }
+
+    /// Ask every App holding this flag to log out and quit.
+    pub fn raise(&self) {
+        self.0.store(true, core::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Whether the flag has been raised.
+    #[must_use]
+    pub fn is_raised(&self) -> bool {
+        self.0.load(core::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+impl Default for TerminationFlag {
+    /// [`TerminationFlag::process`].
+    fn default() -> Self {
+        Self::process()
+    }
+}
 
 /// Ask the operating system to raise a flag on `SIGTERM` and `SIGINT` instead of
 /// killing the process, so [`quit_on_termination_signal`] can turn either into
@@ -410,28 +460,23 @@ pub fn install_termination_handler() -> Result<(), std::io::Error> {
     Ok(())
 }
 
-/// Turn a `SIGTERM` / `SIGINT` into the same graceful logout the menu's Quit
-/// takes, once per run.
+/// Turn a `SIGTERM` / `SIGINT` — or a raised [`TerminationFlag`] of this App's
+/// own — into the same graceful logout the menu's Quit takes, once per run.
 ///
 /// Polled from `Update` rather than acted on in the handler itself: a signal
 /// handler may not touch the ECS (or allocate, or lock), and the quit path is a
 /// message and a deadline.
 pub fn quit_on_termination_signal(
     time: Res<Time>,
+    flag: Res<TerminationFlag>,
     mut session: ResMut<ViewerSession>,
     mut commands: MessageWriter<SlCommand>,
 ) {
-    #[cfg(unix)]
-    {
-        if !TERMINATION_REQUESTED.load(core::sync::atomic::Ordering::Relaxed) {
-            return;
-        }
-        if session.quit_deadline.is_some() {
-            return;
-        }
-        info!("termination signal received; logging out");
-        request_logout(&mut session, &mut commands, time.elapsed_secs());
+    if !flag.is_raised() || session.quit_deadline.is_some() {
+        return;
     }
+    info!("termination requested; logging out");
+    request_logout(&mut session, &mut commands, time.elapsed_secs());
 }
 
 /// Route quit requests — menu ▸ Quit and the window close button (which, on
@@ -559,7 +604,7 @@ pub fn apply_draw_distance(
 /// (`crate::camera::position_camera`) follows the avatar the moment it arrives,
 /// so there is nothing to snap. The `SL_VIEWER_CAMERA_*` framing knobs the old
 /// snap read now seed the third-person orbit
-/// ([`CameraRig::seed_orbit_from_env`](sl_viewer_world_api::CameraRig)).
+/// ([`OrbitSeed`](sl_viewer_world_api::OrbitSeed)).
 pub fn drive_session(
     mut events: MessageReader<SlEvent>,
     identity: Res<SlIdentity>,

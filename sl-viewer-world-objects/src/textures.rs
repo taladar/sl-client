@@ -25,7 +25,6 @@
 //! glow / bump — those are deferred (see the roadmap non-goals).
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use bevy::asset::AssetMut;
@@ -223,10 +222,10 @@ impl FromWorld for TextureManager {
     /// Build the store over a fresh [`BevyTextureFetcher`], backed by the
     /// on-disk texture cache when a cache directory is available (falling back to
     /// an in-memory-only store if the cache cannot be opened).
-    fn from_world(_world: &mut World) -> Self {
+    fn from_world(world: &mut World) -> Self {
         let fetcher = Arc::new(BevyTextureFetcher::new());
-        let disk_dir = texture_cache_dir();
-        let store = build_store(&fetcher, disk_dir);
+        let cache = sl_viewer_platform::paths::ViewerPaths::of(world).texture_cache();
+        let store = build_store(&fetcher, cache);
         Self {
             store,
             fetcher,
@@ -675,19 +674,22 @@ impl TextureManager {
 /// by the on-disk cache at `disk_dir` when it can be opened, and otherwise
 /// in-memory only (a disk-cache failure must never keep the viewer from
 /// rendering).
-fn build_store(fetcher: &Arc<BevyTextureFetcher>, disk_dir: Option<PathBuf>) -> TextureStore {
+fn build_store(
+    fetcher: &Arc<BevyTextureFetcher>,
+    cache: sl_viewer_platform::paths::DiskCache,
+) -> TextureStore {
     // Coerce the concrete fetcher to the trait object the store stores (a move
     // through a typed binding, since `Arc::clone`'s inferred `T` would otherwise
     // demand the argument already be the trait object). The concrete `Arc` is
     // kept in the manager for `set_cap_url`.
     let concrete = Arc::clone(fetcher);
     let fetcher: Arc<dyn TextureFetcher> = concrete;
-    if let Some(dir) = disk_dir {
+    if let Some(dir) = cache.dir {
         match TextureStore::new(
             Arc::clone(&fetcher),
             Some(dir),
             CacheLimits {
-                max_bytes: sl_viewer_platform::paths::texture_cache_max_bytes(),
+                max_bytes: cache.max_bytes,
                 ..CacheLimits::default()
             },
         ) {
@@ -702,7 +704,7 @@ fn build_store(fetcher: &Arc<BevyTextureFetcher>, disk_dir: Option<PathBuf>) -> 
             Arc::clone(&fetcher),
             None,
             CacheLimits {
-                max_bytes: sl_viewer_platform::paths::texture_cache_max_bytes(),
+                max_bytes: cache.max_bytes,
                 ..CacheLimits::default()
             },
         ) {
@@ -710,13 +712,6 @@ fn build_store(fetcher: &Arc<BevyTextureFetcher>, disk_dir: Option<PathBuf>) -> 
             Err(error) => warn!("in-memory texture store failed to open ({error}); retrying"),
         }
     }
-}
-
-/// The viewer's on-disk texture cache directory (`<cache>/sl-client-bevy-viewer/
-/// texturecache`), from `XDG_CACHE_HOME` or `~/.cache`, or `None` when neither is
-/// set (the store then runs in-memory only).
-fn texture_cache_dir() -> Option<PathBuf> {
-    sl_viewer_platform::paths::asset_cache_dir("texturecache")
 }
 
 /// Serve the [`BoostTexture`] requests raised by the crates that only *show*

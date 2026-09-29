@@ -146,6 +146,7 @@ pub(crate) fn drive_own_locomotion(
     controls: Res<AvatarControls>,
     me: OwnAvatar,
     mut anim: crate::animations::AnimationState,
+    overrides: Res<crate::avatar_overrides::AvatarOverrides>,
     mut last_state: Local<Option<&'static str>>,
 ) {
     let now = time.elapsed_secs();
@@ -165,7 +166,7 @@ pub(crate) fn drive_own_locomotion(
     // a root presence too (where the sim would otherwise always drive the avatar and
     // hide it). When forced, the client state and the sim's tend to agree, so the
     // pose merge collapses to one animation rather than doubling.
-    if !force_client_locomotion() && anim.playback.has_active_sim_animation(own) {
+    if !overrides.motion.client_locomotion_forced && anim.playback.has_active_sim_animation(own) {
         anim.playback.set_client_locomotion(own, None, now);
         log_state(&mut last_state, Some("<simulator-driven>"));
         return;
@@ -188,15 +189,6 @@ pub(crate) fn drive_own_locomotion(
     anim.playback
         .set_client_locomotion(own, Some(builtin.id), now);
     log_state(&mut last_state, Some(name));
-}
-
-/// The debug override (env `SL_VIEWER_FORCE_CLIENT_LOCOMOTION=1`) that keeps the
-/// client-side locomotion fallback driving even when the simulator is animating the
-/// avatar — so the fallback can be exercised and verified on a root presence,
-/// without needing to land as an OpenSim child agent.
-#[must_use]
-fn force_client_locomotion() -> bool {
-    std::env::var("SL_VIEWER_FORCE_CLIENT_LOCOMOTION").as_deref() == Ok("1")
 }
 
 /// Edge-triggered live diagnostic (env `SL_VIEWER_LOG_LOCOMOTION=1`): log the own

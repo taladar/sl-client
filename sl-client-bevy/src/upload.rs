@@ -48,7 +48,7 @@ pub(crate) fn spawn_new_file_upload(
     let body = build_new_file_agent_inventory_request(request);
     let creating = owner.map(|owner| (request.clone(), owner));
     let asset_tx = caps.asset_tx.clone();
-    std::thread::spawn(move || {
+    crate::log_context::spawn_thread(move || {
         let event = run_caps_upload(&url, body, data, creating);
         deliver(&asset_tx, event);
     });

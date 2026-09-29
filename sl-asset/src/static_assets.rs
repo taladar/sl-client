@@ -147,7 +147,10 @@ static INSTALLED: OnceLock<Arc<StaticAssetLibrary>> = OnceLock::new();
 /// by consumers (the animation resolver, the wearable fetcher, …) that are
 /// constructed lazily from a Bevy `World` and have no start-up options to be
 /// handed a library through. It mirrors the reference viewer, whose equivalent
-/// is a global disk cache seeded once before anything asks for an asset.
+/// is a global disk cache seeded once before anything asks for an asset. So
+/// several viewer Apps in one process (the automation tier's in-process
+/// backend) share it too: the binary installs it before building its App, and
+/// an App built without an install serves every asset from the grid.
 ///
 /// Returns `false` if a library was already installed, in which case `library`
 /// is dropped and the existing one stays — the first install wins, so a

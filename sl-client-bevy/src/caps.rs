@@ -86,7 +86,9 @@ pub(crate) fn start_caps(session: &Session) -> Option<Caps> {
     let thread_events = events_tx.clone();
     let initial = seed.clone();
     tracing::info!(%seed, "start_caps: event-queue worker starting for the root region");
-    std::thread::spawn(move || run_event_queue(initial, &command_rx, &thread_events, &map_tx));
+    crate::log_context::spawn_thread(move || {
+        run_event_queue(initial, &command_rx, &thread_events, &map_tx);
+    });
     Some(Caps {
         events_rx,
         events_tx,
@@ -139,7 +141,7 @@ pub(crate) fn fetch_neighbour_caps(
     seed_url: url::Url,
     map_tx: Sender<NeighbourMapOutcome>,
 ) {
-    std::thread::spawn(move || {
+    crate::log_context::spawn_thread(move || {
         let outcome = match crate::http_proxy::blocking_client_builder()
             .timeout(EVENT_QUEUE_TIMEOUT)
             .build()

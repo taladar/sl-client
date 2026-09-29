@@ -223,6 +223,37 @@ impl Default for CameraRig {
     }
 }
 
+/// Where the third-person orbit starts, when a debug framing asks for other
+/// than the default rear view: the same `SL_VIEWER_CAMERA_*` knobs the old
+/// login snap read, now read once when the viewer is built and carried in its
+/// camera start.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct OrbitSeed {
+    /// The azimuth in degrees (`SL_VIEWER_CAMERA_ORBIT_DEG`; 90 = a side view).
+    pub azimuth_deg: Option<f32>,
+    /// The elevation in degrees, positive looking down
+    /// (`SL_VIEWER_CAMERA_ELEV_DEG`).
+    pub elevation_deg: Option<f32>,
+    /// The zoom distance in metres (`SL_VIEWER_CAMERA_DISTANCE`).
+    pub distance: Option<f32>,
+}
+
+impl OrbitSeed {
+    /// The seed the `SL_VIEWER_CAMERA_*` environment variables describe; each
+    /// one unset or unparsable leaves its part of the default view.
+    #[must_use]
+    pub fn from_env() -> Self {
+        let env_f32 = |key: &str| -> Option<f32> {
+            std::env::var(key).ok().and_then(|value| value.parse().ok())
+        };
+        Self {
+            azimuth_deg: env_f32("SL_VIEWER_CAMERA_ORBIT_DEG"),
+            elevation_deg: env_f32("SL_VIEWER_CAMERA_ELEV_DEG"),
+            distance: env_f32("SL_VIEWER_CAMERA_DISTANCE"),
+        }
+    }
+}
+
 impl CameraRig {
     /// Reset the third-person orbit to the default rear view — the reference's
     /// `Escape` "reset camera". Leaves the aim / smoothing alone (the caller snaps
@@ -234,24 +265,17 @@ impl CameraRig {
         self.distance = default.distance;
     }
 
-    /// Seed the third-person orbit from the debug framing environment variables,
-    /// so the offline screenshot harness can frame the avatar from a chosen angle
-    /// (the same `SL_VIEWER_CAMERA_*` knobs the old login-snap read). A no-op when
-    /// none are set — the default rear view stands.
-    ///
-    /// `SL_VIEWER_CAMERA_ORBIT_DEG` swings the azimuth (90 = a side view),
-    /// `_ELEV_DEG` the elevation (positive looks down), `_DISTANCE` the zoom.
-    pub fn seed_orbit_from_env(&mut self) {
-        let env_f32 = |key: &str| -> Option<f32> {
-            std::env::var(key).ok().and_then(|value| value.parse().ok())
-        };
-        if let Some(orbit) = env_f32("SL_VIEWER_CAMERA_ORBIT_DEG") {
+    /// Seed the third-person orbit from `seed`, so the offline screenshot
+    /// harness can frame the avatar from a chosen angle. A no-op for an empty
+    /// seed — the default rear view stands.
+    pub fn seed_orbit(&mut self, seed: OrbitSeed) {
+        if let Some(orbit) = seed.azimuth_deg {
             self.azimuth = orbit.to_radians();
         }
-        if let Some(elevation) = env_f32("SL_VIEWER_CAMERA_ELEV_DEG") {
+        if let Some(elevation) = seed.elevation_deg {
             self.elevation = elevation.to_radians().clamp(-MAX_PITCH, MAX_PITCH);
         }
-        if let Some(distance) = env_f32("SL_VIEWER_CAMERA_DISTANCE") {
+        if let Some(distance) = seed.distance {
             self.distance = distance.clamp(MOUSELOOK_CROSS_DISTANCE, MAX_DISTANCE);
         }
     }

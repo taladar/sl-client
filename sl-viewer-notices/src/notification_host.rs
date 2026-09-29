@@ -333,8 +333,8 @@ impl Plugin for NotificationSourcesPlugin {
         );
         // A sample spread on startup, so the live stacking / fade / modal
         // behaviour can be watched without a server alert. Registered only when
-        // the switch is set, so a normal session pays no scheduler dispatch for
-        // it; the system re-checks the variable itself.
+        // the switch is set (read once, here, for this App), so a normal
+        // session pays no scheduler dispatch for it.
         if std::env::var_os(DEMO_ENV).is_some() {
             app.add_systems(Update, spawn_notification_demo);
         }
@@ -2223,8 +2223,8 @@ pub fn apply_diagnostics_setting(
 
 /// **The demo source** (viewer-only, gated on [`DEMO_ENV`]): raise a staggered
 /// spread of sample notifications so the live stacking / timeout / fade / modal
-/// behaviour can be watched without a server alert. A no-op unless the env var
-/// is set.
+/// behaviour can be watched without a server alert. The plugin registers it
+/// only when the env var is set.
 ///
 /// Two stages, spaced in time: first the four **corner** toasts (after a short
 /// settle so the Fluent bundle has loaded and their text resolves through i18n
@@ -2239,7 +2239,7 @@ pub fn spawn_notification_demo(
     mut stage: Local<u8>,
     mut elapsed: Local<f32>,
 ) {
-    if std::env::var_os(DEMO_ENV).is_none() || *stage >= 2 {
+    if *stage >= 2 {
         return;
     }
     *elapsed += time.delta_secs();

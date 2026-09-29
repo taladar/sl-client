@@ -58,6 +58,7 @@ use crate::preferences::{
     spawn_pref_checkbox, spawn_pref_combo, spawn_pref_combo_with_anchor, spawn_pref_section,
     spawn_pref_slider,
 };
+use crate::render_overrides::RenderOverrides;
 use crate::settings::ViewerSettings;
 use crate::settings_binding::SettingBinding;
 use crate::sky::SceneSun;
@@ -682,10 +683,11 @@ pub(crate) fn build_graphics_tab(commands: &mut Commands, panel: Entity) {
 
 /// Apply [`SETTING_SHADOW_DETAIL`] to the scene sun's
 /// `DirectionalLight::shadow_maps_enabled` (idempotent, writes only on
-/// disagreement). The `SL_VIEWER_SUN_SHADOWS=0` experiment env is a hard
-/// off that wins over the stored value.
+/// disagreement). The `SL_VIEWER_SUN_SHADOWS=0` experiment override is a
+/// hard off that wins over the stored value.
 fn apply_shadow_detail(
     settings: Option<Res<ViewerSettings>>,
+    overrides: Option<Res<RenderOverrides>>,
     mut suns: Query<&mut DirectionalLight, With<SceneSun>>,
 ) {
     let Some(settings) = settings else {
@@ -695,7 +697,8 @@ fn apply_shadow_detail(
         .store()
         .get_u32(SETTING_SHADOW_DETAIL)
         .unwrap_or(DEFAULT_SHADOW_DETAIL);
-    let want = crate::sky::sun_shadows_enabled() && stored > 0;
+    let sun_disabled = overrides.is_some_and(|overrides| overrides.shadows.sun_disabled);
+    let want = !sun_disabled && stored > 0;
     for mut light in &mut suns {
         if light.shadow_maps_enabled != want {
             light.shadow_maps_enabled = want;
@@ -740,9 +743,11 @@ fn shadow_map_size_for(stored: u32) -> u32 {
 /// Apply [`SETTING_SHADOW_CASCADES`] to the scene sun's
 /// [`CascadeShadowConfig`], rebuilding it via
 /// [`crate::sky::shadow_cascades_for`] when the cascade count disagrees. The
-/// `SL_VIEWER_SHADOW_CASCADES` experiment env wins over the stored value.
+/// `SL_VIEWER_SHADOW_CASCADES` experiment override wins over the stored
+/// value.
 fn apply_shadow_cascades(
     settings: Option<Res<ViewerSettings>>,
+    overrides: Option<Res<RenderOverrides>>,
     mut suns: Query<&mut CascadeShadowConfig, With<SceneSun>>,
 ) {
     let Some(settings) = settings else {
@@ -753,8 +758,9 @@ fn apply_shadow_cascades(
         .get_u32(SETTING_SHADOW_CASCADES)
         .unwrap_or(DEFAULT_SHADOW_CASCADES)
         .clamp(SHADOW_CASCADES_MIN, SHADOW_CASCADES_MAX);
-    let want =
-        crate::sky::shadow_cascade_count().unwrap_or_else(|| usize::try_from(stored).unwrap_or(4));
+    let want = overrides
+        .and_then(|overrides| overrides.shadows.cascades)
+        .unwrap_or_else(|| usize::try_from(stored).unwrap_or(4));
     for mut config in &mut suns {
         if config.bounds.len() != want {
             *config = crate::sky::shadow_cascades_for(want);
@@ -768,12 +774,12 @@ fn apply_shadow_cascades(
 /// sun's shadows on, which is exactly what [`SETTING_SHADOW_DETAIL`] then drives
 /// through [`apply_shadow_detail`]'s `stored > 0` — nothing is taken away, so
 /// nothing is reported. `SL_VIEWER_SHADOW_CASCADES` pins whenever it parses to a
-/// count, which is what [`crate::sky::shadow_cascade_count`] returns `Some` for.
+/// count.
 ///
-/// Reads the environment through the two `sky` accessors, which resolve it once
-/// per process.
-pub(crate) fn record_env_pins(pins: &mut EnvPinnedSettings) {
-    if !crate::sky::sun_shadows_enabled() {
+/// Reads the app's [`RenderOverrides`], which the viewer read from the
+/// environment once.
+pub(crate) fn record_env_pins(pins: &mut EnvPinnedSettings, overrides: &RenderOverrides) {
+    if overrides.shadows.sun_disabled {
         pins.pin(
             SETTING_SHADOW_DETAIL,
             "SL_VIEWER_SUN_SHADOWS",
@@ -781,7 +787,7 @@ pub(crate) fn record_env_pins(pins: &mut EnvPinnedSettings) {
             PinKind::Live,
         );
     }
-    if let Some(count) = crate::sky::shadow_cascade_count() {
+    if let Some(count) = overrides.shadows.cascades {
         pins.pin(
             SETTING_SHADOW_CASCADES,
             "SL_VIEWER_SHADOW_CASCADES",

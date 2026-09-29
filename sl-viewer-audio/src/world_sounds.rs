@@ -1009,7 +1009,9 @@ mod tests {
         let Ok(mut mixer) = Mixer::new(&MixerConfig::default()) else {
             unreachable!("mixer graph builds without a device")
         };
-        let cache = SoundCache::new();
+        let cache = SoundCache::new(
+            sl_viewer_platform::paths::ViewerPaths::none().asset_cache("soundcache"),
+        );
         let mut sounds = WorldSounds::default();
         // One old (enqueued at t=0), one fresh (t=10), evaluated at now=10.
         sounds.pending_oneshots.push(PendingOneShot {

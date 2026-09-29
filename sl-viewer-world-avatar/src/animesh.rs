@@ -65,14 +65,6 @@ use crate::animations::{
 use crate::avatars::AvatarBody;
 use sl_viewer_world_api::ObjectState;
 
-/// Whether worn rigged meshes' joint position overrides (R1) are applied to the
-/// avatar skeleton. On by default; `SL_VIEWER_JOINT_OVERRIDES=0` disables it, so the
-/// pre-override skeleton behaviour can be compared side by side in one session.
-#[must_use]
-pub fn joint_overrides_enabled() -> bool {
-    std::env::var("SL_VIEWER_JOINT_OVERRIDES").as_deref() != Ok("0")
-}
-
 /// A guard on the linkset-chain walk in [`animesh_root`], against a malformed
 /// parent cycle.
 pub(crate) const MAX_LINKSET_DEPTH: usize = 32;

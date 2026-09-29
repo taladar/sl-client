@@ -32,14 +32,17 @@
 //! - **Clear cache** — confirmation first (the catalogue's
 //!   `ConfirmClearCache`), then a purge **on the next start** (the stores
 //!   hold their directories open for the whole session): the confirmation
-//!   drops [`crate::paths::mark_cache_for_purge`]'s marker file, honoured by
-//!   [`crate::paths::purge_caches_if_marked`] pre-app. **Clear inventory
+//!   drops [`ViewerPaths::mark_cache_for_purge`]'s marker file, honoured by
+//!   [`ViewerPaths::purge_caches_if_marked`] pre-app. **Clear inventory
 //!   cache** deletes the per-avatar inventory snapshots immediately (they
 //!   are only read at login and rewritten at logout).
 //!
 //! Reference (Firestorm, read-only): `panel_preferences_setup.xml`,
 //! `floater_preferences_proxy.xml`, `llviewerthrottle.cpp`,
 //! `llappviewer.cpp` (`initCache`).
+//!
+//! [`ViewerPaths::mark_cache_for_purge`]: crate::paths::ViewerPaths::mark_cache_for_purge
+//! [`ViewerPaths::purge_caches_if_marked`]: crate::paths::ViewerPaths::purge_caches_if_marked
 
 use bevy::prelude::*;
 use bevy::tasks::IoTaskPool;
@@ -160,13 +163,19 @@ pub fn register_settings(settings: &mut ViewerSettings) {
 }
 
 /// Consume this tab's **restart-scoped** settings from the pre-app store
-/// load in `crate::run_viewer`: install the cache / chat-log locations and
-/// cache-size ceilings as [`crate::paths`] startup overrides, install the
-/// HTTP proxy, and honour a pending clear-cache request — all before any
-/// store or HTTP client is built.
-pub fn apply_startup_settings(settings: &ViewerSettings) {
+/// load in `crate::run_viewer`: install the HTTP proxy — before any HTTP
+/// client is built — and return the cache / chat-log locations and
+/// cache-size ceilings, which the caller folds into the viewer's
+/// [`ViewerPaths`](crate::paths::ViewerPaths) (and honours a pending
+/// clear-cache request with) before any store is built.
+///
+/// The proxy is **process-wide**: every HTTP client of the process shares
+/// one (`sl_client_bevy::http_proxy`), set once, so of two viewers in one
+/// process the first to call this decides it.
+#[must_use]
+pub fn apply_startup_settings(settings: &ViewerSettings) -> crate::paths::StartupOverrides {
     let store = settings.store();
-    crate::paths::set_startup_overrides(crate::paths::StartupOverrides {
+    let overrides = crate::paths::StartupOverrides {
         cache_root: validated_dir(store.get_str(SETTING_CACHE_LOCATION).ok(), "cache"),
         chat_log_base: validated_dir(store.get_str(SETTING_CHAT_LOG_LOCATION).ok(), "chat-log"),
         texture_cache_max_bytes: store
@@ -177,7 +186,7 @@ pub fn apply_startup_settings(settings: &ViewerSettings) {
             .get_u32(SETTING_ASSET_CACHE_SIZE_MB)
             .ok()
             .map(megabytes_to_bytes),
-    });
+    };
     let proxy_enabled = store.get_bool(SETTING_HTTP_PROXY_ENABLED).unwrap_or(false);
     let proxy = store.get_str(SETTING_HTTP_PROXY).unwrap_or_default();
     if proxy_enabled && !proxy.is_empty() {
@@ -188,7 +197,7 @@ pub fn apply_startup_settings(settings: &ViewerSettings) {
             }
         }
     }
-    crate::paths::purge_caches_if_marked();
+    overrides
 }
 
 /// A settings value in MB as bytes (a u32 MB count times 2^20 always fits
@@ -383,26 +392,30 @@ pub(crate) fn apply_throttle(
 
 /// Answer the two clear-cache confirmations: **OK** on `ConfirmClearCache`
 /// marks the asset caches for a purge on the next start
-/// ([`crate::paths::mark_cache_for_purge`]); **OK** on
+/// ([`ViewerPaths::mark_cache_for_purge`]); **OK** on
 /// `ConfirmClearInventoryCache` deletes the per-avatar inventory snapshots
 /// now, detached on the [`IoTaskPool`] (they are only read at login and
 /// rewritten at logout, so a live session never re-reads them). Cancel and
 /// dismissal do nothing.
-fn handle_cache_clear_confirmations(mut responses: MessageReader<NotificationResponse>) {
+fn handle_cache_clear_confirmations(
+    mut responses: MessageReader<NotificationResponse>,
+    paths: Option<Res<crate::paths::ViewerPaths>>,
+) {
+    let paths = paths.as_deref().cloned().unwrap_or_default();
     for response in responses.read() {
         if response.button != Some("OK") {
             continue;
         }
         match response.template {
             "ConfirmClearCache" => {
-                if let Err(error) = crate::paths::mark_cache_for_purge() {
+                if let Err(error) = paths.mark_cache_for_purge() {
                     warn!("could not mark the cache for a purge on next start: {error}");
                 } else {
                     info!("cache marked for a purge on the next start");
                 }
             }
             "ConfirmClearInventoryCache" => {
-                let Some(base) = crate::paths::cache_accounts_base() else {
+                let Some(base) = paths.cache_accounts_base() else {
                     continue;
                 };
                 IoTaskPool::get()

@@ -35,7 +35,7 @@ pub(crate) fn dispatch_marketplace_request(
     let failure_reason = match (cap_url, request) {
         (Some(url), Ok(request)) => {
             let asset_tx = asset_tx.clone();
-            std::thread::spawn(move || {
+            crate::log_context::spawn_thread(move || {
                 run_marketplace_request(&url, operation, request, &asset_tx);
             });
             return;

@@ -291,15 +291,6 @@ fn route_hud_attachment(
     routed
 }
 
-/// Whether worn rigged meshes' joint position overrides (R1) are applied to the
-/// avatar skeleton. On by default; `SL_VIEWER_JOINT_OVERRIDES=0` disables it, so
-/// the pre-override skeleton behaviour can be compared side by side in one
-/// session.
-#[must_use]
-pub fn joint_overrides_enabled() -> bool {
-    std::env::var("SL_VIEWER_JOINT_OVERRIDES").as_deref() != Ok("0")
-}
-
 /// Whether the worn-attachment bind trace is enabled
 /// (`SL_VIEWER_LOG_ATTACHMENT_BIND=1`): logs, once per reason-change, why each
 /// worn rigged attachment is not yet bound, so an attachment that never binds
@@ -541,6 +532,9 @@ pub struct RiggedMirrors<'w> {
     avatars: ResMut<'w, AvatarState>,
     /// The animesh control avatars a non-worn rigged mesh drives.
     control: ResMut<'w, ControlAvatarState>,
+    /// The run's debug avatar knobs: whether the joint overrides (R1) reach
+    /// the skeleton at all.
+    overrides: Res<'w, crate::avatar_overrides::AvatarOverrides>,
 }
 
 /// The stores a skinned attachment build spawns and writes through, bundled as
@@ -846,7 +840,7 @@ pub fn apply_rigged_attachments(
         // the wearer (flagging it for a skeleton re-deform, the reference viewer's
         // `addAttachmentOverridesForObject`). Suppressible via
         // `SL_VIEWER_JOINT_OVERRIDES=0` (A/B against the pre-override behaviour).
-        let overrides = if joint_overrides_enabled() {
+        let overrides = if !mirrors.overrides.pose.joint_overrides_disabled {
             body.joint_overrides(&skin)
         } else {
             JointOverrides::default()

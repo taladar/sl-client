@@ -138,6 +138,7 @@ pub fn dump_avatars_on_key(
     keyboard: Res<ButtonInput<KeyCode>>,
     store: Res<ReplayCaptureStore>,
     identity: Res<SlIdentity>,
+    paths: Option<Res<sl_viewer_platform::paths::ViewerPaths>>,
 ) {
     let Some(dir) = std::env::var_os(DUMP_DIR_ENV) else {
         return;
@@ -172,7 +173,7 @@ pub fn dump_avatars_on_key(
     {
         let manifest = build_manifest(&store, avatar);
         let agent = manifest.agent.to_string();
-        let (counts, textures) = copy_cache_assets(&dir, &manifest, now_unix);
+        let (counts, textures) = copy_cache_assets(paths.as_deref(), &dir, &manifest, now_unix);
         assets = assets
             .saturating_add(counts.meshes)
             .saturating_add(counts.anims)
@@ -205,9 +206,10 @@ pub fn dump_avatars_on_key(
     // runtime) but block the dump on its completion: a detached thread would be
     // killed when the operator closes the viewer, leaving the bundle's textures
     // incomplete. The brief pause is the price of a guaranteed-complete bundle.
-    let fetched = std::thread::spawn(move || run_texture_fetch(&dir, &plan, now_unix))
-        .join()
-        .unwrap_or(0);
+    let fetched =
+        sl_client_bevy::log_context::spawn_thread(move || run_texture_fetch(&dir, &plan, now_unix))
+            .join()
+            .unwrap_or(0);
     info!("avatar dump: fetched {fetched}/{total} full-resolution texture(s); capture complete");
 }
 

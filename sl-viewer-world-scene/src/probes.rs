@@ -135,10 +135,11 @@ use sl_viewer_kit::probe_layers::{
     default_probe_camera_render_layers, local_probe_camera_render_layers,
 };
 use sl_viewer_settings::ViewerSettings;
+
+use crate::render_overrides::RenderOverrides;
 use sl_viewer_world_api::{BOX_FALLOFF, MIN_NEAR_CLIP, ObjectReflectionProbe, ViewerCamera};
 use std::collections::VecDeque;
 use std::f32::consts::FRAC_PI_2;
-use std::sync::OnceLock;
 
 /// The per-face cubemap capture resolution, in texels. Must be a power of two
 /// (and ≤ 8192) for [`GeneratedEnvironmentMapLight`]'s filter to accept the cube.
@@ -193,6 +194,9 @@ const PROBE_GAIN: f32 = 1.0;
 /// Default `0.0` drops it entirely (the probe is the single ambient source, so it
 /// is not double-counted); overridable by `SL_VIEWER_PROBE_AMBIENT_SCALE`.
 ///
+/// Per app ([`ProbeOverrides::ambient_scale`](crate::render_overrides::ProbeOverrides)),
+/// read by the viewer from the environment once.
+///
 /// This is a **factor of the ambient the sky asks for**, not an attenuation applied
 /// to whatever the resource happens to hold: `crate::sky`'s `drive_sky` folds it into
 /// the absolute brightness it writes. A `PostUpdate` system that multiplied the
@@ -207,30 +211,17 @@ const PROBE_GAIN: f32 = 1.0;
 /// probes by the same rule or its scenes are lit differently from the world they
 /// stand in for.
 ///
-/// Resolved once per process (the environment is fixed at launch); the sky's
-/// per-frame ambient write reads it.
+/// The sky's per-frame ambient write reads it.
 #[must_use]
-pub fn probe_ambient_scale() -> f32 {
-    static SCALE: OnceLock<f32> = OnceLock::new();
-    *SCALE.get_or_init(|| {
-        std::env::var("SL_VIEWER_PROBE_AMBIENT_SCALE")
-            .ok()
-            .and_then(|value| value.parse::<f32>().ok())
-            .unwrap_or(0.0)
-    })
+pub const fn probe_ambient_scale(overrides: &RenderOverrides) -> f32 {
+    overrides.probes.ambient_scale
 }
 
-/// The gain to apply to the probes' image-based lighting, overridable at runtime by
-/// `SL_VIEWER_PROBE_GAIN` (an A/B knob — the calibrated value is `PROBE_GAIN`).
-/// Resolved once per process; `probe_intensity` reads it from per-frame systems.
-fn probe_gain() -> f32 {
-    static GAIN: OnceLock<f32> = OnceLock::new();
-    *GAIN.get_or_init(|| {
-        std::env::var("SL_VIEWER_PROBE_GAIN")
-            .ok()
-            .and_then(|value| value.parse::<f32>().ok())
-            .unwrap_or(PROBE_GAIN)
-    })
+/// The gain to apply to the probes' image-based lighting: the calibrated
+/// `PROBE_GAIN`, unless the app's overrides pin another (`SL_VIEWER_PROBE_GAIN`,
+/// an A/B knob). `probe_intensity` reads it from per-frame systems.
+fn probe_gain(overrides: &RenderOverrides) -> f32 {
+    overrides.probes.gain.unwrap_or(PROBE_GAIN)
 }
 
 /// The [`EnvironmentMapLight`] intensity that gives the probes a [`probe_gain`] gain
@@ -251,14 +242,14 @@ fn probe_gain() -> f32 {
 /// shaders, which sample the probe and scale by `intensity_for_view * view.exposure`
 /// (they are not themselves exposed), land on the same gain — one calibration for both
 /// material families.
-fn probe_intensity(exposure: &Exposure) -> f32 {
+fn probe_intensity(exposure: &Exposure, overrides: &RenderOverrides) -> f32 {
     let scale = exposure.exposure();
     // A zero/denormal exposure would blow the intensity up to infinity; fall back to
     // Bevy's default rather than emit a NaN into the light probes.
     if scale > f32::EPSILON {
-        probe_gain() / scale
+        probe_gain(overrides) / scale
     } else {
-        probe_gain() / Exposure::default().exposure()
+        probe_gain(overrides) / Exposure::default().exposure()
     }
 }
 
@@ -314,6 +305,7 @@ fn light_capture_cameras(
 /// Only entities whose intensity actually differs are touched, so a settled scene does
 /// no change-detection churn.
 fn calibrate_probe_intensity(
+    overrides: Res<RenderOverrides>,
     camera: Query<&Exposure, With<ViewerCamera>>,
     mut probes: Query<(
         &mut GeneratedEnvironmentMapLight,
@@ -323,7 +315,7 @@ fn calibrate_probe_intensity(
     let Ok(exposure) = camera.single() else {
         return;
     };
-    let intensity = probe_intensity(exposure);
+    let intensity = probe_intensity(exposure, &overrides);
     for (mut generated, filtered) in &mut probes {
         if (generated.intensity - intensity).abs() > f32::EPSILON {
             generated.intensity = intensity;
@@ -533,6 +525,7 @@ pub struct ReflectionProbePlugin;
 impl Plugin for ReflectionProbePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ProbeCubeCopies>()
+            .init_resource::<RenderOverrides>()
             .init_resource::<CaptureSchedule>()
             .init_resource::<ProbeCaptureStats>()
             .init_resource::<ProbeTestSphere>()
@@ -837,6 +830,7 @@ fn setup_probe_rigs(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
 fn install_global_probe(
     mut commands: Commands,
     mut probes: ResMut<ProbeRigs>,
+    overrides: Res<RenderOverrides>,
     camera: Query<(Entity, &Exposure), With<ViewerCamera>>,
 ) {
     if probes.installed {
@@ -850,7 +844,7 @@ fn install_global_probe(
     };
     commands.entity(view).insert(GeneratedEnvironmentMapLight {
         environment_map: global.cube.clone(),
-        intensity: probe_intensity(exposure),
+        intensity: probe_intensity(exposure, &overrides),
         // The cube is captured directly in Bevy world space, so it samples with no
         // extra reorientation.
         rotation: Quat::IDENTITY,
@@ -1024,6 +1018,7 @@ fn drive_local_probes(
     mut commands: Commands,
     books: ProbeBooks,
     mirrors: Res<MirrorSettings>,
+    overrides: Res<RenderOverrides>,
     camera: Query<(&GlobalTransform, &Exposure), With<ViewerCamera>>,
     probes: Query<(Entity, &ObjectReflectionProbe, &GlobalTransform)>,
     mut last_bound: Local<usize>,
@@ -1098,7 +1093,7 @@ fn drive_local_probes(
                     object,
                     cube,
                     probe,
-                    probe_intensity(exposure),
+                    probe_intensity(exposure, &overrides),
                     world_rotation,
                 );
                 if let Some(slot) = rigs.bindings.get_mut(index) {
@@ -1373,19 +1368,6 @@ fn drive_probe_captures(
     };
 }
 
-/// Whether the reflection-probe diagnostic mirror ball is enabled
-/// (`SL_VIEWER_PROBE_TEST_SPHERE=1`). Off by default; a debug affordance to *see* the
-/// captured environment, since ordinary Second Life / OpenSim content rarely carries
-/// the metallic PBR materials a probe visibly reflects. Resolved once per process —
-/// it gates a per-frame system that is otherwise a no-op.
-fn probe_test_sphere_enabled() -> bool {
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| {
-        std::env::var("SL_VIEWER_PROBE_TEST_SPHERE")
-            .is_ok_and(|value| value == "1" || value.eq_ignore_ascii_case("true"))
-    })
-}
-
 /// Tracks whether the diagnostic mirror ball has been spawned yet (it is deferred
 /// until the fly-camera entity exists, then spawned once).
 #[derive(Resource, Default)]
@@ -1397,17 +1379,18 @@ struct ProbeTestSphere {
 /// Spawn a perfectly-mirrored sphere parented to the main view (a "mirror ball") so
 /// the captured environment cubemap is directly visible as its reflection — a
 /// diagnostic for the whole capture → copy → filter → image-based-lighting chain,
-/// enabled only by [`probe_test_sphere_enabled`]. A metallic, near-zero-roughness
+/// enabled only by the app's `ProbeOverrides::test_sphere`. A metallic, near-zero-roughness
 /// `StandardMaterial` renders black without an environment map, so a lit ball
 /// confirms the probe works (and its content confirms the orientation).
 fn spawn_probe_test_sphere(
     mut commands: Commands,
     mut state: ResMut<ProbeTestSphere>,
+    overrides: Res<RenderOverrides>,
     camera: Query<Entity, With<ViewerCamera>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    if state.spawned || !probe_test_sphere_enabled() {
+    if state.spawned || !overrides.probes.test_sphere {
         return;
     }
     let Ok(view) = camera.single() else {
@@ -1907,6 +1890,17 @@ fn spawn_hero_holder(
         .id()
 }
 
+/// What the hero probes are lit by, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): whether mirrors are on at
+/// all, and the app's render overrides (the probes' gain).
+#[derive(bevy::ecs::system::SystemParam)]
+struct HeroLighting<'w> {
+    /// Whether mirrors (the hero probes) are enabled.
+    settings: Res<'w, MirrorSettings>,
+    /// The app's render overrides.
+    overrides: Res<'w, RenderOverrides>,
+}
+
 /// Hand the nearest mirror prims the hero rigs (the mirror counterpart of
 /// `drive_local_probes`).
 ///
@@ -1918,13 +1912,17 @@ fn spawn_hero_holder(
 /// real change, and republishes the render-world blit list.
 fn drive_hero_probes(
     mut commands: Commands,
-    settings: Res<MirrorSettings>,
+    lighting: HeroLighting,
     mut rigs: ResMut<HeroProbeRigs>,
     mut copies: ResMut<HeroCubeCopies>,
     camera: Query<(&GlobalTransform, &Exposure), With<ViewerCamera>>,
     probes: Query<(Entity, &ObjectReflectionProbe, &GlobalTransform)>,
     mut last_bound: Local<usize>,
 ) {
+    let HeroLighting {
+        settings,
+        overrides,
+    } = lighting;
     let Ok((view, exposure)) = camera.single() else {
         return;
     };
@@ -1999,7 +1997,7 @@ fn drive_hero_probes(
                     object,
                     cube,
                     probe,
-                    probe_intensity(exposure),
+                    probe_intensity(exposure, &overrides),
                     world_rotation,
                 );
                 if let Some(slot) = rigs.bindings.get_mut(index) {
@@ -2209,6 +2207,7 @@ mod tests {
         BOX_FALLOFF, DEFAULT_PROBE_PERIOD_SECS, MIN_NEAR_CLIP, ObjectReflectionProbe, PROBE_GAIN,
         pick_next_rig, probe_intensity,
     };
+    use crate::render_overrides::RenderOverrides;
     use bevy::camera::Exposure;
     use bevy::prelude::Vec3;
     use pretty_assertions::assert_eq;
@@ -2388,7 +2387,8 @@ mod tests {
             Exposure::default().ev100,
         ] {
             let exposure = Exposure { ev100 };
-            let gain = probe_intensity(&exposure) * exposure.exposure();
+            let gain =
+                probe_intensity(&exposure, &RenderOverrides::default()) * exposure.exposure();
             assert!(
                 (gain - PROBE_GAIN).abs() < 1.0e-3,
                 "ev100={ev100} gain={gain}"
@@ -2403,9 +2403,10 @@ mod tests {
     fn a_degenerate_exposure_falls_back() {
         // `exposure()` is `exp2(-ev100) / 1.2`, so a huge ev100 underflows it to zero.
         let degenerate = Exposure { ev100: 1000.0 };
-        let intensity = probe_intensity(&degenerate);
+        let overrides = RenderOverrides::default();
+        let intensity = probe_intensity(&degenerate, &overrides);
         assert!(intensity.is_finite());
-        assert!((intensity - probe_intensity(&Exposure::default())).abs() < 1.0e-3);
+        assert!((intensity - probe_intensity(&Exposure::default(), &overrides)).abs() < 1.0e-3);
     }
 
     /// The default (ambient) probe stays off the local probes' continuous

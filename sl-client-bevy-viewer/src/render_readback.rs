@@ -231,6 +231,10 @@ pub(crate) fn frames_for(seconds: f32) -> u32 {
 /// render apps racing for the adapter under a concurrent build is exactly the
 /// load pattern the tier used to flake under. Poisoning is ignored: a test that
 /// failed must not fail the ones after it.
+///
+/// Process-wide by design, and held for a whole test: a test that runs several
+/// viewer Apps side by side (each with its own wgpu device) takes it once for
+/// all of them, never once per App.
 pub(crate) fn gpu_lock() -> MutexGuard<'static, ()> {
     static GPU: Mutex<()> = Mutex::new(());
     GPU.lock().unwrap_or_else(PoisonError::into_inner)

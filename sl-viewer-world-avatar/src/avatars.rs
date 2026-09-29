@@ -143,10 +143,10 @@ impl Plugin for AvatarAppearancePlugin {
             // R22b diagnostic census of unresolved coarse "blue sphere" avatars.
             app.add_systems(Update, log_avatar_interest_census);
         }
-        if std::env::var_os("SL_VIEWER_VOLUME_FOCUS").is_some() {
+        if let Some(focus) = VolumeFocus::from_env() {
             // Aim the camera at the avatar whose shape displaces its collision
             // volumes the most (P34.3).
-            app.add_systems(
+            app.insert_resource(focus).add_systems(
                 Update,
                 focus_camera_on_volume_shape.after(WorldPhase::CameraPositioned),
             );
@@ -323,26 +323,6 @@ pub(crate) fn log_avatar_interest() -> bool {
     std::env::var("SL_VIEWER_LOG_AVATAR_INTEREST").as_deref() == Ok("1")
 }
 
-/// Whether the bake-on-mesh diagnostic flat-skin mode is enabled
-/// (`SL_VIEWER_DEBUG_AVATAR_FLAT=1`): renders every BoM face with a flat neutral
-/// material instead of its baked texture, so a texture / UV-seam artifact (which
-/// disappears) can be distinguished from a geometry / normals one (which remains,
-/// still lit by the mesh normals). An A/B diagnostic for the R22 arm seams.
-fn debug_avatar_flat() -> bool {
-    std::env::var("SL_VIEWER_DEBUG_AVATAR_FLAT").as_deref() == Ok("1")
-}
-
-/// Whether the bake-on-mesh diagnostic UV-grid mode is enabled
-/// (`SL_VIEWER_DEBUG_AVATAR_GRID=1`): renders every BoM face with a generated UV
-/// grid ([`uv_grid_image`]) instead of its baked texture, sampled through the same
-/// per-face UV transform the bake uses. The grid makes the mesh's UV mapping
-/// visible — a continuous grid across the arm means its UV layout is fine and the
-/// seams are baked *skin content*; a broken / offset grid means a UV-mapping
-/// problem. Takes precedence over [`debug_avatar_flat`].
-fn debug_avatar_grid() -> bool {
-    std::env::var("SL_VIEWER_DEBUG_AVATAR_GRID").as_deref() == Ok("1")
-}
-
 /// The side length of the generated UV-grid diagnostic texture.
 const UV_GRID_SIZE: usize = 512;
 /// The UV-grid cell size in texels (fine grid lines).
@@ -353,7 +333,7 @@ const UV_GRID_COARSE: usize = 128;
 /// A UV-diagnostic grid texture (R22): an `x → red`, `y → green` position gradient
 /// (so any UV discontinuity shows as a colour jump) overlaid with black grid lines
 /// every [`UV_GRID_CELL`] texels and white lines every [`UV_GRID_COARSE`]. Rendered
-/// on a BoM face in [`debug_avatar_grid`] mode to reveal how the mesh UVs map a
+/// on a BoM face in `DiagnosticSkin::UvGrid` mode to reveal how the mesh UVs map a
 /// texture. Sampled nearest + repeat so the cells stay crisp.
 fn uv_grid_image() -> Image {
     let size = UV_GRID_SIZE;
@@ -1018,6 +998,36 @@ fn root_drop_from_metrics(metrics: &BodySizeMetrics, hover: f32, pelvis_fixup: f
 /// avatar relative to the ground, added to the root plant (R23).
 const AVATAR_HOVER_PARAM: i32 = 11001;
 
+/// What `SL_VIEWER_VOLUME_FOCUS` asks [`focus_camera_on_volume_shape`] to
+/// frame, read once when the App is built.
+#[derive(Resource, Debug, Clone, PartialEq)]
+pub(crate) struct VolumeFocus {
+    /// The agent id to frame (the variable set to an id), or `None` for
+    /// whichever avatar is displaced most (the variable set to `1`).
+    pinned: Option<String>,
+    /// How far back to stand, metres (`SL_VIEWER_CAMERA_DISTANCE`, default
+    /// 3 m).
+    distance: f32,
+}
+
+impl VolumeFocus {
+    /// The focus the environment asks for, or `None` when the switch is off
+    /// (unset or empty).
+    fn from_env() -> Option<Self> {
+        let setting = std::env::var("SL_VIEWER_VOLUME_FOCUS").ok()?;
+        if setting.is_empty() {
+            return None;
+        }
+        Some(Self {
+            pinned: (setting != "1").then_some(setting),
+            distance: std::env::var("SL_VIEWER_CAMERA_DISTANCE")
+                .ok()
+                .and_then(|raw| raw.parse::<f32>().ok())
+                .unwrap_or(3.0),
+        })
+    }
+}
+
 /// A debug affordance (env `SL_VIEWER_VOLUME_FOCUS`): aim the fly-camera at the
 /// avatar whose shape displaces its **collision volumes** the most (P34.3 / P34.4),
 /// from a few metres back — the counterpart of
@@ -1042,7 +1052,7 @@ pub(crate) fn focus_camera_on_volume_shape(
         (&mut Transform, &mut sl_viewer_world_api::CameraRig),
         With<sl_viewer_world_api::ViewerCamera>,
     >,
-    mut setting: Local<Option<String>>,
+    focus: Res<VolumeFocus>,
     mut framed: Local<bool>,
 ) {
     // Frame the subject **once**, then leave the camera alone: re-aiming every frame
@@ -1053,15 +1063,8 @@ pub(crate) fn focus_camera_on_volume_shape(
         return;
     }
     // `SL_VIEWER_VOLUME_FOCUS=1` frames whichever avatar is displaced most; set it to
-    // an **agent id** instead to pin the subject. An empty setting means the switch is
-    // off (the env is absent), which is the common case.
-    let setting = setting.get_or_insert_with(|| {
-        std::env::var("SL_VIEWER_VOLUME_FOCUS").unwrap_or_else(|_error| String::new())
-    });
-    if setting.is_empty() {
-        return;
-    }
-    let pinned = (setting.as_str() != "1").then_some(setting.as_str());
+    // an **agent id** instead to pin the subject.
+    let pinned = focus.pinned.as_deref();
     // The pinned avatar, else the one with the largest total displacement (summed
     // over every volume, the scale deltas and the position deltas in metres alike —
     // both move a mesh body).
@@ -1111,10 +1114,7 @@ pub(crate) fn focus_camera_on_volume_shape(
     let Ok((mut transform, mut rig)) = camera.single_mut() else {
         return;
     };
-    let distance = std::env::var("SL_VIEWER_CAMERA_DISTANCE")
-        .ok()
-        .and_then(|raw| raw.parse::<f32>().ok())
-        .unwrap_or(3.0);
+    let distance = focus.distance;
     // Stand off the avatar's own forward (its Second Life +X, carried into Bevy by
     // the joint's world rotation) at chest height, looking back at the chest. A
     // degenerate forward (a joint whose facing flattens to nothing) falls back to
@@ -2618,13 +2618,13 @@ pub struct AvatarBakeMaterials {
     /// base region outright ([`apply_avatar_part_visibility`]).
     alpha: HashMap<TextureKey, BakeAlpha>,
     /// The [`uv_grid_image`] handle, built once on first use of the
-    /// [`debug_avatar_grid`] diagnostic mode.
+    /// `DiagnosticSkin::UvGrid` diagnostic mode.
     debug_grid: Option<Handle<Image>>,
 }
 
 impl AvatarBakeMaterials {
     /// The diagnostic UV-grid image handle ([`uv_grid_image`]), built and uploaded
-    /// once on first use (the [`debug_avatar_grid`] mode).
+    /// once on first use (the `DiagnosticSkin::UvGrid` mode).
     fn debug_grid(&mut self, images: &mut Assets<Image>) -> Handle<Image> {
         self.debug_grid
             .get_or_insert_with(|| images.add(uv_grid_image()))
@@ -3403,6 +3403,8 @@ pub struct AppearanceAssets<'w> {
     store: Res<'w, DecodedTextures>,
     /// The live A/B gain on the collision-volume displacement (P34.3).
     volume_gain: Res<'w, VolumeMorphGain>,
+    /// The run's debug avatar knobs: whether body physics is forced on.
+    overrides: Res<'w, crate::avatar_overrides::AvatarOverrides>,
 }
 
 /// The body entities an appearance fold rebuilds, bundled as one
@@ -3593,7 +3595,7 @@ pub(crate) fn apply_avatar_appearance(
     // The reference viewer's `physics_test` switch (P34.2): every `Max_Effect` is
     // zero unless a tuned physics wearable turns it on, so this is what makes the
     // bounce visible on an avatar that wears none.
-    let force_physics = crate::body_physics::force_enabled();
+    let force_physics = assets.overrides.motion.body_physics_forced;
     // The debug A/B knob for the collision-volume displacement (P34.3), live-toggled
     // by the `V` key.
     let volume_gain = assets.volume_gain.gain;
@@ -4218,6 +4220,7 @@ pub(crate) fn apply_bom_face_materials(
         (&BomFace, &MeshMaterial3d<FaceMaterial>, &mut Visibility),
         Without<AvatarBodyPart>,
     >,
+    overrides: Res<crate::avatar_overrides::AvatarOverrides>,
     // Diagnostic-only (R22h): the last per-(agent, slot) resolution tally logged,
     // so the summary is emitted only when it changes (see the loop below).
     mut last_tally: Local<String>,
@@ -4293,7 +4296,9 @@ pub(crate) fn apply_bom_face_materials(
         let bake = region_bake.get(&(face.agent, face.slot));
         let bake_has_alpha = bake.is_some_and(|&(_, has_alpha)| has_alpha);
         let alpha_mode = bom_face_alpha_mode(face.tint[3], bake_has_alpha);
-        let (texture, base_color) = if debug_avatar_grid() {
+        let (texture, base_color) = if overrides.diagnostic_skin
+            == Some(crate::avatar_overrides::DiagnosticSkin::UvGrid)
+        {
             // Diagnostic (R22): render the mesh's UV mapping as a grid, so a broken
             // grid (UV-mapping problem) can be told apart from a continuous one
             // (seams are baked skin content). Same per-face UV transform as the bake.
@@ -4301,7 +4306,7 @@ pub(crate) fn apply_bom_face_materials(
                 Some(paint.bake_mats.debug_grid(&mut paint.images)),
                 Color::WHITE,
             )
-        } else if debug_avatar_flat() {
+        } else if overrides.diagnostic_skin == Some(crate::avatar_overrides::DiagnosticSkin::Flat) {
             // Diagnostic (R22): drop the bake and render a flat neutral skin so a
             // texture/UV-seam artifact (vanishes) can be told apart from a
             // geometry/normals one (persists — still lit by the mesh normals).

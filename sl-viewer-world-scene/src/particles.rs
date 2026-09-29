@@ -720,17 +720,13 @@ fn busiest_centroid<'cloud>(clouds: impl Iterator<Item = &'cloud Cloud>) -> Opti
 /// without hand-aiming. Runs after [`drive_particles`] (so this frame's particles
 /// are in) and after `position_camera` (so it
 /// overrides the follow pose). Flycam is the only mode whose pose a system may
-/// write directly (the others recompute it), so it switches there.
+/// write directly (the others recompute it), so it switches there. The plugin
+/// registers it only when the variable is set, read once as the App is built.
 pub(crate) fn focus_camera_on_particles(
     clouds: Query<&Cloud>,
     mut mode: ResMut<sl_viewer_world_api::CameraMode>,
     mut camera: Query<(&mut Transform, &mut sl_viewer_world_api::CameraRig), With<ViewerCamera>>,
-    mut enabled: Local<Option<bool>>,
 ) {
-    let on = *enabled.get_or_insert_with(|| std::env::var_os("SL_VIEWER_PARTICLE_FOCUS").is_some());
-    if !on {
-        return;
-    }
     let Some((centroid, _count)) = busiest_centroid(clouds.iter()) else {
         return;
     };

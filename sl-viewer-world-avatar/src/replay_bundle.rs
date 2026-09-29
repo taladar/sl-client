@@ -36,6 +36,7 @@ use sl_client_bevy::{
     decode_texture_entry, parse_material_asset, pcode,
 };
 use sl_texture::{CacheLimits as TextureCacheLimits, TextureDiskCache};
+use sl_viewer_platform::paths::ViewerPaths;
 
 use crate::avatars::bake_service_slot_name;
 
@@ -192,9 +193,11 @@ pub(crate) struct BundleCounts {
 /// resolution separately (`run_texture_fetch`).
 ///
 /// Best-effort: a missing source entry (evicted, or never fetched) is skipped,
-/// not an error. `now_unix` stamps the bundle entries for their own LRU
+/// not an error, and a viewer with no cache (`live` absent or storing nothing)
+/// copies nothing. `now_unix` stamps the bundle entries for their own LRU
 /// bookkeeping.
 pub(crate) fn copy_cache_assets(
+    live: Option<&ViewerPaths>,
     bundle_dir: &Path,
     manifest: &ReplayManifest,
     now_unix: u32,
@@ -203,14 +206,15 @@ pub(crate) fn copy_cache_assets(
     // Copy the PBR material assets, expanding each into the texture maps it
     // references so they join the texture fetch set.
     let materials = copy_materials(
+        live,
         bundle_dir,
         &assets.materials,
         &mut assets.textures,
         now_unix,
     );
     let counts = BundleCounts {
-        meshes: copy_meshes(bundle_dir, &assets.meshes, now_unix),
-        anims: copy_anims(bundle_dir, &assets.anims, now_unix),
+        meshes: copy_meshes(live, bundle_dir, &assets.meshes, now_unix),
+        anims: copy_anims(live, bundle_dir, &assets.anims, now_unix),
         materials,
     };
     (counts, assets.textures)
@@ -314,6 +318,7 @@ fn fetch_full_codestream(client: &reqwest::blocking::Client, url: &str) -> Optio
 /// material cache into the bundle, and — decoding each — add the texture maps it
 /// references to `textures` so they are bundled too. Returns the count copied.
 fn copy_materials(
+    live: Option<&ViewerPaths>,
     bundle_dir: &Path,
     ids: &BTreeSet<Uuid>,
     textures: &mut BTreeSet<Uuid>,
@@ -322,7 +327,7 @@ fn copy_materials(
     if ids.is_empty() {
         return 0;
     }
-    let Some(source_dir) = live_cache_dir(MATERIAL_CACHE) else {
+    let Some(source_dir) = live_cache_dir(live, MATERIAL_CACHE) else {
         return 0;
     };
     let Ok(source) = AssetDiskCache::open(source_dir, AssetCacheLimits::default()) else {
@@ -360,9 +365,9 @@ fn copy_materials(
     copied
 }
 
-/// The live cache directory for `kind`, if the platform has a cache root.
-fn live_cache_dir(kind: &str) -> Option<PathBuf> {
-    sl_viewer_platform::paths::asset_cache_dir(kind)
+/// The live cache directory for `kind`, if the viewer has a cache root.
+fn live_cache_dir(live: Option<&ViewerPaths>, kind: &str) -> Option<PathBuf> {
+    live?.live_asset_cache_dir(kind)
 }
 
 /// The bundle's cache directory for `kind` (`<bundle>/cache/<kind>`).
@@ -371,11 +376,16 @@ pub(crate) fn bundle_cache_dir(bundle_dir: &Path, kind: &str) -> PathBuf {
 }
 
 /// Copy the mesh-cache entries for `ids` from the live cache into the bundle.
-fn copy_meshes(bundle_dir: &Path, ids: &BTreeSet<Uuid>, now_unix: u32) -> u32 {
+fn copy_meshes(
+    live: Option<&ViewerPaths>,
+    bundle_dir: &Path,
+    ids: &BTreeSet<Uuid>,
+    now_unix: u32,
+) -> u32 {
     if ids.is_empty() {
         return 0;
     }
-    let Some(source_dir) = live_cache_dir(MESH_CACHE) else {
+    let Some(source_dir) = live_cache_dir(live, MESH_CACHE) else {
         return 0;
     };
     let Ok(source) = MeshDiskCache::open(source_dir, MeshCacheLimits::default()) else {
@@ -401,11 +411,16 @@ fn copy_meshes(bundle_dir: &Path, ids: &BTreeSet<Uuid>, now_unix: u32) -> u32 {
 
 /// Copy the animation-cache entries for `ids` from the live cache into the
 /// bundle (a generic [`sl_asset`] store on disk).
-fn copy_anims(bundle_dir: &Path, ids: &BTreeSet<Uuid>, now_unix: u32) -> u32 {
+fn copy_anims(
+    live: Option<&ViewerPaths>,
+    bundle_dir: &Path,
+    ids: &BTreeSet<Uuid>,
+    now_unix: u32,
+) -> u32 {
     if ids.is_empty() {
         return 0;
     }
-    let Some(source_dir) = live_cache_dir(ANIM_CACHE) else {
+    let Some(source_dir) = live_cache_dir(live, ANIM_CACHE) else {
         return 0;
     };
     let Ok(source) = AssetDiskCache::open(source_dir, AssetCacheLimits::default()) else {

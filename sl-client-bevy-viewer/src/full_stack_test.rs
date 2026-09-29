@@ -1087,6 +1087,7 @@ fn build_viewer_app(
         day_position: options.day_position,
         ..crate::render_overrides::RenderOverrides::default()
     });
+    app_options.avatar_overrides = Some(crate::avatar_overrides::AvatarOverrides::default());
     // The login-time chat history fetch is not what any test here is about,
     // and the fake grid does not serve the capability.
     app_options.content.fetch_server_chat_history = false;

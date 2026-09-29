@@ -975,6 +975,7 @@ fn start_capture(
     mut state: ResMut<PanoramaState>,
     mut commands: Commands,
     translator: Translator,
+    paths: Option<Res<sl_viewer_platform::paths::ViewerPaths>>,
 ) {
     let Some(request) = requests.read().last().copied() else {
         return;
@@ -997,7 +998,7 @@ fn start_capture(
                 return;
             };
             let extension = state.extension();
-            match resolve_save_path(&mut state, extension) {
+            match resolve_save_path(&mut state, extension, paths.as_deref()) {
                 Ok(path) => {
                     state.status = StatusKind::Stitching;
                     commands.spawn(PanoramaSaveTask(spawn_save_task(panorama, metadata, path)));
@@ -1453,8 +1454,11 @@ fn encode_with_metadata(
 fn resolve_save_path(
     state: &mut PanoramaState,
     extension: &'static str,
+    paths: Option<&sl_viewer_platform::paths::ViewerPaths>,
 ) -> Result<PathBuf, &'static str> {
-    let directory = sl_viewer_platform::paths::snapshots_dir().ok_or("panorama-no-dir")?;
+    let directory = paths
+        .and_then(sl_viewer_platform::paths::ViewerPaths::snapshots_dir)
+        .ok_or("panorama-no-dir")?;
     state.counter = state.counter.wrapping_add(1);
     let width = state.output_pixels();
     let name = format!(

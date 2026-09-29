@@ -181,11 +181,42 @@ replaces that person.
   init_private_clipboard`, never to a default (OS) one.
 - AccessKit needs a winit window, so it is absent headless; the semantic
   model must never depend on it.
-- Several statics are process-wide (`STARTUP_OVERRIDES`,
-  `REPLAY_CACHE_ROOT`, `MEDIA_ENGINE_PROFILE`, `TERMINATION_REQUESTED`, env
-  `OnceLock` switches), as are Bevy's tracing subscriber and task pools; two
-  viewers in one process need the former per App
-  ([[viewer-automation-per-app-state]]).
+- **Two viewers in one process are two Apps with two roots**
+  ([[viewer-automation-per-app-state]]). Every on-disk location is read from
+  the App's `ViewerPaths` resource (`sl-viewer-platform/src/paths.rs`), which
+  the builder inserts before any plugin —
+  `Storage::Directories(ViewerPaths::under(root))` gives a viewer a tree of
+  its own (`config/`, `state/`, `cache/`, `snapshots/`), `Storage::Ephemeral`
+  nothing on disk, and a World with no `ViewerPaths` keeps nothing on disk
+  either (a unit test's stores run in memory). The render knobs are
+  `RenderOverrides` fields, the termination flag is a `TerminationFlag`
+  resource (the process's signal flag unless the App is given
+  `TerminationFlag::own()`), and the settings store is per App.
+  `per_app_test` logs two Apps into one fake grid and holds each to its own
+  agent, directories, settings, overrides, log lines and logout.
+- **What stays process-wide**, deliberately: the tracing subscriber, Bevy's
+  task pools, the shared tokio runtime and HTTP pool (and the one HTTP proxy),
+  the static-asset library, the web-media profile (Chromium starts once per
+  process), the signal handler. A `SL_VIEWER_LOG_*` switch and a debug dump
+  destination (`SL_VIEWER_DUMP_DIR`, `_DUMP_MEDIA_FRAMES`, `_CAMERA_DUMP`) stay
+  environment reads: what they change is diagnostic output, not the viewer.
+- **No system reads the environment.** A behavioural knob is read once while
+  the App is built: into `RenderOverrides` / `AvatarOverrides` (stated by a
+  test through `ViewerAppOptions::{render,avatar}_overrides`), into the
+  camera start (`OrbitSeed`), or by the plugin that registers the debug
+  system (a floater or preferences tab to open, a demo, a focus framing).
+- **Log lines are told apart by span.** `ViewerAppOptions::log_label` builds
+  and updates the App inside a `viewer{name}` span (`ViewerApp::update`,
+  `ViewerApp::finish`). The Bevy fork's `bevy_tasks` runs every task in the
+  tracing context it was spawned from (subscriber and span), and
+  `sl_client_bevy::log_context` does the same for the session's threads and
+  shared-runtime tasks, so a line logged on any of them carries the span —
+  and reaches a test's scoped subscriber. A `trace`-feature (profiling) build
+  gives system spans `parent: None`, which hides the `viewer` span from those
+  lines' scope.
+- **Each App opens its own wgpu device.** Windowless on the stock fake-grid
+  region (2026-09-29): the first App adds ~195 MiB resident at build (mostly
+  one-time process cost), the second ~53 MiB; both logged in, ~1.3 GiB.
 - **A virtual list is strict only over its bound rows.** The locator engine
   pages a list when nothing matches, but it does not page to the end to
   prove a bound match unique — about three frames a page, 50 s on a
@@ -327,9 +358,11 @@ replaces that person.
 - **a whole viewer App** (a transport, a harness, a stage): never assemble
   plugins by hand — `ViewerAppOptions::new(params)` is the interactive
   viewer; set `window: WindowMode::Windowless`, `storage:
-  Storage::Ephemeral`, `audio_device: false`, `media: MediaRuntime::OFF`
-  and stated `render_overrides` for a test (`WindowMode::Headless { .. }`
-  instead when it must render the UI and take clicks), then
+  Storage::Ephemeral` (or `Storage::Directories(ViewerPaths::under(root))`
+  when it must store, and one root per viewer), `audio_device: false`,
+  `media: MediaRuntime::OFF`, stated `render_overrides` and — beside another
+  viewer — a `log_label` for a test (`WindowMode::Headless { .. }` instead
+  when it must render the UI and take clicks), then
   `ViewerAppBuilder::from_options(..).build()`
   (`sl-client-bevy-viewer/src/assembly.rs`). A new viewer-wide option
   belongs there, with its first consumer.

@@ -4,9 +4,8 @@
 //! reqwest can only apply a proxy at client-*build* time, and this crate
 //! builds its clients in many places (per worker thread, lazily, and once per
 //! login), so the proxy is a process-global set exactly once, before the app
-//! starts — the same idiom as the viewer's replay cache-root override. The
-//! viewer reads its `HttpProxy` preferences setting during startup and calls
-//! [`set_proxy`]; every construction site then goes through
+//! starts. The viewer reads its `HttpProxy` preferences setting during startup
+//! and calls [`set_proxy`]; every construction site then goes through
 //! [`blocking_client_builder`] / [`async_client_builder`] instead of a bare
 //! `reqwest::…Client::builder()`.
 //!
@@ -14,6 +13,10 @@
 //! direct connections, with reqwest's default honouring of the
 //! `http_proxy` / `https_proxy` environment variables. An explicitly set
 //! proxy takes precedence over the environment.
+//!
+//! **Process-wide on purpose**, like the connection pools the clients share
+//! (`async_http`): several viewer Apps in one process (the automation tier's
+//! in-process backend) all go through the one proxy the first of them set.
 //!
 //! Deliberately out of scope: SOCKS (the UDP circuit does not go through
 //! reqwest at all) and the embedded CEF browser (its Chromium network stack

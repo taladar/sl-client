@@ -215,6 +215,8 @@ pub struct CameraStart {
     /// The Bevy-space look direction (un-normalised is fine), or `None` to keep
     /// the default forward aim.
     pub look: Option<Vec3>,
+    /// Where the third-person orbit starts (the default rear view when empty).
+    pub orbit: sl_viewer_world_api::OrbitSeed,
 }
 
 /// What the third-person camera orbits around.

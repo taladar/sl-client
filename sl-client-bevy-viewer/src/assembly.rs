@@ -19,19 +19,49 @@
 //!   that renders and picks with no display (`--headless`, optionally watched
 //!   through a view-only window); or no window at all — a harness that steps
 //!   `update` itself and renders into images.
-//! - [`Storage`]: the user's settings, chat logs and caches, or nothing on
-//!   disk at all.
+//! - [`Storage`]: where the settings, chat logs and caches live — the user's
+//!   directories, a tree of the caller's ([`ViewerPaths::under`]), or nothing
+//!   on disk at all.
 //! - `audio_device`: whether the machine's speakers are opened.
-//! - `render_overrides`: the render debug knobs read from the environment, or
-//!   stated — a test must not change its answer because a developer exported
-//!   `SL_VIEWER_DISABLE_GLOW` in their shell.
+//! - `render_overrides` / `avatar_overrides`: the render and avatar debug
+//!   knobs read from the environment, or stated — a test must not change its
+//!   answer because a developer exported `SL_VIEWER_DISABLE_GLOW` or
+//!   `SL_VIEWER_TPOSE` in their shell.
 //! - [`Automation`]: whether the automation executor runs, fed by the caller
 //!   through its queue or by a private Unix socket (`--automation-socket`).
 //!
-//! Some things `run()` does are **process-wide** and stay out of the builder:
-//! the tracing subscriber, the static-asset library, the termination-signal
-//! handler and the replay cache root. Making those per App is its own task
-//! (`viewer-automation-per-app-state`).
+//! - `log_label`: the name every line the viewer logs carries.
+//!
+//! # Several viewers in one process
+//!
+//! Everything that can differ between two viewers is **per App** and set here:
+//! the paths every store reads ([`ViewerPaths`], inserted before any plugin),
+//! the settings store, the render and avatar overrides (and every other debug
+//! knob, read from the environment once while the App is built), the
+//! clipboard, the termination
+//! flag (`TerminationFlag`: the process's signal flag unless the App is given
+//! its own), and the log span. Two viewers built here with two roots and two
+//! labels log in, store, render and quit independently (`per_app_test`).
+//!
+//! What stays **process-wide**, deliberately, each documented where it lives:
+//!
+//! - the tracing subscriber — `LogPlugin` is off in every App, and a
+//!   labelled App's lines are told apart by its `viewer{name}` span, which
+//!   the fork's `bevy_tasks` and `sl_client_bevy::log_context` carry onto
+//!   every pool task and session thread;
+//! - Bevy's task pools and the shared tokio runtime and HTTP connection pool
+//!   (`sl_client_bevy::shared_runtime`), with the one HTTP proxy;
+//! - the static-asset library (`sl_asset::static_assets`), installed once by
+//!   the binary before any App is built;
+//! - the web-media profile (`claim_media_engine_profile`): Chromium starts
+//!   once per process;
+//! - the signal handler (`install_termination_handler`), which raises the
+//!   one process flag.
+//!
+//! Each App opens a **wgpu device of its own**. Measured windowless on the
+//! stock fake-grid region (2026-09-29): the first App adds about 195 MiB of
+//! resident memory at build, most of it one-time process cost; the second
+//! adds about 53 MiB; both logged in, the process holds about 1.3 GiB.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -49,9 +79,12 @@ use sl_client_bevy::{
 };
 use tracing::warn;
 
+pub use sl_viewer_platform::paths::{StartupOverrides, ViewerPaths};
+
 use crate::Error;
 use crate::animations::AnimationManager;
 use crate::avatar_assets::AvatarAssetLibrary;
+use crate::avatar_overrides::AvatarOverrides;
 use crate::camera::{CameraSpin, CameraStart};
 use crate::input_context::CursorGrabAllowed;
 use crate::render_overrides::RenderOverrides;
@@ -125,18 +158,40 @@ pub enum Automation {
 const HEADLESS_FRAME_RATE: f64 = 60.0;
 
 /// Where the viewer keeps what it stores between sessions.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum Storage {
-    /// The user's directories: the global and per-avatar settings files, the
-    /// per-avatar chat logs and the inventory cache, under the XDG roots.
-    #[default]
-    UserDirectories,
+    /// These directories: the global and per-avatar settings files, the
+    /// per-avatar chat logs, the inventory cache and every asset cache. The
+    /// user's own ([`ViewerPaths::platform`], the default) for the
+    /// interactive viewer; a tree of its own ([`ViewerPaths::under`]) for a
+    /// test viewer that must keep its state — and its settings — apart from
+    /// the developer's and from any other viewer in the process.
+    Directories(ViewerPaths),
     /// Nothing: every setting starts at its declared default and is never
-    /// written, no chat is logged and no inventory is cached. A test viewer's
-    /// storage — it must neither read the developer's preferences nor leave
-    /// its own behind. (The asset caches are process-wide and not covered.)
+    /// written, no chat is logged, no inventory is cached and every asset
+    /// store runs in memory. A test viewer's storage — it must neither read
+    /// the developer's preferences nor leave its own behind.
     Ephemeral,
+}
+
+impl Default for Storage {
+    /// The user's directories.
+    fn default() -> Self {
+        Self::Directories(ViewerPaths::platform())
+    }
+}
+
+impl Storage {
+    /// The paths this storage keeps everything under ([`ViewerPaths::none`]
+    /// when ephemeral).
+    #[must_use]
+    pub fn paths(&self) -> ViewerPaths {
+        match self {
+            Self::Directories(paths) => paths.clone(),
+            Self::Ephemeral => ViewerPaths::none(),
+        }
+    }
 }
 
 /// What a viewer session is fed at startup, beside the login parameters:
@@ -283,12 +338,22 @@ pub struct ViewerAppOptions {
     /// (`SL_VIEWER_DISABLE_GLOW`, `SL_VIEWER_SKY_DAY_POSITION`, …) — which is
     /// how the interactive viewer and a capture run take them.
     pub render_overrides: Option<RenderOverrides>,
+    /// The avatar debug knobs, or `None` to read them from the environment
+    /// (`SL_VIEWER_TPOSE`, `SL_VIEWER_JOINT_OVERRIDES`, …), as
+    /// `render_overrides` are.
+    pub avatar_overrides: Option<AvatarOverrides>,
     /// Whether the automation executor is installed
     /// (`sl_viewer_automation::AutomationPlugin`), and what feeds it: requests
     /// are carried out, and the state probes' recorders (the event log, the
     /// screenshot store, the render-settle cell) run. Off for the interactive
     /// viewer; a runtime switch, never a Cargo feature.
     pub automation: Automation,
+    /// The name this viewer's log lines carry, or `None` for none: the App is
+    /// built and every [`ViewerApp::update`] runs inside a `viewer` span with
+    /// this `name` field, which Bevy's task pools and the session's threads
+    /// carry to everything the App does. How several viewers in one process
+    /// tell their lines apart — the tracing subscriber is process-wide.
+    pub log_label: Option<String>,
 }
 
 impl ViewerAppOptions {
@@ -309,10 +374,12 @@ impl ViewerAppOptions {
             skin: SkinRuntime::default(),
             media: MediaRuntime::default(),
             window: WindowMode::Windowed,
-            storage: Storage::UserDirectories,
+            storage: Storage::default(),
             audio_device: true,
             render_overrides: None,
+            avatar_overrides: None,
             automation: Automation::Off,
+            log_label: None,
         }
     }
 }
@@ -335,12 +402,15 @@ pub struct LoginOutcome {
     pub rejected: Option<LoginFailure>,
 }
 
-/// A built viewer: [`run`](Self::run) it, or step it through
-/// [`app_mut`](Self::app_mut).
+/// A built viewer: [`run`](Self::run) it, or step it with
+/// [`update`](Self::update).
 #[derive(Debug)]
 pub struct ViewerApp {
     /// The assembled App.
     app: App,
+    /// The span it runs in: `viewer{name=…}` for a labelled viewer
+    /// ([`ViewerAppOptions::log_label`]), none otherwise.
+    span: tracing::Span,
 }
 
 impl ViewerAppBuilder {
@@ -360,6 +430,21 @@ impl ViewerAppBuilder {
     /// them has already failed — and [`Error::AutomationSocket`] if the
     /// automation socket cannot be opened.
     pub fn build(self) -> Result<ViewerApp, Error> {
+        // Created under the subscriber current now, and entered for the build
+        // too: a plugin's build logs, and the tasks it spawns carry the span on.
+        let span = self
+            .options
+            .log_label
+            .as_deref()
+            .map_or_else(tracing::Span::none, |name| {
+                tracing::info_span!("viewer", name)
+            });
+        let app = span.in_scope(|| Self::assemble(self.options))?;
+        Ok(ViewerApp { app, span })
+    }
+
+    /// The whole of [`build`](Self::build) but the span.
+    fn assemble(options: ViewerAppOptions) -> Result<App, Error> {
         let ViewerAppOptions {
             params,
             content,
@@ -371,8 +456,10 @@ impl ViewerAppBuilder {
             storage,
             audio_device,
             render_overrides,
+            avatar_overrides,
             automation,
-        } = self.options;
+            log_label: _,
+        } = options;
         let SessionContent {
             viewer_assets,
             play_animation,
@@ -400,7 +487,10 @@ impl ViewerAppBuilder {
         // opens the system one: a copy in it is what a paste in this App reads
         // back, and the user's clipboard is never read or written.
         let private_clipboard = !windowed;
-        let user_directories = storage == Storage::UserDirectories;
+        // Every location this viewer reads or writes, inserted (below) before
+        // any plugin builds a store from it.
+        let paths = storage.paths();
+        let stores_anything = paths.stores_anything();
         // Per-avatar on-disk directories, keyed by grid + avatar name (with UUID
         // rename discovery). Each kind lands under the XDG root that fits it: chat
         // transcripts under state, the inventory cache under cache, account settings
@@ -412,15 +502,13 @@ impl ViewerAppBuilder {
         let grid = sl_account_dirs::grid_dir_name(&params.login_uri);
         let avatar =
             sl_account_dirs::avatar_dir_name(&params.request.first_name, &params.request.last_name);
-        let account_dirs = user_directories.then(|| AccountDirsConfig {
+        let account_dirs = stores_anything.then(|| AccountDirsConfig {
             grid: grid.clone(),
             avatar: avatar.clone(),
-            chat_log_base: crate::paths::state_accounts_base(),
-            inventory_cache_base: crate::paths::cache_accounts_base(),
+            chat_log_base: paths.state_accounts_base(),
+            inventory_cache_base: paths.cache_accounts_base(),
         });
-        let config_accounts_base = user_directories
-            .then(crate::paths::config_accounts_base)
-            .flatten();
+        let config_accounts_base = paths.config_accounts_base();
 
         // Resolve the system time zone now, while the process is still single-threaded:
         // it reads the `TZ` environment variable, and reading the environment is only
@@ -430,6 +518,10 @@ impl ViewerAppBuilder {
 
         let mut app = App::new();
         app.insert_resource(local_time_zone);
+        // Before any plugin: every asset store is built from it
+        // (`ViewerPaths::of`), and a store built without it keeps nothing on
+        // disk.
+        app.insert_resource(paths.clone());
         if private_clipboard {
             crate::clipboard::use_private_clipboard(&mut app);
         }
@@ -442,6 +534,8 @@ impl ViewerAppBuilder {
             &render_overrides,
         ));
         app.insert_resource(render_overrides);
+        // Likewise the avatar debug knobs.
+        app.insert_resource(avatar_overrides.unwrap_or_else(AvatarOverrides::from_env));
         // The About floater's login-derived facts (grid, login URI, reported
         // channel/version) — captured here where they are all still at hand.
         if automation != Automation::Off {
@@ -592,7 +686,7 @@ impl ViewerAppBuilder {
             // `preferences_chat` pushes the avatar's stored logging preferences
             // over this via `Command::SetChatLogConfig`. With no directories
             // there is nowhere to log to.
-            chat_log_config: if user_directories {
+            chat_log_config: if stores_anything {
                 ChatLogConfig {
                     enabled: BTreeSet::from([
                         LoggedChatType::Nearby,
@@ -609,8 +703,8 @@ impl ViewerAppBuilder {
             account_dirs,
             // Cache the inventory tree per avatar (agent tree + Library).
             inventory_cache_config: InventoryCacheConfig {
-                enabled: user_directories,
-                cache_library: user_directories,
+                enabled: stores_anything,
+                cache_library: stores_anything,
             },
             // **On**, which the default is not. The flag defaults off so a *library*
             // consumer that ignores inventory pays nothing for it; a viewer is the
@@ -673,11 +767,10 @@ impl ViewerAppBuilder {
             // them — so the store is inserted here and only its *persistence* is a plugin.
             // With no storage the store has no file behind it: every setting reads its
             // declared default and nothing is ever written.
-            .insert_resource(if user_directories {
-                ViewerSettings::load_with(crate::paths::global_settings_file(), crate::REGISTRARS)
-            } else {
-                ViewerSettings::declared_for_test(crate::REGISTRARS)
-            })
+            .insert_resource(ViewerSettings::load_or_declared(
+                paths.global_settings_file(),
+                crate::REGISTRARS,
+            ))
             // Hand the settings store the one runtime fact its account-scope loader
             // needs. It reads this mirror rather than `SlIdentity` so that the
             // protocol stack does not sit underneath every crate that reads a
@@ -693,7 +786,7 @@ impl ViewerAppBuilder {
             .insert_resource(camera_start)
             .insert_resource(camera_spin)
             .init_resource::<LoginOutcome>()
-            .insert_resource(AnimationManager::new())
+            .init_resource::<AnimationManager>()
             // The session driver and its shutdown: the `SlEvent` fold, the draw
             // distance and interest-camera reports, the graceful logout every quit
             // path routes through, and the synchronous exit save. `--repeat-animation`
@@ -815,7 +908,7 @@ impl ViewerAppBuilder {
         if let Some(factor) = capture.ui_scale {
             app.insert_resource(crate::preferences_general::UiScaleOverride { factor });
         }
-        Ok(ViewerApp { app })
+        Ok(app)
     }
 }
 
@@ -829,7 +922,7 @@ impl ViewerApp {
     /// status, which is **not** a recoverable outcome: the caller must not retry
     /// it the way it retries an MFA challenge.
     pub fn run(mut self) -> Result<LoginOutcome, Error> {
-        let exit = self.app.run();
+        let exit = self.span.in_scope(|| self.app.run());
         // Taken before the exit is judged, so the outcome is out of the world
         // either way — but reported only on a clean exit. An app that failed has
         // not "stopped on an MFA challenge"; it stopped on the failure, and
@@ -846,9 +939,37 @@ impl ViewerApp {
         }
     }
 
+    /// Finish the App's plugins for a caller that steps it itself rather than
+    /// [`run`](Self::run)ning it: Bevy's `App::finish` and `App::cleanup`,
+    /// which build the render app and publish its device into the main world
+    /// (`run` does both itself). Inside the viewer's span.
+    pub fn finish(&mut self) {
+        self.span.in_scope(|| {
+            self.app.finish();
+            self.app.cleanup();
+        });
+    }
+
+    /// Step one frame, inside the viewer's span.
+    pub fn update(&mut self) {
+        self.span.in_scope(|| self.app.update());
+    }
+
+    /// The span the viewer runs in (none for an unlabelled viewer), for a
+    /// caller that steps [`app_mut`](Self::app_mut) itself.
+    #[must_use]
+    pub const fn span(&self) -> &tracing::Span {
+        &self.span
+    }
+
     /// The App, for a caller that steps it frame by frame or adds to it.
     pub const fn app_mut(&mut self) -> &mut App {
         &mut self.app
+    }
+
+    /// The App, to read.
+    pub const fn app(&self) -> &App {
+        &self.app
     }
 
     /// The App itself, for a caller that owns it from here on.
@@ -939,9 +1060,8 @@ pub(crate) fn setup_scene(
     mut mode: ResMut<CameraMode>,
 ) {
     let mut rig = CameraRig::default();
-    // Seed the third-person orbit from the debug framing envs (a no-op when unset):
-    // orbit → azimuth, elevation → elevation, distance → distance.
-    rig.seed_orbit_from_env();
+    // Seed the third-person orbit from the debug framing (a no-op when empty).
+    rig.seed_orbit(camera_start.orbit);
     let camera_transform = if let Some(position) = camera_start.position {
         // A fixed pose is a flycam pose: place and aim it, and leave it alone.
         let mut transform = Transform::from_translation(position);

@@ -342,7 +342,10 @@ impl Plugin for MediaEnginePlugin {
 /// directory, GStreamer with a loud log of the system's playback gaps
 /// (missing HTTP source / decoders). Failure is soft: the viewer runs
 /// without the failed engine.
-fn initialize_media_engine(mut engine: NonSendMut<MediaEngine>) {
+fn initialize_media_engine(
+    mut engine: NonSendMut<MediaEngine>,
+    paths: Option<Res<sl_viewer_platform::paths::ViewerPaths>>,
+) {
     if engine.initialized {
         return;
     }
@@ -374,7 +377,8 @@ fn initialize_media_engine(mut engine: NonSendMut<MediaEngine>) {
     }
     // A profile of this process's own: Chromium locks its profile, so a shared
     // one would let only the first of several viewers start web media.
-    let cache_dir = match sl_viewer_platform::paths::claim_media_engine_profile() {
+    let root = paths.and_then(|paths| paths.media_engine_cache_dir());
+    let cache_dir = match sl_viewer_platform::paths::claim_media_engine_profile(root.as_deref()) {
         Ok(dir) => dir,
         Err(error) => {
             warn!("web media (media-on-a-prim, embedded browser) is disabled: {error}");

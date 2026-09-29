@@ -20,7 +20,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU32;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use bevy::prelude::*;
@@ -59,21 +58,22 @@ pub struct SoundCache {
     sample_rate: Option<NonZeroU32>,
 }
 
-impl Default for SoundCache {
-    /// [`SoundCache::new`] — the cache has no configuration to vary.
-    fn default() -> Self {
-        Self::new()
+impl FromWorld for SoundCache {
+    /// [`SoundCache::new`] over the world's sound cache
+    /// ([`ViewerPaths`](crate::paths::ViewerPaths)).
+    fn from_world(world: &mut World) -> Self {
+        Self::new(crate::paths::ViewerPaths::of(world).asset_cache("soundcache"))
     }
 }
 
 impl SoundCache {
-    /// Build the cache over a fresh [`BevyAssetFetcher`], backed by the on-disk
-    /// asset cache when a cache directory is available (falling back to an
-    /// in-memory-only store).
+    /// Build the cache over a fresh [`BevyAssetFetcher`], backed by the disk
+    /// cache `cache` names when it has a directory that opens (falling back to
+    /// an in-memory-only store).
     #[must_use]
-    pub fn new() -> Self {
+    pub fn new(cache: crate::paths::DiskCache) -> Self {
         let fetcher = Arc::new(BevyAssetFetcher::new());
-        let store = build_asset_store(&fetcher, sound_cache_dir());
+        let store = build_asset_store(&fetcher, cache);
         Self {
             store,
             fetcher,
@@ -225,15 +225,18 @@ impl SoundCache {
 /// Build an [`AssetStore`] over `fetcher`, disk-backed when the cache opens and
 /// in-memory only otherwise (a cache failure must never wedge the viewer).
 /// Mirrors the animation / wearable asset-store builders.
-fn build_asset_store(fetcher: &Arc<BevyAssetFetcher>, disk_dir: Option<PathBuf>) -> AssetStore {
+fn build_asset_store(
+    fetcher: &Arc<BevyAssetFetcher>,
+    cache: crate::paths::DiskCache,
+) -> AssetStore {
     let concrete = Arc::clone(fetcher);
     let fetcher: Arc<dyn BlobFetcher> = concrete;
-    if let Some(dir) = disk_dir {
+    if let Some(dir) = cache.dir {
         match AssetStore::new(
             Arc::clone(&fetcher),
             Some(dir),
             AssetCacheLimits {
-                max_bytes: crate::paths::asset_cache_max_bytes(),
+                max_bytes: cache.max_bytes,
                 ..AssetCacheLimits::default()
             },
         ) {
@@ -248,7 +251,7 @@ fn build_asset_store(fetcher: &Arc<BevyAssetFetcher>, disk_dir: Option<PathBuf>)
             Arc::clone(&fetcher),
             None,
             AssetCacheLimits {
-                max_bytes: crate::paths::asset_cache_max_bytes(),
+                max_bytes: cache.max_bytes,
                 ..AssetCacheLimits::default()
             },
         ) {
@@ -256,13 +259,6 @@ fn build_asset_store(fetcher: &Arc<BevyAssetFetcher>, disk_dir: Option<PathBuf>)
             Err(error) => warn!("in-memory sound store failed to open ({error}); retrying"),
         }
     }
-}
-
-/// The viewer's on-disk sound-asset cache directory
-/// (`<cache>/sl-client-bevy-viewer/soundcache`), or `None` when no cache root is
-/// available (the store then runs in-memory only).
-fn sound_cache_dir() -> Option<PathBuf> {
-    crate::paths::asset_cache_dir("soundcache")
 }
 
 /// Refresh the store fetcher's `ViewerAsset` capability URL each time the
@@ -333,7 +329,7 @@ pub struct SoundCachePlugin;
 
 impl Plugin for SoundCachePlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(SoundCache::new()).add_systems(
+        app.init_resource::<SoundCache>().add_systems(
             Update,
             (update_sound_caps, track_sound_sample_rate, poll_sound_cache),
         );

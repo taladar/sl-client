@@ -34,7 +34,6 @@
 //! under animation rather than shearing.
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use bevy::ecs::schedule::ScheduleConfigs;
@@ -234,27 +233,28 @@ pub struct AnimationManager {
     pending: HashSet<AssetKey>,
 }
 
-impl Default for AnimationManager {
-    /// [`AnimationManager::new`]: the manager takes no configuration of its
-    /// own — where an animation's bytes come from is the asset store's
-    /// business.
-    fn default() -> Self {
-        Self::new()
+impl FromWorld for AnimationManager {
+    /// [`AnimationManager::new`] over the world's animation cache
+    /// ([`ViewerPaths`](sl_viewer_platform::paths::ViewerPaths)): the manager
+    /// takes no configuration of its own — where an animation's bytes come
+    /// from is the asset store's business.
+    fn from_world(world: &mut World) -> Self {
+        Self::new(sl_viewer_platform::paths::ViewerPaths::of(world).asset_cache("animcache"))
     }
 }
 
 impl AnimationManager {
-    /// Build the manager over a fresh [`BevyAssetFetcher`], backed by the on-disk
-    /// asset cache when a cache directory is available (falling back to an
-    /// in-memory-only store).
+    /// Build the manager over a fresh [`BevyAssetFetcher`], backed by the disk
+    /// cache `cache` names when it has a directory that opens (falling back to
+    /// an in-memory-only store).
     ///
     /// A built-in animation the viewer *ships* is answered by the store's
     /// static-asset library (`sl_asset::static_assets`) rather than by anything
     /// here, so this manager has no local-file path of its own.
     #[must_use]
-    pub fn new() -> Self {
+    pub fn new(cache: sl_viewer_platform::paths::DiskCache) -> Self {
         let fetcher = Arc::new(BevyAssetFetcher::new());
-        let store = build_asset_store(&fetcher, animation_cache_dir());
+        let store = build_asset_store(&fetcher, cache);
         Self {
             store,
             fetcher,
@@ -422,15 +422,18 @@ impl AnimationManager {
 /// Build an [`AssetStore`] over `fetcher`, disk-backed when the cache opens and
 /// in-memory only otherwise (a cache failure must never wedge the viewer).
 /// Mirrors [`bake_inputs`](crate::bake_inputs)'s wearable-asset store builder.
-fn build_asset_store(fetcher: &Arc<BevyAssetFetcher>, disk_dir: Option<PathBuf>) -> AssetStore {
+fn build_asset_store(
+    fetcher: &Arc<BevyAssetFetcher>,
+    cache: sl_viewer_platform::paths::DiskCache,
+) -> AssetStore {
     let concrete = Arc::clone(fetcher);
     let fetcher: Arc<dyn BlobFetcher> = concrete;
-    if let Some(dir) = disk_dir {
+    if let Some(dir) = cache.dir {
         match AssetStore::new(
             Arc::clone(&fetcher),
             Some(dir),
             AssetCacheLimits {
-                max_bytes: sl_viewer_platform::paths::asset_cache_max_bytes(),
+                max_bytes: cache.max_bytes,
                 ..AssetCacheLimits::default()
             },
         ) {
@@ -445,7 +448,7 @@ fn build_asset_store(fetcher: &Arc<BevyAssetFetcher>, disk_dir: Option<PathBuf>)
             Arc::clone(&fetcher),
             None,
             AssetCacheLimits {
-                max_bytes: sl_viewer_platform::paths::asset_cache_max_bytes(),
+                max_bytes: cache.max_bytes,
                 ..AssetCacheLimits::default()
             },
         ) {
@@ -453,13 +456,6 @@ fn build_asset_store(fetcher: &Arc<BevyAssetFetcher>, disk_dir: Option<PathBuf>)
             Err(error) => warn!("in-memory animation store failed to open ({error}); retrying"),
         }
     }
-}
-
-/// The viewer's on-disk animation-asset cache directory
-/// (`<cache>/sl-client-bevy-viewer/animcache`), from `XDG_CACHE_HOME` or
-/// `~/.cache`, or `None` when neither is set (the store then runs in-memory only).
-fn animation_cache_dir() -> Option<PathBuf> {
-    sl_viewer_platform::paths::asset_cache_dir("animcache")
 }
 
 /// Refresh the store fetcher's `ViewerAsset` capability URL each time the region's
@@ -1646,6 +1642,9 @@ pub(crate) struct AvatarAdjusters<'w> {
     locomotion: ResMut<'w, LocomotionAdjust>,
     /// The body-physics spring-damper state (P34.2).
     body_physics: ResMut<'w, BodyPhysicsMotion>,
+    /// The run's debug avatar knobs: whether every avatar is frozen in its
+    /// T-pose.
+    overrides: Res<'w, crate::avatar_overrides::AvatarOverrides>,
     /// The per-frame runtime morph overrides the eye-blink (P31.12b) and body-physics
     /// (P34.2) folds write their morph params into (P31.12a).
     runtime_morphs: ResMut<'w, AvatarRuntimeMorphs>,
@@ -1751,7 +1750,7 @@ pub(crate) fn pose_avatar_skeletons(
     // The debug T-pose switch: freeze every avatar at its shaped rest pose, so two
     // runs of the viewer frame the same body from the same angle and can be compared
     // pixel for pixel (an avatar's AO would otherwise walk and turn it).
-    let t_pose = t_pose_enabled();
+    let t_pose = adjusters.overrides.pose.t_pose;
     // The quantised procedural idle clock (see [`POSE_IDLE_HZ`]).
     let idle_now = (now * POSE_IDLE_HZ).floor() / POSE_IDLE_HZ;
     for agent in rigged {
@@ -2173,20 +2172,6 @@ fn write_socket_locals(
     {
         *transform = Transform::from_matrix(*matrix);
     }
-}
-
-/// The debug T-pose switch (env `SL_VIEWER_TPOSE=1`): whether to freeze every
-/// avatar at its shaped **rest** skeleton — which in Second Life *is* the T-pose —
-/// with no keyframe animation, no procedural idle, and none of the look-at /
-/// locomotion / reach / body-physics adjusters folded in.
-///
-/// An avatar's AO walks, turns and fidgets it, so two runs of the viewer never
-/// frame the same body the same way. Freezing the pose makes an A/B of anything
-/// that shapes the body (a shape slider, a collision-volume displacement, a joint
-/// override) comparable between runs. `pub(crate)` because the GPU-avatar
-/// scheduler mirrors the freeze (no playback staged, idle disabled in pass B).
-pub(crate) fn t_pose_enabled() -> bool {
-    std::env::var("SL_VIEWER_TPOSE").as_deref() == Ok("1")
 }
 
 #[cfg(test)]

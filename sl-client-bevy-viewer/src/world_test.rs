@@ -92,7 +92,7 @@ pub(crate) fn world_app() -> App {
     // needs a ring no viewer would ever draw, and a pie that overflowed the
     // window would be a fact about key length.
     crate::i18n_keys::install_english_strings(&mut app);
-    app.insert_resource(crate::animations::AnimationManager::new());
+    app.init_resource::<crate::animations::AnimationManager>();
     app.init_resource::<crate::camera::CameraStart>();
     app.init_resource::<SlIdentity>();
     // A resource world-group systems read but another group owns: the derender

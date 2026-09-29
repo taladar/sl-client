@@ -43,7 +43,7 @@
 //! **Save to Disk** writes the captured frame at the **window's own resolution**
 //! (free-form disk output, unlike the power-of-two texture-to-inventory path) in
 //! the picked format, into the platform Pictures folder
-//! ([`crate::paths::snapshots_dir`]), and echoes the saved path to nearby chat —
+//! ([`ViewerPaths::snapshots_dir`](crate::paths::ViewerPaths::snapshots_dir)), and echoes the saved path to nearby chat —
 //! the running local-chat index photographers rely on, matching the quick key
 //! ([[viewer-snapshot-quick-key]]).
 //!
@@ -1051,6 +1051,7 @@ fn process_shot(
     ui: Option<Res<SnapshotUi>>,
     widgets: ShotWidgets,
     local_tz: Option<Res<LocalTimeZone>>,
+    paths: Option<Res<crate::paths::ViewerPaths>>,
     translator: Translator,
 ) {
     let ShotWidgets {
@@ -1091,7 +1092,7 @@ fn process_shot(
     // encode + write so the heavy PNG/JPEG deflate and disk write never stall the
     // frame. The status stays `Working` until `poll_snapshot_saves` reports the
     // finished write; only the (synchronous) "no directory" case resolves here.
-    match resolve_save_dest(&mut state, local_tz.as_deref()) {
+    match resolve_save_dest(&mut state, local_tz.as_deref(), paths.as_deref()) {
         Ok(dest) => {
             commands.spawn(SnapshotSaveTask(spawn_save_task(dynamic, dest)));
         }
@@ -1208,8 +1209,11 @@ struct SaveDest {
 fn resolve_save_dest(
     state: &mut SnapshotState,
     zone: Option<&LocalTimeZone>,
+    paths: Option<&crate::paths::ViewerPaths>,
 ) -> Result<SaveDest, SaveError> {
-    let dir = crate::paths::snapshots_dir().ok_or(SaveError::NoDir)?;
+    let dir = paths
+        .and_then(crate::paths::ViewerPaths::snapshots_dir)
+        .ok_or(SaveError::NoDir)?;
     state.counter = state.counter.wrapping_add(1);
     let name = format!(
         "snapshot-{}-{}.{}",

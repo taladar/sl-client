@@ -53,7 +53,7 @@ pub(crate) fn fetch_folder_contents(
     });
     match route {
         Some((url, owner, response_cap, events_tx)) => {
-            std::thread::spawn(move || {
+            crate::log_context::spawn_thread(move || {
                 run_inventory_fetch(&url, owner, &[folder_id], response_cap, &events_tx);
             });
             // Mirror the UDP path's in-flight bookkeeping so the background crawl

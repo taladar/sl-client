@@ -673,6 +673,8 @@ struct DumpSources<'w, 's> {
     animesh: Res<'w, ControlAvatarState>,
     /// The environment the `environment` section states.
     environment: Res<'w, EnvironmentState>,
+    /// The render overrides the sky's uniforms were drawn under.
+    render_overrides: Res<'w, sl_viewer_world_scene::render_overrides::RenderOverrides>,
     /// The settings the `render` section states.
     settings: Res<'w, ViewerSettings>,
     /// The playback, decoded motions and clock the animation lists come from.
@@ -733,7 +735,7 @@ fn build(sources: &DumpSources) -> SceneDump {
             handle,
         ),
         camera: build_camera(sources.cameras.iter().next(), offset, handle),
-        environment: build_environment(&sources.environment),
+        environment: build_environment(&sources.environment, &sources.render_overrides.sky),
         render: build_render(
             &sources.settings,
             sources
@@ -871,7 +873,10 @@ fn build_camera(
 const FOCUS_DISTANCE_M: f32 = 10.0;
 
 /// The `environment` section.
-fn build_environment(environment: &EnvironmentState) -> EnvironmentDump {
+fn build_environment(
+    environment: &EnvironmentState,
+    overrides: &sl_viewer_world_scene::render_overrides::SkyOverrides,
+) -> EnvironmentDump {
     let position = sl_viewer_world_scene::sky::day_position(environment);
     let sky = environment.sky_at(0.0, position);
     let water = environment.water_at(position);
@@ -894,16 +899,19 @@ fn build_environment(environment: &EnvironmentState) -> EnvironmentDump {
                 sky.sun_rotation.s,
             ]
         }),
-        sky_params: sky.as_ref().map(build_sky_params),
+        sky_params: sky.as_ref().map(|sky| build_sky_params(sky, overrides)),
         sky_name: sky.map_or_else(String::new, |sky| sky.name),
         water_name: water.map_or_else(String::new, |water| water.name),
     }
 }
 
 /// The `environment.sky_params` sub-section: the uniform block one sky frame
-/// resolves to. See [`SkyParamsDump`].
-fn build_sky_params(sky: &sl_client_bevy::SkySettings) -> SkyParamsDump {
-    let inputs = sl_viewer_world_scene::sky::sky_shader_inputs(sky);
+/// resolves to under the app's `overrides`, as drawn. See [`SkyParamsDump`].
+fn build_sky_params(
+    sky: &sl_client_bevy::SkySettings,
+    overrides: &sl_viewer_world_scene::render_overrides::SkyOverrides,
+) -> SkyParamsDump {
+    let inputs = sl_viewer_world_scene::sky::sky_shader_inputs(sky, overrides);
     SkyParamsDump {
         sunlight_color: inputs.sunlight_color,
         moonlight_color: inputs.moonlight_color,

@@ -29,7 +29,6 @@
 
 use core::ops::Mul as _;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use bevy::math::Affine2;
@@ -301,9 +300,11 @@ pub struct MaterialManager {
     visibility: Vec<(FaceKey, Entity, bool)>,
 }
 
-impl Default for MaterialManager {
-    fn default() -> Self {
-        Self::new()
+impl FromWorld for MaterialManager {
+    /// [`MaterialManager::new`] over the world's material cache
+    /// ([`ViewerPaths`](sl_viewer_platform::paths::ViewerPaths)).
+    fn from_world(world: &mut World) -> Self {
+        Self::new(sl_viewer_platform::paths::ViewerPaths::of(world).asset_cache("materialcache"))
     }
 }
 
@@ -329,11 +330,12 @@ pub struct PreviewedFace<'a> {
 
 impl MaterialManager {
     /// Build the manager over a fresh [`BevyAssetFetcher`], backed by the on-disk
-    /// asset cache when available (falling back to an in-memory-only store).
+    /// `cache` when it has a directory that opens (falling back to an
+    /// in-memory-only store).
     #[must_use]
-    pub fn new() -> Self {
+    pub fn new(cache: sl_viewer_platform::paths::DiskCache) -> Self {
         let fetcher = Arc::new(BevyAssetFetcher::new());
-        let store = build_asset_store(&fetcher, material_cache_dir());
+        let store = build_asset_store(&fetcher, cache);
         Self {
             store,
             fetcher,
@@ -709,15 +711,18 @@ impl MaterialManager {
 
 /// Build an [`AssetStore`] over `fetcher`, disk-backed when the cache opens and
 /// in-memory only otherwise (a cache failure must never wedge the viewer).
-fn build_asset_store(fetcher: &Arc<BevyAssetFetcher>, disk_dir: Option<PathBuf>) -> AssetStore {
+fn build_asset_store(
+    fetcher: &Arc<BevyAssetFetcher>,
+    cache: sl_viewer_platform::paths::DiskCache,
+) -> AssetStore {
     let concrete = Arc::clone(fetcher);
     let fetcher: Arc<dyn BlobFetcher> = concrete;
-    if let Some(dir) = disk_dir {
+    if let Some(dir) = cache.dir {
         match AssetStore::new(
             Arc::clone(&fetcher),
             Some(dir),
             AssetCacheLimits {
-                max_bytes: sl_viewer_platform::paths::asset_cache_max_bytes(),
+                max_bytes: cache.max_bytes,
                 ..AssetCacheLimits::default()
             },
         ) {
@@ -732,7 +737,7 @@ fn build_asset_store(fetcher: &Arc<BevyAssetFetcher>, disk_dir: Option<PathBuf>)
             Arc::clone(&fetcher),
             None,
             AssetCacheLimits {
-                max_bytes: sl_viewer_platform::paths::asset_cache_max_bytes(),
+                max_bytes: cache.max_bytes,
                 ..AssetCacheLimits::default()
             },
         ) {
@@ -740,13 +745,6 @@ fn build_asset_store(fetcher: &Arc<BevyAssetFetcher>, disk_dir: Option<PathBuf>)
             Err(error) => warn!("in-memory material store failed to open ({error}); retrying"),
         }
     }
-}
-
-/// The viewer's on-disk material-asset cache directory
-/// (`<cache>/sl-client-bevy-viewer/materialcache`), from `XDG_CACHE_HOME` or
-/// `~/.cache`, or `None` when neither is set (the store then runs in-memory only).
-fn material_cache_dir() -> Option<PathBuf> {
-    sl_viewer_platform::paths::asset_cache_dir("materialcache")
 }
 
 /// How a PBR material texture map is uploaded, given whether its slot holds

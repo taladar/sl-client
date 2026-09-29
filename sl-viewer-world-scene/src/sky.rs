@@ -56,7 +56,6 @@
 //! terrain material forever). The cell is finer than the shadow-caster direction snap,
 //! so nothing visible steps that was not already stepping.
 
-use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bevy::asset::RenderAssetUsages;
@@ -71,6 +70,7 @@ use sl_client_bevy::{
 };
 
 use crate::environment::EnvironmentState;
+use crate::render_overrides::{RenderOverrides, SkyOverrides};
 use crate::transparency::SkyBackdrop;
 use sl_viewer_kit::coords::sl_to_bevy_object_rotation;
 use sl_viewer_kit::probe_layers::{
@@ -102,6 +102,7 @@ impl Plugin for SkyPlugin {
             brightness: 0.0,
             ..default()
         })
+        .init_resource::<RenderOverrides>()
         .add_systems(
             Startup,
             (setup_sky, setup_sun_moon_discs, setup_clouds, setup_stars),
@@ -168,37 +169,19 @@ pub(crate) fn sky_ambient_light(ambient: [f32; 3], probe_scale: f32) -> (Color, 
     (color, luminance * AMBIENT_BRIGHTNESS_SCALE * probe_scale)
 }
 
-/// Read the `SL_VIEWER_SHADOW_CASCADES` experiment env: how many sun shadow
-/// cascades to build (clamped `1..=4`; `None` when unset, so the stored
-/// `RenderShadowCascades` preference drives it instead — the env, when set,
-/// **wins** over the preference like the tonemap / glow overrides). The
-/// per-frame shadow-caster cull (`check_dir_light_mesh_visibility`, ungated)
-/// and the shadow-map render both scale with the cascade count × caster count,
-/// so cutting cascades isolates how much the shadow *view count* costs — an
-/// entity/view lever distinct from the sun-movement churn one.
-///
-/// Resolved once per process: the environment is fixed at launch, and this is read
-/// from a per-frame preference-apply system.
-#[must_use]
-pub fn shadow_cascade_count() -> Option<usize> {
-    static COUNT: OnceLock<Option<usize>> = OnceLock::new();
-    *COUNT.get_or_init(|| {
-        std::env::var("SL_VIEWER_SHADOW_CASCADES")
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok())
-            .map(|count| count.clamp(1, 4))
-    })
-}
-
 /// Cascaded-shadow-map coverage for the scene sun / moon (P24.1). Tuned to a
 /// Second Life region's scale (256 m): the last cascade reaches to a region's
 /// diagonal (~362 m) so an avatar's shadow, nearby prims, and terrain relief all
 /// receive the sun, while the first (near) cascade is kept tight so avatar-close
 /// detail gets most of the shadow-map resolution. The reference
 /// `LLPipeline::renderShadow` uses four split sun cascades likewise.
+///
+/// The app's overrides may pin another count
+/// ([`ShadowOverrides::cascades`](crate::render_overrides::ShadowOverrides)),
+/// which `setup_sky` and the shadow preference's apply system honour.
 #[must_use]
 pub fn shadow_cascades() -> CascadeShadowConfig {
-    shadow_cascades_for(shadow_cascade_count().unwrap_or(4))
+    shadow_cascades_for(4)
 }
 
 /// `shadow_cascades` with an explicit cascade count (clamped `1..=4`): the
@@ -909,11 +892,12 @@ pub struct SkyShaderInputs {
     pub classic_mode: bool,
 }
 
-/// The shader inputs one sky frame resolves to — see [`SkyShaderInputs`].
+/// The shader inputs one sky frame resolves to under the app's `overrides` —
+/// see [`SkyShaderInputs`].
 #[must_use]
-pub fn sky_shader_inputs(sky: &SkySettings) -> SkyShaderInputs {
+pub fn sky_shader_inputs(sky: &SkySettings, overrides: &SkyOverrides) -> SkyShaderInputs {
     let resolved = resolve_sky(sky);
-    let params = &resolved.params;
+    let params = &overridden_sky_params(resolved.params, sky, overrides);
     SkyShaderInputs {
         sunlight_color: params.sunlight_color.to_array(),
         moonlight_color: params.moonlight_color.to_array(),
@@ -948,6 +932,7 @@ pub fn sky_shader_inputs(sky: &SkySettings) -> SkyShaderInputs {
 pub(crate) fn setup_sky(
     mut commands: Commands,
     environment: Res<EnvironmentState>,
+    overrides: Res<RenderOverrides>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<SkyMaterial>>,
     mut images: ResMut<Assets<Image>>,
@@ -977,15 +962,15 @@ pub(crate) fn setup_sky(
         DirectionalLight {
             illuminance: SCENE_LIGHT_ILLUMINANCE,
             // P24.1: cast cascaded shadow maps from the sun / moon. Disabled by the
-            // `SL_VIEWER_SUN_SHADOWS=0` experiment env to measure the total
+            // `SL_VIEWER_SUN_SHADOWS=0` experiment override to measure the total
             // per-frame cost of the directional-shadow subsystem (the ungated
             // caster cull plus the shadow-map render).
-            shadow_maps_enabled: sun_shadows_enabled(),
+            shadow_maps_enabled: !overrides.shadows.sun_disabled,
             ..default()
         },
         // Cascades tuned to region scale so shadows cover an avatar plus nearby
         // prims and terrain (`drive_sky` keeps the direction on the active body).
-        shadow_cascades(),
+        shadow_cascades_for(overrides.shadows.cascades.unwrap_or(4)),
         Transform::default().looking_to(Vec3::new(-0.4, -1.0, -0.3), Vec3::Y),
         // The main layer, like any light without layers of its own, plus the
         // shadow-only layer no camera draws — so the own avatar's head keeps its
@@ -1044,7 +1029,7 @@ pub(crate) fn center_sky_on_camera(
 /// change. Resolved once per process — the gate is tested from three per-frame
 /// sites, and the environment is fixed at launch.
 fn log_sky_hdr() -> bool {
-    static ENABLED: OnceLock<bool> = OnceLock::new();
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ENABLED.get_or_init(|| std::env::var_os("SL_VIEWER_LOG_SKY_HDR").is_some())
 }
 
@@ -1053,28 +1038,20 @@ fn log_sky_hdr() -> bool {
 /// Firestorm. Resolved once per process — the gate is tested from three per-frame
 /// sites, and the environment is fixed at launch.
 fn log_clouds() -> bool {
-    static ENABLED: OnceLock<bool> = OnceLock::new();
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ENABLED.get_or_init(|| std::env::var_os("SL_VIEWER_LOG_CLOUDS").is_some())
 }
 
-/// Whether the sun casts shadows (`SL_VIEWER_SUN_SHADOWS`, default on): set to
-/// `0` to disable `shadow_maps_enabled` on [`SceneSun`] at spawn, so an A/B
-/// (frame time via Tracy or the status bar) measures the total per-frame cost of
-/// the directional-shadow subsystem. That cost is the more decisive number than the
-/// sun-churn slice, because the shadow-caster cull runs every frame regardless
-/// of sun movement.
-///
-/// Resolved once per process: the environment is fixed at launch, and this is read
-/// from a per-frame preference-apply system.
-#[must_use]
-pub fn sun_shadows_enabled() -> bool {
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| {
-        !matches!(
-            std::env::var("SL_VIEWER_SUN_SHADOWS").ok().as_deref(),
-            Some("0")
-        )
-    })
+/// What the sky is painted from, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the environment that
+/// schedules the frames, and the app's render overrides of how they are drawn.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct SkyInputs<'w> {
+    /// The environment the sky frames come from.
+    environment: Res<'w, EnvironmentState>,
+    /// The app's render overrides (the sky's colour pipeline, the probes'
+    /// share of the ambient).
+    overrides: Res<'w, RenderOverrides>,
 }
 
 /// The stores the sky is painted through, bundled as one
@@ -1139,7 +1116,7 @@ pub(crate) struct DiscLog<'s> {
 )]
 pub(crate) fn drive_sky(
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
-    environment: Res<EnvironmentState>,
+    inputs: SkyInputs,
     mut state: ResMut<SkyState>,
     stores: SkyStores,
     // Both the shadow-casting [`SceneSun`] and the shadow-free
@@ -1158,6 +1135,10 @@ pub(crate) fn drive_sky(
         mut textures,
         mut images,
     } = stores;
+    let SkyInputs {
+        environment,
+        overrides,
+    } = inputs;
     let altitude = camera.single().map_or(0.0, |camera| camera.translation().y);
     let position = day_position(&environment);
     let Some(sky) = environment.sky_at(altitude, position) else {
@@ -1188,12 +1169,13 @@ pub(crate) fn drive_sky(
 
     // The texture_anim idiom: read-only compare, `get_mut` (and so a material
     // re-prepare) only when the resolved params actually changed.
+    let params = overridden_sky_params(resolved.params, &sky, &overrides.sky);
     if materials
         .get(&state.material)
-        .is_some_and(|material| material.params != resolved.params)
+        .is_some_and(|material| material.params != params)
         && let Some(mut material) = materials.get_mut(&state.material)
     {
-        material.params = resolved.params;
+        material.params = params;
     }
 
     // The light travels *toward* its forward axis, i.e. away from the body, so
@@ -1236,8 +1218,10 @@ pub(crate) fn drive_sky(
 
     // Ambient from the sky's total ambient, already carrying the reflection probe's
     // share of it — see `sky_ambient_light`.
-    let (ambient_color, ambient_brightness) =
-        sky_ambient_light(resolved.ambient, crate::probes::probe_ambient_scale());
+    let (ambient_color, ambient_brightness) = sky_ambient_light(
+        resolved.ambient,
+        crate::probes::probe_ambient_scale(&overrides),
+    );
     if ambient.color != ambient_color
         || ambient.brightness.to_bits() != ambient_brightness.to_bits()
     {
@@ -1382,7 +1366,7 @@ pub(crate) fn setup_sun_moon_discs(
 )]
 pub(crate) fn drive_sun_moon_discs(
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
-    environment: Res<EnvironmentState>,
+    inputs: SkyInputs,
     mut state: ResMut<DiscState>,
     stores: DiscStores,
     mut sun: Query<(&mut Transform, &mut Visibility), (With<SunDisc>, Without<MoonDisc>)>,
@@ -1397,6 +1381,10 @@ pub(crate) fn drive_sun_moon_discs(
         mut last_logged_hdr,
         mut last_logged_sun_y,
     } = log;
+    let SkyInputs {
+        environment,
+        overrides,
+    } = inputs;
     let Ok(camera) = camera.single() else {
         return;
     };
@@ -1452,7 +1440,7 @@ pub(crate) fn drive_sun_moon_discs(
     // "fake HDR" factor so they sit in the same range as the sky dome behind them
     // (1.0 for a legacy sky; > 1.0 for an EEP probe-ambiance sky, so the disc
     // blows out instead of rendering a flat grey).
-    let hdr_scale = resolved_sky_hdr_scale(&sky);
+    let (_linearize, hdr_scale) = colour_pipeline(&sky, &overrides.sky);
     // On-change diagnostic (env-gated, matching `SL_VIEWER_LOG_CLOUDS`): confirm
     // whether the active sky is on the EEP "fake HDR" path — a non-zero
     // `reflection_probe_ambiance` gives `sky_hdr_scale > 1.0`. A legacy sky logs
@@ -1655,12 +1643,16 @@ pub(crate) fn setup_clouds(
 pub(crate) fn drive_clouds(
     time: Res<Time>,
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
-    environment: Res<EnvironmentState>,
+    inputs: SkyInputs,
     mut state: ResMut<CloudState>,
     mut materials: ResMut<Assets<CloudMaterial>>,
     mut textures: ResMut<TextureManager>,
     mut dome: Query<&mut Visibility, With<CloudDome>>,
 ) {
+    let SkyInputs {
+        environment,
+        overrides,
+    } = inputs;
     let altitude = camera.single().map_or(0.0, |camera| camera.translation().y);
     let position = day_position(&environment);
     let Some(sky) = environment.sky_at(altitude, position) else {
@@ -1708,14 +1700,18 @@ pub(crate) fn drive_clouds(
     // scrolling cloud layer re-prepares nothing — and with a live day cycle they
     // are identical between day-cycle sampling steps (`DAY_POSITION_STEPS`),
     // which is the only reason this float-equality compare ever holds on a grid.
-    let params = cloud_params(
+    let params = overridden_cloud_params(
+        cloud_params(
+            &sky,
+            resolved.lightnorm,
+            resolved.sun_up_factor,
+            resolved.glow_factor,
+            state.scroll_ref_time,
+            state.scroll_rate,
+            state.scroll_base,
+        ),
         &sky,
-        resolved.lightnorm,
-        resolved.sun_up_factor,
-        resolved.glow_factor,
-        state.scroll_ref_time,
-        state.scroll_rate,
-        state.scroll_base,
+        &overrides.sky,
     );
     if materials
         .get(&state.material)
@@ -2247,55 +2243,32 @@ const fn visible_if(up: bool) -> Visibility {
     }
 }
 
-/// Whether to linearise the sky / cloud colour before the tone mapper: on by
-/// default (the reference behaviour), off when `SL_VIEWER_SKY_LINEARIZE=0` — an
-/// A/B knob to isolate the linearisation's effect, including on what the
-/// reflection-probe / environment-map capture reads of the sky.
+/// The sky's colour-pipeline pair for `sky` under the app's `overrides`: the
+/// linearisation switch (`1.0`, the reference's, unless an A/B run turns it
+/// off to isolate what it does — including to what the reflection-probe capture
+/// reads of the sky) and the "fake HDR" scale (`SKY_HDR_SCALE`: the value the
+/// reference computes from the frame, [`SkySettings::sky_hdr_scale`] —
+/// `sqrt(gamma) * 2` for an EEP reflection-probe-ambiance sky, `1.0` for a
+/// legacy / classic-mode sky — unless the run forces one).
 ///
-/// Resolved once per process (the environment is fixed at launch); it is read from
-/// the per-frame sky / cloud params builds.
-fn sky_linearize() -> f32 {
-    static LINEARIZE: OnceLock<f32> = OnceLock::new();
-    *LINEARIZE.get_or_init(|| {
-        if std::env::var("SL_VIEWER_SKY_LINEARIZE").as_deref() == Ok("0") {
-            0.0
-        } else {
-            1.0
-        }
-    })
-}
-
-/// The active sky "fake HDR" scale (`SKY_HDR_SCALE`) for a sky frame: the value
-/// the reference computes from the frame ([`SkySettings::sky_hdr_scale`] —
-/// `sqrt(gamma) * 2` for an EEP reflection-probe-ambiance sky, `1.0` for a legacy
-/// / classic-mode sky), unless the `SL_VIEWER_SKY_HDR_SCALE` A/B knob forces a
-/// value.
-///
-/// The override exists alongside `SL_VIEWER_SKY_LINEARIZE` so the EEP blow-out
-/// path can be exercised on *any* grid: the default aditi and OpenSim regions
-/// serve legacy skies (scale `1.0`, a no-op), so without the override there is no
-/// on-grid way to see the sun disc, clouds, and sky expand into HDR. A value `< 0`
-/// is clamped to `0`.
-fn resolved_sky_hdr_scale(sky: &SkySettings) -> f32 {
-    sky_hdr_scale_override().unwrap_or_else(|| sky.sky_hdr_scale())
-}
-
-/// The `SL_VIEWER_SKY_HDR_SCALE` override (clamped to `>= 0`), or `None` when unset
-/// or unparsable — see [`resolved_sky_hdr_scale`]. Resolved once per process (the
-/// environment is fixed at launch); the override is consulted from the per-frame
-/// sky / cloud / star / disc params builds.
-fn sky_hdr_scale_override() -> Option<f32> {
-    static OVERRIDE: OnceLock<Option<f32>> = OnceLock::new();
-    *OVERRIDE.get_or_init(|| {
-        std::env::var("SL_VIEWER_SKY_HDR_SCALE")
-            .ok()
-            .and_then(|value| value.parse::<f32>().ok())
-            .map(|scale| scale.max(0.0))
-    })
+/// The forced scale exists so the EEP blow-out path can be exercised on *any*
+/// grid: the default aditi and OpenSim regions serve legacy skies (scale `1.0`,
+/// a no-op), so without it there is no on-grid way to see the sun disc, clouds,
+/// and sky expand into HDR.
+fn colour_pipeline(sky: &SkySettings, overrides: &SkyOverrides) -> (f32, f32) {
+    let linearize = if overrides.linearize_disabled {
+        0.0
+    } else {
+        1.0
+    };
+    let hdr_scale = overrides.hdr_scale.unwrap_or_else(|| sky.sky_hdr_scale());
+    (linearize, hdr_scale)
 }
 
 /// Build the sky-shader uniform block from a sky frame plus the per-frame light
-/// direction, day/night factor, and glow factor.
+/// direction, day/night factor, and glow factor, with the reference's colour
+/// pipeline; a system applies the app's overrides to it
+/// ([`overridden_sky_params`]).
 fn sky_params(
     sky: &SkySettings,
     lightnorm: Vec3,
@@ -2303,6 +2276,7 @@ fn sky_params(
     glow_factor: f32,
 ) -> SkyParams {
     let (sunlight, moonlight) = shader_light_colors(sky);
+    let (linearize, sky_hdr_scale) = colour_pipeline(sky, &SkyOverrides::default());
     SkyParams {
         lightnorm,
         sun_up_factor,
@@ -2322,8 +2296,8 @@ fn sky_params(
         moisture_level: sky.moisture_level,
         droplet_radius: sky.droplet_radius,
         ice_level: sky.ice_level,
-        linearize: sky_linearize(),
-        sky_hdr_scale: resolved_sky_hdr_scale(sky),
+        linearize,
+        sky_hdr_scale,
     }
 }
 
@@ -2337,7 +2311,9 @@ pub(crate) fn default_sky_params() -> SkyParams {
 /// Build the cloud-shader uniform block from a sky frame plus the per-frame light
 /// direction, day/night factor, glow factor, and accumulated scroll offset. The
 /// scroll is folded into `cloud_pos_density1` the way the reference
-/// `LLSettingsVOSky::applySpecial` does (the x offset negated).
+/// `LLSettingsVOSky::applySpecial` does (the x offset negated). The colour
+/// pipeline is the reference's; a system applies the app's overrides to it
+/// (`overridden_cloud_params`).
 #[must_use]
 pub fn cloud_params(
     sky: &SkySettings,
@@ -2352,6 +2328,7 @@ pub fn cloud_params(
     // sky overwrites its light colours exactly as it does the sky dome's — see
     // [`shader_light_colors`].
     let (sunlight, moonlight) = shader_light_colors(sky);
+    let (linearize, sky_hdr_scale) = colour_pipeline(sky, &SkyOverrides::default());
     let pd1 = sky.cloud_pos_density1;
     let pd2 = sky.cloud_pos_density2;
     CloudParams {
@@ -2377,8 +2354,8 @@ pub fn cloud_params(
         cloud_variance: sky.cloud_variance,
         cloud_pos_density2: Vec3::new(pd2.position_x(), pd2.position_y(), pd2.density()),
         blend_factor: 0.0,
-        linearize: sky_linearize(),
-        sky_hdr_scale: resolved_sky_hdr_scale(sky),
+        linearize,
+        sky_hdr_scale,
         scroll_ref_time,
         scroll_rate,
         scroll_base,
@@ -2390,6 +2367,36 @@ pub fn cloud_params(
 pub(crate) fn default_cloud_params() -> CloudParams {
     let sky = SkySettings::legacy_windlight_default("Default");
     cloud_params(&sky, Vec3::Y, 1.0, 1.0, 0.0, Vec2::ZERO, Vec2::ZERO)
+}
+
+/// The sky uniforms `params` with `sky`'s colour pipeline under the app's
+/// `overrides` ([`colour_pipeline`]).
+fn overridden_sky_params(
+    params: SkyParams,
+    sky: &SkySettings,
+    overrides: &SkyOverrides,
+) -> SkyParams {
+    let (linearize, sky_hdr_scale) = colour_pipeline(sky, overrides);
+    SkyParams {
+        linearize,
+        sky_hdr_scale,
+        ..params
+    }
+}
+
+/// The cloud uniforms `params` with `sky`'s colour pipeline under the app's
+/// `overrides` ([`colour_pipeline`]).
+fn overridden_cloud_params(
+    params: CloudParams,
+    sky: &SkySettings,
+    overrides: &SkyOverrides,
+) -> CloudParams {
+    let (linearize, sky_hdr_scale) = colour_pipeline(sky, overrides);
+    CloudParams {
+        linearize,
+        sky_hdr_scale,
+        ..params
+    }
 }
 
 /// The scene lighting derived from a sky frame — the reference

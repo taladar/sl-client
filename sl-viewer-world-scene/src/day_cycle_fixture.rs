@@ -194,9 +194,18 @@ impl DayCycle {
     /// unit the assertions are about: `frames_per_cell` frames in a row should
     /// resolve one sky and write nothing after the first.
     pub(crate) fn new(settings: EnvironmentSettings, frames_per_cell: u32) -> Self {
+        Self::with_overrides(settings, frames_per_cell, RenderOverrides::default())
+    }
+
+    /// [`new`](Self::new), rendering under `overrides` from the first frame.
+    pub(crate) fn with_overrides(
+        settings: EnvironmentSettings,
+        frames_per_cell: u32,
+        overrides: RenderOverrides,
+    ) -> Self {
         let day_length = f64::from(settings.day_length.max(1));
         let mut cycle = Self {
-            app: build_app(&settings),
+            app: build_app(&settings, overrides),
             now: day_length * DAWN,
             step: day_length / DAY_POSITION_STEPS / f64::from(frames_per_cell.max(1)),
             previous: None,
@@ -330,7 +339,7 @@ impl DayCycle {
 /// [`SlSessionEvent::Environment`] folded in by the real [`ingest_environment`]
 /// — rather than being written into the resource, so what the fixture renders is
 /// what the grid's own reply would have produced.
-fn build_app(settings: &EnvironmentSettings) -> App {
+fn build_app(settings: &EnvironmentSettings, overrides: RenderOverrides) -> App {
     let mut app = App::new();
     app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()));
     app.init_asset::<Mesh>()
@@ -347,7 +356,7 @@ fn build_app(settings: &EnvironmentSettings) -> App {
         .init_resource::<TextureManager>()
         .init_resource::<DecodedTextures>()
         .init_resource::<ExposureRange>()
-        .init_resource::<RenderOverrides>()
+        .insert_resource(overrides)
         .init_resource::<FrameWrites>();
 
     let mut viewer_settings = ViewerSettings::from_store_for_test(SettingsStore::new());
@@ -430,6 +439,7 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::{DayCycle, Frame, eep_day_cycle, moving_day_cycle};
+    use crate::render_overrides::RenderOverrides;
     use crate::tonemap::DEFAULT_TONEMAP_MIX;
 
     /// Frames per day-position sampling cell. Four is enough for "several frames
@@ -583,11 +593,19 @@ mod tests {
     /// So: the ambient holds still while the sky frame does, and it equals what
     /// this frame's sky asks for rather than anything accumulated. That the share
     /// itself is applied *proportionally* is the pure half, tested on
-    /// `sky_ambient_light` — the knob is a process-wide `OnceLock` over an
-    /// environment variable, and this workspace does not `set_var` in tests.
+    /// `sky_ambient_light`. The probes' share is not the default `0.0` here: at
+    /// zero a compounding multiply is idempotent, which is exactly what hid it.
     #[test]
     fn the_ambient_holds_its_value_while_the_sky_frame_does() {
-        let mut cycle = DayCycle::new(moving_day_cycle(), FRAMES_PER_CELL);
+        let overrides = RenderOverrides {
+            probes: crate::render_overrides::ProbeOverrides {
+                ambient_scale: 0.5,
+                ..crate::render_overrides::ProbeOverrides::default()
+            },
+            ..RenderOverrides::default()
+        };
+        let mut cycle =
+            DayCycle::with_overrides(moving_day_cycle(), FRAMES_PER_CELL, overrides.clone());
         let before = cycle.ambient();
         let frames = cycle.run(RUN);
         for frame in frames.iter().filter(|frame| !frame.stepped) {
@@ -606,7 +624,7 @@ mod tests {
             .expect("the preset cycle resolves a sky at every position");
         let expected = crate::sky::sky_ambient_light(
             crate::sky::resolve_sky(&sky).ambient,
-            crate::probes::probe_ambient_scale(),
+            crate::probes::probe_ambient_scale(&overrides),
         );
         let actual = cycle.ambient();
         assert_eq!(actual.color, expected.0, "ambient tint");

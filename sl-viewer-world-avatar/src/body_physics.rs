@@ -170,15 +170,8 @@ pub(crate) fn log_enabled() -> bool {
     std::env::var("SL_VIEWER_LOG_BODY_PHYSICS").as_deref() == Ok("1")
 }
 
-/// The reference viewer's `physics_test` switch (env `SL_VIEWER_PHYSICS_TEST=1`):
-/// whether to force every motion's `Max_Effect` on, so an avatar wearing no tuned
-/// physics wearable — where every `Max_Effect` is zero and nothing would move —
-/// still bounces.
-#[must_use]
-pub(crate) fn force_enabled() -> bool {
-    std::env::var("SL_VIEWER_PHYSICS_TEST").as_deref() == Ok("1")
-}
-
-/// The `Max_Effect` [`force_enabled`] forces every motion to (the reference's
+/// The `Max_Effect` the forced physics test
+/// ([`MotionOverrides::body_physics_forced`](crate::avatar_overrides::MotionOverrides))
+/// forces every motion to (the reference's
 /// `behavior_maxeffect = 1.0f`): the driven params then sweep their whole range.
 pub(crate) const FORCED_MAX_EFFECT: f32 = 1.0;

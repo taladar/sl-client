@@ -24,7 +24,6 @@
 //! path.
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use bevy::prelude::*;
@@ -192,10 +191,10 @@ impl FromWorld for MeshManager {
     /// Build the store over a fresh [`BevyMeshFetcher`], backed by the on-disk
     /// mesh cache when a cache directory is available (falling back to an
     /// in-memory-only store if the cache cannot be opened).
-    fn from_world(_world: &mut World) -> Self {
+    fn from_world(world: &mut World) -> Self {
         let fetcher = Arc::new(BevyMeshFetcher::new());
-        let disk_dir = mesh_cache_dir();
-        let store = build_store(&fetcher, disk_dir);
+        let cache = sl_viewer_platform::paths::ViewerPaths::of(world).asset_cache("meshcache");
+        let store = build_store(&fetcher, cache);
         Self {
             store,
             fetcher,
@@ -633,19 +632,22 @@ impl MeshManager {
 /// Build a [`MeshStore`] over `fetcher`, backed by the on-disk cache at `disk_dir`
 /// when it can be opened, and otherwise in-memory only (a disk-cache failure must
 /// never keep the viewer from rendering).
-fn build_store(fetcher: &Arc<BevyMeshFetcher>, disk_dir: Option<PathBuf>) -> MeshStore {
+fn build_store(
+    fetcher: &Arc<BevyMeshFetcher>,
+    cache: sl_viewer_platform::paths::DiskCache,
+) -> MeshStore {
     // Coerce the concrete fetcher to the trait object the store stores (a move
     // through a typed binding, since `Arc::clone`'s inferred `T` would otherwise
     // demand the argument already be the trait object). The concrete `Arc` is kept
     // in the manager for `set_cap_url`.
     let concrete = Arc::clone(fetcher);
     let fetcher: Arc<dyn MeshFetcher> = concrete;
-    if let Some(dir) = disk_dir {
+    if let Some(dir) = cache.dir {
         match MeshStore::new(
             Arc::clone(&fetcher),
             Some(dir),
             MeshCacheLimits {
-                max_bytes: sl_viewer_platform::paths::asset_cache_max_bytes(),
+                max_bytes: cache.max_bytes,
                 ..MeshCacheLimits::default()
             },
         ) {
@@ -660,7 +662,7 @@ fn build_store(fetcher: &Arc<BevyMeshFetcher>, disk_dir: Option<PathBuf>) -> Mes
             Arc::clone(&fetcher),
             None,
             MeshCacheLimits {
-                max_bytes: sl_viewer_platform::paths::asset_cache_max_bytes(),
+                max_bytes: cache.max_bytes,
                 ..MeshCacheLimits::default()
             },
         ) {
@@ -668,13 +670,6 @@ fn build_store(fetcher: &Arc<BevyMeshFetcher>, disk_dir: Option<PathBuf>) -> Mes
             Err(error) => warn!("in-memory mesh store failed to open ({error}); retrying"),
         }
     }
-}
-
-/// The viewer's on-disk mesh cache directory (`<cache>/sl-client-bevy-viewer/
-/// meshcache`), from `XDG_CACHE_HOME` or `~/.cache`, or `None` when neither is set
-/// (the store then runs in-memory only).
-fn mesh_cache_dir() -> Option<PathBuf> {
-    sl_viewer_platform::paths::asset_cache_dir("meshcache")
 }
 
 /// Refresh the store fetcher's mesh capability URL each time the region's

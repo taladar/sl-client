@@ -269,9 +269,14 @@ pub(crate) struct PreferencesExtraHits(pub(crate) HashMap<usize, bool>);
 /// (`preferences_visible`) to land a headless run on a chosen tab.
 const PREFERENCES_TAB_ENV: &str = "SL_VIEWER_PREFERENCES_TAB";
 
-/// Select the [`PREFERENCES_TAB_ENV`] tab once the shell's content exists; a
-/// missing / unknown value does nothing. One-shot.
+/// The tab [`PREFERENCES_TAB_ENV`] names, read when the App is built.
+#[derive(Resource, Debug, Clone)]
+struct EnvPreferencesTab(String);
+
+/// Select the [`EnvPreferencesTab`] once the shell's content exists; no
+/// such resource, or an unknown tab, does nothing. One-shot.
 fn select_env_preferences_tab(
+    wanted: Option<Res<EnvPreferencesTab>>,
     ui: Option<Res<PreferencesUi>>,
     mut strips: Query<&mut TabStrip>,
     mut done: Local<bool>,
@@ -279,17 +284,14 @@ fn select_env_preferences_tab(
     if *done {
         return;
     }
-    let Some(wanted) = std::env::var_os(PREFERENCES_TAB_ENV) else {
+    let Some(wanted) = wanted else {
         *done = true;
         return;
     };
     let Some(ui) = ui else {
         return;
     };
-    let Some(index) = PREF_TABS
-        .iter()
-        .position(|tab| Some(tab.id) == wanted.to_str())
-    else {
+    let Some(index) = PREF_TABS.iter().position(|tab| tab.id == wanted.0) else {
         *done = true;
         return;
     };
@@ -656,7 +658,15 @@ pub struct PreferencesPlugin;
 
 impl Plugin for PreferencesPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(collect_env_pins())
+        let overrides = app
+            .world()
+            .get_resource::<crate::render_overrides::RenderOverrides>()
+            .cloned()
+            .unwrap_or_default();
+        if let Some(tab) = std::env::var_os(PREFERENCES_TAB_ENV) {
+            app.insert_resource(EnvPreferencesTab(tab.to_string_lossy().into_owned()));
+        }
+        app.insert_resource(collect_env_pins(&overrides))
             .init_resource::<PreferencesState>()
             .init_resource::<PreferencesExtraHits>()
             .init_resource::<PendingPreferencesTab>()
@@ -701,10 +711,10 @@ impl Plugin for PreferencesPlugin {
 /// The environment is read exactly here; everything afterwards reads the
 /// resource, which is also how a test states a pinned setting without touching
 /// the process environment.
-fn collect_env_pins() -> EnvPinnedSettings {
+fn collect_env_pins(overrides: &crate::render_overrides::RenderOverrides) -> EnvPinnedSettings {
     let mut pins = EnvPinnedSettings::default();
     crate::render_overrides::record_env_pins(&mut pins);
-    crate::preferences_graphics::record_env_pins(&mut pins);
+    crate::preferences_graphics::record_env_pins(&mut pins, overrides);
     crate::preferences_colors_skins::record_env_pins(&mut pins);
     crate::i18n::record_env_pins(&mut pins);
     log_active_env_knobs();

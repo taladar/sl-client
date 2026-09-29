@@ -98,7 +98,7 @@ fn spawn_each(
     for part in requests {
         let body = body(&part.objects);
         let events_tx = events_tx.clone();
-        std::thread::spawn(move || {
+        crate::log_context::spawn_thread(move || {
             run_voice_cap(&part.url, body, capability, &events_tx);
         });
     }
@@ -119,14 +119,14 @@ fn spawn_selected_cost(
         let body = build_resource_cost_selected_request(kind, &part.objects);
         let url = part.url.clone();
         let events_tx = events_tx.clone();
-        std::thread::spawn(move || run_voice_cap(&url, body, capability, &events_tx));
+        crate::log_context::spawn_thread(move || run_voice_cap(&url, body, capability, &events_tx));
         return;
     }
     if requests.is_empty() {
         return;
     }
     let events_tx = events_tx.clone();
-    std::thread::spawn(move || {
+    crate::log_context::spawn_thread(move || {
         let replies: Option<Vec<Llsd>> = requests
             .iter()
             .map(|part| {

@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 122 |
 | ready | 311 |
-| blocked | 59 |
+| blocked | 58 |
 | in-progress | 21 |
 | bugs | 17 |
-| done | 1274 |
+| done | 1275 |
 | deferred | 31 |
 | wont-do | 16 |
 | **total** | **1851** |
@@ -389,9 +389,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-automation-accesskit-bridge`](ready/viewer-automation-accesskit-bridge.md)
   — Feed AccessKit from the semantic UI model (blocked by
   `viewer-automation-semantic-custom-widgets` (done))
-- [`viewer-automation-per-app-state`](ready/viewer-automation-per-app-state.md)
-  — Per-App state — two logged-in viewers in one process (blocked by
-  `viewer-automation-app-builder` (done))
+- [`viewer-automation-inprocess-transport`](ready/viewer-automation-inprocess-transport.md)
+  — In-process transport — the same requests against Apps in the test process
+  (blocked by `viewer-automation-executor` (done),
+  `viewer-automation-per-app-state` (done), `viewer-automation-windowless-mode`
+  (done))
 - [`viewer-automation-testkit-locators`](ready/viewer-automation-testkit-locators.md)
   — The in-process tiers speak locators too (blocked by
   `viewer-automation-locator-engine` (done), `viewer-automation-app-builder`
@@ -1051,7 +1053,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-world-heartbeat`](ready/server-world-heartbeat.md) — A region
   heartbeat — the fake grid has no simulation loop at all
 
-## blocked (59)
+## blocked (58)
 
 ### viewer
 
@@ -1062,10 +1064,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   sl-viewer-driver — the async test API over both transports (blocked by
   `viewer-automation-remote-transport` (done),
   `viewer-automation-inprocess-transport`)
-- [`viewer-automation-inprocess-transport`](blocked/viewer-automation-inprocess-transport.md)
-  — In-process transport — the same requests against Apps in the test process
-  (blocked by `viewer-automation-executor` (done),
-  `viewer-automation-per-app-state`, `viewer-automation-windowless-mode` (done))
 - [`viewer-avatar-moderation-actions`](blocked/viewer-avatar-moderation-actions.md)
   — Per-avatar parcel / estate moderation — the shared action layer (blocked by
   `viewer-region-options-estate`)
@@ -1353,7 +1351,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1274)
+## done (1275)
 
 ### protocol
 
@@ -1811,6 +1809,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-automation-semantic-custom-widgets` (done))
 - [`viewer-automation-offscreen-window-spike`](done/viewer-automation-offscreen-window-spike.md)
   — Spike — how a windowless viewer renders and picks at the same time
+- [`viewer-automation-per-app-state`](done/viewer-automation-per-app-state.md) —
+  Per-App state — two logged-in viewers in one process (blocked by
+  `viewer-automation-app-builder` (done))
 - [`viewer-automation-protocol`](done/viewer-automation-protocol.md) —
   sl-automation-proto — the locator, request and snapshot vocabulary
 - [`viewer-automation-remote-transport`](done/viewer-automation-remote-transport.md)

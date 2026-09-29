@@ -351,6 +351,7 @@ pub mod grass;
 mod http;
 pub mod http_proxy;
 mod inventory;
+pub mod log_context;
 mod marketplace;
 mod materials;
 mod media;
@@ -853,11 +854,11 @@ fn start_login(mut commands: Commands, config: Res<SlConfig>) {
         account_dirs: config.account_dirs.clone(),
         inventory_cache_config: config.inventory_cache_config,
     };
-    let spawned = std::thread::Builder::new()
-        .name("sl-session-net".to_owned())
-        .spawn(move || {
-            run_network_thread(Box::new(session), &net_config, &command_rx, &outbound_tx);
-        });
+    // In the tracing context of the App that logged in, so every line of this
+    // session is attributable to its viewer (see `log_context`).
+    let spawned = log_context::spawn_named_thread("sl-session-net", move || {
+        run_network_thread(Box::new(session), &net_config, &command_rx, &outbound_tx);
+    });
     if let Err(error) = spawned {
         tracing::error!("could not spawn the session network thread: {error}");
         commands.insert_resource(SlState { link: None });
@@ -1328,7 +1329,7 @@ fn route_ais3(caps: Option<&Caps>, suffix: &str, verb: Ais3Verb, body: Option<St
     };
     let events_tx = caps.events_tx.clone();
     let url = format!("{base}{suffix}");
-    let _handle = std::thread::spawn(move || match verb {
+    let _handle = crate::log_context::spawn_thread(move || match verb {
         Ais3Verb::Post => {
             run_voice_cap(
                 &url,
@@ -1429,7 +1430,7 @@ fn advance_running(
             // change), surfacing the flags as `Event::SimulatorFeatures`.
             if let Some(url) = map.get(CAP_SIMULATOR_FEATURES).cloned() {
                 let events_tx = caps.events_tx.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_get_caps_llsd(&url, CAP_SIMULATOR_FEATURES, &events_tx);
                 });
             }
@@ -1506,7 +1507,7 @@ fn advance_running(
                 });
             if !agent_folders.is_empty() {
                 let events_tx = caps.events_tx.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_inventory_fetch(
                         &url,
                         owner.uuid(),
@@ -1523,7 +1524,7 @@ fn advance_running(
                 ) {
                     (Some(lib_url), Some(lib_owner)) => {
                         let events_tx = caps.events_tx.clone();
-                        std::thread::spawn(move || {
+                        crate::log_context::spawn_thread(move || {
                             run_inventory_fetch(
                                 &lib_url,
                                 lib_owner.uuid(),
@@ -1564,7 +1565,7 @@ fn advance_running(
                 let from_group = matches!(kind, ChatSessionKind::Group { .. });
                 let events_tx = caps.events_tx.clone();
                 let fetch_url = url.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_chat_session_fetch_history(
                         &fetch_url, body, session_id, from_group, &events_tx,
                     );
@@ -1677,7 +1678,7 @@ fn advance_running(
                     } else if let Some(url) = caps.map.get(CAP_LSL_SYNTAX).cloned() {
                         let events_tx = caps.events_tx.clone();
                         let cache = lsl_syntax.cache.clone();
-                        std::thread::spawn(move || {
+                        crate::log_context::spawn_thread(move || {
                             run_fetch_lsl_syntax(&url, id, &cache, &events_tx);
                         });
                     }
@@ -1911,7 +1912,7 @@ fn apply_command(
             {
                 let events_tx = caps.events_tx.clone();
                 let folders = folder_ids.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_inventory_fetch(
                         &url,
                         owner.uuid(),
@@ -2113,7 +2114,7 @@ fn apply_command(
                     *folder_type,
                     name,
                 );
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_voice_cap(&url, body, CAP_CREATE_INVENTORY_CATEGORY, &events_tx);
                 });
             }
@@ -2132,7 +2133,7 @@ fn apply_command(
                     ais_create_category_url(*parent_id, Uuid::new_v4())
                 );
                 let body = build_ais_create_category_body(*parent_id, *folder_type, name);
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_voice_cap(&url, body, CAP_INVENTORY_API_V3, &events_tx);
                 });
             }
@@ -2144,7 +2145,7 @@ fn apply_command(
                 let events_tx = caps.events_tx.clone();
                 let url = format!("{base}{}", ais_category_url(*folder_id));
                 let body = build_ais_rename_category_body(name);
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_patch_caps_llsd(&url, body, CAP_INVENTORY_API_V3, &events_tx);
                 });
             }
@@ -2159,7 +2160,7 @@ fn apply_command(
                 let events_tx = caps.events_tx.clone();
                 let url = format!("{base}{}", ais_category_url(*folder_id));
                 let body = build_ais_move_body(*parent_id);
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_patch_caps_llsd(&url, body, CAP_INVENTORY_API_V3, &events_tx);
                 });
             }
@@ -2170,7 +2171,7 @@ fn apply_command(
             {
                 let events_tx = caps.events_tx.clone();
                 let url = format!("{base}{}", ais_category_url(*folder_id));
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_delete_caps_llsd(&url, CAP_INVENTORY_API_V3, &events_tx);
                 });
             }
@@ -2181,7 +2182,7 @@ fn apply_command(
             {
                 let events_tx = caps.events_tx.clone();
                 let url = format!("{base}{}", ais_category_children_url(*folder_id));
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_delete_caps_llsd(&url, CAP_INVENTORY_API_V3, &events_tx);
                 });
             }
@@ -2195,7 +2196,7 @@ fn apply_command(
                     "{base}{}",
                     ais_category_children_fetch_url(*folder_id, *depth)
                 );
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_get_caps_llsd(&url, CAP_INVENTORY_API_V3, &events_tx);
                 });
             }
@@ -2211,7 +2212,7 @@ fn apply_command(
                 let events_tx = caps.events_tx.clone();
                 let url = format!("{base}{}", ais_item_url(*item_id));
                 let body = build_ais_update_item_body(name, description);
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_patch_caps_llsd(&url, body, CAP_INVENTORY_API_V3, &events_tx);
                 });
             }
@@ -2223,7 +2224,7 @@ fn apply_command(
                 let events_tx = caps.events_tx.clone();
                 let url = format!("{base}{}", ais_item_url(*item_id));
                 let body = build_ais_move_body(*parent_id);
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_patch_caps_llsd(&url, body, CAP_INVENTORY_API_V3, &events_tx);
                 });
             }
@@ -2234,7 +2235,7 @@ fn apply_command(
             {
                 let events_tx = caps.events_tx.clone();
                 let url = format!("{base}{}", ais_item_url(*item_id));
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_delete_caps_llsd(&url, CAP_INVENTORY_API_V3, &events_tx);
                 });
             }
@@ -2245,7 +2246,7 @@ fn apply_command(
             {
                 let events_tx = caps.events_tx.clone();
                 let url = format!("{base}{}", ais_item_url(*item_id));
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_get_caps_llsd(&url, CAP_INVENTORY_API_V3, &events_tx);
                 });
             }
@@ -2256,7 +2257,7 @@ fn apply_command(
             {
                 let events_tx = caps.events_tx.clone();
                 let group = *group_id;
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_group_members_fetch(&url, group, &events_tx);
                 });
             }
@@ -2355,7 +2356,7 @@ fn apply_command(
                     && let Some(url) = caps.map.get(CAP_ACCEPT_GROUP_INVITE).cloned()
                 {
                     let body = group_invite_response_body(*group_id);
-                    std::thread::spawn(move || run_caps_oneway(&url, body));
+                    crate::log_context::spawn_thread(move || run_caps_oneway(&url, body));
                 }
             } else {
                 session.accept_group_invitation(*group_id, *transaction_id, now)?;
@@ -2371,7 +2372,7 @@ fn apply_command(
                     && let Some(url) = caps.map.get(CAP_DECLINE_GROUP_INVITE).cloned()
                 {
                     let body = group_invite_response_body(*group_id);
-                    std::thread::spawn(move || run_caps_oneway(&url, body));
+                    crate::log_context::spawn_thread(move || run_caps_oneway(&url, body));
                 }
             } else {
                 session.decline_group_invitation(*group_id, *transaction_id, now)?;
@@ -2592,7 +2593,7 @@ fn apply_command(
                         target: "sl_client_bevy::environment",
                         "requesting EEP environment from {CAP_EXT_ENVIRONMENT} cap"
                     );
-                    std::thread::spawn(move || {
+                    crate::log_context::spawn_thread(move || {
                         run_get_caps_llsd(&url, CAP_EXT_ENVIRONMENT, &events_tx);
                     });
                 } else {
@@ -2622,7 +2623,7 @@ fn apply_command(
                 let events_tx = caps.events_tx.clone();
                 let url = environment_cap_url(&base, *parcel_id, *track_no);
                 let body = build_environment_update_request(update);
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_put_caps_llsd(&url, body, CAP_EXT_ENVIRONMENT, &events_tx);
                 });
             }
@@ -2636,7 +2637,7 @@ fn apply_command(
             {
                 let events_tx = caps.events_tx.clone();
                 let url = environment_cap_url(&base, *parcel_id, *track_no);
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_delete_caps_llsd(&url, CAP_EXT_ENVIRONMENT, &events_tx);
                 });
             }
@@ -2734,14 +2735,14 @@ fn apply_command(
                             report.screenshot_id = Uuid::new_v4();
                         }
                         let body = build_send_user_report(&report);
-                        std::thread::spawn(move || {
+                        crate::log_context::spawn_thread(move || {
                             run_report_screenshot_upload(&url, body, bytes);
                         });
                     }
                     None => {
                         if let Some(url) = caps.map.get(CAP_SEND_USER_REPORT).cloned() {
                             let body = build_send_user_report(report);
-                            std::thread::spawn(move || {
+                            crate::log_context::spawn_thread(move || {
                                 run_caps_oneway(&url, body);
                             });
                         }
@@ -3068,7 +3069,7 @@ fn apply_command(
             {
                 let asset_tx = caps.asset_tx.clone();
                 let (id, discard) = (*texture_id, *discard_level);
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_texture_fetch(&url, id, discard, &asset_tx);
                 });
             }
@@ -3086,7 +3087,7 @@ fn apply_command(
             {
                 let asset_tx = caps.asset_tx.clone();
                 let (id, range) = (mesh_id.uuid(), *byte_range);
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_asset_fetch(
                         &url,
                         &format!("?mesh_id={id}"),
@@ -3108,7 +3109,7 @@ fn apply_command(
             {
                 let asset_tx = caps.asset_tx.clone();
                 let (id, asset_type, range) = (asset_id.uuid(), *asset_type, *byte_range);
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_generic_asset_fetch(&url, id, asset_type, range, &asset_tx);
                 });
             }
@@ -3144,7 +3145,7 @@ fn apply_command(
             {
                 let events_tx = caps.events_tx.clone();
                 let version = *cof_version;
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_server_appearance_update(&url, version, &events_tx);
                 });
             }
@@ -3154,7 +3155,7 @@ fn apply_command(
                 && let Some(url) = caps.map.get(CAP_INCREMENT_COF_VERSION).cloned()
             {
                 let events_tx = caps.events_tx.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_increment_cof_version(&url, &events_tx);
                 });
             }
@@ -3275,7 +3276,7 @@ fn apply_command(
                 );
                 let events_tx = caps.events_tx.clone();
                 let query_uuid = query_id.get();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_avatar_picker_search(&url, query_uuid, &events_tx);
                 });
             } else {
@@ -3394,7 +3395,7 @@ fn apply_command(
                     *item_id,
                     *folder_id,
                 );
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     post_caps_llsd_oneway(&url, body);
                 });
             }
@@ -3530,7 +3531,7 @@ fn apply_command(
                 let asset_tx = caps.asset_tx.clone();
                 let body = build_upload_baked_texture_request();
                 let data = data.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     let event = run_caps_upload(&url, body, data, None);
                     deliver(&asset_tx, event);
                 });
@@ -3567,7 +3568,7 @@ fn apply_command(
             {
                 let asset_tx = caps.asset_tx.clone();
                 let data = data.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     let mut event = run_caps_upload(&url, body, data, None);
                     // **Name the item ourselves when the grid does not.** An
                     // update cap's completion is only obliged to carry the new
@@ -3636,7 +3637,7 @@ fn apply_command(
             {
                 let asset_tx = caps.asset_tx.clone();
                 let source = source.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     let mut event = run_script_upload(&url, body, source, running);
                     // Name the item ourselves when the grid does not: Second
                     // Life's update path answers with the asset alone, and the
@@ -3660,7 +3661,7 @@ fn apply_command(
             {
                 let events_tx = caps.events_tx.clone();
                 let object = *object_id;
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_object_media_fetch(&url, object, &events_tx);
                 });
             }
@@ -3670,7 +3671,7 @@ fn apply_command(
                 && let Some(url) = caps.map.get(CAP_OBJECT_MEDIA).cloned()
             {
                 let body = build_object_media_update_request(*object_id, faces);
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     post_caps_llsd_oneway(&url, body);
                 });
             }
@@ -3684,7 +3685,7 @@ fn apply_command(
                 && let Some(url) = caps.map.get(CAP_OBJECT_MEDIA_NAVIGATE).cloned()
             {
                 let body = build_object_media_navigate_request(*object_id, *face, media_url);
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     post_caps_llsd_oneway(&url, body);
                 });
             }
@@ -3695,7 +3696,7 @@ fn apply_command(
             {
                 let asset_tx = caps.asset_tx.clone();
                 let ids = material_ids.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_render_materials_fetch(&url, ids, &asset_tx);
                 });
             }
@@ -3705,7 +3706,7 @@ fn apply_command(
                 && let Some(url) = caps.map.get(CAP_RENDER_MATERIALS).cloned()
             {
                 let body = build_render_materials_put_request(updates);
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_set_render_materials(&url, body);
                 });
             }
@@ -3716,7 +3717,7 @@ fn apply_command(
             {
                 let body = build_modify_material_params_request(updates);
                 let events_tx = caps.events_tx.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_modify_material_params(&url, body, &events_tx);
                 });
             }
@@ -3727,7 +3728,7 @@ fn apply_command(
             {
                 let body = build_provision_voice_account_request(request);
                 let events_tx = caps.events_tx.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_voice_cap(&url, body, CAP_PROVISION_VOICE_ACCOUNT, &events_tx);
                 });
             }
@@ -3738,7 +3739,7 @@ fn apply_command(
             {
                 let body = build_parcel_voice_info_request();
                 let events_tx = caps.events_tx.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_voice_cap(&url, body, CAP_PARCEL_VOICE_INFO, &events_tx);
                 });
             }
@@ -3752,7 +3753,7 @@ fn apply_command(
                 && let Some(url) = caps.map.get(CAP_VOICE_SIGNALING).cloned()
             {
                 let body = build_voice_signaling_request(viewer_session, candidates, *completed);
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_voice_signaling(&url, body);
                 });
             }
@@ -3764,7 +3765,7 @@ fn apply_command(
                 let agent_uuids: Vec<Uuid> = agent_ids.iter().map(AgentKey::uuid).collect();
                 let url = format!("{base}{}", display_names_query(&agent_uuids));
                 let events_tx = caps.events_tx.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_get_caps_llsd(&url, CAP_GET_DISPLAY_NAMES, &events_tx);
                 });
             }
@@ -3785,7 +3786,7 @@ fn apply_command(
                     region_handle: *region_handle,
                 };
                 let events_tx = caps.events_tx.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_remote_parcel_request(&url, request, &events_tx);
                 });
             }
@@ -3795,7 +3796,7 @@ fn apply_command(
                 && let Some(url) = caps.map.get(CAP_SIMULATOR_FEATURES).cloned()
             {
                 let events_tx = caps.events_tx.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_get_caps_llsd(&url, CAP_SIMULATOR_FEATURES, &events_tx);
                 });
             }
@@ -3806,7 +3807,7 @@ fn apply_command(
             {
                 let body = build_agent_preferences_request(&AgentPreferences::default());
                 let events_tx = caps.events_tx.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_voice_cap(&url, body, CAP_AGENT_PREFERENCES, &events_tx);
                 });
             }
@@ -3817,7 +3818,7 @@ fn apply_command(
             {
                 let body = build_agent_preferences_request(prefs);
                 let events_tx = caps.events_tx.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_voice_cap(&url, body, CAP_AGENT_PREFERENCES, &events_tx);
                 });
             }
@@ -3836,7 +3837,7 @@ fn apply_command(
                 && let Some(url) = caps.map.get(CAP_ATTACHMENT_RESOURCES).cloned()
             {
                 let events_tx = caps.events_tx.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_get_caps_llsd(&url, CAP_ATTACHMENT_RESOURCES, &events_tx);
                 });
             }
@@ -3847,7 +3848,7 @@ fn apply_command(
             {
                 let parcel_id = *parcel_id;
                 let events_tx = caps.events_tx.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_land_resources(&url, parcel_id, &events_tx);
                 });
             }
@@ -3872,7 +3873,7 @@ fn apply_command(
             {
                 let url = format!("{base}{}", experience_info_query(experience_ids));
                 let events_tx = caps.events_tx.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_get_caps_llsd(&url, CAP_GET_EXPERIENCE_INFO, &events_tx);
                 });
             }
@@ -3883,7 +3884,7 @@ fn apply_command(
             {
                 let url = format!("{base}{}", find_experience_query(query, *page));
                 let events_tx = caps.events_tx.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_get_caps_llsd(&url, CAP_FIND_EXPERIENCE_BY_NAME, &events_tx);
                 });
             }
@@ -3893,7 +3894,7 @@ fn apply_command(
                 && let Some(url) = caps.map.get(CAP_GET_EXPERIENCES).cloned()
             {
                 let events_tx = caps.events_tx.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_get_caps_llsd(&url, CAP_GET_EXPERIENCES, &events_tx);
                 });
             }
@@ -3908,12 +3909,12 @@ fn apply_command(
                 let events_tx = caps.events_tx.clone();
                 if permission.is_forget() {
                     let url = format!("{base}{}", forget_experience_query(*experience_id));
-                    std::thread::spawn(move || {
+                    crate::log_context::spawn_thread(move || {
                         run_delete_caps_llsd(&url, CAP_EXPERIENCE_PREFERENCES, &events_tx);
                     });
                 } else {
                     let body = build_set_experience_permission_request(*experience_id, *permission);
-                    std::thread::spawn(move || {
+                    crate::log_context::spawn_thread(move || {
                         run_put_caps_llsd(&base, body, CAP_EXPERIENCE_PREFERENCES, &events_tx);
                     });
                 }
@@ -3924,7 +3925,7 @@ fn apply_command(
                 && let Some(url) = caps.map.get(CAP_AGENT_EXPERIENCES).cloned()
             {
                 let events_tx = caps.events_tx.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_get_caps_llsd(&url, CAP_AGENT_EXPERIENCES, &events_tx);
                 });
             }
@@ -3934,7 +3935,7 @@ fn apply_command(
                 && let Some(url) = caps.map.get(CAP_GET_ADMIN_EXPERIENCES).cloned()
             {
                 let events_tx = caps.events_tx.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_get_caps_llsd(&url, CAP_GET_ADMIN_EXPERIENCES, &events_tx);
                 });
             }
@@ -3944,7 +3945,7 @@ fn apply_command(
                 && let Some(url) = caps.map.get(CAP_GET_CREATOR_EXPERIENCES).cloned()
             {
                 let events_tx = caps.events_tx.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_get_caps_llsd(&url, CAP_GET_CREATOR_EXPERIENCES, &events_tx);
                 });
             }
@@ -3956,7 +3957,7 @@ fn apply_command(
                 let url = format!("{base}{}", group_experiences_query(group_id.uuid()));
                 let group_id = *group_id;
                 let asset_tx = caps.asset_tx.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_group_experiences(&url, group_id, &asset_tx);
                 });
             }
@@ -3968,7 +3969,7 @@ fn apply_command(
                 let url = format!("{base}{}", experience_id_query(*experience_id));
                 let experience_id = *experience_id;
                 let asset_tx = caps.asset_tx.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_experience_status(&url, experience_id, true, &asset_tx);
                 });
             }
@@ -3980,7 +3981,7 @@ fn apply_command(
                 let url = format!("{base}{}", experience_id_query(*experience_id));
                 let experience_id = *experience_id;
                 let asset_tx = caps.asset_tx.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_experience_status(&url, experience_id, false, &asset_tx);
                 });
             }
@@ -3991,7 +3992,7 @@ fn apply_command(
             {
                 let body = build_update_experience_request(update);
                 let events_tx = caps.events_tx.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_voice_cap(&url, body, CAP_UPDATE_EXPERIENCE, &events_tx);
                 });
             }
@@ -4001,7 +4002,7 @@ fn apply_command(
                 && let Some(url) = caps.map.get(CAP_REGION_EXPERIENCES).cloned()
             {
                 let events_tx = caps.events_tx.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_get_caps_llsd(&url, CAP_REGION_EXPERIENCES, &events_tx);
                 });
             }
@@ -4016,7 +4017,7 @@ fn apply_command(
             {
                 let body = build_region_experiences_request(allowed, blocked, trusted);
                 let events_tx = caps.events_tx.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_voice_cap(&url, body, CAP_REGION_EXPERIENCES, &events_tx);
                 });
             }
@@ -4031,7 +4032,7 @@ fn apply_command(
                 let url = format!("{base}{}", experience_query(*parcel_id, experiences));
                 let parcel_id = *parcel_id;
                 let events_tx = caps.events_tx.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_experience_query(&url, parcel_id, &events_tx);
                 });
             }
@@ -4113,7 +4114,7 @@ fn apply_command(
                     invitees,
                 );
                 session.open_conference(*session_id, invitees, now);
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_caps_oneway(&url, body);
                 });
             } else {
@@ -4133,7 +4134,7 @@ fn apply_command(
                 let body =
                     chat_session_agents_body(CHAT_SESSION_INVITE, session_id.get(), invitees);
                 session.open_conference(*session_id, invitees, now);
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_caps_oneway(&url, body);
                 });
             } else {
@@ -4176,7 +4177,7 @@ fn apply_command(
                 let body = chat_session_request_body(CHAT_SESSION_ACCEPT, session_id.get());
                 let events_tx = caps.events_tx.clone();
                 let (session_uuid, from_group) = (session_id.get(), *from_group);
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_chat_session_request(&url, body, session_uuid, from_group, &events_tx);
                 });
             }
@@ -4194,7 +4195,7 @@ fn apply_command(
                 let body = chat_session_request_body(CHAT_SESSION_DECLINE, session_id.get());
                 let events_tx = caps.events_tx.clone();
                 let (session_uuid, from_group) = (session_id.get(), *from_group);
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_chat_session_request(&url, body, session_uuid, from_group, &events_tx);
                 });
             } else if *from_group {
@@ -4217,14 +4218,14 @@ fn apply_command(
                     let body =
                         build_provision_voice_account_request(&VoiceProvisionRequest::vivox());
                     let events_tx = caps.events_tx.clone();
-                    std::thread::spawn(move || {
+                    crate::log_context::spawn_thread(move || {
                         run_voice_cap(&url, body, CAP_PROVISION_VOICE_ACCOUNT, &events_tx);
                     });
                 }
                 if let Some(url) = caps.map.get(CAP_CHAT_SESSION_REQUEST).cloned() {
                     let body = chat_session_request_body(CHAT_SESSION_ACCEPT, session_uuid);
                     let events_tx = caps.events_tx.clone();
-                    std::thread::spawn(move || {
+                    crate::log_context::spawn_thread(move || {
                         run_chat_session_request(&url, body, session_uuid, from_group, &events_tx);
                     });
                 }
@@ -4248,7 +4249,7 @@ fn apply_command(
                 if let Some(url) = caps.map.get(CAP_CHAT_SESSION_REQUEST).cloned() {
                     let body = chat_session_request_body(method, session_uuid);
                     let events_tx = caps.events_tx.clone();
-                    std::thread::spawn(move || {
+                    crate::log_context::spawn_thread(move || {
                         run_chat_session_request(&url, body, session_uuid, from_group, &events_tx);
                     });
                 }
@@ -4269,7 +4270,7 @@ fn apply_command(
                 let body = chat_session_request_body(CHAT_SESSION_FETCH_HISTORY, session_uuid);
                 let from_group = matches!(kind, ChatSessionKind::Group { .. });
                 let events_tx = caps.events_tx.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_chat_session_fetch_history(
                         &url,
                         body,
@@ -4413,7 +4414,7 @@ fn apply_command(
                 && let Some(url) = caps.map.get(CAP_READ_OFFLINE_MSGS).cloned()
             {
                 let events_tx = caps.events_tx.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_get_caps_llsd(&url, CAP_READ_OFFLINE_MSGS, &events_tx);
                 });
             }
@@ -4448,7 +4449,7 @@ fn apply_command(
                 && let Some(url) = caps.map.get(CAP_USER_INFO).cloned()
             {
                 let events_tx = caps.events_tx.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_get_caps_llsd(&url, CAP_USER_INFO, &events_tx);
                 });
             } else {
@@ -4473,7 +4474,7 @@ fn apply_command(
                     dir_visibility: directory_visibility.to_wire().to_owned(),
                 });
                 let events_tx = caps.events_tx.clone();
-                std::thread::spawn(move || {
+                crate::log_context::spawn_thread(move || {
                     run_voice_cap(&url, body, CAP_USER_INFO, &events_tx);
                 });
             } else {

@@ -25,7 +25,6 @@
 //! assembles the inputs but they are simply unused by the render path.
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use bevy::prelude::*;
@@ -232,9 +231,10 @@ pub struct WearableAssetManager {
 }
 
 impl FromWorld for WearableAssetManager {
-    fn from_world(_world: &mut World) -> Self {
+    fn from_world(world: &mut World) -> Self {
         let fetcher = Arc::new(BevyAssetFetcher::new());
-        let store = build_asset_store(&fetcher, asset_cache_dir());
+        let cache = sl_viewer_platform::paths::ViewerPaths::of(world).asset_cache("assetcache");
+        let store = build_asset_store(&fetcher, cache);
         Self {
             store,
             fetcher,
@@ -326,15 +326,18 @@ impl WearableAssetManager {
 
 /// Build an [`AssetStore`] over `fetcher`, disk-backed when the cache opens and
 /// in-memory only otherwise (a cache failure must never wedge the viewer).
-fn build_asset_store(fetcher: &Arc<BevyAssetFetcher>, disk_dir: Option<PathBuf>) -> AssetStore {
+fn build_asset_store(
+    fetcher: &Arc<BevyAssetFetcher>,
+    cache: sl_viewer_platform::paths::DiskCache,
+) -> AssetStore {
     let concrete = Arc::clone(fetcher);
     let fetcher: Arc<dyn BlobFetcher> = concrete;
-    if let Some(dir) = disk_dir {
+    if let Some(dir) = cache.dir {
         match AssetStore::new(
             Arc::clone(&fetcher),
             Some(dir),
             AssetCacheLimits {
-                max_bytes: sl_viewer_platform::paths::asset_cache_max_bytes(),
+                max_bytes: cache.max_bytes,
                 ..AssetCacheLimits::default()
             },
         ) {
@@ -349,7 +352,7 @@ fn build_asset_store(fetcher: &Arc<BevyAssetFetcher>, disk_dir: Option<PathBuf>)
             Arc::clone(&fetcher),
             None,
             AssetCacheLimits {
-                max_bytes: sl_viewer_platform::paths::asset_cache_max_bytes(),
+                max_bytes: cache.max_bytes,
                 ..AssetCacheLimits::default()
             },
         ) {
@@ -357,12 +360,6 @@ fn build_asset_store(fetcher: &Arc<BevyAssetFetcher>, disk_dir: Option<PathBuf>)
             Err(error) => warn!("in-memory asset store failed to open ({error}); retrying"),
         }
     }
-}
-
-/// The viewer's on-disk generic-asset cache directory, or `None` when neither
-/// `XDG_CACHE_HOME` nor `HOME` is set (the store then runs in-memory only).
-fn asset_cache_dir() -> Option<PathBuf> {
-    sl_viewer_platform::paths::asset_cache_dir("assetcache")
 }
 
 /// The `ViewerAsset` asset class for a wearable of `wearable_type`: body parts

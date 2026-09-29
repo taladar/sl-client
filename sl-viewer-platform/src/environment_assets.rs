@@ -15,7 +15,6 @@
 //! built-in / local-file paths a settings asset never has.
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use bevy::prelude::*;
@@ -57,10 +56,13 @@ pub struct EnvironmentAssetManager {
     pending: HashSet<AssetKey>,
 }
 
-impl Default for EnvironmentAssetManager {
-    fn default() -> Self {
+impl FromWorld for EnvironmentAssetManager {
+    /// The manager over the world's settings-asset cache
+    /// ([`ViewerPaths`](crate::paths::ViewerPaths)).
+    fn from_world(world: &mut World) -> Self {
         let fetcher = Arc::new(BevyAssetFetcher::new());
-        let store = build_settings_store(&fetcher, settings_cache_dir());
+        let cache = crate::paths::ViewerPaths::of(world).asset_cache("envcache");
+        let store = build_settings_store(&fetcher, cache);
         Self {
             store,
             fetcher,
@@ -209,15 +211,18 @@ impl EnvironmentAssetManager {
 /// Build an [`AssetStore`] over `fetcher`, disk-backed when the cache opens and
 /// in-memory only otherwise (a cache failure must never wedge the viewer).
 /// Mirrors the animation-asset store builder.
-fn build_settings_store(fetcher: &Arc<BevyAssetFetcher>, disk_dir: Option<PathBuf>) -> AssetStore {
+fn build_settings_store(
+    fetcher: &Arc<BevyAssetFetcher>,
+    cache: crate::paths::DiskCache,
+) -> AssetStore {
     let concrete = Arc::clone(fetcher);
     let fetcher: Arc<dyn BlobFetcher> = concrete;
-    if let Some(dir) = disk_dir {
+    if let Some(dir) = cache.dir {
         match AssetStore::new(
             Arc::clone(&fetcher),
             Some(dir),
             AssetCacheLimits {
-                max_bytes: crate::paths::asset_cache_max_bytes(),
+                max_bytes: cache.max_bytes,
                 ..AssetCacheLimits::default()
             },
         ) {
@@ -232,7 +237,7 @@ fn build_settings_store(fetcher: &Arc<BevyAssetFetcher>, disk_dir: Option<PathBu
             Arc::clone(&fetcher),
             None,
             AssetCacheLimits {
-                max_bytes: crate::paths::asset_cache_max_bytes(),
+                max_bytes: cache.max_bytes,
                 ..AssetCacheLimits::default()
             },
         ) {
@@ -240,13 +245,6 @@ fn build_settings_store(fetcher: &Arc<BevyAssetFetcher>, disk_dir: Option<PathBu
             Err(error) => warn!("in-memory settings store failed to open ({error}); retrying"),
         }
     }
-}
-
-/// The viewer's on-disk settings-asset cache directory
-/// (`<cache>/sl-client-bevy-viewer/envcache`), from `XDG_CACHE_HOME` or
-/// `~/.cache`, or `None` when neither is set (the store then runs in-memory only).
-fn settings_cache_dir() -> Option<PathBuf> {
-    crate::paths::asset_cache_dir("envcache")
 }
 
 /// Refresh the store fetcher's `ViewerAsset` capability URL each time the region's

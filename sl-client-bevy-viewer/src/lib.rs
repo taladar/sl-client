@@ -42,6 +42,7 @@ pub(crate) use sl_viewer_places::about_region;
 pub(crate) use sl_viewer_places::telehub;
 pub(crate) use sl_viewer_places::top_objects;
 pub(crate) use sl_viewer_world_avatar::animations;
+pub(crate) use sl_viewer_world_avatar::avatar_overrides;
 pub mod assembly;
 /// Every module that declares settings, in registration order.
 ///
@@ -303,6 +304,8 @@ pub(crate) use sl_viewer_world_view::physics;
 #[cfg(test)]
 mod full_stack_test;
 #[cfg(test)]
+mod per_app_test;
+#[cfg(test)]
 mod pixel_oracle;
 #[cfg(test)]
 mod render_matrix;
@@ -410,7 +413,8 @@ use tracing::{info, warn};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt as _, util::SubscriberInitExt as _};
 
 use crate::assembly::{
-    Automation, CaptureStartup, MediaRuntime, ViewerAppBuilder, ViewerAppOptions, WindowMode,
+    Automation, CaptureStartup, MediaRuntime, Storage, ViewerAppBuilder, ViewerAppOptions,
+    ViewerPaths, WindowMode,
 };
 use crate::camera::{CameraSpin, CameraStart, SpinAxis};
 
@@ -965,6 +969,7 @@ fn fixed_camera_start(options: &Options) -> Option<CameraStart> {
                 target.z - position.z,
             )
         }),
+        ..CameraStart::default()
     })
 }
 
@@ -995,16 +1000,20 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
     // The persisted start-location preference (the preferences General tab) is
     // read from a throwaway store load: the Bevy app — and with it the
     // `ViewerSettings` resource — does not exist yet at login-request time.
-    let (start, stored_skin, stored_theme) = {
-        let settings = crate::settings::ViewerSettings::load_with(
-            crate::paths::global_settings_file(),
+    let (start, stored_skin, stored_theme, paths) = {
+        let platform = ViewerPaths::platform();
+        let settings = crate::settings::ViewerSettings::load_or_declared(
+            platform.global_settings_file(),
             crate::REGISTRARS,
         );
         // The network & cache tab's restart-scoped knobs (cache root and
         // size ceilings, chat-log root, HTTP proxy, a pending clear-cache
         // request) are consumed from this same pre-app load, before any
         // store or HTTP client exists.
-        crate::preferences_network_cache::apply_startup_settings(&settings);
+        let paths = platform.with_startup_overrides(
+            crate::preferences_network_cache::apply_startup_settings(&settings),
+        );
+        paths.purge_caches_if_marked();
         let stored = settings
             .store()
             .get_str(crate::preferences_general::SETTING_LOGIN_START_LOCATION)
@@ -1018,7 +1027,7 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
         // dress; the CLI / env values override it inside `resolve`.
         let (stored_skin, stored_theme) =
             crate::preferences_colors_skins::stored_skin_choice(&settings);
-        (start, stored_skin, stored_theme)
+        (start, stored_skin, stored_theme, paths)
     };
     let mut request = LoginRequest::new(
         avatar.first().to_owned(),
@@ -1039,9 +1048,12 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
             request: request.clone(),
         };
         let mut app_options = cli_app_options(options, params);
+        app_options.storage = Storage::Directories(paths.clone());
         app_options.automation = automation.clone();
         app_options.content.fetch_server_chat_history = !options.no_group_chat_history;
         app_options.camera.start = fixed_camera_start(options).unwrap_or_default();
+        // The debug framing knobs (`SL_VIEWER_CAMERA_ORBIT_DEG` and friends).
+        app_options.camera.start.orbit = sl_viewer_world_api::OrbitSeed::from_env();
         app_options.skin.selection = crate::skin::SkinSelection::resolve(
             options.skin.clone(),
             options.theme.clone(),
@@ -1093,12 +1105,13 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
 /// fails — which is the whole point of a replay run, since it is normally
 /// driven unattended by a harness reading the exit status.
 fn run_replay(options: &Options, bundle_dir: &Path) -> Result<(), Error> {
-    // Serve every asset request from the bundle's drop-in cache for the rest of
-    // the process (must be set before the asset stores are built below).
-    crate::paths::set_replay_cache_root(bundle_dir.join(crate::replay_bundle::CACHE_SUBDIR));
+    // Serve every asset request from the bundle's drop-in cache (the paths
+    // are inserted before the asset stores are built).
+    let paths = ViewerPaths::platform()
+        .with_replay_cache_root(bundle_dir.join(crate::replay_bundle::CACHE_SUBDIR));
     info!(
         "replay: assets served from {:?}",
-        crate::paths::asset_cache_dir("texturecache")
+        paths.asset_cache_dir("texturecache")
     );
     let manifests = crate::replay_bundle::load_bundle(bundle_dir).map_err(Error::Replay)?;
     if manifests.is_empty() {
@@ -1140,12 +1153,15 @@ fn run_replay(options: &Options, bundle_dir: &Path) -> Result<(), Error> {
     // no-network intent explicit.
     app_options.content.fetch_server_chat_history = false;
     app_options.content.replay = Some(config);
-    app_options.camera.start = camera_start;
+    app_options.camera.start = CameraStart {
+        orbit: sl_viewer_world_api::OrbitSeed::from_env(),
+        ..camera_start
+    };
     app_options.skin.selection = {
         // The persisted skin choice dresses the replay UI too; the throwaway
         // pre-app load is the `run_viewer` idiom.
-        let settings = crate::settings::ViewerSettings::load_with(
-            crate::paths::global_settings_file(),
+        let settings = crate::settings::ViewerSettings::load_or_declared(
+            paths.global_settings_file(),
             crate::REGISTRARS,
         );
         let (stored_skin, stored_theme) =
@@ -1157,6 +1173,7 @@ fn run_replay(options: &Options, bundle_dir: &Path) -> Result<(), Error> {
             stored_theme,
         )
     };
+    app_options.storage = Storage::Directories(paths);
     // No network surfaces offline: keep the media engines and web auth off.
     app_options.media = MediaRuntime::OFF;
     let _outcome = ViewerAppBuilder::from_options(app_options).build()?.run()?;
@@ -1182,6 +1199,7 @@ fn replay_camera_start(config: &crate::avatar_replay::ReplayConfig) -> CameraSta
             target.y - position.y,
             target.z - position.z,
         )),
+        ..CameraStart::default()
     }
 }
 
