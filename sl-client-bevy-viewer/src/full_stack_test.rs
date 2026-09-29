@@ -196,7 +196,7 @@ pub(crate) fn stock_fixture() -> RegionFixture {
 /// environment test, and imitating Second Life is wrong only for a test of what
 /// the other flavour does. A bare parameter on `start_in` would say nothing
 /// about which was which at the call site.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) struct HarnessOptions {
     /// The live grid the fake one imitates where the two disagree.
     ///
@@ -231,6 +231,9 @@ pub(crate) struct HarnessOptions {
     /// pointer is over, and every `Window::cursor_position()` reader (the GPU
     /// pick, the pie menus) sees the synthetic cursor.
     offscreen_window: Option<UVec2>,
+    /// Where the automation executor also takes requests over a socket, as
+    /// `--automation-socket` does; without one only the queue feeds it.
+    automation_socket: Option<std::path::PathBuf>,
 }
 
 impl Default for HarnessOptions {
@@ -239,6 +242,7 @@ impl Default for HarnessOptions {
             imitates: sl_fake_grid::ImitatedGrid::default(),
             day_position: Some(DAY_POSITION),
             offscreen_window: None,
+            automation_socket: None,
         }
     }
 }
@@ -258,6 +262,14 @@ impl HarnessOptions {
         Self {
             offscreen_window: Some(size),
             ..Self::default()
+        }
+    }
+
+    /// Serve the automation protocol on a socket at `path` too.
+    pub(crate) fn with_automation_socket(self, path: std::path::PathBuf) -> Self {
+        Self {
+            automation_socket: Some(path),
+            ..self
         }
     }
 
@@ -1081,7 +1093,12 @@ fn build_viewer_app(
     // The automation executor, and with it the state probes' recorders — the
     // event log, the screenshot store and the render-settle cell this
     // harness's own settle waits on.
-    app_options.automation = true;
+    app_options.automation = options
+        .automation_socket
+        .clone()
+        .map_or(crate::assembly::Automation::InProcess, |path| {
+            crate::assembly::Automation::Socket(path)
+        });
     let mut app = ViewerAppBuilder::from_options(app_options)
         .build()?
         .into_app();

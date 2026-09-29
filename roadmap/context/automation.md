@@ -264,6 +264,20 @@ replaces that person.
   warnings and errors logged since the request started
   (`diagnostics_cursor`). The error itself carries the check, the
   candidates and the last observation.
+- **The remote transport** ([[viewer-automation-remote-transport]]) is
+  `RemoteEndpoint` + `RemoteAutomationPlugin`
+  (`sl-viewer-automation/src/remote.rs`), installed by
+  `Automation::Socket(path)` (`--automation-socket [PATH]`). One line of JSON
+  per `Request`; the viewer writes `ViewerMessage`s. It renumbers requests
+  from `REMOTE_ID_BASE` (anything else submitting to the same queue stays
+  below it) and gives answers back under the client's id. A socket path is
+  limited to about 100 bytes, and the bind stages in `<dir>/.<pid>.<n>/s`, so
+  a deep directory fails with "shorter than SUN_LEN" — the default under
+  `/run/user/<uid>` is short. Requests that play input need `--headless` (the
+  synthetic input is installed only there).
+- **Event-log subscriptions live in the executor**, not the transport: a
+  `subscribe` answers at once and its notifications queue beside the
+  responses, so the in-process transport streams them the same way.
 - **A screenshot travels as a file**, not bytes: the request names an
   absolute path the viewer writes the PNG to. The requester shares the
   machine (local socket or same process) and keeps it as an artifact anyway.

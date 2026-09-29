@@ -16,6 +16,9 @@
 //! - **A failure explains itself.** Every error response carries a
 //!   [`FailureReport`]: the semantic tree around a UI locator's scope, the
 //!   event tail, and the warnings and errors logged while the request ran.
+//! - **Subscriptions stream the event log.** A subscription answers at once
+//!   and then, each frame something new was recorded, queues a
+//!   [`Notification`] with the entries under its id, until it is ended.
 //! - **Off by default.** The plugin is added only when automation is asked
 //!   for — a runtime switch in the viewer's assembly, never a Cargo feature —
 //!   and costs one resource check a frame while nothing is submitted.
@@ -30,8 +33,8 @@ use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
 use sl_automation_proto::{
-    AutomationError, Deadline, FailureReport, Locator, Request, RequestBody, RequestId, Response,
-    ResponseBody, UiNode,
+    AutomationError, Deadline, FailureReport, Locator, LogStream, Notification, Request,
+    RequestBody, RequestId, Response, ResponseBody, UiNode,
 };
 use sl_viewer_ui_core::synthetic_input::{
     ActionStatus, InputAction, InputActionId, SyntheticInput,
@@ -61,6 +64,10 @@ const EXCERPT_TOP_DEPTH: usize = 3;
 
 /// The most nodes a failure report's tree excerpt holds.
 const EXCERPT_NODES: usize = 300;
+
+/// The most entries one subscription notification carries; the rest follow
+/// in the next frame's.
+pub const NOTIFICATION_ENTRIES: usize = 256;
 
 /// The ordering of automation's systems in `Last`.
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -111,6 +118,9 @@ pub struct AutomationQueue {
     submitted: VecDeque<Request>,
     /// Responses not yet taken, in the order they were answered.
     answered: VecDeque<Response>,
+    /// Subscription notifications not yet taken, in the order they were
+    /// sent.
+    notified: VecDeque<Notification>,
 }
 
 impl AutomationQueue {
@@ -131,6 +141,30 @@ impl AutomationQueue {
     /// Take every response not yet taken, in the order they were answered.
     pub fn drain_responses(&mut self) -> Vec<Response> {
         self.answered.drain(..).collect()
+    }
+
+    /// Whether nothing is waiting in it: no request to start, no response or
+    /// notification to take.
+    #[cfg(test)]
+    pub(crate) fn is_idle(&self) -> bool {
+        self.submitted.is_empty() && self.answered.is_empty() && self.notified.is_empty()
+    }
+
+    /// Take the notifications of the subscription started by the request
+    /// `subscription`, in the order they were sent.
+    pub fn take_notifications(&mut self, subscription: RequestId) -> Vec<Notification> {
+        let mut taken = Vec::new();
+        self.notified.retain(|notification| {
+            let ours = matches!(
+                notification,
+                Notification::Log { subscription: id, .. } if *id == subscription
+            );
+            if ours {
+                taken.push(notification.clone());
+            }
+            !ours
+        });
+        taken
     }
 }
 
@@ -214,13 +248,52 @@ struct InFlight {
     diagnostics_from: u64,
 }
 
-/// The requests in flight, and which of them has the input.
+/// Who this viewer is, as a hello reports it beside the protocol version, the
+/// process and the agent. The viewer's assembly inserts it; without it a hello
+/// names an unknown viewer.
+#[derive(Resource, Debug, Clone, PartialEq, Eq)]
+pub struct AutomationIdentity {
+    /// The viewer program.
+    pub viewer: String,
+    /// Its version.
+    pub version: String,
+    /// The grid it logs in to, when it logs in to one.
+    pub grid: Option<String>,
+    /// The name of the avatar it logs in as, when it logs in.
+    pub agent_name: Option<String>,
+}
+
+impl Default for AutomationIdentity {
+    fn default() -> Self {
+        Self {
+            viewer: "unknown".to_owned(),
+            version: "unknown".to_owned(),
+            grid: None,
+            agent_name: None,
+        }
+    }
+}
+
+/// One event log subscription.
+struct Subscription {
+    /// The id of the request that started it.
+    id: RequestId,
+    /// The next sequence number to send.
+    cursor: u64,
+    /// Only entries of these streams; every stream when empty.
+    streams: Vec<LogStream>,
+}
+
+/// The requests in flight, which of them has the input, and the
+/// subscriptions.
 #[derive(Resource, Default)]
 struct Executor {
     /// In submission order.
     in_flight: Vec<InFlight>,
     /// The request playing input now; the others that act wait their turn.
     acting: Option<RequestId>,
+    /// In the order they were started.
+    subscriptions: Vec<Subscription>,
 }
 
 /// Start what was submitted and advance everything in flight by a frame.
@@ -230,7 +303,8 @@ fn run_requests(world: &mut World) {
         .submitted
         .drain(..)
         .collect();
-    if submitted.is_empty() && world.resource::<Executor>().in_flight.is_empty() {
+    let executor = world.resource::<Executor>();
+    if submitted.is_empty() && executor.in_flight.is_empty() && executor.subscriptions.is_empty() {
         return;
     }
     world.resource_scope(|world, mut executor: Mut<'_, Executor>| {
@@ -244,7 +318,7 @@ fn run_requests(world: &mut World) {
                 answers.push(respond(world, id, Err(Box::new(error)), diagnostics_from));
                 continue;
             }
-            match start(world, body) {
+            match start(world, &mut executor.subscriptions, id, body) {
                 Started::Answered(answer) => {
                     answers.push(respond(world, id, *answer, diagnostics_from));
                 }
@@ -285,11 +359,38 @@ fn run_requests(world: &mut World) {
                 }
             }
         }
-        world
-            .resource_mut::<AutomationQueue>()
-            .answered
-            .extend(answers);
+        let notifications = notify(world, &mut executor.subscriptions);
+        let mut queue = world.resource_mut::<AutomationQueue>();
+        queue.answered.extend(answers);
+        queue.notified.extend(notifications);
     });
+}
+
+/// Each subscription's notification of what the event log recorded since it
+/// last sent one, and its cursor moved past it.
+fn notify(world: &World, subscriptions: &mut [Subscription]) -> Vec<Notification> {
+    let Some(log) = world.get_resource::<EventLog>() else {
+        return Vec::new();
+    };
+    let mut notifications = Vec::new();
+    for subscription in subscriptions {
+        if log.cursor() <= subscription.cursor {
+            continue;
+        }
+        let page = log.read(
+            subscription.cursor,
+            &subscription.streams,
+            NOTIFICATION_ENTRIES,
+        );
+        subscription.cursor = page.next;
+        if !page.entries.is_empty() || page.dropped > 0 {
+            notifications.push(Notification::Log {
+                subscription: subscription.id,
+                page,
+            });
+        }
+    }
+    notifications
 }
 
 /// What starting a request came to.
@@ -307,9 +408,15 @@ impl Started {
     }
 }
 
-/// Start `body`: answer it at once when it needs no frames, else set up its
-/// task.
-fn start(world: &mut World, body: RequestBody) -> Started {
+/// Start `body`, the request `id`: answer it at once when it needs no frames,
+/// else set up its task. A subscription is started or ended in
+/// `subscriptions`.
+fn start(
+    world: &mut World,
+    subscriptions: &mut Vec<Subscription>,
+    id: RequestId,
+    body: RequestBody,
+) -> Started {
     match body {
         RequestBody::Snapshot { within } => Started::answered(ui::read_snapshot(world, within)),
         RequestBody::Find { locator } => Started::answered(ui::find(world, &locator)),
@@ -378,7 +485,58 @@ fn start(world: &mut World, body: RequestBody) -> Started {
             deadline,
         } => state::wait(condition, deadline),
         RequestBody::Screenshot { path, outline } => state::screenshot(world, path, outline),
+        RequestBody::Hello => Started::answered(Ok(state::hello(world))),
+        RequestBody::Subscribe { cursor, streams } => {
+            Started::answered(subscribe(world, subscriptions, id, cursor, streams))
+        }
+        RequestBody::Unsubscribe { subscription } => {
+            let before = subscriptions.len();
+            subscriptions.retain(|kept| kept.id != subscription);
+            Started::answered(if subscriptions.len() < before {
+                Ok(ResponseBody::Unsubscribed)
+            } else {
+                Err(Box::new(AutomationError::InvalidRequest {
+                    reason: format!("there is no subscription {}", subscription.0),
+                }))
+            })
+        }
     }
+}
+
+/// Start the subscription `id` to the event log from `cursor` (from now on
+/// when absent).
+///
+/// # Errors
+///
+/// [`AutomationError::Unavailable`] when the app keeps no event log, and
+/// [`AutomationError::InvalidRequest`] when `id` is a subscription already.
+fn subscribe(
+    world: &World,
+    subscriptions: &mut Vec<Subscription>,
+    id: RequestId,
+    cursor: Option<u64>,
+    streams: Vec<LogStream>,
+) -> Answer {
+    let log = world.get_resource::<EventLog>().ok_or_else(|| {
+        Box::new(AutomationError::Unavailable {
+            what: "event log".to_owned(),
+        })
+    })?;
+    if subscriptions
+        .iter()
+        .any(|subscription| subscription.id == id)
+    {
+        return Err(Box::new(AutomationError::InvalidRequest {
+            reason: format!("subscription {} is already running", id.0),
+        }));
+    }
+    let cursor = cursor.unwrap_or_else(|| log.cursor());
+    subscriptions.push(Subscription {
+        id,
+        cursor,
+        streams,
+    });
+    Ok(ResponseBody::Subscribed { cursor })
 }
 
 /// The response to `id`, with a failure report on an error.

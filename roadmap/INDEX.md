@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 122 |
-| ready | 312 |
+| ready | 311 |
 | blocked | 59 |
 | in-progress | 21 |
 | bugs | 17 |
-| done | 1273 |
+| done | 1274 |
 | deferred | 31 |
 | wont-do | 16 |
 | **total** | **1851** |
@@ -210,7 +210,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `test-e2e-pilot-suite`)
 - [`test-firestorm-automation-endpoint`](ideas/test-firestorm-automation-endpoint.md)
   — The patched Firestorm answers the same automation protocol (blocked by
-  `viewer-automation-protocol` (done), `viewer-automation-remote-transport`)
+  `viewer-automation-protocol` (done), `viewer-automation-remote-transport`
+  (done))
 - [`test-reference-cpp-oracles`](ideas/test-reference-cpp-oracles.md) —
   Reference-viewer C++ math and GLSL as test oracles (FFI / naga)
 
@@ -309,7 +310,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (312)
+## ready (311)
 
 ### protocol
 
@@ -391,9 +392,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-automation-per-app-state`](ready/viewer-automation-per-app-state.md)
   — Per-App state — two logged-in viewers in one process (blocked by
   `viewer-automation-app-builder` (done))
-- [`viewer-automation-remote-transport`](ready/viewer-automation-remote-transport.md)
-  — Remote transport — automation over a private Unix socket (blocked by
-  `viewer-automation-executor` (done))
 - [`viewer-automation-testkit-locators`](ready/viewer-automation-testkit-locators.md)
   — The in-process tiers speak locators too (blocked by
   `viewer-automation-locator-engine` (done), `viewer-automation-app-builder`
@@ -1062,7 +1060,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-automation-driver`)
 - [`viewer-automation-driver`](blocked/viewer-automation-driver.md) —
   sl-viewer-driver — the async test API over both transports (blocked by
-  `viewer-automation-remote-transport`, `viewer-automation-inprocess-transport`)
+  `viewer-automation-remote-transport` (done),
+  `viewer-automation-inprocess-transport`)
 - [`viewer-automation-inprocess-transport`](blocked/viewer-automation-inprocess-transport.md)
   — In-process transport — the same requests against Apps in the test process
   (blocked by `viewer-automation-executor` (done),
@@ -1354,7 +1353,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1273)
+## done (1274)
 
 ### protocol
 
@@ -1814,6 +1813,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Spike — how a windowless viewer renders and picks at the same time
 - [`viewer-automation-protocol`](done/viewer-automation-protocol.md) —
   sl-automation-proto — the locator, request and snapshot vocabulary
+- [`viewer-automation-remote-transport`](done/viewer-automation-remote-transport.md)
+  — Remote transport — automation over a private Unix socket (blocked by
+  `viewer-automation-executor` (done))
 - [`viewer-automation-semantic-custom-widgets`](done/viewer-automation-semantic-custom-widgets.md)
   — Semantic roles for the custom widgets, and a completeness guard (blocked by
   `viewer-automation-semantic-ui-model` (done))

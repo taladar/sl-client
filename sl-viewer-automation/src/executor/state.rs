@@ -5,11 +5,11 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 use sl_automation_proto::{
-    AutomationError, Deadline, InventoryRoot, Locator, LogEntry, LogStream, Probe, ProbeReadout,
-    ResponseBody, StateCondition, StateObservation, UiNode,
+    AutomationError, Deadline, InventoryRoot, Locator, LogEntry, LogStream, PROTOCOL_VERSION,
+    Probe, ProbeReadout, ResponseBody, StateCondition, StateObservation, UiNode, ViewerIdentity,
 };
 
-use super::{Answer, Clock, Started, Step, Task};
+use super::{Answer, AutomationIdentity, Clock, Started, Step, Task};
 use crate::event_log::EventLog;
 use crate::locate::{find_all, shallow};
 use crate::probes::{
@@ -40,6 +40,31 @@ pub(super) fn read(world: &mut World, probe: &Probe) -> Result<ProbeReadout, Box
         )),
         Probe::Quiescence => ProbeReadout::Quiescence(read_quiescence(world)),
     })
+}
+
+/// The answer to a hello: the protocol version, and who this viewer is — its
+/// [`AutomationIdentity`], its process and, once logged in, its agent.
+pub(super) fn hello(world: &mut World) -> ResponseBody {
+    let AutomationIdentity {
+        viewer,
+        version,
+        grid,
+        agent_name,
+    } = world
+        .get_resource::<AutomationIdentity>()
+        .cloned()
+        .unwrap_or_default();
+    ResponseBody::Hello {
+        protocol: PROTOCOL_VERSION,
+        viewer: ViewerIdentity {
+            viewer,
+            version,
+            pid: std::process::id(),
+            grid,
+            agent_name,
+            agent_id: read_agent(world).agent_id,
+        },
+    }
 }
 
 /// A probe's failure as the protocol's error; `root` is the inventory an

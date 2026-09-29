@@ -36,7 +36,10 @@
 //!   log or the diagnostics, wait on UI nodes ([`WaitCondition`]), world
 //!   things ([`WorldWaitCondition`]) or the viewer's state
 //!   ([`StateCondition`]: quiet, a probe's value, a log entry), and capture a
-//!   screenshot.
+//!   screenshot. [`RequestBody::Hello`] names the viewer and the
+//!   [`PROTOCOL_VERSION`] it speaks, and [`RequestBody::Subscribe`] streams
+//!   the event log as [`Notification`]s; on a connection each line the viewer
+//!   sends is a [`ViewerMessage`], a response or a notification.
 //! - An [`AutomationError`] is what a test matches on: not found, ambiguous
 //!   (with every candidate), not actionable (with the failing
 //!   [`ActionabilityCheck`]) and timed out (with the last observed state);
@@ -80,7 +83,8 @@ pub use crate::action::{DragAmount, DragModifiers, SnapSide, WorldAction, WorldW
 pub use crate::failure::{ActionabilityCheck, AutomationError};
 pub use crate::locator::{Locator, NameMatcher};
 pub use crate::message::{
-    Deadline, Request, RequestBody, RequestId, Response, ResponseBody, WaitCondition,
+    Deadline, Notification, PROTOCOL_VERSION, Request, RequestBody, RequestId, Response,
+    ResponseBody, ViewerIdentity, ViewerMessage, WaitCondition,
 };
 pub use crate::probe::{
     AgentReadout, CameraView, ChatKind, ClockTime, ConversationReadout, ConversationRef,

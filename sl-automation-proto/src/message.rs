@@ -268,6 +268,54 @@ pub enum RequestBody {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         outline: Option<Locator>,
     },
+    /// Who is answering: the protocol version and the viewer's identity.
+    /// Answered with [`ResponseBody::Hello`]. The first request a client on
+    /// a socket sends, to learn whether it speaks the same protocol.
+    Hello,
+    /// Stream the event log: every entry recorded from the cursor on arrives
+    /// as a [`Notification::Log`] under this request's id, until
+    /// [`RequestBody::Unsubscribe`] or the connection closes. Answered with
+    /// [`ResponseBody::Subscribed`] before the first notification.
+    Subscribe {
+        /// The first sequence number wanted; absent for only what is
+        /// recorded from now on.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cursor: Option<u64>,
+        /// Only entries of these streams; every stream when empty.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        streams: Vec<LogStream>,
+    },
+    /// End a subscription. Answered with [`ResponseBody::Unsubscribed`]; no
+    /// notification for it follows the answer.
+    Unsubscribe {
+        /// The id of the [`RequestBody::Subscribe`] request that started it.
+        subscription: RequestId,
+    },
+}
+
+/// The version of this protocol a viewer speaks, reported by
+/// [`RequestBody::Hello`]. Raised when a change would make an older client
+/// misread a newer viewer.
+pub const PROTOCOL_VERSION: u32 = 1;
+
+/// Which viewer answered a [`RequestBody::Hello`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerIdentity {
+    /// The viewer program (`sl-client-bevy-viewer`).
+    pub viewer: String,
+    /// Its version.
+    pub version: String,
+    /// The id of the viewer's process.
+    pub pid: u32,
+    /// The grid it logs in to, when it logs in to one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grid: Option<String>,
+    /// The name of the avatar it logs in as, when it logs in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_name: Option<String>,
+    /// The agent id, once logged in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<uuid::Uuid>,
 }
 
 /// A [`RequestBody::WorldAction`]'s default: reveal.
@@ -478,6 +526,71 @@ pub enum ResponseBody {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         outlined: Vec<UiNode>,
     },
+    /// The answer to [`RequestBody::Hello`].
+    Hello {
+        /// The [`PROTOCOL_VERSION`] the viewer speaks.
+        protocol: u32,
+        /// Which viewer it is.
+        viewer: ViewerIdentity,
+    },
+    /// The answer to [`RequestBody::Subscribe`].
+    Subscribed {
+        /// The sequence number the stream starts at.
+        cursor: u64,
+    },
+    /// The answer to [`RequestBody::Unsubscribe`].
+    Unsubscribed,
+}
+
+/// Something a viewer sends that answers no request: the entries of a
+/// subscription, or the refusal of a line that was not a request.
+///
+/// In JSON, tagged by `notification`:
+/// `{"notification":"log","subscription":3,"page":{"entries":[…],"next":9}}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "notification", rename_all = "snake_case")]
+pub enum Notification {
+    /// Entries a subscription's stream recorded, oldest first.
+    Log {
+        /// The id of the [`RequestBody::Subscribe`] request.
+        subscription: RequestId,
+        /// The entries; its `dropped` counts the ones the log lost before
+        /// the stream could send them.
+        page: LogPage<LogEntry>,
+    },
+    /// A line that was not a request and carried no id to answer under.
+    Rejected {
+        /// Why it was refused.
+        reason: String,
+    },
+}
+
+/// One line a viewer sends on a connection: a [`Response`] or a
+/// [`Notification`], told apart by the `notification` key.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum ViewerMessage {
+    /// The answer to a request, boxed: most lines on a busy connection are
+    /// small notifications.
+    Response(Box<Response>),
+    /// A subscription's entries, or a refused line.
+    Notification(Notification),
+}
+
+impl<'de> Deserialize<'de> for ViewerMessage {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error as _;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if value.get("notification").is_some() {
+            Notification::deserialize(value)
+                .map(Self::Notification)
+                .map_err(D::Error::custom)
+        } else {
+            Response::deserialize(value)
+                .map(|response| Self::Response(Box::new(response)))
+                .map_err(D::Error::custom)
+        }
+    }
 }
 
 /// The JSON shape of [`Response::result`]: `{"ok": …}` or `{"error": …}`
@@ -539,7 +652,10 @@ mod tests {
     use serde::Serialize;
     use serde::de::DeserializeOwned;
 
-    use super::{Deadline, Request, RequestBody, RequestId, Response, ResponseBody, WaitCondition};
+    use super::{
+        Deadline, Notification, PROTOCOL_VERSION, Request, RequestBody, RequestId, Response,
+        ResponseBody, ViewerIdentity, ViewerMessage, WaitCondition,
+    };
     use crate::action::{DragAmount, DragModifiers, SnapSide, WorldAction, WorldWaitCondition};
     use crate::failure::{ActionabilityCheck, AutomationError};
     use crate::locator::{Locator, NameMatcher};
@@ -763,6 +879,18 @@ mod tests {
                     millis: Some(10_000),
                 },
             },
+            RequestBody::Hello,
+            RequestBody::Subscribe {
+                cursor: None,
+                streams: Vec::new(),
+            },
+            RequestBody::Subscribe {
+                cursor: Some(12),
+                streams: vec![LogStream::Event, LogStream::UiAction],
+            },
+            RequestBody::Unsubscribe {
+                subscription: RequestId(3),
+            },
         ];
         for (index, body) in bodies.into_iter().enumerate() {
             round_trip(&Request {
@@ -827,6 +955,30 @@ mod tests {
                 height: 360,
                 outlined: vec![bare_node()],
             }),
+            Ok(ResponseBody::Hello {
+                protocol: PROTOCOL_VERSION,
+                viewer: ViewerIdentity {
+                    viewer: "sl-client-bevy-viewer".to_owned(),
+                    version: "0.1.0".to_owned(),
+                    pid: 4242,
+                    grid: Some("localhost".to_owned()),
+                    agent_name: Some("Test Avatar".to_owned()),
+                    agent_id: Some(uuid::Uuid::from_u128(5)),
+                },
+            }),
+            Ok(ResponseBody::Hello {
+                protocol: PROTOCOL_VERSION,
+                viewer: ViewerIdentity {
+                    viewer: "sl-client-bevy-viewer".to_owned(),
+                    version: "0.1.0".to_owned(),
+                    pid: 1,
+                    grid: None,
+                    agent_name: None,
+                    agent_id: None,
+                },
+            }),
+            Ok(ResponseBody::Subscribed { cursor: 17 }),
+            Ok(ResponseBody::Unsubscribed),
             Err(AutomationError::NotFound {
                 locator: full_locator(),
             }),
@@ -1087,6 +1239,57 @@ mod tests {
                 condition: WaitCondition::Visible,
                 deadline: Deadline::default(),
             }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_viewer_message_is_a_response_or_a_notification() -> Result<(), serde_json::Error> {
+        let messages = [
+            ViewerMessage::Response(Box::new(Response {
+                id: RequestId(1),
+                result: Ok(ResponseBody::Unsubscribed),
+                report: None,
+            })),
+            ViewerMessage::Response(Box::new(Response {
+                id: RequestId(2),
+                result: Err(AutomationError::InvalidRequest {
+                    reason: "no such method".to_owned(),
+                }),
+                report: Some(FailureReport::default()),
+            })),
+            ViewerMessage::Notification(Notification::Log {
+                subscription: RequestId(3),
+                page: LogPage {
+                    entries: vec![log_entry()],
+                    next: 8,
+                    dropped: 2,
+                },
+            }),
+            ViewerMessage::Notification(Notification::Rejected {
+                reason: "not JSON".to_owned(),
+            }),
+        ];
+        for message in &messages {
+            round_trip(message)?;
+        }
+        assert_eq!(
+            serde_json::to_string(&Notification::Log {
+                subscription: RequestId(3),
+                page: LogPage {
+                    entries: Vec::new(),
+                    next: 9,
+                    dropped: 0,
+                },
+            })?,
+            r#"{"notification":"log","subscription":3,"page":{"entries":[],"next":9}}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&Request {
+                id: RequestId(1),
+                body: RequestBody::Hello,
+            })?,
+            r#"{"id":1,"method":"hello"}"#
         );
         Ok(())
     }

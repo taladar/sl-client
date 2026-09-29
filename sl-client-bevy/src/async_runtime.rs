@@ -41,6 +41,14 @@ static SHARED_RUNTIME: std::sync::LazyLock<Option<Runtime>> = std::sync::LazyLoc
         .ok()
 });
 
+/// The shared runtime's handle, for a subsystem that runs a long-lived service
+/// on it (a listener, rather than one future awaited from a Bevy task), or
+/// `None` if the runtime could not be built.
+#[must_use]
+pub fn shared_runtime() -> Option<&'static tokio::runtime::Handle> {
+    SHARED_RUNTIME.as_ref().map(Runtime::handle)
+}
+
 /// Run `future` to completion on the shared runtime, returning its output, or
 /// `None` if the runtime is unavailable (never built) or the spawned task was
 /// cancelled / panicked — in which case the caller falls back to a non-async

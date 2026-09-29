@@ -89,6 +89,11 @@
 //! answers each with a response, several in flight at once; the requests that
 //! play input take turns. A failure's response carries a report: the tree
 //! around the scope, the event tail, the warnings logged meanwhile.
+//!
+//! A **transport** moves requests into that queue and responses out of it.
+//! The remote one is a [`RemoteEndpoint`]: line-delimited JSON on a private
+//! Unix socket, served by [`RemoteAutomationPlugin`], so a test, the command
+//! line tool or an agent drives a viewer running in its own process.
 
 mod diagnostics;
 mod event_log;
@@ -98,6 +103,7 @@ mod manipulator_drag;
 mod probe_sources;
 mod probes;
 mod pursuit;
+mod remote;
 mod render_settle;
 mod reveal;
 mod route;
@@ -113,7 +119,8 @@ pub use crate::diagnostics::{
 };
 pub use crate::event_log::{DETAIL_LIMIT, EventLog, EventLogPlugin};
 pub use crate::executor::{
-    AutomationPlugin, AutomationQueue, AutomationSystems, REPORT_DIAGNOSTICS, REPORT_EVENTS,
+    AutomationIdentity, AutomationPlugin, AutomationQueue, AutomationSystems, NOTIFICATION_ENTRIES,
+    REPORT_DIAGNOSTICS, REPORT_EVENTS,
 };
 pub use crate::locate::{find_all, find_one, shallow};
 pub use crate::manipulator_drag::{DragProgress, DragStage, HeldKeys, ManipulatorDrag};
@@ -124,6 +131,9 @@ pub use crate::probes::{
 };
 pub use crate::pursuit::{
     DEFAULT_DEADLINE, DEFAULT_DEADLINE_FRAMES, Intent, Progress, Pursuit, PursuitError, Target,
+};
+pub use crate::remote::{
+    REMOTE_ID_BASE, RemoteAutomationPlugin, RemoteEndpoint, SocketError, default_socket_path,
 };
 pub use crate::render_settle::{PipelineStatus, PipelineStatusPlugin};
 pub use crate::reveal::{open_floater, scroll_into_view};

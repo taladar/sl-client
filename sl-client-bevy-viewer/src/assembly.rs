@@ -25,6 +25,8 @@
 //! - `render_overrides`: the render debug knobs read from the environment, or
 //!   stated — a test must not change its answer because a developer exported
 //!   `SL_VIEWER_DISABLE_GLOW` in their shell.
+//! - [`Automation`]: whether the automation executor runs, fed by the caller
+//!   through its queue or by a private Unix socket (`--automation-socket`).
 //!
 //! Some things `run()` does are **process-wide** and stay out of the builder:
 //! the tracing subscriber, the static-asset library, the termination-signal
@@ -100,6 +102,22 @@ pub enum WindowMode {
         /// Whether a view-only window shows the run (`--watch`).
         watch: bool,
     },
+}
+
+/// Whether the viewer takes automation requests, and from where.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum Automation {
+    /// No executor: the interactive viewer.
+    #[default]
+    Off,
+    /// The executor (`sl_viewer_automation::AutomationPlugin`), fed by the
+    /// caller through its `AutomationQueue` resource: a test in the same
+    /// process.
+    InProcess,
+    /// The executor, fed by a client of a private Unix socket at this path
+    /// (`--automation-socket`), opened before the App is built so that a path
+    /// in use fails the start.
+    Socket(PathBuf),
 }
 
 /// The fixed frame rate of a headless viewer that runs itself: the rate the
@@ -266,11 +284,11 @@ pub struct ViewerAppOptions {
     /// how the interactive viewer and a capture run take them.
     pub render_overrides: Option<RenderOverrides>,
     /// Whether the automation executor is installed
-    /// (`sl_viewer_automation::AutomationPlugin`): requests submitted to its
-    /// queue are carried out, and the state probes' recorders (the event log,
-    /// the screenshot store, the render-settle cell) run. Off for the
-    /// interactive viewer; a runtime switch, never a Cargo feature.
-    pub automation: bool,
+    /// (`sl_viewer_automation::AutomationPlugin`), and what feeds it: requests
+    /// are carried out, and the state probes' recorders (the event log, the
+    /// screenshot store, the render-settle cell) run. Off for the interactive
+    /// viewer; a runtime switch, never a Cargo feature.
+    pub automation: Automation,
 }
 
 impl ViewerAppOptions {
@@ -294,7 +312,7 @@ impl ViewerAppOptions {
             storage: Storage::UserDirectories,
             audio_device: true,
             render_overrides: None,
-            automation: false,
+            automation: Automation::Off,
         }
     }
 }
@@ -339,7 +357,8 @@ impl ViewerAppBuilder {
     ///
     /// Returns [`Error::ScreenshotDir`] if the capture directory cannot be
     /// created — the run was started to take frames, and one that cannot write
-    /// them has already failed.
+    /// them has already failed — and [`Error::AutomationSocket`] if the
+    /// automation socket cannot be opened.
     pub fn build(self) -> Result<ViewerApp, Error> {
         let ViewerAppOptions {
             params,
@@ -425,6 +444,19 @@ impl ViewerAppBuilder {
         app.insert_resource(render_overrides);
         // The About floater's login-derived facts (grid, login URI, reported
         // channel/version) — captured here where they are all still at hand.
+        if automation != Automation::Off {
+            // Who a hello names: this viewer, the grid, and the avatar it logs
+            // in as.
+            app.insert_resource(sl_viewer_automation::AutomationIdentity {
+                viewer: crate::build_info::VIEWER_NAME.to_owned(),
+                version: crate::build_info::full_version(),
+                grid: Some(grid.clone()),
+                agent_name: Some(format!(
+                    "{} {}",
+                    params.request.first_name, params.request.last_name
+                )),
+            });
+        }
         app.insert_resource(crate::about_floater::AboutSessionInfo {
             grid: grid.clone(),
             login_uri: params.login_uri.to_string(),
@@ -679,11 +711,20 @@ impl ViewerAppBuilder {
             })
             .add_systems(Startup, setup_scene)
             .add_systems(Update, capture_login_outcome);
-        if automation {
-            // The request executor and what it reads: requests submitted to its
-            // queue are carried out through the same synthetic input a headless
-            // viewer installs, and answered with responses.
-            app.add_plugins(sl_viewer_automation::AutomationPlugin);
+        // The request executor and what it reads: requests submitted to its
+        // queue are carried out through the same synthetic input a headless
+        // viewer installs, and answered with responses — to the caller, or
+        // over the socket.
+        match automation {
+            Automation::Off => {}
+            Automation::InProcess => {
+                app.add_plugins(sl_viewer_automation::AutomationPlugin);
+            }
+            Automation::Socket(path) => {
+                let endpoint = sl_viewer_automation::RemoteEndpoint::open(&path)
+                    .map_err(Error::AutomationSocket)?;
+                app.add_plugins(sl_viewer_automation::RemoteAutomationPlugin::new(endpoint));
+            }
         }
         // (Worn rigid attachments no longer need a hand re-propagation: their
         // attachment-point node is an avatar-root child whose local `Transform` the

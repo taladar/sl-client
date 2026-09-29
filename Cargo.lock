@@ -9255,6 +9255,7 @@ dependencies = [
  "sl-viewer-ui-widgets",
  "sl-viewer-world-api",
  "thiserror 2.0.19",
+ "tokio",
  "tracing",
  "tracing-subscriber",
 ]

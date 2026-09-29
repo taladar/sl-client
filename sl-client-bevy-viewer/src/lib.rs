@@ -410,7 +410,7 @@ use tracing::{info, warn};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt as _, util::SubscriberInitExt as _};
 
 use crate::assembly::{
-    CaptureStartup, MediaRuntime, ViewerAppBuilder, ViewerAppOptions, WindowMode,
+    Automation, CaptureStartup, MediaRuntime, ViewerAppBuilder, ViewerAppOptions, WindowMode,
 };
 use crate::camera::{CameraSpin, CameraStart, SpinAxis};
 
@@ -457,6 +457,10 @@ pub enum Error {
     /// put the frames it was started to take.
     #[error("could not create the screenshot directory")]
     ScreenshotDir(#[source] std::io::Error),
+    /// The automation socket (`--automation-socket`) could not be opened: a
+    /// run asked to be driven that cannot be has already failed.
+    #[error("could not open the automation socket")]
+    AutomationSocket(#[source] sl_viewer_automation::SocketError),
 }
 
 /// The command-line options for the viewer.
@@ -742,6 +746,37 @@ struct Options {
     /// nothing — and closing it ends the run with a graceful logout.
     #[clap(long, requires = "headless")]
     watch: bool,
+    /// Take automation requests (`sl-automation-proto`, line-delimited JSON)
+    /// on a Unix socket, created mode 0600, at the path given — or, with no
+    /// path, at `$XDG_RUNTIME_DIR/sl-client-bevy-viewer/automation-<pid>.sock`.
+    /// The path is logged at start-up. A socket another process answers on,
+    /// or a file that is not a socket, stops the start; a stale socket is
+    /// replaced. Without the switch there is no socket. Requests that play
+    /// input need `--headless`, which installs the synthetic input.
+    #[clap(long, value_name = "PATH")]
+    #[expect(
+        clippy::option_option,
+        reason = "clap's shape for a flag whose value is optional: absent, bare, or with a path"
+    )]
+    automation_socket: Option<Option<PathBuf>>,
+}
+
+/// The automation a command-line run asked for: a socket at the path
+/// `--automation-socket` gives, or at the default one when it gives none.
+///
+/// # Errors
+///
+/// [`Error::AutomationSocket`] when no path was given and there is no runtime
+/// directory to default to.
+fn cli_automation(options: &Options) -> Result<Automation, Error> {
+    Ok(match &options.automation_socket {
+        None => Automation::Off,
+        Some(Some(path)) => Automation::Socket(path.clone()),
+        Some(None) => Automation::Socket(
+            sl_viewer_automation::default_socket_path(build_info::VIEWER_NAME)
+                .map_err(Error::AutomationSocket)?,
+        ),
+    })
 }
 
 /// Parse a `--capture-ui-scale` argument: a factor within the `UiScale`
@@ -954,6 +989,8 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
     let credentials = Credentials::load(&options.credentials)?;
     let avatar = credentials.select(options.avatar.as_deref())?;
     let login_uri = resolve_login_uri(options, avatar)?;
+    // Resolved once: an MFA restart reopens the socket at the same path.
+    let automation = cli_automation(options)?;
 
     // The persisted start-location preference (the preferences General tab) is
     // read from a throwaway store load: the Bevy app — and with it the
@@ -1002,6 +1039,7 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
             request: request.clone(),
         };
         let mut app_options = cli_app_options(options, params);
+        app_options.automation = automation.clone();
         app_options.content.fetch_server_chat_history = !options.no_group_chat_history;
         app_options.camera.start = fixed_camera_start(options).unwrap_or_default();
         app_options.skin.selection = crate::skin::SkinSelection::resolve(
@@ -1097,6 +1135,7 @@ fn run_replay(options: &Options, bundle_dir: &Path) -> Result<(), Error> {
         ),
     };
     let mut app_options = cli_app_options(options, params);
+    app_options.automation = cli_automation(options)?;
     // Offline there is no session thread, so the flag is inert; false keeps the
     // no-network intent explicit.
     app_options.content.fetch_server_chat_history = false;
@@ -1367,5 +1406,44 @@ mod ui_scale_option_tests {
         assert!(refused("2.5", "outside"));
         assert!(refused("NaN", "outside"));
         assert!(refused("big", "expected a number"));
+    }
+}
+
+#[cfg(test)]
+mod automation_socket_option_tests {
+    use clap::Parser as _;
+    use pretty_assertions::assert_eq;
+
+    use super::{Automation, Options, cli_automation};
+
+    /// The automation a command line asks for.
+    fn automation(arguments: &[&str]) -> Result<Automation, String> {
+        let options = Options::try_parse_from(
+            core::iter::once("sl-client-bevy-viewer").chain(arguments.iter().copied()),
+        )
+        .map_err(|error| error.to_string())?;
+        cli_automation(&options).map_err(|error| error.to_string())
+    }
+
+    /// Without the switch there is no socket; with a path it is that path.
+    #[test]
+    fn the_switch_opens_a_socket_only_when_given() -> Result<(), String> {
+        assert_eq!(automation(&[])?, Automation::Off);
+        assert_eq!(
+            automation(&["--automation-socket", "/run/test/viewer.sock"])?,
+            Automation::Socket("/run/test/viewer.sock".into())
+        );
+        Ok(())
+    }
+
+    /// The switch alone asks for the default path, rather than being refused
+    /// for its missing value (an empty `default_missing_value` is, by clap's
+    /// path parser).
+    #[test]
+    fn the_bare_switch_asks_for_the_default_path() -> Result<(), String> {
+        let options = Options::try_parse_from(["sl-client-bevy-viewer", "--automation-socket"])
+            .map_err(|error| error.to_string())?;
+        assert_eq!(options.automation_socket, Some(None));
+        Ok(())
     }
 }

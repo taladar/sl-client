@@ -54,3 +54,12 @@ sequence number, and a tally of every warning and error logged with its recent
 lines. Both are bounded and say how much a reader that fell behind missed. A
 screenshot of the primary window — the off-screen one, headless — can have the
 boxes of a locator's matches outlined on it.
+
+Over all of it sits the **executor**: requests go into a queue resource and
+responses come out of it, each request carried out across as many frames as it
+takes, several in flight at once, and every failure answered with a report.
+A subscription streams the event log from a cursor as notifications. The
+**remote transport** serves that queue on a private Unix socket (mode 0600,
+opened only when asked, removed on exit): line-delimited JSON requests in,
+responses and notifications out, so a test, a command line tool or an agent
+drives a viewer running in its own process.
