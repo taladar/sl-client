@@ -127,6 +127,8 @@ fn failed(
 fn click(locator: Locator) -> RequestBody {
     RequestBody::Click {
         locator,
+        button: sl_automation_proto::PointerButton::Left,
+        double: false,
         deadline: Deadline::default(),
     }
 }
@@ -148,6 +150,108 @@ fn a_click_is_carried_out_through_the_queue_alone() -> Result<(), String> {
         app.world().resource::<Clicked>().0,
         vec!["ok".to_owned()],
         "the synthetic click landed, and the answer came after it"
+    );
+    Ok(())
+}
+
+/// The clicks that reached a node: the button and the click count of each.
+#[derive(Resource, Debug, Default)]
+struct Presses(Vec<(PointerButton, u8)>);
+
+#[test]
+fn a_click_takes_either_button_and_may_be_a_double_click() -> Result<(), String> {
+    let mut app = app();
+    app.init_resource::<Presses>();
+    let target = button(&mut app, "row", "Row", placed(100.0, 100.0, 120.0, 30.0));
+    app.world_mut().entity_mut(target).observe(
+        |click: On<Pointer<Click>>, mut presses: ResMut<Presses>| {
+            presses.0.push((click.button, click.count));
+        },
+    );
+    settle(&mut app);
+    for (button, double) in [
+        (sl_automation_proto::PointerButton::Right, false),
+        (sl_automation_proto::PointerButton::Left, true),
+    ] {
+        let body = ok(request(
+            &mut app,
+            RequestBody::Click {
+                locator: Locator::test_id("row"),
+                button,
+                double,
+                deadline: Deadline::default(),
+            },
+        )?)?;
+        assert!(matches!(body, ResponseBody::Done { .. }), "{body:?}");
+    }
+    let presses = &app.world().resource::<Presses>().0;
+    assert_eq!(
+        presses.first(),
+        Some(&(PointerButton::Secondary, 1)),
+        "a right click: {presses:?}"
+    );
+    assert!(
+        presses.contains(&(PointerButton::Primary, 2)),
+        "a double click reaches the node as one: {presses:?}"
+    );
+    Ok(())
+}
+
+/// What was dropped on a node: the dragged node's name.
+#[derive(Resource, Debug, Default)]
+struct Dropped(Vec<String>);
+
+#[test]
+fn a_drag_carries_one_node_onto_another() -> Result<(), String> {
+    let mut app = app();
+    app.init_resource::<Dropped>();
+    button(&mut app, "source", "Item", placed(50.0, 50.0, 120.0, 30.0));
+    let target = button(
+        &mut app,
+        "target",
+        "Folder",
+        placed(300.0, 200.0, 120.0, 30.0),
+    );
+    app.world_mut().entity_mut(target).observe(
+        |drop: On<Pointer<DragDrop>>, names: Query<'_, '_, &Name>, mut dropped: ResMut<Dropped>| {
+            if let Ok(name) = names.get(drop.dropped) {
+                dropped.0.push(name.as_str().to_owned());
+            }
+        },
+    );
+    settle(&mut app);
+    let body = ok(request(
+        &mut app,
+        RequestBody::DragTo {
+            source: Locator::test_id("source"),
+            target: Locator::role(Role::Button).named("Folder"),
+            deadline: Deadline::default(),
+        },
+    )?)?;
+    let ResponseBody::Done { node } = body else {
+        return Err(format!("not a done: {body:?}"));
+    };
+    assert_eq!(
+        node.test_id.as_deref(),
+        Some("target"),
+        "the answer names the target"
+    );
+    assert_eq!(
+        app.world().resource::<Dropped>().0,
+        vec!["source".to_owned()],
+        "the source was dropped on the target through the picking drag"
+    );
+    let (error, _report) = failed(request(
+        &mut app,
+        RequestBody::DragTo {
+            source: Locator::test_id("source"),
+            target: Locator::test_id("nowhere"),
+            deadline: SHORT,
+        },
+    )?)?;
+    assert!(
+        matches!(error, AutomationError::TimedOut { ref locator, .. } if locator.test_id.as_deref() == Some("nowhere")),
+        "a missing target times out naming it: {error}"
     );
     Ok(())
 }
@@ -379,6 +483,8 @@ fn not_actionable_and_timed_out_name_their_check() -> Result<(), String> {
         &mut app,
         RequestBody::Click {
             locator: Locator::test_id("nowhere"),
+            button: sl_automation_proto::PointerButton::Left,
+            double: false,
             deadline: SHORT,
         },
     )?)?;
@@ -437,6 +543,8 @@ fn a_failure_reports_what_was_logged_while_it_ran() -> Result<(), String> {
         1,
         RequestBody::Click {
             locator: Locator::test_id("nowhere"),
+            button: sl_automation_proto::PointerButton::Left,
+            double: false,
             deadline: SHORT,
         },
     );

@@ -277,6 +277,19 @@ replaces that person.
   `ManipulatorProbes` (`ProbeQueue`s in `sl-viewer-world-api`). A handle drag
   names its snap regime: the grid engages only past the snap guide, so where
   the pointer ends decides whether the amount is exact or lands on the grid.
+- **A world aim's stability is judged on screen**: the target's box corners
+  projected, each within 5 % of the projected box's smaller side of the last
+  poll (never under half a pixel), the target within a centimetre — never
+  the camera eye. The follow camera holds the own avatar's animated head,
+  which sways a couple of centimetres with the idle animation; the old
+  0.1 mm eye tolerance restarted every multi-frame GPU probe, so no world
+  action on a live, freshly logged-in viewer ever landed, and a fixed
+  half-pixel tolerance still did under load (at ~10 fps the sway is ~0.6 px
+  a poll; found by the driver acceptance in the commit hook's parallel run,
+  2026-09-29). Candidate points sit a fifth of a face from its edges, so 5 %
+  keeps a probed point on the target. The sweep and handle drags'
+  `CameraStill` still compares the eye: it only gates a two-poll streak and
+  revalidates nothing afterwards.
 - **The viewer has no grab-drag of an object outside build mode yet**, so
   there is no aimed grab; it lands with the Move tool
   ([[viewer-build-tool-row-parity]]).
@@ -316,6 +329,40 @@ replaces that person.
   `REMOTE_ID_BASE` 2⁴⁸), duplicates refused, answers delivered in the order
   the executor gave them. A Bevy `App` is not `Send`: the Apps are built and
   stepped on one thread, the caller's.
+- **The in-process host** (`InProcessHost`,
+  `sl-viewer-automation/src/in_process_host.rs`) runs an
+  `InProcessTransport` on a thread of its own and steps every viewer it hosts
+  continuously, 2 ms apart, as a process runs — waiting or not. Apps are
+  built there (a closure hands the host the builder), a test reaches into one
+  between frames with `with_app`, and each viewer is reached through a
+  `ViewerLink`: a request channel and a message channel, the shape a socket
+  connection has. An exited viewer closes its link; `stop` joins the thread
+  after the pipelines finish.
+- **The driver** (`sl-viewer-driver`) depends on the protocol and tokio
+  only, not on Bevy or the viewer. Its transport boundary is that channel
+  pair, not a trait: `Viewer::connect` bridges a socket to one,
+  `Viewer::over_link` takes the host's. The connection numbers requests from
+  1, routes answers by id and subscription pages by subscription, and fails
+  whatever waits when the viewer's side closes. A request's deadline is
+  **wall-clock only** (`frames: u32::MAX`): an in-process viewer is stepped
+  as fast as it renders, so a frame count would expire early. Past the
+  deadline the driver gives the viewer a grace (30 s) before `NoAnswer`.
+- **Reads are strict in the viewer**: a `UiLocator` read waits for
+  `Attached`, then asks `Snapshot { within: locator }`, which resolves the
+  locator strictly — an ambiguity comes back as the viewer's own
+  `Ambiguous` with its report, not a driver-side guess.
+- **Failure artifacts** go to `<artifact_dir>/<NNN>-<action>/`:
+  `screenshot.png` (the locator's matches outlined; without the outline when
+  its scope does not resolve), `tree.txt` (the report's excerpt, else the top
+  three levels of the whole tree) and `events.txt` (the report's event tail
+  and diagnostics, else the log's last 32 entries). Each one that cannot be
+  saved says why in the error instead; a viewer handle without an artifact
+  directory saves nothing and says so.
+- **Two viewers of one test body** (`automation_driver.rs`): both are Apps on
+  one host, one reached over its link and one over its automation socket —
+  the socket transport is the one a viewer process serves, so the process
+  backend differs only in who launches the viewer
+  ([[test-e2e-viewer-process-launch]]).
 - **Event-log subscriptions live in the executor**, not the transport: a
   `subscribe` answers at once and its notifications queue beside the
   responses, so the in-process transport streams them the same way.
@@ -376,6 +423,12 @@ replaces that person.
   `ViewerAppBuilder::from_options(..).build()`
   (`sl-client-bevy-viewer/src/assembly.rs`). A new viewer-wide option
   belongs there, with its first consumer.
+- **a driver verb**: a method on `UiLocator`, `WorldHandle` or `Viewer`
+  (`sl-viewer-driver/src/{ui,world,viewer}.rs`) that sends one request
+  through `Viewer::ask` with a `Subject` (what a failure's screenshot
+  outlines) and matches the one answer it expects; an expectation in
+  `expect.rs` is a wait request, never a read in a loop. A verb that needs a
+  new request adds it first (see *a request*).
 - **a request**: a `RequestBody` variant and, when it answers with
   something new, a `ResponseBody` one (`sl-automation-proto/src/message.rs`,
   with round-trip tests), any new failure as an `AutomationError` kind (and

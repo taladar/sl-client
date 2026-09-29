@@ -149,3 +149,38 @@ fn a_rotation_is_the_same_as_itself_even_a_hair_off_unit_length() {
         rotation.mul_quat(Quat::from_rotation_y(1.0e-4))
     ));
 }
+
+#[test]
+fn a_pose_is_still_while_the_box_holds_still_on_screen() {
+    use super::Pose;
+
+    // A metre box seven metres ahead: about fourteen pixels across under the
+    // pinhole, so it tolerates 5 % of that — 0.7 px.
+    let boxed = cube(Vec3::new(0.0, 0.0, -7.0), 1.0);
+    let here = Pose::of(&boxed, pinhole);
+    let eye_moved = |by: f32| {
+        Pose::of(&boxed, move |point| {
+            pinhole(point - Vec3::new(by, 0.0, 0.0))
+        })
+    };
+    assert!(
+        here.same(&eye_moved(0.001)),
+        "a millimetre of eye drift is still"
+    );
+    assert!(
+        here.same(&eye_moved(0.03)),
+        "a head's idle sway (~0.5 px here) is still: the probed points stay on the box"
+    );
+    assert!(
+        !here.same(&eye_moved(0.1)),
+        "ten centimetres (~1.7 px, an eighth of the box) is not"
+    );
+    // The same half-pixel move is too much for a box that small on screen.
+    let speck = cube(Vec3::new(0.0, 0.0, -70.0), 1.0);
+    let speck_here = Pose::of(&speck, pinhole);
+    let speck_moved = Pose::of(&speck, |point| pinhole(point - Vec3::new(0.5, 0.0, 0.0)));
+    assert!(
+        !speck_here.same(&speck_moved),
+        "a target a pixel or two across must hold to the pixel tolerance"
+    );
+}

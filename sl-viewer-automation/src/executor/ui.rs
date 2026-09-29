@@ -5,8 +5,8 @@
 use bevy::input::keyboard::Key;
 use bevy::prelude::*;
 use sl_automation_proto::{
-    AutomationError, Deadline, Locator, NodeState, NodeValue, NodeVisibility, ResponseBody, UiNode,
-    WaitCondition,
+    AutomationError, Deadline, Locator, NodeState, NodeValue, NodeVisibility, PointerButton,
+    ResponseBody, UiNode, WaitCondition,
 };
 use sl_viewer_ui_core::synthetic_input::{InputAction, InputActionId};
 
@@ -16,10 +16,15 @@ use crate::pursuit::{Intent, Progress, Pursuit};
 use crate::reveal::open_floater;
 use crate::route::{Gesture, Route, RouteProgress};
 use crate::ui_model::snapshot;
+use crate::world_aim::drop_gesture;
 
 /// How many frames a fill waits, after its typing, for the field to hold the
 /// text before it reports what the field holds instead.
 const FILL_CONFIRM_FRAMES: u32 = 10;
+
+/// The frames a UI drag rests over its target before it lets go, so the
+/// target is the hovered node when the button comes up.
+const DRAG_REST_FRAMES: usize = 2;
 
 /// Open the floater `floater`, naming its window.
 pub(super) fn open(world: &mut World, floater: &str) -> Answer {
@@ -91,7 +96,7 @@ fn model(world: &mut World) -> Result<Vec<UiNode>, Box<AutomationError>> {
 /// An action on the one node `locator` names.
 pub(super) fn act(locator: Locator, kind: UiActKind, deadline: Deadline) -> Started {
     let intent = match kind {
-        UiActKind::Click => Intent::Click,
+        UiActKind::Click { .. } => Intent::Click,
         UiActKind::Hover => Intent::Hover,
         UiActKind::Fill(_) => Intent::Fill,
     };
@@ -101,6 +106,16 @@ pub(super) fn act(locator: Locator, kind: UiActKind, deadline: Deadline) -> Star
         kind,
         stage: ActStage::Pursue,
     })))
+}
+
+/// A drag of the one node `source` names onto the one `target` names.
+pub(super) fn drag_to(source: Locator, target: Locator, deadline: Deadline) -> Started {
+    Started::Running(super::Task::ui(UiTask::Drag(Box::new(UiDrag {
+        pursuit: Pursuit::new(source, Intent::Click).with_deadline(deadline),
+        target,
+        deadline,
+        stage: DragStage::Source,
+    }))))
 }
 
 /// A route of gestures.
@@ -115,6 +130,8 @@ pub(super) fn route(route: Route) -> Started {
 pub(super) enum UiTask {
     /// An action on one node.
     Act(UiAct),
+    /// A drag of one node onto another.
+    Drag(Box<UiDrag>),
     /// A key press.
     Press(Play),
     /// A route of gestures.
@@ -133,6 +150,7 @@ impl UiTask {
     pub(super) fn poll(&mut self, world: &mut World) -> Step {
         match self {
             Self::Act(act) => act.poll(world),
+            Self::Drag(drag) => drag.poll(world),
             Self::Press(play) => match play.poll(world) {
                 Ok(true) => Step::done(ResponseBody::Pressed),
                 Ok(false) => Step::Pending,
@@ -169,8 +187,13 @@ impl Play {
 /// What a UI action does to its node.
 #[derive(Debug)]
 pub(super) enum UiActKind {
-    /// A left click.
-    Click,
+    /// A click.
+    Click {
+        /// With which button.
+        button: PointerButton,
+        /// Twice, as a double click.
+        double: bool,
+    },
     /// The pointer onto it.
     Hover,
     /// Its text replaced by typing.
@@ -211,7 +234,17 @@ impl UiAct {
                     Err(error) => return Step::fail(automation_error(error)),
                 };
                 let gesture = match &self.kind {
-                    UiActKind::Click => InputAction::click(target.aim, MouseButton::Left),
+                    UiActKind::Click { button, double } => {
+                        let button = match button {
+                            PointerButton::Left => MouseButton::Left,
+                            PointerButton::Right => MouseButton::Right,
+                        };
+                        if *double {
+                            InputAction::double_click(target.aim, button)
+                        } else {
+                            InputAction::click(target.aim, button)
+                        }
+                    }
                     UiActKind::Hover => InputAction::move_to(target.aim),
                     UiActKind::Fill(text) => InputAction::click(target.aim, MouseButton::Left)
                         .then(InputAction::chord(
@@ -263,6 +296,72 @@ impl UiAct {
                     text: text.clone(),
                     node: now.unwrap_or_else(|| (**node).clone()),
                 })
+            }
+        }
+    }
+}
+
+/// Where a drag stands.
+enum DragStage {
+    /// Waiting for the source to become actionable.
+    Source,
+    /// Waiting for the target, the drag to start at this point.
+    Target(Vec2, Box<Pursuit>),
+    /// Playing the drag onto the target as it was then.
+    Play(InputActionId, Box<UiNode>),
+}
+
+/// A drag of the one node a locator names onto the one another names.
+pub(super) struct UiDrag {
+    /// The wait for the source.
+    pursuit: Pursuit,
+    /// The target.
+    target: Locator,
+    /// When to give up waiting for the target.
+    deadline: Deadline,
+    /// Where it stands.
+    stage: DragStage,
+}
+
+impl UiDrag {
+    /// Advance it by a frame.
+    fn poll(&mut self, world: &mut World) -> Step {
+        match &mut self.stage {
+            DragStage::Source => match self.pursuit.poll(world) {
+                Ok(Progress::Ready(source)) => {
+                    // The target need only be where the pointer can reach it:
+                    // a drop target may be disabled for clicks.
+                    let pursuit = Box::new(
+                        Pursuit::new(self.target.clone(), Intent::Hover)
+                            .with_deadline(self.deadline),
+                    );
+                    self.stage = DragStage::Target(source.aim, pursuit);
+                    Step::Pending
+                }
+                Ok(Progress::Waiting(_check)) => Step::Pending,
+                Err(error) => Step::fail(automation_error(error)),
+            },
+            DragStage::Target(from, pursuit) => match pursuit.poll(world) {
+                Ok(Progress::Ready(target)) => {
+                    match enqueue(world, drop_gesture(*from, target.aim, DRAG_REST_FRAMES)) {
+                        Ok(id) => {
+                            self.stage = DragStage::Play(id, target.node);
+                            Step::Pending
+                        }
+                        Err(error) => Step::fail(error),
+                    }
+                }
+                Ok(Progress::Waiting(_check)) => Step::Pending,
+                Err(error) => Step::fail(automation_error(error)),
+            },
+            DragStage::Play(id, node) => {
+                if finished(world, *id) {
+                    Step::done(ResponseBody::Done {
+                        node: (**node).clone(),
+                    })
+                } else {
+                    Step::Pending
+                }
             }
         }
     }

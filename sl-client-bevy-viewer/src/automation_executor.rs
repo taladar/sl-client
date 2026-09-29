@@ -138,6 +138,8 @@ mod full_stack {
             4,
             RequestBody::Click {
                 locator: Locator::test_id("bottom-toolbar-button:toggle-inventory"),
+                button: sl_automation_proto::PointerButton::Left,
+                double: false,
                 deadline: Deadline::default(),
             },
         )?)?;
@@ -199,6 +201,8 @@ mod full_stack {
             8,
             RequestBody::Click {
                 locator: Locator::test_id("floater-button:close").within(inventory_window()),
+                button: sl_automation_proto::PointerButton::Left,
+                double: false,
                 deadline: Deadline::default(),
             },
         )?)?;
@@ -621,6 +625,8 @@ mod full_stack {
                     4,
                     RequestBody::Click {
                         locator: Locator::test_id("bottom-toolbar-button:toggle-inventory"),
+                        button: sl_automation_proto::PointerButton::Left,
+                        double: false,
                         deadline: sl_automation_proto::Deadline::default(),
                     },
                 ),

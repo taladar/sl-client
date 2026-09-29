@@ -50,6 +50,7 @@ members = [
   "sl-viewer-audio",
   "sl-viewer-automation",
   "sl-viewer-chat",
+  "sl-viewer-driver",
   "sl-viewer-edit",
   "sl-viewer-environment",
   "sl-viewer-gallery",
@@ -147,6 +148,7 @@ sl-viewer-asset-editors = { path = "sl-viewer-asset-editors", version = "0.1.0" 
 sl-viewer-audio = { path = "sl-viewer-audio", version = "0.1.0" }
 sl-viewer-automation = { path = "sl-viewer-automation", version = "0.1.0" }
 sl-viewer-chat = { path = "sl-viewer-chat", version = "0.1.0" }
+sl-viewer-driver = { path = "sl-viewer-driver", version = "0.1.0" }
 sl-viewer-edit = { path = "sl-viewer-edit", version = "0.1.0" }
 sl-viewer-environment = { path = "sl-viewer-environment", version = "0.1.0" }
 sl-viewer-gallery = { path = "sl-viewer-gallery", version = "0.1.0" }

@@ -97,12 +97,16 @@
 //! in-process one is an [`InProcessTransport`]: it hosts viewer Apps in the
 //! test's own process, steps them while a caller waits, and hands the same
 //! requests to their executors directly. Both keep their clients' ids apart
-//! the same way.
+//! the same way. An [`InProcessHost`] runs an in-process transport on a
+//! thread of its own and steps its viewers continuously, as a process runs,
+//! so an async caller reaches each through a [`ViewerLink`] — a request
+//! channel and a message channel, the shape a socket connection has.
 
 mod diagnostics;
 mod event_log;
 mod executor;
 mod in_process;
+mod in_process_host;
 mod locate;
 mod manipulator_drag;
 mod probe_sources;
@@ -132,6 +136,7 @@ pub use crate::in_process::{
     DEFAULT_PATIENCE, FRAME_PAUSE, HostedApp, IN_PROCESS_ID_BASE, InProcessError,
     InProcessTransport, ViewerHandle,
 };
+pub use crate::in_process_host::{BuildError, HostError, InProcessHost, ViewerLink};
 pub use crate::locate::{find_all, find_one, shallow};
 pub use crate::manipulator_drag::{DragProgress, DragStage, HeldKeys, ManipulatorDrag};
 pub use crate::probe_sources::{LiveNotifications, ProbeSources};

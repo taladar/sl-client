@@ -435,9 +435,17 @@ fn start(
         RequestBody::Snapshot { within } => Started::answered(ui::read_snapshot(world, within)),
         RequestBody::Find { locator } => Started::answered(ui::find(world, &locator)),
         RequestBody::OpenFloater { floater } => Started::answered(ui::open(world, &floater)),
-        RequestBody::Click { locator, deadline } => {
-            ui::act(locator, ui::UiActKind::Click, deadline)
-        }
+        RequestBody::Click {
+            locator,
+            button,
+            double,
+            deadline,
+        } => ui::act(locator, ui::UiActKind::Click { button, double }, deadline),
+        RequestBody::DragTo {
+            source,
+            target,
+            deadline,
+        } => ui::drag_to(source, target, deadline),
         RequestBody::Hover { locator, deadline } => {
             ui::act(locator, ui::UiActKind::Hover, deadline)
         }

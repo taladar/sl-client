@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 122 |
 | ready | 311 |
-| blocked | 57 |
+| blocked | 56 |
 | in-progress | 21 |
 | bugs | 17 |
-| done | 1276 |
+| done | 1277 |
 | deferred | 31 |
 | wont-do | 16 |
 | **total** | **1851** |
@@ -389,10 +389,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-automation-accesskit-bridge`](ready/viewer-automation-accesskit-bridge.md)
   — Feed AccessKit from the semantic UI model (blocked by
   `viewer-automation-semantic-custom-widgets` (done))
-- [`viewer-automation-driver`](ready/viewer-automation-driver.md) —
-  sl-viewer-driver — the async test API over both transports (blocked by
-  `viewer-automation-remote-transport` (done),
-  `viewer-automation-inprocess-transport` (done))
+- [`viewer-automation-ctl-cli`](ready/viewer-automation-ctl-cli.md) —
+  sl-viewer-ctl — drive a running viewer from the shell (blocked by
+  `viewer-automation-driver` (done))
 - [`viewer-automation-testkit-locators`](ready/viewer-automation-testkit-locators.md)
   — The in-process tiers speak locators too (blocked by
   `viewer-automation-locator-engine` (done), `viewer-automation-app-builder`
@@ -1052,13 +1051,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-world-heartbeat`](ready/server-world-heartbeat.md) — A region
   heartbeat — the fake grid has no simulation loop at all
 
-## blocked (57)
+## blocked (56)
 
 ### viewer
 
-- [`viewer-automation-ctl-cli`](blocked/viewer-automation-ctl-cli.md) —
-  sl-viewer-ctl — drive a running viewer from the shell (blocked by
-  `viewer-automation-driver`)
 - [`viewer-avatar-moderation-actions`](blocked/viewer-avatar-moderation-actions.md)
   — Per-avatar parcel / estate moderation — the shared action layer (blocked by
   `viewer-region-options-estate`)
@@ -1174,7 +1170,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `test-e2e-stage`)
 - [`test-e2e-stage`](blocked/test-e2e-stage.md) — sl-e2e Stage — a fake grid,
   several viewers and grid control in one test (blocked by
-  `viewer-automation-driver`, `test-e2e-viewer-process-launch`)
+  `viewer-automation-driver` (done), `test-e2e-viewer-process-launch`)
 - [`test-fake-grid-lsl-offline-cases`](blocked/test-fake-grid-lsl-offline-cases.md)
   — Move the script and chat conformance cases offline (blocked by
   `server-fake-grid-scripted-scenario`)
@@ -1346,7 +1342,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1276)
+## done (1277)
 
 ### protocol
 
@@ -1793,6 +1789,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-dialog-offers-invites` (done))
 - [`viewer-automation-app-builder`](done/viewer-automation-app-builder.md) — A
   public ViewerAppBuilder — one assembly for the binary, the harness and tests
+- [`viewer-automation-driver`](done/viewer-automation-driver.md) —
+  sl-viewer-driver — the async test API over both transports (blocked by
+  `viewer-automation-remote-transport` (done),
+  `viewer-automation-inprocess-transport` (done))
 - [`viewer-automation-executor`](done/viewer-automation-executor.md) —
   AutomationPlugin — the in-viewer request executor (blocked by
   `viewer-automation-locator-engine` (done), `viewer-automation-synthetic-input`

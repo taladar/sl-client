@@ -8582,6 +8582,7 @@ dependencies = [
  "sl-viewer-audio",
  "sl-viewer-automation",
  "sl-viewer-chat",
+ "sl-viewer-driver",
  "sl-viewer-edit",
  "sl-viewer-environment",
  "sl-viewer-gallery",
@@ -9278,6 +9279,19 @@ dependencies = [
  "sl-viewer-ui-core",
  "sl-viewer-ui-widgets",
  "sl-viewer-world-api",
+]
+
+[[package]]
+name = "sl-viewer-driver"
+version = "0.1.0"
+dependencies = [
+ "fs-err",
+ "pretty_assertions",
+ "serde_json",
+ "sl-automation-proto",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

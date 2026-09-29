@@ -1,0 +1,38 @@
+[package]
+name = "sl-viewer-driver"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+description = "An async test API that drives a Second Life viewer through its automation protocol, over a Unix socket or an in-process link: semantic locators with auto-waiting actions, world handles, state probes, expectations and failure artifacts"
+readme = { workspace = true }
+license = { workspace = true }
+
+repository = { workspace = true }
+keywords = ["automation", "opensim", "secondlife", "testing", "viewer"]
+categories = ["development-tools::testing", "game-development"]
+publish = { workspace = true }
+
+exclude = { workspace = true }
+
+[dependencies]
+# Writing failure artifacts, with the path in the error.
+fs-err = { workspace = true }
+serde_json = { workspace = true }
+sl-automation-proto = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = [
+  "io-util",
+  "macros",
+  "net",
+  "rt",
+  "sync",
+  "time",
+] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+
+[lints]
+workspace = true

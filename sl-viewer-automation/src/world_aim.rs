@@ -70,6 +70,18 @@ const EYE_TOLERANCE: f32 = 1.0e-4;
 /// is a hair off 1 (and `angle_between`'s `acos` has an ~8e-4 rad floor).
 const ROTATION_TOLERANCE: f32 = 1.0e-6;
 
+/// The least a corner of the target's box may move on screen between polls
+/// and the target still be still, logical pixels: under the one-pixel pick
+/// the probes ask for, so a target a few pixels across must hold still.
+const PIXEL_TOLERANCE: f32 = 0.5;
+
+/// How far a corner of the target's box may move on screen, as a fraction of
+/// the smaller side of its projected box, and the aim points still land on
+/// it: every candidate point sits at least a fifth of a face from its edges
+/// (the [`LATTICE`] at ±0.3 of a face spanning ±0.5), so a quarter of that
+/// keeps a probed point well inside the target.
+const EDGE_FRACTION: f32 = 0.05;
+
 /// How far the target may drift between polls and still be still, metres.
 const TARGET_TOLERANCE: f32 = 0.01;
 
@@ -173,20 +185,24 @@ impl WorldTarget {
             }
             WorldIntent::RightClick => InputAction::click(self.aim, MouseButton::Right),
             WorldIntent::Hover => InputAction::move_to(self.aim),
-            WorldIntent::DropFrom(from) => {
-                let mut steps = vec![InputStep::Move(from), InputStep::Press(MouseButton::Left)];
-                steps.extend((1..=DROP_STEPS).map(|step| {
-                    let fraction = f32::from(u16::try_from(step).unwrap_or(u16::MAX))
-                        / f32::from(u16::try_from(DROP_STEPS).unwrap_or(u16::MAX));
-                    InputStep::Move(from.lerp(self.aim, fraction))
-                }));
-                steps.extend(core::iter::repeat_n(InputStep::Idle, DROP_REST_FRAMES));
-                steps.push(InputStep::Release(MouseButton::Left));
-                steps.push(InputStep::Idle);
-                InputAction::from_steps(steps)
-            }
+            WorldIntent::DropFrom(from) => drop_gesture(from, self.aim, DROP_REST_FRAMES),
         }
     }
+}
+
+/// A left-button drag from `from` onto `to`: press at `from`, the pointer
+/// across in [`DROP_STEPS`] frames, `rest` frames over `to`, release, settle.
+pub(crate) fn drop_gesture(from: Vec2, to: Vec2, rest: usize) -> InputAction {
+    let mut steps = vec![InputStep::Move(from), InputStep::Press(MouseButton::Left)];
+    steps.extend((1..=DROP_STEPS).map(|step| {
+        let fraction = f32::from(u16::try_from(step).unwrap_or(u16::MAX))
+            / f32::from(u16::try_from(DROP_STEPS).unwrap_or(u16::MAX));
+        InputStep::Move(from.lerp(to, fraction))
+    }));
+    steps.extend(core::iter::repeat_n(InputStep::Idle, rest));
+    steps.push(InputStep::Release(MouseButton::Left));
+    steps.push(InputStep::Idle);
+    InputAction::from_steps(steps)
 }
 
 /// Where a [`WorldAim`] stands after a frame.
@@ -241,23 +257,68 @@ impl Subject {
     }
 }
 
-/// The camera's and the target's pose in one poll.
+/// Where the target is in one poll: its centre in the world, and where each
+/// corner of its box lands on screen (`None` for one behind the camera).
+///
+/// Stability is judged on screen, as the UI judges a node by its bounds: an
+/// aim point is a screen point on the target, so a pose is the same while no
+/// corner of the target moves on screen by more than [`EDGE_FRACTION`] of the
+/// target's projected size (never less than [`PIXEL_TOLERANCE`]) — a probed
+/// point still lands on it. The eye itself may drift: the follow camera holds
+/// the own avatar's animated head, which sways a couple of centimetres with
+/// the idle animation, and at a few frames a second (a loaded machine) that is
+/// more than a pixel between polls; an eye tolerance, or a fixed sub-pixel
+/// one, restarts the probing for ever.
 #[derive(Debug, Clone, Copy)]
 struct Pose {
-    /// The camera's eye.
-    eye: Vec3,
-    /// The camera's rotation.
-    rotation: Quat,
+    /// The box's corners on screen, logical pixels.
+    corners: [Option<Vec2>; 8],
     /// The target's centre.
     target: Vec3,
 }
 
 impl Pose {
+    /// The pose of the box `boxed` (the unit cube's image) under `project`,
+    /// which puts a world point on screen.
+    fn of(boxed: &Affine3A, project: impl Fn(Vec3) -> Option<Vec2>) -> Self {
+        let mut corners = [None; 8];
+        for (index, corner) in corners.iter_mut().enumerate() {
+            let side = |mask: usize| if index & mask == 0 { -0.5 } else { 0.5 };
+            *corner = project(boxed.transform_point3(Vec3::new(side(1), side(2), side(4))));
+        }
+        Self {
+            corners,
+            target: boxed.transform_point3(Vec3::ZERO),
+        }
+    }
+
+    /// How far a corner may move on screen and the pose still be this one:
+    /// [`EDGE_FRACTION`] of the smaller side of the corners' bounds, at least
+    /// [`PIXEL_TOLERANCE`].
+    fn tolerance(&self) -> f32 {
+        let mut on_screen = self.corners.iter().flatten();
+        let Some(first) = on_screen.next() else {
+            return PIXEL_TOLERANCE;
+        };
+        let bounds = on_screen.fold(Rect::from_corners(*first, *first), |rect, corner| {
+            rect.union_point(*corner)
+        });
+        (bounds.width().min(bounds.height()) * EDGE_FRACTION).max(PIXEL_TOLERANCE)
+    }
+
     /// Whether `other` is this pose, to the tolerances.
     fn same(&self, other: &Self) -> bool {
-        self.eye.distance(other.eye) < EYE_TOLERANCE
-            && same_rotation(self.rotation, other.rotation)
-            && self.target.distance(other.target) < TARGET_TOLERANCE
+        let tolerance = self.tolerance();
+        self.target.distance(other.target) < TARGET_TOLERANCE
+            && self
+                .corners
+                .iter()
+                .zip(&other.corners)
+                .all(|pair| match pair {
+                    (Some(this), Some(that)) => this.distance(*that) < tolerance,
+                    (None, None) => true,
+                    (Some(_), None) | (None, Some(_)) => false,
+                })
     }
 }
 
@@ -317,6 +378,8 @@ struct Sight {
     prims: Vec<Entity>,
     /// The camera and its placement.
     camera: (Camera, GlobalTransform),
+    /// The camera's eye.
+    eye: Vec3,
     /// The pose, for stability.
     pose: Pose,
 }
@@ -633,7 +696,7 @@ impl WorldAim {
         let Some(viewport) = camera.logical_viewport_size() else {
             return Ok(AimProgress::Waiting(AimStage::Settling));
         };
-        let candidates = candidates(&sight.boxed, sight.pose.eye, viewport, |point| {
+        let candidates = candidates(&sight.boxed, sight.eye, viewport, |point| {
             camera.world_to_viewport(transform, point).ok()
         });
         let points = reach_the_world(world, candidates.points)?;
@@ -809,7 +872,7 @@ pub fn screen_projection(world: &mut World, node: &WorldNode) -> Option<ScreenPr
     let sight = sight(world, node)?;
     let (camera, transform) = &sight.camera;
     let viewport = camera.logical_viewport_size()?;
-    let candidates = candidates(&sight.boxed, sight.pose.eye, viewport, |point| {
+    let candidates = candidates(&sight.boxed, sight.eye, viewport, |point| {
         camera.world_to_viewport(transform, point).ok()
     });
     Some(ScreenProjection {
@@ -834,18 +897,17 @@ fn sight(world: &mut World, node: &WorldNode) -> Option<Sight> {
     let (subject, geometry, prims) = locate(world, node)?;
     let boxed = world.get::<GlobalTransform>(geometry)?.affine();
     let camera = view(world)?;
-    let (_scale, rotation, eye) = camera.1.to_scale_rotation_translation();
-    let target = boxed.transform_point3(Vec3::ZERO);
+    let eye = camera.1.translation();
+    let pose = Pose::of(&boxed, |point| {
+        camera.0.world_to_viewport(&camera.1, point).ok()
+    });
     Some(Sight {
         subject,
         boxed,
         prims,
         camera,
-        pose: Pose {
-            eye,
-            rotation,
-            target,
-        },
+        eye,
+        pose,
     })
 }
 

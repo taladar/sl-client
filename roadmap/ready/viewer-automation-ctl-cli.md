@@ -2,7 +2,7 @@
 id: viewer-automation-ctl-cli
 title: sl-viewer-ctl — drive a running viewer from the shell
 topic: viewer
-status: blocked
+status: ready
 origin: viewer automation design (2026-09-28)
 points: 5
 blocked_by: [viewer-automation-driver]

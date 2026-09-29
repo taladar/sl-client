@@ -30,8 +30,9 @@
 //!   [`QuiescenceReadout`] that says whether the scene has settled.
 //! - A [`Request`] and its [`Response`] share a [`RequestId`], so several
 //!   requests may be in flight on one channel. The requests read the UI and
-//!   act on it (click, hover, fill, a key press, a menu path, a combo's
-//!   option, a pie slice), read and act on the world ([`WorldAction`], a
+//!   act on it (a click with either button, single or double, a drag onto
+//!   another node, hover, fill, a key press, a menu path, a combo's option, a
+//!   pie slice), read and act on the world ([`WorldAction`], a
 //!   drag of a transform handle, a rubber band), read a [`Probe`], the event
 //!   log or the diagnostics, wait on UI nodes ([`WaitCondition`]), world
 //!   things ([`WorldWaitCondition`]) or the viewer's state
@@ -83,8 +84,8 @@ pub use crate::action::{DragAmount, DragModifiers, SnapSide, WorldAction, WorldW
 pub use crate::failure::{ActionabilityCheck, AutomationError};
 pub use crate::locator::{Locator, NameMatcher};
 pub use crate::message::{
-    Deadline, Notification, PROTOCOL_VERSION, Request, RequestBody, RequestId, Response,
-    ResponseBody, ViewerIdentity, ViewerMessage, WaitCondition,
+    Deadline, Notification, PROTOCOL_VERSION, PointerButton, Request, RequestBody, RequestId,
+    Response, ResponseBody, ViewerIdentity, ViewerMessage, WaitCondition,
 };
 pub use crate::probe::{
     AgentReadout, CameraView, ChatKind, ClockTime, ConversationReadout, ConversationRef,

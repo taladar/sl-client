@@ -60,7 +60,29 @@ pub enum RequestBody {
     Click {
         /// The node to click.
         locator: Locator,
+        /// The button to click with.
+        #[serde(default, skip_serializing_if = "PointerButton::is_primary")]
+        button: PointerButton,
+        /// Two clicks within the viewer's multi-click interval — a double
+        /// click — rather than one.
+        #[serde(default, skip_serializing_if = "is_false")]
+        double: bool,
         /// When to give up waiting for it.
+        #[serde(default, skip_serializing_if = "Deadline::is_default")]
+        deadline: Deadline,
+    },
+    /// Wait until exactly one node matches the source and is actionable, then
+    /// until exactly one matches the target and is actionable, and drag the
+    /// source onto the target with the left button through the viewer's real
+    /// input path: press on the source, move across in steps, rest over the
+    /// target, release. Answered with [`ResponseBody::Done`] naming the
+    /// target.
+    DragTo {
+        /// What to press on.
+        source: Locator,
+        /// What to release over.
+        target: Locator,
+        /// When to give up waiting for each.
         #[serde(default, skip_serializing_if = "Deadline::is_default")]
         deadline: Deadline,
     },
@@ -332,6 +354,35 @@ const fn is_true(flag: &bool) -> bool {
     *flag
 }
 
+/// Whether a flag is unset, to leave the default out of the JSON.
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if passes a reference"
+)]
+const fn is_false(flag: &bool) -> bool {
+    !*flag
+}
+
+/// The mouse button a [`RequestBody::Click`] clicks with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PointerButton {
+    /// The primary button: activate, focus, select.
+    #[default]
+    Left,
+    /// The secondary button: a context menu.
+    Right,
+}
+
+impl PointerButton {
+    /// Whether this is the primary button, to leave the default out of the
+    /// JSON.
+    #[must_use]
+    pub const fn is_primary(&self) -> bool {
+        matches!(self, Self::Left)
+    }
+}
+
 /// Whether a snap side is the default, to leave it out of the JSON.
 #[expect(
     clippy::trivially_copy_pass_by_ref,
@@ -445,7 +496,8 @@ pub enum ResponseBody {
         nodes: Vec<UiNode>,
     },
     /// The answer to a UI action ([`RequestBody::Click`],
-    /// [`RequestBody::Hover`], [`RequestBody::Fill`], and the routes).
+    /// [`RequestBody::DragTo`], [`RequestBody::Hover`], [`RequestBody::Fill`],
+    /// and the routes).
     Done {
         /// The node acted on, without its children: as it was when the
         /// action was applied, or for a fill as it is once it holds the text.
@@ -653,8 +705,8 @@ mod tests {
     use serde::de::DeserializeOwned;
 
     use super::{
-        Deadline, Notification, PROTOCOL_VERSION, Request, RequestBody, RequestId, Response,
-        ResponseBody, ViewerIdentity, ViewerMessage, WaitCondition,
+        Deadline, Notification, PROTOCOL_VERSION, PointerButton, Request, RequestBody, RequestId,
+        Response, ResponseBody, ViewerIdentity, ViewerMessage, WaitCondition,
     };
     use crate::action::{DragAmount, DragModifiers, SnapSide, WorldAction, WorldWaitCondition};
     use crate::failure::{ActionabilityCheck, AutomationError};
@@ -783,6 +835,19 @@ mod tests {
             },
             RequestBody::Click {
                 locator: Locator::role(Role::Button).named("OK"),
+                button: PointerButton::Left,
+                double: false,
+                deadline: Deadline::default(),
+            },
+            RequestBody::Click {
+                locator: Locator::test_id("row"),
+                button: PointerButton::Right,
+                double: true,
+                deadline: Deadline::default(),
+            },
+            RequestBody::DragTo {
+                source: Locator::test_id("row"),
+                target: Locator::role(Role::TreeItem).named("Objects"),
                 deadline: Deadline::default(),
             },
             RequestBody::Hover {
@@ -1173,12 +1238,27 @@ mod tests {
             id: RequestId(1),
             body: RequestBody::Click {
                 locator: Locator::role(Role::Button).named("OK"),
+                button: PointerButton::Left,
+                double: false,
                 deadline: Deadline::default(),
             },
         };
         assert_eq!(
             serde_json::to_string(&request)?,
             r#"{"id":1,"method":"click","locator":{"role":"button","name":{"exact":"OK"}}}"#
+        );
+        let right = Request {
+            id: RequestId(1),
+            body: RequestBody::Click {
+                locator: Locator::test_id("row"),
+                button: PointerButton::Right,
+                double: true,
+                deadline: Deadline::default(),
+            },
+        };
+        assert_eq!(
+            serde_json::to_string(&right)?,
+            r#"{"id":1,"method":"click","locator":{"test_id":"row"},"button":"right","double":true}"#
         );
         let found = Response {
             id: RequestId(2),

@@ -310,6 +310,40 @@ impl<A: HostedApp> InProcessTransport<A> {
         }
     }
 
+    /// Everything `viewer` delivered that nobody has taken yet, in the order
+    /// it arrived, without stepping anything.
+    ///
+    /// # Errors
+    ///
+    /// [`InProcessError::NoViewer`] for a handle of another transport.
+    pub fn take_messages(
+        &mut self,
+        viewer: ViewerHandle,
+    ) -> Result<Vec<ViewerMessage>, InProcessError> {
+        Ok(self.hosted(viewer)?.inbox.drain(..).collect())
+    }
+
+    /// Whether `viewer` has exited: it is stepped no more, and what it
+    /// delivered before is all it ever will.
+    ///
+    /// # Errors
+    ///
+    /// [`InProcessError::NoViewer`] for a handle of another transport.
+    pub fn has_exited(&self, viewer: ViewerHandle) -> Result<bool, InProcessError> {
+        self.viewers
+            .get(viewer.0)
+            .map(|hosted| hosted.exited)
+            .ok_or(InProcessError::NoViewer(viewer))
+    }
+
+    /// The name errors call `viewer` by.
+    #[must_use]
+    pub fn label(&self, viewer: ViewerHandle) -> Option<&str> {
+        self.viewers
+            .get(viewer.0)
+            .map(|hosted| hosted.label.as_str())
+    }
+
     /// Step rounds of frames until `found` takes something out of `viewer`'s
     /// inbox.
     ///
