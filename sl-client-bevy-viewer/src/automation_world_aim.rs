@@ -735,4 +735,176 @@ mod tests {
         }
         Ok(())
     }
+
+    // ---- The same, through the executor's queue. ----------------------------
+
+    use sl_automation_proto::{
+        Deadline, DragAmount, DragModifiers, Request, RequestBody, RequestId, Response,
+        ResponseBody, SnapSide, WorldAction, WorldWaitCondition,
+    };
+    use sl_viewer_automation::{AutomationPlugin, AutomationQueue};
+
+    /// Submit `body` to the executor and step frames until it is answered.
+    fn ask(app: &mut App, body: RequestBody) -> Result<Response, TestError> {
+        let id = RequestId(1);
+        app.world_mut()
+            .resource_mut::<AutomationQueue>()
+            .submit(Request { id, body });
+        for _frame in 0..3000 {
+            app.update();
+            if let Some(response) = app
+                .world_mut()
+                .resource_mut::<AutomationQueue>()
+                .take_response(id)
+            {
+                return Ok(response);
+            }
+        }
+        Err("the executor never answered".into())
+    }
+
+    /// The body of a response that succeeded.
+    fn answered(response: Response) -> Result<ResponseBody, TestError> {
+        response
+            .result
+            .map_err(|error| format!("the request failed: {error}").into())
+    }
+
+    /// **World requests through the executor**: a find, a wait, an action
+    /// that fails without a reveal (naming the wall, and saying what happened
+    /// around it), and the same action with the reveal, which touches the
+    /// target and nothing else.
+    #[test]
+    fn world_requests_find_wait_and_act_through_the_executor() -> Result<(), TestError> {
+        let (mut app, target, wall) = walled()?;
+        app.add_plugins(AutomationPlugin);
+        install_camera_rig(&mut app, along(target, wall, 3.0), target);
+        settle(&mut app, 2);
+
+        let found = answered(ask(
+            &mut app,
+            RequestBody::FindWorld {
+                locator: prim(TARGET),
+                deadline: Deadline::default(),
+            },
+        )?)?;
+        assert!(
+            matches!(&found, ResponseBody::FoundWorld { nodes } if nodes.len() == 1),
+            "{found:?}"
+        );
+        let gone = answered(ask(
+            &mut app,
+            RequestBody::WaitForWorld {
+                locator: prim(99),
+                condition: WorldWaitCondition::Detached,
+                deadline: Deadline::default(),
+            },
+        )?)?;
+        assert_eq!(gone, ResponseBody::WorldSatisfied { nodes: Vec::new() });
+
+        let covered = ask(
+            &mut app,
+            RequestBody::WorldAction {
+                locator: prim(TARGET),
+                action: WorldAction::Click,
+                reveal: false,
+                deadline: Deadline::default(),
+            },
+        )?;
+        let report = covered.report.clone().ok_or("an error with no report")?;
+        match covered.result {
+            Err(AutomationError::WorldNotActionable {
+                check, covered_by, ..
+            }) => {
+                assert_eq!(check, ActionabilityCheck::ReceivesEvents);
+                assert_eq!(covered_by, Some(Uuid::from_u128(u128::from(WALL))));
+            }
+            other => return Err(format!("not a covered failure: {other:?}").into()),
+        }
+        assert!(report.tree.is_empty(), "a world failure has no UI excerpt");
+        assert!(touches(&mut app).is_empty(), "nothing was clicked");
+
+        let done = answered(ask(
+            &mut app,
+            RequestBody::WorldAction {
+                locator: prim(TARGET),
+                action: WorldAction::Click,
+                reveal: true,
+                deadline: Deadline::default(),
+            },
+        )?)?;
+        let ResponseBody::WorldDone { node, hit_point } = done else {
+            return Err(format!("not a world action: {done:?}").into());
+        };
+        assert_eq!(node.local_id, Some(TARGET));
+        assert!(hit_point.is_some(), "a click's pick says where it lands");
+        settle(&mut app, 3);
+        assert_eq!(
+            touches(&mut app),
+            vec![TARGET],
+            "the click touches the target, not the wall"
+        );
+        Ok(())
+    }
+
+    /// **A handle drag and a rubber band through the executor**: the drag
+    /// moves the selection by the metre asked, and the band selects exactly
+    /// the two prims it names.
+    #[test]
+    fn a_drag_and_a_sweep_through_the_executor() -> Result<(), TestError> {
+        let (mut app, entity) = building(10.0)?;
+        app.add_plugins(AutomationPlugin);
+        let start = motion(&app, entity)?.position;
+        let dragged = answered(ask(
+            &mut app,
+            RequestBody::DragHandle {
+                handle: "translate-x".to_owned(),
+                amount: DragAmount::Distance(1.0),
+                snap: SnapSide::Free,
+                modifiers: DragModifiers::None,
+                deadline: Deadline::default(),
+            },
+        )?)?;
+        assert_eq!(
+            dragged,
+            ResponseBody::Dragged {
+                predicted: DragAmount::Distance(1.0)
+            }
+        );
+        settle(&mut app, 3);
+        let moved = motion(&app, entity)?.position;
+        assert!(
+            (moved.x - start.x - 1.0).abs() < 1e-2,
+            "{start:?} → {moved:?}"
+        );
+
+        let mut app = row_of_three()?;
+        app.add_plugins(AutomationPlugin);
+        let pair = WorldLocator::kind(WorldKind::Object).near(
+            sl_automation_proto::Anchor::Point([126.0, 128.0, 30.0]),
+            Some(2.5),
+        );
+        let swept = answered(ask(
+            &mut app,
+            RequestBody::Sweep {
+                locator: pair,
+                deadline: Deadline::default(),
+            },
+        )?)?;
+        let ResponseBody::Swept { nodes } = swept else {
+            return Err(format!("not a sweep: {swept:?}").into());
+        };
+        let mut ids: Vec<Option<u32>> = nodes.iter().map(|node| node.local_id).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, vec![Some(1), Some(2)]);
+        let selection = app.world().resource::<crate::world_api::SelectionSet>();
+        let mut selected: Vec<u32> = selection.iter().map(|node| node.scoped.id.0).collect();
+        selected.sort_unstable();
+        assert_eq!(
+            selected,
+            vec![1, 2],
+            "the answer came with the selection made"
+        );
+        Ok(())
+    }
 }

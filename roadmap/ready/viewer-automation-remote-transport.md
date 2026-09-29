@@ -2,7 +2,7 @@
 id: viewer-automation-remote-transport
 title: Remote transport — automation over a private Unix socket
 topic: viewer
-status: blocked
+status: ready
 origin: viewer automation design (2026-09-28)
 points: 5
 blocked_by: [viewer-automation-executor]

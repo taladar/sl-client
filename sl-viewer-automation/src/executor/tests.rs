@@ -1,0 +1,624 @@
+//! Teeth for the executor: every request is carried out through the queue
+//! alone — submitted, advanced by the app's own frames, answered — and each
+//! failure kind comes back with the report it documents.
+//!
+//! Every fixture lives in an [`InteractionTest`] app, so a click is the
+//! synthetic input's, travelling the same hit test a user's does.
+
+use bevy::input_focus::tab_navigation::TabIndex;
+use bevy::prelude::*;
+use bevy::text::EditableText;
+use bevy::ui_widgets::Button;
+use pretty_assertions::assert_eq;
+use serde_json::json;
+use sl_automation_proto::{
+    ActionabilityCheck, AutomationError, Deadline, Locator, LogStream, NameMatcher, NodeValue,
+    Probe, ProbeReadout, Request, RequestBody, RequestId, Response, ResponseBody, Role,
+    StateCondition, StateObservation, ValueTest, WaitCondition,
+};
+use sl_viewer_testkit::interact::{self, InteractionTest};
+use sl_viewer_testkit::{settle, spawn_under_root};
+use sl_viewer_ui_core::ui_element::UiAction;
+use sl_viewer_world_api::SelectionSet;
+
+use super::{AutomationPlugin, AutomationQueue};
+use crate::diagnostics::{DiagnosticsSource, LogTally};
+
+/// The most frames a test waits for a response.
+const PATIENCE: u32 = 2000;
+
+/// A deadline short enough for the requests that are meant to time out.
+const SHORT: Deadline = Deadline {
+    frames: Some(20),
+    millis: None,
+};
+
+/// The names of the nodes a `Pointer<Click>` reached, in order.
+#[derive(Resource, Debug, Default)]
+struct Clicked(Vec<String>);
+
+/// A built, settled interaction app with the executor installed.
+fn app() -> App {
+    let mut app = InteractionTest::new().build();
+    app.add_plugins(AutomationPlugin).init_resource::<Clicked>();
+    settle(&mut app);
+    app
+}
+
+/// An absolutely placed box, `width` × `height` logical px at (`left`, `top`).
+fn placed(left: f32, top: f32, width: f32, height: f32) -> Node {
+    Node {
+        position_type: PositionType::Absolute,
+        left: Val::Px(left),
+        top: Val::Px(top),
+        width: Val::Px(width),
+        height: Val::Px(height),
+        ..default()
+    }
+}
+
+/// A named button labelled `label` at `node`, whose clicks are recorded.
+fn button(app: &mut App, name: &str, label: &str, node: Node) -> Entity {
+    let button = spawn_under_root(app, (Name::new(name.to_owned()), Button, node));
+    let text = app.world_mut().spawn(Text::new(label)).id();
+    app.world_mut().entity_mut(button).add_child(text);
+    let name = name.to_owned();
+    app.world_mut().entity_mut(button).observe(
+        move |mut click: On<Pointer<Click>>, mut clicked: ResMut<Clicked>| {
+            click.propagate(false);
+            clicked.0.push(name.clone());
+        },
+    );
+    button
+}
+
+/// Submit `body` as request `id`.
+fn submit(app: &mut App, id: u64, body: RequestBody) {
+    app.world_mut()
+        .resource_mut::<AutomationQueue>()
+        .submit(Request {
+            id: RequestId(id),
+            body,
+        });
+}
+
+/// The response to `id`, if it has come.
+fn take(app: &mut App, id: u64) -> Option<Response> {
+    app.world_mut()
+        .resource_mut::<AutomationQueue>()
+        .take_response(RequestId(id))
+}
+
+/// Run frames until `id` is answered.
+fn answer(app: &mut App, id: u64) -> Result<Response, String> {
+    for _frame in 0..PATIENCE {
+        app.update();
+        if let Some(response) = take(app, id) {
+            return Ok(response);
+        }
+    }
+    Err(format!("request {id} was never answered"))
+}
+
+/// Submit `body` and run frames until it is answered.
+fn request(app: &mut App, body: RequestBody) -> Result<Response, String> {
+    submit(app, 1, body);
+    answer(app, 1)
+}
+
+/// The body of a successful response.
+fn ok(response: Response) -> Result<ResponseBody, String> {
+    response
+        .result
+        .map_err(|error| format!("the request failed: {error}"))
+}
+
+/// The error of a failed response, with its report.
+fn failed(
+    response: Response,
+) -> Result<(AutomationError, sl_automation_proto::FailureReport), String> {
+    match response.result {
+        Ok(body) => Err(format!("the request succeeded: {body:?}")),
+        Err(error) => Ok((error, response.report.ok_or("an error with no report")?)),
+    }
+}
+
+/// A click request on `locator` under the default deadline.
+fn click(locator: Locator) -> RequestBody {
+    RequestBody::Click {
+        locator,
+        deadline: Deadline::default(),
+    }
+}
+
+#[test]
+fn a_click_is_carried_out_through_the_queue_alone() -> Result<(), String> {
+    let mut app = app();
+    button(&mut app, "ok", "OK", placed(100.0, 100.0, 120.0, 30.0));
+    settle(&mut app);
+    let body = ok(request(
+        &mut app,
+        click(Locator::role(Role::Button).named("OK")),
+    )?)?;
+    let ResponseBody::Done { node } = body else {
+        return Err(format!("not a done: {body:?}"));
+    };
+    assert_eq!(node.test_id.as_deref(), Some("ok"));
+    assert_eq!(
+        app.world().resource::<Clicked>().0,
+        vec!["ok".to_owned()],
+        "the synthetic click landed, and the answer came after it"
+    );
+    Ok(())
+}
+
+#[test]
+fn requests_in_flight_are_answered_independently_and_actions_take_turns() -> Result<(), String> {
+    let mut app = app();
+    button(
+        &mut app,
+        "first",
+        "First",
+        placed(100.0, 100.0, 120.0, 30.0),
+    );
+    button(
+        &mut app,
+        "second",
+        "Second",
+        placed(100.0, 200.0, 120.0, 30.0),
+    );
+    settle(&mut app);
+    submit(
+        &mut app,
+        1,
+        RequestBody::WaitFor {
+            locator: Locator::test_id("late"),
+            condition: WaitCondition::Visible,
+            deadline: Deadline {
+                frames: Some(PATIENCE),
+                millis: Some(60_000),
+            },
+        },
+    );
+    submit(&mut app, 2, click(Locator::test_id("first")));
+    submit(&mut app, 3, click(Locator::test_id("second")));
+    let mut order = Vec::new();
+    for _frame in 0..PATIENCE {
+        app.update();
+        for response in app
+            .world_mut()
+            .resource_mut::<AutomationQueue>()
+            .drain_responses()
+        {
+            ok(response.clone())?;
+            order.push(response.id.0);
+        }
+        if order.len() == 2 {
+            break;
+        }
+    }
+    assert_eq!(
+        order,
+        vec![2, 3],
+        "the clicks, in turn; the wait still waits"
+    );
+    assert_eq!(
+        app.world().resource::<Clicked>().0,
+        vec!["first".to_owned(), "second".to_owned()]
+    );
+    button(&mut app, "late", "Late", placed(300.0, 100.0, 120.0, 30.0));
+    let body = ok(answer(&mut app, 1)?)?;
+    assert!(
+        matches!(&body, ResponseBody::Satisfied { nodes } if nodes.len() == 1),
+        "{body:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_fill_replaces_the_text_by_typing_and_confirms_it() -> Result<(), String> {
+    let mut app = app();
+    spawn_under_root(
+        &mut app,
+        (
+            Name::new("field"),
+            EditableText::new("old words"),
+            // Focusable, as every viewer field is: a click on a field with no
+            // tab index bubbles its focus request to the window, which clears
+            // it.
+            TabIndex(0),
+            placed(100.0, 100.0, 240.0, 30.0),
+        ),
+    );
+    settle(&mut app);
+    let body = ok(request(
+        &mut app,
+        RequestBody::Fill {
+            locator: Locator::test_id("field"),
+            text: "new text".to_owned(),
+            deadline: Deadline::default(),
+        },
+    )?)?;
+    let ResponseBody::Done { node } = body else {
+        return Err(format!("not a done: {body:?}"));
+    };
+    assert_eq!(node.value, Some(NodeValue::Text("new text".to_owned())));
+    assert_eq!(
+        interact::text_of(&mut app, "field").as_deref(),
+        Some("new text")
+    );
+    Ok(())
+}
+
+#[test]
+fn a_key_press_reaches_the_focused_field() -> Result<(), String> {
+    let mut app = app();
+    let field = spawn_under_root(
+        &mut app,
+        (
+            Name::new("field"),
+            EditableText::new(""),
+            placed(100.0, 100.0, 240.0, 30.0),
+        ),
+    );
+    settle(&mut app);
+    interact::focus(&mut app, field);
+    for keys in ["h", "i", "Shift+!"] {
+        let body = ok(request(
+            &mut app,
+            RequestBody::Press {
+                keys: keys.to_owned(),
+            },
+        )?)?;
+        assert_eq!(body, ResponseBody::Pressed);
+    }
+    let wait = ok(request(
+        &mut app,
+        RequestBody::WaitFor {
+            locator: Locator::test_id("field"),
+            condition: WaitCondition::Text(NameMatcher::Exact("hi!".to_owned())),
+            deadline: Deadline::default(),
+        },
+    )?)?;
+    assert!(matches!(wait, ResponseBody::Satisfied { .. }), "{wait:?}");
+    let (error, _report) = failed(request(
+        &mut app,
+        RequestBody::Press {
+            keys: "Hyper+a".to_owned(),
+        },
+    )?)?;
+    assert!(
+        matches!(error, AutomationError::InvalidRequest { .. }),
+        "{error}"
+    );
+    Ok(())
+}
+
+#[test]
+fn an_ambiguity_reports_the_candidates_the_tree_and_the_event_tail() -> Result<(), String> {
+    let mut app = app();
+    let window = spawn_under_root(
+        &mut app,
+        (Name::new("window"), placed(0.0, 0.0, 400.0, 400.0)),
+    );
+    for (name, top) in [("a", 10.0), ("b", 60.0)] {
+        let child = button(&mut app, name, "OK", placed(10.0, top, 120.0, 30.0));
+        app.world_mut().entity_mut(window).add_child(child);
+    }
+    app.world_mut().write_message(UiAction {
+        element: "toolbar",
+        action: "before",
+    });
+    settle(&mut app);
+    let (error, report) = failed(request(
+        &mut app,
+        click(
+            Locator::role(Role::Button)
+                .named("OK")
+                .within(Locator::test_id("window")),
+        ),
+    )?)?;
+    let AutomationError::Ambiguous { candidates, .. } = &error else {
+        return Err(format!("not an ambiguity: {error}"));
+    };
+    assert_eq!(candidates.len(), 2);
+    assert_eq!(
+        report
+            .tree
+            .iter()
+            .map(|node| node.test_id.as_deref())
+            .collect::<Vec<_>>(),
+        vec![Some("window")],
+        "the excerpt is the scope's subtree"
+    );
+    let first = report.tree.first().ok_or("an empty excerpt")?;
+    assert_eq!(first.children.len(), 2, "both buttons are in it");
+    assert!(
+        report
+            .events
+            .iter()
+            .any(|entry| entry.stream == LogStream::UiAction && entry.kind == "toolbar.before"),
+        "the event tail: {:?}",
+        report.events
+    );
+    assert!(
+        app.world().resource::<Clicked>().0.is_empty(),
+        "nothing was clicked"
+    );
+    Ok(())
+}
+
+#[test]
+fn not_actionable_and_timed_out_name_their_check() -> Result<(), String> {
+    let mut app = app();
+    button(&mut app, "ok", "OK", placed(100.0, 100.0, 120.0, 30.0));
+    settle(&mut app);
+    let (error, report) = failed(request(
+        &mut app,
+        RequestBody::Fill {
+            locator: Locator::test_id("ok"),
+            text: "x".to_owned(),
+            deadline: Deadline::default(),
+        },
+    )?)?;
+    assert!(
+        matches!(
+            error,
+            AutomationError::NotActionable {
+                check: ActionabilityCheck::Editable,
+                ..
+            }
+        ),
+        "{error}"
+    );
+    assert!(
+        !report.tree.is_empty(),
+        "the top of the tree, with no scope"
+    );
+    let (error, _report) = failed(request(
+        &mut app,
+        RequestBody::Click {
+            locator: Locator::test_id("nowhere"),
+            deadline: SHORT,
+        },
+    )?)?;
+    assert!(
+        matches!(
+            error,
+            AutomationError::TimedOut {
+                failed_check: None,
+                condition: None,
+                ..
+            }
+        ),
+        "{error}"
+    );
+    let (error, _report) = failed(request(
+        &mut app,
+        RequestBody::WaitFor {
+            locator: Locator::test_id("ok"),
+            condition: WaitCondition::Disabled,
+            deadline: SHORT,
+        },
+    )?)?;
+    let AutomationError::TimedOut {
+        condition,
+        last_observed,
+        ..
+    } = &error
+    else {
+        return Err(format!("not a timeout: {error}"));
+    };
+    assert_eq!(condition, &Some(WaitCondition::Disabled));
+    assert_eq!(last_observed.len(), 1, "the button, as last seen");
+    let (error, _report) = failed(request(
+        &mut app,
+        RequestBody::Snapshot {
+            within: Some(Locator::test_id("nowhere")),
+        },
+    )?)?;
+    assert!(matches!(error, AutomationError::NotFound { .. }), "{error}");
+    Ok(())
+}
+
+#[test]
+fn a_failure_reports_what_was_logged_while_it_ran() -> Result<(), String> {
+    let mut app = app();
+    let tally = LogTally::default();
+    app.insert_resource(DiagnosticsSource(tally.clone()));
+    let subscriber = tracing_subscriber::layer::SubscriberExt::with(
+        tracing_subscriber::registry(),
+        tally.layer(),
+    );
+    let _guard = tracing::subscriber::set_default(subscriber);
+    tracing::warn!("before the request");
+    submit(
+        &mut app,
+        1,
+        RequestBody::Click {
+            locator: Locator::test_id("nowhere"),
+            deadline: SHORT,
+        },
+    );
+    app.update();
+    tracing::warn!("while it ran");
+    let (_error, report) = failed(answer(&mut app, 1)?)?;
+    assert_eq!(
+        report
+            .diagnostics
+            .iter()
+            .map(|line| line.message.as_str())
+            .collect::<Vec<_>>(),
+        vec!["while it ran"],
+        "only what was logged after it started"
+    );
+    Ok(())
+}
+
+#[test]
+fn state_waits_hold_on_a_probe_value_or_a_log_entry_and_time_out_with_the_last_seen()
+-> Result<(), String> {
+    let mut app = app();
+    app.init_resource::<SelectionSet>();
+    let body = ok(request(
+        &mut app,
+        RequestBody::WaitForState {
+            condition: StateCondition::Probe {
+                probe: Probe::Selection,
+                pointer: String::new(),
+                test: ValueTest::Equals(json!([])),
+            },
+            deadline: Deadline::default(),
+        },
+    )?)?;
+    assert_eq!(
+        body,
+        ResponseBody::StateHeld {
+            observed: StateObservation::Probe {
+                readout: ProbeReadout::Selection(Vec::new()),
+            },
+        }
+    );
+    let (error, _report) = failed(request(
+        &mut app,
+        RequestBody::WaitForState {
+            condition: StateCondition::Probe {
+                probe: Probe::Selection,
+                pointer: "/0/primary".to_owned(),
+                test: ValueTest::Present,
+            },
+            deadline: SHORT,
+        },
+    )?)?;
+    assert!(
+        matches!(
+            &error,
+            AutomationError::StateTimedOut {
+                last_observed: Some(StateObservation::Probe {
+                    readout: ProbeReadout::Selection(selection)
+                }),
+                ..
+            } if selection.is_empty()
+        ),
+        "{error}"
+    );
+
+    let cursor = app.world().resource::<crate::EventLog>().cursor();
+    submit(
+        &mut app,
+        2,
+        RequestBody::WaitForState {
+            condition: StateCondition::Logged {
+                cursor,
+                streams: vec![LogStream::UiAction],
+                kind_is: Some("toolbar.go".to_owned()),
+                detail_contains: None,
+            },
+            deadline: Deadline::default(),
+        },
+    );
+    for action in ["stay", "go"] {
+        app.world_mut().write_message(UiAction {
+            element: "toolbar",
+            action,
+        });
+        app.update();
+    }
+    let body = ok(answer(&mut app, 2)?)?;
+    let ResponseBody::StateHeld {
+        observed: StateObservation::Logged { entry, next },
+    } = body
+    else {
+        return Err(format!("not a log entry: {body:?}"));
+    };
+    assert_eq!(entry.kind, "toolbar.go", "not the entry before it");
+    assert_eq!(next, entry.seq + 1);
+    let log = ok(request(
+        &mut app,
+        RequestBody::ReadLog {
+            cursor,
+            streams: vec![LogStream::UiAction],
+            limit: None,
+        },
+    )?)?;
+    let ResponseBody::Log { page } = log else {
+        return Err(format!("not a log: {log:?}"));
+    };
+    assert_eq!(
+        page.entries
+            .iter()
+            .map(|entry| entry.kind.as_str())
+            .collect::<Vec<_>>(),
+        vec!["toolbar.stay", "toolbar.go"]
+    );
+    Ok(())
+}
+
+#[test]
+fn what_cannot_be_asked_is_refused_at_once() -> Result<(), String> {
+    let mut app = app();
+    let (error, _report) = failed(request(
+        &mut app,
+        RequestBody::Read {
+            probe: Probe::Conversations,
+        },
+    )?)?;
+    assert!(
+        matches!(error, AutomationError::Unavailable { .. }),
+        "no conversation model in this app: {error}"
+    );
+    for body in [
+        RequestBody::Screenshot {
+            path: "relative.png".to_owned(),
+            outline: None,
+        },
+        RequestBody::MenuPath {
+            path: Vec::new(),
+            deadline: Deadline::default(),
+        },
+        RequestBody::WaitForState {
+            condition: StateCondition::Probe {
+                probe: Probe::Agent,
+                pointer: "region".to_owned(),
+                test: ValueTest::Present,
+            },
+            deadline: Deadline::default(),
+        },
+        RequestBody::DragHandle {
+            handle: "translate-w".to_owned(),
+            amount: sl_automation_proto::DragAmount::Distance(1.0),
+            snap: sl_automation_proto::SnapSide::Free,
+            modifiers: sl_automation_proto::DragModifiers::None,
+            deadline: Deadline::default(),
+        },
+    ] {
+        let (error, _report) = failed(request(&mut app, body)?)?;
+        assert!(
+            matches!(error, AutomationError::InvalidRequest { .. }),
+            "{error}"
+        );
+    }
+    submit(
+        &mut app,
+        7,
+        RequestBody::WaitFor {
+            locator: Locator::test_id("never"),
+            condition: WaitCondition::Attached,
+            deadline: SHORT,
+        },
+    );
+    submit(
+        &mut app,
+        7,
+        RequestBody::Find {
+            locator: Locator::default(),
+        },
+    );
+    app.update();
+    let (error, _report) = failed(take(&mut app, 7).ok_or("the duplicate was not refused")?)?;
+    assert!(
+        matches!(error, AutomationError::InvalidRequest { .. }),
+        "a second request under an id in flight: {error}"
+    );
+    Ok(())
+}

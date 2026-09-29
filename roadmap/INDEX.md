@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 122 |
 | ready | 312 |
-| blocked | 60 |
+| blocked | 59 |
 | in-progress | 21 |
 | bugs | 17 |
-| done | 1272 |
+| done | 1273 |
 | deferred | 31 |
 | wont-do | 16 |
 | **total** | **1851** |
@@ -388,14 +388,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-automation-accesskit-bridge`](ready/viewer-automation-accesskit-bridge.md)
   — Feed AccessKit from the semantic UI model (blocked by
   `viewer-automation-semantic-custom-widgets` (done))
-- [`viewer-automation-executor`](ready/viewer-automation-executor.md) —
-  AutomationPlugin — the in-viewer request executor (blocked by
-  `viewer-automation-locator-engine` (done), `viewer-automation-synthetic-input`
-  (done), `viewer-automation-world-aim` (done), `viewer-automation-state-probes`
-  (done))
 - [`viewer-automation-per-app-state`](ready/viewer-automation-per-app-state.md)
   — Per-App state — two logged-in viewers in one process (blocked by
   `viewer-automation-app-builder` (done))
+- [`viewer-automation-remote-transport`](ready/viewer-automation-remote-transport.md)
+  — Remote transport — automation over a private Unix socket (blocked by
+  `viewer-automation-executor` (done))
 - [`viewer-automation-testkit-locators`](ready/viewer-automation-testkit-locators.md)
   — The in-process tiers speak locators too (blocked by
   `viewer-automation-locator-engine` (done), `viewer-automation-app-builder`
@@ -1055,7 +1053,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-world-heartbeat`](ready/server-world-heartbeat.md) — A region
   heartbeat — the fake grid has no simulation loop at all
 
-## blocked (60)
+## blocked (59)
 
 ### viewer
 
@@ -1067,11 +1065,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-automation-remote-transport`, `viewer-automation-inprocess-transport`)
 - [`viewer-automation-inprocess-transport`](blocked/viewer-automation-inprocess-transport.md)
   — In-process transport — the same requests against Apps in the test process
-  (blocked by `viewer-automation-executor`, `viewer-automation-per-app-state`,
-  `viewer-automation-windowless-mode` (done))
-- [`viewer-automation-remote-transport`](blocked/viewer-automation-remote-transport.md)
-  — Remote transport — automation over a private Unix socket (blocked by
-  `viewer-automation-executor`)
+  (blocked by `viewer-automation-executor` (done),
+  `viewer-automation-per-app-state`, `viewer-automation-windowless-mode` (done))
 - [`viewer-avatar-moderation-actions`](blocked/viewer-avatar-moderation-actions.md)
   — Per-avatar parcel / estate moderation — the shared action layer (blocked by
   `viewer-region-options-estate`)
@@ -1359,7 +1354,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A full-stack test passed and then its process died of SIGSEGV, once, in the
   full parallel suite
 
-## done (1272)
+## done (1273)
 
 ### protocol
 
@@ -1806,6 +1801,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-dialog-offers-invites` (done))
 - [`viewer-automation-app-builder`](done/viewer-automation-app-builder.md) — A
   public ViewerAppBuilder — one assembly for the binary, the harness and tests
+- [`viewer-automation-executor`](done/viewer-automation-executor.md) —
+  AutomationPlugin — the in-viewer request executor (blocked by
+  `viewer-automation-locator-engine` (done), `viewer-automation-synthetic-input`
+  (done), `viewer-automation-world-aim` (done), `viewer-automation-state-probes`
+  (done))
 - [`viewer-automation-locator-engine`](done/viewer-automation-locator-engine.md)
   — The locator engine — strict resolution and actionability (blocked by
   `viewer-automation-semantic-ui-model` (done),

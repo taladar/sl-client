@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::locator::Locator;
 use crate::message::WaitCondition;
+use crate::probe::InventoryRoot;
 use crate::snapshot::UiNode;
+use crate::state::{StateCondition, StateObservation};
 use crate::world::{WorldLocator, WorldNode};
 
 /// One of the checks a node must pass before an action is applied to it, in
@@ -100,7 +102,7 @@ pub enum AutomationError {
     /// A wait, or an action's wait for actionability, ran out of time.
     #[error(
         "timed out after {frames} frames ({millis} ms) on {locator}{}",
-        timeout_detail(*condition, *failed_check, last_observed.len())
+        timeout_detail(condition.as_ref(), *failed_check, last_observed.len())
     )]
     TimedOut {
         /// The locator being waited on.
@@ -202,6 +204,68 @@ pub enum AutomationError {
         /// The wall-clock milliseconds waited.
         millis: u64,
     },
+    /// A text field was filled, but does not hold the text afterwards — it
+    /// refused characters, cut the text short, or reformatted it.
+    #[error("{locator} was filled with {text:?} but holds {}", node_text(node))]
+    FillMismatch {
+        /// The locator of the field.
+        locator: Locator,
+        /// The text typed.
+        text: String,
+        /// The field as it is afterwards.
+        node: UiNode,
+    },
+    /// A wait on the viewer's state ran out of time.
+    #[error(
+        "timed out after {frames} frames ({millis} ms) waiting for {condition}{}",
+        if last_observed.is_some() { "" } else { " (nothing observed)" }
+    )]
+    StateTimedOut {
+        /// The condition waited for.
+        condition: StateCondition,
+        /// What it saw last: the readout, or the last log entry read.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        last_observed: Option<StateObservation>,
+        /// The frames waited.
+        frames: u32,
+        /// The wall-clock milliseconds waited.
+        millis: u64,
+    },
+    /// An inventory path names a folder the viewer does not know.
+    #[error(
+        "no inventory folder at segment {index} of {}",
+        inventory_path(*root, path)
+    )]
+    InventoryFolderNotFound {
+        /// Which inventory the path starts in.
+        root: InventoryRoot,
+        /// The whole path asked for.
+        path: Vec<String>,
+        /// The index of the first segment that named nothing (`0` with an
+        /// empty path: the root itself is not known yet).
+        index: u32,
+    },
+    /// The viewer has nothing to answer the request with: no such model, no
+    /// input injector, no event log.
+    #[error("this viewer has no {what}")]
+    Unavailable {
+        /// What it lacks.
+        what: String,
+    },
+    /// The request cannot be carried out as written: an unknown key or
+    /// handle, an empty menu path, a relative screenshot path, a malformed
+    /// JSON Pointer.
+    #[error("invalid request: {reason}")]
+    InvalidRequest {
+        /// What is wrong with it.
+        reason: String,
+    },
+    /// A screenshot could not be captured, encoded or written.
+    #[error("the screenshot failed: {reason}")]
+    ScreenshotFailed {
+        /// Why.
+        reason: String,
+    },
     /// No rubber band over the things a locator names selects exactly them:
     /// the band would miss some, or also catch others.
     #[error(
@@ -242,9 +306,27 @@ fn list_nodes<T: fmt::Display>(nodes: &[T]) -> String {
         .join("; ")
 }
 
+/// A node's text for an error message: its value, else its name.
+fn node_text(node: &UiNode) -> String {
+    match (&node.value, &node.name) {
+        (Some(value), _) => format!("{value:?}"),
+        (None, Some(name)) => format!("{name:?}"),
+        (None, None) => "nothing".to_owned(),
+    }
+}
+
+/// An inventory path for an error message: `agent:/Objects/Boxes`.
+fn inventory_path(root: InventoryRoot, path: &[String]) -> String {
+    let root = match root {
+        InventoryRoot::Agent => "agent",
+        InventoryRoot::Library => "library",
+    };
+    format!("{root}:/{}", path.join("/"))
+}
+
 /// The tail of a timeout's message: what was awaited and what was seen last.
 fn timeout_detail(
-    condition: Option<WaitCondition>,
+    condition: Option<&WaitCondition>,
     failed_check: Option<ActionabilityCheck>,
     observed: usize,
 ) -> String {

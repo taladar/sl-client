@@ -8564,6 +8564,7 @@ dependencies = [
  "image",
  "jiff",
  "pretty_assertions",
+ "serde_json",
  "sl-account-dirs",
  "sl-asset",
  "sl-automation-proto",
@@ -9239,8 +9240,10 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bevy_flair",
+ "fs-err",
  "image",
  "pretty_assertions",
+ "serde_json",
  "sl-automation-proto",
  "sl-client-bevy",
  "sl-viewer-inventory",

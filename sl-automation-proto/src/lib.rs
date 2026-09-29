@@ -29,10 +29,19 @@
 //!   [`DiagnosticsReadout`] of warnings and errors, and the
 //!   [`QuiescenceReadout`] that says whether the scene has settled.
 //! - A [`Request`] and its [`Response`] share a [`RequestId`], so several
-//!   requests may be in flight on one channel.
+//!   requests may be in flight on one channel. The requests read the UI and
+//!   act on it (click, hover, fill, a key press, a menu path, a combo's
+//!   option, a pie slice), read and act on the world ([`WorldAction`], a
+//!   drag of a transform handle, a rubber band), read a [`Probe`], the event
+//!   log or the diagnostics, wait on UI nodes ([`WaitCondition`]), world
+//!   things ([`WorldWaitCondition`]) or the viewer's state
+//!   ([`StateCondition`]: quiet, a probe's value, a log entry), and capture a
+//!   screenshot.
 //! - An [`AutomationError`] is what a test matches on: not found, ambiguous
 //!   (with every candidate), not actionable (with the failing
-//!   [`ActionabilityCheck`]) and timed out (with the last observed state).
+//!   [`ActionabilityCheck`]) and timed out (with the last observed state);
+//!   every error response also carries a [`FailureReport`] — the tree around
+//!   the scope, the event tail and the warnings logged meanwhile.
 //!
 //! The *types* are shared between viewers, but a Fluent key or a test id means
 //! something only to the viewer that owns it: selectors are a per-viewer
@@ -57,13 +66,17 @@
 //! # Ok::<(), serde_json::Error>(())
 //! ```
 
+mod action;
 mod failure;
 mod locator;
 mod message;
 mod probe;
+mod report;
 mod snapshot;
+mod state;
 mod world;
 
+pub use crate::action::{DragAmount, DragModifiers, SnapSide, WorldAction, WorldWaitCondition};
 pub use crate::failure::{ActionabilityCheck, AutomationError};
 pub use crate::locator::{Locator, NameMatcher};
 pub use crate::message::{
@@ -76,5 +89,9 @@ pub use crate::probe::{
     RegionReadout, SelectedObject, SpeakerKind, StatusReadout, TeleportReadout, TeleportState,
     TranscriptLine,
 };
+pub use crate::report::FailureReport;
 pub use crate::snapshot::{Bounds, NodeId, NodeState, NodeValue, NodeVisibility, Role, UiNode};
+pub use crate::state::{
+    Probe, ProbeReadout, StateCondition, StateObservation, ValueTest, includes,
+};
 pub use crate::world::{Anchor, Near, WorldKind, WorldLocator, WorldNode};

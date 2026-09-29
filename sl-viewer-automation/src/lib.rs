@@ -81,9 +81,18 @@
 //! ([`read_diagnostics`]). [`request_screenshot`] captures the primary window
 //! with the boxes of a locator's matches outlined. [`StateProbesPlugin`]
 //! installs what records.
+//!
+//! Over all of it sits the **executor**: [`AutomationPlugin`] takes the
+//! protocol's requests from the [`AutomationQueue`], carries each out across
+//! as many frames as it takes — resolve, wait for actionability, play the
+//! input through the synthetic input, wait for its frames, confirm — and
+//! answers each with a response, several in flight at once; the requests that
+//! play input take turns. A failure's response carries a report: the tree
+//! around the scope, the event tail, the warnings logged meanwhile.
 
 mod diagnostics;
 mod event_log;
+mod executor;
 mod locate;
 mod manipulator_drag;
 mod probe_sources;
@@ -100,9 +109,12 @@ mod world_query;
 mod world_sweep;
 
 pub use crate::diagnostics::{
-    DiagnosticsSource, LogTally, LogTallyLayer, RECENT_LINES, read_diagnostics,
+    DiagnosticsSource, LogTally, LogTallyLayer, RECENT_LINES, diagnostics_cursor, read_diagnostics,
 };
 pub use crate::event_log::{DETAIL_LIMIT, EventLog, EventLogPlugin};
+pub use crate::executor::{
+    AutomationPlugin, AutomationQueue, AutomationSystems, REPORT_DIAGNOSTICS, REPORT_EVENTS,
+};
 pub use crate::locate::{find_all, find_one, shallow};
 pub use crate::manipulator_drag::{DragProgress, DragStage, HeldKeys, ManipulatorDrag};
 pub use crate::probe_sources::{LiveNotifications, ProbeSources};

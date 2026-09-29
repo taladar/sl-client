@@ -126,6 +126,8 @@ mod bottom_toolbar;
 // path in the viewer still resolves.
 pub(crate) use sl_viewer_media::browser_widget;
 #[cfg(test)]
+mod automation_executor;
+#[cfg(test)]
 mod automation_locator;
 #[cfg(test)]
 mod automation_model;

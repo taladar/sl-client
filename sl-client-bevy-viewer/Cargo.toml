@@ -239,6 +239,8 @@ fs-err = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
+# The JSON values the executor's state waits test a readout against.
+serde_json = { workspace = true }
 # The vocabulary the automation sweep's snapshots are written in.
 sl-automation-proto = { workspace = true }
 # The loopback grid the full-stack tier (`src/full_stack_test.rs`) renders

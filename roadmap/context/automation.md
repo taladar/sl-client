@@ -249,6 +249,33 @@ replaces that person.
 - **The viewer has no grab-drag of an object outside build mode yet**, so
   there is no aimed grab; it lands with the Move tool
   ([[viewer-build-tool-row-parity]]).
+- **The executor** ([[viewer-automation-executor]]) is `AutomationPlugin`
+  (`sl-viewer-automation/src/executor.rs`): requests go into the
+  `AutomationQueue` resource and responses come out of it, so a transport is
+  whatever moves them between it and a test. It runs as one exclusive system
+  in `Last`, after the event log records, and costs a resource check a frame
+  while nothing is submitted. Reads and waits run side by side; the requests
+  that play input take turns in submission order (one pointer). The viewer
+  installs it with `ViewerAppOptions::automation` (the full-stack harness
+  does), never by default.
+- **Every error response carries a `FailureReport`**: the tree excerpt
+  around a UI locator's scope (the scope's subtree, else the top of the
+  tree; depth- and node-capped), the event log's last 32 entries, and the
+  warnings and errors logged since the request started
+  (`diagnostics_cursor`). The error itself carries the check, the
+  candidates and the last observation.
+- **A screenshot travels as a file**, not bytes: the request names an
+  absolute path the viewer writes the PNG to. The requester shares the
+  machine (local socket or same process) and keeps it as an artifact anyway.
+- **A state wait tests a probe's readout as JSON** at a JSON Pointer
+  (`ValueTest`: present, absent, equals, `includes` — a structural subset, a
+  string's substring). An inventory folder that is not there yet reads as
+  `null`, so a wait can wait for it.
+- **A fill** is a click into the field, `Ctrl+A`, `Backspace` and the text
+  typed; it answers only once the field holds the text (`FillMismatch`
+  otherwise). A fixture field needs a `TabIndex`, as every viewer field
+  has: a click on an unfocusable field bubbles its focus request to the
+  window, which clears it.
 - Every new crate here trips the extraction gates (`private_interfaces`,
   `must_use_candidate`, fmt, machete, cargo-about, rustdoc, `cliff.toml`,
   `CHANGELOG.md`).
@@ -280,8 +307,9 @@ replaces that person.
   crate, a reader exported by that crate and registered in `ProbeSources`
   by `automation_sources.rs`), a teeth test that the probe changes when the
   state does (fixture tier in `sl-client-bevy-viewer/src/automation_probes.rs`,
-  the full-stack test there for what only a real session feeds), and — once
-  the executor and the driver exist — its request variant and driver method.
+  the full-stack test there for what only a real session feeds), its
+  `Probe` / `ProbeReadout` variants and the executor's `state::read` arm,
+  and — once the driver exists — its driver method.
 - **a whole viewer App** (a transport, a harness, a stage): never assemble
   plugins by hand — `ViewerAppOptions::new(params)` is the interactive
   viewer; set `window: WindowMode::Windowless`, `storage:
@@ -291,6 +319,13 @@ replaces that person.
   `ViewerAppBuilder::from_options(..).build()`
   (`sl-client-bevy-viewer/src/assembly.rs`). A new viewer-wide option
   belongs there, with its first consumer.
+- **a request**: a `RequestBody` variant and, when it answers with
+  something new, a `ResponseBody` one (`sl-automation-proto/src/message.rs`,
+  with round-trip tests), any new failure as an `AutomationError` kind (and
+  its arm in the executor's `ui_locator`), its arm in the executor's `start`
+  and a task in `executor/{ui,world,state}.rs` — marked as acting if it
+  plays input — and a test through the queue (`executor/tests.rs`, or the
+  fixture world in `sl-client-bevy-viewer/src/automation_world_aim.rs`).
 - **an end-to-end test**: in `sl-client-bevy-viewer/tests/`, build a
   `Stage`, launch viewers, act through locators, assert with `expect`. Take
   the lowest tier that can produce the failure (see

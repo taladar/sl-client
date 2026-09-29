@@ -265,6 +265,12 @@ pub struct ViewerAppOptions {
     /// (`SL_VIEWER_DISABLE_GLOW`, `SL_VIEWER_SKY_DAY_POSITION`, …) — which is
     /// how the interactive viewer and a capture run take them.
     pub render_overrides: Option<RenderOverrides>,
+    /// Whether the automation executor is installed
+    /// (`sl_viewer_automation::AutomationPlugin`): requests submitted to its
+    /// queue are carried out, and the state probes' recorders (the event log,
+    /// the screenshot store, the render-settle cell) run. Off for the
+    /// interactive viewer; a runtime switch, never a Cargo feature.
+    pub automation: bool,
 }
 
 impl ViewerAppOptions {
@@ -288,6 +294,7 @@ impl ViewerAppOptions {
             storage: Storage::UserDirectories,
             audio_device: true,
             render_overrides: None,
+            automation: false,
         }
     }
 }
@@ -345,6 +352,7 @@ impl ViewerAppBuilder {
             storage,
             audio_device,
             render_overrides,
+            automation,
         } = self.options;
         let SessionContent {
             viewer_assets,
@@ -671,6 +679,12 @@ impl ViewerAppBuilder {
             })
             .add_systems(Startup, setup_scene)
             .add_systems(Update, capture_login_outcome);
+        if automation {
+            // The request executor and what it reads: requests submitted to its
+            // queue are carried out through the same synthetic input a headless
+            // viewer installs, and answered with responses.
+            app.add_plugins(sl_viewer_automation::AutomationPlugin);
+        }
         // (Worn rigid attachments no longer need a hand re-propagation: their
         // attachment-point node is an avatar-root child whose local `Transform` the
         // pose driver's socket writer sets each frame, so ordinary change-gated

@@ -17,12 +17,13 @@ exclude = { workspace = true }
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
+# The JSON values a state wait tests a probe's readout against.
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
-serde_json = { workspace = true }
 
 [lints]
 workspace = true

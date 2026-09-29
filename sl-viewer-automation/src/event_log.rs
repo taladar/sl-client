@@ -35,7 +35,10 @@ impl Plugin for EventLogPlugin {
             .add_message::<SlEvent>()
             .add_message::<SlCommand>()
             .add_message::<UiAction>()
-            .add_systems(Last, record_log);
+            .add_systems(
+                Last,
+                record_log.in_set(crate::executor::AutomationSystems::Record),
+            );
     }
 }
 

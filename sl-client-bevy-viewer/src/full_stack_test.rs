@@ -1078,14 +1078,14 @@ fn build_viewer_app(
     // The login-time chat history fetch is not what any test here is about,
     // and the fake grid does not serve the capability.
     app_options.content.fetch_server_chat_history = false;
+    // The automation executor, and with it the state probes' recorders — the
+    // event log, the screenshot store and the render-settle cell this
+    // harness's own settle waits on.
+    app_options.automation = true;
     let mut app = ViewerAppBuilder::from_options(app_options)
         .build()?
         .into_app();
-    // The state probes' recorders — the event log, the screenshot store and
-    // the render-settle cell this harness's own settle waits on — as the
-    // automation tier installs them.
-    app.add_plugins(sl_viewer_automation::StateProbesPlugin)
-        .init_resource::<Recorded>()
+    app.init_resource::<Recorded>()
         .init_resource::<SceneWork>()
         .init_resource::<Captured>()
         // After the plugin's `(drive, maintain_world)` chain, so a frame's world

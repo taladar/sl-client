@@ -79,6 +79,12 @@ impl LogTally {
         drop(tally);
     }
 
+    /// The cursor that reads only what is logged from now on.
+    #[must_use]
+    pub fn cursor(&self) -> u64 {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner).next
+    }
+
     /// The counts, and the lines kept from `cursor` on, oldest first.
     #[must_use]
     pub fn read(&self, cursor: u64) -> DiagnosticsReadout {
@@ -166,6 +172,16 @@ pub fn read_diagnostics(world: &World, cursor: u64) -> DiagnosticsReadout {
     match world.get_resource::<DiagnosticsSource>() {
         Some(source) => source.0.read(cursor),
         None => LogTally::global().read(cursor),
+    }
+}
+
+/// The diagnostics cursor that reads only what is logged from now on, in the
+/// tally [`read_diagnostics`] reads.
+#[must_use]
+pub fn diagnostics_cursor(world: &World) -> u64 {
+    match world.get_resource::<DiagnosticsSource>() {
+        Some(source) => source.0.cursor(),
+        None => LogTally::global().cursor(),
     }
 }
 
