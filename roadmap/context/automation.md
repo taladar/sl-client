@@ -201,6 +201,27 @@ replaces that person.
 - **World positions are region-local to the agent's region.** An avatar is
   placed by its tracked object entity, not by its anchor: the anchor (a
   sphere or a body root) does not carry the region basis.
+- **A world action aims through the viewer's own pick**
+  ([[viewer-automation-world-aim]]). `WorldAim` probes candidate points on
+  the target's box through `PickProbes` (`sl-viewer-world-api`), which the
+  GPU ID-buffer pick answers live and the CPU ray-cast double answers in the
+  fixture world — the same resolver every real click goes through, so an aim
+  point is one a click lands on. A pick submission renders one pixel, so
+  `GpuPicker::take_requests` serves one pixel's requests a frame and leaves
+  the rest queued; never fold requests at different pixels into one pick.
+  A target no point reaches is framed once with `FrameObject` (the camera
+  keeps colliding, except with the framed object's own prims) and the camera
+  stays where that left it.
+- **Build mode is judged by the build tool's own resolvers**, not the world
+  pick: a press by the selection gesture's `ObjectPicker` (a handle the rig
+  takes first), a rubber band by its `sweep_candidates`, a handle drag by
+  the rig's hit test and drag math — asked through `SelectionProbes` and
+  `ManipulatorProbes` (`ProbeQueue`s in `sl-viewer-world-api`). A handle drag
+  names its snap regime: the grid engages only past the snap guide, so where
+  the pointer ends decides whether the amount is exact or lands on the grid.
+- **The viewer has no grab-drag of an object outside build mode yet**, so
+  there is no aimed grab; it lands with the Move tool
+  ([[viewer-build-tool-row-parity]]).
 - Every new crate here trips the extraction gates (`private_interfaces`,
   `must_use_candidate`, fmt, machete, cargo-about, rustdoc, `cliff.toml`,
   `CHANGELOG.md`).
@@ -216,6 +237,11 @@ replaces that person.
   `ButtonSpec::name_key`. `ui_contract::every_focus_stop_has_a_contract_row`
   fails any focus stop of any registered element or floater with no role or
   no name, and any floater that is not a named window.
+- **a world action**: a `WorldIntent` variant and its gesture in
+  `WorldTarget::input` (`sl-viewer-automation/src/world_aim.rs`), any
+  precondition as a waiting `AimStage` with its `ActionabilityCheck`, and a
+  fixture test in `sl-client-bevy-viewer/src/automation_world_aim.rs` that
+  the viewer does the thing to the aimed object and not to what is in front.
 - **a world readout**: a field on `WorldNode` (`sl-automation-proto`),
   filled in `WorldModel` (`sl-viewer-automation/src/world_model.rs`) from
   the world layers' own bookkeeping, never from a new per-frame system. If

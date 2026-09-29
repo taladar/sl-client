@@ -6369,6 +6369,71 @@ mod drag_drop_tests {
         Ok(())
     }
 
+    /// **An aimed drop lands on the prim, past the window over half of it**:
+    /// the camera puts the prim's centre under the inventory window, so a drop
+    /// aimed at the centre would land on the window's list. The world aim
+    /// skips every point the window would take and drops the notecard onto
+    /// the part of the prim that shows, through the drag's own world pick.
+    #[test]
+    fn an_aimed_drop_lands_on_the_part_of_the_prim_the_window_leaves() -> Result<(), TestError> {
+        use sl_automation_proto::{WorldKind, WorldLocator};
+        use sl_viewer_automation::{AimProgress, WorldAim, WorldIntent};
+
+        /// The inventory window's right edge, logical pixels.
+        const WINDOW_EDGE: f32 = 360.0;
+
+        let (mut app, prim) = drag_world()?;
+        let at = scene_position_of(&mut app, prim).ok_or("the fixture prim never rendered")?;
+        // A metre to the right of the prim: its centre projects some 65 px
+        // left of the viewport's middle, under the window's edge.
+        let look = Vec3::new(at.x + 1.0, at.y, at.z);
+        install_camera(
+            &mut app,
+            Vec3::new(look.x, look.y + 1.0, look.z + 8.0),
+            look,
+        );
+        settle(&mut app, 3);
+        let centre = super::world_to_viewport(&mut app, at).ok_or("the prim is off screen")?;
+        assert!(
+            centre.x < WINDOW_EDGE,
+            "the prim's centre is under the window: {centre:?}"
+        );
+        let from = row_centre(&mut app, NOTE_LABEL).ok_or("no notecard row")?;
+        let _setup = drain_commands(&mut app);
+
+        let mut aim = WorldAim::new(
+            WorldLocator::kind(WorldKind::Object).local_id(PRIM_LOCAL),
+            WorldIntent::DropFrom(from),
+        );
+        let target = loop {
+            match aim.poll(app.world_mut()) {
+                Ok(AimProgress::Ready(target)) => break target,
+                Ok(AimProgress::Waiting(_stage)) => app.update(),
+                Err(error) => return Err(error.to_string().into()),
+            }
+        };
+        assert!(
+            target.aim.x > WINDOW_EDGE,
+            "the drop is aimed past the window: {:?}",
+            target.aim
+        );
+        interact::perform(&mut app, target.input());
+        settle(&mut app, 3);
+        let added: Vec<_> = drain_commands(&mut app)
+            .into_iter()
+            .filter_map(|command| match command {
+                Command::UpdateTaskInventory { target, item, .. } => Some((target, item.item_id)),
+                _other => None,
+            })
+            .collect();
+        assert_eq!(
+            added,
+            vec![(prim, InventoryKey::from(Uuid::from_u128(NOTE_ITEM)))],
+            "the notecard went into the prim's contents"
+        );
+        Ok(())
+    }
+
     /// **A drag onto the ground rezzes the object there**, along the ray the
     /// camera actually looked down — and a **no-copy** item is *moved* out of
     /// inventory rather than copied, the reference's rule.

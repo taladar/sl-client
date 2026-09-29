@@ -420,6 +420,49 @@ impl EditToolState {
     }
 }
 
+/// A question for the build tool's selection gesture, asked by the
+/// automation layer so a build-mode click or rubber band is aimed with the
+/// gesture's own resolvers (its object picker, its rectangle test) rather
+/// than a stand-in.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SelectionQuery {
+    /// What would a left press at this point (logical pixels) start?
+    Press(Vec2),
+    /// What would a rubber band between these corners (logical pixels)
+    /// select?
+    Sweep {
+        /// Where the drag starts.
+        from: Vec2,
+        /// Where it ends.
+        to: Vec2,
+    },
+}
+
+/// What a build-mode left press at a point starts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PressOutcome {
+    /// A transform-handle drag: the rig takes the press.
+    Handle,
+    /// The selection of this object (the linkset root, or the prim itself
+    /// with edit-linked-parts on).
+    Object(ScopedObjectId),
+    /// Nothing selectable: a click there deselects, a drag sweeps a band.
+    EmptyWorld,
+}
+
+/// The build tool's answer to a [`SelectionQuery`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SelectionAnswer {
+    /// What the press starts.
+    Press(PressOutcome),
+    /// The objects the band would select, in no particular order.
+    Sweep(Vec<ScopedObjectId>),
+}
+
+/// The selection-probe queue: the automation layer asks, and the build tool
+/// answers in the frame it next runs (only in build mode).
+pub type SelectionProbes = crate::probe_queue::ProbeQueue<SelectionQuery, SelectionAnswer>;
+
 /// The current material mode / channel the Texture tab edits — the resolved
 /// `(matmedia, material-type, pbr-type)` selection, mirrored from the three
 /// selector widgets each frame so the visibility system and the channel editors

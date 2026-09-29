@@ -1534,6 +1534,67 @@ mod tests {
         Ok(())
     }
 
+    /// **A world aim is verified by the GPU pick**: the aim probes candidate
+    /// points on the stock box through the ID-buffer pick an off-screen window
+    /// renders, and the right-click it aims opens the box's pie.
+    ///
+    /// The camera looks from the west, over the own avatar standing between
+    /// it and the box, so points of the box's projection land on the avatar;
+    /// the aim must find one that does not, or frame the box first. Either
+    /// way the pie's target is the box, never the avatar.
+    #[test]
+    fn a_world_aim_is_verified_by_the_gpu_pick() -> Result<(), TestError> {
+        use sl_automation_proto::{Deadline, WorldLocator};
+        use sl_viewer_automation::{AimProgress, WorldAim, WorldIntent};
+
+        let mut harness = ViewerHarness::start_in_with(
+            vec![stock_fixture().into_region(RegionConfig::default())],
+            HarnessOptions::in_offscreen_window(UVec2::new(1280, 720)),
+        )?;
+        harness.login()?;
+        let at = sl_fake_grid::scenario::STOCK_SCRIPTED_OBJECT_POSITION;
+        let eye = Vector {
+            x: at.x - 8.0,
+            y: at.y,
+            z: at.z + 0.5,
+        };
+        harness.look_from(eye, at.clone());
+        if harness.capture()?.is_none() {
+            no_adapter("the GPU-verified world aim");
+            return Ok(());
+        }
+        let box_id = sl_fake_grid::scenario::stock_scripted_object();
+        let mut aim = WorldAim::new(
+            WorldLocator::full_id(box_id.uuid()),
+            WorldIntent::RightClick,
+        )
+        .with_deadline(Deadline {
+            frames: Some(3000),
+            millis: Some(60_000),
+        });
+        let target = harness
+            .run_until("the world aim at the stock box", |harness| {
+                match aim.poll(harness.app_world_mut()) {
+                    Ok(AimProgress::Ready(target)) => Some(Ok(target)),
+                    Ok(AimProgress::Waiting(_)) => None,
+                    Err(error) => Some(Err(error.to_string())),
+                }
+            })?
+            .map_err(TestError::from)?;
+        perform(&mut harness, target.input())?;
+        harness.run_until("the object pie on the stock box", |harness| {
+            let picked = harness
+                .world()
+                .resource::<crate::object_menu::ObjectMenuTarget>()
+                .hit
+                .as_ref()
+                .map(|hit| hit.summary.picked_full);
+            (picked == Some(box_id) && a_pie_is_open(harness)).then_some(())
+        })?;
+        drop(harness);
+        Ok(())
+    }
+
     /// **A headless viewer answers nothing but its own injector.**
     ///
     /// The shape `WindowMode::Headless` promises, pinned without a frame: the

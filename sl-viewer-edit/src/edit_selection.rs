@@ -77,7 +77,9 @@ use crate::world_api::SkinPoseTwin;
 use crate::world_api::ViewerCamera;
 use crate::world_api::on_hud_layer;
 use crate::world_api::pointer_over_blocking_ui;
-use crate::world_api::{EditTool, EditToolState};
+use crate::world_api::{
+    EditTool, EditToolState, PressOutcome, SelectionAnswer, SelectionProbes, SelectionQuery,
+};
 use crate::world_api::{SelectedNode, SelectionSet};
 
 /// How far (logical pixels) the cursor may wander between press and release
@@ -331,6 +333,7 @@ impl Plugin for EditSelectionPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SelectionSet>()
             .init_resource::<SelectGesture>()
+            .init_resource::<SelectionProbes>()
             .init_resource::<RubberBandNode>()
             .init_resource::<WireSelection>()
             .init_resource::<HighlightAssets>()
@@ -345,6 +348,7 @@ impl Plugin for EditSelectionPlugin {
                 Update,
                 (
                     handle_select_pointer.after(crate::gizmos::drive_gizmo_interaction),
+                    answer_selection_probes,
                     clear_selection_on_escape,
                     delete_selected_objects,
                     ingest_selection_events,
@@ -477,6 +481,79 @@ impl RubberBand<'_, '_> {
     }
 }
 
+/// What a left press along `ray` would select: the linkset root under it, or
+/// the prim itself with edit-linked-parts on — `None` for empty world, which
+/// a worn attachment counts as (the attachment alignment tools are their own
+/// task). The gesture's own classification, shared with the
+/// [`SelectionProbes`] answer so an aimed press is judged by it.
+fn pressed_object(
+    ray: Ray3d,
+    tool: &EditToolState,
+    targets: &mut SelectTargets,
+    exclude: &HashSet<Entity>,
+) -> Option<(ScopedObjectId, ObjectKey, Entity)> {
+    let hit = targets.picker.pick(ray, &mut targets.ray_cast, exclude)?;
+    if hit.summary.attachment {
+        return None;
+    }
+    let (scoped, full) = if tool.edit_linked {
+        (hit.summary.picked_scoped, hit.summary.picked_full)
+    } else {
+        (hit.summary.root_scoped, hit.summary.root_full)
+    };
+    Some((scoped, full, targets.state.entity_by_scoped(&scoped)?))
+}
+
+/// Answer every waiting [`SelectionProbes`] query with the gesture's own
+/// resolvers: a press is a handle drag when the rig's hit test takes it, else
+/// what [`pressed_object`] selects; a band is what `sweep_candidates` selects.
+/// Left queued while no camera stands.
+fn answer_selection_probes(
+    mut probes: ResMut<SelectionProbes>,
+    tool: Res<EditToolState>,
+    pointer: SelectPointer,
+    mut targets: SelectTargets,
+    handles: Query<(Entity, &crate::gizmos::GizmoHandle)>,
+) {
+    if !probes.has_requests() {
+        return;
+    }
+    let Ok((camera, camera_transform)) = pointer.camera.single() else {
+        return;
+    };
+    let exclude = pointer.pick_exclusions();
+    for (ticket, query) in probes.take_requests() {
+        let answer = match query {
+            SelectionQuery::Press(at) => {
+                let outcome = match camera.viewport_to_world(camera_transform, at) {
+                    Err(_behind) => PressOutcome::EmptyWorld,
+                    Ok(ray) => {
+                        if crate::gizmos::ray_strikes_handle(ray, &handles, &mut targets.ray_cast) {
+                            PressOutcome::Handle
+                        } else {
+                            pressed_object(ray, &tool, &mut targets, &exclude)
+                                .map_or(PressOutcome::EmptyWorld, |(scoped, _full, _entity)| {
+                                    PressOutcome::Object(scoped)
+                                })
+                        }
+                    }
+                };
+                SelectionAnswer::Press(outcome)
+            }
+            SelectionQuery::Sweep { from, to } => {
+                let (min, max) = crate::edit_math::rect_from_corners(from, to);
+                SelectionAnswer::Sweep(
+                    sweep_candidates(min, max, camera, camera_transform, &targets.candidates)
+                        .into_iter()
+                        .map(|(scoped, _entity)| scoped)
+                        .collect(),
+                )
+            }
+        };
+        probes.answer(ticket, answer);
+    }
+}
+
 /// The click / rubber-band pointer gesture of the selection tool. See the
 /// [module documentation](self) for the semantics.
 fn handle_select_pointer(
@@ -555,29 +632,7 @@ fn handle_select_pointer(
         };
         // The world pick, excluding HUD geometry exactly as the touch pick does.
         let exclude = pointer.pick_exclusions();
-        let pressed_object = targets
-            .picker
-            .pick(ray, &mut targets.ray_cast, &exclude)
-            .and_then(|hit| {
-                // A worn attachment is not world-editable here (the attachment
-                // alignment tools are their own task); treat it as empty world.
-                if hit.summary.attachment {
-                    return None;
-                }
-                if tool.edit_linked {
-                    Some((
-                        hit.summary.picked_scoped,
-                        hit.summary.picked_full,
-                        targets.state.entity_by_scoped(&hit.summary.picked_scoped)?,
-                    ))
-                } else {
-                    Some((
-                        hit.summary.root_scoped,
-                        hit.summary.root_full,
-                        targets.state.entity_by_scoped(&hit.summary.root_scoped)?,
-                    ))
-                }
-            });
+        let pressed_object = pressed_object(ray, &tool, &mut targets, &exclude);
         gesture.state = Some(GestureState {
             anchor: cursor,
             extend: keyboard.pressed(KeyCode::ShiftLeft)

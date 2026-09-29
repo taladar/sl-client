@@ -405,8 +405,30 @@ mod tests {
                 locator: WorldLocator::kind(WorldKind::Object).named("Door"),
                 candidates: vec![world_node(), world_node()],
             }),
+            Err(AutomationError::ManipulatorRefused {
+                handle: "rotate-z".to_owned(),
+                reason: "the rig has no such handle".to_owned(),
+            }),
+            Err(AutomationError::ManipulatorTimedOut {
+                handle: "translate-x".to_owned(),
+                failed_check: ActionabilityCheck::Stable,
+                frames: 600,
+                millis: 10_000,
+            }),
+            Err(AutomationError::SweepInexact {
+                locator: WorldLocator::kind(WorldKind::Object).named("Door"),
+                missing: vec![uuid::Uuid::from_u128(4)],
+                extra: Vec::new(),
+            }),
+            Err(AutomationError::WorldNotActionable {
+                locator: WorldLocator::kind(WorldKind::Object).named("Door"),
+                check: ActionabilityCheck::ReceivesEvents,
+                node: Box::new(world_node()),
+                covered_by: Some(uuid::Uuid::from_u128(9)),
+            }),
             Err(AutomationError::WorldTimedOut {
                 locator: WorldLocator::own_avatar(),
+                failed_check: Some(ActionabilityCheck::Stable),
                 unresolved: vec![world_node()],
                 last_observed: Vec::new(),
                 frames: 600,

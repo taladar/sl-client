@@ -644,6 +644,43 @@ impl UiModel<'_, '_> {
         }
         false
     }
+
+    /// Whether a click at `point` (physical pixels) would go to the UI rather
+    /// than the world: the world's own rule (`pointer_over_blocking_ui`) — a
+    /// UI node with an area under the pointer that blocks what is below it —
+    /// made with the same front-to-back walk as the covered test.
+    ///
+    /// Without a UI stack there is no UI to take it.
+    #[must_use]
+    pub fn takes_click_at(&self, point: Vec2) -> bool {
+        let Some(stack) = &self.stack else {
+            return false;
+        };
+        for &entity in stack.uinodes.iter().rev() {
+            let Ok(facts) = self.nodes.get(entity) else {
+                continue;
+            };
+            let drawn = facts
+                .inherited_visibility
+                .is_some_and(|visibility| visibility.get());
+            let size = facts.computed.size;
+            if !drawn
+                || size.x <= 0.0
+                || size.y <= 0.0
+                || !facts.computed.contains_point(*facts.transform, point)
+                || !clip_check_recursive(point, entity, &self.clipping, &self.clip_parents)
+            {
+                continue;
+            }
+            let pickable = self.pickables.get(entity).ok();
+            if pickable.is_none_or(|pickable| pickable.should_block_lower) {
+                // Hovered, it suppresses the world pick; not hoverable, it still
+                // hides everything under it from the hover map.
+                return pickable.is_none_or(|pickable| pickable.is_hoverable);
+            }
+        }
+        false
+    }
 }
 
 /// The part of the node a user can see, in physical pixels: its box cut

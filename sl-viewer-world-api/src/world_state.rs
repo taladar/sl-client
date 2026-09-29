@@ -67,6 +67,30 @@ impl Default for FirstPersonAvatarVisible {
 #[derive(Message, Debug, Clone, Copy)]
 pub struct ToggleFlycam;
 
+/// A request to **frame an object** with the camera: focus it, from the side
+/// the camera is already on, near enough that it fills a good part of the view
+/// — the older reference `handle_zoom_to_object` (`llviewermenu.cpp`), which
+/// sized the distance from the object's bounding box and the field of view.
+///
+/// The camera leaves mouselook or flycam for third person and keeps the focus
+/// on the object until the avatar moves, like an alt-click focus. Camera
+/// collision still applies, so a wall between the camera side and the object
+/// pulls the eye in front of the wall — which is what makes this the way to
+/// *reveal* an object something else covers. Written by the automation layer's
+/// world aim; `sl_viewer_world_view::camera`'s `frame_object` answers it.
+#[derive(Message, Debug, Clone, PartialEq)]
+pub struct FrameObject {
+    /// The centre of the object's bounds, Bevy world space.
+    pub center: Vec3,
+    /// The radius of a sphere around `center` that holds the whole object,
+    /// metres.
+    pub radius: f32,
+    /// The object's own entities (its prims), which camera collision passes
+    /// through while this focus holds: the focus sits inside the object, and
+    /// a collision cast from there would stop at the object's own far side.
+    pub passes_through: Vec<Entity>,
+}
+
 /// The marker on the one main viewer camera entity — the camera every world
 /// system means by "the camera", as opposed to the reflection-probe, mirror and
 /// minimap cameras that also carry `Camera3d`. Mode-agnostic: the same entity is

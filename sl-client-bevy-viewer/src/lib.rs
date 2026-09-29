@@ -132,6 +132,8 @@ mod automation_model;
 #[cfg(test)]
 mod automation_world;
 #[cfg(test)]
+mod automation_world_aim;
+#[cfg(test)]
 mod build_floater_test;
 mod build_info;
 pub(crate) use sl_viewer_chat::chat;

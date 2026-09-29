@@ -5,7 +5,8 @@ topic: viewer
 status: ready
 origin: Firestorm full-parity audit (2026-08-19)
 refs: [viewer-transform-gizmos, viewer-prim-linking,
-       viewer-camera-focus-on-object, viewer-camera-controls-window]
+       viewer-camera-focus-on-object, viewer-camera-controls-window,
+       viewer-automation-world-aim]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -20,7 +21,11 @@ tool), and the **Move (grab)** tool (`button move` with the Move /
 Lift / Spin radio group: grab-drag an unlocked object without entering
 full edit mode, via ObjectGrab / ObjectGrabUpdate / ObjectDeGrab — we
 currently send only instantaneous grab/degrab for touch clicks in
-`sl-client-bevy-viewer/src/hud_pick.rs`).
+`sl-client-bevy-viewer/src/hud_pick.rs`). When the grab-drag exists, give
+the automation world aim a grab intent (`WorldIntent` in
+`sl-viewer-automation/src/world_aim.rs`; [[viewer-automation-world-aim]]
+covers every other drag and left this one out for want of a consumer) and a
+fixture test that the drag sends `GrabObjectUpdate`s for the aimed object.
 
 Row-parity extras on the Edit panel: in-floater **Link / Unlink**
 buttons (`link_btn` / `unlink_btn` — the function exists via Ctrl+L /

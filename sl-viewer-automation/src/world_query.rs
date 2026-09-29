@@ -201,6 +201,7 @@ impl WorldQuery {
         if self.frames >= self.max_frames || waited >= self.max_time {
             return Err(AutomationError::WorldTimedOut {
                 locator: self.locator.clone(),
+                failed_check: None,
                 unresolved,
                 last_observed: matches,
                 frames: self.frames,

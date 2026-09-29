@@ -91,6 +91,9 @@ use crate::world_api::SelectionSet;
 use crate::world_api::ViewerCamera;
 use crate::world_api::pointer_over_blocking_ui;
 use crate::world_api::{EditTool, EditToolState};
+use crate::world_api::{ManipulatorAxis, ManipulatorHandle, ManipulatorProbes};
+
+mod plan;
 
 /// The render layer the gizmo rig (and only it) lives on, drawn by the
 /// overlay camera between the world (order 0) and the HUD (order 2).
@@ -125,15 +128,6 @@ enum GizmoAxis {
 impl GizmoAxis {
     /// All three, in order.
     const ALL: [Self; 3] = [Self::X, Self::Y, Self::Z];
-
-    /// The axis' lower-case letter for a handle's test address.
-    const fn slug(self) -> &'static str {
-        match self {
-            Self::X => "x",
-            Self::Y => "y",
-            Self::Z => "z",
-        }
-    }
 
     /// The axis' unit vector in the (Second Life space) grid frame.
     const fn unit(self) -> Vec3 {
@@ -211,20 +205,55 @@ enum GizmoPart {
 impl GizmoPart {
     /// The part's stable test address suffix: every rig handle is named
     /// `edit-gizmo:<slug>`, so a headless interaction test can find a handle
-    /// by [`Name`] without reaching into this module's private types.
+    /// by [`Name`] without reaching into this module's private types. The
+    /// public vocabulary's ([`ManipulatorHandle::slug`]), so the two agree.
     fn slug(self) -> String {
-        match self {
-            Self::TranslateAxis(axis) => format!("translate-{}", axis.slug()),
-            Self::TranslatePlane(axis) => format!("translate-plane-{}", axis.slug()),
-            Self::RotateRing(axis) => format!("rotate-{}", axis.slug()),
-            Self::ScaleFace(axis, positive) => {
-                let side = if positive { "pos" } else { "neg" };
-                format!("scale-face-{}-{side}", axis.slug())
+        ManipulatorHandle::from(self).slug()
+    }
+}
+
+impl From<GizmoAxis> for ManipulatorAxis {
+    fn from(axis: GizmoAxis) -> Self {
+        match axis {
+            GizmoAxis::X => Self::X,
+            GizmoAxis::Y => Self::Y,
+            GizmoAxis::Z => Self::Z,
+        }
+    }
+}
+
+impl From<ManipulatorAxis> for GizmoAxis {
+    fn from(axis: ManipulatorAxis) -> Self {
+        match axis {
+            ManipulatorAxis::X => Self::X,
+            ManipulatorAxis::Y => Self::Y,
+            ManipulatorAxis::Z => Self::Z,
+        }
+    }
+}
+
+impl From<GizmoPart> for ManipulatorHandle {
+    fn from(part: GizmoPart) -> Self {
+        match part {
+            GizmoPart::TranslateAxis(axis) => Self::Translate(axis.into()),
+            GizmoPart::TranslatePlane(axis) => Self::TranslatePlane(axis.into()),
+            GizmoPart::RotateRing(axis) => Self::Rotate(axis.into()),
+            GizmoPart::ScaleFace(axis, positive) => Self::StretchFace(axis.into(), positive),
+            GizmoPart::ScaleCorner(signs) => Self::StretchCorner(signs),
+        }
+    }
+}
+
+impl From<ManipulatorHandle> for GizmoPart {
+    fn from(handle: ManipulatorHandle) -> Self {
+        match handle {
+            ManipulatorHandle::Translate(axis) => Self::TranslateAxis(axis.into()),
+            ManipulatorHandle::TranslatePlane(axis) => Self::TranslatePlane(axis.into()),
+            ManipulatorHandle::Rotate(axis) => Self::RotateRing(axis.into()),
+            ManipulatorHandle::StretchFace(axis, positive) => {
+                Self::ScaleFace(axis.into(), positive)
             }
-            Self::ScaleCorner([x, y, z]) => {
-                let sign = |positive: bool| if positive { 'p' } else { 'n' };
-                format!("scale-corner-{}{}{}", sign(x), sign(y), sign(z))
-            }
+            ManipulatorHandle::StretchCorner(signs) => Self::ScaleCorner(signs),
         }
     }
 }
@@ -1195,6 +1224,7 @@ impl Plugin for EditGizmoPlugin {
         app.add_message::<LocalChatNotice>()
             .init_resource::<GizmoAssets>()
             .init_resource::<GizmoInteraction>()
+            .init_resource::<ManipulatorProbes>()
             .init_resource::<BuiltRig>()
             .init_resource::<GizmoReadoutUi>()
             // Gated on build mode: the interaction / drag / readout systems all
@@ -1209,6 +1239,7 @@ impl Plugin for EditGizmoPlugin {
                     spawn_gizmo_camera,
                     maintain_gizmo_rig,
                     drive_gizmo_interaction,
+                    plan::plan_manipulator_drags,
                     dispatch_shift_drag_copy,
                     update_snap_guide_markers,
                     update_gizmo_readout,
@@ -1890,20 +1921,7 @@ pub(crate) fn drive_gizmo_interaction(
     let Ok(ray) = camera.viewport_to_world(camera_transform, cursor) else {
         return;
     };
-    let handle_entities: HashSet<Entity> =
-        rig.handles.iter().map(|(entity, _handle)| entity).collect();
-    let handle_filter = |entity: Entity| handle_entities.contains(&entity);
-    let settings = MeshRayCastSettings::default()
-        // The rig is drawn by the overlay camera; the main camera's view
-        // visibility for it reads false, so use inherited visibility.
-        .with_visibility(bevy::picking::mesh_picking::ray_cast::RayCastVisibility::Visible)
-        .with_filter(&handle_filter);
-    let hovered = rig
-        .ray_cast
-        .cast_ray(ray, &settings)
-        .first()
-        .and_then(|(entity, _hit)| rig.handles.get(*entity).ok())
-        .map(|(_entity, handle)| handle.part);
+    let hovered = struck_handle(ray, &rig.handles, &mut rig.ray_cast);
     interaction.hovered = hovered;
 
     // ---- Press: begin a drag. -----------------------------------------------
@@ -2030,6 +2048,37 @@ pub(crate) fn drive_gizmo_interaction(
             }
         }
     }
+}
+
+/// The handle a pointer ray strikes first — the rig's hit test, which the
+/// hover (and so the press) makes.
+fn struck_handle(
+    ray: Ray3d,
+    handles: &Query<(Entity, &GizmoHandle)>,
+    ray_cast: &mut MeshRayCast,
+) -> Option<GizmoPart> {
+    let handle_entities: HashSet<Entity> = handles.iter().map(|(entity, _handle)| entity).collect();
+    let handle_filter = |entity: Entity| handle_entities.contains(&entity);
+    let settings = MeshRayCastSettings::default()
+        // The rig is drawn by the overlay camera; the main camera's view
+        // visibility for it reads false, so use inherited visibility.
+        .with_visibility(bevy::picking::mesh_picking::ray_cast::RayCastVisibility::Visible)
+        .with_filter(&handle_filter);
+    ray_cast
+        .cast_ray(ray, &settings)
+        .first()
+        .and_then(|(entity, _hit)| handles.get(*entity).ok())
+        .map(|(_entity, handle)| handle.part)
+}
+
+/// Whether a press along `ray` lands on a handle — so the rig, not the
+/// selection gesture, takes it.
+pub(crate) fn ray_strikes_handle(
+    ray: Ray3d,
+    handles: &Query<(Entity, &GizmoHandle)>,
+    ray_cast: &mut MeshRayCast,
+) -> bool {
+    struck_handle(ray, handles, ray_cast).is_some()
 }
 
 /// The press that starts a drag: which handle, the ray through the cursor, the

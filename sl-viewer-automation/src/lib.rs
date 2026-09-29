@@ -53,21 +53,42 @@
 //! resolves a [`sl_automation_proto::WorldLocator`], and a [`WorldQuery`] waits
 //! for it, asking the simulator for the properties of the objects it cannot
 //! judge yet.
+//!
+//! A world action aims through [`WorldAim`]: it resolves the one thing, waits
+//! for the camera to hold still, and asks the viewer's own pick resolver
+//! (`sl_viewer_world_api::PickProbes`) about candidate points on the thing's
+//! box, so a click is aimed only where it lands on *that* thing — and when no
+//! point does, the camera frames the thing once and the aim starts over.
+//! [`WorldTarget::input`] is the gesture, for the synthetic input to play.
+//!
+//! Build mode has its own gestures, judged by the build tool's own resolvers:
+//! a [`ManipulatorDrag`] drags a transform handle by a stated amount, on a
+//! stated side of the snap guide, with the modifier keys held that pick the
+//! rig; a [`WorldSweep`] draws the rubber band that selects exactly the things
+//! a locator names.
 
 mod locate;
+mod manipulator_drag;
 mod pursuit;
 mod reveal;
 mod route;
 mod ui_model;
+mod world_aim;
 mod world_model;
 mod world_query;
+mod world_sweep;
 
 pub use crate::locate::{find_all, find_one, shallow};
+pub use crate::manipulator_drag::{DragProgress, DragStage, HeldKeys, ManipulatorDrag};
 pub use crate::pursuit::{
     DEFAULT_DEADLINE, DEFAULT_DEADLINE_FRAMES, Intent, Progress, Pursuit, PursuitError, Target,
 };
 pub use crate::reveal::{open_floater, scroll_into_view};
 pub use crate::route::{Gesture, Route, RouteProgress};
 pub use crate::ui_model::{UiModel, entity_of, node_id, snapshot};
+pub use crate::world_aim::{
+    AimProgress, AimStage, ScreenProjection, WorldAim, WorldIntent, WorldTarget, screen_projection,
+};
 pub use crate::world_model::{ObjectFacts, WorldModel, WorldModelPlugin, world_snapshot};
 pub use crate::world_query::{WorldProgress, WorldQuery, WorldWant, find_world};
+pub use crate::world_sweep::{SweepProgress, SweepTarget, WorldSweep};

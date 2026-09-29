@@ -29,8 +29,12 @@ pub enum ActionabilityCheck {
     /// only by actions that type.
     Editable,
     /// A hit test at the aim point lands on the node or a descendant — so
-    /// nothing covers it.
+    /// nothing covers it. For a thing in the world: the viewer's own pick
+    /// resolver says a click there lands on it.
     ReceivesEvents,
+    /// The build tool is active. Checked only by a world select, which is a
+    /// click that selects only in build mode (outside it, the click touches).
+    BuildMode,
 }
 
 impl ActionabilityCheck {
@@ -45,6 +49,7 @@ impl ActionabilityCheck {
             Self::Enabled => "enabled",
             Self::Editable => "editable",
             Self::ReceivesEvents => "receives_events",
+            Self::BuildMode => "build_mode",
         }
     }
 }
@@ -127,16 +132,42 @@ pub enum AutomationError {
         /// Every thing it matched, in the resolver's order.
         candidates: Vec<WorldNode>,
     },
+    /// The one thing a world action is aimed at failed a check the action
+    /// cannot wait out: no point of it is on screen, or a click at every
+    /// point of it that is would land on something else — even after the
+    /// camera framed it.
+    #[error(
+        "{locator} is not actionable: {node} fails the {check} check{}",
+        covered_detail(*covered_by)
+    )]
+    WorldNotActionable {
+        /// The locator of the thing.
+        locator: WorldLocator,
+        /// The check it failed.
+        check: ActionabilityCheck,
+        /// The thing as it was when it failed.
+        node: Box<WorldNode>,
+        /// What a click at the thing's centre would have hit instead: an
+        /// object's or an avatar's full id. Absent when it would hit nothing
+        /// that has one (land, water, sky) or no point was on screen.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        covered_by: Option<uuid::Uuid>,
+    },
     /// A wait on a world locator ran out of time: it matched nothing (when
-    /// one match was wanted), or things it might match were still waiting
-    /// for the names or owners the viewer asked the simulator for.
+    /// one match was wanted), things it might match were still waiting for
+    /// the names or owners the viewer asked the simulator for, or the one
+    /// match never passed a world action's checks.
     #[error(
         "timed out after {frames} frames ({millis} ms) on {locator}{}",
-        world_timeout_detail(unresolved, last_observed.len())
+        world_timeout_detail(*failed_check, unresolved, last_observed.len())
     )]
     WorldTimedOut {
         /// The locator being waited on.
         locator: WorldLocator,
+        /// The check the one match was still failing when a world action gave
+        /// up; absent for a lookup, or when there was no single match.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        failed_check: Option<ActionabilityCheck>,
         /// The things whose name or owner never arrived, so whether they
         /// match could not be told.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -148,6 +179,58 @@ pub enum AutomationError {
         /// The wall-clock milliseconds waited.
         millis: u64,
     },
+    /// The build tool will not plan a drag of a transform handle.
+    #[error("the {handle} handle cannot be dragged: {reason}")]
+    ManipulatorRefused {
+        /// The handle, by its test address (`translate-x`, `rotate-z`, …).
+        handle: String,
+        /// Why not.
+        reason: String,
+    },
+    /// A drag of a transform handle ran out of time before it could start.
+    #[error(
+        "timed out after {frames} frames ({millis} ms) dragging the {handle} handle, still \
+         failing the {failed_check} check"
+    )]
+    ManipulatorTimedOut {
+        /// The handle, by its test address.
+        handle: String,
+        /// The check still failing.
+        failed_check: ActionabilityCheck,
+        /// The frames waited.
+        frames: u32,
+        /// The wall-clock milliseconds waited.
+        millis: u64,
+    },
+    /// No rubber band over the things a locator names selects exactly them:
+    /// the band would miss some, or also catch others.
+    #[error(
+        "a rubber band over {locator} does not select exactly them: it misses {} and also \
+         catches {}",
+        list_ids(missing),
+        list_ids(extra)
+    )]
+    SweepInexact {
+        /// The locator of the things to select.
+        locator: WorldLocator,
+        /// The full ids of those the band would not select.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        missing: Vec<uuid::Uuid>,
+        /// The full ids of other things it would select too.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        extra: Vec<uuid::Uuid>,
+    },
+}
+
+/// A list of full ids for an error message, or "nothing".
+fn list_ids(ids: &[uuid::Uuid]) -> String {
+    if ids.is_empty() {
+        return "nothing".to_owned();
+    }
+    ids.iter()
+        .map(|id| format!("#{id}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// The nodes of an error message, one after the other.
@@ -173,9 +256,16 @@ fn timeout_detail(
     format!("{awaited} ({observed} matching nodes at the end)")
 }
 
-/// The tail of a world timeout's message: what was still unresolved and how
-/// much matched at the end.
-fn world_timeout_detail(unresolved: &[WorldNode], observed: usize) -> String {
+/// The tail of a world timeout's message: the check still failing, what was
+/// still unresolved and how much matched at the end.
+fn world_timeout_detail(
+    failed_check: Option<ActionabilityCheck>,
+    unresolved: &[WorldNode],
+    observed: usize,
+) -> String {
+    let failing = failed_check
+        .map(|check| format!(", still failing the {check} check"))
+        .unwrap_or_default();
     let pending = if unresolved.is_empty() {
         String::new()
     } else {
@@ -184,7 +274,14 @@ fn world_timeout_detail(unresolved: &[WorldNode], observed: usize) -> String {
             list_nodes(unresolved)
         )
     };
-    format!("{pending} ({observed} matching things at the end)")
+    format!("{failing}{pending} ({observed} matching things at the end)")
+}
+
+/// The tail of a world not-actionable message: what is in the way.
+fn covered_detail(covered_by: Option<uuid::Uuid>) -> String {
+    covered_by
+        .map(|id| format!(" (a click there hits #{id})"))
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -259,7 +356,8 @@ mod tests {
         };
         let error = AutomationError::WorldTimedOut {
             locator: WorldLocator::kind(WorldKind::Object).named("Door"),
-            unresolved: vec![pending],
+            failed_check: None,
+            unresolved: vec![pending.clone()],
             last_observed: Vec::new(),
             frames: 60,
             millis: 1000,
@@ -267,6 +365,16 @@ mod tests {
         assert_eq!(
             error.to_string(),
             r#"timed out after 60 frames (1000 ms) on object name="Door", still waiting for the name or owner of object #00000000-0000-0000-0000-000000000002 local=2 at <1,2,3> (0 matching things at the end)"#
+        );
+        let covered = AutomationError::WorldNotActionable {
+            locator: WorldLocator::kind(WorldKind::Object).named("Door"),
+            check: ActionabilityCheck::ReceivesEvents,
+            node: Box::new(pending),
+            covered_by: Some(uuid::Uuid::from_u128(3)),
+        };
+        assert_eq!(
+            covered.to_string(),
+            r#"object name="Door" is not actionable: object #00000000-0000-0000-0000-000000000002 local=2 at <1,2,3> fails the receives_events check (a click there hits #00000000-0000-0000-0000-000000000003)"#
         );
     }
 

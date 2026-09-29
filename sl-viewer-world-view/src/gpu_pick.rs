@@ -27,7 +27,8 @@
 //! Consumers ([`GpuPicker::request`] → [`GpuPickResolved`]): the hover
 //! tooltip (dwell-gated, ~[`PICK_HZ`] Hz), the left-click touch, the
 //! right-click context-menu resolver, the double-click teleport, the
-//! inventory-drag world drop, and the debug pick inspector. Non-cursor ray
+//! inventory-drag world drop, the debug pick inspector, and the automation
+//! layer's aim probes ([`PickProbes`]). Non-cursor ray
 //! casts (edit-tool axis rays, camera collision, the arm-reach probe, the
 //! crosshair `P` diagnostic) deliberately stay on `MeshRayCast`.
 //!
@@ -62,7 +63,8 @@ use sl_client_bevy::{AgentKey, PrimFaceId, ScopedObjectId};
 
 use sl_viewer_intents::{DragPickActive, DragPickHit, DragWorldPick};
 use sl_viewer_world_api::{
-    AvatarPickTarget, TerrainSurface, ViewerCamera, WorldPhase, on_hud_layer,
+    AvatarPickTarget, PickProbes, ProbeHit, ProbeTarget, TerrainSurface, ViewerCamera, WorldPhase,
+    on_hud_layer,
 };
 use sl_viewer_world_objects::objects::{PrimFaceEntity, SceneObject, WornPickTarget};
 use sl_viewer_world_scene::water::WaterCell;
@@ -766,6 +768,9 @@ pub enum PickPurpose {
     Drag,
     /// The `SL_VIEWER_DEBUG_PICK` cursor inspector.
     Inspector,
+    /// A [`PickProbes`] question — "what would a click here hit?" — at a point
+    /// that need not be the cursor.
+    Probe,
 }
 
 /// A resolved pick, delivered 1–2 frames after its request.
@@ -831,19 +836,37 @@ pub struct GpuPicker {
 }
 
 impl GpuPicker {
-    /// Queue a pick at `cursor` (logical pixels) for `purpose`. All of one
-    /// frame's requests share a single submission (and its cursor — the last
-    /// request wins, which is harmless: every consumer asks at the live
-    /// cursor).
+    /// Queue a pick at `cursor` (logical pixels) for `purpose`. A frame's
+    /// requests at one point share a single submission; a request at another
+    /// point waits for a later frame (see `take_requests`).
     pub fn request(&mut self, cursor: Vec2, purpose: PickPurpose) {
         self.requests.push((cursor, purpose));
     }
 
-    /// Take this frame's queued requests — the resolver's side of
+    /// Whether a request for `purpose` is still waiting to be submitted.
+    fn has_queued(&self, purpose: PickPurpose) -> bool {
+        self.requests.iter().any(|(_at, queued)| *queued == purpose)
+    }
+
+    /// Take the requests one submission answers — the resolver's side of
     /// [`request`](Self::request), shared by the GPU submission and the CPU
-    /// resolver so exactly one of them answers a frame's queue.
+    /// resolver so exactly one of them answers the queue.
+    ///
+    /// A submission renders one pixel, so it takes the oldest request and every
+    /// other one at the same point; the rest stay queued for the next frame.
+    /// Every cursor consumer asks at the live cursor, so they share a pixel —
+    /// but a [`PickPurpose::Probe`] asks about an arbitrary one, and answering
+    /// it with the cursor's pixel (or the cursor's consumers with the probe's)
+    /// would put a hit where nobody pointed.
     pub(crate) fn take_requests(&mut self) -> Vec<(Vec2, PickPurpose)> {
-        std::mem::take(&mut self.requests)
+        let Some((at, _purpose)) = self.requests.first().copied() else {
+            return Vec::new();
+        };
+        let (taken, deferred) = std::mem::take(&mut self.requests)
+            .into_iter()
+            .partition(|(cursor, _purpose)| *cursor == at);
+        self.requests = deferred;
+        taken
     }
 }
 
@@ -1059,7 +1082,7 @@ pub(crate) fn submit_gpu_picks(
     submission.active = false;
     submission.items.clear();
 
-    let requests: Vec<(Vec2, PickPurpose)> = std::mem::take(&mut picker.requests);
+    let requests = picker.take_requests();
     if !requests.is_empty()
         && let Ok((camera, camera_transform)) = camera.single()
         && let Some(viewport) = camera.logical_viewport_size()
@@ -1258,9 +1281,43 @@ fn ingest_drag_world_picks(
     }
 }
 
+/// Submit the oldest queued [`PickProbes`] point as a pick — one at a time: a
+/// frame's pick renders one pixel, so a probe still waiting for its frame holds
+/// the next one back rather than piling up behind the cursor's consumers.
+fn drive_pick_probes(mut probes: ResMut<PickProbes>, mut picker: ResMut<GpuPicker>) {
+    if picker.has_queued(PickPurpose::Probe) {
+        return;
+    }
+    if let Some(at) = probes.next_to_submit() {
+        picker.request(at, PickPurpose::Probe);
+    }
+}
+
+/// File every resolved probe pick back into [`PickProbes`].
+fn ingest_pick_probes(mut picks: MessageReader<GpuPickResolved>, mut probes: ResMut<PickProbes>) {
+    for pick in picks.read() {
+        if pick.purpose != PickPurpose::Probe {
+            continue;
+        }
+        let hit = pick.hit.as_ref().map(|hit| ProbeHit {
+            target: match hit.resolution {
+                PickResolution::Avatar { agent, worn } => ProbeTarget::Avatar { agent, worn },
+                PickResolution::ObjectFace { scoped, face, .. } => {
+                    ProbeTarget::Object { scoped, face }
+                }
+                PickResolution::Terrain => ProbeTarget::Ground,
+                PickResolution::Water => ProbeTarget::Water,
+            },
+            world_point: hit.world_point,
+        });
+        probes.answer(pick.cursor, hit);
+    }
+}
+
 /// The ECS half of picking, shared by the GPU rasteriser and the CPU
 /// resolver: the registry with its tag assignment / freeing, the request
-/// queue, the [`GpuPickResolved`] channel, and the drag-pick consumers.
+/// queue, the [`GpuPickResolved`] channel, the drag-pick consumers and the
+/// [`PickProbes`] seam.
 /// [`GpuPickPlugin`] and [`CpuPickResolverPlugin`] both add it (guarded), so
 /// a headless world takes this half without the shader, the ID target or the
 /// render pass.
@@ -1273,6 +1330,7 @@ impl Plugin for PickRegistryPlugin {
             .init_resource::<GpuPicker>()
             .init_resource::<DragPickActive>()
             .init_resource::<DragWorldPick>()
+            .init_resource::<PickProbes>()
             .add_message::<GpuPickResolved>()
             .add_systems(
                 Update,
@@ -1298,7 +1356,8 @@ impl Plugin for PickRegistryPlugin {
                 (drive_drag_world_picks, ingest_drag_world_picks)
                     .chain()
                     .in_set(WorldPhase::DragPickResolved),
-            );
+            )
+            .add_systems(Update, (ingest_pick_probes, drive_pick_probes).chain());
     }
 }
 

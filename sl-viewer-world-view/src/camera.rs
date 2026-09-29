@@ -64,8 +64,8 @@ use sl_viewer_world_api::AvatarState;
 use sl_viewer_world_api::InputContext;
 use sl_viewer_world_api::rlv::RlvExtFacts;
 use sl_viewer_world_api::{
-    AvatarMotion, CameraMode, CameraRig, MAX_DISTANCE, MAX_PITCH, MOUSELOOK_CROSS_DISTANCE,
-    ToggleFlycam, ViewerCamera,
+    AvatarMotion, CameraMode, CameraRig, FrameObject, MAX_DISTANCE, MAX_PITCH,
+    MOUSELOOK_CROSS_DISTANCE, ToggleFlycam, ViewerCamera,
 };
 use sl_viewer_world_avatar::avatars::{SeatChainQuery, seat_world_transform};
 use sl_viewer_world_scene::water::WaterCell;
@@ -428,6 +428,7 @@ impl Plugin for CameraPlugin {
             .init_resource::<CameraAim>()
             .init_resource::<CameraTuning>()
             .init_resource::<FlycamSmoothing>()
+            .init_resource::<FramedObject>()
             // The auto-spin is this module's own resource, and the viewer's
             // `--camera-spin` only ever *overrides* it: without this, a host that
             // does not set the debug option at all leaves `drive_flycam` with a
@@ -447,6 +448,7 @@ impl Plugin for CameraPlugin {
             // accelerator). Registered here, with the system that reads it, so a
             // host that mounts the camera gets the request channel with it.
             .add_message::<ToggleFlycam>()
+            .add_message::<FrameObject>()
             .add_systems(PreUpdate, sync_input_mode)
             .add_systems(
                 Update,
@@ -462,6 +464,7 @@ impl Plugin for CameraPlugin {
                         .in_set(sl_viewer_world_api::WorldPhase::CameraOrbited),
                     aim_look.run_if(resource_equals(CameraMode::Mouselook)),
                     focus_on_object,
+                    frame_object,
                     // The flycam writes the camera `Transform` itself rather
                     // than through `position_camera`, so it needs the same
                     // stand-aside while a 360 capture owns the pose.
@@ -970,6 +973,66 @@ pub(crate) fn focus_on_object(
     }
 }
 
+/// How far the old reference `handle_zoom_to_object` padded an object's extent
+/// when it framed one (`PADDING_FACTOR`).
+const FRAME_PADDING: f32 = 2.0;
+
+/// The narrowest angle of view the framing distance is computed for, radians
+/// (the reference's `llmax(0.1f, …)`), so a degenerate projection cannot send
+/// the camera to infinity.
+const FRAME_MIN_VIEW: f32 = 0.1;
+
+/// The distance from an object's centre at which the camera frames it: the
+/// reference's `extent * PADDING_FACTOR / atan(angle_of_view)`, with the extent
+/// the diameter of the object's bounding sphere and the angle of view the wider
+/// of the vertical field and the horizontal one.
+fn framing_distance(radius: f32, vertical_fov: f32, aspect: f32) -> f32 {
+    let view = if aspect > 1.0 {
+        vertical_fov * aspect
+    } else {
+        vertical_fov
+    };
+    (2.0 * radius * FRAME_PADDING) / view.max(FRAME_MIN_VIEW).atan()
+}
+
+/// **Frame an object** on a [`FrameObject`] request: focus the camera on its
+/// centre from the side the camera is on, at [`framing_distance`], in third
+/// person. The eye then glides there like any focus change, and camera
+/// collision pulls it in front of anything between that side and the object.
+pub(crate) fn frame_object(
+    mut requests: MessageReader<FrameObject>,
+    mut mode: ResMut<CameraMode>,
+    mut focus: ResMut<FocusTarget>,
+    mut framed: ResMut<FramedObject>,
+    mut cameras: Query<(&GlobalTransform, Option<&Projection>, &mut CameraRig), With<ViewerCamera>>,
+) {
+    let Some(request) = requests.read().last().cloned() else {
+        return;
+    };
+    let Ok((camera_transform, projection, mut rig)) = cameras.single_mut() else {
+        return;
+    };
+    let (fov, aspect) = match projection {
+        Some(Projection::Perspective(perspective)) => (perspective.fov, perspective.aspect_ratio),
+        _ => (PerspectiveProjection::default().fov, 1.0),
+    };
+    let distance = framing_distance(request.radius, fov, aspect);
+    let eye = camera_transform.translation();
+    // From the side the camera is already on; a camera sitting at the centre
+    // backs out along its own view.
+    let away = vsub(eye, request.center)
+        .try_normalize()
+        .unwrap_or_else(|| camera_transform.back().as_vec3());
+    rig.set_point_offset(vscale(away, distance));
+    *focus = FocusTarget::Point(request.center);
+    framed.center = request.center;
+    framed.entities = request.passes_through;
+    if *mode != CameraMode::ThirdPerson {
+        *mode = CameraMode::ThirdPerson;
+    }
+    info!("camera: framing {:?} from {distance:.2} m", request.center);
+}
+
 /// Mouselook aim from the (captured) mouse: raw motion aims the first-person view,
 /// and scrolling out returns to third person. Flycam aim is handled in
 /// `drive_flycam` (with a local-frame quaternion, so it has no gimbal lock).
@@ -1298,6 +1361,20 @@ pub(crate) struct CameraColliders<'w> {
     /// The moving (physical-prim) colliders, so the camera also occludes on a
     /// physical mover.
     dynamic: Res<'w, DynamicColliders>,
+    /// The object a [`FrameObject`] request framed, whose own colliders the
+    /// camera passes through while it is the focus.
+    framed: Res<'w, FramedObject>,
+}
+
+/// The object the last [`FrameObject`] request framed: its centre (the focus
+/// point it set) and its prims, which camera collision ignores for as long as
+/// the focus is that point.
+#[derive(Resource, Debug, Default)]
+pub(crate) struct FramedObject {
+    /// The focus point the framing set.
+    center: Vec3,
+    /// The framed object's prims.
+    entities: Vec<Entity>,
 }
 
 /// What the pose pass writes, bundled as one
@@ -1470,13 +1547,17 @@ pub(crate) fn position_camera(
             // Camera collision: pull the eye in toward the focus if the line of
             // sight is obstructed, so the camera does not clip through a wall.
             if collide {
-                eye = collide_camera(
-                    &colliders.index,
-                    &colliders.dynamic,
-                    focus,
-                    eye,
-                    &own_avatar_entities,
+                // A framed object's own prims do not stop the camera: the focus
+                // sits inside the object.
+                let framed = matches!(
+                    (sit_pose, *state.focus),
+                    (None, FocusTarget::Point(point)) if point == colliders.framed.center
                 );
+                let mut ignored = own_avatar_entities;
+                if framed {
+                    ignored.extend(colliders.framed.entities.iter().copied());
+                }
+                eye = collide_camera(&colliders.index, &colliders.dynamic, focus, eye, &ignored);
             }
             // `&transform` reads through the `Mut` without marking it; the write
             // below is the only mutable deref, so a settled camera stays
@@ -2016,6 +2097,28 @@ mod tests {
         );
     }
 
+    /// Framing puts the camera further from a bigger object and nearer under a
+    /// wider lens — the reference's `extent * 2 / atan(view)` — and a
+    /// degenerate lens still gives a finite distance.
+    #[test]
+    fn framing_distance_follows_the_extent_and_the_lens() {
+        use super::framing_distance;
+
+        let fov = core::f32::consts::FRAC_PI_3;
+        let near = framing_distance(0.5, fov, 1.0);
+        // Extent 1 m, padded twice, over atan(60°).
+        assert!((near - 2.0 / fov.atan()).abs() < 1.0e-5, "{near}");
+        assert!(
+            (framing_distance(1.0, fov, 1.0) - 2.0 * near).abs() < 1.0e-5,
+            "twice the size, twice the distance"
+        );
+        assert!(
+            framing_distance(0.5, fov, 16.0 / 9.0) < near,
+            "a wide window's horizontal view is the wider angle"
+        );
+        assert!(framing_distance(0.5, 0.0, 1.0).is_finite());
+    }
+
     /// The mouselook aim deltas scale linearly with the sensitivity, and the
     /// invert flag flips **only** the pitch axis — yaw is identical either way, so
     /// inverting can never mirror the horizontal look.
@@ -2464,6 +2567,7 @@ mod tests {
             .init_resource::<Time>()
             .init_resource::<StaticRaycastIndex>()
             .init_resource::<DynamicColliders>()
+            .init_resource::<super::FramedObject>()
             .init_resource::<CameraAim>()
             .init_resource::<sl_viewer_world_api::AvatarControls>()
             .init_resource::<Writes>()
