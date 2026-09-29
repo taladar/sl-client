@@ -54,7 +54,7 @@ use crate::notification_host::{
     NotificationChannelRoot, ResolveNotification, ToastSpec, adopt_toast,
 };
 use crate::notifications::{
-    NotificationId, NotificationKind, NotificationManager, NotificationPriority,
+    NotificationId, NotificationKind, NotificationManager, NotificationPriority, ToastButton,
 };
 use crate::skin_palette::SkinPalette;
 use crate::ui::{column, row};
@@ -363,6 +363,19 @@ fn spawn_script_dialog_card(
         submit_label: translator.get("script-dialog-button-submit"),
     };
     let card = build_script_dialog_card(commands, &content);
+    // What the card offers: the script's own buttons (a reply carries the
+    // button's text, so that is its name), Submit for a text box, then Block
+    // and Ignore.
+    let mut buttons: Vec<ToastButton> = card
+        .buttons
+        .iter()
+        .map(|(_entity, _index, label)| ToastButton::new(label.clone(), label.clone()))
+        .collect();
+    if card.submit.is_some() {
+        buttons.push(ToastButton::new("Submit", content.submit_label.clone()));
+    }
+    buttons.push(ToastButton::new("Block", content.block_label.clone()));
+    buttons.push(ToastButton::new("Ignore", content.ignore_label.clone()));
 
     // Adopt the card into the shared toast channel so it stacks / orders /
     // overflow-cycles with the catalogue notifications. An `Alert` never
@@ -379,6 +392,7 @@ fn spawn_script_dialog_card(
             template: SCRIPT_DIALOG_TEMPLATE,
             default_button: None,
             history_body: content.message.clone(),
+            buttons,
         },
     );
 

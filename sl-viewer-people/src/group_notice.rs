@@ -62,7 +62,7 @@ use crate::notification_persist::{
     PersistNotification, PersistedKind, ReloadPersistedNotification,
 };
 use crate::notifications::{
-    NotificationId, NotificationKind, NotificationManager, NotificationPriority,
+    NotificationId, NotificationKind, NotificationManager, NotificationPriority, ToastButton,
 };
 use crate::skin::BUTTON_CLASS;
 use crate::skin::{role_class, text_role};
@@ -572,6 +572,11 @@ fn spawn_group_notice_card(
             template: GROUP_NOTICE_TEMPLATE,
             default_button: Some("OK"),
             history_body: notice.subject.clone(),
+            buttons: vec![
+                ToastButton::new("OK", content.ok_label.clone()).default_choice(),
+                ToastButton::new("Notices", content.notices_label.clone()),
+                ToastButton::new("Chat", content.chat_label.clone()),
+            ],
         },
     );
 

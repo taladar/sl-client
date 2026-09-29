@@ -81,7 +81,9 @@ use crate::inventory_actions::default_folder_type;
 use crate::notification_host::{
     NotificationChannelRoot, ResolveNotification, ToastSpec, adopt_toast,
 };
-use crate::notifications::{NotificationKind, NotificationManager, NotificationPriority};
+use crate::notifications::{
+    NotificationKind, NotificationManager, NotificationPriority, ToastButton,
+};
 use crate::skin::BUTTON_CLASS;
 use crate::skin::role_class;
 use crate::skin_palette::SkinPalette;
@@ -655,6 +657,7 @@ fn adopt_offer_card(
     channel: &NotificationChannelRoot,
     manager: &mut NotificationManager,
     card: &OfferCard,
+    content: &OfferContent,
     template: &'static str,
     history: String,
 ) {
@@ -669,6 +672,17 @@ fn adopt_offer_card(
             template,
             default_button: None,
             history_body: history,
+            buttons: [
+                Some(ToastButton::new("Accept", content.accept_label.clone())),
+                Some(ToastButton::new("Decline", content.decline_label.clone())),
+                content
+                    .block_label
+                    .as_ref()
+                    .map(|label| ToastButton::new("Block", label.clone())),
+            ]
+            .into_iter()
+            .flatten()
+            .collect(),
         },
     );
 }
@@ -706,6 +720,7 @@ fn spawn_inventory_offer_card(
         channel,
         manager,
         &card,
+        &content,
         INVENTORY_OFFER_TEMPLATE,
         lead,
     );
@@ -855,6 +870,7 @@ fn spawn_lure_card(
         channel,
         manager,
         &card,
+        &content,
         TELEPORT_OFFER_TEMPLATE,
         lead,
     );
@@ -927,6 +943,7 @@ fn spawn_friendship_card(
         channel,
         manager,
         &card,
+        &content,
         FRIENDSHIP_OFFER_TEMPLATE,
         lead,
     );
@@ -1016,6 +1033,7 @@ fn spawn_group_invite_card(
         channel,
         manager,
         &card,
+        &content,
         GROUP_INVITE_TEMPLATE,
         lead,
     );

@@ -14979,6 +14979,41 @@ mod test {
         Ok(())
     }
 
+    /// A distant teleport's destination greets the client **before** the
+    /// handover commits, on a circuit that is still a child — and its
+    /// `RegionInfoHandshake` already names the destination's handle, so a
+    /// consumer can attribute it to the region it describes rather than the one
+    /// being left.
+    #[test]
+    fn handover_destination_handshake_names_the_destination() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut session, mut grid) = grid_session(now)?;
+        session.teleport_to(
+            RegionHandle(C_HANDLE),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        grid.teleport_finish(&mut session, sim_addr(), sim_c(), now)?;
+        grid.pump(&mut session, now)?;
+        let order: Vec<(&str, RegionHandle)> = drain_events(&mut session)
+            .into_iter()
+            .filter_map(|event| match event {
+                Event::RegionInfoHandshake(identity) => Some(("handshake", identity.region_handle)),
+                Event::RegionChanged { region_handle, .. } => Some(("changed", region_handle)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            order,
+            [
+                ("handshake", RegionHandle(C_HANDLE)),
+                ("changed", RegionHandle(C_HANDLE)),
+            ]
+        );
+        Ok(())
+    }
+
     /// A teleport to a region we already neighbour promotes its child circuit and
     /// keeps the world (no reset), the deferred-commit counterpart of a crossing.
     #[test]

@@ -244,6 +244,13 @@ pub(crate) struct AgentBalance {
     balance: Option<LindenBalance>,
 }
 
+impl AgentBalance {
+    /// The balance in L$, once the grid said it (and when it fits an `i64`).
+    pub(crate) fn linden_dollars(&self) -> Option<i64> {
+        self.balance.as_ref().and_then(LindenBalance::to_i64)
+    }
+}
+
 /// Which read-out a status text node carries, so one update system can rewrite
 /// every text node from a single `Query<(&StatusReadout, &mut Text)>` (several
 /// `Query<&mut Text, With<_>>` in one system would be a conflicting access). In
@@ -588,7 +595,7 @@ fn request_balance_on_entry(
 /// Fold each [`SlSessionEvent::MoneyBalance`] into the [`AgentBalance`] mirror,
 /// and chime the money up / down UI sound on a real balance change (not the first
 /// reply, which is the initial read rather than a transaction).
-fn track_balance(
+pub(crate) fn track_balance(
     mut events: MessageReader<SlEvent>,
     mut agent_balance: ResMut<AgentBalance>,
     mut ui_sound: MessageWriter<crate::ui_sounds::PlayUiSound>,

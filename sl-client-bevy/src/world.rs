@@ -288,6 +288,12 @@ pub(crate) struct SlRegionIndex {
     parcels: HashMap<(RegionHandle, RegionLocalParcelId), Entity>,
     /// The handle of the region currently marked [`SlCurrentRegion`].
     current: Option<RegionHandle>,
+    /// Handshake identities of regions that have no entity yet, by handle,
+    /// until one is spawned. A teleport's destination completes its handshake
+    /// on its circuit **before** the `RegionChanged` that spawns its entity —
+    /// and a distant one's reset clears every entity first — so without this
+    /// the destination would never be named.
+    pending_identities: HashMap<RegionHandle, RegionIdentity>,
 }
 
 /// Plugin system: folds the high-level session event stream into the ECS world
@@ -338,10 +344,20 @@ pub(crate) fn maintain_world(
                     current = handle == RegionHandle(0),
                     "region handshake identity"
                 );
-                if let Some(entity) = entity {
-                    commands
-                        .entity(entity)
-                        .insert(SlRegionIdentity((**region_identity).clone()));
+                match entity {
+                    Some(entity) => {
+                        commands
+                            .entity(entity)
+                            .insert(SlRegionIdentity((**region_identity).clone()));
+                    }
+                    // A region with no entity yet (a teleport destination):
+                    // named once its entity is spawned.
+                    None if handle != RegionHandle(0) => {
+                        let _previous = index
+                            .pending_identities
+                            .insert(handle, (**region_identity).clone());
+                    }
+                    None => {}
                 }
             }
             SessionEvent::RegionLimits(limits) => {
@@ -388,6 +404,7 @@ pub(crate) fn maintain_world(
             }
             SessionEvent::Disconnected(_) | SessionEvent::LoggedOut => {
                 clear_world(&mut commands, &mut index);
+                index.pending_identities.clear();
                 *overlay = SlParcelOverlay::default();
             }
             _other => {}
@@ -442,6 +459,20 @@ fn set_current_region(
         .insert(SlCurrentRegion)
         .remove::<SlNeighbor>();
     index.current = Some(handle);
+    attach_pending_identity(commands, index, handle, entity);
+}
+
+/// Name a region's freshly spawned (or adopted) entity with the handshake that
+/// arrived before it existed, if one did.
+fn attach_pending_identity(
+    commands: &mut Commands,
+    index: &mut SlRegionIndex,
+    handle: RegionHandle,
+    entity: Entity,
+) {
+    if let Some(identity) = index.pending_identities.remove(&handle) {
+        commands.entity(entity).insert(SlRegionIdentity(identity));
+    }
 }
 
 /// Spawns a neighbour region entity for `handle` / `sim` if no entity for that
@@ -458,6 +489,7 @@ fn ensure_neighbor(
     }
     let entity = commands.spawn((SlRegion { handle, sim }, SlNeighbor)).id();
     index.by_handle.insert(handle, entity);
+    attach_pending_identity(commands, index, handle, entity);
 }
 
 /// Upserts a parcel of the current region: updates the existing child entity for
@@ -714,6 +746,57 @@ mod tests {
             .ok()
             .and_then(|identity| identity.0.sim_name.as_ref().map(ToString::to_string));
         assert_eq!(current_name, Some("Next Region".to_owned()));
+    }
+
+    /// A teleport destination completes its handshake before the
+    /// `RegionChanged` that spawns its entity — and a distant one clears every
+    /// entity first — yet the region the agent lands in is named: the identity
+    /// waits for its entity, and never lands on the region being left.
+    #[test]
+    fn a_teleport_destination_is_named_by_its_early_handshake() {
+        let mut app = world_app();
+        let home = RegionHandle(0x0000_03e8_0000_03e8);
+        let far = RegionHandle(0x0000_03f2_0000_03e8);
+        app.world_mut().resource_mut::<SlIdentity>().region_handle = Some(home);
+        app.world_mut()
+            .write_message(SlEvent(SessionEvent::CircuitEstablished {
+                sim: sim(9000),
+                circuit: CircuitId(1),
+            }));
+        app.world_mut()
+            .write_message(SlEvent(SessionEvent::RegionInfoHandshake(Box::new(
+                region_identity(home, "Home Region"),
+            ))));
+        app.update();
+        // The destination's handshake, on its circuit, before the handover.
+        app.world_mut()
+            .write_message(SlEvent(SessionEvent::RegionInfoHandshake(Box::new(
+                region_identity(far, "Far Region"),
+            ))));
+        app.update();
+        let current_name = |app: &mut App| {
+            let mut current = app
+                .world_mut()
+                .query_filtered::<&SlRegionIdentity, With<SlCurrentRegion>>();
+            current
+                .single(app.world())
+                .ok()
+                .and_then(|identity| identity.0.sim_name.as_ref().map(ToString::to_string))
+        };
+        assert_eq!(
+            current_name(&mut app),
+            Some("Home Region".to_owned()),
+            "the region being left keeps its own name"
+        );
+        app.world_mut()
+            .write_message(SlEvent(SessionEvent::RegionChanged {
+                region_handle: far,
+                sim: sim(9010),
+                circuit: CircuitId(3),
+                world_reset: true,
+            }));
+        app.update();
+        assert_eq!(current_name(&mut app), Some("Far Region".to_owned()));
     }
 
     /// A handshake whose handle the session never learned (`0`) still lands on the

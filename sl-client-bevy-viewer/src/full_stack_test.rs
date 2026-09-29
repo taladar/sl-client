@@ -68,8 +68,8 @@ use sl_fake_grid::{
 use crate::assembly::{MediaRuntime, Storage, ViewerAppBuilder, ViewerAppOptions, WindowMode};
 use crate::pixel_oracle::Frame;
 use crate::render_readback::{
-    Captured, FRAME, HOLD_FRAMES, PipelineStatus, PipelineStatusPlugin, Projected, STEP_DURATION,
-    SettleError, frames_for, gpu_lock, settle,
+    Captured, FRAME, HOLD_FRAMES, PipelineStatus, Projected, STEP_DURATION, SettleError,
+    frames_for, gpu_lock, settle,
 };
 use crate::render_test::{LogCapture, TestError, capture_logs};
 use crate::world_api::{CameraMode, ViewerCamera};
@@ -254,7 +254,7 @@ impl HarnessOptions {
 
     /// Render into an off-screen primary window of `size` physical pixels,
     /// with synthetic input installed, rather than into the readback image.
-    fn in_offscreen_window(size: UVec2) -> Self {
+    pub(crate) fn in_offscreen_window(size: UVec2) -> Self {
         Self {
             offscreen_window: Some(size),
             ..Self::default()
@@ -781,7 +781,7 @@ impl ViewerHarness {
     }
 
     /// Write a command into the plugin's outbound stream.
-    fn command(&mut self, command: Command) {
+    pub(crate) fn command(&mut self, command: Command) {
         self.app.world_mut().write_message(SlCommand(command));
     }
 
@@ -1081,7 +1081,10 @@ fn build_viewer_app(
     let mut app = ViewerAppBuilder::from_options(app_options)
         .build()?
         .into_app();
-    app.add_plugins(PipelineStatusPlugin)
+    // The state probes' recorders — the event log, the screenshot store and
+    // the render-settle cell this harness's own settle waits on — as the
+    // automation tier installs them.
+    app.add_plugins(sl_viewer_automation::StateProbesPlugin)
         .init_resource::<Recorded>()
         .init_resource::<SceneWork>()
         .init_resource::<Captured>()

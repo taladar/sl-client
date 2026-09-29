@@ -43,7 +43,6 @@
 //! adapter is available rather than failing.
 
 use core::time::Duration;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use bevy::app::ScheduleRunnerPlugin;
@@ -54,10 +53,12 @@ use bevy::log::LogPlugin;
 use bevy::prelude::*;
 use bevy::render::gpu_readback::{Readback, ReadbackComplete};
 use bevy::render::pipelined_rendering::PipelinedRenderingPlugin;
-use bevy::render::render_resource::{PipelineCache, TextureFormat, TextureUsages};
-use bevy::render::{Render, RenderApp, RenderSystems};
+use bevy::render::render_resource::{TextureFormat, TextureUsages};
 use bevy::time::TimeUpdateStrategy;
 use bevy::winit::WinitPlugin;
+// How many pipelines are still compiling is the automation state probes'
+// render-settle cell; this tier waits on the same one.
+pub(crate) use sl_viewer_automation::{PipelineStatus, PipelineStatusPlugin};
 
 use crate::pixel_oracle::Frame;
 use crate::probes::ProbeCaptureStats;
@@ -233,50 +234,6 @@ pub(crate) fn frames_for(seconds: f32) -> u32 {
 pub(crate) fn gpu_lock() -> MutexGuard<'static, ()> {
     static GPU: Mutex<()> = Mutex::new(());
     GPU.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
-/// How many pipelines the render world still has queued or compiling, mirrored
-/// into the main world every frame.
-///
-/// Shared through an atomic rather than extracted, because extraction copies
-/// main → render and this travels the other way. A frame rendered while a
-/// pipeline is still compiling simply omits whatever that pipeline draws — the
-/// "pre-render black" the old fixed warm-up was papering over.
-#[derive(Resource, Clone, Default)]
-pub(crate) struct PipelineStatus(Arc<AtomicU32>);
-
-impl PipelineStatus {
-    /// Pipelines queued or compiling as of the last render.
-    pub(crate) fn waiting(&self) -> u32 {
-        self.0.load(Ordering::Relaxed)
-    }
-}
-
-/// Publishes [`PipelineStatus`]: the same cell in both worlds, written from the
-/// render world's cleanup set each frame.
-pub(crate) struct PipelineStatusPlugin;
-
-impl Plugin for PipelineStatusPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<PipelineStatus>();
-    }
-
-    fn finish(&self, app: &mut App) {
-        let status = app.world().resource::<PipelineStatus>().clone();
-        // No render app means no adapter; `settle` reports that by outcome.
-        if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app.insert_resource(status).add_systems(
-                Render,
-                publish_pipeline_status.in_set(RenderSystems::Cleanup),
-            );
-        }
-    }
-}
-
-/// Render-world system: count the pipelines not yet ready into [`PipelineStatus`].
-fn publish_pipeline_status(cache: Res<PipelineCache>, status: Res<PipelineStatus>) {
-    let waiting = u32::try_from(cache.waiting_pipelines().count()).unwrap_or(u32::MAX);
-    status.0.store(waiting, Ordering::Relaxed);
 }
 
 /// Why [`settle`] did not settle.

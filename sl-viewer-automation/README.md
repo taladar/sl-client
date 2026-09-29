@@ -35,3 +35,22 @@ selection gesture's object picker, a transform-handle drag by the rig's own
 hit test and drag math — moved, turned or stretched by a stated amount, on a
 stated side of the snap guide, with the modifier keys held that pick the rig
 — and a rubber band that must select exactly the things named.
+
+Beside the models sit the **state probes**: what a test asserts on that is not
+one widget, read from the models the viewer already keeps — never scraped from
+the widgets that draw them. The conversations (local chat and instant-message
+transcripts: speaker, kind of speaker, how it was said, text), the
+notifications (text, the buttons each card offers, whether it is on screen,
+how it was answered), the status bar (region, parcel, balance, time), the own
+agent (region, position, seat, teleport phase, camera mode), the selection, an
+inventory folder by path, and whether the scene has settled (the region is up,
+no asset is outstanding, no render pipeline is compiling). The models that
+live in the viewer's heavy crates are read through probe sources the viewer's
+assembly registers, so this crate pulls in no renderer, audio or browser.
+
+What happened is read by cursor, so a slow reader never misses an entry: an
+event log of every session event, outbound command and UI action under one
+sequence number, and a tally of every warning and error logged with its recent
+lines. Both are bounded and say how much a reader that fell behind missed. A
+screenshot of the primary window — the off-screen one, headless — can have the
+boxes of a locator's matches outlined on it.

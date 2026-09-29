@@ -9239,16 +9239,21 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bevy_flair",
+ "image",
  "pretty_assertions",
  "sl-automation-proto",
  "sl-client-bevy",
+ "sl-viewer-inventory",
  "sl-viewer-kit",
+ "sl-viewer-notifications",
  "sl-viewer-testkit",
  "sl-viewer-ui-core",
  "sl-viewer-ui-pie-menu",
  "sl-viewer-ui-widgets",
  "sl-viewer-world-api",
  "thiserror 2.0.19",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -9491,6 +9496,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sl-anim",
+ "sl-automation-proto",
  "sl-client-bevy",
  "sl-l10n",
  "sl-settings",
@@ -9540,6 +9546,7 @@ dependencies = [
  "bevy",
  "bevy_flair",
  "pretty_assertions",
+ "sl-automation-proto",
  "sl-client-bevy",
  "sl-notecard",
  "sl-types",

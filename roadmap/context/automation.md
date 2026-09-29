@@ -212,6 +212,33 @@ replaces that person.
   A target no point reaches is framed once with `FrameObject` (the camera
   keeps colliding, except with the framed object's own prims) and the camera
   stays where that left it.
+- **State probes read models, and some models live in heavy crates**
+  ([[viewer-automation-state-probes]]). `sl-viewer-automation` reads the
+  light ones itself (identity, region entity, parcel, `CameraMode`,
+  `SelectionSet`, `InventoryModel`, `NotificationManager`); the
+  conversations (`sl-viewer-people`), the live toasts (`sl-viewer-notices`),
+  the teleport overlay (`sl-viewer-places`), the balance (the status bar)
+  and the scene's outstanding work (`SceneQuiescence`, world-view) come
+  through `ProbeSources` — plain `fn(&mut World)` pointers the viewer's
+  assembly registers (`sl-client-bevy-viewer/src/automation_sources.rs`),
+  run only when asked. The owning crate exports the reader; the automation
+  crate never depends on it.
+- **Every toast card declares its buttons** (`ToastButtons`, in
+  `sl-viewer-notifications`): the catalogue host from the template form, and
+  every bespoke card through `ToastSpec::buttons` — a script dialog's own
+  buttons, a permission request's, an offer's. A notification no longer shown
+  reports its template's form.
+- **A heard chat line has no channel.** `ChatFromSimulator` carries none: a
+  viewer hears public chat and the script-only kinds (owner-say, region-say
+  to it, the debug channel), which the readout's `ChatKind` names. The
+  channel of what the own agent *said* is in its `Chat` command, in the event
+  log.
+- **The event log records in `Last`**, one counter over session events,
+  outbound commands and UI actions, clones kept and printed only when read.
+  The diagnostics tally is a `tracing` layer: the binary's `init_tracing`
+  feeds `LogTally::global()`, so like the subscriber it is process-wide; an
+  in-process test names its own with `DiagnosticsSource` and a scoped
+  subscriber.
 - **Build mode is judged by the build tool's own resolvers**, not the world
   pick: a press by the selection gesture's `ObjectPicker` (a handle the rig
   takes first), a rubber band by its `sweep_candidates`, a handle drag by
@@ -248,9 +275,13 @@ replaces that person.
   it is also a criterion, add it to `WorldLocator::matches_node`. If it is
   not streamed (a name, an owner), `WorldQuery::unresolved` must also wait
   for it.
-- **a state probe**: a request variant in `sl-automation-proto`, a reader in
-  `sl-viewer-automation`, a driver method, and a teeth test that the probe
-  changes when the state does.
+- **a state probe**: a readout type in `sl-automation-proto/src/probe.rs`, a
+  reader in `sl-viewer-automation/src/probes.rs` (or, for a model in a heavy
+  crate, a reader exported by that crate and registered in `ProbeSources`
+  by `automation_sources.rs`), a teeth test that the probe changes when the
+  state does (fixture tier in `sl-client-bevy-viewer/src/automation_probes.rs`,
+  the full-stack test there for what only a real session feeds), and — once
+  the executor and the driver exist — its request variant and driver method.
 - **a whole viewer App** (a transport, a harness, a stage): never assemble
   plugins by hand — `ViewerAppOptions::new(params)` is the interactive
   viewer; set `window: WindowMode::Windowless`, `storage:

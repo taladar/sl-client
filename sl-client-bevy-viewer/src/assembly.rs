@@ -614,6 +614,10 @@ impl ViewerAppBuilder {
                 headless: !windowed,
             });
         app
+            // Where the state probes read the models of the viewer's heavy crates
+            // (`sl_viewer_automation::ProbeSources`). Plain function pointers,
+            // run only when a probe asks, so every viewer carries them.
+            .insert_resource(crate::automation_sources::probe_sources())
             // The per-avatar account identity (grid + name + accounts root), used by
             // `load_account_settings` to locate the account-scope settings once the
             // agent UUID is known at login. No accounts root, no account scope.

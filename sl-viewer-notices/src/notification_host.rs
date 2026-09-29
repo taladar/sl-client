@@ -64,8 +64,8 @@ use crate::notification_persist::{PersistNotification, PersistedKind};
 use crate::notifications::{
     DismissNotification, NOTIFICATIONS, NOTIFICATIONS_SECTION, NotificationIgnore,
     NotificationKind, NotificationManager, NotificationPriority, NotificationRecord,
-    NotificationResponse, NotificationTemplate, ShowNotification, TOAST_GAP,
-    last_response_setting_name, substitute, template,
+    NotificationResponse, NotificationTemplate, ShowNotification, TOAST_GAP, ToastButton,
+    ToastButtons, last_response_setting_name, substitute, template,
 };
 use crate::settings::ViewerSettings;
 use crate::skin_palette::SkinPalette;
@@ -957,6 +957,31 @@ pub struct ToastSpec {
     pub default_button: Option<&'static str>,
     /// The line it leaves in the notification history.
     pub history_body: String,
+    /// The buttons the card shows, in order ([`ToastButtons`]).
+    pub buttons: Vec<ToastButton>,
+}
+
+/// The notifications on screen now (or queued behind the ones that are), in
+/// the order they were raised, each with the buttons its card shows — what
+/// automation reads as live.
+///
+/// A viewer's probe source (`sl_viewer_automation::ProbeSources`).
+pub fn live_notifications(
+    world: &mut World,
+) -> Vec<(crate::notifications::NotificationId, Vec<ToastButton>)> {
+    let mut toasts = world.query::<(&Toast, Option<&ToastButtons>)>();
+    let mut live: Vec<_> = toasts
+        .iter(world)
+        .filter(|(toast, _buttons)| !toast.resolved)
+        .map(|(toast, buttons)| {
+            (
+                toast.id,
+                buttons.map_or_else(Vec::new, |buttons| buttons.0.clone()),
+            )
+        })
+        .collect();
+    live.sort_unstable_by_key(|(id, _buttons)| *id);
+    live
 }
 
 /// Adopt an externally-built card `root` as a managed toast in the shared corner
@@ -984,6 +1009,7 @@ pub fn adopt_toast(
         template,
         default_button,
         history_body,
+        buttons,
     } = toast;
     let id = manager.allocate_id();
     commands.entity(root).insert((
@@ -1001,6 +1027,7 @@ pub fn adopt_toast(
             resolved: false,
             input_field: None,
         },
+        ToastButtons(buttons),
         ChildOf(channel.channel),
     ));
     manager.push_history(NotificationRecord {
@@ -1294,6 +1321,17 @@ fn raise_notifications(
             input,
         };
         let card = build_toast_card(&mut commands, &content);
+        let offered = ToastButtons(
+            content
+                .buttons
+                .iter()
+                .map(|button| ToastButton {
+                    name: button.name.to_owned(),
+                    label: button.label.clone(),
+                    is_default: button.is_default,
+                })
+                .collect(),
+        );
 
         // A modal lives on a centred scrim; every other kind is a corner toast.
         let toast_entity = if tmpl.kind.is_modal() {
@@ -1304,6 +1342,7 @@ fn raise_notifications(
             commands.entity(card.root).insert(ChildOf(channel.channel));
             card.root
         };
+        commands.entity(toast_entity).insert(offered);
         commands.entity(toast_entity).insert(Toast {
             id,
             template: tmpl.name,
@@ -2373,15 +2412,16 @@ mod tests {
     use super::{
         DoNotDisturbQueue, IgnoreCheckbox, MAX_HELD_NOTIFICATIONS, MAX_QUEUED_TOASTS,
         MAX_VISIBLE_TOASTS, NotificationChannelRoot, QUEUE_AGING_SECS, ResolveNotification,
-        RestackToasts, SETTING_COLLECT_DIAGNOSTICS, TOP_PRIORITY_RANK, Toast, age_and_fade_toasts,
-        aged_rank, announce_command_failures, apply_diagnostics_setting, apply_toast_overflow,
-        auto_response_button, cap_queued_toasts, compare_toasts, ingest_protocol_diagnostics,
-        order_channel_by_priority, priority_rank, resolve_notifications, should_age, visible_split,
+        RestackToasts, SETTING_COLLECT_DIAGNOSTICS, TOP_PRIORITY_RANK, Toast, ToastSpec,
+        adopt_toast, age_and_fade_toasts, aged_rank, announce_command_failures,
+        apply_diagnostics_setting, apply_toast_overflow, auto_response_button, cap_queued_toasts,
+        compare_toasts, ingest_protocol_diagnostics, live_notifications, order_channel_by_priority,
+        priority_rank, resolve_notifications, should_age, visible_split,
     };
     use crate::notifications::{
         NOTIFICATIONS, NotificationButton, NotificationIgnore, NotificationKind,
         NotificationManager, NotificationPriority, NotificationResponse, NotificationTemplate,
-        ShowNotification, last_response_setting_name,
+        ShowNotification, ToastButton, last_response_setting_name,
     };
     use crate::settings::ViewerSettings;
 
@@ -3101,6 +3141,53 @@ mod tests {
             .iter(app.world())
             .filter(|toast| !toast.resolved)
             .count()
+    }
+
+    /// An adopted card is live with exactly the buttons it declared — a script
+    /// dialog's own, not a catalogue form — until it is answered.
+    #[test]
+    fn a_live_card_reports_the_buttons_it_declared() -> Result<(), TestError> {
+        use bevy::ecs::system::RunSystemOnce as _;
+        use bevy::prelude::{Commands, Res, ResMut};
+
+        let (mut app, _channel) = stack_app();
+        let card = app.world_mut().spawn(Node::default()).id();
+        let declared = vec![
+            ToastButton::new("Red", "Red"),
+            ToastButton::new("Ignore", "Ignore"),
+        ];
+        let spec_buttons = declared.clone();
+        let id = app
+            .world_mut()
+            .run_system_once(
+                move |mut commands: Commands,
+                      mut manager: ResMut<NotificationManager>,
+                      channel: Res<NotificationChannelRoot>| {
+                    adopt_toast(
+                        &mut commands,
+                        &mut manager,
+                        &channel,
+                        card,
+                        ToastSpec {
+                            kind: NotificationKind::Alert,
+                            priority: NotificationPriority::Normal,
+                            template: "ScriptDialog",
+                            default_button: None,
+                            history_body: "Pick a colour".to_owned(),
+                            buttons: spec_buttons.clone(),
+                        },
+                    )
+                },
+            )
+            .map_err(|error| error.to_string())?;
+        assert_eq!(live_notifications(app.world_mut()), vec![(id, declared)]);
+        app.world_mut().write_message(ResolveNotification {
+            toast: card,
+            button: None,
+        });
+        app.update();
+        assert_eq!(live_notifications(app.world_mut()), Vec::new());
+        Ok(())
     }
 
     /// **The invariant.** Under an unending stream of `Critical` arrivals — one

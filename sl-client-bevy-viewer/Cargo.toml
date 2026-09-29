@@ -191,6 +191,10 @@ sl-texture = { path = "../sl-texture", version = "0.1.0", features = [
 ] }
 sl-viewer-asset-editors = { workspace = true }
 sl-viewer-audio = { workspace = true }
+# The automation layer: the state probes' sources the assembly registers
+# (`src/automation_sources.rs`), the diagnostics tally `init_tracing` feeds,
+# and the semantic UI model the automation sweep reads.
+sl-viewer-automation = { workspace = true }
 sl-viewer-chat = { workspace = true }
 sl-viewer-edit = { workspace = true }
 sl-viewer-environment = { workspace = true }
@@ -245,9 +249,6 @@ sl-proto = { workspace = true }
 # The shared procedural fixtures the fake grid dresses a region with — the
 # full-stack tier states the environment it publishes in the same values.
 sl-test-assets = { workspace = true }
-# The semantic UI model the automation sweep (`src/automation_model.rs`) reads
-# every registered element and floater through.
-sl-viewer-automation = { workspace = true }
 # The render-scene registry the harness tiers (`render_matrix`,
 # `render_readback`, `render_test`) draw. A dev-dependency: only those tiers
 # build scenes, so the shipped viewer never compiles a fixture.

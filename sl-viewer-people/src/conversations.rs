@@ -73,6 +73,9 @@ use bevy::ecs::system::SystemParam;
 use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
 use bevy::ui_widgets::Activate;
+use sl_automation_proto::{
+    ChatKind, ConversationReadout, ConversationRef, SpeakerKind, TranscriptLine as ReadoutLine,
+};
 use sl_client_bevy::{
     AgentKey, ChatSource, ChatType, Command, GroupKey, ImDialog, ImSessionId, MessageCursor,
     ObjectKey, SlCommand, SlEvent, SlIdentity, SlSessionEvent, Uuid, chat_text_muted,
@@ -316,6 +319,10 @@ struct TranscriptLine {
     speaker_link: SpeakerLink,
     /// The message text.
     body: String,
+    /// How a nearby-chat line was said (whisper, say, shout, an object's
+    /// owner-say, …), or `None` for an instant message and a line recalled from
+    /// a log, which does not record it.
+    chat_type: Option<ChatType>,
 }
 
 /// One conversation: its key, bounded transcript, unread count, who is currently
@@ -370,6 +377,86 @@ impl Conversation {
             server_history: Vec::new(),
             revision: 0,
         }
+    }
+}
+
+/// Every open conversation as automation reads it — the transcript the view
+/// renders, not scraped from its text nodes — in tab order, Nearby first.
+///
+/// Only the live lines of this session are read: the recall band (an earlier
+/// session's log) and a group's server backlog are history, not something the
+/// session under test said. A line the grid echoed back from the own agent
+/// (local chat) counts as own, like the one the view echoed itself.
+///
+/// A viewer's probe source (`sl_viewer_automation::ProbeSources`); empty in an
+/// app with no conversation model.
+pub fn conversation_readouts(world: &mut World) -> Vec<ConversationReadout> {
+    let own = world
+        .get_resource::<SlIdentity>()
+        .and_then(|identity| identity.agent_id);
+    world
+        .get_resource::<ConversationModel>()
+        .map_or_else(Vec::new, |model| {
+            model
+                .entries
+                .iter()
+                .map(|entry| ConversationReadout {
+                    conversation: conversation_ref(entry.key),
+                    unread: entry.unread,
+                    pending_invite: entry.pending_invite,
+                    lines: entry
+                        .lines
+                        .iter()
+                        .map(|line| line_readout(line, own))
+                        .collect(),
+                })
+                .collect()
+        })
+}
+
+/// A conversation key in the automation vocabulary.
+const fn conversation_ref(key: ConversationKey) -> ConversationRef {
+    match key {
+        ConversationKey::Nearby => ConversationRef::Nearby,
+        ConversationKey::Direct(peer) => ConversationRef::Direct(peer.uuid()),
+        ConversationKey::Group(group) => ConversationRef::Group(group.uuid()),
+        ConversationKey::Conference(session) => ConversationRef::Conference(session.get()),
+    }
+}
+
+/// One transcript line in the automation vocabulary; `own_agent` makes the
+/// grid's echo of the own local chat an own line.
+fn line_readout(line: &TranscriptLine, own_agent: Option<AgentKey>) -> ReadoutLine {
+    let (speaker_id, speaker_kind) = match line.speaker_link {
+        SpeakerLink::Own => (own_agent.map(|agent| agent.uuid()), SpeakerKind::Agent),
+        SpeakerLink::Agent(agent) => (Some(agent.uuid()), SpeakerKind::Agent),
+        SpeakerLink::Object(object) => (Some(object.uuid()), SpeakerKind::Object),
+        SpeakerLink::None => (None, SpeakerKind::System),
+    };
+    let echoed = matches!(line.speaker_link, SpeakerLink::Agent(agent) if Some(agent) == own_agent);
+    ReadoutLine {
+        own: line.own || echoed,
+        speaker: line.speaker.clone(),
+        speaker_id,
+        speaker_kind,
+        chat_kind: line.chat_type.map(chat_kind),
+        text: line.body.clone(),
+    }
+}
+
+/// A chat type in the automation vocabulary.
+const fn chat_kind(chat_type: ChatType) -> ChatKind {
+    match chat_type {
+        ChatType::Whisper => ChatKind::Whisper,
+        ChatType::Normal => ChatKind::Normal,
+        ChatType::Shout => ChatKind::Shout,
+        ChatType::Region => ChatKind::Region,
+        ChatType::Owner => ChatKind::Owner,
+        ChatType::Direct => ChatKind::Direct,
+        ChatType::DebugChannel => ChatKind::Debug,
+        // The typing triggers never reach a transcript; an unnamed byte (and a
+        // type added to the wire enum later) is kept as its byte.
+        other => ChatKind::Other(other.to_u8()),
     }
 }
 
@@ -503,6 +590,7 @@ impl ConversationModel {
                 speaker: speaker.to_owned(),
                 speaker_link: SpeakerLink::Agent(speaker_id),
                 body: body.to_owned(),
+                chat_type: None,
             },
         );
         self.clear_typing(key, speaker_id);
@@ -512,7 +600,7 @@ impl ConversationModel {
     /// (from the chat message's [`ChatSource`]) — so the sender name links to the
     /// right profile / inspector. It clears no typing flag (a nearby speaker's
     /// typed id is not always held).
-    fn push_nearby(&mut self, speaker: &str, source: &ChatSource, body: &str) {
+    fn push_nearby(&mut self, speaker: &str, source: &ChatSource, chat_type: ChatType, body: &str) {
         self.push_line(
             ConversationKey::Nearby,
             TranscriptLine {
@@ -524,6 +612,7 @@ impl ConversationModel {
                     ChatSource::System | ChatSource::Unknown { .. } => SpeakerLink::None,
                 },
                 body: body.to_owned(),
+                chat_type: Some(chat_type),
             },
         );
     }
@@ -538,6 +627,7 @@ impl ConversationModel {
                 speaker: String::new(),
                 speaker_link: SpeakerLink::Own,
                 body: body.to_owned(),
+                chat_type: None,
             },
         );
     }
@@ -1743,6 +1833,7 @@ pub fn spawn_conversations_specimen(
             speaker,
             speaker_link,
             body,
+            chat_type: None,
         };
     let bands = SkinChatBands::default();
     let lines = [
@@ -1834,6 +1925,7 @@ fn ingest_nearby_notices(
                     .speaker_agent
                     .map_or(SpeakerLink::None, SpeakerLink::Agent),
                 body: notice.body.clone(),
+                chat_type: None,
             },
         );
     }
@@ -1853,6 +1945,7 @@ fn ingest_conversation_notices(
                 speaker: String::new(),
                 speaker_link: SpeakerLink::None,
                 body: notice.body.clone(),
+                chat_type: None,
             },
         );
     }
@@ -1971,7 +2064,12 @@ pub(crate) fn ingest_conversation_events(
                     )
                     && !mutes.is_some_and(|mutes| chat_text_muted(mutes.list(), message))
                 {
-                    model.push_nearby(&message.from_name, &message.source, &message.message);
+                    model.push_nearby(
+                        &message.from_name,
+                        &message.source,
+                        message.chat_type,
+                        &message.message,
+                    );
                 }
             }
             SlSessionEvent::ChatTyping {
@@ -2167,6 +2265,7 @@ pub(crate) fn ingest_conversation_events(
                         // typed id, so a recalled name is not a link.
                         speaker_link: SpeakerLink::None,
                         body: line.text.clone(),
+                        chat_type: None,
                     })
                     .collect();
                 model.set_nearby_recall(recalled);
@@ -2233,6 +2332,7 @@ pub(crate) fn ingest_conversation_events(
                                 SpeakerLink::Agent(message.sender)
                             },
                             body: message.text.clone(),
+                            chat_type: None,
                         }
                     })
                     .collect();
@@ -2276,6 +2376,7 @@ fn transcript_line_for(
             SpeakerLink::Agent(sender)
         },
         body: text.to_owned(),
+        chat_type: None,
     }
 }
 
@@ -3103,17 +3204,134 @@ fn position_conversations_dock_host(
 mod tests {
     use super::{
         Command, ConferencePlan, ConversationKey, ConversationModel, ConversationTitle, MuteModel,
-        SpeakerLink, TranscriptLine, command_for, conference_plan, invite_command, line_text,
-        tab_label, transcript_line_color,
+        SpeakerLink, TranscriptLine, command_for, conference_plan, conversation_readouts,
+        invite_command, line_text, tab_label, transcript_line_color,
     };
     use bevy::app::{App, Update};
+    use bevy::prelude::World;
     use pretty_assertions::assert_eq;
+    use sl_automation_proto::{
+        ChatKind, ConversationReadout, ConversationRef, SpeakerKind, TranscriptLine as ReadoutLine,
+    };
     use sl_client_bevy::{
         AgentKey, ChatAudible, ChatMessage, ChatSessionKind, ChatSource, ChatType, GroupKey,
         ImDialog, ImSessionId, InstantMessage, MuteEntry, MuteFlags, MuteType, ObjectKey,
         RegionCoordinates, ServerHistoryMessage, SlCommand, SlEvent, SlIdentity, SlSessionEvent,
         Uuid,
     };
+
+    /// The automation readout is the live transcript of every tab, in tab
+    /// order: how nearby lines were said and who said them, the grid's echo of
+    /// the own local chat as an own line, a direct session's unread count — and
+    /// not the recall band an earlier session's log fills in above it.
+    #[test]
+    fn the_automation_readout_is_the_live_transcript() {
+        let own = AgentKey::from(Uuid::from_u128(1));
+        let other = AgentKey::from(Uuid::from_u128(2));
+        let door = ObjectKey::from(Uuid::from_u128(3));
+        let mut world = World::new();
+        assert_eq!(conversation_readouts(&mut world), Vec::new(), "no model");
+        world.insert_resource(SlIdentity {
+            agent_id: Some(own),
+            ..SlIdentity::default()
+        });
+        let mut model = ConversationModel::default();
+        model.push_nearby("Door", &ChatSource::Object(door), ChatType::Shout, "Locked");
+        model.push_nearby(
+            "Own Resident",
+            &ChatSource::Agent(own),
+            ChatType::Normal,
+            "hi",
+        );
+        model.push_nearby("Region", &ChatSource::System, ChatType::Region, "Restart");
+        model.push_remote(
+            ConversationKey::Direct(other),
+            other,
+            "Two Resident",
+            "psst",
+        );
+        model.push_own(ConversationKey::Direct(other), "hello back");
+        model.set_nearby_recall(vec![TranscriptLine {
+            own: false,
+            speaker: "Old".to_owned(),
+            speaker_link: SpeakerLink::None,
+            body: "yesterday".to_owned(),
+            chat_type: None,
+        }]);
+        world.insert_resource(model);
+        let line = |own: bool,
+                    speaker: &str,
+                    speaker_id: Option<Uuid>,
+                    speaker_kind: SpeakerKind,
+                    chat_kind: Option<ChatKind>,
+                    text: &str| ReadoutLine {
+            own,
+            speaker: speaker.to_owned(),
+            speaker_id,
+            speaker_kind,
+            chat_kind,
+            text: text.to_owned(),
+        };
+        assert_eq!(
+            conversation_readouts(&mut world),
+            vec![
+                ConversationReadout {
+                    conversation: ConversationRef::Nearby,
+                    unread: 0,
+                    pending_invite: false,
+                    lines: vec![
+                        line(
+                            false,
+                            "Door",
+                            Some(door.uuid()),
+                            SpeakerKind::Object,
+                            Some(ChatKind::Shout),
+                            "Locked"
+                        ),
+                        line(
+                            true,
+                            "Own Resident",
+                            Some(own.uuid()),
+                            SpeakerKind::Agent,
+                            Some(ChatKind::Normal),
+                            "hi"
+                        ),
+                        line(
+                            false,
+                            "Region",
+                            None,
+                            SpeakerKind::System,
+                            Some(ChatKind::Region),
+                            "Restart"
+                        ),
+                    ],
+                },
+                ConversationReadout {
+                    conversation: ConversationRef::Direct(other.uuid()),
+                    unread: 1,
+                    pending_invite: false,
+                    lines: vec![
+                        line(
+                            false,
+                            "Two Resident",
+                            Some(other.uuid()),
+                            SpeakerKind::Agent,
+                            None,
+                            "psst"
+                        ),
+                        line(
+                            true,
+                            "",
+                            Some(own.uuid()),
+                            SpeakerKind::Agent,
+                            None,
+                            "hello back"
+                        ),
+                    ],
+                },
+            ]
+        );
+    }
 
     /// The transcript colour chooser: the Nearby tab colours by speaker, every
     /// IM-flavoured tab colours own lines self and everything else IM.
@@ -3204,7 +3422,12 @@ mod tests {
     #[test]
     fn active_tab_has_no_unread() {
         let mut model = ConversationModel::default();
-        model.push_nearby("Avatar Three", &ChatSource::System, "hello");
+        model.push_nearby(
+            "Avatar Three",
+            &ChatSource::System,
+            ChatType::Normal,
+            "hello",
+        );
         assert_eq!(model.entries.first().map(|entry| entry.unread), Some(0));
     }
 
@@ -3319,7 +3542,7 @@ mod tests {
         // Nearby unread (arrives while another tab is active) is not attention.
         model.select(ConversationKey::Direct(peer));
         model.ensure(ConversationKey::Direct(peer));
-        model.push_nearby("Avatar Ten", &ChatSource::System, "hello");
+        model.push_nearby("Avatar Ten", &ChatSource::System, ChatType::Normal, "hello");
         assert_eq!(model.has_im_attention(), false);
         // A direct IM to a non-active tab is.
         model.select(ConversationKey::Nearby);
@@ -3383,6 +3606,7 @@ mod tests {
             speaker: "Avatar Five".to_owned(),
             speaker_link: SpeakerLink::Agent(agent),
             body: "hi".to_owned(),
+            chat_type: None,
         };
         assert_eq!(
             line_text(&remote, "You", None),
@@ -3398,6 +3622,7 @@ mod tests {
             speaker: "Radio".to_owned(),
             speaker_link: SpeakerLink::Object(object),
             body: "tune in".to_owned(),
+            chat_type: None,
         };
         assert_eq!(
             line_text(&object_line, "You", None),
@@ -3412,6 +3637,7 @@ mod tests {
             speaker: String::new(),
             speaker_link: SpeakerLink::Own,
             body: "hey".to_owned(),
+            chat_type: None,
         };
         assert_eq!(line_text(&own, "You", None), "You: hey");
 
@@ -3420,6 +3646,7 @@ mod tests {
             speaker: "Region".to_owned(),
             speaker_link: SpeakerLink::None,
             body: "notice".to_owned(),
+            chat_type: None,
         };
         assert_eq!(line_text(&system, "You", None), "Region: notice");
     }
@@ -3434,6 +3661,7 @@ mod tests {
             speaker: "Avatar Five".to_owned(),
             speaker_link: SpeakerLink::Agent(agent),
             body: "hi".to_owned(),
+            chat_type: None,
         };
         assert_eq!(
             line_text(&remote, "You", Some("'Neighbour'")),
@@ -3450,7 +3678,12 @@ mod tests {
     fn nearby_recall_renders_above_live_lines() {
         let mut model = ConversationModel::default();
         // A live line arrives first…
-        model.push_nearby("Avatar Live", &ChatSource::System, "live line");
+        model.push_nearby(
+            "Avatar Live",
+            &ChatSource::System,
+            ChatType::Normal,
+            "live line",
+        );
         assert_eq!(model.nearby_live_len(), 1);
         // …then persisted history is recalled (oldest-first, as the ingest builds).
         model.set_nearby_recall(vec![
@@ -3459,12 +3692,14 @@ mod tests {
                 speaker: "Avatar Past".to_owned(),
                 speaker_link: SpeakerLink::None,
                 body: "older".to_owned(),
+                chat_type: None,
             },
             TranscriptLine {
                 own: false,
                 speaker: "Avatar Past".to_owned(),
                 speaker_link: SpeakerLink::None,
                 body: "newer".to_owned(),
+                chat_type: None,
             },
         ]);
         // Recall lines render above the live lines (recall first, then live).
@@ -3609,6 +3844,7 @@ mod tests {
             speaker: speaker.to_owned(),
             speaker_link: SpeakerLink::None,
             body: body.to_owned(),
+            chat_type: None,
         }
     }
 

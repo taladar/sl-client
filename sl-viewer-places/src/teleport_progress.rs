@@ -43,6 +43,7 @@ use bevy_flair::style::components::ClassList;
 use sl_viewer_ui_core::skin::text_role;
 use sl_viewer_ui_core::skin::{WARN_TEXT_CLASS, set_state_class, text_meaning};
 
+use sl_automation_proto::{TeleportReadout, TeleportState};
 use sl_client_bevy::{Command, SlCommand, SlEvent, SlSessionEvent};
 
 use crate::intents::{BeginTeleportFlow, TeleportTarget, issue_teleport};
@@ -194,6 +195,42 @@ impl TeleportFlow {
             retry: None,
         })
     }
+}
+
+/// The teleport the overlay tracks, as automation reads it: idle when it shows
+/// none, else its phase or how it ended, the destination the surface named, the
+/// last progress message and whether the watchdog judged it slow.
+///
+/// A viewer's probe source (`sl_viewer_automation::ProbeSources`); `None` in an
+/// app without the overlay.
+pub fn teleport_readout(world: &mut World) -> Option<TeleportReadout> {
+    let flow = world.get_resource::<TeleportFlow>()?;
+    let Some(entry) = &flow.entry else {
+        return Some(TeleportReadout {
+            state: TeleportState::Idle,
+            destination: None,
+            message: None,
+            stalled: false,
+        });
+    };
+    let state = match &entry.outcome {
+        Outcome::Pending => match entry.phase {
+            Phase::Requested => TeleportState::Requested,
+            Phase::InProgress => TeleportState::InProgress,
+            Phase::Arriving => TeleportState::Arriving,
+        },
+        Outcome::Succeeded => TeleportState::Succeeded,
+        Outcome::Failed { reason, detail } => TeleportState::Failed {
+            reason: reason.clone(),
+            detail: detail.clone(),
+        },
+    };
+    Some(TeleportReadout {
+        state,
+        destination: entry.destination.clone(),
+        message: entry.message.clone(),
+        stalled: entry.stalled,
+    })
 }
 
 /// A marker on the overlay's root container.
@@ -730,8 +767,13 @@ fn message_line(entry: &Entry) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Entry, Outcome, Phase, TeleportFlow, detail_line, message_line, status_line};
+    use super::{
+        Entry, Outcome, Phase, TeleportFlow, detail_line, message_line, status_line,
+        teleport_readout,
+    };
+    use bevy::prelude::World;
     use pretty_assertions::assert_eq;
+    use sl_automation_proto::{TeleportReadout, TeleportState};
 
     /// A pending entry begun at time 0, for the state-transition assertions.
     fn pending() -> Entry {
@@ -745,6 +787,67 @@ mod tests {
             stalled: false,
             retry: None,
         }
+    }
+
+    /// The automation readout follows the overlay: idle with no entry, the
+    /// phase while pending, the outcome once resolved, and nothing without the
+    /// overlay at all.
+    #[test]
+    fn the_automation_readout_follows_the_flow() {
+        let mut world = World::new();
+        assert_eq!(teleport_readout(&mut world), None, "no overlay, no readout");
+        world.init_resource::<TeleportFlow>();
+        assert_eq!(
+            teleport_readout(&mut world),
+            Some(TeleportReadout {
+                state: TeleportState::Idle,
+                destination: None,
+                message: None,
+                stalled: false,
+            })
+        );
+        let mut entry = pending();
+        entry.phase = Phase::InProgress;
+        entry.message = Some("Contacting region".to_owned());
+        entry.stalled = true;
+        world.resource_mut::<TeleportFlow>().entry = Some(entry);
+        assert_eq!(
+            teleport_readout(&mut world),
+            Some(TeleportReadout {
+                state: TeleportState::InProgress,
+                destination: Some("Region (128, 128)".to_owned()),
+                message: Some("Contacting region".to_owned()),
+                stalled: true,
+            })
+        );
+        if let Some(entry) = world.resource_mut::<TeleportFlow>().entry.as_mut() {
+            entry.outcome = Outcome::Failed {
+                reason: "no route".to_owned(),
+                detail: Some("blocked".to_owned()),
+            };
+        }
+        assert_eq!(
+            teleport_readout(&mut world).map(|readout| readout.state),
+            Some(TeleportState::Failed {
+                reason: "no route".to_owned(),
+                detail: Some("blocked".to_owned()),
+            })
+        );
+        if let Some(entry) = world.resource_mut::<TeleportFlow>().entry.as_mut() {
+            entry.phase = Phase::Arriving;
+            entry.outcome = Outcome::Pending;
+        }
+        assert_eq!(
+            teleport_readout(&mut world).map(|readout| readout.state),
+            Some(TeleportState::Arriving)
+        );
+        if let Some(entry) = world.resource_mut::<TeleportFlow>().entry.as_mut() {
+            entry.outcome = Outcome::Succeeded;
+        }
+        assert_eq!(
+            teleport_readout(&mut world).map(|readout| readout.state),
+            Some(TeleportState::Succeeded)
+        );
     }
 
     /// `begin` opens a pending, requested entry; `pending_entry` reuses it while

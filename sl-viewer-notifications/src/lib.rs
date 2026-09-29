@@ -58,7 +58,7 @@ use std::{
     sync::LazyLock,
 };
 
-use bevy_ecs::prelude::{Message, Resource};
+use bevy_ecs::prelude::{Component, Message, Resource};
 
 mod catalogue;
 mod forms;
@@ -459,6 +459,15 @@ pub fn substitute(template: &str, args: &NotificationArgs) -> String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NotificationId(u64);
 
+impl NotificationId {
+    /// The id's number, unique within the session — how a notification is named
+    /// outside the viewer (an automation readout).
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
 /// A request to raise a notification from the catalogue — the message a caller
 /// writes; the host (`notification_host`) reads it, resolves the
 /// template's text, and stacks a toast.
@@ -547,6 +556,47 @@ pub struct DismissNotification {
     /// The notification to dismiss.
     pub id: NotificationId,
 }
+
+/// One button a live notification card shows: the name its answer goes by, the
+/// label the user reads, and whether it is the card's default.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToastButton {
+    /// The locale-independent name the answer goes by — a catalogue button's
+    /// [`name`](NotificationButton::name), a script dialog button's own text.
+    pub name: String,
+    /// The label as shown, in the current locale.
+    pub label: String,
+    /// Whether it is the choice `Enter` (and, for a catalogue toast, expiry)
+    /// takes.
+    pub is_default: bool,
+}
+
+impl ToastButton {
+    /// A button that is not the default.
+    #[must_use]
+    pub fn new(name: impl Into<String>, label: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            label: label.into(),
+            is_default: false,
+        }
+    }
+
+    /// This button, as the card's default.
+    #[must_use]
+    pub const fn default_choice(mut self) -> Self {
+        self.is_default = true;
+        self
+    }
+}
+
+/// The buttons a live notification card offers, in the order it shows them,
+/// beside the card's teardown state — every card, a catalogue toast or a
+/// bespoke one (a script dialog, a permission request, an offer), declares its
+/// own, so a reader need not know how each one is built. The close × is not
+/// among them: it answers nothing.
+#[derive(Component, Debug, Clone, Default, PartialEq, Eq)]
+pub struct ToastButtons(pub Vec<ToastButton>);
 
 /// One entry in the notification history — the data the future notification list
 /// / history panel ([[viewer-notification-history]]) renders. Recorded when a

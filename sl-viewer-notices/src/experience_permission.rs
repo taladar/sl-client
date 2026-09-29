@@ -80,7 +80,7 @@ use crate::notification_host::{
     NotificationChannelRoot, ResolveNotification, ToastSpec, adopt_toast,
 };
 use crate::notifications::{
-    NotificationId, NotificationKind, NotificationManager, NotificationPriority,
+    NotificationId, NotificationKind, NotificationManager, NotificationPriority, ToastButton,
 };
 use crate::script_permission::{is_caution, other_permission_keys, recognized_mask};
 use crate::skin_palette::SkinPalette;
@@ -474,6 +474,12 @@ fn spawn_experience_card(
             template: EXPERIENCE_TEMPLATE,
             default_button: None,
             history_body: history,
+            buttons: vec![
+                ToastButton::new("Yes", content.yes_label.clone()),
+                ToastButton::new("No", content.no_label.clone()),
+                ToastButton::new("BlockExperience", content.block_experience_label.clone()),
+                ToastButton::new("BlockObject", content.block_object_label.clone()),
+            ],
         },
     );
 

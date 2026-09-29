@@ -76,7 +76,7 @@ use crate::notification_host::{
     NotificationChannelRoot, ResolveNotification, ToastSpec, adopt_toast,
 };
 use crate::notifications::{
-    NotificationId, NotificationKind, NotificationManager, NotificationPriority,
+    NotificationId, NotificationKind, NotificationManager, NotificationPriority, ToastButton,
 };
 use crate::skin_palette::SkinPalette;
 use crate::ui::{column, row};
@@ -465,6 +465,17 @@ fn spawn_script_permission_card(
             template,
             default_button: None,
             history_body: history,
+            buttons: [
+                Some(ToastButton::new("Grant", content.grant_label.clone())),
+                Some(ToastButton::new("Deny", content.deny_label.clone())),
+                content
+                    .block_label
+                    .as_ref()
+                    .map(|label| ToastButton::new("Block", label.clone())),
+            ]
+            .into_iter()
+            .flatten()
+            .collect(),
         },
     );
 

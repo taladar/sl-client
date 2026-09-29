@@ -68,7 +68,7 @@ use crate::notification_host::{
     NotificationChannelRoot, ResolveNotification, ToastSpec, adopt_toast,
 };
 use crate::notifications::{
-    NotificationId, NotificationKind, NotificationManager, NotificationPriority,
+    NotificationId, NotificationKind, NotificationManager, NotificationPriority, ToastButton,
 };
 use crate::skin_palette::SkinPalette;
 use crate::ui::{column, row};
@@ -355,6 +355,11 @@ fn spawn_load_url_card(
             template: LOAD_URL_TEMPLATE,
             default_button: None,
             history_body: url.clone(),
+            buttons: vec![
+                ToastButton::new("Load", content.load_label.clone()),
+                ToastButton::new("Block", content.block_label.clone()),
+                ToastButton::new("Ignore", content.ignore_label.clone()),
+            ],
         },
     );
 

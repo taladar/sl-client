@@ -130,6 +130,9 @@ mod automation_locator;
 #[cfg(test)]
 mod automation_model;
 #[cfg(test)]
+mod automation_probes;
+mod automation_sources;
+#[cfg(test)]
 mod automation_world;
 #[cfg(test)]
 mod automation_world_aim;
@@ -1268,7 +1271,13 @@ pub fn init_tracing() -> TracingGuards {
 
     // The `EnvFilter` sits below the output layers so it gates all of them (the
     // fmt log, Tracy and Chrome), exactly as `LogPlugin` orders them.
-    let subscriber = tracing_subscriber::registry().with(filter).with(fmt_layer);
+    let subscriber = tracing_subscriber::registry()
+        .with(filter)
+        .with(fmt_layer)
+        // Every warning and error, counted for the automation diagnostics probe
+        // (`sl_viewer_automation::read_diagnostics`); it keeps a bounded tail,
+        // and does nothing for the quieter levels.
+        .with(sl_viewer_automation::LogTally::global().layer());
 
     #[cfg(feature = "profile-tracy")]
     let subscriber = subscriber.with(tracing_tracy::TracyLayer::new(TracyConfig::default()));

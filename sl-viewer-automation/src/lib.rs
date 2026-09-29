@@ -66,25 +66,60 @@
 //! stated side of the snap guide, with the modifier keys held that pick the
 //! rig; a [`WorldSweep`] draws the rubber band that selects exactly the things
 //! a locator names.
+//!
+//! Beside both sit the **state probes**: what a test asserts on that is not
+//! one widget, read from the models the viewer already keeps — the
+//! conversations ([`read_conversations`]), the notifications and the buttons
+//! they offer ([`read_notifications`]), the status bar ([`read_status`]), the
+//! own agent ([`read_agent`]), the selection ([`read_selection`]), an
+//! inventory folder by path ([`read_inventory`]) and whether the scene has
+//! settled ([`read_quiescence`], with [`PipelineStatus`] for the render
+//! half). The models that live in the viewer's heavy crates are read through
+//! [`ProbeSources`], which the viewer's assembly fills. What happened is read
+//! by cursor: the [`EventLog`] of session events, outbound commands and UI
+//! actions, and the warnings and errors a [`LogTally`] counted
+//! ([`read_diagnostics`]). [`request_screenshot`] captures the primary window
+//! with the boxes of a locator's matches outlined. [`StateProbesPlugin`]
+//! installs what records.
 
+mod diagnostics;
+mod event_log;
 mod locate;
 mod manipulator_drag;
+mod probe_sources;
+mod probes;
 mod pursuit;
+mod render_settle;
 mod reveal;
 mod route;
+mod screenshot;
 mod ui_model;
 mod world_aim;
 mod world_model;
 mod world_query;
 mod world_sweep;
 
+pub use crate::diagnostics::{
+    DiagnosticsSource, LogTally, LogTallyLayer, RECENT_LINES, read_diagnostics,
+};
+pub use crate::event_log::{DETAIL_LIMIT, EventLog, EventLogPlugin};
 pub use crate::locate::{find_all, find_one, shallow};
 pub use crate::manipulator_drag::{DragProgress, DragStage, HeldKeys, ManipulatorDrag};
+pub use crate::probe_sources::{LiveNotifications, ProbeSources};
+pub use crate::probes::{
+    ProbeError, read_agent, read_conversations, read_inventory, read_notifications,
+    read_quiescence, read_selection, read_status,
+};
 pub use crate::pursuit::{
     DEFAULT_DEADLINE, DEFAULT_DEADLINE_FRAMES, Intent, Progress, Pursuit, PursuitError, Target,
 };
+pub use crate::render_settle::{PipelineStatus, PipelineStatusPlugin};
 pub use crate::reveal::{open_floater, scroll_into_view};
 pub use crate::route::{Gesture, Route, RouteProgress};
+pub use crate::screenshot::{
+    CapturedFrame, OVERLAY_COLOUR, OVERLAY_THICKNESS, ScreenshotError, ScreenshotProbePlugin,
+    ScreenshotTicket, Screenshots, request_screenshot, take_screenshot,
+};
 pub use crate::ui_model::{UiModel, entity_of, node_id, snapshot};
 pub use crate::world_aim::{
     AimProgress, AimStage, ScreenProjection, WorldAim, WorldIntent, WorldTarget, screen_projection,
@@ -92,3 +127,19 @@ pub use crate::world_aim::{
 pub use crate::world_model::{ObjectFacts, WorldModel, WorldModelPlugin, world_snapshot};
 pub use crate::world_query::{WorldProgress, WorldQuery, WorldWant, find_world};
 pub use crate::world_sweep::{SweepProgress, SweepTarget, WorldSweep};
+
+/// Installs what the state probes record as the app runs: the [`EventLog`],
+/// the render-settle [`PipelineStatus`] and the [`Screenshots`] store. The
+/// readers themselves need nothing installed — they read the models the
+/// viewer keeps anyway, when asked.
+///
+/// Added with automation, never by default: the event log clones every
+/// message it records.
+#[derive(Debug, Default)]
+pub struct StateProbesPlugin;
+
+impl bevy::app::Plugin for StateProbesPlugin {
+    fn build(&self, app: &mut bevy::app::App) {
+        app.add_plugins((EventLogPlugin, PipelineStatusPlugin, ScreenshotProbePlugin));
+    }
+}

@@ -1399,6 +1399,13 @@ impl Session {
         }
         if let Some(child) = self.children.get_mut(&dest) {
             child.send_complete_agent_movement(now)?;
+            // Name the destination's region on its circuit now, not at commit:
+            // its `RegionHandshake` arrives while it is still this child, and an
+            // identity keyed by an unknown handle would be attributed to the
+            // source region instead. (A neighbour's child already carries it
+            // from `EnableSimulator`.)
+            let child_id = child.id;
+            self.world.note_region(child_id, region_handle);
         }
         self.pending_handover = Some(PendingHandover {
             dest,

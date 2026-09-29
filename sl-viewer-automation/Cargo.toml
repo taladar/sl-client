@@ -19,14 +19,20 @@ publish.workspace = true
 # crates this one reads, so the two unify on one Bevy build.
 bevy = { version = "0.19.0", features = ["system_font_discovery"] }
 bevy_flair = { version = "0.8.0" }
+# PNG encoding of a captured frame; the version Bevy's own image support uses.
+image = { version = "0.25.10", default-features = false, features = ["png"] }
 sl-automation-proto = { workspace = true }
 sl-client-bevy = { workspace = true }
+sl-viewer-inventory = { workspace = true }
 sl-viewer-kit = { workspace = true }
+sl-viewer-notifications = { workspace = true }
 sl-viewer-ui-core = { workspace = true }
 sl-viewer-ui-pie-menu = { workspace = true }
 sl-viewer-ui-widgets = { workspace = true }
 sl-viewer-world-api = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

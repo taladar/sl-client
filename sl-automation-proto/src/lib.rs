@@ -19,6 +19,15 @@
 //!   picked with [`WorldLocator::nth`]. A [`WorldNode`] is what the viewer
 //!   reports for one: ids, name, owner, region-local placement, link set,
 //!   attachment point, sit state, selection and the text shown over it.
+//! - A state probe reads what a test asserts on that is not one widget: a
+//!   [`ConversationReadout`] (local chat and instant-message transcripts), a
+//!   [`NotificationReadout`] (text and offered buttons), the [`StatusReadout`]
+//!   of the status bar, the own [`AgentReadout`] (region, position, seat,
+//!   teleport, camera), the [`SelectedObject`]s, an
+//!   [`InventoryFolderReadout`] by path, the sequence-numbered [`LogEntry`]s
+//!   of events, commands and UI actions read by cursor as a [`LogPage`], the
+//!   [`DiagnosticsReadout`] of warnings and errors, and the
+//!   [`QuiescenceReadout`] that says whether the scene has settled.
 //! - A [`Request`] and its [`Response`] share a [`RequestId`], so several
 //!   requests may be in flight on one channel.
 //! - An [`AutomationError`] is what a test matches on: not found, ambiguous
@@ -51,6 +60,7 @@
 mod failure;
 mod locator;
 mod message;
+mod probe;
 mod snapshot;
 mod world;
 
@@ -58,6 +68,13 @@ pub use crate::failure::{ActionabilityCheck, AutomationError};
 pub use crate::locator::{Locator, NameMatcher};
 pub use crate::message::{
     Deadline, Request, RequestBody, RequestId, Response, ResponseBody, WaitCondition,
+};
+pub use crate::probe::{
+    AgentReadout, CameraView, ChatKind, ClockTime, ConversationReadout, ConversationRef,
+    DiagnosticLine, DiagnosticsReadout, InventoryEntry, InventoryFolderReadout, InventoryRoot,
+    LogEntry, LogLevel, LogPage, LogStream, NotificationReadout, OfferedButton, QuiescenceReadout,
+    RegionReadout, SelectedObject, SpeakerKind, StatusReadout, TeleportReadout, TeleportState,
+    TranscriptLine,
 };
 pub use crate::snapshot::{Bounds, NodeId, NodeState, NodeValue, NodeVisibility, Role, UiNode};
 pub use crate::world::{Anchor, Near, WorldKind, WorldLocator, WorldNode};

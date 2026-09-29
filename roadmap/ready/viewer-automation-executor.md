@@ -2,7 +2,7 @@
 id: viewer-automation-executor
 title: AutomationPlugin — the in-viewer request executor
 topic: viewer
-status: blocked
+status: ready
 origin: viewer automation design (2026-09-28)
 points: 8
 blocked_by: [viewer-automation-locator-engine, viewer-automation-synthetic-input,
@@ -44,6 +44,16 @@ with a `Response` — independent of how the request arrived.
   `ManipulatorDrag` (handle, amount, snap regime, held keys — it plays its
   own input) and a `WorldSweep` (a rubber band that selects exactly its
   targets).
+- The state probes land here as requests, their first consumer
+  ([[viewer-automation-state-probes]] built the readers and the readouts
+  without them): agent, status, conversations, notifications, selection,
+  inventory by path, quiescence (a `quiet` wait condition), event-log and
+  diagnostics reads by cursor (an "event seen after cursor" wait), and a
+  screenshot with a locator's matches outlined (`request_screenshot` /
+  `take_screenshot`; decide here whether the frame travels as PNG bytes or a
+  path the viewer wrote). `StateProbesPlugin` is installed with the executor;
+  `ProbeSources` and the global `LogTally` layer are already in every
+  viewer.
 
 Acceptance: an App-level test drives a login, opens a floater, clicks a
 button and waits for its effect entirely through requests; each failure
