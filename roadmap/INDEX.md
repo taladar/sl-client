@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 311 |
 | blocked | 56 |
 | in-progress | 21 |
-| bugs | 17 |
-| done | 1277 |
+| bugs | 16 |
+| done | 1278 |
 | deferred | 31 |
 | wont-do | 16 |
 | **total** | **1851** |
@@ -1294,7 +1294,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (17)
+## bugs (16)
 
 ### protocol
 
@@ -1338,11 +1338,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
-- [`test-full-stack-sigsegv-at-exit-under-load`](bugs/test-full-stack-sigsegv-at-exit-under-load.md)
-  — A full-stack test passed and then its process died of SIGSEGV, once, in the
-  full parallel suite
 
-## done (1277)
+## done (1278)
 
 ### protocol
 
@@ -3892,6 +3889,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — terminate, confirm removal
 - [`test-friendship-terminate-aditi`](done/test-friendship-terminate-aditi-add-the-aditi-variant.md)
   — Friendship terminate — [aditi] variant
+- [`test-full-stack-sigsegv-at-exit-under-load`](done/test-full-stack-sigsegv-at-exit-under-load.md)
+  — A full-stack test passed and then its process died of SIGSEGV, once, in the
+  full parallel suite
 - [`test-gestures`](done/test-gestures-activate-deactivate-gestures.md) —
   activate / deactivate gestures
 - [`test-give-inventory`](done/test-give-inventory-give-an-item-to-another-avatar-peer-accepts.md)
