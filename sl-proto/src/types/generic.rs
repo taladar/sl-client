@@ -7,6 +7,8 @@
 //! feature-specific parsing of [`params`](GenericMessage::params) /
 //! [`data`](GenericStreamingMessage::data) to consumers.
 
+use core::fmt;
+
 use crate::InvoiceId;
 
 /// A generic method-name + parameter-list envelope, parsed from a
@@ -20,7 +22,13 @@ use crate::InvoiceId;
 /// raw byte blobs here. In practice each parameter is a (usually
 /// NUL-terminated) UTF-8 string, but the payload is preserved verbatim so a
 /// consumer can decode it however the specific method requires.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+///
+/// Its `Debug` prints the method, then each parameter as a string when it is
+/// UTF-8 (as bytes when it is not), then the invoice — so a log line reads
+/// `method: "emptytrash", params: ["…"]` rather than a list of byte values,
+/// and a test can find a message in printed output by its method and
+/// parameters together.
+#[derive(Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GenericMessage {
     /// The method name selecting which feature this envelope carries.
     pub method: String,
@@ -28,6 +36,50 @@ pub struct GenericMessage {
     pub invoice: InvoiceId,
     /// The opaque parameter blobs, in the order the simulator sent them.
     pub params: Vec<Vec<u8>>,
+}
+
+impl fmt::Debug for GenericMessage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GenericMessage")
+            .field("method", &self.method)
+            .field(
+                "params",
+                &DebugParams {
+                    params: &self.params,
+                },
+            )
+            .field("invoice", &self.invoice)
+            .finish()
+    }
+}
+
+/// A [`GenericMessage`]'s parameters, printed as strings where they are UTF-8.
+struct DebugParams<'params> {
+    /// The parameters.
+    params: &'params [Vec<u8>],
+}
+
+impl fmt::Debug for DebugParams<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_list()
+            .entries(self.params.iter().map(|param| DebugParam { param }))
+            .finish()
+    }
+}
+
+/// One parameter: a string when it is UTF-8, its bytes when it is not.
+struct DebugParam<'param> {
+    /// The parameter.
+    param: &'param [u8],
+}
+
+impl fmt::Debug for DebugParam<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match core::str::from_utf8(self.param) {
+            Ok(text) => fmt::Debug::fmt(text, f),
+            Err(_not_utf8) => fmt::Debug::fmt(self.param, f),
+        }
+    }
 }
 
 /// An optimised generic envelope for streaming arbitrary data to the viewer,
@@ -44,4 +96,32 @@ pub struct GenericStreamingMessage {
     pub method: u16,
     /// The opaque streamed payload.
     pub data: Vec<u8>,
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::GenericMessage;
+    use crate::InvoiceId;
+
+    /// A message prints its method and its UTF-8 parameters as strings, in
+    /// that order, and a parameter that is not UTF-8 as its bytes.
+    #[test]
+    fn a_generic_message_prints_its_parameters_as_text() {
+        let message = GenericMessage {
+            method: "sl-fake-grid-marker".to_owned(),
+            invoice: InvoiceId::default(),
+            params: vec![b"arrived".to_vec(), vec![0xff, 0x00]],
+        };
+        let printed = format!("{message:?}");
+        assert!(
+            printed.starts_with(
+                "GenericMessage { method: \"sl-fake-grid-marker\", params: [\"arrived\", [255, 0]], \
+                 invoice: "
+            ),
+            "{printed}"
+        );
+        assert_eq!(printed.matches("arrived").count(), 1);
+    }
 }

@@ -638,6 +638,15 @@ impl Viewer {
         Ok(EventCursor::new(self.clone(), page.next))
     }
 
+    /// A cursor at the start of the event log: its first read or wait sees
+    /// everything the viewer still keeps, even what it recorded before the
+    /// cursor was made — a grid marker that arrived before the wait for it
+    /// began, say.
+    #[must_use]
+    pub fn events_from_start(&self) -> EventCursor {
+        EventCursor::new(self.clone(), 0)
+    }
+
     /// Stream the event log's entries of `streams` (every stream when empty)
     /// from now on.
     ///

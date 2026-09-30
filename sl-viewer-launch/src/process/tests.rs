@@ -171,6 +171,23 @@ fn a_hung_viewer_is_killed_after_the_grace() -> Result<(), TestError> {
     Ok(())
 }
 
+/// A viewer that dies of another signal while it logs out — a crash on the
+/// way out — is reported as that signal, never as having quit when asked.
+#[test]
+fn a_crash_during_the_logout_is_not_a_clean_stop() -> Result<(), TestError> {
+    let dir = scratch("crashes")?;
+    let viewer = RunningViewer::spawn(&launch(
+        &dir,
+        "viewer",
+        "trap 'kill $!; kill -SEGV $$' TERM; sleep 120 & touch ready; wait",
+    ))?;
+    wait_ready(&dir)?;
+    let ran = viewer.stop(Duration::from_secs(30))?;
+    assert_eq!(ran.ending, Ending::Signalled(11));
+    fs_err::remove_dir_all(&dir)?;
+    Ok(())
+}
+
 /// A viewer dropped while running — a test body that panicked — is still
 /// asked to log out, rather than left running or killed.
 #[test]

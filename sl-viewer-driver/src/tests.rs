@@ -13,7 +13,7 @@ use pretty_assertions::assert_eq;
 use sl_automation_proto::{
     AutomationError, Bounds, FailureReport, LogEntry, LogPage, LogStream, NodeId, NodeVisibility,
     Notification, PROTOCOL_VERSION, Request, RequestBody, RequestId, Response, ResponseBody, Role,
-    UiNode, ViewerIdentity, ViewerMessage, WaitCondition,
+    StateCondition, StateObservation, UiNode, ViewerIdentity, ViewerMessage, WaitCondition,
 };
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
@@ -240,6 +240,52 @@ async fn a_viewer_that_stops_answering_runs_out_the_grace() -> Result<(), String
     assert!(
         matches!(read, Err(DriverError::NoAnswer { ref what, .. }) if what == "read"),
         "{read:?}"
+    );
+    Ok(())
+}
+
+/// A cursor from the start waits from sequence number 0 — so it sees what the
+/// viewer logged before the wait began — for an entry of one kind whose
+/// detail contains the part asked for, and moves past what it found.
+#[tokio::test]
+async fn a_wait_from_the_start_matches_kind_and_detail() -> Result<(), String> {
+    let (viewer, seen) = viewer(
+        ViewerOptions::new("one"),
+        Arc::new(|body| match body {
+            RequestBody::WaitForState { .. } => Some(Ok(ResponseBody::StateHeld {
+                observed: StateObservation::Logged {
+                    entry: entry(3, "GenericMessage"),
+                    next: 4,
+                },
+            })),
+            _ => None,
+        }),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    let mut cursor = viewer.events_from_start();
+    assert_eq!(cursor.position(), 0);
+    let found = cursor
+        .wait_for_containing("GenericMessage", "params: [\"go\"]", Duration::from_secs(5))
+        .await
+        .map_err(|error| error.to_string())?;
+    assert_eq!(found.seq, 3);
+    assert_eq!(cursor.position(), 4, "the cursor moves past the entry");
+    let seen = seen.lock().map_err(|error| error.to_string())?.clone();
+    assert!(
+        seen.iter().any(|body| matches!(
+            body,
+            RequestBody::WaitForState {
+                condition: StateCondition::Logged {
+                    cursor: 0,
+                    kind_is: Some(kind),
+                    detail_contains: Some(part),
+                    ..
+                },
+                ..
+            } if kind == "GenericMessage" && part == "params: [\"go\"]"
+        )),
+        "{seen:?}"
     );
     Ok(())
 }

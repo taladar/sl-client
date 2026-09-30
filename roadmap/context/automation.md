@@ -373,6 +373,23 @@ replaces that person.
   running one stops it the same way, so a panicking test logs its viewers
   out. The viewer turns `SIGTERM` into a logout at any point after start-up
   (`tests/viewer_processes.rs` checks the grid sees `LoggedOut` for both).
+- **The stage** ([[test-e2e-stage]]) is `sl-e2e`'s `StageBuilder::run`: a
+  fresh fake grid per backend, an account `Stage <label>` per viewer, each
+  viewer logged in and quiet before the body, and a teardown that always
+  runs (a panicking body is resumed only after it) and fails on a viewer
+  that would not log out or a session left on the grid. It depends on the
+  viewer's library and the viewer's integration tests dev-depend on it: a
+  dev-dependency cycle Cargo allows, so the stage is for `tests/`, never for
+  the crate's unit tests. An in-process viewer's `log_label` is
+  `<test>/<backend>/<label>`, and a process-wide tracing layer (`logs.rs`)
+  files every line in that span into the viewer's `viewer.log`; lines
+  outside any viewer span go to `grid.log`.
+- **A marker is found in the event log by its printed detail**:
+  `GenericMessage`'s `Debug` prints UTF-8 parameters as strings in the order
+  method, params, invoice, so `Stage::wait_marker` waits for a
+  `GenericMessage` entry containing `method: "sl-fake-grid-marker", params:
+  ["<name>"]` from sequence number 0 (`Viewer::events_from_start`). A marker
+  that arrived before the wait began still counts.
 - **Event-log subscriptions live in the executor**, not the transport: a
   `subscribe` answers at once and its notifications queue beside the
   responses, so the in-process transport streams them the same way.

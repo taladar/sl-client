@@ -243,6 +243,10 @@ pretty_assertions = { workspace = true }
 serde_json = { workspace = true }
 # The vocabulary the automation sweep's snapshots are written in.
 sl-automation-proto = { workspace = true }
+# The end-to-end stage the `tests/e2e_*.rs` tier builds: a fake grid and
+# several viewers, as processes or in process. A dev-dependency cycle (it
+# depends on this crate's library), which Cargo allows for integration tests.
+sl-e2e = { path = "../sl-e2e", version = "0.1.0" }
 # The loopback grid the full-stack tier (`src/full_stack_test.rs`) renders
 # against: the real viewer logging into a real grid, in one process.
 sl-fake-grid = { path = "../sl-fake-grid", version = "0.1.0" }

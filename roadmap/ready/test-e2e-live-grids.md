@@ -2,7 +2,7 @@
 id: test-e2e-live-grids
 title: Run end-to-end tests against the local OpenSim and aditi
 topic: test
-status: blocked
+status: ready
 origin: viewer automation design (2026-09-28)
 points: 5
 blocked_by: [test-e2e-stage]

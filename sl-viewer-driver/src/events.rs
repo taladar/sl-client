@@ -57,11 +57,37 @@ impl EventCursor {
         kind: &str,
         timeout: Duration,
     ) -> Result<LogEntry, DriverError> {
+        self.wait_logged(kind, None, timeout).await
+    }
+
+    /// Wait up to `timeout` for an entry of kind `kind` whose printed detail
+    /// contains `part`, from here on, and move past it — a
+    /// `GenericMessage` with one method and parameter, say.
+    ///
+    /// # Errors
+    ///
+    /// As any request; [`DriverError::Failed`] when none comes.
+    pub async fn wait_for_containing(
+        &mut self,
+        kind: &str,
+        part: &str,
+        timeout: Duration,
+    ) -> Result<LogEntry, DriverError> {
+        self.wait_logged(kind, Some(part), timeout).await
+    }
+
+    /// The wait both of the above are.
+    async fn wait_logged(
+        &mut self,
+        kind: &str,
+        part: Option<&str>,
+        timeout: Duration,
+    ) -> Result<LogEntry, DriverError> {
         let condition = StateCondition::Logged {
             cursor: self.next,
             streams: Vec::new(),
             kind_is: Some(kind.to_owned()),
-            detail_contains: None,
+            detail_contains: part.map(ToOwned::to_owned),
         };
         match self.viewer.wait_for_state(condition, timeout).await? {
             StateObservation::Logged { entry, next } => {

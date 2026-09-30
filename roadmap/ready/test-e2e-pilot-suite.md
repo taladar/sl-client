@@ -2,7 +2,7 @@
 id: test-e2e-pilot-suite
 title: The first end-to-end tests — one viewer, two viewers, two regions
 topic: test
-status: blocked
+status: ready
 origin: viewer automation design (2026-09-28)
 points: 8
 blocked_by: [test-e2e-stage]

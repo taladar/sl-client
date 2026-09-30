@@ -11,6 +11,13 @@
 [test-groups.gpu]
 max-threads = 1
 
+# The end-to-end tier (`sl-client-bevy-viewer/tests/e2e_*.rs`, the `sl-e2e`
+# stage): each test starts a fake grid and several viewers — processes or
+# in-process Apps — on the one GPU, so they run one at a time, beside the gpu
+# group rather than inside it, with room for cold logins on both backends.
+[test-groups.e2e]
+max-threads = 1
+
 [[profile.default.overrides]]
 filter = "test(/^render_readback::/) | test(/^render_matrix::/) | test(/^full_stack_test::/) | test(/^world_test::gpu_/) | binary(viewer_processes)"
 test-group = "gpu"
@@ -18,3 +25,8 @@ test-group = "gpu"
 # first pipeline compile on a cold shader cache is slow; give it room before
 # nextest calls a test hung.
 slow-timeout = { period = "120s", terminate-after = 3 }
+
+[[profile.default.overrides]]
+filter = "binary(/^e2e_/)"
+test-group = "e2e"
+slow-timeout = { period = "180s", terminate-after = 4 }

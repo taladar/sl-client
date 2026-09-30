@@ -7,9 +7,9 @@ the `test` topic (fake-grid fixtures, determinism, conformance). Read this
 before working any `viewer-render-*`, `viewer-*-interaction-*`,
 `viewer-world-test-*`, `viewer-fake-grid-*` or `test-fake-grid-*` task.
 
-Above tier F sits the **end-to-end automation** tier (the real viewer —
-binary or in-process App — driven by semantic locators, several viewers per
-test): see [context/automation.md](automation.md).
+Above tier F sits tier **E, end-to-end** (the real viewer — binary or
+in-process App — driven by semantic locators, several viewers per test): see
+[context/automation.md](automation.md).
 
 ## The tier rule
 
@@ -28,6 +28,7 @@ fake grid where content must be repeatable.
 | R — render matrix | `render_readback.rs` GPU app + `ViewerRenderPlugins` | pixels of registered scenes under context axes | seconds per capture |
 | F — full stack | viewer plugin groups + in-process `sl-fake-grid` + readback | grid sequencing: arrival, CAPS fetches, teleport, crossing, NPCs | tens of seconds per test |
 | B — baselines | recorded derived facts, opt-in | "has this moved by accident" | ms |
+| E — end-to-end | `sl-e2e` `Stage`: fake grid + N whole viewers (process or in-process), driven by `sl-viewer-driver` | what only the whole app, or several of them, can break | tens of seconds per backend |
 
 Tier I is the `SlEvent`-in / `SlCommand`-out seam: everything downstream
 of the network reads `SlEvent(SessionEvent)` messages and everything
@@ -35,6 +36,12 @@ outbound is a `SlCommand`, so a fixture world needs no socket. Tier F is
 for what only grid *sequencing* can break: arrival ordering, the CAPS
 fetch paths, teleport / crossing hand-overs, `KillObject` timing,
 multi-region offsets, in-flight asset leaks, NPC appearance delivery.
+Tier E is for what needs the whole assembled viewer — its real input path,
+its binary's signal handling and command line, its automation endpoint — or
+two viewers watching each other. Its tests live in
+`sl-client-bevy-viewer/tests/e2e_*.rs` and run once per backend
+(`SL_E2E_BACKEND=process|in-process|both`, default both) in nextest's `e2e`
+group, one at a time.
 
 ## Shared foundations
 

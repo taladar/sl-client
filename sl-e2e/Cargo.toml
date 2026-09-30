@@ -1,0 +1,52 @@
+[package]
+name = "sl-e2e"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+description = "The end-to-end test stage: an in-process fake grid, several real viewers logged into it — as processes or as Apps in the test process — driven through the automation driver, and torn down without a stranded session"
+readme = { workspace = true }
+license = { workspace = true }
+
+repository = { workspace = true }
+keywords = ["automation", "opensim", "secondlife", "testing", "viewer"]
+categories = ["development-tools::testing", "game-development"]
+publish = { workspace = true }
+
+exclude = { workspace = true }
+
+[dependencies]
+# The in-process viewer is the viewer's own builder's App.
+bevy = { version = "0.19.0", default-features = false }
+fs-err = { workspace = true }
+# Blocks on the one GPU adapter probe a stage makes before it starts.
+pollster = { workspace = true }
+serde_json = { workspace = true }
+sl-automation-proto = { workspace = true }
+sl-client-bevy = { workspace = true }
+# The viewer a stage runs in process: its builder, and the App it builds.
+sl-client-bevy-viewer = { path = "../sl-client-bevy-viewer", version = "0.1.0" }
+sl-fake-grid = { path = "../sl-fake-grid", version = "0.1.0" }
+sl-proto = { workspace = true }
+# The in-process host the in-process backend steps its viewers on.
+sl-viewer-automation = { workspace = true }
+sl-viewer-driver = { workspace = true }
+# The process backend: each viewer confined to its directory, stopped by a
+# logout rather than a kill.
+sl-viewer-launch = { workspace = true }
+sl-viewer-world-avatar = { workspace = true }
+sl-viewer-world-scene = { workspace = true }
+# The termination flag an in-process viewer is asked to log out by.
+sl-viewer-world-view = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt", "registry"] }
+# The GPU adapter probe: the same wgpu Bevy renders with, features unified.
+wgpu = { version = "29.0.3", default-features = false }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+
+[lints]
+workspace = true

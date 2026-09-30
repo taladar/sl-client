@@ -58,10 +58,13 @@ pub const LOGOUT_GRACE: Duration = Duration::from_secs(45);
 pub enum Ending {
     /// It exited on its own, with this status code.
     Exited(i32),
-    /// It was killed by this signal without being asked first — which for these
-    /// viewers means something outside this crate killed it.
+    /// It was killed by this signal — without being asked first, or while
+    /// asked by a signal other than the `SIGTERM` (a crash during its logout,
+    /// a `SIGKILL` from outside this crate).
     Signalled(i32),
-    /// It was asked to quit, and did.
+    /// It was asked to quit, and did: it exited, or the `SIGTERM` ended it.
+    /// A viewer that died of another signal after the request is
+    /// [`Signalled`](Self::Signalled), not this.
     AskedToQuit,
     /// It was asked to quit, ignored the request for the whole grace, and was
     /// killed. The grid session it leaves behind may block the next login.
@@ -254,8 +257,17 @@ impl RunningViewer {
         }
         self.ask_to_quit();
         let never = AtomicBool::new(false);
-        if self.wait(grace, &never)?.is_some() {
-            let ending = Ending::AskedToQuit;
+        if let Some(ending) = self.wait(grace, &never)? {
+            // Only an exit, or the SIGTERM itself, is the viewer taking the
+            // request. Death by any other signal while it was asked — a crash
+            // during the logout, a SIGKILL from elsewhere — stays what it is,
+            // or a crash on the way out would read as a clean stop.
+            let ending = match ending {
+                Ending::Signalled(signal) if Signal::try_from(signal) != Ok(Signal::SIGTERM) => {
+                    ending
+                }
+                _ => Ending::AskedToQuit,
+            };
             self.ended = Some(ending);
             return Ok(ending);
         }
