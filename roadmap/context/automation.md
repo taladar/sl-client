@@ -291,6 +291,27 @@ replaces that person.
   keeps a probed point on the target. The sweep and handle drags'
   `CameraStill` still compares the eye: it only gates a two-poll streak and
   revalidates nothing afterwards.
+- **Rezzing is a world action on what the rez lands on** (`WorldAction::Place`,
+  the driver's `place()`): a click with the Create tool, waiting for that tool
+  (`ActionabilityCheck::CreateTool`) and aimed through the pick resolver like a
+  touch. There is no locator for bare ground, so a test rezzes on an object.
+  A **select or sweep waits for a tool that selects**
+  (`EditTool::selects_objects`): the Build window opens on the Create tool
+  when nothing is selected, and a click there rezzes. A plain Create click
+  selects nothing (the reference's `LLToolCompCreate`); only the rez's
+  drop-into-edit selects, and only an object that arrived after the rez.
+- **What a viewer may do with an object is per viewer on the fake grid too**:
+  every `ObjectUpdate` leaves through `world::send_objects`, which stamps the
+  receiving agent's `OBJECT_*` permission flags from the object's owner and
+  masks (OpenSim's `GenerateClientFlags`). A new prim is its owner's alone. A
+  test that needs another viewer to edit an object sets its everyone mask.
+- **Status bar read-outs are addressable**: `status-readout:region`,
+  `:coordinates`, `:parcel`, `:balance`, `:time`, `:fps` — what the bar shows,
+  as against the `Status` probe, which reads the models it is drawn from.
+- **The pilot suite** (`tests/e2e_pilot.rs`) is the worked example of each
+  kind of test: chrome, two viewers on one object, a pie and a touch the grid
+  sees (a test prim put on the grid through `FakeAgent::with_world`), and a
+  teleport through the world map between two stage regions.
 - **The viewer has no grab-drag of an object outside build mode yet**, so
   there is no aimed grab; it lands with the Move tool
   ([[viewer-build-tool-row-parity]]).

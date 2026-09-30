@@ -27,6 +27,8 @@ mod tests {
     const TARGET: u32 = 1;
     /// The wall in front of it.
     const WALL: u32 = 2;
+    /// The prim a place rezzes.
+    const REZZED: u32 = 3;
 
     /// A region-local position.
     const fn at(x: f32, y: f32, z: f32) -> Vector {
@@ -389,6 +391,102 @@ mod tests {
         let entity = entity_of(&mut app, scoped(TARGET)).ok_or("the prim has no entity")?;
         let _before = drain_commands(&mut app);
         Ok((app, entity))
+    }
+
+    /// A place waits for the Create tool — the Build window open on the Move
+    /// tool is not enough — and then rezzes on the prim: one `ObjectAdd`, on
+    /// the prim's top face, and no touch.
+    #[test]
+    fn a_place_waits_for_the_create_tool_then_rezzes_on_the_prim() -> Result<(), TestError> {
+        let mut app = world_app_with_build_tools()?;
+        app.add_plugins(WorldModelPlugin);
+        seed_object(&mut app, fixture_prim(TARGET, at(128.0, 128.0, 30.0), 0));
+        settle(&mut app, 5);
+        let target =
+            scene_position_of(&mut app, scoped(TARGET)).ok_or("the target prim never spawned")?;
+        let look = Vec3::new(target.x - 3.5, target.y, target.z);
+        install_camera(
+            &mut app,
+            Vec3::new(look.x, look.y + 2.0, look.z + 12.0),
+            look,
+        );
+        open_build_floater(&mut app);
+
+        let mut aim = WorldAim::new(prim(TARGET), WorldIntent::Place);
+        let mut waited_for_create = false;
+        for _frame in 0..10 {
+            if aim.poll(app.world_mut())? == AimProgress::Waiting(AimStage::CreateTool) {
+                waited_for_create = true;
+            }
+            app.update();
+        }
+        assert!(waited_for_create, "a place waits for the Create tool");
+        app.world_mut()
+            .resource_mut::<crate::world_api::EditToolState>()
+            .tool = crate::world_api::EditTool::Create;
+        let placed = loop {
+            match aim.poll(app.world_mut())? {
+                AimProgress::Ready(target) => break target,
+                AimProgress::Waiting(_stage) => app.update(),
+            }
+        };
+        let _before = drain_commands(&mut app);
+        interact::perform(&mut app, placed.input());
+        settle(&mut app, 3);
+        let commands = drain_commands(&mut app);
+        let rezzes: Vec<&Vector> = commands
+            .iter()
+            .filter_map(|command| match command {
+                Command::RezObject { shape, .. } => Some(&shape.position),
+                _other => None,
+            })
+            .collect();
+        let [on_prim] = rezzes.as_slice() else {
+            return Err(format!("not one rez: {commands:?}").into());
+        };
+        // Where the aim's pick said the click lands, which is on the prim (a
+        // 2 × 3 × 4 m fixture box).
+        let [hit_x, hit_y, hit_z] = placed.hit_point.ok_or("the aim has no hit point")?;
+        assert!(
+            (on_prim.x - hit_x).abs() < 0.05
+                && (on_prim.y - hit_y).abs() < 0.05
+                && (on_prim.z - hit_z).abs() < 0.05,
+            "the rez lands at the aim's hit point {:?}: {on_prim:?}",
+            placed.hit_point
+        );
+        assert!(
+            (on_prim.x - 128.0).abs() <= 1.05
+                && (on_prim.y - 128.0).abs() <= 1.55
+                && (on_prim.z - 30.0).abs() <= 2.05,
+            "the rez lands on the prim: {on_prim:?}"
+        );
+        assert!(
+            !commands
+                .iter()
+                .any(|command| matches!(command, Command::TouchObject { .. })),
+            "a place touches nothing"
+        );
+        assert!(
+            app.world()
+                .resource::<crate::world_api::SelectionSet>()
+                .primary()
+                .is_none(),
+            "a plain click with the Create tool selects nothing, not even what it landed on"
+        );
+
+        // The grid's answer: the new prim, where the rez asked for it — within
+        // the match slop of the prim it landed on, which must not be taken for
+        // it.
+        let mut rezzed = fixture_prim(REZZED, (*on_prim).clone(), 0);
+        rezzed.scale = at(0.5, 0.5, 0.5);
+        seed_object(&mut app, rezzed);
+        settle(&mut app, 3);
+        let selection = app.world().resource::<crate::world_api::SelectionSet>();
+        assert!(
+            selection.is_selected(scoped(REZZED)) && !selection.is_selected(scoped(TARGET)),
+            "the rez drops into edit on the new prim, not on the one under it"
+        );
+        Ok(())
     }
 
     /// Drag `handle` by `amount` in `regime` holding `keys`, polling to the

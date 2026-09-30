@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 122 |
-| ready | 312 |
+| ready | 310 |
 | blocked | 53 |
 | in-progress | 21 |
 | bugs | 16 |
-| done | 1280 |
+| done | 1282 |
 | deferred | 31 |
 | wont-do | 16 |
 | **total** | **1851** |
@@ -207,7 +207,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — putting two viewers into the same interaction state
 - [`test-e2e-live-verify-sweep`](ideas/test-e2e-live-verify-sweep.md) — Turn
   pending live-verify checks into end-to-end tests (blocked by
-  `test-e2e-pilot-suite`)
+  `test-e2e-pilot-suite` (done))
 - [`test-firestorm-automation-endpoint`](ideas/test-firestorm-automation-endpoint.md)
   — The patched Firestorm answers the same automation protocol (blocked by
   `viewer-automation-protocol` (done), `viewer-automation-remote-transport`
@@ -249,7 +249,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `server-world-sit-and-attach`)
 - [`server-lsl-lib-comms`](ideas/server-lsl-lib-comms.md) — Library tranche —
   chat, listens, dialogs and link messages (blocked by `server-lsl-vm-execution`
-  (done), `server-world-chat-routing`, `protocol-sim-script-messages`)
+  (done), `server-world-chat-routing` (done), `protocol-sim-script-messages`)
 - [`server-lsl-lib-detection-sensors`](ideas/server-lsl-lib-detection-sensors.md)
   — Library tranche — the detected block, sensors and raycasts (blocked by
   `server-lsl-state-and-events` (done), `server-world-ecs-store`,
@@ -310,7 +310,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (312)
+## ready (310)
 
 ### protocol
 
@@ -1021,9 +1021,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
 - [`test-e2e-live-grids`](ready/test-e2e-live-grids.md) — Run end-to-end tests
   against the local OpenSim and aditi (blocked by `test-e2e-stage` (done))
-- [`test-e2e-pilot-suite`](ready/test-e2e-pilot-suite.md) — The first end-to-end
-  tests — one viewer, two viewers, two regions (blocked by `test-e2e-stage`
-  (done))
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
@@ -1047,8 +1044,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The vendored library document lacks 50 current functions
 - [`server-lsl-memory-sizes`](ready/server-lsl-memory-sizes.md) — Measure Second
   Life's per-value memory costs and rotation arithmetic on aditi
-- [`server-world-chat-routing`](ready/server-world-chat-routing.md) — The fake
-  grid hears local chat and drops it
 - [`server-world-ecs-store`](ready/server-world-ecs-store.md) — An ECS scene
   store for the region, in place of a Vec of objects
 - [`server-world-heartbeat`](ready/server-world-heartbeat.md) — A region
@@ -1334,7 +1329,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1280)
+## done (1282)
 
 ### protocol
 
@@ -3758,6 +3753,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   GetDisplayNames
 - [`test-draw-distance`](done/test-draw-distance-set-draw-distance-confirm-no-error-and-any-echoed-state.md)
   — set draw distance; confirm no error and any echoed state
+- [`test-e2e-pilot-suite`](done/test-e2e-pilot-suite.md) — The first end-to-end
+  tests — one viewer, two viewers, two regions (blocked by `test-e2e-stage`
+  (done))
 - [`test-e2e-stage`](done/test-e2e-stage.md) — sl-e2e Stage — a fake grid,
   several viewers and grid control in one test (blocked by
   `viewer-automation-driver` (done), `test-e2e-viewer-process-launch` (done))
@@ -4170,6 +4168,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-vm-execution`](done/server-lsl-vm-execution.md) — The script VM —
   suspendable execution in per-tick slices (blocked by `server-lsl-compiler-ir`
   (done))
+- [`server-world-chat-routing`](done/server-world-chat-routing.md) — The fake
+  grid hears local chat and drops it
 
 ## deferred (31)
 

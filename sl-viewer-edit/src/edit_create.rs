@@ -992,16 +992,20 @@ fn base_shape(create: &CreateToolState) -> PrimShape {
     shape
 }
 
-/// Drop into edit on a freshly rezzed object: poll the tracked scene for a root
-/// object matching each pending rez (its kind and build point) and, unless it
-/// was a repeat-rez, select it and switch to the Move tool. Polling the scene
-/// rather than consuming the `ObjectAdded` event stream is robust to the
-/// object's entity not being spawned the frame its event lands. Expired pending
-/// rezzes are dropped.
+/// Drop into edit on a freshly rezzed object: look among the root objects that
+/// entered the scene since the last run for one matching each pending rez (its
+/// kind and build point) and, unless it was a repeat-rez, select it and switch
+/// to the Move tool. Reading the scene rather than the `ObjectAdded` event
+/// stream is robust to the object's entity not being spawned the frame its
+/// event lands. Expired pending rezzes are dropped.
+///
+/// Only *new* entities are candidates: a rez lands on a surface, and the
+/// object it landed on is within the match slop of its build point, so an
+/// object already in the scene would be taken for the one just rezzed.
 fn select_new_object(
     time: Res<Time>,
     objects: Res<ObjectState>,
-    scene_objects: Query<(Entity, &SceneObject, &ObjectSlMotion)>,
+    scene_objects: Query<(Entity, &SceneObject, &ObjectSlMotion), Added<SceneObject>>,
     mut pending: ResMut<PendingRezzes>,
     mut selection: ResMut<SelectionSet>,
     mut tool: ResMut<EditToolState>,

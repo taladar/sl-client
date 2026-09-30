@@ -13,7 +13,7 @@ use sl_proto::{
     RegionIdentity, RegionLocalObjectId, SimSession, SimulatorFeatures, Uuid, VoiceConfig,
     install_preset_day_cycle, region_name_from_wire,
 };
-use sl_types::key::AgentKey;
+use sl_types::key::{AgentKey, ObjectKey};
 use sl_types::lsl::Vector;
 use sl_types::map::RegionCoordinates;
 use sl_wire::{
@@ -2147,6 +2147,60 @@ impl FakeAgent {
         drop(guard);
         self.shared.finish_flush(outcome).await;
         result
+    }
+
+    /// Say `line` in this session's region, as an object's `llSay` would:
+    /// every avatar in range and every listen that admits it hears it, the
+    /// same way as a line an avatar typed ([`crate::chat`]).
+    pub async fn say(&self, line: crate::chat::Line) {
+        let (world, changes, seq) = {
+            let state = self.shared.state.lock().await;
+            (Arc::clone(&state.world), state.changes.clone(), state.seq)
+        };
+        let change = world.lock().say(line);
+        // A region whose sessions have all gone has nobody to hear it.
+        drop(changes.send(crate::world::RegionUpdate {
+            source: seq,
+            change,
+        }));
+    }
+
+    /// Register a listen of the object `listener` in this session's region
+    /// for what `filter` admits, as a script's `llListen` would; its id, and
+    /// every line it hears.
+    pub async fn listen(
+        &self,
+        listener: ObjectKey,
+        filter: crate::chat::ListenFilter,
+    ) -> (
+        crate::chat::ListenId,
+        tokio::sync::mpsc::UnboundedReceiver<crate::chat::Line>,
+    ) {
+        self.region_world()
+            .await
+            .lock()
+            .listens
+            .listen(listener, filter)
+    }
+
+    /// Turn a listen off or back on (`llListenControl`); whether there was
+    /// one.
+    pub async fn set_listen_active(&self, id: crate::chat::ListenId, active: bool) -> bool {
+        self.region_world()
+            .await
+            .lock()
+            .listens
+            .set_active(id, active)
+    }
+
+    /// Remove a listen (`llListenRemove`); whether there was one.
+    pub async fn remove_listen(&self, id: crate::chat::ListenId) -> bool {
+        self.region_world().await.lock().listens.remove(id)
+    }
+
+    /// This session's region world, the session's lock already released.
+    async fn region_world(&self) -> crate::world::RegionWorld {
+        Arc::clone(&self.shared.state.lock().await.world)
     }
 
     /// Re-sends this session's own avatar **seated** on `seat` (a region-local

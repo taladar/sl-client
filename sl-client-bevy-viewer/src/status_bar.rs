@@ -273,6 +273,21 @@ enum StatusReadout {
     Fps,
 }
 
+impl StatusReadout {
+    /// The read-out's `Name`: its test id, which an automation locator
+    /// addresses it by.
+    const fn test_id(self) -> &'static str {
+        match self {
+            Self::Region => "status-readout:region",
+            Self::Coords => "status-readout:coordinates",
+            Self::ParcelName => "status-readout:parcel",
+            Self::Balance => "status-readout:balance",
+            Self::Time => "status-readout:time",
+            Self::Fps => "status-readout:fps",
+        }
+    }
+}
+
 /// Marker on the L$ balance read-out text node, so the snapshot floater can find
 /// and blank it for a shot without knowing this module's private
 /// [`StatusReadout`] enum (`viewer-snapshot-hide-balance`). Its slot keeps its
@@ -533,7 +548,7 @@ fn spawn_readout(
             text_node,
             ClassList::new_with_classes(["sk-status-readout"]),
             readout,
-            Name::new("status-readout"),
+            Name::new(readout.test_id()),
             ChildOf(slot_entity),
         ))
         .id();

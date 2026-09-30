@@ -31,8 +31,9 @@ use sl_client_bevy::{AgentKey, ObjectKey, ScopedObjectId, SlIdentity, Uuid};
 use sl_viewer_kit::coords::{bevy_to_sl_vec, region_offset_bevy};
 use sl_viewer_ui_core::synthetic_input::{InputAction, InputStep};
 use sl_viewer_world_api::{
-    AvatarState, EditToolState, FrameObject, ObjectState, PickProbes, PressOutcome, ProbeId,
-    ProbeTarget, ProbeTicket, SelectionAnswer, SelectionProbes, SelectionQuery, ViewerCamera,
+    AvatarState, EditTool, EditToolState, FrameObject, ObjectState, PickProbes, PressOutcome,
+    ProbeId, ProbeTarget, ProbeTicket, SelectionAnswer, SelectionProbes, SelectionQuery,
+    ViewerCamera,
 };
 
 use crate::pursuit::{DEFAULT_DEADLINE, DEFAULT_DEADLINE_FRAMES, PursuitError};
@@ -108,10 +109,16 @@ pub enum WorldIntent {
     /// The pointer over it: its hover tip.
     Hover,
     /// A left click in build mode, which selects. Waits for the build tool to
-    /// be active; outside it the same click would touch. Judged by the
+    /// be active on a tool that selects; outside it the same click would
+    /// touch, and with the Create tool it would rez. Judged by the
     /// selection gesture's own object picker, and a point the transform rig
     /// would take is not on the target.
     Select,
+    /// A left click with the build tool's Create tool, which rezzes the picked
+    /// shape where it lands. Waits for the Create tool; with any other tool the
+    /// same click would select. Judged by the pick resolver, whose hit is the
+    /// surface the placer's own ray strikes.
+    Place,
     /// Drop what a drag started at this point (logical pixels — an inventory
     /// row, found with a UI locator) carries onto the target: press there,
     /// move onto the target, rest while the drag's world pick catches up,
@@ -126,8 +133,11 @@ pub enum AimStage {
     Resolving,
     /// Waiting for the camera and the target to hold still.
     Settling,
-    /// Waiting for the build tool (a [`WorldIntent::Select`]).
+    /// Waiting for the build tool on a tool that selects (a
+    /// [`WorldIntent::Select`] or a sweep).
     BuildMode,
+    /// Waiting for the build tool's Create tool (a [`WorldIntent::Place`]).
+    CreateTool,
     /// Asking the pick resolver about candidate points.
     Probing,
     /// Framing the target with the camera, because it failed this check.
@@ -142,6 +152,7 @@ impl AimStage {
             Self::Resolving => ActionabilityCheck::Attached,
             Self::Settling => ActionabilityCheck::Stable,
             Self::BuildMode => ActionabilityCheck::BuildMode,
+            Self::CreateTool => ActionabilityCheck::CreateTool,
             Self::Probing => ActionabilityCheck::ReceivesEvents,
             Self::Revealing(check) => check,
         }
@@ -180,7 +191,7 @@ impl WorldTarget {
     #[must_use]
     pub fn input(&self) -> InputAction {
         match self.intent {
-            WorldIntent::Click | WorldIntent::Select => {
+            WorldIntent::Click | WorldIntent::Select | WorldIntent::Place => {
                 InputAction::click(self.aim, MouseButton::Left)
             }
             WorldIntent::RightClick => InputAction::click(self.aim, MouseButton::Right),
@@ -684,10 +695,18 @@ impl WorldAim {
         if self.intent == WorldIntent::Select
             && !world
                 .get_resource::<EditToolState>()
-                .is_some_and(|tool| tool.active)
+                .is_some_and(|tool| tool.active && tool.tool.selects_objects())
         {
             self.stability = None;
             return Ok(AimProgress::Waiting(AimStage::BuildMode));
+        }
+        if self.intent == WorldIntent::Place
+            && !world
+                .get_resource::<EditToolState>()
+                .is_some_and(|tool| tool.active && tool.tool == EditTool::Create)
+        {
+            self.stability = None;
+            return Ok(AimProgress::Waiting(AimStage::CreateTool));
         }
         if !self.observe(sight.pose) || self.frames < self.settle_from {
             return Ok(AimProgress::Waiting(AimStage::Settling));

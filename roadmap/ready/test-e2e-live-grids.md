@@ -11,10 +11,10 @@ refs: [server-world-chat-routing, server-world-agent-movement]
 
 Context: [context/automation.md](../context/automation.md).
 
-The fake grid does not yet relay chat between sessions, show real avatars
-to each other, or move them — and it is a separate track to make it do so.
-A test that needs any of that should still be writable today, and some
-behaviour must be checked against a real grid regardless.
+The fake grid does not yet show real avatars to each other, or move them —
+and it is a separate track to make it do so. A test that needs any of that
+should still be writable today, and some behaviour must be checked against a
+real grid regardless.
 
 ## Wanted
 

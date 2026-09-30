@@ -34,9 +34,15 @@ pub enum ActionabilityCheck {
     /// nothing covers it. For a thing in the world: the viewer's own pick
     /// resolver says a click there lands on it.
     ReceivesEvents,
-    /// The build tool is active. Checked only by a world select, which is a
-    /// click that selects only in build mode (outside it, the click touches).
+    /// The build tool is active on a tool that selects. Checked by a world
+    /// select or sweep, which select only in build mode (outside it a click
+    /// touches) and not with the Create or Land tool (a click there rezzes or
+    /// works on the ground).
     BuildMode,
+    /// The build tool is active on its Create tool. Checked only by a world
+    /// place, a click that rezzes only with that tool (with another, the
+    /// click selects).
+    CreateTool,
 }
 
 impl ActionabilityCheck {
@@ -52,6 +58,7 @@ impl ActionabilityCheck {
             Self::Editable => "editable",
             Self::ReceivesEvents => "receives_events",
             Self::BuildMode => "build_mode",
+            Self::CreateTool => "create_tool",
         }
     }
 }

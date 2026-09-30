@@ -587,6 +587,20 @@ fn handle_select_pointer(
     let buttons = &pointer.buttons;
     let alt = keyboard.pressed(KeyCode::AltLeft) || keyboard.pressed(KeyCode::AltRight);
 
+    // -- Create tool: a plain click places, it does not select. ---------------
+    // The reference's `LLToolCompCreate::handleMouseDown` hands a plain press to
+    // the placer and picks (selects) only on a Shift / Ctrl press. Without this
+    // a click that rezzed on an object also selected the object it landed on.
+    let modified = keyboard.any_pressed([
+        KeyCode::ShiftLeft,
+        KeyCode::ShiftRight,
+        KeyCode::ControlLeft,
+        KeyCode::ControlRight,
+    ]);
+    if tool.tool == EditTool::Create && !modified && gesture.state.is_none() {
+        return;
+    }
+
     // -- Select Face tool: pick a per-face texture-entry selection. -----------
     // A distinct mode (the reference's `LLToolFace`): a click resolves to one
     // prim face rather than sweeping a rubber band or driving a gizmo, so it

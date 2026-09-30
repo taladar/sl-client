@@ -1222,6 +1222,21 @@ region's own lock:
   `Object` snapshots (`EditHistory`), which is the only definition of "undo"
   that composes across edits of different kinds.
 
+  Part of an `ObjectUpdate` is **per viewer**: the `PrimFlags` that say what
+  the receiving agent may do with the object (`OBJECT_MODIFY`, `_MOVE`,
+  `_COPY`, `_TRANSFER`, `_YOU_OWNER`, `_ANY_OWNER`, `_OWNER_MODIFY`), which a
+  viewer greys its edit controls and pie slices by. They are never stored on
+  the object: every update leaves the grid through `world::send_objects`,
+  which works them out for that session's agent (`as_seen_by`, OpenSim's
+  `GenerateClientFlags`) from the object's owner and masks. The owner gets
+  what the owner mask grants; anyone else what the everyone mask grants.
+  Group sharing is not modelled. A prim nobody has changed carries OpenSim's
+  new-prim masks — everything to the owner, nothing to anyone else — so a
+  prim one viewer rezzes is editable there and nowhere else, and a
+  permissions edit re-sends the object so each viewer's flags follow. Until
+  2026-09-30 the flags were whatever the rez sent (none), so on the fake grid
+  no viewer, the owner included, could edit anything.
+
 - **`parcel_edits.rs`** — About Land, and the land a client buys, deeds,
   abandons and reclaims. A parcel has **one** record and a
   `ParcelPropertiesUpdate` carries the whole of it, so an edit is "read the
@@ -1312,6 +1327,33 @@ form and the ban list, each refetched and restored), `region-info`,
 `estate-info`, `estate-access`, and `asset-round-trip` (every seeded
 inventory class fetched, every savable one saved and re-fetched, plus a prim
 this case rezzes and drops an item into).
+
+### Local chat
+
+`chat.rs` routes a line said in a region the way OpenSim's
+`ChatModule.DeliverChatToAvatars` does, and every line takes one path: a
+viewer's `ChatFromViewer` is said where its agent stands, under its name, an
+object speaks through `FakeAgent::say`, and both go through
+`SceneFixtures::say`, which offers the line to the region's **listens** and
+publishes a `RegionChange::Chat`. Each session's region watcher then decides
+whether its own avatar hears it — including the speaker's own session, whose
+echo is how a viewer shows the line it typed.
+
+- An avatar hears channel 0 and the debug channel only: a whisper within
+  10 m, a say within 20 m, a shout within 100 m; a region-say, a debug line
+  and the typing indicators at any distance; an owner-say only its owner. A
+  line on any other channel reaches no viewer at all — that is what a
+  dialog's reply channel relies on.
+- A listen (`llListen`'s channel, name, key and message filter; switched off
+  and on, removed) hears any channel, from its object's position, never its
+  own object's lines. With no script engine yet, whoever registers it through
+  `FakeAgent::listen` is its consumer and receives each line it hears.
+- An avatar is where it last arrived — its login, or an intra-region
+  teleport, which records the new position — since the grid tracks no
+  walking. A child agent hears nothing; chat across a border is not modelled.
+
+Offline conformance: `chat-self-echo`, `chat-hear-other` and
+`chat-whisper-shout-range`.
 
 ### A parcel's other half
 

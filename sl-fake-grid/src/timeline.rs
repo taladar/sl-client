@@ -71,7 +71,7 @@ use crate::driver::SharedSim;
 use crate::error::Error;
 use crate::runtime::GridCore;
 use crate::scenario::SimHook;
-use crate::world::{REAL_TIME_DILATION, RegionChange, SceneFixtures};
+use crate::world::{RegionChange, SceneFixtures};
 
 /// A test of a drained [`ServerEvent`]: what [`At::OnEvent`] waits for.
 pub type EventPredicate = Arc<dyn Fn(&ServerEvent) -> bool + Send + Sync>;
@@ -1125,9 +1125,7 @@ fn edit_object(
 /// Streams one object to this session's client, logging a failure rather than
 /// failing the step.
 fn push_object(sim: &mut SimSession, object: &Object, now: Instant) {
-    if let Err(error) =
-        sim.send_object_update(std::slice::from_ref(object), REAL_TIME_DILATION, now)
-    {
+    if let Err(error) = crate::world::send_objects(sim, std::slice::from_ref(object), now) {
         tracing::warn!("streaming a scripted object failed: {error}");
     }
 }

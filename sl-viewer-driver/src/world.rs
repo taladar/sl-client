@@ -176,13 +176,25 @@ impl WorldHandle {
     }
 
     /// Select the one thing this names with a click in build mode, which
-    /// the action waits for.
+    /// the action waits for — on a tool that selects: the Build window opens
+    /// on the Create tool when nothing is selected, and a click with it rezzes.
     ///
     /// # Errors
     ///
-    /// As [`touch`](Self::touch), and when build mode never comes.
+    /// As [`touch`](Self::touch), and when build mode on a selecting tool
+    /// never comes.
     pub async fn select(&self) -> Result<WorldNode, DriverError> {
         self.act(WorldAction::Select).await
+    }
+
+    /// Rez the Build window's picked shape on the one thing this names: a
+    /// click with the Create tool, which the action waits for.
+    ///
+    /// # Errors
+    ///
+    /// As [`touch`](Self::touch), and when the Create tool never comes.
+    pub async fn place(&self) -> Result<WorldNode, DriverError> {
+        self.act(WorldAction::Place).await
     }
 
     /// Sit: on the one object this names, by its pie's *Sit Here*; for the

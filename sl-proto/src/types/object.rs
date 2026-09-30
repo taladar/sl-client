@@ -32,11 +32,34 @@ pub mod prim_flags {
     /// The object is physical (`FLAGS_USE_PHYSICS`), the physics half of an
     /// `ObjectFlagUpdate`.
     pub const USE_PHYSICS: u32 = 1 << 0;
+    /// The receiving agent may modify the object (`FLAGS_OBJECT_MODIFY`).
+    /// Agent-relative, like every `OBJECT_*` bit: a simulator works it out
+    /// for each viewer it sends the object to.
+    pub const OBJECT_MODIFY: u32 = 1 << 2;
+    /// The receiving agent may copy the object (`FLAGS_OBJECT_COPY`).
+    pub const OBJECT_COPY: u32 = 1 << 3;
+    /// Somebody owns the object (`FLAGS_OBJECT_ANY_OWNER`).
+    pub const OBJECT_ANY_OWNER: u32 = 1 << 4;
+    /// The receiving agent owns the object (`FLAGS_OBJECT_YOU_OWNER`).
+    pub const OBJECT_YOU_OWNER: u32 = 1 << 5;
+    /// The object holds a running script (`FLAGS_SCRIPTED`).
+    pub const SCRIPTED: u32 = 1 << 6;
+    /// A script in the object handles touches (`FLAGS_HANDLE_TOUCH`): what a
+    /// viewer enables its Touch entries on.
+    pub const HANDLE_TOUCH: u32 = 1 << 7;
+    /// The receiving agent may move the object (`FLAGS_OBJECT_MOVE`).
+    pub const OBJECT_MOVE: u32 = 1 << 8;
     /// The object is phantom — no collisions (`FLAGS_PHANTOM`).
     pub const PHANTOM: u32 = 1 << 10;
     /// The object is listed in parcel search (`FLAGS_INCLUDE_IN_SEARCH`), what
     /// an `ObjectIncludeInSearch` sets.
     pub const INCLUDE_IN_SEARCH: u32 = 1 << 15;
+    /// The receiving agent may transfer (take) the object
+    /// (`FLAGS_OBJECT_TRANSFER`).
+    pub const OBJECT_TRANSFER: u32 = 1 << 17;
+    /// The receiving agent owns the object and may modify it
+    /// (`FLAGS_OBJECT_OWNER_MODIFY`).
+    pub const OBJECT_OWNER_MODIFY: u32 = 1 << 28;
     /// The object is deleted a minute after it is rezzed
     /// (`FLAGS_TEMPORARY_ON_REZ`) — the "temporary" checkbox of the build
     /// floater, and the temporary half of an `ObjectFlagUpdate`.

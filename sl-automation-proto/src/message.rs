@@ -1191,6 +1191,7 @@ mod tests {
             ActionabilityCheck::Editable,
             ActionabilityCheck::ReceivesEvents,
             ActionabilityCheck::BuildMode,
+            ActionabilityCheck::CreateTool,
         ] {
             let json = round_trip(&check)?;
             assert_eq!(json, format!("\"{check}\""), "display matches serde");

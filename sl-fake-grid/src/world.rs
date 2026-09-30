@@ -27,7 +27,7 @@ use sl_proto::{
     ObjectPlayingAnimation, ObjectProperties, ParcelAccessEntry, ParcelAccessScope, ParcelCategory,
     ParcelDetails, ParcelInfo, ParcelRequestResult, ParcelStatus, PrimShape, PrimShapeParams,
     RegionIdentity, RegionLocalObjectId, RegionLocalParcelId, RegionTerrainComposition, SaleType,
-    ServerEvent, SimSession, TaskInventoryItem, TerrainLayerType, TransactionId, pcode,
+    ServerEvent, SimSession, TaskInventoryItem, TerrainLayerType, TransactionId, pcode, prim_flags,
 };
 use sl_types::key::{AgentKey, InventoryFolderKey, InventoryKey, ObjectKey, OwnerKey, ParcelKey};
 use sl_types::lsl::{Rotation, Vector};
@@ -53,7 +53,7 @@ const OVERLAY_WEST_LINE: u8 = 0x40;
 /// The parcel-overlay bit marking a cell on a parcel's south edge.
 const OVERLAY_SOUTH_LINE: u8 = 0x80;
 /// The physics time dilation reported on fixture object updates: real time.
-pub(crate) const REAL_TIME_DILATION: u16 = 0xFFFF;
+const REAL_TIME_DILATION: u16 = 0xFFFF;
 /// The sequence id of an unsolicited agent-parcel push (what OpenSim's
 /// `SendLandUpdateToClient` sends).
 const UNSOLICITED_SEQUENCE_ID: i32 = 0;
@@ -165,6 +165,9 @@ pub struct SceneFixtures {
     /// here rather than on the identity because the identity is a per-session
     /// copy: a terrain texture is the region's, not one viewer's.
     terrain_composition: Option<RegionTerrainComposition>,
+    /// The listens registered in the region: what hears a line on a channel
+    /// no avatar does ([`crate::chat`]).
+    pub listens: crate::chat::Listens,
 }
 
 /// One parcel's two access lists: who may come in, and who may not.
@@ -331,6 +334,24 @@ pub enum RegionChange {
     /// session's identity, so what travels here is the composition rather than
     /// a finished message.
     TerrainRetextured(Box<RegionTerrainComposition>),
+    /// A line was said in the region ([`crate::chat`]). The one change that
+    /// reaches the session that made it too: a speaker hears its own line,
+    /// which is how its viewer shows it.
+    Chat(Box<crate::chat::Line>),
+}
+
+/// Where the object `key` among `objects` hears from, region-local metres:
+/// its own position for a linkset root, its root's for a child prim (whose own
+/// position is an offset from it).
+fn listening_position(objects: &[Object], key: ObjectKey) -> Option<Vector> {
+    let object = objects.iter().find(|object| object.full_id == key)?;
+    if object.parent_id.0 == 0 {
+        return Some(object.motion.position.clone());
+    }
+    objects
+        .iter()
+        .find(|root| root.local_id == object.parent_id)
+        .map(|root| root.motion.position.clone())
 }
 
 /// The name a viewer gives a prim nobody has named — the reference viewer's
@@ -346,18 +367,31 @@ const DEFAULT_OBJECT_NAME: &str = "Object";
 /// one field that never matched.
 const FIXTURE_CREATION_DATE: i32 = 1_700_000_000;
 
-/// Permissions with everything granted on every mask: what the fake grid's own
-/// avatar gets on an object it rezzed itself.
+/// Permissions with everything granted on every mask: what an inventory item
+/// the grid files away (a take) carries.
 ///
-/// The fake grid enforces no permissions — every account owns the region's
-/// content and nothing is for sale — so a mask that withheld anything would be
-/// a rule with no rule behind it.
+/// The fake grid enforces no permissions on an edit or a take — nothing is for
+/// sale, and the grid refuses no write — so an item mask that withheld anything
+/// would be a rule with no rule behind it. What a viewer is *told* it may do
+/// with an in-world object is another matter: that follows the object's own
+/// masks ([`as_seen_by`]).
 const FULL_PERMISSIONS: sl_wire::Permissions5 = sl_wire::Permissions5 {
     base: sl_wire::Permissions::ALL,
     owner: sl_wire::Permissions::ALL,
     group: sl_wire::Permissions::ALL,
     everyone: sl_wire::Permissions::ALL,
     next_owner: sl_wire::Permissions::ALL,
+};
+
+/// The permissions of a prim nobody has changed the permissions of: OpenSim's
+/// `SceneObjectPart` defaults. The owner may do anything, the group and
+/// everyone else nothing, and a next owner may move and transfer it.
+const NEW_OBJECT_PERMISSIONS: sl_wire::Permissions5 = sl_wire::Permissions5 {
+    base: sl_wire::Permissions::ALL,
+    owner: sl_wire::Permissions::ALL,
+    group: sl_wire::Permissions::NONE,
+    everyone: sl_wire::Permissions::NONE,
+    next_owner: sl_wire::Permissions::MOVE.union(sl_wire::Permissions::TRANSFER),
 };
 
 /// One in-world object's task (prim) inventory: what it contains and the
@@ -524,7 +558,19 @@ impl SceneFixtures {
             estate: EstateFixture::default(),
             limits: None,
             terrain_composition: None,
+            listens: crate::chat::Listens::default(),
         }
+    }
+
+    /// Say `line` in the region to its listens; the change that says it to the
+    /// region's avatars, each session's watcher deciding whether its own
+    /// avatar hears it. The one path every line takes, an avatar's and an
+    /// object's.
+    pub fn say(&mut self, line: crate::chat::Line) -> RegionChange {
+        let objects = &self.objects;
+        self.listens
+            .hear(&line, |key| listening_position(objects, key));
+        RegionChange::Chat(Box::new(line))
     }
 
     /// Adds an object's stated task inventory under its region-local id — a
@@ -1393,7 +1439,7 @@ pub(crate) fn push_arrival_world(
         z: placement.z(),
     };
     let avatar = avatar_prim(world.avatar_local_id, identity, arrival.clone());
-    if let Err(error) = sim.send_object_update(&[avatar], REAL_TIME_DILATION, now) {
+    if let Err(error) = send_objects(sim, &[avatar], now) {
         tracing::warn!("rezzing the arriving avatar failed: {error}");
     }
     push_own_appearance(identity, assets, bakes, sim, now);
@@ -1410,7 +1456,7 @@ pub(crate) fn push_arrival_world(
     }
     push_terrain(terrain, sim, now);
     if !world.objects.is_empty()
-        && let Err(error) = sim.send_object_update(&world.objects, REAL_TIME_DILATION, now)
+        && let Err(error) = send_objects(sim, &world.objects, now)
     {
         tracing::warn!("rezzing the fixture objects failed: {error}");
     }
@@ -1442,7 +1488,7 @@ pub(crate) fn push_child_world(
     now: Instant,
 ) {
     if !world.objects.is_empty()
-        && let Err(error) = sim.send_object_update(&world.objects, REAL_TIME_DILATION, now)
+        && let Err(error) = send_objects(sim, &world.objects, now)
     {
         tracing::warn!("rezzing a neighbour's objects failed: {error}");
     }
@@ -1582,7 +1628,7 @@ fn push_npcs(
         return;
     }
     let bodies: Vec<Object> = npcs.iter().map(NpcFixture::avatar_prim).collect();
-    if let Err(error) = sim.send_object_update(&bodies, REAL_TIME_DILATION, now) {
+    if let Err(error) = send_objects(sim, &bodies, now) {
         tracing::warn!("rezzing the NPC avatars failed: {error}");
     }
     for npc in npcs {
@@ -1604,7 +1650,7 @@ fn push_npcs(
         .flat_map(|npc| npc.attachments.iter().cloned())
         .collect();
     if !attachments.is_empty()
-        && let Err(error) = sim.send_object_update(&attachments, REAL_TIME_DILATION, now)
+        && let Err(error) = send_objects(sim, &attachments, now)
     {
         tracing::warn!("rezzing the NPC attachments failed: {error}");
     }
@@ -1626,7 +1672,7 @@ pub(crate) fn receive_crossing(
     now: Instant,
 ) {
     if !objects.is_empty()
-        && let Err(error) = sim.send_object_update(&objects, REAL_TIME_DILATION, now)
+        && let Err(error) = send_objects(sim, &objects, now)
     {
         tracing::warn!("streaming what crossed into the region failed: {error}");
     }
@@ -1762,9 +1808,7 @@ pub(crate) fn answer_world_request(
                 &params.shape,
             );
             world.objects.push(object.clone());
-            if let Err(error) =
-                sim.send_object_update(std::slice::from_ref(&object), REAL_TIME_DILATION, now)
-            {
+            if let Err(error) = send_objects(sim, std::slice::from_ref(&object), now) {
                 tracing::warn!("streaming a rezzed object back failed: {error}");
             }
             return vec![RegionChange::Rezzed(Box::new(object))];
@@ -1774,6 +1818,23 @@ pub(crate) fn answer_world_request(
         // region mints every id they come back under.
         ServerEvent::RezObjectFromInventory { params } => {
             return rez_from_inventory(world, assets, mint, sim, params, now);
+        }
+        // Local chat: said where the avatar stands, under its name.
+        ServerEvent::Chat {
+            message,
+            channel,
+            chat_type,
+        } => {
+            let line = crate::chat::Line {
+                source: sl_proto::ChatSource::Agent(identity.agent_id),
+                from_name: format!("{} {}", identity.first_name, identity.last_name),
+                owner_id: identity.agent_id.uuid(),
+                chat_type: *chat_type,
+                channel: *channel,
+                position: crate::chat::agent_position(sim),
+                message: message.clone(),
+            };
+            return vec![world.say(line)];
         }
         // A take, a save, a return, a delete to trash. What each does is the
         // destination's business, and the destination alone decides both
@@ -2007,7 +2068,7 @@ pub(crate) fn answer_world_request(
                     z: placement.z(),
                 },
             );
-            if let Err(error) = sim.send_object_update(&[avatar], REAL_TIME_DILATION, now) {
+            if let Err(error) = send_objects(sim, &[avatar], now) {
                 tracing::warn!("standing the agent up failed: {error}");
             }
         }
@@ -2079,7 +2140,7 @@ pub(crate) fn answer_world_request(
                 .filter(|object| objects.iter().any(|(id, _)| *id == object.local_id))
                 .collect();
             if !matching.is_empty()
-                && let Err(error) = sim.send_object_update(&matching, REAL_TIME_DILATION, now)
+                && let Err(error) = send_objects(sim, &matching, now)
             {
                 tracing::warn!("answering an object refetch failed: {error}");
             }
@@ -2155,9 +2216,10 @@ pub fn region_limits(identity: &RegionIdentity) -> sl_proto::RegionLimits {
 /// holds about a freshly rezzed prim.
 ///
 /// Named `Object` — the reference viewer's own `DEFAULT_OBJECT_NAME` — with no
-/// description, owned and created by whoever owns the object, fully
-/// permissive, not for sale, uncategorised: the state the build floater shows
-/// for a prim that was rezzed and left alone. The inventory serial is filled in
+/// description, owned and created by whoever owns the object, with a new
+/// prim's permissions (everything to the owner, nothing to anyone else), not
+/// for sale, uncategorised: the state the build floater shows for a prim that
+/// was rezzed and left alone. The inventory serial is filled in
 /// by [`SceneFixtures::properties_of`], which is the only place that knows it.
 #[must_use]
 pub fn default_object_properties(object: &Object) -> ObjectProperties {
@@ -2169,7 +2231,7 @@ pub fn default_object_properties(object: &Object) -> ObjectProperties {
         group: None,
         last_owner_id: uuid::Uuid::nil(),
         creation_date: FIXTURE_CREATION_DATE.unsigned_abs().into(),
-        permissions: FULL_PERMISSIONS,
+        permissions: NEW_OBJECT_PERMISSIONS,
         ownership_cost: LindenAmount(0),
         sale_type: SaleType::NotForSale.to_code(),
         sale_price: None,
@@ -2187,6 +2249,95 @@ pub fn default_object_properties(object: &Object) -> ObjectProperties {
         sit_name: String::new(),
         texture_ids: Vec::new(),
     }
+}
+
+/// The `update_flags` bits a simulator works out for each viewer from the
+/// object's permissions, rather than storing on the object: what this agent
+/// may do with it and whether it owns it (OpenSim's `NOT_DEFAULT_FLAGS`).
+const AGENT_RELATIVE_FLAGS: u32 = prim_flags::OBJECT_MODIFY
+    | prim_flags::OBJECT_COPY
+    | prim_flags::OBJECT_ANY_OWNER
+    | prim_flags::OBJECT_YOU_OWNER
+    | prim_flags::OBJECT_MOVE
+    | prim_flags::OBJECT_TRANSFER
+    | prim_flags::OBJECT_OWNER_MODIFY;
+
+/// `object` as the viewer of `agent` is sent it: its `update_flags` carrying
+/// that agent's own permission bits — OpenSim's `GenerateClientFlags`, owner
+/// and everyone half. The owner gets what the owner mask grants and is told it
+/// owns the object; anyone else gets what the everyone mask grants. Move and
+/// modify need the owner mask to allow moving at all (OpenSim's "unlocked").
+///
+/// Group sharing is not modelled: the fake grid has no group roles to ask, so a
+/// member of the object's group is judged as everyone. An avatar is not a prim
+/// and carries no such bits.
+#[must_use]
+pub fn as_seen_by(object: &Object, agent: Option<AgentKey>) -> Object {
+    let mut seen = object.clone();
+    if object.pcode == pcode::AVATAR {
+        return seen;
+    }
+    let (owner, permissions) = object.properties.as_ref().map_or_else(
+        || (object.owner_id, NEW_OBJECT_PERMISSIONS),
+        |properties| (properties.owner.uuid(), properties.permissions),
+    );
+    let owns = agent.is_some_and(|agent| agent.uuid() == owner && !owner.is_nil());
+    let granted = if owns {
+        permissions.owner
+    } else {
+        permissions.everyone
+    };
+    let unlocked = permissions.owner.contains(sl_wire::Permissions::MOVE);
+    let mut flags = object.update_flags & !AGENT_RELATIVE_FLAGS;
+    for (permission, flag, needs_unlocked) in [
+        (sl_wire::Permissions::COPY, prim_flags::OBJECT_COPY, false),
+        (sl_wire::Permissions::MOVE, prim_flags::OBJECT_MOVE, true),
+        (
+            sl_wire::Permissions::MODIFY,
+            prim_flags::OBJECT_MODIFY,
+            true,
+        ),
+        (
+            sl_wire::Permissions::TRANSFER,
+            prim_flags::OBJECT_TRANSFER,
+            false,
+        ),
+    ] {
+        if granted.contains(permission) && (unlocked || !needs_unlocked) {
+            flags |= flag;
+        }
+    }
+    if !owner.is_nil() {
+        flags |= prim_flags::OBJECT_ANY_OWNER;
+    }
+    if owns {
+        flags |= prim_flags::OBJECT_YOU_OWNER;
+        if flags & prim_flags::OBJECT_MODIFY != 0 {
+            flags |= prim_flags::OBJECT_OWNER_MODIFY;
+        }
+    }
+    seen.update_flags = flags;
+    seen
+}
+
+/// Sends a full `ObjectUpdate` of `objects` to the session's viewer, each one
+/// [as that viewer's agent sees it](as_seen_by) — the only way an object
+/// update leaves the grid, so no viewer is ever told another's permissions.
+///
+/// # Errors
+///
+/// What [`SimSession::send_object_update`] fails with.
+pub fn send_objects(
+    sim: &mut SimSession,
+    objects: &[Object],
+    now: Instant,
+) -> Result<(), sl_proto::Error> {
+    let agent = sim.agent_id();
+    let seen: Vec<Object> = objects
+        .iter()
+        .map(|object| as_seen_by(object, agent))
+        .collect();
+    sim.send_object_update(&seen, REAL_TIME_DILATION, now)
 }
 
 /// Rezzes an inventory item back into the world: the other half of a take.
@@ -2279,7 +2430,7 @@ fn rez_from_inventory(
         }
     };
     world.objects.extend(rezzed.iter().cloned());
-    if let Err(error) = sim.send_object_update(&rezzed, REAL_TIME_DILATION, now) {
+    if let Err(error) = send_objects(sim, &rezzed, now) {
         tracing::warn!("streaming an object rezzed from inventory failed: {error}");
     }
     if !item.permissions.owner.contains(sl_wire::Permissions::COPY) {
@@ -2843,7 +2994,7 @@ pub(crate) fn push_seated_avatar(
 ) {
     let mut avatar = avatar_prim(world.avatar_local_id, identity, offset);
     avatar.parent_id = seat;
-    if let Err(error) = sim.send_object_update(&[avatar], REAL_TIME_DILATION, now) {
+    if let Err(error) = send_objects(sim, &[avatar], now) {
         tracing::warn!("seating the agent's avatar failed: {error}");
     }
 }
@@ -2883,6 +3034,84 @@ mod test {
     /// A fixed agent for the overlay tests.
     fn agent(id: u128) -> AgentKey {
         AgentKey::from(uuid::Uuid::from_u128(id))
+    }
+
+    /// A one-metre box owned by agent `0x1`, carrying a physics bit of its
+    /// own and a stale permission bit a viewer must never be sent.
+    fn owned_box() -> Object {
+        let mut object = box_prim(
+            RegionLocalObjectId(7),
+            ObjectKey::from(uuid::Uuid::from_u128(0x77)),
+            agent(0x1),
+            Vector {
+                x: 128.0,
+                y: 128.0,
+                z: 25.0,
+            },
+            Vector {
+                x: 1.0,
+                y: 1.0,
+                z: 1.0,
+            },
+        );
+        object.update_flags = prim_flags::USE_PHYSICS | prim_flags::OBJECT_YOU_OWNER;
+        object
+    }
+
+    /// The owner of a new prim is told it owns it and may do anything with
+    /// it; anyone else is told somebody owns it and nothing more — and the
+    /// object's own bits reach both.
+    #[test]
+    fn a_new_prim_is_the_owners_to_edit_and_nobody_elses() {
+        let object = owned_box();
+        let owner = as_seen_by(&object, Some(agent(0x1))).update_flags;
+        let other = as_seen_by(&object, Some(agent(0x2))).update_flags;
+        assert_eq!(
+            owner,
+            prim_flags::USE_PHYSICS
+                | prim_flags::OBJECT_MODIFY
+                | prim_flags::OBJECT_COPY
+                | prim_flags::OBJECT_ANY_OWNER
+                | prim_flags::OBJECT_YOU_OWNER
+                | prim_flags::OBJECT_MOVE
+                | prim_flags::OBJECT_TRANSFER
+                | prim_flags::OBJECT_OWNER_MODIFY
+        );
+        assert_eq!(
+            other,
+            prim_flags::USE_PHYSICS | prim_flags::OBJECT_ANY_OWNER
+        );
+    }
+
+    /// What the everyone mask grants, anyone else is told; a locked object
+    /// (its owner may not move it) is moved and modified by nobody.
+    #[test]
+    fn the_everyone_mask_decides_what_anyone_else_may_do() {
+        let mut object = owned_box();
+        let mut properties = default_object_properties(&object);
+        properties.permissions.everyone =
+            sl_wire::Permissions::MODIFY.union(sl_wire::Permissions::MOVE);
+        object.properties = Some(properties.clone());
+        assert_eq!(
+            as_seen_by(&object, Some(agent(0x2))).update_flags,
+            prim_flags::USE_PHYSICS
+                | prim_flags::OBJECT_ANY_OWNER
+                | prim_flags::OBJECT_MOVE
+                | prim_flags::OBJECT_MODIFY
+        );
+        properties.permissions.owner =
+            sl_wire::Permissions::ALL.difference(sl_wire::Permissions::MOVE);
+        object.properties = Some(properties);
+        assert_eq!(
+            as_seen_by(&object, Some(agent(0x2))).update_flags,
+            prim_flags::USE_PHYSICS | prim_flags::OBJECT_ANY_OWNER
+        );
+        assert_eq!(
+            as_seen_by(&object, Some(agent(0x1))).update_flags
+                & (prim_flags::OBJECT_MOVE | prim_flags::OBJECT_MODIFY),
+            0,
+            "not even the owner moves a locked object"
+        );
     }
 
     /// A region identity at grid `(grid_x, grid_y)`, as the runtime mints one

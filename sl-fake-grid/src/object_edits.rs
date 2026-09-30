@@ -35,7 +35,7 @@ use sl_proto::{
 use sl_types::key::ObjectKey;
 use sl_types::lsl::{Rotation, Vector};
 
-use crate::world::{REAL_TIME_DILATION, RegionChange, SceneFixtures};
+use crate::world::{RegionChange, SceneFixtures};
 
 /// The objects one session holds selected.
 ///
@@ -104,7 +104,10 @@ pub(crate) fn answer_object_edit(
             }));
         }
         // A grant sets the named bits and a revoke clears them: the message
-        // carries the bits being *changed*, not the mask's new value.
+        // carries the bits being *changed*, not the mask's new value. What each
+        // viewer may do with the object follows from the masks and travels in
+        // its update flags, so the object goes out again too — to each viewer
+        // with its own.
         ServerEvent::ObjectPermissionsSet {
             local_id,
             field,
@@ -112,14 +115,19 @@ pub(crate) fn answer_object_edit(
             mask,
             ..
         } => {
-            return Some(edit_properties(world, *local_id, sim, now, |properties| {
+            let mut changes = edit_properties(world, *local_id, sim, now, |properties| {
                 let target = field.select_mut(&mut properties.permissions);
                 *target = if *set {
                     target.union(*mask)
                 } else {
                     target.difference(*mask)
                 };
-            }));
+            });
+            if let Some(object) = world.object_by_local_id(*local_id) {
+                push_object(sim, &object, now);
+                changes.push(RegionChange::Updated(Box::new(object)));
+            }
+            return Some(changes);
         }
         ServerEvent::ObjectGroupSet {
             local_ids,
@@ -665,9 +673,7 @@ fn step_history(
 /// Streams one object to the client, logging a send failure rather than
 /// failing the edit.
 fn push_object(sim: &mut SimSession, object: &Object, now: Instant) {
-    if let Err(error) =
-        sim.send_object_update(std::slice::from_ref(object), REAL_TIME_DILATION, now)
-    {
+    if let Err(error) = crate::world::send_objects(sim, std::slice::from_ref(object), now) {
         tracing::warn!("streaming an edited object failed: {error}");
     }
 }

@@ -8,9 +8,10 @@ offline, deterministically, with no OpenSim and no network.
 That target is worth stating precisely, because "run LSL" hides most of
 the work. A script is not a function the grid calls; it is an
 event-driven state machine that reads and writes an authoritative world.
-The fake grid today has **no authority to read or write** — no tick, no
-agent position, no chat routing, no touch. Roughly half of the tasks in
-this topic are that missing simulator, not the language.
+The fake grid today has **little authority to read or write** — no tick, no
+walking agent position, no touch; local chat is routed and a listen registry
+exists (`sl-fake-grid/src/chat.rs`), waiting for scripts. Roughly half of
+the tasks in this topic are that missing simulator, not the language.
 
 ## Why, beyond "the fixtures should behave"
 

@@ -20,8 +20,8 @@ use crate::terrain::TerrainFixture;
 use crate::time::Now;
 use crate::udp_assets::{UdpAssetFixtures, answer_from_fixtures};
 use crate::world::{
-    AvatarIdentity, REAL_TIME_DILATION, RegionChange, RegionUpdate, RegionWorld,
-    answer_world_request, push_arrival_world, push_child_world,
+    AvatarIdentity, RegionChange, RegionUpdate, RegionWorld, answer_world_request,
+    push_arrival_world, push_child_world,
 };
 
 /// The lockable state of one logged-in session: the protocol machine, its
@@ -566,6 +566,10 @@ pub(crate) async fn run_udp_pump(shared: SharedSim) {
     }
 }
 
+/// The `audible` byte of a line heard in full: OpenSim's
+/// `ChatAudibleLevel.Fully`, the only level it sends.
+const FULLY_AUDIBLE: u8 = 1;
+
 /// The region watcher: streams the changes *other* sessions in this region
 /// made to the shared world — an object rezzed, an object taken away — to this
 /// session's viewer.
@@ -598,16 +602,19 @@ pub(crate) async fn run_region_watcher(
             }
             received = changes.recv() => {
                 match received {
-                    Ok(RegionUpdate { source, .. }) if source == seq => {}
+                    // A speaker hears its own line; every other change its
+                    // session was told about in the same breath.
+                    Ok(RegionUpdate { source, change })
+                        if source == seq && !matches!(change, RegionChange::Chat(_)) => {}
                     Ok(RegionUpdate { change, .. }) => {
                         let now = shared.now();
                         shared
                             .with_state(|state| {
                                 let result = match &change {
                                     RegionChange::Rezzed(object)
-                                    | RegionChange::Updated(object) => state.sim.send_object_update(
+                                    | RegionChange::Updated(object) => crate::world::send_objects(
+                                        &mut state.sim,
                                         std::slice::from_ref(object.as_ref()),
-                                        REAL_TIME_DILATION,
                                         now,
                                     ),
                                     RegionChange::Killed(local_id) => {
@@ -640,6 +647,28 @@ pub(crate) async fn run_region_watcher(
                                     }
                                     RegionChange::RegionConfigured(limits) => {
                                         state.sim.send_region_info(limits, now)
+                                    }
+                                    // Heard by a root agent in range; a child
+                                    // agent's avatar is in another region, and
+                                    // chat across a border is not modelled.
+                                    RegionChange::Chat(line) => {
+                                        if !state.sim.is_root_agent() {
+                                            return;
+                                        }
+                                        let standing = crate::chat::agent_position(&state.sim);
+                                        if !line.heard_by(state.avatar.agent_id, &standing) {
+                                            return;
+                                        }
+                                        state.sim.send_chat_from_simulator(
+                                            &line.from_name,
+                                            line.source,
+                                            line.owner_id,
+                                            line.chat_type,
+                                            FULLY_AUDIBLE,
+                                            line.position.clone(),
+                                            &line.message,
+                                            now,
+                                        )
                                     }
                                     RegionChange::TerrainRetextured(composition) => {
                                         let mut identity = state.identity.clone();

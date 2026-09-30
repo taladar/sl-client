@@ -358,6 +358,14 @@ impl EditTool {
             .position(|&tool| tool == self)
             .unwrap_or(0)
     }
+
+    /// Whether a click with this tool selects the object under it. The
+    /// Create tool's click rezzes on it instead, and the Land tool's works on
+    /// the ground.
+    #[must_use]
+    pub const fn selects_objects(self) -> bool {
+        !matches!(self, Self::Create | Self::SelectLand)
+    }
 }
 
 /// The build tool's shared state. See the [module documentation](self).

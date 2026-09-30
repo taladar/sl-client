@@ -4739,6 +4739,170 @@ mod test {
         Ok(())
     }
 
+    /// The next line `avatar` hears whose text is `message`, failing if a
+    /// line whose text is `unheard` comes first.
+    async fn heard(
+        avatar: &mut Joined,
+        message: &str,
+        unheard: &str,
+    ) -> Result<sl_client_tokio::ChatMessage, TestError> {
+        let line = wait_on(&mut avatar.events, |event| match event {
+            Event::ChatReceived(chat) if chat.message == message || chat.message == unheard => {
+                Some((**chat).clone())
+            }
+            _ => None,
+        })
+        .await?;
+        if line.message == unheard {
+            return Err(format!("the avatar heard {unheard:?}").into());
+        }
+        Ok(line)
+    }
+
+    /// Says `message` on `channel` from `avatar`'s client.
+    async fn say(
+        avatar: &Joined,
+        message: &str,
+        channel: i32,
+        chat_type: sl_client_tokio::ChatType,
+    ) -> Result<(), TestError> {
+        avatar
+            .commands
+            .send(Command::Chat {
+                message: message.to_owned(),
+                chat_type,
+                channel: sl_client_tokio::ChatChannel(channel),
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// Local chat routed by the region: a say on channel 0 reaches the
+    /// speaker (its echo) and the avatar beside it; a line on channel 7
+    /// reaches no avatar — only a listen on channel 7 — and a line an object
+    /// says reaches the avatars in range, attributed to the object.
+    #[tokio::test]
+    async fn chat_reaches_avatars_on_channel_0_and_listens_on_any() -> Result<(), TestError> {
+        use sl_client_tokio::{ChatSource, ChatType};
+        use sl_fake_grid::chat::{Line, ListenFilter};
+
+        let grid = FakeGridBuilder::new()
+            .account(AccountConfig::new("First", "User", "password"))
+            .account(AccountConfig::new("Second", "User", "password"))
+            .event_queue_hold(Duration::from_secs(2))
+            .region(RegionConfig::default())
+            .start()
+            .await?;
+        let mut first = join(&grid, "First").await?;
+        let mut second = join(&grid, "Second").await?;
+        let speaker = first.agent.agent_id();
+
+        // A listen on channel 7, in a prim standing beside the two avatars.
+        let prim = rez_cube(
+            &mut first,
+            &Vector {
+                x: 130.0,
+                y: 128.0,
+                z: 26.0,
+            },
+        )
+        .await?;
+        let (_listen, mut listened) = first
+            .agent
+            .listen(
+                prim.full_id,
+                ListenFilter::channel(sl_client_tokio::ChatChannel(7)),
+            )
+            .await;
+
+        say(&first, "hidden", 7, ChatType::Normal).await?;
+        say(&first, "public", 0, ChatType::Normal).await?;
+        // Channel 7 was said first on the same circuit: an avatar that heard
+        // it would hear it before the public line.
+        let echo = heard(&mut first, "public", "hidden").await?;
+        assert_eq!(echo.source, ChatSource::Agent(speaker));
+        assert_eq!(echo.from_name, "First User");
+        let other = heard(&mut second, "public", "hidden").await?;
+        assert_eq!(other.source, ChatSource::Agent(speaker));
+        let hidden = tokio::time::timeout(WAIT, listened.recv())
+            .await?
+            .ok_or("the listen was dropped")?;
+        assert_eq!(hidden.message, "hidden");
+        assert_eq!(hidden.source, ChatSource::Agent(speaker));
+        assert!(
+            listened.try_recv().is_err(),
+            "a channel-7 listen does not hear channel 0"
+        );
+
+        // The object speaks, on the path an avatar's line takes.
+        second
+            .agent
+            .say(Line {
+                source: ChatSource::Object(prim.full_id),
+                from_name: "Object".to_owned(),
+                owner_id: speaker.uuid(),
+                chat_type: ChatType::Normal,
+                channel: sl_client_tokio::ChatChannel(0),
+                position: prim.motion.position.clone(),
+                message: "from the prim".to_owned(),
+            })
+            .await;
+        for avatar in [&mut first, &mut second] {
+            let line = heard(avatar, "from the prim", "hidden").await?;
+            assert_eq!(line.source, ChatSource::Object(prim.full_id));
+        }
+        Ok(())
+    }
+
+    /// What each viewer is told it may do with a prim is its own: the rezzer
+    /// owns it and may edit it, the region's other avatar is told only that
+    /// somebody owns it.
+    #[tokio::test]
+    async fn a_rezzed_prim_is_the_rezzers_to_edit_and_nobody_elses() -> Result<(), TestError> {
+        use sl_proto::prim_flags;
+
+        let grid = FakeGridBuilder::new()
+            .account(AccountConfig::new("First", "User", "password"))
+            .account(AccountConfig::new("Second", "User", "password"))
+            .event_queue_hold(Duration::from_secs(2))
+            .region(RegionConfig::default())
+            .start()
+            .await?;
+        let mut first = join(&grid, "First").await?;
+        let mut second = join(&grid, "Second").await?;
+        let position = Vector {
+            x: 140.0,
+            y: 128.0,
+            z: 26.0,
+        };
+        let rezzed = rez_cube(&mut first, &position).await?;
+        let seen = wait_on(&mut second.events, |event| match event {
+            Event::ObjectAdded(object) if object.full_id == rezzed.full_id => {
+                Some((**object).clone())
+            }
+            _ => None,
+        })
+        .await?;
+        let permission_bits = prim_flags::OBJECT_MODIFY
+            | prim_flags::OBJECT_COPY
+            | prim_flags::OBJECT_ANY_OWNER
+            | prim_flags::OBJECT_YOU_OWNER
+            | prim_flags::OBJECT_MOVE
+            | prim_flags::OBJECT_TRANSFER
+            | prim_flags::OBJECT_OWNER_MODIFY;
+        assert_eq!(
+            rezzed.update_flags & permission_bits,
+            permission_bits,
+            "the rezzer may do anything with its prim"
+        );
+        assert_eq!(
+            seen.update_flags & permission_bits,
+            prim_flags::OBJECT_ANY_OWNER,
+            "the other avatar may do nothing with it"
+        );
+        Ok(())
+    }
+
     /// A grid serving two accounts in one region.
     async fn two_avatar_grid() -> Result<FakeGrid, TestError> {
         Ok(FakeGridBuilder::new()

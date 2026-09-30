@@ -140,6 +140,9 @@ pub(crate) async fn teleport_session(
             .with_sim(|sim| {
                 let now = source.now();
                 sim.send_teleport_start(request.flags, now)?;
+                // Where the agent now stands: what the region measures chat
+                // range from, and what a later movement completes to.
+                sim.set_arrival_position(request.arrival.position, request.arrival.look_at.clone());
                 sim.send_teleport_local(
                     request.arrival.position,
                     request.arrival.look_at.clone(),

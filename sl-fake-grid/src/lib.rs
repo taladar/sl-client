@@ -6,6 +6,7 @@ pub mod assets;
 pub mod bakes;
 pub mod benefits;
 mod caps_endpoint;
+pub mod chat;
 pub mod crossing;
 mod driver;
 mod economy_endpoint;

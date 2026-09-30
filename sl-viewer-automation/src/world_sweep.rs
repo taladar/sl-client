@@ -198,7 +198,7 @@ impl WorldSweep {
         self.stage = Stage::Settle;
         if !world
             .get_resource::<EditToolState>()
-            .is_some_and(|tool| tool.active)
+            .is_some_and(|tool| tool.active && tool.tool.selects_objects())
         {
             self.still.reset();
             return Ok(SweepProgress::Waiting(AimStage::BuildMode));

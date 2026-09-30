@@ -10,7 +10,7 @@ use crate::locator::Locator;
 
 /// What a world action does to the one thing its locator names.
 ///
-/// In JSON: `"click"`, `"right_click"`, `"hover"`, `"select"`, or
+/// In JSON: `"click"`, `"right_click"`, `"hover"`, `"select"`, `"place"`, or
 /// `{"drop_from":{…locator…}}`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -22,8 +22,13 @@ pub enum WorldAction {
     /// The pointer rests over it: its hover tip.
     Hover,
     /// A left click in build mode, which selects it. Waits for the build tool
-    /// to be active; outside it the same click would touch.
+    /// to be active on a tool that selects; outside it the same click would
+    /// touch, and with the Create tool it would rez.
     Select,
+    /// A left click with the build tool's Create tool, which rezzes the
+    /// picked shape on the thing's surface. Waits for the Create tool to be
+    /// the active one; with any other tool the same click would select.
+    Place,
     /// Drag what the UI node this locator names carries (an inventory row)
     /// and drop it on the thing.
     DropFrom(Locator),
@@ -36,6 +41,7 @@ impl fmt::Display for WorldAction {
             Self::RightClick => f.write_str("right_click"),
             Self::Hover => f.write_str("hover"),
             Self::Select => f.write_str("select"),
+            Self::Place => f.write_str("place"),
             Self::DropFrom(source) => write!(f, "drop_from({source})"),
         }
     }
@@ -128,6 +134,7 @@ mod tests {
             (WorldAction::RightClick, r#""right_click""#),
             (WorldAction::Hover, r#""hover""#),
             (WorldAction::Select, r#""select""#),
+            (WorldAction::Place, r#""place""#),
             (
                 WorldAction::DropFrom(Locator::test_id("row")),
                 r#"{"drop_from":{"test_id":"row"}}"#,

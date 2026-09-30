@@ -85,7 +85,8 @@ enum Heard {
 /// `2av`. Runs on OpenSim today (local secondary `Friend Tester`); the Aditi
 /// variant is deferred to Phase Z pending its Aditi run. The flow is
 /// plain LLUDP `ChatFromViewer`/`ChatFromSimulator` and `TeleportLocationRequest`,
-/// identical on both grids.
+/// identical on both grids. Runs offline too: the fake grid measures chat
+/// range from where an intra-region teleport put each avatar.
 #[derive(Debug)]
 pub struct ChatWhisperShoutRange;
 
@@ -99,7 +100,7 @@ impl GridTest for ChatWhisperShoutRange {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl]
     }
 
     fn accounts(&self) -> u8 {

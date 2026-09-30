@@ -34,6 +34,7 @@ const PUBLIC_CHANNEL: ChatChannel = ChatChannel(0);
 /// `2av`. Runs on OpenSim today (local secondary `Friend Tester`); the Aditi
 /// variant is deferred to Phase Z pending its Aditi run. The flow is
 /// plain LLUDP `ChatFromViewer`/`ChatFromSimulator`, identical on both grids.
+/// Runs offline too: the fake grid relays local chat between its sessions.
 #[derive(Debug)]
 pub struct ChatHearOther;
 
@@ -47,7 +48,7 @@ impl GridTest for ChatHearOther {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl]
     }
 
     fn accounts(&self) -> u8 {

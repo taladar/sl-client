@@ -31,9 +31,10 @@ const PUBLIC_CHANNEL: ChatChannel = ChatChannel(0);
 /// [`Event::ChatReceived`] whose source is the speaker's own agent. It asserts
 /// the echoed text, source, and chat type, and records the echo round-trip time.
 ///
-/// Runs on both grids: `ChatFromViewer`/`ChatFromSimulator` is plain LLUDP,
-/// present on OpenSim and Second Life alike, and needs only the one logged-in
-/// avatar.
+/// Runs on both grids and offline: `ChatFromViewer`/`ChatFromSimulator` is
+/// plain LLUDP, present on OpenSim and Second Life alike, and needs only the
+/// one logged-in avatar. The fake grid routes local chat since
+/// `server-world-chat-routing`.
 #[derive(Debug)]
 pub struct ChatSelfEcho;
 
@@ -47,7 +48,7 @@ impl GridTest for ChatSelfEcho {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl]
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {

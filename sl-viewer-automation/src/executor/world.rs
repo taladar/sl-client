@@ -65,6 +65,7 @@ pub(super) fn act(
         WorldAction::RightClick => ActStage::Aim(Box::new(aim(WorldIntent::RightClick))),
         WorldAction::Hover => ActStage::Aim(Box::new(aim(WorldIntent::Hover))),
         WorldAction::Select => ActStage::Aim(Box::new(aim(WorldIntent::Select))),
+        WorldAction::Place => ActStage::Aim(Box::new(aim(WorldIntent::Place))),
         WorldAction::DropFrom(source) => ActStage::Source {
             pursuit: Box::new(Pursuit::new(source, Intent::Click).with_deadline(deadline)),
         },
