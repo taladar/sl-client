@@ -9279,6 +9279,7 @@ dependencies = [
  "serde_json",
  "sl-automation-proto",
  "sl-client-bevy",
+ "sl-viewer-driver",
  "sl-viewer-inventory",
  "sl-viewer-kit",
  "sl-viewer-notifications",

@@ -101,10 +101,17 @@
 //! thread of its own and steps its viewers continuously, as a process runs,
 //! so an async caller reaches each through a [`ViewerLink`] — a request
 //! channel and a message channel, the shape a socket connection has.
+//!
+//! The cheap test tiers need no transport: [`in_app`] submits the same
+//! requests to an `&mut App`'s own executor and steps the app until they are
+//! answered, so a fixture test clicks, fills and expects through locators and
+//! fails with the driver's own error, printed as the end-to-end tier prints
+//! it.
 
 mod diagnostics;
 mod event_log;
 mod executor;
+pub mod in_app;
 mod in_process;
 mod in_process_host;
 mod locate;

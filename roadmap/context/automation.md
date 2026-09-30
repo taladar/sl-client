@@ -488,6 +488,27 @@ replaces that person.
   depends on the fake grid but not on the viewer's library, so it builds in
   seconds; it runs the release viewer beside itself. A `launch` onto aditi
   takes its turn under the shared login cooldown.
+- **The cheap tiers speak locators** ([[viewer-automation-testkit-locators]]):
+  `sl_viewer_automation::in_app` submits the protocol's requests to an
+  `&mut App`'s own executor (installing `AutomationPlugin` if it is absent)
+  and steps the app until each is answered, so a fixture test's click is the
+  engine's — strict, actionable, played through the synthetic input — and its
+  failure is the driver's own `DriverError::Failed`, printed `viewer <label>:
+  <action> <locator> failed: <error>` as the end-to-end tier prints it, with
+  the report in the error instead of an artifact directory. The waits count
+  **frames** (`in_app::Options`, 600 by default), since a fixture is stepped by
+  hand; `ViewerHarness` states a wall-clock deadline and has `click`, `hover`
+  and `expect` of its own. The testkit crate itself cannot host them — the
+  automation crate dev-depends on it, and a UI crate the automation crate
+  depends on would get a second copy of itself in its own tests — so they
+  are for the viewer crate and the crates above the automation crate.
+- **A disabled control is proved inert with `click_while_disabled`**: a click
+  never presses a disabled node (it waits for `enabled`), so the test that
+  "disabled does nothing" waits for `disabled`, brings the pointer on as a
+  hover does and presses there anyway. The first one written
+  (`a_greyed_group_set_button_does_nothing`) found the Build floater's
+  parameter tabs enabled with nothing ever selected: the gate redrew only on a
+  changed snapshot, and "nothing selected" is `None` before and after.
 - Every new crate here trips the extraction gates (`private_interfaces`,
   `must_use_candidate`, fmt, machete, cargo-about, rustdoc, `cliff.toml`,
   `CHANGELOG.md`).

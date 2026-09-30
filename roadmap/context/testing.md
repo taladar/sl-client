@@ -227,7 +227,10 @@ reason.
   `render_stage.rs`, an `expectation()` rule, and a `toggle_should_differ`
   row if it is a toggle.
 - **an interaction test**: `InteractionTest` (UI) or `WorldTest` (world)
-  from the testkit / viewer crate; drive the pointer with
+  from the testkit / viewer crate; address a widget by **locator** where the
+  crate can reach `sl_viewer_automation::in_app` (`click`, `fill`, `press`,
+  `locate`, `expect_*`, `click_while_disabled` — the end-to-end tier's
+  engine and actionability, in the `&mut App`), else drive the pointer with
   `hover`/`click`/`drag`/`type_str`; assert effects via `Recorded<M>`
   drains and entity queries, never via widget internals. The fixture
   world comes in folds — `world_app` (world group only),

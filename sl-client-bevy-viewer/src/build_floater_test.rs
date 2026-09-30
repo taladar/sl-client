@@ -52,10 +52,11 @@
 mod tests {
     use bevy::input::keyboard::Key;
     use bevy::prelude::*;
-    use bevy::ui::Checked;
     use pretty_assertions::assert_eq;
 
+    use sl_automation_proto::{Locator, NodeState};
     use sl_client_bevy::{Command, ObjectKey, ScopedObjectId, Uuid, Vector};
+    use sl_viewer_automation::in_app;
     use sl_viewer_testkit::{box_of, find_by_name, interact};
 
     use crate::world_api::{EditTool, EditToolState, SelectionSet};
@@ -300,136 +301,20 @@ mod tests {
             .is_some_and(|shown| shown.0))
     }
 
-    /// Click the named field and **confirm the caret landed in it**, scrolling
-    /// its page when it did not.
+    /// Replace a field's text with `value` and commit it with `Enter` — the
+    /// whole of a numeric edit, as a user performs it, through the locator
+    /// engine.
     ///
     /// A tab page is a stack of rows taller than the window that shows it, so
-    /// the field a test wants is often below the fold — and a click at a node's
-    /// laid-out centre that happens to be outside its scroll viewport reaches
-    /// nothing at all. Silently. Everything typed afterwards then goes to
-    /// whatever *does* hold focus, and the test fails somewhere else entirely,
-    /// which is how the first draft of this module spent a run blaming the
-    /// Texture tab for a tab strip that had never switched.
-    ///
-    /// So the field is first **wheeled into its panel** — the same gesture a
-    /// user makes — and the click is then confirmed by asking who holds focus.
-    /// A field that is outside its panel is out of view whether it is above the
-    /// fold or below it, and the wheel goes whichever way brings it back, so
-    /// the loop converges instead of scrolling past.
-    fn click_field(app: &mut App, name: &str) -> Result<(), TestError> {
-        /// How many wheel steps the page is given to bring a field into view.
-        const SCROLL_TRIES: u32 = 24;
-        /// Wheel lines per step.
-        const LINES: f32 = 2.0;
-        /// How far inside the panel's leading edge the wheel is aimed: over the
-        /// rows' labels rather than their fields, since a field is entitled to
-        /// take the wheel for its own content.
-        const WHEEL_INSET: f32 = 6.0;
-
-        let entity = find_by_name(app, name)
-            .ok_or_else(|| TestError::from(format!("no field named `{name}` in the window")))?;
-        // A control in the window's fixed rows (the grid unit) is not on any
-        // page and has nothing to scroll; only a tab page's rows do.
-        let panel = active_panel_entity(app)?;
-        if !descends_from(app, entity, panel) {
-            interact::click_node(app, name)?;
-            settle(app, 2);
-            return caret_landed(app, entity, name);
-        }
-        for _try in 0..SCROLL_TRIES {
-            let panel = active_panel_box(app)?;
-            let field = box_of(app, name)
-                .ok_or_else(|| TestError::from(format!("the field `{name}` never laid out")))?;
-            if field.min.y >= panel.min.y && field.max.y <= panel.max.y {
-                interact::click_node(app, name)?;
-                settle(app, 2);
-                return caret_landed(app, entity, name);
-            }
-            let lines = if field.min.y < panel.min.y {
-                LINES
-            } else {
-                -LINES
-            };
-            let at = Vec2::new(
-                panel.min.x + WHEEL_INSET,
-                f32::midpoint(panel.min.y, panel.max.y),
-            );
-            interact::scroll(app, at, Vec2::new(0.0, lines));
-            settle(app, 2);
-        }
-        Err(TestError::from(format!(
-            "the field `{name}` never came into its panel after {SCROLL_TRIES} wheel steps"
-        )))
-    }
-
-    /// The box of the tab panel currently on show — the scroll viewport a
-    /// field has to be inside to be clickable.
-    fn active_panel_box(app: &mut App) -> Result<Rect, TestError> {
-        let active = active_tab(app)?;
-        box_of(app, &format!("build-tabs:panel:{active}"))
-            .ok_or_else(|| TestError::from("the active tab panel never laid out"))
-    }
-
-    /// The entity of the tab panel currently on show.
-    fn active_panel_entity(app: &mut App) -> Result<Entity, TestError> {
-        let active = active_tab(app)?;
-        find_by_name(app, &format!("build-tabs:panel:{active}"))
-            .ok_or_else(|| TestError::from("the build floater has no active tab panel"))
-    }
-
-    /// Whether `entity` sits anywhere under `ancestor`.
-    fn descends_from(app: &App, entity: Entity, ancestor: Entity) -> bool {
-        let mut current = entity;
-        while let Some(parent) = app.world().get::<ChildOf>(current) {
-            if parent.parent() == ancestor {
-                return true;
-            }
-            current = parent.parent();
-        }
-        false
-    }
-
-    /// `Ok` when `entity` now holds the keyboard focus, else what went wrong.
-    fn caret_landed(app: &mut App, entity: Entity, name: &str) -> Result<(), TestError> {
-        if app
-            .world()
-            .resource::<bevy::input_focus::InputFocus>()
-            .get()
-            == Some(entity)
-        {
-            return Ok(());
-        }
-        let at = box_of(app, name);
-        Err(TestError::from(format!(
-            "a click on the field `{name}` (at {at:?}) did not put the caret in it, so nothing \
-             typed would reach it"
-        )))
-    }
-
-    /// Replace a focused field's text with `value` and commit it with `Enter` —
-    /// the whole of a numeric edit, as a user performs it.
-    ///
-    /// The field is cleared with `End` + `Backspace` rather than a select-all
-    /// so the deletion goes through the same edit path a user's does, and the
-    /// count is taken from the text that is actually there.
+    /// the field a test wants is often below the fold, and a click at a
+    /// node's laid-out centre outside its scroll viewport reaches nothing —
+    /// silently, with everything typed afterwards going to whatever *does*
+    /// hold focus. The fill's actionability is what rules that out: the field
+    /// is scrolled into its panel, clicked only once nothing covers it, and
+    /// the fill answers only when the field holds `value`.
     fn retype_and_commit(app: &mut App, name: &str, value: &str) -> Result<(), TestError> {
-        click_field(app, name)?;
-        interact::tap(app, KeyCode::End, Key::End);
-        for _character in 0..field_text(app, name).chars().count() {
-            interact::tap(app, KeyCode::Backspace, Key::Backspace);
-        }
-        assert_eq!(
-            field_text(app, name),
-            "",
-            "the field `{name}` did not clear, so what follows would be typed onto its old value"
-        );
-        interact::type_str(app, value);
-        assert_eq!(
-            field_text(app, name),
-            value,
-            "the field `{name}` did not take `{value}`"
-        );
-        interact::tap(app, KeyCode::Enter, Key::Enter);
+        in_app::fill(app, &Locator::test_id(name), value)?;
+        in_app::press(app, "Enter")?;
         settle(app, 3);
         Ok(())
     }
@@ -759,7 +644,10 @@ mod tests {
 
         // Click each option in turn: the radio order is the `BUILD_TOOLS` order.
         for (index, tool) in crate::world_api::BUILD_TOOLS.iter().enumerate() {
-            interact::click_node(&mut app, &format!("build-tool:radio:{index}"))?;
+            in_app::click(
+                &mut app,
+                &Locator::test_id(format!("build-tool:radio:{index}")),
+            )?;
             settle(&mut app, 3);
             assert_eq!(
                 app.world().resource::<EditToolState>().tool,
@@ -801,7 +689,7 @@ mod tests {
                 before,
                 "`{key}` does not start where the reference defaults put it"
             );
-            interact::click_node(&mut app, &row)?;
+            in_app::click(&mut app, &Locator::test_id(row.as_str()))?;
             settle(&mut app, 3);
             assert_eq!(
                 toggle_state(&app, key)?,
@@ -809,13 +697,13 @@ mod tests {
                 "a click on `{key}` must flip it"
             );
             assert_eq!(
-                toggle_is_ticked(&mut app, &row),
+                toggle_is_ticked(&mut app, &row)?,
                 !before,
                 "`{key}`'s tick must follow its flag"
             );
             // Put it back, so each toggle is checked from the shipped defaults
             // rather than from whatever the previous one left behind.
-            interact::click_node(&mut app, &row)?;
+            in_app::click(&mut app, &Locator::test_id(row.as_str()))?;
             settle(&mut app, 3);
             assert_eq!(
                 toggle_state(&app, key)?,
@@ -838,13 +726,15 @@ mod tests {
         })
     }
 
-    /// Whether a toggle's checkbox carries the tick.
+    /// Whether a toggle's checkbox carries the tick, as the semantic model
+    /// reads it.
     ///
     /// `Checked` rather than a glyph: the mark is the skin's `content` on a
     /// pseudo-element now, so the marker is where the state actually lives —
-    /// and it is what `.sk-checkbox:checked` draws from.
-    fn toggle_is_ticked(app: &mut App, row: &str) -> bool {
-        find_by_name(app, row).is_some_and(|entity| app.world().get::<Checked>(entity).is_some())
+    /// and it is what `.sk-checkbox:checked` draws from, and what the model's
+    /// `checked` state is read from.
+    fn toggle_is_ticked(app: &mut App, row: &str) -> Result<bool, TestError> {
+        Ok(in_app::locate(app, &Locator::test_id(row))?.has_state(NodeState::Checked))
     }
 
     /// **`Ctrl+B` opens and closes the build window — and closing it leaves
@@ -1061,51 +951,36 @@ mod tests {
         );
         settle(&mut app, 5);
 
-        // The row is hidden while whole linksets are selected.
-        assert_eq!(
-            link_nav_display(&mut app)?,
-            Display::None,
-            "the linked-part row has nothing to do outside edit-linked-parts mode"
-        );
+        // The row is hidden while whole linksets are selected: nothing in it
+        // can be seen, and so nothing in it can be clicked.
+        let row = Locator::test_id("build-tools:link-part-nav");
+        in_app::expect_hidden(&mut app, &row)?;
         app.world_mut().resource_mut::<EditToolState>().edit_linked = true;
         settle(&mut app, 3);
-        assert_eq!(
-            link_nav_display(&mut app)?,
-            Display::Flex,
-            "edit-linked-parts mode must reveal the linked-part row"
-        );
+        in_app::expect_visible(&mut app, &row)?;
 
         // Select the root part, then walk.
+        let next = Locator::test_id("build-tools:link-part-next");
         select_directly(&mut app, root)?;
-        interact::click_node(&mut app, "build-tools:link-part-next")?;
+        in_app::click(&mut app, &next)?;
         settle(&mut app, 3);
         assert!(
             app.world().resource::<SelectionSet>().is_selected(child),
             "next must step from the root to its child"
         );
-        interact::click_node(&mut app, "build-tools:link-part-next")?;
+        in_app::click(&mut app, &next)?;
         settle(&mut app, 3);
         assert!(
             app.world().resource::<SelectionSet>().is_selected(root),
             "next must wrap from the last part back to the root"
         );
-        interact::click_node(&mut app, "build-tools:link-part-prev")?;
+        in_app::click(&mut app, &Locator::test_id("build-tools:link-part-prev"))?;
         settle(&mut app, 3);
         assert!(
             app.world().resource::<SelectionSet>().is_selected(child),
             "prev must wrap the other way"
         );
         Ok(())
-    }
-
-    /// The `display` of the linked-part navigation row.
-    fn link_nav_display(app: &mut App) -> Result<Display, TestError> {
-        let row = find_by_name(app, "build-tools:link-part-nav")
-            .ok_or("the linked-part row is not in the window")?;
-        app.world()
-            .get::<Node>(row)
-            .map(|node| node.display)
-            .ok_or_else(|| TestError::from("the linked-part row is not a node"))
     }
 
     /// Select `scoped` without a pointer — for the cases where *what* is
@@ -1162,6 +1037,46 @@ mod tests {
         Ok(())
     }
 
+    /// The General tab's group Set… button.
+    const SET_GROUP: &str = "build-params:action:build-set-group";
+
+    /// **A greyed Set… does nothing when pressed, and the same button works
+    /// once there is something to set the group of.**
+    ///
+    /// The gate greys the button while nothing is selected. The click is made
+    /// anyway, with the real pointer where the button is drawn, since "greyed"
+    /// is only paint: a button that still took the press would open a picker
+    /// whose answer had nothing to go to. With a prim selected, the same
+    /// locator is enabled and the same press opens the picker — so what the
+    /// first half asserts is the gate, not a click that missed.
+    #[test]
+    fn a_greyed_group_set_button_does_nothing() -> Result<(), TestError> {
+        use crate::intents::OpenGroupPicker;
+
+        let mut app = build_tools_app()?;
+        sl_viewer_testkit::record::<OpenGroupPicker>(&mut app);
+        show_tab(&mut app, 0)?;
+        let set = Locator::test_id(SET_GROUP);
+
+        in_app::click_while_disabled(&mut app, &set)?;
+        settle(&mut app, 2);
+        assert!(
+            sl_viewer_testkit::drain::<OpenGroupPicker>(&mut app).is_empty(),
+            "a greyed Set… opened a group picker with nothing selected"
+        );
+
+        let (_scoped, _at) = select_a_fixture_prim(&mut app)?;
+        in_app::expect_enabled(&mut app, &set)?;
+        in_app::click(&mut app, &set)?;
+        settle(&mut app, 2);
+        assert_eq!(
+            sl_viewer_testkit::drain::<OpenGroupPicker>(&mut app).len(),
+            1,
+            "the enabled Set… must open one picker"
+        );
+        Ok(())
+    }
+
     /// **The General tab's group Set… opens the picker, and the picker's answer
     /// commits a `SetObjectGroup`** (`viewer-region-estate-group-picker`).
     ///
@@ -1184,7 +1099,7 @@ mod tests {
         show_tab(&mut app, 0)?;
         let _settling = drain_commands(&mut app);
 
-        interact::click_node(&mut app, "build-params:action:build-set-group")?;
+        in_app::click(&mut app, &Locator::test_id(SET_GROUP))?;
         settle(&mut app, 2);
         let opens = sl_viewer_testkit::drain::<OpenGroupPicker>(&mut app);
         let open = opens.last().ok_or("Set… opened no group picker")?;
@@ -1267,12 +1182,12 @@ mod tests {
         show_tab(&mut app, 0)?;
         let _settling = drain_commands(&mut app);
 
-        interact::click_node(&mut app, "build-params:action:build-set-group")?;
+        in_app::click(&mut app, &Locator::test_id(SET_GROUP))?;
         settle(&mut app, 3);
         // Row 0 is the "none" row; row 1 is the one group seeded above.
-        interact::click_node(&mut app, "group-picker-row:1")?;
+        in_app::click(&mut app, &Locator::test_id("group-picker-row:1"))?;
         settle(&mut app, 2);
-        interact::click_node(&mut app, "group-picker:group-picker-ok")?;
+        in_app::click(&mut app, &Locator::test_id("group-picker:group-picker-ok"))?;
         settle(&mut app, 3);
 
         assert!(

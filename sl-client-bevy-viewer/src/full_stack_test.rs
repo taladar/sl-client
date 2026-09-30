@@ -436,6 +436,17 @@ impl ViewerHarness {
         // no-adapter skip is decided later, by outcome, in `wait_quiet`.
         app.finish();
         app.cleanup();
+        // Locators in this app (`click`, `hover`, `expect`) wait by the wall
+        // clock, as every wait here does: a rendered frame costs real time,
+        // and a frame count would expire early on a fast machine and late on
+        // a loaded one.
+        app.insert_resource(sl_viewer_automation::in_app::Options {
+            label: "harness".to_owned(),
+            deadline: sl_automation_proto::Deadline {
+                frames: Some(u32::MAX),
+                millis: Some(u64::try_from(WAIT.as_millis()).unwrap_or(u64::MAX)),
+            },
+        });
         Ok(Self {
             runtime,
             grid,
@@ -750,6 +761,36 @@ impl ViewerHarness {
     /// client (a teleport) goes through the client's own command path instead.
     pub(crate) fn grid<F: Future>(&self, future: F) -> F::Output {
         self.runtime.block_on(future)
+    }
+
+    /// Click the one UI node `locator` names once it is actionable, through
+    /// the viewer's own executor — the end-to-end tier's click, in this app.
+    pub(crate) fn click(
+        &mut self,
+        locator: &sl_automation_proto::Locator,
+    ) -> Result<sl_automation_proto::UiNode, TestError> {
+        Ok(sl_viewer_automation::in_app::click(&mut self.app, locator)?)
+    }
+
+    /// Rest the pointer on the one UI node `locator` names.
+    pub(crate) fn hover(
+        &mut self,
+        locator: &sl_automation_proto::Locator,
+    ) -> Result<sl_automation_proto::UiNode, TestError> {
+        Ok(sl_viewer_automation::in_app::hover(&mut self.app, locator)?)
+    }
+
+    /// Step frames until the UI nodes `locator` names satisfy `condition`.
+    pub(crate) fn expect(
+        &mut self,
+        locator: &sl_automation_proto::Locator,
+        condition: sl_automation_proto::WaitCondition,
+    ) -> Result<Vec<sl_automation_proto::UiNode>, TestError> {
+        Ok(sl_viewer_automation::in_app::expect(
+            &mut self.app,
+            locator,
+            condition,
+        )?)
     }
 
     /// The viewer's world, mutably, for a query a read-only handle cannot run.
@@ -1344,26 +1385,6 @@ mod tests {
         })
     }
 
-    /// Step frames until the one node `locator` names is actionable for
-    /// `intent`, through the locator engine, and return where to aim at it.
-    fn pursue(
-        harness: &mut ViewerHarness,
-        locator: sl_automation_proto::Locator,
-        intent: sl_viewer_automation::Intent,
-    ) -> Result<Vec2, TestError> {
-        let mut pursuit = sl_viewer_automation::Pursuit::new(locator, intent);
-        harness
-            .run_until(
-                "the locator engine to find the node",
-                |harness| match pursuit.poll(harness.app_world_mut()) {
-                    Ok(sl_viewer_automation::Progress::Ready(target)) => Some(Ok(target.aim)),
-                    Ok(sl_viewer_automation::Progress::Waiting(_)) => None,
-                    Err(error) => Some(Err(error.to_string())),
-                },
-            )?
-            .map_err(Into::into)
-    }
-
     /// Whether any pie menu is open.
     fn a_pie_is_open(harness: &mut ViewerHarness) -> bool {
         let world = harness.app_world_mut();
@@ -1372,15 +1393,6 @@ mod tests {
             .iter(world)
             .next()
             .is_some()
-    }
-
-    /// Whether the singleton floater `id` is shown.
-    fn floater_shown(harness: &mut ViewerHarness, id: &str) -> bool {
-        let world = harness.app_world_mut();
-        world
-            .query::<(&crate::floater::Floater, &crate::ui::UiPanelShown)>()
-            .iter(world)
-            .any(|(floater, shown)| floater.id == id && shown.0)
     }
 
     /// The singleton floater `id`'s laid-out box, as its (min, max) corners in
@@ -1452,8 +1464,7 @@ mod tests {
     ///    over the floater's own laid-out box.
     #[test]
     fn an_offscreen_window_renders_the_ui_and_takes_clicks_and_picks() -> Result<(), TestError> {
-        use sl_automation_proto::Locator;
-        use sl_viewer_automation::Intent;
+        use sl_automation_proto::{Locator, WaitCondition};
         use sl_viewer_ui_core::synthetic_input::InputAction;
 
         let mut harness = ViewerHarness::start_in_with(
@@ -1509,27 +1520,20 @@ mod tests {
         // 2. The UI click, aimed by the locator engine. The pose again first:
         // the Escape that closed the pie also left flycam, and a frame pair
         // whose camera moved differs everywhere, floater or no floater.
-        assert!(
-            !floater_shown(&mut harness, "inventory"),
-            "the inventory floater is open before anything asked for it"
-        );
+        // Not open before anything asked for it.
+        let inventory = Locator::test_id("floater:inventory");
+        let _closed = harness.expect(&inventory, WaitCondition::Hidden)?;
         harness.look_from(eye, at);
-        let button = pursue(
-            &mut harness,
-            Locator::test_id("bottom-toolbar-button:toggle-inventory"),
-            Intent::Click,
-        )?;
+        let button = Locator::test_id("bottom-toolbar-button:toggle-inventory");
         // The pointer onto the button before the "before" frame, so that frame
         // does not carry the hover tooltip the box raised under the pointer.
-        perform(&mut harness, InputAction::move_to(button))?;
+        let _hovered = harness.hover(&button)?;
         let Some(before) = harness.capture()? else {
             no_adapter("the off-screen window check");
             return Ok(());
         };
-        perform(&mut harness, InputAction::click(button, MouseButton::Left))?;
-        harness.run_until("the inventory floater to open", |harness| {
-            floater_shown(harness, "inventory").then_some(())
-        })?;
+        let _clicked = harness.click(&button)?;
+        let _open = harness.expect(&inventory, WaitCondition::Visible)?;
 
         // 3. …and it is drawn into the window: the frame changed over the
         // floater's own box, and hardly anywhere else.

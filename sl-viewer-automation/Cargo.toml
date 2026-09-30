@@ -27,6 +27,9 @@ image = { version = "0.25.10", default-features = false, features = ["png"] }
 serde_json = { workspace = true }
 sl-automation-proto = { workspace = true }
 sl-client-bevy = { workspace = true }
+# `in_app` fails with the driver's own error, so a failure in a fixture test
+# reads exactly as one in the end-to-end tier.
+sl-viewer-driver = { workspace = true }
 sl-viewer-inventory = { workspace = true }
 sl-viewer-kit = { workspace = true }
 sl-viewer-notifications = { workspace = true }

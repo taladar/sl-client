@@ -2345,6 +2345,9 @@ struct ParamWidgets<'w, 's> {
     infos: InfoQuery<'w, 's>,
     /// Every gated interactive widget root.
     gates: Query<'w, 's, (Entity, &'static ParamGate)>,
+    /// The gated widgets spawned since the last draw, which have drawn
+    /// nothing yet whatever the last snapshot shown was.
+    new_gates: Query<'w, 's, (), Added<ParamGate>>,
     /// The per-type shape row containers.
     shape_rows: ShapeRowQuery<'w, 's>,
     /// The swappable row labels.
@@ -2412,9 +2415,14 @@ fn sync_param_widgets(
         &mut facts.costs,
         &mut names,
     );
+    // Widgets just spawned have drawn nothing yet, whatever was last shown:
+    // with nothing selected the snapshot is `None` before and after, and the
+    // fresh controls would keep their spawned (enabled) state until the first
+    // selection.
     if snapshot.shown.as_ref() == current.as_ref()
         && !text.localization.is_changed()
         && !text.locale.is_changed()
+        && widgets.new_gates.is_empty()
     {
         return;
     }

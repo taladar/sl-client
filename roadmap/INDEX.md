@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 122 |
-| ready | 308 |
+| ready | 307 |
 | blocked | 53 |
 | in-progress | 21 |
 | bugs | 16 |
-| done | 1284 |
+| done | 1285 |
 | deferred | 31 |
 | wont-do | 16 |
 | **total** | **1851** |
@@ -310,7 +310,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (308)
+## ready (307)
 
 ### protocol
 
@@ -389,10 +389,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-automation-accesskit-bridge`](ready/viewer-automation-accesskit-bridge.md)
   — Feed AccessKit from the semantic UI model (blocked by
   `viewer-automation-semantic-custom-widgets` (done))
-- [`viewer-automation-testkit-locators`](ready/viewer-automation-testkit-locators.md)
-  — The in-process tiers speak locators too (blocked by
-  `viewer-automation-locator-engine` (done), `viewer-automation-app-builder`
-  (done))
 - [`viewer-autopilot-click-to-walk`](ready/viewer-autopilot-click-to-walk.md) —
   Autopilot core + click-to-walk (blocked by `viewer-input-action-map` (done))
 - [`viewer-avatar-alignment-tools`](ready/viewer-avatar-alignment-tools.md) —
@@ -1324,7 +1320,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1284)
+## done (1285)
 
 ### protocol
 
@@ -1815,6 +1811,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-automation-synthetic-input`](done/viewer-automation-synthetic-input.md)
   — Synthetic input for a live viewer — interact.rs as a frame-queued injector
   (blocked by `viewer-automation-protocol` (done))
+- [`viewer-automation-testkit-locators`](done/viewer-automation-testkit-locators.md)
+  — The in-process tiers speak locators too (blocked by
+  `viewer-automation-locator-engine` (done), `viewer-automation-app-builder`
+  (done))
 - [`viewer-automation-windowless-mode`](done/viewer-automation-windowless-mode.md)
   — Windowless viewer — the whole app, UI included, with no OS window (blocked
   by `viewer-automation-app-builder` (done),
